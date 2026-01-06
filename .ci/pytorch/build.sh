@@ -11,10 +11,6 @@ source "$(dirname "${BASH_SOURCE[0]}")/common.sh"
 # shellcheck source=./common-build.sh
 source "$(dirname "${BASH_SOURCE[0]}")/common-build.sh"
 
-if [[ "$BUILD_ENVIRONMENT" == *-mobile-*build* ]]; then
-  exec "$(dirname "${BASH_SOURCE[0]}")/build-mobile.sh" "$@"
-fi
-
 echo "Python version:"
 python --version
 
@@ -40,6 +36,11 @@ if [[ "$BUILD_ENVIRONMENT" == *cuda* ]]; then
   nvcc --version
 fi
 
+if [[ "$BUILD_ENVIRONMENT" == *cuda13* ]]; then
+  # Disable FBGEMM for CUDA 13 builds
+  export USE_FBGEMM=0
+fi
+
 if [[ "$BUILD_ENVIRONMENT" == *cuda11* ]]; then
   if [[ "$BUILD_ENVIRONMENT" != *clang* ]]; then
     # TODO: there is a linking issue when building with UCC using clang,
@@ -54,9 +55,6 @@ if [[ ${BUILD_ENVIRONMENT} == *"parallelnative"* ]]; then
   export ATEN_THREADING=NATIVE
 fi
 
-# Enable LLVM dependency for TensorExpr testing
-export USE_LLVM=/opt/llvm
-export LLVM_DIR=/opt/llvm/lib/cmake/llvm
 
 if ! which conda; then
   # In ROCm CIs, we are doing cross compilation on build machines with
@@ -96,7 +94,28 @@ fi
 if [[ "$BUILD_ENVIRONMENT" == *aarch64* ]]; then
   export USE_MKLDNN=1
   export USE_MKLDNN_ACL=1
-  export ACL_ROOT_DIR=/ComputeLibrary
+  export ACL_ROOT_DIR=/acl
+fi
+
+if [[ "$BUILD_ENVIRONMENT" == *riscv64* ]]; then
+  if [[ -f /opt/riscv-cross-env/bin/activate ]]; then
+    # shellcheck disable=SC1091
+    source /opt/riscv-cross-env/bin/activate
+  else
+    echo "Activation file not found"
+    exit 1
+  fi
+
+  export CMAKE_CROSSCOMPILING=TRUE
+  export CMAKE_SYSTEM_NAME=Linux
+  export CMAKE_SYSTEM_PROCESSOR=riscv64
+
+  export USE_CUDA=0
+  export USE_MKLDNN=0
+
+  export SLEEF_TARGET_EXEC_USE_QEMU=ON
+  sudo chown -R jenkins /var/lib/jenkins/workspace /opt
+
 fi
 
 if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
@@ -124,26 +143,8 @@ if [[ "$BUILD_ENVIRONMENT" == *libtorch* ]]; then
 fi
 
 # Use special scripts for Android builds
-if [[ "${BUILD_ENVIRONMENT}" == *-android* ]]; then
-  export ANDROID_NDK=/opt/ndk
-  build_args=()
-  if [[ "${BUILD_ENVIRONMENT}" == *-arm-v7a* ]]; then
-    build_args+=("-DANDROID_ABI=armeabi-v7a")
-  elif [[ "${BUILD_ENVIRONMENT}" == *-arm-v8a* ]]; then
-    build_args+=("-DANDROID_ABI=arm64-v8a")
-  elif [[ "${BUILD_ENVIRONMENT}" == *-x86_32* ]]; then
-    build_args+=("-DANDROID_ABI=x86")
-  elif [[ "${BUILD_ENVIRONMENT}" == *-x86_64* ]]; then
-    build_args+=("-DANDROID_ABI=x86_64")
-  fi
-  if [[ "${BUILD_ENVIRONMENT}" == *vulkan* ]]; then
-    build_args+=("-DUSE_VULKAN=ON")
-  fi
-  build_args+=("-DUSE_LITE_INTERPRETER_PROFILER=OFF")
-  exec ./scripts/build_android.sh "${build_args[@]}" "$@"
-fi
 
-if [[ "$BUILD_ENVIRONMENT" != *android* && "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *vulkan* ]]; then
   export USE_VULKAN=1
   # shellcheck disable=SC1091
   source /var/lib/jenkins/vulkansdk/setup-env.sh
@@ -172,13 +173,16 @@ if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/compiler/latest/env/vars.sh
   # shellcheck disable=SC1091
+  source /opt/intel/oneapi/umf/latest/env/vars.sh
+  # shellcheck disable=SC1091
   source /opt/intel/oneapi/ccl/latest/env/vars.sh
   # shellcheck disable=SC1091
   source /opt/intel/oneapi/mpi/latest/env/vars.sh
+  # shellcheck disable=SC1091
+  source /opt/intel/oneapi/pti/latest/env/vars.sh
   # Enable XCCL build
   export USE_XCCL=1
-  # XPU kineto feature dependencies are not fully ready, disable kineto build as temp WA
-  export USE_KINETO=0
+  export USE_MPI=0
   export TORCH_XPU_ARCH_LIST=pvc
 fi
 
@@ -198,10 +202,16 @@ fi
 
 # We only build FlashAttention files for CUDA 8.0+, and they require large amounts of
 # memory to build and will OOM
-if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && [[ 1 -eq $(echo "${TORCH_CUDA_ARCH_LIST} >= 8.0" | bc) ]] && [ -z "$MAX_JOBS_OVERRIDE" ]; then
-  echo "WARNING: FlashAttention files require large amounts of memory to build and will OOM"
-  echo "Setting MAX_JOBS=(nproc-2)/3 to reduce memory usage"
-  export MAX_JOBS="$(( $(nproc --ignore=2) / 3 ))"
+
+if [[ "$BUILD_ENVIRONMENT" == *cuda* ]] && echo "${TORCH_CUDA_ARCH_LIST}" | tr ' ' '\n' | sed 's/$/>= 8.0/' | bc | grep -q 1; then
+  J=2  # default to 2 jobs
+  case "$RUNNER" in
+    linux.12xlarge.memory|linux.24xlarge.memory)
+      J=24
+      ;;
+  esac
+  echo "Building FlashAttention with job limit $J"
+  export BUILD_CUSTOM_STEP="ninja -C build flash_attention -j ${J}"
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *clang* ]]; then
@@ -216,7 +226,6 @@ if [[ "$BUILD_ENVIRONMENT" == *-clang*-asan* ]]; then
   export USE_ASAN=1
   export REL_WITH_DEB_INFO=1
   export UBSAN_FLAGS="-fno-sanitize-recover=all"
-  unset USE_LLVM
 fi
 
 if [[ "${BUILD_ENVIRONMENT}" == *no-ops* ]]; then
@@ -227,17 +236,19 @@ if [[ "${BUILD_ENVIRONMENT}" == *-pch* ]]; then
     export USE_PRECOMPILED_HEADERS=1
 fi
 
-if [[ "${BUILD_ENVIRONMENT}" != *android* && "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
+if [[ "${BUILD_ENVIRONMENT}" != *cuda* ]]; then
   export BUILD_STATIC_RUNTIME_BENCHMARK=ON
 fi
 
-if [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
+if [[ "$BUILD_ENVIRONMENT" == *-full-debug* ]]; then
+  export CMAKE_BUILD_TYPE=Debug
+elif [[ "$BUILD_ENVIRONMENT" == *-debug* ]]; then
   export CMAKE_BUILD_TYPE=RelWithAssert
 fi
 
 # Do not change workspace permissions for ROCm and s390x CI jobs
 # as it can leave workspace with bad permissions for cancelled jobs
-if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && -d /var/lib/jenkins/workspace ]]; then
+if [[ "$BUILD_ENVIRONMENT" != *rocm* && "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64* && -d /var/lib/jenkins/workspace ]]; then
   # Workaround for dind-rootless userid mapping (https://github.com/pytorch/ci-infra/issues/96)
   WORKSPACE_ORIGINAL_OWNER_ID=$(stat -c '%u' "/var/lib/jenkins/workspace")
   cleanup_workspace() {
@@ -257,6 +268,7 @@ if [[ "$BUILD_ENVIRONMENT" == *-bazel-* ]]; then
   set -e -o pipefail
 
   get_bazel
+  python3 tools/optional_submodules.py checkout_eigen
 
   # Leave 1 CPU free and use only up to 80% of memory to reduce the change of crashing
   # the runner
@@ -281,31 +293,42 @@ else
     # XLA test build fails when WERROR=1
     # set only when building other architectures
     # or building non-XLA tests.
-    if [[ "$BUILD_ENVIRONMENT" != *rocm*  &&
-          "$BUILD_ENVIRONMENT" != *xla* ]]; then
+    if [[ "$BUILD_ENVIRONMENT" != *rocm*  && "$BUILD_ENVIRONMENT" != *xla* && "$BUILD_ENVIRONMENT" != *riscv64* ]]; then
       # Install numpy-2.0.2 for builds which are backward compatible with 1.X
       python -mpip install numpy==2.0.2
 
       WERROR=1 python setup.py clean
 
-      if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-        python3 tools/packaging/split_wheel.py bdist_wheel
-      else
-        WERROR=1 python setup.py bdist_wheel
-      fi
+      WERROR=1 python -m build --wheel --no-isolation
     else
       python setup.py clean
       if [[ "$BUILD_ENVIRONMENT" == *xla* ]]; then
         source .ci/pytorch/install_cache_xla.sh
       fi
-      if [[ "$USE_SPLIT_BUILD" == "true" ]]; then
-        echo "USE_SPLIT_BUILD cannot be used with xla or rocm"
-        exit 1
-      else
-        python setup.py bdist_wheel
-      fi
+      python -m build --wheel --no-isolation
     fi
     pip_install_whl "$(echo dist/*.whl)"
+    if [[ "$BUILD_ENVIRONMENT" == *full-debug* ]]; then
+      # Regression test for https://github.com/pytorch/pytorch/issues/164297
+      # Torch should be importable and that's about it
+      pushd /; python -c "import torch;print(torch.__config__.show(), torch.randn(5) + 1.7)"; popd
+    fi
+
+    if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *vision* ]]; then
+      install_torchvision
+    fi
+
+    if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *audio* ]]; then
+      install_torchaudio
+    fi
+
+    if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchrec* || "${BUILD_ADDITIONAL_PACKAGES:-}" == *fbgemm* ]]; then
+      install_torchrec_and_fbgemm
+    fi
+
+    if [[ "${BUILD_ADDITIONAL_PACKAGES:-}" == *torchao* ]]; then
+      install_torchao
+    fi
 
     if [[ "$BUILD_ENVIRONMENT" == *xpu* ]]; then
       echo "Checking that xpu is compiled"
@@ -335,13 +358,18 @@ else
       sudo rm -f /opt/cache/bin/c++
       sudo rm -f /opt/cache/bin/gcc
       sudo rm -f /opt/cache/bin/g++
-      pushd /opt/rocm/llvm/bin
-      if [[ -d original ]]; then
-        sudo mv original/clang .
-        sudo mv original/clang++ .
+      # Restore original clang compilers that were backed up during sccache wrapping.
+      # Skip for theRock nightly: sccache wrapping is disabled, so no backup exists.
+      # theRock also uses ${ROCM_PATH}/lib/llvm/bin instead of /opt/rocm/llvm/bin.
+      if [[ -d /opt/rocm/llvm/bin ]]; then
+        pushd /opt/rocm/llvm/bin
+        if [[ -d original ]]; then
+          sudo mv original/clang .
+          sudo mv original/clang++ .
+        fi
+        sudo rm -rf original
+        popd
       fi
-      sudo rm -rf original
-      popd
     fi
 
     CUSTOM_TEST_ARTIFACT_BUILD_DIR=${CUSTOM_TEST_ARTIFACT_BUILD_DIR:-"build/custom_test_artifacts"}
@@ -394,10 +422,8 @@ else
     # This is an attempt to mitigate flaky libtorch build OOM error. By default, the build parallelization
     # is set to be the number of CPU minus 2. So, let's try a more conservative value here. A 4xlarge has
     # 16 CPUs
-    if [ -z "$MAX_JOBS_OVERRIDE" ]; then
-      MAX_JOBS=$(nproc --ignore=4)
-      export MAX_JOBS
-    fi
+    MAX_JOBS=$(nproc --ignore=4)
+    export MAX_JOBS
 
     # NB: Install outside of source directory (at the same level as the root
     # pytorch folder) so that it doesn't get cleaned away prior to docker push.
@@ -412,9 +438,9 @@ fi
 if [[ "$BUILD_ENVIRONMENT" != *libtorch* && "$BUILD_ENVIRONMENT" != *bazel* ]]; then
   # export test times so that potential sharded tests that'll branch off this build will use consistent data
   # don't do this for libtorch as libtorch is C++ only and thus won't have python tests run on its build
-  python tools/stats/export_test_times.py
+  PYTHONPATH=. python tools/stats/export_test_times.py
 fi
-# don't do this for bazel or s390x as they don't use sccache
-if [[ "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then
+# don't do this for bazel or s390x or riscv64 as they don't use sccache
+if [[ "$BUILD_ENVIRONMENT" != *s390x* && "$BUILD_ENVIRONMENT" != *riscv64* && "$BUILD_ENVIRONMENT" != *-bazel-* ]]; then
   print_sccache_stats
 fi

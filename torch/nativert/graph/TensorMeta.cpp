@@ -1,7 +1,5 @@
 #include <torch/nativert/graph/TensorMeta.h>
 
-#include <c10/util/Logging.h>
-
 namespace torch::nativert {
 
 c10::ScalarType convertJsonScalarType(
@@ -41,6 +39,10 @@ c10::ScalarType convertJsonScalarType(
       return c10::ScalarType::Float8_e4m3fn;
     case torch::_export::ScalarType::FLOAT8E5M2:
       return c10::ScalarType::Float8_e5m2;
+    case torch::_export::ScalarType::FLOAT8E4M3FNUZ:
+      return c10::ScalarType::Float8_e4m3fnuz;
+    case torch::_export::ScalarType::FLOAT8E5M2FNUZ:
+      return c10::ScalarType::Float8_e5m2fnuz;
     default:
       TORCH_CHECK(false, "unknown scalar type", static_cast<int>(scalarType));
   }
@@ -102,11 +104,14 @@ TensorMeta::TensorMeta(const torch::_export::TensorMeta& tensorMeta)
       layout_(convertJsonLayout(tensorMeta.get_layout())),
       requiresGrad_(tensorMeta.get_requires_grad()),
       device_(convertJsonDevice(tensorMeta.get_device())) {
-  if (tensorMeta.get_storage_offset().tag() ==
-      torch::_export::SymInt::Tag::AS_INT) {
+  const auto& storageOffset = tensorMeta.get_storage_offset();
+  if (storageOffset.tag() == torch::_export::SymInt::Tag::AS_INT) {
     storage_offset_ = tensorMeta.get_storage_offset().get_as_int();
-  } else {
-    CHECK(false) << "SymInt not supported yet";
+  } else if (storageOffset.tag() == torch::_export::SymInt::Tag::AS_EXPR) {
+    // TODO: it's still unclear how SymInt shape should be used in runtime
+    // setting the storage offset to 0 for now
+    hasSymbolicShape_ = true;
+    storage_offset_ = 0;
   }
 
   for (const auto& size : tensorMeta.get_sizes()) {
@@ -116,7 +121,7 @@ TensorMeta::TensorMeta(const torch::_export::TensorMeta& tensorMeta)
       numel_ *= val;
     } else if (size.tag() == torch::_export::SymInt::Tag::AS_EXPR) {
       // TODO: it's still unclear how SymInt shape should be used in runtime
-      // One potential use cases is for verifing inputs shape matches constrain
+      // One potential use cases is for verifying inputs shape matches constrain
       // This would require unpacking the serialized constrain, which is NYI
       //
       // For the time being, we just set the symbolic dim to -1

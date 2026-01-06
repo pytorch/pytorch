@@ -93,7 +93,7 @@ void pytorch_qnnp_requantize_q31__scalar(
      * overflow is possible only when input is positive, and even when addition
      * of a rounding constant overflows 32-bit signed integer, it still doesn't
      *    overflow 32-bit unsigned integer. Thus, in case of signed overflow, we
-     * can compute the result using unsigned arithmetics, specifically using
+     * can compute the result using unsigned arithmetic, specifically using
      * logical shift right instead of arithmetic shift right.
      * 3. Performs arithmetic shift as is, which will produce division result
      * rounded down. Then compute remainder of this division by a power of 2,

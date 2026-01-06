@@ -66,7 +66,7 @@ TORCH_API bool isSupported(Node* node);
 /// work with dynamic shapes unless explicitly register the shape function via
 /// `torch::jit::RegisterShapeComputeGraphForSchema` for the custom operator.
 ///
-/// @return Reference of the custome operator set
+/// @return Reference of the custom operator set
 ///
 TORCH_API OperatorSet& getCustomOperatorSet();
 

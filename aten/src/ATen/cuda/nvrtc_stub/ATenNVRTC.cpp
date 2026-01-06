@@ -1,5 +1,4 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
-#include <iostream>
 
 namespace at::cuda {
 

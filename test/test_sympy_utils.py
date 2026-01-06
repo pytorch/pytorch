@@ -5,7 +5,7 @@ import itertools
 import math
 import pickle
 import sys
-from typing import Callable
+from collections.abc import Callable
 
 import sympy
 
@@ -24,6 +24,7 @@ from torch.utils._sympy.functions import (
     FloorDiv,
     Identity,
     OpaqueUnaryFn_cos,
+    BitwiseFn_bitwise_and,
     simple_floordiv_gcd,
 )
 from torch.utils._sympy.interp import sympy_interp
@@ -66,10 +67,12 @@ BINARY_OPS = [
     "mod",
     "bitwise_and",
     "bitwise_or",
+    "bitwise_xor",
 ]
 BITWISE_OPS = [
     "bitwise_and",
     "bitwise_or",
+    "bitwise_xor",
 ]
 
 UNARY_BOOL_OPS = ["not_"]
@@ -277,6 +280,16 @@ class TestValueRanges(TestCase):
             ValueRanges.wrap(0.0),
         )
 
+    def test_trunc_infinite(self):
+        self.assertEqual(
+            ValueRangeAnalysis.trunc(ValueRanges.wrap(sympy.Float('inf'))),
+            ValueRanges.wrap(sympy.Float('inf')),
+        )
+        self.assertEqual(
+            ValueRangeAnalysis.trunc(ValueRanges.wrap(sympy.Float('-inf'))),
+            ValueRanges.wrap(sympy.Float('-inf')),
+        )
+
     @parametrize("fn", UNARY_BOOL_OPS)
     def test_unary_bool_ref_range(self, fn):
         vals = [sympy.false, sympy.true]
@@ -387,6 +400,72 @@ class TestValueRanges(TestCase):
                 self.assertIn(r, ref_r)
 
 
+    def test_python_mod(self):
+        """Test python_mod value range analysis."""
+        # Test with positive divisor
+        # x % 4 should be in [0, 3]
+        r = ValueRangeAnalysis.python_mod(ValueRanges(-100, 100), ValueRanges(4, 4))
+        self.assertEqual(r, ValueRanges(0, 3))
+
+        # Test with range of positive divisors
+        # x % [2, 10] should be in [0, 9]
+        r = ValueRangeAnalysis.python_mod(ValueRanges(-100, 100), ValueRanges(2, 10))
+        self.assertEqual(r, ValueRanges(0, 9))
+
+        # Test with negative divisor
+        # x % -4 should be in [-3, 0]
+        r = ValueRangeAnalysis.python_mod(ValueRanges(-100, 100), ValueRanges(-4, -4))
+        self.assertEqual(r, ValueRanges(-3, 0))
+
+        # Test with range of negative divisors
+        # x % [-10, -2] should be in [-9, 0]
+        r = ValueRangeAnalysis.python_mod(ValueRanges(-100, 100), ValueRanges(-10, -2))
+        self.assertEqual(r, ValueRanges(-9, 0))
+
+        # Test with mixed divisor range (assuming y != 0)
+        # x % [-5, 5] should be in [-4, 4]
+        r = ValueRangeAnalysis.python_mod(ValueRanges(-100, 100), ValueRanges(-5, 5))
+        self.assertEqual(r, ValueRanges(-4, 4))
+
+        # Test with infinite bounds
+        # x % [1, int_oo] should be in [0, int_oo - 1] = [0, int_oo]
+        r = ValueRangeAnalysis.python_mod(ValueRanges(-100, 100), ValueRanges(1, int_oo))
+        self.assertEqual(r.lower, 0)
+        self.assertEqual(r.upper, int_oo)  # int_oo - 1 == int_oo
+
+        # x % [-int_oo, -1] should be in [-int_oo + 1, 0] = [-int_oo, 0]
+        r = ValueRangeAnalysis.python_mod(ValueRanges(-100, 100), ValueRanges(-int_oo, -1))
+        self.assertEqual(r.lower, -int_oo)  # -int_oo + 1 == -int_oo
+        self.assertEqual(r.upper, 0)
+
+        # x % [-int_oo, int_oo] should be in [-int_oo + 1, int_oo - 1] = [-int_oo, int_oo]
+        r = ValueRangeAnalysis.python_mod(ValueRanges(-100, 100), ValueRanges(-int_oo, int_oo))
+        self.assertEqual(r.lower, -int_oo)  # -int_oo + 1 == -int_oo
+        self.assertEqual(r.upper, int_oo)  # int_oo - 1 == int_oo
+
+        # x % [0, int_oo] should be in [0, int_oo - 1] = [0, int_oo]
+        # (assuming y != 0 at runtime, lower bound should be 0, not 1)
+        r = ValueRangeAnalysis.python_mod(ValueRanges(-int_oo, int_oo), ValueRanges(0, int_oo))
+        self.assertEqual(r.lower, 0)
+        self.assertEqual(r.upper, int_oo)  # int_oo - 1 == int_oo
+
+        # Test edge case: y = [1, 1] -> result is always 0
+        r = ValueRangeAnalysis.python_mod(ValueRanges(-100, 100), ValueRanges(1, 1))
+        self.assertEqual(r, ValueRanges(0, 0))
+
+        # Test edge case: y = [-1, -1] -> result is always 0
+        r = ValueRangeAnalysis.python_mod(ValueRanges(-100, 100), ValueRanges(-1, -1))
+        self.assertEqual(r, ValueRanges(0, 0))
+
+        # Test that actual values fall within computed range
+        for x in range(-20, 21):
+            for y in [1, 2, 3, 4, 5, -1, -2, -3, -4, -5]:
+                result = x % y
+                y_range = ValueRanges(y, y)
+                r = ValueRangeAnalysis.python_mod(ValueRanges(x, x), y_range)
+                self.assertIn(result, r, f"x={x}, y={y}, result={result}, range={r}")
+
+
 class TestSympyInterp(TestCase):
     @parametrize(
         "fn", UNARY_OPS + BINARY_OPS + UNARY_BOOL_OPS + BINARY_BOOL_OPS + COMPARE_OPS
@@ -423,7 +502,7 @@ class TestSympyInterp(TestCase):
                 sargs = [sympy.sympify(a) for a in args]
                 sympy_expr = getattr(ReferenceAnalysis, fn)(*symbols)
                 ref_r = getattr(ReferenceAnalysis, fn)(*sargs)
-                # Yes, I know this is a longwinded way of saying xreplace; the
+                # Yes, I know this is a long-winded way of saying xreplace; the
                 # point is to test sympy_interp
                 r = sympy_interp(
                     ReferenceAnalysis, dict(zip(symbols, sargs)), sympy_expr
@@ -870,6 +949,10 @@ class TestSympySolve(TestCase):
 class TestSympyFunctions(TestCase):
     def test_pickle(self):
         x = OpaqueUnaryFn_cos(sympy.Symbol("a"))
+        r = pickle.loads(pickle.dumps(x))
+        self.assertEqual(x, r)
+
+        x = BitwiseFn_bitwise_and(sympy.Symbol("a"), sympy.Symbol("b"))
         r = pickle.loads(pickle.dumps(x))
         self.assertEqual(x, r)
 

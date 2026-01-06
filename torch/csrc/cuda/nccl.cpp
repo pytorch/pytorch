@@ -62,7 +62,7 @@ ncclResult_t to_nccl_result(torch::cuda::nccl::ncclResult var) {
     case torch::cuda::nccl::ncclResult::NumResults:
       return ncclResult_t::ncclNumResults;
     default:
-      throw std::runtime_error("Unconvertible NCCL type");
+      TORCH_CHECK(false, "Unconvertible NCCL type");
   }
 }
 
@@ -91,7 +91,7 @@ torch::cuda::nccl::ncclResult from_nccl_result(ncclResult_t var) {
     case ncclNumResults:
       return torch::cuda::nccl::ncclResult::NumResults;
     default:
-      throw std::runtime_error("Unconvertible NCCL type");
+      TORCH_CHECK(false, "Unconvertible NCCL type");
   }
 }
 
@@ -146,7 +146,7 @@ ncclDataType_t to_nccl_data_type(const at::Tensor& t) {
 }
 
 ncclRedOp_t to_nccl_red_op(int var) {
-  return (ncclRedOp_t)(var);
+  return (ncclRedOp_t)var;
 }
 
 namespace torch::cuda::nccl {
@@ -194,10 +194,9 @@ static void NCCL_CHECK_TIMEOUT(ncclResult status, ncclComm_t comm) {
     auto timeElapsed = std::chrono::duration_cast<std::chrono::seconds>(
                            currentTimepoint - startTimepoint)
                            .count();
-    if (timeElapsed > nccl_nonblocking_timeout()) {
-      throw std::runtime_error(
-          "NCCL timeout when waiting for nonblocking call to become successful.");
-    }
+    TORCH_CHECK(
+        timeElapsed <= nccl_nonblocking_timeout(),
+        "NCCL timeout when waiting for nonblocking call to become successful.");
     sched_yield(); // yield to other threads
     ncclCommGetAsyncError(to_nccl_comm(comm), &result);
   }
@@ -227,10 +226,9 @@ static void NCCL_CHECK_TIMEOUT(
         auto timeElapsed = std::chrono::duration_cast<std::chrono::seconds>(
                                currentTimepoint - startTimepoint)
                                .count();
-        if (timeElapsed > nccl_nonblocking_timeout()) {
-          throw std::runtime_error(
-              "NCCL timeout when waiting for nonblocking call to become successful.");
-        }
+        TORCH_CHECK(
+            timeElapsed <= nccl_nonblocking_timeout(),
+            "NCCL timeout when waiting for nonblocking call to become successful.");
         sched_yield(); // yield to other threads
         ncclCommGetAsyncError(to_nccl_comm(comms[i]), &result);
       } while (result == ncclInProgress);
@@ -258,7 +256,7 @@ void throw_nccl_error(torch::cuda::nccl::ncclResult status) {
   std::ostringstream err;
   err << "NCCL Error " << static_cast<int>(status) << ": "
       << ncclGetErrorString(to_nccl_result(status));
-  throw std::runtime_error(err.str());
+  TORCH_CHECK(false, err.str());
 }
 
 struct NcclCommList {
@@ -318,41 +316,36 @@ static void check_tensor(
     int64_t ref_numel,
     ScalarType ref_dtype) {
   auto check_one = [&](const at::Tensor& tensor) {
-    if (!tensor.is_cuda() || tensor.is_sparse()) {
-      throw std::runtime_error(
-          "input and output elements have to be cuda dense Tensors");
-    }
+    TORCH_CHECK(
+        tensor.is_cuda() && !tensor.is_sparse(),
+        "input and output elements have to be cuda dense Tensors");
 
-    if (ref_dtype != tensor.scalar_type()) {
-      throw std::runtime_error(
-          "all inputs and outputs must be of the same Tensor dtype");
-    }
+    TORCH_CHECK(
+        ref_dtype == tensor.scalar_type(),
+        "all inputs and outputs must be of the same Tensor dtype");
 
-    if (!tensor.is_contiguous()) {
-      throw std::runtime_error("all inputs and outputs have to be contiguous");
-    }
+    TORCH_CHECK(
+        tensor.is_contiguous(), "all inputs and outputs have to be contiguous");
   };
 
   check_one(input);
 
   // all inputs must be same size
-  if (input.numel() != ref_numel) {
-    throw std::runtime_error(
-        "all inputs must have the same number of elements");
-  }
+  TORCH_CHECK(
+      input.numel() == ref_numel,
+      "all inputs must have the same number of elements");
 
   if (output) {
     check_one(*output);
 
     // inputs and outputs must be on same device respectively
-    if (input.get_device() != output->get_device()) {
-      throw std::runtime_error("input and output must be on the same device");
-    }
+    TORCH_CHECK(
+        input.get_device() == output->get_device(),
+        "input and output must be on the same device");
 
-    if (output->numel() * output_multiplier != ref_numel * input_multiplier) {
-      throw std::runtime_error(
-          "output must be of size input_size * size_multiplier");
-    }
+    TORCH_CHECK(
+        output->numel() * output_multiplier == ref_numel * input_multiplier,
+        "output must be of size input_size * size_multiplier");
   }
 }
 
@@ -364,15 +357,13 @@ void check_inputs(
   // len(inputs) == len(outputs)
   size_t len = inputs.size();
 
-  if (len == 0) {
-    throw std::runtime_error("input sequence can't be empty");
-  }
+  TORCH_CHECK(len != 0, "input sequence can't be empty");
 
   if (len != outputs.size()) {
     std::stringstream err;
     err << "inputs and outputs sequences have to be of the same length, but got input of length "
         << len << " and output of length " << outputs.size();
-    throw std::runtime_error(err.str());
+    TORCH_CHECK(false, err.str());
   }
 
   device_set devices;
@@ -388,9 +379,8 @@ void check_inputs(
 
     auto input_device = input.get_device();
     // inputs must be on unique devices
-    if (devices.test(input_device)) {
-      throw std::runtime_error("inputs must be on unique devices");
-    }
+    TORCH_CHECK(
+        !devices.test(input_device), "inputs must be on unique devices");
     devices.set(input_device);
   }
 }
@@ -403,9 +393,7 @@ void check_inputs(
     int output_multiplier) {
   auto len = inputs.size();
 
-  if (len <= 0) {
-    throw std::runtime_error("input sequence can't be empty");
-  }
+  TORCH_CHECK(len > 0, "input sequence can't be empty");
 
   device_set devices;
   int64_t numel = inputs[0].numel();
@@ -426,9 +414,8 @@ void check_inputs(
 
     auto input_device = input.get_device();
     // inputs must be on unique devices
-    if (devices.test(input_device)) {
-      throw std::runtime_error("inputs must be on unique devices");
-    }
+    TORCH_CHECK(
+        !devices.test(input_device), "inputs must be on unique devices");
     devices.set(input_device);
   }
 }
@@ -624,7 +611,7 @@ void broadcast(
         ")");
     ncclComm_t comm = comms[i];
     NCCL_CHECK(ncclBcast(
-        tensors[i].data_ptr(),
+        tensors[i].mutable_data_ptr(),
         numel,
         data_type,
         0,
@@ -669,9 +656,9 @@ void reduce(
 
     ncclComm_t comm = comms_ref[i];
     NCCL_CHECK(ncclReduce(
-        inputs[i].data_ptr(),
+        inputs[i].const_data_ptr(),
         static_cast<std::remove_cv_t<decltype(i)>>(root) == i
-            ? output.data_ptr()
+            ? output.mutable_data_ptr()
             : nullptr,
         count,
         data_type,
@@ -723,8 +710,8 @@ void all_reduce(
 
     ncclComm_t comm = comms_ref[i];
     NCCL_CHECK(ncclAllReduce(
-        inputs[i].data_ptr(),
-        outputs[i].data_ptr(),
+        inputs[i].const_data_ptr(),
+        outputs[i].mutable_data_ptr(),
         count,
         data_type,
         to_nccl_red_op(op),
@@ -765,8 +752,8 @@ void reduce_scatter(
 
     ncclComm_t comm = comms_ref[i];
     NCCL_CHECK(ncclReduceScatter(
-        inputs[i].data_ptr(),
-        outputs[i].data_ptr(),
+        inputs[i].const_data_ptr(),
+        outputs[i].mutable_data_ptr(),
         count,
         data_type,
         to_nccl_red_op(op),
@@ -807,18 +794,18 @@ void all_gather(
     ncclComm_t comm = comms_ref[i];
 #if defined(NCCL_MAJOR) && (NCCL_MAJOR >= 2)
     NCCL_CHECK(ncclAllGather(
-        inputs[i].data_ptr(),
-        outputs[i].data_ptr(),
+        inputs[i].const_data_ptr(),
+        outputs[i].mutable_data_ptr(),
         count,
         data_type,
         to_nccl_comm(comm),
         stream));
 #else
     NCCL_CHECK(ncclAllGather(
-        inputs[i].data_ptr(),
+        inputs[i].const_data_ptr(),
         count,
         data_type,
-        outputs[i].data_ptr(),
+        outputs[i].mutable_data_ptr(),
         to_nccl_comm(comm),
         stream));
 #endif
@@ -843,13 +830,15 @@ void all2all_single_equal_split(
   size_t count = input.numel() / size;
   [[maybe_unused]] size_t rankdiff = input.nbytes() / size;
   const auto* sendbuff = reinterpret_cast<const char*>(input.const_data_ptr());
-  auto* recvbuff = reinterpret_cast<char*>(output.data_ptr());
+  auto* recvbuff = reinterpret_cast<char*>(output.mutable_data_ptr());
   auto comm = to_nccl_comm(_comm);
 #if defined(USE_ROCM) || defined(NCCL_ALLTOALL_SUPPORTED)
   // NCCL_ALLTOALL_SUPPORTED is used so NCCL can differentiate send/recv
   // operations issued as a part of the collective (e.g. alltoall) vs those
   // inside traditional p2p operations.
   NCCL_CHECK(ncclAllToAll(sendbuff, recvbuff, count, type, comm, stream));
+#elif NCCL_VERSION_CODE >= NCCL_VERSION(2, 28, 0)
+  NCCL_CHECK(ncclAlltoAll(sendbuff, recvbuff, count, type, comm, stream));
 #else
   int numranks = 0;
   NCCL_CHECK(ncclCommCount(comm, &numranks));
@@ -964,7 +953,7 @@ void all2all(
 
     if (_nccl_should_send_recv(input.numel())) {
       NCCL_CHECK(ncclSend(
-          input.data_ptr(),
+          input.const_data_ptr(),
           input.numel(),
           to_nccl_data_type(input),
           r,
@@ -973,7 +962,7 @@ void all2all(
     }
     if (_nccl_should_send_recv(output.numel())) {
       NCCL_CHECK(ncclRecv(
-          output.data_ptr(),
+          output.mutable_data_ptr(),
           output.numel(),
           to_nccl_data_type(output),
           r,
@@ -1005,7 +994,7 @@ void send(
   using namespace torch::cuda::nccl::detail;
 #ifndef NCCL_HAS_COMM_NONBLOCKING
   NCCL_CHECK(ncclSend(
-      input.data_ptr(),
+      input.const_data_ptr(),
       input.numel(),
       to_nccl_data_type(input),
       dst,
@@ -1014,7 +1003,7 @@ void send(
 #else
   NCCL_CHECK_TIMEOUT(
       ncclSend(
-          input.data_ptr(),
+          input.const_data_ptr(),
           input.numel(),
           to_nccl_data_type(input),
           dst,
@@ -1041,7 +1030,7 @@ void recv(
   using namespace torch::cuda::nccl::detail;
 #ifndef NCCL_HAS_COMM_NONBLOCKING
   NCCL_CHECK(ncclRecv(
-      output.data_ptr(),
+      output.mutable_data_ptr(),
       output.numel(),
       to_nccl_data_type(output),
       src,
@@ -1050,7 +1039,7 @@ void recv(
 #else
   NCCL_CHECK_TIMEOUT(
       ncclRecv(
-          output.data_ptr(),
+          output.mutable_data_ptr(),
           output.numel(),
           to_nccl_data_type(output),
           src,
@@ -1091,7 +1080,7 @@ void gather(
   if (cur_rank == root) {
     for (const auto r : c10::irange(numranks)) {
       if (r != root) {
-        auto* recvbuff = reinterpret_cast<char*>(outputs[r].data_ptr());
+        auto* recvbuff = reinterpret_cast<char*>(outputs[r].mutable_data_ptr());
         NCCL_CHECK(ncclRecv(recvbuff, count, type, r, comm, stream));
       } else {
         // on its own rank, simply copy from the input
@@ -1152,7 +1141,7 @@ void scatter(
   } else {
     size_t recv_count = outputs.numel();
     auto recv_type = to_nccl_data_type(outputs);
-    auto* recvbuff = reinterpret_cast<char*>(outputs.data_ptr());
+    auto* recvbuff = reinterpret_cast<char*>(outputs.mutable_data_ptr());
     NCCL_CHECK(ncclRecv(recvbuff, recv_count, recv_type, root, comm, stream));
   }
 #ifndef NCCL_HAS_COMM_NONBLOCKING

@@ -1,7 +1,8 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import inspect
-from typing import Callable, Optional
+from collections.abc import Callable
+from typing import Optional
 
 import torch
 import torch._decomp
@@ -83,7 +84,7 @@ def _register_jit_decomposition_for_jvp(decomp, use_python=False):
         # Thanks copilot!
         def get_function_def(sig):
             param_def = [f"{param_str}" for param_str in sig.parameters.values()]
-            param_use = [f"{param_str}" for param_str in sig.parameters.keys()]
+            param_use = [f"{param_str}" for param_str in sig.parameters]
 
             return f"def wrapped_decomp({', '.join(param_def)}):\n  return decomp_fn({', '.join(param_use)})\n"
 
@@ -146,7 +147,7 @@ def native_layer_norm_backward(
     inner_dims = input_shape[axis:]
     outer_dims = input_shape[:axis]
     inner_dim_indices = list(range(axis, input_ndim))
-    outer_dim_indices = list(range(0, axis))
+    outer_dim_indices = list(range(axis))
 
     N = 1
     for i in inner_dims:
@@ -227,26 +228,35 @@ def native_batch_norm_backward(
 ) -> tuple[Tensor, Optional[Tensor], Optional[Tensor]]:
     input_shape = input.shape
     input_rank = input.dim()
-    assert input_rank >= 2, "rank of the input must be at least 2"
+    if input_rank < 2:
+        raise AssertionError(f"rank of the input must be at least 2, got {input_rank}")
 
     axis = 1
     num_features = prod(input_shape) / input_shape[axis]  # type: ignore[arg-type]
     mean = save_mean
     invstd = save_invstd
     if train:
-        assert save_mean is not None and save_invstd is not None, (
-            "when train=True, save_mean and save_invstd are required"
-        )
+        if save_mean is None or save_invstd is None:
+            raise AssertionError(
+                "when train=True, save_mean and save_invstd are required"
+            )
 
         reduciton_dims = [0] + list(range(2, input.dim()))
-        assert invstd is not None  # for typing
+        if invstd is None:
+            raise AssertionError("invstd must not be None for typing")
         mean, invstd = recompute_mean_var(input, invstd, reduciton_dims, keepdim=False)
     else:
-        assert running_mean is not None and running_var is not None
+        if running_mean is None or running_var is None:
+            raise AssertionError(
+                "running_mean and running_var must not be None when train=False"
+            )
         mean = running_mean
         invstd = torch.rsqrt(running_var + eps)
 
-    assert invstd is not None and mean is not None
+    if invstd is None or mean is None:
+        raise AssertionError(
+            f"invstd and mean must not be None, got invstd={invstd}, mean={mean}"
+        )
 
     broadcast_mask = [1] * input_rank
     broadcast_mask[axis] = input_shape[axis]

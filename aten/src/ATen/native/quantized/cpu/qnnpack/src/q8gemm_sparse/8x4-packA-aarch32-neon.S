@@ -32,7 +32,7 @@
 #
 
 # Packed A format.
-# 8kx4m blocks for alls blocks given 4 rows (4m) are placed in contiguous memory.
+# 8kx4m blocks for all blocks given 4 rows (4m) are placed in contiguous memory.
 # Original A
 # --------- K -----------          -- (K + 4 - 1) / 4 --
 # |                     |          |                   |
@@ -53,7 +53,7 @@
 # This locality helps in loading 8kx8m blocks of activations
 # Note when M is not multiple of 8, the rest can contain arbitrary
 # data in packed A as we will not be writing those out.
-# This wil be taken care by just copying the appropriate valid data
+# This will be taken care by just copying the appropriate valid data
 
 # void pytorch_q8gemm_sparse_packA_ukernel_8x4__aarch32_neon(
 #     size_t mr,
@@ -125,7 +125,7 @@ k_loop:
     VLD1.8 {d6}, [r10]!
     VLD1.8 {d7}, [r11]!
 
-    #  Now we have 8x8 block of values that we will tranpose
+    #  Now we have 8x8 block of values that we will transpose
     #  A matrix
     #  --------------------------------
     #  |                              |
@@ -189,7 +189,7 @@ k_loop:
     VTRN.32 q0, q2
     VTRN.32 q1, q3
 
-    # Now store the tranposed values
+    # Now store the transposed values
     # d0, d1, d2, d3
     # then d4, d5, d6, d7 contiguously
     VST1.8 {q0}, [r2]!
@@ -213,7 +213,7 @@ k_loop:
     VLD1.32 {d6[]}, [r7]
     VLD1.32 {d7[]}, [r11]
 
-    #  Now we have 4x8 block of values that we will tranpose
+    #  Now we have 4x8 block of values that we will transpose
     #  _d{0-3} are arm neon vector registers
     #  va04 = _d0 = a0 a1 a2 a3 e0 e1 e2 e3
     #  va15 = _d1 = b0 b1 b2 b3 f0 f1 f2 f3
@@ -260,7 +260,7 @@ k_loop:
     VTRN.16 d0, d2
     VTRN.16 d1, d3
 
-    # Now store the tranposed values
+    # Now store the transposed values
     # d0, d1, d2, d3
     # then d4, d5, d6, d7 contiguously
     VST1.8 {q0}, [r2]!

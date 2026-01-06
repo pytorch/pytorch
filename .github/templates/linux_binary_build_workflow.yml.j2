@@ -71,12 +71,15 @@ jobs:
     with:!{{ upload.binary_env_as_input(config) }}
       {%- if "aarch64" in build_environment %}
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.arm64.m7g.4xlarge.ephemeral
+      runs_on: linux.arm64.r7g.12xlarge.memory
       ALPINE_IMAGE: "arm64v8/alpine"
       {%- elif "s390x" in build_environment %}
       runs_on: linux.s390x
       ALPINE_IMAGE: "docker.io/s390x/alpine"
       timeout-minutes: 420
+      {%- elif config["gpu_arch_type"] == "rocm" %}
+      runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
+      timeout-minutes: 300
       {%- elif "conda" in build_environment and config["gpu_arch_type"] == "cuda" %}
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.24xlarge.ephemeral
@@ -94,7 +97,6 @@ jobs:
     secrets:
       github-token: ${{ secrets.GITHUB_TOKEN }}
 
-  {%- if config["gpu_arch_type"] != "cuda-aarch64" %}
   !{{ config["build_name"] }}-test:  # Testing
     if: ${{ github.repository_owner == 'pytorch' }}
     needs:
@@ -114,12 +116,12 @@ jobs:
       ALPINE_IMAGE: "docker.io/s390x/alpine"
       {%- elif config["gpu_arch_type"] == "rocm" %}
       runs_on: linux.rocm.gpu
-      {%- elif config["gpu_arch_type"] == "cuda" and config["gpu_arch_version"] in ["12.8", "12.9"] %}
+      {%- elif config["gpu_arch_type"] == "cuda" and config["gpu_arch_version"] in ["12.6"] %}
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.g4dn.4xlarge.nvidia.gpu  # 12.8 and 12.9 build need sm_70+ runner
+      runs_on: linux.4xlarge.nvidia.gpu  # 12.6 build can use maxwell (sm_50) runner
       {%- elif config["gpu_arch_type"] == "cuda" %}
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runs_on: linux.4xlarge.nvidia.gpu # for other cuda versions, we use 4xlarge runner
+      runs_on: linux.g4dn.4xlarge.nvidia.gpu # 12.8+ builds need sm_70+ runner
       {%- else %}
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       runs_on: linux.4xlarge
@@ -135,16 +137,9 @@ jobs:
       contents: read
     steps:
       - name: Setup XPU
-        uses: ./.github/actions/setup-xpu
-      - name: configure aws credentials
-        id: aws_creds
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
-          aws-region: us-east-1
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+        uses: pytorch/pytorch/.github/actions/setup-xpu@main
+      - name: Login to ECR
+        uses: pytorch/pytorch/.github/actions/ecr-login@main
       - uses: !{{ common.download_artifact_action }}
         name: Download Build Artifacts
         with:
@@ -171,9 +166,12 @@ jobs:
       - name: Teardown XPU
         uses: ./.github/actions/teardown-xpu
     {%- else %}
-    runs-on: linux.rocm.gpu.mi250
+    runs-on: linux.rocm.gpu.mi250.1
     timeout-minutes: !{{ common.timeout_minutes }}
     !{{ upload.binary_env(config) }}
+    permissions:
+      id-token: write
+      contents: read
     steps:
       - name: Setup ROCm
         uses: ./.github/actions/setup-rocm
@@ -214,7 +212,6 @@ jobs:
       - name: Teardown ROCm
         uses: ./.github/actions/teardown-rocm
     {%- endif %}
-  {%- endif %}
 
 {%- if branches == "nightly" %}
   !{{ upload.upload_binaries(config) }}

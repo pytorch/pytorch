@@ -1,5 +1,3 @@
-# mypy: allow-untyped-defs
-
 """Testing utilities for Dynamo, providing a specialized TestCase class and test running functionality.
 
 This module extends PyTorch's testing framework with Dynamo-specific testing capabilities.
@@ -18,10 +16,12 @@ import os
 import re
 import sys
 import unittest
-from typing import Union
+from collections.abc import Callable
+from typing import Any, Union
 
 import torch
 import torch.testing
+from torch._dynamo import polyfills
 from torch._logging._internal import trace_log
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     IS_WINDOWS,
@@ -97,10 +97,38 @@ class TestCase(TorchTestCase):
             print(k, v.most_common())
         reset()
         utils.counters.clear()
+        torch._C._autograd._saved_tensors_hooks_enable()
         super().tearDown()
         if self._prior_is_grad_enabled is not torch.is_grad_enabled():
             log.warning("Running test changed grad mode")
             torch.set_grad_enabled(self._prior_is_grad_enabled)
+
+    def assertEqual(self, x: Any, y: Any, *args: Any, **kwargs: Any) -> None:  # type: ignore[override]
+        if (
+            config.debug_disable_compile_counter
+            and isinstance(x, utils.CompileCounterInt)
+            or isinstance(y, utils.CompileCounterInt)
+        ):
+            return
+        return super().assertEqual(x, y, *args, **kwargs)
+
+    # assertExpectedInline might also need to be disabled for wrapped nested
+    # graph break tests
+
+
+# NB: multiple inheritance with LoggingTestCase is possible - this should be fine
+# since there is no overlap in overridden methods.
+class TestCaseWithNestedGraphBreaks(TestCase):
+    def setUp(self) -> None:
+        super().setUp()
+        self.prev_nested_graph_breaks = torch._dynamo.config.nested_graph_breaks
+        # pyrefly: ignore [bad-assignment]
+        torch._dynamo.config.nested_graph_breaks = True
+
+    def tearDown(self) -> None:
+        super().tearDown()
+        # pyrefly: ignore [bad-assignment]
+        torch._dynamo.config.nested_graph_breaks = self.prev_nested_graph_breaks
 
 
 class CPythonTestCase(TestCase):
@@ -136,13 +164,15 @@ class CPythonTestCase(TestCase):
     assertRegex = unittest.TestCase.assertRegex
     assertNotRegex = unittest.TestCase.assertNotRegex
     assertCountEqual = unittest.TestCase.assertCountEqual
-    assertMultiLineEqual = unittest.TestCase.assertMultiLineEqual
-    assertSequenceEqual = unittest.TestCase.assertSequenceEqual
+    assertMultiLineEqual = polyfills.assert_multi_line_equal
+    assertSequenceEqual = polyfills.assert_sequence_equal
     assertListEqual = unittest.TestCase.assertListEqual
     assertTupleEqual = unittest.TestCase.assertTupleEqual
     assertSetEqual = unittest.TestCase.assertSetEqual
-    assertDictEqual = unittest.TestCase.assertDictEqual
+    assertDictEqual = polyfills.assert_dict_equal
+    # pyrefly: ignore [bad-override]
     assertRaises = unittest.TestCase.assertRaises
+    # pyrefly: ignore [bad-override]
     assertRaisesRegex = unittest.TestCase.assertRaisesRegex
     assertWarns = unittest.TestCase.assertWarns
     assertWarnsRegex = unittest.TestCase.assertWarnsRegex
@@ -150,15 +180,22 @@ class CPythonTestCase(TestCase):
     fail = unittest.TestCase.fail
     failureException = unittest.TestCase.failureException
 
-    def compile_fn(self, fn, backend, nopython):
+    def compile_fn(
+        self,
+        fn: Callable[..., Any],
+        backend: Union[str, Callable[..., Any]],
+        nopython: bool,
+    ) -> Callable[..., Any]:
         # We want to compile only the test function, excluding any setup code
         # from unittest
+
         method = getattr(self, self._testMethodName)
-        method = torch._dynamo.optimize(backend, nopython=nopython)(method)
+        method = torch._dynamo.optimize(backend, error_on_graph_break=nopython)(method)
+
         setattr(self, self._testMethodName, method)
         return fn
 
-    def _dynamo_test_key(self):
+    def _dynamo_test_key(self) -> str:
         suffix = super()._dynamo_test_key()
         test_cls = self.__class__
         test_file = inspect.getfile(test_cls).split(os.sep)[-1].split(".")[0]
@@ -184,7 +221,7 @@ class CPythonTestCase(TestCase):
         if m:
             test_py_ver = tuple(map(int, m.group().removeprefix(prefix).split("_")))
             py_ver = sys.version_info[:2]
-            if py_ver < test_py_ver:
+            if py_ver != test_py_ver:
                 expected = ".".join(map(str, test_py_ver))
                 got = ".".join(map(str, py_ver))
                 raise unittest.SkipTest(

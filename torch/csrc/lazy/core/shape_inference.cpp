@@ -73,7 +73,7 @@
 
 namespace torch::lazy {
 
-// Copied from ATen/native/utils/ParamUtils.h, which aparently I can't include
+// Copied from ATen/native/utils/ParamUtils.h, which apparently I can't include
 // from here?
 static std::vector<int64_t> expand_param_if_needed(
     at::IntArrayRef list_param,
@@ -85,7 +85,7 @@ static std::vector<int64_t> expand_param_if_needed(
     std::ostringstream ss;
     ss << "expected " << param_name << " to be a single integer value or a "
        << "list of " << expected_dim << " values to match the convolution "
-       << "dimensions, but got " << param_name << "=" << list_param;
+       << "dimensions, but got " << param_name << '=' << list_param;
     TORCH_CHECK(false, ss.str());
   } else {
     return list_param.vec();
@@ -225,7 +225,7 @@ std::vector<Shape> compute_shape_constant_pad_nd(
     auto pad_idx = pad.size() - ((i + 1) * 2);
     auto new_dim = input_sizes[l_diff + i] + pad[pad_idx] + pad[pad_idx + 1];
     TORCH_CHECK(
-        new_dim > 0,
+        new_dim >= 0,
         "The input size ",
         input_sizes[l_diff + i],
         ", plus negative padding ",
@@ -281,7 +281,7 @@ std::vector<Shape> compute_shape_convolution(
   TORCH_CHECK(dim > 0, "weight should have at least three dimensions");
 
   // at::convolution performs parameter expansion before running kernels on
-  // expanded parameters we must do the same.  Shape formulae access differnent
+  // expanded parameters we must do the same.  Shape formulae access different
   // dimensions of e.g. output_padding, but output_padding may be passed in as a
   // scalar.  Sadly, accessing output_padding[1] in this case gives incorrect
   // results rather than indexing error

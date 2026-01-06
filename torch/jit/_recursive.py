@@ -2,7 +2,6 @@
 import collections
 import functools
 import inspect
-import sys
 import textwrap
 import types
 import warnings
@@ -153,13 +152,10 @@ def _get_valid_constant(attr, v, owner_type):
 
 
 class SourceContext(torch._C._jit_tree_views.SourceRangeFactory):
-    def __init__(self, source, filename, file_lineno, leading_whitespace_len):
-        super().__init__(source, filename, file_lineno, leading_whitespace_len)
+    pass
 
 
 def get_annotations(obj):
-    if sys.version_info < (3, 10):
-        return getattr(obj, "__annotations__", {})
     # In Python-3.10+ it is recommended to use inspect.get_annotations
     # See https://docs.python.org/3.10/howto/annotations.html
     # But also, in 3.10 annotations from base class are not inherited
@@ -312,7 +308,8 @@ def infer_concrete_type_builder(nn_module, share_types=True):
 
             warnings.warn(
                 f"'{name}' was found in ScriptModule constants, "
-                f" but it is a non-constant {hint}. Consider removing it."
+                f" but it is a non-constant {hint}. Consider removing it.",
+                stacklevel=2,
             )
             continue
         if not hasattr(nn_module, name):
@@ -321,7 +318,8 @@ def infer_concrete_type_builder(nn_module, share_types=True):
             warnings.warn(
                 f"'{name}' was found in ScriptModule constants, "
                 "but was not actually set in __init__. "
-                "Consider removing it."
+                "Consider removing it.",
+                stacklevel=2,
             )
             continue
         value = getattr(nn_module, name)
@@ -371,7 +369,7 @@ def infer_concrete_type_builder(nn_module, share_types=True):
                 hint = (
                     "(This function exists as an attribute on the Python module, "
                     "but we failed to compile it to a TorchScript function. "
-                    f"\nThe error stack is reproduced here:\n{e}"
+                    f"\nThe error stack is reproduced here:\n{e})"
                 )
                 concrete_type_builder.add_failed_attribute(name, hint)
 
@@ -431,7 +429,7 @@ class ConcreteTypeStore:
         self.methods_compiled = set()
 
     def get_or_create_concrete_type(self, nn_module):
-        """Infer a ConcreteType from this `nn.Module` instance. Underlying JIT types are re-used if possible."""
+        """Infer a ConcreteType from this `nn.Module` instance. Underlying JIT types are reused if possible."""
         concrete_type_builder = infer_concrete_type_builder(nn_module)
 
         nn_module_type = type(nn_module)
@@ -455,7 +453,7 @@ concrete_type_store = ConcreteTypeStore()
 
 def create_methods_and_properties_from_stubs(
     concrete_type, method_stubs, property_stubs
-):
+) -> None:
     method_defs = [m.def_ for m in method_stubs]
     method_rcbs = [m.resolution_callback for m in method_stubs]
     method_defaults = [get_default_args(m.original_method) for m in method_stubs]
@@ -468,7 +466,7 @@ def create_methods_and_properties_from_stubs(
     )
 
 
-def create_hooks_from_stubs(concrete_type, hook_stubs, pre_hook_stubs):
+def create_hooks_from_stubs(concrete_type, hook_stubs, pre_hook_stubs) -> None:
     hook_defs = [h.def_ for h in hook_stubs]
     hook_rcbs = [h.resolution_callback for h in hook_stubs]
 
@@ -502,7 +500,7 @@ def get_module_concrete_type(nn_module, share_types=True):
         # Look into the store of cached JIT types
         concrete_type = concrete_type_store.get_or_create_concrete_type(nn_module)
     else:
-        # Get a concrete type directly, without trying to re-use an existing JIT
+        # Get a concrete type directly, without trying to reuse an existing JIT
         # type from the type store.
         concrete_type_builder = infer_concrete_type_builder(nn_module, share_types)
         concrete_type_builder.set_poisoned()
@@ -572,10 +570,10 @@ def create_script_module_impl(nn_module, concrete_type, stubs_fn):
     hook_stubs, pre_hook_stubs = get_hook_stubs(nn_module)
     ignored_properties = jit_ignored_properties(nn_module)
 
-    def init_fn(script_module):
+    def init_fn(script_module) -> None:
         # Initialize the ScriptModule:
         # 1. Copy the attributes/parameters/buffers from the original `nn_module` to the new ScriptModule.
-        for name in concrete_type.get_attributes().keys():
+        for name in concrete_type.get_attributes():
             orig_value = getattr(nn_module, name)
             orig_value = (
                 orig_value.value
@@ -726,7 +724,7 @@ def script_model_defines_attr(script_model, attr):
     return script_attr != default_attr
 
 
-def add_python_attr_to_scripted_model(script_model, orig, attr):
+def add_python_attr_to_scripted_model(script_model, orig, attr) -> None:
     if hasattr(orig, attr) and script_model_defines_attr(script_model, attr):
         setattr(script_model, attr, getattr(orig, attr))
 
@@ -750,6 +748,7 @@ def get_overload_annotations(mod, jit_ignored_properties):
             if method_overloads is None:
                 continue
 
+            # pyrefly: ignore [missing-attribute]
             if item.__func__ in method_overloads:
                 raise RuntimeError(
                     _jit_internal.get_overload_no_implementation_error_message(
@@ -777,7 +776,7 @@ def get_overload_name_mapping(overload_info):
     return overload_name_mappings
 
 
-def _check_no_signature(func):
+def _check_no_signature(func) -> None:
     signature = torch.jit.annotations.get_signature(
         func, None, fake_range(), inspect.ismethod(func)
     )
@@ -807,7 +806,7 @@ def make_stubs_for_overloads(overload_info):
     return overload_stubs
 
 
-def check_module_initialized(mod):
+def check_module_initialized(mod) -> None:
     assert isinstance(mod, torch.nn.Module)
     if not hasattr(mod, "_parameters"):
         raise RuntimeError(
@@ -1002,7 +1001,7 @@ def wrap_cpp_class(cpp_class):
 def wrap_cpp_module(cpp_module):
     """Wrap this torch._C.ScriptModule in a Python ScriptModule, recursively for all submodules."""
 
-    def init_fn(script_module):
+    def init_fn(script_module) -> None:
         for name, cpp_module in torch._C.ModuleDict(script_module._c).items():
             setattr(script_module, name, wrap_cpp_module(cpp_module))
         script_module._concrete_type = torch._C.ConcreteModuleType.from_jit_type(
@@ -1037,7 +1036,7 @@ def lazy_bind(concrete_type, unbound_method):
     """
 
     def lazy_binding_method(cpp_module, *args):
-        def init_fn(script_module):
+        def init_fn(script_module) -> None:
             orig_class = concrete_type.py_class
 
             # Copy @ignored/@unused methods from the original module to the new one.

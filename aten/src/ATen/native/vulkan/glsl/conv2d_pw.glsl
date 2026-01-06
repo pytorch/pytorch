@@ -39,7 +39,7 @@ layout(local_size_x_id = 0, local_size_y_id = 1, local_size_z_id = 2) in;
 /*
  * Computes a 2D pointwise convolution of a 2x2 output tile. Calculating an
  * output tile for pointwise convolution is more efficient because the kernel
- * size is only 1x1, making it much easier to re-use loaded texels from uKernel.
+ * size is only 1x1, making it much easier to reuse loaded texels from uKernel.
  */
 void main() {
   const ivec3 gpos = ivec3(gl_GlobalInvocationID);

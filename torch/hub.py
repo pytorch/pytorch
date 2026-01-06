@@ -12,7 +12,7 @@ import uuid
 import warnings
 import zipfile
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 from typing_extensions import deprecated
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse  # noqa: F401
@@ -91,7 +91,7 @@ DEFAULT_CACHE_DIR = "~/.cache"
 VAR_DEPENDENCY = "dependencies"
 MODULE_HUBCONF = "hubconf.py"
 READ_DATA_CHUNK = 128 * 1024
-_hub_dir: Optional[str] = None
+_hub_dir: str | None = None
 
 
 @contextlib.contextmanager
@@ -109,9 +109,11 @@ def _import_module(name, path):
     from importlib.abc import Loader
 
     spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None
+    if spec is None:
+        raise AssertionError(f"failed to load spec from {path}")
     module = importlib.util.module_from_spec(spec)
-    assert isinstance(spec.loader, Loader)
+    if not isinstance(spec.loader, Loader):
+        raise AssertionError(f"expected Loader, got {type(spec.loader)}")
     spec.loader.exec_module(module)
     return module
 
@@ -200,7 +202,12 @@ def _validate_not_a_forked_repo(repo_owner, repo_name, ref):
         while True:
             page += 1
             url = f"{url_prefix}?per_page=100&page={page}"
-            response = json.loads(_read_url(Request(url, headers=headers)))
+            try:
+                response = json.loads(_read_url(Request(url, headers=headers)))
+            except HTTPError:
+                # Retry without token in case it had insufficient permissions.
+                del headers["Authorization"]
+                response = json.loads(_read_url(Request(url, headers=headers)))
             # Empty response means no more data to process
             if not response:
                 break
@@ -267,14 +274,15 @@ def _get_cache_or_reload(
         except HTTPError as err:
             if err.code == 300:
                 # Getting a 300 Multiple Choices error likely means that the ref is both a tag and a branch
-                # in the repo. This can be disambiguated by explicitely using refs/heads/ or refs/tags
+                # in the repo. This can be disambiguated by explicitly using refs/heads/ or refs/tags
                 # See https://git-scm.com/book/en/v2/Git-Internals-Git-References
                 # Here, we do the same as git: we throw a warning, and assume the user wanted the branch
                 warnings.warn(
                     f"The ref {ref} is ambiguous. Perhaps it is both a tag and a branch in the repo? "
                     "Torchhub will now assume that it's a branch. "
                     "You can disambiguate tags and branches by explicitly passing refs/heads/branch_name or "
-                    "refs/tags/tag_name as the ref. That might require using skip_validation=True."
+                    "refs/tags/tag_name as the ref. That might require using skip_validation=True.",
+                    stacklevel=2,
                 )
                 disambiguated_branch_ref = f"refs/heads/{ref}"
                 url = _git_archive_link(
@@ -329,11 +337,12 @@ def _check_repo_is_trusted(
         if not is_trusted:
             warnings.warn(
                 "You are about to download and run code from an untrusted repository. In a future release, this won't "
-                "be allowed. To add the repository to your trusted list, change the command to {calling_fn}(..., "
+                f"be allowed. To add the repository to your trusted list, change the command to {calling_fn}(..., "
                 "trust_repo=False) and a command prompt will appear asking for an explicit confirmation of trust, "
                 f"or {calling_fn}(..., trust_repo=True), which will assume that the prompt is to be answered with "
                 f"'yes'. You can also use {calling_fn}(..., trust_repo='check') which will only prompt for "
-                f"confirmation if the repo is not already trusted. This will eventually be the default behaviour"
+                f"confirmation if the repo is not already trusted. This will eventually be the default behaviour",
+                stacklevel=2,
             )
         return
 
@@ -367,7 +376,7 @@ def _check_dependencies(m):
 
     if dependencies is not None:
         missing_deps = [pkg for pkg in dependencies if not _check_module_exists(pkg)]
-        if len(missing_deps):
+        if missing_deps:
             raise RuntimeError(f"Missing dependencies: {', '.join(missing_deps)}")
 
 
@@ -401,14 +410,16 @@ def get_dir() -> str:
     """
     # Issue warning to move data if old env is set
     if os.getenv("TORCH_HUB"):
-        warnings.warn("TORCH_HUB is deprecated, please use env TORCH_HOME instead")
+        warnings.warn(
+            "TORCH_HUB is deprecated, please use env TORCH_HOME instead", stacklevel=2
+        )
 
     if _hub_dir is not None:
         return _hub_dir
     return os.path.join(_get_torch_home(), "hub")
 
 
-def set_dir(d: Union[str, os.PathLike]) -> None:
+def set_dir(d: str | os.PathLike) -> None:
     r"""
     Optionally set the Torch Hub directory used to save downloaded models & weights.
 
@@ -685,7 +696,7 @@ def _load_local(hubconf_dir, model, *args, **kwargs):
 def download_url_to_file(
     url: str,
     dst: str,
-    hash_prefix: Optional[str] = None,
+    hash_prefix: str | None = None,
     progress: bool = True,
 ) -> None:
     r"""Download object at the given URL to a local path.
@@ -707,17 +718,6 @@ def download_url_to_file(
         ... )
 
     """
-    file_size = None
-    req = Request(url, headers={"User-Agent": "torch.hub"})
-    u = urlopen(req)
-    meta = u.info()
-    if hasattr(meta, "getheaders"):
-        content_length = meta.getheaders("Content-Length")
-    else:
-        content_length = meta.get_all("Content-Length")
-    if content_length is not None and len(content_length) > 0:
-        file_size = int(content_length[0])
-
     # We deliberately save it in a temp file and move it after
     # download is complete. This prevents a local working checkpoint
     # being overridden by a broken download.
@@ -727,39 +727,48 @@ def download_url_to_file(
     for _ in range(tempfile.TMP_MAX):
         tmp_dst = dst + "." + uuid.uuid4().hex + ".partial"
         try:
-            f = open(tmp_dst, "w+b")
+            f = open(tmp_dst, "w+b")  # noqa: SIM115
         except FileExistsError:
             continue
         break
     else:
         raise FileExistsError(errno.EEXIST, "No usable temporary file name found")
-
+    req = Request(url, headers={"User-Agent": "torch.hub"})
     try:
-        if hash_prefix is not None:
-            sha256 = hashlib.sha256()
-        with tqdm(
-            total=file_size,
-            disable=not progress,
-            unit="B",
-            unit_scale=True,
-            unit_divisor=1024,
-        ) as pbar:
-            while True:
-                buffer = u.read(READ_DATA_CHUNK)
-                if len(buffer) == 0:
-                    break
-                f.write(buffer)  # type: ignore[possibly-undefined]
-                if hash_prefix is not None:
-                    sha256.update(buffer)  # type: ignore[possibly-undefined]
-                pbar.update(len(buffer))
+        with urlopen(req) as u:
+            meta = u.info()
+            if hasattr(meta, "getheaders"):
+                content_length = meta.getheaders("Content-Length")
+            else:
+                content_length = meta.get_all("Content-Length")
+            file_size = None
+            if content_length is not None and len(content_length) > 0:
+                file_size = int(content_length[0])
 
-        f.close()
-        if hash_prefix is not None:
-            digest = sha256.hexdigest()  # type: ignore[possibly-undefined]
-            if digest[: len(hash_prefix)] != hash_prefix:
-                raise RuntimeError(
-                    f'invalid hash value (expected "{hash_prefix}", got "{digest}")'
-                )
+            sha256 = hashlib.sha256() if hash_prefix is not None else None
+            with tqdm(
+                total=file_size,
+                disable=not progress,
+                unit="B",
+                unit_scale=True,
+                unit_divisor=1024,
+            ) as pbar:
+                while True:
+                    buffer = u.read(READ_DATA_CHUNK)
+                    if len(buffer) == 0:
+                        break
+                    f.write(buffer)
+                    if sha256 is not None:
+                        sha256.update(buffer)
+                    pbar.update(len(buffer))
+
+            f.close()
+            if sha256 is not None and hash_prefix is not None:
+                digest = sha256.hexdigest()
+                if digest[: len(hash_prefix)] != hash_prefix:
+                    raise RuntimeError(
+                        f'invalid hash value (expected "{hash_prefix}", got "{digest}")'
+                    )
         shutil.move(f.name, dst)
     finally:
         f.close()
@@ -772,7 +781,8 @@ def download_url_to_file(
 # We should remove this support since zipfile is now default zipfile format for torch.save().
 def _is_legacy_zip_format(filename: str) -> bool:
     if zipfile.is_zipfile(filename):
-        infolist = zipfile.ZipFile(filename).infolist()
+        with zipfile.ZipFile(filename) as zf:
+            infolist = zf.infolist()
         return len(infolist) == 1 and not infolist[0].is_dir()
     return False
 
@@ -806,11 +816,11 @@ def _legacy_zip_load(
 
 def load_state_dict_from_url(
     url: str,
-    model_dir: Optional[str] = None,
+    model_dir: str | None = None,
     map_location: MAP_LOCATION = None,
     progress: bool = True,
     check_hash: bool = False,
-    file_name: Optional[str] = None,
+    file_name: str | None = None,
     weights_only: bool = False,
 ) -> dict[str, Any]:
     r"""Loads the Torch serialized object at the given URL.
@@ -848,7 +858,8 @@ def load_state_dict_from_url(
     # Issue warning to move data if old env is set
     if os.getenv("TORCH_MODEL_ZOO"):
         warnings.warn(
-            "TORCH_MODEL_ZOO is deprecated, please use env TORCH_HOME instead"
+            "TORCH_MODEL_ZOO is deprecated, please use env TORCH_HOME instead",
+            stacklevel=2,
         )
 
     if model_dir is None:

@@ -250,9 +250,11 @@ class TestJoin(MultiProcessTestCase):
             else "Detected at least one rank that exhausted inputs. "
             "Throwing across all ranks."
         )
-        with self.assertRaisesRegex(
-            RuntimeError, expected_msg
-        ) if throw_on_early_termination else contextlib.nullcontext():
+        with (
+            self.assertRaisesRegex(RuntimeError, expected_msg)
+            if throw_on_early_termination
+            else contextlib.nullcontext()
+        ):
             with Join(
                 allreducers,
                 enable=enable,

@@ -746,7 +746,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             if cnts:
                 self.assertEqual(cnts.frame_count, 1)
             # These same exact assertions run on both eager and compiled
-            # X goes to x*2 becaue of mul_
+            # X goes to x*2 because of mul_
             self.assertEqual(x, torch.tensor([0.5, 0.5, 0.5]) * 2)
             # This test proves grad aliasing works -
             self.assertEqual(x.grad, b * 5)
@@ -807,7 +807,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
             def __init__(self) -> None:
                 super().__init__()
                 self.layers = torch.nn.ModuleList()
-                for i in range(10):
+                for _ in range(10):
                     layer = torch.nn.Linear(16, 16)
                     layer.register_forward_pre_hook(lambda _, inp: fw_hook(inp))
                     layer = torch.compile(layer, backend=cnts)

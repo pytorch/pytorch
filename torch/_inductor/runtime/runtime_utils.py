@@ -25,8 +25,8 @@ def conditional_product(*args: int) -> int:
     return functools.reduce(operator.mul, [x for x in args if x])
 
 
-def ceildiv(numer: int, denom: int) -> int:
-    return -(numer // -denom)
+def ceildiv(number: int, denom: int) -> int:
+    return -(number // -denom)
 
 
 def is_power_of_2(n: int) -> bool:
@@ -45,6 +45,12 @@ def next_power_of_2(n: int) -> int:
     n |= n >> 32
     n += 1
     return n
+
+
+def last_power_of_2(n: int) -> int:
+    """Return the largest power of 2 less than or equal to n"""
+    next_pow2 = next_power_of_2(n)
+    return next_pow2 // 2 if next_pow2 > n else next_pow2
 
 
 def get_num_bytes(*args: torch.Tensor, num_in_out_args: int = 0) -> int:
@@ -68,8 +74,11 @@ def triton_config_to_hashable(cfg: Config) -> Hashable:
     Convert triton config to a tuple that can uniquely identify it. We can use
     the return value as a dictionary key.
     """
+    # pyrefly: ignore [missing-attribute]
     items = sorted(cfg.kwargs.items())
+    # pyrefly: ignore [missing-attribute]
     items.append(("num_warps", cfg.num_warps))
+    # pyrefly: ignore [missing-attribute]
     items.append(("num_stages", cfg.num_stages))
     return tuple(items)
 
@@ -103,6 +112,7 @@ def get_max_y_grid() -> int:
 
 
 try:
+    # pyrefly: ignore [import-error]
     import colorama
 
     HAS_COLORAMA = True
@@ -114,6 +124,7 @@ except ModuleNotFoundError:
 if HAS_COLORAMA:
 
     def _color_text(msg: str, color: str) -> str:
+        # pyrefly: ignore [missing-attribute]
         return getattr(colorama.Fore, color.upper()) + msg + colorama.Fore.RESET
 
 else:
@@ -155,7 +166,7 @@ dynamo_timed = torch._dynamo.utils.dynamo_timed  # type: ignore[has-type]
 def triton_hash_to_path_key(key: str) -> str:
     # In early versions of Triton, the hash is directly used in the path name.
     # Later, the hash is converted to base64 before being used in the path name.
-    # Later, the base64 convertion was replaced to the base32
+    # Later, the base64 conversion was replaced to the base32
     #
     # This code tries to import _base64 and falls back to _base32 if _base64 is unavailable.
     #
@@ -182,3 +193,57 @@ def compile_mps_shader(source: str) -> Any:
         return torch.mps.compile_shader(source)
     except SyntaxError as err:
         raise SyntaxError(f"failed to compile {source} with {err.msg}") from err
+
+
+def torch_dtype_to_jax_runtime(dtype: torch.dtype) -> Any:
+    """
+    Map PyTorch dtype to actual JAX dtype object at runtime.
+
+    This helper is used in generated Pallas kernels at runtime to convert
+    PyTorch dtypes to JAX dtype objects (not string representations).
+
+    Args:
+        dtype: PyTorch dtype to convert
+
+    Returns:
+        JAX dtype object (e.g., jnp.float32 object itself)
+    """
+    import jax.numpy as jnp  # pyrefly: ignore [import-error, missing-import]
+
+    dtype_map = {
+        torch.float32: jnp.float32,
+        torch.float64: jnp.float64,
+        torch.float16: jnp.float16,
+        torch.bfloat16: jnp.bfloat16,
+        torch.int32: jnp.int32,
+        torch.int64: jnp.int64,
+        torch.int16: jnp.int16,
+        torch.int8: jnp.int8,
+        torch.uint8: jnp.uint8,
+        torch.bool: jnp.bool_,
+        torch.complex64: jnp.complex64,
+        torch.complex128: jnp.complex128,
+    }
+    if dtype not in dtype_map:
+        raise ValueError(f"Unsupported dtype for JAX conversion: {dtype}")
+    return dtype_map[dtype]
+
+
+def torch_dtype_to_jax(dtype: torch.dtype) -> str:
+    """
+    Map PyTorch dtype to JAX dtype expression string.
+
+    This helper is used at compile time in codegen to generate
+    JAX dtype expressions for Pallas kernels.
+
+    Args:
+        dtype: PyTorch dtype to convert
+
+    Returns:
+        JAX dtype expression as string (e.g., "jnp.float32")
+    """
+    jax_dtype = torch_dtype_to_jax_runtime(dtype)
+    dtype_name = jax_dtype.__name__
+    if dtype_name == "bool":
+        dtype_name = "bool_"
+    return f"jnp.{dtype_name}"

@@ -89,29 +89,38 @@ def _block_extra(b):
 
 def format_flamegraph(flamegraph_lines, flamegraph_script=None):
     if flamegraph_script is None:
-        flamegraph_script = f"/tmp/{os.getuid()}_flamegraph.pl"
+        cache_dir = os.path.expanduser("~/.cache/")
+        os.makedirs(cache_dir, exist_ok=True)
+        flamegraph_script = f"{cache_dir}/flamegraph.pl"
     if not os.path.exists(flamegraph_script):
+        import tempfile
         import urllib.request
 
         print(f"Downloading flamegraph.pl to: {flamegraph_script}")
-        urllib.request.urlretrieve(
-            "https://raw.githubusercontent.com/brendangregg/FlameGraph/master/flamegraph.pl",
-            flamegraph_script,
-        )
-        subprocess.check_call(["chmod", "+x", flamegraph_script])
+        with tempfile.NamedTemporaryFile(mode="wb", suffix=".pl") as f:
+            urllib.request.urlretrieve(
+                "https://raw.githubusercontent.com/brendangregg/FlameGraph/master/flamegraph.pl",
+                f.name,
+            )
+            try:
+                os.chmod(f.name, 0o755)
+                os.rename(f.name, flamegraph_script)
+            except OSError:  # noqa: B001,E722
+                # Ok to skip, the file will be removed by tempfile
+                pass
     args = [flamegraph_script, "--countname", "bytes"]
-    p = subprocess.Popen(
+    with subprocess.Popen(
         args, stdin=subprocess.PIPE, stdout=subprocess.PIPE, encoding="utf-8"
-    )
-    assert p.stdin is not None
-    assert p.stdout is not None
-    p.stdin.write(flamegraph_lines)
-    p.stdin.close()
-    result = p.stdout.read()
-    p.stdout.close()
-    p.wait()
-    assert p.wait() == 0
-    return result
+    ) as p:
+        assert p.stdin is not None
+        assert p.stdout is not None
+        p.stdin.write(flamegraph_lines)
+        p.stdin.close()
+        result = p.stdout.read()
+        p.stdout.close()
+        p.wait()
+        assert p.wait() == 0
+        return result
 
 
 def _write_blocks(f, prefix, blocks):
@@ -124,7 +133,7 @@ def _write_blocks(f, prefix, blocks):
         if "history" not in b:
             frames, accounted_for_size = _block_extra(b)
             f.write(
-                f'{prefix};{b["state"]};{frames_fragment(frames)} {accounted_for_size}\n'
+                f"{prefix};{b['state']};{frames_fragment(frames)} {accounted_for_size}\n"
             )
         else:
             accounted_for_size = 0
@@ -133,18 +142,18 @@ def _write_blocks(f, prefix, blocks):
                 accounted_for_size += sz
                 if "frames" in h:
                     frames = h["frames"]
-                    f.write(f'{prefix};{b["state"]};{frames_fragment(frames)} {sz}\n')
+                    f.write(f"{prefix};{b['state']};{frames_fragment(frames)} {sz}\n")
                 else:
-                    f.write(f'{prefix};{b["state"]};<no-context> {sz}\n')
+                    f.write(f"{prefix};{b['state']};<no-context> {sz}\n")
         gaps = b["size"] - accounted_for_size
         if gaps:
-            f.write(f'{prefix};{b["state"]};<gaps> {gaps}\n')
+            f.write(f"{prefix};{b['state']};<gaps> {gaps}\n")
 
 
 def segments(snapshot, format_flamegraph=format_flamegraph):
     f = io.StringIO()
     for seg in snapshot["segments"]:
-        prefix = f'stream_{seg["stream"]};seg_{seg["address"]}'
+        prefix = f"stream_{seg['stream']};seg_{seg['address']}"
         _write_blocks(f, prefix, seg["blocks"])
     return format_flamegraph(f.getvalue())
 
@@ -152,7 +161,7 @@ def segments(snapshot, format_flamegraph=format_flamegraph):
 def memory(snapshot, format_flamegraph=format_flamegraph):
     f = io.StringIO()
     for seg in snapshot["segments"]:
-        prefix = f'stream_{seg["stream"]}'
+        prefix = f"stream_{seg['stream']}"
         _write_blocks(f, prefix, seg["blocks"])
     return format_flamegraph(f.getvalue())
 
@@ -162,7 +171,7 @@ def compare(before, after, format_flamegraph=format_flamegraph):
         return (seg["address"], seg["total_size"])
 
     def _seg_info(seg):
-        return f'stream_{seg["stream"]};seg_{seg["address"]}'
+        return f"stream_{seg['stream']};seg_{seg['address']}"
 
     f = io.StringIO()
 
@@ -292,18 +301,18 @@ def segsum(data):
                     occupied[j] = "0123456789*"[int(frac[j] * 10)]
                 else:
                     occupied[j] = m
-        stream = "" if seg["stream"] == 0 else f', stream_{seg["stream"]}'
+        stream = "" if seg["stream"] == 0 else f", stream_{seg['stream']}"
         body = "".join(occupied)
         assert (
             seg_free_external + seg_free_internal + seg_allocated == seg["total_size"]
         )
-        stream = f' stream_{seg["stream"]}' if seg["stream"] != 0 else ""
+        stream = f" stream_{seg['stream']}" if seg["stream"] != 0 else ""
         if seg["total_size"] >= PAGE_SIZE:
             out.write(
-                f'[{body}] {Bytes(seg["total_size"])} allocated, '
+                f"[{body}] {Bytes(seg['total_size'])} allocated, "
                 f"{_report_free(seg_free_external, seg_free_internal)} free{stream}\n"
             )
-    out.write(f'segments: {len(data["segments"])}\n')
+    out.write(f"segments: {len(data['segments'])}\n")
     out.write(f"total_reserved: {Bytes(total_reserved)}\n")
     out.write(f"total_allocated: {Bytes(total_allocated)}\n")
     out.write(f"total_free: {_report_free(free_external, free_internal)}\n")
@@ -329,7 +338,7 @@ def trace(data):
                 return free_names.pop()
             r, m = next_name // 26, next_name % 26
             next_name += 1
-            return f'{chr(ord("a") + m)}{"" if r == 0 else r}'
+            return f"{chr(ord('a') + m)}{'' if r == 0 else r}"
 
         def find_segment(addr):
             for name, saddr, size in segment_intervals:
@@ -437,7 +446,43 @@ def _format_viz(data, viz_kind, device):
     )
 
 
-def trace_plot(data, device=None, plot_segments=False):
+def filter_alloc_free_pairs(data):
+    for dev_id in range(len(data["device_traces"])):
+        # set of indexes of trace events for alloc-free pairs
+        filterSet = set()
+        # map from addr to index of alloc event
+        allocMap = {}
+        # set of addrs from free_requested events
+        freeRequested = set()
+        for idx, event in enumerate(data["device_traces"][dev_id]):
+            if event["action"] == "alloc":
+                allocMap[event["addr"]] = idx
+            elif event["action"] == "free_requested":
+                freeRequested.add(event["addr"])
+                if allocMap.get(event["addr"]) is not None:
+                    filterSet.add(idx)
+                    filterSet.add(allocMap[event["addr"]])
+                    allocMap.pop(event["addr"])
+            elif event["action"] == "free_completed":
+                if event["addr"] in freeRequested:
+                    freeRequested.remove(event["addr"])
+                    filterSet.add(idx)
+                else:
+                    print(f"free_completed without free_requested: {event}")
+
+        # Remove events whose index is in filterSet
+        if filterSet:
+            # Create a new list excluding events with indices in filterSet
+            data["device_traces"][dev_id] = [
+                event
+                for idx, event in enumerate(data["device_traces"][dev_id])
+                if idx not in filterSet
+            ]
+
+    return data
+
+
+def trace_plot(data, device=None, plot_segments=False, filter_freed=False):
     """Generate a visualization over time of the memory usage recorded by the trace as an html file.
 
     Args:
@@ -445,10 +490,15 @@ def trace_plot(data, device=None, plot_segments=False):
         device (torch.device, optional): Generate the trace for this device, needed if multiple devices have allocations.
         plot_segments (bool, optional): Plots memory returned from cudaMalloc, rather than individual allocations.
                                         Defaults to False.
+        filter_freed (bool, optional): Filter out alloc-free paired events to only plot allocations that are not freed yet.
+                                        Defaults to False to plot all trace events.
 
     Returns:
         str: HTML of visualization
     """
+    if filter_freed:
+        data = filter_alloc_free_pairs(data)
+
     return _format_viz(
         data,
         "Active Memory Timeline"
@@ -689,14 +739,22 @@ if __name__ == "__main__":
                 "-s", "--segments", action="store_true", help=help
             )
 
+            help = (
+                "filter out allocation-free pairs to only visualize the allocations that are not freed yet;"
+                "useful to reduce the number of events for large traces for debugging OOM"
+            )
+            trace_plot_a.add_argument(
+                "-f", "--filter_freed", action="store_true", help=help
+            )
+
     args = parser.parse_args()
 
     def _read(name):
         if name == "-":
-            f = sys.stdin.buffer
+            data = pickle.load(sys.stdin.buffer)
         else:
-            f = open(name, "rb")
-        data = pickle.load(f)
+            with open(name, "rb") as f:
+                data = pickle.load(f)
         if isinstance(data, list):  # segments only...
             data = {"segments": data, "traces": []}
         return data
@@ -725,7 +783,12 @@ if __name__ == "__main__":
         data = _read(args.input)
         _write(
             args.output,
-            trace_plot(data, device=args.device, plot_segments=args.segments),
+            trace_plot(
+                data,
+                device=args.device,
+                plot_segments=args.segments,
+                filter_freed=args.filter_freed,
+            ),
         )
     elif args.action == "segment_plot":
         data = _read(args.input)

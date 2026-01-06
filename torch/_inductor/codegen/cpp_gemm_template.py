@@ -2,8 +2,9 @@
 import contextlib
 import logging
 import math
+from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, Callable, cast, Optional, TypeVar, Union
+from typing import Any, cast, Optional, TypeVar, Union
 from unittest.mock import patch
 
 import torch
@@ -239,9 +240,9 @@ GEMM_TEMPLATE = r"""
 {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}
 {%- else %}
     {%- if is_woq_int4 %}
-        {%- set tile_W = kernel.slice_nd(W, [("n_start", "n_start + n_size"), ("k_start * Nr / 2", "k_end * Nr / 2")]) %}
+        {%- set tile_W = kernel.slice_nd(W, [("nci * Nr", "(nci + 1) * Nr"), ("k_start * Nr / 2", "k_end * Nr / 2")]) %}
         {%- set tile_qparam = kernel.slice_nd(
-            qscale_and_zeros, [("k_start // group_size", "k_end // group_size"), ("n_start", "n_start + n_size"), ()]) %}
+            qscale_and_zeros, [("k_start // group_size", "k_end // group_size"), ("nci * Nr", "(nci + 1) * Nr"), ()]) %}
     {%- else %}
         {%- set tile_W = kernel.slice_nd(W, [("k_start", "k_end"), ("n_start", "n_start + n_size")]) %}
         {%- set tile_qparam = None %}
@@ -396,12 +397,15 @@ def transpose_w(W: _T, trans_w: bool) -> _T:
     if isinstance(W, ir.IRNode):
         if trans_w:
             if not isinstance(W, ir.TensorBox):
+                # pyrefly: ignore [bad-assignment]
                 W = ir.TensorBox(W)
             W = L.permute(W, [1, 0])
     else:
         if trans_w:
             assert isinstance(W, torch.Tensor)
+            # pyrefly: ignore [bad-assignment]
             W = W.transpose(0, 1)
+    # pyrefly: ignore [bad-return]
     return W
 
 
@@ -412,12 +416,15 @@ def expand_bias(B: Optional[_T], X: _T) -> Optional[_T]:
     if B is not None:
         if isinstance(B, ir.IRNode):
             if not isinstance(B, ir.TensorBox):
+                # pyrefly: ignore [bad-assignment]
                 B = ir.TensorBox(B)
             assert hasattr(X, "get_size")
+            # pyrefly: ignore [missing-attribute]
             B = L.expand(B, (X.get_size()[0], B.get_size()[-1]))
         else:
             assert isinstance(B, torch.Tensor)
             assert isinstance(X, torch.Tensor)
+            # pyrefly: ignore [bad-assignment]
             B = B.expand(X.shape[0], B.shape[-1])
     return B
 
@@ -578,6 +585,10 @@ def gen_2d_view_of_epilogue_buf(
 
 
 class CppGemmTemplate(CppTemplate):
+    """
+    GEMM Template for Inductor CPP Backend.
+    """
+
     def __init__(
         self,
         input_nodes,
@@ -591,7 +602,13 @@ class CppGemmTemplate(CppTemplate):
         should_block_weights: bool = True,
         name="packed_gemm",
     ) -> None:
-        assert layout.dtype in [torch.float, torch.bfloat16, torch.half, torch.uint8]
+        assert layout.dtype in [
+            torch.float,
+            torch.bfloat16,
+            torch.half,
+            torch.uint8,
+            torch.int8,
+        ]
         super().__init__(
             name,
             input_nodes,
@@ -802,6 +819,31 @@ class CppGemmTemplate(CppTemplate):
             if size_cache_B > L1:
                 Kc_blocks = math.floor(L1 / (Kr * Nr * num_byte_B))
 
+            if (
+                config.cpp.use_small_dequant_buffer
+                and dtype_A is torch.bfloat16
+                and Mt_blocks == 1
+            ):
+                if dtype_B is torch.uint8:
+                    # A16W4
+                    # Make a small dequant_B buffer for woq int4 [q_group_size, Nr]
+                    # Since when Mt_blocks == 1, L1-reside B block can't be reused by A.
+                    if Kc_blocks * Kr >= self.q_group_size():
+                        Kc_blocks = self.q_group_size() // Kr
+
+                elif dtype_B is torch.int8:
+                    # A16W8
+                    # Make A, B, C buffer in L1
+                    A_buf_size_div_K = self.m * num_byte_A
+                    B_buf_size_div_K = Nr * num_byte_B
+                    # assume acc in float32/int32 and Mc_blocks = Nc_blocks = 1
+                    C_buf_size = Mr * Nr * 4
+                    K_block_size = (L1 - C_buf_size) // (
+                        A_buf_size_div_K + B_buf_size_div_K
+                    )
+                    if Kc_blocks * Kr >= K_block_size:
+                        Kc_blocks = (K_block_size + Kr - 1) // Kr
+
             # Step 2: Decide Mc assuming A block is L2-reside.
             min_Mc_ratio = 2  # TODO(jgong5): something to tune?
             min_Mc_blocks = math.ceil(min_Mc_ratio * Mr / Nr)
@@ -902,9 +944,6 @@ class CppGemmTemplate(CppTemplate):
 
         if input_indices is None:
             input_indices = list(range(len(input_nodes)))
-        only_one_input = (
-            input_nodes[0] == input_nodes[1] if len(input_nodes) > 1 else False
-        )
 
         def reorder_and_filter(inputs, layout_or_out):
             if has_bias:
@@ -1004,6 +1043,9 @@ class CppGemmTemplate(CppTemplate):
         assert micro_gemm is not None
         pre_block_weights = cls.check_if_block_weight(new_inputs[1], micro_gemm)
         micro_gemm.use_local_vnni_blocking(not pre_block_weights)
+        only_one_input = (
+            input_nodes[0] == input_nodes[1] if len(input_nodes) > 1 else False
+        ) and not pre_block_weights  # If weights are blocked, use the second input
 
         def preprocessor(inputs, layout):
             new_inputs, new_layout = normalize_shapes(
@@ -1014,6 +1056,7 @@ class CppGemmTemplate(CppTemplate):
             return cls.prep_weight(
                 new_inputs,
                 new_layout,
+                # pyrefly: ignore [bad-argument-type]
                 micro_gemm,
                 pre_block_weights,
                 use_int8_fast_compensation_path,
@@ -1037,6 +1080,7 @@ class CppGemmTemplate(CppTemplate):
                 new_input_nodes, _ = cls.prep_weight(
                     new_input_nodes,
                     new_layout,
+                    # pyrefly: ignore [bad-argument-type]
                     micro_gemm,
                     pre_block_weights,
                     use_int8_fast_compensation_path,
@@ -1079,6 +1123,18 @@ class CppGemmTemplate(CppTemplate):
         new_size = [padded_n // block_n, k, block_n]
         return new_size, padded_n
 
+    @staticmethod
+    def _maybe_remove_storage_offset(node: ir.IRNode):
+        if node.get_layout().offset == 0:
+            return node
+        # node may be contiguous but still have a non-zero storage offset.
+        # GEMM_TEMPLATE emits code like:
+        #   W.data_ptr[node.offset + ...]
+        # but runtime W.data_ptr (after normalize_shapes()) already includes this offset.
+        # To avoid double-offsetting, we remove the offset in the node also in the generated code.
+        #   W.data_ptr[...]
+        return ir.ExternKernel.copy_input(node)
+
     @classmethod
     def prep_weight(
         cls,
@@ -1092,7 +1148,7 @@ class CppGemmTemplate(CppTemplate):
         """
         NOTE Weight prep consists of 2 separate steps:
         1. Blocking the weight tensor into a 3D shape: [n//block_n, k, block_n]
-           This is always done if the weight tensor is contant, i.e. for all GEMM and some BMM.
+           This is always done if the weight tensor is constant, i.e. for all GEMM and some BMM.
            For BMM, we also block non-contiguous weight tensors, since they would be reshaped anyway.
            This assumes that blocked, contiguous weights will be more efficient for the GEMM kernel,
            and is worth the overhead of reshape and blocking.
@@ -1134,6 +1190,7 @@ class CppGemmTemplate(CppTemplate):
         elif isinstance(W, ir.IRNode):
             # Require W layout to be fixed & contiguous, happens inplace.
             ir.ExternKernel.require_contiguous(W)
+            new_inputs[1] = cls._maybe_remove_storage_offset(W)
 
         if not skip_int8_compensation and _is_int8_gemm(new_inputs):
             BCompensate = None
@@ -1212,7 +1269,7 @@ class CppGemmTemplate(CppTemplate):
                 permute_size[-2], permute_size[-3] = permute_size[-3], permute_size[-2]
                 blocked_w = L.constant_pad_nd(W, (0, padding))
                 blocked_w = L.permute(
-                    L.view(blocked_w, permute_size),
+                    L.view(blocked_w, permute_size),  # type: ignore[arg-type]
                     permute_dims,
                 )
         else:
@@ -1428,7 +1485,9 @@ class CppGemmTemplate(CppTemplate):
             assert isinstance(template_buffer, ir.IRNode)
             gemm_output_name = f"{template_buffer.get_name()}_GemmOut"
             gemm_output_buffer = ir.Buffer(
-                name=gemm_output_name, layout=template_buffer.layout
+                name=gemm_output_name,
+                # pyrefly: ignore [missing-attribute]
+                layout=template_buffer.layout,
             )
             current_input_buffer = gemm_output_buffer
             for i, creator in enumerate(epilogue_creators):
@@ -1439,6 +1498,7 @@ class CppGemmTemplate(CppTemplate):
                 epilogues.append(
                     ir.ComputedBuffer(
                         name=buffer_name,
+                        # pyrefly: ignore [missing-attribute]
                         layout=template_buffer.layout,
                         data=creator(current_input_buffer),
                     )
@@ -1448,7 +1508,9 @@ class CppGemmTemplate(CppTemplate):
                 reindexers.append(None)
                 if i < len(epilogue_creators) - 1:
                     current_input_buffer = ir.Buffer(
-                        name=buffer_name, layout=template_buffer.layout
+                        name=buffer_name,
+                        # pyrefly: ignore [missing-attribute]
+                        layout=template_buffer.layout,
                     )
 
         assert isinstance(Y, (ir.Buffer, ir.ReinterpretView))
@@ -1479,6 +1541,7 @@ class CppGemmTemplate(CppTemplate):
             self.n,
             self.k,
             input_dtype=X.get_dtype(),
+            # pyrefly: ignore [missing-attribute]
             input2_dtype=W.get_dtype(),
             output_dtype=output_dtype,
             compute_dtype=compute_dtype,

@@ -6,13 +6,13 @@
 #include <utility>
 
 #include <Python.h>
-#define PYBIND11_SIMPLE_GIL_MANAGEMENT
-#include <pybind11/gil.h>
+#include <pybind11/gil_simple.h>
 
 // Include some often-used cpp_wrapper headers, for precompiling.
 #include <c10/util/BFloat16.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/DynamicTypes.h>
+#include <torch/csrc/stable/library.h>
 #include <torch/csrc/utils/pythoncapi_compat.h>
 #include <torch/csrc/utils/tensor_memoryformats.h>
 

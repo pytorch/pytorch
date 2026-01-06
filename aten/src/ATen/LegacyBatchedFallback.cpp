@@ -218,7 +218,7 @@ static Tensor safeStack(TensorList tensors) {
   // is possible for the backward function to return an undefined grad for some
   // grad_input for each example. In that case, we return an undefined grad.
   //
-  // It is theoretically posssible for *some* of the examples to produce an
+  // It is theoretically possible for *some* of the examples to produce an
   // undefined grad (a kernel could peek at the gradient values and return an
   // undefined tensor if it determines the gradient is full of zeros). We
   // could handle this by treating the undefined grad as a zero-filled tensor

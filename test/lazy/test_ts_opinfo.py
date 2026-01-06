@@ -85,6 +85,7 @@ def init_lists():
         "linalg_inv_ex",
         "linalg_pinv.atol_rtol_tensor",
         "logsumexp",
+        "svd",
     }
     # For some ops, we don't support all variants. Here we use formatted_name
     # to uniquely identify the variant.
@@ -164,7 +165,7 @@ class TestLazyTensor(JitTestCase):
             if mark_step:
                 torch._lazy.mark_step()
 
-            # y and x should contiue to be aliased after the mark_step call.
+            # y and x should continue to be aliased after the mark_step call.
             y.add_(1)
             return x
 
@@ -220,20 +221,15 @@ class TestLazyOpInfo(TestCase):
         torch._lazy.wait_device_ops()
         prefix = "aten" if op.name in FALLBACK_LIST else "lazy"
         symint_suffix = "_symint" if op.name in HAS_SYMINT_SUFFIX else ""
-        found = f"{prefix}::{op.name}{symint_suffix}" in remove_suffixes(
-            torch._lazy.metrics.counter_names()
-        )
+        metrics = remove_suffixes(torch._lazy.metrics.counter_names())
+        cands = [f"{prefix}::{op.name}{symint_suffix}"]
         # check aliases
-        if not found:
-            for alias in op.aliases:
-                alias_found = (
-                    f"{prefix}::{alias.name}{symint_suffix}"
-                    in remove_suffixes(torch._lazy.metrics.counter_names())
-                )
-                found = found or alias_found
-                if found:
-                    break
-        self.assertTrue(found)
+        for alias in op.aliases:
+            cands.append(f"{prefix}::{alias.name}{symint_suffix}")
+
+        self.assertTrue(
+            any(c in metrics for c in cands), f"none of {cands} not found in {metrics}"
+        )
 
     @ops(
         [

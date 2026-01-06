@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any, get_args, Optional, Union
 
@@ -14,6 +14,7 @@ from torch._higher_order_ops.utils import (
     _has_gen_schema,
     call_op,
     HopInstance,
+    HopSchema,
     materialize_callable_in_args,
     unique_graph_id,
 )
@@ -43,7 +44,7 @@ class SchemaHolder:
         return cls(pytree.tree_unflatten([], tree_spec).schema)
 
 
-# regsiter_constant allows us to get a tree_spec from pytree.tree_flatten(SchemaHolder(FunctionSchema)).
+# register_constant allows us to get a tree_spec from pytree.tree_flatten(SchemaHolder(FunctionSchema)).
 # The tree_spec is proxable in the graph and we can get back the schema via
 # schema = pytree.tree_unflatten([], tree_spec).schema
 pytree.register_constant(SchemaHolder)
@@ -238,7 +239,7 @@ def write_view_information_to_args(
             write_single_view(
                 f"_{arg_name}",
                 kwargs[arg_name],
-                arg_to_base_index.get(arg_name, None),  # type: ignore[arg-type]
+                arg_to_base_index.get(arg_name),  # type: ignore[arg-type]
             )
         else:
             raise RuntimeError(f"Unsupported type {arg_type}")
@@ -355,6 +356,7 @@ class AutoFunctionalized(HigherOrderOperator):
     ) -> tuple[Any, tuple[Tensor, ...]]:
         assert can_auto_functionalize(_mutable_op)
         assert isinstance(kwargs, dict)
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(_mutable_op, **kwargs)
 
 
@@ -389,7 +391,7 @@ class AutoFunctionalizedV2(HigherOrderOperator):
         if isinstance(_mutable_op, HigherOrderOperator):
             _op_to_check = HopInstance(
                 _mutable_op,
-                SchemaHolder.from_tree_spec(kwargs.get("_op_schema", None)).schema,  # type: ignore[arg-type]
+                SchemaHolder.from_tree_spec(kwargs.get("_op_schema")).schema,  # type: ignore[arg-type]
             )
         else:
             _op_to_check = _mutable_op
@@ -397,6 +399,7 @@ class AutoFunctionalizedV2(HigherOrderOperator):
         assert _op_to_check is not None
         assert can_auto_functionalize(_op_to_check)
         assert isinstance(kwargs, dict)
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(_mutable_op, **kwargs)
 
 
@@ -507,7 +510,7 @@ def do_auto_functionalize(
             normalized_kwargs[arg.name] = kwargs[arg.name]
         elif idx < len(args):
             # if its out of bounds we don't need to do anything
-            # as it means the the optional arg was passed with its default
+            # as it means the optional arg was passed with its default
             # value
             normalized_kwargs[arg.name] = args[idx]
         else:
@@ -517,11 +520,13 @@ def do_auto_functionalize(
     if "self" in unwrapped_kwargs or "self_" in unwrapped_kwargs:
         warnings.warn(
             "Using `self` or `self_` as an argument in the definition of custom ops may lead to ambiguous parsing. "
-            "Please consider using a different name for this argument to avoid potential issues."
+            "Please consider using a different name for this argument to avoid potential issues.",
+            stacklevel=2,
         )
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized(
-            op, **unwrapped_kwargs  # type: ignore[arg-type]
+            op,
+            **unwrapped_kwargs,  # type: ignore[arg-type]
         )
 
     # List of the name of args that get mutated (according to the schema)
@@ -570,6 +575,28 @@ def do_auto_functionalize(
     return ctx.wrap_tensors(unwrapped_actual_out)  # type: ignore[arg-type]
 
 
+# Wrapper for GraphModule that applies functionalization during execution to enable
+# epilogue graph inlining and better fusion opportunities in subgraphs
+# When tracing this wrapper, we'll get a graph module with epilogue.
+#
+# We want to hash it according to the original graph module, so that when we go
+# from Functional mode -> fake mode for multiple invoke_subgraph calls that share,
+# the same inner graph module, we can hit the cache.
+class FunctionalCallableWithEpilogue:
+    def __init__(self, orig_callable: Callable):
+        self.orig_callable = orig_callable
+
+    def __call__(self, *args, **kwargs):
+        # We call torch.func.functionalize. This allows us to inline the epilogue graph.
+        # Inlining has the benefit of allowing easiser fusion inside subgraph.
+        # Though the epilogue graph contains copy_, it is OK because inductor can handle it
+        # and this is also how we have been supporting top-level graph input mutation.
+        return tuple(torch.func.functionalize(self.orig_callable)(*args, **kwargs))
+
+    def __hash__(self):
+        return id(self.orig_callable)
+
+
 def do_auto_functionalize_v2(
     mode: "torch._subclasses.functional_tensor.FunctionalTensorMode",
     op: Union[OpOverload, HopInstance],
@@ -585,24 +612,13 @@ def do_auto_functionalize_v2(
     normalized_kwargs = {}
 
     schema = op._schema
+    # pyrefly: ignore [bad-assignment]
     op = op._op if isinstance(op, HopInstance) else op
     assert isinstance(op, get_args(_MutableOpType))
 
     def _functionalize_callable(arg: Any):
         if callable(arg):
-
-            def functional_fn(*args, **kwargs):
-                # We call torch.func.functionalize. This allows us to inline the epilogue graph.
-                # Inlining has the benefit of allowing easiser fusion inside subgraph.
-                # Though the epilogue graph contains copy_, it is OK becuase inductor can handle it
-                # and this is also how we have been supporting top-level graph input mutation.
-                return tuple(
-                    pytree.tree_leaves(torch.func.functionalize(arg)(*args, **kwargs))
-                )
-
-            return torch._higher_order_ops.base_hop.FunctionWithNoFreeVars(
-                functional_fn
-            )
+            return FunctionalCallableWithEpilogue(arg)
         return arg
 
     args, kwargs = pytree.tree_map(_functionalize_callable, (args, kwargs))
@@ -613,7 +629,7 @@ def do_auto_functionalize_v2(
             normalized_kwargs[arg.name] = kwargs[arg.name]
         elif idx < len(args):
             # if its out of bounds we don't need to do anything
-            # as it means the the optional arg was passed with its default
+            # as it means the optional arg was passed with its default
             # value
             normalized_kwargs[arg.name] = args[idx]
         else:
@@ -678,7 +694,8 @@ def do_auto_functionalize_v2(
     if "self" in unwrapped_kwargs or "self_" in unwrapped_kwargs:
         warnings.warn(
             "Using `self` or `self_` as an argument in the definition of custom ops may lead to ambiguous parsing. "
-            "Please consider using a different name for this argument to avoid potential issues."
+            "Please consider using a different name for this argument to avoid potential issues.",
+            stacklevel=2,
         )
     all_basis_unwrapped = ctx.unwrap_tensors(all_bases)
 
@@ -693,7 +710,8 @@ def do_auto_functionalize_v2(
 
     with ctx.redispatch_to_next():
         unwrapped_outs = auto_functionalized_v2(
-            op, **auto_func_kwargs  # type: ignore[arg-type]
+            op,
+            **auto_func_kwargs,  # type: ignore[arg-type]
         )
 
     unwrapped_actual_out: Union[Any, tuple[Any]] = (
@@ -705,9 +723,9 @@ def do_auto_functionalize_v2(
     )
 
     if isinstance(op, HigherOrderOperator):
-        assert (
-            len(schema.returns) > 0
-        ), f"hop is expected to return at least one output {schema}."
+        assert len(schema.returns) > 0, (
+            f"hop is expected to return at least one output {schema}."
+        )
         assert len(unwrapped_actual_out) == len(schema.returns)
     else:
         if len(schema.returns) == 0:
@@ -835,15 +853,15 @@ def auto_functionalized_v2_dense(
         _only_clone_these_bases = tuple(range(len(_all_bases)))
 
     if isinstance(_mutable_op, OpOverload):
-        schema = _mutable_op._schema
+        schema: torch._C.FunctionSchema = _mutable_op._schema
     else:
         schema = pytree.tree_unflatten([], kwargs.pop("_op_schema")).schema
 
-    _mutable_op = (
-        _mutable_op
-        if isinstance(_mutable_op, OpOverload)
-        else HopInstance(_mutable_op, schema)
-    )
+    if isinstance(_mutable_op, OpOverload):
+        _callable_op: Union[HopInstance, OpOverload] = _mutable_op
+    else:
+        assert isinstance(schema, HopSchema)
+        _callable_op = HopInstance(_mutable_op, schema)
 
     op_kwargs_new, all_bases_new = _generate_new_op_kwargs_from_bases(
         schema,
@@ -853,7 +871,7 @@ def auto_functionalized_v2_dense(
     )
 
     out = call_op(
-        _mutable_op,
+        _callable_op,
         tuple(),
         op_kwargs_new,
     )
@@ -931,7 +949,7 @@ def auto_functionalized_v2_proxy(
         # Below code materializes the callable inputs to the hop as graph modules.
         # kwargs may contain general callables, that are not proxable e.g. FunctionWithNoFreeVars
         # this could happen when we auto_functionalize the backward of the hop,
-        # where backward fn is a callablle that wrapps forward graph module.
+        # where backward fn is a callablle that wraps forward graph module.
         # This function materialize the callable args according to the schema of the hop.
 
         # We cannot materialize the callables in kwargs directly because the inputs to callable
@@ -944,11 +962,11 @@ def auto_functionalized_v2_proxy(
         # hop node in the traced graph and graph module inputs to the hop. Finally, we replace the
         # original kwarg's callable with the graph module.
         all_bases = kwargs.get("_all_bases", [])
-        _only_clone_these_bases = kwargs.get("_only_clone_these_bases", None)
+        _only_clone_these_bases = kwargs.get("_only_clone_these_bases")
         if _only_clone_these_bases is None:
             _only_clone_these_bases = tuple(range(len(all_bases)))
 
-        schema = pytree.tree_unflatten([], kwargs.get("_op_schema", None)).schema  # type: ignore[arg-type]
+        schema = pytree.tree_unflatten([], kwargs.get("_op_schema")).schema  # type: ignore[arg-type]
         new_kwargs, _ = _generate_new_op_kwargs_from_bases(
             schema,
             {k: v for k, v in kwargs.items() if k not in ("_all_bases", "_op_schema")},

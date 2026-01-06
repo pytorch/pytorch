@@ -67,7 +67,7 @@ namespace at::cuda {
   _(cuDeviceGet)                        \
 
 
-#if defined(CUDA_VERSION) && CUDA_VERSION >= 12000
+#if defined(CUDA_VERSION)
 #define AT_FORALL_NVRTC_EXTENDED(_)              \
   AT_FORALL_NVRTC_BASE(_)                        \
   _(cuTensorMapEncodeTiled)
@@ -117,6 +117,8 @@ namespace at::cuda {
   _(nvrtcGetPTXSize)                              \
   _(nvrtcGetPTX)                                  \
   _(cuModuleLoadData)                             \
+  _(cuModuleLoad)                                 \
+  _(cuGetErrorString)                             \
   _(cuModuleGetFunction)                          \
   _(HIPOCCUPANCYMAXACTIVEBLOCKSPERMULTIPROCESSOR) \
   _(nvrtcGetErrorString)                          \

@@ -117,8 +117,9 @@ class Linear(nnq.Linear):
             + str([float_mod.__name__ for float_mod in float_modules])
         )
         assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
-        if type(mod) == nni.LinearReLU:
+        if type(mod) is nni.LinearReLU:
             mod = mod[0]
+
         if mod.qconfig is not None and mod.qconfig.weight is not None:
             weight_observer = mod.qconfig.weight()
         else:
@@ -143,6 +144,7 @@ class Linear(nnq.Linear):
                 "Unsupported dtype specified for dynamic quantized Linear!"
             )
         qlinear = cls(mod.in_features, mod.out_features, dtype=dtype)
+
         qlinear.set_weight_bias(qweight, mod.bias)
         return qlinear
 

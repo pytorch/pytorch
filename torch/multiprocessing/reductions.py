@@ -4,7 +4,6 @@ import os
 import threading
 from multiprocessing import reduction
 from multiprocessing.util import register_after_fork
-from typing import Union
 
 import torch
 from torch._namedtensor_internals import check_serializing_named_tensor
@@ -290,7 +289,7 @@ def reduce_tensor(tensor):
     # 0xE000 ->  --------CUDA allocation-----
     #
     # To send tensor1, the following info are required from sender to receiver for
-    # storage recontruction.
+    # storage reconstruction.
     #   1. cudaIpcMemHandle of 0xA000(which can be mapped to a basePtr in receiver process).
     #      basePtr may not be exactly 0xA000 since it's a different process.
     #   2. offset(0xA100) of storage1 in the CUDA allocation.
@@ -551,9 +550,7 @@ def rebuild_storage_fd(cls, df, size):
 
 
 def rebuild_storage_filename(cls, manager, handle, size, dtype=None):
-    storage: Union[torch.TypedStorage, torch.UntypedStorage] = storage_from_cache(
-        cls, handle
-    )
+    storage: torch.TypedStorage | torch.UntypedStorage = storage_from_cache(cls, handle)
     if storage is not None:
         return storage._shared_decref()
     if dtype is None:

@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+# pylint: disable=useless-parent-delegation
 import ctypes
 
 import torch
@@ -32,6 +33,9 @@ class Stream(torch._C._CudaStreamBase):
     """
 
     def __new__(cls, device=None, priority=0, **kwargs):
+        # Check CUDA availability
+        if not torch.backends.cuda.is_built():
+            raise RuntimeError("torch.cuda.Stream requires CUDA support")
         # setting device manager is expensive, so we avoid it unless necessary
         if device is None or ("stream_id" in kwargs and "device_index" in kwargs):
             return super().__new__(cls, priority=priority, **kwargs)
@@ -115,6 +119,16 @@ class Stream(torch._C._CudaStreamBase):
 
     def __repr__(self):
         return f"<torch.cuda.Stream device={self.device} cuda_stream={self.cuda_stream:#x}>"
+
+    def __cuda_stream__(self):
+        """Implements the CUDA Stream Protocol:
+        https://nvidia.github.io/cuda-python/cuda-core/latest/interoperability.html#cuda-stream-protocol
+
+        Returns:
+            tuple: A 2-tuple of (version, handle) where version is the protocol version
+                   and handle is the address of cudaStream_t (CUDA) or hipStream_t (ROCm) as a Python int.
+        """
+        return (0, self.cuda_stream)
 
 
 class ExternalStream(Stream):

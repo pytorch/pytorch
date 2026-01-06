@@ -145,7 +145,7 @@ INVARIANT_CHECK_FUNC_API _check_idx_sorted_distinct_vals_slices_with_cidx(
   }
 }
 
-static inline int64_t indexCount(IntArrayRef sizes) {
+inline int64_t indexCount(IntArrayRef sizes) {
   int64_t res = 1;
   for (const auto& s : sizes) {
     res *= s;
@@ -242,7 +242,7 @@ void _validate_compressed_sparse_indices_kernel(
   // Catch integer overflow from large dimensions. Otherwise, the
   // invariant checks may fail with bogus exceptions or succeed with
   // false-positive results when int64_t typed dimensions are cast to
-  // index dtype that corresponds to smaller interger type such as
+  // index dtype that corresponds to smaller integer type such as
   // int32_t.
   {
     AT_DISPATCH_INDEX_TYPES(idx.scalar_type(), NAME, [cdim, dim, nnz]() {

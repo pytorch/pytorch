@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from itertools import chain
-from typing import Any, Optional
+from typing import Any
 
 from torch import nn
 from torch.nn.utils.parametrize import is_parametrized, type_before_parametrizations
@@ -51,10 +51,12 @@ def swap_module(
             new_mod.register_forward_hook(hook_fn)
 
         # respect device affinity when swapping modules
+        # pyrefly: ignore [bad-argument-type]
         devices = {p.device for p in chain(mod.parameters(), mod.buffers())}
-        assert len(devices) <= 1, (
-            f"swap_module only works with cpu or single-device CUDA modules, but got devices {devices}"
-        )
+        if len(devices) > 1:
+            raise AssertionError(
+                f"swap_module only works with cpu or single-device CUDA modules, but got devices {devices}"
+            )
         device = next(iter(devices)) if len(devices) > 0 else None
         if device:
             new_mod.to(device)
@@ -65,9 +67,7 @@ def swap_module(
         return mod
 
 
-def module_to_fqn(
-    model: nn.Module, module: nn.Module, prefix: str = ""
-) -> Optional[str]:
+def module_to_fqn(model: nn.Module, module: nn.Module, prefix: str = "") -> str | None:
     """
     Returns the fqn for a module or None if module not a descendent of model.
     """
@@ -80,7 +80,7 @@ def module_to_fqn(
     return None
 
 
-def fqn_to_module(model: Optional[nn.Module], path: str) -> Optional[nn.Module]:
+def fqn_to_module(model: nn.Module | None, path: str) -> nn.Module | None:
     """
     Given an fqn, returns the corresponding module or tensor or None if the fqn given by `path`
     doesn't correspond to anything. Similar to model.get_submodule(path) but works for tensors.
@@ -98,7 +98,7 @@ def get_arg_info_from_tensor_fqn(model: nn.Module, tensor_fqn: str) -> dict[str,
     # string manip to split tensor_fqn into module_fqn and tensor_name
     # if tensor_fqn is 'weight' then module_fqn and tensor_name are '' and 'weight'
     # if tensor_fqn is 'linear.weight' then module_fqn and tensor_name are 'linear' and 'weight'
-    tensor_name = tensor_fqn.split(".")[-1]
+    tensor_name = tensor_fqn.rsplit(".", maxsplit=1)[-1]
     module_fqn = tensor_fqn[: -len(tensor_name) - ("." in tensor_fqn)]
 
     module = fqn_to_module(model, module_fqn)
@@ -128,7 +128,10 @@ class FakeSparsity(nn.Module):
         self.register_buffer("mask", mask)
 
     def forward(self, x):
-        assert self.mask.shape == x.shape
+        if self.mask.shape != x.shape:
+            raise AssertionError(
+                f"mask shape ({self.mask.shape}) must match x shape ({x.shape})"
+            )
         return self.mask * x
 
     def state_dict(self, *args, **kwargs):

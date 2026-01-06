@@ -1,4 +1,4 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["module: sparse"]
 
 import itertools
 import re
@@ -119,7 +119,7 @@ class TestBaseSparsifier(TestCase):
         for idx in range(len(sparsifier0.groups)):
             mg0 = sparsifier0.groups[idx]
             mg1 = sparsifier1.groups[idx]
-            for key in mg0.keys():
+            for key in mg0:
                 assert key in mg1
                 if key == "module":
                     # We cannot compare modules as they are different
@@ -291,7 +291,7 @@ class TestWeightNormSparsifier(TestCase):
             assert hasattr(module.parametrizations["weight"][0], "mask")
             # Check parametrization exists and is correct
             assert is_parametrized(module, "weight")
-            assert type(module.parametrizations.weight[0]) == FakeSparsity
+            assert type(module.parametrizations.weight[0]) is FakeSparsity
 
     def test_mask_squash(self):
         model = SimpleLinear()
@@ -415,7 +415,7 @@ class TestNearlyDiagonalSparsifier(TestCase):
             assert hasattr(module.parametrizations["weight"][0], "mask")
             # Check parametrization exists and is correct
             assert is_parametrized(module, "weight")
-            assert type(module.parametrizations.weight[0]) == FakeSparsity
+            assert type(module.parametrizations.weight[0]) is FakeSparsity
 
     def test_mask_squash(self):
         model = SimpleLinear()
@@ -472,8 +472,8 @@ class TestNearlyDiagonalSparsifier(TestCase):
         else:
             height, width = mask.shape
             dist_to_diagonal = nearliness // 2
-            for row in range(0, height):
-                for col in range(0, width):
+            for row in range(height):
+                for col in range(width):
                     if abs(row - col) <= dist_to_diagonal:
                         assert mask[row, col] == 1
                     else:

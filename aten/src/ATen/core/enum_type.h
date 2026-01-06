@@ -18,6 +18,7 @@ struct TORCH_API EnumType : public NamedType {
       TypePtr value,
       std::vector<EnumNameValue> enum_names_values,
       std::weak_ptr<::torch::jit::CompilationUnit> cu) {
+    C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wswitch-enum")
     switch (value->kind()) {
       case TypeKind::IntType:
       case TypeKind::FloatType:
@@ -34,6 +35,7 @@ struct TORCH_API EnumType : public NamedType {
             value->str(),
             "', only int, float and string are supported");
     }
+    C10_DIAGNOSTIC_POP()
   }
 
   std::string str() const override {

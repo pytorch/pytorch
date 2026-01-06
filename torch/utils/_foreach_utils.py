@@ -1,5 +1,4 @@
-from typing import Optional
-from typing_extensions import TypeAlias
+from typing import TypeAlias
 
 import torch
 from torch import Tensor
@@ -8,7 +7,7 @@ from torch.autograd.grad_mode import no_grad
 
 def _get_foreach_kernels_supported_devices() -> list[str]:
     r"""Return the device type list that supports foreach kernels."""
-    return ["cuda", "xpu", torch._C._get_privateuse1_backend_name()]
+    return ["cuda", "xpu", "mtia", torch._C._get_privateuse1_backend_name()]
 
 
 def _get_fused_kernels_supported_devices() -> list[str]:
@@ -19,11 +18,12 @@ def _get_fused_kernels_supported_devices() -> list[str]:
         "xpu",
         "hpu",
         "cpu",
+        "mtia",
         torch._C._get_privateuse1_backend_name(),
     ]
 
 
-TensorListList: TypeAlias = list[list[Optional[Tensor]]]
+TensorListList: TypeAlias = list[list[Tensor | None]]
 Indices: TypeAlias = list[int]
 _foreach_supported_types = [torch.Tensor]
 

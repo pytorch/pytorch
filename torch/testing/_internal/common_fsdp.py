@@ -6,13 +6,15 @@ import os
 import re
 import sys
 import time
+import unittest
 import warnings
 from abc import ABC, abstractmethod
+from collections.abc import Callable
 from contextlib import nullcontext
 from copy import deepcopy
 from enum import auto, Enum
 from functools import wraps
-from typing import Any, Callable, cast, no_type_check, Optional, Union
+from typing import Any, cast, no_type_check, Optional, Union
 from unittest import mock
 
 import torch
@@ -57,6 +59,7 @@ from torch.testing._internal.common_distributed import (
 from torch.testing._internal.common_utils import (
     FILE_SCHEMA,
     get_cycles_per_ms,
+    set_rng_seed,
     TEST_CUDA,
     TEST_HPU,
     TEST_XPU,
@@ -154,7 +157,7 @@ def _assert_module_states(
     assert rank0_states is not None  # mypy
     for state in olist[1:]:
         assert state is not None  # mypy
-        for (_, p1), (_, p2) in zip(rank0_states, state):
+        for (_, p1), (_, p2) in zip(rank0_states, state, strict=True):
             assert_fn(p1, p2)
 
 
@@ -206,7 +209,7 @@ def _broadcast_state_dict(rank, state_dict):
     dist.broadcast_object_list(olist)
     state_dict = cast(dict[str, torch.Tensor], olist[0])
     # Ensure that the state is on DEVICE
-    for param_name in state_dict.keys():
+    for param_name in state_dict:
         state_dict[param_name] = state_dict[param_name].to(DEVICE_TYPE)
     return state_dict
 
@@ -995,6 +998,42 @@ def patch_all_gather(new_all_gather_into_tensor: Callable):
 
 
 @contextlib.contextmanager
+def patch_foreach_all_gather(new_foreach_all_gather: Callable):
+    orig_foreach_all_gather = (
+        torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_all_gather
+    )
+    dist.barrier()
+    torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_all_gather = (
+        new_foreach_all_gather
+    )
+    try:
+        yield
+    finally:
+        dist.barrier()
+        torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_all_gather = (
+            orig_foreach_all_gather
+        )
+
+
+@contextlib.contextmanager
+def patch_foreach_reduce(new_foreach_reduce: Callable):
+    orig_foreach_foreach_reduce = (
+        torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_reduce
+    )
+    dist.barrier()
+    torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_reduce = (
+        new_foreach_reduce
+    )
+    try:
+        yield
+    finally:
+        dist.barrier()
+        torch.distributed.fsdp._fully_shard._fsdp_param_group.foreach_reduce = (
+            orig_foreach_foreach_reduce
+        )
+
+
+@contextlib.contextmanager
 def patch_reduce_scatter(new_reduce_scatter_tensor: Callable):
     orig_reduce_scatter = dist.reduce_scatter_tensor
     dist.barrier()
@@ -1096,7 +1135,9 @@ def check_sharded_parity(
     prefixes_to_ignore: tuple[str, ...] = (),
 ):
     for (replicated_name, replicated_param), (sharded_name, sharded_param) in zip(
-        replicated_module.named_parameters(), sharded_module.named_parameters()
+        replicated_module.named_parameters(),
+        sharded_module.named_parameters(),
+        strict=True,
     ):
         clean_sharded_name = sharded_name
         for prefix in prefixes_to_ignore:
@@ -1122,6 +1163,7 @@ def check_sharded_parity(
         cls.assertEqual(sharded_param.grad.to_local(), sharded_ref_grad.to_local())
 
 
+@unittest.skipIf(TEST_XPU, "not-support-multithread")
 class FSDPTestMultiThread(MultiThreadedTestCase):
     @property
     def world_size(self):
@@ -1187,6 +1229,8 @@ class FSDPTest(MultiProcessTestCase):
         fake_pg = kwargs.get("fake_pg", False)
 
         print(f"dist init r={self.rank}, world={self.world_size}")
+        if torch.accelerator.device_count() < self.world_size:
+            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
 
         # Specify gloo backend to make 'init_process_group()' succeed,
         # Actual tests will be skipped if there is no enough GPUs.
@@ -1224,6 +1268,7 @@ class FSDPTest(MultiProcessTestCase):
         dist.barrier(device_ids=device_ids)
 
         torch._dynamo.reset()
+        set_rng_seed()
         self.run_test(test_name, pipe)
         torch._dynamo.reset()
 
@@ -1283,10 +1328,10 @@ class FSDPTest(MultiProcessTestCase):
             loss = sharded_grad_scaler.scale(loss)
 
             if not mixed_precision and not use_pure_fp16:
-                assert (
-                    loss.dtype == torch.float32
-                ), "loss data type should be float32, as the original \
+                assert loss.dtype == torch.float32, (
+                    "loss data type should be float32, as the original \
                     parameter data type is float32."
+                )
             else:
                 if use_pure_fp16:
                     self.assertEqual(loss.dtype, torch.float16)
@@ -1352,9 +1397,9 @@ class FSDPTest(MultiProcessTestCase):
                 wrapper should provide data parallel semantics. If ``None``,
                 then the callable defaults to the DDP constructor.
         """
-        assert (
-            fsdp_init_mode != FSDPInitMode.NO_FSDP
-        ), "Expects an FSDP init mode that wraps with FSDP"
+        assert fsdp_init_mode != FSDPInitMode.NO_FSDP, (
+            "Expects an FSDP init mode that wraps with FSDP"
+        )
         if init_kwargs is None:
             init_kwargs = {}
         lr = 1e-2
@@ -1506,7 +1551,9 @@ def compiled_fsdp_test(compile_compute_on_module: Optional[type] = None):
             original_fully_shard: Any = torch.distributed.fsdp.fully_shard
             for mode in FullyShardMode:
                 if mode != FullyShardMode.EAGER and not has_triton():
-                    warnings.warn("Inductor on GPU needs Triton and recent GPU arch")
+                    warnings.warn(
+                        "Inductor on GPU needs Triton and recent GPU arch", stacklevel=2
+                    )
                     continue
                 # barrier to ensure thread reading the same value
                 original_skip_fsdp_hooks = torch._dynamo.config.skip_fsdp_hooks

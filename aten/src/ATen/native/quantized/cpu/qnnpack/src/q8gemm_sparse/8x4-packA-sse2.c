@@ -14,7 +14,7 @@
 #include "8x4c1x4-packed-sse2.h"
 
 // This is a super slow kernel in that it does not use intrinsics to
-// tranpose. Since this is for x86 we are not optimizing it.
+// transpose. Since this is for x86 we are not optimizing it.
 // For ARM this will be optimized.
 void pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2(
     const size_t mr,
@@ -24,7 +24,7 @@ void pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2(
     uint8_t* a_packed) {
 
   // Packed A format.
-  // 8kx4m blocks for alls blocks given 4 rows (4m) are placed in contiguous memory.
+  // 8kx4m blocks for all blocks given 4 rows (4m) are placed in contiguous memory.
   // Original A
   // --------- K -----------          -- (K + 4 - 1) / 4 --
   // |                     |          |                   |
@@ -45,7 +45,7 @@ void pytorch_q8gemm_sparse_packA_ukernel_8x4__sse2(
   // This locality helps in loading 8kx8m blocks of activations
   // Note when M is not multiple of 8, the rest can contain arbitrary
   // data in packed A as we will not be writing those out.
-  // This wil be taken care by just copying the appropriate valid data
+  // This will be taken care by just copying the appropriate valid data
 
   // Note that parts of A that are not filled are:
   // Remainder of M blocks. So some m values are random. This is ok

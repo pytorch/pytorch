@@ -90,8 +90,17 @@ C10_CUDA_API void __inline__ memcpy_and_sync(
     (*interp)->trace_gpu_stream_synchronization(
         c10::kCUDA, reinterpret_cast<uintptr_t>(stream));
   }
-#if defined(TORCH_HIP_VERSION) && (TORCH_HIP_VERSION >= 301)
-  C10_CUDA_CHECK(hipMemcpyWithStream(dst, src, nbytes, kind, stream));
+#if defined(USE_ROCM) && USE_ROCM
+  // As of ROCm 6.4.1, HIP runtime does not raise an error during capture of
+  // hipMemcpyWithStream which is a synchronous call. Thus, we add a check
+  // here explicitly.
+  hipStreamCaptureStatus captureStatus;
+  C10_CUDA_CHECK(hipStreamGetCaptureInfo(stream, &captureStatus, nullptr));
+  if (C10_LIKELY(captureStatus == hipStreamCaptureStatusNone)) {
+    C10_CUDA_CHECK(hipMemcpyWithStream(dst, src, nbytes, kind, stream));
+  } else {
+    C10_CUDA_CHECK(hipErrorStreamCaptureUnsupported);
+  }
 #else
   C10_CUDA_CHECK(cudaMemcpyAsync(dst, src, nbytes, kind, stream));
   C10_CUDA_CHECK(cudaStreamSynchronize(stream));

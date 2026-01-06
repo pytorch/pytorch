@@ -4,8 +4,8 @@
 
 namespace torch::nativert {
 
-void selectScalarOverload(torch::nativert::Graph* graph);
+void selectScalarOverload(Graph* graph);
 
-std::string selectScalarOverloadName(const torch::nativert::Node& node);
+std::string selectScalarOverloadName(const Node& node);
 
 } // namespace torch::nativert

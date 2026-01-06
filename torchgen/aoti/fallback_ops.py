@@ -39,10 +39,12 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
     "aten._flash_attention_forward.default": {},
     "aten._fused_moving_avg_obs_fq_helper_functional.default": {},
     "aten._fused_moving_avg_obs_fq_helper.default": {},
+    "aten._fused_rms_norm.default": {},
     "aten._histogramdd_from_bin_cts.default": {},
     "aten._int_mm.out": {},
     "aten._pdist_backward.default": {},
     "aten._pdist_forward.default": {},
+    "aten._scaled_dot_product_attention_math_for_mps.default": {},
     "aten._scaled_dot_product_cudnn_attention_backward.default": {},
     "aten._scaled_dot_product_cudnn_attention.default": {},
     "aten._scaled_dot_product_efficient_attention_backward.default": {},
@@ -54,6 +56,7 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
     "aten._scaled_dot_product_fused_attention_overrideable_backward.default": {},
     "aten._scaled_dot_product_fused_attention_overrideable.default": {},
     "aten._scaled_mm.default": {},
+    "aten._scaled_grouped_mm.default": {},
     "aten._scaled_mm.out": {},
     "aten._segment_reduce_backward.default": {},
     "aten._thnn_fused_lstm_cell.default": {},
@@ -91,6 +94,7 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
     "aten.cumprod.default": {},
     "aten.cumsum.default": {},
     "aten.exponential.default": {},
+    "aten.fill_.Scalar": {},
     "aten.fractional_max_pool2d_backward.default": {},
     "aten.fractional_max_pool2d.default": {},
     "aten.fractional_max_pool3d_backward.default": {},
@@ -122,6 +126,7 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
     "aten.mul.Scalar": {},
     "aten.mul.Tensor": {},
     "aten.nanmedian.default": {},
+    "aten.narrow.default": {},
     "aten.native_dropout.default": {},
     "aten.nonzero.default": {},
     "aten.normal_functional.default": {},
@@ -170,4 +175,20 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
     "aten.view_as_real.default": {},
     "aten.view.dtype": {},
     "aten._weight_int4pack_mm_with_scales_and_zeros.default": {},
+}
+
+# `python torchgen/gen.py --update-aoti-c-shim` will automatically generate
+# c_shim_aten.{h/cpp} based on the list below.
+# Operators in this list are intended to be used in torch/csrc/stable/ops.h
+# Unlike other c_shims, operators in this file do not bypass the dispatcher.
+# The same BC rules apply as inductor_fallback_ops.
+aten_shimified_ops: dict[str, dict[str, list[str]]] = {
+    "aten.fill_.Scalar": {},
+    "aten.pad.default": {},
+    "aten.narrow.default": {},
+    "aten.amax.default": {},
+    "aten.new_empty.default": {},
+    "aten.new_zeros.default": {},
+    "aten.full.default": {},
+    "aten.subtract.Tensor": {},
 }

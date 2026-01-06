@@ -1,6 +1,7 @@
 #undef __HIP_NO_HALF_CONVERSIONS__
 
 #include <ATen/native/hip/ck_gemm.h>
+#if defined(USE_ROCM_CK_GEMM)
 #include <ATen/native/hip/ck_gemm_template.h>
 #include <ck/utility/sequence.hpp>
 
@@ -10,7 +11,7 @@ using S = ck::Sequence<Is...>;
 namespace at::native {
 
 void dispatch_float_gemm(CUDABLAS_GEMM_ARGTYPES(float)) {
-  // If any of the shapes cant be tiled, we must use padding.
+  // If any of the shapes can't be tiled, we must use padding.
   bool use_padding = ((m % 256 != 0) || (n % 128 != 0) || (k % 64 != 0));
   // Dispatch to best implementation.
   // TODO add more configurations. Optimize.
@@ -484,3 +485,4 @@ void gemm_internal_ck<double>(CUDABLAS_GEMM_ARGTYPES(double)) {
 }
 
 } // namespace at::native
+#endif // USE_ROCM_CK_GEMM

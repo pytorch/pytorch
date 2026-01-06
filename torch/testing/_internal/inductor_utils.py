@@ -1,46 +1,58 @@
 # mypy: ignore-errors
 
-import logging
-import torch
-import re
-import unittest
-import functools
 import contextlib
+import functools
+import logging
 import os
-from subprocess import CalledProcessError
+import re
 import sys
+import unittest
+from subprocess import CalledProcessError
+
+import torch
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
-from torch.fx.experimental.proxy_tensor import make_fx
-from torch._inductor.graph import GraphLowering
-from torch._inductor.compile_fx import shape_env_from_inputs
+import torch._inductor.config as config
 from torch._inductor.codecache import CppCodeCache
-from torch._inductor.custom_graph_pass import CustomGraphModulePass
 from torch._inductor.codegen.common import (
+    get_custom_backend_config_for_device,
     get_custom_backend_pass_for_device,
     get_scheduling_for_device,
     get_wrapper_codegen_for_device,
     init_backend_registration,
-    register_backend_for_device
+    register_backend_for_device,
 )
 from torch._inductor.codegen.wrapper import PythonWrapperCodegen
-from torch._inductor.utils import get_gpu_shared_memory, is_big_gpu
-from torch._inductor.utils import GPU_TYPES, get_gpu_type, is_gpu
+from torch._inductor.compile_fx import shape_env_from_inputs
+from torch._inductor.custom_graph_pass import CustomGraphModulePass, CustomGraphPass
+from torch._inductor.graph import GraphLowering
+from torch._inductor.utils import (
+    get_gpu_shared_memory,
+    get_gpu_type,
+    GPU_TYPES,
+    is_big_gpu,
+    is_gpu,
+    OrderedSet,
+)
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.utils._helion import has_helion
+from torch.utils._pallas import has_pallas_package, has_tpu_pallas
 from torch.utils._triton import has_triton
+from torch.utils._config_module import ConfigModule
 from torch.testing._internal.common_device_type import (
     get_desired_device_type_test_bases,
 )
 from torch.testing._internal.common_utils import (
-    LazyVal,
-    IS_FBCODE,
-)
-from torch.testing._internal.common_utils import (
-    TestCase,
     IS_CI,
+    IS_FBCODE,
     IS_WINDOWS,
+    LazyVal,
+    TestCase,
 )
 
+from collections.abc import Callable
+
 log: logging.Logger = logging.getLogger(__name__)
+
 
 def test_cpu():
     try:
@@ -54,26 +66,31 @@ def test_cpu():
     ):
         return False
 
+
 HAS_CPU = LazyVal(test_cpu)
 
 HAS_TRITON = has_triton()
+
+HAS_PALLAS = has_pallas_package()
 
 HAS_HELION = has_helion()
 
 if HAS_TRITON:
     import triton
+
     TRITON_HAS_CPU = "cpu" in triton.backends.backends
 else:
     TRITON_HAS_CPU = False
 
 
-HAS_CUDA = torch.cuda.is_available() and HAS_TRITON
+HAS_CUDA_AND_TRITON = torch.cuda.is_available() and HAS_TRITON
 
-HAS_XPU = torch.xpu.is_available() and HAS_TRITON
+HAS_XPU_AND_TRITON = torch.xpu.is_available() and HAS_TRITON
 
 HAS_MPS = torch.mps.is_available()
 
-HAS_GPU = HAS_CUDA or HAS_XPU
+HAS_GPU = HAS_CUDA_AND_TRITON or HAS_XPU_AND_TRITON
+HAS_GPU_AND_TRITON = HAS_GPU
 
 GPU_TYPE = get_gpu_type()
 
@@ -83,15 +100,17 @@ HAS_MULTIGPU = any(
 )
 
 _desired_test_bases = get_desired_device_type_test_bases(allow_xpu=True)
-RUN_GPU = (
-    HAS_GPU
-    and any(is_gpu(getattr(x, "device_type", "")) for x in _desired_test_bases)
+RUN_GPU = HAS_GPU and any(
+    is_gpu(getattr(x, "device_type", "")) for x in _desired_test_bases
 )
 
-RUN_CPU = (
-    HAS_CPU
-    and any(getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases)
+RUN_CPU = HAS_CPU and any(
+    getattr(x, "device_type", "") == "cpu" for x in _desired_test_bases
 )
+
+HAS_TPU = has_tpu_pallas()
+RUN_TPU = HAS_TPU
+
 
 def _check_has_dynamic_shape(
     self: TestCase,
@@ -114,23 +133,30 @@ def _check_has_dynamic_shape(
 
 def skipDeviceIf(cond, msg, *, device):
     if cond:
+
         def decorate_fn(fn):
             @functools.wraps(fn)
             def inner(self, *args, **kwargs):
                 if not hasattr(self, "device"):
-                    warn_msg = "Expect the test class to have attribute device but not found. "
+                    warn_msg = (
+                        "Expect the test class to have attribute device but not found. "
+                    )
                     if hasattr(self, "device_type"):
                         warn_msg += "Consider using the skip device decorators in common_device_type.py"
                     log.warning(warn_msg)
                 if self.device == device:
                     raise unittest.SkipTest(msg)
                 return fn(self, *args, **kwargs)
+
             return inner
+
     else:
+
         def decorate_fn(fn):
             return fn
 
     return decorate_fn
+
 
 def skip_windows_ci(name: str, file: str) -> None:
     if IS_WINDOWS and IS_CI:
@@ -142,35 +168,40 @@ def skip_windows_ci(name: str, file: str) -> None:
             sys.exit(0)
         raise unittest.SkipTest("requires sympy/functorch/filelock")
 
+
 # TODO: Remove HAS_MPS condition  when `HAS_GPU` includes HAS_MPS
-requires_gpu = functools.partial(unittest.skipIf, not (HAS_GPU or HAS_MPS), "requires gpu")
+requires_gpu = functools.partial(
+    unittest.skipIf, not (HAS_GPU or HAS_MPS), "requires gpu"
+)
 requires_triton = functools.partial(unittest.skipIf, not HAS_TRITON, "requires triton")
 requires_helion = functools.partial(unittest.skipIf, not HAS_HELION, "requires helion")
 
+
 def requires_cuda_with_enough_memory(min_mem_required):
     def inner(fn):
-        if not torch.cuda.is_available() or torch.cuda.get_device_properties().total_memory < min_mem_required:
-            return unittest.skip(f"Only if the CUDA device has at least {min_mem_required / 1e9:.3f}GB memory to be safe")(fn)
+        if (
+            not torch.cuda.is_available()
+            or torch.cuda.get_device_properties().total_memory < min_mem_required
+        ):
+            return unittest.skip(
+                f"Only if the CUDA device has at least {min_mem_required / 1e9:.3f}GB memory to be safe"
+            )(fn)
         else:
             return fn
 
     return inner
 
+
 skipCUDAIf = functools.partial(skipDeviceIf, device="cuda")
 skipXPUIf = functools.partial(skipDeviceIf, device="xpu")
 skipCPUIf = functools.partial(skipDeviceIf, device="cpu")
 
-IS_A100 = LazyVal(
-    lambda: HAS_CUDA
-    and get_gpu_shared_memory() == 166912
-)
+IS_A100 = LazyVal(lambda: HAS_CUDA_AND_TRITON and get_gpu_shared_memory() == 166912)
 
-IS_H100 = LazyVal(
-    lambda: HAS_CUDA
-    and get_gpu_shared_memory() == 232448
-)
+IS_H100 = LazyVal(lambda: HAS_CUDA_AND_TRITON and get_gpu_shared_memory() == 232448)
 
-IS_BIG_GPU = LazyVal(lambda: HAS_CUDA and is_big_gpu())
+IS_BIG_GPU = LazyVal(lambda: HAS_GPU_AND_TRITON and is_big_gpu())
+
 
 def dummy_graph() -> GraphLowering:
     """
@@ -187,9 +218,10 @@ def dummy_graph() -> GraphLowering:
 
     return graph
 
+
 def maybe_skip_size_asserts(op):
     """
-    For certain ops, there meta and eager implementation returns differents
+    For certain ops, there meta and eager implementation returns different
     strides. This cause size/strides assert fail. Skip adding those
     asserts for now.
     """
@@ -223,11 +255,18 @@ def maybe_skip_size_asserts(op):
     else:
         return contextlib.nullcontext()
 
+
 def get_func_call() -> str:
-    return "void inductor_entry_impl(" if torch._inductor.config.cpp_wrapper else "def call("
+    return (
+        "void inductor_entry_impl("
+        if torch._inductor.config.cpp_wrapper
+        else "def call("
+    )
+
 
 def get_kernel_launch() -> str:
     return "call_triton_" if torch._inductor.config.cpp_wrapper else ".run("
+
 
 def clone_preserve_strides_offset(x, device=None):
     if not isinstance(x, torch.Tensor):
@@ -242,6 +281,7 @@ def clone_preserve_strides_offset(x, device=None):
     out = torch.as_strided(buffer, x.size(), x.stride(), x.storage_offset())
     return out
 
+
 # define the e4m3/e5m2 constants
 E4M3_MAX_POS = torch.finfo(torch.float8_e4m3fn).max
 E5M2_MAX_POS = torch.finfo(torch.float8_e5m2).max
@@ -252,6 +292,7 @@ FP16_MAX_POS: float = torch.finfo(torch.float16).max
 EPS: float = 1e-12
 
 Tensor = torch.Tensor
+
 
 def _to_fp8_saturated(x: Tensor, float8_dtype: torch.dtype) -> Tensor:
     # The default behavior in PyTorch for casting to `float8_e4m3fn`
@@ -272,6 +313,7 @@ def _to_fp8_saturated(x: Tensor, float8_dtype: torch.dtype) -> Tensor:
         raise TypeError(f"Unsupported float8_dtype: {float8_dtype}")
     return x.to(float8_dtype)
 
+
 @torch.no_grad()
 def _amax_to_scale(
     amax: torch.Tensor, float8_dtype: torch.dtype, orig_dtype: torch.dtype
@@ -290,12 +332,14 @@ def _amax_to_scale(
         res = torch.clamp(res, max=FP16_MAX_POS)
     return res
 
+
 def _quantize_tensorwise(x: Tensor, float8_dtype: torch.dtype):
     amax = torch.max(torch.abs(x))
     scale = _amax_to_scale(amax, float8_dtype, x.dtype)
     x_fp8 = _to_fp8_saturated(x * scale, float8_dtype)
     inverse_scale = scale.reciprocal()
     return x_fp8, inverse_scale
+
 
 def _quantize_rowwise(x: Tensor, float8_dtype: torch.dtype):
     amax = torch.max(torch.abs(x), dim=1, keepdim=True).values
@@ -304,11 +348,53 @@ def _quantize_rowwise(x: Tensor, float8_dtype: torch.dtype):
     inverse_scale = scale.reciprocal()
     return x_fp8, inverse_scale
 
+
+def _quantize_blockwise(
+    x: Tensor, float8_dtype: torch.dtype, block_outer: int, block_inner: int
+):
+    min_outer = min(block_outer, x.shape[0])
+    min_inner = min(block_inner, x.shape[1])
+    x = x.unflatten(1, (-1, min_inner)).unflatten(0, (-1, min_outer))
+    amax = x.abs().amax(dim=[1, 3], keepdim=True).float()
+    scale = _amax_to_scale(amax, float8_dtype, x.dtype)
+    x = x.flatten(2, 3).flatten(0, 1)
+    scale = scale.flatten(2, 3).flatten(0, 1)
+    scale_expanded = scale.repeat_interleave(min_outer, dim=0).repeat_interleave(
+        min_inner, dim=1
+    )
+    x_fp8 = _to_fp8_saturated(
+        x / scale_expanded,  # Ensures that scaling doesn't cause inf/nan values
+        float8_dtype,
+    )
+    inverse_scale = scale.reciprocal()
+    return x_fp8, inverse_scale
+
+
+class MockGraphHandler(GraphLowering):
+    """Minimal mock graph handler for testing virtualized context."""
+
+    def __init__(self, name_to_buffer=None):
+        import torch._inductor.sizevars
+
+        self.sizevars = torch._inductor.sizevars.SizeVarAllocator()
+        self.name_to_buffer = name_to_buffer or {}
+        self.graph_inputs = {}
+        self.mutated_buffers = OrderedSet()
+        self.removed_buffers = OrderedSet()
+        self.constants = {}
+        self.scheduler = None
+
+    def get_dtype(self, buffer_name: str) -> torch.dtype:  # noqa: ARG002
+        """Return default dtype for any buffer (for testing)."""
+        return torch.float32
+
+
 @contextlib.contextmanager
 def patch_inductor_backend(
     device: str,
     python_wrapper_codegen: PythonWrapperCodegen = None,
-    custom_pass: CustomGraphModulePass = None
+    custom_pass: CustomGraphModulePass = None,
+    custom_backend_config: ConfigModule = None,
 ):
     """
     Patch the inductor backend for a specific device.
@@ -320,16 +406,28 @@ def patch_inductor_backend(
     original_scheduling = get_scheduling_for_device(device)
     original_python_wrapper = get_wrapper_codegen_for_device(device, False)
     original_cpp_wrapper = get_wrapper_codegen_for_device(device, True)
+    original_fx_wrapper = get_wrapper_codegen_for_device(device, fx_wrapper=True)
     original_custom_pass = get_custom_backend_pass_for_device(device)
+    original_custom_backend_config = get_custom_backend_config_for_device(device)
 
     try:
         # Register modified backend for the device
         register_backend_for_device(
             device,
             original_scheduling,
-            python_wrapper_codegen if python_wrapper_codegen is not None else original_python_wrapper,
+            (
+                python_wrapper_codegen
+                if python_wrapper_codegen is not None
+                else original_python_wrapper
+            ),
             original_cpp_wrapper,
-            custom_pass if custom_pass is not None else original_custom_pass
+            original_fx_wrapper,
+            custom_pass if custom_pass is not None else original_custom_pass,
+            (
+                custom_backend_config
+                if custom_backend_config is not None
+                else original_custom_backend_config
+            ),
         )
         yield
     finally:
@@ -339,5 +437,25 @@ def patch_inductor_backend(
             original_scheduling,
             original_python_wrapper,
             original_cpp_wrapper,
-            original_custom_pass
+            original_fx_wrapper,
+            original_custom_pass,
+            original_custom_backend_config,
         )
+
+def patch_custom_fallback_pass(predicate: Callable[[torch.fx.Node], bool]) -> contextlib.ContextDecorator:
+    """
+    Create a custom pass which falls back based on the provided predicate. For example,
+    we could provide a predicate which returns True for all aten.add.default nodes.
+    Returns a context activating the pass.
+    """
+    class Pass(CustomGraphPass):
+        def __call__(self, graph: torch.fx.Graph):
+            for node in graph.nodes:
+                if predicate(node):
+                    node.meta["should_fallback"] = True
+
+        def uuid(self):
+            return None
+
+
+    return config.patch(post_grad_custom_pre_pass=Pass())

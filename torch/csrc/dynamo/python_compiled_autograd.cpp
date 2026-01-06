@@ -1,15 +1,13 @@
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
 
 #include <torch/csrc/autograd/engine.h>
-#include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/autograd/python_function.h>
 #include <torch/csrc/dynamo/compiled_autograd.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <torch/csrc/python_headers.h>
-#include <torch/csrc/utils/pythoncapi_compat.h>
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <vector>
 
 /*
@@ -56,6 +54,19 @@ namespace {
 PyObject* the_autograd_compiler = nullptr;
 int default_dyn_type_int = 0;
 PyObject* python_verbose_logger = nullptr;
+
+constexpr std::string_view _TURN_OFF_COMPILED_AUTOGRAD_MSG = R"(
+  You can disable compiled autograd for this operation by:
+  1.  Relocating the unsupported autograd call outside the compiled region.
+  2.  Wrapping the unsupported autograd call within a scope that disables compiled autograd.
+  3.  Configuring the specific compilation unit to disable compiled autograd.
+  4.  Globally disabling compiled autograd at the application's initialization.
+  )";
+
+std::string TURN_OFF_COMPILED_AUTOGRAD_MSG() {
+  return std::string(_TURN_OFF_COMPILED_AUTOGRAD_MSG);
+}
+
 } // namespace
 
 // see https://github.com/pytorch/pytorch/pull/34845
@@ -420,10 +431,10 @@ struct VerboseLogger : public PythonLogger {
       }
       oss << it->key_size;
       if (std::next(it) != cached_keys.end()) {
-        oss << ",";
+        oss << ',';
       }
     }
-    oss << "]";
+    oss << ']';
     std::string compile_reason = oss.str();
     log(PythonLogger::DEBUG, compile_reason);
     return compile_reason;
@@ -440,7 +451,7 @@ struct VerboseLogger : public PythonLogger {
     }
     oss << "sizes["
         << std::to_string(new_dyn_sizes_idx[new_dyn_sizes_idx.size() - 1])
-        << "]";
+        << ']';
     std::string recompile_reason = oss.str();
     log(PythonLogger::DEBUG, recompile_reason);
     return recompile_reason;
@@ -966,7 +977,7 @@ static CacheNode* _compiled_autograd_impl(
     // cache miss, need to capture FX graph
     TORCH_INTERNAL_ASSERT(!vlogger.has_value() || compile_reason.has_value());
     ClosingTHPObjectPtr py_compiler(
-        check(PyObject_CallNoArgs((the_autograd_compiler))));
+        check(PyObject_CallNoArgs(the_autograd_compiler)));
     PyCompilerGuard py_compiler_guard(
         std::make_unique<PyCompilerInterfaceImpl>());
 
@@ -1172,9 +1183,10 @@ struct LockGuardWithErrorLogs {
     // performance reasons, but it shouldn't happen here since we:
     // 1. disable multithreaded autograd
     // 2. plenty of latency between backward calls
-    TORCH_INTERNAL_ASSERT(
+    TORCH_CHECK_NOT_IMPLEMENTED(
         mtx_.try_lock(),
-        "Trying to run compiled autograd within another compiled autograd call (e.g. reentrant checkpointing), this is not supported yet.");
+        "Trying to run compiled autograd within another compiled autograd call, this is not supported yet. " +
+            TURN_OFF_COMPILED_AUTOGRAD_MSG());
   }
 
   ~LockGuardWithErrorLogs() {
@@ -1190,9 +1202,6 @@ static variable_list compiled_autograd(
     const GraphTask& graph_task,
     bool accumulate_grad,
     const edge_list& output_edges) {
-  TORCH_CHECK(
-      c10::impl::TorchDispatchModeTLS::stack_len() == 0,
-      "TorchDispatchMode not yet implemented for compiled autograd")
   static std::mutex mtx;
   LockGuardWithErrorLogs lock_guard(mtx);
   pybind11::gil_scoped_acquire gil;
@@ -1204,17 +1213,27 @@ static variable_list compiled_autograd(
   THPObjectPtr ivalue_args;
   THPObjectPtr hooks;
   THPObjectPtr packed_inputs;
-  CacheNode* cache = _compiled_autograd_impl(
-      graph_root,
-      graph_task,
-      accumulate_grad,
-      output_edges,
-      &inputs,
-      &sizes,
-      &ivalue_args,
-      &hooks,
-      &packed_inputs,
-      active_rstate);
+  CacheNode* cache = nullptr;
+  try {
+    torch_dispatch_mode::StashTorchDispatchStackGuard stash_stack_guard;
+    TORCH_INTERNAL_ASSERT(c10::impl::TorchDispatchModeTLS::stack_len() == 0);
+    cache = _compiled_autograd_impl(
+        graph_root,
+        graph_task,
+        accumulate_grad,
+        output_edges,
+        &inputs,
+        &sizes,
+        &ivalue_args,
+        &hooks,
+        &packed_inputs,
+        active_rstate);
+    TORCH_INTERNAL_ASSERT(c10::impl::TorchDispatchModeTLS::stack_len() == 0);
+  } catch (const c10::NotImplementedError& e) {
+    TORCH_CHECK_NOT_IMPLEMENTED(
+        false, std::string(e.what()) + " " + TURN_OFF_COMPILED_AUTOGRAD_MSG());
+  }
+  TORCH_INTERNAL_ASSERT(cache != nullptr);
 
   THPObjectPtr pyresult(check(PyObject_CallFunctionObjArgs(
       cache->runtime_wrapper.get(),

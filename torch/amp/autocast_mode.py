@@ -43,7 +43,9 @@ def autocast_decorator(autocast_instance, func):
         with autocast_instance:
             return func(*args, **kwargs)
 
-    decorate_autocast.__script_unsupported = "@autocast() decorator is not supported in script mode"  # type: ignore[attr-defined]
+    decorate_autocast.__script_unsupported = (  # type: ignore[attr-defined]
+        "@autocast() decorator is not supported in script mode"
+    )
     return decorate_autocast
 
 
@@ -88,9 +90,9 @@ class autocast:
 
         class AutocastModel(nn.Module):
             ...
+
             @torch.autocast(device_type="cuda")
-            def forward(self, input):
-                ...
+            def forward(self, input): ...
 
     Floating-point Tensors produced in an autocast-enabled region may be ``float16``.
     After returning to an autocast-disabled region, using them with floating-point
@@ -152,8 +154,10 @@ class autocast:
             def __init__(self, input_size, num_classes):
                 super().__init__()
                 self.fc1 = nn.Linear(input_size, num_classes)
+
             def forward(self, x):
                 return self.fc1(x)
+
 
         input_size = 2
         num_classes = 2
@@ -226,21 +230,24 @@ class autocast:
             raise ValueError(
                 f"Expected `device_type` of type `str`, got: `{type(device_type)}`"
             )
-        if dtype is None:
-            dtype = torch.get_autocast_dtype(device_type)
+        self.fast_dtype = (
+            torch.get_autocast_dtype(device_type) if dtype is None else dtype
+        )
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
             self.device = device_type
-            self.fast_dtype = dtype
-            assert dtype is not None
+            if self.fast_dtype is None:
+                raise AssertionError("fast_dtype must not be None in scripting mode")
             return
         self.device = device_type
         if not is_autocast_available(self.device):
             raise RuntimeError(
                 f"User specified an unsupported autocast device_type '{self.device}'"
             )
+
+        device_supported_dtypes = [torch.bfloat16, torch.float16]
+
         self.custom_backend_name = torch._C._get_privateuse1_backend_name()
-        self.fast_dtype = torch.get_autocast_dtype(self.device)
         if self.device == self.custom_backend_name:
             necessary_funcs = [
                 "get_amp_supported_dtype",
@@ -250,123 +257,70 @@ class autocast:
             message += "a module by `torch._register_device_module`, and the module must have these funcs: \n"
             message += "`get_amp_supported_dtype() -> List[torch.dtype]`. \n"
 
-            assert hasattr(torch, self.custom_backend_name), message
+            if not hasattr(torch, self.custom_backend_name):
+                raise AssertionError(message)
             self.custom_device_mod = getattr(torch, self.custom_backend_name)
             for func in necessary_funcs:
-                assert hasattr(self.custom_device_mod, func), (
-                    message + f"But the func `{func}` is missing. \n"
-                )
+                if not hasattr(self.custom_device_mod, func):
+                    raise AssertionError(
+                        message + f"But the func `{func}` is missing. \n"
+                    )
+            device_supported_dtypes = self.custom_device_mod.get_amp_supported_dtype()
 
-        self._cache_enabled = torch.is_autocast_cache_enabled()
-        if (
-            enabled
-            and self.device == "cuda"
-            and torch.cuda.amp.common.amp_definitely_not_available()
-        ):
-            warnings.warn(
-                "User provided device_type of 'cuda', but CUDA is not available. Disabling"
-            )
-            enabled = False
-        if dtype is not None:
-            self.fast_dtype = dtype
-        if cache_enabled is not None:
-            self._cache_enabled = cache_enabled
+        self._cache_enabled = (
+            torch.is_autocast_cache_enabled()
+            if cache_enabled is None
+            else cache_enabled
+        )
 
-        if self.device == "cpu":
-            supported_dtype = [torch.bfloat16, torch.float16]
-            if self.fast_dtype not in supported_dtype and enabled:
-                error_message = "In CPU autocast, but the target dtype is not supported. Disabling autocast.\n"
-                error_message += "CPU Autocast only supports dtype of "
-                error_message += (
-                    ", ".join(str(dtype) for dtype in supported_dtype) + " currently."
-                )
-                warnings.warn(error_message)
-                enabled = False
-        elif self.device == "mtia":
-            supported_dtype = [torch.bfloat16, torch.float16]
-            if self.fast_dtype not in supported_dtype:
-                error_message = "In MTIA autocast, but the target dtype is not supported. Disabling autocast.\n"
-                error_message += "MTIA Autocast only supports dtypes of torch.bfloat16 and torch.float16 currently."
-                warnings.warn(error_message)
-                enabled = False
-        elif self.device == "maia":
-            supported_dtype = [torch.bfloat16, torch.float16]
-            if self.fast_dtype not in supported_dtype:
-                error_message = "In MAIA autocast, but the target dtype is not supported. Disabling autocast.\n"
-                error_message += "MAIA Autocast only supports dtypes of torch.bfloat16 and torch.float16 currently."
-                warnings.warn(error_message)
-                enabled = False
-        elif self.device == "xpu":
-            supported_dtype = [torch.bfloat16, torch.float16]
-            if self.fast_dtype not in supported_dtype:
-                error_message = "In XPU autocast, but the target dtype is not supported. Disabling autocast.\n"
-                error_message += "XPU Autocast only supports dtypes of torch.bfloat16 and torch.float16 currently."
-                warnings.warn(error_message)
-                enabled = False
-        elif self.device == "ipu":
-            supported_dtypes = [torch.bfloat16, torch.float16]
-            if self.fast_dtype not in supported_dtypes:
-                error_message = "In IPU autocast, but the target dtype is not supported. Disabling autocast.\n"
-                error_message += "IPU Autocast only supports dtypes of torch.bfloat16 and torch.float16 currently."
-                warnings.warn(error_message)
-                enabled = False
-        elif self.device == "hpu":
-            supported_dtype = [torch.bfloat16, torch.float16]
-            if self.fast_dtype not in supported_dtype:
-                error_message = "In HPU autocast, but the target dtype is not supported. Disabling autocast.\n"
-                error_message += "HPU Autocast only supports dtypes of torch.bfloat16 and torch.float16 currently."
-                warnings.warn(error_message)
-                enabled = False
-        elif self.device == self.custom_backend_name:
-            supported_dtype = self.custom_device_mod.get_amp_supported_dtype()
-            if self.fast_dtype not in supported_dtype:
-                error_message = f"In {self.custom_backend_name} autocast, but the target dtype is not supported. "
-                error_message += f"Disabling autocast.\n {self.custom_backend_name} Autocast only supports dtypes of "
-                error_message += (
-                    ", ".join(str(dtype) for dtype in supported_dtype) + " currently."
-                )
-                warnings.warn(error_message)
-                enabled = False
-        elif self.device == "cuda":
-            if (
-                enabled
-                and self.fast_dtype == torch.bfloat16
-                and not torch.cuda.is_bf16_supported()
-            ):
-                raise RuntimeError(
-                    "Current CUDA Device does not support bfloat16. Please switch dtype to float16."
-                )
-        elif self.device == "mps":
-            supported_dtype = [torch.bfloat16, torch.float16]
-            if self.fast_dtype not in supported_dtype:
+        device_name = (
+            self.device
+            if self.device == self.custom_backend_name
+            else self.device.upper()
+        )
+        if enabled:
+            # Special case for CUDA AMP and bfloat16 support
+            if self.device == "cuda":
+                if torch.cuda.amp.common.amp_definitely_not_available():
+                    warnings.warn(
+                        "CUDA is not available or torch_xla is imported. Disabling autocast.",
+                        stacklevel=2,
+                    )
+                    enabled = False
+                elif (
+                    self.fast_dtype == torch.bfloat16
+                    and not torch.cuda.is_bf16_supported()
+                ):
+                    raise RuntimeError(
+                        "Current CUDA Device does not support bfloat16. Please switch dtype to float16."
+                    )
+            elif self.fast_dtype not in device_supported_dtypes:
                 error_message = (
-                    "In MPS autocast, but the target dtype is not supported. Disabling autocast.\n"
-                    "MPS Autocast only supports dtype of torch.bfloat16 and torch.float16 currently."
+                    f"In {device_name} autocast, but the target dtype is not supported. Disabling autocast.\n"
+                    f"{device_name} Autocast only supports dtypes of "
+                    + ", ".join(map(str, device_supported_dtypes))
+                    + " currently."
                 )
-                warnings.warn(error_message)
+                warnings.warn(error_message, stacklevel=2)
                 enabled = False
-            elif self.fast_dtype == torch.bfloat16:
-                if not torch.backends.mps.is_macos_or_newer(14, 0):
+                # Special case for MPS bfloat16 support on macOS < 14
+                if (
+                    self.device == "mps"
+                    and self.fast_dtype == torch.bfloat16
+                    and not torch.backends.mps.is_macos_or_newer(14, 0)
+                ):
                     error_message = (
                         "In MPS autocast, but the target dtype torch.bfloat16 is not supported "
                         "on macOS versions below 14. Disabling autocast."
                     )
-                    warnings.warn(error_message)
+                    warnings.warn(error_message, stacklevel=2)
                     enabled = False
-        elif self.device == "xla":
-            supported_dtype = [torch.float16, torch.bfloat16]
-            if self.fast_dtype not in supported_dtype:
-                error_message = "In XLA autocast, but the target dtype is not supported. Disabling autocast.\n"
-                error_message += (
-                    "XLA Autocast only supports dtype of torch.bfloat16 currently."
-                )
-                warnings.warn(error_message)
-                enabled = False
         self._enabled = enabled
 
     def __enter__(self):
         if torch._jit_internal.is_scripting():
-            assert self.fast_dtype is not None
+            if self.fast_dtype is None:
+                raise AssertionError("fast_dtype must not be None in scripting mode")
             return self
 
         self.prev_cache_enabled = torch.is_autocast_cache_enabled()
@@ -393,7 +347,10 @@ class autocast:
                         self._enabled,
                         self._cache_enabled,
                     )
-                    return mode.__torch_function__(torch.amp._enter_autocast, (), args)
+                    mode.__torch_function__(torch.amp._enter_autocast, (), args)
+                    return self
+
+        return self
 
     def __exit__(self, exc_type: Any, exc_val: Any, exc_tb: Any):  # type: ignore[override]
         if torch._jit_internal.is_scripting():
@@ -416,7 +373,10 @@ class autocast:
                     mode,
                     torch.fx.experimental.proxy_tensor.PreDispatchTorchFunctionMode,
                 ):
-                    return mode.__torch_function__(torch.amp._exit_autocast, (), ())
+                    mode.__torch_function__(torch.amp._exit_autocast, (), ())
+                    # This is very important because the above line actually doesn't
+                    # run exit code so it end up swallowing exceptions.
+                    return False
         return False
 
     def __call__(self, func):
@@ -457,7 +417,11 @@ def _cast(value, device_type: str, dtype: _dtype):
         return value.to(dtype) if is_eligible else value
     elif isinstance(value, (str, bytes)):
         return value
-    elif HAS_NUMPY and isinstance(value, np.ndarray):
+    elif HAS_NUMPY and isinstance(
+        value,
+        # pyrefly: ignore [missing-attribute]
+        np.ndarray,
+    ):
         return value
     elif isinstance(value, collections.abc.Mapping):
         return {
@@ -514,18 +478,18 @@ def custom_fwd(
         args[0]._dtype = torch.get_autocast_dtype(device_type)
         if cast_inputs is None:
             args[0]._fwd_used_autocast = torch.is_autocast_enabled(device_type)
-            return fwd(*args, **kwargs)
+            return fwd(*args, **kwargs)  # pyrefly: ignore [not-callable]
         else:
             autocast_context = torch.is_autocast_enabled(device_type)
             args[0]._fwd_used_autocast = False
             if autocast_context:
                 with autocast(device_type=device_type, enabled=False):
-                    return fwd(
+                    return fwd(  # pyrefly: ignore  # not-callable
                         *_cast(args, device_type, cast_inputs),
                         **_cast(kwargs, device_type, cast_inputs),
                     )
             else:
-                return fwd(*args, **kwargs)
+                return fwd(*args, **kwargs)  # pyrefly: ignore [not-callable]
 
     return decorate_fwd
 
@@ -560,6 +524,6 @@ def custom_bwd(bwd=None, *, device_type: str):
             enabled=args[0]._fwd_used_autocast,
             dtype=args[0]._dtype,
         ):
-            return bwd(*args, **kwargs)
+            return bwd(*args, **kwargs)  # pyrefly: ignore [not-callable]
 
     return decorate_bwd

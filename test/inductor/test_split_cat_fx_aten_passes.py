@@ -5,7 +5,7 @@ import torch._inductor
 from torch._dynamo.utils import counters
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.inductor_utils import GPU_TYPE
-from torch.testing._internal.triton_utils import requires_cuda
+from torch.testing._internal.triton_utils import requires_gpu_and_triton
 
 
 try:
@@ -43,6 +43,22 @@ class TestSplitCat(torch.nn.Module):
                 getitem_6,
                 getitem_7,
             ],
+            1,
+        )
+        cat_2 = torch.ops.aten.cat.default([getitem, z], 1)
+        return torch.ops.aten.cat.default([cat_1, cat_2], 1)
+
+
+class TestSplitCatSingular(torch.nn.Module):
+    def __init__(self) -> None:
+        super().__init__()
+
+    def forward(self, x: torch.Tensor, y: torch.Tensor, z: torch.Tensor):
+        cat = torch.ops.aten.cat.default([x, y], 1)
+        split = torch.ops.aten.split.Tensor(cat, 32, 1)
+        getitem = split[0]
+        cat_1 = torch.ops.aten.cat.default(
+            [getitem],
             1,
         )
         cat_2 = torch.ops.aten.cat.default([getitem, z], 1)
@@ -208,7 +224,7 @@ class TestSplitCatAten(TestCase):
     def compare_dict_tensors(self, ref_dict, res_dict, rtol=1e-3, atol=1e-3):
         if len(set(ref_dict.keys())) != len(set(res_dict.keys())):
             return False
-        for key1 in ref_dict.keys():
+        for key1 in ref_dict:
             key2 = "_orig_mod." + key1
             assert key2 in res_dict, f"{key1} does not exist in traced module"
             if not torch.allclose(ref_dict[key1], res_dict[key2], rtol=rtol, atol=atol):
@@ -232,7 +248,7 @@ class TestSplitCatAten(TestCase):
             self.compare_dict_tensors(ref_grad, res_grad, rtol=rtol, atol=atol)
         )
 
-    @requires_cuda
+    @requires_gpu_and_triton
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
         post_grad_fusion_options={
@@ -275,7 +291,33 @@ class TestSplitCatAten(TestCase):
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
-    @requires_cuda
+    @requires_gpu_and_triton
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={
+            "normalization_aten_pass": {},
+            "split_cat_aten_pass": {"threshold_to_cat": 5},
+        },
+    )
+    def test_split_cat_post_grad_singular(self):
+        counters.clear()
+        inputs = [
+            torch.randn(1024, 128, device=torch.device(device=GPU_TYPE)),
+            torch.randn(1024, 128, device=torch.device(device=GPU_TYPE)),
+            torch.randn(1024, 32, device=torch.device(device=GPU_TYPE)),
+        ]
+        module = TestSplitCatSingular()
+        traced = torch.compile(module)
+        ref = module(*inputs)
+        res = traced(*inputs)
+        self.compare_pred(module, traced, inputs)
+        self.assertEqual(counters["inductor"]["normalization_aten_pass"], 4)
+        self.assertEqual(counters["inductor"]["split_cat_aten_pass"], 0)
+        self.assertEqual(ref, res, rtol=1e-8, atol=1e-8)
+        self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
+        counters.clear()
+
+    @requires_gpu_and_triton
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
         post_grad_fusion_options={
@@ -300,7 +342,7 @@ class TestSplitCatAten(TestCase):
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
 
-    @requires_cuda
+    @requires_gpu_and_triton
     @torch._inductor.config.patch(
         pre_grad_fusion_options={},
         post_grad_fusion_options={
@@ -323,6 +365,39 @@ class TestSplitCatAten(TestCase):
         self.assertEqual(ref, res, rtol=1e-8, atol=1e-8)
         self.compare_parameters(module, traced, rtol=1e-8, atol=1e-8)
         counters.clear()
+
+
+class TestSplitCatAtenNormalizationPasses(TestCase):
+    @torch._inductor.config.patch(
+        pre_grad_fusion_options={},
+        post_grad_fusion_options={
+            "normalization_aten_pass": {},
+        },
+    )
+    def test_split_aten_normalization(self):
+        def arg_only_size_same(x):
+            return torch.ops.aten.split.Tensor(x, 300, 1)
+
+        def arg_only_size_different(x):
+            return torch.ops.aten.split.Tensor(x, 320, 1)
+
+        args = [
+            torch.randn(4096, 300),
+        ]
+        for fn, expected_split_norm_count in [
+            (arg_only_size_same, 1),
+            (arg_only_size_different, 1),
+        ]:
+            expected = fn(*args)
+            actual = torch.compile(fn)(*args)
+
+            torch.testing.assert_close(actual, expected)
+            self.assertEqual(
+                counters["inductor"]["normalization_aten_pass"],
+                expected_split_norm_count,
+                msg=f"for {fn}",
+            )
+            counters.clear()
 
 
 if __name__ == "__main__":

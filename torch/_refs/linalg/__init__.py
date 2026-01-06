@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import math
 from functools import partial
 from typing import Optional, Union
 
@@ -56,7 +57,7 @@ def _check_norm_dtype(dtype: Optional[torch.dtype], x_dtype: torch.dtype, fn_nam
         torch._check(
             utils.get_higher_dtype(dtype, x_dtype) == dtype,
             lambda: f"{fn_name}: the dtype of the input ({x_dtype}) should be convertible "
-            "without narrowing to the specified dtype ({dtype})",
+            f"without narrowing to the specified dtype ({dtype})",
         )
 
 
@@ -110,7 +111,7 @@ def _check_vector_norm_args(
             x.numel() != 0,
             not isinstance(dim, IntLike) and dim is not None and len(dim) != 0,
         ),
-        "linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
+        lambda: f"linalg.vector_norm cannot compute the {ord} norm on an empty tensor "
         "because the operation does not have an identity",
     )
 
@@ -119,7 +120,7 @@ def _check_vector_norm_args(
         for d in dim:
             torch._check(
                 sym_or(x.numel() != 0, d < len(shape) and d >= 0 and shape[d] != 0),
-                "linalg.vector_norm cannot compute the {ord} norm on the "
+                lambda: f"linalg.vector_norm cannot compute the {ord} norm on the "
                 f"dimension {d} because this dimension is empty and the "
                 "operation does not have an identity",
             )
@@ -135,7 +136,7 @@ def vector_norm(
     *,
     dtype: Optional[torch.dtype] = None,
 ) -> Tensor:
-    from torch.fx.experimental.symbolic_shapes import guard_size_oblivious
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
 
     check_fp_or_complex(x.dtype, "linalg.vector_norm")
 
@@ -170,7 +171,7 @@ def vector_norm(
 
         if (dim is None and x.numel() == 1) or (
             dim is not None
-            and (x.ndim > 0 and all(guard_size_oblivious(x.shape[d] == 1) for d in dim))
+            and (x.ndim > 0 and all(guard_or_false(x.shape[d] == 1) for d in dim))
         ):
             if x.ndim > 64:
                 raise RuntimeError(
@@ -180,7 +181,7 @@ def vector_norm(
             if keepdim or x.ndim == 0:
                 return to_result_dtype(x).contiguous()
             elif dim is None:
-                return x.flatten()[0]
+                return to_result_dtype(x).flatten()[0]
             else:
                 new_shape = [s for d, s in enumerate(x.shape) if d not in dim]
                 return to_result_dtype(x.view(new_shape)).contiguous()
@@ -216,15 +217,19 @@ def matrix_norm(
     # shape
     check_is_matrix(A, "linalg.matrix_norm")
     # dim
+
     dim = utils.canonicalize_dims(A.ndim, dim)
     if isinstance(dim, Dim):
         dim = (dim,)  # type: ignore[assignment]
     torch._check(
-        len(dim) == 2, lambda: "linalg.matrix_norm: dim must be a 2-tuple. Got {dim}"
+        len(dim) == 2, lambda: f"linalg.matrix_norm: dim must be a 2-tuple. Got {dim}"
     )
     torch._check(
+        # pyrefly: ignore [bad-index]
         dim[0] != dim[1],
-        lambda: "linalg.matrix_norm: dims must be different. Got ({dim[0]}, {dim[1]})",
+        # pyrefly: ignore [bad-index, index-error]
+        # pyrefly: ignore [bad-index, index-error]
+        lambda: f"linalg.matrix_norm: dims must be different. Got ({dim[0]}, {dim[1]})",
     )
     # dtype arg
     _check_norm_dtype(dtype, A.dtype, "linalg.matrix_norm")
@@ -233,7 +238,7 @@ def matrix_norm(
         # ord
         torch._check(
             ord in ("fro", "nuc"),
-            lambda: "linalg.matrix_norm: Order {ord} not supported.",
+            lambda: f"linalg.matrix_norm: Order {ord} not supported.",
         )
         # dtype
         check_fp_or_complex(
@@ -245,6 +250,7 @@ def matrix_norm(
         else:  # ord == "nuc"
             if dtype is not None:
                 A = _maybe_convert_to_dtype(A, dtype)  # type: ignore[assignment]
+            # pyrefly: ignore [bad-index, index-error]
             perm = _backshift_permutation(dim[0], dim[1], A.ndim)
             result = torch.sum(svdvals(prims.transpose(A, perm)), -1, keepdim)
             if keepdim:
@@ -256,7 +262,7 @@ def matrix_norm(
         abs_ord = abs(ord)
         torch._check(
             abs_ord in (2, 1, float("inf")),
-            lambda: "linalg.matrix_norm: Order {ord} not supported.",
+            lambda: f"linalg.matrix_norm: Order {ord} not supported.",
         )
         # dtype
         check_fp_or_complex(
@@ -265,22 +271,36 @@ def matrix_norm(
 
         max_min = partial(torch.amax if ord > 0.0 else torch.amin, keepdim=keepdim)
 
+        def _max_min_wrapper(A, dim):
+            # pyrefly: ignore [unsupported-operation]
+            if A.size(dim) == 0 and ord > 0.0:
+                new_size = list(A.size())
+                if keepdim:
+                    new_size[dim] = 1
+                else:
+                    del new_size[dim]
+                return torch.zeros(new_size, dtype=A.dtype, device=A.device)
+            else:
+                return max_min(A, dim)
+
         if abs_ord == 2.0:
             if dtype is not None:
                 A = _maybe_convert_to_dtype(A, dtype)  # type: ignore[assignment]
+            # pyrefly: ignore [bad-index, index-error]
             perm = _backshift_permutation(dim[0], dim[1], A.ndim)
-            result = max_min(svdvals(prims.transpose(A, perm)), dim=-1)
+            result = _max_min_wrapper(svdvals(prims.transpose(A, perm)), dim=-1)
             if keepdim:
                 inv_perm = _inverse_permutation(perm)
                 result = prims.transpose(torch.unsqueeze(result, -1), inv_perm)
             return result
         else:  # 1, -1, inf, -inf
+            # pyrefly: ignore [bad-unpacking]
             dim0, dim1 = dim
             if abs_ord == float("inf"):
                 dim0, dim1 = dim1, dim0
             if not keepdim and (dim0 < dim1):
                 dim1 -= 1
-            return max_min(
+            return _max_min_wrapper(
                 vector_norm(A, 1.0, dim=dim0, keepdim=keepdim, dtype=dtype), dim1
             )
 
@@ -300,12 +320,12 @@ def norm(
             dim = (dim,)  # type: ignore[assignment]
         torch._check(
             len(dim) in (1, 2),
-            lambda: "linalg.norm: If dim is specified, it must be of length 1 or 2. Got {dim}",
+            lambda: f"linalg.norm: If dim is specified, it must be of length 1 or 2. Got {dim}",
         )
     elif ord is not None:
         torch._check(
             A.ndim in (1, 2),
-            lambda: "linalg.norm: If dim is not specified but ord is, the input must be 1D or 2D. Got {A.ndim}D",
+            lambda: f"linalg.norm: If dim is not specified but ord is, the input must be 1D or 2D. Got {A.ndim}D",
         )
 
     if ord is not None and (
@@ -341,3 +361,76 @@ def svdvals(A: TensorLikeType) -> Tensor:
 def vecdot(x: Tensor, y: Tensor, dim: int = -1) -> Tensor:
     check_fp_or_complex(x.dtype, "linalg.vecdot")
     return (x.conj() * y).sum(dim=dim)
+
+
+def _pivots_to_permutation(pivots, shape, *, inverse=False):
+    perm = torch.empty(shape, dtype=torch.int32, device=pivots.device)
+    perm[..., :] = torch.arange(shape[-1], dtype=torch.int32, device=pivots.device)
+    indices = range(shape[-1])
+    if inverse:
+        indices = reversed(indices)
+
+    if len(shape) > 1:
+        for i in indices:
+            j_s = pivots[..., i]
+            perm_i = perm[..., i].clone()
+            j_idx = torch.meshgrid(
+                *[torch.arange(s, device=perm.device) for s in j_s.shape], indexing="ij"
+            ) + (j_s,)
+            perm_j = perm[j_idx]
+            perm.index_put_(j_idx, perm_i)
+            perm[..., i].copy_(perm_j)
+
+    else:
+        for i in indices:
+            j = pivots[i]
+            perm_i = perm[i].clone()
+            perm_j = perm[j].clone()
+            perm[i].copy_(perm_j)
+            perm[j].copy_(perm_i)
+
+    return perm
+
+
+def _apply_pivots(a, pivots, shape, *, inverse=False):
+    perm = _pivots_to_permutation(pivots - 1, shape, inverse=inverse)
+
+    if len(shape) == 1:
+        return a[perm, :]
+    else:
+        idx = torch.meshgrid(
+            *[torch.arange(s, device=a.device) for s in perm.shape], indexing="ij"
+        )[:-1] + (perm, slice(None))
+        return a[idx]
+
+
+def linalg_lu_solve_out_mps(LU, pivots, B, *, left=True, adjoint=False, out):
+    if out.numel() == 0:
+        return
+
+    if not left:
+        adjoint = not adjoint
+        B = B.mH
+
+    if adjoint:
+        lu_ = LU.mH
+        x = torch.linalg.solve_triangular(lu_, B, left=True, upper=False)
+        x = torch.linalg.solve_triangular(
+            lu_, x, left=True, upper=True, unitriangular=True
+        )
+        x = _apply_pivots(x, pivots, LU.shape[:-1], inverse=True)
+    else:
+        x = _apply_pivots(B, pivots, LU.shape[:-1])
+        x = torch.linalg.solve_triangular(
+            LU, x, left=True, upper=False, unitriangular=True
+        )
+        x = torch.linalg.solve_triangular(LU, x, left=True, upper=True)
+
+    if not left:
+        x = x.mH
+
+    out.copy_(x)
+
+
+mps_lib = torch.library.Library("aten", "IMPL", "MPS")  # noqa: TOR901
+mps_lib.impl("aten::linalg_lu_solve.out", linalg_lu_solve_out_mps)

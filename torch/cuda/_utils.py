@@ -1,7 +1,6 @@
 import ctypes
-import os
 import sys
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
 
@@ -9,29 +8,29 @@ import torch
 from torch._utils import _get_device_index as _torch_get_device_index
 
 
-def _get_nvrtc_version(cuda_version: int) -> str:
-    # TODO: Expose this from native code
-    # Follows same logic as LazyNVRTC.cpp getLibVersion()
-    major = cuda_version // 1000
-    minor = (cuda_version // 10) % 10
+def _get_hip_runtime_library() -> ctypes.CDLL:
+    # If ROCm python packages are available, query the OS-independent absolute
+    # path to the library provided by those packages, including any version suffix.
+    # See https://github.com/ROCm/TheRock/blob/main/docs/packaging/python_packaging.md#dynamic-library-resolution
+    try:
+        # pyrefly: ignore [import-error, missing-import]
+        import rocm_sdk
 
-    if sys.platform == "win32":
-        if major < 11 or (major == 11 and minor < 3):
-            return f"{major}{minor}"
-        elif major == 11:
-            return "112"
-        else:
-            return f"{major}0"
-    else:
-        if major < 11 or (major == 11 and minor < 3):
-            return f"{major}.{minor}"
-        elif major == 11:
-            return "11.2"
-        else:
-            return str(major)
+        lib = ctypes.CDLL(str(rocm_sdk.find_libraries("amdhip64")[0]))
+    except (ImportError, IndexError):
+        if sys.platform == "win32":
+            lib = ctypes.CDLL(f"amdhip64_{torch.version.hip[0]}.dll")
+        else:  # Unix-based systems
+            lib = ctypes.CDLL("libamdhip64.so")
+
+    lib.cuGetErrorString = lib.hipGetErrorString  # type: ignore[attr-defined]
+    lib.cuModuleLoadData = lib.hipModuleLoadData  # type: ignore[attr-defined]
+    lib.cuModuleGetFunction = lib.hipModuleGetFunction  # type: ignore[attr-defined]
+    lib.cuLaunchKernel = lib.hipModuleLaunchKernel  # type: ignore[attr-defined]
+    lib.cuFuncSetAttribute = lib.hipFuncSetAttribute  # type: ignore[attr-defined]
+    return lib
 
 
-# Load CUDA driver and NVRTC
 def _get_cuda_library() -> ctypes.CDLL:
     if sys.platform == "win32":
         return ctypes.CDLL("nvcuda.dll")
@@ -39,12 +38,20 @@ def _get_cuda_library() -> ctypes.CDLL:
         return ctypes.CDLL("libcuda.so.1")
 
 
+# Load GPU driver runtime
+def _get_gpu_runtime_library() -> ctypes.CDLL:
+    if torch.version.hip:
+        return _get_hip_runtime_library()
+    else:
+        return _get_cuda_library()
+
+
 # Helper: check CUDA errors
 def _check_cuda(result: int) -> None:
     if result == 0:
         return
     err_str = ctypes.c_char_p()
-    libcuda = _get_cuda_library()  # Get reference to CUDA library
+    libcuda = _get_gpu_runtime_library()  # Get reference to CUDA library
     libcuda.cuGetErrorString(result, ctypes.byref(err_str))
     error_message = (
         err_str.value.decode() if err_str.value is not None else "Unknown CUDA error"
@@ -52,62 +59,95 @@ def _check_cuda(result: int) -> None:
     raise RuntimeError(f"CUDA error: {error_message}")
 
 
-def _get_nvrtc_library() -> ctypes.CDLL:
-    # Get NVRTC version based on CUDA runtime version
-    # Use an alternative approach to get the CUDA version
-    # since cudart().getVersion() is failing
-    import torch
-
+def _get_hiprtc_library() -> ctypes.CDLL:
     try:
-        import torch.cuda
+        # pyrefly: ignore [import-error, missing-import]
+        import rocm_sdk
 
-        cuda_runtime_version = torch.cuda.cudart().getVersion()
-    except (ImportError, AttributeError):
-        # Fallback: if we have CUDA available, get version from device properties
-        if hasattr(torch, "cuda") and torch.cuda.is_available():
-            # Import locally to avoid circular imports
-            import torch.cuda
-
-            props = torch.cuda.get_device_properties(torch.cuda.current_device())
-            cuda_runtime_version = props.major * 1000 + props.minor * 10
+        lib = ctypes.CDLL(str(rocm_sdk.find_libraries("hiprtc")[0]))
+    except (ImportError, IndexError):
+        if sys.platform == "win32":
+            version_str = "".join(
+                ["0", torch.version.hip[0], "0", torch.version.hip[2]]
+            )
+            lib = ctypes.CDLL(f"hiprtc{version_str}.dll")
         else:
-            # Hardcode a default CUDA version if all else fails
-            cuda_runtime_version = 12000  # Assume CUDA 12.0 as default
+            lib = ctypes.CDLL("libhiprtc.so")
 
-    version = _get_nvrtc_version(cuda_runtime_version)
+    # Provide aliases for HIP RTC functions to match NVRTC API
+    lib.nvrtcGetErrorString = lib.hiprtcGetErrorString  # type: ignore[attr-defined]
+    lib.nvrtcCreateProgram = lib.hiprtcCreateProgram  # type: ignore[attr-defined]
+    lib.nvrtcDestroyProgram = lib.hiprtcDestroyProgram  # type: ignore[attr-defined]
+    lib.nvrtcCompileProgram = lib.hiprtcCompileProgram  # type: ignore[attr-defined]
+    lib.nvrtcGetPTXSize = lib.hiprtcGetCodeSize  # type: ignore[attr-defined]
+    lib.nvrtcGetPTX = lib.hiprtcGetCode  # type: ignore[attr-defined]
+    lib.nvrtcGetProgramLogSize = lib.hiprtcGetProgramLogSize  # type: ignore[attr-defined]
+    lib.nvrtcGetProgramLog = lib.hiprtcGetProgramLog  # type: ignore[attr-defined]
+    lib.nvrtcAddNameExpression = lib.hiprtcAddNameExpression  # type: ignore[attr-defined]
+    lib.nvrtcGetLoweredName = lib.hiprtcGetLoweredName  # type: ignore[attr-defined]
+    return lib
 
+
+def _get_nvrtc_library() -> ctypes.CDLL:
+    major_version = int(torch.version.cuda.split(".")[0])  # type: ignore[union-attr]
     if sys.platform == "win32":
-        # Windows handling remains the same
-        lib_name = f"nvrtc64_{version}_0.dll"
-        return ctypes.CDLL(lib_name)
-    else:
-        lib_paths = [
-            f"libnvrtc.so.{version}",
-            os.path.join(
-                os.environ.get("CUDA_HOME", ""), f"lib64/libnvrtc.so.{version}"
-            ),
-            "/usr/local/cuda/lib64/libnvrtc.so",
+        nvrtc_libs = [
+            f"nvrtc64_{major_version}0_0.dll",
         ]
+    else:
+        nvrtc_libs = [
+            f"libnvrtc.so.{major_version}",
+            "libnvrtc.so",  # Fallback to unversioned
+        ]
+    for lib_name in nvrtc_libs:
+        try:
+            return ctypes.CDLL(lib_name)
+        except OSError:
+            continue
+    raise OSError("Could not find any NVRTC library")
 
-        for path in lib_paths:
-            try:
-                return ctypes.CDLL(path)
-            except OSError:
-                continue
 
-        raise RuntimeError(
-            "Could not find libnvrtc.so. Please make sure CUDA is installed."
-        )
+def _get_gpu_rtc_library() -> ctypes.CDLL:
+    # Since PyTorch already loads the GPU RTC library, we can use the system library
+    # which should be compatible with PyTorch's version
+    if torch.version.hip:
+        return _get_hiprtc_library()
+    else:
+        return _get_nvrtc_library()
+
+
+def _get_gpu_rtc_compatible_flags() -> list[str]:
+    """
+    Get HIPCC/NVCC flags that are compatible with NVRTC compilation.
+
+    Returns:
+        List of HIPCC/NVCC flags that can be safely used with NVRTC.
+    """
+    from torch.utils.cpp_extension import COMMON_HIPCC_FLAGS, COMMON_NVCC_FLAGS
+
+    nvrtc_unsupported_flags = {
+        "--expt-relaxed-constexpr",
+    }
+
+    # Filter out unsupported flags
+    compatible_flags = [
+        flag for flag in COMMON_NVCC_FLAGS if flag not in nvrtc_unsupported_flags
+    ]
+
+    if torch.version.hip:
+        compatible_flags.extend(COMMON_HIPCC_FLAGS)
+
+    return compatible_flags
 
 
 def _nvrtc_compile(
     kernel_source: str,
     kernel_name: str,
-    compute_capability: Optional[str] = None,
-    header_code: str = "",
-    cuda_include_dirs: Optional[list] = None,
-    nvcc_options: Optional[list] = None,
-) -> bytes:
+    compute_capability: str | None = None,
+    cuda_include_dirs: list | None = None,
+    nvcc_options: list | None = None,
+    auto_pch: bool = False,
+) -> tuple[bytes, str]:
     """
     Compiles a CUDA kernel using NVRTC and returns the PTX code.
 
@@ -116,18 +156,18 @@ def _nvrtc_compile(
         kernel_name (str): The name of the kernel function to compile
         compute_capability (str, None): The compute capability to target (e.g., "86").
                                            If None, will detect from current device.
-        header_code (str, optional): Additional header code to prepend to the kernel source
         cuda_include_dirs (list, None): List of directories containing CUDA headers
         nvcc_options (list, None): Additional options to pass to NVRTC
+        auto_pch (bool): Enable automatic precompiled headers (CUDA 12.8+)
 
     Returns:
-        str: The compiled PTX code
+        Tuple[bytes, str]: The compiled PTX code and mangled kernel name
     """
     # Ensure CUDA is initialized
     import torch.cuda
 
     # Load NVRTC library
-    libnvrtc = _get_nvrtc_library()
+    libnvrtc = _get_gpu_rtc_library()
 
     # NVRTC constants
     NVRTC_SUCCESS = 0
@@ -144,45 +184,49 @@ def _nvrtc_compile(
             )
             raise RuntimeError(f"CUDA error: {error_message}")
 
-    # Add 'extern "C"' if not already present to ensure C linkage
-    if not kernel_source.strip().startswith('extern "C"'):
-        kernel_source = f'extern "C" {kernel_source}'
-
-    # Combine header code and kernel source
-    if header_code:
-        full_source = header_code + "\n" + kernel_source
-    else:
-        full_source = kernel_source
-
     # Convert source to bytes
-    source_bytes = full_source.encode("utf-8")
+    source_bytes = kernel_source.encode("utf-8")
 
     # Get compute capability if not provided
     if compute_capability is None:
         props = torch.cuda.get_device_properties(torch.cuda.current_device())
-        compute_capability = f"{props.major}{props.minor}"
+        if torch.version.hip:
+            compute_capability = f"{props.gcnArchName}"
+        else:
+            compute_capability = f"{props.major}{props.minor}"
 
     # Prepare compilation options
     options = []
-    options.append(f"--gpu-architecture=sm_{compute_capability}".encode())
+    if torch.version.hip:
+        options.append(f"--offload-arch={compute_capability}".encode())
+    else:
+        options.append(f"--gpu-architecture=sm_{compute_capability}".encode())
+
+    # Auto-detect and add CUDA include paths
+    from torch.utils.cpp_extension import include_paths
+
+    cuda_include_paths = include_paths("cuda")
+    for cuda_path in cuda_include_paths:
+        options.append(f"-I{cuda_path}".encode())
 
     # Add custom include directories
     if cuda_include_dirs:
         for directory in cuda_include_dirs:
             options.append(f"-I{directory}".encode())
 
+    # Enable automatic precompiled headers (CUDA 12.8+)
+    if auto_pch:
+        assert str(torch.version.cuda) >= "12.8", "PCH requires CUDA 12.8+"
+        if nvcc_options is None:
+            nvcc_options = []
+        nvcc_options.append("--pch")
+
     # Add custom NVCC options
     if nvcc_options:
         for option in nvcc_options:
             options.append(option.encode("utf-8"))
 
-    # TODO: Should we refactor flags into a common place?
-    from torch.utils.cpp_extension import COMMON_NVCC_FLAGS
-
-    # Filter out flags not supported by NVRTC
-    nvrtc_compatible_flags = [
-        flag for flag in COMMON_NVCC_FLAGS if flag != "--expt-relaxed-constexpr"
-    ]
+    nvrtc_compatible_flags = _get_gpu_rtc_compatible_flags()
     options.extend([flag.encode("utf-8") for flag in nvrtc_compatible_flags])
 
     # Convert options to C array
@@ -202,6 +246,10 @@ def _nvrtc_compile(
         )
     )
 
+    # Add kernel name, which can be a template expression
+    c_kernel_name = kernel_name.encode("utf-8")
+    check_nvrtc(libnvrtc.nvrtcAddNameExpression(prog, c_kernel_name))
+
     # Compile program
     res = libnvrtc.nvrtcCompileProgram(prog, num_options, options_array)
 
@@ -219,9 +267,24 @@ def _nvrtc_compile(
     check_nvrtc(libnvrtc.nvrtcGetPTXSize(prog, ctypes.byref(ptx_size)))
     ptx = ctypes.create_string_buffer(ptx_size.value)
     check_nvrtc(libnvrtc.nvrtcGetPTX(prog, ptx))
+
+    # Get mangled name
+    c_mangled_name = ctypes.c_char_p()
+    check_nvrtc(
+        libnvrtc.nvrtcGetLoweredName(prog, c_kernel_name, ctypes.byref(c_mangled_name))
+    )
+    if c_mangled_name.value is not None:
+        mangled_name = c_mangled_name.value.decode()  # make a copy
+    else:
+        mangled_name = ""
+
     libnvrtc.nvrtcDestroyProgram(ctypes.byref(prog))
 
-    return ptx.value
+    # For HIP, hipRTC generates raw CO binaries instead of PTX,
+    # and for some reason, ".value" causes the string to be truncated,
+    # likely due to the presence of '\0' in the string. So we use .raw instead.
+    ptx_bytes = ptx.raw if torch.version.hip else ptx.value
+    return ptx_bytes, mangled_name
 
 
 class _CudaModule:
@@ -234,9 +297,10 @@ class _CudaModule:
             return self._kernels[name]
 
         # Import the CUDA library inside the method
-        from torch.cuda._utils import _get_cuda_library
+        # pyrefly: ignore [missing-module-attribute]
+        from torch.cuda._utils import _get_gpu_runtime_library
 
-        libcuda = _get_cuda_library()
+        libcuda = _get_gpu_runtime_library()
 
         func = ctypes.c_void_p()
         try:
@@ -261,14 +325,15 @@ class _CudaKernel:
     def __init__(self, func: ctypes.c_void_p, module: ctypes.c_void_p) -> None:
         self.func = func
         self.module = module
+        self._max_shared_mem_bytes = 0
 
     def __call__(
         self,
         grid: tuple[int, int, int] = (1, 1, 1),
         block: tuple[int, int, int] = (1, 1, 1),
-        args: Optional[list] = None,
+        args: list | None = None,
         shared_mem: int = 0,
-        stream: Optional[Any] = None,
+        stream: Any | None = None,
     ) -> None:
         """
         Call the compiled CUDA kernel
@@ -283,7 +348,7 @@ class _CudaKernel:
         """
         import torch
 
-        libcuda = torch.cuda._utils._get_cuda_library()
+        libcuda = torch.cuda._utils._get_gpu_runtime_library()
 
         if not args:
             args = []
@@ -307,12 +372,11 @@ class _CudaKernel:
                 c_int = ctypes.c_int(arg)
                 # Store the C int for reference keeping, not in processed_args
                 c_args.append(ctypes.byref(c_int))
-            # TODO: Python floats are actually doubles
             elif isinstance(arg, float):
-                # Convert floats to C float
-                c_float = ctypes.c_float(arg)
-                # Store the C float for reference keeping, not in processed_args
-                c_args.append(ctypes.byref(c_float))
+                # Python floats are doubles - use double by default
+                c_double = ctypes.c_double(arg)
+                # Store the C double for reference keeping, not in processed_args
+                c_args.append(ctypes.byref(c_double))
             else:
                 raise TypeError(f"Unsupported argument type: {type(arg)}")
 
@@ -327,6 +391,22 @@ class _CudaKernel:
             import torch.cuda
 
             stream = torch.cuda.current_stream()
+
+        # Check if kernel requires large shared memory but hasn't been configured
+        if shared_mem >= 48 * 1024 and (
+            self._max_shared_mem_bytes == 0 or shared_mem > self._max_shared_mem_bytes
+        ):
+            configured_msg = (
+                "not configured"
+                if self._max_shared_mem_bytes == 0
+                else f"only {self._max_shared_mem_bytes} bytes configured"
+            )
+            raise RuntimeError(
+                f"Kernel requires {shared_mem} bytes of shared memory (>= 48KB), "
+                f"but {configured_msg}. "
+                "Call kernel.set_shared_memory_config(shared_mem) after compilation "
+                "and before launching the kernel."
+            )
 
         _check_cuda(
             libcuda.cuLaunchKernel(
@@ -344,10 +424,52 @@ class _CudaKernel:
             )
         )
 
+    def set_shared_memory_config(self, shared_mem_bytes: int) -> None:
+        if shared_mem_bytes < 48 * 1024:
+            # No configuration needed for <= 48KB, just update the value
+            self._max_shared_mem_bytes = shared_mem_bytes
+            return
+
+        libcuda = _get_gpu_runtime_library()
+
+        # Get device properties to validate against limits
+        device_props = torch.cuda.get_device_properties()
+        # HIP doesn't have shared_memory_per_block_optin in device properties, so we hard-code it here
+        if torch.version.hip:
+            # navi, CDNA1-CDNA3 allows a max of 64KB shared memory
+            # CDNA4 allows a max of 160KB shared memory
+            max_shared_mem = (
+                65536 if device_props.gcnArchName != "gfx950" else 160 * 1024
+            )
+        else:
+            max_shared_mem = getattr(
+                device_props, "shared_memory_per_block_optin", 49152
+            )
+
+        if shared_mem_bytes > max_shared_mem:
+            raise RuntimeError(
+                f"Requested shared memory ({shared_mem_bytes} bytes) exceeds "
+                f"device limit ({max_shared_mem} bytes). "
+                "Consider reducing block size or shared memory usage."
+            )
+
+        # Set the function attribute once
+        # https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__TYPES.html
+        cudaFuncAttributeMaxDynamicSharedMemorySize = 8
+        _check_cuda(
+            libcuda.cuFuncSetAttribute(
+                self.func,
+                cudaFuncAttributeMaxDynamicSharedMemorySize,
+                shared_mem_bytes,
+            )
+        )
+
+        self._max_shared_mem_bytes = shared_mem_bytes
+
 
 def _cuda_load_module(
-    ptx: Union[str, bytes], kernel_names: Optional[list[str]] = None
-) -> Union[_CudaModule, dict[str, "_CudaKernel"]]:
+    ptx: str | bytes, kernel_names: list[str] | None = None
+) -> _CudaModule | dict[str, "_CudaKernel"]:
     """
     Loads a CUDA module from PTX code and returns a module object that can access kernels.
 
@@ -364,7 +486,7 @@ def _cuda_load_module(
     import torch.cuda
 
     # Load CUDA driver library
-    libcuda = _get_cuda_library()
+    libcuda = _get_gpu_runtime_library()
 
     # Convert PTX to bytes if it's a string
     if isinstance(ptx, str):

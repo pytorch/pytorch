@@ -1,7 +1,8 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["oncall: distributed"]
 import unittest
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, cast, Union
+from typing import Any, cast, Union
 
 import torch
 from torch import nn, optim

@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Optional, Union
 
 import torch
 from torch import inf, Tensor
@@ -32,14 +31,16 @@ class HalfCauchy(TransformedDistribution):
     """
 
     arg_constraints = {"scale": constraints.positive}
+    # pyrefly: ignore [bad-override]
     support = constraints.nonnegative
     has_rsample = True
+    # pyrefly: ignore [bad-override]
     base_dist: Cauchy
 
     def __init__(
         self,
-        scale: Union[Tensor, float],
-        validate_args: Optional[bool] = None,
+        scale: Tensor | float,
+        validate_args: bool | None = None,
     ) -> None:
         base_dist = Cauchy(0, scale, validate_args=False)
         super().__init__(base_dist, AbsTransform(), validate_args=validate_args)

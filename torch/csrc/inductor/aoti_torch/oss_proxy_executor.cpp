@@ -4,6 +4,7 @@
 #include <vector>
 
 #include <c10/util/Exception.h>
+#include <c10/util/FileSystem.h>
 #include <torch/csrc/inductor/aoti_torch/oss_proxy_executor.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 
@@ -17,12 +18,6 @@ bool has_key(
     const std::string& key) {
   return map.find(key) != map.end();
 }
-
-#ifdef _WIN32
-const std::string k_separator = "\\";
-#else
-const std::string k_separator = "/";
-#endif
 
 } // namespace
 
@@ -423,7 +418,7 @@ void OSSProxyExecutor::get_input_info_from_serialized(
     const auto& arg = named_argument["arg"];
     const auto& name = named_argument["name"].get<std::string>();
 
-    std::string custom_obj_name = "";
+    std::string custom_obj_name;
     if (arg.contains("as_custom_obj")) {
       custom_obj_name = arg["as_custom_obj"]["name"].get<std::string>();
     }
@@ -445,10 +440,9 @@ void OSSProxyExecutor::get_input_info_from_serialized(
   // If an argument is not filled and has a default value, we should
   // also prefill the default value.
   for (size_t index = 0; index < schema_args.size(); index++) {
-    if (!filled[index] && schema_args[index].default_value()) {
-      // @lint-ignore CLANGTIDY bugprone-unchecked-optional-access
-      auto default_value = *schema_args[index].default_value();
-      op_kernel.stack_.at(index) = default_value;
+    auto default_value = schema_args[index].default_value();
+    if (!filled[index] && default_value.has_value()) {
+      op_kernel.stack_.at(index) = std::move(default_value.value());
     }
   }
 }
@@ -625,10 +619,8 @@ OSSProxyExecutor::OSSProxyExecutor(
     // Load custom objects from custom_objs_config.json file
     // Get the constants json path from the extern_kernel_nodes .json file
 
-    size_t lastSlash = json_path.find_last_of("/\\");
-    std::string folder_path = json_path.substr(0, lastSlash);
-    std::string custom_objs_json_path =
-        folder_path + k_separator + "custom_objs_config.json";
+    auto folder_path = c10::filesystem::path(json_path).parent_path();
+    auto custom_objs_json_path = folder_path / "custom_objs_config.json";
     LOG(INFO) << "Loading custom_objs_config .json file from "
               << custom_objs_json_path;
 
@@ -643,8 +635,7 @@ OSSProxyExecutor::OSSProxyExecutor(
       custom_objs_json_file >> custom_objs_json;
       // Load custom objects from binary torchbind file
       for (auto& [customObjName, file_name] : custom_objs_json.items()) {
-        std::string customObjPath =
-            folder_path + k_separator + file_name.get<std::string>();
+        auto customObjPath = folder_path / file_name.get<std::string>();
         LOG(INFO) << "Loading custom object to FbProxyExecutor from: "
                   << customObjPath;
 
@@ -872,7 +863,7 @@ void OSSProxyExecutor::call_function(
       auto serialized_int_value = flatten_int_args[int_id++];
       TORCH_CHECK(
           returned_int_value == serialized_int_value,
-          "Expect returned int value to match the serialized int value, but got retured int value: ",
+          "Expect returned int value to match the serialized int value, but got returned int value: ",
           returned_int_value,
           " and serialized int value: ",
           serialized_int_value);

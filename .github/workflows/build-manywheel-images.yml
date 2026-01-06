@@ -23,8 +23,7 @@ on:
 env:
   DOCKER_REGISTRY: "docker.io"
   DOCKER_BUILDKIT: 1
-  WITH_PUSH: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release')) }}
-
+  WITH_PUSH: ${{ github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release') || startsWith(github.ref, 'refs/tags/v')) }}
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
   cancel-in-progress: true
@@ -41,22 +40,24 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
 
   build:
-    environment: ${{ (github.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) && 'docker-build' || '' }}
+    environment: ${{ (github.event_name == 'push' && (github.ref == 'refs/heads/main' || startsWith(github.ref, 'refs/heads/release') || startsWith(github.ref, 'refs/tags/v')) && 'docker-build') || '' }}
     needs: get-label-type
     strategy:
       fail-fast: false
       matrix:
         include: [
-          { name: "manylinux2_28-builder",          tag: "cuda12.9",         runner: "linux.9xlarge.ephemeral" },
+          { name: "manylinux2_28-builder",          tag: "cuda13.0",          runner: "linux.9xlarge.ephemeral" },
           { name: "manylinux2_28-builder",          tag: "cuda12.8",          runner: "linux.9xlarge.ephemeral" },
+          { name: "manylinux2_28-builder",          tag: "cuda12.9",          runner: "linux.9xlarge.ephemeral" },
           { name: "manylinux2_28-builder",          tag: "cuda12.6",          runner: "linux.9xlarge.ephemeral" },
+          { name: "manylinuxaarch64-builder",       tag: "cuda13.0",          runner: "linux.arm64.2xlarge.ephemeral" },
           { name: "manylinuxaarch64-builder",       tag: "cuda12.9",          runner: "linux.arm64.2xlarge.ephemeral" },
           { name: "manylinuxaarch64-builder",       tag: "cuda12.8",          runner: "linux.arm64.2xlarge.ephemeral" },
-          { name: "manylinux2_28-builder",          tag: "rocm6.3",           runner: "linux.9xlarge.ephemeral" },
-          { name: "manylinux2_28-builder",          tag: "rocm6.4",           runner: "linux.9xlarge.ephemeral" },
+          { name: "manylinuxaarch64-builder",       tag: "cuda12.6",          runner: "linux.arm64.2xlarge.ephemeral" },
+          { name: "manylinux2_28-builder",          tag: "rocm7.0",           runner: "linux.9xlarge.ephemeral" },
+          { name: "manylinux2_28-builder",          tag: "rocm7.1",           runner: "linux.9xlarge.ephemeral" },
           { name: "manylinux2_28-builder",          tag: "cpu",               runner: "linux.9xlarge.ephemeral" },
           { name: "manylinux2_28_aarch64-builder",  tag: "cpu-aarch64",       runner: "linux.arm64.2xlarge.ephemeral" },
-          { name: "manylinuxcxx11-abi-builder",     tag: "cpu-cxx11-abi",     runner: "linux.9xlarge.ephemeral" },
           { name: "manylinux2_28-builder",          tag: "xpu",               runner: "linux.9xlarge.ephemeral" },
         ]
     runs-on: ${{ needs.get-label-type.outputs.label-type }}${{ matrix.runner }}

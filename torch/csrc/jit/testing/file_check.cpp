@@ -12,7 +12,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/StringUtil.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/Export.h>
 #include <torch/csrc/jit/frontend/source_range.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/testing/file_check.h>
@@ -116,7 +115,7 @@ size_t assertFind(
     const std::string& sub,
     const Check& check) {
   return assertFind(search_range, sub, [&](std::ostream& out) {
-    out << "From " << check << "\n";
+    out << "From " << check << '\n';
   });
 }
 
@@ -156,7 +155,7 @@ size_t assertFindRegex(
     const std::string& sub,
     const Check& check) {
   return assertFindRegex(search_range, sub, [&](std::ostream& out) {
-    out << "From " << check << "\n";
+    out << "From " << check << '\n';
   });
 }
 
@@ -182,7 +181,7 @@ void assertNotFind(
     c10::printQuotedString(ss, sub);
     ss << " but found it\n";
     found_range.highlight(ss);
-    ss << "From " << check << "\n";
+    ss << "From " << check << '\n';
     throw std::runtime_error(ss.str());
   }
 }
@@ -543,7 +542,7 @@ FileCheck::FileCheck() : fcImpl(new FileCheckImpl()) {}
 std::ostream& operator<<(std::ostream& out, const FileCheckImpl& fc) {
   out << "FileCheck checks:\n";
   for (const Check& c : fc.checks) {
-    out << "\t" << c << "\n";
+    out << '\t' << c << '\n';
   }
   return out;
 }

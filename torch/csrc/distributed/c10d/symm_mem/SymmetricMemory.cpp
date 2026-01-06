@@ -1,10 +1,18 @@
+#include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryTypes.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+
+#include <atomic>
 
 namespace {
 
 using namespace c10d::symmetric_memory;
 
 static bool is_finalizing_ = false;
+
+// Signal pad size configuration - uses default if not explicitly set.
+// A value of 0 indicates "not set" (use default).
+// Using std::atomic for thread safety when accessed from C++ without GIL.
+static std::atomic<size_t> configured_signal_pad_size_{0};
 
 // NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
 class AllocatorMap {
@@ -22,6 +30,39 @@ class AllocatorMap {
     map_[device_type] = std::move(allocator);
   }
 
+  void register_availability(
+      const std::string& name,
+      c10::intrusive_ptr<SymmetricMemoryAllocator> allocator) {
+    avail_map_[name] = std::move(allocator);
+  }
+
+  void set_backend(const std::string& name) {
+    auto it = avail_map_.find(name);
+    TORCH_CHECK(
+        it != avail_map_.end(),
+        "SymmetricMemory does not find allocation backend ",
+        name);
+    auto device_type = it->second->supported_device_type();
+    // Check if the existing one is already the one desired.
+    auto existing = map_.find(device_type);
+    if (existing != map_.end()) {
+      if (existing->second->name() == name) {
+        // The existing one is the same as the desired one. No need to change.
+        return;
+      }
+      TORCH_CHECK(!in_use_, "Backend can not be changed after use.");
+    }
+    register_allocator(device_type, it->second);
+  }
+
+  std::optional<std::string> get_backend(c10::DeviceType device_type) {
+    auto it = map_.find(device_type);
+    if (it == map_.end()) {
+      return std::nullopt;
+    }
+    return it->second->name();
+  }
+
   c10::intrusive_ptr<SymmetricMemoryAllocator> get_allocator(
       c10::DeviceType device_type) {
     auto it = map_.find(device_type);
@@ -29,6 +70,7 @@ class AllocatorMap {
         it != map_.end(),
         "SymmetricMemory does not support device type ",
         device_type);
+    in_use_ = true;
     return it->second;
   }
 
@@ -38,7 +80,6 @@ class AllocatorMap {
   }
 
   ~AllocatorMap() {
-    LOG(INFO) << "Destroying Symmetric Memory Allocators";
     is_finalizing_ = true;
   }
 
@@ -49,6 +90,17 @@ class AllocatorMap {
       c10::DeviceType,
       c10::intrusive_ptr<SymmetricMemoryAllocator>>
       map_;
+
+  // For backends to register availability.
+  // This registration is at static time. Therefore, it is expected that the
+  // derived `SymmetricMemoryAllocator` classes do not have backend-specific
+  // initialization in constructor (in case it is not selected).
+  std::unordered_map<
+      std::string, // backend name "NVSHMEM", "CUDA", "NCCL", etc.
+      c10::intrusive_ptr<SymmetricMemoryAllocator>>
+      avail_map_;
+
+  bool in_use_ = false;
 };
 
 static std::unordered_map<std::string, GroupInfo> group_info_map{};
@@ -81,7 +133,7 @@ static at::Tensor empty_strided_p2p_persistent(
   const size_t numel = std::accumulate(
       size.begin(),
       size.end(),
-      size_t(1),
+      static_cast<size_t>(1),
       // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::multiplies<size_t>());
   const size_t element_size = c10::elementSize(dtype);
@@ -108,8 +160,7 @@ static at::Tensor empty_strided_p2p_persistent(
   auto allocated = at::from_blob(dev_ptr, size, stride, options);
 
   // Track the allocation's activeness
-  alloc_id_to_storage.erase(alloc_id);
-  alloc_id_to_storage.emplace(
+  alloc_id_to_storage.insert_or_assign(
       alloc_id, allocated.storage().getWeakStorageImpl());
   return allocated;
 }
@@ -127,6 +178,29 @@ void register_allocator(
     c10::intrusive_ptr<SymmetricMemoryAllocator> allocator) {
   return AllocatorMap::get().register_allocator(
       device_type, std::move(allocator));
+}
+
+void register_availability(
+    const std::string& name,
+    c10::intrusive_ptr<SymmetricMemoryAllocator> allocator) {
+  return AllocatorMap::get().register_availability(name, std::move(allocator));
+}
+
+void set_backend(const std::string& name) {
+  return AllocatorMap::get().set_backend(name);
+}
+
+std::optional<std::string> get_backend(c10::Device device) {
+  return AllocatorMap::get().get_backend(device.type());
+}
+
+size_t get_signal_pad_size() {
+  size_t val = configured_signal_pad_size_.load(std::memory_order_acquire);
+  return val == 0 ? default_signal_pad_size : val;
+}
+
+void set_signal_pad_size(size_t size) {
+  configured_signal_pad_size_.store(size, std::memory_order_release);
 }
 
 bool has_allocator(c10::DeviceType device_type) {
@@ -173,7 +247,7 @@ at::Tensor empty_strided_p2p(
   const size_t numel = std::accumulate(
       size.begin(),
       size.end(),
-      size_t(1),
+      static_cast<size_t>(1),
       // NOLINTNEXTLINE(modernize-use-transparent-functors)
       std::multiplies<size_t>());
   const size_t element_size = c10::elementSize(dtype);
@@ -208,6 +282,171 @@ TORCH_API bool has_multicast_support(
     return allocator->has_multicast_support(device_idx);
   }
 }
+
+// MemPool Support
+
+// A map from device type to allocator for MemPool.
+// TODO: Consolidate with `AllocatorMap` above.
+// NOLINTNEXTLINE(cppcoreguidelines-special-member-functions)
+class MemPoolAllocatorMap {
+ public:
+  MemPoolAllocatorMap(const MemPoolAllocatorMap&) = delete;
+  MemPoolAllocatorMap& operator=(const MemPoolAllocatorMap&) = delete;
+  static MemPoolAllocatorMap& get() {
+    static MemPoolAllocatorMap instance;
+    return instance;
+  }
+
+  // Register allocator for MemPool given device type
+  void register_mempool_allocator(
+      c10::DeviceType device_type,
+      std::shared_ptr<c10::Allocator> allocator) {
+    mempool_allocators_[device_type] = std::move(allocator);
+  }
+
+  // Get allocator for MemPool given device
+  std::shared_ptr<c10::Allocator> get_mempool_allocator(c10::Device device) {
+    auto it = mempool_allocators_.find(device.type());
+    if (it == mempool_allocators_.end()) {
+      TORCH_CHECK(
+          false,
+          "SymmetricMemory MemPool did not find backend for device type ",
+          device.type());
+    }
+    return it->second;
+  }
+
+ private:
+  MemPoolAllocatorMap() = default;
+
+  std::unordered_map<c10::DeviceType, std::shared_ptr<c10::Allocator>>
+      mempool_allocators_;
+};
+
+// Register allocator for MemPool given device type
+C10_EXPORT void register_mempool_allocator(
+    c10::DeviceType device_type,
+    std::shared_ptr<c10::Allocator> allocator) {
+  return MemPoolAllocatorMap::get().register_mempool_allocator(
+      device_type, std::move(allocator));
+}
+
+// Get allocator for MemPool given device
+TORCH_API std::shared_ptr<c10::Allocator> get_mempool_allocator(
+    c10::Device device) {
+  return MemPoolAllocatorMap::get().get_mempool_allocator(device);
+}
+
+// Helper function:
+// Calculate the number of bytes of a tensor given its shape and dtype
+static inline size_t nbytes_of(c10::IntArrayRef sizes, c10::ScalarType dtype) {
+  const auto numel = std::accumulate(
+      sizes.begin(), sizes.end(), static_cast<size_t>(1), std::multiplies<>());
+  return numel * c10::elementSize(dtype);
+}
+
+// Helper function:
+// Get the buffer pointer for a peer at a given offset
+static at::Tensor get_buffer_at_byte_offset(
+    SymmetricMemory* handle,
+    int peer,
+    c10::IntArrayRef sizes,
+    c10::ScalarType dtype,
+    size_t offset_bytes) {
+  TORCH_CHECK(
+      peer >= 0 && peer < handle->get_world_size(),
+      "Invalid peer rank: ",
+      peer);
+  auto peer_ptr = handle->get_buffer_ptrs()[peer];
+  TORCH_CHECK(
+      peer_ptr != nullptr,
+      "Cannot get buffer across nodes, my rank: ",
+      handle->get_rank(),
+      ", peer: ",
+      peer);
+  const size_t tensor_bytes = nbytes_of(sizes, dtype);
+  const auto req_size = offset_bytes + tensor_bytes;
+  const auto buffer_size = handle->get_buffer_size();
+  TORCH_CHECK(
+      req_size <= buffer_size,
+      "SymmetricMemory::get_buffer: the requested size (",
+      req_size,
+      " bytes) exceeds the allocated size (",
+      buffer_size,
+      " bytes)");
+  auto data_ptr = reinterpret_cast<uint8_t*>(peer_ptr) + offset_bytes;
+  auto device = handle->get_device();
+  auto options = at::TensorOptions().dtype(dtype).device(device);
+  return at::for_blob(data_ptr, sizes)
+      .options(options)
+      .target_device(device)
+      .make_tensor();
+}
+
+// Implementation of SymmetricMemory APIs common to all backends
+
+at::Tensor SymmetricMemory::get_buffer(
+    int rank,
+    c10::IntArrayRef sizes,
+    c10::ScalarType dtype,
+    int64_t storage_offset) {
+  // storage_offset is in element, convert to byte
+  const auto offset_bytes = storage_offset * c10::elementSize(dtype);
+  return get_buffer_at_byte_offset(this, rank, sizes, dtype, offset_bytes);
+}
+
+at::Tensor SymmetricMemory::get_remote_tensor(
+    int peer,
+    c10::IntArrayRef sizes,
+    c10::ScalarType dtype) {
+  return get_buffer_at_byte_offset(this, peer, sizes, dtype, get_offset());
+}
+
+size_t SymmetricMemory::get_signal_pad_size() {
+  return c10d::symmetric_memory::get_signal_pad_size();
+}
+
+at::Tensor SymmetricMemory::get_signal_pad(
+    int rank,
+    c10::IntArrayRef sizes,
+    std::optional<c10::ScalarType> dtype,
+    int64_t storage_offset) {
+  // If the dtype is unspecified, default it to UInt32, as it
+  // is the most common type for signaling purposes.
+  if (!dtype.has_value()) {
+    dtype = c10::ScalarType::UInt32;
+  }
+
+  // If the shape is unspecified, treat the signal pad as a 1d tensor.
+  const auto element_size = c10::elementSize(*dtype);
+  const auto signal_pad_size = get_signal_pad_size();
+  std::vector<int64_t> shape;
+  if (!sizes.empty()) {
+    shape = sizes.vec();
+  } else {
+    shape.push_back(static_cast<int64_t>(signal_pad_size / element_size));
+  }
+
+  const auto req_pad_bytes = nbytes_of(shape, *dtype);
+  const auto offset_bytes = storage_offset * element_size;
+  const auto req_size = offset_bytes + req_pad_bytes;
+  TORCH_CHECK(
+      req_size <= signal_pad_size,
+      "SymmetricMemory::get_signal_pad: the requested size (",
+      req_size,
+      " bytes) exceeds the allocated size (",
+      signal_pad_size,
+      " bytes)");
+  auto data_ptr =
+      reinterpret_cast<uint8_t*>(get_signal_pad_ptrs()[rank]) + offset_bytes;
+  auto device = get_device();
+  auto options = at::TensorOptions().dtype(dtype).device(device);
+  return at::for_blob(data_ptr, shape)
+      .options(options)
+      .target_device(device)
+      .make_tensor();
+}
+
 } // namespace c10d::symmetric_memory
 
 namespace {
@@ -238,6 +477,8 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
       "multimem_one_shot_all_reduce(Tensor input, str reduce_op, str group_name) -> Tensor");
   m.def(
       "multimem_one_shot_all_reduce_out(Tensor input, str reduce_op, str group_name, Tensor(a!) out) -> Tensor(a!)");
+  m.def(
+      "multimem_one_shot_reduce_out(Tensor input, str reduce_op, int root, str group_name, Tensor(a!) out) -> Tensor(a!)");
   m.def(
       "multimem_all_gather_out(Tensor input, str group_name, Tensor(a!) out) -> Tensor(a!)");
   m.def(
@@ -276,13 +517,29 @@ TORCH_LIBRARY_FRAGMENT(symm_mem, m) {
   m.def(
       "memset32_(Tensor(a!) input, int offset, int val, int count) -> Tensor(a!)");
 
-  m.def("nvshmem_broadcast(Tensor(a!) input, str group_name) -> Tensor(a!)");
+  m.def("nvshmem_put(Tensor(a!) tensor, int peer) -> ()");
+  m.def("nvshmem_get(Tensor(a!) tensor, int peer) -> ()");
+  m.def(
+      "nvshmem_broadcast(Tensor(a!) input, int root, str group_name) -> Tensor(a!)");
+  m.def("nvshmem_wait_for_signal(Tensor sigpad, int signal, int peer) -> ()");
+  m.def(
+      "nvshmem_put_with_signal(Tensor(a) tensor, Tensor(a) sigpad, int signal, int peer) -> ()");
+  m.def("nccl_put(Tensor(a!) tensor, int peer) -> ()");
+  m.def("nccl_get(Tensor(a!) tensor, int peer) -> ()");
+  m.def("nccl_wait_for_signal(Tensor sigpad, int signal) -> ()");
+  m.def("nccl_put_with_signal(Tensor(a) tensor, int signal, int peer) -> ()");
   m.def(
       "nvshmem_all_to_all(Tensor input, Tensor(a!) out, str group_name) -> Tensor(a!)");
   m.def(
-      "nvshmem_all_to_all_vdev(Tensor input, Tensor(a!) out, Tensor(a!) in_out_splits, str group_name) -> Tensor(a!)");
+      "all_to_all_vdev(Tensor input, Tensor(a!) out, Tensor in_splits, Tensor(a!) out_splits_offsets, str group_name) -> ()");
   m.def(
-      "nvshmem_all_to_all_vdev_2d(Tensor input, Tensor(a!) out, Tensor(a!) in_out_splits, str group_name, int? major_align=None) -> Tensor(a!)");
+      "all_to_all_vdev_2d(Tensor input, Tensor(a!) out, Tensor in_splits, Tensor(a!) out_splits_offsets, str group_name, int? major_align=None) -> ()");
+  m.def(
+      "all_to_all_vdev_2d_offset(Tensor input, Tensor(a!) out, Tensor in_splits_offsets, Tensor(a!) out_splits_offsets, str group_name) -> ()");
+  m.def(
+      "tile_reduce(Tensor in_tile, Tensor(a!) out_tile, int root, str group_name, str reduce_op='sum') -> ()");
+  m.def(
+      "multi_root_tile_reduce(Tensor[] in_tiles, Tensor(a!) out_tile, int[] roots, str group_name, str reduce_op='sum') -> ()");
 }
 
 TORCH_LIBRARY_IMPL(symm_mem, Meta, m) {

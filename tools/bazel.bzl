@@ -2,7 +2,7 @@ load("@rules_cc//cc:defs.bzl", "cc_binary", "cc_library", "cc_test")
 load("@rules_cuda//cuda:defs.bzl", "cuda_library", "requires_cuda_enabled")
 load("@rules_python//python:defs.bzl", "py_binary", "py_library")
 load("@pip_deps//:requirements.bzl", "requirement")
-load("@pytorch//c10/macros:cmake_configure_file.bzl", "cmake_configure_file")
+load("@pytorch//torch/headeronly/macros:cmake_configure_file.bzl", "cmake_configure_file")
 load("@pytorch//tools/config:defs.bzl", "if_cuda")
 
 def _genrule(**kwds):
@@ -16,6 +16,7 @@ def _is_cpu_static_dispatch_build():
 # build structure aims to replicate Bazel as much as possible, most of
 # the rules simply forward to the Bazel definitions.
 rules = struct(
+    alias = native.alias,
     cc_binary = cc_binary,
     cc_library = cc_library,
     cc_test = cc_test,

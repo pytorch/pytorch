@@ -4,7 +4,7 @@
 #include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/FunctionalTensorWrapper.h>
-#include <ATen/FunctionalInverses.h>
+#include <ATen/ViewMetaClasses.h>
 #include <ATen/MemoryOverlap.h>
 #include <torch/library.h>
 

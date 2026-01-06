@@ -16,7 +16,7 @@ namespace torch::distributed::rpc {
 namespace {
 
 py::tuple toPyTuple(const RRefForkData& rrefForkData) {
-  // add GIL as it is contructing a py::object
+  // add GIL as it is constructing a py::object
   pybind11::gil_scoped_acquire ag;
   return py::make_tuple(
       rrefForkData.ownerId_,
@@ -321,7 +321,7 @@ void PyRRef::backwardOwnerRRef(
     py::object obj = torch::jit::toPyObject(value);
     try {
       value = torch::jit::toIValue(obj, c10::TensorType::get());
-    } catch (py::cast_error& e) {
+    } catch (py::cast_error&) {
       TORCH_CHECK(false, "RRef should contain a tensor for .backward()");
     }
   }

@@ -1,5 +1,6 @@
 # Owner(s): ["oncall: export"]
 import copy
+import re
 import tempfile
 import unittest
 
@@ -181,9 +182,12 @@ class TestDraftExport(TestCase):
             self.assertEqual(len(report.op_profiles), 1)
             self.assertEqual(len(report.op_profiles["mylib.foo8.default"]), 1)
 
-            with torch._library.fake_profile.unsafe_generate_fake_kernels(
-                report.op_profiles
-            ), FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()):
+            with (
+                torch._library.fake_profile.unsafe_generate_fake_kernels(
+                    report.op_profiles
+                ),
+                FakeTensorMode(allow_non_fake_inputs=True, shape_env=ShapeEnv()),
+            ):
                 torch.ops.mylib.foo8(*new_inp)
 
                 # Existing registration has been updated to match the new
@@ -293,7 +297,8 @@ class TestDraftExport(TestCase):
                     res = torch.ops.mylib.foo1(a, b)
 
                     c_item = c.item()
-                    return res[:c_item]
+                    if c_item > 0:
+                        return res[:c_item]
 
             inp = (torch.ones(3, 3), torch.ones(3, 3), torch.tensor(3))
 
@@ -319,11 +324,7 @@ class TestDraftExport(TestCase):
 
         ep = draft_export(M(), (torch.tensor([938]),))
         report = ep._report
-        self.assertEqual(len(report.failures), 1)
-        self.assertEqual(
-            report.failures[0].failure_type, FailureType.DATA_DEPENDENT_ERROR
-        )
-        self.assertEqual(report.failures[0].data["expr"], "Eq(Mod(10, 2*u1), 0)")
+        self.assertEqual(len(report.failures), 0)
 
     def test_dedup_data_dependent_failure(self):
         class M(torch.nn.Module):
@@ -369,7 +370,8 @@ class TestDraftExport(TestCase):
 
                 z = torch.cat([y, y])
 
-                return z[:a]
+                if a > 0:
+                    return z[:a]
 
         ep = draft_export(
             M(),
@@ -387,7 +389,7 @@ class TestDraftExport(TestCase):
             for node in _ep.graph.nodes:
                 if bindings := node.meta.get("unbacked_bindings"):
                     unbacked_binding_symbols.update(bindings.keys())
-            self.assertEqual(len(unbacked_binding_symbols), 1)
+            self.assertEqual(len(unbacked_binding_symbols), 2)
 
     def test_offsets(self):
         class M(torch.nn.Module):
@@ -408,7 +410,12 @@ class TestDraftExport(TestCase):
 
         inp = (torch.ones(3, 3),)
 
-        ep = draft_export(M(), inp, dynamic_shapes={"a": {0: Dim("a0")}})
+        ep = draft_export(
+            M(),
+            inp,
+            dynamic_shapes={"a": {0: Dim("a0")}},
+            prefer_deferred_runtime_asserts_over_guards=True,
+        )
         report = ep._report
 
         self.assertEqual(len(report.failures), 1)
@@ -418,7 +425,11 @@ class TestDraftExport(TestCase):
         self.assertEqual(ep.module()(*inp), M()(*inp))
 
         inp = (torch.randn(4, 3),)
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(
+            AssertionError,
+            re.escape("Guard failed: a.size()[0] <= 3"),
+        ):
+            # expected <= 3, but got 4
             ep.module()(*inp)
 
     def test_side_effect1(self):

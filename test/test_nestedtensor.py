@@ -26,7 +26,6 @@ from torch.nested._internal.nested_tensor import (
     NestedTensor,
     ViewNestedFromBuffer,
 )
-from torch.nn.attention.flex_attention import create_nested_block_mask, flex_attention
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     SM70OrLater,
@@ -36,7 +35,6 @@ from torch.testing._internal.common_cuda import (
 from torch.testing._internal.common_device_type import (
     dtypes,
     dtypesIfCUDA,
-    flex_attention_supported_platform,
     instantiate_device_type_tests,
     onlyCPU,
     onlyCUDA,
@@ -54,18 +52,19 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     instantiate_parametrized_tests,
     IS_FBCODE,
-    IS_WINDOWS,
     markDynamoStrictTest,
+    MI200_ARCH,
+    MI300_ARCH,
     NestedTensorTestCase,
     parametrize,
     run_tests,
     serialTest,
-    skipIfRocm,
+    skipIfRocmArch,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
     subtest,
-    TEST_WITH_ROCM,
     xfailIfTorchDynamo,
+    xfailIfWindows,
 )
 from torch.testing._internal.opinfo.core import (
     BinaryUfuncInfo,
@@ -860,6 +859,22 @@ class TestNestedTensor(NestedTensorTestCase):
         ):
             torch.cat([x, y], dim=-1)
 
+    # https://github.com/pytorch/pytorch/issues/161812
+    def test_jagged_with_dim_error(self):
+        x = torch.nested.nested_tensor(
+            [torch.ones(3, 2, 3), torch.ones(4, 2, 3)], layout=torch.jagged
+        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "not supported for NestedTensor on dim=0",
+        ):
+            torch.cat([x, x])
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "not supported for NestedTensor on dim=0",
+        ):
+            torch.stack([x, x])
+
     def test_nested_view_from_buffer_overflow_errors(self):
         buffer = torch.tensor([1])
         sizes = torch.tensor([[2**63 - 1], [2**63 - 1], [3]], dtype=torch.int64)
@@ -1092,6 +1107,188 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
 
         check(inputs, y)
 
+    @dtypes(
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+        torch.float,
+        torch.float16,
+        torch.bfloat16,
+        torch.double,
+    )
+    def test_jagged_max_dtypes(self, device, dtype):
+        x = torch.nested.nested_tensor(
+            [torch.arange(0, n, dtype=dtype, device=device) for n in (10, 20, 30)],
+            layout=torch.jagged,
+        )
+
+        result_max = x.max(dim=1)
+        expected_max = torch.tensor([9, 19, 29], dtype=dtype, device=device)
+
+        self.assertEqual(result_max.values, expected_max)
+
+    @dtypes(
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+        torch.float,
+        torch.float16,
+        torch.bfloat16,
+        torch.double,
+    )
+    def test_jagged_min_dtypes(self, device, dtype):
+        x = torch.nested.nested_tensor(
+            [torch.arange(0, n, dtype=dtype, device=device) for n in (10, 20, 30)],
+            layout=torch.jagged,
+        )
+
+        result_min = x.min(dim=1)
+        expected_min = torch.tensor([0, 0, 0], dtype=dtype, device=device)
+
+        self.assertEqual(result_min.values, expected_min)
+
+    @dtypes(
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+        torch.float,
+        torch.float16,
+        torch.bfloat16,
+        torch.double,
+    )
+    def test_jagged_amax_dtypes(self, device, dtype):
+        x = torch.nested.nested_tensor(
+            [torch.arange(0, n, dtype=dtype, device=device) for n in (10, 20, 30)],
+            layout=torch.jagged,
+        )
+
+        result_amax = x.amax(dim=1)
+        expected_amax = torch.tensor([9, 19, 29], dtype=dtype, device=device)
+
+        self.assertEqual(result_amax, expected_amax)
+
+    @dtypes(
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+        torch.float,
+        torch.float16,
+        torch.bfloat16,
+        torch.double,
+    )
+    def test_jagged_amin_dtypes(self, device, dtype):
+        x = torch.nested.nested_tensor(
+            [torch.arange(0, n, dtype=dtype, device=device) for n in (10, 20, 30)],
+            layout=torch.jagged,
+        )
+
+        result_amin = x.amin(dim=1)
+        expected_amin = torch.tensor([0, 0, 0], dtype=dtype, device=device)
+
+        self.assertEqual(result_amin, expected_amin)
+
+    @dtypes(
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+        torch.float,
+        torch.float16,
+        torch.bfloat16,
+        torch.double,
+    )
+    def test_jagged_argmax_dtypes(self, device, dtype):
+        x = torch.nested.nested_tensor(
+            [torch.arange(0, n, dtype=dtype, device=device) for n in (10, 20, 30)],
+            layout=torch.jagged,
+        )
+
+        result_argmax = x.argmax(dim=1)
+        expected_argmax = torch.tensor([9, 19, 29], dtype=torch.long, device=device)
+
+        self.assertEqual(result_argmax, expected_argmax)
+
+    @dtypes(
+        torch.int8,
+        torch.int16,
+        torch.int32,
+        torch.int64,
+        torch.uint8,
+        torch.float,
+        torch.float16,
+        torch.bfloat16,
+        torch.double,
+    )
+    def test_jagged_argmin_dtypes(self, device, dtype):
+        x = torch.nested.nested_tensor(
+            [torch.arange(0, n, dtype=dtype, device=device) for n in (10, 20, 30)],
+            layout=torch.jagged,
+        )
+
+        result_argmin = x.argmin(dim=1)
+        expected_argmin = torch.tensor([0, 0, 0], dtype=torch.long, device=device)
+
+        self.assertEqual(result_argmin, expected_argmin)
+
+    @dtypes(torch.int64)
+    def test_jagged_max_extreme_values(self, device, dtype):
+        # Values beyond 2^53 expose an issue where finite padding sentinels
+        # (1 << 53) - 1 would be incorrectly selected as the max/min
+        large_neg = -(2**60)
+
+        t1 = torch.tensor(
+            [large_neg, large_neg + 1, large_neg + 2], dtype=dtype, device=device
+        )
+        t2 = torch.tensor([large_neg, large_neg + 5], dtype=dtype, device=device)
+        t3 = torch.tensor(
+            [large_neg, large_neg + 10, large_neg + 3, large_neg + 7],
+            dtype=dtype,
+            device=device,
+        )
+
+        x = torch.nested.nested_tensor([t1, t2, t3], layout=torch.jagged)
+
+        result_max = x.max(dim=1)
+        expected_max = torch.tensor(
+            [large_neg + 2, large_neg + 5, large_neg + 10], dtype=dtype, device=device
+        )
+
+        self.assertEqual(result_max.values, expected_max)
+
+    @dtypes(torch.int64)
+    def test_jagged_min_extreme_values(self, device, dtype):
+        # Values beyond 2^53 expose an issue where finite padding sentinels
+        # (1 << 53) - 1 would be incorrectly selected as the max/min
+        large_pos = 2**60
+
+        t1 = torch.tensor(
+            [large_pos, large_pos - 1, large_pos - 2], dtype=dtype, device=device
+        )
+        t2 = torch.tensor([large_pos, large_pos - 5], dtype=dtype, device=device)
+        t3 = torch.tensor(
+            [large_pos, large_pos - 10, large_pos - 3, large_pos - 7],
+            dtype=dtype,
+            device=device,
+        )
+
+        x = torch.nested.nested_tensor([t1, t2, t3], layout=torch.jagged)
+
+        result_min = x.min(dim=1)
+        expected_min = torch.tensor(
+            [large_pos - 2, large_pos - 5, large_pos - 10], dtype=dtype, device=device
+        )
+
+        self.assertEqual(result_min.values, expected_min)
+
     @skipMeta
     @torch.inference_mode()
     @dtypes(*floating_types_and_half())
@@ -1230,6 +1427,24 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
         is_cuda = "cuda" in str(device)
         self.assertEqual(nt.is_cuda, is_cuda)
 
+    @skipIfTorchDynamo("Not a suitable test for TorchDynamo")
+    def test_share_memory(self, device):
+        a = torch.randn(3, 4, device=device)
+        b = torch.randn(5, 4, device=device)
+        nt = torch.nested.nested_tensor([a, b], layout=torch.jagged)
+
+        # Guard CUDA tensors
+        if "cuda" in device:
+            result = nt.share_memory_()
+            self.assertIs(result, nt)
+            return
+
+        result = nt.share_memory_()
+        self.assertIs(result, nt)
+
+        # Verify in shared memory
+        self.assertTrue(nt.is_shared())
+
     @dtypes(torch.float, torch.float16, torch.double)
     def test_nested_tensor_indexing(self, device, dtype):
         # edge case: empty nested tensor
@@ -1318,6 +1533,82 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
             "NestedTensor must be contiguous to get buffer.",
             lambda: func(nt_noncontiguous),
         )
+
+    def test_is_any_true_jagged(self, device):
+        B, Fin = 2, 6
+        start = torch.zeros(B, dtype=torch.int64, device=device)
+        lengths = torch.tensor([3, 2], dtype=torch.int64, device=device)
+
+        # NestedTensor reduction should operate on same data as .values().
+        with self.subTest("dispatch_matches_values_buffer"):
+            cond = torch.tensor(
+                [
+                    [True, False, False, True, True, False],
+                    [False, False, True, False, False, False],
+                ],
+                dtype=torch.bool,
+                device=device,
+            )
+            nt = torch.nested.narrow(
+                cond, dim=1, start=start, length=lengths, layout=torch.jagged
+            )
+            out_nt = torch.ops.aten._is_any_true.default(nt).item()
+            out_vals = torch.ops.aten._is_any_true.default(nt.values()).item()
+            self.assertEqual(out_nt, out_vals)
+
+        # Verify jagged boolean behavior.
+        with self.subTest("all_false_returns_false"):
+            cond_false = torch.zeros(B, Fin, dtype=torch.bool, device=device)
+            nt_false = torch.nested.narrow(
+                cond_false, dim=1, start=start, length=lengths, layout=torch.jagged
+            )
+            self.assertFalse(torch.ops.aten._is_any_true.default(nt_false).item())
+
+        with self.subTest("one_true_returns_true"):
+            cond_mixed = torch.zeros(B, Fin, dtype=torch.bool, device=device)
+            cond_mixed[0, 0] = True
+            nt_mixed = torch.nested.narrow(
+                cond_mixed, dim=1, start=start, length=lengths, layout=torch.jagged
+            )
+            self.assertTrue(torch.ops.aten._is_any_true.default(nt_mixed).item())
+
+    def test_is_all_true_jagged(self, device):
+        B, Fin = 2, 6
+        start = torch.zeros(B, dtype=torch.int64, device=device)
+        lengths = torch.tensor([3, 2], dtype=torch.int64, device=device)
+
+        # NestedTensor reduction should operate on same data as .values().
+        with self.subTest("dispatch_matches_values_buffer"):
+            cond = torch.tensor(
+                [
+                    [True, True, True, False, False, False],
+                    [True, True, False, False, False, False],
+                ],
+                dtype=torch.bool,
+                device=device,
+            )
+            nt = torch.nested.narrow(
+                cond, dim=1, start=start, length=lengths, layout=torch.jagged
+            )
+            out_nt = torch.ops.aten._is_all_true.default(nt).item()
+            out_vals = torch.ops.aten._is_all_true.default(nt.values()).item()
+            self.assertEqual(out_nt, out_vals)
+
+        # Verify jagged boolean behavior.
+        with self.subTest("all_true_returns_true"):
+            cond_true = torch.ones(B, Fin, dtype=torch.bool, device=device)
+            nt_true = torch.nested.narrow(
+                cond_true, dim=1, start=start, length=lengths, layout=torch.jagged
+            )
+            self.assertTrue(torch.ops.aten._is_all_true.default(nt_true).item())
+
+        with self.subTest("any_false_returns_false"):
+            cond_mixed = torch.ones(B, Fin, dtype=torch.bool, device=device)
+            cond_mixed[0, 1] = False
+            nt_mixed = torch.nested.narrow(
+                cond_mixed, dim=1, start=start, length=lengths, layout=torch.jagged
+            )
+            self.assertFalse(torch.ops.aten._is_all_true.default(nt_mixed).item())
 
     @parametrize("func", [subtest(torch.ge, name="ge"), subtest(torch.eq, name="eq")])
     def test_binary_ops_with_scalar(self, device, func):
@@ -4444,12 +4735,18 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     @dtypes(torch.float32)
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
+    @parametrize(
+        "func",
+        [torch.nn.functional.softmax, torch.nn.functional.log_softmax],
+        name_fn=lambda func: func.__name__,
+    )
     def test_softmax_dim(
         self,
         device,
         dtype,
         requires_grad,
         components_require_grad,
+        func,
     ):
         """
         Softmax passes when reducing on valid reduction dimensions.
@@ -4468,7 +4765,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
 
         for reduce_dim, _ in reduce_dims:
             nt = torch.nested.as_nested_tensor(ts, layout=torch.jagged)
-            out_actual = torch.nn.functional.softmax(nt, dim=reduce_dim)
+            out_actual = func(nt, dim=reduce_dim)
             torch._dynamo.disable(self.assertEqual)(
                 len(out_actual.shape), len(output_shape)
             )  # disable if running on dynamo
@@ -4498,12 +4795,10 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
             reduce_dim, reduce_dim_expected = reduce_dim_tuple
 
             if nt.dim() > reduce_dim:
-                out_actual = torch.nn.functional.softmax(
-                    nt, dim=reduce_dim
-                )  # nested tensor
-                out_expected = torch.nn.functional.softmax(
-                    nt.values(), dim=reduce_dim_expected
-                )  # dense tensor of dimensions 1 less than out_actual
+                # nested tensor
+                out_actual = func(nt, dim=reduce_dim)
+                # dense tensor of dimensions 1 less than out_actual
+                out_expected = func(nt.values(), dim=reduce_dim_expected)
                 self.assertTrue(
                     torch.allclose(out_actual.values().view(-1), out_expected.view(-1))
                 )
@@ -4601,8 +4896,13 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
     @dtypes(torch.float32)
     @parametrize("requires_grad", [False, True])
     @parametrize("components_require_grad", [False, True])
+    @parametrize(
+        "func",
+        [torch.nn.functional.softmax, torch.nn.functional.log_softmax],
+        name_fn=lambda func: func.__name__,
+    )
     def test_softmax_reduce_batch_dim(
-        self, device, dtype, requires_grad, components_require_grad
+        self, device, dtype, requires_grad, components_require_grad, func
     ):
         """
         Softmax on NestedTensor fails when trying to reduce across batch dimension.
@@ -4627,7 +4927,7 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
                 RuntimeError,
                 "not supported when reducing across the batch dimension for NestedTensor",
             ):
-                out = torch.nn.functional.softmax(nt, dim=reduce_dim)
+                out = func(nt, dim=reduce_dim)
 
     @dtypes(torch.float32)
     @parametrize("requires_grad", [False, True])
@@ -5640,6 +5940,11 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         ):
             torch.nested.nested_tensor_from_jagged(values, offsets=None, lengths=None)
 
+        with self.assertRaisesRegex(ValueError, "Expected jagged_dim >=1, but got 0."):
+            torch.nested.nested_tensor_from_jagged(
+                values, lengths=lengths, jagged_dim=0
+            )
+
     @onlyCPU
     def test_nested_tensor_from_jagged_fx_trace(self, device):
         def fn(x, y):
@@ -6318,11 +6623,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         ):
             a.copy_(b)
 
-    # This can't happen in the opinfo tests due to subprocess creation
-    @unittest.skipIf(
-        TEST_WITH_ROCM,
-        "In ROCm, kernel asserts are disabled due to performance overhead",
-    )
     def test_index_put_error(self, device):
         import subprocess
 
@@ -6419,7 +6719,6 @@ torch.cuda.synchronize()
         check_size(nt1_t, nt2_t, nt3_t, nt4_t)
 
     @skipIfTorchDynamo("compiles internally")
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     def test_specialize_dynamic_shape(self, device):
         values = torch.randn((18, 16), device=device)
@@ -6441,7 +6740,6 @@ torch.cuda.synchronize()
         )
 
     @skipIfTorchDynamo("compiles internally")
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     def test_specialize_dynamic_shape_recompile(self, device):
         def generate_inp(total_len):
@@ -6478,12 +6776,7 @@ torch.cuda.synchronize()
         check_results(fn, compiled_fn, generate_inp(20))
         self.assertEqual(compile_counter.frame_count, frame_count_2)
 
-    # Note 1: Math fallback doesn't work with bfloat16 on CUDA
-    # Note 2: ROCm doesn't support flash attention or mem_efficient attention for NT
-    @unittest.skipIf(
-        TEST_WITH_ROCM,
-        "ROCm doesn't support flash attention or mem_efficient attention for NT",
-    )
+    # Note: Math fallback doesn't work with bfloat16 on CUDA
     @tf32_on_and_off(0.005)
     @dtypes(
         *(
@@ -6746,17 +7039,14 @@ torch.cuda.synchronize()
             and check_cudnn
             and (dtype == torch.float16 or dtype == torch.bfloat16)
         ):
-            with self.assertRaisesRegex(RuntimeError, "cuDNN SDPA Nested Tensor"):
-                with torch.nn.attention.sdpa_kernel(
-                    torch.nn.attention.SDPBackend.CUDNN_ATTENTION
-                ):
-                    check_forward_backward()
+            with torch.nn.attention.sdpa_kernel(
+                torch.nn.attention.SDPBackend.CUDNN_ATTENTION
+            ):
+                check_forward_backward()
 
     @skipIfTorchDynamo("SDPA test compiles internally")
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    # Guarding with sqrt() doesn't work on ROCm?
-    @skipCUDAIfRocm
+    @xfailIfWindows
     @onlyCUDA
     @dtypes(
         *(
@@ -6940,12 +7230,12 @@ torch.cuda.synchronize()
                 out, out_component, atol=output_ref_atol, rtol=output_ref_rtol
             )
 
+    @decorateIf(xfailIfWindows, lambda params: params["dtype"] == torch.float32)
     @skipIfTorchDynamo("SDPA test compiles internally")
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    # mha_varlen_fwd not supported on ROCm
-    @skipCUDAIfRocm
     @onlyCUDA
+    # efficient_attention_forward meta kernel shape mismatch on CDNA - see issue #171568
+    @skipIfRocmArch(MI200_ARCH + MI300_ARCH)
     @dtypes(
         *(
             [torch.float16, torch.bfloat16, torch.float32]
@@ -6975,10 +7265,10 @@ torch.cuda.synchronize()
         "Platform doesn't support flash or mem-efficient attention",
     )
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @skipCUDAIfRocm
     @onlyCUDA
+    # flash_attention_forward meta kernel shape mismatch on CDNA - see issue #171568
+    @skipIfRocmArch(MI200_ARCH + MI300_ARCH)
     @skipIfTorchDynamo()
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     def test_sdpa_autocast(self, device):
         def fn_nt(values32, values16, offsets):
             nt32 = convert_jagged_to_nested_tensor(values32, offsets, max_length=16)
@@ -7059,7 +7349,6 @@ torch.cuda.synchronize()
         "Platform doesn't support flash or mem-efficient attention",
     )
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @skipCUDAIfRocm
     @onlyCUDA
     @skipIfTorchDynamo()
     def test_sdpa_flop_counter(self, device):
@@ -7125,10 +7414,13 @@ torch.cuda.synchronize()
     # TODO: Remove these when ViewNestedFromBuffer, etc. are deprecated.
     @skipCUDAIfRocm  # not needed
     @skipIfTorchDynamo("compiles internally")
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @parametrize("use_legacy_api", [True, False])
     @skipCPUIf(True, "SPDA Math NT fallback causes failure: see issue #133644")
+    @unittest.skipIf(
+        "RelWithAssert" in torch.__config__.show(),
+        "failing in debug build, see https://github.com/pytorch/pytorch/pull/165158 for context",
+    )
     def test_dummy_mha_with_nt(self, device, use_legacy_api):
         bs = 3
         d1 = 2
@@ -7190,7 +7482,7 @@ torch.cuda.synchronize()
 
         query = torch.rand(bs, d1, d3, device=device)
         value = torch.rand(30, d2, requires_grad=True, device=device)
-        # total_length must > than max_length otherwise flash_attn backwark will fail
+        # total_length must > than max_length otherwise flash_attn backward will fail
         offsets = torch.tensor([0, 2, 3, 30], device=device)
 
         m = mha(use_legacy_api)
@@ -7271,121 +7563,6 @@ torch.cuda.synchronize()
         )
 
         return query, key, value
-
-    @onlyCUDA
-    @flex_attention_supported_platform
-    @dtypes(torch.float32)
-    # non-contiguous with holes not supported yet
-    @decorateIf(unittest.skip, lambda params: params["noncontig_with_holes"])
-    @parametrize("noncontig_with_holes", [False, True])
-    @parametrize("cross_attention", [False, True])
-    @skipIfRocm
-    def test_flex_attention(self, device, dtype, noncontig_with_holes, cross_attention):
-        query, key, value = self._rand_qkv(
-            device, dtype, noncontig_with_holes, q_and_kv_match=(not cross_attention)
-        )
-
-        # Run FlexAttention with a causal mask
-        def causal_mask(b, h, q_idx, kv_idx):
-            return q_idx >= kv_idx
-
-        if cross_attention:
-            block_mask = create_nested_block_mask(
-                causal_mask, 1, 1, query, key, _compile=True
-            )
-        else:
-            block_mask = create_nested_block_mask(
-                causal_mask, 1, 1, query, _compile=True
-            )
-
-        out_flex = flex_attention(query, key, value, block_mask=block_mask)
-        grad_out = torch.randn_like(out_flex)
-        grads_flex = torch.autograd.grad(
-            out_flex, inputs=(query, key, value), grad_outputs=(grad_out,)
-        )
-        flex_outs = [out_flex, *grads_flex]
-
-        # Run FlexAttention with a score_mod that represents causal attention
-        def causal_score_mod(score, b, h, q_idx, kv_idx):
-            return torch.where(q_idx >= kv_idx, score, float("-inf"))
-
-        out_flex2 = flex_attention(query, key, value, score_mod=causal_score_mod)
-        grads_flex2 = torch.autograd.grad(
-            out_flex2, inputs=(query, key, value), grad_outputs=(grad_out,)
-        )
-        flex_outs2 = [out_flex2, *grads_flex2]
-
-        # Run causal SDPA for comparison
-        out_sdpa = F.scaled_dot_product_attention(query, key, value, is_causal=True)
-        grads_sdpa = torch.autograd.grad(
-            out_sdpa, inputs=(query, key, value), grad_outputs=(grad_out,)
-        )
-        sdpa_outs = [out_sdpa, *grads_sdpa]
-
-        # Compare flex vs. SDPA output and grads
-        for flex, flex2, sdpa in zip(flex_outs, flex_outs2, sdpa_outs):
-            self.assertTrue(flex.is_nested and flex2.is_nested and sdpa.is_nested)
-            self.assertEqual(flex, sdpa, atol=1e-2, rtol=1e-2)
-            self.assertEqual(flex2, sdpa, atol=1e-2, rtol=1e-2)
-
-    @onlyCUDA
-    @flex_attention_supported_platform
-    @dtypes(torch.float32)
-    def test_flex_attention_converts_stacked_seq_indices(self, device, dtype):
-        # This test verifies that a score_mod function written to operate within
-        # NJT sequence index space, such as a lookup table, works correctly. This
-        # validates that FlexAttention properly converts indices within the
-        # "stacked sequence" space used for NJT -> sequence-relative indices.
-        query, key, value = self._rand_qkv(device, dtype)
-
-        # Test with score_mod
-        score_mod_table = torch.randn(query._max_seqlen, device=device, dtype=dtype)
-
-        def my_score_mod(score, b, h, q_idx, kv_idx):
-            return score_mod_table[q_idx]
-
-        flex_attention(query, key, value, score_mod=my_score_mod)
-
-        # Test with batch-specific score_mod
-        batch_size = query.size(0)
-        batch_table = torch.randn(batch_size, device=device, dtype=dtype)
-        # Keep score the same for batch index == 0
-        batch_table[0].zero_()
-
-        def batch_specific_score_mod(score, b, h, q_idx, kv_idx):
-            return score + batch_table[b]
-
-        def identity_score_mod(score, b, h, q_idx, kv_idx):
-            return score
-
-        output = flex_attention(query, key, value, score_mod=batch_specific_score_mod)
-        output_identity = flex_attention(
-            query, key, value, score_mod=identity_score_mod
-        )
-
-        # Guard against a bug where the batch index passed to score_mod is always b == 0.
-        # Output would be equivalent to applying an identity score_mod.
-        # See https://github.com/pytorch/pytorch/issues/143788
-        self.assertFalse(torch.allclose(output._values, output_identity._values))
-
-        # Test with mask_mod
-        mask_mod_table = score_mod_table > 0.0
-
-        def my_mask_mod(b, h, q_idx, kv_idx):
-            return mask_mod_table[q_idx]
-
-        def my_mask_mod2(b, h, q_idx, kv_idx):
-            return mask_mod_table[q_idx] & (b == 0)
-
-        block_mask = create_nested_block_mask(my_mask_mod, 1, 1, query, _compile=True)
-        output = flex_attention(query, key, value, block_mask=block_mask)
-
-        block_mask2 = create_nested_block_mask(my_mask_mod2, 1, 1, query, _compile=True)
-        output2 = flex_attention(query, key, value, block_mask=block_mask2)
-
-        # Guard against a bug where the batch index passed to mask_mod is always b == 0.
-        # See https://github.com/pytorch/pytorch/issues/143788
-        self.assertFalse(torch.allclose(output._values, output2._values))
 
     @dtypes(torch.float32)
     def test_apply_(self, device, dtype):
@@ -7593,12 +7770,9 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
+    # efficient_attention_forward meta kernel shape mismatch on CDNA - see issue #171568
+    @skipIfRocmArch(MI200_ARCH + MI300_ARCH)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @skipCUDAIfRocm
     def test_compile_preserves_metadata_cache(self, device, dtype):
         # shape (B, *, D)
         nt = random_nt_from_dims(
@@ -7624,12 +7798,7 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @skipCUDAIfRocm
     def test_compile_with_dynamic_max_seq_len(self, device, dtype):
         # shape (B, *, D)
         # max seq len: 18
@@ -7661,12 +7830,7 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @skipCUDAIfRocm
     def test_compile_with_dynamic_min_seq_len(self, device, dtype):
         # shape (B, *, D)
         # min seq len: 7
@@ -7698,12 +7862,7 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @skipCUDAIfRocm
     def test_compile_with_propagated_dynamic_max_seq_len(self, device, dtype):
         # shape (B, *, D)
         # max seq len: 18
@@ -7794,9 +7953,13 @@ torch.cuda.synchronize()
 
         nt = torch.nested.nested_tensor(
             [
-                torch.randint(2, (n, *post_seq_len_shape), device=device, dtype=dtype)
-                if dtype is torch.bool
-                else torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
+                (
+                    torch.randint(
+                        2, (n, *post_seq_len_shape), device=device, dtype=dtype
+                    )
+                    if dtype is torch.bool
+                    else torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
+                )
                 for n in range(2, 9)
             ],
             layout=torch.jagged,
@@ -7825,9 +7988,7 @@ torch.cuda.synchronize()
     # blows up due to test parametrization otherwise
     @torch._dynamo.utils.disable_cache_limit()
     @skipIfTorchDynamo("SDPA test compiles internally")
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @skipCUDAIfRocm
     @dtypes(torch.float32, torch.double, torch.half)
     @parametrize("nt_dim", [2, 3, 4])
     @parametrize("requires_grad", [False, True])
@@ -7845,9 +8006,13 @@ torch.cuda.synchronize()
 
         nt = torch.nested.nested_tensor(
             [
-                torch.randint(2, (n, *post_seq_len_shape), device=device, dtype=dtype)
-                if dtype is torch.bool
-                else torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
+                (
+                    torch.randint(
+                        2, (n, *post_seq_len_shape), device=device, dtype=dtype
+                    )
+                    if dtype is torch.bool
+                    else torch.randn(n, *post_seq_len_shape, device=device, dtype=dtype)
+                )
                 for n in range(2, 9)
             ],
             layout=torch.jagged,
@@ -7924,12 +8089,7 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
-    @unittest.skipIf(
-        sys.version_info >= (3, 12), "torch.compile is not supported on python 3.12+"
-    )
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @skipCUDAIfRocm
     def test_compile_padded_dense_conversion_preserves_metadata_cache(
         self, device, dtype
     ):
@@ -8017,7 +8177,6 @@ torch.cuda.synchronize()
         self.assertEqual(res.shape, (4, nt.shape[1], 6))
 
     @skipIfTorchDynamo("compiles internally")
-    @unittest.skipIf(IS_WINDOWS, reason="Windows not yet supported for torch.compile")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @dtypes(torch.float32)
     @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
@@ -8083,6 +8242,7 @@ FORWARD_SKIPS_AND_XFAILS = [
             "std.unbiased",
             "var",
             "var.unbiased",
+            "hash_tensor",
         },
         name="not_implemented",
     ),
@@ -8340,7 +8500,7 @@ BACKWARD_SKIPS_AND_XFAILS = [
     XFailRule(
         error_type=RuntimeError,
         error_msg="SymIntArrayRef expected to contain only concrete integers",
-        op_match_fn=lambda device, op: (op.full_name in {"mean"}),
+        op_match_fn=lambda device, op: (op.full_name == "mean"),
         sample_match_fn=lambda device, sample: (
             "full reduction" not in sample.name
             and "normal dim reduction" not in sample.name
@@ -8375,7 +8535,7 @@ BACKWARD_SKIPS_AND_XFAILS = [
     XFailRule(
         error_type=RuntimeError,
         error_msg="cannot view shape",
-        op_match_fn=lambda device, op: (op.full_name in {"unflatten"}),
+        op_match_fn=lambda device, op: (op.full_name == "unflatten"),
         sample_match_fn=lambda device, sample: ("noncontig_holes" in sample.name),
         name="broken_unflatten_backward",
     ),
@@ -8530,14 +8690,6 @@ BACKWARD_SKIPS_AND_XFAILS = [
 
 COMPILE_FORWARD_SKIPS_AND_XFAILS = [
     *FORWARD_SKIPS_AND_XFAILS,
-    # Needs investigation in AOTAutograd: len(unwrapped_args) == num_args_tallied assertion fails
-    # e.g. Expected 5 == 4
-    XFailRule(
-        error_type=AssertionError,
-        op_match_fn=lambda device, op: (op.full_name == "fill"),
-        sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
-        name="fill_aot_autograd_bug_with_transposed_input",
-    ),
     # Bug: cross-device conversions with to() result in new nested ints within compile only
     XFailRule(
         error_type=AssertionError,
@@ -8575,18 +8727,6 @@ COMPILE_FORWARD_SKIPS_AND_XFAILS = [
         sample_match_fn=lambda device, sample: ("batch_dim" in sample.name),
         name="broken_select_backward_unbacked",
     ),
-    # Bug: no idea what's going on here; needs investigation within AOTAutograd
-    XFailRule(
-        op_match_fn=lambda device, op: (op.full_name == "nan_to_num"),
-        sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
-        name="crazy_aot_autograd_bug1",
-    ),
-    # Bug: also no idea what's going on here: needs investigation within AOTAutograd
-    XFailRule(
-        op_match_fn=lambda device, op: (op.full_name == "isreal"),
-        sample_match_fn=lambda device, sample: ("noncontig_transposed" in sample.name),
-        name="crazy_aot_autograd_bug2",
-    ),
 ]
 
 COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
@@ -8611,7 +8751,7 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
     # min() / max(): weird bug
     XFailRule(
         error_type=AttributeError,
-        error_msg="'ConstantIntNode' object has no attribute 'add'",
+        error_msg="'NestedIntNode' object has no attribute 'add'",
         op_match_fn=lambda device, op: (
             op.full_name in {"max.reduction_with_dim", "min.reduction_with_dim"}
         ),
@@ -8628,7 +8768,7 @@ COMPILE_BACKWARD_SKIPS_AND_XFAILS = [
     # copysign(): formula is broken for (T, NT) broadcasting
     XFailRule(
         error_type=AttributeError,
-        error_msg="'ConstantIntNode' object has no attribute 'add'",
+        error_msg="'NestedIntNode' object has no attribute 'add'",
         op_match_fn=lambda device, op: (op.full_name == "copysign"),
         sample_match_fn=lambda device, sample: ("(T, NT)" in sample.name),
         name="broken_copysign_compile_backward",

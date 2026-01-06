@@ -21,7 +21,7 @@ except ImportError:
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 if not c10d.is_available():
     print("c10d not available, skipping tests", file=sys.stderr)
@@ -34,7 +34,7 @@ class AbstractProcessGroupShareTensorTest:
     def _test_multiprocess(self, f, shared_tensors, init_pg, n_output):
         ws = self.world_size
         # file store will delete the test file on destruction
-        file = tempfile.NamedTemporaryFile(delete=False)
+        file = tempfile.NamedTemporaryFile(delete=False)  # noqa: SIM115
         ctx = mp.get_context("spawn")
         c2p = ctx.Queue(2)
         p2c = ctx.Queue(2)

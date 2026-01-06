@@ -3,11 +3,17 @@
 import importlib
 import math
 import warnings
-from typing import Callable, Optional, TYPE_CHECKING, Union
+from collections.abc import Callable
+from typing import Any as _Any, Optional, TYPE_CHECKING
 
 import torch
 from torch import _VF, sym_int as _sym_int, Tensor
-from torch._C import _add_docstr, _infer_size
+from torch._C import (
+    _add_docstr,
+    _infer_size,
+    _ScalingType as ScalingType,
+    _SwizzleType as SwizzleType,
+)
 from torch._jit_internal import (
     _overload,
     boolean_dispatch,
@@ -25,6 +31,10 @@ from torch.overrides import (
     has_torch_function_variadic,
 )
 
+
+# Set visibility of the bound enums to this module
+ScalingType.__module__ = "torch.nn.functional"
+SwizzleType.__module__ = "torch.nn.functional"
 
 if TYPE_CHECKING:
     from torch.types import _dtype as DType
@@ -338,9 +348,6 @@ avg_pool1d(input, kernel_size, stride=None, padding=0, ceil_mode=False, count_in
 Applies a 1D average pooling over an input signal composed of several
 input planes.
 
-.. note::
-    pad should be at most half of effective kernel size.
-
 See :class:`~torch.nn.AvgPool1d` for details and output shape.
 
 Args:
@@ -349,8 +356,9 @@ Args:
       tuple `(kW,)`
     stride: the stride of the window. Can be a single number or a tuple
       `(sW,)`. Default: :attr:`kernel_size`
-    padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padW,)`. Default: 0
+    padding: implicit zero paddings on both sides of the input. Can be a single
+      number or a tuple `(padW,)`. Should be at most half of effective kernel
+      size, that is :math:`((kernelSize - 1) * dilation + 1) / 2`. Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` to compute the
         output shape. Default: ``False``
     count_include_pad: when True, will include the zero-padding in the
@@ -376,9 +384,6 @@ Applies 2D average-pooling operation in :math:`kH \times kW` regions by step siz
 :math:`sH \times sW` steps. The number of output features is equal to the number of
 input planes.
 
-.. note::
-    pad should be at most half of effective kernel size.
-
 See :class:`~torch.nn.AvgPool2d` for details and output shape.
 
 Args:
@@ -388,7 +393,9 @@ Args:
     stride: stride of the pooling operation. Can be a single number, a single-element tuple or a
       tuple `(sH, sW)`. Default: :attr:`kernel_size`
     padding: implicit zero paddings on both sides of the input. Can be a
-      single number, a single-element tuple or a tuple `(padH, padW)`. Default: 0
+      single number, a single-element tuple or a tuple `(padH, padW)`.
+      Should be at most half of effective kernel size, that
+      is :math:`((kernelSize - 1) * dilation + 1) / 2`. Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` in the formula
         to compute the output shape. Default: ``False``
     count_include_pad: when True, will include the zero-padding in the
@@ -407,9 +414,6 @@ Applies 3D average-pooling operation in :math:`kT \times kH \times kW` regions b
 size :math:`sT \times sH \times sW` steps. The number of output features is equal to
 :math:`\lfloor\frac{\text{input planes}}{sT}\rfloor`.
 
-.. note::
-    pad should be at most half of effective kernel size.
-
 See :class:`~torch.nn.AvgPool3d` for details and output shape.
 
 Args:
@@ -419,7 +423,9 @@ Args:
     stride: stride of the pooling operation. Can be a single number or a
       tuple `(sT, sH, sW)`. Default: :attr:`kernel_size`
     padding: implicit zero paddings on both sides of the input. Can be a
-      single number or a tuple `(padT, padH, padW)`, Default: 0
+      single number or a tuple `(padT, padH, padW)`. Should be at most half
+      of effective kernel size, that is :math:`((kernelSize - 1) * dilation + 1) / 2`.
+      Default: 0
     ceil_mode: when True, will use `ceil` instead of `floor` in the formula
         to compute the output shape
     count_include_pad: when True, will include the zero-padding in the
@@ -486,7 +492,8 @@ def fractional_max_pool2d_with_indices(
             "fractional_max_pool2d requires specifying either an output_size or an output_ratio"
         )
     if output_size is None:
-        assert output_ratio is not None
+        if output_ratio is None:
+            raise AssertionError("output_ratio is unexpectedly None")
         if len(output_ratio) > 2:
             raise ValueError(
                 "fractional_max_pool2d requires output_ratio to either be a single Int or tuple of Ints."
@@ -605,7 +612,8 @@ def fractional_max_pool3d_with_indices(
             "fractional_max_pool3d requires specifying either an output_size or an output_ratio"
         )
     if output_size is None:
-        assert output_ratio is not None
+        if output_ratio is None:
+            raise AssertionError("output_ratio is unexpectedly None")
         _output_ratio = _triple(output_ratio)
         output_size = [
             int(input.size(-3) * _output_ratio[0]),
@@ -1072,7 +1080,7 @@ def max_unpool3d(
 
 def lp_pool3d(
     input: Tensor,
-    norm_type: Union[int, float],
+    norm_type: int | float,
     kernel_size: BroadcastingList3[int],
     stride: Optional[BroadcastingList3[int]] = None,
     ceil_mode: bool = False,
@@ -1082,6 +1090,9 @@ def lp_pool3d(
 
     If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
+
+    When ``ceil_mode`` is ``True``, sliding windows may go off-bounds if they start within the left
+    padding or the input. Sliding windows that would start in the right padded region are ignored.
 
     See :class:`~torch.nn.LPPool3d` for details.
     """
@@ -1110,7 +1121,7 @@ def lp_pool3d(
 
 def lp_pool2d(
     input: Tensor,
-    norm_type: Union[int, float],
+    norm_type: int | float,
     kernel_size: BroadcastingList2[int],
     stride: Optional[BroadcastingList2[int]] = None,
     ceil_mode: bool = False,
@@ -1120,6 +1131,9 @@ def lp_pool2d(
 
     If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
+
+    When ``ceil_mode`` is ``True``, sliding windows may go off-bounds if they start within the left
+    padding or the input. Sliding windows that would start in the right padded region are ignored.
 
     See :class:`~torch.nn.LPPool2d` for details.
     """
@@ -1146,7 +1160,7 @@ def lp_pool2d(
 
 def lp_pool1d(
     input: Tensor,
-    norm_type: Union[int, float],
+    norm_type: int | float,
     kernel_size: int,
     stride: Optional[BroadcastingList1[int]] = None,
     ceil_mode: bool = False,
@@ -1155,6 +1169,9 @@ def lp_pool1d(
 
     If the sum of all inputs to the power of `p` is
     zero, the gradient is set to zero as well.
+
+    When ``ceil_mode`` is ``True``, sliding windows may go off-bounds if they start within the left
+    padding or the input. Sliding windows that would start in the right padded region are ignored.
 
     See :class:`~torch.nn.LPPool1d` for details.
     """
@@ -1260,6 +1277,7 @@ def adaptive_max_pool2d_with_indices(
             output_size,
             return_indices=return_indices,
         )
+    # pyrefly: ignore [bad-argument-type]
     output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_max_pool2d(input, output_size)
 
@@ -1317,6 +1335,7 @@ def adaptive_max_pool3d_with_indices(
             output_size,
             return_indices=return_indices,
         )
+    # pyrefly: ignore [bad-argument-type]
     output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_max_pool3d(input, output_size)
 
@@ -1375,6 +1394,7 @@ def adaptive_avg_pool2d(input: Tensor, output_size: BroadcastingList2[int]) -> T
     """
     if has_torch_function_unary(input):
         return handle_torch_function(adaptive_avg_pool2d, (input,), input, output_size)
+    # pyrefly: ignore [bad-argument-type]
     _output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_avg_pool2d(input, _output_size)
 
@@ -1390,6 +1410,7 @@ def adaptive_avg_pool3d(input: Tensor, output_size: BroadcastingList3[int]) -> T
     """
     if has_torch_function_unary(input):
         return handle_torch_function(adaptive_avg_pool3d, (input,), input, output_size)
+    # pyrefly: ignore [bad-argument-type]
     _output_size = _list_with_default(output_size, input.size())
     return torch._C._nn.adaptive_avg_pool3d(input, _output_size)
 
@@ -1532,7 +1553,7 @@ def dropout2d(
             "exists to provide channel-wise dropout on inputs with 2 spatial dimensions, "
             "a channel dimension, and an optional batch dimension (i.e. 3D or 4D inputs)."
         )
-        warnings.warn(warn_msg)
+        warnings.warn(warn_msg, stacklevel=2)
 
     # TODO: Properly support no-batch-dim inputs. For now, these are NOT supported; passing
     # a 3D input will perform dropout1d behavior instead. This was done historically and the
@@ -1544,7 +1565,8 @@ def dropout2d(
             "1D dropout behavior is desired - input is interpreted as shape (N, C, L), where C "
             "is the channel dim. This behavior will change in a future release to interpret the "
             "input as one without a batch dimension, i.e. shape (C, H, W). To maintain the 1D "
-            "channel-wise dropout behavior, please switch to using dropout1d instead."
+            "channel-wise dropout behavior, please switch to using dropout1d instead.",
+            stacklevel=2,
         )
 
     result = (
@@ -1591,7 +1613,7 @@ def dropout3d(
             "exists to provide channel-wise dropout on inputs with 3 spatial dimensions, "
             "a channel dimension, and an optional batch dimension (i.e. 4D or 5D inputs)."
         )
-        warnings.warn(warn_msg)
+        warnings.warn(warn_msg, stacklevel=2)
 
     is_batched = inp_dim == 5
     if not is_batched:
@@ -2191,7 +2213,7 @@ def gumbel_softmax(
             gumbel_softmax, (logits,), logits, tau=tau, hard=hard, eps=eps, dim=dim
         )
     if eps != 1e-10:
-        warnings.warn("`eps` parameter is deprecated and has no effect.")
+        warnings.warn("`eps` parameter is deprecated and has no effect.", stacklevel=2)
 
     gumbels = (
         -torch.empty_like(logits, memory_format=torch.legacy_contiguous_format)
@@ -2209,7 +2231,7 @@ def gumbel_softmax(
         ).scatter_(dim, index, 1.0)
         ret = y_hard - y_soft.detach() + y_soft
     else:
-        # Reparametrization trick.
+        # Reparameterization trick.
         ret = y_soft
     return ret
 
@@ -2425,6 +2447,7 @@ def _no_grad_embedding_renorm_(
     input: Tensor,
     max_norm: float,
     norm_type: float,
+    # pyrefly: ignore [bad-return]
 ) -> tuple[Tensor, Tensor]:
     torch.embedding_renorm_(weight.detach(), input, max_norm, norm_type)
 
@@ -2521,13 +2544,11 @@ def embedding(
         )
     if padding_idx is not None:
         if padding_idx > 0:
-            assert padding_idx < weight.size(0), (
-                "Padding_idx must be within num_embeddings"
-            )
+            if padding_idx >= weight.size(0):
+                raise AssertionError("Padding_idx must be within num_embeddings")
         elif padding_idx < 0:
-            assert padding_idx >= -weight.size(0), (
-                "Padding_idx must be within num_embeddings"
-            )
+            if padding_idx < -weight.size(0):
+                raise AssertionError("Padding_idx must be within num_embeddings")
             padding_idx = weight.size(0) + padding_idx
     else:
         padding_idx = -1
@@ -2592,7 +2613,9 @@ def embedding_bag(
             :attr:`offsets`, if those are not None.
 
         include_last_offset (bool, optional): if ``True``, the size of offsets is equal to the number of bags + 1.
-            The last element is the size of the input, or the ending index position of the last bag (sequence).
+                                              The last element is the size of the input, or the ending index position
+                                              of the last bag (sequence). This matches the CSR format. Ignored when
+                                              input is 2D. Default ``False``.
 
         padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the
                                      gradient; therefore, the embedding vector at :attr:`padding_idx` is not updated
@@ -2661,7 +2684,8 @@ def embedding_bag(
         warnings.warn(
             "Argument order of nn.functional.embedding_bag was changed. "
             "Usage `embedding_bag(weight, input, ...)` is deprecated, "
-            "and should now be `embedding_bag(input, weight, ...)`."
+            "and should now be `embedding_bag(input, weight, ...)`.",
+            stacklevel=2,
         )
         weight, input = input, weight
 
@@ -2678,6 +2702,7 @@ def embedding_bag(
 
     if not torch.jit.is_scripting() and input.dim() == 2 and input.is_nested:
         include_last_offset = True
+        # pyrefly: ignore [missing-attribute]
         offsets = input.offsets()
         input = input.values().reshape(-1)
         if per_sample_weights is not None:
@@ -2701,7 +2726,7 @@ def embedding_bag(
         offsets = torch.arange(
             0, input.numel(), input.size(1), dtype=input.dtype, device=input.device
         )
-
+        include_last_offset = False
         input = input.reshape(-1)
         if per_sample_weights is not None:
             per_sample_weights = per_sample_weights.reshape(-1)
@@ -2812,7 +2837,11 @@ def batch_norm(
             eps=eps,
         )
     if training:
+        # pyrefly: ignore [bad-argument-type]
         _verify_batch_size(input.size())
+
+    if eps <= 0.0:
+        raise ValueError(f"batch_norm eps must be positive, but got {eps}")
 
     return torch.batch_norm(
         input,
@@ -2867,6 +2896,7 @@ def instance_norm(
             eps=eps,
         )
     if use_input_stats:
+        # pyrefly: ignore [bad-argument-type]
         _verify_spatial_size(input.size())
     return torch.instance_norm(
         input,
@@ -2992,11 +3022,13 @@ def local_response_norm(
     div = input.mul(input)
     if dim == 3:
         div = div.unsqueeze(1)
+        # pyrefly: ignore [bad-argument-type]
         div = pad(div, (0, 0, size // 2, (size - 1) // 2))
         div = avg_pool2d(div, (size, 1), stride=1).squeeze(1)
     else:
         sizes = input.size()
         div = div.view(sizes[0], 1, sizes[1], sizes[2], -1)
+        # pyrefly: ignore [bad-argument-type]
         div = pad(div, (0, 0, 0, 0, size // 2, (size - 1) // 2))
         div = avg_pool3d(div, (size, 1, 1), stride=1).squeeze(1)
         div = div.view(sizes)
@@ -3145,7 +3177,12 @@ def nll_loss(
     if size_average is not None or reduce is not None:
         reduction = _Reduction.legacy_get_string(size_average, reduce)
     return torch._C._nn.nll_loss_nd(
-        input, target, weight, _Reduction.get_enum(reduction), ignore_index
+        input,
+        target,
+        weight,
+        # pyrefly: ignore [bad-argument-type]
+        _Reduction.get_enum(reduction),
+        ignore_index,
     )
 
 
@@ -3212,7 +3249,7 @@ def poisson_nll_loss(
 def gaussian_nll_loss(
     input: Tensor,
     target: Tensor,
-    var: Union[Tensor, float],
+    var: Tensor | float,
     full: bool = False,
     eps: float = 1e-6,
     reduction: str = "mean",
@@ -3266,11 +3303,14 @@ def gaussian_nll_loss(
         if input.size()[:-1] == var.size():
             var = torch.unsqueeze(var, -1)
 
-        # This checks if the sizes match up to the final dimension, and the final dimension of var is of size 1.
+        # This checks if the var is broadcastable to the input and there is only one mismatched dimension.
         # This is also a homoscedastic case.
         # e.g. input.size = (10, 2, 3), var.size = (10, 2, 1)
+        # or  input.size = (4, 3, 32, 32), var.size = (4, 1, 32, 32)
         elif (
-            input.size()[:-1] == var.size()[:-1] and var.size(-1) == 1
+            input.ndim == var.ndim
+            and sum(y for x, y in zip(input.size(), var.size(), strict=True) if x != y)
+            == 1
         ):  # Heteroscedastic case
             pass
 
@@ -3288,6 +3328,7 @@ def gaussian_nll_loss(
         var.clamp_(min=eps)
 
     # Calculate the loss
+    # pyrefly: ignore [unsupported-operation]
     loss = 0.5 * (torch.log(var) + (input - target) ** 2 / var)
     if full:
         loss += 0.5 * math.log(2 * math.pi)
@@ -3359,7 +3400,8 @@ def kl_div(
             warnings.warn(
                 "reduction: 'mean' divides the total loss by both the batch size and the support size."
                 "'batchmean' divides only by the batch size, and aligns with the KL div math definition."
-                "'mean' will be changed to behave the same as 'batchmean' in the next major release."
+                "'mean' will be changed to behave the same as 'batchmean' in the next major release.",
+                stacklevel=2,
             )
 
         # special case for batchmean
@@ -3463,6 +3505,7 @@ def cross_entropy(
         input,
         target,
         weight,
+        # pyrefly: ignore [bad-argument-type]
         _Reduction.get_enum(reduction),
         ignore_index,
         label_smoothing,
@@ -3527,6 +3570,7 @@ def binary_cross_entropy(
         new_size = _infer_size(target.size(), weight.size())
         weight = weight.expand(new_size)
 
+    # pyrefly: ignore [bad-argument-type]
     return torch._C._nn.binary_cross_entropy(input, target, weight, reduction_enum)
 
 
@@ -3546,8 +3590,9 @@ def binary_cross_entropy_with_logits(
     Args:
         input: Tensor of arbitrary shape as unnormalized scores (often referred to as logits).
         target: Tensor of the same shape as input with values between 0 and 1
-        weight (Tensor, optional): a manual rescaling weight
-            if provided it's repeated to match input tensor shape
+        weight (Tensor, optional): a manual rescaling weight. If provided, the dimension
+           of weight supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
+           with respect to the input (and target) shape.
         size_average (bool, optional): Deprecated (see :attr:`reduction`).
         reduce (bool, optional): Deprecated (see :attr:`reduction`).
         reduction (str, optional): Specifies the reduction to apply to the output:
@@ -3641,7 +3686,7 @@ def smooth_l1_loss(
             reduction=reduction,
             beta=beta,
         )
-    if not (target.size() == input.size()):
+    if target.size() != input.size():
         warnings.warn(
             f"Using a target size ({target.size()}) that is different to the input size ({input.size()}). "
             "This will likely lead to incorrect results due to broadcasting. "
@@ -3655,11 +3700,18 @@ def smooth_l1_loss(
 
     if beta == 0.0:
         return torch._C._nn.l1_loss(
-            expanded_input, expanded_target, _Reduction.get_enum(reduction)
+            expanded_input,
+            expanded_target,
+            # pyrefly: ignore [bad-argument-type]
+            _Reduction.get_enum(reduction),
         )
     else:
         return torch._C._nn.smooth_l1_loss(
-            expanded_input, expanded_target, _Reduction.get_enum(reduction), beta
+            expanded_input,
+            expanded_target,
+            # pyrefly: ignore [bad-argument-type]
+            _Reduction.get_enum(reduction),
+            beta,
         )
 
 
@@ -3704,7 +3756,7 @@ def huber_loss(
             weight=weight,
         )
 
-    if not (target.size() == input.size()):
+    if target.size() != input.size():
         warnings.warn(
             f"Using a target size ({target.size()}) that is different to the input size ({input.size()}). "
             "This will likely lead to incorrect results due to broadcasting. "
@@ -3717,7 +3769,11 @@ def huber_loss(
     if weight is None:
         # Use the optimized C++ backend for standard Huber loss
         return torch._C._nn.huber_loss(
-            expanded_input, expanded_target, _Reduction.get_enum(reduction), delta
+            expanded_input,
+            expanded_target,
+            # pyrefly: ignore [bad-argument-type]
+            _Reduction.get_enum(reduction),
+            delta,
         )
     else:
         if weight.size() != input.size():
@@ -3725,7 +3781,11 @@ def huber_loss(
 
         # Calculate the unweighted loss first
         unweighted_loss = torch._C._nn.huber_loss(
-            expanded_input, expanded_target, _Reduction.get_enum("none"), delta
+            expanded_input,
+            expanded_target,
+            # pyrefly: ignore [bad-argument-type]
+            _Reduction.get_enum("none"),
+            delta,
         )
 
         # Apply weight to the unweighted loss
@@ -3781,7 +3841,7 @@ def l1_loss(
             reduce=reduce,
             reduction=reduction,
         )
-    if not (target.size() == input.size()):
+    if target.size() != input.size():
         warnings.warn(
             f"Using a target size ({target.size()}) that is different to the input size ({input.size()}). "
             "This will likely lead to incorrect results due to broadcasting. "
@@ -3812,7 +3872,10 @@ def l1_loss(
             )
     else:
         return torch._C._nn.l1_loss(
-            expanded_input, expanded_target, _Reduction.get_enum(reduction)
+            expanded_input,
+            expanded_target,
+            # pyrefly: ignore [bad-argument-type]
+            _Reduction.get_enum(reduction),
         )
 
 
@@ -3854,7 +3917,7 @@ def mse_loss(
             weight=weight,
         )
 
-    if not (target.size() == input.size()):
+    if target.size() != input.size():
         warnings.warn(
             f"Using a target size ({target.size()}) that is different to the input size ({input.size()}). "
             "This will likely lead to incorrect results due to broadcasting. "
@@ -3887,7 +3950,10 @@ def mse_loss(
             )
     else:
         return torch._C._nn.mse_loss(
-            expanded_input, expanded_target, _Reduction.get_enum(reduction)
+            expanded_input,
+            expanded_target,
+            # pyrefly: ignore [bad-argument-type]
+            _Reduction.get_enum(reduction),
         )
 
 
@@ -4024,6 +4090,7 @@ def multilabel_margin_loss(
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction_enum = _Reduction.get_enum(reduction)
+    # pyrefly: ignore [bad-argument-type]
     return torch._C._nn.multilabel_margin_loss(input, target, reduction_enum)
 
 
@@ -4065,6 +4132,7 @@ def soft_margin_loss(
         reduction_enum = _Reduction.legacy_get_enum(size_average, reduce)
     else:
         reduction_enum = _Reduction.get_enum(reduction)
+    # pyrefly: ignore [bad-argument-type]
     return torch._C._nn.soft_margin_loss(input, target, reduction_enum)
 
 
@@ -4229,7 +4297,13 @@ def multi_margin_loss(
             raise ValueError("weight must be one-dimensional")
 
     return torch._C._nn.multi_margin_loss(
-        input, target, p, margin, weight, reduction_enum
+        input,
+        target,
+        p,
+        margin,
+        weight,
+        # pyrefly: ignore [bad-argument-type]
+        reduction_enum,
     )
 
 
@@ -4375,6 +4449,7 @@ def upsample(  # noqa: F811
     scale_factor: Optional[float] = None,
     mode: str = "nearest",
     align_corners: Optional[bool] = None,
+    # pyrefly: ignore [bad-return]
 ) -> Tensor:  # noqa: B950
     pass
 
@@ -4386,6 +4461,7 @@ def upsample(  # noqa: F811
     scale_factor: Optional[float] = None,
     mode: str = "nearest",
     align_corners: Optional[bool] = None,
+    # pyrefly: ignore [bad-return]
 ) -> Tensor:  # noqa: B950
     pass
 
@@ -4488,6 +4564,7 @@ def interpolate(  # noqa: F811
     align_corners: Optional[bool] = None,
     recompute_scale_factor: Optional[bool] = None,
     antialias: bool = False,
+    # pyrefly: ignore [bad-return]
 ) -> Tensor:  # noqa: B950
     pass
 
@@ -4501,6 +4578,7 @@ def interpolate(  # noqa: F811
     align_corners: Optional[bool] = None,
     recompute_scale_factor: Optional[bool] = None,
     antialias: bool = False,
+    # pyrefly: ignore [bad-return]
 ) -> Tensor:  # noqa: B950
     pass
 
@@ -4514,6 +4592,7 @@ def interpolate(  # noqa: F811
     align_corners: Optional[bool] = None,
     recompute_scale_factor: Optional[bool] = None,
     antialias: bool = False,
+    # pyrefly: ignore [bad-return]
 ) -> Tensor:  # noqa: B950
     pass
 
@@ -4527,6 +4606,7 @@ def interpolate(  # noqa: F811
     align_corners: Optional[bool] = None,
     recompute_scale_factor: Optional[bool] = None,
     antialias: bool = False,
+    # pyrefly: ignore [bad-return]
 ) -> Tensor:
     pass
 
@@ -4640,7 +4720,8 @@ def interpolate(  # noqa: F811
     if size is not None and scale_factor is not None:
         raise ValueError("only one of size or scale_factor should be defined")
     elif size is not None:
-        assert scale_factor is None
+        if scale_factor is not None:
+            raise AssertionError("scale_factor must be None when size is specified")
         scale_factors = None
         if isinstance(size, (list, tuple)):
             if len(size) != dim:
@@ -4660,7 +4741,8 @@ def interpolate(  # noqa: F811
         else:
             output_size = [size for _ in range(dim)]
     elif scale_factor is not None:
-        assert size is None
+        if size is not None:
+            raise AssertionError("size must be None when scale_factor is specified")
         output_size = None
         if isinstance(scale_factor, (list, tuple)):
             if len(scale_factor) != dim:
@@ -4687,20 +4769,22 @@ def interpolate(  # noqa: F811
         )
 
     # "area" mode always requires an explicit size rather than scale factor.
-    # Re-use the recompute_scale_factor code path.
+    # Reuse the recompute_scale_factor code path.
     if mode == "area" and output_size is None:
         recompute_scale_factor = True
 
     if recompute_scale_factor is not None and recompute_scale_factor:
         # We compute output_size here, then un-set scale_factors.
         # The C++ code will recompute it based on the (integer) output size.
-        assert scale_factors is not None
+        if scale_factors is None:
+            raise AssertionError("scale_factors is unexpectedly None")
         if not torch.jit.is_scripting() and torch._C._get_tracing_state():
             # make scale_factor a tensor in tracing so constant doesn't get baked in
             output_size = [
                 (
                     torch.floor(
                         (
+                            # pyrefly: ignore [missing-attribute]
                             input.size(i + 2).float()
                             * torch.tensor(scale_factors[i], dtype=torch.float32)
                         ).float()
@@ -4710,7 +4794,7 @@ def interpolate(  # noqa: F811
             ]
         elif torch.jit.is_scripting():
             output_size = [
-                int(math.floor(float(input.size(i + 2)) * scale_factors[i]))
+                math.floor(float(input.size(i + 2)) * scale_factors[i])
                 for i in range(dim)
             ]
         else:
@@ -4725,46 +4809,64 @@ def interpolate(  # noqa: F811
         )
 
     if input.dim() == 3 and mode == "nearest":
+        # pyrefly: ignore [bad-argument-type]
         return torch._C._nn.upsample_nearest1d(input, output_size, scale_factors)
     if input.dim() == 4 and mode == "nearest":
+        # pyrefly: ignore [bad-argument-type]
         return torch._C._nn.upsample_nearest2d(input, output_size, scale_factors)
     if input.dim() == 5 and mode == "nearest":
+        # pyrefly: ignore [bad-argument-type]
         return torch._C._nn.upsample_nearest3d(input, output_size, scale_factors)
 
     if input.dim() == 3 and mode == "nearest-exact":
+        # pyrefly: ignore [bad-argument-type]
         return torch._C._nn._upsample_nearest_exact1d(input, output_size, scale_factors)
     if input.dim() == 4 and mode == "nearest-exact":
+        # pyrefly: ignore [bad-argument-type]
         return torch._C._nn._upsample_nearest_exact2d(input, output_size, scale_factors)
     if input.dim() == 5 and mode == "nearest-exact":
+        # pyrefly: ignore [bad-argument-type]
         return torch._C._nn._upsample_nearest_exact3d(input, output_size, scale_factors)
 
     if input.dim() == 3 and mode == "area":
-        assert output_size is not None
+        if output_size is None:
+            raise AssertionError("output_size is unexpectedly None")
+        # pyrefly: ignore [bad-argument-type]
         return adaptive_avg_pool1d(input, output_size)
     if input.dim() == 4 and mode == "area":
-        assert output_size is not None
+        if output_size is None:
+            raise AssertionError("output_size is unexpectedly None")
         return adaptive_avg_pool2d(input, output_size)
     if input.dim() == 5 and mode == "area":
-        assert output_size is not None
+        if output_size is None:
+            raise AssertionError("output_size is unexpectedly None")
         return adaptive_avg_pool3d(input, output_size)
 
     if input.dim() == 3 and mode == "linear":
-        assert align_corners is not None
+        if align_corners is None:
+            raise AssertionError("align_corners is unexpectedly None")
         return torch._C._nn.upsample_linear1d(
-            input, output_size, align_corners, scale_factors
+            input,
+            # pyrefly: ignore [bad-argument-type]
+            output_size,
+            align_corners,
+            scale_factors,
         )
     if input.dim() == 4 and mode == "bilinear":
-        assert align_corners is not None
+        if align_corners is None:
+            raise AssertionError("align_corners is unexpectedly None")
         if antialias:
             return torch._C._nn._upsample_bilinear2d_aa(
-                input, output_size, align_corners, scale_factors
+                input,
+                # pyrefly: ignore [bad-argument-type]
+                output_size,
+                align_corners,
+                scale_factors,
             )
         # Two levels are necessary to prevent TorchScript from touching
         # are_deterministic_algorithms_enabled.
         if not torch.jit.is_scripting():
-            if torch.are_deterministic_algorithms_enabled() and (
-                input.is_cuda or input.is_xpu
-            ):
+            if not input.is_cpu and torch.are_deterministic_algorithms_enabled():
                 # Use slow decomp whose backward will be in terms of index_put
                 # importlib is required because the import cannot be top level
                 # (cycle) and cannot be nested (TS doesn't support)
@@ -4772,21 +4874,49 @@ def interpolate(  # noqa: F811
                     "torch._decomp.decompositions"
                 )._upsample_linear_vec(input, output_size, align_corners, scale_factors)
         return torch._C._nn.upsample_bilinear2d(
-            input, output_size, align_corners, scale_factors
+            input,
+            # pyrefly: ignore [bad-argument-type]
+            output_size,
+            align_corners,
+            scale_factors,
         )
     if input.dim() == 5 and mode == "trilinear":
-        assert align_corners is not None
+        if align_corners is None:
+            raise AssertionError("align_corners is unexpectedly None")
+        # Two levels are necessary to prevent TorchScript from touching
+        # are_deterministic_algorithms_enabled.
+        if not torch.jit.is_scripting():
+            if not input.is_cpu and torch.are_deterministic_algorithms_enabled():
+                # Use slow decomp whose backward will be in terms of index_put
+                # importlib is required because the import cannot be top level
+                # (cycle) and cannot be nested (TS doesn't support)
+                return importlib.import_module(
+                    "torch._decomp.decompositions"
+                )._upsample_linear_vec(input, output_size, align_corners, scale_factors)
         return torch._C._nn.upsample_trilinear3d(
-            input, output_size, align_corners, scale_factors
+            input,
+            # pyrefly: ignore [bad-argument-type]
+            output_size,
+            align_corners,
+            scale_factors,
         )
     if input.dim() == 4 and mode == "bicubic":
-        assert align_corners is not None
+        if align_corners is None:
+            raise AssertionError("align_corners is unexpectedly None")
         if antialias:
             return torch._C._nn._upsample_bicubic2d_aa(
-                input, output_size, align_corners, scale_factors
+                input,
+                # pyrefly: ignore [bad-argument-type]
+                output_size,
+                align_corners,
+                scale_factors,
             )
         return torch._C._nn.upsample_bicubic2d(
-            input, output_size, align_corners, scale_factors
+            input,
+            # pyrefly: ignore [bad-argument-type]
+            output_size,
+            align_corners,
+            scale_factors,
         )
 
     if input.dim() == 3 and mode == "bilinear":
@@ -4818,6 +4948,7 @@ def upsample_nearest(  # noqa: F811
     input: Tensor,
     size: Optional[int] = None,
     scale_factor: Optional[float] = None,
+    # pyrefly: ignore [bad-return]
 ) -> Tensor:
     pass
 
@@ -4827,6 +4958,7 @@ def upsample_nearest(  # noqa: F811
     input: Tensor,
     size: Optional[list[int]] = None,
     scale_factor: Optional[float] = None,
+    # pyrefly: ignore [bad-return]
 ) -> Tensor:
     pass
 
@@ -4868,6 +5000,7 @@ def upsample_bilinear(  # noqa: F811
     input: Tensor,
     size: Optional[int] = None,
     scale_factor: Optional[float] = None,
+    # pyrefly: ignore [bad-return]
 ) -> Tensor:
     pass
 
@@ -4877,6 +5010,7 @@ def upsample_bilinear(  # noqa: F811
     input: Tensor,
     size: Optional[list[int]] = None,
     scale_factor: Optional[float] = None,
+    # pyrefly: ignore [bad-return]
 ) -> Tensor:
     pass
 
@@ -4886,6 +5020,7 @@ def upsample_bilinear(  # noqa: F811
     input: Tensor,
     size: Optional[int] = None,
     scale_factor: Optional[list[float]] = None,
+    # pyrefly: ignore [bad-return]
 ) -> Tensor:
     pass
 
@@ -4895,6 +5030,7 @@ def upsample_bilinear(  # noqa: F811
     input: Tensor,
     size: Optional[list[int]] = None,
     scale_factor: Optional[list[float]] = None,
+    # pyrefly: ignore [bad-return]
 ) -> Tensor:
     pass
 
@@ -4907,7 +5043,7 @@ def upsample_bilinear(input, size=None, scale_factor=None):  # noqa: F811
         This is equivalent with
         ``nn.functional.interpolate(..., mode='bilinear', align_corners=True)``.
 
-    Expected inputs are spatial (4 dimensional). Use `upsample_trilinear` fo
+    Expected inputs are spatial (4 dimensional). Use `upsample_trilinear` for
     volumetric (5 dimensional) inputs.
 
     Args:
@@ -5097,7 +5233,8 @@ def grid_sample(
             "Default grid_sample and affine_grid behavior has changed "
             "to align_corners=False since 1.3.0. Please specify "
             "align_corners=True if the old behavior is desired. "
-            "See the documentation of grid_sample for details."
+            "See the documentation of grid_sample for details.",
+            stacklevel=2,
         )
         align_corners = False
 
@@ -5164,7 +5301,8 @@ def affine_grid(
             "Default grid_sample and affine_grid behavior has changed "
             "to align_corners=False since 1.3.0. Please specify "
             "align_corners=True if the old behavior is desired. "
-            "See the documentation of grid_sample for details."
+            "See the documentation of grid_sample for details.",
+            stacklevel=2,
         )
         align_corners = False
 
@@ -5198,7 +5336,8 @@ def affine_grid(
             "Since version 1.3.0, affine_grid behavior has changed "
             "for unit-size grids when align_corners=True. "
             "This is not an intended use case of affine_grid. "
-            "See the documentation of affine_grid for details."
+            "See the documentation of affine_grid for details.",
+            stacklevel=2,
         )
     elif min(size) <= 0:
         raise ValueError(f"Expected non-zero, positive output size. Got {size}")
@@ -5572,7 +5711,8 @@ def normalize(
 
 
 def assert_int_or_pair(arg: list[int], arg_name: str, message: str) -> None:
-    assert isinstance(arg, int) or len(arg) == 2, message.format(arg_name)
+    if not (isinstance(arg, int) or len(arg) == 2):
+        raise AssertionError(message.format(arg_name))
 
 
 def unfold(
@@ -5701,6 +5841,7 @@ def _in_projection_packed(
                 .squeeze(-2)
                 .contiguous()
             )
+            # pyrefly: ignore [bad-return]
             return proj[0], proj[1], proj[2]
         else:
             # encoder-decoder attention
@@ -5719,6 +5860,7 @@ def _in_projection_packed(
                 .squeeze(-2)
                 .contiguous()
             )
+            # pyrefly: ignore [bad-return]
             return (q_proj, kv_proj[0], kv_proj[1])
     else:
         w_q, w_k, w_v = w.chunk(3)
@@ -5726,6 +5868,7 @@ def _in_projection_packed(
             b_q = b_k = b_v = None
         else:
             b_q, b_k, b_v = b.chunk(3)
+        # pyrefly: ignore [bad-return]
         return linear(q, w_q, b_q), linear(k, w_k, b_k), linear(v, w_v, b_v)
 
 
@@ -5774,27 +5917,30 @@ def _in_projection(
 
     """
     Eq, Ek, Ev = q.size(-1), k.size(-1), v.size(-1)
-    assert w_q.shape == (
-        Eq,
-        Eq,
-    ), f"expecting query weights shape of {(Eq, Eq)}, but got {w_q.shape}"
-    assert w_k.shape == (
-        Eq,
-        Ek,
-    ), f"expecting key weights shape of {(Eq, Ek)}, but got {w_k.shape}"
-    assert w_v.shape == (
-        Eq,
-        Ev,
-    ), f"expecting value weights shape of {(Eq, Ev)}, but got {w_v.shape}"
-    assert b_q is None or b_q.shape == (Eq,), (
-        f"expecting query bias shape of {(Eq,)}, but got {b_q.shape}"
-    )
-    assert b_k is None or b_k.shape == (Eq,), (
-        f"expecting key bias shape of {(Eq,)}, but got {b_k.shape}"
-    )
-    assert b_v is None or b_v.shape == (Eq,), (
-        f"expecting value bias shape of {(Eq,)}, but got {b_v.shape}"
-    )
+    if w_q.shape != (Eq, Eq):
+        raise AssertionError(
+            f"expecting query weights shape of {(Eq, Eq)}, but got {w_q.shape}"
+        )
+    if w_k.shape != (Eq, Ek):
+        raise AssertionError(
+            f"expecting key weights shape of {(Eq, Ek)}, but got {w_k.shape}"
+        )
+    if w_v.shape != (Eq, Ev):
+        raise AssertionError(
+            f"expecting value weights shape of {(Eq, Ev)}, but got {w_v.shape}"
+        )
+    if b_q is not None and b_q.shape != (Eq,):
+        raise AssertionError(
+            f"expecting query bias shape of {(Eq,)}, but got {b_q.shape}"
+        )
+    if b_k is not None and b_k.shape != (Eq,):
+        raise AssertionError(
+            f"expecting key bias shape of {(Eq,)}, but got {b_k.shape}"
+        )
+    if b_v is not None and b_v.shape != (Eq,):
+        raise AssertionError(
+            f"expecting value bias shape of {(Eq,)}, but got {b_v.shape}"
+        )
     return linear(q, w_q, b_q), linear(k, w_k, b_k), linear(v, w_v, b_v)
 
 
@@ -5819,7 +5965,6 @@ scaled_dot_product_attention = _add_docstr(
                 assert attn_mask is None
                 temp_mask = torch.ones(L, S, dtype=torch.bool).tril(diagonal=0)
                 attn_bias.masked_fill_(temp_mask.logical_not(), float("-inf"))
-                attn_bias.to(query.dtype)
 
             if attn_mask is not None:
                 if attn_mask.dtype == torch.bool:
@@ -5857,6 +6002,21 @@ scaled_dot_product_attention = _add_docstr(
                 def forward(self, ...):
                     return F.scaled_dot_product_attention(...,
                         dropout_p=(self.p if self.training else 0.0))
+
+    Note:
+
+        The boolean mask semantics for ``attn_mask`` are the inverse of
+        :class:`~torch.nn.MultiheadAttention`'s ``key_padding_mask``.
+
+        In :func:`scaled_dot_product_attention`, ``True`` indicates values
+        to **participate** in attention.
+
+        In :class:`~torch.nn.MultiheadAttention`, ``True`` indicates values
+        to be **masked out** (padding).
+
+        If migrating from MHA, ensure you invert your boolean mask (e.g.,
+        using ``~mask`` or ``mask.logical_not()``).
+
 
     Note:
 
@@ -5975,44 +6135,51 @@ def _mha_shape_check(
     if query.dim() == 3:
         # Batched Inputs
         is_batched = True
-        assert key.dim() == 3 and value.dim() == 3, (
-            "For batched (3-D) `query`, expected `key` and `value` to be 3-D"
-            f" but found {key.dim()}-D and {value.dim()}-D tensors respectively"
-        )
+        if key.dim() != 3 or value.dim() != 3:
+            raise AssertionError(
+                "For batched (3-D) `query`, expected `key` and `value` to be 3-D"
+                f" but found {key.dim()}-D and {value.dim()}-D tensors respectively"
+            )
         if key_padding_mask is not None:
-            assert key_padding_mask.dim() == 2, (
-                "For batched (3-D) `query`, expected `key_padding_mask` to be `None` or 2-D"
-                f" but found {key_padding_mask.dim()}-D tensor instead"
-            )
+            if key_padding_mask.dim() != 2:
+                raise AssertionError(
+                    "For batched (3-D) `query`, expected `key_padding_mask` to be `None` or 2-D"
+                    f" but found {key_padding_mask.dim()}-D tensor instead"
+                )
         if attn_mask is not None:
-            assert attn_mask.dim() in (2, 3), (
-                "For batched (3-D) `query`, expected `attn_mask` to be `None`, 2-D or 3-D"
-                f" but found {attn_mask.dim()}-D tensor instead"
-            )
+            if attn_mask.dim() not in (2, 3):
+                raise AssertionError(
+                    "For batched (3-D) `query`, expected `attn_mask` to be `None`, 2-D or 3-D"
+                    f" but found {attn_mask.dim()}-D tensor instead"
+                )
     elif query.dim() == 2:
         # Unbatched Inputs
         is_batched = False
-        assert key.dim() == 2 and value.dim() == 2, (
-            "For unbatched (2-D) `query`, expected `key` and `value` to be 2-D"
-            f" but found {key.dim()}-D and {value.dim()}-D tensors respectively"
-        )
+        if key.dim() != 2 or value.dim() != 2:
+            raise AssertionError(
+                "For unbatched (2-D) `query`, expected `key` and `value` to be 2-D"
+                f" but found {key.dim()}-D and {value.dim()}-D tensors respectively"
+            )
 
         if key_padding_mask is not None:
-            assert key_padding_mask.dim() == 1, (
-                "For unbatched (2-D) `query`, expected `key_padding_mask` to be `None` or 1-D"
-                f" but found {key_padding_mask.dim()}-D tensor instead"
-            )
+            if key_padding_mask.dim() != 1:
+                raise AssertionError(
+                    "For unbatched (2-D) `query`, expected `key_padding_mask` to be `None` or 1-D"
+                    f" but found {key_padding_mask.dim()}-D tensor instead"
+                )
 
         if attn_mask is not None:
-            assert attn_mask.dim() in (2, 3), (
-                "For unbatched (2-D) `query`, expected `attn_mask` to be `None`, 2-D or 3-D"
-                f" but found {attn_mask.dim()}-D tensor instead"
-            )
+            if attn_mask.dim() not in (2, 3):
+                raise AssertionError(
+                    "For unbatched (2-D) `query`, expected `attn_mask` to be `None`, 2-D or 3-D"
+                    f" but found {attn_mask.dim()}-D tensor instead"
+                )
             if attn_mask.dim() == 3:
                 expected_shape = (num_heads, query.shape[0], key.shape[0])
-                assert attn_mask.shape == expected_shape, (
-                    f"Expected `attn_mask` shape to be {expected_shape} but got {attn_mask.shape}"
-                )
+                if attn_mask.shape != expected_shape:
+                    raise AssertionError(
+                        f"Expected `attn_mask` shape to be {expected_shape} but got {attn_mask.shape}"
+                    )
     else:
         raise AssertionError(
             f"query should be unbatched 2D or batched 3D tensor but received {query.dim()}-D query tensor"
@@ -6040,7 +6207,8 @@ def _canonical_mask(
             if _mask_dtype != other_type:
                 warnings.warn(
                     f"Support for mismatched {mask_name} and {other_name} "
-                    "is deprecated. Use same type for both instead."
+                    "is deprecated. Use same type for both instead.",
+                    stacklevel=2,
                 )
         if not _mask_is_float:
             mask = torch.zeros_like(mask, dtype=target_type).masked_fill_(
@@ -6273,45 +6441,53 @@ def multi_head_attention_forward(
             # longer causal.
             is_causal = False
 
-    assert embed_dim == embed_dim_to_check, (
-        f"was expecting embedding dimension of {embed_dim_to_check}, but got {embed_dim}"
-    )
+    if embed_dim != embed_dim_to_check:
+        raise AssertionError(
+            f"was expecting embedding dimension of {embed_dim_to_check}, but got {embed_dim}"
+        )
     if isinstance(embed_dim, torch.Tensor):
         # embed_dim can be a tensor when JIT tracing
         head_dim = embed_dim.div(num_heads, rounding_mode="trunc")
     else:
         head_dim = embed_dim // num_heads
-    assert head_dim * num_heads == embed_dim, (
-        f"embed_dim {embed_dim} not divisible by num_heads {num_heads}"
-    )
+    if head_dim * num_heads != embed_dim:
+        raise AssertionError(
+            f"embed_dim {embed_dim} not divisible by num_heads {num_heads}"
+        )
     if use_separate_proj_weight:
         # allow MHA to have different embedding dimensions when separate projection weights are used
-        assert key.shape[:2] == value.shape[:2], (
-            f"key's sequence and batch dims {key.shape[:2]} do not match value's {value.shape[:2]}"
-        )
+        if key.shape[:2] != value.shape[:2]:
+            raise AssertionError(
+                f"key's sequence and batch dims {key.shape[:2]} do not match value's {value.shape[:2]}"
+            )
     else:
-        assert key.shape == value.shape, (
-            f"key shape {key.shape} does not match value shape {value.shape}"
-        )
+        if key.shape != value.shape:
+            raise AssertionError(
+                f"key shape {key.shape} does not match value shape {value.shape}"
+            )
 
     #
     # compute in-projection
     #
     if not use_separate_proj_weight:
-        assert in_proj_weight is not None, (
-            "use_separate_proj_weight is False but in_proj_weight is None"
-        )
+        if in_proj_weight is None:
+            raise AssertionError(
+                "use_separate_proj_weight is False but in_proj_weight is None"
+            )
         q, k, v = _in_projection_packed(query, key, value, in_proj_weight, in_proj_bias)
     else:
-        assert q_proj_weight is not None, (
-            "use_separate_proj_weight is True but q_proj_weight is None"
-        )
-        assert k_proj_weight is not None, (
-            "use_separate_proj_weight is True but k_proj_weight is None"
-        )
-        assert v_proj_weight is not None, (
-            "use_separate_proj_weight is True but v_proj_weight is None"
-        )
+        if q_proj_weight is None:
+            raise AssertionError(
+                "use_separate_proj_weight is True but q_proj_weight is None"
+            )
+        if k_proj_weight is None:
+            raise AssertionError(
+                "use_separate_proj_weight is True but k_proj_weight is None"
+            )
+        if v_proj_weight is None:
+            raise AssertionError(
+                "use_separate_proj_weight is True but v_proj_weight is None"
+            )
         if in_proj_bias is None:
             b_q = b_k = b_v = None
         else:
@@ -6352,57 +6528,76 @@ def multi_head_attention_forward(
 
     # add bias along batch dimension (currently second)
     if bias_k is not None and bias_v is not None:
-        assert static_k is None, "bias cannot be added to static key."
-        assert static_v is None, "bias cannot be added to static value."
+        if static_k is not None:
+            raise AssertionError("bias cannot be added to static key.")
+        if static_v is not None:
+            raise AssertionError("bias cannot be added to static value.")
         k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
         v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
         if attn_mask is not None:
+            # pyrefly: ignore [bad-argument-type]
             attn_mask = pad(attn_mask, (0, 1))
         if key_padding_mask is not None:
+            # pyrefly: ignore [bad-argument-type]
             key_padding_mask = pad(key_padding_mask, (0, 1))
     else:
-        assert bias_k is None
-        assert bias_v is None
+        if bias_k is not None:
+            raise AssertionError("bias_k is set but bias_v is None")
+        if bias_v is not None:
+            raise AssertionError("bias_v is set but bias_k is None")
 
     #
     # reshape q, k, v for multihead attention and make them batch first
     #
+    # pyrefly: ignore [no-matching-overload]
     q = q.view(tgt_len, bsz * num_heads, head_dim).transpose(0, 1)
     if static_k is None:
+        # pyrefly: ignore [no-matching-overload]
         k = k.view(k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
-        assert static_k.size(0) == bsz * num_heads, (
-            f"expecting static_k.size(0) of {bsz * num_heads}, but got {static_k.size(0)}"
-        )
-        assert static_k.size(2) == head_dim, (
-            f"expecting static_k.size(2) of {head_dim}, but got {static_k.size(2)}"
-        )
+        if static_k.size(0) != bsz * num_heads:
+            raise AssertionError(
+                f"expecting static_k.size(0) of {bsz * num_heads}, but got {static_k.size(0)}"
+            )
+        if static_k.size(2) != head_dim:
+            raise AssertionError(
+                f"expecting static_k.size(2) of {head_dim}, but got {static_k.size(2)}"
+            )
         k = static_k
     if static_v is None:
+        # pyrefly: ignore [no-matching-overload]
         v = v.view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
-        assert static_v.size(0) == bsz * num_heads, (
-            f"expecting static_v.size(0) of {bsz * num_heads}, but got {static_v.size(0)}"
-        )
-        assert static_v.size(2) == head_dim, (
-            f"expecting static_v.size(2) of {head_dim}, but got {static_v.size(2)}"
-        )
+        if static_v.size(0) != bsz * num_heads:
+            raise AssertionError(
+                f"expecting static_v.size(0) of {bsz * num_heads}, but got {static_v.size(0)}"
+            )
+        if static_v.size(2) != head_dim:
+            raise AssertionError(
+                f"expecting static_v.size(2) of {head_dim}, but got {static_v.size(2)}"
+            )
         v = static_v
 
     # add zero attention along batch dimension (now first)
     if add_zero_attn:
         zero_attn_shape = (bsz * num_heads, 1, head_dim)
         k = torch.cat(
-            [k, torch.zeros(zero_attn_shape, dtype=k.dtype, device=k.device)], dim=1
+            # pyrefly: ignore [no-matching-overload]
+            [k, torch.zeros(zero_attn_shape, dtype=k.dtype, device=k.device)],
+            dim=1,
         )
         v = torch.cat(
-            [v, torch.zeros(zero_attn_shape, dtype=v.dtype, device=v.device)], dim=1
+            # pyrefly: ignore [no-matching-overload]
+            [v, torch.zeros(zero_attn_shape, dtype=v.dtype, device=v.device)],
+            dim=1,
         )
         if attn_mask is not None:
+            # pyrefly: ignore [bad-argument-type]
             attn_mask = pad(attn_mask, (0, 1))
         if key_padding_mask is not None:
+            # pyrefly: ignore [bad-argument-type]
             key_padding_mask = pad(key_padding_mask, (0, 1))
 
     # update source sequence length after adjustments
@@ -6435,9 +6630,8 @@ def multi_head_attention_forward(
         _B, _Nt, E = q.shape
         q_scaled = q * math.sqrt(1.0 / float(E))
 
-        assert not (is_causal and attn_mask is None), (
-            "FIXME: is_causal not implemented for need_weights"
-        )
+        if is_causal and attn_mask is None:
+            raise AssertionError("FIXME: is_causal not implemented for need_weights")
 
         if attn_mask is not None:
             attn_output_weights = torch.baddbmm(
@@ -6452,6 +6646,7 @@ def multi_head_attention_forward(
         attn_output = torch.bmm(attn_output_weights, v)
 
         attn_output = (
+            # pyrefly: ignore [no-matching-overload]
             attn_output.transpose(0, 1).contiguous().view(tgt_len * bsz, embed_dim)
         )
         attn_output = linear(attn_output, out_proj_weight, out_proj_bias)
@@ -6478,13 +6673,16 @@ def multi_head_attention_forward(
                 attn_mask = attn_mask.view(bsz, num_heads, -1, src_len)
 
         q = q.view(bsz, num_heads, tgt_len, head_dim)
+        # pyrefly: ignore [no-matching-overload]
         k = k.view(bsz, num_heads, src_len, head_dim)
+        # pyrefly: ignore [no-matching-overload]
         v = v.view(bsz, num_heads, src_len, head_dim)
 
         attn_output = scaled_dot_product_attention(
             q, k, v, attn_mask, dropout_p, is_causal
         )
         attn_output = (
+            # pyrefly: ignore [no-matching-overload]
             attn_output.permute(2, 0, 1, 3).contiguous().view(bsz * tgt_len, embed_dim)
         )
 
@@ -6494,3 +6692,220 @@ def multi_head_attention_forward(
             # squeeze the output if input was unbatched
             attn_output = attn_output.squeeze(1)
         return attn_output, None
+
+
+def grouped_mm(
+    mat_a: Tensor,
+    mat_b: Tensor,
+    *,
+    offs: Optional[Tensor] = None,
+    bias: Optional[Tensor] = None,
+    out_dtype: Optional[torch.dtype] = None,
+) -> Tensor:
+    r"""
+    grouped_mm(mat_a, mat_b, *, offs=None, bias=None, out_dtype=None)
+
+    Computes a grouped matrix multiply that shares weight shapes across experts but
+    allows jagged token counts per expert, which is common in Mixture-of-Experts
+    (MoE) layers. Both ``mat_a`` and ``mat_b`` must be 2D or 3D tensors that already
+    satisfy the physical layout restrictions of grouped GEMM kernels (e.g., row-major
+    ``mat_a`` and column-major ``mat_b`` for FP8 inputs). Inputs are currently
+    expected to be ``torch.bfloat16`` values on CUDA devices with :math:`SM \ge 80`.
+
+    Args:
+        mat_a: Left operand. When 2D, its leading dimension is sliced into groups
+            according to ``offs``. When 3D, its first dimension enumerates the groups
+            directly and ``offs`` must be ``None``.
+        mat_b: Right operand. When both operands are 2D (e.g., MoE weight-gradient
+            updates), the trailing dimension of ``mat_a`` and the leading dimension of
+            ``mat_b`` are partitioned according to the same ``offs`` tensor. For the
+            common forward pass (``out = input @ weight.T``) ``mat_b`` is 3D with
+            shape ``(num_groups, N, K)``.
+        offs: Optional 1D tensor of monotonically increasing ``int32`` offsets that
+            delimit the jagged dimension of any 2D operand. ``offs[i]`` marks the end
+            of group ``i`` and ``offs[-1]`` must be strictly less than the total
+            length of that operand's sliced dimension; elements beyond ``offs[-1]``
+            are ignored.
+        bias: Optional tensor that is added to the grouped outputs. Bias is not
+            jagged and must be broadcastable to the result shape of each group.
+        out_dtype: Optional dtype that controls the accumulation/output dtype.
+            Passing ``torch.float32`` accumulates BF16 inputs in FP32 while keeping
+            the grouped GEMM API non-differentiable.
+
+    Returns:
+        A tensor containing the concatenated results of each per-group GEMM with
+        shape inferred from the operands and ``offs``.
+    """
+
+    return torch._grouped_mm(mat_a, mat_b, offs=offs, bias=bias, out_dtype=out_dtype)
+
+
+def scaled_mm(
+    mat_a: Tensor,
+    mat_b: Tensor,
+    scale_a: Tensor | list[Tensor],
+    scale_recipe_a: ScalingType | list[ScalingType],
+    scale_b: Tensor | list[Tensor],
+    scale_recipe_b: ScalingType | list[ScalingType],
+    swizzle_a: SwizzleType | list[SwizzleType] | None = None,
+    swizzle_b: SwizzleType | list[SwizzleType] | None = None,
+    bias: Optional[Tensor] = None,
+    output_dtype: Optional[torch.dtype] = torch.bfloat16,
+    contraction_dim: list[int] | tuple[int, ...] = (),
+    use_fast_accum: bool = False,
+) -> Tensor:
+    r"""
+    scaled_mm(mat_a, mat_b, scale_a, scale_recipe_a, scale_b, scale_recipe_b, swizzle_a, swizzle_b, bias, output_dtype,
+              contraction_dim, use_fast_accum)
+
+    Applies a scaled matrix-multiply, mm(mat_a, mat_b) where the scaling of mat_a and mat_b are described by
+    scale_recipe_a and scale_recipe_b respectively.
+
+    Args:
+        scale_a: Tensor containing decoding scaling factors for mat_a
+        scale_recipe_a: Enum describing how mat_a has been scaled
+        scale_b: Tensor containing decoding scaling factors for mat_b
+        scale_recipe_b: Enum describing how mat_b has been scaled
+        swizzle_a: Enum describing the swizzling pattern (if any) of scale_a
+        swizzle_b: Enum describing the swizzling pattern (if any) of scale_b
+        bias: optional bias term to be added to the output
+        output_dtype: dtype used for the output tensor
+        contraction_dim: describe which dimensions are :math:`K` in the matmul.
+        use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
+    """
+
+    def expand_single_value(v: _Any | list[_Any] | None) -> list[_Any]:
+        if v is None:
+            return []
+        elif not isinstance(v, (list)):
+            return [
+                v,
+            ]
+        else:
+            return v
+
+    scale_a = expand_single_value(scale_a)
+    scale_recipe_a = expand_single_value(scale_recipe_a)
+    scale_b = expand_single_value(scale_b)
+    scale_recipe_b = expand_single_value(scale_recipe_b)
+    swizzle_a = expand_single_value(swizzle_a)
+    swizzle_b = expand_single_value(swizzle_b)
+
+    # native_functions has restrictions on what can be defined
+    # & passed through - std::optional<ArrayRef<Tensor>> for instance
+    # *cannot* be passed, but an empty vector (list) can.
+    # So, we need to convert None arguments for lists in python
+    # explicitly into empty lists.
+    def list_or_empty(l: list[_Any] | None) -> list[_Any]:
+        return l if l else []
+
+    def enum_list_as_int_list(l: _Any | list[_Any]) -> list[_Any]:
+        if not isinstance(l, list):
+            l = [
+                l,
+            ]
+        return [li.value for li in l]
+
+    out = torch._scaled_mm_v2(
+        mat_a,
+        mat_b,
+        scale_a,
+        enum_list_as_int_list(scale_recipe_a),
+        enum_list_as_int_list(list_or_empty(swizzle_a)),
+        scale_b,
+        enum_list_as_int_list(scale_recipe_b),
+        enum_list_as_int_list(list_or_empty(swizzle_b)),
+        bias,
+        output_dtype,
+        contraction_dim,
+        use_fast_accum,
+    )
+
+    return out
+
+
+def scaled_grouped_mm(
+    mat_a: Tensor,
+    mat_b: Tensor,
+    scale_a: Tensor | list[Tensor],
+    scale_recipe_a: ScalingType | list[ScalingType],
+    scale_b: Tensor | list[Tensor],
+    scale_recipe_b: ScalingType | list[ScalingType],
+    swizzle_a: SwizzleType | list[SwizzleType] | None = None,
+    swizzle_b: SwizzleType | list[SwizzleType] | None = None,
+    bias: Optional[Tensor] = None,
+    offs: Optional[Tensor] = None,
+    output_dtype: Optional[torch.dtype] = torch.bfloat16,
+    contraction_dim: list[int] | tuple[int, ...] = (),
+    use_fast_accum: bool = False,
+) -> Tensor:
+    r"""
+    scaled_grouped_mm(mat_a, mat_b, scale_a, scale_recipe_a, scale_b, scale_recipe_b, swizzle_a, swizzle_b, bias, offs,
+              output_dtype, use_fast_accum)
+
+    Applies a grouped scaled matrix-multiply, grouped_mm(mat_a, mat_b) where the scaling of mat_a and mat_b are described by
+    scale_recipe_a and scale_recipe_b respectively.
+
+    Args:
+        scale_a: Tensor containing decoding scaling factors for mat_a
+        scale_recipe_a: Enum describing how mat_a has been scaled
+        scale_b: Tensor containing decoding scaling factors for mat_b
+        scale_recipe_b: Enum describing how mat_b has been scaled
+        swizzle_a: Enum describing the swizzling pattern (if any) of scale_a
+        swizzle_b: Enum describing the swizzling pattern (if any) of scale_b
+        bias: optional bias term to be added to the output
+        offs: optional offsets into the source tensors denoting group start indices
+        output_dtype: dtype used for the output tensor
+        contraction_dim: describe which dimensions are :math:`K` in the matmul.
+        use_fast_accum: enable/disable tensor-core fast accumulation (Hopper-GPUs only)
+    """
+
+    def expand_single_value(v: _Any | list[_Any] | None) -> list[_Any]:
+        if v is None:
+            return []
+        elif not isinstance(v, (list)):
+            return [
+                v,
+            ]
+        else:
+            return v
+
+    scale_a = expand_single_value(scale_a)
+    scale_recipe_a = expand_single_value(scale_recipe_a)
+    scale_b = expand_single_value(scale_b)
+    scale_recipe_b = expand_single_value(scale_recipe_b)
+    swizzle_a = expand_single_value(swizzle_a)
+    swizzle_b = expand_single_value(swizzle_b)
+
+    # native_functions has restrictions on what can be defined
+    # & passed through - std::optional<ArrayRef<Tensor>> for instance
+    # *cannot* be passed, but an empty vector (list) can.
+    # So, we need to convert None arguments for lists in python
+    # explicitly into empty lists.
+    def list_or_empty(l: list[_Any] | None) -> list[_Any]:
+        return l if l else []
+
+    def enum_list_as_int_list(l: _Any | list[_Any]) -> list[_Any]:
+        if not isinstance(l, list):
+            l = [
+                l,
+            ]
+        return [li.value for li in l]
+
+    out = torch._scaled_grouped_mm_v2(
+        mat_a,
+        mat_b,
+        scale_a,
+        enum_list_as_int_list(scale_recipe_a),
+        enum_list_as_int_list(list_or_empty(swizzle_a)),
+        scale_b,
+        enum_list_as_int_list(scale_recipe_b),
+        enum_list_as_int_list(list_or_empty(swizzle_b)),
+        offs,
+        bias,
+        output_dtype,
+        contraction_dim,
+        use_fast_accum,
+    )
+
+    return out

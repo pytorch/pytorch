@@ -14,7 +14,6 @@
 /torch/csrc/autograd/ @albanD @soulitzer
 /torch/autograd/ @albanD @soulitzer
 /tools/autograd/ @albanD @soulitzer
-/torch/header_only_apis.txt @janeyx99
 /torch/nn/ @albanD @jbschlosser @mikaylagawarecki
 /torch/optim/ @albanD @janeyx99
 /test/test_public_bindings.py @albanD
@@ -51,12 +50,12 @@ nn/qat/ @jerryzh168
 /torch/csrc/distributed/c10d/Ops.* @kwen2501
 
 # ONNX Export
-/torch/_dynamo/backends/onnxrt.py @wschin
-/torch/csrc/jit/passes/onnx.h @titaiwangms @shubhambhokare1
-/torch/csrc/jit/passes/onnx.cpp @titaiwangms @shubhambhokare1
-/torch/csrc/jit/passes/onnx/ @titaiwangms @shubhambhokare1
-/torch/onnx/ @titaiwangms @shubhambhokare1 @justinchuby @wschin
-/test/onnx/  @titaiwangms @shubhambhokare1 @justinchuby @wschin
+/torch/_dynamo/backends/onnxrt.py @titaiwangms @xadupre @justinchuby
+/torch/csrc/jit/passes/onnx.h @titaiwangms @xadupre
+/torch/csrc/jit/passes/onnx.cpp @titaiwangms @xadupre
+/torch/csrc/jit/passes/onnx/ @titaiwangms @xadupre
+/torch/onnx/ @titaiwangms @xadupre @justinchuby
+/test/onnx/  @titaiwangms @xadupre @justinchuby
 
 # CI
 /.ci  @pytorch/pytorch-dev-infra
@@ -136,7 +135,7 @@ torch/profiler/ @sraikund16
 test/functorch/test_aotdispatch.py @ezyang @Chillee
 
 # Dataloader
-torch/utils/data/ @divyanshk @ramanishsingh
+torch/utils/data/ @divyanshk @ramanishsingh @scotts @aelavender
 
 # hipify
 torch/utils/hipify/ @jeffdaily @jithunnair-amd
@@ -161,10 +160,12 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 /test/xpu/ @EikanWang @gujinghui
 /test/test_xpu.py @EikanWang @gujinghui
 /third_party/xpu.txt @EikanWang @gujinghui
+/docs/source/notes/get_start_xpu.rst @EikanWang @gujinghui
 
 # torch.export
 /torch/export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
 /torch/_export/ @avikchaudhuri @tugsbayasgalan @zhxchen17 @ydwu4 @angelayi
+/torch/_export/serde/schema.py @SherlockNoMad @zhxchen17
 
 # Dynamic Shapes
 /torch/fx/experimental/symbolic_shapes.py @bobrenjc93 @laithsakka
@@ -181,18 +182,49 @@ caffe2/utils/hip @jeffdaily @jithunnair-amd
 /torch/csrc/jit/python/init.cpp @mikaylagawarecki
 
 # CUDA and CUDA math libraries
-aten/src/ATen/cuda/ @eqy @syed-ahmed
-aten/src/ATen/cudnn/ @eqy @syed-ahmed
-aten/src/ATen/native/cuda/ @eqy @syed-ahmed
-aten/src/ATen/native/cudnn/ @eqy @syed-ahmed
-c10/cuda @eqy @syed-ahmed
-torch/cuda/ @eqy @syed-ahmed
-torch/csrc/cuda/ @eqy @syed-ahmed
-torch/backends/cuda/ @eqy @syed-ahmed
-torch/backends/cudnn/ @eqy @syed-ahmed
+aten/src/ATen/cuda/ @eqy @syed-ahmed @Aidyn-A
+aten/src/ATen/cudnn/ @eqy @syed-ahmed @Aidyn-A
+aten/src/ATen/native/cuda/ @eqy @syed-ahmed @Aidyn-A
+aten/src/ATen/native/cudnn/ @eqy @syed-ahmed @Aidyn-A
+c10/cuda @eqy @syed-ahmed @Aidyn-A
+torch/cuda/ @eqy @syed-ahmed @Aidyn-A
+torch/csrc/cuda/ @eqy @syed-ahmed @Aidyn-A
+torch/backends/cuda/ @eqy @syed-ahmed @Aidyn-A
+torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 
 # PyTree utilities
 /torch/utils/_pytree.py @XuehaiPan
 /torch/utils/_cxx_pytree.py @XuehaiPan
 /torch/utils/pytree/ @XuehaiPan
 /torch/_dynamo/polyfills/pytree.py @XuehaiPan
+
+# Relating to libtorch ABI
+/torch/csrc/stable/ @janeyx99 @mikaylagawarecki
+/torch/headeronly/ @janeyx99
+/torch/header_only_apis.txt @janeyx99
+
+# FlexAttention
+/torch/nn/attention/flex_attention.py @drisspg
+/torch/_higher_order_ops/flex_attention.py @drisspg
+/torch/_inductor/kernel/flex/ @drisspg
+/torch/_inductor/codegen/cpp_flex_attention_template.py @drisspg
+/test/inductor/test_flex_attention.py @drisspg
+/test/inductor/test_flex_decoding.py @drisspg
+
+# Low Precision & Grouped GEMMs
+/aten/src/ATen/native/cuda/Blas.cpp @drisspg @slayton58
+/aten/src/ATen/native/cuda/GroupedBlas.cpp @drisspg @slayton58
+/aten/src/ATen/native/cuda/ScaledBlas.cpp @drisspg @slayton58
+/aten/src/ATen/cuda/CUDABlas.cpp @drisspg @slayton58
+/aten/src/ATen/cuda/CUDABlas.h @drisspg @slayton58
+/aten/src/ATen/cuda/CUDAScaledBlas.cpp @drisspg @slayton58
+/aten/src/ATen/cuda/CUDAScaledBlas.h @drisspg @slayton58
+/test/test_scaled_matmul_cuda.py @drisspg @slayton58
+
+# Sparse Tensors
+/aten/src/ATen/native/sparse/ @amjames @pearu @nikitaved
+/aten/src/ATen/SparseTensorImpl.cpp @amjames @pearu @nikitaved
+/aten/src/ATen/SparseCsrTensorImpl.cpp @amjames @pearu @nikitaved
+/torch/sparse/ @amjames @pearu @nikitaved
+/test/test_sparse.py @amjames @pearu @nikitaved
+/test/test_sparse_csr.py @amjames @pearu @nikitaved

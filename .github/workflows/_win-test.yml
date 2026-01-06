@@ -70,14 +70,12 @@ jobs:
         run: |
           git config --global core.longpaths true
           git config --global core.symlinks true
+          git config --global core.ignorecase false
 
           # https://git-scm.com/docs/git-fsmonitor--daemon.  The daemon could lock
           # the directory on Windows and prevent GHA from checking out as reported
           # in https://github.com/actions/checkout/issues/1018
           git config --global core.fsmonitor false
-
-      - name: Clean up leftover processes on non-ephemeral Windows runner
-        uses: pytorch/test-infra/.github/actions/cleanup-runner@main
 
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -105,18 +103,6 @@ jobs:
         with:
           cuda-version: ${{ inputs.cuda-version }}
 
-      # TODO: Move to a requirements.txt file for windows
-      - name: Install pip dependencies
-        uses: nick-fields/retry@7152eba30c6575329ac0576536151aca5a72780e # v3.0.0
-        with:
-          shell: bash
-          timeout_minutes: 5
-          max_attempts: 5
-          retry_wait_seconds: 30
-          command: |
-            set -eu
-            python3 -m pip install 'xdoctest>=1.1.0'
-
       - name: Get workflow job id
         id: get-job-id
         uses: ./.github/actions/get-workflow-job-id
@@ -138,7 +124,7 @@ jobs:
         continue-on-error: true
         run: |
           # Windows conda doesn't have python3 binary, only python, but it's python3
-          ${CONDA_RUN} python -m pip install psutil==5.9.1 dataclasses_json==0.6.7 nvidia-ml-py==11.525.84
+          ${CONDA_RUN} python -m pip install psutil==5.9.8 dataclasses_json==0.6.7 nvidia-ml-py==11.525.84
           ${CONDA_RUN} python -m tools.stats.monitor --log-interval "$MONITOR_LOG_INTERVAL" --data-collect-interval "$MONITOR_DATA_COLLECT_INTERVAL" > usage_log.txt 2>&1 &
           echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
@@ -183,7 +169,7 @@ jobs:
         env:
           USE_CUDA: ${{ inputs.cuda-version != 'cpu' && '1' || '0' }}
           INSTALL_WINDOWS_SDK: 1
-          PYTHON_VERSION: 3.9
+          PYTHON_VERSION: "3.10"
           CONTINUE_THROUGH_ERROR: ${{ steps.keep-going.outputs.keep-going }}
           VERBOSE_TEST_LOGS: ${{ steps.keep-going.outputs.ci-verbose-test-logs }}
           TEST_SHOWLOCALS: ${{ steps.keep-going.outputs.ci-test-showlocals }}
@@ -270,15 +256,6 @@ jobs:
         id: parse-ref
         shell: bash
         run: python3 .github/scripts/parse_ref.py
-
-      - name: Uninstall PyTorch
-        if: always()
-        continue-on-error: true
-        shell: bash
-        run: |
-          # This step removes PyTorch installed by the test to give a clean slate
-          # to the next job
-          python3 -mpip uninstall -y torch
 
       - name: Teardown Windows
         uses: ./.github/actions/teardown-win

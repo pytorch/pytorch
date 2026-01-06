@@ -1,7 +1,5 @@
 #include <torch/csrc/inductor/aoti_package/model_package_loader.h>
 #include <torch/csrc/inductor/aoti_package/pybind.h>
-#include <torch/csrc/inductor/aoti_runner/model_container_runner.h>
-#include <torch/csrc/inductor/aoti_runner/model_container_runner_cpu.h>
 #ifdef USE_CUDA
 #include <torch/csrc/inductor/aoti_runner/model_container_runner_cuda.h>
 #endif
@@ -9,7 +7,6 @@
 #include <c10/core/Device.h>
 #include <torch/csrc/autograd/python_variable.h>
 #include <torch/csrc/inductor/aoti_runner/pybind.h>
-#include <torch/csrc/utils/pybind.h>
 
 namespace torch::inductor {
 
@@ -86,6 +83,11 @@ void initAOTIPackageBindings(PyObject* module) {
           py::arg("tensor_map"),
           py::arg("use_inactive"),
           py::arg("validate_full_updates"),
-          py::arg("user_managed") = false);
+          py::arg("user_managed") = false)
+      .def_static(
+          "load_metadata_from_package",
+          &AOTIModelPackageLoaderPybind::load_metadata_from_package,
+          py::arg("model_package_path"),
+          py::arg("model_name"));
 }
 } // namespace torch::inductor

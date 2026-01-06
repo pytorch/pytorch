@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 
+import itertools
 from collections import namedtuple
 from collections.abc import Sequence
 
@@ -174,12 +175,18 @@ class AdaptiveLogSoftmaxWithLoss(Module):
             self.tail.append(projection)
 
     def reset_parameters(self) -> None:
+        """
+        Resets parameters based on their initialization used in ``__init__``.
+        """
         self.head.reset_parameters()
         for i2h, h2o in self.tail:  # type: ignore[misc]
             i2h.reset_parameters()  # type: ignore[has-type]
             h2o.reset_parameters()  # type: ignore[has-type]
 
     def forward(self, input_: Tensor, target_: Tensor) -> _ASMoutput:
+        """
+        Runs the forward pass.
+        """
         targ_dim = target_.dim()
 
         if targ_dim == 1:
@@ -267,7 +274,7 @@ class AdaptiveLogSoftmaxWithLoss(Module):
 
         out[:, : self.shortlist_size] = head_logprob[:, : self.shortlist_size]
 
-        for i, (start_idx, stop_idx) in enumerate(zip(self.cutoffs, self.cutoffs[1:])):
+        for i, (start_idx, stop_idx) in enumerate(itertools.pairwise(self.cutoffs)):
             cluster_output = self.tail[i](input)
             cluster_logprob = F.log_softmax(cluster_output, dim=1)
             output_logprob = cluster_logprob + head_logprob[

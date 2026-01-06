@@ -1,9 +1,10 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 import math
+from collections.abc import Callable
 from functools import wraps
-from typing import Callable, Optional, TypeVar, Union
-from typing_extensions import Concatenate, ParamSpec
+from typing import Concatenate, Optional, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch._prims as prims
@@ -141,9 +142,11 @@ def _inplace_wrapper(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     # nb. We use the name of the first argument used in the unary references
     @wraps(fn)
     def _fn(*args: _P.args, **kwargs: _P.kwargs) -> _T:
+        # pyrefly: ignore [unsupported-operation]
         a = args[0]
         if "inplace" not in kwargs:
             kwargs["inplace"] = False
+        # pyrefly: ignore [unsupported-operation]
         if kwargs["inplace"]:
             torch._check(
                 "out" not in kwargs,
@@ -516,8 +519,8 @@ def softshrink(a: TensorLikeType, lambd: float = 0.5):
     #               = x + lambd if x < -lambd
     #               = 0 otherwise
     torch._check(
-        lambd >= 0,
-        lambda: f"lambda must be greater or equal to 0, but found to be {lambd}",
+        0 <= lambd <= torch.finfo(a.dtype).max,
+        lambda: f"lambda must be in range [0, {torch.finfo(a.dtype).max}] for input dtype {a.dtype}, but found {lambd}",
     )
     # We implement this in one torch.where to generate better code in the backward
     # see https://github.com/pytorch/pytorch/pull/107052#discussion_r1293748211
@@ -624,6 +627,7 @@ def smooth_l1_loss(
         )
     else:
         loss = torch.abs(input - target)
+        # pyrefly: ignore [unsupported-operation]
         loss = torch.where(loss < beta, 0.5 * loss**2 / beta, loss - 0.5 * beta)
         return _apply_loss_reduction(loss, reduction)
 
@@ -760,7 +764,7 @@ def _nll_loss_nd(
         batch_size = input.shape[0]
         loss = -input[torch.arange(batch_size), target] * current_weight
     else:
-        # 3D case (N batch size, C classe, K dimensions)
+        # 3D case (N batch size, C classes, K dimensions)
         # input (N batch size, C classes, K)
         batch_size = input.shape[0]
         extent = input.shape[2]

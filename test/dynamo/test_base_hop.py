@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import unittest
 import unittest.mock as mock
 
 import torch
@@ -13,10 +12,6 @@ from torch._dynamo.testing import (
 )
 from torch._higher_order_ops.schema import find_hop_schema
 from torch.testing._internal.common_utils import instantiate_parametrized_tests
-from torch.testing._internal.inductor_utils import HAS_CUDA
-
-
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
 
 
 def normalize_graph(gm):
@@ -195,10 +190,13 @@ class GraphModule(torch.nn.Module):
         def f(x, y):
             return invoke_quant_test(inner, [x, y], scheme="nf4")
 
-        with mock.patch(
-            "torch._dynamo.variables.higher_order_ops.BaseHOPVariable.supports_input_mutation",
-            True,
-        ), torch.no_grad():
+        with (
+            mock.patch(
+                "torch._dynamo.variables.higher_order_ops.BaseHOPVariable.supports_input_mutation",
+                True,
+            ),
+            torch.no_grad(),
+        ):
             torch.compile(f, backend=bk, fullgraph=True)(x.clone(), y)
 
         self.assertEqual(len(bk.graphs), 1)
@@ -224,13 +222,13 @@ class GraphModule(torch.nn.Module):
 
             matmul: "f32[3, 3]" = l_x_ @ l_y_
             sin: "f32[3, 3]" = matmul.sin();  matmul = None
-            child: "f32[3, 3]" = sin.cos();  sin = None
+            cos: "f32[3, 3]" = sin.cos();  sin = None
 
-            child_1: "f32[3, 3]" = l_x_ + l_y_
-            child_2: "f32[3, 3]" = l_x_ - l_y_
+            add: "f32[3, 3]" = l_x_ + l_y_
+            sub: "f32[3, 3]" = l_x_ - l_y_
 
-            child_3: "f32[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
-            return (child, child_1, child_2, child_3)
+            matmul_1: "f32[3, 3]" = l_x_ @ l_y_;  l_x_ = l_y_ = None
+            return (cos, add, sub, matmul_1)
 """,  # noqa: B950
         )
         self.assertExpectedInline(
@@ -319,10 +317,13 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3, 3, requires_grad=False)
         x_clone = x.clone()
         y = torch.randn(3, 3, requires_grad=True)
-        with mock.patch(
-            "torch._dynamo.variables.higher_order_ops.BaseHOPVariable.supports_input_mutation",
-            True,
-        ), torch.no_grad():
+        with (
+            mock.patch(
+                "torch._dynamo.variables.higher_order_ops.BaseHOPVariable.supports_input_mutation",
+                True,
+            ),
+            torch.no_grad(),
+        ):
             compiled_out = torch.compile(f, backend=backend, fullgraph=True)(x, y)
         self.assertEqual(x, x_clone + 1)
         self.assertEqual(compiled_out, x_clone + y + 1)

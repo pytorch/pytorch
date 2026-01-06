@@ -72,8 +72,8 @@ ARG BASE_CUDA_VERSION
 ADD ./common/install_cuda.sh install_cuda.sh
 COPY ./common/install_nccl.sh install_nccl.sh
 COPY ./common/install_cusparselt.sh install_cusparselt.sh
-COPY ./ci_commit_pins/nccl-cu* /ci_commit_pins/
-RUN bash ./install_cuda.sh ${BASE_CUDA_VERSION} && rm install_cuda.sh install_nccl.sh ci_commit_pins/nccl-cu* install_cusparselt.sh
+COPY ./ci_commit_pins/nccl* /ci_commit_pins/
+RUN bash ./install_cuda.sh ${BASE_CUDA_VERSION} && rm install_cuda.sh install_nccl.sh ci_commit_pins/nccl* install_cusparselt.sh
 
 FROM base as magma
 ARG BASE_CUDA_VERSION
@@ -86,6 +86,15 @@ FROM base as nvpl
 ADD ./common/install_nvpl.sh install_nvpl.sh
 RUN bash ./install_nvpl.sh && rm install_nvpl.sh
 
+# Install Arm Compute Library
+FROM base as arm_compute
+# use python3.9 to install scons
+RUN python3.9 -m pip install scons==4.7.0
+RUN ln -sf /opt/python/cp39-cp39/bin/scons /usr/local/bin
+COPY ./common/install_acl.sh install_acl.sh
+RUN bash ./install_acl.sh && rm install_acl.sh
+FROM base as final
+
 FROM final as cuda_final
 ARG BASE_CUDA_VERSION
 RUN rm -rf /usr/local/cuda-${BASE_CUDA_VERSION}
@@ -93,5 +102,9 @@ COPY --from=cuda     /usr/local/cuda-${BASE_CUDA_VERSION}  /usr/local/cuda-${BAS
 COPY --from=magma    /usr/local/cuda-${BASE_CUDA_VERSION}  /usr/local/cuda-${BASE_CUDA_VERSION}
 COPY --from=nvpl /opt/nvpl/lib/  /usr/local/lib/
 COPY --from=nvpl /opt/nvpl/include/  /usr/local/include/
+COPY --from=arm_compute /acl /acl
 RUN ln -sf /usr/local/cuda-${BASE_CUDA_VERSION} /usr/local/cuda
 ENV PATH=/usr/local/cuda/bin:$PATH
+ENV LD_LIBRARY_PATH=/acl/build/:$LD_LIBRARY_PATH
+ADD ./common/patch_libstdc.sh patch_libstdc.sh
+RUN bash ./patch_libstdc.sh && rm patch_libstdc.sh

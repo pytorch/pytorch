@@ -2,13 +2,13 @@
 import os
 from collections import defaultdict
 from pathlib import Path
-from typing import Any, Union
+from typing import Any
 from typing_extensions import deprecated
 
 
 try:
     from torchgen.api.python import format_function_signature
-    from torchgen.utils import FileManager as FileManager
+    from torchgen.utils import FileManager
 except ImportError:
     import sys
 
@@ -52,7 +52,7 @@ def gen_from_template(
     template_name: str,
     output_name: str,
     replacements: list[tuple[str, Any, int]],
-):
+) -> None:
     template_path = os.path.join(dir, template_name)
     output_path = os.path.join(dir, output_name)
 
@@ -225,7 +225,7 @@ def process_signature(line: str) -> list[str]:
 
 
 def get_method_definitions(
-    file_path: Union[str, list[str]],
+    file_path: str | list[str],
     files_to_exclude: set[str],
     deprecated_files: set[str],
     default_output_type: str,

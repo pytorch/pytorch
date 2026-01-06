@@ -1,6 +1,6 @@
 import importlib
 import warnings
-from typing import Callable
+from collections.abc import Callable
 
 
 _MESSAGE_TEMPLATE = (
@@ -45,7 +45,7 @@ def lazy_deprecated_import(
         if name in all:
             # We are using the "RuntimeWarning" to make sure it is not
             # ignored by default.
-            warnings.warn(warning_message, RuntimeWarning)
+            warnings.warn(warning_message, RuntimeWarning, stacklevel=2)
             package = importlib.import_module(new_module)
             return getattr(package, name)
         raise AttributeError(f"Module {new_module!r} has no attribute {name!r}.")

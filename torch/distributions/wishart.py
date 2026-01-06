@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 import math
 import warnings
-from typing import Optional, Union
 
 import torch
 from torch import nan, Tensor
@@ -18,7 +17,8 @@ _log_2 = math.log(2)
 
 
 def _mvdigamma(x: Tensor, p: int) -> Tensor:
-    assert x.gt((p - 1) / 2).all(), "Wrong domain for multivariate digamma function."
+    if not x.gt((p - 1) / 2).all():
+        raise AssertionError("Wrong domain for multivariate digamma function.")
     return torch.digamma(
         x.unsqueeze(-1)
         - torch.arange(p, dtype=x.dtype, device=x.device).div(2).expand(x.shape + (-1,))
@@ -79,17 +79,20 @@ class Wishart(ExponentialFamily):
 
     def __init__(
         self,
-        df: Union[Tensor, Number],
-        covariance_matrix: Optional[Tensor] = None,
-        precision_matrix: Optional[Tensor] = None,
-        scale_tril: Optional[Tensor] = None,
-        validate_args: Optional[bool] = None,
+        df: Tensor | Number,
+        covariance_matrix: Tensor | None = None,
+        precision_matrix: Tensor | None = None,
+        scale_tril: Tensor | None = None,
+        validate_args: bool | None = None,
     ) -> None:
-        assert (covariance_matrix is not None) + (scale_tril is not None) + (
-            precision_matrix is not None
-        ) == 1, (
-            "Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified."
-        )
+        if (
+            (covariance_matrix is not None)
+            + (scale_tril is not None)
+            + (precision_matrix is not None)
+        ) != 1:
+            raise AssertionError(
+                "Exactly one of covariance_matrix or precision_matrix or scale_tril may be specified."
+            )
 
         param = next(
             p
@@ -116,17 +119,22 @@ class Wishart(ExponentialFamily):
             )
 
         if scale_tril is not None:
+            # pyrefly: ignore [read-only]
             self.scale_tril = param.expand(batch_shape + (-1, -1))
         elif covariance_matrix is not None:
+            # pyrefly: ignore [read-only]
             self.covariance_matrix = param.expand(batch_shape + (-1, -1))
         elif precision_matrix is not None:
+            # pyrefly: ignore [read-only]
             self.precision_matrix = param.expand(batch_shape + (-1, -1))
 
         if self.df.lt(event_shape[-1]).any():
             warnings.warn(
-                "Low df values detected. Singular samples are highly likely to occur for ndim - 1 < df < ndim."
+                "Low df values detected. Singular samples are highly likely to occur for ndim - 1 < df < ndim.",
+                stacklevel=2,
             )
 
+        # pyrefly: ignore [bad-argument-type]
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
         self._batch_dims = [-(x + 1) for x in range(len(self._batch_shape))]
 
@@ -276,7 +284,7 @@ class Wishart(ExponentialFamily):
         else:
             # More optimized version with data-dependent control flow.
             if is_singular.any():
-                warnings.warn("Singular sample detected.")
+                warnings.warn("Singular sample detected.", stacklevel=2)
 
                 for _ in range(max_try_correction):
                     sample_new = self._bartlett_sampling(is_singular[is_singular].shape)
@@ -335,6 +343,7 @@ class Wishart(ExponentialFamily):
         p = self._event_shape[-1]  # has singleton shape
         return -self.precision_matrix / 2, (nu - p - 1) / 2
 
+    # pyrefly: ignore [bad-override]
     def _log_normalizer(self, x, y):
         p = self._event_shape[-1]
         return (y + (p + 1) / 2) * (

@@ -1,6 +1,5 @@
 #include <fmt/format.h>
 #include <fmt/ostream.h>
-#include <fmt/ranges.h>
 #include <torch/nativert/graph/Serialization.h>
 #include <limits>
 namespace torch::nativert {
@@ -101,6 +100,11 @@ Value* symbolicToValue(
     case torch::_export::Argument::Tag::AS_SYM_FLOAT: {
       return graph.getValue(arg.get_as_sym_float().get_as_name());
     }
+    case torch::_export::Argument::Tag::AS_STRING_TO_ARGUMENT: {
+      TORCH_CHECK(
+          false,
+          "String to argument mapping is not yet supported in symbolic context");
+    }
     default:
       TORCH_CHECK(
           false,
@@ -184,7 +188,7 @@ std::unique_ptr<Graph> jsonToSubgraph(
     graphInputs = std::move(reorderedGraphInputs);
     auto reorderedSignature = *signature;
     reorderedSignature.set_input_specs(reorderedInputSpecs);
-    graph->setSignature(torch::nativert::GraphSignature{reorderedSignature});
+    graph->setSignature(GraphSignature{reorderedSignature});
   }
 
   for (const auto& input : graphInputs) {
@@ -408,7 +412,7 @@ std::unique_ptr<Graph> jsonToSubgraph(
     }
     sig.set_output_specs(std::move(outputSpecs));
 
-    graph->setSignature(torch::nativert::GraphSignature{sig});
+    graph->setSignature(GraphSignature{sig});
   }
 
   // weightsTensorMeta are indexed by weight's name, not graph input's name
@@ -422,9 +426,11 @@ std::unique_ptr<Graph> jsonToSubgraph(
     }
 
     auto it = jsonTensorValue.find(inputName);
-    CHECK(it != jsonTensorValue.end())
-        << "Missing tensor metadata for " << inputName
-        << "in thriftGraph.tensorValue";
+    TORCH_CHECK(
+        it != jsonTensorValue.end(),
+        "Missing tensor metadata for ",
+        inputName,
+        "in thriftGraph.tensorValue");
     weightsTensorMeta[weightName] = it->second;
   }
   graph->setWeightsMeta(weightsTensorMeta);
@@ -451,6 +457,7 @@ bool isSymbolic(const torch::_export::Argument& arg) {
     case torch::_export::Argument::Tag::AS_SYM_FLOAT:
     case torch::_export::Argument::Tag::AS_SYM_FLOATS:
     case torch::_export::Argument::Tag::AS_CUSTOM_OBJ:
+    case torch::_export::Argument::Tag::AS_OPTIONAL_TENSOR:
       return true;
     default:
       return false;
@@ -462,7 +469,7 @@ Constant constantToValue(
     bool loadNodeMetadata) {
   switch (jsonArg.tag()) {
     case torch::_export::Argument::Tag::AS_NONE:
-      return torch::nativert::None();
+      return None();
     case torch::_export::Argument::Tag::AS_INT:
       return jsonArg.get_as_int();
     case torch::_export::Argument::Tag::AS_INTS: {
@@ -491,15 +498,13 @@ Constant constantToValue(
       return ret;
     }
     case torch::_export::Argument::Tag::AS_SCALAR_TYPE:
-      return torch::nativert::convertJsonScalarType(
-          jsonArg.get_as_scalar_type());
+      return convertJsonScalarType(jsonArg.get_as_scalar_type());
     case torch::_export::Argument::Tag::AS_MEMORY_FORMAT:
-      return torch::nativert::convertJsonMemoryFormat(
-          jsonArg.get_as_memory_format());
+      return convertJsonMemoryFormat(jsonArg.get_as_memory_format());
     case torch::_export::Argument::Tag::AS_LAYOUT:
-      return torch::nativert::convertJsonLayout(jsonArg.get_as_layout());
+      return convertJsonLayout(jsonArg.get_as_layout());
     case torch::_export::Argument::Tag::AS_DEVICE:
-      return torch::nativert::convertJsonDevice(jsonArg.get_as_device());
+      return convertJsonDevice(jsonArg.get_as_device());
     case torch::_export::Argument::Tag::AS_BOOL:
       return jsonArg.get_as_bool();
     case torch::_export::Argument::Tag::AS_BOOLS: {
@@ -532,6 +537,23 @@ Constant constantToValue(
     case torch::_export::Argument::Tag::AS_SYM_FLOATS: {
       TORCH_CHECK(false, "SymFloats is not yet implemented");
     }
+    case torch::_export::Argument::Tag::AS_OPTIONAL_TENSOR:
+      TORCH_CHECK(false, "Optional tensor is symbolic, not constant");
+    case torch::_export::Argument::Tag::AS_COMPLEX:
+      TORCH_CHECK(false, "Complex values are not yet supported as constants");
+    case torch::_export::Argument::Tag::AS_INT_LISTS: {
+      std::vector<std::vector<int64_t>> ret;
+      for (const auto& inner_list : jsonArg.get_as_int_lists()) {
+        std::vector<int64_t> inner_ret;
+        for (const auto& val : inner_list) {
+          inner_ret.push_back(val);
+        }
+        ret.push_back(inner_ret);
+      }
+      return ret;
+    }
+    case torch::_export::Argument::Tag::AS_STRING_TO_ARGUMENT:
+      return None();
     default:
       TORCH_CHECK(false, "Got unknown json argument");
   }

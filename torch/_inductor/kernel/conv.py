@@ -29,7 +29,6 @@ from ..utils import (
     use_triton_template,
 )
 from ..virtualized import V
-from .mm_common import mm_config_kwargs
 
 
 if TYPE_CHECKING:
@@ -59,13 +58,6 @@ def conv3d_grid(n, c, d, h, w, meta, *, cdiv):
         cdiv(c, meta["BLOCK_N"]),
         meta["GROUPS"],
     )
-
-
-def _is_large_block_for_cpu(m, n, k):
-    # Thresholds are experimentally determined to reduce Triton CPU compile times
-    if m > 256 or n > 256 or k > 256:
-        return True
-    return m * n * k > 2**17
 
 
 LOOP_BODY_2D = """
@@ -125,19 +117,19 @@ conv2d_template = TritonTemplate(
     stride_wh = {{stride("W", 2)}}
     stride_ww = {{stride("W", 3)}}
 
-    nhw = tl.program_id(0) * BLOCK_M + tl.arange(0, BLOCK_M)
+    nhw = tl.program_id(0).to(INDEX_DTYPE) * BLOCK_M + tl.arange(0, BLOCK_M)
     idx_y_w = nhw % OUT_W
     nh = nhw // OUT_W
     idx_y_h = nh % OUT_H
     idx_n = nh // OUT_H
-    idx_y_c = tl.program_id(1) * BLOCK_N + tl.arange(0, BLOCK_N)
+    idx_y_c = tl.program_id(1).to(INDEX_DTYPE) * BLOCK_N + tl.arange(0, BLOCK_N)
 
 {% if GROUPS == 1 %}
     group = 0
     GROUP_IN_C = IN_C
     GROUP_OUT_C = OUT_C
 {% else %}
-    group = tl.program_id(2)
+    group = tl.program_id(2).to(INDEX_DTYPE)
     GROUP_IN_C = IN_C // GROUPS
     GROUP_OUT_C = OUT_C // GROUPS
 {% endif %}
@@ -188,7 +180,7 @@ conv2d_template = TritonTemplate(
     idx_w = idx_y_w[:, None]
 
     # inductor generates a suffix
-    {{store_output(("idx_n", "idx_c", "idx_h", "idx_w"), "acc", "mask")}}
+    {{store_output(("idx_n", "idx_c", "idx_h", "idx_w"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
 """,
 )
 
@@ -253,21 +245,21 @@ conv3d_template = TritonTemplate(
     stride_wh = {{stride("W", 3)}}
     stride_ww = {{stride("W", 4)}}
 
-    ndhw = tl.program_id(0) * BLOCK_M + tl.arange(0, BLOCK_M)
+    ndhw = tl.program_id(0).to(INDEX_DTYPE) * BLOCK_M + tl.arange(0, BLOCK_M)
     idx_y_w = ndhw % OUT_W
     ndh = ndhw // OUT_W
     idx_y_h = ndh % OUT_H
     nd = ndh // OUT_H
     idx_y_d = nd % OUT_D
     idx_n = nd // OUT_D
-    idx_y_c = tl.program_id(1) * BLOCK_N + tl.arange(0, BLOCK_N)
+    idx_y_c = tl.program_id(1).to(INDEX_DTYPE) * BLOCK_N + tl.arange(0, BLOCK_N)
 
 {% if GROUPS == 1 %}
     group = 0
     GROUP_IN_C = IN_C
     GROUP_OUT_C = OUT_C
 {% else %}
-    group = tl.program_id(2)
+    group = tl.program_id(2).to(INDEX_DTYPE)
     GROUP_IN_C = IN_C // GROUPS
     GROUP_OUT_C = OUT_C // GROUPS
 {% endif %}
@@ -326,7 +318,7 @@ conv3d_template = TritonTemplate(
     idx_w = idx_y_w[:, None]
 
     # inductor generates a suffix
-    {{store_output(("idx_n", "idx_c", "idx_d", "idx_h", "idx_w"), "acc", "mask")}}
+    {{store_output(("idx_n", "idx_c", "idx_d", "idx_h", "idx_w"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
 """,
 )
 
@@ -438,17 +430,17 @@ def convolution(
     dilation = tuple(dilation)
     output_padding = tuple(output_padding)
     if not isinstance(groups, int):
-        groups = V.graph.sizevars.evaluate_static_shape(groups)
+        groups = V.graph.sizevars.guard_int(groups)
     assert isinstance(groups, int)
 
     # Need use hint for triton template since the template does not
     # work with a dynamic shape.
     #
-    # No need to evaluate_static_shape for dilation and output_padding
+    # No need to guard_int for dilation and output_padding
     # since the template is only used when dilation is 1 and output_padding
     # is 0.
-    stride = tuple(V.graph.sizevars.evaluate_static_shapes(stride))
-    padding = tuple(V.graph.sizevars.evaluate_static_shapes(padding))
+    stride = tuple(V.graph.sizevars.guard_int_seq(stride))
+    padding = tuple(V.graph.sizevars.guard_int_seq(padding))
 
     kwargs: ConvLayoutParams = {
         "stride": stride,
@@ -468,9 +460,7 @@ def convolution(
             dim=0,
         )
 
-    out_chan, in_chan, *kernel_shape = V.graph.sizevars.evaluate_static_shapes(
-        weight.get_size()
-    )
+    out_chan, in_chan, *kernel_shape = V.graph.sizevars.guard_int_seq(weight.get_size())
 
     # Always convert conv1D to 2D for Intel GPU.
     # Only conv2D can be converted to channel last layout,
@@ -539,18 +529,18 @@ def convolution(
     # apply channels last.
     if V.graph.layout_opt and ndim == 2:
         V.graph.num_channels_last_conv += 1
-        x = ir.ExternKernel.require_channels_last(x)
+        x = ir.ExternKernel.require_channels_last(x)  # type: ignore[assignment]
         # TODO maybe we can convert weights to channels last just once before
         # running the model.
-        weight = ir.ExternKernel.require_channels_last(weight)
+        weight = ir.ExternKernel.require_channels_last(weight)  # type: ignore[assignment]
         layout = conv_layout(x, weight, None, **kwargs)
     else:
         layout = conv_layout(x, weight, None, **kwargs)
         req_stride_order = ir.get_stride_order(
             V.graph.sizevars.size_hints(layout.stride)
         )
-        x = ir.ExternKernel.require_stride_order(x, req_stride_order)
-        weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)
+        x = ir.ExternKernel.require_stride_order(x, req_stride_order)  # type: ignore[assignment]
+        weight = ir.ExternKernel.require_stride_order(weight, req_stride_order)  # type: ignore[assignment]
 
     ordered_kwargs_for_cpp_kernel = [
         "stride",
@@ -568,7 +558,7 @@ def convolution(
         args = [x, weight, bias]
         bias.realize()
         bias.freeze_layout()
-        V.graph.sizevars.evaluate_static_shapes(bias.get_size())
+        V.graph.sizevars.guard_int_seq(bias.get_size())
 
     choices = []
     if torch._inductor.utils._use_conv_autotune_backend("ATEN"):
@@ -589,7 +579,7 @@ def convolution(
         and not transposed
         and is_zeros(output_padding)
         # there are some odd models where this check fails (e.g. shufflenet_v2_x1_0)
-        and V.graph.sizevars.statically_known_equals(in_chan, x.get_size()[1])  # type: ignore[arg-type]
+        and V.graph.sizevars.statically_known_equals(in_chan * groups, x.get_size()[1])  # type: ignore[arg-type]
     ):
         if (
             is_ones(kernel_shape)
@@ -601,11 +591,12 @@ def convolution(
 
         conv_configs = V.choices.get_conv_configs(device_type)
 
+        dtype_size = x.get_dtype().itemsize
         for cfg in conv_configs(
             sympy_product([x.get_size()[0], *x.get_size()[2:]]),
             out_chan,
             in_chan,
-            **mm_config_kwargs(device_type, _is_large_block_for_cpu),
+            dtype_size=dtype_size,
         ):
             if ndim == 2:
                 conv2d_template.maybe_append_choice(
@@ -686,7 +677,7 @@ def _convolution(
 
 
 def constrain_conv_to_fx_strides(fx_node, *args, **kwargs):
-    assert fx_node.target == torch.ops.aten.convolution.default
+    assert fx_node.target is torch.ops.aten.convolution.default
     if V.graph.layout_opt:
         return args, kwargs
     else:

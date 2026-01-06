@@ -7,10 +7,9 @@
 # This source code is licensed under the BSD-style license found in the
 # LICENSE file in the root directory of this source tree.
 
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from contextlib import contextmanager
 from datetime import timedelta
-from typing import Callable, Optional
 
 import torch
 
@@ -109,7 +108,7 @@ def _try_detecting_missing_ranks(
     rank: int,
     rank_decoder: Callable[[int], str],
     trace_timeout: float,
-) -> Optional[Iterable[str]]:
+) -> Iterable[str] | None:
     store.set(f"{key_prefix}{rank}{_TRACE}", "<val_ignored>")
 
     def _find_missing_ranks():
@@ -169,8 +168,8 @@ def barrier(
     world_size: int,
     key_prefix: str,
     barrier_timeout: float = 300,
-    rank: Optional[int] = None,
-    rank_tracing_decoder: Optional[Callable[[int], str]] = None,
+    rank: int | None = None,
+    rank_tracing_decoder: Callable[[int], str] | None = None,
     trace_timeout: float = 10,
 ) -> None:
     """
@@ -184,7 +183,7 @@ def barrier(
 
     Optionally, passing rank will enable tracing of missing ranks on timeouts.
     `rank_tracing_decoder` lambda arg can be used to convert rank data
-    into a more meaninful information at an app level (e.g. hostname).
+    into a more meaningful information at an app level (e.g. hostname).
 
     Note: Since the data is not removed from the store, the barrier can be used
         once per unique ``key_prefix``.

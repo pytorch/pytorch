@@ -62,7 +62,7 @@ static NvlMesh getNvlMesh(const std::vector<int>& rankToDeviceIdx) {
 }
 
 /**
- * Detech topology given a NvlMesh.
+ * Detect topology given a NvlMesh.
  */
 static Topology detectTopology(const NvlMesh nvlMesh, size_t worldSize) {
   if (getCvarBool(TEST_INTRA_NODE_COMM, false)) {
@@ -121,7 +121,7 @@ static std::vector<T> storeAllGather(
   std::vector<std::string> peerKeys;
   for (size_t r = 0; r < worldSize; ++r) {
     std::ostringstream oss;
-    oss << prefix << "-" << r;
+    oss << prefix << '-' << r;
     peerKeys.push_back(oss.str());
   }
 
@@ -187,7 +187,7 @@ bool IntraNodeComm::rendezvous() {
     if (strcmp(info.hostname, peerDevInfos.front().hostname) != 0) {
       LOG(WARNING) << "Aborting IntraNodeComm::rendezvous because some "
                       "participants are not on the same host ("
-                   << info.hostname << ", " << devInfo.hostname << ")";
+                   << info.hostname << ", " << devInfo.hostname << ')';
       return false;
     }
     rankToDeviceIdx.emplace_back(info.deviceIdx);

@@ -73,7 +73,7 @@ def parse_namespace(base):
         "sparse_": "sparse",
         "special_": "special",
     }
-    for heading in mappings.keys():
+    for heading in mappings:
         if base.startswith(heading):
             return mappings[heading], base[len(heading) :]
     return None, base
@@ -121,9 +121,7 @@ def get_suggested_xfails(base, tests):
         cpu_variant = base + "_cpu_float32"
         cuda_variant = base + "_cuda_float32"
         namespace, api, variant = parse_base(base)
-        if namespace is None:
-            api = api
-        else:
+        if namespace is not None:
             api = f"{namespace}.{api}"
         if cpu_variant in tests and cuda_variant in tests:
             result.append(f"xfail('{api}', '{variant}'),")

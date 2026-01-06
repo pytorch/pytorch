@@ -34,7 +34,9 @@ class Vectorized<c10::complex<double>> {
   static constexpr size_type size() {
     return 2;
   }
-  Vectorized() {}
+  Vectorized() {
+    values = _mm256_setzero_pd();
+  }
   Vectorized(__m256d v) : values(v) {}
   Vectorized(c10::complex<double> val) {
     double real_value = val.real();
@@ -340,19 +342,19 @@ class Vectorized<c10::complex<double>> {
     return _mm256_cmp_pd(values, other.values, _CMP_NEQ_UQ);
   }
   Vectorized<c10::complex<double>> operator<(
-      const Vectorized<c10::complex<double>>&) const {
+      const Vectorized<c10::complex<double>>& /*unused*/) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vectorized<c10::complex<double>> operator<=(
-      const Vectorized<c10::complex<double>>&) const {
+      const Vectorized<c10::complex<double>>& /*unused*/) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vectorized<c10::complex<double>> operator>(
-      const Vectorized<c10::complex<double>>&) const {
+      const Vectorized<c10::complex<double>>& /*unused*/) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
   Vectorized<c10::complex<double>> operator>=(
-      const Vectorized<c10::complex<double>>&) const {
+      const Vectorized<c10::complex<double>>& /*unused*/) const {
     TORCH_CHECK(false, "not supported for complex numbers");
   }
 

@@ -1840,7 +1840,7 @@ class TestDynamicQuantizedModule(QuantizationTestCase):
                     'RNNTanh': torch.ops.quantized.quantized_rnn_tanh_cell_dynamic,
                     'RNNReLU': torch.ops.quantized.quantized_rnn_relu_cell_dynamic}
 
-        for rnn_type in cell_dict.keys():
+        for rnn_type in cell_dict:
             if not (dtype == torch.float16 and torch.backends.quantized.engine in ("qnnpack", "onednn")):
                 # fp16 dynamic quant is not supported for qnnpack or onednn
                 kwargs = {'input_size': input_size, 'hidden_size': hidden_size, 'bias': bias, 'dtype': dtype}
@@ -1903,7 +1903,7 @@ class TestReferenceQuantizedModule(QuantizationTestCase):
                     'RNNTanh': nnqr.RNNCell,
                     'RNNReLU': nnqr.RNNCell}
 
-        for rnn_type in cell_dict.keys():
+        for rnn_type in cell_dict:
             kwargs = {'input_size': input_size, 'hidden_size': hidden_size, 'bias': bias}
             if rnn_type == 'RNNReLU':
                 kwargs['nonlinearity'] = "relu"

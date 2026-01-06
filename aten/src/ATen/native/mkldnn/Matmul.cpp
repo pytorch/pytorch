@@ -1,7 +1,7 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/Config.h>
 #include <ATen/Context.h>
+#include <ATen/core/Tensor.h>
 #include <ATen/native/mkldnn/Matmul.h>
 
 #if !AT_MKLDNN_ENABLED()
@@ -53,7 +53,7 @@ bool mkldnn_fp16_gemm(
     c10::Half *c, int64_t ldc) {
   return false;
 }
-bool mkldnn_bf32_gemm(
+bool mkldnn_reduced_f32_gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     float alpha,
@@ -85,6 +85,13 @@ void mkldnn_matmul_i8i8i32(
   TORCH_INTERNAL_ASSERT(false, __func__, ": ATen not compiled with MKLDNN support");
 }
 
+bool use_mkldnn_tf32_matmul(
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Tensor& result) {
+    return false;
+}
+
 } // namespace at::native
 
 
@@ -104,7 +111,16 @@ static bool use_mkldnn_fp16_matmul() {
 }
 
 static bool use_mkldnn_bf32_matmul() {
-  return use_mkldnn_bf16_matmul() && at::globalContext().float32MatmulPrecision() == at::Float32MatmulPrecision::MEDIUM;
+  return use_mkldnn_bf16_matmul() && at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::MATMUL) == at::Float32Precision::BF16;
+}
+
+
+static bool use_mkldnn_tf32_matmul() {
+#if defined(__x86_64__) || defined(_M_X64)
+    return cpuinfo_has_x86_amx_fp16() && at::globalContext().float32Precision(at::Float32Backend::MKLDNN, at::Float32Op::MATMUL) == at::Float32Precision::TF32;
+#else
+    return false;  // TF32 not supported on power system
+#endif
 }
 
 // returns an ideep::tensor
@@ -144,7 +160,8 @@ mkldnn_gemm(
   bool bf16_usable = std::is_same_v<scalar_t, c10::BFloat16> && use_mkldnn_bf16_matmul();
   bool fp16_usable = std::is_same_v<scalar_t, c10::Half> && use_mkldnn_fp16_matmul();
   bool bf32_usable = std::is_same_v<scalar_t, float> && use_mkldnn_bf32_matmul();
-  if ( !(bf16_usable || fp16_usable || bf32_usable) ||
+  bool tf32_usable = std::is_same_v<scalar_t, float> && use_mkldnn_tf32_matmul();
+  if ( !(bf16_usable || fp16_usable || bf32_usable || tf32_usable) ||
       (m * n * k <= 16 * 16 * 16) || (alpha == 0.0f)) {
     return false;
   }
@@ -155,6 +172,7 @@ mkldnn_gemm(
     op_attr = ideep::attr_t::fuse_sum();
   }
   if (bf32_usable) op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16); // bf32 path
+  if (tf32_usable) op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32); // tf32 path
 
   // NOTE: View as c-contiguous to avoid extra reordering in mkldnn
   // Use identity: C = AB <=> C^T = B^T A^T
@@ -281,7 +299,7 @@ bool mkldnn_fp16_gemm(
   return mkldnn_gemm<c10::Half>(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
 }
 
-bool mkldnn_bf32_gemm(
+bool mkldnn_reduced_f32_gemm(
     TransposeType transa, TransposeType transb,
     int64_t m, int64_t n, int64_t k,
     float alpha,
@@ -339,6 +357,7 @@ void mkldnn_matmul(
   auto mat2_unsqueezed = mat2.dim() == 1 ? mat2.unsqueeze(1) : mat2;
   auto result_unsqueezed = result.dim() == 1 ? result.unsqueeze(1) : result;
   bool bf32_usable = mat1.scalar_type() == at::kFloat && use_mkldnn_bf32_matmul();
+  bool tf32_usable = mat1.scalar_type() == at::kFloat && use_mkldnn_tf32_matmul();
 
   ideep::attr_t op_attr;
   // "addmm", "addbmm" "baddbmm" in pytorch allow bias to be 2-D or 3-D tensor
@@ -346,6 +365,7 @@ void mkldnn_matmul(
   // to address their differences, we use mkldnn post ops to perform a fused "add" after matrix multiplication is over
   if (beta != 0.0f) op_attr = ideep::attr_t::fuse_sum();
   if (bf32_usable) op_attr.set_fpmath_mode(dnnl_fpmath_mode_bf16); // bf32 path
+  if (tf32_usable) op_attr.set_fpmath_mode(dnnl_fpmath_mode_tf32); // tf32 path
   // If alpha = 0, dose not need actually do gemm computation
   if (alpha == 0)
     return;
@@ -396,7 +416,7 @@ static inline bool checksize(const Tensor& mat1, const Tensor& mat2){
   // else if dim = 3, mat1's size = (b * m * n), mat2's size = (b * n * k)
   // else called from aten::mv, mat1.size = (m * n), mat2.size = (n)
   // only m * n * b * k(if exist) are large enough we can get benefit from mkldnn optimized gemm kernel
-  static const int64_t mkldnn_gemm_min_size = 16 * 16 * 16;
+  constexpr int64_t mkldnn_gemm_min_size = 16 * 16 * 16;
   if (mat1.dim() == 1 && mat2.dim() == 1) {
     // aten::dot
     return mat1.size(0) > mkldnn_gemm_min_size;
@@ -418,26 +438,23 @@ bool use_mkldnn_bf16_matmul(
     const Tensor& result) {
 #if defined(__aarch64__)
   if (mkldnn_bf16_device_check_arm()) {
-     //onednn fastmath mode can leverage bf16 HW even for the fp32 input, e.g. Arm Neoverse V1
-     //so, don't restrict the mkldnn_matmul only for bf16 inputs, allow it for float as well
-     return (
+    // onednn fastmath mode can leverage bf16 HW even for the fp32 input, e.g.
+    // Arm Neoverse V1 so, don't restrict the mkldnn_matmul only for bf16
+    // inputs, allow it for float as well
+    return (
         use_mkldnn_bf16_matmul() &&
-        (mat1.scalar_type() == mat2.scalar_type()) && (!result.defined() || (mat1.scalar_type() == result.scalar_type())) &&
+        (mat1.scalar_type() == mat2.scalar_type()) &&
+        (!result.defined() || (mat1.scalar_type() == result.scalar_type())) &&
         ((mat1.scalar_type() == kFloat) || (mat1.scalar_type() == kBFloat16)) &&
-        mat1.numel() != 0 &&
-        mat2.numel() != 0 &&
-        checksize(mat1, mat2));
+        mat1.numel() != 0 && mat2.numel() != 0 && checksize(mat1, mat2));
   } else
 #endif
   {
-     return (
-        use_mkldnn_bf16_matmul() &&
-        mat1.scalar_type() == kBFloat16 &&
+    return (
+        use_mkldnn_bf16_matmul() && mat1.scalar_type() == kBFloat16 &&
         mat2.scalar_type() == kBFloat16 &&
         (!result.defined() || result.scalar_type() == kBFloat16) &&
-        mat1.numel() != 0 &&
-        mat2.numel() != 0 &&
-        checksize(mat1, mat2));
+        mat1.numel() != 0 && mat2.numel() != 0 && checksize(mat1, mat2));
   }
 }
 
@@ -445,37 +462,44 @@ bool use_mkldnn_fp16_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
     const Tensor& result) {
-
-    return (
-      use_mkldnn_fp16_matmul() &&
-      mat1.scalar_type() == kHalf &&
+  return (
+      use_mkldnn_fp16_matmul() && mat1.scalar_type() == kHalf &&
       mat2.scalar_type() == kHalf &&
       (!result.defined() || result.scalar_type() == kHalf) &&
-      mat1.numel() != 0 &&
-      mat2.numel() != 0 &&
-      checksize(mat1, mat2));
+      mat1.numel() != 0 && mat2.numel() != 0 && checksize(mat1, mat2));
 }
 
 bool use_mkldnn_bf32_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
     const Tensor& result) {
-
-    return (
-      use_mkldnn_bf32_matmul() &&
-      mat1.scalar_type() == kFloat &&
+  return (
+      use_mkldnn_bf32_matmul() && mat1.scalar_type() == kFloat &&
       mat2.scalar_type() == kFloat &&
       (!result.defined() || result.scalar_type() == kFloat) &&
-      mat1.numel() != 0 &&
-      mat2.numel() != 0 &&
-      checksize(mat1, mat2));
+      mat1.numel() != 0 && mat2.numel() != 0 && checksize(mat1, mat2));
+}
+
+bool use_mkldnn_tf32_matmul(
+    const Tensor& mat1,
+    const Tensor& mat2,
+    const Tensor& result) {
+  return (
+      use_mkldnn_tf32_matmul() && mat1.scalar_type() == kFloat &&
+      mat2.scalar_type() == kFloat &&
+      (!result.defined() || result.scalar_type() == kFloat) &&
+      mat1.numel() != 0 && mat2.numel() != 0 && checksize(mat1, mat2));
 }
 
 bool use_mkldnn_matmul(
     const Tensor& mat1,
     const Tensor& mat2,
     const Tensor& result) {
-  return (use_mkldnn_bf16_matmul(mat1, mat2, result) || use_mkldnn_fp16_matmul(mat1, mat2, result) || use_mkldnn_bf32_matmul(mat1, mat2, result));
+  return (
+      use_mkldnn_bf16_matmul(mat1, mat2, result) ||
+      use_mkldnn_fp16_matmul(mat1, mat2, result) ||
+      use_mkldnn_bf32_matmul(mat1, mat2, result) ||
+      use_mkldnn_tf32_matmul(mat1, mat2, result));
 }
 
 static void _mkldnn_matmul_i8i8i32_with_primitive(
@@ -516,7 +540,7 @@ static void _mkldnn_matmul_i8i8i32_with_primitive(
   args.insert({DNNL_ARG_WEIGHTS, expected_weight});
   args.insert({DNNL_ARG_DST, dst});
   args.insert({DNNL_ARG_SCRATCHPAD, scratchpad});
-  // Create primitve and execute
+  // Create primitive and execute
   auto primitive = dnnl::matmul(prim_desc);
   primitive.execute(ideep::stream::default_stream(), args);
 }
@@ -552,14 +576,14 @@ static void _mkldnn_gemm_i8i8i32_with_blas(
         n,
         k,
         alpha,
-        (int8_t*)self.data_ptr(),
+        static_cast<int8_t*>(self.data_ptr()),
         lda,
         ao,
-        (int8_t*)mat2.data_ptr(),
+        static_cast<int8_t*>(mat2.data_ptr()),
         ldb,
         bo,
         beta,
-        (int32_t*)result.data_ptr(),
+        static_cast<int32_t*>(result.data_ptr()),
         ldc,
         &co);
   }

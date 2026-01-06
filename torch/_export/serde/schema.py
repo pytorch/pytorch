@@ -5,11 +5,11 @@ from dataclasses import dataclass, field
 from enum import IntEnum
 from typing import Annotated, Optional
 
-from torch._export.serde.union import _Union
+from torch._export.serde.union import _Union, _union_dataclass
 
 
 # NOTE: Please update this value if any modifications are made to the schema
-SCHEMA_VERSION = (8, 8)
+SCHEMA_VERSION = (8, 15)
 TREESPEC_VERSION = 1
 
 
@@ -33,6 +33,8 @@ class ScalarType(IntEnum):
     UINT16 = 28
     FLOAT8E4M3FN = 29
     FLOAT8E5M2 = 30
+    FLOAT8E4M3FNUZ = 31
+    FLOAT8E5M2FNUZ = 32
 
 
 class Layout(IntEnum):
@@ -60,7 +62,7 @@ class Device:
     index: Annotated[Optional[int], 20] = None
 
 
-@dataclass(repr=False)
+@_union_dataclass
 class SymExprHint(_Union):
     as_int: Annotated[int, 10]
     as_bool: Annotated[bool, 20]
@@ -77,19 +79,19 @@ class SymExpr:
     hint: Annotated[Optional[SymExprHint], 20] = None
 
 
-@dataclass(repr=False)
+@_union_dataclass
 class SymInt(_Union):
     as_expr: Annotated[SymExpr, 10]
     as_int: Annotated[int, 20]
 
 
-@dataclass(repr=False)
+@_union_dataclass
 class SymFloat(_Union):
     as_expr: Annotated[SymExpr, 10]
     as_float: Annotated[float, 20]
 
 
-@dataclass(repr=False)
+@_union_dataclass
 class SymBool(_Union):
     as_expr: Annotated[SymExpr, 10]
     as_bool: Annotated[bool, 20]
@@ -112,7 +114,7 @@ class TensorMeta:
 # of SymInt and ints (ex. [1, s0, ...]). We will serialize this type of list to
 # be List[SymIntArgument] and map the SymInts to the "as_name" field, and ints
 # to the "as_int" field.
-@dataclass(repr=False)
+@_union_dataclass
 class SymIntArgument(_Union):
     as_name: Annotated[str, 10]
     as_int: Annotated[int, 20]
@@ -124,7 +126,7 @@ class SymIntArgument(_Union):
 # of SymFloat and float (ex. [1.0, s0, ...]). We will serialize this type of list to
 # be List[SymFloatArgument] and map the SymFloats to the "as_name" field, and ints
 # to the "as_float" field.
-@dataclass(repr=False)
+@_union_dataclass
 class SymFloatArgument(_Union):
     as_name: Annotated[str, 10]
     as_float: Annotated[float, 20]
@@ -136,7 +138,7 @@ class SymFloatArgument(_Union):
 # of SymBool and bools (ex. [True, i0, ...]). We will serialize this type of list to
 # be List[SymboolArgument] and map the SymBools to the "as_name" field, and bools
 # to the "as_bool" field.
-@dataclass(repr=False)
+@_union_dataclass
 class SymBoolArgument(_Union):
     as_name: Annotated[str, 10]
     as_bool: Annotated[bool, 20]
@@ -154,9 +156,9 @@ class TokenArgument:
 
 # This is use for storing the contents of a list which contain optional tensors
 # (Tensor?[], ex. [Tensor, None, ...]), where the list will be serialized to the
-# type List[OptionalTensorArgument], with tensor values seiralized to the
+# type List[OptionalTensorArgument], with tensor values serialized to the
 # "as_tensor" field, and None values serialized to the "as_none" field.
-@dataclass(repr=False)
+@_union_dataclass
 class OptionalTensorArgument(_Union):
     as_tensor: Annotated[TensorArgument, 20]
     as_none: Annotated[bool, 10]
@@ -174,8 +176,14 @@ class CustomObjArgument:
     class_fqn: Annotated[str, 20]
 
 
+@dataclass
+class ComplexValue:
+    real: Annotated[float, 10]
+    imag: Annotated[float, 20]
+
+
 # This is actually a union type
-@dataclass(repr=False)
+@_union_dataclass
 class Argument(_Union):
     as_none: Annotated[bool, 10]
     as_tensor: Annotated[TensorArgument, 20]
@@ -203,6 +211,9 @@ class Argument(_Union):
     as_sym_float: Annotated[SymFloatArgument, 230]
     as_sym_floats: Annotated[list[SymFloatArgument], 240]
     as_optional_tensor: Annotated[OptionalTensorArgument, 250]
+    as_complex: Annotated[ComplexValue, 260]
+    as_int_lists: Annotated[list[list[int]], 280]
+    as_string_to_argument: Annotated[dict[str, "Argument"], 290]
 
 
 class ArgumentKind(IntEnum):
@@ -253,7 +264,7 @@ class UserInputSpec:
     arg: Annotated[Argument, 10]
 
 
-@dataclass(repr=False)
+@_union_dataclass
 class ConstantValue(_Union):
     as_none: Annotated[bool, 10]
     as_int: Annotated[int, 20]
@@ -298,7 +309,7 @@ class InputTokenSpec:
     arg: Annotated[TokenArgument, 10]
 
 
-@dataclass(repr=False)
+@_union_dataclass
 class InputSpec(_Union):
     user_input: Annotated[UserInputSpec, 10]
     parameter: Annotated[InputToParameterSpec, 20]
@@ -326,6 +337,12 @@ class BufferMutationSpec:
 
 
 @dataclass
+class ParameterMutationSpec:
+    arg: Annotated[TensorArgument, 10]
+    parameter_name: Annotated[str, 20]
+
+
+@dataclass
 class GradientToParameterSpec:
     arg: Annotated[TensorArgument, 10]
     parameter_name: Annotated[str, 20]
@@ -348,7 +365,7 @@ class OutputTokenSpec:
     arg: Annotated[TokenArgument, 10]
 
 
-@dataclass(repr=False)
+@_union_dataclass
 class OutputSpec(_Union):
     user_output: Annotated[UserOutputSpec, 10]
     loss_output: Annotated[LossOutputSpec, 20]
@@ -357,6 +374,7 @@ class OutputSpec(_Union):
     gradient_to_user_input: Annotated[GradientToUserInputSpec, 50]
     user_input_mutation: Annotated[UserInputMutationSpec, 60]
     token: Annotated[OutputTokenSpec, 70]
+    parameter_mutation: Annotated[ParameterMutationSpec, 80]
 
 
 @dataclass
@@ -382,7 +400,7 @@ class ModuleCallSignature:
     out_spec: Annotated[str, 40]
 
     # This field is used to prettify the graph placeholders
-    # after we ser/der and retrace
+    # after we Ser/Der and retrace
     forward_arg_names: Annotated[Optional[list[str]], 50] = None
 
 
@@ -413,7 +431,7 @@ class GraphModule:
 
 
 # Invariant: Every time a change is made to the schema, one of the versions
-#            should be upadted.
+#            should be updated.
 @dataclass
 class SchemaVersion:
     major: Annotated[
@@ -433,6 +451,7 @@ class ExportedProgram:
     schema_version: Annotated[SchemaVersion, 60]
     verifiers: Annotated[list[str], 70] = field(default_factory=list)
     torch_version: Annotated[str, 80] = "<=2.4"
+    guards_code: Annotated[list[str], 90] = field(default_factory=list)
 
 
 #########################################################################
@@ -440,29 +459,25 @@ class ExportedProgram:
 #########################################################################
 
 
+# The metadata for payload saved in PT2 archive.
+# payload includes params, buffers, tensor constants, and custom objects.
 @dataclass
-class Program:
-    methods: Annotated[dict[str, ExportedProgram], 200]
+class PayloadMeta:
+    # the path of the payload in the archive file, e.g. "weight_0"
+    path_name: Annotated[str, 10]
+    is_param: Annotated[bool, 20]
+    # whether the payload is serialized using pickle.
+    # Only custom objects and tensor subclasses that are not fake tensors
+    # are serialized using pickle.
+    use_pickle: Annotated[bool, 30]
+    # Custom Objects don't have tensor_meta and will be serialized using pickle
+    tensor_meta: Annotated[Optional[TensorMeta], 40]
 
 
-# This is the top-level model definition that be will serialized into the package
+# The mapping from payload FQN to its metadata.
 @dataclass
-class Model:
-    # unique identifier of the model in the package, e.g. local, remote, merge
-    name: Annotated[str, 10]
-    # key is the FQN of tensor in exported program
-    # value is the archive path of tensor payloads
-    # e.g. "L__self__linear.weight" : "/data/tensor/L__self__linear.weight"
-    tensorPaths: Annotated[dict[str, str], 20]
-    # program exported from torch.export()
-    program: Annotated[Program, 40]
-    # Backend-specialized Lowered GraphModule
-    # e.g. "aotinductor-a100" : ExportedProgram_with_AOTInductor_delegate
-    delegates: Annotated[dict[str, Program], 50]
-    deviceAllocationMap: Annotated[dict[str, str], 60]
-    # key is the FQN of constant in exported program (constant tensor or torchbind objs)
-    # value is the archive path of serialized constants
-    constantPaths: Annotated[dict[str, str], 70]
+class PayloadConfig:
+    config: Annotated[dict[str, PayloadMeta], 10]
 
 
 #

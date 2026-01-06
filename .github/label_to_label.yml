@@ -16,6 +16,11 @@
   then:
   - "module: pt2-dispatcher"
 - any:
+  - "vllm-compile"
+  then:
+  - "module: vllm"
+  - "oncall: pt2"
+- any:
   - "module: vmap"
   then:
   - "module: functorch"
@@ -27,10 +32,6 @@
   - "module: pt2 optimizer"
   then:
   - "module: dynamo"
-- any:
-  - "module: flex attention"
-  then:
-  - "module: higher order operators"
 - any:
   - "module: aotinductor"
   then:
@@ -48,3 +49,12 @@
   - "module: dynamic shapes"
   then:
   - "oncall: pt2"
+- any:
+  - "release notes: distributed (c10d)"
+  - "release notes: distributed (symm_mem)"
+  - "release notes: distributed (pipeline)"
+  - "release notes: distributed (fsdp)"
+  - "release notes: distributed (dtensor)"
+  - "oncall: distributed"
+  then:
+  - "ciflow/h100-distributed"

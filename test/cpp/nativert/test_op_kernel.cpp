@@ -1,5 +1,6 @@
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/op_registration/op_registration.h>
+#include <ATen/ops/tensor.h>
 #include <gtest/gtest.h>
 #include <torch/nativert/executor/OpKernel.h>
 

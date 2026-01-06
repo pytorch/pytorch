@@ -215,7 +215,7 @@ class SmallVectorTemplateCommon
       class ItTy,
       std::enable_if_t<!std::is_same_v<std::remove_const_t<ItTy>, T*>, bool> =
           false>
-  void assertSafeToReferenceAfterClear(ItTy, ItTy) {}
+  void assertSafeToReferenceAfterClear(ItTy /*unused*/, ItTy /*unused*/) {}
 
   /// Check whether any part of the range will be invalidated by growing.
   void assertSafeToAddRange(const T* From, const T* To) {
@@ -228,7 +228,7 @@ class SmallVectorTemplateCommon
       class ItTy,
       std::enable_if_t<!std::is_same_v<std::remove_const_t<ItTy>, T*>, bool> =
           false>
-  void assertSafeToAddRange(ItTy, ItTy) {}
+  void assertSafeToAddRange(ItTy /*unused*/, ItTy /*unused*/) {}
 
   /// Reserve enough space to add one element, and return the updated element
   /// pointer in case it was a reference to the storage.
@@ -538,7 +538,7 @@ class SmallVectorTemplateBase<T, true> : public SmallVectorTemplateCommon<T> {
   SmallVectorTemplateBase(size_t Size) : SmallVectorTemplateCommon<T>(Size) {}
 
   // No need to do a destroy loop for POD's.
-  static void destroy_range(T*, T*) {}
+  static void destroy_range(T* /*unused*/, T* /*unused*/) {}
 
   /// Move the range [I, E) onto the uninitialized memory
   /// starting with "Dest", constructing elements into it as needed.
@@ -563,8 +563,8 @@ class SmallVectorTemplateBase<T, true> : public SmallVectorTemplateCommon<T> {
       T1* I,
       T1* E,
       T2* Dest,
-      std::enable_if_t<std::is_same_v<std::remove_const_t<T1>, T2>>* =
-          nullptr) {
+      std::enable_if_t<std::is_same_v<std::remove_const_t<T1>, T2>>* /*unused*/
+      = nullptr) {
     // Use memcpy for PODs iterated by pointers (which includes SmallVector
     // iterators): std::uninitialized_copy optimizes to memmove, but we can
     // use memcpy here. Note that I and E are iterators and thus might be
@@ -795,7 +795,7 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
     std::move(I + 1, this->end(), I);
     // Drop the last elt.
     this->pop_back();
-    return (N);
+    return N;
   }
 
   iterator erase(iterator S, iterator E) {
@@ -807,7 +807,7 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
     // Drop the last elts.
     this->destroy_range(I, this->end());
     this->set_size(I - this->begin());
-    return (N);
+    return N;
   }
 
  private:
@@ -815,8 +815,8 @@ class SmallVectorImpl : public SmallVectorTemplateBase<T> {
   iterator insert_one_impl(iterator I, ArgType&& Elt) {
     // Callers ensure that ArgType is derived from T.
     static_assert(
-        std::is_same<std::remove_const_t<std::remove_reference_t<ArgType>>, T>::
-            value,
+        std::
+            is_same_v<std::remove_const_t<std::remove_reference_t<ArgType>>, T>,
         "ArgType must be derived from T!");
 
     if (I == this->end()) { // Important special case for empty vector.
@@ -1412,13 +1412,13 @@ inline size_t capacity_in_bytes(const SmallVector<T, N>& X) {
 template <typename T, unsigned N>
 std::ostream& operator<<(std::ostream& out, const SmallVector<T, N>& list) {
   int i = 0;
-  out << "[";
+  out << '[';
   for (auto e : list) {
     if (i++ > 0)
       out << ", ";
     out << e;
   }
-  out << "]";
+  out << ']';
   return out;
 }
 

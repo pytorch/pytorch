@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 
 import torch
 from torch import nan, Tensor
@@ -29,15 +28,16 @@ class FisherSnedecor(Distribution):
         df2 (float or Tensor): degrees of freedom parameter 2
     """
 
+    # pyrefly: ignore [bad-override]
     arg_constraints = {"df1": constraints.positive, "df2": constraints.positive}
     support = constraints.positive
     has_rsample = True
 
     def __init__(
         self,
-        df1: Union[Tensor, float],
-        df2: Union[Tensor, float],
-        validate_args: Optional[bool] = None,
+        df1: Tensor | float,
+        df2: Tensor | float,
+        validate_args: bool | None = None,
     ) -> None:
         self.df1, self.df2 = broadcast_all(df1, df2)
         self._gamma1 = Gamma(self.df1 * 0.5, self.df1)

@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 """
 The following example demonstrates how to train a ConvNeXt model
-with intermediate activations sharded across mutliple GPUs via DTensor
+with intermediate activations sharded across multiple GPUs via DTensor
 
 To run the example, use the following command:
 torchrun --standalone --nnodes=1 --nproc-per-node=4 convnext_example.py
@@ -34,7 +34,7 @@ class LayerNorm(nn.Module):
         self.bias = nn.Parameter(torch.zeros(normalized_shape))
         self.eps = eps
         self.data_format = data_format
-        if self.data_format not in [torch.contiguous_format]:
+        if self.data_format != torch.contiguous_format:
             raise NotImplementedError
         self.normalized_shape = (normalized_shape,)
 
@@ -110,7 +110,7 @@ class DownSampling(nn.Module):
 
 @torch.no_grad()
 def init_weights(m):
-    if type(m) == nn.Conv2d or type(m) == nn.Linear:
+    if type(m) is nn.Conv2d or type(m) is nn.Linear:
         nn.init.ones_(m.weight)
         if m.bias is not None:
             nn.init.zeros_(m.bias)

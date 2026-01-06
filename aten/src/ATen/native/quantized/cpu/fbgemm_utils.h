@@ -7,11 +7,13 @@
 #include <c10/util/irange.h>
 
 #ifdef USE_FBGEMM
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wextra-semi")
 #include <fbgemm/Fbgemm.h>
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Winconsistent-missing-destructor-override")
 #include <fbgemm/FbgemmFP16.h>
 C10_DIAGNOSTIC_POP()
 #include <fbgemm/QuantUtils.h>
+C10_DIAGNOSTIC_POP()
 
 // The struct for the packed weight matrix (PackBMatrix) and the corresponding
 // column offsets used for the fully connect layer, which are both prepared in
@@ -378,7 +380,7 @@ struct TORCH_API PackedEmbeddingBagWeight : public EmbeddingPackedParamsBase {
 
   at::Tensor unpack() override;
   static c10::intrusive_ptr<EmbeddingPackedParamsBase> prepack(
-      at::Tensor weight);
+      const at::Tensor& weight);
 
   int64_t bit_rate() const override {
     return bit_rate_;

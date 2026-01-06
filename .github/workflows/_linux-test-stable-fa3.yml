@@ -1,0 +1,258 @@
+# The point of this workflow is to test that a FA3 wheel that was built based off the
+# stable ABI as of torch nightly 20250830 can still run on the newer torch.
+#
+# This workflow is very similar to the _linux-test.yml workflow, with the following
+# differences:
+#   1. It is simpler (there is no test matrix)
+#   2. It pulls flash-attention as a secondary repository in order to access the tests.
+#      Note that it does not BUILD anything from flash-attention, as we have a prebuilt
+#      wheel. We pull flash-attention only to run a few tests.
+#   3. It runs only FA3 tests. No PyTorch tests are run.
+name: linux-test-stable-fa3
+
+on:
+  workflow_call:
+    inputs:
+      build-environment:
+        required: true
+        type: string
+        description: Top-level label for what's being built/tested.
+      docker-image:
+        required: true
+        type: string
+        description: Docker image to run in.
+      timeout-minutes:
+        required: false
+        type: number
+        default: 30
+        description: |
+          Set the maximum (in minutes) how long the workflow should take to finish
+      s3-bucket:
+        description: S3 bucket to download artifact
+        required: false
+        type: string
+        default: "gha-artifacts"
+    secrets:
+      HUGGING_FACE_HUB_TOKEN:
+        required: false
+        description: |
+          HF Auth token to avoid rate limits when downloading models or datasets from hub
+      VLLM_TEST_HUGGING_FACE_TOKEN:
+        required: false
+        description: |
+          HF Auth token to test vllm
+      SCRIBE_GRAPHQL_ACCESS_TOKEN:
+        required: false
+        description: |
+          FB app token to write to scribe endpoint
+
+env:
+  GIT_DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+
+jobs:
+  test:
+    # Don't run on forked repos
+    if: github.repository_owner == 'pytorch'
+    runs-on: linux.aws.h100
+    timeout-minutes: ${{ inputs.timeout-minutes || 30 }}
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          no-sudo: true
+
+      - name: Checkout flash-attention as a secondary repository
+        uses: actions/checkout@v4
+        with:
+          repository: Dao-AILab/flash-attention
+          path: flash-attention
+
+      - name: Setup Linux
+        uses: ./.github/actions/setup-linux
+
+      - name: Login to ECR
+        uses: ./.github/actions/ecr-login
+
+      - name: Calculate docker image
+        id: calculate-docker-image
+        uses: pytorch/test-infra/.github/actions/calculate-docker-image@main
+        with:
+          docker-image-name: ${{ inputs.docker-image }}
+
+      - name: Use following to pull public copy of the image
+        id: print-ghcr-mirror
+        env:
+          ECR_DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
+        shell: bash
+        run: |
+          tag=${ECR_DOCKER_IMAGE##*:}
+          echo "docker pull ghcr.io/pytorch/ci-image:${tag/:/-}"
+
+      - name: Pull docker image
+        uses: pytorch/test-infra/.github/actions/pull-docker-image@main
+        with:
+          docker-image: ${{ steps.calculate-docker-image.outputs.docker-image }}
+
+      - name: Check if in a container runner
+        shell: bash
+        id: check_container_runner
+        run: echo "IN_CONTAINER_RUNNER=$(if [ -f /.inarc ] || [ -f /.incontainer ]; then echo true ; else echo false; fi)" >> "$GITHUB_OUTPUT"
+
+      - name: Setup GPU_FLAG for docker run
+        id: setup-gpu-flag
+        run: echo "GPU_FLAG=--gpus all -e NVIDIA_DRIVER_CAPABILITIES=all" >> "${GITHUB_ENV}"
+
+      - name: Setup SCCACHE_SERVER_PORT environment for docker run when on container
+        id: setup-sscache-port-flag
+        run: echo "SCCACHE_SERVER_PORT_DOCKER_FLAG=-e SCCACHE_SERVER_PORT=$((RUNNER_UID + 4226))" >> "${GITHUB_ENV}"
+        if: ${{ steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'true' }}
+
+      - name: Get workflow job id
+        id: get-job-id
+        uses: ./.github/actions/get-workflow-job-id
+        if: always()
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Download build artifacts
+        uses: ./.github/actions/download-build-artifacts
+        with:
+          name: ${{ inputs.build-environment }}
+          s3-bucket: ${{ inputs.s3-bucket }}
+
+      - name: Parse ref
+        id: parse-ref
+        run: .github/scripts/parse_ref.py
+
+      - name: Set Test step time
+        id: test-timeout
+        shell: bash
+        env:
+          JOB_TIMEOUT: ${{ inputs.timeout-minutes }}
+        run: |
+          echo "timeout=$((JOB_TIMEOUT-30))" >> "${GITHUB_OUTPUT}"
+
+      - name: Preserve github env variables for use in docker
+        shell: bash
+        run: |
+          env | grep '^GITHUB' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+          env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
+
+      - name: Test
+        id: test
+        timeout-minutes: ${{ fromJson(steps.test-timeout.outputs.timeout) }}
+        env:
+          BUILD_ENVIRONMENT: ${{ inputs.build-environment }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          GITHUB_WORKFLOW: ${{ github.workflow }}
+          GITHUB_JOB: ${{ github.job }}
+          GITHUB_RUN_ID: ${{ github.run_id }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          GITHUB_RUN_ATTEMPT: ${{ github.run_attempt }}
+          JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
+          JOB_NAME: ${{ steps.get-job-id.outputs.job-name }}
+          BRANCH: ${{ steps.parse-ref.outputs.branch }}
+          SHA1: ${{ github.event.pull_request.head.sha || github.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha || github.sha }}
+          SHM_SIZE: '2g'
+          DOCKER_IMAGE: ${{ inputs.docker-image }}
+          VLLM_TEST_HUGGING_FACE_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
+          HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
+          SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
+          ARTIFACTS_FILE_SUFFIX: ${{ github.job }}-${{ steps.get-job-id.outputs.job-id }}
+        run: |
+          set -x
+
+          TEST_COMMAND=.ci/pytorch/test_fa3_abi_stable.sh
+
+          # Leaving 1GB for the runner and other things
+          TOTAL_AVAILABLE_MEMORY_IN_GB=$(awk '/MemTotal/ { printf "%.3f \n", $2/1024/1024 - 1 }' /proc/meminfo)
+          # https://docs.docker.com/engine/containers/resource_constraints/#--memory-swap-details, the 3GB swap
+          # comes from https://github.com/pytorch/test-infra/pull/6058
+          TOTAL_MEMORY_WITH_SWAP=$(("${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}" + 3))
+
+
+          SHM_OPTS="--shm-size=${SHM_SIZE}"
+          JENKINS_USER="--user jenkins"
+          DOCKER_SHELL_CMD=
+
+          # detached container should get cleaned up by teardown_ec2_linux
+          # TODO: Stop building test binaries as part of the build phase
+          # Used for GPU_FLAG, SHM_OPTS, JENKINS_USER and DOCKER_SHELL_CMD since that doesn't play nice
+          # shellcheck disable=SC2086,SC2090
+          container_name=$(docker run \
+            ${GPU_FLAG:-} \
+            ${SCCACHE_SERVER_PORT_DOCKER_FLAG:-} \
+            -e BUILD_ENVIRONMENT \
+            -e PR_NUMBER \
+            -e GITHUB_ACTIONS \
+            -e GITHUB_REPOSITORY \
+            -e GITHUB_WORKFLOW \
+            -e GITHUB_JOB \
+            -e GITHUB_RUN_ID \
+            -e GITHUB_RUN_NUMBER \
+            -e GITHUB_RUN_ATTEMPT \
+            -e JOB_ID \
+            -e JOB_NAME \
+            -e BASE_SHA \
+            -e BRANCH \
+            -e SHA1 \
+            -e MAX_JOBS="$(nproc --ignore=2)" \
+            -e HUGGING_FACE_HUB_TOKEN \
+            -e VLLM_TEST_HUGGING_FACE_TOKEN \
+            -e SCRIBE_GRAPHQL_ACCESS_TOKEN \
+            -e ARTIFACTS_FILE_SUFFIX \
+            --memory="${TOTAL_AVAILABLE_MEMORY_IN_GB%.*}g" \
+            --memory-swap="${TOTAL_MEMORY_WITH_SWAP}g" \
+            --env-file="/tmp/github_env_${GITHUB_RUN_ID}" \
+            --security-opt seccomp=unconfined \
+            --cap-add=SYS_PTRACE \
+            --ipc=host \
+            ${SHM_OPTS} \
+            --tty \
+            --detach \
+            --name="${container_name}" \
+            ${JENKINS_USER} \
+            -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
+            -w /var/lib/jenkins/workspace \
+            "${DOCKER_IMAGE}" \
+            ${DOCKER_SHELL_CMD}
+          )
+
+          echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"
+
+          docker exec -t "${container_name}" sh -c "python3 -m pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
+
+      - name: Collect backtraces from coredumps (if any)
+        if: always()
+        run: |
+          # shellcheck disable=SC2156
+          find . -iname "core.[1-9]*" -exec docker exec "${DOCKER_CONTAINER_ID}" sh -c "gdb python {} -ex 'bt' -ex 'q'" \;
+
+      - name: Store Core dumps on S3
+        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
+        if: failure()
+        with:
+          name: coredumps-fa3-stable-abi-smoke-tests
+          retention-days: 14
+          if-no-files-found: ignore
+          path: ./**/core.[1-9]*
+
+      - name: Upload utilization stats
+        if: ${{ always() && steps.test.conclusion && steps.test.conclusion != 'skipped' }}
+        continue-on-error: true
+        uses: ./.github/actions/upload-utilization-stats
+        with:
+          job_id: ${{ steps.get-job-id.outputs.job-id }}
+          job_name: ${{ steps.get-job-id.outputs.job-name }}
+          workflow_name: ${{ github.workflow }}
+          workflow_run_id: ${{github.run_id}}
+          workflow_attempt: ${{github.run_attempt}}
+
+      - name: Teardown Linux
+        uses: pytorch/test-infra/.github/actions/teardown-linux@main
+        if: always() && steps.check_container_runner.outputs.IN_CONTAINER_RUNNER == 'false'

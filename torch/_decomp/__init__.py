@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
 import inspect
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from functools import lru_cache, partial, wraps
 from itertools import chain
-from typing import Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import ParamSpec
 
 
@@ -58,7 +58,7 @@ def _should_decompose_because_unsafe_op(op: torch._ops.OperatorBase) -> bool:
         return False
     if torch.Tag.maybe_aliasing_or_mutating in op.tags:
         return True
-    return op == torch.ops.aten.native_batch_norm.default
+    return op is torch.ops.aten.native_batch_norm.default
 
 
 def _add_op_to_registry(registry, op, fn):
@@ -76,7 +76,8 @@ def _add_op_to_registry(registry, op, fn):
     elif isinstance(op, OpOverload):
         overloads.append(op)
     else:
-        assert isinstance(op, OpOverloadPacket)
+        if not isinstance(op, OpOverloadPacket):
+            raise AssertionError(f"expected OpOverloadPacket, got {type(op)}")
         for ol in op.overloads():
             overloads.append(getattr(op, ol))
 
@@ -109,7 +110,10 @@ def _convert_out_params(f):
             out_kwargs = tuple(kwargs.pop(o, None) for o in out_names)
             # Either all of the out kwargs are set or none of them
             is_none = out_kwargs[0] is None
-            assert all((o is None) == is_none for o in out_kwargs)
+            if not all((o is None) == is_none for o in out_kwargs):
+                raise AssertionError(
+                    f"all out kwargs must be set or none of them, got {out_kwargs}"
+                )
             return f(*args, **kwargs, out=None if is_none else out_kwargs)
 
         out_params = [
@@ -200,7 +204,10 @@ def register_decomposition(
     things
     """
 
-    assert type in {"post_autograd", "pre_autograd", "meta"}
+    if type not in {"post_autograd", "pre_autograd", "meta"}:
+        raise AssertionError(
+            f"type must be one of post_autograd, pre_autograd, or meta, got {type}"
+        )
 
     def decomposition_decorator(fn: Callable[_P, _T]) -> Callable[_P, _T]:
         orig_fn = fn
@@ -236,10 +243,14 @@ def get_decompositions(
     they know how to implement, and we provide decompositions for everything
     not in this set.
     """
-    assert type in {"post_autograd", "pre_autograd", "meta"}
+    if type not in {"post_autograd", "pre_autograd", "meta"}:
+        raise AssertionError(
+            f"type must be one of post_autograd, pre_autograd, or meta, got {type}"
+        )
 
     registry = global_decomposition_table[type]
     packets_to_overloads = defaultdict(list)
+
     for opo in registry:
         if isinstance(opo, (OpOverload, OpOverloadPacket)):
             packets_to_overloads[opo.overloadpacket].append(opo)
@@ -403,6 +414,7 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.max_unpool3d,
             aten.mish,
             aten.mish_,
+            aten.mish_backward,
             aten.mse_loss,
             aten.mse_loss_backward,
             aten.multi_margin_loss,
@@ -418,6 +430,8 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.native_dropout_backward,
             aten.native_group_norm_backward,
             aten.native_layer_norm_backward,
+            aten._fused_rms_norm,
+            aten._fused_rms_norm_backward,
             aten.new_empty,
             aten.new_full,
             aten.new_ones,
@@ -473,6 +487,7 @@ def _core_aten_decompositions_post_autograd() -> dict[
             aten.silu,
             aten.silu_,
             aten.silu_backward.grad_input,
+            aten.silu_backward,
             aten.sinc,
             aten.sinc_,
             aten.slice_backward,

@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import Any, Optional
+from typing import Any, Literal, Optional
 
 import torch
 import torch.nn as nn
@@ -62,10 +62,10 @@ class Conv1d(_ConvNd, nn.Conv1d):
         dilation: _size_1_t = 1,
         groups: int = 1,
         bias: bool = True,
-        padding_mode: str = "zeros",
+        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
         device=None,
         dtype=None,
-        weight_qparams: Optional[dict[str, Any]] = None,
+        weight_qparams: dict[str, Any] | None = None,
     ):
         nn.Conv1d.__init__(
             self,
@@ -95,6 +95,7 @@ class Conv1d(_ConvNd, nn.Conv1d):
         and the backend should be able to fuse the ops with `*` into a quantized conv1d
         """
         weight_quant_dequant = self.get_weight()
+
         result = F.conv1d(
             x,
             weight_quant_dequant,
@@ -128,7 +129,7 @@ class Conv2d(_ConvNd, nn.Conv2d):
         padding_mode="zeros",
         device=None,
         dtype=None,
-        weight_qparams: Optional[dict[str, Any]] = None,
+        weight_qparams: dict[str, Any] | None = None,
     ):
         nn.Conv2d.__init__(
             self,
@@ -140,6 +141,7 @@ class Conv2d(_ConvNd, nn.Conv2d):
             dilation,
             groups,
             bias,
+            # pyrefly: ignore [bad-argument-type]
             padding_mode,
             device,
             dtype,
@@ -158,6 +160,7 @@ class Conv2d(_ConvNd, nn.Conv2d):
         and the backend should be able to fuse the ops with `*` into a quantized conv2d
         """
         weight_quant_dequant = self.get_weight()
+
         result = F.conv2d(
             x,
             weight_quant_dequant,
@@ -191,7 +194,7 @@ class Conv3d(_ConvNd, nn.Conv3d):
         padding_mode="zeros",
         device=None,
         dtype=None,
-        weight_qparams: Optional[dict[str, Any]] = None,
+        weight_qparams: dict[str, Any] | None = None,
     ):
         nn.Conv3d.__init__(
             self,
@@ -203,6 +206,7 @@ class Conv3d(_ConvNd, nn.Conv3d):
             dilation,
             groups,
             bias,
+            # pyrefly: ignore [bad-argument-type]
             padding_mode,
             device,
             dtype,
@@ -221,6 +225,7 @@ class Conv3d(_ConvNd, nn.Conv3d):
         and the backend should be able to fuse the ops with `*` into a quantized conv3d
         """
         weight_quant_dequant = self.get_weight()
+
         result = F.conv3d(
             x,
             weight_quant_dequant,
@@ -282,10 +287,10 @@ class ConvTranspose1d(_ConvTransposeNd, nn.ConvTranspose1d):
         groups: int = 1,
         bias: bool = True,
         dilation: _size_1_t = 1,
-        padding_mode: str = "zeros",
+        padding_mode: Literal["zeros", "reflect", "replicate", "circular"] = "zeros",
         device=None,
         dtype=None,
-        weight_qparams: Optional[dict[str, Any]] = None,
+        weight_qparams: dict[str, Any] | None = None,
     ):
         nn.ConvTranspose1d.__init__(
             self,
@@ -305,7 +310,7 @@ class ConvTranspose1d(_ConvTransposeNd, nn.ConvTranspose1d):
         self._init_weight_qparams(weight_qparams, device)
 
     def forward(
-        self, x: torch.Tensor, output_size: Optional[list[int]] = None
+        self, x: torch.Tensor, output_size: list[int] | None = None
     ) -> torch.Tensor:
         """
         we have:
@@ -365,7 +370,7 @@ class ConvTranspose2d(_ConvTransposeNd, nn.ConvTranspose2d):
         padding_mode="zeros",
         device=None,
         dtype=None,
-        weight_qparams: Optional[dict[str, Any]] = None,
+        weight_qparams: dict[str, Any] | None = None,
     ):
         nn.ConvTranspose2d.__init__(
             self,
@@ -378,6 +383,7 @@ class ConvTranspose2d(_ConvTransposeNd, nn.ConvTranspose2d):
             groups,
             bias,
             dilation,
+            # pyrefly: ignore [bad-argument-type]
             padding_mode,
             device,
             dtype,
@@ -385,7 +391,7 @@ class ConvTranspose2d(_ConvTransposeNd, nn.ConvTranspose2d):
         self._init_weight_qparams(weight_qparams, device)
 
     def forward(
-        self, x: torch.Tensor, output_size: Optional[list[int]] = None
+        self, x: torch.Tensor, output_size: list[int] | None = None
     ) -> torch.Tensor:
         """
         we have:
@@ -446,7 +452,7 @@ class ConvTranspose3d(_ConvTransposeNd, nn.ConvTranspose3d):
         padding_mode="zeros",
         device=None,
         dtype=None,
-        weight_qparams: Optional[dict[str, Any]] = None,
+        weight_qparams: dict[str, Any] | None = None,
     ):
         nn.ConvTranspose3d.__init__(
             self,
@@ -459,6 +465,7 @@ class ConvTranspose3d(_ConvTransposeNd, nn.ConvTranspose3d):
             groups,
             bias,
             dilation,
+            # pyrefly: ignore [bad-argument-type]
             padding_mode,
             device,
             dtype,
@@ -466,7 +473,7 @@ class ConvTranspose3d(_ConvTransposeNd, nn.ConvTranspose3d):
         self._init_weight_qparams(weight_qparams, device)
 
     def forward(
-        self, x: torch.Tensor, output_size: Optional[list[int]] = None
+        self, x: torch.Tensor, output_size: list[int] | None = None
     ) -> torch.Tensor:
         """
         we have:

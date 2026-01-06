@@ -7,7 +7,6 @@ into its building blocks to be able to observe.
 
 import numbers
 import warnings
-from typing import Optional
 
 import torch
 from torch import Tensor
@@ -101,7 +100,7 @@ class LSTMCell(torch.nn.Module):
         self.cell_state_dtype: torch.dtype = torch.quint8
 
     def forward(
-        self, x: Tensor, hidden: Optional[tuple[Tensor, Tensor]] = None
+        self, x: Tensor, hidden: tuple[Tensor, Tensor] | None = None
     ) -> tuple[Tensor, Tensor]:
         if hidden is None or hidden[0] is None or hidden[1] is None:
             hidden = self.initialize_hidden(x.shape[0], x.is_quantized)
@@ -203,7 +202,7 @@ class LSTMCell(torch.nn.Module):
 
     @classmethod
     def from_float(cls, other, use_precomputed_fake_quant=False, split_gates=False):
-        assert type(other) == cls._FLOAT_MODULE
+        assert type(other) is cls._FLOAT_MODULE
         assert hasattr(other, "qconfig"), "The float module must have 'qconfig'"
         observed = cls.from_params(
             other.weight_ih,
@@ -247,7 +246,7 @@ class _LSTMSingleLayer(torch.nn.Module):
             input_dim, hidden_dim, bias=bias, split_gates=split_gates, **factory_kwargs
         )
 
-    def forward(self, x: Tensor, hidden: Optional[tuple[Tensor, Tensor]] = None):
+    def forward(self, x: Tensor, hidden: tuple[Tensor, Tensor] | None = None):
         result = []
         seq_len = x.shape[0]
         for i in range(seq_len):
@@ -297,14 +296,14 @@ class _LSTMLayer(torch.nn.Module):
                 **factory_kwargs,
             )
 
-    def forward(self, x: Tensor, hidden: Optional[tuple[Tensor, Tensor]] = None):
+    def forward(self, x: Tensor, hidden: tuple[Tensor, Tensor] | None = None):
         if self.batch_first:
             x = x.transpose(0, 1)
         if hidden is None:
             hx_fw, cx_fw = (None, None)
         else:
             hx_fw, cx_fw = hidden
-        hidden_bw: Optional[tuple[Tensor, Tensor]] = None
+        hidden_bw: tuple[Tensor, Tensor] | None = None
         if self.bidirectional:
             if hx_fw is None:
                 hx_bw = None
@@ -369,13 +368,19 @@ class _LSTMLayer(torch.nn.Module):
         split_gates = kwargs.get("split_gates", False)
 
         layer = cls(
+            # pyrefly: ignore [bad-argument-type]
             input_size,
+            # pyrefly: ignore [bad-argument-type]
             hidden_size,
+            # pyrefly: ignore [bad-argument-type]
             bias,
+            # pyrefly: ignore [bad-argument-type]
             batch_first,
+            # pyrefly: ignore [bad-argument-type]
             bidirectional,
             split_gates=split_gates,
         )
+        # pyrefly: ignore [bad-argument-type]
         layer.qconfig = getattr(other, "qconfig", qconfig)
         wi = getattr(other, f"weight_ih_l{layer_idx}")
         wh = getattr(other, f"weight_hh_l{layer_idx}")
@@ -462,18 +467,21 @@ class LSTM(torch.nn.Module):
                 "representing the probability of an element being "
                 "zeroed"
             )
+
         if dropout > 0:
             warnings.warn(
                 "dropout option for quantizable LSTM is ignored. "
                 "If you are training, please, use nn.LSTM version "
-                "followed by `prepare` step."
+                "followed by `prepare` step.",
+                stacklevel=2,
             )
             if num_layers == 1:
                 warnings.warn(
                     "dropout option adds dropout after all but last "
                     "recurrent layer, so non-zero dropout expects "
                     f"num_layers greater than 1, but got dropout={dropout} "
-                    f"and num_layers={num_layers}"
+                    f"and num_layers={num_layers}",
+                    stacklevel=2,
                 )
 
         layers = [
@@ -501,7 +509,7 @@ class LSTM(torch.nn.Module):
         )
         self.layers = torch.nn.ModuleList(layers)
 
-    def forward(self, x: Tensor, hidden: Optional[tuple[Tensor, Tensor]] = None):
+    def forward(self, x: Tensor, hidden: tuple[Tensor, Tensor] | None = None):
         if self.batch_first:
             x = x.transpose(0, 1)
 
@@ -573,6 +581,7 @@ class LSTM(torch.nn.Module):
             other.bidirectional,
             split_gates=split_gates,
         )
+        # pyrefly: ignore [bad-argument-type]
         observed.qconfig = getattr(other, "qconfig", qconfig)
         for idx in range(other.num_layers):
             observed.layers[idx] = _LSTMLayer.from_float(

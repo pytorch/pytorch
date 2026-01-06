@@ -14,7 +14,6 @@
 #include <c10/util/Exception.h>
 #include <nccl.h>
 #include <torch/csrc/cuda/nccl.h>
-#include <torch/csrc/distributed/c10d/TraceUtils.h>
 #include <optional>
 
 constexpr int64_t kCommInitBusyWaitMillis = 2;
@@ -63,6 +62,10 @@ static_assert(
 #define NCCL_HAS_COMM_REGISTER
 #endif
 
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_COMM_WINDOW_REGISTER
+#endif
+
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 19, 0)
 #define NCCL_HAS_MEM_ALLOC
 #endif
@@ -85,6 +88,10 @@ static_assert(
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
 #define NCCL_HAS_NVLS_CTAS
+#endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 0)
+#define NCCL_HAS_COMM_SHRINK
 #endif
 
 // Macro to throw on a non-successful NCCL return value.
@@ -126,7 +133,11 @@ static_assert(
   } while (0)
 
 // Macro to throw on a non-successful NCCL return value, non-blocking.
-#define C10D_NCCL_CHECK_TIMEOUT_BASE(cmd, comm, failureReason, yield_fn)      \
+// Thread-safe: uses NCCLComm wrapper's getAsyncError() which acquires mutex
+// before calling ncclCommGetAsyncError to prevent race conditions between
+// watchdog and main threads.
+#define C10D_NCCL_CHECK_TIMEOUT_BASE(                                         \
+    cmd, commWrapper, failureReason, yield_fn)                                \
   do {                                                                        \
     ncclResult_t result = cmd;                                                \
     auto startTimepoint = std::chrono::steady_clock::now();                   \
@@ -134,7 +145,7 @@ static_assert(
     while (result == ncclInProgress) {                                        \
       C10D_CHECK_TIMEOUT(startTimepoint, timeout);                            \
       yield_fn;                                                               \
-      ncclCommGetAsyncError(comm, &result);                                   \
+      commWrapper->getAsyncError(&result);                                    \
     }                                                                         \
     if (result != ncclSuccess) {                                              \
       std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +     \
@@ -153,15 +164,16 @@ static_assert(
 // This macro uses sched_yield() to yield the CPU.
 // Thus suitable for NCCL calls that would quickly turn ncclSuccess, e.g.
 // collectives.
-#define C10D_NCCL_CHECK_TIMEOUT(cmd, comm, failureReason) \
-  C10D_NCCL_CHECK_TIMEOUT_BASE(cmd, comm, failureReason, sched_yield())
+#define C10D_NCCL_CHECK_TIMEOUT(cmd, commWrapper, failureReason) \
+  C10D_NCCL_CHECK_TIMEOUT_BASE(cmd, commWrapper, failureReason, sched_yield())
 
 // Macro to throw exception on a non-successful NCCL return value or timeout.
 // This macro uses sleep to yield the CPU.
 // Thus suitable for NCCL calls that would take longer to turn ncclSuccess, e.g.
 // ncclCommInitRankConfig, ncclCommFinalize, etc.
-#define C10D_NCCL_CHECK_TIMEOUT_SLEEP(cmd, comm, failureReason) \
-  C10D_NCCL_CHECK_TIMEOUT_BASE(cmd, comm, failureReason, C10D_SCHED_SLEEP())
+#define C10D_NCCL_CHECK_TIMEOUT_SLEEP(cmd, commWrapper, failureReason) \
+  C10D_NCCL_CHECK_TIMEOUT_BASE(                                        \
+      cmd, commWrapper, failureReason, C10D_SCHED_SLEEP())
 
 #define C10D_NCCL_CHECK_TIMEOUT_GROUPEND(cmd, comm, failureReason)           \
   do {                                                                       \
@@ -172,7 +184,7 @@ static_assert(
       do {                                                                   \
         C10D_CHECK_TIMEOUT(startTimepoint, timeout);                         \
         sched_yield();                                                       \
-        ncclCommGetAsyncError(comm->getNcclComm(), &state);                  \
+        comm->getAsyncError(&state);                                         \
       } while (state == ncclInProgress);                                     \
     }                                                                        \
     if (state != ncclSuccess) {                                              \
@@ -228,7 +240,9 @@ static std::map<at::ScalarType, ncclDataType_t> ncclDataType = {
 };
 
 TORCH_API size_t hashTensors(const std::vector<at::Tensor>& tensors);
+TORCH_API int genNcclSplitColor(const std::vector<int>& ranks);
 TORCH_API std::string getNcclVersion();
+TORCH_API std::tuple<int, int, int> getNcclVersionTuple();
 TORCH_API int getNcclVersionNumber();
 TORCH_API std::string ncclGetErrorWithVersion(ncclResult_t error);
 int nccl_nonblocking_timeout();
@@ -253,6 +267,10 @@ class NCCLComm {
   NCCLComm() = default;
 
   ~NCCLComm() noexcept;
+
+  void setUniqueHash(ncclUniqueId ncclId);
+  void setUniqueHash(std::string hash);
+  std::string getUniqueHash();
 
   static std::shared_ptr<NCCLComm> create(
       int numRanks,
@@ -282,15 +300,21 @@ class NCCLComm {
       NCCLComm* source,
       int color_id,
       int rank,
-      ncclConfig_t& config,
-      std::vector<uint64_t>& ranks_ull);
+      ncclConfig_t& config);
 #endif // NCCL_HAS_COMM_SPLIT
+
+#ifdef NCCL_HAS_COMM_SHRINK
+  static std::shared_ptr<NCCLComm> shrink(
+      NCCLComm* source,
+      std::vector<int>& ranks_to_exclude,
+      ncclConfig_t* config,
+      int shrinkFlags = 0);
+#endif // NCCL_HAS_COMM_SHRINK
 
 #if (defined(IS_NCCLX) || defined(USE_ROCM)) && defined(NCCL_COMM_DUMP)
   std::unordered_map<std::string, std::string> ncclCommDump();
 #endif
 
-  ncclUniqueId getNcclId();
   at::DeviceIndex getDeviceIndex();
 
   // Must not be copyable
@@ -337,20 +361,27 @@ class NCCLComm {
 
   ncclResult_t checkForNcclError();
 
+  // Thread-safe wrapper for ncclCommGetAsyncError that acquires the mutex
+  // before calling the NCCL API. This is needed because NCCL does not provide
+  // thread-safety guarantees for ncclCommGetAsyncError, and both the main
+  // thread and watchdog thread may call it concurrently.
+  ncclResult_t getAsyncError(ncclResult_t* asyncError);
+
   ncclResult_t registerSegment(
       void* ptr,
       size_t size,
-      bool errorOnRereg = true);
+      bool errorOnRereg = true,
+      bool window = false);
 
-  ncclResult_t deregisterSegment(void* ptr);
+  ncclResult_t deregisterSegment(void* ptr, bool window = false);
 
   std::string repr() const;
 
   friend class ProcessGroupNCCL;
 
  protected:
-  // Unique nccl_id for this communicator.
-  ncclUniqueId ncclId_{};
+  // Unique hash for this communicator.
+  std::string uniqueHash_;
   bool aborted_{false};
   uint64_t ncclCommSplitCounter_{0};
   ncclResult_t ncclAsyncErr_{ncclSuccess};
@@ -359,7 +390,7 @@ class NCCLComm {
   int rank_{};
   // Optional reason for communicator failure, provided by ProcessGroupNCCL for
   // better error messaging.
-  std::optional<std::string> commFailureReason_{};
+  std::optional<std::string> commFailureReason_;
   bool initialized_{false};
   // Whether this communicator is using nonblocking mode. Recorded during comm
   // creation or split. For safety, we give a default value of true (more

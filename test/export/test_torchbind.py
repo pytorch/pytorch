@@ -2,7 +2,6 @@
 # ruff: noqa: F841
 
 import copy
-import unittest
 
 import torch
 import torch.utils._pytree as pytree
@@ -25,6 +24,7 @@ from torch.testing._internal.torchbind_impls import (
     _empty_tensor_queue,
     init_torchbind_implementations,
 )
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 def _assertEqualSkipScriptObject(test_case, exp, actual):
@@ -138,7 +138,7 @@ class TestExportTorchbind(TestCase):
         def export_wrapper(f, args, kwargs, strict, pre_dispatch):
             with enable_torchbind_tracing():
                 if pre_dispatch:
-                    exported_program = torch.export.export_for_training(
+                    exported_program = torch.export.export(
                         f, args, kwargs, strict=strict
                     ).run_decompositions({})
                 else:
@@ -185,6 +185,7 @@ class TestExportTorchbind(TestCase):
 def forward(self, x, n):
     x, n, = fx_pytree.tree_flatten_spec(([x, n], {}), self._in_spec)
     attr = self.attr
+    _guards_fn = self._guards_fn(x, n);  n = _guards_fn = None
     call_torchbind = torch.ops.higher_order.call_torchbind(attr, 'add_tensor', x);  attr = None
     add = torch.ops.aten.add.Tensor(x, call_torchbind);  x = call_torchbind = None
     return pytree.tree_unflatten((add,), self._out_spec)""",
@@ -232,6 +233,7 @@ def forward(self, token, obj_attr, x, n):
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     attr = self.attr
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     call_torchbind = torch.ops.higher_order.call_torchbind(attr, 'add_tensor', x);  attr = None
     add = torch.ops.aten.add.Tensor(x, call_torchbind);  x = call_torchbind = None
     return pytree.tree_unflatten((add,), self._out_spec)""",
@@ -266,6 +268,7 @@ def forward(self, token, obj_attr, x):
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     attr = self.attr
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(attr, x);  attr = None
     add = torch.ops.aten.add.Tensor(x, takes_foo_default);  x = takes_foo_default = None
     return pytree.tree_unflatten((add,), self._out_spec)""",
@@ -300,6 +303,7 @@ def forward(self, token, obj_attr, x):
             """\
 def forward(self, x, cc):
     x, cc, = fx_pytree.tree_flatten_spec(([x, cc], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x, cc);  _guards_fn = None
     call_torchbind = torch.ops.higher_order.call_torchbind(cc, 'add_tensor', x);  cc = None
     add = torch.ops.aten.add.Tensor(x, call_torchbind);  x = call_torchbind = None
     return pytree.tree_unflatten((add,), self._out_spec)""",
@@ -362,6 +366,7 @@ def forward(self, token, x, cc):
             """\
 def forward(self, x, cc):
     x, cc, = fx_pytree.tree_flatten_spec(([x, cc], {}), self._in_spec)
+    _guards_fn = self._guards_fn(x, cc);  _guards_fn = None
     takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(cc, x);  cc = None
     add = torch.ops.aten.add.Tensor(x, takes_foo_default);  x = takes_foo_default = None
     return pytree.tree_unflatten((add,), self._out_spec)""",
@@ -406,10 +411,7 @@ def forward(self, token, x, cc):
             F1(), (torch.ones(2, 3),), strict=False, pre_dispatch=pre_dispatch
         )
 
-    # TODO(pianpwk): look into this
-    @unittest.expectedFailure
-    @parametrize("pre_dispatch", [True, False])
-    def test_torchbind_input_and_alias(self, pre_dispatch):
+    def test_torchbind_register_attr_at_runtime_get_restored(self):
         # alias as model attribute
         class F3(torch.nn.Module):
             def forward(self, x, foo):
@@ -417,8 +419,23 @@ def forward(self, token, x, cc):
                 return x + self.foo.add_tensor(x)
 
         foo = torch.classes._TorchScriptTesting._Foo(10, 20)
+        torch.export.export(F3(), (torch.ones(2, 3), foo), strict=False)
+        self.assertFalse(hasattr(foo, "foo"))
+
+    @parametrize("pre_dispatch", [True, False])
+    def test_torchbind_input_and_alias(self, pre_dispatch):
+        # alias as model attribute
+        class F3(torch.nn.Module):
+            def __init__(self, foo):
+                super().__init__()
+                self.foo = foo
+
+            def forward(self, x):
+                return x + self.foo.add_tensor(x)
+
+        foo = torch.classes._TorchScriptTesting._Foo(10, 20)
         self._test_export_same_as_eager(
-            F3(), (torch.ones(2, 3), foo), strict=False, pre_dispatch=pre_dispatch
+            F3(foo), (torch.ones(2, 3),), strict=False, pre_dispatch=pre_dispatch
         )
 
     @parametrize("pre_dispatch", [True, False])
@@ -443,9 +460,10 @@ def forward(self, token, x, cc):
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     attr = self.attr
-    takes_foo_default_1 = torch.ops._TorchScriptTesting.takes_foo.default(attr, x)
-    takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(attr, takes_foo_default_1);  attr = takes_foo_default_1 = None
-    add = torch.ops.aten.add.Tensor(x, takes_foo_default);  x = takes_foo_default = None
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
+    takes_foo_default = torch.ops._TorchScriptTesting.takes_foo.default(attr, x)
+    takes_foo_default_1 = torch.ops._TorchScriptTesting.takes_foo.default(attr, takes_foo_default);  attr = takes_foo_default = None
+    add = torch.ops.aten.add.Tensor(x, takes_foo_default_1);  x = takes_foo_default_1 = None
     return pytree.tree_unflatten((add,), self._out_spec)""",  # noqa: B950
         )
         self.assertExpectedInline(
@@ -485,6 +503,7 @@ def forward(self, token, obj_attr, x):
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     attr = self.attr
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     takes_foo_list_return_default = torch.ops._TorchScriptTesting.takes_foo_list_return.default(attr, x)
     getitem_2 = takes_foo_list_return_default[0]
     getitem_3 = takes_foo_list_return_default[1]
@@ -537,6 +556,7 @@ def forward(self, token, obj_attr, x):
 def forward(self, x):
     x, = fx_pytree.tree_flatten_spec(([x], {}), self._in_spec)
     attr = self.attr
+    _guards_fn = self._guards_fn(x);  _guards_fn = None
     takes_foo_tuple_return_default = torch.ops._TorchScriptTesting.takes_foo_tuple_return.default(attr, x)
     getitem_1 = takes_foo_tuple_return_default[0]
     getitem_2 = takes_foo_tuple_return_default[1];  takes_foo_tuple_return_default = None
@@ -733,7 +753,7 @@ def forward(self, arg0_1, arg1_1):
         b = torch.randn(2, 2)
         tq.push(a)
         tq.push(b)
-        ep = torch.export.export_for_training(
+        ep = torch.export.export(
             mod, (tq, torch.randn(2, 2)), strict=False
         ).run_decompositions({})
         self.assertExpectedInline(
@@ -787,9 +807,9 @@ def forward(self, L_safe_obj_ : torch.ScriptObject):
         )
 
         with enable_torchbind_tracing():
-            ep = torch.export.export_for_training(
-                mod, (safe_obj,), strict=False
-            ).run_decompositions({})
+            ep = torch.export.export(mod, (safe_obj,), strict=False).run_decompositions(
+                {}
+            )
             self.assertExpectedInline(
                 ep.graph_module.code.strip(),
                 """\
@@ -812,8 +832,8 @@ def forward(self, token, safe_obj):
             self.assertFalse(op._has_torchbind_op_overload)
 
     def test_torchbind_op_register_fallthrough(self):
-        TEST_DISPATCH_KEY = torch._C.DispatchKey.AutocastCPU
-        TEST_DISPATCH_KEY_STR = "AutocastCPU"
+        TEST_DISPATCH_KEY = torch._C.DispatchKey.AutogradCPU
+        TEST_DISPATCH_KEY_STR = "AutogradCPU"
 
         for op_packet in self.torch_bind_ops:
             op = op_packet.default
@@ -944,19 +964,19 @@ def forward(self, token, safe_obj):
             with torch.library._scoped_library(ns, "FRAGMENT") as lib:
                 for op in ops:
                     lib.impl(
-                        op.__name__, torch.library.fallthrough_kernel, "AutocastCUDA"
+                        op.__name__, torch.library.fallthrough_kernel, "AutogradCPU"
                     )
 
                 gm = make_fx(mod, tracing_mode="fake")(tq1, x)
         else:
             for op in ops:
-                op.default.py_impl(torch._C.DispatchKey.AutocastCUDA)(
+                op.default.py_impl(torch._C.DispatchKey.AutogradCPU)(
                     torch.library.fallthrough_kernel
                 )
             gm = make_fx(mod, tracing_mode="fake")(tq1, x)
             for op in ops:
                 op.default._dispatch_cache.clear()
-                del op.default.py_kernels[torch._C.DispatchKey.AutocastCUDA]
+                del op.default.py_kernels[torch._C.DispatchKey.AutogradCPU]
 
         self.assertExpectedInline(
             gm.code.strip(),
@@ -1051,6 +1071,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             """\
 def forward(self, tq, x):
     tq, x, = fx_pytree.tree_flatten_spec(([tq, x], {}), self._in_spec)
+    _guards_fn = self._guards_fn(tq, x);  _guards_fn = None
     queue_push_default = torch.ops._TorchScriptTesting.queue_push.default(tq, x);  x = queue_push_default = None
     return pytree.tree_unflatten((tq,), self._out_spec)""",
         )
@@ -1066,10 +1087,12 @@ def forward(self, token, tq, x):
             str(ep.graph_module.graph).strip(),
             """\
 graph():
+    %token : [num_users=1] = placeholder[target=token]
     %tq : [num_users=2] = placeholder[target=tq]
     %x : [num_users=1] = placeholder[target=x]
-    %queue_push_default : [num_users=0] = call_function[target=torch.ops._TorchScriptTesting.queue_push.default](args = (%tq, %x), kwargs = {})
-    return (tq,)""",  # noqa: B950
+    %with_effects : [num_users=1] = call_function[target=torch.ops.higher_order.with_effects](args = (%token, _TorchScriptTesting.queue_push.default, %tq, %x), kwargs = {})
+    %getitem : [num_users=1] = call_function[target=operator.getitem](args = (%with_effects, 0), kwargs = {})
+    return (getitem, tq)""",  # noqa: B950
         )
 
     def test_deepcopy(self):
@@ -1136,7 +1159,7 @@ class TestCompileTorchbind(TestCase):
     def tearDown(self):
         torch._dynamo.reset()
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_script_object_input(self, backend):
         if backend == "eager":
             backend = EagerAndRecordGraphs()
@@ -1200,7 +1223,7 @@ class TestCompileTorchbind(TestCase):
         return (x_sin,)""",
             )
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_script_object_input_guards(self, backend):
         class Model(torch.nn.Module):
             def __init__(self) -> None:
@@ -1274,7 +1297,7 @@ class TestCompileTorchbind(TestCase):
         self.assertEqual(cnt.frame_count, 1)
 
         tq2 = _empty_tensor_queue()
-        # make first tensor's secon dim dynamic
+        # make first tensor's second dim dynamic
         tq2.push(torch.randn(2, 4, requires_grad=False))
         torch.compile(mod, backend=cnt)(tq2, x)
         self.assertEqual(cnt.frame_count, 2)
@@ -1285,7 +1308,7 @@ class TestCompileTorchbind(TestCase):
         torch.compile(mod, backend=cnt)(tq3, x)
         self.assertEqual(cnt.frame_count, 2)
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_error_on_input_aliasing_contents(self, backend):
         if backend == "eager":
             backend = EagerAndRecordGraphs()
@@ -1303,7 +1326,7 @@ class TestCompileTorchbind(TestCase):
 
         tq1 = _empty_tensor_queue()
         tq1.push(x)
-        with self.assertRaisesRegex(RuntimeError, "is alising"):
+        with self.assertRaisesRegex(RuntimeError, "is aliasing"):
             torch.compile(mod, backend=backend)(tq1, x)
 
     @parametrize("backend", ["eager", "aot_eager"])
@@ -1316,7 +1339,7 @@ class TestCompileTorchbind(TestCase):
             return tq
 
         with self.assertRaisesRegex(
-            RuntimeError, "call method __setattr__ on script object is not safe"
+            RuntimeError, "Weird method call on TorchScript object"
         ):
             torch.compile(setattr_f, backend=backend)(_empty_tensor_queue())
 
@@ -1329,11 +1352,11 @@ class TestCompileTorchbind(TestCase):
             return tq._not_defined_attr
 
         with self.assertRaisesRegex(
-            RuntimeError, "doesn't define method _not_defined_attr"
+            RuntimeError, "FakeScriptObject missing method implementation"
         ):
             torch.compile(setattr_f, backend=backend)(_empty_tensor_queue())
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_body_aliasing_contents(self, backend):
         if backend == "eager":
             backend = EagerAndRecordGraphs()
@@ -1369,7 +1392,7 @@ def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
     return (sub, add)""",
             )
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_tensor_op_in_tensor_flatten(self, backend):
         test_obj = torch.classes._TorchScriptTesting._FlattenWithTensorOp(
             torch.randn(3, 2)
@@ -1377,26 +1400,33 @@ def forward(self, L_x_ : torch.Tensor, L_tq_ : torch.ScriptObject):
 
         class TestMod(torch.nn.Module):
             def forward(self, obj, x):
-                return obj.get() + x
+                return obj.get() + x + obj.get().size(0)
 
         mod = TestMod()
 
-        torch.compile(mod, backend=backend, fullgraph=True)(test_obj, torch.randn(3, 1))
-        ep = torch.export.export_for_training(
-            mod, (test_obj, torch.randn(3, 1)), strict=False
-        ).run_decompositions({})
+        x = torch.randn(3, 1)
+        eager_out = mod(test_obj, x)
+        compiled_out = torch.compile(mod, backend=backend, fullgraph=True)(test_obj, x)
+        ep = torch.export.export(mod, (test_obj, x), strict=False).run_decompositions(
+            {}
+        )
         self.assertExpectedInline(
             ep.graph_module.code.strip(),
             """\
 def forward(self, token, obj, x):
-    with_effects = torch.ops.higher_order.with_effects(token, torch.ops.higher_order.call_torchbind, obj, 'get');  token = obj = None
+    with_effects = torch.ops.higher_order.with_effects(token, torch.ops.higher_order.call_torchbind, obj, 'get');  token = None
     getitem = with_effects[0]
     getitem_1 = with_effects[1];  with_effects = None
-    add_3 = torch.ops.aten.add.Tensor(getitem_1, x);  getitem_1 = x = None
-    return (getitem, add_3)""",  # noqa: B950
+    add = torch.ops.aten.add.Tensor(getitem_1, x);  getitem_1 = x = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.call_torchbind, obj, 'get');  getitem = obj = None
+    getitem_2 = with_effects_1[0];  with_effects_1 = None
+    add_1 = torch.ops.aten.add.Tensor(add, 3);  add = None
+    return (getitem_2, add_1)""",  # noqa: B950
         )
+        self.assertEqual(eager_out, compiled_out)
+        self.assertEqual(eager_out, ep.module()(test_obj, x))
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_error_on_non_fakified_method(self, backend):
         if backend == "eager":
             backend = EagerAndRecordGraphs()
@@ -1413,11 +1443,11 @@ def forward(self, token, obj, x):
 
         x = torch.randn(2, 3)
         with self.assertRaisesRegex(
-            RuntimeError, "FakeScriptObject doesn't define method"
+            RuntimeError, "FakeScriptObject missing method implementation"
         ):
             torch.compile(f, backend=backend)(_empty_tensor_queue(), x)
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_obj_as_hop_input(self, backend):
         def f(tq, x):
             def fn(tq, x):
@@ -1433,7 +1463,7 @@ def forward(self, token, obj, x):
             torch.compile(f, backend=backend)(_empty_tensor_queue(), x),
         )
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_obj_closure(self, backend):
         def f(x):
             def inner_f(x):
@@ -1448,7 +1478,7 @@ def forward(self, token, obj, x):
         x = torch.randn(3, 2)
         _assertEqualScriptObject(self, f(x), opt_f(x))
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_global_obj(self, backend):
         global _TENSOR_QUEUE_GLOBAL_TEST
         _TENSOR_QUEUE_GLOBAL_TEST = _empty_tensor_queue()
@@ -1484,7 +1514,7 @@ def forward(self, token, obj, x):
         )
         self.assertEqual(cnt.frame_count, 4)
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_obj_attributes(self, backend):
         if backend == "eager":
             backend = EagerAndRecordGraphs()
@@ -1516,7 +1546,7 @@ def forward(self, token, obj, x):
         return (call_torchbind_1,)""",
             )
 
-    @parametrize("backend", ["eager", "aot_eager"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
     def test_compile_obj_torchbind_op(self, backend):
         def f(tq, x):
             torch.ops._TorchScriptTesting.queue_push(tq, x.cos())
@@ -1529,6 +1559,44 @@ def forward(self, token, obj, x):
         x = torch.randn(2)
         _assertEqualScriptObject(
             self, f(_empty_tensor_queue(), x), opt_f(_empty_tensor_queue(), x)
+        )
+
+    @requires_cuda_and_triton
+    @parametrize("device", ["cpu", "cuda"])
+    @parametrize("backend", ["eager", "aot_eager", "inductor"])
+    def test_compile_obj_torchbind_op_with_autocast(self, backend, device):
+        def f(tq, x):
+            with torch.autocast(device_type=device):
+                torch.ops._TorchScriptTesting.queue_push(tq, x.cos())
+                torch.ops._TorchScriptTesting.queue_push(tq, x.cos() + 1)
+                torch.ops._TorchScriptTesting.queue_pop(tq)
+                torch.ops._TorchScriptTesting.queue_push(tq, x.sin())
+            return tq.pop(), tq.pop() + tq.size(), tq
+
+        opt_f = torch.compile(f, backend=backend)
+        x = torch.randn(2, device=device)
+        _assertEqualScriptObject(
+            self, f(_empty_tensor_queue(), x), opt_f(_empty_tensor_queue(), x)
+        )
+
+    @requires_cuda_and_triton
+    @parametrize("device", ["cpu", "cuda"])
+    def test_export_obj_torchbind_op_with_autocast(self, device):
+        class Mod(torch.nn.Module):
+            def forward(self, x, tq):
+                with torch.autocast(device_type=device):
+                    torch.ops._TorchScriptTesting.queue_push(tq, x.cos())
+                    torch.ops._TorchScriptTesting.queue_push(tq, x.cos() + 1)
+                    torch.ops._TorchScriptTesting.queue_pop(tq)
+                    torch.ops._TorchScriptTesting.queue_push(tq, x.sin())
+                return tq.pop(), tq.pop() + tq.size(), tq
+
+        x = torch.randn(2, device=device)
+        args = (x,)
+        mod = Mod()
+        ep = torch.export.export(mod, (x, _empty_tensor_queue()))
+        _assertEqualScriptObject(
+            self, ep.module()(x, _empty_tensor_queue()), mod(x, _empty_tensor_queue())
         )
 
 

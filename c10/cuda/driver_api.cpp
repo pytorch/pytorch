@@ -1,7 +1,8 @@
 #if !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+#include <c10/cuda/CUDAException.h>
 #include <c10/cuda/driver_api.h>
-#include <c10/util/CallOnce.h>
 #include <c10/util/Exception.h>
+#include <c10/util/Logging.h>
 #include <cuda_runtime.h>
 #include <dlfcn.h>
 
@@ -9,16 +10,25 @@ namespace c10::cuda {
 
 namespace {
 
+void* get_symbol(const char* name, int version);
+
 DriverAPI create_driver_api() {
   void* handle_1 = DriverAPI::get_nvml_handle();
   DriverAPI r{};
 
-#define LOOKUP_LIBCUDA_ENTRY(name)                                  \
-  r.name##_ = reinterpret_cast<decltype(&name)>(get_symbol(#name)); \
-  TORCH_INTERNAL_ASSERT(r.name##_, "Can't find ", #name)
-  C10_LIBCUDA_DRIVER_API(LOOKUP_LIBCUDA_ENTRY)
-  C10_LIBCUDA_DRIVER_API_12030(LOOKUP_LIBCUDA_ENTRY)
-#undef LOOKUP_LIBCUDA_ENTRY
+#define LOOKUP_LIBCUDA_ENTRY_WITH_VERSION_REQUIRED(name, version)            \
+  r.name##_ = reinterpret_cast<decltype(&name)>(get_symbol(#name, version)); \
+  TORCH_INTERNAL_ASSERT(r.name##_, "Can't find ", #name);
+  C10_LIBCUDA_DRIVER_API_REQUIRED(LOOKUP_LIBCUDA_ENTRY_WITH_VERSION_REQUIRED)
+#undef LOOKUP_LIBCUDA_ENTRY_WITH_VERSION_REQUIRED
+
+// Users running drivers between 12.0 and 12.3 will not have these symbols,
+// they would be resolved into nullptr, but we guard their usage at runtime
+// to ensure safe fallback behavior.
+#define LOOKUP_LIBCUDA_ENTRY_WITH_VERSION_OPTIONAL(name, version) \
+  r.name##_ = reinterpret_cast<decltype(&name)>(get_symbol(#name, version));
+  C10_LIBCUDA_DRIVER_API_OPTIONAL(LOOKUP_LIBCUDA_ENTRY_WITH_VERSION_OPTIONAL)
+#undef LOOKUP_LIBCUDA_ENTRY_WITH_VERSION_OPTIONAL
 
   if (handle_1) {
 #define LOOKUP_NVML_ENTRY(name)                          \
@@ -27,64 +37,54 @@ DriverAPI create_driver_api() {
     C10_NVML_DRIVER_API(LOOKUP_NVML_ENTRY)
 #undef LOOKUP_NVML_ENTRY
   }
+
+  if (handle_1) {
+#define LOOKUP_NVML_ENTRY_OPTIONAL(name) \
+  r.name##_ = ((decltype(&name))dlsym(handle_1, #name));
+    C10_NVML_DRIVER_API_OPTIONAL(LOOKUP_NVML_ENTRY_OPTIONAL)
+#undef LOOKUP_NVML_ENTRY_OPTIONAL
+  }
   return r;
 }
+
+void* get_symbol(const char* name, int version) {
+  void* out = nullptr;
+  cudaDriverEntryPointQueryResult qres{};
+
+  // CUDA 12.5+ supports version-based lookup
+#if defined(CUDA_VERSION) && (CUDA_VERSION >= 12050)
+  if (auto st = cudaGetDriverEntryPointByVersion(
+          name, &out, version, cudaEnableDefault, &qres);
+      st == cudaSuccess && qres == cudaDriverEntryPointSuccess && out) {
+    return out;
+  }
+#endif
+
+  // As of CUDA 13, this API is deprecated.
+#if defined(CUDA_VERSION) && (CUDA_VERSION < 13000)
+  // This fallback to the old API to try getting the symbol again.
+  if (auto st = cudaGetDriverEntryPoint(name, &out, cudaEnableDefault, &qres);
+      st == cudaSuccess && qres == cudaDriverEntryPointSuccess && out) {
+    return out;
+  }
+#endif
+
+  // If the symbol cannot be resolved, report and return nullptr;
+  // the caller is responsible for checking the pointer.
+  LOG(INFO) << "Failed to resolve symbol " << name;
+  return nullptr;
+}
+
 } // namespace
 
 void* DriverAPI::get_nvml_handle() {
-  static void* nvml_hanle = dlopen("libnvidia-ml.so.1", RTLD_LAZY);
-  return nvml_hanle;
+  static void* nvml_handle = dlopen("libnvidia-ml.so.1", RTLD_LAZY);
+  return nvml_handle;
 }
 
 C10_EXPORT DriverAPI* DriverAPI::get() {
   static DriverAPI singleton = create_driver_api();
   return &singleton;
-}
-
-typedef cudaError_t (*VersionedGetEntryPoint)(
-    const char*,
-    void**,
-    unsigned int,
-    unsigned long long, // NOLINT(*)
-    cudaDriverEntryPointQueryResult*);
-typedef cudaError_t (*GetEntryPoint)(
-    const char*,
-    void**,
-    unsigned long long, // NOLINT(*)
-    cudaDriverEntryPointQueryResult*);
-
-void* get_symbol(const char* symbol, int cuda_version) {
-  // We link to the libcudart.so already, so can search for it in the current
-  // context
-  static GetEntryPoint driver_entrypoint_fun = reinterpret_cast<GetEntryPoint>(
-      dlsym(RTLD_DEFAULT, "cudaGetDriverEntryPoint"));
-  static VersionedGetEntryPoint driver_entrypoint_versioned_fun =
-      reinterpret_cast<VersionedGetEntryPoint>(
-          dlsym(RTLD_DEFAULT, "cudaGetDriverEntryPointByVersion"));
-
-  cudaDriverEntryPointQueryResult driver_result{};
-  void* entry_point = nullptr;
-  if (driver_entrypoint_versioned_fun != nullptr) {
-    // Found versioned entrypoint function
-    cudaError_t result = driver_entrypoint_versioned_fun(
-        symbol, &entry_point, cuda_version, cudaEnableDefault, &driver_result);
-    TORCH_CHECK(
-        result == cudaSuccess,
-        "Error calling cudaGetDriverEntryPointByVersion");
-  } else {
-    TORCH_CHECK(
-        driver_entrypoint_fun != nullptr,
-        "Error finding the CUDA Runtime-Driver interop.");
-    // Versioned entrypoint function not found
-    cudaError_t result = driver_entrypoint_fun(
-        symbol, &entry_point, cudaEnableDefault, &driver_result);
-    TORCH_CHECK(result == cudaSuccess, "Error calling cudaGetDriverEntryPoint");
-  }
-  TORCH_CHECK(
-      driver_result == cudaDriverEntryPointSuccess,
-      "Could not find CUDA driver entry point for ",
-      symbol);
-  return entry_point;
 }
 
 } // namespace c10::cuda

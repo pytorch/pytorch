@@ -64,13 +64,10 @@ runs:
     - name: Setup Linux
       uses: ./.github/actions/setup-linux
 
-    - name: configure aws credentials
-      if : ${{ inputs.aws-role-to-assume != '' }}
-      uses: aws-actions/configure-aws-credentials@v4
+    - name: Login to ECR
+      uses: ./.github/actions/ecr-login
       with:
-        role-to-assume: ${{ inputs.aws-role-to-assume }}
-        role-session-name: gha-linux-test
-        aws-region: us-east-1
+        aws-role-to-assume: ${{ inputs.aws-role-to-assume }}
 
     - name: Calculate docker image
       id: calculate-docker-image
@@ -126,7 +123,7 @@ runs:
       shell: bash
       continue-on-error: true
       run: |
-        python3 -m pip install psutil==5.9.1 nvidia-ml-py==11.525.84
+        python3 -m pip install psutil==5.9.8 nvidia-ml-py==11.525.84
         python3 -m tools.stats.monitor > usage_log.txt 2>&1 &
         echo "monitor-script-pid=${!}" >> "${GITHUB_OUTPUT}"
 
@@ -274,8 +271,6 @@ runs:
           -w /var/lib/jenkins/workspace \
           "${DOCKER_IMAGE}"
         )
-        # Propagate download.pytorch.org IP to container
-        grep download.pytorch.org /etc/hosts | docker exec -i "${container_name}" sudo bash -c "/bin/cat >> /etc/hosts"
         echo "DOCKER_CONTAINER_ID=${container_name}" >> "${GITHUB_ENV}"
         docker exec -t "${container_name}" sh -c "pip install $(echo dist/*.whl)[opt-einsum] && ${TEST_COMMAND}"
 

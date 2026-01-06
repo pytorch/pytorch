@@ -14,7 +14,7 @@ namespace torch::nativert {
  *
  * The GraphSignature class models the input and output specs of an exported
  * graph produced by torch.export, which is a fx.Graph with stronger invariants
- * gurantees. It holds the graph information deserialized from the pt2 archive
+ * guarantees. It holds the graph information deserialized from the pt2 archive
  * package. Runtime relies on the GraphSignature for weight name lookup and
  * weight loading. The serialization schema is defined in
  * torch/_export/serde/schema.py See more at:

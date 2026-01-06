@@ -20,51 +20,53 @@ for a brief introduction to all features related to distributed training.
 
 ## Backends
 
-`torch.distributed` supports three built-in backends, each with
+`torch.distributed` supports four built-in backends, each with
 different capabilities. The table below shows which functions are available
-for use with CPU / CUDA tensors.
+for use with a CPU or GPU for each backend. For NCCL, GPU refers to CUDA GPU
+while for XCCL to XPU GPU.
+
 MPI supports CUDA only if the implementation used to build PyTorch supports it.
 
 ```{eval-rst}
-+----------------+-----------+-----------+-----------+
-| Backend        | ``gloo``  | ``mpi``   | ``nccl``  |
-+----------------+-----+-----+-----+-----+-----+-----+
-| Device         | CPU | GPU | CPU | GPU | CPU | GPU |
-+================+=====+=====+=====+=====+=====+=====+
-| send           | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
-+----------------+-----+-----+-----+-----+-----+-----+
-| recv           | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
-+----------------+-----+-----+-----+-----+-----+-----+
-| broadcast      | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
-+----------------+-----+-----+-----+-----+-----+-----+
-| all_reduce     | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
-+----------------+-----+-----+-----+-----+-----+-----+
-| reduce         | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
-+----------------+-----+-----+-----+-----+-----+-----+
-| all_gather     | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
-+----------------+-----+-----+-----+-----+-----+-----+
-| gather         | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
-+----------------+-----+-----+-----+-----+-----+-----+
-| scatter        | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
-+----------------+-----+-----+-----+-----+-----+-----+
-| reduce_scatter | ✓   | ✓   | ✘   | ✘   | ✘   | ✓   |
-+----------------+-----+-----+-----+-----+-----+-----+
-| all_to_all     | ✓   | ✓   | ✓   | ?   | ✘   | ✓   |
-+----------------+-----+-----+-----+-----+-----+-----+
-| barrier        | ✓   | ✘   | ✓   | ?   | ✘   | ✓   |
-+----------------+-----+-----+-----+-----+-----+-----+
++----------------+-----------+-----------+-----------+-----------+
+| Backend        | ``gloo``  | ``mpi``   | ``nccl``  | ``xccl``  |
++----------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| Device         | CPU | GPU | CPU | GPU | CPU | GPU | CPU | GPU |
++================+=====+=====+=====+=====+=====+=====+=====+=====+
+| send           | ✓   | ✘   | ✓   | ?   | ✘   | ✓   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| recv           | ✓   | ✘   | ✓   | ?   | ✘   | ✓   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| broadcast      | ✓   | ✓   | ✓   | ?   | ✘   | ✓   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| all_reduce     | ✓   | ✓   | ✓   | ?   | ✘   | ✓   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| reduce         | ✓   | ✓   | ✓   | ?   | ✘   | ✓   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| all_gather     | ✓   | ✓   | ✓   | ?   | ✘   | ✓   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| gather         | ✓   | ✓   | ✓   | ?   | ✘   | ✓   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| scatter        | ✓   | ✓   | ✓   | ?   | ✘   | ✓   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| reduce_scatter | ✓   | ✓   | ✘   | ✘   | ✘   | ✓   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| all_to_all     | ✘   | ✘   | ✓   | ?   | ✘   | ✓   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+-----+-----+
+| barrier        | ✓   | ✘   | ✓   | ?   | ✘   | ✓   | ✘   | ✓   |
++----------------+-----+-----+-----+-----+-----+-----+-----+-----+
 ```
 
 ### Backends that come with PyTorch
 
-PyTorch distributed package supports Linux (stable), MacOS (stable), and Windows (prototype).
+PyTorch distributed package supports Linux (stable), macOS (stable), and Windows (prototype).
 By default for Linux, the Gloo and NCCL backends are built and included in PyTorch
 distributed (NCCL only when building with CUDA). MPI is an optional backend that can only be
 included if you build PyTorch from source. (e.g. building PyTorch on a host that has MPI
 installed.)
 
 :::{note}
-As of PyTorch v1.8, Windows supports all collective communications backend but NCCL,
+As of PyTorch v1.8, Windows supports all collective communications backends but NCCL,
 If the `init_method` argument of {func}`init_process_group` points to a file it must adhere
 to the following schema:
 
@@ -81,8 +83,9 @@ In the past, we were often asked: "which backend should I use?".
 
 - Rule of thumb
 
-  - Use the NCCL backend for distributed **GPU** training
-  - Use the Gloo backend for distributed **CPU** training.
+  - Use the NCCL backend for distributed training with CUDA **GPU**.
+  - Use the XCCL backend for distributed training with XPU **GPU**.
+  - Use the Gloo backend for distributed training with **CPU**.
 
 - GPU hosts with InfiniBand interconnect
 
@@ -218,10 +221,24 @@ inconsistent 'UUID' assignment across ranks, and to prevent races during initial
 
 ```{eval-rst}
 .. autofunction:: torch.distributed.distributed_c10d.is_xccl_available
+.. autofunction:: torch.distributed.distributed_c10d.batch_isend_irecv
+.. autofunction:: torch.distributed.distributed_c10d.destroy_process_group
+.. autofunction:: torch.distributed.distributed_c10d.is_backend_available
+.. autofunction:: torch.distributed.distributed_c10d.irecv
+.. autofunction:: torch.distributed.distributed_c10d.is_gloo_available
+.. autofunction:: torch.distributed.distributed_c10d.is_initialized
+.. autofunction:: torch.distributed.distributed_c10d.is_mpi_available
+.. autofunction:: torch.distributed.distributed_c10d.is_nccl_available
+.. autofunction:: torch.distributed.distributed_c10d.is_torchelastic_launched
+.. autofunction:: torch.distributed.distributed_c10d.is_ucc_available
 ```
 
 ```{eval-rst}
 .. autofunction:: is_torchelastic_launched
+```
+
+```{eval-rst}
+.. autofunction:: get_default_backend_for_device
 ```
 
 ______________________________________________________________________
@@ -375,6 +392,10 @@ an opaque group handle that can be given as a `group` argument to all collective
 
 ```{eval-rst}
 .. autofunction:: new_group
+```
+
+```{eval-rst}
+.. autofunction:: torch.distributed.distributed_c10d.shrink_group
 ```
 
 ```{eval-rst}
@@ -966,6 +987,24 @@ In addition, `TORCH_DISTRIBUTED_DEBUG=DETAIL` can be used in conjunction with `T
 collective desynchronization checks will work for all applications that use `c10d` collective calls backed by process groups created with the
 {func}`torch.distributed.init_process_group` and {func}`torch.distributed.new_group` APIs.
 
+
+### torch.distributed.debug HTTP Server
+
+The `torch.distributed.debug` module provides a HTTP server that can be used to debug distributed applications. The server can
+be started by calling {func}`torch.distributed.debug.start_debug_server`. This
+allows users to collect data across all workers at runtime.
+
+```{eval-rst}
+.. automodule:: torch.distributed.debug
+    :members:
+    :undoc-members:
+    :show-inheritance:
+    :special-members: __init__
+    :member-order: bysource
+
+```
+
+
 ## Logging
 
 In addition to explicit debugging support via {func}`torch.distributed.monitored_barrier` and `TORCH_DISTRIBUTED_DEBUG`, the underlying C++ library of `torch.distributed` also outputs log
@@ -1130,6 +1169,10 @@ If you are running single node training, it may be convenient to interactively b
 
 ```{eval-rst}
 .. py:module:: torch.distributed.checkpoint.hf_storage
+```
+
+```{eval-rst}
+.. py:module:: torch.distributed.checkpoint.quantized_hf_storage
 ```
 
 ```{eval-rst}
@@ -1470,4 +1513,10 @@ If you are running single node training, it may be convenient to interactively b
 
 ```{eval-rst}
 .. py:module:: torch.distributed.checkpoint.state_dict
+```
+
+```{toctree}
+:hidden:
+
+distributed._dist2
 ```

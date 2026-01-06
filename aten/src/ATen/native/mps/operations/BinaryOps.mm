@@ -16,10 +16,7 @@
 #include <ATen/ops/eq_native.h>
 #include <ATen/ops/ge_native.h>
 #include <ATen/ops/gt_native.h>
-#include <ATen/ops/hypot_native.h>
 #include <ATen/ops/le_native.h>
-#include <ATen/ops/logaddexp2_native.h>
-#include <ATen/ops/logaddexp_native.h>
 #include <ATen/ops/logical_and_native.h>
 #include <ATen/ops/logical_or_native.h>
 #include <ATen/ops/logical_xor_native.h>
@@ -48,28 +45,11 @@ typedef MPSGraphTensor* (^BinaryOpBlock)(BinaryOpCachedGraph*, MPSGraphTensor*, 
 #define BinaryOpFn(graph, primary, secondary) \
   MPSGraphTensor*(mps::BinaryOpCachedGraph * graph, MPSGraphTensor * primary, MPSGraphTensor * secondary)
 
-static inline Tensor legacy_complex_as_view(const Tensor& t) {
-  // Convert non-complex types (and cdouble CPU scalars) to cfloat
-  if (!isComplexType(t.scalar_type()) || t.scalar_type() == kComplexDouble) {
-    return at::view_as_real(t.to(kMPS, kComplexFloat));
-  }
-  return at::view_as_real(t.dim() != 0 ? t : t.to(kMPS));
-}
-
 static void binaryOpTensor(const Tensor& self,
                            const Tensor& other,
                            const Tensor& output_,
                            std::string op_name,
                            BinaryOpBlock binaryBlock) {
-  TORCH_CHECK(!(op_name == "power" && !is_macos_13_or_newer(MacOSVersion::MACOS_VER_13_2_PLUS) &&
-                (self.scalar_type() == ScalarType::Long ||
-                 (other.scalar_type() == ScalarType::Long &&
-                  (self.scalar_type() != ScalarType::Half && self.scalar_type() != ScalarType::Float)))),
-              "MPS: ",
-              op_name,
-              " op with int64 input is supported natively starting from macOS 13.2");
-  TORCH_CHECK_TYPE(!isComplexType(self.scalar_type()) || mps::supportsComplex(),
-                   "Complex types are supported starting from MacOS 14.0+");
   MPSStream* mpsStream = getCurrentMPSStream();
 
   const bool is_self_scalar = self.dim() == 0;
@@ -266,7 +246,6 @@ CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(gt_tensor_out_mps, greaterThan, Tensor);
 // Arithmetic Binary Ops
 CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(minimum_out_mps, minimumWithNaNPropagationAndIntFallback, Tensor);
 CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(maximum_out_mps, maximumWithNaNPropagationAndIntFallback, Tensor);
-CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(pow_tensor_scalar_out_mps, power, Scalar);
 CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(pow_tensor_tensor_out_mps, power, Tensor);
 CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_and_out_mps, logicalAND, Tensor);
 CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_or_out_mps, logicalOR, Tensor);
@@ -293,46 +272,6 @@ TORCH_IMPL_FUNC(pow_Scalar_out_mps)(const Scalar& base, const Tensor& exp, const
   } else {
     at::pow_out(const_cast<Tensor&>(out), mps::wrapped_scalar_tensor_mps(base, exp.device()), exp); // redispatch!
   }
-}
-
-TORCH_IMPL_FUNC(hypot_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
-  mps::BinaryOpBlock hypot_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
-    MPSGraph* mpsGraph = cachedGraph->graph();
-    MPSGraphTensor* twoTensor = [mpsGraph constantWithScalar:2.0 shape:@[ @1 ] dataType:primaryCastTensor.dataType];
-    MPSGraphTensor* sumTensor = [mpsGraph additionWithPrimaryTensor:[mpsGraph powerWithPrimaryTensor:primaryCastTensor
-                                                                                     secondaryTensor:twoTensor
-                                                                                                name:nil]
-                                                    secondaryTensor:[mpsGraph powerWithPrimaryTensor:secondaryCastTensor
-                                                                                     secondaryTensor:twoTensor
-                                                                                                name:nil]
-                                                               name:nil];
-    return [mpsGraph squareRootWithTensor:sumTensor name:nil];
-  };
-  mps::binaryOpTensor(self, other, output, "hypot_out_mps", hypot_op_block);
-}
-
-TORCH_IMPL_FUNC(logaddexp_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
-  mps::BinaryOpBlock logaddexp_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
-    MPSGraph* mpsGraph = cachedGraph->graph();
-    MPSGraphTensor* sumTensor =
-        [mpsGraph additionWithPrimaryTensor:[mpsGraph exponentWithTensor:primaryCastTensor name:nil]
-                            secondaryTensor:[mpsGraph exponentWithTensor:secondaryCastTensor name:nil]
-                                       name:nil];
-    return [mpsGraph logarithmWithTensor:sumTensor name:nil];
-  };
-  mps::binaryOpTensor(self, other, output, "logaddexp_out_mps", logaddexp_op_block);
-}
-
-TORCH_IMPL_FUNC(logaddexp2_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {
-  mps::BinaryOpBlock logaddexp2_op_block = ^BinaryOpFn(cachedGraph, primaryCastTensor, secondaryCastTensor) {
-    MPSGraph* mpsGraph = cachedGraph->graph();
-    MPSGraphTensor* sumTensor =
-        [mpsGraph additionWithPrimaryTensor:[mpsGraph exponentBase2WithTensor:primaryCastTensor name:nil]
-                            secondaryTensor:[mpsGraph exponentBase2WithTensor:secondaryCastTensor name:nil]
-                                       name:nil];
-    return [mpsGraph logarithmBase2WithTensor:sumTensor name:nil];
-  };
-  mps::binaryOpTensor(self, other, output, "logaddexp2_out_mps", logaddexp2_op_block);
 }
 
 TORCH_IMPL_FUNC(xlogy_out_mps)(const Tensor& self, const Tensor& other, const Tensor& output) {

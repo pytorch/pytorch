@@ -12,7 +12,7 @@ namespace at {
 
 // AcceleratorHooksInterface is a shared interface provided by all
 // accelerators to allow generic code.
-// This inferface is hook-based as it corresponds to all the functions
+// This interface is hook-based as it corresponds to all the functions
 // that are going to be called in a generic way from the CPU code.
 
 struct TORCH_API AcceleratorHooksInterface {

@@ -2,10 +2,8 @@ name: inductor-perf-nightly-h100
 
 on:
   schedule:
-    - cron: 15 0,8,16 * * 1-6
+    - cron: 15 0 * * 1-6
     - cron: 0 7 * * 0
-  # NB: GitHub has an upper limit of 10 inputs here, so before we can sort it
-  # out, let try to run torchao cudagraphs_low_precision as part of cudagraphs
   workflow_dispatch:
     inputs:
       training:
@@ -58,12 +56,19 @@ on:
         required: false
         type: string
         default: inductor_huggingface_perf_cuda_h100,inductor_timm_perf_cuda_h100,inductor_torchbench_perf_cuda_h100
+  pull_request:
+    # Changing these files guarantees that this workflow needs to be run
+    paths:
+      - .github/workflows/inductor-perf-test-nightly-h100.yml
+      - .ci/docker/ci_commit_pins/huggingface-requirements.txt
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
-permissions: read-all
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
   get-label-type:
@@ -77,15 +82,19 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
       opt_out_experiments: lf
 
-  # NB: Keep this in sync with trunk.yml
   build:
-    name: cuda12.8-py3.10-gcc9-sm90
+    name: build
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm90
-      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc9-inductor-benchmarks
+      # Use a bigger runner here because CUDA_ARCH 9.0 is only built for H100
+      # or newer GPUs, so it doesn't benefit much from existing compiler cache
+      # from trunk. Also use a memory-intensive runner here because memory is
+      # usually the bottleneck
+      runner: linux.12xlarge.memory
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm90
+      docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11-inductor-benchmarks
       cuda-arch-list: '9.0'
       test-matrix: |
         { include: [
@@ -94,30 +103,35 @@ jobs:
           { config: "inductor_huggingface_perf_cuda_h100", shard: 3, num_shards: 5, runner: "linux.aws.h100" },
           { config: "inductor_huggingface_perf_cuda_h100", shard: 4, num_shards: 5, runner: "linux.aws.h100" },
           { config: "inductor_huggingface_perf_cuda_h100", shard: 5, num_shards: 5, runner: "linux.aws.h100" },
-          { config: "inductor_timm_perf_cuda_h100", shard: 1, num_shards: 6, runner: "linux.aws.h100" },
-          { config: "inductor_timm_perf_cuda_h100", shard: 2, num_shards: 6, runner: "linux.aws.h100" },
-          { config: "inductor_timm_perf_cuda_h100", shard: 3, num_shards: 6, runner: "linux.aws.h100" },
-          { config: "inductor_timm_perf_cuda_h100", shard: 4, num_shards: 6, runner: "linux.aws.h100" },
-          { config: "inductor_timm_perf_cuda_h100", shard: 5, num_shards: 6, runner: "linux.aws.h100" },
-          { config: "inductor_timm_perf_cuda_h100", shard: 6, num_shards: 6, runner: "linux.aws.h100" },
-          { config: "inductor_torchbench_perf_cuda_h100", shard: 1, num_shards: 6, runner: "linux.aws.h100" },
-          { config: "inductor_torchbench_perf_cuda_h100", shard: 2, num_shards: 6, runner: "linux.aws.h100" },
-          { config: "inductor_torchbench_perf_cuda_h100", shard: 3, num_shards: 6, runner: "linux.aws.h100" },
-          { config: "inductor_torchbench_perf_cuda_h100", shard: 4, num_shards: 6, runner: "linux.aws.h100" },
-          { config: "inductor_torchbench_perf_cuda_h100", shard: 5, num_shards: 6, runner: "linux.aws.h100" },
-          { config: "inductor_torchbench_perf_cuda_h100", shard: 6, num_shards: 6, runner: "linux.aws.h100" },
+          { config: "inductor_timm_perf_cuda_h100", shard: 1, num_shards: 7, runner: "linux.aws.h100" },
+          { config: "inductor_timm_perf_cuda_h100", shard: 2, num_shards: 7, runner: "linux.aws.h100" },
+          { config: "inductor_timm_perf_cuda_h100", shard: 3, num_shards: 7, runner: "linux.aws.h100" },
+          { config: "inductor_timm_perf_cuda_h100", shard: 4, num_shards: 7, runner: "linux.aws.h100" },
+          { config: "inductor_timm_perf_cuda_h100", shard: 5, num_shards: 7, runner: "linux.aws.h100" },
+          { config: "inductor_timm_perf_cuda_h100", shard: 6, num_shards: 7, runner: "linux.aws.h100" },
+          { config: "inductor_timm_perf_cuda_h100", shard: 7, num_shards: 7, runner: "linux.aws.h100" },
+          { config: "inductor_torchbench_perf_cuda_h100", shard: 1, num_shards: 9, runner: "linux.aws.h100" },
+          { config: "inductor_torchbench_perf_cuda_h100", shard: 2, num_shards: 9, runner: "linux.aws.h100" },
+          { config: "inductor_torchbench_perf_cuda_h100", shard: 3, num_shards: 9, runner: "linux.aws.h100" },
+          { config: "inductor_torchbench_perf_cuda_h100", shard: 4, num_shards: 9, runner: "linux.aws.h100" },
+          { config: "inductor_torchbench_perf_cuda_h100", shard: 5, num_shards: 9, runner: "linux.aws.h100" },
+          { config: "inductor_torchbench_perf_cuda_h100", shard: 6, num_shards: 9, runner: "linux.aws.h100" },
+          { config: "inductor_torchbench_perf_cuda_h100", shard: 7, num_shards: 9, runner: "linux.aws.h100" },
+          { config: "inductor_torchbench_perf_cuda_h100", shard: 8, num_shards: 9, runner: "linux.aws.h100" },
+          { config: "inductor_torchbench_perf_cuda_h100", shard: 9, num_shards: 9, runner: "linux.aws.h100" },
         ]}
       selected-test-configs: ${{ inputs.benchmark_configs }}
+      build-additional-packages: "vision audio fbgemm torchao"
     secrets: inherit
 
   test-periodically:
-    name: cuda12.8-py3.10-gcc9-sm90
+    name: test-periodically
     uses: ./.github/workflows/_linux-test.yml
     needs: build
-    if: github.event.schedule == '15 0,8,16 * * 1-6'
+    if: github.event.schedule == '15 0 * * 1-6'
     with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm90
-      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-cudagraphs_low_precision-true
+      build-environment: ${{ needs.build.outputs.build-environment }}
+      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
       timeout-minutes: 720
@@ -128,13 +142,13 @@ jobs:
     secrets: inherit
 
   test-weekly:
-    name: cuda12.8-py3.10-gcc9-sm90
+    name: test-weekly
     uses: ./.github/workflows/_linux-test.yml
     needs: build
     if: github.event.schedule == '0 7 * * 0'
     with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm90
-      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-maxautotune-true-freeze_autotune_cudagraphs-true-cudagraphs_low_precision-true
+      build-environment: ${{ needs.build.outputs.build-environment }}
+      dashboard-tag: training-true-inference-true-default-true-dynamic-true-cudagraphs-true-cppwrapper-true-aotinductor-true-freezing_cudagraphs-true-maxautotune-true-freeze_autotune_cudagraphs-true
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
       timeout-minutes: 1440
@@ -145,13 +159,15 @@ jobs:
     secrets: inherit
 
   test:
-    name: cuda12.8-py3.10-gcc9-sm90
+    name: test
     uses: ./.github/workflows/_linux-test.yml
     needs: build
-    if: github.event_name == 'workflow_dispatch'
+    # The pull_request trigger is used in PR to bump transformers pin which always
+    # needs one round of benchmark
+    if: ${{ github.event_name == 'workflow_dispatch' || github.event_name == 'pull_request' }}
     with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc9-sm90
-      dashboard-tag: training-${{ inputs.training }}-inference-${{ inputs.inference }}-default-${{ inputs.default }}-dynamic-${{ inputs.dynamic }}-cudagraphs-${{ inputs.cudagraphs }}-cppwrapper-${{ inputs.cppwrapper }}-aotinductor-${{ inputs.aotinductor }}-maxautotune-${{ inputs.maxautotune }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs }}-cudagraphs_low_precision-${{ inputs.cudagraphs }}
+      build-environment: ${{ needs.build.outputs.build-environment }}
+      dashboard-tag: training-${{ inputs.training || 'true' }}-inference-${{ inputs.inference || 'true' }}-default-${{ inputs.default || 'true' }}-dynamic-${{ inputs.dynamic || 'true' }}-cudagraphs-${{ inputs.cudagraphs || 'true' }}-cppwrapper-${{ inputs.cppwrapper || 'false' }}-aotinductor-${{ inputs.aotinductor || 'false' }}-maxautotune-${{ inputs.maxautotune || 'false' }}-freezing_cudagraphs-${{ inputs.freezing_cudagraphs || 'false' }}
       docker-image: ${{ needs.build.outputs.docker-image }}
       test-matrix: ${{ needs.build.outputs.test-matrix }}
       timeout-minutes: 720

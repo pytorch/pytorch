@@ -115,6 +115,9 @@ RUN env GRPC_PYTHON_BUILD_SYSTEM_OPENSSL=True pip3 install grpcio
 # cmake-3.28.0 from pip for onnxruntime
 RUN python3 -mpip install cmake==3.28.0
 
+ADD ./common/patch_libstdc.sh patch_libstdc.sh
+RUN bash ./patch_libstdc.sh && rm patch_libstdc.sh
+
 # build onnxruntime 1.21.0 from sources.
 # it is not possible to build it from sources using pip,
 # so just build it from upstream repository.
@@ -131,6 +134,8 @@ RUN pip3 install flatbuffers && \
   git clone https://github.com/microsoft/onnxruntime && \
   cd onnxruntime && git checkout v1.21.0 && \
   git submodule update --init --recursive && \
+  wget https://github.com/microsoft/onnxruntime/commit/f57db79743c4d1a3553aa05cf95bcd10966030e6.patch && \
+  patch -p1 < f57db79743c4d1a3553aa05cf95bcd10966030e6.patch && \
   ./build.sh --config Release --parallel 0 --enable_pybind \
   --build_wheel --enable_training --enable_training_apis \
   --enable_training_ops --skip_tests --allow_running_as_root \

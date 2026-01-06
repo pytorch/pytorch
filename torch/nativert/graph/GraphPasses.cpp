@@ -101,7 +101,10 @@ std::string selectScalarOverloadName(const Node& node) {
       "floor_divide_out",
       "_conj"};
   std::vector<std::string_view> atoms = c10::split(node.target(), '.');
-  TORCH_CHECK_GE(atoms.size(), 3);
+
+  if (atoms.size() < 3) {
+    return "";
+  }
 
   std::string ns = std::string{atoms[atoms.size() - 3]};
   std::string opName = std::string{atoms[atoms.size() - 2]};
@@ -110,7 +113,7 @@ std::string selectScalarOverloadName(const Node& node) {
       overloadName != "Tensor_mode") {
     return overloadName;
   }
-  if (allowed.find(std::string{opName}) == allowed.end()) {
+  if (allowed.find(opName) == allowed.end()) {
     return overloadName;
   }
   auto op = c10::Dispatcher::singleton().findSchemaOrThrow(
@@ -121,7 +124,7 @@ std::string selectScalarOverloadName(const Node& node) {
   for (const auto& variant :
        {"Scalar_mode", "Scalar", "Scalar_Tensor", "Tensor_Scalar"}) {
     if (auto schema = c10::Dispatcher::singleton().findSchema(
-            {fmt::format("{}::{}", ns, opName.c_str()).c_str(), variant})) {
+            {fmt::format("{}::{}", ns, opName.c_str()), variant})) {
       if (schemaTypeMatch(schema->schema(), node)) {
         return variant;
       }

@@ -8,6 +8,7 @@ on:
       # NOTE: Binary build pipelines should only get triggered on release candidate builds
       # Release candidate tags look like: v1.11.0-rc1
       - v[0-9]+.[0-9]+.[0-9]+-rc[0-9]+
+      - 'ciflow/triton_binaries/*'
     paths:
       - .github/workflows/build-triton-wheel.yml
       - .github/scripts/build_triton_wheel.py
@@ -49,12 +50,12 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.9", "3.10", "3.11", "3.12", "3.13", "3.13t" ]
+        py_vers: [ "3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t" ]
         device: ["cuda", "rocm", "xpu", "aarch64"]
         docker-image: ["pytorch/manylinux2_28-builder:cpu"]
         include:
           - device: "rocm"
-            rocm_version: "6.4"
+            rocm_version: "7.1"
             runs_on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
           - device: "cuda"
             rocm_version: ""
@@ -85,6 +86,9 @@ jobs:
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
+      - name: Login to ECR
+        uses: ./.github/actions/ecr-login
+
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
@@ -107,9 +111,6 @@ jobs:
 
           # Determine python executable for given version
           case $PY_VERS in
-          3.9)
-            PYTHON_EXECUTABLE=/opt/python/cp39-cp39/bin/python
-            ;;
           3.10)
             PYTHON_EXECUTABLE=/opt/python/cp310-cp310/bin/python
             ;;
@@ -125,6 +126,12 @@ jobs:
           3.13t)
             PYTHON_EXECUTABLE=/opt/python/cp313-cp313t/bin/python
             ;;
+          3.14)
+            PYTHON_EXECUTABLE=/opt/python/cp314-cp314/bin/python
+            ;;
+          3.14t)
+            PYTHON_EXECUTABLE=/opt/python/cp314-cp314t/bin/python
+            ;;
           *)
             echo "Unsupported python version ${PY_VERS}"
             exit 1
@@ -138,7 +145,7 @@ jobs:
           fi
 
           docker exec -t "${container_name}" yum install -y zlib-devel zip
-          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==78.1.0 pybind11==2.13.1 auditwheel wheel
+          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}"  -m pip install -U setuptools==78.1.0 pybind11==3.0.1 auditwheel wheel
           set +e
           docker exec -t "${container_name}" command -v pip
           has_pip=$?
@@ -155,12 +162,7 @@ jobs:
             WITH_CLANG_LDD="--with-clang-ldd"
           fi
 
-          if [[ "${BUILD_DEVICE}" == xpu ]]; then
-            docker exec -t "${container_name}" bash -c "dnf install -y gcc-toolset-13-gcc-c++"
-            docker exec -t "${container_name}" bash -c "source /opt/rh/gcc-toolset-13/enable && ${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE"
-          else
-            docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE $WITH_CLANG_LDD"
-          fi
+          docker exec -t "${container_name}" bash -c "${PYTHON_EXECUTABLE} /pytorch/.github/scripts/build_triton_wheel.py --device=$BUILD_DEVICE $RELEASE $WITH_CLANG_LDD"
 
           if [[ ("${{ matrix.device }}" == "cuda" || "${{ matrix.device }}" == "xpu") ]]; then
             docker exec -t "${container_name}"  bash -c "auditwheel repair --plat ${PLATFORM} //artifacts/*.whl"
@@ -172,7 +174,7 @@ jobs:
 
       - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
-          name: pytorch-triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}-${{ env.PLATFORM }}
+          name: triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}-${{ env.PLATFORM }}
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/wheelhouse/*
 
@@ -187,7 +189,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        py_vers: [ "3.9", "3.10", "3.11", "3.12", "3.13", "3.13t" ]
+        py_vers: [ "3.10", "3.11", "3.12", "3.13", "3.13t", "3.14", "3.14t" ]
         device: ["xpu"]
     timeout-minutes: 40
     env:
@@ -259,7 +261,7 @@ jobs:
           mv ./*.whl "${RUNNER_TEMP}/artifacts/"
       - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
-          name: pytorch-triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}
+          name: triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/*
 
@@ -303,7 +305,7 @@ jobs:
         run: |
           set -x
           mkdir -p "${RUNNER_TEMP}/artifacts/"
-          mv "${RUNNER_TEMP}"/artifacts-all/pytorch-triton-wheel-*/* "${RUNNER_TEMP}/artifacts/"
+          mv "${RUNNER_TEMP}"/artifacts-all/triton-wheel-*/* "${RUNNER_TEMP}/artifacts/"
 
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) }}

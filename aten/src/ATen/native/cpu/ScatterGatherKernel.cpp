@@ -41,7 +41,7 @@ public:
     *self_data = c10::load(self_data) && c10::load(src_data);
   }
 };
-static ReduceMultiply reduce_multiply;
+ReduceMultiply reduce_multiply;
 
 class ReduceAdd {
 public:
@@ -51,7 +51,7 @@ public:
     *self_data += opmath_t(c10::load(src_data));
   }
 };
-static ReduceAdd reduce_add;
+ReduceAdd reduce_add;
 
 class ReduceMean {
 public:
@@ -61,7 +61,7 @@ public:
     *self_data += opmath_t(c10::load(src_data));
   }
 };
-static ReduceMean reduce_mean;
+ReduceMean reduce_mean;
 
 class ReduceMaximum {
 public:
@@ -73,7 +73,7 @@ public:
     *self_data = at::_isnan<scalar_t>(src_value) ? opmath_t(src_value) : std::max(self_value, opmath_t(src_value));
   }
 };
-static ReduceMaximum reduce_maximum;
+ReduceMaximum reduce_maximum;
 
 class ReduceMinimum {
 public:
@@ -85,7 +85,7 @@ public:
     *self_data = at::_isnan<scalar_t>(src_value) ? opmath_t(src_value) : std::min(self_value, opmath_t(src_value));
   }
 };
-static ReduceMinimum reduce_minimum;
+ReduceMinimum reduce_minimum;
 
 class TensorAssign {
 public:
@@ -95,7 +95,7 @@ public:
     *self_data = opmath_t(c10::load(src_data));
   }
 };
-static TensorAssign tensor_assign;
+TensorAssign tensor_assign;
 
 template <bool is_scatter_like = true>
 struct _cpu_scatter_gather_dim_loop {

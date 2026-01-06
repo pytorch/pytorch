@@ -49,6 +49,18 @@ def gen_transformer_inputs(vocab_size, bs, seq_length):
     return input_dict
 
 
+def get_padded_stride(shape, alignment_bytes, pad_output, itemsize):
+    align = alignment_bytes // itemsize
+    new_strides = [0 for _ in range(len(shape))]
+    new_strides[len(shape) - 1] = 1
+    for i in range(len(shape) - 1, 0, -1):
+        stride = shape[i] * new_strides[i]
+        if pad_output and stride % align != 0:
+            stride = (stride + align - 1) // align * align
+        new_strides[i - 1] = stride
+    return tuple(new_strides)
+
+
 class LinearAndSoftmax(nn.Module):
     """
     It's very common that a transformer model will do a matmul and then
@@ -97,7 +109,10 @@ class TestCaseBase(TestCase):
         if HAS_GPU:
             cls.prior_float32_matmul_precision = torch.get_float32_matmul_precision()
             cls.prior_default_device = torch.get_default_device()
-            torch.set_float32_matmul_precision("high")
+            if torch.version.hip:
+                torch.set_float32_matmul_precision("highest")
+            else:
+                torch.set_float32_matmul_precision("high")
             torch.set_default_device(GPU_TYPE)
 
     @classmethod
@@ -363,7 +378,7 @@ class PerfTestWithAndWithoutPadding(TestCaseBase):
     @unittest.skipIf(not DO_PERF_TEST or not HAS_TRANSFORMER, "Perf test not enabled")
     def test_longformer_small_bs(self):
         """
-        The model exists in both HF and TB. In TB it uses a samller batch size.
+        The model exists in both HF and TB. In TB it uses a smaller batch size.
         """
         self.test_longformer(bs=2)
 
@@ -404,7 +419,7 @@ class PaddingTest(TestCaseBase):
     @unittest.skipIf(not DO_PERF_TEST, "Perf test not enabled")
     def test_padmm(self):
         """
-        Latency between origional matmul and padded matmul: 2.717 v.s. 2.356
+        Latency between original matmul and padded matmul: 2.717 v.s. 2.356
         """
         mat1_pad = torch.randn(8192, 30522, dtype=torch.float16)
         mat2_pad = torch.randn(30522, 768, dtype=torch.float16)
@@ -428,7 +443,7 @@ class PaddingTest(TestCaseBase):
         pad_time = benchmarker.benchmark_gpu(g)
 
         print(
-            f"Latency between origional matmul and padded matmul: {ori_time:.3f} v.s. {pad_time:.3f}"
+            f"Latency between original matmul and padded matmul: {ori_time:.3f} v.s. {pad_time:.3f}"
         )
         self.do_profiling(f, g, "No MM Padding", "With mm padding")
 
@@ -481,7 +496,7 @@ class PaddingTest(TestCaseBase):
         self.assertEqual(
             m_bad_shape.linear.weight.grad, m_bad_shape_opt.linear.weight.grad
         )
-        self.assertTrue(len(wrapper_codes) == 2)  # one for forward and oen for backward
+        self.assertTrue(len(wrapper_codes) == 2)  # one for forward and one for backward
         forward_wrapper = wrapper_codes[0]
 
         # make sure the load for softmax is aligned
@@ -761,7 +776,137 @@ class PaddingTest(TestCaseBase):
         output_shape = (shape[0] * num_inputs, shape[1])
         output_stride = input_tensors[0].stride()
         output_line = f"buf12 = empty_strided_{GPU_TYPE}({output_shape}, {output_stride}, torch.float32)"
-        self.assertTrue(any(output_line in line for line in code))
+        self.assertTrue(output_line in code[0])
+
+    @parametrize(
+        "shape,alignment_bytes,enable_pad",
+        [
+            ((512, 1), 32, False),
+            ((512, 1), 32, True),
+            ((32, 30), 64, False),
+            ((32, 30), 64, True),
+            ((512, 100, 1), 32, False),
+            ((512, 100, 1), 32, True),
+            ((32, 50, 30), 64, False),
+            ((32, 50, 30), 64, True),
+        ],
+    )
+    def test_outer_dynamic_shape_padding(self, shape, alignment_bytes, enable_pad):
+        """
+        When only the outermost dim is dynamic shape, the output can still be padded up
+        based on padding configuration.
+        """
+        num_inputs = 2
+        input_tensors = [
+            torch.randn(shape, dtype=torch.float32) for _ in range(num_inputs)
+        ]
+
+        config_patches = {
+            "comprehensive_padding": enable_pad,
+            "pad_dynamic_shapes": True,
+            "cpu_backend": "triton",
+            "padding_alignment_bytes": alignment_bytes,
+            "pad_outputs": True,
+            "padding_stride_threshold": 0,
+        }
+        with config.patch(config_patches):
+            torch._dynamo.mark_dynamic(input_tensors[0], 0)
+            torch._dynamo.mark_dynamic(input_tensors[1], 0)
+            compiled = torch.compile(torch.add)
+            result, _ = run_and_get_code(compiled, *input_tensors)
+
+        expected_stride = get_padded_stride(
+            result.shape, alignment_bytes, enable_pad, result.dtype.itemsize
+        )
+        self.assertEqual(result.stride(), expected_stride)
+
+    @parametrize(
+        "shape,perm,alignment_bytes,enable_pad",
+        [
+            ((500, 10, 1), (2, 1, 0), 32, False),
+            ((500, 20, 1), (2, 1, 0), 32, True),
+            ((30, 10, 20), (2, 1, 0), 64, True),
+            ((30, 10, 20), (2, 1, 0), 64, False),
+            ((500, 10, 1), (1, 2, 0), 32, False),
+            ((500, 20, 1), (1, 2, 0), 32, True),
+            ((30, 10, 20), (1, 2, 0), 64, True),
+            ((30, 10, 20), (1, 2, 0), 64, False),
+        ],
+    )
+    def test_perm_outer_dynamic_shape_padding(
+        self, shape, perm, alignment_bytes, enable_pad
+    ):
+        """
+        When only the outermost dim is dynamic shape, the output can still be padded up
+        based on padding configuration. Test when this occurs after a permute op.
+        """
+
+        def permute_contig(x):
+            return torch.permute(x, perm).contiguous()
+
+        num_inputs = 1
+        input_tensors = [
+            torch.randn(shape, dtype=torch.float32) for _ in range(num_inputs)
+        ]
+
+        config_patches = {
+            "comprehensive_padding": enable_pad,
+            "pad_dynamic_shapes": True,
+            "cpu_backend": "triton",
+            "padding_alignment_bytes": alignment_bytes,
+            "pad_outputs": True,
+            "padding_stride_threshold": 0,
+            "triton.use_block_ptr": True,
+        }
+        with config.patch(config_patches):
+            torch._dynamo.mark_dynamic(input_tensors[0], 2)
+            compiled = torch.compile(permute_contig)
+            result, _ = run_and_get_code(compiled, *input_tensors)
+
+        expected_stride = get_padded_stride(
+            result.shape, alignment_bytes, enable_pad, result.dtype.itemsize
+        )
+        self.assertEqual(result.stride(), expected_stride)
+
+    @parametrize(
+        "shape,alignment_bytes,enable_pad",
+        [
+            ((512, 1), 32, False),
+            ((512, 1), 32, True),
+            ((32, 30), 64, False),
+            ((32, 30), 64, True),
+            ((512, 100, 1), 32, False),
+            ((512, 100, 1), 32, True),
+            ((32, 50, 30), 64, False),
+            ((32, 50, 30), 64, True),
+        ],
+    )
+    def test_dynamic_shape_padding(self, shape, alignment_bytes, enable_pad):
+        """
+        When only the outermost dim is dynamic shape, the output can still be padded up
+        based on padding configuration.
+        """
+        num_inputs = 2
+        input_tensors = [
+            torch.randn(shape, dtype=torch.float32) for _ in range(num_inputs)
+        ]
+
+        config_patches = {
+            "comprehensive_padding": enable_pad,
+            "pad_dynamic_shapes": enable_pad,
+            "cpu_backend": "triton",
+            "padding_alignment_bytes": alignment_bytes,
+            "pad_outputs": True,
+            "padding_stride_threshold": 0,
+        }
+        with config.patch(config_patches):
+            compiled = torch.compile(torch.add, dynamic=True)
+            result, _ = run_and_get_code(compiled, *input_tensors)
+
+        expected_stride = get_padded_stride(
+            result.shape, alignment_bytes, enable_pad, result.dtype.itemsize
+        )
+        self.assertEqual(result.stride(), expected_stride)
 
 
 if __name__ == "__main__":

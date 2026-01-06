@@ -54,7 +54,7 @@ void check_maxpool2d_params(
 Tensor adaptive_avg_pool2d_quantized_cuda(
     const at::Tensor& input,
     IntArrayRef output_size) {
-// TODO: renable these cudnn preprocessors like quantized_max_pool2d_cudnn below when we implement this function with cudnn
+// TODO: re-enable these cudnn preprocessors like quantized_max_pool2d_cudnn below when we implement this function with cudnn
 #ifdef USE_CUDA
 // #if AT_CUDNN_ENABLED()
     // TODO: limit this to per tensor quantized tensors for now, though should be easy to adapt

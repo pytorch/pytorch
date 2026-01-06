@@ -173,6 +173,8 @@ class CodeState:
 
 _INIT_CODE_STATE: Optional[defaultdict[CodeId, CodeState]] = None
 _CODE_STATE: Optional[defaultdict[CodeId, CodeState]] = None
+_LOGGED_DYNAMIC_ALLOWLIST: bool = False
+_KNOWN_DYNAMIC_SOURCES: set[str] = set()
 
 
 @dataclasses.dataclass(frozen=True)
@@ -262,7 +264,7 @@ class FrameStateSizeEntry:
                 return f"tensor size={render_tuple(self.size)} stride={render_tuple(self.stride)}"
 
         # Fallback
-        return "unusual {repr(self)}"
+        return f"unusual {repr(self)}"
 
     def __post_init__(self) -> None:
         assert not isinstance(self.scalar, torch.SymInt), self.scalar
@@ -519,14 +521,7 @@ def process_automatic_dynamic(
         return res
 
 
-def get_cache_key() -> Optional[str]:
-    # TODO: info versions of these logs that log only once
-    if torch._inductor.config.force_disable_caches:
-        warn_once(
-            "dynamo_pgo force disabled by torch._inductor.config.force_disable_caches"
-        )
-        return None
-
+def format_cache_key(key: str) -> str:
     # NB: We always use global rank for keys, even though they are overkill
     # for local only cache
     rank = None
@@ -534,6 +529,16 @@ def get_cache_key() -> Optional[str]:
         rank = dist.get_rank()
 
     tag = torch.compiler.config.cache_key_tag
+    return f"{key}:{rank}:{tag}"
+
+
+def get_cache_key() -> Optional[str]:
+    # TODO: info versions of these logs that log only once
+    if torch.compiler.config.force_disable_caches:
+        warn_once(
+            "dynamo_pgo force disabled by torch.compiler.config.force_disable_caches"
+        )
+        return None
 
     # NB: We namespace the cache keys so that only user-specified job id
     # can alias with each other.
@@ -544,13 +549,23 @@ def get_cache_key() -> Optional[str]:
                 "automatically generated job id associated with a specific MAST job "
                 "name and version."
             )
-        return f"{r}:{rank}:{tag}"
+        return format_cache_key(r)
 
     if (name_version := torch._utils_internal.get_mast_job_name_version()) is not None:
         mast_job_name, mast_job_version = name_version
-        return f"mast:{mast_job_name}:{mast_job_version}:{rank}:{tag}"
+        return format_cache_key(f"mast:{mast_job_name}:{mast_job_version}")
 
     return None
+
+
+def get_extra_cache_key(sticky_key: str) -> Optional[str]:
+    if torch.compiler.config.force_disable_caches:
+        warn_once(
+            "dynamo_pgo force disabled by torch.compiler.config.force_disable_caches"
+        )
+        return None
+
+    return format_cache_key(sticky_key)
 
 
 # This solely controls local PGO
@@ -566,7 +581,7 @@ def code_state_path(cache_key: str) -> Optional[str]:
 
 
 def should_use_remote_dynamo_pgo_cache() -> bool:
-    if torch._inductor.config.force_disable_caches:
+    if torch.compiler.config.force_disable_caches:
         return False
 
     if (r := torch._dynamo.config.automatic_dynamic_remote_pgo) is not None:
@@ -602,30 +617,81 @@ def get_remote_cache() -> Optional[RemoteCache[JsonDataTy]]:
     )
 
 
-def render_code_state(cs: defaultdict[CodeId, CodeState]) -> str:
-    terms: list[str] = []
+def _collect_dynamic_sources(code_state: CodeState) -> OrderedSet[str]:
     dynamic_sources: OrderedSet[str] = OrderedSet()
-    for k, v in cs.items():
-        cs_terms: list[str] = []
-        for src, fs in v.automatic_dynamic.items():
-            cs_terms.append(f"  {src}: {fs.render()}")
-            if (
-                (isinstance(fs.size, tuple) and auto_dynamic in fs.size)  # type: ignore[operator]
-                or fs.size == auto_dynamic
-            ):
-                dynamic_sources.add(src)
-        terms.append(f"{k}:\n" + "\n".join(cs_terms))
-    code_state_str = "\n".join(terms)
+    for src, fs in code_state.automatic_dynamic.items():
+        dynamic = False
+        if isinstance(fs.size, tuple):
+            dynamic = auto_dynamic in fs.size  # type: ignore[operator]
+        elif fs.scalar == auto_dynamic:
+            dynamic = True
+        if dynamic:
+            dynamic_sources.add(src)
+    return dynamic_sources
+
+
+def _collect_missing_sources(all_sources: OrderedSet[str]) -> OrderedSet[str]:
+    from torch._dynamo.variables.builder import is_dynamic_source
+
+    global _KNOWN_DYNAMIC_SOURCES
+    missing_sources: OrderedSet[str] = OrderedSet()
+    for src in all_sources:
+        if src in _KNOWN_DYNAMIC_SOURCES:
+            continue
+        elif is_dynamic_source(src):
+            _KNOWN_DYNAMIC_SOURCES.add(src)
+            continue
+        missing_sources.add(src)
+    return missing_sources
+
+
+def log_frame_dynamic_whitelist(f_code: types.CodeType) -> None:
+    global _KNOWN_DYNAMIC_SOURCES
+    code_id = CodeId.make(f_code)
+    frame_state = get_code_state()[code_id]
+    all_dynamic_sources = _collect_dynamic_sources(frame_state)
+    frame_whitelist = ",".join(all_dynamic_sources)
+    missing_whitelist = ",".join(_collect_missing_sources(all_dynamic_sources))
+    if frame_whitelist:
+        with dynamo_timed(name := "pgo.dynamic_whitelist", log_pt2_compile_event=True):
+            CompileEventLogger.pt2_compile(
+                name,
+                recompile_dynamic_whitelist=frame_whitelist,
+                missing_dynamic_whitelist=missing_whitelist,
+            )
+
+
+def _log_size_mismatch_recompile() -> None:
+    global _LOGGED_DYNAMIC_ALLOWLIST
+    if not _LOGGED_DYNAMIC_ALLOWLIST:
+        torch._utils_internal.add_mlhub_insight(
+            category="dynamic_shapes_analysis",
+            insight="Dynamic shape recompilation detected",
+            insight_description="PGO detected a recompilation due to dynamic shapes. \
+            Please follow the instruction from the action link to reduce \
+            recompilation overhead.",
+        )
+        # add mlhub insight only once per rank
+        _LOGGED_DYNAMIC_ALLOWLIST = True
+
+
+def render_code_state(cs: defaultdict[CodeId, CodeState]) -> str:
+    code_state_str = "\n".join(
+        f"{k}:\n"
+        + "\n".join(
+            f"  {src}: {fs.render()}" for src, fs in v.automatic_dynamic.items()
+        )
+        for k, v in cs.items()
+    )
+    dynamic_sources: OrderedSet[str] = OrderedSet()
+    for state in cs.values():
+        dynamic_sources.update(_collect_dynamic_sources(state))
     if dynamic_sources:
         code_state_str += (
-            "\n\nPGO detected a recompilation due to tensor sizes. "
+            "\n\nPGO detected a recompilation due to dynamic shapes. "
             "To reduce shape recompilations by compiling dynamically to start, "
             f'set environment variable TORCH_COMPILE_DYNAMIC_SOURCES="{",".join(dynamic_sources)}"'
         )
-        with dynamo_timed(name := "pgo.dynamic_whitelist", log_pt2_compile_event=True):
-            CompileEventLogger.pt2_compile(
-                name, recompile_dynamic_whitelist=",".join(dynamic_sources)
-            )
     return code_state_str
 
 
@@ -658,32 +724,22 @@ class PGOCacheArtifact(CacheArtifact):
         return original_key
 
 
-def get_code_state() -> defaultdict[CodeId, CodeState]:
-    global _CODE_STATE, _INIT_CODE_STATE
-    if _CODE_STATE is not None:
-        return _CODE_STATE
+def hit(key: str, ty: str) -> defaultdict[CodeId, CodeState]:
+    global _INIT_CODE_STATE
+    assert isinstance(_CODE_STATE, defaultdict)
+    log.info("get_code_state %s hit %s, %d entries", key, ty, len(_CODE_STATE))
+    trace_structured_artifact(
+        f"get_{ty}_code_state",
+        "string",
+        lambda: render_code_state(_CODE_STATE),  # type: ignore[arg-type]
+    )
+    set_feature_use("pgo", True)
+    _INIT_CODE_STATE = copy.deepcopy(_CODE_STATE)
+    return _CODE_STATE
 
-    # Initialize it (even if we don't look up profile)
-    _CODE_STATE = defaultdict(CodeState)
 
-    cache_key = get_cache_key()
-    if cache_key is None:
-        return _CODE_STATE
-
-    def hit(ty: str) -> defaultdict[CodeId, CodeState]:
-        global _INIT_CODE_STATE
-        assert isinstance(_CODE_STATE, defaultdict)
-        log.info("get_code_state %s hit %s, %d entries", path, ty, len(_CODE_STATE))
-        trace_structured_artifact(
-            f"get_{ty}_code_state",
-            "string",
-            lambda: render_code_state(_CODE_STATE),  # type: ignore[arg-type]
-        )
-        set_feature_use("pgo", True)
-        _INIT_CODE_STATE = copy.deepcopy(_CODE_STATE)
-        return _CODE_STATE
-
-    # Attempt local
+def get_local_code_state(cache_key: str) -> Optional[defaultdict[CodeId, CodeState]]:
+    global _CODE_STATE
     path = code_state_path(cache_key)
     if path is not None and os.path.exists(path):
         with dynamo_timed(
@@ -705,9 +761,49 @@ def get_code_state() -> defaultdict[CodeId, CodeState]:
                     CacheArtifactManager.record_artifact(
                         PGOCacheArtifact.type(), cache_key, content
                     )
-                    return hit("local")
+                    return hit(path, "local")
+    return None
 
-    # Attempt remote
+
+def lookup_remote_cache_entry(
+    remote_cache: RemoteCache[JsonDataTy],
+    cache_key: str,
+    event_name: Optional[str] = None,
+) -> Optional[defaultdict[CodeId, CodeState]]:
+    code_state = None
+    try:
+        cache_data = remote_cache.get(cache_key)
+    except Exception:
+        log.warning("get_code_state failed remote read on %s", cache_key, exc_info=True)
+    else:
+        if cache_data is not None:
+            try:
+                assert isinstance(cache_data, dict)
+                data = cache_data["data"]
+                assert isinstance(data, str)
+                payload = base64.b64decode(data)
+                if event_name is not None:
+                    CompileEventLogger.pt2_compile(
+                        event_name, cache_size_bytes=len(payload)
+                    )
+                code_state = pickle.loads(payload)
+            except Exception:
+                log.warning(
+                    "get_code_state failed parsing remote result on %s",
+                    cache_key,
+                    exc_info=True,
+                )
+            else:
+                CacheArtifactManager.record_artifact(
+                    PGOCacheArtifact.type(), cache_key, payload
+                )
+        else:
+            log.info("get_code_state remote miss on %s", cache_key)
+    return code_state
+
+
+def get_remote_code_state(cache_key: str) -> Optional[defaultdict[CodeId, CodeState]]:
+    global _CODE_STATE
     remote_cache = get_remote_cache()
     if remote_cache is not None:
         with dynamo_timed(
@@ -716,37 +812,72 @@ def get_code_state() -> defaultdict[CodeId, CodeState]:
             dynamo_compile_column_us="pgo_get_remote_code_state_time_us",
         ):
             CompileEventLogger.pt2_compile(name, cache_key=cache_key)
-            # TODO: I don't really understand why there's a JSON container format
-            try:
-                cache_data = remote_cache.get(cache_key)
-            except Exception:
-                log.warning(
-                    "get_code_state failed remote read on %s", cache_key, exc_info=True
+            code_state = lookup_remote_cache_entry(remote_cache, cache_key, name)
+            if code_state is not None:
+                _CODE_STATE = code_state
+                return hit(cache_key, "remote")
+    return None
+
+
+def get_extra_remote_code_state(cache_key: str) -> None:
+    """
+    Reads an additional PGO profile from the given cache key, and merges it with the default PGO profile.
+    """
+    global _CODE_STATE
+    assert _CODE_STATE is not None
+
+    remote_cache = get_remote_cache()
+    if remote_cache is not None:
+        with dynamo_timed(
+            name := "pgo.get_extra_remote_code_state",
+            log_pt2_compile_event=True,
+            dynamo_compile_column_us="pgo_get_remote_code_state_time_us",
+        ):
+            CompileEventLogger.pt2_compile(name, cache_key=cache_key)
+            code_state = lookup_remote_cache_entry(remote_cache, cache_key)
+            log.info(
+                "get_extra_code_state %s hit, %d entries",
+                cache_key,
+                len(code_state) if code_state is not None else 0,
+            )
+            if code_state is not None:
+                assert not _CODE_STATE
+                _CODE_STATE = code_state
+                # log to tlparse
+                trace_structured_artifact(
+                    "get_extra_remote_code_state",
+                    "string",
+                    lambda: render_code_state(code_state),
                 )
-            else:
-                if cache_data is not None:
-                    try:
-                        assert isinstance(cache_data, dict)
-                        data = cache_data["data"]
-                        assert isinstance(data, str)
-                        payload = base64.b64decode(data)
-                        CompileEventLogger.pt2_compile(
-                            name, cache_size_bytes=len(payload)
-                        )
-                        _CODE_STATE = pickle.loads(payload)
-                    except Exception:
-                        log.warning(
-                            "get_code_state failed parsing remote result on %s",
-                            cache_key,
-                            exc_info=True,
-                        )
-                    else:
-                        CacheArtifactManager.record_artifact(
-                            PGOCacheArtifact.type(), cache_key, payload
-                        )
-                        return hit("remote")
-                else:
-                    log.info("get_code_state remote miss on %s", cache_key)
+
+
+def get_code_state() -> defaultdict[CodeId, CodeState]:
+    global _CODE_STATE, _INIT_CODE_STATE
+    if _CODE_STATE is not None:
+        return _CODE_STATE
+
+    # Initialize it (even if we don't look up profile)
+    _CODE_STATE = defaultdict(CodeState)
+
+    cache_key = get_cache_key()
+    if cache_key is None:
+        return _CODE_STATE
+
+    # Attempt local
+    local_code_state = get_local_code_state(cache_key)
+
+    # Attempt remote
+    if local_code_state is None:
+        get_remote_code_state(cache_key)
+
+    # Attempt additional remote if neither local/default remote succeeded
+    if (
+        not _CODE_STATE
+        and (sticky_read := torch.compiler.config.pgo_extra_read_key) is not None
+    ):
+        extra_read_key = get_extra_cache_key(sticky_read)
+        if extra_read_key is not None:
+            get_extra_remote_code_state(extra_read_key)
 
     log.info("get_code_state using default")
 
@@ -770,6 +901,10 @@ def put_code_state() -> None:
 
     put_local_code_state(cache_key)
     put_remote_code_state(cache_key)
+    if (sticky_write := torch.compiler.config.pgo_extra_write_key) is not None:
+        extra_write_key = get_extra_cache_key(sticky_write)
+        if extra_write_key is not None:
+            put_remote_code_state(extra_write_key)
 
 
 def write_local_impl(cache_key: str, pickled_code: bytes) -> Optional[tuple[str, int]]:
@@ -823,9 +958,14 @@ def put_local_code_state(cache_key: str) -> None:
         )
 
 
-def put_remote_code_state(cache_key: str) -> None:
+def put_remote_code_state(cache_key: str, extra_code_state: bool = False) -> None:
+    event_name = (
+        "put_remote_code_state"
+        if not extra_code_state
+        else "put_extra_remote_code_state"
+    )
     with dynamo_timed(
-        name := "pgo.put_remote_code_state",
+        name := f"pgo.{event_name}",
         log_pt2_compile_event=True,
         dynamo_compile_column_us="pgo_put_remote_code_state_time_us",
     ):
@@ -835,7 +975,7 @@ def put_remote_code_state(cache_key: str) -> None:
         remote_cache = get_remote_cache()
 
         if remote_cache is None:
-            log.info("put_code_state: remote cache disabled")
+            log.info("%s: remote cache disabled", event_name)
             return
 
         content = pickle.dumps(_CODE_STATE)
@@ -845,11 +985,11 @@ def put_remote_code_state(cache_key: str) -> None:
         }
         remote_cache.put(cache_key, cache_data)
         log.info(
-            "put_code_state: wrote remote %s, %d entries", cache_key, len(_CODE_STATE)
+            "%s: wrote remote %s, %d entries", event_name, cache_key, len(_CODE_STATE)
         )
         # TODO: don't log this multiple times
         trace_structured_artifact(
-            "put_remote_code_state",
+            event_name,
             "string",
             lambda: render_code_state(_CODE_STATE),
         )
@@ -857,6 +997,7 @@ def put_remote_code_state(cache_key: str) -> None:
 
 # NB: this does NOT reset the cached code state on disk
 def reset_code_state() -> None:
-    global _CODE_STATE, _INIT_CODE_STATE
+    global _CODE_STATE, _INIT_CODE_STATE, _LOGGED_DYNAMIC_ALLOWLIST
     _CODE_STATE = None
     _INIT_CODE_STATE = None
+    _LOGGED_DYNAMIC_ALLOWLIST = False

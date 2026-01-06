@@ -2,15 +2,17 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import contextlib
 import warnings
-from typing import Optional, Union
+from logging import getLogger
+from typing import Optional
 
 import torch
-import torch.distributed as dist
-from torch import Tensor
+from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import _get_device_handle, DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
-from torch.distributed.tensor.placement_types import Shard
+from torch.distributed.tensor.placement_types import _StridedShard, Shard
 
+
+logger = getLogger(__name__)
 
 __all__ = [
     "is_rng_supported_mesh",
@@ -42,7 +44,8 @@ def is_rng_supported_mesh(device_mesh: DeviceMesh) -> bool:
     else:
         # TODO: Logs way too much
         warnings.warn(
-            f"DTensor random operators may not have complete support on {device_mesh.device_type} device mesh"
+            f"DTensor random operators may not have complete support on {device_mesh.device_type} device mesh",
+            stacklevel=2,
         )
         return False
 
@@ -71,9 +74,18 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
     if not is_rng_supported_mesh(device_mesh):
         warnings.warn(
             "DTensor manual_seed() may not have complete support "
-            f"on {device_mesh.device_type} device mesh"
+            f"on {device_mesh.device_type} device mesh",
+            stacklevel=2,
         )
         return
+
+    # TODO: deprecate this API, but also need to ensure we disable broadcast for PP case, and that's currently
+    # bundled together with this API.  See torchtitan/distributed/utils.py:set_determinism
+    # warnings.warn(
+    #     "DTensor manual_seed() is deprecated, since DTensor no longer maintains a separate copy of generator state. "
+    #     "Use `torch.manual_seed` instead"
+    # )
+    # Note: we still need to ensure setting `run_state_sync=False` to support the pp case
 
     # instantiate a RNG tracker if haven't. By default DTensor uses an
     # OffsetBasedRNGTracker to perform random operators.
@@ -81,15 +93,57 @@ def manual_seed(seed: int, device_mesh: DeviceMesh) -> None:
     if not _rng_tracker:
         _rng_tracker = OffsetBasedRNGTracker(device_mesh, run_state_sync=False)
 
-    # the current rank is in mesh
-    if device_mesh.get_coordinate() is not None:
-        _rng_tracker._manual_seed(seed)
-    else:
+    if device_mesh.get_coordinate() is None:
         raise RuntimeError(
             "manual_seed requires the current rank to be a part of the device mesh "
             "otherwise DTensor RNG state on the rank will not be initialized and "
             "the behavior of DTensor random ops is undefined."
         )
+
+    # DTensor no longer maintains a copy of rng state. manual seed on dtensor is the same thing
+    # as manual seed on torch.
+    #
+    # torch.manual_seed will handle LocalTensor mode correctly by
+    # iterating through all ranks if seed is a LocalIntNode.
+    torch.manual_seed(seed)
+
+
+class _PhiloxState:
+    """
+    Convenience accessor for interpreting the packed bits of (seed: uint64, offset: uint64) in the philox state,
+    which for some reason is actually exposed as a size-16 uint8 tensor.
+
+    The state is always moved to .cpu since it is necessary for it to be on CPU before applying it back to a generator.
+    """
+
+    def __init__(self, state: torch.Tensor):
+        self._state = state.to("cpu")
+
+    @property
+    def state(self):
+        return self._state
+
+    @property
+    def offset(self) -> int:
+        return int(self._state[8:].view(dtype=torch.int64).item())
+
+    @offset.setter
+    def offset(self, offset: int) -> None:
+        offset_tensor = torch.tensor([offset], dtype=torch.uint64, device="cpu").view(
+            torch.uint8
+        )
+        self._state[8:] = offset_tensor
+
+    @property
+    def seed(self) -> int:
+        return int(self._state[:8].view(dtype=torch.uint64).item())
+
+    @seed.setter
+    def seed(self, seed: int) -> None:
+        seed_tensor = torch.tensor([seed], dtype=torch.uint64, device="cpu").view(
+            torch.uint8
+        )
+        self._state[:8] = seed_tensor
 
 
 class _RNGStateTracker:
@@ -102,6 +156,7 @@ class _RNGStateTracker:
     """
 
     def __init__(self, device: torch.device):
+        # pyrefly: ignore [read-only]
         self._device = device
         self._device_handle = _get_device_handle(self._device.type)
         if not (self._device_handle and self._device_handle.is_available()):
@@ -109,13 +164,7 @@ class _RNGStateTracker:
                 f"{self.__class__.__name__} instantiation requires the presence of "
                 f"{device.type} device but couldn't find."
             )
-
-        self._states: dict[str, Tensor] = {}
         self._use_distribute_region = True
-
-    @property
-    def rng_states(self) -> dict[str, Tensor]:
-        return self._states
 
     @property
     def distribute_region_enabled(self) -> bool:
@@ -125,28 +174,9 @@ class _RNGStateTracker:
     def distribute_region_enabled(self, value) -> None:
         self._use_distribute_region = value
 
-    def rng_state_is_sync(self, name) -> bool:
-        return name in self.rng_states
-
-    def get_seed(self, name: str) -> int:
-        if name not in self.rng_states:
-            raise RuntimeError(
-                f"{self.__class__.__name__} does not have random state for {name}"
-            )
-
-        seed_tensor = (self.rng_states[name])[0:8].view(dtype=torch.int64)
-        return int(seed_tensor.item())
-
-    def set_seed(self, name: str, seed: int) -> None:
-        seed_tensor = torch.tensor([seed], dtype=torch.uint64, device="cpu").view(
-            torch.uint8
-        )
-        offset_tensor = torch.tensor([0], dtype=torch.uint64, device="cpu").view(
-            torch.uint8
-        )
-        self.rng_states[name] = torch.cat([seed_tensor, offset_tensor])
-
-    def _distribute_region(self, spec: DTensorSpec):
+    def _distribute_region(
+        self, spec: DTensorSpec, generator: torch.Generator | None = None
+    ):
         pass
 
     def _manual_seed(self, parallel_seed: int) -> None:
@@ -176,63 +206,90 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
                 f"CUDA/CUDA-like/XPU device. Got {self._device.type} instead."
             )
 
-        rng_state = self._device_handle.get_rng_state().to(self._device)
+        rng_state = self._get_device_state()
         if run_state_sync:
             # synchronize RNG state using rank 0's current one
-            dist.broadcast(rng_state, 0)
+            torch.distributed.broadcast(rng_state, 0)
+            my_rng_state = self._get_device_state()
+            if not all(my_rng_state == rng_state):
+                logger.warning(
+                    "DTensor is synchronizing RNG states of every rank with the state from rank 0. "
+                    "This behavior is deprecated. "
+                    "Please call `torch.manual_seed()` on every rank that participates in SPMD DTensor Operations with "
+                    "the same seed. If using Pipeline Parallelism, each pipeling state would use a different seed, "
+                    "but all ranks belonging to one pipeline stage would use the same seed."
+                )
+            self._set_device_state(rng_state)
 
-        self.rng_states["parallel-rng"] = rng_state.to("cpu")
+    def _get_device_state(self) -> torch.Tensor:
+        if self._device.type == "hpu":
+            self._device_handle.set_rng_ctx("philox")
+        rng_state = self._device_handle.get_rng_state().to(self._device)
+        if self._device.type == "hpu":
+            self._device_handle.unset_rng_ctx("philox")
+        return rng_state
 
-    def _manual_seed(self, parallel_seed: int) -> None:
-        self.set_seed("parallel-rng", parallel_seed)
+    def _set_device_state(self, state: torch.Tensor):
+        # It seems that the underlying generator wants a cpu tensor but the dtensor code expects `_get_device_state`
+        # to convert to a 'device' tensor, probably because we may use it with our backend comms for sync/debug
+        # for now, we just convert back to cpu here to make sure it always works.
+        if self._device.type == "hpu":
+            self._device_handle.set_rng_ctx("philox")
+        self._device_handle.set_rng_state(state.to("cpu"))
+        if self._device.type == "hpu":
+            self._device_handle.unset_rng_ctx("philox")
 
     @contextlib.contextmanager
-    def _distribute_region(self, spec: DTensorSpec):
-        # check if the parallel rng state has been synchronized or not
-        if not self.rng_state_is_sync("parallel-rng"):
-            raise RuntimeError(
-                "OffsetBasedRNGTracker requires the random state to be synchronized "
-                "before entering into a distribute region!"
-            )
+    def _distribute_region(
+        self, spec: DTensorSpec, generator: torch.Generator | None = None
+    ):
+        from torch.distributed._local_tensor import maybe_enable_local_tracker
+
+        if local_tracker_context := maybe_enable_local_tracker(
+            self._device.type, self.distribute_region_enabled, spec, generator
+        ):
+            with local_tracker_context:
+                yield
+            return
+
+        # regular (non-LocalTensor) mode
+        if generator is not None:
+            # This is a little hacky, but for any user-passed generator, we store its state under a unique key,
+            # not because we need to keep a copy of it but because its the easiest way to make it work with the
+            # existing set/get APIs. We also ensure we remove it from rng_states after each _distribute_region.
+            state = _PhiloxState(generator.get_state())
+        else:
+            state = _PhiloxState(self._get_device_state())
 
         if self.distribute_region_enabled:
-            old_offset = self.get_offset("parallel-rng")
-            self._set_pre_op_offset(spec)
+            if self._device.type == "hpu":
+                self._device_handle.set_rng_ctx("philox")
+            old_offset = state.offset
+            self._set_pre_op_offset(state, spec)
             with torch.random.fork_rng(
                 devices=[self._device], device_type=self._device.type
             ):
                 assert self._device_handle is not None
-                self._device_handle.set_rng_state(self.rng_states["parallel-rng"])
+                self._device_handle.set_rng_state(state.state)
                 try:
                     yield  # execute the region code
                 finally:
                     # update offset to synchronize among ranks
-                    self._set_post_op_offset(spec, old_offset)
+                    self._set_post_op_offset(state, spec, old_offset)
+            if self._device.type == "hpu":
+                self._device_handle.unset_rng_ctx("philox")
         else:
             yield
 
-    def get_offset(self, name: str) -> int:
-        if name not in self.rng_states:
-            raise RuntimeError(
-                f"{self.__class__.__name__} does not have random state for {name}"
-            )
+        if generator is not None:
+            # ensure we (a) propagate the state advancement back to the user's RNG so its visible and impacts any future
+            # usage of that RNG (dtensor or non-dtensor), (b) drop it from our own cache so that if the user updates
+            # the seed value in their rng and uses it with DTensor again, we always use the latest value
+            generator.set_state(state.state)
+        else:
+            self._set_device_state(state.state)
 
-        offset_tensor = (self.rng_states[name])[8:].view(dtype=torch.int64)
-        return int(offset_tensor.item())
-
-    def set_offset(self, name: str, offset: int) -> None:
-        if name not in self.rng_states:
-            raise RuntimeError(
-                f"{self.__class__.__name__} does not have random state for {name}"
-            )
-
-        seed_tensor = (self.rng_states[name])[0:8]
-        offset_tensor = torch.tensor([offset], dtype=torch.uint64, device="cpu").view(
-            torch.uint8
-        )
-        self.rng_states[name] = torch.cat([seed_tensor, offset_tensor])
-
-    def _set_pre_op_offset(self, spec: DTensorSpec) -> None:
+    def _set_pre_op_offset(self, state: _PhiloxState, spec: DTensorSpec) -> None:
         """Set the starting RNG offset for current device's local shard before actual
         op execution. The pre_op_offset value should start from the current RNG offset
         and increment by the size of local shard until it reaches the size of the whole
@@ -240,6 +297,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         will be the same.
 
         Args:
+            state (:class:`Tensor`): The generator state to modify
             spec (:class:`DTensorSpec`): the spec of the DTensor object on which
                 we prepare the offset for running random ops.
 
@@ -279,44 +337,14 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
             The last value to calculate before obtaining the starting offset is the shard linear index.
             The starting offset for each rank will be its shard_linear_index * local_tensor_numel.
         """
-        dtensor_shape = spec.shape
         mesh = spec.mesh
-        # note: dim_map does not allow double sharding which is the FSDP(fully_shard)+TP
-        # case. Replace the custom logic with dim_map once we support it.
-        dim_map: list[Union[int, list[int]]] = [-1] * spec.ndim
-        for i, placement in enumerate(spec.placements):
-            if isinstance(placement, Shard):
-                shard_dim = placement.dim
-                if dim_map[shard_dim] == -1:
-                    dim_map[shard_dim] = [i]
-                else:
-                    mesh_dim_list = dim_map[shard_dim]
-                    assert isinstance(mesh_dim_list, list)
-                    mesh_dim_list.append(i)
-
-        # Compute shard coordinate:
-        # The coordinate on each tensor dim is a tuple (idx, range)
-        # If a DTensor is partitioned on its dim i into n shards, and the current rank
-        # holds the j-th, then its shard coordinate will be (idx=j, range=n) on dim i
         mesh_coordinate = mesh.get_coordinate()
         assert mesh_coordinate is not None
-        mesh_size = mesh.shape
-        shard_idx_by_dim = []
-        total_num_shards_by_dim = []  # total number of shards on each tensor dim
-        for mesh_dim in dim_map:
-            shard_idx = 0
-            total_num_shards = 1
-            # the tensor dim is sharded on more than 1 mesh dim
-            if isinstance(mesh_dim, list):
-                rank_coord = [mesh_coordinate[d] for d in mesh_dim]
-                num_shards = [mesh_size[d] for d in mesh_dim]
-                # compute the shard idx and total number of shards
-                for idx, size in zip(rank_coord, num_shards):
-                    shard_idx = shard_idx * size + idx
-                    total_num_shards *= size
 
-            shard_idx_by_dim.append(shard_idx)
-            total_num_shards_by_dim.append(total_num_shards)
+        # Compute shard index and total number of shards on each tensor dim
+        shard_idx_by_dim, total_num_shards_by_dim = _calc_shard_info(
+            mesh_coordinate, spec
+        )
 
         # compute shard linear index
         shard_linear_idx = self._calc_shard_linear_idx(
@@ -324,38 +352,30 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         )
 
         # compute starting offset using the first shard's size
-        local_size_on_rank_0 = list(dtensor_shape)
-        for idx, placement in enumerate(spec.placements):
-            if isinstance(placement, Shard):
-                mesh_dim_size = mesh.size(idx)
-                shard_dim = placement.dim
-                local_size_on_rank_0[shard_dim], _ = (
-                    placement._local_shard_size_and_offset(
-                        dtensor_shape[shard_dim],
-                        mesh_dim_size,
-                        0,
-                    )
-                )
+        local_size_on_rank_0 = _calc_first_shard_size(spec)
 
         from torch.distributed.tensor._ops.utils import prod
 
         local_size = prod(local_size_on_rank_0)
 
         # get current RNG offset
-        current_offset = self.get_offset("parallel-rng")
+        current_offset = state.offset
 
         # pytorch: offset must be multiple of 4
         # source: aten/src/ATen/cuda/CUDAGeneratorImpl.cpp
         offset_incr = (shard_linear_idx * local_size + 3) // 4 * 4
-        self.set_offset("parallel-rng", current_offset + offset_incr)
+        state.offset = current_offset + offset_incr
 
-    def _set_post_op_offset(self, spec: DTensorSpec, old_offset: int) -> None:
+    def _set_post_op_offset(
+        self, state: _PhiloxState, spec: DTensorSpec, old_offset: int
+    ) -> None:
         """Sets the RNG to a synchronized state after running the local random op. Every
         rank should set its RNG offset to `old_offset + DTensor.numel()` where old_offset is
         the offset before calling `set_pre_op_offset` i.e. the offset before running DTensor
         random ops.
 
         Args:
+            state (:class:`Tensor`): The generator state to modify.
             spec (:class:`DTensorSpec`): the spec of the DTensor object on which
                 we post-process the offset for running random ops.
 
@@ -370,19 +390,79 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
         # pytorch: offset must be multiple of 4
         # source: aten/src/ATen/cuda/CUDAGeneratorImpl.cpp
         numel = (numel + 3) // 4 * 4
-        self.set_offset("parallel-rng", old_offset + numel)
+        state.offset = old_offset + numel
 
     def _calc_shard_linear_idx(
         self, shard_coord: list[int], shard_size: list[int]
     ) -> int:
-        # compute shard linear index
-        shard_linear_idx = 0
-        shard_coord_stride = 1
-        for idx, size in zip(reversed(shard_coord), reversed(shard_size)):
-            shard_linear_idx += idx * shard_coord_stride
-            shard_coord_stride *= size
+        return _calc_shard_linear_idx(shard_coord, shard_size)
 
-        return shard_linear_idx
+
+def _calc_first_shard_size(spec: DTensorSpec) -> list[int]:
+    local_size_on_rank_0 = list(spec.shape)
+    for idx, placement in enumerate(spec.placements):
+        if isinstance(placement, Shard | _StridedShard):
+            mesh_dim_size = spec.mesh.size(idx)
+            shard_dim = placement.dim
+            local_size_on_rank_0[shard_dim], _ = placement._local_shard_size_and_offset(
+                spec.shape[shard_dim],
+                mesh_dim_size,
+                0,
+            )
+    return local_size_on_rank_0
+
+
+def _calc_shard_info(
+    mesh_coordinate: list[int], spec: DTensorSpec
+) -> tuple[list[int], list[int]]:
+    mesh = spec.mesh
+    # note: dim_map does not allow double sharding which is the FSDP(fully_shard)+TP
+    # case. Replace the custom logic with dim_map once we support it.
+    dim_map: list[int | list[int]] = [-1] * spec.ndim
+    for i, placement in enumerate(spec.placements):
+        if isinstance(placement, Shard | _StridedShard):
+            shard_dim = placement.dim
+            if dim_map[shard_dim] == -1:
+                dim_map[shard_dim] = [i]
+            else:
+                mesh_dim_list = dim_map[shard_dim]
+                assert isinstance(mesh_dim_list, list)
+                mesh_dim_list.append(i)
+
+    # Compute shard coordinate:
+    # The coordinate on each tensor dim is a tuple (idx, range)
+    # If a DTensor is partitioned on its dim i into n shards, and the current rank
+    # holds the j-th, then its shard coordinate will be (idx=j, range=n) on dim i
+    assert mesh_coordinate is not None
+    mesh_size = mesh.shape
+    shard_idx_by_dim = []
+    total_num_shards_by_dim = []  # total number of shards on each tensor dim
+    for mesh_dim in dim_map:
+        shard_idx = 0
+        total_num_shards = 1
+        # the tensor dim is sharded on more than 1 mesh dim
+        if isinstance(mesh_dim, list):
+            rank_coord = [mesh_coordinate[d] for d in mesh_dim]
+            num_shards = [mesh_size[d] for d in mesh_dim]
+            # compute the shard idx and total number of shards
+            for idx, size in zip(rank_coord, num_shards):
+                shard_idx = shard_idx * size + idx
+                total_num_shards *= size
+
+        shard_idx_by_dim.append(shard_idx)
+        total_num_shards_by_dim.append(total_num_shards)
+    return shard_idx_by_dim, total_num_shards_by_dim
+
+
+def _calc_shard_linear_idx(shard_coord: list[int], shard_size: list[int]) -> int:
+    # compute shard linear index
+    shard_linear_idx = 0
+    shard_coord_stride = 1
+    for idx, size in zip(reversed(shard_coord), reversed(shard_size)):
+        shard_linear_idx += idx * shard_coord_stride
+        shard_coord_stride *= size
+
+    return shard_linear_idx
 
 
 def _resolve_device(device_mesh: DeviceMesh) -> torch.device:
@@ -390,4 +470,9 @@ def _resolve_device(device_mesh: DeviceMesh) -> torch.device:
     device_handle = _get_device_handle(device_type)
     assert device_handle is not None
     device_idx = device_mesh.get_rank() % device_handle.device_count()
-    return torch.device(f"{device_type}:{device_idx:d}")
+
+    @maybe_run_for_local_tensor
+    def get_device(device_idx):
+        return torch.device(f"{device_type}:{device_idx:d}")
+
+    return get_device(device_idx)

@@ -112,7 +112,7 @@ kernel void int4pack_mm(constant T *A [[buffer(0)]],
   constant uchar *B_ptr = B + ((n * K) / k_pack_factor);
 
   thread float4 result = float4(0.0);
-  // We multipy group of 4 channels with these scales.
+  // We multiply group of 4 channels with these scales.
   // Because corresponding values from weight matrix are effectively left
   // shifted. This is to avoid doing right shift on those values which ends up
   // affecting performance. This is the trick applied in MLX kernels.
@@ -197,12 +197,10 @@ INSTANTIATE_INT4MV(float, 128);
 INSTANTIATE_INT4MV(half, 128);
 INSTANTIATE_INT4MV(float, 256);
 INSTANTIATE_INT4MV(half, 256);
-#if __METAL_VERSION__ >= 310
 INSTANTIATE_INT4MV(bfloat, 32);
 INSTANTIATE_INT4MV(bfloat, 64);
 INSTANTIATE_INT4MV(bfloat, 128);
 INSTANTIATE_INT4MV(bfloat, 256);
-#endif
 
 // ------------------------------ int8 MM For M >= 12 ------------------------------------
 /**
@@ -234,12 +232,10 @@ template <> struct BlockType<half> {
   using simdgroup_type8x8 = simdgroup_half8x8;
   using type4 = half4;
 };
-#if __METAL_VERSION__ >= 310
 template <> struct BlockType<bfloat> {
   using simdgroup_type8x8 = simdgroup_bfloat8x8;
   using type4 = bfloat4;
 };
-#endif
 
 template<typename T>
 float2 get_scale_zero_q8(constant T * scalesAndZeros, uint2 index) {
@@ -490,9 +486,7 @@ kernel void kernel_mul_mm<DTYPE, WDTYPE, DEQUANT_FUNC>(                  \
 
 INSTANTIATE_MM(float, char, get_scale_zero_q8);
 INSTANTIATE_MM(half, char, get_scale_zero_q8);
-#if __METAL_VERSION__ >= 310
 INSTANTIATE_MM(bfloat, char, get_scale_zero_q8);
-#endif
 // ------------------------------ int8 MM For M < 12 ------------------------------------
 /* Matrix vector multiplication, used for small M size for matrix multiplication as well.
 
@@ -646,6 +640,4 @@ kernel void kernel_mul_mv<DTYPE>(                                               
 
 INSTANTIATE_MV(float);
 INSTANTIATE_MV(half);
-#if __METAL_VERSION__ >= 310
 INSTANTIATE_MV(bfloat);
-#endif

@@ -67,18 +67,14 @@ jobs:
             # an OOM issue when running the job, so this upgrades the runner from 4xlarge
             # to the next available tier of 12xlarge. So much memory just to generate cpp
             # doc
-            runner: ${{ inputs.runner_prefix }}linux.12xlarge
+            runner: ${{ inputs.runner_prefix }}linux.12xlarge.memory
             # TODO: Nightly cpp docs take longer and longer to finish (more than 3h now)
             # Let's try to figure out how this can be improved
-            timeout-minutes: 240
+            timeout-minutes: 360
           - docs_type: python
-            runner: ${{ inputs.runner_prefix }}linux.2xlarge
+            runner: ${{ inputs.runner_prefix }}linux.c7i.2xlarge
             # It takes less than 30m to finish python docs unless there are issues
             timeout-minutes: 30
-          - docs_type: functorch
-            runner: ${{ inputs.runner_prefix }}linux.2xlarge
-            # It takes less than 15m to finish functorch docs unless there are issues
-            timeout-minutes: 15
     # Set a fixed name for this job instead of using the current matrix-generated name, i.e. build-docs (cpp, linux.12xlarge, 180)
     # The current name requires updating the database last docs push query from test-infra every time the matrix is updated
     name: build-docs-${{ matrix.docs_type }}-${{ inputs.push }}
@@ -100,13 +96,10 @@ jobs:
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
-      - name: configure aws credentials
-        if : ${{ inputs.aws-role-to-assume != '' }}
-        uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
+      - name: Login to ECR
+        uses: ./.github/actions/ecr-login
         with:
-          role-to-assume: ${{ inputs.aws-role-to-assume }}
-          role-session-name: gha-linux-test
-          aws-region: us-east-1
+          aws-role-to-assume: ${{ inputs.aws-role-to-assume }}
 
       - name: Calculate docker image
         id: calculate-docker-image
@@ -210,16 +203,6 @@ jobs:
           s3-bucket: doc-previews
           path: cppdocs/
           s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}/cppdocs
-
-      - name: Upload functorch Docs Preview
-        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
-        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'functorch' && steps.build-docs.outcome == 'success' }}
-        with:
-          retention-days: 14
-          s3-bucket: doc-previews
-          if-no-files-found: error
-          path: functorch_ghpages/nightly/
-          s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}/functorchdocs
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main

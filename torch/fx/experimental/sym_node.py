@@ -49,7 +49,7 @@ log = logging.getLogger(__name__)
 sym_node_log = torch._logging.getArtifactLogger(__name__, "sym_node")
 
 
-__all__ = ["SymNode", "method_to_operator", "magic_methods"]
+__all__ = ["SymNode", "method_to_operator", "magic_methods", "DynamicInt"]
 
 
 from torch.types import py_sym_types as SymTypes
@@ -211,7 +211,9 @@ class SymNode:
                 # for the unbacked symints, we may need to beef it up at some point.
                 unbacked_symbols = free_unbacked_symbols(self.expr)
                 replacements = {
-                    s: 4096 if s in unbacked_symbols else self.shape_env.var_to_val[s]
+                    s: fallback
+                    if s in unbacked_symbols
+                    else self.shape_env.var_to_val[s]
                     for s in self.expr.free_symbols
                 }
                 return self.expr.xreplace(replacements)
@@ -448,6 +450,9 @@ class SymNode:
     def bitwise_or(self, other):
         return self._bitwise_or(other)  # type: ignore[attr-defined]
 
+    def bitwise_xor(self, other):
+        return self._bitwise_xor(other)  # type: ignore[attr-defined]
+
     # There is no int_truediv available from C++
     def truediv(self, other):
         return self.float_truediv(other)
@@ -556,23 +561,9 @@ class SymNode:
         # a regular guard if we can!)
         # TODO: file/line here is very important, because the assert has been
         # deferred so you can't backtrace easily
-        return self.shape_env.defer_runtime_assert(
+        return self.shape_env.guard_or_defer_runtime_assert(
             self.expr, f"{file}:{line}", fx_node=self.fx_node
         )
-
-    def expect_size(self, file, line):
-        from torch.fx.experimental.symbolic_shapes import _advise_is_size
-
-        b = self.ge(self.wrap_int(0))
-        # Generate a deferred runtime assert
-        r = b.expect_true(file, line)
-        # Refine compile time range, but only if it's unbacked.
-        # If you refine range for hinted variables, you can end up making
-        # improper deductions since compile time reasoning may be
-        # incompatible with runtime reasoning.
-        if r and not self.has_hint():
-            _advise_is_size(SymInt(self))
-        return r
 
     def statically_known_true(self, file, line):
         from torch.fx.experimental.symbolic_shapes import statically_known_true
@@ -625,6 +616,40 @@ class SymNode:
         return False
 
 
+class _DynamicScalar:
+    def __new__(cls, *args):
+        if cls is _DynamicScalar:
+            raise TypeError("_DynamicScalar is an abstract base class, use DynamicInt.")
+        return super().__new__(cls, *args)
+
+
+class DynamicInt(_DynamicScalar, int):
+    """
+    User API for marking dynamic integers in `torch.compile`.
+    Intended to be compatible with both compile and eager mode.
+
+    Example usage::
+
+        fn = torch.compile(f)
+        x = DynamicInt(4)
+        fn(x)  # compiles x as a dynamic integer input; returns f(4)
+    """
+
+    def __new__(cls, val):
+        assert isinstance(val, int)
+        obj = super().__new__(cls, int(val))
+        return obj
+
+    def __repr__(self):
+        return f"DynamicInt({self.real})"
+
+    def __floordiv__(self, other):  # // was casting to int without these overrides?
+        return DynamicInt(self.real // other)
+
+    def __rfloordiv__(self, other):
+        return DynamicInt(other // self.real)
+
+
 # TODO: this probably needs the sizes-strides eval functions
 METHOD_TO_OPERATOR = {
     "pos": operator.pos,
@@ -649,6 +674,7 @@ METHOD_TO_OPERATOR = {
     "neg": operator.neg,
     "or": operator.or_,
     "bitwise_or": operator.or_,
+    "bitwise_xor": operator.xor,
     "float_pow": operator.pow,
     "pow_by_natural": operator.pow,
     "round": builtins.round,
@@ -728,10 +754,7 @@ only_float_magic_methods = {"is_integer", "round", "sym_int", "sym_log2"}
 
 magic_methods_on_operator_with_trailing_underscore = {"and", "or"}
 # remap necessary because an op name can have a bitwise and boolean implementation
-bitwise_ops = {
-    "bitwise_and": "and",
-    "bitwise_or": "or",
-}
+bitwise_ops = {"bitwise_and": "and", "bitwise_or": "or", "bitwise_xor": "xor"}
 
 
 always_float_magic_methods = {"int_truediv", "float_truediv", "sym_float", "float_pow"}
@@ -931,8 +954,14 @@ def _bitwise_or(a, b):
     return BitwiseFn_bitwise_or(a, b)
 
 
+def _bitwise_xor(a, b):
+    from torch.utils._sympy.functions import BitwiseFn_bitwise_xor
+
+    return BitwiseFn_bitwise_xor(a, b)
+
+
 reflectable_magic_methods = {
-    "add": _optimized_add,
+    "add": operator.add,
     "sub": operator.sub,
     "mul": operator.mul,
     "mod": _sympy_mod,
@@ -942,6 +971,7 @@ reflectable_magic_methods = {
     "bitwise_and": _bitwise_and,
     "or": _sympy_or,
     "bitwise_or": _bitwise_or,
+    "bitwise_xor": _bitwise_xor,
     "float_truediv": _sympy_float_truediv,
     "int_truediv": _sympy_int_truediv,
     "int_floordiv": _sympy_floordiv,
@@ -1370,7 +1400,7 @@ def _make_node_magic(method, func):
                     out = PythonMod(self.expr, other.expr)
             elif method == "add":
                 # see Note [optimized_summation]
-                (optimized_summation, out) = func(
+                (optimized_summation, out) = _optimized_add(
                     self.expr,
                     other.expr,
                     self._optimized_summation,
@@ -1650,7 +1680,6 @@ for method, func in sizes_strides_methods.items():
 def _make_user_magic(method, user_type):
     # User magic takes care of wrapping the other operand into a node,
     # so that our internal logic can assume everything is nodes
-
     if method in magic_methods_on_operator_with_trailing_underscore:
         method_attr = f"sym_{method}"
     else:
@@ -1659,6 +1688,8 @@ def _make_user_magic(method, user_type):
     def get_constant(x: Union[SymInt, int, SymFloat, float, SymBool, bool]):
         if isinstance(x, (int, float, bool)):
             return x
+        if isinstance(x, SymInt):
+            return x.node.guard_int("", 0)
         if isinstance(x, SymBool):
             return x.node.guard_bool("", 0)
         raise AssertionError("expect to be called with constant SymBools")
@@ -1781,7 +1812,7 @@ def _make_user_magic(method, user_type):
         other = promote(other)
         self, other = promote2(self, other)
         if is_constant(self):
-            return (method_to_operator(method))(get_constant(self), other)
+            return (method_to_operator(method))(other, get_constant(self))
         if is_constant(other):
             other = get_constant(other)
         other_node = to_node(self.node, other)
@@ -1790,11 +1821,31 @@ def _make_user_magic(method, user_type):
         ret = wrap_node(getattr(other_node, method_attr)(self.node))
         return get_constant(ret) if is_constant(ret) else ret
 
+    def setattrs(user_type, attr, symnode_impl):
+        """
+        Registers the SymNode magic method on SymInt/Float/Bool,
+        and optionally registers a corresponding wrapped method on DynamicInt.
+        """
+
+        # SymInt/Float/Bool
+        setattr(user_type, attr, symnode_impl)
+
+        # DynamicInt impl
+        def dynamic_int_impl(*args):
+            args = [x.real if isinstance(x, DynamicInt) else x for x in args]
+            out = getattr(int, attr)(*args)
+            if isinstance(out, int) and not isinstance(out, bool):
+                return DynamicInt(out)
+            return out
+
+        if user_type is SymInt:
+            setattr(DynamicInt, attr, dynamic_int_impl)
+
     if method in unary_magic_methods:
-        setattr(user_type, f"__{method}__", unary_magic_impl)
+        setattrs(user_type, f"__{method}__", unary_magic_impl)
     elif method in unary_nonmagic_methods:
         orig = getattr(user_type, method)
-        setattr(user_type, method, update_wrapper(unary_magic_impl, orig))
+        setattrs(user_type, method, update_wrapper(unary_magic_impl, orig))
     elif method == "sym_ite":
 
         def sym_ite_magic_impl(pred, then_val, else_val):
@@ -1811,7 +1862,7 @@ def _make_user_magic(method, user_type):
             ret = wrap_node(getattr(pred.node, method_attr)(then_node, else_node))
             return get_constant(ret) if ret.node.is_constant() else ret
 
-        setattr(user_type, f"__{method}__", sym_ite_magic_impl)
+        setattrs(user_type, f"__{method}__", sym_ite_magic_impl)
     elif method == "round":
 
         def round_magic_impl(self, ndigits=None):
@@ -1820,17 +1871,17 @@ def _make_user_magic(method, user_type):
 
             return wrap_node(getattr(self.node, method)(ndigits))
 
-        setattr(user_type, f"__{method}__", round_magic_impl)
+        setattrs(user_type, f"__{method}__", round_magic_impl)
     else:
         method_name = method
         if method in bitwise_ops:
             method_name = bitwise_ops[method]
-        setattr(user_type, f"__{method_name}__", binary_magic_impl)
+        setattrs(user_type, f"__{method_name}__", binary_magic_impl)
         if method in reflectable_magic_methods:
-            setattr(user_type, f"__r{method_name}__", rbinary_magic_impl)
+            setattrs(user_type, f"__r{method_name}__", rbinary_magic_impl)
 
 
-for method, func in magic_methods.items():  # type: ignore[assignment]
+for method in magic_methods:  # type: ignore[assignment]
     if method in only_bool_magic_methods:
         _make_user_magic(method, SymBool)
         continue

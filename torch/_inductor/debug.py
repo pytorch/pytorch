@@ -12,17 +12,21 @@ import os.path
 import pickle
 import pstats
 import shutil
+import tempfile
 import traceback
-from collections.abc import Iterator
-from typing import Any, Callable, IO, Optional, Union
+from collections.abc import Callable, Iterator, Sequence
+from typing import Any, IO, Optional, Union
 from unittest.mock import patch
 
 import torch
 from functorch.compile import draw_graph, get_aot_graph_name, get_graph_being_compiled
-from torch import fx as fx
+from torch import fx
 from torch._dynamo.repro.after_aot import save_graph_repro
 from torch._dynamo.utils import get_debug_dir
+from torch._inductor import utils
 from torch._logging import getArtifactLogger
+from torch._logging._internal import trace_structured
+from torch._utils_internal import signpost_event
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.fx.passes.tools_common import legalize_graph
@@ -31,6 +35,7 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
 
 from . import config, ir  # noqa: F811, this is needed
+from .ir import ExternKernel
 from .scheduler import (
     BaseSchedulerNode,
     FusedSchedulerNode,
@@ -42,6 +47,11 @@ from .virtualized import V
 
 
 log = logging.getLogger(__name__)
+
+# Graph execution tracking for debugging
+GRAPH_EXECUTION_ORDER: Optional[list[dict[str, object]]] = None
+RECORD_GRAPH_EXECUTION: bool = False
+GRAPH_COMPILE_IDS: Optional[dict[int, Optional[str]]] = None
 
 ir_pre_fusion_log = getArtifactLogger(__name__, "ir_pre_fusion")
 ir_post_fusion_log = getArtifactLogger(__name__, "ir_post_fusion")
@@ -88,6 +98,7 @@ def draw_buffers(
             dtype = node.data.dtype
 
         metadata = TensorMetadata(group, dtype, None, None, None, None, None)  # type: ignore[arg-type]
+        # pyrefly: ignore [missing-attribute]
         node.meta["tensor_meta"] = metadata
 
     if print_graph:
@@ -219,6 +230,7 @@ def update_orig_fx_node_name_to_buf_name(
             )
             continue
         else:
+            # pyrefly: ignore [bad-argument-type, unsupported-operation]
             assert len(children_nodes) == 1 and children_nodes[0] == node
 
         ir_node = node.node
@@ -242,6 +254,7 @@ def get_node_name_to_buf_meta(
         if buf_name not in buf_name_to_n_node:
             buf_name_to_n_node[buf_name] = OrderedSet([node_name])
         else:
+            # pyrefly: ignore [missing-attribute]
             buf_name_to_n_node[buf_name].add(node_name)
 
     node_name_to_buf_meta = {}
@@ -312,15 +325,72 @@ def enable_aot_logging() -> Iterator[None]:
 # Used for provenance tracking
 # They are not stored in DebugContext because they are not set in
 # _inductor_triton_kernel_to_post_grad_node_info's Debug Context
-_inductor_post_to_pre_grad_nodes: dict[str, Any] = {}
+_inductor_post_to_pre_grad_nodes: dict[str, dict[str, list[str]]] = {}
+_inductor_triton_kernel_to_post_grad_node_info: dict[str, list[str]] = {}
 _pre_grad_graph_id: Optional[int] = None
+_inductor_pre_grad_node_stack_trace: dict[str, str] = {}
+_inductor_kernel_stack_trace: dict[str, list[str]] = {}
+_inductor_kernel_provenance_debug_handle: int = 0
+
+
+def reset_inductor_kernel_provenance_debug_handle() -> None:
+    global _inductor_kernel_provenance_debug_handle
+    _inductor_kernel_provenance_debug_handle = 0
+
+
+@contextlib.contextmanager
+def reset_provenance_globals() -> Iterator[None]:
+    """Context manager that resets provenance tracking globals upon entering
+    and restores their original values when exiting."""
+    global _pre_grad_graph_id
+    global _inductor_post_to_pre_grad_nodes
+    global _inductor_triton_kernel_to_post_grad_node_info
+    global _inductor_pre_grad_node_stack_trace
+    global _inductor_kernel_stack_trace
+    global _inductor_kernel_provenance_debug_handle
+
+    # Store original values
+    original_pre_grad_graph_id = _pre_grad_graph_id
+    original_post_to_pre_grad_nodes = _inductor_post_to_pre_grad_nodes.copy()
+    original_triton_kernel_to_post_grad_node_info = (
+        _inductor_triton_kernel_to_post_grad_node_info.copy()
+    )
+    original_inductor_pre_grad_node_stack_trace = (
+        _inductor_pre_grad_node_stack_trace.copy()
+    )
+    original_inductor_kernel_stack_trace = _inductor_kernel_stack_trace.copy()
+    original_inductor_kernel_provenance_debug_handle = (
+        _inductor_kernel_provenance_debug_handle
+    )
+
+    # Reset to default values
+    _pre_grad_graph_id = -1
+    _inductor_post_to_pre_grad_nodes = {}
+    _inductor_triton_kernel_to_post_grad_node_info = {}
+    _inductor_pre_grad_node_stack_trace = {}
+    _inductor_kernel_stack_trace = {}
+    _inductor_kernel_provenance_debug_handle = 0
+
+    try:
+        yield
+    finally:
+        # Restore original values
+        _pre_grad_graph_id = original_pre_grad_graph_id
+        _inductor_post_to_pre_grad_nodes = original_post_to_pre_grad_nodes
+        _inductor_triton_kernel_to_post_grad_node_info = (
+            original_triton_kernel_to_post_grad_node_info
+        )
+        _inductor_kernel_stack_trace = original_inductor_kernel_stack_trace
+        _inductor_pre_grad_node_stack_trace = (
+            original_inductor_pre_grad_node_stack_trace
+        )
+        _inductor_kernel_provenance_debug_handle = (
+            original_inductor_kernel_provenance_debug_handle
+        )
 
 
 class DebugContext:
     _counter = itertools.count()
-
-    # Used for provenance tracking
-    _inductor_triton_kernel_to_post_grad_node_info: dict[str, list[str]] = {}
 
     @staticmethod
     def create_debug_dir(folder_name: str) -> Optional[str]:
@@ -557,25 +627,6 @@ class DebugFormatter:
     def output_code(self, filename: str, extension: str = "py") -> None:
         shutil.copy(filename, self.filename(f"output_code.{extension}"))
 
-    def log_inductor_triton_kernel_to_post_grad_node_info(
-        self, filename: str = "inductor_generated_kernel_to_post_grad_nodes.json"
-    ) -> tuple[dict[str, list[str]], dict[str, Any]]:
-        debug_info = {}
-        with self.fopen(filename, "w") as fd:
-            log.info("Writing provenance tracing debugging info to %s", fd.name)
-            debug_info = DebugContext._inductor_triton_kernel_to_post_grad_node_info
-            json.dump(debug_info, fd)
-        node_mapping = {}
-        if _pre_grad_graph_id:
-            with self.fopen(
-                "inductor_provenance_tracking_node_mappings.json", "w"
-            ) as fd:
-                node_mapping = create_node_mapping(
-                    _pre_grad_graph_id, _inductor_post_to_pre_grad_nodes, debug_info
-                )
-                json.dump(node_mapping, fd)
-        return debug_info, node_mapping
-
     def log_autotuning_results(
         self,
         name: str,
@@ -681,6 +732,132 @@ def log_ir_post_fusion(nodes: SchedulerNodeList) -> None:
     V.debug.ir_post_fusion(nodes)
 
 
+def _dump_collective_schedule(schedule: list[Union[str, None]]) -> None:
+    try:
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_collective_schedule",
+                "encoding": "json",
+            },
+            payload_fn=lambda: schedule,
+        )
+    except Exception:
+        log.debug(
+            "Failed to log inductor_collective_schedule via structured logging",
+            exc_info=True,
+        )
+
+
+def log_collective_schedule(nodes: Sequence[BaseSchedulerNode]) -> None:
+    schedule = [
+        getattr(op, "python_kernel_name", None)
+        for node in nodes
+        if isinstance(op := getattr(node, "node", None), ir._CollectiveKernel)
+    ]
+
+    # Only log when there is at least one collective op
+    if schedule:
+        _dump_collective_schedule(schedule)
+
+
+def log_runtime_and_tensor_meta(node_runtimes: Sequence[tuple[Any, float]]) -> None:
+    """Log per-op runtime estimates and output tensor metadata for TLParse."""
+
+    try:
+        to_size_hints = V.graph.sizevars.size_hints
+
+        def to_list(x: Optional[Sequence[Any]]) -> list[Any]:
+            return list(to_size_hints(x)) if x is not None else []
+
+        def dtype_to_str(dtype: Any) -> Optional[str]:
+            if dtype is None:
+                return None
+            s = str(dtype)
+            s = s.removeprefix("torch.")
+            return s
+
+        ops: list[dict[str, Any]] = []
+        for s, runtime_ns in node_runtimes:
+            name = getattr(s.node, "python_kernel_name", s.get_name())
+            op_type = "collective" if utils.is_collective(s.node) else "compute"
+
+            # Build outputs metadata if available
+            outputs: list[dict[str, Any]] = []
+            try:
+                for buf in s.get_outputs():
+                    irnode = buf.node
+                    shape = irnode.maybe_get_size()
+                    stride = (
+                        irnode.get_stride()
+                        if isinstance(irnode.layout, ir.Layout)
+                        else None
+                    )
+                    dtype = irnode.maybe_get_dtype()
+                    outputs.append(
+                        {
+                            "shape": to_list(shape),
+                            "stride": to_list(stride),
+                            "dtype": dtype_to_str(dtype),
+                        }
+                    )
+            except Exception:
+                pass
+
+            ops.append(
+                {
+                    "name": name,
+                    "type": op_type,
+                    "estimated_runtime_ns": runtime_ns,
+                    "outputs": outputs,
+                }
+            )
+
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "inductor_runtime_and_tensor_meta",
+                "encoding": "json",
+            },
+            payload_fn=lambda: {"ops": ops},
+        )
+    except Exception:
+        log.debug("Failed to log inductor_runtime_and_tensor_meta", exc_info=True)
+
+
+def log_graph_execution() -> None:
+    """Emit a structured artifact with the graph execution order."""
+    if not GRAPH_EXECUTION_ORDER:
+        return
+    try:
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "graph_execution",
+                "encoding": "json",
+            },
+            payload_fn=lambda: {"graph_execution_order": GRAPH_EXECUTION_ORDER},
+        )
+    except Exception:
+        log.debug("Failed to log graph_execution", exc_info=True)
+
+
+@contextlib.contextmanager
+def record_and_log_graph_execution_order() -> Iterator[None]:
+    """Record graph execution order and log it once on exit."""
+    global RECORD_GRAPH_EXECUTION, GRAPH_EXECUTION_ORDER, GRAPH_COMPILE_IDS
+    GRAPH_EXECUTION_ORDER = []
+    GRAPH_COMPILE_IDS = {}
+    RECORD_GRAPH_EXECUTION = True
+    try:
+        yield
+    finally:
+        log_graph_execution()
+        RECORD_GRAPH_EXECUTION = False
+        GRAPH_EXECUTION_ORDER = None
+        GRAPH_COMPILE_IDS = None
+
+
 @dataclasses.dataclass
 class TensorMetadataHolder:
     tensor_metadata: TensorMetadata
@@ -690,55 +867,33 @@ class TensorMetadataHolder:
 save_args_cnt = itertools.count()
 
 
-def create_node_mapping(
-    pre_grad_graph_id: int,
+def create_mapping_pre_post_grad_nodes(
+    pre_grad_graph_id: Optional[int],
     post_to_pre_grad_nodes_json: dict[str, Any],
-    triton_kernel_to_post_grad_json: dict[str, Any],
-) -> dict[str, dict[str, Any]]:
-    """Create bidirectional mappings between:
-
-    - pre_grad graph nodes and post_grad graph code nodes, and vice versa
-    - triton kernel name and post_grad graph code nodes, and vice versa
+) -> dict[str, dict[str, list[str]]]:
     """
-
+    Create bidirectional mappings between pre_grad graph nodes
+    and post_grad graph code nodes, and vice versa.
+    """
     # return a dummy dict if there's any error
-    empty_return: dict[str, dict[str, Any]] = {
+    empty_return: dict[str, dict[str, list[str]]] = {
         "preToPost": {},
         "postToPre": {},
-        "cppCodeToPost": {},
-        "postToCppCode": {},
     }
-
-    log.info("Creating node mappings for provenance tracking")
 
     if not isinstance(post_to_pre_grad_nodes_json, dict):
         log.error("Provenance tacking error: post_to_pre_grad_nodes_json is not a dict")
         return empty_return
 
-    if not isinstance(triton_kernel_to_post_grad_json, dict):
-        log.error(
-            "Provenance tacking error: triton_kernel_to_post_grad_json is not a dict"
-        )
-        return empty_return
-
     if not isinstance(pre_grad_graph_id, int):
-        log.error("Provenance tacking error: pre_grad_graph_id is not an int")
+        # pre_grad_graph_id may be empty if there's no pre_grad graph
+        # and there's only a backward graph from backward pass engine
         return empty_return
 
     pre_to_post: dict[str, Any] = collections.defaultdict(OrderedSet)
     post_to_pre: dict[str, Any] = collections.defaultdict(OrderedSet)
 
-    post_to_cpp_code: dict[str, Any] = collections.defaultdict(OrderedSet)
-
     try:
-        for outer_key, node_array in triton_kernel_to_post_grad_json.items():
-            if not isinstance(node_array, list):
-                log.error(
-                    "Provenance tacking error: triton_kernel_to_post_grad_json value is not a list"
-                )
-                return empty_return
-            for curr_node in node_array:
-                post_to_cpp_code[curr_node].add(outer_key)
 
         def check_format(node: dict[str, Any]) -> bool:
             if not isinstance(node, dict):
@@ -788,24 +943,245 @@ def create_node_mapping(
         # convert to list because set is not JSON serializable
         convert_sets_to_lists(pre_to_post)
         convert_sets_to_lists(post_to_pre)
-        convert_sets_to_lists(post_to_cpp_code)
         return {
             "preToPost": pre_to_post,
             "postToPre": post_to_pre,
+        }
+    except Exception as e:
+        # Since this is just logging code, it should never interfere with regular
+        # program execution, so we use this try-except to guard against any error
+        signpost_event(
+            "inductor",
+            "provenance_tracking_error",
+            {
+                "function": "create_mapping_pre_post_grad_nodes",
+                "error_msg": str(e),
+                "stack_trace": traceback.format_exc(),
+            },
+        )
+        log.error("post_to_pre_grad_nodes_json:  %s", post_to_pre_grad_nodes_json)
+        log.error("pre_grad_graph_id:  %s", pre_grad_graph_id)
+        return empty_return
+
+
+def create_node_mapping_kernel_to_post_grad(
+    triton_kernel_to_post_grad_json: dict[str, Any],
+) -> dict[str, dict[str, Any]]:
+    """Create bidirectional mappings between triton kernel name and post_grad
+    graph code nodes, and vice versa.
+    """
+
+    # return a dummy dict if there's any error
+    empty_return: dict[str, dict[str, Any]] = {
+        "cppCodeToPost": {},
+        "postToCppCode": {},
+    }
+
+    if not isinstance(triton_kernel_to_post_grad_json, dict):
+        log.error(
+            "Provenance tacking error: triton_kernel_to_post_grad_json is not a dict"
+        )
+        return empty_return
+
+    post_to_cpp_code: dict[str, Any] = collections.defaultdict(OrderedSet)
+
+    try:
+        for outer_key, node_array in triton_kernel_to_post_grad_json.items():
+            if not isinstance(node_array, list):
+                log.error(
+                    "Provenance tacking error: triton_kernel_to_post_grad_json value is not a list"
+                )
+                return empty_return
+            for curr_node in node_array:
+                post_to_cpp_code[curr_node].add(outer_key)
+
+        def convert_sets_to_lists(d: dict[str, Any]) -> None:
+            for key in d:
+                d[key] = list(d[key])
+            d = dict(d)
+
+        # convert to list because set is not JSON serializable
+        convert_sets_to_lists(post_to_cpp_code)
+        return {
             "cppCodeToPost": triton_kernel_to_post_grad_json,
             "postToCppCode": post_to_cpp_code,
         }
     except Exception as e:
         # Since this is just logging code, it should never interfere with regular
         # program execution, so we use this try-except to guard against any error
-        log.error("Unexpected error in create_node_mapping: %s", e)
-        log.error("post_to_pre_grad_nodes_json:  %s", post_to_pre_grad_nodes_json)
+        signpost_event(
+            "inductor",
+            "provenance_tracking_error",
+            {
+                "function": "create_mapping_kernel_to_post_grad",
+                "error_msg": str(e),
+                "stack_trace": traceback.format_exc(),
+            },
+        )
         log.error(
             "triton_kernel_to_post_grad_json:  %s", triton_kernel_to_post_grad_json
         )
-        log.error("pre_grad_graph_id:  %s", pre_grad_graph_id)
-        log.error(traceback.format_exc())
         return empty_return
+
+
+def dump_inductor_provenance_info() -> dict[str, Any]:
+    try:
+        global _pre_grad_graph_id
+        global _inductor_post_to_pre_grad_nodes
+        global _inductor_triton_kernel_to_post_grad_node_info
+        node_mapping: dict[str, Any] = {}
+        if _pre_grad_graph_id:
+            node_mapping_kernel = create_node_mapping_kernel_to_post_grad(
+                _inductor_triton_kernel_to_post_grad_node_info
+            )
+            node_mapping = {
+                **_inductor_post_to_pre_grad_nodes,
+                **node_mapping_kernel,
+            }
+            if config.trace.enabled:
+                with V.debug.fopen(
+                    "inductor_provenance_tracking_node_mappings.json", "w"
+                ) as fd:
+                    json.dump(node_mapping, fd)
+        # we need to update the node mapping version when node mapping format changes
+        # so the tlparse tool knows which node mapping version it is looking at
+        node_mapping["version"] = 2.0
+        return node_mapping
+    except Exception as e:
+        # Since this is just debugging, it should never interfere with regular
+        # program execution, so we use this try-except to guard against any error
+        signpost_event(
+            "inductor",
+            "provenance_tracking_error",
+            {
+                "function": "dump_inductor_provenance_info",
+                "error_msg": str(e),
+                "stack_trace": traceback.format_exc(),
+            },
+        )
+        return {}
+
+
+def create_kernel_information_json() -> dict[str, dict[str, list[str]]]:
+    """Create kernel information JSON"""
+    try:
+        global _inductor_post_to_pre_grad_nodes
+        global _inductor_kernel_stack_trace
+        global _inductor_triton_kernel_to_post_grad_node_info
+
+        post_to_pre = _inductor_post_to_pre_grad_nodes.get("postToPre", {})
+        all_kernels = OrderedSet(_inductor_kernel_stack_trace.keys()) | OrderedSet(
+            _inductor_triton_kernel_to_post_grad_node_info.keys()
+        )
+
+        result = {}
+        for kernel_name in all_kernels:
+            post_grad_nodes = _inductor_triton_kernel_to_post_grad_node_info.get(
+                kernel_name, []
+            )
+
+            pre_grad_nodes: OrderedSet[str] = OrderedSet()
+            for post_node in post_grad_nodes:
+                pre_grad_nodes.update(post_to_pre.get(post_node, []))
+
+            result[kernel_name] = {
+                "stack_traces": _inductor_kernel_stack_trace.get(kernel_name, []),
+                "post_grad_nodes": post_grad_nodes,
+                "pre_grad_nodes": list(pre_grad_nodes),
+            }
+
+        return result
+    except Exception as e:
+        signpost_event(
+            "inductor",
+            "provenance_tracking_error",
+            {
+                "function": "create_kernel_information_json",
+                "error_msg": str(e),
+                "stack_trace": traceback.format_exc(),
+            },
+        )
+        return {}
+
+
+def set_kernel_post_grad_provenance_tracing(
+    node_schedule: Union[Sequence[BaseSchedulerNode], ExternKernel],
+    kernel_name: str,
+    is_extern: bool = False,
+) -> Optional[int]:
+    """
+    Set the mapping between `kernel_name` and the post_grad nodes in `node_schedule`.
+
+    Returns a unique int debug handler for each call to this function.
+    """
+
+    if config.trace.provenance_tracking_level == 0:
+        return None
+
+    try:
+        from .codegen.simd_kernel_features import DisableReduction, EnableReduction
+
+        global _inductor_triton_kernel_to_post_grad_node_info
+        global _inductor_kernel_stack_trace
+        global _inductor_kernel_provenance_debug_handle
+
+        _inductor_kernel_provenance_debug_handle += 1
+        stack_traces: list[str] = []
+        kernel_name = f"{kernel_name}:{_inductor_kernel_provenance_debug_handle}"
+        if is_extern:
+            assert isinstance(node_schedule, ExternKernel)
+            curr_node_info = _inductor_triton_kernel_to_post_grad_node_info.setdefault(
+                kernel_name, []
+            )
+            # 'origins' on IR nodes gives what FX IR nodes contributed to any given fused kernel.
+            # "origin_node" is more precise and says that the contents of this node corresponds
+            # EXACTLY to the output of a particular FX node, but it's not always available
+            if node_schedule.origin_node:
+                origin_node_name = node_schedule.origin_node.name
+                if origin_node_name not in curr_node_info:
+                    curr_node_info.append(origin_node_name)
+            else:
+                curr_node_info.extend(
+                    origin.name
+                    for origin in node_schedule.origins
+                    if origin.name not in curr_node_info
+                )
+            stack_traces = list(node_schedule.get_stack_traces())
+        else:
+            assert isinstance(node_schedule, list)
+            stack_traces_set: OrderedSet[str] = OrderedSet()
+            for snode in node_schedule:
+                if snode not in (EnableReduction, DisableReduction):
+                    if snode.node is not None:
+                        curr_node_info = (
+                            _inductor_triton_kernel_to_post_grad_node_info.setdefault(
+                                kernel_name, []
+                            )
+                        )
+                        # pyrefly: ignore [missing-attribute]
+                        stack_traces_set.update(snode.node.get_stack_traces())
+                        curr_node_info.extend(
+                            origin.name
+                            # pyrefly: ignore [missing-attribute]
+                            for origin in snode.node.origins
+                            if origin.name not in curr_node_info
+                        )
+            stack_traces = list(stack_traces_set)
+        _inductor_kernel_stack_trace.setdefault(kernel_name, []).extend(stack_traces)
+        return _inductor_kernel_provenance_debug_handle
+    except Exception as e:
+        # Since this is just debugging, it should never interfere with regular
+        # program execution, so we use this try-except to guard against any error
+        signpost_event(
+            "inductor",
+            "provenance_tracking_error",
+            {
+                "function": "set_kernel_post_grad_provenance_tracing",
+                "error_msg": str(e),
+                "stack_trace": traceback.format_exc(),
+            },
+        )
+        return None
 
 
 def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:
@@ -815,7 +1191,7 @@ def save_args_for_compile_fx_inner(*args: Any, **kwargs: Any) -> None:
     with the saved arguments using load_args_and_run_compile_fx_inner.
     """
 
-    folder = "/tmp/inductor_saved_args"
+    folder = os.path.join(tempfile.gettempdir(), "inductor_saved_args")
     if not os.path.exists(folder):
         os.mkdir(folder)
 
@@ -891,7 +1267,7 @@ def aot_inductor_minifier_wrapper(
 
     use_minifier = config.aot_inductor.dump_aoti_minifier
 
-    gm = exported_program.module()
+    gm = exported_program.module(check_guards=False)
     assert isinstance(gm, torch.fx.GraphModule)
 
     args, kwargs = exported_program.example_inputs
@@ -920,7 +1296,7 @@ def aot_inductor_minifier_wrapper(
             tuple_inputs = tuple(flat_example_inputs)
             flattened_ep = torch.export.export(gm_copy, tuple_inputs, strict=False)
             func(
-                flattened_ep.module(),
+                flattened_ep.module(check_guards=False),
                 tuple_inputs,
                 inductor_configs=config_copy,
                 package_path=package_path,

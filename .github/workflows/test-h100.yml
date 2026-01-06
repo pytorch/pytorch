@@ -4,6 +4,10 @@ on:
   pull_request:
     paths:
       - .github/workflows/test-h100.yml
+      - test/inductor/test_max_autotune.py
+      - torch/_inductor/kernel/mm.py
+      - torch/_inductor/kernel/mm_grouped.py
+
   workflow_dispatch:
   schedule:
     - cron: 0 4,10,16,22 * * *  # every 6 hours
@@ -14,6 +18,10 @@ on:
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
+
+permissions:
+  id-token: write
+  contents: read
 
 jobs:
 
@@ -33,7 +41,6 @@ jobs:
     needs: get-label-type
     with:
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
-      runner: "linux.12xlarge"
       build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm90
       docker-image-name: ci-image:pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11
       cuda-arch-list: '9.0'
@@ -49,7 +56,19 @@ jobs:
     needs:
       - linux-jammy-cuda12_8-py3_10-gcc11-sm90-build
     with:
-      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm90
+      build-environment: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build.outputs.build-environment }}
       docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build.outputs.docker-image }}
       test-matrix: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build.outputs.test-matrix }}
+    secrets: inherit
+
+  linux-jammy-cuda12_8-py3_10-gcc11-sm90-FA3-ABI-stable-test:
+    name: linux-jammy-cuda12_8-py3_10-gcc11-sm90-FA3-ABI-stable-test
+    uses: ./.github/workflows/_linux-test-stable-fa3.yml
+    needs:
+      - linux-jammy-cuda12_8-py3_10-gcc11-sm90-build
+    with:
+      build-environment: linux-jammy-cuda12.8-py3.10-gcc11-sm90
+      docker-image: ${{ needs.linux-jammy-cuda12_8-py3_10-gcc11-sm90-build.outputs.docker-image }}
+      timeout-minutes: 30
+      s3-bucket: gha-artifacts
     secrets: inherit

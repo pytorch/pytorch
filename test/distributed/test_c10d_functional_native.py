@@ -1,5 +1,6 @@
 # Owner(s): ["module: c10d"]
 import gc
+import re
 import threading
 import unittest
 from datetime import timedelta
@@ -9,7 +10,7 @@ import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as funcol
 from torch._C import FileCheck
-from torch._inductor.utils import fresh_cache, run_and_get_triton_code
+from torch._inductor.utils import fresh_cache, run_and_get_code, run_and_get_triton_code
 from torch.distributed._functional_collectives import (
     all_gather_into_tensor_coalesced,
     all_gather_tensor,
@@ -20,15 +21,15 @@ from torch.distributed._functional_collectives import (
     reduce_scatter_tensor,
     reduce_scatter_tensor_coalesced,
 )
-from torch.testing._internal.common_cuda import SM90OrLater
+from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
+from torch.testing._internal.common_device_type import e4m3_type
 from torch.testing._internal.common_distributed import (
-    MultiProcessTestCase,
-    requires_nccl,
+    DistributedTestBase,
+    requires_accelerator_dist_backend,
     skip_if_lt_x_gpu,
 )
 from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     run_tests,
-    skipIfRocm,
     TestCase,
 )
 from torch.testing._internal.distributed.fake_pg import FakeStore
@@ -58,12 +59,8 @@ if not dist.is_available():
     sys.exit(0)
 
 
-@requires_nccl()
-class TestWithNCCL(MultiProcessTestCase):
-    def setUp(self) -> None:
-        super().setUp()
-        self._spawn_processes()
-
+@requires_accelerator_dist_backend()
+class TestWithNCCL(DistributedTestBase):
     @property
     def world_size(self) -> int:
         return 2
@@ -74,21 +71,10 @@ class TestWithNCCL(MultiProcessTestCase):
 
     @property
     def device(self) -> torch.device:
-        return torch.device(f"cuda:{self.rank}")
+        return torch.device(self.rank)
 
     def _init_process_group(self) -> None:
-        # Allow testing aoti after torch.compile
-        torch._inductor.config.triton.store_cubin = True
-        torch._inductor.config.debug = True
-
-        torch.cuda.set_device(self.device)
-        store = dist.FileStore(self.file_name, self.world_size)
-        dist.init_process_group(
-            backend="nccl",
-            world_size=self.world_size,
-            rank=self.rank,
-            store=store,
-        )
+        self.create_pg(self.device.type)
         torch._C._distributed_c10d._register_process_group("default", dist.group.WORLD)
 
     @skip_if_lt_x_gpu(2)
@@ -276,7 +262,7 @@ class TestWithNCCL(MultiProcessTestCase):
         )
         # check memory leak
         for i in range(1, 10):
-            mem_usage[i] = torch.cuda.max_memory_allocated()
+            mem_usage[i] = torch.accelerator.max_memory_allocated()
             compiled(arg)
 
         assert mem_usage[9] == mem_usage[8]
@@ -344,6 +330,22 @@ class TestWithNCCL(MultiProcessTestCase):
         assert output.completed
 
     @skip_if_lt_x_gpu(2)
+    def test_reduce_scatter_tensor_out(self) -> None:
+        self._init_process_group()
+
+        input = torch.tensor(self.ranks, device=self.device)
+        out = torch.tensor([-1], device=self.device)
+        w = torch.ops._c10d_functional.reduce_scatter_tensor_out(
+            input,
+            "avg",
+            self.world_size,
+            "default",
+            out=out,
+        )
+        torch.ops._c10d_functional.wait_tensor(w)
+        assert out.eq(self.rank).all()
+
+    @skip_if_lt_x_gpu(2)
     def test_reduce_scatter_tensor_coalesced(self) -> None:
         self._init_process_group()
 
@@ -373,14 +375,16 @@ class TestWithNCCL(MultiProcessTestCase):
     @skip_if_lt_x_gpu(2)
     def test_all_to_all_single(self) -> None:
         self._init_process_group()
-        torch.cuda.set_device(self.device)
+        torch.accelerator.set_device_index(self.rank)
 
         torch.manual_seed(42)
         send_sz_matrix = torch.randint(0, 20, (self.world_size, self.world_size))
 
         input_split_sizes = send_sz_matrix[self.rank].tolist()
         output_split_sizes = send_sz_matrix[:, self.rank].tolist()
-        input = torch.full((sum(input_split_sizes),), float(self.rank)).cuda()
+        input = torch.full((sum(input_split_sizes),), float(self.rank)).to(
+            self.device.type
+        )
 
         output = torch.ops._c10d_functional.all_to_all_single(
             input,
@@ -391,7 +395,7 @@ class TestWithNCCL(MultiProcessTestCase):
         output = torch.ops._c10d_functional.wait_tensor(output)
         expect = torch.cat(
             [
-                torch.full((sz,), float(rank)).cuda()
+                torch.full((sz,), float(rank)).to(self.device.type)
                 for rank, sz in enumerate(output_split_sizes)
             ]
         )
@@ -467,7 +471,7 @@ class TestWithNCCL(MultiProcessTestCase):
     @fresh_cache()
     def test_threading(self):
         self._init_process_group()
-        device = torch.device(f"cuda:{self.rank}")
+        device = self.device
 
         def func(arg: torch.Tensor) -> torch.Tensor:
             buf0 = arg + 42
@@ -492,7 +496,7 @@ class TestWithNCCL(MultiProcessTestCase):
                 try:
                     func(arg)
                     compiled(arg)
-                except BaseException as exc:
+                except BaseException as exc:  # noqa: B036
                     self.exc = exc
 
             def join(self):
@@ -504,10 +508,9 @@ class TestWithNCCL(MultiProcessTestCase):
         t.start()
         t.join()
 
-    @skipIfRocm
     @unittest.skipIf(
-        not SM90OrLater,
-        "_scaled_mm currently only supports sm>=90",
+        not PLATFORM_SUPPORTS_FP8,
+        "_scaled_mm currently only supports sm>=90 on cuda and gfx94/95 on ROCm",
     )
     @skip_if_lt_x_gpu(2)
     @fresh_cache()
@@ -516,10 +519,9 @@ class TestWithNCCL(MultiProcessTestCase):
 
         def scale(t):
             scale = (
-                torch.finfo(torch.float8_e4m3fn).max
-                / t.abs().amax(dim=-1, keepdim=True).float()
+                torch.finfo(e4m3_type).max / t.abs().amax(dim=-1, keepdim=True).float()
             )
-            t = t.mul(scale).to(torch.float8_e4m3fn)
+            t = t.mul(scale).to(e4m3_type)
             return t, scale
 
         def fp8_rowwise_backward(in_, w, out_grad):
@@ -549,9 +551,9 @@ class TestWithNCCL(MultiProcessTestCase):
             return in_grad, w_grad
 
         m, n, k = 128, 256, 64
-        in_ = torch.randn((m, k), device="cuda", dtype=torch.bfloat16)
-        w = torch.randn((n, k), device="cuda", dtype=torch.bfloat16)
-        out_grad = torch.randn((m, n), device="cuda", dtype=torch.bfloat16)
+        in_ = torch.randn((m, k), device=self.device.type, dtype=torch.bfloat16)
+        w = torch.randn((n, k), device=self.device.type, dtype=torch.bfloat16)
+        out_grad = torch.randn((m, n), device=self.device.type, dtype=torch.bfloat16)
 
         eager_in_grad, eager_w_grad = fp8_rowwise_backward(in_, w, out_grad)
         compile_in_grad, compile_w_grad = torch.compile(fp8_rowwise_backward)(
@@ -713,16 +715,75 @@ class PyWorkTest(TestCase):
         self.assertEqual(pg.dels, 4)
 
 
+def find_buffer_assignments(code):
+    pattern = r"buf(\d+) = empty_strided_"
+    matches = re.finditer(pattern, code)
+    return tuple(f"buf{match.group(1)}" for match in matches)
+
+
+class CompileTestCPU(TestCase):
+    def setUp(self):
+        super().setUp()
+
+        if not dist.is_initialized():
+            self.rank = 0
+            self.world_size = 2
+
+            store = FakeStore()
+            dist.init_process_group(
+                backend="fake",
+                world_size=self.world_size,
+                rank=self.rank,
+                store=store,
+            )
+
+    def tearDown(self):
+        dist.destroy_process_group()
+
+    @fresh_cache()
+    def _test_inductor_all_reduce_cpu(self, cpp_wrapper=False):
+        def func(arg: torch.Tensor) -> torch.Tensor:
+            buf0 = arg + 42
+            ar0 = funcol.all_reduce(buf0, "avg", "0")
+            ar0 = funcol.wait_tensor(ar0)
+            return ar0
+
+        arg = torch.rand(4, 4, device="cpu")
+        with torch._inductor.config.patch({"cpp_wrapper": cpp_wrapper}):
+            compiled = torch.compile(func)
+
+            _, (code,) = run_and_get_code(compiled, arg)
+            include_ops = (
+                [
+                    "aoti_torch_cpu__c10d_functional_all_reduce_",
+                    "aoti_torch_cpu__c10d_functional_wait_tensor",
+                ]
+                if cpp_wrapper
+                else [
+                    "torch.ops._c10d_functional.all_reduce_.default",
+                    "torch.ops._c10d_functional.wait_tensor.default",
+                ]
+            )
+            for op in include_ops:
+                self.assertIn(op, code)
+
+        # Test aoti
+        AOTIRunnerUtil.run(func, (arg,))
+        torch.cpu.synchronize()
+
+    def test_inductor_all_reduce_cpu(self):
+        self._test_inductor_all_reduce_cpu(cpp_wrapper=False)
+        self._test_inductor_all_reduce_cpu(cpp_wrapper=True)
+
+
 class CompileTest(TestCase):
     def setUp(self):
         super().setUp()
-        # Allow testing aoti after torch.compile
-        torch._inductor.config.triton.store_cubin = True
-        torch._inductor.config.debug = True
 
         self.rank = 0
         self.world_size = 2
-        torch.cuda.set_device("cuda:0")
+        torch.accelerator.set_device_index(0)
+        self.device = torch.accelerator.current_accelerator()
 
         store = FakeStore()
         dist.init_process_group(
@@ -748,29 +809,40 @@ class CompileTest(TestCase):
             ar1 = funcol.wait_tensor(ar1)
             return ar0, ar1
 
-        arg = torch.rand(4, 4, device="cuda")
+        arg = torch.rand(4, 4, device=self.device)
         compiled = torch.compile(func)
 
         code = run_and_get_triton_code(compiled, arg)
+        buf0, buf1 = find_buffer_assignments(code)
         (
             FileCheck()
-            .check("buf0 = empty")
-            .check("buf7 = empty")
+            .check(f"{buf0} = empty")
+            .check(f"{buf1} = empty")
             # Expect in-place with inductor allocated buf
-            .check("torch.ops._c10d_functional.all_reduce_.default(buf0")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
-            # Expect no in-place with graph input (buf5 is a clone)
-            .check("torch.ops._c10d_functional.all_reduce_.default(buf7")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf7")
+            .check(f"torch.ops._c10d_functional.all_reduce_.default({buf0}")
+            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf0}")
+            # Expect no in-place with graph input
+            .check(f"torch.ops._c10d_functional.all_reduce_.default({buf1}")
+            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf1}")
             # Expect no extra copy on return
-            .check("return (buf0, buf7, )")
+            .check(f"return ({buf0}, {buf1}, )")
             .run(code)
         )
+        # Check the return tensor from wait_tensor is not used anywhere
         assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
+
+        with torch._inductor.config.patch({"cpp_wrapper": True}):
+            code = run_and_get_triton_code(compiled, arg)
+            # Check the return tensors from all_reduce and wait_tensor are not used anywhere by
+            # checking if they are explicitly deleted by calling aoti_torch_delete_tensor_object
+            FileCheck().check_not(
+                # all_reduce must have been rewritten into all_reduce_
+                "aoti_torch_cpu__c10d_functional_all_reduce(buf"
+            ).check_count("aoti_torch_delete_tensor_object(buf", 4).run(code)
 
         # Test aoti
         AOTIRunnerUtil.run(func, (arg,))
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
@@ -785,38 +857,37 @@ class CompileTest(TestCase):
             ar1 = [funcol.wait_tensor(out) for out in ar1]
             return ar0, ar1
 
-        args = [torch.rand(4, 4, device="cuda") for _ in range(2)]
+        args = [torch.rand(4, 4, device=self.device.type) for _ in range(2)]
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
+        buf0, buf1, buf2, buf3 = find_buffer_assignments(code)
         (
             FileCheck()
-            .check("buf0 = empty")
-            .check("buf5 = empty")
-            .check("buf1 = empty")
-            .check("buf6 = empty")
+            .check(f"{buf0} = empty")
+            .check(f"{buf1} = empty")
+            .check(f"{buf2} = empty")
+            .check(f"{buf3} = empty")
             # Expect in-place with inductor allocated buf
             .check(
-                "torch.ops._c10d_functional.all_reduce_coalesced_"
-                ".default([buf0, buf1]"
+                f"torch.ops._c10d_functional.all_reduce_coalesced_.default([{buf0}, {buf2}]"
             )
-            # Expect no in-place with graph input (buf5, buf6 are clones)
+            # Expect no in-place with graph input ({buf1}, {buf3} are clones)
             .check(
-                "torch.ops._c10d_functional.all_reduce_coalesced_"
-                ".default([buf5, buf6]"
+                f"torch.ops._c10d_functional.all_reduce_coalesced_.default([{buf1}, {buf3}]"
             )
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf1")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf5")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf6")
+            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf0}")
+            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf2}")
+            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf1}")
+            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf3}")
             # Expect no extra copy on return
-            .check("return (buf0, buf1, buf5, buf6, )")
+            .check(f"return ({buf0}, {buf2}, {buf1}, {buf3}, )")
             .run(code)
         )
         assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
 
         # Test aoti
         out = AOTIRunnerUtil.run(func, (args,))  # noqa: F841
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
@@ -827,18 +898,19 @@ class CompileTest(TestCase):
             ar0 = funcol.wait_tensor(ar0)
             return ar0
 
-        arg = torch.rand(4, 4, device="cuda")
+        arg = torch.rand(4, 4, device=self.device.type)
         compiled = torch.compile(func)
 
         code = run_and_get_triton_code(compiled, arg)
+        (buf0,) = find_buffer_assignments(code)
         (
             FileCheck()
-            .check("buf0 = empty")
+            .check(f"{buf0} = empty")
             # We always call .contiguous() on the input to all_reduce_,
             # so input will not be a view anymore.
-            .check("torch.ops._c10d_functional.all_reduce_.default(buf0")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
-            .check("return (buf0")
+            .check(f"torch.ops._c10d_functional.all_reduce_.default({buf0}")
+            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf0}")
+            .check(f"return ({buf0}")
             .run(code)
         )
 
@@ -851,7 +923,7 @@ class CompileTest(TestCase):
             # Expect allocation
             return ar0
 
-        arg = torch.rand(4, 4, device="cuda").T
+        arg = torch.rand(4, 4, device=self.device.type).T
         compiled = torch.compile(func)
 
         code = run_and_get_triton_code(compiled, arg)
@@ -869,6 +941,9 @@ class CompileTest(TestCase):
         assert "torch.ops._c10d_functional.wait_tensor.default" in code
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @unittest.skipIf(
+        torch._inductor.config.triton.native_matmul, "no extern_kernels.mm"
+    )
     @fresh_cache()
     def test_inductor_reuse_buffer_after_inplace_collective(self):
         def func(arg: torch.Tensor) -> torch.Tensor:
@@ -882,23 +957,24 @@ class CompileTest(TestCase):
             buf2 = torch.mm(arg, buf1)
             return buf1, buf2
 
-        arg = torch.rand(4, 4, device="cuda")
+        arg = torch.rand(4, 4, device=self.device.type)
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, arg)
+        buf0, buf1 = find_buffer_assignments(code)
         (
             FileCheck()
             # Expect allocation
-            .check("buf0 = empty")
-            .check("torch.ops._c10d_functional.all_reduce_.default(buf0")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf0")
+            .check(f"{buf0} = empty")
+            .check(f"torch.ops._c10d_functional.all_reduce_.default({buf0}")
+            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf0}")
             # Expect allocation
-            .check("buf7 = empty")
-            .check("extern_kernels.mm(arg0_1, buf0, out=buf7")
-            # Expect buf0 to be reused
-            .check("buf8 = buf0; del buf0  # reuse")
-            .check("extern_kernels.mm(arg0_1, buf7, out=buf8")
+            .check(f"{buf1} = empty")
+            .check(f"extern_kernels.mm(arg0_1, {buf0}, out={buf1}")
+            # Expect {buf0} to be reused
+            .check(f"buf8 = {buf0}; del {buf0}  # reuse")
+            .check(f"extern_kernels.mm(arg0_1, {buf1}, out=buf8")
             # Expect no extra copy on return
-            .check("return (buf7, buf8, )")
+            .check(f"return ({buf1}, buf8, )")
             .run(code)
         )
         assert "= torch.ops._c10d_functional.wait_tensor.default" not in code
@@ -911,7 +987,7 @@ class CompileTest(TestCase):
             ag0 = funcol.wait_tensor(ag0)
             return ag0
 
-        arg = torch.rand(4, 4, device="cuda")
+        arg = torch.rand(4, 4, device=self.device.type)
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, arg)
         (
@@ -928,7 +1004,7 @@ class CompileTest(TestCase):
 
         # Test aoti
         AOTIRunnerUtil.run(func, (arg,))
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
@@ -938,7 +1014,7 @@ class CompileTest(TestCase):
             ag0 = [funcol.wait_tensor(out) for out in ag0]
             return ag0
 
-        args = [torch.rand(4, 4, device="cuda") for _ in range(4)]
+        args = [torch.rand(4, 4, device=self.device.type) for _ in range(4)]
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
         (
@@ -962,7 +1038,7 @@ class CompileTest(TestCase):
 
         # Test aoti
         out = AOTIRunnerUtil.run(func, (args,))  # noqa: F841
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "This is a GPU test!")
     @fresh_cache()
@@ -972,7 +1048,7 @@ class CompileTest(TestCase):
             return funcol.wait_tensor(t)
 
         # Test aoti
-        arg = torch.rand(4, 4, device="cuda")
+        arg = torch.rand(4, 4, device=self.device.type)
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, arg)
         (
@@ -984,7 +1060,7 @@ class CompileTest(TestCase):
 
         # Test aoti
         AOTIRunnerUtil.run(func, (arg,))
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
@@ -994,7 +1070,7 @@ class CompileTest(TestCase):
             rs0 = funcol.wait_tensor(rs0)
             return rs0
 
-        arg = torch.rand(4, 4, device="cuda")
+        arg = torch.rand(4, 4, device=self.device.type)
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, arg)
         (
@@ -1010,7 +1086,7 @@ class CompileTest(TestCase):
 
         # Test aoti
         AOTIRunnerUtil.run(func, (arg,))
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
@@ -1022,7 +1098,7 @@ class CompileTest(TestCase):
             rs0 = [funcol.wait_tensor(out) for out in rs0]
             return rs0
 
-        args = [torch.rand(4, 4, device="cuda") for _ in range(4)]
+        args = [torch.rand(4, 4, device=self.device.type) for _ in range(4)]
         compiled = torch.compile(func)
         code = run_and_get_triton_code(compiled, args)
         (
@@ -1046,17 +1122,11 @@ class CompileTest(TestCase):
 
         # Test aoti
         AOTIRunnerUtil.run(func, (args,))
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
     def test_inductor_all_to_all_single(self):
-        def _tolist_with_constrain_as_size(tensor):
-            lst = tensor.tolist()
-            for elem in lst:
-                torch._check_is_size(elem)
-            return lst
-
         def func(
             input: torch.Tensor,
             output_split_sizes: torch.Tensor,
@@ -1064,8 +1134,8 @@ class CompileTest(TestCase):
         ) -> torch.Tensor:
             output = funcol.all_to_all_single(
                 input,
-                _tolist_with_constrain_as_size(output_split_sizes),
-                _tolist_with_constrain_as_size(input_split_sizes),
+                output_split_sizes.tolist(),
+                input_split_sizes.tolist(),
                 "0",
             )
             return funcol.wait_tensor(output)
@@ -1075,7 +1145,9 @@ class CompileTest(TestCase):
 
         input_split_sizes = send_sz_matrix[self.rank]
         output_split_sizes = send_sz_matrix[:, self.rank].contiguous()
-        input = torch.full((input_split_sizes.sum().item(),), float(self.rank)).cuda()
+        input = torch.full((input_split_sizes.sum().item(),), float(self.rank)).to(
+            self.device.type
+        )
 
         with torch._dynamo.config.patch(
             dynamic_shapes=True,
@@ -1109,29 +1181,30 @@ class CompileTest(TestCase):
             br1 = funcol.wait_tensor(br1)
             return br0, br1
 
-        arg = torch.rand(4, 4, device="cuda")
+        arg = torch.rand(4, 4, device=self.device.type)
         compiled = torch.compile(func)
 
         code = run_and_get_triton_code(compiled, arg)
+        buf0, buf1 = find_buffer_assignments(code)
         (
             FileCheck()
-            .check("buf0 = empty")
-            .check("buf1 = buf0")
-            .check("buf8 = empty")
+            .check(f"{buf0} = empty")
+            .check(f"buf1 = {buf0}")
+            .check(f"{buf1} = empty")
             # Expect in-place with inductor allocated buf
             .check("torch.ops._c10d_functional.broadcast_.default(buf1")
             .check("torch.ops._c10d_functional.wait_tensor.default(buf1")
             # Expect no in-place with graph input (buf5 is a clone)
-            .check("torch.ops._c10d_functional.broadcast_.default(buf8")
-            .check("torch.ops._c10d_functional.wait_tensor.default(buf8")
+            .check(f"torch.ops._c10d_functional.broadcast_.default({buf1}")
+            .check(f"torch.ops._c10d_functional.wait_tensor.default({buf1}")
             # Expect no extra copy on return
-            .check("return (buf1, buf8, )")
+            .check(f"return (buf1, {buf1}, )")
             .run(code)
         )
 
         # Test aoti
         AOTIRunnerUtil.run(func, (arg,))
-        torch.cuda.synchronize()
+        torch.accelerator.synchronize()
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
     @fresh_cache()
@@ -1146,7 +1219,7 @@ class CompileTest(TestCase):
             ar1 = funcol.wait_tensor(ar1)
             return ar0, ar1
 
-        arg = torch.rand(4, 4, device="cuda")
+        arg = torch.rand(4, 4, device=self.device.type)
         compiled = torch.compile(func, fullgraph=True)
 
         code = run_and_get_triton_code(compiled, arg)

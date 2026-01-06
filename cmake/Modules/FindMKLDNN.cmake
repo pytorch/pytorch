@@ -46,8 +46,8 @@ IF(NOT MKLDNN_FOUND)
       endif()
     endif()
     ExternalProject_Add(xpu_mkldnn_proj
-      GIT_REPOSITORY https://github.com/oneapi-src/oneDNN
-      GIT_TAG v3.8.1
+      GIT_REPOSITORY https://github.com/uxlfoundation/oneDNN
+      GIT_TAG v3.10.2
       PREFIX ${XPU_MKLDNN_DIR_PREFIX}
       BUILD_IN_SOURCE 0
       CMAKE_ARGS  -DCMAKE_C_COMPILER=icx
@@ -85,8 +85,12 @@ IF(NOT MKLDNN_FOUND)
   ENDIF(NOT APPLE AND NOT WIN32 AND NOT BUILD_LITE_INTERPRETER)
 
   IF(EXISTS "${MKLDNN_ROOT}/include/oneapi/dnnl/dnnl_ukernel.hpp")
-    MESSAGE("-- Will build oneDNN UKERNEL")
-    SET(DNNL_EXPERIMENTAL_UKERNEL ON CACHE BOOL "" FORCE)
+    IF(CPU_POWER OR CPU_RISCV)
+      SET(DNNL_EXPERIMENTAL_UKERNEL OFF CACHE BOOL "" FORCE)
+    ELSE()
+      MESSAGE("-- Will build oneDNN UKERNEL")
+      SET(DNNL_EXPERIMENTAL_UKERNEL ON CACHE BOOL "" FORCE)
+    ENDIF()
   ENDIF(EXISTS "${MKLDNN_ROOT}/include/oneapi/dnnl/dnnl_ukernel.hpp")
 
   FIND_PACKAGE(BLAS)

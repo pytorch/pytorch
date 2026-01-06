@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import platform
+import subprocess
 
 from .optional_submodules import checkout_nccl
 from .setup_helpers.cmake import CMake, USE_NINJA
@@ -15,13 +16,15 @@ from .setup_helpers.env import (
 
 def _get_vc_env(vc_arch: str) -> dict[str, str]:
     try:
-        from setuptools import distutils  # type: ignore[import]
+        from setuptools import distutils  # type: ignore[import,attr-defined]
 
         return distutils._msvccompiler._get_vc_env(vc_arch)  # type: ignore[no-any-return]
     except AttributeError:
-        from setuptools._distutils import _msvccompiler  # type: ignore[import]
+        from setuptools._distutils import (
+            _msvccompiler,  # type: ignore[import,attr-defined]
+        )
 
-        return _msvccompiler._get_vc_env(vc_arch)  # type: ignore[no-any-return]
+        return _msvccompiler._get_vc_env(vc_arch)  # type: ignore[no-any-return,attr-defined]
 
 
 def _overlay_windows_vcvars(env: dict[str, str]) -> dict[str, str]:
@@ -85,7 +88,8 @@ def build_pytorch(
 ) -> None:
     my_env = _create_build_env()
     if (
-        not check_negative_env_flag("USE_CUDA")
+        not check_negative_env_flag("USE_DISTRIBUTED")
+        and not check_negative_env_flag("USE_CUDA")
         and not check_negative_env_flag("USE_NCCL")
         and not check_env_flag("USE_SYSTEM_NCCL")
     ):
@@ -96,4 +100,20 @@ def build_pytorch(
     )
     if cmake_only:
         return
+    build_custom_step = os.getenv("BUILD_CUSTOM_STEP")
+    if build_custom_step:
+        try:
+            output = subprocess.check_output(
+                build_custom_step,
+                shell=True,
+                stderr=subprocess.STDOUT,
+                text=True,
+            )
+            print("Command output:")
+            print(output)
+        except subprocess.CalledProcessError as e:
+            print("Command failed with return code:", e.returncode)
+            print("Output (stdout and stderr):")
+            print(e.output)
+            raise
     cmake.build(my_env)

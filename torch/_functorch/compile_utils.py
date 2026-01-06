@@ -1,7 +1,8 @@
 # mypy: ignore-errors
 
 
-from typing import Callable
+import operator
+from collections.abc import Callable
 
 import sympy
 
@@ -98,7 +99,7 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
             # so it's not worth CSEing.
             or get_aten_target(n) is aten.empty
             or n in nodes_that_alias_outputs
-            # This CSE pass currently doesn't handle re-propogation of unbacked
+            # This CSE pass currently doesn't handle re-propagation of unbacked
             # meta where it'll sometimes eliminate a _local_scalar_dense but not
             # replace the meta of downstream users. eg. one bug we've seen is:
             #
@@ -168,6 +169,24 @@ def fx_graph_cse(fx_g: torch.fx.graph.Graph):
                 token_map[hash_val] = token
 
     return new_graph
+
+
+def raise_getitems(gm: fx.GraphModule) -> fx.GraphModule:
+    # Pre-create a list of nodes to iterate over, as modifying the node order
+    # during the loop can lead to infinite loops if not handled properly.
+    getitem_nodes = list(
+        gm.graph.find_nodes(op="call_function", target=operator.getitem)
+    )
+
+    # loop through getitem nodes in the graph and raise them to the parent node
+    # in reverse order to preserve their original relative order
+    for node in reversed(getitem_nodes):
+        assert len(node.all_input_nodes) == 1
+        parent = node.all_input_nodes[0]
+        parent.append(node)
+
+    gm.recompile()
+    return gm
 
 
 def strip_overloads(gm):

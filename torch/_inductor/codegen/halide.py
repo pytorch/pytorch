@@ -8,7 +8,7 @@ import logging
 import re
 from collections import defaultdict
 from math import inf
-from typing import Any, Callable, cast, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -51,9 +51,10 @@ from .simd import constant_repr, SIMDKernel, SIMDScheduling
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
     from ..ops_handler import ReductionType, StoreMode
+    from ..shape_propagation import BlockShapeType
 
 log = logging.getLogger(__name__)
 
@@ -556,6 +557,7 @@ class HalideOverrides(OpOverrides):
             f"hl.cast({result.name}.type(), {halide_constant(other)})",
             [],
             bounds=ValueRanges.wrap(other),
+            shape=result.shape,
         )
         # TODO(jansel): look into removing the where in the same places triton does
         return ops.where(new_mask, result, other)
@@ -563,6 +565,20 @@ class HalideOverrides(OpOverrides):
     @staticmethod
     def frexp(x):
         raise NotImplementedError("frexp")
+
+    @staticmethod
+    def device_assert_async(cond, msg):
+        raise NotImplementedError("device_assert_async")
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def partial_accumulate(
+        name: str,
+        reduction_type: str,
+        value: CSEVariable,
+        extra_meta: dict[str, Any],
+    ) -> None:
+        raise NotImplementedError
 
 
 HalideOverrides._initialize_pointwise_overrides("halide")
@@ -576,8 +592,9 @@ class HalideCSEVariable(CSEVariable):
         name,
         bounds: ValueRanges[Any],
         dtype: Optional[torch.dtype] = None,
+        shape: BlockShapeType = None,
     ) -> None:
-        super().__init__(name, bounds, dtype)
+        super().__init__(name, bounds, dtype, shape=shape)
         self.used_dims: Optional[list[sympy.Symbol]] = None
 
     def update_on_args(self, name, args, kwargs):
@@ -629,6 +646,7 @@ class DimensionInfo:
             return "hl.Var()"
         if replacements:
             replacements = {**replacements}
+            # pyrefly: ignore [missing-attribute]
             for sym in expr.free_symbols:
                 if symbol_is_type(sym, SymT.TMP):
                     assert isinstance(sym, sympy.Symbol)
@@ -643,12 +661,12 @@ def eq(left, right):
     if V.graph.sizevars.statically_known_equals(left, right):
         return True
     try:
-        a = V.graph.sizevars.size_hint(left)
-        b = V.graph.sizevars.size_hint(right)
+        a = V.graph.sizevars.size_hint_or_throw(left)
+        b = V.graph.sizevars.size_hint_or_throw(right)
     except TypeError:  # unbacked symints
         return False
     if a == b:
-        V.graph.sizevars.guard_equals(left, right)
+        V.graph.sizevars.check_equals(left, right)
     return a == b
 
 
@@ -656,15 +674,15 @@ def lt(left, right):
     if V.graph.sizevars.statically_known_lt(left, right):
         return True
     try:
-        a = V.graph.sizevars.size_hint(left)
-        b = V.graph.sizevars.size_hint(right)
+        a = V.graph.sizevars.size_hint_or_throw(left)
+        b = V.graph.sizevars.size_hint_or_throw(right)
     except TypeError:  # unbacked symints
         gcd = sympy.gcd(left, right)
         if gcd == left:
             return left != right
         return False
     if a < b:
-        V.graph.sizevars.guard_lt(left, right)
+        V.graph.sizevars.check_lt(left, right)
     return a < b
 
 
@@ -702,9 +720,11 @@ class HalideKernel(SIMDKernel):
     def dtype_to_str(self, dtype: torch.dtype) -> str:
         return halide_type(dtype)
 
-    def create_cse_var(self, name, bounds=None, dtype=None):
+    # pyrefly: ignore [bad-override]
+    def create_cse_var(self, name, bounds=None, dtype=None, shape=None):
         self.body.writeline(f"{name} = hl.Func({name!r})")
-        return HalideCSEVariable(name, bounds, dtype)
+        # pyrefly: ignore [bad-argument-type]
+        return HalideCSEVariable(name, bounds, dtype, shape)
 
     def finalize_indexing(self, indices: Sequence[sympy.Expr]):
         """
@@ -721,6 +741,7 @@ class HalideKernel(SIMDKernel):
             self.index_replacements or self.halide_vars or self.reduction_renames
         )
         size_hint = functools.partial(V.graph.sizevars.size_hint, fallback=inf)  # type: ignore[arg-type]
+        # pyrefly: ignore [bad-assignment]
         indices = dict.fromkeys(map(super().prepare_indexing, indices))
         all_used_symbols = OrderedSet[Any]()
         sym_to_node = {
@@ -808,6 +829,7 @@ class HalideKernel(SIMDKernel):
                         if lt(divisor, n.divisor) and lt(n.divisor, end)
                     ]
                 )
+                # pyrefly: ignore [bad-assignment]
                 while sizes_to_add:
                     next_size = functools.reduce(sympy.gcd, sizes_to_add)
                     if eq(next_size, 1):
@@ -819,6 +841,7 @@ class HalideKernel(SIMDKernel):
                         handled_count = len(nodes)
                         had_fallback = True
                     sym = sympy_index_symbol(f"h{len(self.halide_vars)}")
+                    # pyrefly: ignore [missing-argument]
                     if tree.is_reduction:
                         self.reduction_renames[sym] = sympy_index_symbol(
                             f"hr{len(self.halide_vars)}"
@@ -884,7 +907,7 @@ class HalideKernel(SIMDKernel):
             return self.dom_renames[prefix]
 
         renames = {}
-        for var in self.halide_vars.keys():
+        for var in self.halide_vars:
             if not self.inside_reduction and var in self.reduction_renames:
                 continue
             m = re.match(r"^h(\d+)$", var.name)
@@ -1196,12 +1219,13 @@ class HalideKernel(SIMDKernel):
         assert isinstance(value, HalideCSEVariable) and value.used_dims is not None
         reduction_vars = OrderedSet(self.reduction_renames)
         result_var = self.newfunc(
-            [v for v in value.used_dims if v not in reduction_vars]
+            [v for v in value.used_dims if v not in reduction_vars],
         )
         if reduction_vars - OrderedSet(value.used_dims):
             value = self.genfunc(
                 f"{value}",
                 self.sort_used_dims(OrderedSet((*value.used_dims, *reduction_vars))),
+                shape=value.shape,
             )
         value_str = value.subs_str(self.reduction_renames)
         default = ir.Reduction.default_accumulator(reduction_type, src_dtype)
@@ -1214,8 +1238,10 @@ class HalideKernel(SIMDKernel):
             parts = []
             stride = 1
             for i, sym in enumerate(self.reduction_renames):
+                # pyrefly: ignore [bad-argument-type]
                 parts.append(f"{index}[{i}]")
                 if stride != 1:
+                    # pyrefly: ignore [unsupported-operation]
                     parts[-1] += f"*{stride}"
                 stride *= self.halide_vars[sym]
             self.body.writeline(f"{result_var} = {' + '.join(parts)}")
@@ -1291,7 +1317,9 @@ class HalideKernel(SIMDKernel):
             else:
                 values.append(
                     self.genfunc(
-                        f"{value}", [*value.used_dims, [*self.reduction_renames][:1]]
+                        f"{value}",
+                        [*value.used_dims, [*self.reduction_renames][:1]],
+                        shape=value.shape,
                     )
                 )
             all_used_dims.update(value.used_dims)
@@ -1355,15 +1383,20 @@ class HalideKernel(SIMDKernel):
         return tuple(unpack_vars)
 
     def genfunc(
-        self, line, used_dims, *, bounds=ValueRanges.unknown()
+        self,
+        line,
+        used_dims,
+        *,
+        bounds=ValueRanges.unknown(),
+        shape: BlockShapeType = None,
     ) -> HalideCSEVariable:
-        var = self.cse.generate(self.body, line, bounds=bounds)
+        var = self.cse.generate(self.body, line, bounds=bounds, shape=shape)
         assert isinstance(var, HalideCSEVariable)
         var.used_dims = used_dims
         return var
 
-    def newfunc(self, used_dims) -> HalideCSEVariable:
-        var = self.cse.newvar()
+    def newfunc(self, used_dims, *, shape: BlockShapeType = None) -> HalideCSEVariable:
+        var = self.cse.newvar(shape=shape)
         assert isinstance(var, HalideCSEVariable)
         var.used_dims = used_dims
         return var
@@ -1447,7 +1480,7 @@ class HalideKernel(SIMDKernel):
         current_device = V.graph.get_current_device_or_throw()
         if current_device.type == "cpu":
             target = [config.halide.cpu_target]
-            schduler = config.halide.scheduler_cpu
+            scheduler = config.halide.scheduler_cpu
             scheduler_flags = {
                 "parallelism": parallel_num_threads(),
             }
@@ -1456,7 +1489,7 @@ class HalideKernel(SIMDKernel):
             assert current_device.type == "cuda", "only cpu/cuda supported"
             assert current_device.index <= 0, "only default device supported"
             target = [config.halide.gpu_target]
-            schduler = config.halide.scheduler_cuda
+            scheduler = config.halide.scheduler_cuda
             capability = torch.cuda.get_device_properties(current_device)
             if "cuda_capability" not in target[0]:
                 for major, minor in [(8, 6), (8, 0), (7, 5), (7, 0), (6, 1)]:
@@ -1490,7 +1523,7 @@ class HalideKernel(SIMDKernel):
         return HalideMeta(
             argtypes,
             target="-".join(target),
-            scheduler=schduler,
+            scheduler=scheduler,
             scheduler_flags=scheduler_flags,  # type: ignore[arg-type]
             cuda_device=cuda_device,
         )
@@ -1561,6 +1594,7 @@ class HalideKernel(SIMDKernel):
                     hint = self._autoscheduler_workarounds(
                         V.graph.sizevars.size_hint(dim.size, fallback=1), dims
                     )
+                    # pyrefly: ignore [bad-argument-type]
                     range_hints.append(f"hl.Range(0, {hint})")
                     if "out" not in arg.name:
                         code.writeline(f"{arg.name}.dim({i}).set_min(0)")
@@ -1627,7 +1661,7 @@ class HalideKernel(SIMDKernel):
             n = max(2, n)
         return n
 
-    def call_kernel(self, name: str, node=None):
+    def call_kernel(self, name: str, node=None, deallocate_ws: bool = True):
         """Codegen a call to this kernel"""
         wrapper = V.graph.wrapper_code
         call_args = [f"{n}" for n, arg in self.halide_argdefs() if arg.alias_of is None]

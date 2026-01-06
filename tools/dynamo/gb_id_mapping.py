@@ -1,35 +1,49 @@
-# mypy: ignore-errors
-
 import argparse
 import ast
 import json
+import random
 import re
-import sys
 from pathlib import Path
+from typing import Any
 
 
-def get_source_segment(source, node):
+def get_source_segment(source: str, node: ast.AST) -> str | None:
     return ast.get_source_segment(source, node)
 
 
-def load_registry(path):
+def load_registry(path: Path) -> dict[str, Any]:
     if path.exists():
         with path.open() as f:
-            return json.load(f)
+            return json.load(f)  # type: ignore[no-any-return]
     return {}
 
 
-def save_registry(reg, path):
+def save_registry(reg: dict[str, Any], path: Path) -> None:
     with path.open("w") as f:
         json.dump(reg, f, indent=2)
 
 
-def next_gb_id(reg):
-    ids = [int(x[2:]) for x in reg if x.startswith("GB") and x[2:].isdigit()]
-    return f"GB{(max(ids, default=0) + 1):04d}"
+def next_gb_id(reg: dict[str, Any]) -> str:
+    """Generate a random unused GB ID from GB0000-GB9999 range."""
+    used_ids = set(reg.keys())
+    max_attempts = 100
+
+    # Try random selection first
+    for _ in range(max_attempts):
+        candidate = f"GB{random.randint(0, 9999):04d}"
+        if candidate not in used_ids:
+            return candidate
+
+    # Fallback: find first available ID if random selection keeps colliding
+    for i in range(10000):
+        candidate = f"GB{i:04d}"
+        if candidate not in used_ids:
+            return candidate
+
+    raise RuntimeError("No available GB IDs in range GB0000-GB9999")
 
 
-def clean_string(s):
+def clean_string(s: Any) -> Any:
     """
     Normalizes string literals by removing formatting artifacts and escape sequences.
     Handles f-strings, quotes, newlines, and other syntax elements for cleaner output.
@@ -50,26 +64,46 @@ def clean_string(s):
     return s
 
 
-def expand_hints(hints):
-    # Expands hint references to their actual values from graph_break_hints.
-    from torch._dynamo import graph_break_hints
+def expand_hints(hints: list[str], dynamo_dir: str | None = None) -> list[str]:
+    """
+    Expands hint references to their actual values from graph_break_hints.
+    Uses exec() to avoid import dependencies.
+    """
+    if dynamo_dir is None:
+        script_dir = Path(__file__).resolve().parent
+        dynamo_dir_path = script_dir.parent.parent / "torch" / "_dynamo"
+    else:
+        dynamo_dir_path = Path(dynamo_dir)
+
+    graph_break_hints_path = dynamo_dir_path / "graph_break_hints.py"
+
+    with open(graph_break_hints_path) as f:
+        hints_source = f.read()
+
+    hints_namespace: dict[str, Any] = {}
+    exec(hints_source, hints_namespace)
 
     hint_constants = {
         name: value
-        for name, value in graph_break_hints.__dict__.items()
-        if isinstance(value, list) and name.isupper()
+        for name, value in hints_namespace.items()
+        if isinstance(value, list) and name.isupper() and not name.startswith("_")
     }
 
     expanded_hints = []
     for hint in hints:
+        expanded = False
         for name, value in hint_constants.items():
             if f"*graph_break_hints.{name}" in hint:
                 expanded_hints.extend(value)
+                expanded = True
                 break
+        if not expanded:
+            expanded_hints.append(hint)
+
     return expanded_hints
 
 
-def extract_info_from_keyword(source, kw):
+def extract_info_from_keyword(source: str, kw: ast.keyword) -> Any:
     """
     Extracts and returns the value of a keyword argument from an AST node.
 
@@ -87,22 +121,26 @@ def extract_info_from_keyword(source, kw):
         evaluated_context = []
         for value in kw.value.values:
             if isinstance(value, ast.FormattedValue):
+                # pyrefly: ignore [bad-argument-type]
                 evaluated_context.append(f"{{{ast.unparse(value.value)}}}")
             elif isinstance(value, ast.Constant):
+                # pyrefly: ignore [bad-argument-type]
                 evaluated_context.append(value.value)
         return "".join(evaluated_context)
     else:
         return clean_string(param_source)
 
 
-def find_unimplemented_v2_calls(path):
+def find_unimplemented_calls(
+    path: str, dynamo_dir: str | None = None
+) -> list[dict[str, Any]]:
     results = []
-    path = Path(path)
+    path_obj = Path(path)
 
-    if path.is_dir():
-        file_paths = path.glob("**/*.py")
+    if path_obj.is_dir():
+        file_paths = path_obj.glob("**/*.py")
     else:
-        file_paths = [path]
+        file_paths = [path_obj]  # type: ignore[assignment]
 
     for file_path in file_paths:
         with open(file_path) as f:
@@ -112,14 +150,18 @@ def find_unimplemented_v2_calls(path):
 
                 for node in ast.walk(tree):
                     if isinstance(node, ast.FunctionDef):
-                        if node.name == "unimplemented_v2":
+                        if node.name in (
+                            "unimplemented",
+                            "unimplemented_with_warning",
+                        ):
                             continue
                     if (
                         isinstance(node, ast.Call)
                         and isinstance(node.func, ast.Name)
-                        and node.func.id == "unimplemented_v2"
+                        and node.func.id
+                        in ("unimplemented", "unimplemented_with_warning")
                     ):
-                        info = {
+                        info: dict[str, Any] = {
                             "gb_type": None,
                             "context": None,
                             "explanation": None,
@@ -128,6 +170,7 @@ def find_unimplemented_v2_calls(path):
 
                         for kw in node.keywords:
                             if kw.arg in info:
+                                # pyrefly: ignore [unsupported-operation]
                                 info[kw.arg] = extract_info_from_keyword(source, kw)
 
                         if info["gb_type"] is None:
@@ -141,7 +184,7 @@ def find_unimplemented_v2_calls(path):
                                 expanded_hints.extend(items)
 
                             if "*graph_break_hints." in hints:
-                                expanded_hints.extend(expand_hints([hints]))
+                                expanded_hints.extend(expand_hints([hints], dynamo_dir))
 
                             info["hints"] = expanded_hints
 
@@ -152,129 +195,16 @@ def find_unimplemented_v2_calls(path):
     return results
 
 
-def cmd_add_new_gb_type(gb_type, file_path, registry_path, additional_info=None):
-    """
-    Add a new graph break type to the registry.
-
-    Args:
-        gb_type: The graph break type to add
-        file_path: Path to the file containing the unimplemented_v2 call
-        registry_path: Path to the registry JSON file
-    """
-    registry_path = Path(registry_path)
-    reg = load_registry(registry_path)
-
-    existing_gb_types = {entry[0]["Gb_type"] for entry in reg.values()}
-    if gb_type in existing_gb_types:
-        print(
-            f"Error: gb_type '{gb_type}' already exists in registry. Please rename the gb_type so it can be unique."
-        )
-        return False
-
-    calls = find_unimplemented_v2_calls(Path(file_path))
-    matching_call = next((call for call in calls if call["gb_type"] == gb_type), None)
-
-    if not matching_call:
-        print(
-            f"Error: Could not find unimplemented_v2 call with gb_type '{gb_type}' in {file_path}"
-        )
-        return False
-
-    gb_id = next_gb_id(reg)
-    reg[gb_id] = [
-        {
-            "Gb_type": gb_type,
-            "Context": matching_call["context"],
-            "Explanation": matching_call["explanation"],
-            "Hints": matching_call["hints"] or [],
-            **({"Additional_Info": [additional_info]} if additional_info else {}),
-        }
-    ]
-
-    save_registry(reg, registry_path)
-    print(f"Added {gb_type} to registry with ID {gb_id}")
-    return True
-
-
-def cmd_update_gb_type(
-    old_gb_type, file_path, registry_path, new_gb_type=None, additional_info=None
-):
-    """
-    Update an existing graph break type in the registry by adding a new version
-    to the version history list.
-
-    Args:
-        old_gb_type: The current graph break type to update
-        file_path: Path to the file containing the updated unimplemented_v2 call
-        registry_path: Path to the registry JSON file
-        new_gb_type: Optional new gb_type name to replace the old one
-    """
-    registry_path = Path(registry_path)
-    reg = load_registry(registry_path)
-
-    gb_id_map = {entry[0]["Gb_type"]: id for id, entry in reg.items()}
-    gb_id = gb_id_map.get(old_gb_type)
-
-    if gb_id is None:
-        print(f"Error: gb_type '{old_gb_type}' not found in registry.")
-        return False
-
-    search_gb_type = new_gb_type if new_gb_type else old_gb_type
-    calls = find_unimplemented_v2_calls(Path(file_path))
-    matching_call = next(
-        (call for call in calls if call["gb_type"] == search_gb_type), None
-    )
-
-    if not matching_call:
-        print(
-            f"Error: Could not find unimplemented_v2 call with gb_type '{search_gb_type}' in {file_path}"
-        )
-        return False
-
-    if (
-        matching_call["gb_type"] != old_gb_type
-        and matching_call["gb_type"] in gb_id_map
-    ):
-        print(
-            f"Error: New gb_type '{matching_call['gb_type']}' already exists in registry. Please use a unique gb_type."
-        )
-        return False
-
-    new_entry = {
-        "Gb_type": matching_call["gb_type"],
-        "Context": matching_call["context"],
-        "Explanation": matching_call["explanation"],
-        "Hints": matching_call["hints"] or [],
-    }
-
-    if additional_info:
-        additional_info_list = reg[gb_id][0].get("Additional_Info", [])
-        new_entry["Additional_Info"] = (
-            additional_info_list + [additional_info]
-            if additional_info_list
-            else [additional_info]
-        )
-    elif "Additional_Info" in reg[gb_id][0]:
-        new_entry["Additional_Info"] = reg[gb_id][0]["Additional_Info"]
-
-    reg[gb_id].insert(0, new_entry)
-
-    save_registry(reg, registry_path)
-    print(
-        f"Updated {old_gb_type} to {matching_call['gb_type']} in registry with ID {gb_id}"
-    )
-    return True
-
-
-def create_registry(dynamo_dir, registry_path):
-    calls = find_unimplemented_v2_calls(dynamo_dir)
+def create_registry(dynamo_dir: str, registry_path: str) -> None:
+    calls = find_unimplemented_calls(dynamo_dir)
     registry = {}
 
     gb_types = {}
     for info in calls:
         gb_types[info["gb_type"]] = info
 
-    GB_ID_INDEX = 0000
+    # Use sequential IDs for initial registry creation
+    GB_ID_INDEX = 0
     for i, (gb_type, info) in enumerate(sorted(gb_types.items()), GB_ID_INDEX):
         gb_id = f"GB{i:04d}"
         hints = info["hints"]
@@ -292,10 +222,9 @@ def create_registry(dynamo_dir, registry_path):
         json.dump(registry, f, indent=2)
 
 
-def main():
-    script_dir = Path(__file__).resolve().parent
-    repo_root = script_dir.parent.parent
-    registry_path = script_dir / "graph_break_registry.json"
+def main() -> None:
+    repo_root = Path(__file__).resolve().parent.parent.parent
+    registry_path = repo_root / "torch" / "_dynamo" / "graph_break_registry.json"
 
     try:
         import torch._dynamo
@@ -312,31 +241,7 @@ def main():
         "--dynamo_dir",
         type=str,
         default=default_dynamo_dir,
-        help="Directory to search for unimplemented_v2 calls.",
-    )
-
-    add_parser = subparsers.add_parser("add", help="Add a gb_type to registry")
-    add_parser.add_argument("gb_type", help="The gb_type to add")
-    add_parser.add_argument(
-        "file_path", help="Path to the file containing the unimplemented_v2 call"
-    )
-    add_parser.add_argument(
-        "--additional-info", help="Optional additional information to include"
-    )
-
-    update_parser = subparsers.add_parser(
-        "update", help="Update an existing gb_type in registry"
-    )
-    update_parser.add_argument("gb_type", help="The gb_type to update")
-    update_parser.add_argument(
-        "file_path",
-        help="Path to the file containing the updated unimplemented_v2 call",
-    )
-    update_parser.add_argument(
-        "--new_gb_type", help="New gb_type name if it has changed", default=None
-    )
-    update_parser.add_argument(
-        "--additional-info", help="Optional additional information to include"
+        help="Directory to search for unimplemented calls.",
     )
 
     parser.add_argument(
@@ -350,22 +255,6 @@ def main():
 
     if args.command == "create":
         create_registry(args.dynamo_dir, args.registry_path)
-    elif args.command == "add":
-        success = cmd_add_new_gb_type(
-            args.gb_type, args.file_path, args.registry_path, args.additional_info
-        )
-        if not success:
-            sys.exit(1)
-    elif args.command == "update":
-        success = cmd_update_gb_type(
-            args.gb_type,
-            args.file_path,
-            args.registry_path,
-            args.new_gb_type,
-            args.additional_info,
-        )
-        if not success:
-            sys.exit(1)
     else:
         parser.print_help()
 

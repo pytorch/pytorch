@@ -1,8 +1,10 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
+import inspect
+import logging
 import os
 import warnings
-from typing import Any, cast, Optional, Union
+from typing import Any, cast, TYPE_CHECKING
 from typing_extensions import deprecated
 
 import torch
@@ -18,7 +20,12 @@ from .storage import StorageReader
 from .utils import _api_bc_check, _DistWrapper, _profile
 
 
+if TYPE_CHECKING:
+    from torch.distributed.checkpoint.metadata import Metadata
+
 __all__ = ["load_state_dict", "load"]
+
+logger = logging.getLogger()
 
 
 @deprecated(
@@ -29,10 +36,10 @@ __all__ = ["load_state_dict", "load"]
 def load_state_dict(
     state_dict: dict[str, Any],
     storage_reader: StorageReader,
-    process_group: Optional[dist.ProcessGroup] = None,
+    process_group: dist.ProcessGroup | None = None,
     coordinator_rank: int = 0,
     no_dist: bool = False,
-    planner: Optional[LoadPlanner] = None,
+    planner: LoadPlanner | None = None,
 ) -> None:
     """This method is deprecated. Please switch to 'load'."""
     storage_reader.reset()
@@ -53,10 +60,10 @@ def load_state_dict(
 def load(
     state_dict: dict[str, Any],
     *,
-    checkpoint_id: Union[str, os.PathLike, None] = None,
-    storage_reader: Optional[StorageReader] = None,
-    planner: Optional[LoadPlanner] = None,
-    process_group: Optional[dist.ProcessGroup] = None,
+    checkpoint_id: str | os.PathLike | None = None,
+    storage_reader: StorageReader | None = None,
+    planner: LoadPlanner | None = None,
+    process_group: dist.ProcessGroup | None = None,
     no_dist: bool = False,
 ) -> None:
     """
@@ -74,7 +81,7 @@ def load(
     For each ``Stateful`` object (having both a ``state_dict`` and a ``load_state_dict``),
     load will first call ``state_dict`` before attempting deserialization, followed by
     ``load_state_dict`` once the deserialization is complete.
-    For each non-``Stateful`` object, load will deserailize the object, and then replace
+    For each non-``Stateful`` object, load will deserialize the object, and then replace
     it in the ``state_dict`` with the deserialized object.
 
     .. warning::
@@ -110,7 +117,7 @@ def load(
             checkpoint_id. If checkpoint_id is also None, an exception will
             be raised. (Default: ``None``)
         planner (Optional[LoadPlanner]):
-            Instance of LoadPlanner. If this is not specificed, the default
+            Instance of LoadPlanner. If this is not specified, the default
             planner will be used. (Default: ``None``)
         process_group (Optional[ProcessGroup]):
             ProcessGroup to be used for cross-rank synchronization.
@@ -151,7 +158,8 @@ def load(
     no_dist = no_dist or (not dist.is_available()) or (not dist.is_initialized())
     if no_dist:
         warnings.warn(
-            "torch.distributed is disabled, unavailable or uninitialized, assuming the intent is to load in a single process."
+            "torch.distributed is disabled, unavailable or uninitialized, assuming the intent is to load in a single process.",
+            stacklevel=2,
         )
 
     with _profile():
@@ -197,10 +205,10 @@ def load(
 def _load_state_dict(
     state_dict: dict[str, Any],
     storage_reader: StorageReader,
-    process_group: Optional[dist.ProcessGroup] = None,
+    process_group: dist.ProcessGroup | None = None,
     coordinator_rank: int = 0,
     no_dist: bool = False,
-    planner: Optional[LoadPlanner] = None,
+    planner: LoadPlanner | None = None,
 ) -> None:
     torch._C._log_api_usage_once("torch.distributed.checkpoint.load_state_dict")
 
@@ -213,12 +221,50 @@ def _load_state_dict(
         ckpt_kwargs["checkpoint_id"] = ckpt_id
         ckpt_kwargs["process_group"] = distW.group
 
+    use_collectives = True
+    metadata: Metadata | None = None
+
     @_dcp_method_logger(**ckpt_kwargs)
     def local_step():
-        assert planner is not None
-        metadata = storage_reader.read_metadata()
+        nonlocal use_collectives
+        nonlocal metadata
+
+        # Use global metadata if available, otherwise fallback to rank local metadata
+        try:
+            metadata = storage_reader.read_metadata()
+        except Exception:
+            logger.info(
+                "Global metadata is not found. Falling back to rank local metadata."
+            )
+
+        if (
+            not metadata
+            and "kwargs" in inspect.signature(storage_reader.read_metadata).parameters
+        ):
+            try:
+                metadata = storage_reader.read_metadata(rank=distW.rank)  # noqa: F841
+                use_collectives = False
+            except Exception:
+                logger.info("Rank local metadata is not found.")
+
+        if planner is None:
+            raise AssertionError("planner is None")
+        if metadata is None:
+            raise AssertionError("metadata is None")
         planner.set_up_planner(state_dict, metadata, distW.is_coordinator)
-        storage_reader.set_up_storage_reader(metadata, distW.is_coordinator)
+
+        if (
+            "kwargs"
+            in inspect.signature(storage_reader.set_up_storage_reader).parameters
+        ):
+            storage_reader.set_up_storage_reader(
+                metadata,
+                distW.is_coordinator,
+                rank=distW.rank,
+                use_collectives=use_collectives,
+            )
+        else:
+            storage_reader.set_up_storage_reader(metadata, distW.is_coordinator)
 
         local_plan = planner.create_local_plan()
         local_plan = storage_reader.prepare_local_plan(local_plan)
@@ -226,31 +272,45 @@ def _load_state_dict(
 
     @_dcp_method_logger(**ckpt_kwargs)
     def global_step(all_local_plans):
-        assert planner is not None
+        if planner is None:
+            raise AssertionError("planner is None")
         all_local_plans = planner.create_global_plan(all_local_plans)
         all_local_plans = storage_reader.prepare_global_plan(all_local_plans)
         return all_local_plans
 
-    central_plan: LoadPlan = distW.reduce_scatter("plan", local_step, global_step)
+    central_plan: LoadPlan | None = None
+    if use_collectives:
+        central_plan = distW.reduce_scatter("plan", local_step, global_step)
+    else:
+        local_plan: LoadPlan = local_step()
+        global_plan: list[LoadPlan] = global_step([local_plan])
+        central_plan = global_plan[0]
 
     @_dcp_method_logger(**ckpt_kwargs)
     def read_data():
-        assert planner is not None
+        if planner is None:
+            raise AssertionError("planner is None")
+        if central_plan is None:
+            raise AssertionError("central_plan is None")
         final_local_plan = planner.finish_plan(central_plan)
         all_reads = storage_reader.read_data(final_local_plan, planner)
 
         all_reads.wait()
         return None
 
-    _ = distW.all_gather("read", read_data)
+    if use_collectives:
+        _ = distW.all_gather("read", read_data)
+    else:
+        read_data()
+        distW.barrier()
 
 
 def _load_state_dict_from_keys(
-    keys: Optional[Union[set[str], str]] = None,
+    keys: set[str] | str | None = None,
     *,
-    checkpoint_id: Union[str, os.PathLike, None] = None,
-    storage_reader: Optional[StorageReader] = None,
-    process_group: Optional[dist.ProcessGroup] = None,
+    checkpoint_id: str | os.PathLike | None = None,
+    storage_reader: StorageReader | None = None,
+    process_group: dist.ProcessGroup | None = None,
 ) -> dict[str, Any]:
     """
     Load only the specified keys from the checkpoint, if no keys are specified, the entire
@@ -306,7 +366,8 @@ def _load_state_dict_from_keys(
     no_dist = not (dist.is_available() and dist.is_initialized())
     if no_dist:
         warnings.warn(
-            "torch.distributed is unavailable or uninitialized, assuming the intent is to load in a single process."
+            "torch.distributed is unavailable or uninitialized, assuming the intent is to load in a single process.",
+            stacklevel=2,
         )
 
     storage_reader = cast(

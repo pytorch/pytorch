@@ -2,7 +2,6 @@
 #include <c10/util/Exception.h>
 #include <c10/util/env.h>
 #include <torch/csrc/profiler/unwind/unwind.h>
-#include <torch/csrc/utils/cpp_stacktraces.h>
 
 #if !defined(__linux__) || !defined(__x86_64__) || !defined(__has_include) || \
     !__has_include("ext/stdio_filebuf.h")
@@ -47,9 +46,7 @@ Stats stats() {
 #include <vector>
 
 #include <c10/util/irange.h>
-#include <cxxabi.h>
 #include <torch/csrc/profiler/unwind/communicate.h>
-#include <torch/csrc/profiler/unwind/dwarf_enums.h>
 #include <torch/csrc/profiler/unwind/eh_frame_hdr.h>
 #include <torch/csrc/profiler/unwind/fast_symbolizer.h>
 #include <torch/csrc/profiler/unwind/fde.h>
@@ -354,7 +351,7 @@ struct Symbolizer {
     entry.queried.push_back(addr);
     auto libaddress = maybe_library->second - 1;
     // NOLINTNEXTLINE(performance-no-int-to-ptr)
-    entry.comm->out() << (void*)libaddress << "\n";
+    entry.comm->out() << (void*)libaddress << '\n';
     // we need to make sure we don't write more than 64k bytes to
     // a pipe before reading the results. Otherwise the buffer may
     // get filled and block before we read the results.
@@ -511,7 +508,7 @@ extern "C" C10_USED void unwind_c(
   std::shared_lock lock(torch::unwind::cache_mutex_);
   torch::unwind::UnwindState state{};
   // NOLINTNEXTLINE(performance-no-int-to-ptr)
-  state.rip = *(int64_t*)(rsp);
+  state.rip = *(int64_t*)rsp;
   // +8 because we saved rsp after the return address was already pushed
   // to the stack
   state.rsp = rsp + 8;

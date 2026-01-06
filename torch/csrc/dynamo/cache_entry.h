@@ -53,7 +53,7 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   // diff guard root guard manager if exists
   void* diff_guard_root_mgr{nullptr};
   // backend used to create this cache entry
-  PyObject* backend{nullptr};
+  py::object backend;
   // Reference to owning ExtraState
   ExtraState* _owner{nullptr};
   // Reference to this CacheEntry's location in owner's linked list

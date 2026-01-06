@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Union
 
 from torch import Tensor
 from torch.types import _size
@@ -50,9 +49,15 @@ class Flatten(Module):
         self.end_dim = end_dim
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return input.flatten(self.start_dim, self.end_dim)
 
     def extra_repr(self) -> str:
+        """
+        Returns the extra representation of the module.
+        """
         return f"start_dim={self.start_dim}, end_dim={self.end_dim}"
 
 
@@ -106,12 +111,10 @@ class Unflatten(Module):
     NamedShape = tuple[tuple[str, int]]
 
     __constants__ = ["dim", "unflattened_size"]
-    dim: Union[int, str]
-    unflattened_size: Union[_size, NamedShape]
+    dim: int | str
+    unflattened_size: _size | NamedShape
 
-    def __init__(
-        self, dim: Union[int, str], unflattened_size: Union[_size, NamedShape]
-    ) -> None:
+    def __init__(self, dim: int | str, unflattened_size: _size | NamedShape) -> None:
         super().__init__()
 
         if isinstance(dim, int):
@@ -124,7 +127,7 @@ class Unflatten(Module):
         self.dim = dim
         self.unflattened_size = unflattened_size
 
-    def _require_tuple_tuple(self, input):
+    def _require_tuple_tuple(self, input) -> None:
         if isinstance(input, tuple):
             for idx, elem in enumerate(input):
                 if not isinstance(elem, tuple):
@@ -138,7 +141,7 @@ class Unflatten(Module):
             + f"but found type {type(input).__name__}"
         )
 
-    def _require_tuple_int(self, input):
+    def _require_tuple_int(self, input) -> None:
         if isinstance(input, (tuple, list)):
             for idx, elem in enumerate(input):
                 if not isinstance(elem, int):
@@ -152,7 +155,13 @@ class Unflatten(Module):
         )
 
     def forward(self, input: Tensor) -> Tensor:
+        """
+        Runs the forward pass.
+        """
         return input.unflatten(self.dim, self.unflattened_size)
 
     def extra_repr(self) -> str:
+        """
+        Returns the extra representation of the module.
+        """
         return f"dim={self.dim}, unflattened_size={self.unflattened_size}"

@@ -92,7 +92,7 @@ def vmap(
     doesn't provide a batched ``torch.dot`` API; instead of unsuccessfully
     rummaging through docs, use :func:`vmap` to construct a new function.
 
-        >>> torch.dot                            # [D], [D] -> []
+        >>> torch.dot  # [D], [D] -> []
         >>> batched_dot = torch.func.vmap(torch.dot)  # [N, D], [N, D] -> [N]
         >>> x, y = torch.randn(2, 5), torch.randn(2, 5)
         >>> batched_dot(x, y)
@@ -104,7 +104,7 @@ def vmap(
         >>> weights = torch.randn(feature_size, requires_grad=True)
         >>>
         >>> def model(feature_vec):
-        >>>     # Very simple linear model with activation
+        >>> # Very simple linear model with activation
         >>>     return feature_vec.dot(weights).relu()
         >>>
         >>> examples = torch.randn(batch_size, feature_size)
@@ -120,7 +120,7 @@ def vmap(
 
         >>> # Setup
         >>> N = 5
-        >>> f = lambda x: x ** 2
+        >>> f = lambda x: x**2
         >>> x = torch.randn(N, requires_grad=True)
         >>> y = f(x)
         >>> I_N = torch.eye(N)
@@ -137,43 +137,49 @@ def vmap(
 
     :func:`vmap` can also be nested, producing an output with multiple batched dimensions
 
-        >>> torch.dot                            # [D], [D] -> []
-        >>> batched_dot = torch.vmap(torch.vmap(torch.dot))  # [N1, N0, D], [N1, N0, D] -> [N1, N0]
+        >>> torch.dot  # [D], [D] -> []
+        >>> batched_dot = torch.vmap(
+        ...     torch.vmap(torch.dot)
+        ... )  # [N1, N0, D], [N1, N0, D] -> [N1, N0]
         >>> x, y = torch.randn(2, 3, 5), torch.randn(2, 3, 5)
-        >>> batched_dot(x, y) # tensor of size [2, 3]
+        >>> batched_dot(x, y)  # tensor of size [2, 3]
 
     If the inputs are not batched along the first dimension, ``in_dims`` specifies
     the dimension that each inputs are batched along as
 
-        >>> torch.dot                            # [N], [N] -> []
+        >>> torch.dot  # [N], [N] -> []
         >>> batched_dot = torch.vmap(torch.dot, in_dims=1)  # [N, D], [N, D] -> [D]
         >>> x, y = torch.randn(2, 5), torch.randn(2, 5)
-        >>> batched_dot(x, y)   # output is [5] instead of [2] if batched along the 0th dimension
+        >>> batched_dot(
+        ...     x, y
+        ... )  # output is [5] instead of [2] if batched along the 0th dimension
 
     If there are multiple inputs each of which is batched along different dimensions,
     ``in_dims`` must be a tuple with the batch dimension for each input as
 
-        >>> torch.dot                            # [D], [D] -> []
+        >>> torch.dot  # [D], [D] -> []
         >>> batched_dot = torch.vmap(torch.dot, in_dims=(0, None))  # [N, D], [D] -> [N]
         >>> x, y = torch.randn(2, 5), torch.randn(5)
-        >>> batched_dot(x, y) # second arg doesn't have a batch dim because in_dim[1] was None
+        >>> batched_dot(
+        ...     x, y
+        ... )  # second arg doesn't have a batch dim because in_dim[1] was None
 
     If the input is a Python struct, ``in_dims`` must be a tuple containing a struct
     matching the shape of the input:
 
-        >>> f = lambda dict: torch.dot(dict['x'], dict['y'])
+        >>> f = lambda dict: torch.dot(dict["x"], dict["y"])
         >>> x, y = torch.randn(2, 5), torch.randn(5)
-        >>> input = {'x': x, 'y': y}
-        >>> batched_dot = torch.vmap(f, in_dims=({'x': 0, 'y': None},))
+        >>> input = {"x": x, "y": y}
+        >>> batched_dot = torch.vmap(f, in_dims=({"x": 0, "y": None},))
         >>> batched_dot(input)
 
     By default, the output is batched along the first dimension. However, it can be batched
     along any dimension by using ``out_dims``
 
-        >>> f = lambda x: x ** 2
+        >>> f = lambda x: x**2
         >>> x = torch.randn(2, 5)
         >>> batched_pow = torch.vmap(f, out_dims=1)
-        >>> batched_pow(x) # [5, 2]
+        >>> batched_pow(x)  # [5, 2]
 
     For any function that uses kwargs, the returned function will not batch the kwargs but will
     accept kwargs
@@ -184,13 +190,13 @@ def vmap(
         >>>
         >>> batched_pow = torch.vmap(fn)
         >>> assert torch.allclose(batched_pow(x), x * 4)
-        >>> batched_pow(x, scale=x) # scale is not batched, output has shape [2, 2, 5]
+        >>> batched_pow(x, scale=x)  # scale is not batched, output has shape [2, 2, 5]
 
     .. note::
         vmap does not provide general autobatching or handle variable-length
         sequences out of the box.
     """
-    from torch._dynamo import is_compiling
+    from torch.compiler import is_compiling
 
     _check_randomness_arg(randomness)
     if not (chunk_size is None or chunk_size > 0):
@@ -337,7 +343,7 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
         >>> batch_size, feature_size = 3, 5
         >>>
         >>> def model(weights, feature_vec):
-        >>>     # Very simple linear model with activation
+        >>> # Very simple linear model with activation
         >>>     assert feature_vec.dim() == 1
         >>>     return feature_vec.dot(weights).relu()
         >>>
@@ -349,7 +355,9 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
         >>> examples = torch.randn(batch_size, feature_size)
         >>> targets = torch.randn(batch_size)
         >>> inputs = (weights, examples, targets)
-        >>> grad_weight_per_example = vmap(grad(compute_loss), in_dims=(None, 0, 0))(*inputs)
+        >>> grad_weight_per_example = vmap(grad(compute_loss), in_dims=(None, 0, 0))(
+        ...     *inputs
+        ... )
 
     Example of using ``grad`` with ``has_aux`` and ``argnums``:
 
@@ -392,7 +400,7 @@ def grad(func: Callable, argnums: argnums_t = 0, has_aux: bool = False) -> Calla
     """
     # To avoid cyclical dependency.
     import torch._functorch.eager_transforms as eager_transforms
-    from torch._dynamo import is_compiling
+    from torch.compiler import is_compiling
 
     def wrapper(*args, **kwargs):
         return eager_transforms.grad_impl(func, argnums, has_aux, args, kwargs)
@@ -434,8 +442,8 @@ def grad_and_value(
 
     See :func:`grad` for examples
     """
-    from torch._dynamo import is_compiling
     from torch._functorch import eager_transforms
+    from torch.compiler import is_compiling
 
     def wrapper(*args, **kwargs):
         return eager_transforms.grad_and_value_impl(

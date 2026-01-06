@@ -1,4 +1,4 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["module: cuda"]
 
 from torch.testing._internal.common_utils import TestCase, run_tests
 from torch.testing._internal.check_kernel_launches import (

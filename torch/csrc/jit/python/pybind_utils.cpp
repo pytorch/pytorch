@@ -1,4 +1,3 @@
-#include <torch/csrc/jit/ir/graph_utils.h>
 #include <torch/csrc/jit/python/module_python.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
 #include <torch/csrc/jit/python/python_dict.h>
@@ -8,7 +7,6 @@
 
 #include <ATen/ScalarOps.h>
 
-#include <c10/core/QScheme.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
@@ -90,7 +88,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
         if (PyBool_Check(obj.ptr())) {
           scalar = at::Scalar(THPUtils_unpackBool(obj.ptr()));
         } else if (THPUtils_checkLong(obj.ptr())) {
-          scalar = at::Scalar(THPUtils_unpackLong(obj.ptr()));
+          scalar = THPUtils_unpackInteger<at::Scalar>(obj.ptr());
         } else if (PyComplex_Check(obj.ptr())) {
           scalar = at::Scalar(THPUtils_unpackComplexDouble(obj.ptr()));
         } else if (THPUtils_checkDouble(obj.ptr())) {
@@ -313,7 +311,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
           bool is_symbolic = false;
           for (auto it = obj.begin(); it != obj.end(); it++) {
             auto elm = *it;
-            if (torch::is_symint(elm)) {
+            if (torch::is_symint(elm) || THPVariable_Check(elm.ptr())) {
               is_symbolic = true;
               break;
             }
@@ -383,7 +381,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
       try {
         auto script_dict = py::cast<ScriptDict>(obj);
         return script_dict.dict_;
-      } catch (py::cast_error& e) {
+      } catch (py::cast_error&) {
       }
 
       // If not (i.e. it is a regular Python dictionary), make a new
@@ -512,7 +510,7 @@ IValue toIValue(py::handle obj, const TypePtr& type, std::optional<int32_t> N) {
       if (py::isinstance<py::bool_>(obj)) {
         return py::cast<bool>(obj);
       } else if (py::isinstance<py::int_>(obj)) {
-        return py::cast<int64_t>(obj);
+        return THPUtils_unpackInteger<IValue>(obj.ptr());
       } else if (py::isinstance<py::float_>(obj)) {
         return py::cast<double>(obj);
       } else if (PyComplex_CheckExact(obj.ptr())) {
@@ -587,7 +585,9 @@ py::object toPyObject(IValue ivalue) {
   } else if (ivalue.isTensor()) {
     auto tensor = std::move(ivalue).toTensor();
     if (tensor.unsafeGetTensorImpl()->is_wrapped_number()) {
-      TORCH_INTERNAL_ASSERT(tensor.device().is_cpu());
+      TORCH_INTERNAL_ASSERT(
+          tensor.device().is_cpu() ||
+          (tensor._is_zerotensor() && tensor.dim() == 0));
       auto py_tensor = py::cast(tensor);
       if (PyObject_HasAttrString(py_tensor.ptr(), "_wrapped_number")) {
         return py_tensor.attr("_wrapped_number");
@@ -595,15 +595,27 @@ py::object toPyObject(IValue ivalue) {
       auto scalar_type = tensor.scalar_type();
       switch (scalar_type) {
         case at::ScalarType::Bool:
-          return py::cast(*tensor.const_data_ptr<bool>());
+          return (tensor._is_zerotensor())
+              ? py::cast(false)
+              : py::cast(*tensor.const_data_ptr<bool>());
         case at::ScalarType::Long:
-          return py::cast(*tensor.const_data_ptr<int64_t>());
+          return (tensor._is_zerotensor())
+              ? py::cast(int64_t(0))
+              : py::cast(*tensor.const_data_ptr<int64_t>());
+        case at::ScalarType::UInt64:
+          return (tensor._is_zerotensor())
+              ? py::cast(uint64_t(0))
+              : py::cast(*tensor.const_data_ptr<uint64_t>());
         case at::ScalarType::Double:
-          return py::cast(*tensor.const_data_ptr<double>());
+          return (tensor._is_zerotensor())
+              ? py::cast(0.0)
+              : py::cast(*tensor.const_data_ptr<double>());
         case at::ScalarType::ComplexDouble:
           // TODO: https://github.com/pytorch/pytorch/issues/77134
-          return py::cast(static_cast<std::complex<double>>(
-              *tensor.const_data_ptr<c10::complex<double>>()));
+          return (tensor._is_zerotensor())
+              ? py::cast(std::complex<double>(0.0, 0.0))
+              : py::cast(static_cast<std::complex<double>>(
+                    *tensor.const_data_ptr<c10::complex<double>>()));
         default:
           TORCH_CHECK(
               false,
@@ -763,6 +775,8 @@ py::object toPyObject(IValue ivalue) {
     return py::cast(std::move(ivalue).toSymFloat());
   } else if (ivalue.isSymBool()) {
     return py::cast(std::move(ivalue).toSymBool());
+  } else if (ivalue.isUnsigned()) {
+    return py::cast(std::move(ivalue).toUInt());
   } else {
     TORCH_CHECK(
         false,
@@ -776,9 +790,17 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     const std::vector<std::shared_ptr<Operator>>& operations,
     const py::args& args,
     const py::kwargs& kwargs) {
+  return getOpWithStack(
+      c10::ArrayRef<std::shared_ptr<Operator>>(operations), args, kwargs);
+}
+
+std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
+    c10::ArrayRef<std::shared_ptr<Operator>> operations,
+    const py::args& args,
+    const py::kwargs& kwargs) {
   Stack stack;
   if (operations.size() == 1) {
-    std::shared_ptr<Operator> op = operations.at(0);
+    std::shared_ptr<Operator> op = operations[0];
     // Create a stack full of the arguments and keyword arguments.
     stack = createStackForSchema(op->schema(), args, kwargs, std::nullopt);
 
@@ -809,7 +831,7 @@ std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
 }
 
 // This function is used to check if the schema is valid for the given args and
-// kwargs. It checks script object by checking wether the FakeScriptObject is
+// kwargs. It checks script object by checking whether the FakeScriptObject is
 // an instance of the corresponding fake class for the actual class used in
 // schema.
 bool checkSchemaAllowFakeScriptObject(
@@ -827,6 +849,15 @@ bool checkSchemaAllowFakeScriptObject(
 
 py::object invokeOperatorFromPython(
     const std::vector<std::shared_ptr<Operator>>& operations,
+    const py::args& args,
+    const py::kwargs& kwargs,
+    std::optional<c10::DispatchKey> dk) {
+  return invokeOperatorFromPython(
+      c10::ArrayRef<std::shared_ptr<Operator>>(operations), args, kwargs, dk);
+}
+
+py::object invokeOperatorFromPython(
+    c10::ArrayRef<std::shared_ptr<Operator>> operations,
     const py::args& args,
     const py::kwargs& kwargs,
     std::optional<c10::DispatchKey> dk) {
@@ -851,11 +882,29 @@ std::optional<py::object> _maybe_handle_torch_function(
     const py::args& args,
     const py::kwargs& kwargs) {
   std::vector<PyObject*> overloaded_args;
-  size_t total_arg_num = args.size() + kwargs.size();
-  for (const auto i : c10::irange(args.size())) {
-    is_tensor_and_append_overloaded(args[i].ptr(), &overloaded_args);
+  const auto args_size = args.size();
+  size_t total_arg_num = args_size + kwargs.size();
+  PyObject* const args_ptr = args.ptr();
+  for (const auto i : c10::irange(args_size)) {
+    // Because pybind object indexing is implemented generically for
+    // all objects, operator[] returns py::object instead of
+    // py::handle, so args[i].ptr() would cause a reference count
+    // round trip. This has enough overhead that I noticed it while
+    // profiling and came here to fix it. In contrast,
+    // PyTuple_GetItem returns a borrowed reference, so no counting
+    // overhead.
+    static_assert(
+        std::is_base_of_v<py::tuple, std::decay_t<decltype(args)>>,
+        "Use of PyTuple_GetItem below requires that args is a tuple!");
+
+    // Using PyTuple_GetItem instead of PyTuple_GET_ITEM out of an
+    // abundance of caution and for robustness under maintenance. If
+    // you're here looking for further performance improvements, you
+    // can probably switch to PyTuple_GET_ITEM.
+    auto* const args_i_ptr = PyTuple_GetItem(args_ptr, i);
+    is_tensor_and_append_overloaded(args_i_ptr, &overloaded_args);
     is_tensor_list_and_append_overloaded(
-        args[i].ptr(),
+        args_i_ptr,
         &overloaded_args,
         static_cast<int>(total_arg_num),
         false /* throw_error */);
@@ -902,6 +951,17 @@ std::optional<py::object> _maybe_handle_torch_function(
 
 py::object _get_operation_for_overload_or_packet(
     const std::vector<std::shared_ptr<Operator>>& operations,
+    Symbol symbol,
+    const py::args& args,
+    const py::kwargs& kwargs,
+    bool is_overload,
+    std::optional<c10::DispatchKey> dk) {
+  return _get_operation_for_overload_or_packet(
+      c10::ArrayRef(operations), symbol, args, kwargs, is_overload, dk);
+}
+
+py::object _get_operation_for_overload_or_packet(
+    c10::ArrayRef<std::shared_ptr<Operator>> operations,
     Symbol symbol,
     const py::args& args,
     const py::kwargs& kwargs,

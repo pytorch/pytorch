@@ -1,7 +1,6 @@
 # mypy: allow-untyped-decorators
 # mypy: allow-untyped-defs
 from collections.abc import Iterable
-from typing import Optional
 
 import torch
 import torch.ao.nn.intrinsic as nni
@@ -31,9 +30,7 @@ class LinearPackedParams(torch.nn.Module):
         self.set_weight_bias(wq, None)  # type: ignore[possibly-undefined]
 
     @torch.jit.export
-    def set_weight_bias(
-        self, weight: torch.Tensor, bias: Optional[torch.Tensor]
-    ) -> None:
+    def set_weight_bias(self, weight: torch.Tensor, bias: torch.Tensor | None) -> None:
         if self.dtype == torch.qint8:
             self._packed_params = torch.ops.quantized.linear_prepack(weight, bias)
         elif self.dtype == torch.float16:
@@ -279,7 +276,7 @@ class Linear(WeightedQuantizedModule):
     def bias(self):
         return self._weight_bias()[1]
 
-    def set_weight_bias(self, w: torch.Tensor, b: Optional[torch.Tensor]) -> None:
+    def set_weight_bias(self, w: torch.Tensor, b: torch.Tensor | None) -> None:
         self._packed_params.set_weight_bias(w, b)
 
     @classmethod
@@ -310,6 +307,7 @@ class Linear(WeightedQuantizedModule):
             # the type mismatch in assignment. Also, mypy has an issue with
             # iterables not being implemented, so we are ignoring those too.
             if not isinstance(cls._FLOAT_MODULE, Iterable):
+                # pyrefly: ignore [bad-assignment]
                 cls._FLOAT_MODULE = [cls._FLOAT_MODULE]
             supported_modules = ", ".join(
                 [float_mod.__name__ for float_mod in cls._FLOAT_MODULE]

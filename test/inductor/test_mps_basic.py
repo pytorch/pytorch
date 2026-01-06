@@ -6,7 +6,7 @@ import sys
 import numpy as np
 
 import torch
-from torch.testing import make_tensor
+from torch.testing import FileCheck, make_tensor
 from torch.testing._internal.common_dtype import get_all_dtypes
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -85,65 +85,6 @@ class MPSBasicTests(TestCase):
     def test_cast(self, dtype):
         self.common(lambda a: a.to(dtype), (torch.rand(1024),))
 
-    pointwise_unary_ops = [
-        "i0",
-        "i0e",
-        "i1",
-        "i1e",
-        "erf",
-        "digamma",
-        "sinc",
-        "spherical_bessel_j0",
-        "bessel_j0",
-        "bessel_j1",
-        "bessel_y0",
-        "bessel_y1",
-        "modified_bessel_i0",
-        "modified_bessel_i1",
-        "modified_bessel_k0",
-        "modified_bessel_k1",
-        "scaled_modified_bessel_k0",
-        "scaled_modified_bessel_k1",
-        "entr",
-    ]
-
-    @parametrize("op_name", pointwise_unary_ops)
-    def test_pointwise_unary_op(self, op_name):
-        self.common(
-            lambda x: getattr(torch.special, op_name)(x),
-            (torch.rand(128, 128),),
-            check_lowp=False,
-        )
-
-    def test_pointwise_polygamma(self):
-        self.common(
-            torch.special.polygamma,
-            (
-                1,
-                torch.rand(128, 128),
-            ),
-            check_lowp=False,
-        )
-
-    @parametrize(
-        "op_name",
-        [
-            "zeta",
-            "xlog1py",
-            "chebyshev_polynomial_t",
-            "chebyshev_polynomial_u",
-            "chebyshev_polynomial_v",
-            "chebyshev_polynomial_w",
-            "hermite_polynomial_he",
-        ],
-    )
-    def test_pointwise_binary_op(self, op_name):
-        self.common(
-            lambda x, y: getattr(torch.special, op_name)(x, y),
-            (torch.rand(128, 128), torch.rand(128, 128)),
-            check_lowp=False,
-        )
-
     def test_broadcast(self):
         self.common(torch.add, (torch.rand(32, 1024), torch.rand(1024)))
 
@@ -179,6 +120,40 @@ class MPSBasicTests(TestCase):
                 torch.rand(1, 4, 8, 8),
             ),
         )
+
+    def test_conv_train(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/161905
+        def fn(x, y):
+            return torch.nn.functional.conv2d(x, y, None, 1, 1, 1)
+
+        self.common(
+            fn,
+            (
+                torch.rand(4, 512, 7, 7, requires_grad=True),
+                torch.rand(512, 512, 3, 3),
+            ),
+            check_gradient=True,
+        )
+
+    def test_cholesky(self):
+        def fn(x):
+            return (
+                torch.linalg.cholesky(x, upper=False),
+                torch.linalg.cholesky(x, upper=True),
+            )
+
+        self.common(fn, (torch.eye(64),), check_lowp=False)
+
+    def test_reduced_max(self):
+        # inductor test do not validate that max of say 16K half elements can be computed
+        self.common(torch.max, (torch.rand(16384, dtype=torch.half),), check_lowp=False)
+
+    def test_linalg_inv(self):
+        def fn(x):
+            return torch.linalg.inv(torch.linalg.cholesky(x))
+
+        A = torch.diag(torch.tensor([20.0, 0.5, 5.0], dtype=torch.float32) ** 2)
+        self.common(fn, (A,), check_lowp=False)
 
 
 class MPSBasicTestsAOTI(TestCase):
@@ -273,6 +248,38 @@ class MPSBasicTestsAOTI(TestCase):
         dim0_b = torch.export.Dim("dim0_b", min=1, max=20)
         dynamic_shapes = {"a": {0: dim0_a}, "b": {0: dim0_b}}
         self.check_model(m, inp, dynamic_shapes)
+
+    def test_reuse_kernel(self):
+        class Model(torch.nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+
+            def forward(self, x, y):
+                a = torch.sin(x)
+                b = torch.mm(a, y)
+                c = torch.sin(b)
+                d = torch.mm(b, c)
+                return d
+
+        example_inputs = (
+            torch.randn(87, 87, device="mps"),
+            torch.randn(87, 87, device="mps"),
+        )
+        model = Model()
+
+        ep = torch.export.export(model, example_inputs)
+        package_path = torch._export.aot_compile(ep.module(), example_inputs)
+
+        target_str = "aoti_torch_mps_get_kernel_function("
+        target_count = 1
+
+        with open(os.path.splitext(package_path)[0] + ".cpp") as cpp:
+            src_code = cpp.read()
+            FileCheck().check_count(
+                target_str,
+                target_count,
+                exactly=True,
+            ).run(src_code)
 
 
 if __name__ == "__main__":

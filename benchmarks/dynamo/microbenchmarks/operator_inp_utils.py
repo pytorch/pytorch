@@ -293,11 +293,11 @@ class OperatorInputsLoader:
             yield args, kwargs
 
     def get_all_ops(self):
-        for key in self.operator_db.keys():
+        for key in self.operator_db:
             try:
                 op = eval(key)
-            except AttributeError as ae:
-                log.warning("Evaluating an op name into an OpOverload: %s", ae)
+            except AttributeError:
+                log.warning("Evaluating an op name into an OpOverload", exc_info=True)
                 continue
             yield op
 

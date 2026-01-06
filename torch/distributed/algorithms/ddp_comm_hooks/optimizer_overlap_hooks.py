@@ -1,7 +1,8 @@
 # mypy: allow-untyped-defs
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import partial
-from typing import Any, Callable, no_type_check
+from typing import Any, no_type_check
 
 import torch
 import torch.distributed as dist

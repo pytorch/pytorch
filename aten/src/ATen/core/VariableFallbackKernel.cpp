@@ -1,4 +1,3 @@
-#include <ATen/core/LegacyTypeDispatch.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 #include <ATen/core/VariableHooksInterface.h>
 #include <torch/library.h>
@@ -106,6 +105,10 @@ TORCH_LIBRARY_IMPL(_, ADInplaceOrView, m) {
 }
 
 TORCH_LIBRARY_IMPL(_, AutogradHPU, m) {
+  m.fallback(AUTOGRAD_FALLBACK);
+}
+
+TORCH_LIBRARY_IMPL(_, AutogradPrivateUse1, m) {
   m.fallback(AUTOGRAD_FALLBACK);
 }
 

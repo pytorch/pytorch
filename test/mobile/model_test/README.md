@@ -81,7 +81,7 @@ python test/mobile/model_test/gen_test_model.py ios
 The test coverage is based on the number of root ops tested in these test models. The full list of generated ops can be found in:
 https://github.com/pytorch/pytorch/blob/master/test/mobile/model_test/coverage.yaml
 
-In additional, the simulator tests will also report the percentage of Meta's production ops that are covered. The list of production ops changes overtime, so a Meta employee needs to regularly udpate the list it using
+In additional, the simulator tests will also report the percentage of Meta's production ops that are covered. The list of production ops changes overtime, so a Meta employee needs to regularly update the list it using
 ```
 python test/mobile/model_test/update_production_ops.py ~/fbsource/xplat/pytorch_models/build/all_mobile_model_configs.yaml
 ```

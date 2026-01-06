@@ -1,10 +1,11 @@
 # mypy: ignore-errors
 
+import contextlib
 import itertools
-from collections.abc import KeysView, Sequence
-from contextlib import contextmanager, nullcontext
-from functools import partial, wraps
-from typing import Any, Callable, NewType, Optional, Protocol, TypeVar
+from collections.abc import Callable
+from contextlib import nullcontext
+from functools import wraps
+from typing import Any, Optional
 from unittest.mock import patch
 
 import torch
@@ -24,15 +25,11 @@ from torch._dynamo.utils import (
 )
 from torch._guards import detect_fake_mode
 from torch._inductor.cudagraph_utils import BoxedDeviceIndex
-from torch._inductor.output_code import OutputCode
-from torch._inductor.utils import BoxedBool, InputType
+from torch._inductor.utils import BoxedBool
 from torch._subclasses import FakeTensor, FakeTensorMode
-from torch.fx.experimental.proxy_tensor import (
-    _pytree_subclasses_that_lose_info,
-    make_fx,
-)
+from torch.export._tree_utils import reorder_kwargs
+from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 
 static_inputs_log = torch._logging.getArtifactLogger(
@@ -48,6 +45,18 @@ from ._aot_autograd.autograd_cache import (  # noqa: F401
 from ._aot_autograd.collect_metadata_analysis import (  # noqa: F401
     run_functionalized_fw_and_collect_metadata,
 )
+from ._aot_autograd.descriptors import (
+    AOTInput,
+    BufferAOTInput,
+    ParamAOTInput,
+    PlainAOTInput,
+)
+from ._aot_autograd.frontend_utils import (
+    _detect_attribute_assignment,
+    _try_get_metadata_from_dynamo,
+    construct_fake_mode,
+    process_inputs,
+)
 from ._aot_autograd.functional_utils import (  # noqa: F401
     _check_if_mutation_can_be_in_graph,
     are_all_mutations_hidden_from_autograd,
@@ -61,16 +70,25 @@ from ._aot_autograd.functional_utils import (  # noqa: F401
     sync_functional_tensor,
     to_fun,
 )
+from ._aot_autograd.graph_capture_wrappers import (  # noqa: F401
+    aot_dispatch_subclass,
+    create_functional_call,
+    create_functionalized_fn,
+    create_functionalized_rng_ops_wrapper,
+    create_joint,
+    fn_input_mutations_to_outputs,
+    fn_prepped_for_autograd,
+)
+from ._aot_autograd.graph_compile import (  # noqa: F401
+    aot_stage1_graph_capture,
+    aot_stage2_compile,
+    aot_stage2_export,
+)
 from ._aot_autograd.input_output_analysis import (  # noqa: F401
     compute_overlapping_inputs,
     create_graph_signature,
     create_synthetic_base_metadata,
     remove_dupe_metadata,
-)
-from ._aot_autograd.jit_compile_runtime_wrappers import (  # noqa: F401
-    aot_dispatch_autograd,
-    aot_dispatch_base,
-    aot_dispatch_export,
 )
 from ._aot_autograd.logging_utils import (  # noqa: F401
     callback_set,
@@ -89,18 +107,25 @@ from ._aot_autograd.logging_utils import (  # noqa: F401
 from ._aot_autograd.runtime_wrappers import (  # noqa: F401
     AOTDedupeWrapper,
     AOTSyntheticBaseWrapper,
+    SerializableCompiledFunction,
 )
 from ._aot_autograd.schemas import (  # noqa: F401
     AOTConfig,
+    AOTDispatchCompiler,
+    AOTGraphCapture,
+    AOTState,
     BackwardSignature,
+    FakifiedFlatArgs,
     FQN,
     GraphInputName,
     GraphOutputName,
     GraphSignature,
     InputAliasInfo,
+    JointWithDescriptors,
     MutationType,
     OutputAliasInfo,
     OutputType,
+    SerializableAOTDispatchCompiler,
     SubclassCreationMeta,
     SubclassMeta,
     TensorAlias,
@@ -112,15 +137,6 @@ from ._aot_autograd.subclass_utils import (  # noqa: F401
     unwrap_tensor_subclasses_with_indices_to_original,
     wrap_tensor_subclasses,
     wrap_tensor_subclasses_maybe_joint,
-)
-from ._aot_autograd.traced_function_transforms import (  # noqa: F401
-    aot_dispatch_subclass,
-    create_functional_call,
-    create_functionalized_fn,
-    create_functionalized_rng_ops_wrapper,
-    create_joint,
-    fn_input_mutations_to_outputs,
-    fn_prepped_for_autograd,
 )
 from ._aot_autograd.utils import (  # noqa: F401
     _get_autocast_states,
@@ -134,6 +150,7 @@ from ._aot_autograd.utils import (  # noqa: F401
     normalize_as_list,
     partial_flatten_asdict,
     root_module_when_exporting_non_strict,
+    simple_wraps,
     strict_zip,
 )
 from .partitioners import default_partition
@@ -365,7 +382,7 @@ AOT_COUNTER = itertools.count()
 #
 # We view every forward output when creating out tangent tensors to handle the problematic
 # case in which a subclass does extra aliasing between graph outputs/inputs in a way that
-# is not visible above the sublass.
+# is not visible above the subclass.
 #
 # Ordinarily, when constructing the joint function that we want to trace in AOTAutograd,
 # we're guaranteed that the tangent tensors that we pass
@@ -439,152 +456,16 @@ AOT_COUNTER = itertools.count()
 
 aot_autograd_decompositions = {}
 
-FakifiedFlatArgs = NewType("FakifiedFlatArgs", list[Any])
 
-
-TOutputCode = TypeVar("TOutputCode", bound=OutputCode)
-
-
-class AOTDispatchCompiler(Protocol):
-    """
-    Represents a fw or bw_compiler passed to AOTAutograd.
-    """
-
-    def __call__(
-        self,
-        gm: torch.fx.GraphModule,
-        example_inputs: Sequence[InputType],
-    ) -> Any:
-        ...
-
-
-# TODO: bikeshed on this name
-class SerializableAOTDispatchCompiler(AOTDispatchCompiler):
-    """
-    Represents an AOTDispatchCompiler that returns an OutputCode, and is
-    therefore cacheable. SerializableAOTDispatchCompiler always return an OutputCode.
-    A _CompileFxCallable usually gets converted into an AOTDispatchCompiler after binding all of
-    the kwargs in _CompileFxKwargs.
-    """
-
-    def __init__(
-        self,
-        output_code_ty: type[TOutputCode],
-        compiler_fn: Callable[[torch.fx.GraphModule, Sequence[InputType]], TOutputCode],
-    ):
-        self.output_code_ty = output_code_ty
-        self.compiler_fn = compiler_fn
-
-    def __call__(
-        self,
-        gm: torch.fx.GraphModule,
-        example_inputs: Sequence[InputType],
-    ) -> OutputCode:
-        return self.compiler_fn(gm, example_inputs)
-
-
-def process_inputs(
-    flat_args: list[Any],
-    aot_config: AOTConfig,
-    fake_mode: FakeTensorMode,
-    shape_env: Optional[ShapeEnv],
-    ignore_shape_env: bool = False,
-) -> FakifiedFlatArgs:
-    with fake_mode:
-
-        def convert(idx, x):
-            if shape_env is not None and not ignore_shape_env:
-                from torch._dynamo.source import ConstantSource
-
-                if isinstance(x, int):
-                    # We always specialize on scalar values in export.
-                    if aot_config.is_export:
-                        return x
-                    source = ConstantSource(f"sym_{idx}")
-                    return shape_env.create_symintnode(
-                        shape_env.create_symbol(x, source), hint=x, source=source
-                    )
-            if isinstance(x, torch.ScriptObject):
-                return torch._library.fake_class_registry.maybe_to_fake_obj(
-                    fake_mode, x
-                )
-            if not isinstance(x, torch.Tensor):
-                return x
-            if isinstance(x, FakeTensor):
-                assert x.fake_mode is fake_mode
-                return x
-            if is_traceable_wrapper_subclass(x):
-                attrs, _ = x.__tensor_flatten__()
-                if all(isinstance(getattr(x, attr), FakeTensor) for attr in attrs):
-                    assert all(
-                        getattr(x, attr).fake_mode is fake_mode for attr in attrs
-                    )
-                    return x
-
-            # see note [Tensor Fakification and Symbol Caching]
-            symbolic_context = None
-            source = None
-            trace = True
-            if tracing_context := torch._guards.TracingContext.try_get():
-                if x in tracing_context.tensor_to_context:
-                    symbolic_context = tracing_context.tensor_to_context[x]
-                    source = symbolic_context.tensor_source
-                    # We already fakeified this tensor in Dynamo, don't
-                    # dump the trace for it again
-                    trace = False
-            if (
-                idx < aot_config.num_params_buffers
-                and config.static_weight_shapes
-                and not symbolic_context
-            ):
-                # TODO: Ensure that this codepath is never exercised from
-                # Dynamo
-                return fake_mode.from_tensor(x, static_shapes=True)
-
-            result = fake_mode.from_tensor(
-                x,
-                static_shapes=ignore_shape_env,
-                symbolic_context=symbolic_context,
-                source=source,
-                trace=trace,
-            )
-            return result
-
-        return FakifiedFlatArgs([convert(idx, x) for idx, x in enumerate(flat_args)])
-
-
-def construct_fake_mode(
-    flat_args: list[Any], aot_config: AOTConfig
-) -> tuple[FakeTensorMode, Optional[ShapeEnv]]:
-    fake_mode = detect_fake_mode(flat_args)
-    if fake_mode is None:
-        shape_env = ShapeEnv() if aot_config.dynamic_shapes else None
-        fake_mode = FakeTensorMode(shape_env=shape_env)
-    else:
-        shape_env = fake_mode.shape_env
-    return (fake_mode, shape_env)
-
-
-def create_aot_dispatcher_function(
+def create_aot_state(
+    stack: contextlib.ExitStack,
     flat_fn,
     fake_flat_args: FakifiedFlatArgs,
+    flat_args_descs: list[AOTInput],
     aot_config: AOTConfig,
     fake_mode: FakeTensorMode,
     shape_env: Optional[ShapeEnv],
-) -> tuple[Callable, ViewAndMutationMeta]:
-    with dynamo_timed("create_aot_dispatcher_function", log_pt2_compile_event=True):
-        return _create_aot_dispatcher_function(
-            flat_fn, fake_flat_args, aot_config, fake_mode, shape_env
-        )
-
-
-def _create_aot_dispatcher_function(
-    flat_fn,
-    fake_flat_args: FakifiedFlatArgs,
-    aot_config: AOTConfig,
-    fake_mode: FakeTensorMode,
-    shape_env: Optional[ShapeEnv],
-) -> tuple[Callable, ViewAndMutationMeta]:
+) -> AOTState:
     """
     Traces the forward and backward graphs of the attr:`flat_fn` to generate a
     joint graph. The joint graph is an Fx graph with Aten ops. Please refer to
@@ -601,11 +482,13 @@ def _create_aot_dispatcher_function(
     inputs in flat_args are parameters and buffers, and the rest are inputs.
 
     We use this to assume that parameters/buffer's shapes don't change.
-
-    Note: this function is used both by aot_function and aot_export (controlled by aot_config.is_export)
-        When aot_config.is_export is True, we return an FX graph + metadata
-        When aot_config.is_export is False, we return an ordinary runtime function
     """
+
+    # Old name for now to avoid messing with stats.  Also, note this is pushed
+    # on the stack, so it extends BEYOND this function
+    stack.enter_context(
+        dynamo_timed("create_aot_dispatcher_function", log_pt2_compile_event=True)
+    )
 
     # This is the main entry point.
     # TODO: Chillee argues that dynamo itself should pass in fake tensors to
@@ -637,209 +520,194 @@ def _create_aot_dispatcher_function(
     # If any saved tensor hooks are active, we **don't** want to trace them.
     # Instead, we'll let them run at runtime, around the custom autograd.Function
     # that we generate in torch.compile.
-    with torch.autograd.set_multithreading_enabled(
-        False
-    ), preserve_rng_state(), (
-        fake_mode
-    ), (
-        python_dispatcher_mode
-    ), PhiloxStateTracker(), torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing():
-        from torch._library.fake_class_registry import (
-            FakeScriptObject,
-            maybe_to_fake_obj,
-        )
+    stack.enter_context(torch.autograd.set_multithreading_enabled(False))
+    stack.enter_context(preserve_rng_state())
+    stack.enter_context(fake_mode)
+    stack.enter_context(python_dispatcher_mode)
+    stack.enter_context(PhiloxStateTracker())
+    stack.enter_context(
+        torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing()
+    )
 
-        # Tracing may mutate the states the fake script object,
-        # so we need to duplicate the fake script objects so that subsequent tracing
-        # won't be affected.
-        def _dup_fake_script_obj(fake_flat_args):
-            return [
-                maybe_to_fake_obj(detect_fake_mode(fake_flat_args), arg.real_obj)
-                if isinstance(arg, FakeScriptObject)
-                else arg
-                for arg in fake_flat_args
-            ]
+    from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
+    from torch._library.opaque_object import is_opaque_type
 
-        needs_autograd = any(
-            x.requires_grad for x in fake_flat_args if isinstance(x, Tensor)
-        )
+    # Tracing may mutate the states the fake script object,
+    # so we need to duplicate the fake script objects so that subsequent tracing
+    # won't be affected.
+    def _dup_fake_script_obj(fake_flat_args):
+        return [
+            maybe_to_fake_obj(detect_fake_mode(fake_flat_args), arg.real_obj)
+            if isinstance(arg, FakeScriptObject) or is_opaque_type(type(arg))
+            else arg
+            for arg in fake_flat_args
+        ]
 
-        with enable_python_dispatcher():
-            # Patch set_rng_state as set_rng_state with fake tensors is
-            # nonsensical. This does not affect the collection of metadata.
-            with patch("torch.cuda.set_rng_state", lambda *args: None):
-                mod = root_module_when_exporting_non_strict(flat_fn)
-                if mod is not None:
-                    ctx = _detect_attribute_assignment(mod)
-                else:
-                    ctx = nullcontext()
+    needs_autograd = any(
+        x.requires_grad for x in fake_flat_args if isinstance(x, Tensor)
+    )
 
-                if torch._functorch.config.fake_tensor_propagate_real_tensors:
-                    # Running dynamo_timed causes fake tensor issues when
-                    # propagate real tensor is switched on.
-                    dynamo_timed_ctx = nullcontext()
-                else:
-                    dynamo_timed_ctx = dynamo_timed(
-                        "aot_collect_metadata", log_pt2_compile_event=True
-                    )
+    with enable_python_dispatcher():
+        # Patch set_rng_state as set_rng_state with fake tensors is
+        # nonsensical. This does not affect the collection of metadata.
+        with patch("torch.cuda.set_rng_state", lambda *args: None):
+            mod = root_module_when_exporting_non_strict(flat_fn)
+            if mod is not None:
+                ctx = _detect_attribute_assignment(mod)
+            else:
+                ctx = nullcontext()
 
-                with dynamo_timed_ctx, ctx:
+            if torch._functorch.config.fake_tensor_propagate_real_tensors:
+                # Running dynamo_timed causes fake tensor issues when
+                # propagate real tensor is switched on.
+                dynamo_timed_ctx = nullcontext()
+            else:
+                dynamo_timed_ctx = dynamo_timed(
+                    "aot_collect_metadata", log_pt2_compile_event=True
+                )
+
+            with dynamo_timed_ctx, ctx:
+                fw_metadata = run_functionalized_fw_and_collect_metadata(
+                    flat_fn,
+                    flat_args_descs=flat_args_descs,
+                    static_input_indices=aot_config.static_input_indices,
+                    keep_input_mutations=aot_config.keep_inference_input_mutations,
+                    is_train=needs_autograd,
+                    pre_dispatch=aot_config.pre_dispatch,
+                )(*_dup_fake_script_obj(fake_flat_args))
+
+            req_subclass_dispatch = requires_subclass_dispatch(
+                fake_flat_args, fw_metadata
+            )
+            CompileEventLogger.try_add_pt2_compile(
+                "backend_compile", requires_subclass_dispatch=req_subclass_dispatch
+            )
+
+            output_and_mutation_safe = not any(
+                x.requires_grad
+                # view-type operations preserve requires_grad even in no_grad.
+                # Do not count aliases of inputs with requires_grad as reason to make a training graph,
+                # as AOTAutograd will perform view-replay to regenerate the view outputs at runtime,
+                # setting their grad_fn properly.
+                and not (
+                    x.output_type in (OutputType.alias_of_input, OutputType.is_input)
+                    and fw_metadata.input_info[x.base_idx].requires_grad
+                )
+                for x in fw_metadata.output_info
+            ) and not any(
+                x.requires_grad
+                and x.mutates_data
+                and not x.mutations_under_no_grad_or_inference_mode
+                and not x.mutations_hidden_from_autograd
+                for x in fw_metadata.input_info
+            )
+
+            if needs_autograd and output_and_mutation_safe:
+                # We realized that none of the outputs require grad,
+                # and none of the inputs that require grad are mutated.
+                # so we actually have an inference graph.
+                needs_autograd = False
+                # A bit silly: right now in the subclass codepath, our ViewAndMutationMeta
+                # changes depending on whether we pass in is_train / keep_input_mutations,
+                # so we're forced to recompute the metadata.
+                # TODO: refactor the subclass path of run_functionalized_fw_and_collect_metadata
+                # so that this is unnecessary.
+                if req_subclass_dispatch:
                     fw_metadata = run_functionalized_fw_and_collect_metadata(
                         flat_fn,
-                        static_input_indices=aot_config.static_input_indices,
+                        flat_args_descs=flat_args_descs,
                         keep_input_mutations=aot_config.keep_inference_input_mutations,
-                        is_train=needs_autograd,
+                        is_train=False,
                         pre_dispatch=aot_config.pre_dispatch,
-                        is_export=aot_config.is_export,
-                    )(*_dup_fake_script_obj(fake_flat_args))
-
-                req_subclass_dispatch = requires_subclass_dispatch(
-                    fake_flat_args, fw_metadata
-                )
-                CompileEventLogger.try_add_pt2_compile(
-                    "backend_compile", requires_subclass_dispatch=req_subclass_dispatch
-                )
-
-                output_and_mutation_safe = not any(
-                    x.requires_grad
-                    # view-type operations preserve requires_grad even in no_grad.
-                    # Do not count aliases of inputs with requires_grad as reason to make a training graph,
-                    # as AOTAutograd will perform view-replay to regenerate the view outputs at runtime,
-                    # setting their grad_fn properly.
-                    and not (
-                        x.output_type
-                        in (OutputType.alias_of_input, OutputType.is_input)
-                        and fw_metadata.input_info[x.base_idx].requires_grad
+                        static_input_indices=aot_config.static_input_indices,
+                    )(*fake_flat_args)
+                else:
+                    fw_metadata = ViewAndMutationMeta(
+                        input_info=fw_metadata.input_info,
+                        output_info=fw_metadata.output_info,
+                        num_intermediate_bases=fw_metadata.num_intermediate_bases,
+                        keep_input_mutations=aot_config.keep_inference_input_mutations,
+                        traced_tangents=fw_metadata.traced_tangents,
+                        traced_tangents_descs=fw_metadata.traced_tangents_descs,
+                        subclass_inp_meta=fw_metadata.subclass_inp_meta,
+                        subclass_fw_graph_out_meta=fw_metadata.subclass_fw_graph_out_meta,
+                        subclass_tangent_meta=fw_metadata.subclass_tangent_meta,
+                        is_train=False,
+                        tokens=fw_metadata.tokens,
+                        static_input_indices=fw_metadata.static_input_indices,
                     )
-                    for x in fw_metadata.output_info
-                ) and not any(
-                    x.requires_grad
-                    and x.mutates_data
-                    and not x.mutations_under_no_grad_or_inference_mode
-                    and not x.mutations_hidden_from_autograd
-                    for x in fw_metadata.input_info
-                )
 
-                if needs_autograd and output_and_mutation_safe:
-                    # We realized that none of the outputs require grad,
-                    # and none of the inputs that require grad are mutated.
-                    # so we actually have an inference graph.
-                    needs_autograd = False
-                    # A bit silly: right now in the subclass codepath, our ViewAndMutationMeta
-                    # changes depending on whether we pass in is_train / keep_input_mutations,
-                    # so we're forced to recompute the metadata.
-                    # TODO: refactor the subclass path of run_functionalized_fw_and_collect_metadata
-                    # so that this is unnecessary.
-                    if req_subclass_dispatch:
-                        fw_metadata = run_functionalized_fw_and_collect_metadata(
-                            flat_fn,
-                            keep_input_mutations=aot_config.keep_inference_input_mutations,
-                            is_train=False,
-                            pre_dispatch=aot_config.pre_dispatch,
-                            static_input_indices=aot_config.static_input_indices,
-                        )(*fake_flat_args)
-                    else:
-                        fw_metadata = ViewAndMutationMeta(
-                            input_info=fw_metadata.input_info,
-                            output_info=fw_metadata.output_info,
-                            num_intermediate_bases=fw_metadata.num_intermediate_bases,
-                            keep_input_mutations=aot_config.keep_inference_input_mutations,
-                            traced_tangents=fw_metadata.traced_tangents,
-                            subclass_inp_meta=fw_metadata.subclass_inp_meta,
-                            subclass_fw_graph_out_meta=fw_metadata.subclass_fw_graph_out_meta,
-                            subclass_tangent_meta=fw_metadata.subclass_tangent_meta,
-                            is_train=False,
-                            tokens=fw_metadata.tokens,
-                            static_input_indices=fw_metadata.static_input_indices,
-                        )
+    if fw_metadata.num_intermediate_bases > 0:
+        assert not req_subclass_dispatch, f"""\
+torch.compile is currently being used with tensor subclass inputs.
+We are attempting to a compile a graph with two graph outputs
+that alias one another, specifically output indices:
 
-        if fw_metadata.num_intermediate_bases > 0:
-            assert not req_subclass_dispatch, f"""\
-torch.compile is currently being used with tensor subclass inputs:
-{','.join([str(type(x)) for x in fake_flat_args])}. We are attempting to a compile a graph with two graph outputs
-that alias one another, which is currently unsupported in the subclass use case. If you run into this,
-please file a github issue"""
+    {[i for i, x in enumerate(fw_metadata.output_info) if x.output_type == OutputType.alias_of_intermediate]}
 
-        if aot_config.is_export:
-            # aot_export: ban input metadata mutations for now to keep shared code paths simpler.
-            # Keeping .resize_() in the graph will require some work
-            # Allowing it but keeping the graph functional will require some calling convention changes.
-            if len([x for x in fw_metadata.input_info if x.mutates_metadata]) != 0:
-                raise RuntimeError(
-                    f"""\
+ANY output aliasing (even for regular tensors) is currently unsupported if
+there are any subclass outputs. If you run into this, please file a github
+issue"""
+
+    if aot_config.is_export:
+        # aot_export: ban input metadata mutations for now to keep shared code paths simpler.
+        # Keeping .resize_() in the graph will require some work
+        # Allowing it but keeping the graph functional will require some calling convention changes.
+        if len([x for x in fw_metadata.input_info if x.mutates_metadata]) != 0:
+            raise RuntimeError(
+                f"""\
 Found an input that received a metadata mutation, through e.g. a call to `.resize_()` or `.transpose_()`.
 This is currently banned in the aot_export workflow. If you need this functionality, please file a github issue.
 
 fw_metadata={str(fw_metadata)}"""
-                )
-            # In export, banning data mutations on inputs that require grad for now.
-            # This should be rare, and is tricky to get right. When we trace the backward,
-            # we currently trace with autograd.grad instead of .backward(), which makes it difficult
-            # to ensure that we run autograd all the way through the input **before** it saw the mutation.
-            if (
-                len(
-                    [
-                        x
-                        for x in fw_metadata.input_info
-                        if x.requires_grad and x.mutates_data
-                    ]
-                )
-                != 0
-            ):
-                raise RuntimeError(
-                    f"""\
+            )
+        # In export, banning data mutations on inputs that require grad for now.
+        # This should be rare, and is tricky to get right. When we trace the backward,
+        # we currently trace with autograd.grad instead of .backward(), which makes it difficult
+        # to ensure that we run autograd all the way through the input **before** it saw the mutation.
+        if (
+            len(
+                [
+                    x
+                    for x in fw_metadata.input_info
+                    if x.requires_grad and x.mutates_data
+                ]
+            )
+            != 0
+            and aot_config.export_trace_joint
+        ):
+            raise RuntimeError(
+                f"""\
 Found a graph input that requires gradients, and received a mutation.
 This is currently banned in the aot_export workflow. If you need this functionality, please file a github issue.
 
 fw_metadata={str(fw_metadata)}"""
-                )
-            if req_subclass_dispatch:
-                raise RuntimeError(
-                    """\
+            )
+        if req_subclass_dispatch:
+            raise RuntimeError(
+                """\
 aot_export is not currently supported with traceable tensor subclass.
 If you need this feature, please comment on <CREATE_ISSUE_LINK>"""
-                )
+            )
 
-            # Need to decide on a strategy for functionalized RNG: toggling via global config seems bad,
-            # and turning it on will require a non-trivial calling convention change for any export runtime.
-            if config.functionalize_rng_ops:
-                raise RuntimeError(
-                    """\
+        # Need to decide on a strategy for functionalized RNG: toggling via global config seems bad,
+        # and turning it on will require a non-trivial calling convention change for any export runtime.
+        if config.functionalize_rng_ops:
+            raise RuntimeError(
+                """\
 Functionalized RNG is not currently supported in the aot_export workflow. Please file a github issue,
 or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
-                )
+            )
 
-        def choose_dispatcher(needs_autograd, aot_config):
-            """
-            Pick a dispatcher based on the config rules.
-            """
-            if aot_config.is_export:
-                # export uses just the "graph bits", whereas the other
-                # two dispatchers include some extra work around handling a runtime epilogue
-                CompileEventLogger.try_add_pt2_compile(
-                    "backend_compile", dispatch_mode="export"
-                )
-                return partial(aot_dispatch_export, needs_autograd=needs_autograd)
-            elif needs_autograd and not aot_config.pre_dispatch:
-                CompileEventLogger.try_add_pt2_compile(
-                    "backend_compile", dispatch_mode="autograd"
-                )
-                return aot_dispatch_autograd
-            else:
-                CompileEventLogger.try_add_pt2_compile(
-                    "backend_compile", dispatch_mode="inference"
-                )
-                return aot_dispatch_base
-
-        compiler_fn = choose_dispatcher(needs_autograd, aot_config)
-
-        compiled_fn, fw_metadata = compiler_fn(
-            flat_fn,
-            _dup_fake_script_obj(fake_flat_args),
-            aot_config,
-            fw_metadata=fw_metadata,
-        )
-        return compiled_fn, fw_metadata
+    return AOTState(
+        needs_autograd=needs_autograd,
+        flat_args=_dup_fake_script_obj(fake_flat_args),
+        flat_args_descs=flat_args_descs,
+        fw_metadata=fw_metadata,
+        # Packaging this just for later use
+        aot_config=aot_config,
+        stack=stack,
+    )
 
 
 def aot_function(
@@ -855,6 +723,7 @@ def aot_function(
     # Whether or not to trace with dynamic shapes
     dynamic=False,
     enable_log=True,
+    disable_functionalization=False,
 ) -> Callable:
     """
     Traces the forward and backward graph of :attr:`fn` using torch dispatch
@@ -872,7 +741,7 @@ def aot_function(
         This API is experimental and likely to change.
 
     Args:
-        fn (Callable): A Python function that takes one ore more arguments. Must
+        fn (Callable): A Python function that takes one or more arguments. Must
             return one or more Tensors.
         fw_compiler (Callable): A Python function that accepts an Fx graph with
             Aten ops and input args, and returns a Callable that semantically is
@@ -899,7 +768,7 @@ def aot_function(
     A simple example usage of :func:`aot_function` is as follows. This example
     will print the forward and backward graphs of the function ``fn``
 
-        >>> fn = lambda x : x.sin().cos()
+        >>> fn = lambda x: x.sin().cos()
         >>> def print_compile_fn(fx_module, args):
         >>>     print(fx_module)
         >>>     return fx_module
@@ -908,15 +777,11 @@ def aot_function(
         >>> aot_fn(x)
     """
 
-    if bw_compiler is None:
-        bw_compiler = fw_compiler
-    if inference_compiler is None:
-        inference_compiler = fw_compiler
     aot_config = AOTConfig(
-        fw_compiler=fw_compiler,
-        bw_compiler=bw_compiler,
-        inference_compiler=inference_compiler,
-        partition_fn=partition_fn,
+        fw_compiler=None,
+        bw_compiler=None,
+        inference_compiler=None,
+        partition_fn=None,
         decompositions=decompositions,
         num_params_buffers=num_params_buffers,
         aot_id=next(AOT_COUNTER),
@@ -926,6 +791,7 @@ def aot_function(
         is_export=False,
         no_tangents=False,
         enable_log=enable_log,
+        disable_functionalization=disable_functionalization,
     )
     cached_res = None
 
@@ -942,13 +808,30 @@ def aot_function(
             fake_flat_args: FakifiedFlatArgs = process_inputs(
                 flat_args, aot_config, fake_mode, shape_env
             )
-            compiled_fn, _ = create_aot_dispatcher_function(
-                flat_fn,
-                fake_flat_args,
-                aot_config,
-                fake_mode,
-                shape_env,
-            )
+            # TODO: We actually could use the pytree path to make better descs.
+            # Also, the descs here are bad if you do aot_module.
+            fake_flat_args_descs = [
+                PlainAOTInput(i) for i in range(len(fake_flat_args))
+            ]
+            with contextlib.ExitStack() as stack:
+                aot_state = create_aot_state(
+                    stack,
+                    flat_fn,
+                    fake_flat_args,
+                    fake_flat_args_descs,
+                    aot_config,
+                    fake_mode,
+                    shape_env,
+                )
+                aot_graph_capture = aot_stage1_graph_capture(aot_state, flat_fn)
+                compiled_fn, _ = aot_stage2_compile(
+                    aot_state,
+                    aot_graph_capture,
+                    partition_fn,
+                    fw_compiler,
+                    bw_compiler,
+                    inference_compiler,
+                )
             cached_res = (compiled_fn, out_spec)
 
         cached_fn, out_spec = cached_res
@@ -1010,85 +893,138 @@ def aot_module(mod: nn.Module, *args, **kwargs) -> nn.Module:
     return AOTModule()
 
 
-def _try_get_metadata_from_dynamo(
-    mod: torch.nn.Module, param_keys: KeysView[str], full_args_num: int
-) -> tuple[Optional[list[torch._guards.Source]], list[int]]:
-    """
-    Metadata is forwarded from Dynamo to AOTDispatch via special fields on GraphModule.
-    We first verify that `mod` does come from Dynamo, then we handle cases where
-    metadata might be missing.
+def prepare_aot_module_simplified(
+    mod: nn.Module,
+    args,
+    kwargs,
+    decompositions: dict,
+    keep_inference_input_mutations,
+    boxed_forward_device_index: BoxedDeviceIndex,
+    ignore_shape_env: bool,
+    flatten: bool,
+    *,
+    force_non_lazy_backward_lowering: bool = False,
+    disable_functionalization: bool = False,
+    _record_nn_module_stack: bool = False,
+):
+    if not flatten:
+        assert kwargs is None
+    elif kwargs is None:
+        kwargs = {}
 
-    Returns:
-        aot_autograd_arg_pos_to_source: used to dedup params and their guards
-        static_input_indices: used to identify static inputs for cudagraphs
-    """
-    # Note [Assumption on Dynamo Metadata]
-    # This function assumes a graph module from dynamo provides `dynamo_compiled_id`,
-    # _param_name_to_source, and every placeholder node has `_dynamo_source` attributes.
-    # When gm is modified (e.g., DDPOptimizer via split_module), metadata needs to
-    # be propagated in order to be recognized as a dynamo graph
+    # TODO: There's something a bit suspicious here; typically simplified
+    # module shouldn't actually have any parameters...
+    params = dict(mod.named_parameters(remove_duplicate=False))
+    buffers = dict(dict(mod.named_buffers(remove_duplicate=False)))
 
-    if not (isinstance(mod, torch.fx.GraphModule) and "dynamo_compile_id" in mod.meta):
-        # graph was not captured by dynamo
-        return None, []
+    params_flat, params_spec = list(params.values()), list(params.keys())
+    params_len = len(params_flat)
 
-    if not hasattr(mod, "_param_name_to_source"):
-        # is from export
-        return None, []
+    buffers_flat, buffers_spec = list(buffers.values()), list(buffers.keys())
+    buffers_len = len(buffers_flat)
 
-    # We now know this came from dynamo, and (1) we care about guards,
-    # so setting up aot_autograd_arg_pos_to_source for downstream dedup guards
-    # can now be done safely. (2) Dynamo logic protects the 1:1 sizing below.
-    # Additionally, we mark static indices for cudagraphs.
-    param_name_to_source = mod._param_name_to_source
-    seen_sources = set()
+    params_buffers = {**params, **buffers}
+    params_buffers_flat = params_flat + buffers_flat
+    params_buffers_spec = params_spec + buffers_spec
 
-    aot_autograd_arg_pos_to_source = []
-    static_input_indices = []
-    # Collect the new inputs lifted by aotdispatch
-    for i, name in enumerate(param_keys):
-        assert name in param_name_to_source, f"{name} not found."
-        source = param_name_to_source[name]
-        assert source not in seen_sources, source
-        seen_sources.add(source)
-        aot_autograd_arg_pos_to_source.append(source)
+    # Take a break to figure what we're doing with the module
 
-        static_input_indices.append(i)
+    # NB: This doesn't change the in/out convention, except adding the
+    # parameters as explicit arguments
+    functional_call = create_functional_call(
+        mod,
+        params_buffers_spec,
+        params_len + buffers_len,
+        strict_out_tuple=not flatten,
+        # We need this for export to run ModuleStackTracer
+        # instead of PythonKeyTracer
+        store_orig_mod=_record_nn_module_stack,
+    )
 
-    # Collect the dynamo graph inputs
-    # TODO(mlazos): Revisit if this is still needed. With Dynamo install ID
-    # matched tensors back into the Fx graph, this might not be necessary.
-    for pos, node in enumerate(mod.graph.find_nodes(op="placeholder")):
-        assert hasattr(node, "_dynamo_source")
-        source = node._dynamo_source
-        # `source`` specifies the source from user code. ddp optimizer may have
-        # intermediate values becoming submodule placeholders which does not
-        # have a source
-        assert source is None or source not in seen_sources, source
-        seen_sources.add(source)
-        aot_autograd_arg_pos_to_source.append(source)
-        source_name = source.name() if source else str(source)
+    full_args = [*params_flat, *buffers_flat, *args]
+    in_spec, out_spec = None, None
+    if flatten:
+        functional_call, out_spec = create_tree_flattened_fn(
+            functional_call, full_args, kwargs
+        )
+        full_args, in_spec = pytree.tree_flatten((full_args, kwargs))
 
-        # input[i] in dynamo is now:
-        # input[i + len(extra_params)] in AOT,
-        # where extra_params are the params/buffers that dynamo baked into the
-        # OutputGraph
-        actual_pos = pos + len(param_keys)
+    del kwargs
 
-        if "tensor_dict" in node.meta and node.meta["tensor_dict"].get(
-            "_dynamo_static_input_type", None
-        ):
-            static_inputs_log.debug(
-                "Adding static input pos %s for source %s", actual_pos, source_name
-            )
-            static_input_indices.append(actual_pos)
-        else:
-            static_inputs_log.debug(
-                "Non-static input pos %s for source %s", actual_pos, source_name
-            )
+    # OK, set up the descs
 
-    assert full_args_num == len(aot_autograd_arg_pos_to_source)
-    return aot_autograd_arg_pos_to_source, static_input_indices
+    full_args_descs = []
+    full_args_descs.extend(ParamAOTInput(fqn) for fqn in params_spec)
+    full_args_descs.extend(BufferAOTInput(fqn) for fqn in buffers_spec)
+    # TODO: it would be better to put pytree information in here
+    full_args_descs.extend(
+        PlainAOTInput(i) for i in range(len(full_args) - len(full_args_descs))
+    )
+
+    # TODO: These tracing_context fields should become unnecessary once we
+    # always maintain sources on all arguments
+    if tracing_context := torch._guards.TracingContext.try_get():
+        # NB: TracingContext misnames this, the "params" here also contains
+        # buffers
+        tracing_context.params_flat = params_buffers_flat
+        (
+            tracing_context.params_flat_unwrap_subclasses,
+            tracing_context.params_unwrapped_to_flat_index,
+        ) = unwrap_tensor_subclasses_with_indices_to_original(params_buffers_flat)
+
+    # TODO: Might be nice to hold on to the Dynamo source here in full_args_descs!
+    (
+        aot_autograd_arg_pos_to_source,
+        static_input_indices,
+    ) = _try_get_metadata_from_dynamo(
+        mod, params_buffers.keys(), len(full_args), full_args_descs
+    )
+
+    dynamic_shapes = False
+    for x in full_args:
+        if isinstance(x, FakeTensor):
+            dynamic_shapes = x.fake_mode.shape_env is not None
+            break
+
+    aot_config = AOTConfig(
+        fw_compiler=None,
+        bw_compiler=None,
+        inference_compiler=None,
+        partition_fn=None,
+        decompositions=decompositions,
+        num_params_buffers=params_len + buffers_len,
+        aot_id=next(AOT_COUNTER),
+        keep_inference_input_mutations=keep_inference_input_mutations,
+        dynamic_shapes=dynamic_shapes,
+        aot_autograd_arg_pos_to_source=aot_autograd_arg_pos_to_source,
+        static_input_indices=static_input_indices,
+        is_export=False,
+        no_tangents=False,
+        cache_info=None,
+        ignore_shape_env=ignore_shape_env,
+        precompile_backend_id=getattr(mod, "_backend_id", None),
+        force_non_lazy_backward_lowering=force_non_lazy_backward_lowering,
+        disable_functionalization=False,
+    )
+    fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
+    # NB: full_args_descs not needed here, fake_flat_args is 1:1 with full_args
+    fake_flat_args = process_inputs(
+        full_args, aot_config, fake_mode, shape_env, ignore_shape_env
+    )
+
+    return (
+        functional_call,
+        params_buffers_flat,
+        params_spec,
+        buffers_spec,
+        fake_flat_args,
+        full_args_descs,
+        aot_config,
+        fake_mode,
+        shape_env,
+        in_spec,
+        out_spec,
+    )
 
 
 def aot_module_simplified(
@@ -1100,9 +1036,12 @@ def aot_module_simplified(
     decompositions: Optional[dict] = None,
     keep_inference_input_mutations=False,
     inference_compiler: Optional[AOTDispatchCompiler] = None,
+    # TODO: This doesn't seem to be used in any nontrivial way, check if it's
+    # actually needed
     cudagraphs: Optional[BoxedBool] = None,
     boxed_forward_device_index: Optional[BoxedDeviceIndex] = None,
     ignore_shape_env: bool = False,
+    disable_functionalization: bool = False,
 ) -> nn.Module:
     """
     This is the simplified or low overhead version of aot_module. For frontends
@@ -1114,137 +1053,298 @@ def aot_module_simplified(
 
     :func:`aot_module_simplified` removes these overheads.
     """
-    params = {
-        **dict(mod.named_parameters(remove_duplicate=False)),
-        **dict(mod.named_buffers(remove_duplicate=False)),
-    }
-    params_flat, params_spec = pytree.tree_flatten(params)
-    params_flat = list(params_flat)
-    params_len = len(params_flat)
 
     if cudagraphs is None:
         cudagraphs = BoxedBool(torch._inductor.config.triton.cudagraphs)
 
-    if bw_compiler is None:
-        bw_compiler = fw_compiler
-    if inference_compiler is None:
-        inference_compiler = fw_compiler
-
-    full_args = []
-    # First, the params
-    full_args.extend(params_flat)
-
-    if tracing_context := torch._guards.TracingContext.try_get():
-        tracing_context.params_flat = params_flat
+    with contextlib.ExitStack() as stack:
         (
-            tracing_context.params_flat_unwrap_subclasses,
-            tracing_context.params_unwrapped_to_flat_index,
-        ) = unwrap_tensor_subclasses_with_indices_to_original(params_flat)
+            functional_call,
+            params_buffers_flat,
+            _params_spec,
+            _buffers_spec,
+            fake_flat_args,
+            full_args_descs,
+            aot_config,
+            fake_mode,
+            shape_env,
+            _in_spec,
+            _out_spec,
+        ) = prepare_aot_module_simplified(
+            mod,
+            args,
+            None,
+            decompositions,
+            keep_inference_input_mutations,
+            boxed_forward_device_index,
+            ignore_shape_env,
+            flatten=False,
+            force_non_lazy_backward_lowering=config.force_non_lazy_backward_lowering,
+            disable_functionalization=disable_functionalization,
+        )
 
-    # Next, the input args
-    full_args.extend(args)
+        compiled_fn = None
 
-    (
-        aot_autograd_arg_pos_to_source,
-        static_input_indices,
-    ) = _try_get_metadata_from_dynamo(mod, params.keys(), len(full_args))
+        if (
+            isinstance(fw_compiler, SerializableAOTDispatchCompiler)
+            or torch._functorch.config.force_autograd_cache
+        ):
+            local = should_use_local_autograd_cache()
+            remote = should_use_remote_autograd_cache()
+            if local or remote:
+                set_feature_use("aot_autograd_remote_cache", remote)
+                compiled_fn = AOTAutogradCache.try_load(
+                    mod,
+                    fake_flat_args,
+                    aot_config,
+                    cudagraphs,
+                    boxed_forward_device_index,
+                    local,
+                    remote,
+                )
 
-    dynamic_shapes = False
-    for x in full_args:
-        if isinstance(x, FakeTensor):
-            dynamic_shapes = x.fake_mode.shape_env is not None
-            break
-
-    aot_config = AOTConfig(
-        fw_compiler=fw_compiler,
-        bw_compiler=bw_compiler,
-        inference_compiler=inference_compiler,
-        partition_fn=partition_fn,
-        decompositions=decompositions,
-        num_params_buffers=params_len,
-        aot_id=next(AOT_COUNTER),
-        keep_inference_input_mutations=keep_inference_input_mutations,
-        dynamic_shapes=dynamic_shapes,
-        aot_autograd_arg_pos_to_source=aot_autograd_arg_pos_to_source,
-        static_input_indices=static_input_indices,
-        is_export=False,
-        no_tangents=False,
-        cache_info=None,
-        ignore_shape_env=ignore_shape_env,
-    )
-    fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
-    fake_flat_args = process_inputs(
-        full_args, aot_config, fake_mode, shape_env, ignore_shape_env
-    )
-
-    def dispatch_and_compile():
-        functional_call = create_functional_call(mod, params_spec, params_len)
-        with compiled_autograd._disable():
-            compiled_fn, _ = create_aot_dispatcher_function(
+        if compiled_fn is None:
+            stack.enter_context(compiled_autograd._disable())
+            aot_state = create_aot_state(
+                stack,
                 functional_call,
                 fake_flat_args,
+                full_args_descs,
                 aot_config,
                 fake_mode,
                 shape_env,
             )
-        return compiled_fn
-
-    # We only care if the forward will return an OutputCode.
-    if isinstance(fw_compiler, SerializableAOTDispatchCompiler):
-        local = should_use_local_autograd_cache()
-        remote = should_use_remote_autograd_cache()
-        if local or remote:
-            set_feature_use("aot_autograd_remote_cache", remote)
-            compiled_fn = AOTAutogradCache.load(
-                dispatch_and_compile,
-                mod,
-                fake_flat_args,
-                aot_config,
-                cudagraphs,
-                boxed_forward_device_index,
-                local,
-                remote,
+            aot_graph_capture = aot_stage1_graph_capture(aot_state, functional_call)
+            compiled_fn, _ = aot_stage2_compile(
+                aot_state,
+                aot_graph_capture,
+                partition_fn,
+                fw_compiler,
+                bw_compiler,
+                inference_compiler,
             )
-        else:
-            compiled_fn = dispatch_and_compile()
-    else:
-        compiled_fn = dispatch_and_compile()
 
     if isinstance(mod, torch._dynamo.utils.GmWrapper):
         # This function is called by the flatten_graph_inputs wrapper, which boxes
         # the inputs so that they can be freed before the end of this scope.
         # For overhead reasons, this is not the default wrapper, see comment:
         # https://github.com/pytorch/pytorch/pull/122535/files#r1560096481
-        def boxed_forward(runtime_args: list[Any]):
+        @simple_wraps(compiled_fn)
+        def forward(runtime_args: list[Any]):
             flat_args = []
-            flat_args.extend(params_flat)
+            flat_args.extend(params_buffers_flat)
             flat_args.extend(runtime_args)
             runtime_args.clear()
             return compiled_fn(flat_args)
 
-        # Just for convenience
-        boxed_forward.zero_grad = mod.zero_grad
-        boxed_forward.named_parameters = mod.named_parameters
-        boxed_forward.named_buffers = mod.named_buffers
-        return boxed_forward
-
-    # TODO: There is something deeply wrong here; compiled_fn running with
-    # the boxed calling convention, but aot_module_simplified somehow
-    # historically returned a function that was not the boxed calling
-    # convention.  This should get fixed...
-    # NB: GraphModule/nn.Module rely on the non-boxed calling convention here
-    def forward(*runtime_args: tuple[Any]):
-        full_args = []
-        full_args.extend(params_flat)
-        full_args.extend(runtime_args)
-        return compiled_fn(full_args)
+    else:
+        # TODO: There is something deeply wrong here; compiled_fn running with
+        # the boxed calling convention, but aot_module_simplified somehow
+        # historically returned a function that was not the boxed calling
+        # convention.  This should get fixed...
+        # NB: GraphModule/nn.Module rely on the non-boxed calling convention here
+        @simple_wraps(compiled_fn)
+        def forward(*runtime_args: tuple[Any]):
+            full_args = []
+            full_args.extend(params_buffers_flat)
+            full_args.extend(runtime_args)
+            return compiled_fn(full_args)
 
     # Just for convenience
     forward.zero_grad = mod.zero_grad
     forward.named_parameters = mod.named_parameters
     forward.named_buffers = mod.named_buffers
 
+    # Add a serialize function
+    def grab_serialize_fn(fn):
+        if isinstance(fn, SerializableCompiledFunction):
+            return fn.serialize_fn
+        elif hasattr(fn, "__wrapped__"):
+            return grab_serialize_fn(fn.__wrapped__)
+        else:
+            return None
+
+    forward.serialize = grab_serialize_fn(forward)  # type: ignore[attr-defined]
     return forward
+
+
+def boxed_nop_preserve_node_meta(fx_g, example_inputs):
+    def run(args):
+        with torch.fx.traceback.preserve_node_meta():
+            return torch.fx.Interpreter(fx_g).boxed_run(args)
+
+    run._boxed_call = True
+    return run
+
+
+def aot_export_joint_with_descriptors(
+    stack: contextlib.ExitStack,
+    mod: nn.Module,
+    args,
+    kwargs=None,
+    *,
+    decompositions: Optional[dict] = None,
+    keep_inference_input_mutations=False,
+    ignore_shape_env=False,
+    disable_functionalization=False,
+    _record_nn_module_stack=False,
+) -> JointWithDescriptors:
+    """
+    This API captures the joint graph for an nn.Module.  However, unlike
+    aot_export_joint_simple or aot_export_module(trace_joint=True), the
+    calling convention of the produced joint graph follows no fixed positional
+    schema; for example, you cannot rely on the second argument of the traced
+    joint graph to correspond to the second argument of the module you traced.
+    However, the inputs and outputs of the traced graph are schematized
+    with **descriptors**, annotated on meta['desc'] on the placeholder and
+    return FX nodes, which you can use to determine the meaning of arguments.
+
+    The major benefit of using this export rather than aot_export_joint_simple
+    is that we have feature parity with all situations that torch.compile
+    supports (via aot_module_simplified), including handling for more
+    complicated cases such as multiple differentiable outputs, input mutations
+    that must be handled outside of the graph, tensor subclasses, etc.
+
+    What can you do with one of these joint graphs with descriptors?  The
+    motivating use case (autoparallel) involves taking the joint graph, doing
+    optimizations on it, and then turning it back into a callable so it can be
+    torch.compile'd at a later point in time.  This cannot be done as a
+    traditional torch.compile joint graph pass for two reasons:
+
+        1. The sharding of parameters must be decided before parameter
+           initialization / checkpoint load, far before torch.compile would
+           ordinarily run.
+
+        2. We need to change the meaning of parameters (e.g., we might replace
+           a replicated parameter with a sharded version of it, changing its
+           input size).  torch.compile is ordinarily semantics preserving, and
+           not allowed to change the meaning of inputs.
+
+    Some descriptors can be quite exotic, so we recommend thinking carefully
+    if there is a safe fallback you can apply to descriptors you don't understand.
+    For example, you should have some way to handle not finding a particular
+    input exactly as is in the final FX graph inputs.
+
+    Note: When using this API, you must create and enter an ExitStack context
+    manager, which will be passed into this function.  This context manager
+    must remain active if you call the compile function to finish compilation.
+    (TODO: We may relax this requirement by having AOTAutograd keep track of
+    how to reconstruct all the context managers at a later point in time.)
+
+    NB: You're not obligated to do a /full/ compile in stage2; instead you can
+    leave the forward/backward compilers unspecified in which case the
+    partitioned FX graphs will directly run.  The overall autograd Function
+    can be allowed in graph so you can reprocess it in the context of a
+    (potentially larger) compiled region later.
+
+    NB: These APIs do NOT hit cache, as we only ever cache the final compile results,
+    not the intermediate export result.
+
+    NB: If the passed nn.Module has parameters and buffers on it, we will
+    generate extra implicit parameter/buffer arguments and assign ParamAOTInput
+    and BufferAOTInput descriptors to them.  However, if you generate the input
+    nn.Module from a mechanism like Dynamo, you will NOT get these descriptors
+    (because Dynamo will already have taken care of lifting the parameters/buffers
+    into arguments!)  In that case, it would be necessary to analyze the Sources
+    of the inputs to determine if inputs are parameters and their FQNs.
+    """
+
+    (
+        functional_call,
+        _params_buffers_flat,
+        params_spec,
+        buffers_spec,
+        fake_flat_args,
+        full_args_descs,
+        aot_config,
+        fake_mode,
+        shape_env,
+        in_spec,
+        out_spec,
+    ) = prepare_aot_module_simplified(
+        mod,
+        args,
+        kwargs,
+        # In contrast, decompositions are needed at this stage.
+        decompositions,
+        keep_inference_input_mutations,
+        None,
+        ignore_shape_env,
+        flatten=True,
+        # Without this, we will attempt to "compile" the backward lazily
+        # at runtime, but this is pointless because it's just boxed_nop,
+        # it's trivial.  But this will get Inductor confused about scoping
+        # Metric(s) {'is_forward'} have already been set in the current
+        # context.
+        force_non_lazy_backward_lowering=True,
+        disable_functionalization=disable_functionalization,
+        _record_nn_module_stack=_record_nn_module_stack,
+    )
+
+    # TODO: Maybe this should be in create_aot_state?  Not sure, that would
+    # increase its scope
+    stack.enter_context(compiled_autograd._disable())
+
+    aot_state = create_aot_state(
+        stack,
+        functional_call,
+        fake_flat_args,
+        full_args_descs,
+        aot_config,
+        fake_mode,
+        shape_env,
+    )
+
+    # NB: no cache lookup!
+    aot_graph_capture = aot_stage1_graph_capture(aot_state, functional_call)
+
+    assert out_spec.spec is not None
+
+    return JointWithDescriptors(
+        _aot_state=aot_state,
+        _aot_graph_capture=aot_graph_capture,
+        params_spec=params_spec,
+        buffers_spec=buffers_spec,
+        in_spec=in_spec,
+        out_spec=out_spec.spec,
+    )
+
+
+def aot_compile_joint_with_descriptors(
+    jd: JointWithDescriptors,
+    *,
+    partition_fn: Callable = default_partition,
+    fw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
+    bw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
+) -> callable:
+    """
+    Companion function for aot_export_joint_with_descriptors which compiles the joint
+    graph into a callable function that follows a standard calling convention.
+    params_flat all are arguments.
+
+    Note: We do NOT instantiate the module; this gives you the flexibility to subclass it and
+    customize its behavior without having to worry about FQN rebinding.
+
+    TODO: Consider if we should allow_in_graph the result by default.
+    """
+    compiled_fn, _ = aot_stage2_compile(
+        jd._aot_state,
+        jd._aot_graph_capture,
+        partition_fn,
+        fw_compiler,
+        bw_compiler,
+    )
+
+    # Cribbed from torch/export/pt2_archive/_package.py
+    @simple_wraps(compiled_fn)
+    @torch._dynamo.nonstrict_trace  # allow recursive compilation
+    def unflattened_compiled_fn(*args, **kwargs):
+        flat_inputs = pytree.tree_flatten((args, reorder_kwargs(kwargs, jd.in_spec)))[0]
+        # TODO: do I need to filter? I hope not!
+        flat_outputs = compiled_fn(flat_inputs)
+        return pytree.tree_unflatten(flat_outputs, jd.out_spec)
+
+    return unflattened_compiled_fn
 
 
 def aot_export_module(
@@ -1259,7 +1359,7 @@ def aot_export_module(
     # Your module can return multiple outputs, so you must specify which output the loss is.
     output_loss_index: Optional[int] = None,
     pre_dispatch: bool = False,
-    # If None, will be infered from inputs and mod.graph.nodes if mod is a graph module, but the inferred result might be wrong.
+    # If None, will be inferred from inputs and mod.graph.nodes if mod is a graph module, but the inferred result might be wrong.
     dynamic_shapes: Optional[bool] = None,
     kwargs=None,
 ) -> tuple[torch.fx.GraphModule, GraphSignature]:
@@ -1391,8 +1491,11 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             no_tangents=True,
             pre_dispatch=pre_dispatch,
             dynamic_shapes=dynamic_shapes,
+            trace_joint=trace_joint,
             kwargs=kwargs,
         )
+
+    # TODO: subsume this path with the aot_stage2_graph_capture path
     if trace_joint:
 
         @wraps(functional_call)
@@ -1424,9 +1527,7 @@ We require the output marked as the loss (at index {output_loss_index}) to be a 
             output_gradients = []
             for a, grad in zip(args, gradients):
                 if isinstance(a, torch.Tensor) and a.requires_grad:
-                    assert (
-                        grad is not None
-                    ), """\
+                    assert grad is not None, """\
 Found a parameter that did not receive a gradient.
 "This is most likely a bug, but if this needs to be supported please comment on this Github issue:
 https://github.com/pytorch/pytorch/issues/101192
@@ -1460,7 +1561,7 @@ def aot_export_joint_simple(
     *,
     trace_joint: bool,
     # It looks like the main consequence of this API is that for dynamic shapes,
-    # it will assume that parms/buffers are static.
+    # it will assume that params/buffers are static.
     # With the new inferred dynamic shapes API, maybe this doesn't matter?
     num_params_buffers: int = 0,
     decompositions: Optional[dict] = None,
@@ -1493,8 +1594,9 @@ def aot_export_joint_simple(
             func,
             args,
             decompositions=decompositions,
+            trace_joint=trace_joint,
         )
-        in_spec, _kw_in_spec = in_spec.children_specs
+        in_spec, _kw_in_spec = in_spec.children()
     # At this point, we can just directly return the (joint or inference graph) that we traced.
     # First though: a bunch of assertions to make sure that our graph doesn't require
     # any calling convention changes compared to the original function.
@@ -1521,7 +1623,7 @@ def aot_export_joint_simple(
         raise RuntimeError(
             f"aot_export_joint_simple requires inputs to be a single list/tuple. in_spec={str(in_spec)}"
         )
-    if not all(child.is_leaf() for child in in_spec.children_specs):
+    if not all(child.is_leaf() for child in in_spec.children()):
         raise RuntimeError(
             f"aot_export_joint_simple requires individual inputs not to be pytrees. in_spec={str(in_spec)}"
         )
@@ -1529,7 +1631,7 @@ def aot_export_joint_simple(
         raise RuntimeError(
             f"aot_export_joint_simple requires outputs to be a single list/tuple. out_spec={str(out_spec)}"
         )
-    if not all(child.is_leaf() for child in out_spec.children_specs):
+    if not all(child.is_leaf() for child in out_spec.children()):
         raise RuntimeError(
             f"aot_export_joint_simple requires individual outputs not to be pytrees. out_spec={str(out_spec)}"
         )
@@ -1539,7 +1641,9 @@ def aot_export_joint_simple(
     if config.debug_assert:
         # Smoke test that after partitioning, we can run the forward without any calling convention changes.
         fw_module, _bw_module = aot_config.default_partition(  # noqa: F821
-            fx_g, args, num_fwd_outputs=len(fw_metadata.output_infos)  # noqa: F821
+            fx_g,
+            args,
+            num_fwd_outputs=len(fw_metadata.output_infos),  # noqa: F821
         )
         # Attempt to run the fw_module with the original user inputs
         fake_mode = detect_fake_mode(args)
@@ -1569,8 +1673,11 @@ def _aot_export_function(
     # We don't know this info at trace time though, so we need to make it an explicit config.
     no_tangents: bool = False,
     pre_dispatch: bool = False,
-    # If None, `dynamic_shapes` will be infered from inputs, but the inferred result might be wrong.
+    # If None, `dynamic_shapes` will be inferred from inputs, but the inferred result might be wrong.
     dynamic_shapes: Optional[bool] = None,
+    keep_input_mutations: bool = False,
+    # Under export, configures whether we are getting inference or training IR
+    trace_joint: bool = False,
     kwargs=None,
 ) -> tuple[torch.fx.GraphModule, ViewAndMutationMeta, pytree.TreeSpec, pytree.TreeSpec]:
     kwargs = kwargs or {}
@@ -1609,127 +1716,36 @@ def _aot_export_function(
         # For now there's no use case involving keeping input mutations in the graph
         # (which we can only do in the inference case anyway).
         # We can add this later if we need to.
-        keep_inference_input_mutations=False,
+        keep_inference_input_mutations=keep_input_mutations,
         dynamic_shapes=dynamic_shapes,
         aot_autograd_arg_pos_to_source=None,
         is_export=True,
         no_tangents=no_tangents,
         pre_dispatch=pre_dispatch,
+        export_trace_joint=trace_joint,
     )
     if fake_mode is None:
         fake_mode, shape_env = construct_fake_mode(flat_args, aot_config)
     else:
         shape_env = fake_mode.shape_env
     fake_flat_args = process_inputs(flat_args, aot_config, fake_mode, shape_env)
+    # TODO: Improve the descs here with pytree information
+    fake_flat_args_descs = [PlainAOTInput(i) for i in range(len(fake_flat_args))]
 
-    fx_g, meta = create_aot_dispatcher_function(
-        flat_fn,
-        fake_flat_args,
-        aot_config,
-        fake_mode,
-        shape_env,
-    )
-    return fx_g, meta, in_spec, out_spec.spec
-
-
-@contextmanager
-def _detect_attribute_assignment(mod: torch.nn.Module):
-    # Do not allow assignment of tensor attributes during export unless
-    # the attribute is registered as a buffer.
-
-    NN_MODULE_STD_ATTRS = [
-        "_backward_hooks",
-        "_backward_pre_hooks",
-        "_buffers",
-        "_forward_hooks",
-        "_forward_hooks_always_called",
-        "_forward_hooks_with_kwargs",
-        "_forward_pre_hooks",
-        "_forward_pre_hooks_with_kwargs",
-        "_is_full_backward_hook",
-        "_load_state_dict_post_hooks",
-        "_load_state_dict_pre_hooks",
-        "_modules",
-        "_non_persistent_buffers_set",
-        "_parameters",
-        "_state_dict_hooks",
-        "_state_dict_pre_hooks",
-        "training",
-    ]
-    NN_MODULE_LAZY_STD_ATTRS = [
-        "_initialize_hook",
-        "_load_hook",
-    ]
-    STD_ATTRS = {
-        *NN_MODULE_STD_ATTRS,
-        *NN_MODULE_LAZY_STD_ATTRS,
-    }
-
-    def _get_attributes(mod):
-        # return any attributes of a module that are not standard attributes
-        return {k: v for k, v in mod.__dict__.items() if k not in STD_ATTRS}
-
-    # save state of attributes before enter
-    snapshot = pytree.tree_map(
-        lambda x: x,
-        _get_attributes(mod),
-        is_leaf=lambda x: type(x) in _pytree_subclasses_that_lose_info,
-    )
-    try:
-        yield
-    finally:
-        # after exit, compare state of attributes with snapshot
-        # to detect which tensor attributes were assigned
-        assigned_tensor_attributes = []
-
-        def _collect_assigned_tensor_attributes(kp, v, _v):
-            if _v is not v:
-                attr, *rest = kp
-                if isinstance(v, torch.Tensor):
-                    assigned_tensor_attributes.append(
-                        f"self.{attr.key}{pytree.keystr(rest)}"
-                    )
-                # TODO(avik): Assigning all other types are allowed right now.
-                # Maybe in the future we want to limit this to primitive types?
-            return v
-
-        new_attrs = _get_attributes(mod)
-        if len(new_attrs) != len(snapshot):
-            added_attrs = new_attrs.keys() - snapshot.keys()
-            deleted_attrs = snapshot.keys() - new_attrs.keys()
-
-            if len(added_attrs) > 0:
-                raise ValueError(
-                    f"During torch.export, following attrs were created in the model.forward: {added_attrs} "
-                    f"Such attributes must be registered as buffers using the `register_buffer` "
-                    f"API and must be initialized at model.__init__ "
-                    f"(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
-                )
-
-            if len(deleted_attrs) > 0:
-                raise ValueError(
-                    f"During torch.export, following attrs were deleted in the model.forward: {deleted_attrs} "
-                    f"Such attributes must be registered as buffers using the `register_buffer` "
-                    f"API and must be initialized at model.__init__ "
-                    f"(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
-                )
-
-        pytree.tree_map_with_path(
-            _collect_assigned_tensor_attributes, snapshot, new_attrs
+    with contextlib.ExitStack() as stack:
+        aot_state = create_aot_state(
+            stack,
+            flat_fn,
+            fake_flat_args,
+            fake_flat_args_descs,
+            aot_config,
+            fake_mode,
+            shape_env,
         )
-        # restore state of all attributes (including, e.g., of primitive types)
-        mod.__dict__.update(snapshot)
+        aot_graph_capture = aot_stage1_graph_capture(aot_state, flat_fn)
+        fx_g, meta = aot_stage2_export(aot_state, aot_graph_capture)
 
-        if assigned_tensor_attributes:
-            if len(assigned_tensor_attributes) > 1:
-                noun, verb = "attributes", "were"
-            else:
-                noun, verb = "attribute", "was"
-            raise ValueError(
-                f"The tensor {noun} {', '.join(assigned_tensor_attributes)} {verb} assigned during export. "
-                "Such attributes must be registered as buffers using the `register_buffer` API "
-                "(https://pytorch.org/docs/stable/generated/torch.nn.Module.html#torch.nn.Module.register_buffer)."
-            )
+    return fx_g, meta, in_spec, out_spec.spec
 
 
 compiled_function = aot_function

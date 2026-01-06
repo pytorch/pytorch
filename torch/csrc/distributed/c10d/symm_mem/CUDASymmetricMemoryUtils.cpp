@@ -1,5 +1,4 @@
 #include <sys/socket.h>
-#include <sys/syscall.h>
 #include <sys/un.h>
 #include <unistd.h>
 
@@ -12,7 +11,6 @@
 #include <hip/hip_runtime_api.h>
 #endif
 
-#include <torch/csrc/distributed/c10d/Store.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 
@@ -32,15 +30,23 @@ bool allow_overlapping_devices() {
 
 // Query environment variable to get the backend used for CUDA Symmetric Memory.
 std::string getSymmMemBackendCUDA() {
+  // TORCH_SYMMMEM environment variable can be used to indicate the preferred
+  // backend.
   static auto val = c10::utils::get_env("TORCH_SYMMMEM");
-  if (!val.has_value()) {
-    // In-house implementation: `CUDASymmetricMemory`
-    return "CUDA";
-  } else {
-    // Other backends:
-    //   - "NVSHMEM": `NVSHMEMSymmetricMemory`
+  if (val.has_value()) {
+    TORCH_CHECK(
+        val.value() == "CUDA" || val.value() == "NVSHMEM" ||
+            val.value() == "NCCL",
+        "TORCH_SYMMMEM environment variable must be one of 'CUDA', 'NVSHMEM', 'NCCL'.")
     return val.value();
   }
+  // If TORCH_SYMMMEM is not set, check if NVSHMEM is available (for broader
+  // support).
+  // TODO: uncomment this once all single-node tests work with NVSHMEM
+  // if (is_nvshmem_available()) {
+  //   return "NVSHMEM";
+  // }
+  return "CUDA";
 }
 
 IpcChannel::IpcChannel()
@@ -77,7 +83,7 @@ void IpcChannel::send_fd(int dst_pid, int fd) {
   // Prepare data to send
   // Data being sent is "fd", the value of fd will be sent as auxiliary data
   // (control message)
-  struct iovec io = {.iov_base = (void*)("fd"), .iov_len = 2};
+  struct iovec io = {.iov_base = (void*)"fd", .iov_len = 2};
 
   // Prepare control message data buffer and zero it out
   // NOLINTNEXTLINE(*array*)
@@ -115,7 +121,7 @@ void IpcChannel::send_fd(int dst_pid, int fd) {
     msg.msg_controllen = 0;
   }
 
-  // Finally send the the message
+  // Finally send the message
   TORCH_CHECK(
       sendmsg(socket_, &msg, 0) > 0,
       "Failed to send fd: ",
@@ -148,7 +154,7 @@ int IpcChannel::recv_fd() {
       .msg_control = cbuf,
       .msg_controllen = sizeof(cbuf)};
 
-  // Recieve message on socket_
+  // Receive message on socket_
   TORCH_CHECK(
       recvmsg(socket_, &msg, 0) > 0,
       "Failed to receive fd: ",
@@ -170,7 +176,7 @@ std::vector<int> IpcChannel::all_gather_fds(
     int rank,
     const std::vector<int>& pids,
     int fd) {
-  int world_size = (int)pids.size();
+  int world_size = static_cast<int>(pids.size());
   std::vector<int> fds(pids.size());
   fds[rank] = fd;
 
@@ -189,10 +195,10 @@ int IpcChannel::broadcast_fds(
     int src_rank,
     const std::vector<int>& pids,
     int fd) {
-  int world_size = (int)pids.size();
+  int world_size = static_cast<int>(pids.size());
 
   if (rank == src_rank) {
-    for (int dst_rank = 0; dst_rank < (int)world_size; ++dst_rank) {
+    for (int dst_rank = 0; dst_rank < world_size; ++dst_rank) {
       if (dst_rank == rank) {
         continue;
       }
@@ -234,7 +240,7 @@ void map_block(
   CUmemAccessDesc desc;
   desc.location.type = CU_MEM_LOCATION_TYPE_DEVICE;
   // NOLINTNEXTLINE(bugprone-signed-char-misuse)
-  desc.location.id = static_cast<int>(device_idx);
+  desc.location.id = device_idx;
   desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
   C10_CUDA_DRIVER_CHECK(driver_api->cuMemSetAccess_(*dev_ptr, size, &desc, 1));
 #elif defined(USE_ROCM)

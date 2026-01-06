@@ -17,7 +17,7 @@ restoring the RNG state during each checkpoint.
 The stashing logic saves and restores the RNG state for CPU and another
 device type (infer the device type from Tensor arguments excluding CPU
 tensors by `_infer_device_type`) to the `run_fn`. If there are multiple
-device, device state will only be saved for devices of a single device type,
+devices, device state will only be saved for devices of a single device type,
 and the remaining devices will be ignored. Consequently, if any checkpointed
 functions involve randomness, this may result in incorrect gradients. (Note
 that if CUDA devices are among the devices detected, it will be prioritized;

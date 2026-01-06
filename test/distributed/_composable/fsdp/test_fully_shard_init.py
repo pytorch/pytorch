@@ -9,7 +9,7 @@ import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed._composable import replicate
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.fsdp import fully_shard
+from torch.distributed.fsdp import fully_shard, MixedPrecisionPolicy
 from torch.distributed.fsdp._fully_shard._fsdp_init import (
     _get_managed_modules,
     _get_managed_states,
@@ -644,19 +644,28 @@ class TestFullyShardMetaDeviceInit(FSDPTestMultiThread):
     def test_meta_device_1d_init(self):
         default_pg = torch.distributed.distributed_c10d._get_default_group()
         mesh = init_device_mesh(device_type.type, mesh_shape=(default_pg.size(),))
-
-        # Test both even sharding (8) and uneven sharding (3)
-        for mlp_dim in (8, 3):
-            with torch.device("meta"):
-                model = nn.Sequential(MLP(mlp_dim, with_buffer=True), MLP(mlp_dim))
+        # Test both even sharding (8), uneven sharding (3), and empty local tensor (1)
+        for mlp_dim in (8, 3, 1):
+            # cover foreach_copy code path for bf16
+            for mp_policy in (
+                MixedPrecisionPolicy(),
+                MixedPrecisionPolicy(
+                    param_dtype=torch.bfloat16, reduce_dtype=torch.float32
+                ),
+            ):
+                with torch.device("meta"):
+                    model = nn.Sequential(
+                        MLP(mlp_dim, dim_multiplier=1, with_buffer=True, bias=False),
+                        MLP(mlp_dim, dim_multiplier=1, bias=False),
+                    )
+                    for param in model.parameters():
+                        self.assertEqual(param.device, torch.device("meta"))
+                    fully_shard(model[0], mesh=mesh, mp_policy=mp_policy)
+                    fully_shard(model[1], mesh=mesh, mp_policy=mp_policy)
+                    fully_shard(model, mesh=mesh, mp_policy=mp_policy)
                 for param in model.parameters():
                     self.assertEqual(param.device, torch.device("meta"))
-                fully_shard(model[0], mesh=mesh)
-                fully_shard(model[1], mesh=mesh)
-                fully_shard(model, mesh=mesh)
-            for param in model.parameters():
-                self.assertEqual(param.device, torch.device("meta"))
-            self._test_to_empty_and_reset_parameters(model, mesh, mlp_dim)
+                self._test_to_empty_and_reset_parameters(model, mesh, mlp_dim)
 
         # Test that we can call `fully_shard` under meta-device context and
         # that `init_device_mesh` call still works
@@ -910,9 +919,9 @@ class TestFullyShardProcessGroupInit(FSDPTestMultiThread):
     @skip_if_lt_x_gpu(1)
     def test_2d_process_group_init(self):
         shard_mesh_dim_size = 2
-        assert (
-            self.world_size % shard_mesh_dim_size == 0
-        ), f"Expects {self.world_size} to be divisible by {shard_mesh_dim_size}"
+        assert self.world_size % shard_mesh_dim_size == 0, (
+            f"Expects {self.world_size} to be divisible by {shard_mesh_dim_size}"
+        )
         replicate_mesh_dim_size = self.world_size // shard_mesh_dim_size
         mesh_dim_names = ("replicate", "shard")
         ref_mesh = init_device_mesh(
@@ -1305,9 +1314,6 @@ class TestFullyShardOldImport(FSDPTestMultiThread):
 
     @skip_if_lt_x_gpu(1)
     def test_old_import_training(self):
-        from torch.distributed._composable.fsdp import fully_shard, MixedPrecisionPolicy
-        from torch.distributed._composable.fsdp.fully_shard import FSDPModule
-
         model = nn.Sequential(nn.Linear(16, 16), nn.Linear(16, 16))
         mp_policy = MixedPrecisionPolicy(param_dtype=torch.bfloat16)
         fully_shard(model[0], mp_policy=mp_policy)

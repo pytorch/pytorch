@@ -695,17 +695,17 @@ class TestTensorExprFuser(BaseTestClass):
             _atol = 2e-3
             _rtol = 1e-5
             if data_type is torch.bfloat16:
-                # Compared to aten logic, NNC coudl save addtional BF16/Fp32 conversion.
+                # Compared to aten logic, NNC could save additional BF16/Fp32 conversion.
                 # Take d = a + b - c as an example, the aten logic is as follows at
                 # operator level:
                 #    tmp = to_bf16(to_fp32(a) + to_fp32(b))
                 #    d = to_bf16(to_fp32(tmp) + to_fp32(c))
-                # But NNC could fuse the compression and remove the redudant conversions.
+                # But NNC could fuse the compression and remove the redundant conversions.
                 # The final statement is as follows
                 #    d = to_bf16(to_fp32(a) + to_fp32(b) + to_fp32(c))
                 # Hence, we simulate NNC computation by feeding fp32 tensors and converting
                 # the result tensor back to bf16. The simulation could avoid the numeric
-                # deviation to simplify the result comprasion
+                # deviation to simplify the result comparison
                 y = warmup_and_run_forward(traced, rand_a.float(), rand_b.float())
                 if torch_fn not in cmp_fns:
                     y = y.bfloat16()
@@ -891,7 +891,7 @@ class TestTensorExprFuser(BaseTestClass):
 
         torch.manual_seed(0)
         for torch_fn, dev, data_type in fn_dev_dtype:
-            if torch_fn == test_lgamma and dev == "cuda":
+            if torch_fn is test_lgamma and dev == "cuda":
                 # lgamma_cuda does not support BF16
                 continue
             rand_a = torch.rand(1024, dtype=data_type, device=dev)
@@ -1216,7 +1216,7 @@ class TestTensorExprFuser(BaseTestClass):
         @torch.jit.script
         def test(x: torch.Tensor, y: torch.Tensor, z: int) -> torch.Tensor:
             b = y
-            for i in range(0, z):
+            for _ in range(z):
                 a = x + y
                 b = b + y
             return b

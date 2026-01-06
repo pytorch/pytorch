@@ -39,6 +39,7 @@ def get_class_if_classified_error(e: Exception) -> Optional[str]:
         TorchRuntimeError: None,
     }
     if type(e) in _ALLOW_LIST:
+        # pyrefly: ignore [bad-index, index-error]
         attr_name = _ALLOW_LIST[type(e)]
         if attr_name is None:
             return ALWAYS_CLASSIFIED

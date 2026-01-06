@@ -25,9 +25,9 @@ torch.serialization.add_safe_globals([_NestedTensor, _rebuild_njt])
 
 
 def as_nested_tensor(
-    ts: Union[Tensor, list[Tensor], tuple[Tensor, ...]],
-    dtype: Optional[DType] = None,
-    device: Optional[Device] = None,
+    ts: Tensor | list[Tensor] | tuple[Tensor, ...],
+    dtype: DType | None = None,
+    device: Device | None = None,
     layout=None,
 ) -> Tensor:
     r"""
@@ -113,7 +113,10 @@ def as_nested_tensor(
                 *torch._nested_compute_contiguous_strides_offsets(nested_sizes),
             )
         else:
-            assert isinstance(ts, list)
+            if not isinstance(ts, list):
+                raise AssertionError(
+                    f"Expected ts to be a list, but got {type(ts).__name__}"
+                )
             return torch._nested_tensor_from_tensor_list(ts, dtype, None, device, None)
     elif layout == torch.jagged:
         if isinstance(ts, Tensor):
@@ -139,7 +142,10 @@ def as_nested_tensor(
         else:
             from torch.nested._internal.nested_tensor import jagged_from_list
 
-            assert isinstance(ts, list)
+            if not isinstance(ts, list):
+                raise AssertionError(
+                    f"Expected ts to be a list, but got {type(ts).__name__}"
+                )
             nt, _ = jagged_from_list(ts, offsets=None, device=device, dtype=dtype)
             return nt
     else:
@@ -281,8 +287,8 @@ def nested_tensor(
 def narrow(
     tensor: Tensor,
     dim: int,
-    start: Union[int, Tensor],
-    length: Union[int, Tensor],
+    start: int | Tensor,
+    length: int | Tensor,
     layout=torch.strided,
 ) -> Tensor:
     r"""
@@ -358,11 +364,11 @@ def narrow(
 
 def nested_tensor_from_jagged(
     values: Tensor,
-    offsets: Optional[Tensor] = None,
-    lengths: Optional[Tensor] = None,
-    jagged_dim: Optional[int] = None,
-    min_seqlen: Optional[int] = None,
-    max_seqlen: Optional[int] = None,
+    offsets: Tensor | None = None,
+    lengths: Tensor | None = None,
+    jagged_dim: int | None = None,
+    min_seqlen: int | None = None,
+    max_seqlen: int | None = None,
 ) -> Tensor:
     r"""
     Constructs a jagged layout nested tensor from the given jagged components. The jagged layout
@@ -392,8 +398,8 @@ def nested_tensor_from_jagged(
         offsets (optional :class:`torch.Tensor`): Offsets into the jagged dimension of shape B + 1.
         lengths (optional :class:`torch.Tensor`): Lengths of the batch elements of shape B.
         jagged_dim (optional int): Indicates which dimension in values is the packed jagged
-            dimension. If None, this is set to dim=1 (i.e. the dimension immediately following
-            the batch dimension). Default: None
+            dimension. Must be >= 1 as the batch dimension (dim=0) cannot be ragged.
+            If None, this is set to dim=1 (i.e. the dimension immediately following the batch dimension). Default: None
         min_seqlen (optional int): If set, uses the specified value as the cached minimum sequence
             length for the returned nested tensor. This can be a useful alternative to computing
             this value on-demand, possibly avoiding a GPU -> CPU sync. Default: None
@@ -450,6 +456,8 @@ def nested_tensor_from_jagged(
 
     if jagged_dim is None:
         jagged_dim = 1
+    elif jagged_dim < 1:
+        raise ValueError(f"Expected jagged_dim >=1, but got {jagged_dim}.")
 
     from torch.nested._internal.nested_tensor import (
         nested_view_from_values_offsets_lengths,

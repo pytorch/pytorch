@@ -5,8 +5,6 @@ batch_size:
     demucs: 4
     dlrm: 1024
     densenet121: 4
-    hf_Reformer: 4
-    hf_T5_base: 4
     timm_efficientdet: 1
     llama_v2_7b_16h: 1
     # reduced from 16 due to cudagraphs OOM in TorchInductor dashboard
@@ -30,7 +28,6 @@ tolerance:
     - alexnet
     - attention_is_all_you_need_pytorch
     - densenet121
-    - hf_Albert
     - vgg16
     - mobilenet_v3_large
     - nvidia_deeprecommender
@@ -40,20 +37,22 @@ tolerance:
     - soft_actor_critic
     - tacotron2
     - yolov3
-    - timm_efficientdet
-    - timm_efficientnet
     - squeezenet1_1
 
   higher_fp16:
     - doctr_reco_predictor
     - drq
-    - hf_Whisper
     - phlippe_resnet
+    - pytorch_CycleGAN_and_pix2pix
 
   higher_bf16:
     - doctr_reco_predictor
     - drq
-    - hf_Whisper
+
+  # These models need higher tolerance for xpu devices with bf16
+  higher_bf16_xpu:
+    - squeezenet1_1
+    - phlippe_resnet
 
   freezing:
     # Similar logic to timm_models.py:get_tolerance_and_cosine_flag
@@ -67,16 +66,9 @@ tolerance:
 
 require_larger_multiplier_for_smaller_tensor:
   - yolov3
-  - timm_efficientnet
 
 # These benchmarks took >600s on an i9-11900K CPU
 very_slow: &VERY_SLOW_MODELS
-  # 3339s
-  - hf_BigBird
-  # 3062s
-  - hf_Longformer
-  # 930s
-  - hf_T5
 
 
 # These benchmarks took >60s on an i9-11900K CPU
@@ -88,18 +80,6 @@ slow:
   - demucs
   # 242s
   - fastNLP_Bert
-  # 221s
-  - hf_Albert
-  # 400s
-  - hf_Bart
-  # 334s
-  - hf_Bert
-  # 187s
-  - hf_DistilBert
-  # 470s
-  - hf_GPT2
-  # 141s
-  - hf_Reformer
   # 317s
   - speech_transformer
   # 99s
@@ -131,6 +111,8 @@ dtype:
   force_fp16_for_bf16_models:
     - vision_maskrcnn
 
+  amp_dtype_bfloat16:
+    - modded_nanogpt
 
 # models in canary_models that we should run anyway
 canary_models:
@@ -159,6 +141,7 @@ only_training:
   - hf_Reformer
   - pytorch_struct
   - yolov3
+  - modded_nanogpt
 
 
 trt_not_yet_working:
@@ -183,13 +166,43 @@ skip:
     - hf_clip
     # multi gpu not always available in benchmark runners
     - simple_gpt_tp_manual
+    # skip hf and timm models in torchbench since
+    # there are already separate benchmarks for them
+    - hf_Albert
+    - hf_Bart
+    - hf_Bert
+    - hf_BigBird
+    - hf_DistilBert
+    - hf_GPT2
+    - hf_Longformer
+    - hf_Reformer
+    - hf_T5
+    - timm_efficientdet
+    - timm_efficientnet
+    - timm_nfnet
+    - timm_regnet
+    - timm_resnest
+    - timm_vision_transformer
+    - timm_vovnet
+    - hf_Bert_large
+    - hf_GPT2_large
+    - hf_Roberta_base
+    - hf_T5_base
+    - hf_T5_generate
+    - hf_T5_large
+    - hf_Whisper
+    - hf_distil_whisper
+    - timm_vision_transformer_large
+    # https://github.com/pytorch/pytorch/issues/167895
+    - stable_diffusion
+    - stable_diffusion_text_encoder
+    - stable_diffusion_unet
 
   device:
     cpu:
-      # OOMs
-      - hf_T5_generate
       # model is CUDA only
       - cm3leon_generate
+      - modded_nanogpt
       # timeout
       - nanogpt
       # timeout
@@ -204,12 +217,17 @@ skip:
       - torchrec_dlrm
       - simple_gpt
       # works on cuda, accuracy failure on cpu
-      - hf_Whisper
       - stable_diffusion_text_encoder
       - llava
       - moco
 
+    # Skip these additional models when running on aarch64
+    cpu_aarch64: []
+
     cuda: []
+
+    xpu:
+      - *DETECTRON2_MODELS
 
   test:
     training:
@@ -225,7 +243,6 @@ skip:
       - sam_fast
       # Model's DEFAULT_TRAIN_BSIZE is not implemented
       - cm3leon_generate
-      - hf_T5_generate
       - doctr_det_predictor
       - doctr_reco_predictor
       - moondream
@@ -237,9 +254,6 @@ skip:
     - cm3leon_generate
     - detectron2_fcos_r_50_fpn
     - fastNLP_Bert
-    - hf_Longformer
-    - hf_Reformer
-    - hf_T5_generate
     - opacus_cifar10
     - speech_transformer
 
@@ -276,9 +290,6 @@ accuracy:
       # Models too large to have eager, dynamo and fp64_numbers simultaneosuly
       # even for 40 GB machine. We have tested accuracy for smaller version of
       # these models
-      - hf_GPT2_large
-      - hf_T5_large
-      - timm_vision_transformer_large
       # accuracy https://github.com/pytorch/pytorch/issues/93847
       - maml
       - llama_v2_7b_16h
@@ -290,5 +301,4 @@ accuracy:
       - pytorch_unet
 
   max_batch_size:
-    hf_GPT2: 2
     pytorch_unet: 2

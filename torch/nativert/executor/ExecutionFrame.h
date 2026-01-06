@@ -2,8 +2,9 @@
 
 #include <unordered_map>
 
-#include <torch/csrc/distributed/c10d/Work.hpp>
+#include <torch/nativert/executor/ExecutorConfig.h>
 #include <torch/nativert/executor/Weights.h>
+#include <torch/nativert/executor/memory/LayoutManager.h>
 #include <torch/nativert/graph/Graph.h>
 
 #include <c10/util/Logging.h>
@@ -21,7 +22,11 @@ class ExecutionFrame {
   // torch.cond
   explicit ExecutionFrame(const Graph& graph);
 
-  explicit ExecutionFrame(const Graph& graph, const Weights& weights);
+  explicit ExecutionFrame(
+      const Graph& graph,
+      const Weights& weights,
+      const torch::nativert::ExecutorConfig& executorConfig = {},
+      LayoutPlanner* layoutPlanner = nullptr);
 
   // Constructor for testing purpose
   explicit ExecutionFrame(
@@ -30,8 +35,24 @@ class ExecutionFrame {
       const std::vector<ValueId>& graphInputIds,
       const std::vector<ValueId>& graphOutputIds);
 
+  ExecutionFrame(const ExecutionFrame&) = delete;
+  ExecutionFrame& operator=(const ExecutionFrame&) = delete;
+  ExecutionFrame(ExecutionFrame&&) = delete;
+  ExecutionFrame& operator=(ExecutionFrame&&) = delete;
+
   ~ExecutionFrame() {
     destroyBorrowedIValues();
+  }
+
+  template <typename CB>
+  auto withManagedMemory(CB&& cb) {
+    if (!layoutManager_) {
+      return std::forward<CB>(cb)(nullptr);
+    }
+
+    LayoutManagerGuard guard(*layoutManager_);
+    return std::forward<CB>(cb)(
+        const_cast<const LayoutManager*>(layoutManager_.get()));
   }
 
   std::vector<c10::IValue> tryMoveUserOutputs();
@@ -75,14 +96,19 @@ class ExecutionFrame {
     return getIValue(id).toDouble();
   }
 
+  C10_ALWAYS_INLINE bool isManagedValue(const ValueId id) const {
+    return layoutPlanner_ != nullptr && layoutPlanner_->is_managed(id);
+  }
+
   void setPersistentIValue(ValueId id, c10::IValue ivalue) {
     setIValue(id, std::move(ivalue));
     persistent_[id] = true;
   }
 
-  void releaseValue(ValueId id) {
-    CHECK(!persistent_[id]) << "Cannot release persistent value";
-    allValues_[id] = c10::IValue();
+  void releaseValueIfNeeded(ValueId id) {
+    if (!isManagedValue(id) && !persistent_[id]) {
+      allValues_[id] = c10::IValue();
+    }
   }
 
   void destroyBorrowedIValues() {
@@ -92,42 +118,48 @@ class ExecutionFrame {
     borrowedValueIds_.clear();
   }
 
-  void setWork(int64_t workId, const c10::intrusive_ptr<c10d::Work>& work) {
-    work_[workId] = work;
-  }
-
-  c10::intrusive_ptr<c10d::Work> getWork(int64_t workId) const {
-    CHECK(work_.find(workId) != work_.end())
-        << "Couldn't find work with Id: " << workId;
-    return work_.at(workId);
-  }
-
   WeightVersion weightVersion() const {
     return weightVersion_;
   }
 
   void setWeights(const Weights& weights);
 
+  static std::vector<std::pair<ValueId, c10::IValue>> getPersistentValues(
+      const Graph& graph,
+      const Weights* weights = nullptr);
+
+  static std::vector<bool> getPersistentValueMask(
+      const Graph& graph,
+      const Weights* weights = nullptr) {
+    std::vector<bool> persistentValuesMask(graph.numValues());
+    for (auto& [valueId, _] : getPersistentValues(graph, weights)) {
+      persistentValuesMask[valueId] = true;
+    }
+    return persistentValuesMask;
+  }
+
  private:
   bool isOutputMovable(size_t idx) const {
-    TORCH_CHECK_LT(idx, moveable_output_mask_.size());
+    TORCH_CHECK(idx < moveable_output_mask_.size());
     return moveable_output_mask_[idx];
   }
+
+  void updatePersistentValues(const Weights* weights = nullptr);
   void updateMovableOutputs();
 
   const Graph& graph_;
   WeightVersion weightVersion_ = -1;
 
+  std::unique_ptr<LayoutManager> layoutManager_;
+  LayoutPlanner* layoutPlanner_{nullptr};
+
   // All the intermediate values for the entire graph, including graph inputs
   // and outputs This table is fixed once constructed
   std::vector<c10::IValue> allValues_;
+  // a class-local version of getPersistentValueMask
   std::vector<bool> persistent_;
 
-  std::unordered_map<int64_t, c10::intrusive_ptr<c10d::Work>> work_;
-
   std::vector<ValueId> borrowedValueIds_;
-
-  std::unordered_map<std::string, ValueId> foldedConstIds_;
 
   // moveable_output_mask_[i] corresponds to user_outputs_[i]
   //

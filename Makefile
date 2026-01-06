@@ -11,18 +11,6 @@ all:
 	@cmake -S . -B build $(shell $(PYTHON) ./scripts/get_python_cmake_flags.py) && \
 		cmake --build build --parallel --
 
-.PHONY: local
-local:
-	@./scripts/build_local.sh
-
-.PHONY: android
-android:
-	@./scripts/build_android.sh
-
-.PHONY: ios
-ios:
-	@./scripts/build_ios.sh
-
 .PHONY: triton
 triton:
 	$(PIP) uninstall -y triton
@@ -58,17 +46,31 @@ setup-env-rocm:
 	$(MAKE) setup-env PYTHON="$(PYTHON)" NIGHTLY_TOOL_OPTS="$(NIGHTLY_TOOL_OPTS) --rocm"
 
 .PHONY: setup-lint
-setup-lint:
+setup-lint .lintbin/.lintrunner.sha256: requirements.txt pyproject.toml .lintrunner.toml
+	@echo "Setting up lintrunner..."
 	$(PIP) install lintrunner
 	lintrunner init
+	@echo "Generating .lintrunner.sha256..."
+	@mkdir -p .lintbin
+	@sha256sum requirements.txt pyproject.toml .lintrunner.toml > .lintbin/.lintrunner.sha256
+
+.PHONY: lazy-setup-lint
+lazy-setup-lint: .lintbin/.lintrunner.sha256
+	@if [ ! -x "$(shell command -v lintrunner)" ]; then \
+		$(MAKE) setup-lint; \
+	fi
 
 .PHONY: lint
-lint:
-	lintrunner
+lint: lazy-setup-lint
+	lintrunner --all-files
 
 .PHONY: quicklint
-quicklint:
+quicklint: lazy-setup-lint
 	lintrunner
+
+.PHONY: quickfix
+quickfix: lazy-setup-lint
+	lintrunner --apply-patches
 
 # Deprecated target aliases
 .PHONY: setup_env setup_env_cuda setup_env_rocm setup_lint

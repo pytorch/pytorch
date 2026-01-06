@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import functools
+from collections.abc import Callable
 from contextlib import contextmanager
-from typing import Callable
 
 import torch
 from torch._decomp import decomposition_table
@@ -37,10 +37,10 @@ expanded_weights_rnn_decomps = {
 # all of the RNN decomps run linear with the batch dimension second, even if batch_first was set
 @contextmanager
 def batch_second(args, kwargs):
-    def set_batch_second(ew):
+    def set_batch_second(ew) -> None:
         ew.set_batch_first(False)
 
-    def reset_batch_first(ew):
+    def reset_batch_first(ew) -> None:
         ew.set_batch_first(True)
 
     tree_map_only(ExpandedWeight, set_batch_second, args)
@@ -55,10 +55,10 @@ def batch_second(args, kwargs):
 # to support packed sequences, we need to allow for smaller batches. Expanded weights represents the largest batch
 @contextmanager
 def allow_smaller_batches(args, kwargs):
-    def allow(ew):
+    def allow(ew) -> None:
         ew.set_allow_smaller_batches(True)
 
-    def reset(ew):
+    def reset(ew) -> None:
         ew.set_allow_smaller_batches(False)
 
     tree_map_only(ExpandedWeight, allow, args)
@@ -100,9 +100,9 @@ def implements_per_sample_grads(torch_function):
 # This is a __torch_function__ object but it could have also been a Tensor Extension
 # with a dispatch key.
 #
-# Needs to be a tensor subclass to allow reparamaterization
+# Needs to be a tensor subclass to allow reparameterization
 class ExpandedWeight(torch.Tensor):
-    def __init__(self, orig_weight, batch_size, loss_reduction):
+    def __init__(self, orig_weight, batch_size, loss_reduction) -> None:
         self.batch_size = batch_size
         self.batch_first = True
         self.allow_smaller_batches = False
@@ -131,14 +131,16 @@ class ExpandedWeight(torch.Tensor):
             # in aten, choosing the input or data variants is done by parsing logic. This mimics some of that
             decomp_opts = expanded_weights_rnn_decomps[func]
             use_input_variant = isinstance(
-                args[2], list
+                # pyrefly: ignore [bad-index, index-error]
+                args[2],
+                list,
             )  # data variant uses a list here
             decomp = decomp_opts[0] if use_input_variant else decomp_opts[1]
 
             if decomp is not None:
                 with setup_rnn(use_input_variant, args, kwargs):
                     return decomp(*args, **kwargs)
-        if func == torch._cudnn_rnn_flatten_weight:
+        if func is torch._cudnn_rnn_flatten_weight:
             # since we aren't using the fused cuda kernels for RNNs, don't do this
             return
         if func in cls.handled_functions:
@@ -177,8 +179,8 @@ class ExpandedWeight(torch.Tensor):
     def get_device(self):
         return self.orig_weight.get_device()
 
-    def set_allow_smaller_batches(self, is_allow_smaller_batches):
+    def set_allow_smaller_batches(self, is_allow_smaller_batches) -> None:
         self.allow_smaller_batches = is_allow_smaller_batches
 
-    def set_batch_first(self, is_batch_first=True):
+    def set_batch_first(self, is_batch_first=True) -> None:
         self.batch_first = is_batch_first

@@ -54,19 +54,23 @@ These backends include:
 .. attribute::  allow_tf32
 
     A :class:`bool` that controls whether TensorFloat-32 tensor cores may be used in matrix
-    multiplications on Ampere or newer GPUs. See :ref:`tf32_on_ampere`.
+    multiplications on Ampere or newer GPUs. allow_tf32 is going to be deprecated. See :ref:`tf32_on_ampere`.
 ```
 
 ```{eval-rst}
 .. attribute::  allow_fp16_reduced_precision_reduction
 
     A :class:`bool` that controls whether reduced precision reductions (e.g., with fp16 accumulation type) are allowed with fp16 GEMMs.
+    Assigning a tuple ``(allow_reduced_precision, allow_splitk)`` lets you also toggle whether
+    split-K heuristics may be used when dispatching to cuBLASLt. ``allow_splitk`` defaults to ``True``.
 ```
 
 ```{eval-rst}
 .. attribute::  allow_bf16_reduced_precision_reduction
 
     A :class:`bool` that controls whether reduced precision reductions are allowed with bf16 GEMMs.
+    Assigning a tuple ``(allow_reduced_precision, allow_splitk)`` lets you also toggle whether
+    split-K heuristics may be used when dispatching to cuBLASLt. ``allow_splitk`` defaults to ``True``.
 ```
 
 ```{eval-rst}
@@ -193,7 +197,7 @@ These backends include:
 .. attribute::  allow_tf32
 
     A :class:`bool` that controls where TensorFloat-32 tensor cores may be used in cuDNN
-    convolutions on Ampere or newer GPUs. See :ref:`tf32_on_ampere`.
+    convolutions on Ampere or newer GPUs. allow_tf32 is going to be deprecated. See :ref:`tf32_on_ampere`.
 ```
 
 ```{eval-rst}
@@ -251,6 +255,19 @@ These backends include:
 ```{eval-rst}
 .. autofunction::  torch.backends.mha.set_fastpath_enabled
 
+```
+
+## torch.backends.miopen
+
+```{eval-rst}
+.. automodule:: torch.backends.miopen
+```
+
+```{eval-rst}
+.. attribute::  immediate
+
+    A :class:`bool` that, if True, causes MIOpen to use Immediate Mode
+    (https://rocm.docs.amd.com/projects/MIOpen/en/latest/how-to/find-and-immediate.html).
 ```
 
 ## torch.backends.mps

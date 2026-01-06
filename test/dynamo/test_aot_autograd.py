@@ -715,8 +715,45 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
         out = compiled_fn(x, y)
         out.sum().backward()
 
+    def test_joint_custom_pass(self):
+        is_called = False
+
+        def joint_custom_pass(joint_gm: torch.fx.GraphModule, joint_inputs):
+            nonlocal is_called
+            is_called = True
+
+            self.assertTrue(isinstance(joint_gm, torch.fx.GraphModule))
+
+            self.assertTrue(isinstance(joint_inputs, tuple))
+            # first input is list of primals
+            self.assertTrue(isinstance(joint_inputs[0], list))
+            # second input is list of tangents
+            self.assertTrue(isinstance(joint_inputs[1], list))
+
+            return joint_gm
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.sin()
+
+        x = torch.randn(10, requires_grad=False)
+        compiled_fn = torch.compile(M(), backend="aot_eager")
+
+        with torch._functorch.config.patch("joint_custom_pass", joint_custom_pass):
+            _ = compiled_fn(x)
+        # x doesn't require grad, shouldn't trigger joint graph compiler
+        self.assertFalse(is_called)
+
+        y = torch.randn(10, requires_grad=True)
+        with torch._functorch.config.patch("joint_custom_pass", joint_custom_pass):
+            out = compiled_fn(y)
+        # y requires grad, should trigger joint graph compiler
+        self.assertTrue(is_called)
+        out.sum().backward()
+
     @expectedFailureDynamic  # https://github.com/pytorch/pytorch/issues/103539
     @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
+    @patch("torch._functorch.config.check_custom_op_aliasing", False)
     @patch("torch._functorch.config.debug_assert", True)
     def test_multiple_aot_autograd_calls_dupe_args(self):
         # this is just dealing with the fact that
@@ -880,43 +917,41 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
             dedent(
                 """\
 SeqNr|OrigAten|SrcFn|FwdSrcFn
-0|aten.convolution.default|l__self___conv1|
-0|aten.add.Tensor|l__self___bn1|
-1|aten._native_batch_norm_legit_functional.default|l__self___bn1|
-2|aten.relu.default|l__self___relu1|
-2|aten.detach.default|l__self___relu1|
-2|aten.detach.default|l__self___relu1|
+0|aten.convolution.default|conv2d|
+0|aten.add.Tensor|add_|
+1|aten._native_batch_norm_legit_functional.default|batch_norm|
+2|aten.relu.default|relu|
+2|aten.detach.default|relu|
 3|aten.add.Tensor|add|
 4|aten.view.default|flatten|
-5|aten.view.default|l__self___fc1|
-6|aten.t.default|l__self___fc1|
-7|aten.addmm.default|l__self___fc1|
-8|aten.view.default|l__self___fc1|
-9|aten.sub.Tensor|l__self___loss_fn|
-10|aten.abs.default|l__self___loss_fn|
-11|aten.mean.default|l__self___loss_fn|
-11|aten.ones_like.default||l__self___loss_fn
-11|aten.expand.default||l__self___loss_fn
-11|aten.div.Scalar||l__self___loss_fn
-10|aten.sgn.default||l__self___loss_fn
-10|aten.mul.Tensor||l__self___loss_fn
-8|aten.view.default||l__self___fc1
-7|aten.t.default||l__self___fc1
-7|aten.mm.default||l__self___fc1
-7|aten.t.default||l__self___fc1
-7|aten.mm.default||l__self___fc1
-7|aten.t.default||l__self___fc1
-7|aten.sum.dim_IntList||l__self___fc1
-7|aten.view.default||l__self___fc1
-6|aten.t.default||l__self___fc1
-5|aten.view.default||l__self___fc1
-4|aten.view.default||
-2|aten.detach.default||l__self___relu1
-2|aten.detach.default||l__self___relu1
-2|aten.threshold_backward.default||l__self___relu1
-1|aten.native_batch_norm_backward.default||l__self___bn1
-0|aten.convolution_backward.default||l__self___conv1
-11|aten.add.Tensor||l__self___loss_fn
+5|aten.view.default|linear|
+6|aten.t.default|linear|
+7|aten.addmm.default|linear|
+8|aten.view.default|linear|
+9|aten.sub.Tensor|l1_loss|
+10|aten.abs.default|l1_loss|
+11|aten.mean.default|l1_loss|
+11|aten.ones_like.default||l1_loss
+11|aten.expand.default||l1_loss
+11|aten.div.Scalar||l1_loss
+10|aten.sgn.default||l1_loss
+10|aten.mul.Tensor||l1_loss
+8|aten.view.default||linear
+7|aten.t.default||linear
+7|aten.mm.default||linear
+7|aten.t.default||linear
+7|aten.mm.default||linear
+7|aten.t.default||linear
+7|aten.sum.dim_IntList||linear
+7|aten.view.default||linear
+6|aten.t.default||linear
+5|aten.view.default||linear
+4|aten.view.default||flatten
+2|aten.detach.default||relu
+2|aten.threshold_backward.default||relu
+1|aten.native_batch_norm_backward.default||batch_norm
+0|aten.convolution_backward.default||conv2d
+11|aten.add.Tensor||
 """
             ),
         )
@@ -1131,9 +1166,13 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     def test_data_ptr_access_fails_in_forward(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            torch.library.define("mylib::foo", "(Tensor x) -> Tensor", lib=lib)
+            torch.library.define(
+                "mylib::foo_data_ptr_forward", "(Tensor x) -> Tensor", lib=lib
+            )
 
-            @torch.library.impl("mylib::foo", "CompositeImplicitAutograd", lib=lib)
+            @torch.library.impl(
+                "mylib::foo_data_ptr_forward", "CompositeImplicitAutograd", lib=lib
+            )
             def _(x):
                 x.data_ptr()
                 return x.clone()
@@ -1141,12 +1180,12 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             x = torch.randn(3)
 
             def data_ptr_graph_input(x):
-                r0 = torch.ops.mylib.foo(x)
+                r0 = torch.ops.mylib.foo_data_ptr_forward(x)
                 return r0
 
             def data_ptr_graph_intermediate(x):
                 y = x.clone()
-                r0 = torch.ops.mylib.foo(y)
+                r0 = torch.ops.mylib.foo_data_ptr_forward(y)
                 return r0
 
             tests = [data_ptr_graph_input, data_ptr_graph_intermediate]
@@ -1166,7 +1205,9 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     def test_data_ptr_access_fails_in_backward(self):
         with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
-            torch.library.define("mylib::foo", "(Tensor x) -> Tensor", lib=lib)
+            torch.library.define(
+                "mylib::foo_data_ptr_backward", "(Tensor x) -> Tensor", lib=lib
+            )
 
             backward_called = False
 
@@ -1182,12 +1223,14 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
                     grad.data_ptr()
                     return grad.clone()
 
-            @torch.library.impl("mylib::foo", "CompositeImplicitAutograd", lib=lib)
+            @torch.library.impl(
+                "mylib::foo_data_ptr_backward", "CompositeImplicitAutograd", lib=lib
+            )
             def _(x):
                 return Foo.apply(x)
 
             def f(x):
-                return torch.ops.mylib.foo(x)
+                return torch.ops.mylib.foo_data_ptr_backward(x)
 
             x = torch.randn(3, requires_grad=True)
             with self.assertRaisesRegex(RuntimeError, "Cannot access data pointer"):
@@ -1213,7 +1256,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._functorch.config.patch(donated_buffer=True)
     def test_donated_buffer1(self):
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
         @torch.compile()
         def relu(x):
@@ -1233,9 +1276,9 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer2(self):
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
-        # we will re-use the graph for g across f1 and f2
+        # we will reuse the graph for g across f1 and f2
         @torch.compile()
         def g(activation, param2):
             return torch.matmul(activation, param2)
@@ -1255,9 +1298,9 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer3(self):
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
-        # we will re-use the graph for g across f1 and f2
+        # we will reuse the graph for g across f1 and f2
         @torch.compile()
         def g(activation, param2):
             return torch.matmul(activation, param2)
@@ -1278,7 +1321,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer4(self):
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
         class Mod(torch.nn.Module):
             def __init__(self) -> None:
@@ -1309,7 +1352,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
 
     @torch._functorch.config.patch("donated_buffer", True)
     def test_donated_buffer5(self):
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
         @torch.compile()
         def f(x, z):
@@ -1339,6 +1382,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         FileCheck().check("bw_donated_idxs=[1]").run("\n".join(captured.output))
 
     @torch._functorch.config.patch("donated_buffer", True)
+    @torch._dynamo.config.patch("graph_break_on_nn_param_ctor", False)
     def test_donated_buffer6(self):
         if is_dynamic_shape_test(self._testMethodName):
             # parameters should not be dynamic shape
@@ -1346,7 +1390,7 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
             #    SymNodeVariable() is not a constant
             return
 
-        logger_name = "torch._functorch._aot_autograd.jit_compile_runtime_wrappers"
+        logger_name = "torch._functorch._aot_autograd.graph_compile"
 
         def fn(x):
             p = torch.nn.Parameter(x + 123)
@@ -1648,6 +1692,73 @@ SeqNr|OrigAten|SrcFn|FwdSrcFn
         # Note: this is an arbitrary number. So, we might have to change it in the future.
         # However, at the time this change was introduced, it went down from 15154 to 403.
         self.assertLess(len(shape_env_guards), 1000)
+
+    # See # https://github.com/pytorch/pytorch/issues/164814
+    def test_aot_autograd_stride_reconstruction_on_zero_dim_dynamic_shaped_tensor(
+        self,
+    ) -> None:
+        def repro(sentinel: torch.Tensor, skip_squeeze: bool = False) -> torch.Tensor:
+            x = torch.unique(torch.ones(1))
+            x = torch.reshape(x, [1])
+            if not skip_squeeze:
+                x = torch.squeeze(x)  # 0-d tensor
+            return x * sentinel
+
+        # Grad required to trigger the issue (need to replay stride)
+        sentinel = torch.tensor(1.0, requires_grad=True)
+        eager_sq = repro(sentinel)
+        comp_aot_sq = torch.compile(repro, backend="aot_eager", fullgraph=True)(
+            sentinel
+        )
+        comp_ind_sq = torch.compile(repro, backend="inductor", fullgraph=True)(sentinel)
+        self.assertEqual(eager_sq, comp_aot_sq)
+        self.assertEqual(eager_sq, comp_ind_sq)
+        self.assertEqual(eager_sq.stride(), comp_ind_sq.stride())
+
+        # Now check semantics preserved when skipping squeeze
+        eager_no_sq = repro(sentinel, skip_squeeze=True)
+        comp_aot_no_sq = torch.compile(repro, backend="aot_eager", fullgraph=True)(
+            sentinel, skip_squeeze=True
+        )
+        comp_ind_no_sq = torch.compile(repro, backend="inductor", fullgraph=True)(
+            sentinel, skip_squeeze=True
+        )
+        self.assertEqual(eager_no_sq, comp_aot_no_sq)
+        self.assertEqual(eager_no_sq, comp_ind_no_sq)
+        self.assertEqual(eager_no_sq.stride(), comp_ind_no_sq.stride())
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    @torch._dynamo.config.patch(capture_dynamic_output_shape_ops=True)
+    def test_unbacked_activation_specialized_in_inductor(self):
+        """Test compilation with unbacked operations like nonzero."""
+        torch._dynamo.reset()
+
+        def fuzzed_program(arg_0, sentinel):
+            var_node_1 = arg_0
+            var_node_5 = torch.full((1, 2), -66, dtype=torch.int32)
+            var_node_6 = torch.full((1, 2), 77, dtype=torch.int64)
+            var_node_4 = torch.ops.aten.add(var_node_5, var_node_6)
+            var_node_7 = torch.full((1, 2), -64, dtype=torch.int32)
+            var_node_3 = torch.ops.aten.mul(var_node_4, var_node_7)
+            var_node_9 = torch.full((3, 4), False, dtype=torch.bool)
+            var_node_8 = torch.nonzero(var_node_9)
+            var_node_2 = torch.ops.aten.add(var_node_3, var_node_8)
+            var_node_0 = torch.ops.aten.div(var_node_1, var_node_2)
+            result = var_node_0 * sentinel
+            if result.is_complex():
+                result = result.real
+            return result
+
+        sentinel = torch.tensor(1.0, requires_grad=True)
+        arg_0 = torch.randint(0, 3, (1, 2), dtype=torch.int64)
+        args = (arg_0,) + (sentinel,)
+
+        result_original = fuzzed_program(*args)
+
+        compiled_program = torch.compile(fuzzed_program, fullgraph=True, dynamic=True)
+        result_compiled = compiled_program(*args)
+
+        self.assertTrue(torch.allclose(result_original, result_compiled))
 
 
 if __name__ == "__main__":

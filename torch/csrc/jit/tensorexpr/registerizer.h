@@ -186,7 +186,7 @@ class AccessInfo {
   bool firstUsageOverlapped_{false};
 
   // The cost in real ops that this access represents, to enable
-  // filtering accesses that wont save any loads or stores.
+  // filtering accesses that won't save any loads or stores.
   ExprPtr store_cost_;
   ExprPtr load_cost_;
 

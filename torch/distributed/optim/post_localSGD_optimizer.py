@@ -9,7 +9,7 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
     r"""
     Wraps an arbitrary :class:`torch.optim.Optimizer` and runs `post-local SGD <https://arxiv.org/abs/1808.07217>`_,
     This optimizer runs local optimizer at every step.
-    After the warm-up stage, it averages parameters periodically afer the local optimizer is applied.
+    After the warm-up stage, it averages parameters periodically after the local optimizer is applied.
 
     Args:
         optim: The local optimizer.
@@ -92,7 +92,8 @@ class PostLocalSGDOptimizer(torch.optim.Optimizer):
         else:
             warnings.warn(
                 "Loaded state dict does not contain a step counter for an averager. "
-                "Setting step counter to 0."
+                "Setting step counter to 0.",
+                stacklevel=2,
             )
             self.averager.step = 0
 

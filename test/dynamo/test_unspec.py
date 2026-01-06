@@ -132,6 +132,9 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res1 = fn(shape)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
+        # Especially for internal: before resetting the seed, first shake out any rng
+        # calls that occur on compile, e.g., as a result of some module initializations.
+        opt_fn(shape)
         random.seed(1)
         res2 = opt_fn(shape)
 
@@ -151,6 +154,9 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res1 = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
+        # Especially for internal: before resetting the seed, first shake out any rng
+        # calls that occur on compile, e.g., as a result of some module initializations.
+        opt_fn(x)
         random.seed(1)
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
@@ -176,6 +182,9 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         res1 = fn(x)
         cnts = torch._dynamo.testing.CompileCounter()
         opt_fn = torch.compile(fn, backend=cnts)
+        # Especially for internal: before resetting the seed, first shake out any rng
+        # calls that occur on compile, e.g., as a result of some module initializations.
+        opt_fn(x)
         random.seed(1)
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
@@ -206,6 +215,9 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         random.seed(1)
         res1 = fn(x)
         opt_fn = torch.compile(fn, backend="eager")
+        # Especially for internal: before resetting the seed, first shake out any rng
+        # calls that occur on compile, e.g., as a result of some module initializations.
+        opt_fn(x)
         random.seed(1)
         res2 = opt_fn(x)
         self.assertTrue(same(res1, res2))
@@ -232,6 +244,9 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
         random.seed(0)
         y_1, rand2_1, rand3_1 = fn(inp, random.Random(12))
         state_1 = random.getstate()
+        # Especially for internal: before resetting the seed, first shake out any rng
+        # calls that occur on compile, e.g., as a result of some module initializations.
+        opt_fn(inp, random.Random(12))
         random.seed(0)
         y_2, rand2_2, rand3_2 = opt_fn(inp, random.Random(12))
         state_2 = random.getstate()
@@ -682,7 +697,7 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
     @torch._dynamo.config.patch(specialize_float=False, capture_scalar_outputs=True)
     def test_unspecialized_float_multiply_precision(self):
         dtypes = [torch.bfloat16, torch.float16, torch.float32, torch.float64]
-        for i, dtype in enumerate(dtypes):
+        for dtype in dtypes:
 
             def fn(x, y):
                 return x * y
@@ -698,6 +713,40 @@ class UnspecTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(fn_opt(x, y2), fn(x, y2))
             self.assertEqual(fn_opt(x, y3), fn(x, y3))
             self.assertEqual(cnt.frame_count, 1)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_tensorfiy_python_scalars_1(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            y = x.sum()
+            return x + y.item()
+
+        dtypes = [torch.bfloat16, torch.float16, torch.float32, torch.float64]
+        for dtype in dtypes:
+            x = torch.ones(3, 3, dtype=dtype)
+            self.assertEqual(f(x), x + x.sum().item())
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_tensorfiy_python_scalars_2(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            return x.item() * x.item() * torch.ones((), dtype=torch.float64)
+
+        x = torch.tensor(1e20, dtype=torch.float32)
+        self.assertEqual(
+            f(x), x.item() * x.item() * torch.ones((), dtype=torch.float64)
+        )
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_tensorfiy_python_scalars_3(self):
+        @torch.compile(backend="aot_eager")
+        def f(x):
+            y = x.item() * 101
+            return y * torch.tensor([1], dtype=torch.float32)
+
+        finfo_float16 = torch.finfo(torch.float16)
+        x = torch.tensor([finfo_float16.max], dtype=torch.float16)
+        self.assertEqual(f(x), x.item() * 101 * torch.tensor([1], dtype=torch.float32))
 
     @torch._dynamo.config.patch(specialize_float=False, assume_static_by_default=False)
     def test_unspec_float_input_f64(self):
@@ -883,8 +932,10 @@ class UnspecTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertEqual(ref.device, res.device)
 
 
-devices = ["cuda", "hpu"]
-instantiate_device_type_tests(UnspecTestsDevice, globals(), only_for=devices)
+devices = ["cuda", "hpu", "xpu"]
+instantiate_device_type_tests(
+    UnspecTestsDevice, globals(), only_for=devices, allow_xpu=True
+)
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

@@ -5,12 +5,12 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/cuda/CUDAGuard.h>
 
-// Two warninngs in Cutlass included header files
+// Two warnings in Cutlass included header files
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
+C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-variable")
 
-#if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION) && \
-    CUDA_VERSION >= 12000
+#if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION)
 #define BUILD_ASYNC_MM_KERNEL
 #endif
 
@@ -37,6 +37,7 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 
 #include <torch/csrc/distributed/c10d/cuda/cutlass/gemm/kernel/persistent_async_input_scheduler.cuh>
 
+C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 C10_DIAGNOSTIC_POP()
 
@@ -149,7 +150,7 @@ at::Tensor async_input_mm_impl(
           reinterpret_cast<ElementB*>(b.data_ptr<at::BFloat16>()),
           stride_B,
       },
-      {{1, 1},
+      {{},
        reinterpret_cast<ElementC*>(out.data_ptr<at::BFloat16>()),
        stride_C,
        reinterpret_cast<ElementC*>(out.data_ptr<at::BFloat16>()),
@@ -163,7 +164,7 @@ at::Tensor async_input_mm_impl(
 
   TORCH_CHECK(
       M % num_chunks_M == 0,
-      "async_input_mm: `a.shape(0)` must be an interger multiple of `a_chunk_signals.numel()`");
+      "async_input_mm: `a.shape(0)` must be an integer multiple of `a_chunk_signals.numel()`");
   size_t chunk_size_M = M / num_chunks_M;
   size_t tile_size_M = cute::get<0>(TileShape_MNK{});
 
@@ -248,7 +249,7 @@ at::Tensor async_input_mm_out(
   });
 #else
   TORCH_CHECK(
-      false, "async_input_mm is not currenlty supported on your device");
+      false, "async_input_mm is not currently supported on your device");
 #endif
   return out;
 }

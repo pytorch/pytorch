@@ -12,7 +12,6 @@ import logging
 import sys
 import threading
 import time
-from typing import Optional
 
 
 try:
@@ -153,7 +152,7 @@ class EtcdRendezvousHandler(RendezvousHandler):
     +--------------------------------------------+--------------------------+
     """
 
-    def __init__(self, rdzv_impl: "EtcdRendezvous", local_addr: Optional[str]):
+    def __init__(self, rdzv_impl: "EtcdRendezvous", local_addr: str | None):
         """
         Args:
             rdzv_impl: the implementation of the rendezvous
@@ -208,8 +207,8 @@ class EtcdRendezvousHandler(RendezvousHandler):
         try:
             self.set_closed()
             return True
-        except BaseException as e:
-            logger.warning("Shutdown failed. Error occurred: %s", str(e))
+        except BaseException:  # noqa: B036
+            logger.warning("Shutdown failed", exc_info=True)
             return False
 
 
@@ -333,7 +332,7 @@ class EtcdRendezvous:
                 # to avoid spamming etcd
                 # FIXME: there are a few things that fall under this like
                 # etcd.EtcdKeyNotFound, etc, which could be handled more explicitly.
-                logger.info("Rendezvous attempt failed, will retry. Reason: %s", e)
+                logger.info("Rendezvous attempt failed, will retry. Reason: %s", e)  # noqa: G200
                 time.sleep(1)
 
     def init_phase(self):
@@ -542,7 +541,7 @@ class EtcdRendezvous:
 
             # When reaching min workers, or changing state to frozen, we'll set
             # the active_version node to be ephemeral.
-            set_ttl: Optional[int] = None
+            set_ttl: int | None = None
             if len(state["participants"]) == self._num_max_workers:
                 state["status"] = "frozen"
                 state["keep_alives"] = []

@@ -264,7 +264,7 @@ static PyObject * THPVariable_contiguous(PyObject* self, PyObject* args, PyObjec
   auto& self_ = THPVariable_Unpack(self);
   auto memory_format = r.memoryformat(0);
   // avoids touching the GIL or current device if self is already contiguous
-  if (self_.is_contiguous(memory_format)) {
+  if (self_.is_contiguous_or_false(memory_format)) {
     // NOTE: this logic is duplicated from VariableType.cpp. Since we need to
     // record this call to contiguous() in the trace regardless of whether
     // we actually call contiguous here, we need to record this information

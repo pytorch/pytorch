@@ -5,6 +5,7 @@ import contextlib
 import math
 import operator
 import os
+import sys
 import unittest
 import warnings
 
@@ -21,6 +22,13 @@ from torch.testing import FileCheck
 # some tests
 torch._C._jit_set_profiling_executor(True)
 torch._C._get_graph_executor_optimize(True)
+
+if __name__ == "__main__":
+    from torch.testing._internal.common_utils import parse_cmd_line_args
+
+    # The value of GRAPH_EXECUTOR depends on command line arguments so make sure they're parsed
+    # before instantiating tests.
+    parse_cmd_line_args()
 
 from itertools import combinations, permutations, product
 from textwrap import dedent
@@ -87,7 +95,7 @@ def strip_profiling_nodes(nodes):
 
 
 def warmup_forward(f, *args, profiling_count=2):
-    for i in range(profiling_count):
+    for _ in range(profiling_count):
         results = f(*args)
 
     return results
@@ -126,7 +134,7 @@ class TestTEFuser(JitTestCase):
         super().setUp()
         self.tensorexpr_options = TensorExprTestOptions()
 
-        # note: `self.dynamic_shapes` instatiated in specialization of class
+        # note: `self.dynamic_shapes` instantiated in specialization of class
         # defined below
 
         fusion_strategy = [("DYNAMIC", 20)] if self.dynamic_shapes else [("STATIC", 20)]
@@ -236,7 +244,7 @@ class TestTEFuser(JitTestCase):
             return x2.sum()
 
         with texpr_reductions_enabled():
-            a = torch.tensor(list(range(0, 15)), dtype=torch.float, device="cpu")
+            a = torch.tensor(list(range(15)), dtype=torch.float, device="cpu")
             a = a.reshape(5, 3)
             scripted = self.checkScript(func, (a,))
             self.assertLastGraphAllFused()
@@ -252,7 +260,7 @@ class TestTEFuser(JitTestCase):
             return x.sum((-2,)) * 2
 
         with texpr_reductions_enabled():
-            a = torch.tensor(list(range(0, 15)), dtype=torch.float, device="cpu")
+            a = torch.tensor(list(range(15)), dtype=torch.float, device="cpu")
             a = a.reshape(5, 3)
             scripted = self.checkScript(func, (a,))
             self.assertLastGraphAllFused()
@@ -264,7 +272,7 @@ class TestTEFuser(JitTestCase):
             return x.sum((0,), keepdim=True, dtype=torch.double) * 2
 
         with texpr_reductions_enabled():
-            a = torch.tensor(list(range(0, 15)), dtype=torch.float, device="cpu")
+            a = torch.tensor(list(range(15)), dtype=torch.float, device="cpu")
             a = a.reshape(5, 3)
 
             self.checkScript(func, (a,))
@@ -1675,11 +1683,8 @@ class TestTEFuser(JitTestCase):
         ]
         dtypes = ["int", "float", "bool"]
         values = {"int": [10, 3], "float": [12.34, 2.78], "bool": [True, False]}
-        devices = self.devices
-        for dtype_x, dtype_y, op, device in product(
-            dtypes, dtypes, binary_ops, devices
-        ):
-            code = ir_template.format(**locals())
+        for dtype_x, dtype_y, op in product(dtypes, dtypes, binary_ops):
+            code = ir_template.format(dtype_x=dtype_x, dtype_y=dtype_y, op=op)
 
             # Interpret the graph
             try:
@@ -1694,9 +1699,7 @@ class TestTEFuser(JitTestCase):
             try:
                 k = torch._C._te.TensorExprKernel(graph)
             except Exception as e:
-                raise RuntimeError(
-                    " ".join(["Compilation failed:", device, str(code)])
-                ) from e
+                raise RuntimeError(" ".join(["Compilation failed:", str(code)])) from e
 
             # Run the graph
             for x, y in product(values[dtype_x], values[dtype_y]):
@@ -1706,9 +1709,7 @@ class TestTEFuser(JitTestCase):
                     self.assertEqual(ref, res)
                 except Exception as e:
                     raise RuntimeError(
-                        " ".join(
-                            ["Failed at runtime:", device, str(x), str(y), str(code)]
-                        )
+                        " ".join(["Failed at runtime:", str(x), str(y), str(code)])
                     ) from e
 
     def test_matmul(self):
@@ -2227,7 +2228,7 @@ class TestTEFuser(JitTestCase):
 
         indices = [0, 1, 2, 3]
         sets = []
-        for i in range(0, len(indices) + 1):
+        for i in range(len(indices) + 1):
             for subset in combinations(indices, i):
                 sets.append(subset)  # noqa: PERF402
 
@@ -2277,7 +2278,7 @@ class TestTEFuser(JitTestCase):
         x = torch.arange(-10, 10, dtype=torch.float32, requires_grad=True)
         xs = torch.arange(-10, 10, dtype=torch.float32, requires_grad=True)
         script = torch.jit.script(fn)
-        for i in range(11):
+        for _ in range(11):
             y = fn(x)
             g0 = torch.rand_like(y)
             y.backward(g0)
@@ -2507,7 +2508,7 @@ class TestTEFuser(JitTestCase):
                                 x, y, z = gen(n), gen(n), gen(n)
                                 func_s(x, y, z)
 
-                            for incr in range(3):
+                            for _incr in range(3):
                                 func_s(*[gen(n + 1) for _ in range(3)])
 
                             g = torch.jit.last_executed_optimized_graph()
@@ -2671,7 +2672,7 @@ class TestTEFuser(JitTestCase):
 
             f_traced = torch.jit.trace(f, (x, y))
 
-            for i in range(4):
+            for _ in range(4):
                 # make sure this doesn't error out
                 res = f_traced(x, y)
 
@@ -2690,7 +2691,7 @@ class TestTEFuser(JitTestCase):
         ref = fn(x)
 
         script_fn = torch.jit.script(fn)
-        for i in range(4):
+        for _ in range(4):
             res = script_fn(x)
 
         self.assertEqual(ref, res)
@@ -2939,7 +2940,10 @@ def f({", ".join(param_names)}):
 
     @slowTest
     @onlyCPU
-    @ops(op_db, dtypes=OpDTypes.supported)
+    @ops(
+        [op for op in op_db if get_name(op) not in known_failures],
+        dtypes=OpDTypes.supported,
+    )
     def test_nnc_correctness(self, device, dtype, op):
         if not op.supports_tracing:
             self.skipTest("Requires tracing support")
@@ -3044,4 +3048,5 @@ instantiate_device_type_tests(TestLoopnestRandomization, globals(), only_for=("c
 
 
 if __name__ == "__main__":
-    run_tests()
+    if sys.version_info < (3, 14):
+        run_tests()

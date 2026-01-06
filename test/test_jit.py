@@ -3,6 +3,13 @@
 
 import torch
 
+if __name__ == '__main__':
+    from torch.testing._internal.common_utils import parse_cmd_line_args
+
+    # The value of GRAPH_EXECUTOR depends on command line arguments so make sure they're parsed
+    # before instantiating tests.
+    parse_cmd_line_args()
+
 # This is how we include tests located in test/jit/...
 # They are included here so that they are invoked when you call `test_jit.py`,
 # do not run these test files directly.
@@ -97,7 +104,7 @@ import torch.nn.functional as F
 from torch.testing._internal import jit_utils
 from torch.testing._internal.common_jit import check_against_reference
 from torch.testing._internal.common_utils import run_tests, IS_WINDOWS, \
-    suppress_warnings, IS_SANDCASTLE, GRAPH_EXECUTOR, ProfilingMode, \
+    GRAPH_EXECUTOR, suppress_warnings, IS_SANDCASTLE, ProfilingMode, \
     TestCase, freeze_rng_state, slowTest, TemporaryFileName, \
     enable_profiling_mode_for_profiling_tests, TEST_MKL, set_default_dtype, num_profiled_runs, \
     skipIfCrossRef, skipIfTorchDynamo
@@ -158,6 +165,7 @@ def doAutodiffCheck(testname):
     if "test_t_" in testname or testname == "test_t":
         return False
 
+    assert GRAPH_EXECUTOR
     if GRAPH_EXECUTOR == ProfilingMode.SIMPLE:
         return False
 
@@ -201,6 +209,7 @@ def doAutodiffCheck(testname):
     return testname not in test_exceptions
 
 
+assert GRAPH_EXECUTOR
 # TODO: enable TE in PE when all tests are fixed
 torch._C._jit_set_texpr_fuser_enabled(GRAPH_EXECUTOR == ProfilingMode.PROFILING)
 torch._C._jit_set_profiling_executor(GRAPH_EXECUTOR != ProfilingMode.LEGACY)
@@ -2033,10 +2042,9 @@ graph(%Ra, %Rb):
             self.assertEqual(inp_refcount + 1, sys.getrefcount(ivalue_holder))
             return ivalue_holder + 1
 
-        test_input = 2200
-        before_count = sys.getrefcount(test_input)
-        test_func_scope_helper(test_input)
-        after_count = sys.getrefcount(test_input)
+        before_count = sys.getrefcount(py_array)
+        test_func_scope_helper(py_array)
+        after_count = sys.getrefcount(py_array)
 
         # after the test_func_scope_helper_call, the refcount of
         # test_input should be equal to the original refcount
@@ -2328,9 +2336,9 @@ graph(%Ra, %Rb):
                 print("stays")
             while False:
                 print("removed")
-            for _i in range(0):
+            for _ in range(0):
                 print("removed")
-            for _i in range(-4):
+            for _ in range(-4):
                 print("removed")
             return b
 
@@ -2878,9 +2886,9 @@ graph(%Ra, %Rb):
                     self.assertTrue(hasattr(input, 'type'))
                     self.assertTrue(input.type() is not None)
                 self.assertTrue(hasattr(block, 'returnNode'))
-                self.assertTrue(type(block.returnNode()) == torch._C.Node)
+                self.assertTrue(type(block.returnNode()) is torch._C.Node)
                 self.assertTrue(hasattr(block, 'paramNode'))
-                self.assertTrue(type(block.paramNode()) == torch._C.Node)
+                self.assertTrue(type(block.paramNode()) is torch._C.Node)
         self.assertTrue(tested_blocks)
 
     def test_export_opnames(self):
@@ -3129,7 +3137,7 @@ class TestScript(JitTestCase):
         with enable_profiling_mode_for_profiling_tests():
 
             def fct_loop(x):
-                for i in range(3):
+                for _ in range(3):
                     x = torch.cat((x, x), 0)
                 return x
 
@@ -3144,7 +3152,7 @@ class TestScript(JitTestCase):
             eplan = get_execution_plan(dstate)
             num_bailouts = eplan.code.num_bailouts()
 
-            for i in range(0, num_bailouts):
+            for i in range(num_bailouts):
                 eplan.code.request_bailout(i)
                 self.assertEqual(jitted(x), expected)
 
@@ -3236,7 +3244,7 @@ class TestScript(JitTestCase):
     def test_nested_bailouts(self):
         @torch.jit.script
         def fct_loop(x):
-            for i in range(3):
+            for _ in range(3):
                 x = torch.cat((x, x), 0)
             return x
 
@@ -3898,7 +3906,7 @@ def foo(x):
                 else:
                     return f'v{idx - len(exprs)}'
 
-            for i in range(50):
+            for _ in range(50):
                 n = None
                 while n is None or n > len(exprs) + n_variables:
                     template = random.choice(templates)
@@ -3913,7 +3921,7 @@ def foo(x):
             src_lines.append('  return ({})\n'.format(''.join(f'v{i},' for i in range(n_variables))))
             return '\n'.join(src_lines)
 
-        for i in range(100):
+        for _ in range(100):
             g = {'torch': torch}
             code = gen_code()
             builtins.exec(code, g, None)
@@ -4593,7 +4601,7 @@ def foo(xyz):
         y = torch.randn(3, 3, requires_grad=True)
 
         def grad_in_loop(x, y):
-            for i in range(100):
+            for _ in range(100):
                 x = y @ x
             return x
 
@@ -4764,7 +4772,7 @@ a")
         self.assertIsNot(fun_compiled, fun_compiled_2)
         self.assertEqual(fun_compiled_2(), 7)
 
-        # caching doesnt increase refcounts to function (holds weak reference)
+        # caching doesn't increase refcounts to function (holds weak reference)
         self.assertTrue(sys.getrefcount(fun), num_ref_counts)
 
     def test_string_ops(self):
@@ -5550,7 +5558,7 @@ a")
             @torch.jit.script
             def test(x):
                 after_resize_alias = torch.zeros([2])
-                for _i in range(5):
+                for _ in range(5):
                     b = x + 1
                     f = [1]
                     before_resize_alias = b.sub_(1)
@@ -5941,7 +5949,7 @@ a")
             # type: (int) -> int
             prev = 1
             v = 1
-            for i in range(0, x):
+            for _ in range(x):
                 save = v
                 v = v + prev
                 prev = save
@@ -6501,7 +6509,7 @@ a")
                     if isinstance(res_python, Exception):
                         continue
 
-                    if type(res_python) == type(res_script):
+                    if type(res_python) is type(res_script):
                         if isinstance(res_python, tuple) and (math.isnan(res_python[0]) == math.isnan(res_script[0])):
                             continue
                         if isinstance(res_python, float) and math.isnan(res_python) and math.isnan(res_script):
@@ -6714,7 +6722,7 @@ a")
         @torch.jit.script
         def testNoThrows(t):
             c1 = 1
-            if (False and bool(t[1])) or (True or bool(t[1])):
+            if (False and bool(t[1])) or (True or bool(t[1])):  # noqa: SIM222,SIM223
                 c1 = 0
             return c1
 
@@ -7374,8 +7382,8 @@ a")
                     # tensor from empty list is type float in python and annotated type in torchscript
                     if "annotate" in li and "dtype" not in option:
                         continue
-                    # Skip unsigned tensor initializaton for signed values on 3.10
-                    if sys.version_info[:2] >= (3, 10) and "torch.uint8" in option and "-" in li:
+                    # Skip unsigned tensor initialization for signed values on 3.10
+                    if "torch.uint8" in option and "-" in li:
                         continue
                     code = tensor_template.format(list_create=li, tensor_op=op, options=option)
                     scope = {}
@@ -7776,7 +7784,7 @@ dedent """
             while int(tensor.add_(1)) < 4:
                 if y == 1:
                     continue
-                for i in range(y):
+                for _ in range(y):
                     continue
                     ret += 1
                 ret += 1
@@ -7887,7 +7895,7 @@ dedent """
         def assign_after_break_nested(y):
             # type: (int)
             x = 0
-            for i in range(y):
+            for _ in range(y):
                 if y == 1:
                     x = 5
                     break
@@ -7907,7 +7915,7 @@ dedent """
         def may_break(y):
             # type: (int)
             x = 0
-            for i in range(y):
+            for _ in range(y):
                 if y == 1:
                     x = 5
                 else:
@@ -7979,7 +7987,7 @@ dedent """
         def test_varexit(cond):
             # type: (int)
             m = 0
-            for i in range(3):
+            for _ in range(3):
                 if cond == 2:
                     if cond == 2:
                         m = 2
@@ -7990,7 +7998,7 @@ dedent """
                 m += k
             return m
 
-        # use of k tests the pathway where we have to insert unitialized
+        # use of k tests the pathway where we have to insert uninitialized
         self.checkScript(test_varexit, (3,))
         self.checkScript(test_varexit, (2,))
 
@@ -8367,7 +8375,7 @@ dedent """
                 # find the last output, then all subsequent uses
                 fc.check(out_name[-1] + " : ")
                 # skip past node body
-                for i in range(contained_blocks(node)):
+                for _ in range(contained_blocks(node)):
                     fc.check("->")
                 if (node.kind() == "prim::If"):
                     fc.check("->").check("->").check("\n")
@@ -8420,7 +8428,7 @@ dedent """
             a = 1
             b = 2
             c = 3
-            for i in range(iter):
+            for _ in range(iter):
                 a = 4
                 b = 5
                 c = 6
@@ -8436,7 +8444,7 @@ dedent """
             a = 1
             b = 2
             c = 3
-            for i in range(iter):
+            for _ in range(iter):
                 c = c + 1
                 b = b + 1
                 a = a + 1
@@ -8637,7 +8645,7 @@ dedent """
         args = args + [1, 1.5]
 
         def isBool(arg):
-            return type(arg) == bool or (type(arg) == str and "torch.bool" in arg)
+            return type(arg) is bool or (type(arg) is str and "torch.bool" in arg)
 
         for op in ops:
             for first_arg in args:
@@ -8646,7 +8654,7 @@ dedent """
                     if (op == 'sub' or op == 'div') and (isBool(first_arg) or isBool(second_arg)):
                         continue
                     # div is not implemented correctly for mixed-type or int params
-                    if (op == 'div' and (type(first_arg) != type(second_arg) or
+                    if (op == 'div' and (type(first_arg) is not type(second_arg) or
                        isinstance(first_arg, int) or
                        (isinstance(first_arg, str) and 'int' in first_arg))):
                         continue
@@ -8662,7 +8670,7 @@ dedent """
                     graph = cu.func.graph
                     torch._C._jit_pass_complete_shape_analysis(graph, (), False)
                     # use dim=-1 to represent a python/jit scalar.
-                    dim = -1 if type(first_arg) != str and type(second_arg) != str else non_jit_result.dim()
+                    dim = -1 if type(first_arg) is not str and type(second_arg) is not str else non_jit_result.dim()
                     dtype = non_jit_result.dtype
                     # jit only supports int/float scalars.
                     if dim < 0:
@@ -9450,7 +9458,7 @@ dedent """
                 return self.mods(input)
 
         m = M()
-        self.assertTrue('mods.conv.weight' in m.state_dict().keys())
+        self.assertTrue('mods.conv.weight' in m.state_dict())
 
     def test_script_sequential_multi_output_fail(self):
         class Sub(torch.jit.ScriptModule):
@@ -9996,7 +10004,7 @@ dedent """
         def tensor_unifying(x, y, z):
             # testing dynamic is appropriately set for y and z
             if bool(x):
-                x, y, z = x + 1, y, z
+                x, y, z = x + 1, y, z  # noqa: PLW0127
             else:
                 x, y, z = x + 1, x, y
 
@@ -10066,7 +10074,7 @@ dedent """
         buffer = io.BytesIO()
         torch.jit.save(cm, buffer)
         buffer.seek(0)
-        # when tensor is loaded as constant it isnt specialized
+        # when tensor is loaded as constant it isn't specialized
         cm_load = torch.jit.load(buffer)
         FileCheck().check_not("Float(1, 3)").run(cm_load.forward.graph)
 
@@ -10300,7 +10308,7 @@ dedent """
 
     def test_type_inferred_from_empty_annotation(self):
         """
-        Test that the type inferred from an empty or missing annotation is Torch.Tensor wtih `inferred=true`
+        Test that the type inferred from an empty or missing annotation is Torch.Tensor with `inferred=true`
         """
         @torch.jit.script
         def fn(x):
@@ -10929,7 +10937,7 @@ dedent """
 
             # Test symbolic differentiation
             # Run Forward and Backward thrice to trigger autodiff graph
-            for i in range(0, 3):
+            for _ in range(3):
                 y = jit_module(x)
                 y.backward(grad)
             x.grad.zero_()
@@ -11021,7 +11029,7 @@ dedent """
         W.data /= 4
 
         with enable_profiling_mode_for_profiling_tests():
-            for i in range(4):
+            for _ in range(4):
                 self.assertTrue((foo(x, y, W).grad_fn is None) == (jitted_foo(x, y, W).grad_fn is None))
 
 
@@ -11793,7 +11801,7 @@ dedent """
         def fn_zip_enumerate(x, y):
             # type: (List[int], List[int]) -> int
             sum = 0
-            for (i, (j, v), k) in zip(x, enumerate(y), range(0, 100)):
+            for (i, (j, v), k) in zip(x, enumerate(y), range(100)):
                 sum += i * j * v * k
 
             return sum
@@ -11813,7 +11821,7 @@ dedent """
     def test_for_in_tensors(self):
         def test_sizes(x):
             sumz = 0
-            for s in x:
+            for _ in x:
                 sumz += 1
             return sumz
         self.checkScript(test_sizes, (torch.rand(5, 4, 3, 2, 1),))
@@ -11825,7 +11833,7 @@ dedent """
             @torch.jit.script
             def test_sizes(x):
                 sumz = 0
-                for s in x:
+                for _ in x:
                     sumz += 1
                 return sumz
 
@@ -11837,7 +11845,7 @@ dedent """
             def test_sizes(x):
                 # type: (float) -> int
                 sumz = 0
-                for s in x:
+                for _ in x:
                     sumz += 1
                 return sumz
 
@@ -11847,7 +11855,7 @@ dedent """
         def test_sizes(x):
             sumz = 0
             for n in x:
-                for t in n:
+                for _ in n:
                     sumz += 1
             return sumz
 
@@ -11945,7 +11953,7 @@ dedent """
             # type: (Dict[str, int]) -> Tuple[str, int]
             key_str = ""
             sum = 0
-            for key in x.keys():
+            for key in x:
                 key_str += key
             for val in x.values():
                 sum += val
@@ -12307,7 +12315,7 @@ dedent """
 
                 @torch.jit.script_method
                 def forward(self, x):
-                    for _i in range(4):
+                    for _ in range(4):
                         x += self.param
                     return x
 
@@ -12831,7 +12839,7 @@ dedent """
 
         # Load from filename
         tracemalloc.start()
-        for i in range(num_iters):
+        for _ in range(num_iters):
             torch._C.PyTorchFileReader(filename)
         _, peak_from_string = tracemalloc.get_traced_memory()
         tracemalloc.stop()
@@ -12839,7 +12847,7 @@ dedent """
         # Load from stream
         tracemalloc.start()
         with open(filename, 'rb') as f:
-            for i in range(num_iters):
+            for _ in range(num_iters):
                 f.seek(0)
                 torch._C.PyTorchFileReader(f)
         _, peak_from_file = tracemalloc.get_traced_memory()
@@ -13278,7 +13286,7 @@ dedent """
     def test_pass(self):
         def foo(x):
             # type: (bool) -> int
-            for _i in range(3):
+            for _ in range(3):
                 pass
             if x:
                 pass
@@ -13894,7 +13902,7 @@ dedent """
         def test_loop_no_escape(x):
             # type: (int)
             if x >= 0:
-                for i in range(x):
+                for _ in range(x):
                     raise RuntimeError("hi")
             else:
                 return 5
@@ -14107,7 +14115,7 @@ dedent """
 
         def test_will_ret(y):
             # type: (int) -> int
-            for i in range(y):
+            for _ in range(y):
                 return 2
             return 1
 
@@ -14116,8 +14124,8 @@ dedent """
 
         def test_loop_nest_ret(y):
             # type: (int) -> int
-            for i in range(y):
-                for i in range(y - 2):
+            for _ in range(y):
+                for _ in range(y - 2):
                     return 10
                 return 5
             return 0
@@ -14835,7 +14843,7 @@ dedent """
 
         # testing overload declared first, then non-overload
         if sys.version_info < (3, 13):  # test broken in 3.13
-            with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
+            with self.assertRaisesRegex(Exception, "Overloads are not usable when a module"):
                 class W3(torch.nn.Module):
                     @torch.jit._overload_method  # noqa: F811
                     def forward(self, x):  # noqa: F811
@@ -14888,7 +14896,7 @@ dedent """
                 return self.hello(1), self.hello(x)
 
         if sys.version_info < (3, 13):  # test broken in 3.13
-            with self.assertRaisesRegex(Exception, "Overloads are not useable when a module"):
+            with self.assertRaisesRegex(Exception, "Overloads are not usable when a module"):
                 a = torch.jit.script(W2())
 
     def test_narrow_copy(self):
@@ -15378,7 +15386,7 @@ dedent """
                 if isinstance(item, list):
                     return is_tensor_value(item[0])
                 return False
-            for name, value, the_type in self.get_pickle_values():
+            for name, value, _the_type in self.get_pickle_values():
                 if is_tensor_value(value):
                     continue
                 self.assertEqual(value, getattr(loaded, "_" + name))
@@ -15606,7 +15614,7 @@ dedent """
                 a = hasattr(self, "fee")
                 b = hasattr(self, "foo")
                 c = hasattr(self, "hi")
-                d = hasattr(self, "nonexistant")
+                d = hasattr(self, "nonexistent")
                 return (a, b, c, d)
 
             def foo(self):
@@ -15749,7 +15757,7 @@ dedent """
         def fn(d):
             # type: (Dict[str, int]) -> List[int]
             out = [1]
-            for i in range(d["hi"] if "hi" in d else 6):
+            for i in range(d.get("hi", 6)):
                 out.append(i)  # noqa: PERF402
             return out
 
@@ -15759,7 +15767,7 @@ dedent """
     def test_for_else(self):
         def fn():
             c = 0
-            for i in range(4):
+            for _ in range(4):
                 c += 10
             else:
                 print("In else block of for...else")
@@ -16044,7 +16052,7 @@ EXCLUDE_TYPE_CHECK = {
 # chunk returns a list in scripting and we don't unpack the list,
 # Thus it won't be replaced by ConstantChunk and run AD.
 # It's explicitly checked in test_chunk_constant_script_ad
-# Similary for split, it's replaced by split_with_sizes in tracing,
+# Similarly for split, it's replaced by split_with_sizes in tracing,
 # but we don't have AD formula for aten::split(Tensor, int[], int),
 # an op registered in JIT so AD is not triggered in scripting.
 EXCLUDE_SCRIPT_AD_CHECK = {
@@ -16095,7 +16103,7 @@ M = 10
 S = 5
 
 def add_nn_module_test(*args, **kwargs):
-    no_grad = False if 'no_grad' not in kwargs else kwargs['no_grad']
+    no_grad = kwargs.get('no_grad', False)
 
     if 'desc' in kwargs and 'eval' in kwargs['desc']:
         # eval() is not supported, so skip these tests
@@ -16262,8 +16270,10 @@ for test in criterion_tests:
     add_nn_module_test(**test)
 
 if __name__ == '__main__':
-    TestCase._default_dtype_check_enabled = True
-    run_tests()
-    import jit.test_module_interface
-    suite = unittest.findTestCases(jit.test_module_interface)
-    unittest.TextTestRunner().run(suite)
+    if sys.version_info < (3, 14):
+        TestCase._default_dtype_check_enabled = True
+        run_tests()
+        import jit.test_module_interface
+
+        suite = unittest.findTestCases(jit.test_module_interface)
+        unittest.TextTestRunner().run(suite)

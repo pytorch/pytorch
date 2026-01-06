@@ -33,7 +33,9 @@ class Vectorized<c10::complex<float>> {
   static constexpr size_type size() {
     return 4;
   }
-  Vectorized() {}
+  Vectorized() {
+    values = _mm256_setzero_ps();
+  }
   Vectorized(__m256 v) : values(v) {}
   Vectorized(c10::complex<float> val) {
     float real_value = val.real();

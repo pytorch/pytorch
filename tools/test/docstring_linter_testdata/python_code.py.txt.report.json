@@ -9,9 +9,9 @@
     "index": 0,
     "is_local": false,
     "is_method": false,
-    "line_count": 4,
+    "line_count": 3,
     "parent": null,
-    "start_line": 2
+    "start_line": 1
   },
   {
     "category": "class",
@@ -23,9 +23,9 @@
     "index": 1,
     "is_local": false,
     "is_method": false,
-    "line_count": 3,
+    "line_count": 2,
     "parent": null,
-    "start_line": 7
+    "start_line": 6
   },
   {
     "category": "class",
@@ -39,9 +39,9 @@
     "index": 2,
     "is_local": false,
     "is_method": false,
-    "line_count": 6,
+    "line_count": 5,
     "parent": null,
-    "start_line": 11
+    "start_line": 10
   },
   {
     "category": "def",
@@ -53,9 +53,9 @@
     "index": 3,
     "is_local": false,
     "is_method": true,
-    "line_count": 3,
+    "line_count": 2,
     "parent": 2,
-    "start_line": 14
+    "start_line": 13
   },
   {
     "category": "class",
@@ -69,9 +69,9 @@
     "index": 4,
     "is_local": false,
     "is_method": false,
-    "line_count": 4,
+    "line_count": 5,
     "parent": null,
-    "start_line": 20
+    "start_line": 17
   },
   {
     "category": "def",
@@ -83,9 +83,9 @@
     "index": 5,
     "is_local": false,
     "is_method": true,
-    "line_count": 3,
+    "line_count": 2,
     "parent": 4,
-    "start_line": 21
+    "start_line": 20
   },
   {
     "category": "class",
@@ -99,9 +99,9 @@
     "index": 6,
     "is_local": false,
     "is_method": false,
-    "line_count": 6,
+    "line_count": 5,
     "parent": null,
-    "start_line": 25
+    "start_line": 24
   },
   {
     "category": "def",
@@ -113,9 +113,9 @@
     "index": 7,
     "is_local": false,
     "is_method": true,
-    "line_count": 3,
+    "line_count": 2,
     "parent": 6,
-    "start_line": 28
+    "start_line": 27
   },
   {
     "category": "class",
@@ -129,9 +129,9 @@
     "index": 8,
     "is_local": false,
     "is_method": false,
-    "line_count": 6,
+    "line_count": 5,
     "parent": null,
-    "start_line": 32
+    "start_line": 31
   },
   {
     "category": "def",
@@ -143,9 +143,9 @@
     "index": 9,
     "is_local": false,
     "is_method": true,
-    "line_count": 3,
+    "line_count": 2,
     "parent": 8,
-    "start_line": 35
+    "start_line": 34
   },
   {
     "category": "def",
@@ -157,9 +157,9 @@
     "index": 10,
     "is_local": false,
     "is_method": false,
-    "line_count": 3,
+    "line_count": 5,
     "parent": null,
-    "start_line": 42
+    "start_line": 38
   },
   {
     "category": "def",
@@ -171,9 +171,9 @@
     "index": 11,
     "is_local": false,
     "is_method": false,
-    "line_count": 8,
+    "line_count": 7,
     "parent": null,
-    "start_line": 46
+    "start_line": 45
   },
   {
     "category": "def",
@@ -185,9 +185,9 @@
     "index": 12,
     "is_local": false,
     "is_method": false,
-    "line_count": 3,
+    "line_count": 6,
     "parent": null,
-    "start_line": 59
+    "start_line": 54
   },
   {
     "category": "class",
@@ -204,9 +204,9 @@
     "index": 13,
     "is_local": false,
     "is_method": false,
-    "line_count": 15,
+    "line_count": 20,
     "parent": null,
-    "start_line": 69
+    "start_line": 62
   },
   {
     "category": "def",
@@ -222,9 +222,9 @@
     "index": 14,
     "is_local": false,
     "is_method": true,
-    "line_count": 12,
+    "line_count": 11,
     "parent": 13,
-    "start_line": 72
+    "start_line": 71
   },
   {
     "category": "def",
@@ -239,9 +239,9 @@
     "index": 15,
     "is_local": true,
     "is_method": false,
-    "line_count": 11,
+    "line_count": 10,
     "parent": 14,
-    "start_line": 73
+    "start_line": 72
   },
   {
     "category": "class",
@@ -255,7 +255,7 @@
     "is_method": false,
     "line_count": 6,
     "parent": 15,
-    "start_line": 74
+    "start_line": 73
   },
   {
     "category": "class",
@@ -267,9 +267,9 @@
     "index": 17,
     "is_local": true,
     "is_method": false,
-    "line_count": 3,
+    "line_count": 2,
     "parent": 15,
-    "start_line": 81
+    "start_line": 80
   },
   {
     "category": "class",
@@ -288,9 +288,9 @@
     "index": 18,
     "is_local": false,
     "is_method": false,
-    "line_count": 21,
+    "line_count": 19,
     "parent": null,
-    "start_line": 86
+    "start_line": 85
   },
   {
     "category": "def",
@@ -304,7 +304,7 @@
     "is_method": true,
     "line_count": 2,
     "parent": 18,
-    "start_line": 87
+    "start_line": 86
   },
   {
     "category": "def",
@@ -318,9 +318,9 @@
     "index": 20,
     "is_local": false,
     "is_method": true,
-    "line_count": 2,
+    "line_count": 6,
     "parent": 18,
-    "start_line": 97
+    "start_line": 92
   },
   {
     "category": "def",
@@ -334,7 +334,7 @@
     "is_method": true,
     "line_count": 2,
     "parent": 18,
-    "start_line": 100
+    "start_line": 99
   },
   {
     "category": "def",
@@ -346,9 +346,9 @@
     "index": 22,
     "is_local": false,
     "is_method": true,
-    "line_count": 4,
+    "line_count": 2,
     "parent": 18,
-    "start_line": 103
+    "start_line": 102
   },
   {
     "category": "def",
@@ -360,8 +360,8 @@
     "index": 23,
     "is_local": false,
     "is_method": false,
-    "line_count": 1,
+    "line_count": 6,
     "parent": null,
-    "start_line": 112
+    "start_line": 107
   }
 ]

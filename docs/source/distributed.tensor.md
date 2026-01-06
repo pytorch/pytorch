@@ -15,7 +15,7 @@ in the doc, but there might be API changes if necessary.
 
 PyTorch DTensor offers simple and flexible tensor sharding primitives that transparently handles distributed
 logic, including sharded storage, operator computation and collective communications across devices/hosts.
-`DTensor` could be used to build different paralleism solutions and support sharded state_dict representation
+`DTensor` could be used to build different parallelism solutions and support sharded state_dict representation
 when working with multi-dimensional sharding.
 
 Please see examples from the PyTorch native parallelism solutions that are built on top of `DTensor`:
@@ -88,6 +88,12 @@ DTensor supports the following types of {class}`Placement` on each {class}`Devic
 ```
 
 ```{eval-rst}
+.. autoclass:: _StridedShard
+  :members:
+  :undoc-members:
+```
+
+```{eval-rst}
 .. autoclass:: Replicate
   :members:
   :undoc-members:
@@ -95,6 +101,12 @@ DTensor supports the following types of {class}`Placement` on each {class}`Devic
 
 ```{eval-rst}
 .. autoclass:: Partial
+  :members:
+  :undoc-members:
+```
+
+```{eval-rst}
+.. autoclass:: _MaskPartial
   :members:
   :undoc-members:
 ```
@@ -179,6 +191,18 @@ specifying the {class}`DeviceMesh` and {class}`Placement` for the {class}`DTenso
 
 ```
 
+### Random Operations
+
+DTensor provides distributed RNG functionality to ensure that random operations on sharded tensors get unique values, and random operations on replicated tensors get the same values. This system requires that all participating
+ranks (e.g. SPMD ranks) start out using the same generator state before each dtensor random operation is performed,
+and if this is true, it ensures they all end up at the same state after each dtensor random operation completes. There is no communication performed during random operations to synchronize RNG states.
+
+Operators that accept a `generator` kwarg will utilize the user-passed generator, if passed, or the default generator for the device otherwise. Whichever generator is used, it will be advanced after the DTensor operation.  It is valid to use the same generator for both DTensor and non-DTensor operations, but care must be taken to ensure the non-DTensor operations advance the generator state equally on all ranks if so.
+
+When using DTensor together with Pipeline Parallelism, ranks for each pipeline stage should use a distinct seed, and ranks within a pipeline stage should use the same seed.
+
+DTensor's RNG infra is based on the philox based RNG algorithm, and supports any philox based backend (cuda, and other cuda-like devices), but unfortunately does not yet support the CPU backend.
+
 ## Debugging
 
 ```{eval-rst}
@@ -248,3 +272,73 @@ these features.
 ```{eval-rst}
 .. py:module:: torch.distributed.tensor.device_mesh
 ```
+
+## Mixed Tensor and DTensor operations
+
+So you got the following error message.
+```
+got mixed torch.Tensor and DTensor, need to convert all
+torch.Tensor to DTensor before calling distributed operators!
+```
+
+There are two cases.
+
+### Case 1: this is user error
+
+The most common way to run into this error is to create a regular Tensor
+(using a factory function) and then perform a Tensor-DTensor operation,
+like the following:
+
+```
+tensor = torch.arange(10)
+return tensor + dtensor
+```
+
+We disallow mixed Tensor-DTensor operations: if the input to any operations
+(e.g. torch.add) is a DTensor, then all Tensor inputs must be DTensors.
+This is because the semantics are ambiguous. We don't know if `tensor` is
+the same across ranks or if it is different so we ask that the user
+figure out how to construct a DTensor with accurate placements from `tensor`.
+
+If each rank does have the same `tensor`, then please construct a replicated
+DTensor:
+
+```
+tensor = torch.arange(10)
+tensor = DTensor.from_local(tensor, placements=(Replicate(),))
+return tensor + dtensor
+```
+
+If you wanted to create a DTensor with shards, below is how to do it.
+Semantically this means that your Tensor data is split between the shards
+and that operations act on the "full stacked data".
+
+```
+tensor = torch.full([], RANK)
+tensor = DTensor.from_local(tensor, placements=(Shard(0),))
+return tensor + dtensor
+```
+
+There are other things you may wish to do with your tensor beyond
+these situations (these are not the only two options!).
+
+## Case 2: the error came from PyTorch framework code
+
+Sometimes the problem is that PyTorch framework code attempts to perform mixed
+Tensor-DTensor operations. These are bugs in PyTorch, please file an issue
+so that we can fix them.
+
+On the user side, the only thing you can do is to avoid using the operation
+that caused the issue and file a bug report.
+
+For PyTorch Developers: one approach of fixing this is to rewrite PyTorch
+framework code to avoid mixed Tensor-DTensor code (like in the previous section).
+
+For PyTorch Developers: the second approach is to turn on DTensor implicit
+replication inside the right places in PyTorch framework code.
+When on, any mixed Tensor-DTensor operations will assume that the
+non-DTensors can be replicated. Please be careful when using this as it
+can lead to silent incorrectness.
+
+- [Turning on implicit replication in Python](https://github.com/pytorch/pytorch/blob/d8e6b2fddc54c748d976e8f0ebe4b63ebe36d85b/torch/distributed/tensor/experimental/__init__.py#L15)
+- [Turning on implicit replication in C++](https://github.com/pytorch/pytorch/blob/7a0f93344e2c851b9bcf2b9c3225a323d48fde26/aten/src/ATen/DTensorState.h#L10)

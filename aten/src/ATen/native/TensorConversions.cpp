@@ -67,7 +67,7 @@ namespace at::native {
 namespace {
 // dense_to_sparse_{csr,bsr,csc,bsc} common helpers
 
-// Preparation fo the N-D dense -> sparse compressed conversion.
+// Preparation for the N-D dense -> sparse compressed conversion.
 // The N-D input is converted to 3-D (single batch dim) where we check that the
 // product of batch dims is nonzero and for each batch the sparse matrix
 // contained within has the same number of non-zero elements.

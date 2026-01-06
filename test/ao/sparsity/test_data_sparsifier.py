@@ -1,4 +1,4 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["module: sparse"]
 
 import copy
 import itertools
@@ -123,7 +123,7 @@ class _BaseDataSparsiferTestCase(TestCase):
 
         step_count = 3
 
-        for _ in range(0, step_count):
+        for _ in range(step_count):
             sparsifier.step()
         for some_data in all_data:
             name, data, _ = self._get_name_data_config(some_data)
@@ -208,7 +208,7 @@ class _BaseDataSparsiferTestCase(TestCase):
         assert len(sparsifier1.data_groups) == len(sparsifier2.data_groups)
 
         state1 = state_dict1["state"]
-        for name in state1.keys():
+        for name in state1:
             # compare mask
             assert name in sparsifier2.state
             assert "mask" in sparsifier2.state[name]
@@ -265,7 +265,7 @@ class _BaseDataSparsiferTestCase(TestCase):
 class _NormDataSparsifierTestCase(_BaseDataSparsiferTestCase):
     r"""This helper test class takes in any supported type of and runs some tests.
     This inherits the TestBaseDataSparsifierRuner wherein some functions are
-    over-ridden to take accomodate the specific sparsifier.
+    over-ridden to take accommodate the specific sparsifier.
     TODO: Change the structure by creating a separate test case class for each
           member function
     """
@@ -494,9 +494,7 @@ class TestBaseDataSparsifier(_BaseDataSparsiferTestCase):
         (
             emb1,
             emb2,
-        ) = nn.Embedding(
-            10, 3
-        ), nn.Embedding(20, 3)
+        ) = nn.Embedding(10, 3), nn.Embedding(20, 3)
         emb1_bag, emb2_bag = nn.EmbeddingBag(10, 3), nn.EmbeddingBag(20, 3)
 
         emb3, emb3_bag = nn.Embedding(15, 3), nn.EmbeddingBag(20, 3)
@@ -627,9 +625,7 @@ class TestNormDataSparsifiers(_NormDataSparsifierTestCase):
         (
             emb1,
             emb2,
-        ) = nn.Embedding(
-            10, 3
-        ), nn.Embedding(20, 3)
+        ) = nn.Embedding(10, 3), nn.Embedding(20, 3)
         emb1_bag, emb2_bag = nn.EmbeddingBag(10, 3), nn.EmbeddingBag(20, 3)
 
         emb3, emb3_bag = nn.Embedding(15, 3), nn.EmbeddingBag(20, 3)
@@ -714,15 +710,15 @@ class TestQuantizationUtils(TestCase):
             **sparse_config,
         )
 
-        assert type(model.emb1) == torch.ao.nn.quantized.modules.embedding_ops.Embedding
+        assert type(model.emb1) is torch.ao.nn.quantized.modules.embedding_ops.Embedding
         assert (
             type(model.embbag1)
-            == torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag
+            is torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag
         )
-        assert type(model.emb_seq[0] == nn.Embedding)
-        assert type(model.emb_seq[1] == nn.EmbeddingBag)
-        assert type(model.linear1) == nn.Linear
-        assert type(model.linear2) == nn.Linear
+        assert type(model.emb_seq[0] is nn.Embedding)
+        assert type(model.emb_seq[1] is nn.EmbeddingBag)
+        assert type(model.linear1) is nn.Linear
+        assert type(model.linear2) is nn.Linear
 
         dequant_emb1 = torch.dequantize(model.emb1.weight())
         dequant_embbag1 = torch.dequantize(model.embbag1.weight())
@@ -753,19 +749,21 @@ class TestQuantizationUtils(TestCase):
             model, DataNormSparsifier, sparsify_first=False, **sparse_config
         )
 
-        assert type(model.emb1) == torch.ao.nn.quantized.modules.embedding_ops.Embedding
+        assert type(model.emb1) is torch.ao.nn.quantized.modules.embedding_ops.Embedding
         assert (
             type(model.embbag1)
-            == torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag
+            is torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag
         )
-        assert type(
-            model.emb_seq[0] == torch.ao.nn.quantized.modules.embedding_ops.Embedding
+        assert (
+            type(model.emb_seq[0])
+            is torch.ao.nn.quantized.modules.embedding_ops.Embedding
         )
-        assert type(
-            model.emb_seq[1] == torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag
+        assert (
+            type(model.emb_seq[1])
+            is torch.ao.nn.quantized.modules.embedding_ops.EmbeddingBag
         )
-        assert type(model.linear1) == nn.Linear  # not quantized
-        assert type(model.linear2) == nn.Linear  # not quantized
+        assert type(model.linear1) is nn.Linear  # not quantized
+        assert type(model.linear2) is nn.Linear  # not quantized
 
         dequant_emb1 = torch.dequantize(model.emb1.weight())
         dequant_embbag1 = torch.dequantize(model.embbag1.weight())
@@ -774,7 +772,7 @@ class TestQuantizationUtils(TestCase):
 
         # higher threshold as quantization occurs before sparsity
         threshold = (
-            1  # zero points seem to have higher magnitude with sparsity occuring after
+            1  # zero points seem to have higher magnitude with sparsity occurring after
         )
 
         sl_emb1 = (torch.abs(dequant_emb1) < threshold).float().mean()

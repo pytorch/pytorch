@@ -1,5 +1,3 @@
-# This module contains functions that *will be allowed* by dynamo
-
 """
 This module contains utility functions that are explicitly allowed to be called during
 TorchDynamo compilation. These functions are carefully vetted to ensure they work
@@ -24,7 +22,8 @@ Key functionality groups:
 
 import functools
 import warnings
-from typing import Any, Callable, Optional, TYPE_CHECKING, TypeVar, Union
+from collections.abc import Callable
+from typing import Any, Optional, TYPE_CHECKING, TypeVar, Union
 from typing_extensions import deprecated, ParamSpec
 
 import torch
@@ -98,7 +97,9 @@ def wrap_numpy(f: Callable[_P, _R]) -> Callable[_P, _R]:
         args, kwargs = pytree.tree_map_only(
             torch.Tensor, lambda x: x.numpy(), (args, kwargs)
         )
+        # pyrefly: ignore [invalid-param-spec]
         out = f(*args, **kwargs)
+        # pyrefly: ignore [missing-attribute]
         return pytree.tree_map_only(np.ndarray, lambda x: torch.as_tensor(x), out)
 
     return wrap
@@ -195,15 +196,21 @@ def get_nonrecursive_disable_wrapper(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     # this function is in external_utils so that convert_frame doesn't skip it.
     @functools.wraps(fn)
     def nonrecursive_disable_wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
+        if torch.compiler.is_exporting():
+            raise RuntimeError(
+                "Non-recursive torch.compiler.disable is not supported with torch.export."
+            )
         return fn(*args, **kwargs)
 
     return nonrecursive_disable_wrapper
 
 
-def _dynamo_config_patch_proxy_dunder_call(
-    self: Any, func: Callable[_P, _R]
-) -> Callable[_P, _R]:
-    @functools.wraps(func)
+def wrap_dunder_call_ctx_manager(self: Any, func: Callable[_P, _R]) -> Callable[_P, _R]:
+    """
+    Apply self as a ctx manager around a call to func
+    """
+
+    # NOTE: do not functools.wraps(func) because we don't ever want this frame to be skipped!
     def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         with self:
             return func(*args, **kwargs)
@@ -229,23 +236,52 @@ def call_accumulate_grad(
     variable.grad = updated_grad[0]
 
 
-def wrap_inline_with_set_fullgraph(
-    fn: Callable[_P, _R], fullgraph: bool
+def wrap_inline_with_error_on_graph_break(
+    fn: Callable[_P, _R], error_on_graph_break: bool
 ) -> Callable[_P, _R]:
     # NB: need multiple definitions in order to prevent `fullgraph` from
     # being a freevar of wrapper
-    if fullgraph:
+    # NOTE: do not functools.wraps(fn) because we don't ever want these wrappers to be skipped!
+    if error_on_graph_break:
 
-        @functools.wraps(fn)
         def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
-            with torch._dynamo.set_fullgraph(True):
+            with torch._dynamo.error_on_graph_break(True):
                 return fn(*args, **kwargs)
 
     else:
 
-        @functools.wraps(fn)
         def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> _R:
-            with torch._dynamo.set_fullgraph(False):
+            with torch._dynamo.error_on_graph_break(False):
                 return fn(*args, **kwargs)
 
     return wrapper
+
+
+def filter_out_const_values(tup: tuple[Any, ...], masks: list[bool]) -> tuple[Any, ...]:
+    """
+    masks is a list of bools, where True means the corresponding element in tup
+    is a const value. Filter out the const values.
+    """
+    out = []
+    for mask_idx, mask in enumerate(masks):
+        if not mask:
+            out.append(tup[mask_idx])
+    return tuple(out)
+
+
+def insert_const_values_with_mask(
+    tup: tuple[Any, ...], masks: list[bool], values: tuple[Any, ...]
+) -> tuple[Any, ...]:
+    """
+    masks and values are of same length. For indices where the mask is True, use
+    the const_values to fill in.
+    """
+    out = []
+    idx = 0
+    for mask_idx, mask in enumerate(masks):
+        if mask:
+            out.append(values[mask_idx])
+        else:
+            out.append(tup[idx])
+            idx += 1
+    return tuple(out)

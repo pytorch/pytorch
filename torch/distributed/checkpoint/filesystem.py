@@ -11,13 +11,13 @@ import threading
 import uuid
 import warnings
 from abc import ABC, abstractmethod
-from collections.abc import Generator, Iterable, Iterator, Sequence
+from collections.abc import Callable, Generator, Iterable, Iterator, Sequence
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import Enum
 from io import UnsupportedOperation
 from pathlib import Path
-from typing import Any, Callable, cast, IO, Optional, Union
+from typing import Any, cast, Final, IO
 
 # introduced as collections.abc.Buffer in Python 3.12
 from typing_extensions import Buffer
@@ -29,6 +29,13 @@ from torch.distributed._shard._utils import narrow_tensor_by_index
 from torch.distributed.checkpoint._extension import (
     ExtensionRegistry,
     StreamTransformExtension,
+)
+from torch.distributed.checkpoint._hf_utils import (
+    CUSTOM_METADATA_KEY,
+    DCP_VERSION_KEY,
+    FORMAT_KEY,
+    FORMAT_VALUE,
+    HF_DCP_VERSION,
 )
 from torch.distributed.checkpoint.metadata import Metadata, STATE_DICT_TYPE, StorageMeta
 from torch.distributed.checkpoint.planner import (
@@ -61,6 +68,8 @@ __all__ = [
 
 _metadata_fn: str = ".metadata"
 
+CURRENT_DCP_VERSION: Final[str] = "1.0.0"
+
 
 @dataclass
 class _StorageInfo:
@@ -69,7 +78,7 @@ class _StorageInfo:
     relative_path: str
     offset: int
     length: int
-    transform_descriptors: Optional[Sequence[str]] = None
+    transform_descriptors: Sequence[str] | None = None
 
     def __getstate__(self):
         return {k: v for k, v in self.__dict__.items() if v is not None}
@@ -133,7 +142,7 @@ class _OverlappingCpuLoader(_TensorLoader):
     def __init__(
         self,
         resolve_fun: Callable,
-        stream: Optional[torch.Stream] = None,
+        stream: torch.Stream | None = None,
         inflight_threshhold: int = 1_000_000,
     ) -> None:
         self.resolve_fun = resolve_fun
@@ -192,7 +201,8 @@ class _OverlappingCpuLoader(_TensorLoader):
                 self.in_flight_data += tensor.numel() * tensor.element_size()
 
     def _finish(self) -> Iterable[tuple[torch.Tensor, object]]:
-        assert self._done
+        if not self._done:
+            raise AssertionError("_finish called before all items were processed")
         if len(self.current_items) > 0:
             self.stream.synchronize()
         return self.current_items
@@ -227,7 +237,7 @@ class _StorageWriterTransforms:
     """
 
     def __init__(
-        self, extensions: Optional[Sequence[StreamTransformExtension]] = None
+        self, extensions: Sequence[StreamTransformExtension] | None = None
     ) -> None:
         """
         If the extensions arg is None, this means the implementation
@@ -272,7 +282,8 @@ class _StorageWriterTransforms:
 
 def _item_size(item: WriteItem) -> int:
     size = 1
-    assert item.tensor_data is not None
+    if item.tensor_data is None:
+        raise AssertionError("WriteItem tensor_data must not be None")
     # can't use math.prod as PT needs to support older python
     for s in item.tensor_data.size:
         size *= s
@@ -308,7 +319,7 @@ def _split_by_size_and_type(bins: int, items: list[WriteItem]) -> list[list[Writ
 def _write_item(
     transforms: _StorageWriterTransforms,
     stream: io.IOBase,
-    data: Union[io.BytesIO, torch.Tensor],
+    data: io.BytesIO | torch.Tensor,
     write_item: WriteItem,
     storage_key: str,
     serialization_format: SerializationFormat,
@@ -320,11 +331,16 @@ def _write_item(
     )
 
     if write_item.type == WriteItemType.BYTE_IO:
-        assert isinstance(data, io.BytesIO)
+        if not isinstance(data, io.BytesIO):
+            raise AssertionError("Data must be io.BytesIO for BYTE_IO write items")
         transform_to.write(data.getbuffer())
     else:
-        assert isinstance(data, torch.Tensor)
-        assert data.device == torch.device("cpu")
+        if not isinstance(data, torch.Tensor):
+            raise AssertionError(
+                "Data must be torch.Tensor for non-BYTE_IO write items"
+            )
+        if data.device != torch.device("cpu"):
+            raise AssertionError("Tensor must be on CPU device")
         if serialization_format == SerializationFormat.TORCH_SAVE:
             torch.save(data, transform_to)
 
@@ -375,7 +391,7 @@ def _write_files_from_queue(
             custom_device_mod = getattr(torch, custom_backend_name, None)
 
             # TODO: Using the OverlappingCpuLoader with multiple threads creates significant
-            # performance degredation, observed as being related to cuda stream syncs. We
+            # performance degradation, observed as being related to cuda stream syncs. We
             # should try to fix this and use _OverlappingCpuLoader for all threaded cases
             if (
                 thread_count == 1
@@ -419,7 +435,8 @@ def _write_files_from_queue(
                 tensor_dict = {}
                 metadata_dict = {}
                 for tensor, write_item in loader.values():
-                    assert tensor.is_cpu
+                    if not tensor.is_cpu:
+                        raise AssertionError("Tensor must be on CPU")
                     write_results.append(
                         _write_item(
                             transforms,
@@ -442,8 +459,9 @@ def _write_files_from_queue(
                         save(
                             tensor_dict,
                             metadata={
-                                "DCP_SHARDING_INFO": json.dumps(metadata_dict),
-                                "DCP_VERSION": "1.0",
+                                CUSTOM_METADATA_KEY: json.dumps(metadata_dict),
+                                DCP_VERSION_KEY: str(HF_DCP_VERSION),
+                                FORMAT_KEY: FORMAT_VALUE,
                             },
                         )
                     )
@@ -463,73 +481,67 @@ class FileSystemBase(ABC):
     @contextmanager
     @abstractmethod
     def create_stream(
-        self, path: Union[str, os.PathLike], mode: str
+        self, path: str | os.PathLike, mode: str
     ) -> Generator[io.IOBase, None, None]: ...
 
     @abstractmethod
     def concat_path(
-        self, path: Union[str, os.PathLike], suffix: str
-    ) -> Union[str, os.PathLike]: ...
+        self, path: str | os.PathLike, suffix: str
+    ) -> str | os.PathLike: ...
 
     @abstractmethod
-    def rename(
-        self, path: Union[str, os.PathLike], new_path: Union[str, os.PathLike]
-    ) -> None: ...
+    def rename(self, path: str | os.PathLike, new_path: str | os.PathLike) -> None: ...
 
     @abstractmethod
-    def init_path(self, path: Union[str, os.PathLike]) -> Union[str, os.PathLike]: ...
+    def init_path(self, path: str | os.PathLike) -> str | os.PathLike: ...
 
     @abstractmethod
-    def mkdir(self, path: Union[str, os.PathLike]) -> None: ...
+    def mkdir(self, path: str | os.PathLike) -> None: ...
 
     @classmethod
     @abstractmethod
-    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool: ...
+    def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool: ...
 
     @abstractmethod
-    def exists(self, path: Union[str, os.PathLike]) -> bool: ...
+    def exists(self, path: str | os.PathLike) -> bool: ...
 
     @abstractmethod
-    def rm_file(self, path: Union[str, os.PathLike]) -> None: ...
+    def rm_file(self, path: str | os.PathLike) -> None: ...
 
 
 class FileSystem(FileSystemBase):
     @contextmanager
     def create_stream(
-        self, path: Union[str, os.PathLike], mode: str
+        self, path: str | os.PathLike, mode: str
     ) -> Generator[io.IOBase, None, None]:
         if not isinstance(path, Path):
             path = Path(path)
         with path.open(mode) as stream:
             yield cast(io.IOBase, stream)
 
-    def concat_path(
-        self, path: Union[str, os.PathLike], suffix: str
-    ) -> Union[str, os.PathLike]:
+    def concat_path(self, path: str | os.PathLike, suffix: str) -> str | os.PathLike:
         if not isinstance(path, Path):
             path = Path(path)
         return path / suffix
 
-    def init_path(self, path: Union[str, os.PathLike]) -> Union[str, os.PathLike]:
+    def init_path(self, path: str | os.PathLike) -> str | os.PathLike:
         if not isinstance(path, Path):
             path = Path(path)
         return path
 
-    def rename(
-        self, path: Union[str, os.PathLike], new_path: Union[str, os.PathLike]
-    ) -> None:
+    def rename(self, path: str | os.PathLike, new_path: str | os.PathLike) -> None:
         if not isinstance(path, Path):
             path = Path(path)
 
         path.rename(cast(Path, new_path))
 
-    def mkdir(self, path: Union[str, os.PathLike]) -> None:
+    def mkdir(self, path: str | os.PathLike) -> None:
         if not isinstance(path, Path):
             path = Path(path)
         path.mkdir(parents=True, exist_ok=True)
 
     @classmethod
-    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+    def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:
         if isinstance(checkpoint_id, Path):
             return True
 
@@ -542,17 +554,17 @@ class FileSystem(FileSystemBase):
 
         return False
 
-    def exists(self, path: Union[str, os.PathLike]) -> bool:
+    def exists(self, path: str | os.PathLike) -> bool:
         if not isinstance(path, Path):
             path = Path(path)
         return path.exists()
 
-    def rm_file(self, path: Union[str, os.PathLike]) -> None:
+    def rm_file(self, path: str | os.PathLike) -> None:
         if not isinstance(path, Path):
             path = Path(path)
         path.unlink()
 
-    def ls(self, path: Union[str, os.PathLike]) -> list[str]:
+    def ls(self, path: str | os.PathLike) -> list[str]:
         if not isinstance(path, Path):
             path = Path(path)
         return [str(p) for p in path.iterdir()]
@@ -574,13 +586,13 @@ class _FileSystemWriter(StorageWriter):
 
     def __init__(
         self,
-        path: Union[str, os.PathLike],
+        path: str | os.PathLike,
         single_file_per_rank: bool = True,
         sync_files: bool = True,
         thread_count: int = 1,
         per_thread_copy_ahead: int = 10_000_000,
         overwrite: bool = True,
-        _extensions: Optional[Sequence[StreamTransformExtension]] = None,
+        _extensions: Sequence[StreamTransformExtension] | None = None,
         serialization_format: SerializationFormat = SerializationFormat.TORCH_SAVE,
         *args: Any,
         **kwargs: Any,
@@ -610,32 +622,56 @@ class _FileSystemWriter(StorageWriter):
         self.overwrite = overwrite
         self.transforms = _StorageWriterTransforms(_extensions)
         self.serialization_format = serialization_format
+        self.rank: int | None = None
+        self.use_collectives: bool = True
 
-    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+    def reset(self, checkpoint_id: str | os.PathLike | None = None) -> None:
         if checkpoint_id:
             self.path = self.fs.init_path(checkpoint_id)
         self.save_id = _generate_uuid()
 
-    def set_up_storage_writer(self, is_coordinator: bool) -> None:
-        pass
+    def set_up_storage_writer(
+        self, is_coordinator: bool, *args: Any, **kwargs: Any
+    ) -> None:
+        self.rank = kwargs.get("rank")
+        self.use_collectives = kwargs.get("use_collectives", True)
+
+    def _metadata_exists(self) -> bool:
+        if self.use_collectives:
+            # A global checkpoint metadata file
+            metadata_path = self._get_metadata_path(rank=None)
+        else:
+            # A rank 0 specific metadata file if every rank has written its own metadata
+            # Just looking for lowest rank metadata file is sufficient
+            metadata_path = self._get_metadata_path(rank=0)
+
+        return self.fs.exists(metadata_path)
 
     def prepare_local_plan(self, plan: SavePlan) -> SavePlan:
         self.fs.mkdir(self.path)
-        if self.fs.exists(self.metadata_path):
+        if self._metadata_exists():
             if self.overwrite:
                 warnings.warn(
-                    f"Detected an existing checkpoint in {self.metadata_path}, overwriting since {self.overwrite=}."
+                    f"Detected an existing checkpoint in {self.path}, overwriting since {self.overwrite=}."
                     " Past version 2.5 of PyTorch, `overwrite` will default to False. Set this variable to True to"
-                    " maintain this functionality or False to raise when an existing checkpoint is found."
+                    " maintain this functionality or False to raise when an existing checkpoint is found.",
+                    stacklevel=2,
                 )
             else:
                 raise RuntimeError(f"Checkpoint already exists and {self.overwrite=}.")
+
+        if self.rank is not None and not self.use_collectives:
+            plan = dataclasses.replace(
+                plan, storage_data=_StoragePrefix(f"__{self.rank}_")
+            )
 
         return plan
 
     def prepare_global_plan(self, plans: list[SavePlan]) -> list[SavePlan]:
         new_plans = [
             dataclasses.replace(plan, storage_data=_StoragePrefix(f"__{i}_"))
+            if plan.storage_data is None
+            else plan
             for i, plan in enumerate(plans)
         ]
         return new_plans
@@ -719,14 +755,20 @@ class _FileSystemWriter(StorageWriter):
             return fut
 
     def finish(self, metadata: Metadata, results: list[list[WriteResult]]) -> None:
+        metadata = dataclasses.replace(metadata, version=CURRENT_DCP_VERSION)
+
         storage_md = {}
         for wr_list in results:
             storage_md.update({wr.index: wr.storage_data for wr in wr_list})
         metadata.storage_data = storage_md
 
         metadata.storage_meta = self.storage_meta()
-
-        tmp_path = cast(Path, self.fs.concat_path(self.path, f"{_metadata_fn}.tmp"))
+        tmp_filename = (
+            f"__{self.rank}{_metadata_fn}.tmp"
+            if not self.use_collectives and self.rank is not None
+            else f"{_metadata_fn}.tmp"
+        )
+        tmp_path = cast(Path, self.fs.concat_path(self.path, tmp_filename))
         with self.fs.create_stream(tmp_path, "wb") as metadata_file:
             pickle.dump(metadata, metadata_file)
             if self.sync_files:
@@ -736,27 +778,32 @@ class _FileSystemWriter(StorageWriter):
                     os.sync()
 
         # delete in-case other checkpoints were present.
-        if self.fs.exists(self.metadata_path):
-            self.fs.rm_file(self.metadata_path)
+        if not self.use_collectives and self.rank is not None:
+            metadata_path = self._get_metadata_path(self.rank)
+        else:
+            metadata_path = self._get_metadata_path()
 
-        self.fs.rename(tmp_path, self.metadata_path)
+        if self.fs.exists(metadata_path):
+            self.fs.rm_file(metadata_path)
 
-    def storage_meta(self) -> Optional[StorageMeta]:
+        self.fs.rename(tmp_path, metadata_path)
+
+    def storage_meta(self) -> StorageMeta | None:
         return StorageMeta(checkpoint_id=self.checkpoint_id, save_id=self.save_id)
 
-    @property
-    def metadata_path(self) -> Union[str, os.PathLike]:
-        return cast(Path, self.fs.concat_path(self.path, _metadata_fn))
+    def _get_metadata_path(self, rank: int | None = None) -> os.PathLike:
+        filename = f"{_metadata_fn}" if rank is None else f"__{rank}{_metadata_fn}"
+        return cast(Path, self.fs.concat_path(self.path, filename))
 
     @property
-    def checkpoint_id(self) -> Union[str, os.PathLike]:
+    def checkpoint_id(self) -> str | os.PathLike:
         """
         return the checkpoint_id that will be used to save the checkpoint.
         """
         return self.path
 
     @classmethod
-    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+    def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:
         return FileSystem.validate_checkpoint_id(checkpoint_id)
 
 
@@ -767,7 +814,7 @@ class _StorageReaderTransforms:
     learning and gathering feedback.
     """
 
-    def __init__(self, extension_registry: Optional[ExtensionRegistry] = None) -> None:
+    def __init__(self, extension_registry: ExtensionRegistry | None = None) -> None:
         self.extension_registry = (
             ExtensionRegistry() if extension_registry is None else extension_registry
         )
@@ -789,8 +836,8 @@ class _StorageReaderTransforms:
 class FileSystemReader(StorageReader):
     def __init__(
         self,
-        path: Union[str, os.PathLike],
-        _extension_registry: Optional[ExtensionRegistry] = None,  # EXPERIMENTAL
+        path: str | os.PathLike,
+        _extension_registry: ExtensionRegistry | None = None,  # EXPERIMENTAL
     ) -> None:
         super().__init__()
         self.fs = FileSystem()
@@ -798,11 +845,13 @@ class FileSystemReader(StorageReader):
         self.storage_data: dict[Any, Any] = {}
         self.load_id = _generate_uuid()
         self.transforms = _StorageReaderTransforms(_extension_registry)
+        self.rank = None
+        self.use_collectives = True
 
     def _slice_file(self, file, sinfo: _StorageInfo) -> IO[bytes]:
         return cast(IO[bytes], _create_file_view(file, sinfo.offset, sinfo.length))
 
-    def reset(self, checkpoint_id: Union[str, os.PathLike, None] = None) -> None:
+    def reset(self, checkpoint_id: str | os.PathLike | None = None) -> None:
         self.storage_data = {}
         if checkpoint_id:
             self.path = self.fs.init_path(checkpoint_id)
@@ -857,9 +906,10 @@ class FileSystemReader(StorageReader):
                         )
                         target_tensor = planner.resolve_tensor(req).detach()
 
-                        assert target_tensor.size() == tensor.size(), (
-                            f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
-                        )
+                        if target_tensor.size() != tensor.size():
+                            raise AssertionError(
+                                f"req {req.storage_index} mismatch sizes {target_tensor.size()} vs {tensor.size()}"
+                            )
                         target_tensor.copy_(tensor)
                         planner.commit_tensor(req, target_tensor)
 
@@ -867,9 +917,14 @@ class FileSystemReader(StorageReader):
         fut.set_result(None)
         return fut
 
+    def _get_metadata_path(self, rank: int | None = None) -> os.PathLike:
+        filename = f"{_metadata_fn}" if rank is None else f"__{rank}{_metadata_fn}"
+        return cast(Path, self.fs.concat_path(self.path, filename))
+
     # Implementing the abstract function in StorageReader
-    def read_metadata(self) -> Metadata:
-        path = self.fs.concat_path(self.path, ".metadata")
+    def read_metadata(self, *args: Any, **kwargs: Any) -> Metadata:
+        rank = kwargs.get("rank")
+        path = self._get_metadata_path(rank)
         with self.fs.create_stream(path, "rb") as metadata_file:
             metadata = pickle.load(metadata_file)
 
@@ -879,9 +934,14 @@ class FileSystemReader(StorageReader):
 
         return metadata
 
-    def set_up_storage_reader(self, metadata: Metadata, is_coordinator: bool) -> None:
+    def set_up_storage_reader(
+        self, metadata: Metadata, is_coordinator: bool, *args: Any, **kwargs: Any
+    ) -> None:
         self.storage_data = metadata.storage_data
-        assert self.storage_data is not None
+        self.rank = kwargs.get("rank")
+        self.use_collectives = kwargs.get("use_collectives", True)
+        if self.storage_data is None:
+            raise AssertionError("storage_data must not be None in metadata")
 
     def prepare_local_plan(self, plan: LoadPlan) -> LoadPlan:
         return plan
@@ -890,14 +950,14 @@ class FileSystemReader(StorageReader):
         return plans
 
     @property
-    def checkpoint_id(self) -> Union[str, os.PathLike]:
+    def checkpoint_id(self) -> str | os.PathLike:
         """
         return the checkpoint_id that will be used to load the checkpoint.
         """
         return self.path
 
     @classmethod
-    def validate_checkpoint_id(cls, checkpoint_id: Union[str, os.PathLike]) -> bool:
+    def validate_checkpoint_id(cls, checkpoint_id: str | os.PathLike) -> bool:
         return FileSystem.validate_checkpoint_id(checkpoint_id)
 
 
@@ -911,20 +971,21 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
     * File creation is atomic
 
     The checkpoint consist of one file per write request plus
-    a `.metadata` file with the serialized metadata.
+    a global `.metadata` file with the serialized metadata if rank coordination is enabled.
+    a rank local `__{rank}.metadata` file with the serialized metadata if rank coordination is NOT enabled.
 
     """
 
     def __init__(
         self,
-        path: Union[str, os.PathLike],
+        path: str | os.PathLike,
         single_file_per_rank: bool = True,
         sync_files: bool = True,
         thread_count: int = 1,
         per_thread_copy_ahead: int = 10_000_000,
         cache_staged_state_dict: bool = False,
         overwrite: bool = True,
-        _extensions: Optional[Sequence[StreamTransformExtension]] = None,
+        _extensions: Sequence[StreamTransformExtension] | None = None,
         serialization_format: SerializationFormat = SerializationFormat.TORCH_SAVE,
     ) -> None:
         """
@@ -938,7 +999,7 @@ class FileSystemWriter(_FileSystemWriter, BlockingAsyncStager):
             per_thread_copy_ahead: How many bytes to copy from the GPU ahead of saving then. Default 10Mb.
             cache_staged_state_dict: Whether to cache the staged state_dict. This option decreases staging latency
                 at the cost of increases memory usage. Additionally, if this parameter is set to True, it's the expectation
-                that the stager is maintained and re-used for multiple dcp.async_save calls. Default to False.
+                that the stager is maintained and reused for multiple dcp.async_save calls. Default to False.
             overwrite: Whether to allow overwriting existing checkpoints. Defaults to True.
             _extensions: Extensions to apply to output streams (EXPERIMENTAL)
 

@@ -1,0 +1,11 @@
+ERROR
+  File "/home/oulgen/dev/pytorch/torch/_inductor/ops_handler.py", line 1038, in _default
+    return getattr(self._inner, name)(*args, **kwargs)
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "<string>", line 257, in masked
+  File "/home/oulgen/dev/pytorch/torch/_inductor/codegen/common.py", line 2571, in _default
+    value = getattr(self.parent_handler, name)(*args, **kwargs)
+            ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "/home/oulgen/dev/pytorch/torch/_inductor/ops_handler.py", line 120, in masked
+    raise NotImplementedError
+NotImplementedError

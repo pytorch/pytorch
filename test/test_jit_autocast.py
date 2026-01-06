@@ -4,13 +4,19 @@ import torch
 from torch.cuda.amp import autocast
 from typing import Optional
 
+import sys
 import unittest
-from test_jit import JitTestCase
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo
+from torch.testing._internal.common_utils import parse_cmd_line_args, run_tests, skipIfTorchDynamo
 from torch.testing import FileCheck
 from jit.test_models import MnistNet
 
+if __name__ == '__main__':
+    # The value of GRAPH_EXECUTOR depends on command line arguments so make sure they're parsed
+    # before instantiating tests.
+    parse_cmd_line_args()
+
+from test_jit import JitTestCase
 TEST_BFLOAT16 = TEST_CUDA and torch.cuda.is_bf16_supported()
 
 @skipIfTorchDynamo("Not a TorchDynamo suitable test")
@@ -106,7 +112,7 @@ class TestAutocast(JitTestCase):
     def test_runtime_autocast_state_expr(self):
         @torch.jit.script
         def fn(a, b):
-            with autocast(enabled=True if a[0][0] > 0.5 else False):
+            with autocast(enabled=bool((a[0][0] > 0.5).item())):
                 return torch.mm(a, b)
         # runtime values for autocast enable argument are not supported
         with self.assertRaises(RuntimeError):
@@ -319,7 +325,7 @@ class TestAutocast(JitTestCase):
 
     # TODO: fix and enable this test?
     #   (we could technically fix this, but is it really worth it?)
-    @unittest.skipIf(True, "unsuported autocast syntax")
+    @unittest.skipIf(True, "unsupported autocast syntax")
     def test_reused_autocast_expr(self):
         @torch.jit.script
         def fn(a, b, c, d):
@@ -956,4 +962,5 @@ class TestJitTraceAutocast(JitTestCase):
 
 
 if __name__ == "__main__":
-    run_tests()
+    if sys.version_info < (3, 14):
+        run_tests()

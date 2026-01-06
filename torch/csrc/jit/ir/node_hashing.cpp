@@ -1,22 +1,19 @@
 #include <torch/csrc/jit/ir/ir.h>
 
 #include <algorithm>
-#include <unordered_map>
 
-#include <ATen/core/functional.h>
 #include <ATen/core/symbol.h>
 #include <c10/util/Exception.h>
 #include <c10/util/hash.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/ir/node_hashing.h>
-#include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 
 namespace torch::jit {
 
 namespace {
 
 bool tensorEqual(const at::Tensor& lhs, const at::Tensor& rhs) {
-  // type_equal doesnt distinguish between mkldnn/pytorch cpu tensors,
+  // type_equal doesn't distinguish between mkldnn/pytorch cpu tensors,
   // and we dont want to coalesce mkldnn tensors bc they do layout
   // transformations based on usage
   if (lhs.is_mkldnn() || rhs.is_mkldnn()) {

@@ -3,8 +3,6 @@
 # Author: Pearu Peterson
 # Created: February 2020
 
-from typing import Optional
-
 import torch
 from torch import _linalg_utils as _utils, Tensor
 from torch.overrides import handle_torch_function, has_torch_function
@@ -57,7 +55,7 @@ def _polynomial_coefficients_given_roots(roots):
         # So the code below tries to circumvent the explicit root finding by series
         # of operations on memory copies imitating the Horner's method.
         # The memory copies are required to construct nodes in the computational graph
-        # by exploting the explicit (not in-place, separate node for each step)
+        # by exploiting the explicit (not in-place, separate node for each step)
         # recursion of the Horner's method.
         # Needs more memory, O(... * k^2), but with only O(... * k^2) complexity.
         poly_coeffs_new = poly_coeffs.clone() if roots.requires_grad else poly_coeffs
@@ -80,7 +78,7 @@ def _polynomial_value(poly, x, zero_power, transition):
                      poly[..., i] = (a_{i_0}, ..., a{i_n} (==1)), and
                      poly(x) = poly[..., 0] * zero_power + ... + poly[..., n] * x^n
 
-      x (Tensor): the value (possible batched) to evalate the polynomial `poly` at.
+      x (Tensor): the value (possible batched) to evaluate the polynomial `poly` at.
 
       zero_power (Tensor): the representation of `x^0`. It is application-specific.
 
@@ -168,7 +166,7 @@ def _symeig_backward_partial_eigenspace(D_grad, U_grad, A, D, U, largest):
     # of the characteristic polynomial.
     chr_poly_D = _polynomial_coefficients_given_roots(D)
 
-    # the code belows finds the explicit solution to the Sylvester equation
+    # the code below finds the explicit solution to the Sylvester equation
     # U_ortho^T A U_ortho dX - dX D = -U_ortho^T A U
     # and incorporates it into the whole gradient stored in the `res` variable.
     #
@@ -258,19 +256,19 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
     def forward(  # type: ignore[override]
         ctx,
         A: Tensor,
-        k: Optional[int] = None,
-        B: Optional[Tensor] = None,
-        X: Optional[Tensor] = None,
-        n: Optional[int] = None,
-        iK: Optional[Tensor] = None,
-        niter: Optional[int] = None,
-        tol: Optional[float] = None,
-        largest: Optional[bool] = None,
-        method: Optional[str] = None,
+        k: int | None = None,
+        B: Tensor | None = None,
+        X: Tensor | None = None,
+        n: int | None = None,
+        iK: Tensor | None = None,
+        niter: int | None = None,
+        tol: float | None = None,
+        largest: bool | None = None,
+        method: str | None = None,
         tracker: None = None,
-        ortho_iparams: Optional[dict[str, int]] = None,
-        ortho_fparams: Optional[dict[str, float]] = None,
-        ortho_bparams: Optional[dict[str, bool]] = None,
+        ortho_iparams: dict[str, int] | None = None,
+        ortho_fparams: dict[str, float] | None = None,
+        ortho_bparams: dict[str, bool] | None = None,
     ) -> tuple[Tensor, Tensor]:
         # makes sure that input is contiguous for efficiency.
         # Note: autograd does not support dense gradients for sparse input yet.
@@ -301,7 +299,7 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
         return D, U
 
     @staticmethod
-    def backward(ctx, D_grad, U_grad):
+    def backward(ctx, D_grad, U_grad):  # pyrefly: ignore  # bad-override
         A_grad = B_grad = None
         grads = [None] * 14
 
@@ -344,19 +342,19 @@ class LOBPCGAutogradFunction(torch.autograd.Function):
 
 def lobpcg(
     A: Tensor,
-    k: Optional[int] = None,
-    B: Optional[Tensor] = None,
-    X: Optional[Tensor] = None,
-    n: Optional[int] = None,
-    iK: Optional[Tensor] = None,
-    niter: Optional[int] = None,
-    tol: Optional[float] = None,
-    largest: Optional[bool] = None,
-    method: Optional[str] = None,
+    k: int | None = None,
+    B: Tensor | None = None,
+    X: Tensor | None = None,
+    n: int | None = None,
+    iK: Tensor | None = None,
+    niter: int | None = None,
+    tol: float | None = None,
+    largest: bool | None = None,
+    method: str | None = None,
     tracker: None = None,
-    ortho_iparams: Optional[dict[str, int]] = None,
-    ortho_fparams: Optional[dict[str, float]] = None,
-    ortho_bparams: Optional[dict[str, bool]] = None,
+    ortho_iparams: dict[str, int] | None = None,
+    ortho_fparams: dict[str, float] | None = None,
+    ortho_bparams: dict[str, bool] | None = None,
 ) -> tuple[Tensor, Tensor]:
     """Find the k largest (or smallest) eigenvalues and the corresponding
     eigenvectors of a symmetric positive definite generalized
@@ -391,9 +389,16 @@ def lobpcg(
       we do the following symmetrization map: `A -> (A + A.t()) / 2`.
       The map is performed only when the `A` requires gradients.
 
+    .. warning:: LOBPCG algorithm is not applicable when the number of `A`'s rows
+      is smaller than 3x the number of requested eigenpairs `n`.
+
     Args:
 
       A (Tensor): the input tensor of size :math:`(*, m, m)`
+
+      k (integer, optional): the number of requested
+                  eigenpairs. Default is the number of :math:`X`
+                  columns (when specified) or `1`.
 
       B (Tensor, optional): the input tensor of size :math:`(*, m,
                   m)`. When not specified, `B` is interpreted as
@@ -404,19 +409,21 @@ def lobpcg(
                   initial approximation of eigenvectors. X must be a
                   dense tensor.
 
-      iK (tensor, optional): the input tensor of size :math:`(*, m,
-                  m)`. When specified, it will be used as preconditioner.
-
-      k (integer, optional): the number of requested
-                  eigenpairs. Default is the number of :math:`X`
-                  columns (when specified) or `1`.
-
       n (integer, optional): if :math:`X` is not specified then `n`
                   specifies the size of the generated random
                   approximation of eigenvectors. Default value for `n`
-                  is `k`. If :math:`X` is specified, the value of `n`
-                  (when specified) must be the number of :math:`X`
-                  columns.
+                  is `k`. If :math:`X` is specified, any provided value of `n` is
+                  ignored and `n` is automatically set to the number of
+                  columns in :math:`X`.
+
+      iK (tensor, optional): the input tensor of size :math:`(*, m,
+                  m)`. When specified, it will be used as preconditioner.
+
+      niter (int, optional): maximum number of iterations. When
+                 reached, the iteration process is hard-stopped and
+                 the current approximation of eigenpairs is returned.
+                 For infinite iteration but until convergence criteria
+                 is met, use `-1`.
 
       tol (float, optional): residual tolerance for stopping
                  criterion. Default is `feps ** 0.5` where `feps` is
@@ -431,12 +438,6 @@ def lobpcg(
       method (str, optional): select LOBPCG method. See the
                  description of the function above. Default is
                  "ortho".
-
-      niter (int, optional): maximum number of iterations. When
-                 reached, the iteration process is hard-stopped and
-                 the current approximation of eigenpairs is returned.
-                 For infinite iteration but until convergence criteria
-                 is met, use `-1`.
 
       tracker (callable, optional) : a function for tracing the
                  iteration process. When specified, it is called at
@@ -581,25 +582,29 @@ def lobpcg(
 
 def _lobpcg(
     A: Tensor,
-    k: Optional[int] = None,
-    B: Optional[Tensor] = None,
-    X: Optional[Tensor] = None,
-    n: Optional[int] = None,
-    iK: Optional[Tensor] = None,
-    niter: Optional[int] = None,
-    tol: Optional[float] = None,
-    largest: Optional[bool] = None,
-    method: Optional[str] = None,
+    k: int | None = None,
+    B: Tensor | None = None,
+    X: Tensor | None = None,
+    n: int | None = None,
+    iK: Tensor | None = None,
+    niter: int | None = None,
+    tol: float | None = None,
+    largest: bool | None = None,
+    method: str | None = None,
     tracker: None = None,
-    ortho_iparams: Optional[dict[str, int]] = None,
-    ortho_fparams: Optional[dict[str, float]] = None,
-    ortho_bparams: Optional[dict[str, bool]] = None,
+    ortho_iparams: dict[str, int] | None = None,
+    ortho_fparams: dict[str, float] | None = None,
+    ortho_bparams: dict[str, bool] | None = None,
 ) -> tuple[Tensor, Tensor]:
     # A must be square:
-    assert A.shape[-2] == A.shape[-1], A.shape
+    if A.shape[-2] != A.shape[-1]:
+        raise AssertionError(f"A must be square, got shape {A.shape}")
     if B is not None:
         # A and B must have the same shapes:
-        assert A.shape == B.shape, (A.shape, B.shape)
+        if A.shape != B.shape:
+            raise AssertionError(
+                f"A and B must have same shape, got {A.shape} vs {B.shape}"
+            )
 
     dtype = _utils.get_floating_dtype(A)
     device = A.device
@@ -663,7 +668,10 @@ def _lobpcg(
             X_ = (
                 torch.randn((m, n), dtype=dtype, device=device) if bX is None else bX[i]
             )
-            assert len(X_.shape) == 2 and X_.shape == (m, n), (X_.shape, (m, n))
+            if not (len(X_.shape) == 2 and X_.shape == (m, n)):
+                raise AssertionError(
+                    f"X_ shape mismatch: got {X_.shape}, expected {(m, n)}"
+                )
             iparams["batch_index"] = i
             worker = LOBPCG(A_, B_, X_, iK, iparams, fparams, bparams, method, tracker)
             worker.run()
@@ -676,7 +684,8 @@ def _lobpcg(
         return bE.reshape(A.shape[:-2] + (k,)), bXret.reshape(A.shape[:-2] + (m, k))
 
     X = torch.randn((m, n), dtype=dtype, device=device) if X is None else X
-    assert len(X.shape) == 2 and X.shape == (m, n), (X.shape, (m, n))
+    if not (len(X.shape) == 2 and X.shape == (m, n)):
+        raise AssertionError(f"X shape mismatch: got {X.shape}, expected {(m, n)}")
 
     worker = LOBPCG(A, B, X, iK, iparams, fparams, bparams, method, tracker)
 
@@ -693,10 +702,10 @@ class LOBPCG:
 
     def __init__(
         self,
-        A: Optional[Tensor],
-        B: Optional[Tensor],
+        A: Tensor | None,
+        B: Tensor | None,
         X: Tensor,
-        iK: Optional[Tensor],
+        iK: Tensor | None,
         iparams: dict[str, int],
         fparams: dict[str, float],
         bparams: dict[str, bool],
@@ -794,9 +803,10 @@ class LOBPCG:
                 # strict ordering of eigenpairs
                 break
             count += 1
-        assert count >= prev_count, (
-            f"the number of converged eigenpairs (was {prev_count}, got {count}) cannot decrease"
-        )
+        if count < prev_count:
+            raise AssertionError(
+                f"the number of converged eigenpairs (was {prev_count}, got {count}) cannot decrease"
+            )
         self.ivars["converged_count"] = count
         self.tvars["rerr"] = rerr
         return count
@@ -1021,7 +1031,8 @@ class LOBPCG:
         # the exact zero columns here and then continue with the
         # original algorithm below.
         nz = torch.where(abs(d) != 0.0)
-        assert len(nz) == 1, nz
+        if len(nz) != 1:
+            raise AssertionError(f"expected nz to have length 1, got {nz}")
         if len(nz[0]) < len(d):
             U = U[:, nz[0]]
             if torch.numel(U) == 0:
@@ -1029,7 +1040,10 @@ class LOBPCG:
             UBU = _utils.qform(self.B, U)
             d = UBU.diagonal(0, -2, -1)
             nz = torch.where(abs(d) != 0.0)
-            assert len(nz[0]) == len(d)
+            if len(nz[0]) != len(d):
+                raise AssertionError(
+                    f"expected nz[0] length {len(d)}, got {len(nz[0])}"
+                )
 
         # The original algorithm 4 from [DuerschPhD2015].
         d_col = (d**-0.5).reshape(d.shape[0], 1)
@@ -1038,14 +1052,19 @@ class LOBPCG:
         t = tau * abs(E).max()
         if drop:
             keep = torch.where(E > t)
-            assert len(keep) == 1, keep
+            if len(keep) != 1:
+                raise AssertionError(f"expected keep to have length 1, got {keep}")
             E = E[keep[0]]
             Z = Z[:, keep[0]]
             d_col = d_col[keep[0]]
         else:
             E[(torch.where(E < t))[0]] = t
 
-        return torch.matmul(U * d_col.mT, Z * E**-0.5)
+        return torch.matmul(
+            U * d_col.mT,
+            # pyrefly: ignore [unsupported-operation]
+            Z * E**-0.5,
+        )
 
     def _get_ortho(self, U, V):
         """Return B-orthonormal U with columns are B-orthogonal to V.
@@ -1135,7 +1154,8 @@ class LOBPCG:
                 # TorchScript needs the class var to be assigned to a local to
                 # do optional type refinement
                 B = self.B
-                assert B is not None
+                if B is None:
+                    raise AssertionError("B must not be None")
                 raise ValueError(
                     "Overdetermined shape of U:"
                     f" #B-cols(={B.shape[-1]}) >= #U-cols(={U.shape[-1]}) + #V-cols(={V.shape[-1]}) must hold"

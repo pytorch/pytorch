@@ -126,7 +126,7 @@ void ImplicitCastForBinaryInplaceOps(Block* b) {
           originalInputs.at(0)->type()->cast<TensorType>();
       TensorTypePtr secondInp_tensor =
           originalInputs.at(1)->type()->cast<TensorType>();
-      if (!(firstInp_tensor) || !(secondInp_tensor) ||
+      if (!firstInp_tensor || !secondInp_tensor ||
           !(firstInp_tensor->scalarType().has_value())) {
         continue;
       }

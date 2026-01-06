@@ -8,7 +8,7 @@ import os
 from collections import defaultdict, namedtuple, OrderedDict
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Any, Callable, Literal, TYPE_CHECKING, TypeVar
+from typing import Any, Literal, TYPE_CHECKING, TypeVar
 from typing_extensions import assert_never
 
 import yaml
@@ -43,6 +43,8 @@ from torchgen.gen_functionalization_type import (
     gen_functionalization_definition,
     gen_functionalization_registration,
     gen_functionalization_view_inverse_declaration,
+    gen_functionalization_view_meta_classes_decl,
+    gen_functionalization_view_meta_classes_impl,
     GenCompositeViewCopyKernel,
 )
 from torchgen.gen_vmap_plumbing import gen_all_vmap_plumbing
@@ -94,7 +96,7 @@ from torchgen.yaml_utils import YamlDumper, YamlLoader
 
 
 if TYPE_CHECKING:
-    from collections.abc import Sequence
+    from collections.abc import Callable, Sequence
 
 
 T = TypeVar("T")
@@ -2215,7 +2217,7 @@ def gen_source_files(
     per_operator_headers: bool,
     skip_dispatcher_op_registration: bool,
     update_aoti_c_shim: bool,
-    aoti_backends: set[DispatchKey],
+    aoti_backends: set[DispatchKey | None],
     extend_aoti_c_shim: bool,
 ) -> None:
     extra_cuda_headers = """\
@@ -2492,48 +2494,48 @@ def gen_source_files(
         },
     )
 
+    def gen_op_headers(
+        g: NativeFunction | NativeFunctionsGroup | NativeFunctionsViewGroup,
+    ) -> list[str]:
+        if isinstance(g, NativeFunctionsViewGroup):
+            # view ops always get a functionalization kernel
+            headers = [
+                f"#include <ATen/ops/{g.view.root_name}_native.h>",
+                f"#include <ATen/ops/{g.view.root_name}_ops.h>",
+            ]
+            if g.view_copy is not None:
+                headers += [
+                    f"#include <ATen/ops/{g.view_copy.root_name}_native.h>",
+                    f"#include <ATen/ops/{g.view_copy.root_name}_ops.h>",
+                ]
+            return headers
+        elif isinstance(g, NativeFunctionsGroup):
+            headers = [
+                f"#include <ATen/ops/{g.functional.root_name}_native.h>",
+                f"#include <ATen/ops/{g.functional.root_name}_ops.h>",
+                f"#include <ATen/ops/{g.out.root_name}_native.h>",
+                f"#include <ATen/ops/{g.out.root_name}_ops.h>",
+            ]
+            if g.inplace is not None:
+                headers += [
+                    f"#include <ATen/ops/{g.inplace.root_name}_native.h>",
+                    f"#include <ATen/ops/{g.inplace.root_name}_ops.h>",
+                ]
+            if g.mutable is not None:
+                headers += [
+                    f"#include <ATen/ops/{g.mutable.root_name}_native.h>",
+                    f"#include <ATen/ops/{g.mutable.root_name}_ops.h>",
+                ]
+            return headers
+        else:
+            return [
+                f"#include <ATen/ops/{g.root_name}_native.h>",
+                f"#include <ATen/ops/{g.root_name}_ops.h>",
+            ]
+
     def functionalization_env_callable(
         g: NativeFunction | NativeFunctionsGroup | NativeFunctionsViewGroup,
     ) -> dict[str, list[str]]:
-        def gen_op_headers(
-            g: NativeFunction | NativeFunctionsGroup | NativeFunctionsViewGroup,
-        ) -> list[str]:
-            if isinstance(g, NativeFunctionsViewGroup):
-                # view ops always get a functionalization kernel
-                headers = [
-                    f"#include <ATen/ops/{g.view.root_name}_native.h>",
-                    f"#include <ATen/ops/{g.view.root_name}_ops.h>",
-                ]
-                if g.view_copy is not None:
-                    headers += [
-                        f"#include <ATen/ops/{g.view_copy.root_name}_native.h>",
-                        f"#include <ATen/ops/{g.view_copy.root_name}_ops.h>",
-                    ]
-                return headers
-            elif isinstance(g, NativeFunctionsGroup):
-                headers = [
-                    f"#include <ATen/ops/{g.functional.root_name}_native.h>",
-                    f"#include <ATen/ops/{g.functional.root_name}_ops.h>",
-                    f"#include <ATen/ops/{g.out.root_name}_native.h>",
-                    f"#include <ATen/ops/{g.out.root_name}_ops.h>",
-                ]
-                if g.inplace is not None:
-                    headers += [
-                        f"#include <ATen/ops/{g.inplace.root_name}_native.h>",
-                        f"#include <ATen/ops/{g.inplace.root_name}_ops.h>",
-                    ]
-                if g.mutable is not None:
-                    headers += [
-                        f"#include <ATen/ops/{g.mutable.root_name}_native.h>",
-                        f"#include <ATen/ops/{g.mutable.root_name}_ops.h>",
-                    ]
-                return headers
-            else:
-                return [
-                    f"#include <ATen/ops/{g.root_name}_native.h>",
-                    f"#include <ATen/ops/{g.root_name}_ops.h>",
-                ]
-
         return {
             "ops_headers": gen_op_headers(g),
             "func_definitions": gen_functionalization_definition(
@@ -2596,6 +2598,31 @@ def gen_source_files(
                     view_groups,
                 )
             )
+        },
+    )
+
+    cpu_fm.write(
+        "ViewMetaClasses.h",
+        lambda: {
+            "view_meta_declarations": list(
+                concatMap(
+                    lambda g: gen_functionalization_view_meta_classes_decl(selector, g),
+                    view_groups,
+                )
+            )
+        },
+    )
+
+    cpu_fm.write(
+        "ViewMetaClasses.cpp",
+        lambda: {
+            "view_meta_implementations": list(
+                concatMap(
+                    lambda g: gen_functionalization_view_meta_classes_impl(selector, g),
+                    view_groups,
+                )
+            ),
+            "op_headers": list(concatMap(gen_op_headers, view_groups)),
         },
     )
 
@@ -2824,15 +2851,42 @@ def main() -> None:
 
     from torchgen.model import dispatch_keys
 
+    # Only a limited set of dispatch keys get CPUFunctions.h headers generated
+    # for them; this is the set
+    functions_keys = {
+        DispatchKey.CPU,
+        DispatchKey.CUDA,
+        DispatchKey.CompositeImplicitAutograd,
+        DispatchKey.CompositeImplicitAutogradNestedTensor,
+        DispatchKey.CompositeExplicitAutograd,
+        DispatchKey.CompositeExplicitAutogradNonFunctional,
+        DispatchKey.Meta,
+        DispatchKey.MTIA,
+    }
+
+    aoti_backends = {
+        DispatchKey.CPU,
+        DispatchKey.CUDA,
+        # None will generate the aten shim based on aten_shimified_ops
+        # which does not bypass the dispatcher
+        None,
+    }
+
     # TODO: stop generating CUDA kernels for non-CUDA builds
     ignore_keys = set()
-    if not options.mps:
-        ignore_keys.add(DispatchKey.MPS)
 
-        if DispatchKey.MPS in dispatch_keys:
-            del dispatch_keys[dispatch_keys.index(DispatchKey.MPS)]
+    MPS_KEYS = {DispatchKey.MPS, DispatchKey.SparseMPS, DispatchKey.SparseCsrMPS}
+    if options.mps or options.update_aoti_c_shim:
+        functions_keys.update(MPS_KEYS)
+        aoti_backends.add(DispatchKey.MPS)
+    else:
+        ignore_keys.update(MPS_KEYS)
+        dispatch_keys[:] = [k for k in dispatch_keys if k not in MPS_KEYS]
 
-    if not options.xpu:
+    if options.xpu or options.update_aoti_c_shim:
+        functions_keys.add(DispatchKey.XPU)
+        aoti_backends.add(DispatchKey.XPU)
+    else:
         ignore_keys.add(DispatchKey.XPU)
 
         if DispatchKey.XPU in dispatch_keys:
@@ -2843,6 +2897,13 @@ def main() -> None:
 
         if DispatchKey.MTIA in dispatch_keys:
             del dispatch_keys[dispatch_keys.index(DispatchKey.MTIA)]
+
+    if options.backend_whitelist:
+        dispatch_keys = [
+            k
+            for k in dispatch_keys
+            if is_generic_dispatch_key(k) or str(k) in options.backend_whitelist
+        ]
 
     parsed_yaml = parse_native_yaml(native_yaml_path, tags_yaml_path, ignore_keys)
     valid_tags = _GLOBAL_PARSE_TAGS_YAML_CACHE[tags_yaml_path]
@@ -2892,45 +2953,6 @@ def main() -> None:
     device_fms = {"cuda": cuda_fm}
     if options.xpu:
         device_fms["xpu"] = make_file_manager(options=options)
-
-    # Only a limited set of dispatch keys get CPUFunctions.h headers generated
-    # for them; this is the set
-    functions_keys = {
-        DispatchKey.CPU,
-        DispatchKey.CUDA,
-        DispatchKey.CompositeImplicitAutograd,
-        DispatchKey.CompositeImplicitAutogradNestedTensor,
-        DispatchKey.CompositeExplicitAutograd,
-        DispatchKey.CompositeExplicitAutogradNonFunctional,
-        DispatchKey.Meta,
-        DispatchKey.MTIA,
-    }
-
-    aoti_backends = {
-        DispatchKey.CPU,
-        DispatchKey.CUDA,
-    }
-    if options.update_aoti_c_shim:
-        # When updating the shim we want to update all devices, but when just
-        # building/checking the headers, we only want to check the devices that
-        # are available.
-        aoti_backends.add(DispatchKey.XPU)
-        aoti_backends.add(DispatchKey.MPS)
-
-    if options.mps:
-        functions_keys.add(DispatchKey.MPS)
-        aoti_backends.add(DispatchKey.MPS)
-
-    if options.xpu:
-        functions_keys.add(DispatchKey.XPU)
-        aoti_backends.add(DispatchKey.XPU)
-
-    if options.backend_whitelist:
-        dispatch_keys = [
-            k
-            for k in dispatch_keys
-            if is_generic_dispatch_key(k) or str(k) in options.backend_whitelist
-        ]
 
     static_dispatch_idx: list[BackendIndex] = []
     if options.static_dispatch_backend:

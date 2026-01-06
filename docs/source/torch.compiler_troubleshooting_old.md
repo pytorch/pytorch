@@ -211,7 +211,7 @@ debugging. There are two tools available to enable this:
 If the error does not occur with the `"eager"` backend, then the
 backend compiler is the source of the error ([example
 error](https://gist.github.com/mlazos/2f13681e3cc6c43b3911f336327032de)).
-There are [different choices](./torch.compiler.md)
+There are [different choices](./user_guide/torch_compiler/torch.compiler.md)
 for backend compilers for TorchDynamo, with TorchInductor
 fitting the needs of most users. This section focuses on TorchInductor
 as the motivating example, but some tools can also be used with other
@@ -717,5 +717,5 @@ backtrace is slow and very spammy so it is not included by default with extended
 
 In order to measure the cold start compilation time or debug a cache corruption,
 it is possible pass `TORCHINDUCTOR_FORCE_DISABLE_CACHES=1` or set
-`torch._inductor.config.force_disable_caches = True` which will override any
+`torch.compiler.config.force_disable_caches = True` which will override any
 other caching config option and disable all compile time caching.

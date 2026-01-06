@@ -40,7 +40,7 @@ at::Tensor PackedLinearWeightQnnp::apply_dynamic_impl<false>(
       "quantized_sparse_linear(): Input tensor rank should be >= 2");
 
   const auto rows_input = c10::multiply_integers(input.sizes().begin(), input.sizes().end() - 1);
-  const auto cols_input = static_cast<int64_t>(input.size(input.dim() - 1));
+  const auto cols_input = input.size(input.dim() - 1);
   TORCH_CHECK(
       cols_input == input_channels_,
       "quantized_sparse_linear: Input tensor's last and weight tensor's"

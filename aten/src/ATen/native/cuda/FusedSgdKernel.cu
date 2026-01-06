@@ -62,7 +62,7 @@ struct FusedSgdMathFunctor {
       depth == 2 || depth == 3,
       "depth of 2 for SGD w/ momentum == 0, 3 for SGD w/ momentum != 0");
   C10_DEVICE __forceinline__ void operator()(
-      const int chunk_size,
+      const int64_t chunk_size,
       TensorListMetadata<depth>& tl,
       const double weight_decay,
       const double momentum,

@@ -12,37 +12,22 @@ PyTorch is an optimized tensor library for deep learning using GPUs and CPUs.
 
 Features described in this documentation are classified by release status:
 
-  *Stable:*  These features will be maintained long-term and there should generally
-  be no major performance limitations or gaps in documentation.
-  We also expect to maintain backwards compatibility (although
-  breaking changes can happen and notice will be given one release ahead
-  of time).
+**Stable (API-Stable):**
+These features will be maintained long-term and there should generally be no major performance limitations or gaps in documentation. We also expect to maintain backwards compatibility (although breaking changes can happen and notice will be given one release ahead of time).
 
-  *Beta:*  These features are tagged as Beta because the API may change based on
-  user feedback, because the performance needs to improve, or because
-  coverage across operators is not yet complete. For Beta features, we are
-  committing to seeing the feature through to the Stable classification.
-  We are not, however, committing to backwards compatibility.
-
-  *Prototype:*  These features are typically not available as part of
-  binary distributions like PyPI or Conda, except sometimes behind run-time
-  flags, and are at an early stage for feedback and testing.
+**Unstable (API-Unstable):**
+Encompasses all features that are under active development where APIs may change based on user feedback, requisite performance improvements or because coverage across operators is not yet complete.
+The APIs and performance characteristics of these features may change.
 
 ```{toctree}
 :glob:
 :maxdepth: 2
 
+Install PyTorch <https://pytorch.org/get-started/locally/>
+user_guide/index
 pytorch-api
 notes
-```
-
-```{toctree}
-:glob:
-:hidden:
-:maxdepth: 2
-
 community/index
-C++ <https://docs.pytorch.org/cppdocs/>
 ```
 
 ## Indices and tables

@@ -1,14 +1,17 @@
 # mypy: allow-untyped-defs
+import base64
 import contextlib
 import copy
+import hashlib
 import itertools
 import linecache
 import os
 import sys
 import traceback
 import warnings
+from collections.abc import Callable
 from pathlib import Path
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.nn as nn
@@ -17,7 +20,9 @@ from torch.nn.modules.module import _addindent
 from torch.package import Importer, PackageExporter, PackageImporter, sys_importer
 
 from ._compatibility import compatibility
+from .experimental import _config as fx_experimental_config
 from .graph import (
+    _BoxedCodeGen,
     _custom_builtins,
     _is_from_torch,
     _override_sym_repr,
@@ -30,11 +35,11 @@ from .graph import (
 __all__ = [
     "reduce_graph_module",
     "reduce_package_graph_module",
-    "reduce_deploy_graph_module",
     "GraphModule",
 ]
 
 _USER_PRESERVED_ATTRIBUTES_KEY = "_user_preserved_attributes"
+FX_GRAPH_MODULE_FILE_PREFIX = "fx_generated_"
 
 
 # Normal exec loses the source code, however we can work with
@@ -60,7 +65,13 @@ class _EvalCacheLoader:
 
         key = self._get_key()
         if co_fields:
-            key += f" from {co_fields['co_filename']}:{co_fields['co_firstlineno']} in {co_fields['co_name']}"
+            if "co_filename" in co_fields:
+                # If only co_filename is provided, use it directly as the key
+                if "co_firstlineno" not in co_fields or "co_name" not in co_fields:
+                    key = co_fields["co_filename"]
+                else:
+                    # Full co_fields with all three components
+                    key += f" from {co_fields['co_filename']}:{co_fields['co_firstlineno']} in {co_fields['co_name']}"
         self.eval_cache[key] = src
 
         # Don't mutate globals so that this loader is only used
@@ -147,18 +158,6 @@ def reduce_package_graph_module(
     return _deserialize_graph_module(forward, body)
 
 
-@compatibility(is_backward_compatible=True)
-def reduce_deploy_graph_module(
-    importer: PackageImporter, body: dict[Any, Any], import_block: str
-) -> torch.nn.Module:
-    ns = {}
-    ns["__builtins__"] = importer.patched_builtins
-    fn_src = body.get("_code")
-    assert fn_src is not None
-    forward = _forward_from_src(import_block + fn_src, ns)
-    return _deserialize_graph_module(forward, body)
-
-
 # We create a dummy class here because symbolic_trace pulls the forward()
 # function off of the class, rather than the instance. This class is used
 # in _deserialize_graph_module() below.
@@ -205,7 +204,7 @@ def _deserialize_graph_module(
     graph = KeepModules().trace(com, **tracer_extras)
 
     # Recover node.meta["stack_trace"] after re-tracing
-    node_meta_stack_trace = body.get("_graphmodule_graph_node_meta_stack_trace", None)
+    node_meta_stack_trace = body.get("_graphmodule_graph_node_meta_stack_trace")
     if node_meta_stack_trace is not None:
         del body["_graphmodule_graph_node_meta_stack_trace"]
         for node in graph.nodes:
@@ -322,6 +321,7 @@ def _print_readable(
     include_stride=False,
     include_device=False,
     colored=False,
+    expanded_def=False,
 ):
     graph = module.graph
     assert graph is not None and isinstance(graph, torch.fx.Graph), (
@@ -334,6 +334,7 @@ def _print_readable(
         include_stride=include_stride,
         include_device=include_device,
         colored=colored,
+        expanded_def=expanded_def,
     )
     module_code = verbose_python_code.src
     module_code = module_code.lstrip("\n")
@@ -360,6 +361,36 @@ def _print_readable(
     if print_output:
         print(module_code + submodule_code)
     return output
+
+
+def _metadata_hash(code: str, node_metadata: dict) -> str:
+    """
+    Create a content-addressed hash from code and metadata.
+
+    Args:
+        code: The source code string
+        lineno_map: Mapping from line numbers to node indices
+        node_metadata: Metadata for each node
+
+    Returns:
+        A 51-character base32-encoded hash
+    """
+    import json
+
+    # Create a deterministic string representation of all components
+    # We use JSON to ensure consistent serialization
+    hash_data = {
+        "code": code,
+        "node_metadata": node_metadata,
+    }
+    hashing_str = json.dumps(hash_data).encode("utf-8")
+
+    # [:51] to strip off the "Q====" suffix common to every hash value.
+    return (
+        base64.b32encode(hashlib.sha256(hashing_str).digest())[:51]
+        .decode("utf-8")
+        .lower()
+    )
 
 
 class _WrappedCall:
@@ -544,6 +575,7 @@ class GraphModule(torch.nn.Module):
             self.graph._tracer_cls
             and "<locals>" not in self.graph._tracer_cls.__qualname__
         ):
+            # pyrefly: ignore [bad-assignment]
             self._tracer_cls = self.graph._tracer_cls
 
         self._tracer_extras = {}
@@ -557,12 +589,17 @@ class GraphModule(torch.nn.Module):
         self._erase_node_hooks: list[Callable] = []
         # Used to remove hooks from deepcopied graph modules within a context manager.
         self._deepcopy_hooks: list[Callable] = []
+        self.shape_env = None  # optional not always set even when dynamic shapes exist.
 
     # TorchScript breaks trying to compile the graph setter because of the
     # continued string literal. Issue here: https://github.com/pytorch/pytorch/issues/44842
     #
     # Shouldn't be an issue since these methods shouldn't be used in TorchScript anyway
-    __jit_unused_properties__ = ["graph"]
+    __jit_unused_properties__ = ["graph", "_boxed_call"]
+
+    @property
+    def _boxed_call(self) -> bool:
+        return isinstance(self._graph._codegen, _BoxedCodeGen)
 
     @property
     def graph(self) -> Graph:
@@ -634,10 +671,10 @@ class {module_name}(torch.nn.Module):
                 blobified_modules.append(module_name)
                 module_repr = module.__repr__().replace("\r", " ").replace("\n", " ")
                 # weights_only=False as this is legacy code that saves the model
-                module_str = (
-                    f"torch.load(r'{module_file}', weights_only=False) # {module_repr}"
-                )
-            model_str += f"{tab * 2}self.{module_name} = {module_str}\n"
+                module_load_str = f"torch.load(r'{module_file}', weights_only=False)"
+                model_str += f"{tab * 2}setattr(self, '{module_name}', {module_load_str}) # {module_repr}\n"
+            else:
+                model_str += f"{tab * 2}setattr(self, '{module_name}', {module_str})\n"
 
         for buffer_name, buffer in self._buffers.items():
             if buffer is None:
@@ -647,7 +684,7 @@ class {module_name}(torch.nn.Module):
         for param_name, param in self._parameters.items():
             if param is None:
                 continue
-            model_str += f"{tab * 2}self.{param_name} = torch.nn.Parameter(torch.empty({list(param.shape)}, dtype={param.dtype}))\n"  # noqa: B950
+            model_str += f"{tab * 2}setattr(self, '{param_name}', torch.nn.Parameter(torch.empty({list(param.shape)}, dtype={param.dtype})))\n"  # noqa: B950
 
         model_str += (
             f"{tab * 2}self.load_state_dict(torch.load(r'{folder}/state_dict.pt'))\n"
@@ -822,15 +859,64 @@ class {module_name}(torch.nn.Module):
         called after editing the contained ``graph``, otherwise the generated
         code of this ``GraphModule`` will be out of date.
         """
+        # Do not import anything inside recompile, it might slow down the
+        # function and cause perf regression. Import outside of the method instead.
         if isinstance(self._graph._codegen, _PyTreeCodeGen):
             self._in_spec = self._graph._codegen.pytree_info.in_spec
             self._out_spec = self._graph._codegen.pytree_info.out_spec
-        python_code = self._graph.python_code(root_module="self")
+
+        python_code = self._graph.python_code(
+            root_module="self",
+            record_func=fx_experimental_config.enrich_profiler_metadata,
+        )
         self._code = python_code.src
         self._lineno_map = python_code._lineno_map
+        self._prologue_start = python_code._prologue_start
 
         cls = type(self)
         co_fields = self._graph._co_fields if hasattr(self._graph, "_co_fields") else {}
+
+        if fx_experimental_config.enrich_profiler_metadata:
+            # Generate metadata and register for profiler augmentation
+            node_metadata: dict[int, dict[str, Any]] = {}
+            for i, node in enumerate(self._graph.nodes):
+                node_metadata[i] = {
+                    "name": node.name,
+                    "op": node.op,
+                    "target": str(node.target),
+                    "stack_trace": node.meta.get("stack_trace", None),
+                }
+
+            # Generate a content-addressed filename based on hash of code and metadata
+            # This ensures the same code+metadata always generates the same filename
+            hash_value = _metadata_hash(self._code, node_metadata)
+            file_stem = f"{FX_GRAPH_MODULE_FILE_PREFIX}_{hash_value}"
+            filename = f"{file_stem}.py"
+
+            # Only include co_filename to use it directly as the cache key
+            co_fields = {
+                "co_filename": filename,
+            }
+
+            # Store metadata in global in-memory registry
+            metadata = {
+                "lineno_map": python_code._lineno_map,
+                "prologue_start": python_code._prologue_start,
+                "node_metadata": node_metadata,
+            }
+
+            # Register metadata in the global registry
+            from torch.fx.traceback import _register_fx_metadata
+
+            _register_fx_metadata(filename, metadata)
+
+            # Replace the placeholder in generated code with actual filename
+            # The double hash ## convention is used by post-processing to find the fx markers
+            self._code = self._code.replace(
+                "torch._C._profiler._RecordFunctionFast('## ENTER_GRAPH_PLACEHOLDER_KEY ##')",
+                f"torch._C._profiler._RecordFunctionFast('## {filename} ##')",
+            )
+
         cls.forward = _forward_from_src(self._code, python_code.globals, co_fields)
 
         # Determine whether this class explicitly defines a __call__ implementation
@@ -844,6 +930,8 @@ class {module_name}(torch.nn.Module):
         if "_wrapped_call" not in vars(cls):
             cls._wrapped_call = _WrappedCall(cls, cls_call)  # type: ignore[attr-defined]
 
+        self._recompile_submodules()
+
         def call_wrapped(self, *args, **kwargs):
             return self._wrapped_call(self, *args, **kwargs)
 
@@ -851,16 +939,19 @@ class {module_name}(torch.nn.Module):
 
         return python_code
 
+    def _recompile_submodules(self) -> list[tuple[str, PythonCode]]:
+        """
+        Recompile all submodules of this graph module, returning their respective PythonCodes
+        in a similar format to named_children()
+        """
+        results: list[tuple[str, PythonCode]] = []
+        for name, mod in self.named_children():
+            if isinstance(mod, GraphModule):
+                results.append((name, mod.recompile()))
+        return results
+
     # Passing Tracer as argument allows subclasses extending fx.GraphModule
     # define their own Tracer (extending fx.Tracer).
-    def __reduce_deploy__(self, importer: Importer):
-        dict_without_graph = self.__dict__.copy()
-        dict_without_graph["_graphmodule_cls_name"] = self.__class__.__name__
-        del dict_without_graph["_graph"]
-
-        python_code = self.recompile()
-        import_block = _format_import_block(python_code.globals, importer)
-        return (reduce_deploy_graph_module, (dict_without_graph, import_block))
 
     def __reduce_package__(self, exporter: PackageExporter):
         dict_without_graph = self.__dict__.copy()
@@ -956,6 +1047,7 @@ class {module_name}(torch.nn.Module):
         # If `fast_sympy_print` is True then we use a sympy printer which is faster
         # but may result in less-readable output.
         fast_sympy_print: bool = False,
+        expanded_def: bool = False,
     ):
         """
         Return the Python code generated for current GraphModule and its children GraphModules
@@ -977,6 +1069,7 @@ class {module_name}(torch.nn.Module):
                 include_stride,
                 include_device,
                 colored,
+                expanded_def,
             )
             return r
 
@@ -995,7 +1088,7 @@ class {module_name}(torch.nn.Module):
     @contextlib.contextmanager
     def _set_replace_hook(self, f):
         """
-        Takes a callable which will be called everytime when we replace a node
+        Takes a callable which will be called every time when we replace a node
         to a new node, or change the node's name. Callable takes three arguments:
         the old node we're changing, and NAME of the new node, followed by the
         user node which consumes the old node to be replaced.
@@ -1009,7 +1102,7 @@ class {module_name}(torch.nn.Module):
 
     def _register_replace_node_hook(self, f):
         """
-        Takes a callable which will be called everytime when we replace a node
+        Takes a callable which will be called every time when we replace a node
         to a new node, or change the node's name. Callable takes three arguments:
         the old node we're changing, and NAME of the new node, followed by the
         user node which consumes the old node to be replaced.
@@ -1019,7 +1112,7 @@ class {module_name}(torch.nn.Module):
 
     def _unregister_replace_node_hook(self, f):
         """
-        Takes a callable which was previously registered to be called everytime when we replace a node.
+        Takes a callable which was previously registered to be called every time when we replace a node.
         This function will unregister that callable so it is no longer invoked on node replacement.
         """
         assert callable(f), "create_node hook must be a callable."

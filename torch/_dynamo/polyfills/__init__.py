@@ -9,9 +9,11 @@ Python polyfills for common builtins.
 # mypy: allow-untyped-defs
 
 import types
-from collections.abc import Iterable, MutableMapping, Sequence
+from collections import OrderedDict
+from collections.abc import Callable, Hashable, Iterable, Mapping, Sequence
 from itertools import repeat as _repeat
-from typing import Any, Callable, TYPE_CHECKING
+from operator import eq, ne
+from typing import Any, TYPE_CHECKING
 
 import torch
 
@@ -23,13 +25,17 @@ if TYPE_CHECKING:
     # See also the POLYFILLED_MODULE_NAMES in torch/_dynamo/polyfills/loader.py
     # Put the submodules here to avoid circular imports
     from . import (
+        _collections as _collections,
         builtins as builtins,
         functools as functools,
         itertools as itertools,
         operator as operator,
         os as os,
         pytree as pytree,
+        struct as struct,
         sys as sys,
+        torch_c_nn as torch_c_nn,
+        traceback as traceback,
     )
 
 from torch.overrides import BaseTorchFunctionMode
@@ -74,6 +80,17 @@ def radians(x):
     return math.pi / 180.0 * x
 
 
+def impl_CONTAINS_OP_fallback(a, b):
+    # performs fallback "a in b"
+    if hasattr(b, "__iter__"):
+        # use __iter__ if __contains__ is not available
+        for x in b:
+            if x == a:
+                return True
+        return False
+    raise TypeError(f"argument of type {type(b)} is not iterable")
+
+
 def accumulate_grad(x, new_grad):
     # polyfills according to the Gradient Layout Contract
     if new_grad is None:
@@ -92,16 +109,41 @@ def accumulate_grad(x, new_grad):
 # https://github.com/python/cpython/blob/a1c52d1265c65bcf0d9edf87e143843ad54f9b8f/Objects/listobject.c#L3352-L3413
 def list_cmp(op: Callable[[Any, Any], bool], left: Sequence[Any], right: Sequence[Any]):
     """emulate `(1,2,3) > (1,2)` etc"""
+
+    # Optimization: For equality, short-circuit if lengths differ
+    # This avoids iterating through elements and triggering guards on SymInts
+    left_len = len(left)
+    right_len = len(right)
+
+    if op is eq and left_len != right_len:
+        return False
+    if op is ne and left_len != right_len:
+        return True
+
     # Apply `op` to the first pair that differ
     for a, b in zip(left, right):
         if a != b:
             return op(a, b)
 
     # No more pairs to compare, so compare sizes.
-    return op(len(left), len(right))
+    return op(left_len, right_len)
 
 
-def set_symmetric_difference(set1, set2):
+def dict___eq__(d, other):
+    if (len(d) != len(other)) or (d.keys() != other.keys()):
+        return False
+
+    if all(isinstance(a, OrderedDict) for a in (d, other)):
+        return list(d.items()) == list(other.items())
+
+    for k, v in d.items():
+        if v != other[k]:
+            return False
+
+    return True
+
+
+def set_symmetric_difference(set1, set2, cls=set):
     symmetric_difference_set = set()
     for x in set1:
         if x not in set2:
@@ -109,7 +151,7 @@ def set_symmetric_difference(set1, set2):
     for x in set2:
         if x not in set1:
             symmetric_difference_set.add(x)
-    return symmetric_difference_set
+    return cls(symmetric_difference_set)
 
 
 def set_symmetric_difference_update(set1, set2):
@@ -119,24 +161,38 @@ def set_symmetric_difference_update(set1, set2):
 
 
 def set_isdisjoint(set1, set2):
+    if not isinstance(set2, Iterable):
+        raise TypeError(f"'{type(set2)}' object is not iterable")
+
     for x in set1:
-        if x in set2:
-            return False
+        for y in set2:
+            if not isinstance(y, Hashable):
+                raise TypeError(f"unhashable type: '{type(y)}'")
+            if x == y:
+                return False
     return True
 
 
-def set_intersection(set1, *others):
+def set_intersection(set1, *others, cls=set):
     if len(others) == 0:
         return set1.copy()
 
+    if not all(isinstance(s, Iterable) for s in others):
+        raise TypeError(f"set.difference expected an iterable, got {type(others)}")
+
+    for s in others:
+        if any(not isinstance(x, Hashable) for x in s):
+            raise TypeError("unhashable type")
+
+    # return a new set with elements common in all sets
     intersection_set = set()
     for x in set1:
         for set2 in others:
-            if x not in set2:
+            if not any(x == y for y in set2):
                 break
         else:
             intersection_set.add(x)
-    return intersection_set
+    return cls(intersection_set)
 
 
 def set_intersection_update(set1, *others):
@@ -145,12 +201,27 @@ def set_intersection_update(set1, *others):
     set1.update(result)
 
 
-def set_union(set1, *others):
+def set_union(set1, *others, cls=None):
     # frozenset also uses this function
+    if cls is None:
+        cls = type(set1)
+
+    if len(others) == 0:
+        return set1.copy()
+
+    if not all(isinstance(s, Iterable) for s in others):
+        raise TypeError(f"set.union expected an iterable, got {type(others)}")
+
+    for s in others:
+        if any(not isinstance(x, Hashable) for x in s):
+            raise TypeError("unhashable type")
+
     union_set = set(set1.copy())
     for set2 in others:
         set_update(union_set, set2)
-    return type(set1)(union_set)
+
+    # frozenset also uses this function
+    return cls(union_set)
 
 
 def set_update(set1, *others):
@@ -163,12 +234,16 @@ def set_update(set1, *others):
                 set1.add(x)
 
 
-def set_difference(set1, *others):
+def set_difference(set1, *others, cls=set):
     if len(others) == 0:
         return set1.copy()
 
     if not all(isinstance(s, Iterable) for s in others):
         raise TypeError(f"set.difference expected an iterable, got {type(others)}")
+
+    for s in others:
+        if any(not isinstance(x, Hashable) for x in s):
+            raise TypeError("unhashable type")
 
     difference_set = set()
     for x in set1:
@@ -177,13 +252,26 @@ def set_difference(set1, *others):
                 break
         else:
             difference_set.add(x)
-    return difference_set
+    return cls(difference_set)
 
 
 def set_difference_update(set1, *others):
     result = set1.difference(*others)
     set1.clear()
     set1.update(result)
+
+
+def assert_dict_equal(self_, d1, d2, msg=None):
+    self_.assertTrue(d1 == d2, msg)
+
+
+def assert_multi_line_equal(self_, first, second, msg=None):
+    return self_.assertTrue(first == second, msg)
+
+
+# The original impl. uses difflib
+def assert_sequence_equal(self_, seq1, seq2, msg=None, seq_type=None):
+    return self_.assertTrue(seq1 == seq2, msg)
 
 
 def getattr_and_trace(*args, **kwargs):
@@ -193,7 +281,7 @@ def getattr_and_trace(*args, **kwargs):
     return fn(*args[2:], **kwargs)
 
 
-def mapping_get(obj, key, value=None):
+def mapping_get(obj, key, value=None, /):
     try:
         return obj.__getitem__(key)
     except KeyError:
@@ -210,28 +298,45 @@ def instantiate_user_defined_class_object(cls, /, *args, **kwargs):
     return obj
 
 
-# Used with something like dict(obj)
-def construct_dict(cls, /, *args, **kwargs):
-    dst = cls.__new__(cls)
-
-    if args:
-        src = args[0]
-
-        # Ensure that the overridden __iter__ method is invoked
-        if isinstance(src, (dict, MutableMapping)):
-            for key in src:
-                # This will inline the __getitem__ of the src object
-                dst[key] = src[key]
-        else:
-            # likely a sequence like tuple of pairs
-            for key, value in src:
-                dst[key] = value
+def mutable_mapping_update(self, data=(), /, **kwargs):
+    if isinstance(data, Mapping):
+        # Merge standard mapping with PyMapping_Items
+        for key, value in data.items():
+            self[key] = value
+    # FIXME: Enabling the `elif`-branch below needs too many `VariableClass.call_obj_hasattr` changes.
+    #   >>> class Foo:
+    #   ...     def __init__(self):
+    #   ...         self.keys = lambda: ['a', 'b', 'c']  # not required to be a method
+    #   ...
+    #   ...     def __getitem__(self, key):
+    #   ...         return 0
+    #   ...
+    #   >>> dict(Foo())
+    #   {'a': 0, 'b': 0, 'c': 0}
+    #
+    # > This is a rare case, so we comment it out for now.
+    #
+    # elif hasattr(data, "keys"):
+    #     # Merge mapping-like object with PyMapping_Keys + PyObject_GetItem
+    #     for key in data.keys():
+    #         self[key] = data[key]
+    else:
+        if not isinstance(data, Iterable):
+            raise TypeError(f"{type(data).__name__!r} object is not iterable")
+        # Likely a sequence of pairs
+        for key, value in data:
+            self[key] = value
 
     if kwargs:
-        for key in kwargs:
-            dst[key] = kwargs[key]
+        for key, value in kwargs.items():
+            self[key] = value
 
-    return dst
+
+# Used with something like dict(obj)
+def construct_dict(cls, data=(), /, **kwargs):
+    self = cls.__new__(cls)
+    mutable_mapping_update(self, data, **kwargs)
+    return self
 
 
 def foreach_map_fn(*args):
@@ -298,7 +403,14 @@ def cmp_eq(a, b):
 def cmp_ne(a, b):
     # Check if __ne__ is overridden
     if isinstance(type(a).__ne__, types.FunctionType):
-        return a.__ne__(b)
+        result = a.__ne__(b)
+        if result is not NotImplemented:
+            return result
+        # Fall through to try b.__ne__(a) or cmp_eq
+    if isinstance(type(b).__ne__, types.FunctionType):
+        result = b.__ne__(a)
+        if result is not NotImplemented:
+            return result
     return not cmp_eq(a, b)
 
 
@@ -329,3 +441,59 @@ def cmp_ge(a, b):
     if isinstance(type(a).__ge__, types.FunctionType):
         return a.__ge__(b)
     return cmp_eq(a, b) or cmp_gt(a, b)
+
+
+def group_tensors_by_device_and_dtype(tensorlistlist, with_indices=False):
+    """Pure Python implementation of torch._C._group_tensors_by_device_and_dtype.
+
+    Groups tensors by their device and dtype. This is useful before sending
+    tensors off to a foreach implementation, which requires tensors to be on
+    one device and dtype.
+
+    Args:
+        tensorlistlist: A list of lists of tensors (tensors can be None).
+        with_indices: If True, track original indices in the output.
+
+    Returns:
+        A dict mapping (device, dtype) tuples to (grouped_tensorlistlist, indices).
+    """
+    # Result dict: (device, dtype) -> (list of lists, indices)
+    result: dict[tuple[torch.device, torch.dtype], tuple[list[list], list[int]]] = {}
+
+    if not tensorlistlist or not tensorlistlist[0]:
+        return result
+
+    num_lists = len(tensorlistlist)
+    num_tensors = len(tensorlistlist[0])
+
+    for idx in range(num_tensors):
+        # Find the first non-None tensor at this index to get device and dtype
+        first_tensor = None
+        for tlist in tensorlistlist:
+            if tlist is not None and idx < len(tlist) and tlist[idx] is not None:
+                first_tensor = tlist[idx]
+                break
+
+        if first_tensor is None:
+            # All tensors at this index are None, skip
+            continue
+
+        key = (first_tensor.device, first_tensor.dtype)
+
+        if key not in result:
+            # Initialize empty lists for each tensorlist
+            result[key] = ([[] for _ in range(num_lists)], [])
+
+        grouped_lists, indices = result[key]
+
+        # Add tensors from each list at this index
+        for list_idx, tlist in enumerate(tensorlistlist):
+            if tlist is not None and idx < len(tlist):
+                grouped_lists[list_idx].append(tlist[idx])
+            else:
+                grouped_lists[list_idx].append(None)
+
+        if with_indices:
+            indices.append(idx)
+
+    return result

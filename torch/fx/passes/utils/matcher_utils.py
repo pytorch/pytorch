@@ -95,7 +95,7 @@ class SubgraphMatcher:
             )
 
         for node in pattern.nodes:
-            if node.op != "output":
+            if node.op != "output" and not node.is_impure():
                 assert len(node.users) > 0, (
                     "SubgraphMatcher cannot be initialized with an pattern with dead code"
                 )
@@ -127,7 +127,7 @@ class SubgraphMatcher:
         pn_value = torch.fx.graph_module._get_attr(pn.graph.owning_module, pn.target)
         gn_value = torch.fx.graph_module._get_attr(gn.graph.owning_module, gn.target)
 
-        if type(pn_value) != type(gn_value):
+        if type(pn_value) is not type(gn_value):
             return False
 
         # Don't require exact match on tensor values.
@@ -137,9 +137,12 @@ class SubgraphMatcher:
             raise RuntimeError(f"Unsupported type {pn_value} when matching attributes")
         return False
 
-    def _nodes_are_equal(self, pn: Node, gn: Node) -> bool:
+    def _nodes_are_equal(self, pn: Node, gn: Node, node_name_match: str = "") -> bool:
         # if exact match for placeholder is not required, then use placeholder as a wildcard
         if not self.match_placeholder and pn.op == "placeholder":
+            return True
+
+        if node_name_match and node_name_match in gn.name:
             return True
 
         if pn.op == gn.op:
@@ -210,9 +213,11 @@ class SubgraphMatcher:
         elif not isinstance(pn, Node) and isinstance(gn, Node):
             return False
         else:
-            return type(gn) == type(pn) and gn == pn
+            return type(gn) is type(pn) and gn == pn
 
-    def _match_nodes(self, pn: Node, gn: Node, match: InternalMatch) -> bool:
+    def _match_nodes(
+        self, pn: Node, gn: Node, match: InternalMatch, node_name_match: str = ""
+    ) -> bool:
         logger.info("  matching %s to %s", pn, gn)
 
         assert isinstance(pn, Node) and isinstance(gn, Node), str(
@@ -228,7 +233,7 @@ class SubgraphMatcher:
         if gn in match.nodes_map.values():
             return False
 
-        if not self._nodes_are_equal(pn, gn):
+        if not self._nodes_are_equal(pn, gn, node_name_match):
             return False
 
         # Optimistically mark `pn` as a match for `gn`, and save a local copy of match
@@ -313,11 +318,11 @@ class SubgraphMatcher:
 
         return True
 
-    def match(self, graph: Graph) -> list[InternalMatch]:
+    def match(self, graph: Graph, node_name_match: str = "") -> list[InternalMatch]:
         """
         Returns:
             The matched subgraphs.
-            Thre returned subgraph would be fully self-contained, meaning the nodes (except placeholder
+            The returned subgraph would be fully self-contained, meaning the nodes (except placeholder
             and nodes returned by output) can only be consumed by nodes within the matched subgraph.
 
         Subgraph pattern matcher is implemented with the backtracking style in the following steps:
@@ -355,7 +360,7 @@ class SubgraphMatcher:
         match_candidates: dict[Node, list[Node]] = defaultdict(list)
         for pattern_anchor in self.pattern_anchors:
             for node in graph.nodes:
-                if self._nodes_are_equal(pattern_anchor, node):
+                if self._nodes_are_equal(pattern_anchor, node, node_name_match):
                     match_candidates[pattern_anchor].append(node)
         match_candidates_list = list(match_candidates.items())
 
@@ -382,7 +387,9 @@ class SubgraphMatcher:
             for node in candidate_nodes:
                 logger.info("Trying to match anchor %s to %s", pattern_anchor, node)
 
-                match_found = self._match_nodes(pattern_anchor, node, match)
+                match_found = self._match_nodes(
+                    pattern_anchor, node, match, node_name_match
+                )
                 if match_found:
                     # match next anchor
                     backtracking(anchor_index + 1, match)

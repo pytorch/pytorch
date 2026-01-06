@@ -3,7 +3,6 @@
 #include <cuda_runtime.h>
 
 #include <nlohmann/json.hpp>
-#include <filesystem>
 #include <fstream>
 #include <mutex>
 #include <vector>

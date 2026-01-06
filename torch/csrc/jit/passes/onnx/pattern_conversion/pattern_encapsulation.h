@@ -17,7 +17,7 @@ namespace torch::jit {
 // information. Shape and type information is only available after
 // _jit_pass_onnx, which converts aten nodes to onnx nodes. So there is a
 // interdependent issue. _jit_pass_onnx depends on preprocess passes to convert
-// aten nodes into convertable condition, and preprocess passes depend on
+// aten nodes into convertible condition, and preprocess passes depend on
 // _jit_pass_onnx to convert upstream nodes and apply onnx shape inference.
 // Separating the pass into two parts breaks the interdependency.
 //

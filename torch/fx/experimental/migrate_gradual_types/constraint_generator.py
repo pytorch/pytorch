@@ -1,8 +1,8 @@
 # mypy: allow-untyped-defs
 import operator
 import warnings
-from collections.abc import Iterable
-from typing import Callable, TypeVar
+from collections.abc import Callable, Iterable
+from typing import TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -528,11 +528,13 @@ def view_inference_rule(n: Node, symbols, constraints, counter):
         if t == -1:
             var, counter = gen_dvar(counter)
             t2_type.append(var)
+            # pyrefly: ignore [bad-argument-type]
             num_constraints.append(BinConstraintD(var, Dyn, op_neq))
 
         else:
+            # pyrefly: ignore [bad-argument-type]
             num_constraints.append(BinConstraintD(t, Dyn, op_neq))
-            t2_type.append(t)
+            t2_type.append(t)  # type: ignore[arg-type]
 
     t2_type = TensorType(t2_type)  # type: ignore[assignment]
 
@@ -681,7 +683,7 @@ def getitem_inference_rule(n: Node, symbols, constraints, counter):
     # tensor output case
     elif isinstance(n.args[1], tuple):
         # create and store the new tensor variable
-        get_item_output, counter = gen_tvar(counter)
+        get_item_output, counter = gen_tvar(counter)  # type: ignore[arg-type,assignment]
         symbols[n] = get_item_output
 
         # retrieve arg variables
@@ -1048,9 +1050,9 @@ def gen_broadcasting_constraints(e1, e2, symbols, counter, output_var):
 @register_inference_rule(operator.add)
 def broadcasting_inference_rule(n: Node, symbols, constraints, counter):
     op_code = None
-    if n.target == operator.add or n.target == torch.add:
+    if n.target is operator.add or n.target is torch.add:
         op_code = op_add
-    elif n.target == operator.mul:
+    elif n.target is operator.mul:
         op_code = op_mul
 
     if isinstance(n.args[0], Node) and isinstance(n.args[1], Node):
@@ -1073,7 +1075,7 @@ def broadcasting_inference_rule(n: Node, symbols, constraints, counter):
             e1 = symbols[n.args[0]]
             return [BinConstraintT(my_output, e1, op_eq)], counter
         elif isinstance(symbols[n.args[0]], DVar):
-            my_output, counter = gen_dvar(counter)
+            my_output, counter = gen_dvar(counter)  # type: ignore[arg-type,assignment]
             symbols[n] = my_output
             e1 = symbols[n.args[0]]
 
@@ -1095,7 +1097,7 @@ def broadcasting_inference_rule(n: Node, symbols, constraints, counter):
             e2 = symbols[n.args[1]]
             return [BinConstraintT(my_output, e2, op_eq)], counter
         elif isinstance(symbols[n.args[1]], DVar):
-            my_output, counter = gen_dvar(counter)
+            my_output, counter = gen_dvar(counter)  # type: ignore[arg-type,assignment]
             symbols[n] = my_output
             e2 = symbols[n.args[1]]
 
@@ -1475,6 +1477,7 @@ class ConstraintGenerator:
 
         all_constraints = []
 
+        # pyrefly: ignore [missing-attribute]
         for n in graph.nodes:
             (constraints, counter) = self.generate_constraints_node(n, counter)
             all_constraints += constraints

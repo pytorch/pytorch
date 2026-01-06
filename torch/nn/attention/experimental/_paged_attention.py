@@ -4,8 +4,6 @@ This module implements Paged Attention on top of flex_attention.
 This module is experimental and subject to change.
 """
 
-from typing import Optional, Union
-
 import torch
 from torch.nn.attention.flex_attention import (
     _identity,
@@ -19,9 +17,7 @@ from torch.nn.attention.flex_attention import (
 __all__ = ["PagedAttention"]
 
 
-def _cdiv(
-    x: Union[int, float, torch.Tensor], multiple: Union[int, float, torch.Tensor]
-):
+def _cdiv(x: int | float | torch.Tensor, multiple: int | float | torch.Tensor):
     return (x + multiple - 1) // multiple
 
 
@@ -29,7 +25,7 @@ class PagedAttention:
     """
     PagedAttention supports flex attention inference with a large batch size.
     With PagedAttention, a batch of key/value tensors with varying kv length
-    is splitted into tensor blocks of fixed length and cached in a compact way.
+    is split into tensor blocks of fixed length and cached in a compact way.
     Thus we can avoid redundant memory consumption due to varying kv length and
     support a larger batch size.
     """
@@ -40,7 +36,7 @@ class PagedAttention:
         page_size: int,
         max_batch_size: int,
         device: str = "cuda",
-    ):
+    ) -> None:
         # number of pages
         self.n_pages = n_pages
 
@@ -80,10 +76,11 @@ class PagedAttention:
             seq_len - self.capacity[batch_idx], self.page_size
         )
 
-        assert len(self.empty_pages) >= num_pages_to_allocate, (
-            f"requested {num_pages_to_allocate.item()} pages "
-            f"but there are only {len(self.empty_pages)} empty pages"
-        )
+        if len(self.empty_pages) < num_pages_to_allocate:
+            raise AssertionError(
+                f"requested {num_pages_to_allocate.item()} pages "
+                f"but there are only {len(self.empty_pages)} empty pages"
+            )
 
         start_page_idx = self.capacity[batch_idx] // self.page_size
         end_page_idx = start_page_idx + num_pages_to_allocate
@@ -197,7 +194,8 @@ class PagedAttention:
     def convert_logical_block_mask(
         self,
         block_mask: BlockMask,
-        batch_idx: Optional[torch.Tensor] = None,
+        batch_idx: torch.Tensor | None = None,
+        kv_len: torch.Tensor | None = None,
     ) -> BlockMask:
         """
         Converts a logical block mask by mapping its logical kv indices to the corresponding
@@ -210,6 +208,8 @@ class PagedAttention:
                 batch dimension. This provides flexibility to convert a
                 block mask with smaller batch size than the page table;
                 shape :math:`(B)`.
+            kv_len (Optional[Tensor]): actual KV sequence length for upper bound check;
+                shape :math:`(B,)` to handle multiple batches.
         """
         B, H, ROWS, MAX_BLOCKS_IN_COL = block_mask.kv_indices.shape
 
@@ -246,7 +246,10 @@ class PagedAttention:
 
         new_full_kv_indices, new_full_kv_num_blocks = None, None
         if block_mask.full_kv_num_blocks is not None:
-            assert block_mask.full_kv_indices is not None
+            if block_mask.full_kv_indices is None:
+                raise AssertionError(
+                    "block_mask.full_kv_indices must not be None when full_kv_num_blocks is not None"
+                )
             new_full_kv_num_blocks = block_mask.full_kv_num_blocks.clone()
             new_full_kv_indices = torch.zeros(
                 (B, H, ROWS, self.n_pages), dtype=torch.int32, device=device
@@ -261,7 +264,7 @@ class PagedAttention:
                 .to(torch.int32)
             )
 
-        new_mask_mod = self.get_mask_mod(block_mask.mask_mod)
+        new_mask_mod = self.get_mask_mod(block_mask.mask_mod, kv_len)
 
         seq_lengths = (block_mask.seq_lengths[0], self.n_pages * self.page_size)
         return BlockMask.from_kv_blocks(
@@ -275,7 +278,9 @@ class PagedAttention:
         )
 
     def get_mask_mod(
-        self, mask_mod: Optional[_mask_mod_signature]
+        self,
+        mask_mod: _mask_mod_signature | None,
+        kv_len: torch.Tensor | None = None,
     ) -> _mask_mod_signature:
         """
         Converts a mask_mod based on mapping from the physical block index to the logical
@@ -283,6 +288,7 @@ class PagedAttention:
 
         Args:
             mask_mod (_mask_mod_signature): mask_mod based on the logical block index.
+            kv_len (Optional[torch.Tensor]): actual KV sequence length for upper bound check.
         """
         if mask_mod is None:
             mask_mod = noop_mask
@@ -297,14 +303,21 @@ class PagedAttention:
             physical_kv_offset = physical_kv_idx % self.page_size
             logical_block_idx = self.physical_to_logical[b, physical_kv_block]
             logical_kv_idx = logical_block_idx * self.page_size + physical_kv_offset
-            return torch.where(
-                logical_block_idx >= 0, mask_mod(b, h, q_idx, logical_kv_idx), False
+            live_block = logical_block_idx >= 0
+            within_upper_bound = (
+                logical_kv_idx < kv_len[b] if kv_len is not None else True
             )
+            within_lower_bound = logical_kv_idx >= 0
+            is_valid = live_block & within_upper_bound & within_lower_bound
+
+            return torch.where(is_valid, mask_mod(b, h, q_idx, logical_kv_idx), False)
 
         return new_mask_mod
 
     def get_score_mod(
-        self, score_mod: Optional[_score_mod_signature]
+        self,
+        score_mod: _score_mod_signature | None,
+        kv_len: torch.Tensor | None = None,
     ) -> _score_mod_signature:
         """
         Converts a score_mod based on mapping from the physical block index to the logical
@@ -312,6 +325,8 @@ class PagedAttention:
 
         Args:
             score_mod (_score_mod_signature): score_mod based on the logical block index.
+            `kv_len (Optional[torch.Tensor]): actual KV sequence length for upper bound check.
+
         """
         if score_mod is None:
             score_mod = _identity
@@ -327,8 +342,15 @@ class PagedAttention:
             physical_kv_offset = physical_kv_idx % self.page_size
             logical_block_idx = self.physical_to_logical[b, physical_kv_block]
             logical_kv_idx = logical_block_idx * self.page_size + physical_kv_offset
+            live_block = logical_block_idx >= 0
+            within_upper_bound = (
+                logical_kv_idx < kv_len[b] if kv_len is not None else True
+            )
+            within_lower_bound = logical_kv_idx >= 0
+            is_valid = live_block & within_upper_bound & within_lower_bound
+
             return torch.where(
-                logical_block_idx >= 0,
+                is_valid,
                 score_mod(score, b, h, q_idx, logical_kv_idx),
                 float("-inf"),
             )

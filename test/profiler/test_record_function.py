@@ -1,25 +1,13 @@
 # Owner(s): ["oncall: profiler"]
 # ruff: noqa: F841
 
-# if tqdm is not shutdown properly, it will leave the monitor thread alive.
-# This causes an issue in the multithreading test because we check all events
-# in that test with their tids. The events that correspond to these lingering
-# threads all have TID of (uint64_t)(-1) which is invalid.
-# The work around is turnning off monitoring thread when tqdm is loaded.
-# Since these are unit tests, it is safe to turn off monitor thread.
-try:
-    import tqdm
-
-    tqdm.tqdm.monitor_interval = 0
-except ImportError:
-    None
-
 from typing import Any
 
 import torch
 import torch.optim
 import torch.utils.data
 import torch.utils.data.datapipes as dp
+from torch._dispatch.python import enable_python_dispatcher
 from torch.autograd import (
     _record_function_with_args_enter,
     _record_function_with_args_exit,
@@ -28,6 +16,19 @@ from torch.autograd.profiler import profile as _profile
 from torch.profiler import kineto_available, record_function
 from torch.testing._internal.common_utils import run_tests, TestCase
 
+
+# if tqdm is not shutdown properly, it will leave the monitor thread alive.
+# This causes an issue in the multithreading test because we check all events
+# in that test with their tids. The events that correspond to these lingering
+# threads all have TID of (uint64_t)(-1) which is invalid.
+# The work around is turning off monitoring thread when tqdm is loaded.
+# Since these are unit tests, it is safe to turn off monitor thread.
+try:
+    import tqdm
+
+    tqdm.tqdm.monitor_interval = 0
+except ImportError:
+    pass
 
 Json = dict[str, Any]
 
@@ -151,6 +152,79 @@ class TestRecordFunction(TestCase):
                 has_child = True
         self.assertTrue(has_iter)
         self.assertTrue(has_child)
+
+    def test_python_dispatch_mode_record_function(self):
+        from torch.utils._python_dispatch import TorchDispatchMode
+
+        class TestDispatchMode(TorchDispatchMode):
+            def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+                return func(*args, **kwargs)
+
+        with _profile() as prof:
+            with enable_python_dispatcher():
+                with TestDispatchMode():
+                    x = torch.randn(3, 4)
+                    y = torch.sin(x)
+
+        found_python_dispatch_mode = False
+        for e in prof.function_events:
+            if e.name == "PythonDispatchMode":
+                found_python_dispatch_mode = True
+                break
+        self.assertTrue(
+            found_python_dispatch_mode,
+            "PythonDispatchMode record function not found in profiler events",
+        )
+
+    def test_python_subclass_record_function(self):
+        class TestTensorSubclass(torch.Tensor):
+            @staticmethod
+            def __new__(cls, elem):
+                r = torch.Tensor._make_wrapper_subclass(
+                    cls,
+                    elem.size(),
+                    dtype=elem.dtype,
+                    device=elem.device,
+                    requires_grad=elem.requires_grad,
+                )
+                r.elem = elem
+                return r
+
+            @classmethod
+            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                if kwargs is None:
+                    kwargs = {}
+
+                def unwrap(x):
+                    return x.elem if isinstance(x, TestTensorSubclass) else x
+
+                def wrap(x):
+                    return TestTensorSubclass(x) if isinstance(x, torch.Tensor) else x
+
+                unwrapped_args = tuple(unwrap(arg) for arg in args)
+                unwrapped_kwargs = {k: unwrap(v) for k, v in kwargs.items()}
+                result = func(*unwrapped_args, **unwrapped_kwargs)
+
+                if isinstance(result, torch.Tensor):
+                    return TestTensorSubclass(result)
+                return result
+
+        with _profile() as prof:
+            with enable_python_dispatcher():
+                x = TestTensorSubclass(torch.randn(3, 4))
+                y = torch.sin(x)
+
+        found_python_subclass = False
+        for e in prof.function_events:
+            if e.name == "PythonSubclass":
+                found_python_subclass = True
+                break
+        self.assertTrue(
+            found_python_subclass,
+            "PythonSubclass record function not found in profiler events",
+        )
 
 
 if __name__ == "__main__":

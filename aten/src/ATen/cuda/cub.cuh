@@ -6,6 +6,10 @@
 #include <iterator>
 #include <limits>
 
+#ifndef USE_ROCM
+#include <cuda/std/functional>
+#endif
+
 #include <ATen/cuda/cub_definitions.cuh>
 #include <ATen/cuda/CUDAContextLight.h>
 
@@ -51,11 +55,22 @@
 #define ROCM_HIPCUB(x) x
 #endif
 
-#if (!defined(USE_ROCM) && !CUB_SUPPORTS_NV_BFLOAT16()) || defined(USE_ROCM)
-
-#if !defined(USE_ROCM)
-namespace at_cuda_detail {
+#if CUB_V3_PLUS()
+#include <thrust/iterator/transform_iterator.h>
+#include <thrust/iterator/counting_iterator.h>
+#include <thrust/iterator/constant_iterator.h>
+#define ATEN_CUB_TRANSFORM_ITERATOR(ValueType, ...) ::thrust::transform_iterator<__VA_ARGS__>
+#define ATEN_CUB_COUNTING_ITERATOR(...) ::thrust::counting_iterator<__VA_ARGS__>
+#define ATEN_CUB_CONSTANT_ITERATOR(...) ::thrust::constant_iterator<__VA_ARGS__>
+#define ATEN_CUB_MAXIMUM() ::cuda::maximum<>()
+#else
+#define ATEN_CUB_TRANSFORM_ITERATOR(...) NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::TransformInputIterator<__VA_ARGS__>
+#define ATEN_CUB_COUNTING_ITERATOR(...) NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::CountingInputIterator<__VA_ARGS__>
+#define ATEN_CUB_CONSTANT_ITERATOR(...) NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::ConstantInputIterator<__VA_ARGS__>
+#define ATEN_CUB_MAXIMUM() NO_ROCM(at_cuda_detail)ROCM_HIPCUB(::cub)::Max()
 #endif
+
+#if defined(USE_ROCM)
 
 // backport https://github.com/NVIDIA/cub/pull/306 for c10::BFloat16
 
@@ -76,10 +91,6 @@ struct ROCM_HIPCUB(cub)::FpLimits<c10::BFloat16>
 template <>
 struct ROCM_HIPCUB(cub)::NumericTraits<c10::BFloat16>:
        ROCM_HIPCUB(cub)::BaseTraits<ROCM_HIPCUB(cub)::FLOATING_POINT, true, false, unsigned short, c10::BFloat16> {};
-
-#if !defined(USE_ROCM)
-} // namespace at_cuda_detail
-#endif
 
 #endif
 
@@ -102,7 +113,7 @@ struct cuda_type<c10::Half> {
   using type = __half;
 };
 
-#if !defined(USE_ROCM) && CUB_SUPPORTS_NV_BFLOAT16()
+#if !defined(USE_ROCM)
 
 template<>
 struct cuda_type<c10::BFloat16> {
@@ -158,7 +169,6 @@ inline void segmented_sort_pairs(
   }
 }
 
-#if CUB_SUPPORTS_UNIQUE_BY_KEY()
 template <typename KeysInputIteratorT, typename ValuesInputIteratorT, typename ValuesOutputIteratorT, typename NumSelectedIteratorT>
 inline void unique_by_key(
   KeysInputIteratorT keys_in, ValuesInputIteratorT values_in,
@@ -174,7 +184,6 @@ inline void unique_by_key(
   CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceSelect::UniqueByKey,
     keys_in, values_in, keys_out_, values_out, num_selected, num_input_items, c10::cuda::getCurrentCUDAStream());
 }
-#endif
 
 namespace impl {
 
@@ -185,36 +194,6 @@ __global__ void transform_vals(InputIteratorT1 a, InputIteratorT2 b, OutputItera
   using acc_t = typename std::iterator_traits<OutputIteratorT>::value_type;
   *out = scan_op(static_cast<acc_t>(*a), static_cast<acc_t>(*b));
 }
-
-#if !CUB_SUPPORTS_FUTURE_VALUE()
-template<typename ValueT, typename InputIteratorT>
-struct chained_iterator {
-  using iterator_category = std::random_access_iterator_tag;
-  using difference_type   = std::ptrdiff_t;
-  using value_type        = ValueT;
-  using pointer           = ValueT*;
-  using reference         = ValueT&;
-
-  InputIteratorT iter;
-  ValueT *first;
-  difference_type offset = 0;
-
-  __device__ ValueT operator[](difference_type i) {
-    i +=  offset;
-    if (i == 0) {
-      return *first;
-    } else {
-      return ValueT(iter[i - 1]);
-    }
-  }
-  __device__ chained_iterator operator+(difference_type i) {
-    return chained_iterator{iter, first, i};
-  }
-  __device__ ValueT operator*() {
-    return (*this)[0];
-  }
-};
-#endif
 
 // even though cub is supposed to support tensors with int_max elements, in reality it doesn't,
 // so split at int_max/2
@@ -260,25 +239,6 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
         first_elem_ptr,
         scan_op);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
-#if !CUB_SUPPORTS_FUTURE_VALUE()
-    using ArgIndexInputIterator = NO_ROCM(at_cuda_detail)::cub::ArgIndexInputIterator<InputIteratorT>;
-    using tuple = typename ArgIndexInputIterator::value_type;
-    auto input_iter_transform = [=] __device__ (const tuple &x)->input_t  {
-      if (x.key == 0) {
-        return *first_elem_ptr;
-      } else {
-        return x.value;
-      }
-    };
-    auto input_ = NO_ROCM(at_cuda_detail)::cub::TransformInputIterator<input_t, decltype(input_iter_transform), ArgIndexInputIterator>(
-      ArgIndexInputIterator(input + i), input_iter_transform);
-    CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::InclusiveScan,
-        input_,
-        output + i,
-        scan_op,
-        size_cub,
-        at::cuda::getCurrentCUDAStream());
-#else
     CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::ExclusiveScan,
         input + i + 1,
         output + i,
@@ -286,12 +246,9 @@ inline void inclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
         ::at_cuda_detail::cub::FutureValue<input_t>(first_elem_ptr),
         size_cub,
         at::cuda::getCurrentCUDAStream());
-#endif
   }
 #endif
 }
-
-# if defined(CUDA_VERSION) || defined(USE_ROCM)
 
 template<typename T>
 struct BlockPrefixCallbackOp
@@ -345,11 +302,11 @@ __global__ void final_scan_kernel(const T* d_in, T* d_out, T* agg, int64_t nelem
   // load agg and reduce my starting value
   T agg_data;
   agg_data = threadIdx.x >= blockIdx.x ? T(0) : agg[threadIdx.x];
-  // if there are fewer threads than previous values to be read,
-  // read another value
-  if (threadIdx.x + blockDim.x < blockIdx.x) {
-    agg_data += agg[threadIdx.x + blockDim.x];
+  // In case there are fewer threads than previous block aggregates to be read, add more aggregates (should be at most 2-3 aggregates per thread)
+  for (unsigned int i=threadIdx.x + blockDim.x; i<blockIdx.x; i+=blockDim.x) {
+    agg_data += agg[i];
   }
+
   T aggregate = BlockReduceT(temp_storage.reduce).Sum(agg_data);
   __syncthreads();
   BlockPrefixCallbackOp prefix_op(aggregate);
@@ -425,7 +382,7 @@ __global__ void calc_block_sums(const T * d_in, aggT * agg, int64_t nelem, int i
     aggT data[ITEMS_PER_THREAD];
     aggT agg_val = 0;
     TransformFunctor<T, aggT, nonzero> transform_functor;
-    auto iter_in = ROCM_HIPCUB(at_cuda_detail::cub)::TransformInputIterator<aggT, TransformFunctor<T, aggT, nonzero>, const T*>(d_in, transform_functor);
+    auto iter_in = ATEN_CUB_TRANSFORM_ITERATOR(aggT, TransformFunctor<T, aggT, nonzero>, const T*)(d_in, transform_functor);
     for (int i=0; i<iters_per_cta; i++){
       if (remaining >= BLOCK_THREADS * ITEMS_PER_THREAD) {
         BlockLoadT(temp_storage.load).Load(iter_in, data);
@@ -485,8 +442,6 @@ inline void inclusive_deterministic_scan(const scalar_t *  input, scalar_t * out
 
   const int iters_per_cta = (grid_size + num_sms - 1)/num_sms;
   grid_size = std::min(num_sms, grid_size);
-  // simple reduction in scan kernel handles at most 2 items per thread
-  TORCH_INTERNAL_ASSERT(2 * BLOCK_THREADS >= grid_size);
   auto& allocator = *c10::cuda::CUDACachingAllocator::get();
   auto agg = allocator.allocate(grid_size * sizeof(scalar_t));
   calc_block_sums<BLOCK_THREADS, ITEMS_PER_THREAD, false>
@@ -499,7 +454,6 @@ inline void inclusive_deterministic_scan(const scalar_t *  input, scalar_t * out
   C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 
-#endif
 
 template<typename InputIteratorT, typename OutputIteratorT, typename ScanOpT, typename InitValueT, int max_cub_size=impl::max_cub_size>
 inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT scan_op, InitValueT init_value, int64_t num_items) {
@@ -538,16 +492,6 @@ inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
         first_elem_ptr,
         scan_op);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
-#if !CUB_SUPPORTS_FUTURE_VALUE()
-    auto input_ = impl::chained_iterator<InitValueT, InputIteratorT>{
-      input + i, first_elem_ptr};
-    CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::InclusiveScan,
-        input_,
-        output + i,
-        scan_op,
-        size_cub,
-        at::cuda::getCurrentCUDAStream());
-#else
     CUB_WRAPPER(NO_ROCM(at_cuda_detail)::cub::DeviceScan::ExclusiveScan,
         input + i,
         output + i,
@@ -555,12 +499,10 @@ inline void exclusive_scan(InputIteratorT input, OutputIteratorT output, ScanOpT
         ::at_cuda_detail::cub::FutureValue<InitValueT>(first_elem_ptr),
         size_cub,
         at::cuda::getCurrentCUDAStream());
-#endif
   }
 #endif
 }
 
-#if CUB_SUPPORTS_SCAN_BY_KEY()
 
 template <typename KeysInputIteratorT, typename ValuesInputIteratorT, typename ValuesOutputIteratorT>
 inline void inclusive_sum_by_key(KeysInputIteratorT keys, ValuesInputIteratorT input, ValuesOutputIteratorT output, int64_t num_items) {
@@ -568,7 +510,7 @@ inline void inclusive_sum_by_key(KeysInputIteratorT keys, ValuesInputIteratorT i
     "cub InclusiveSumByKey does not support more than INT_MAX elements");
 #if !defined(USE_ROCM)
   CUB_WRAPPER(at_cuda_detail::cub::DeviceScan::InclusiveSumByKey,
-      keys, input, output, num_items, at_cuda_detail::cub::Equality(), at::cuda::getCurrentCUDAStream());
+      keys, input, output, num_items, NO_ROCM(::cuda)::std::equal_to<>(), at::cuda::getCurrentCUDAStream());
 #else
   CUB_WRAPPER(cub::DeviceScan::InclusiveSumByKey,
       keys, input, output, num_items, hipcub::Equality(), at::cuda::getCurrentCUDAStream());
@@ -581,14 +523,13 @@ inline void inclusive_scan_by_key(KeysInputIteratorT keys, ValuesInputIteratorT 
     "cub InclusiveSumByKey does not support more than INT_MAX elements");
 #if !defined(USE_ROCM)
   CUB_WRAPPER(at_cuda_detail::cub::DeviceScan::InclusiveScanByKey,
-      keys, input, output, scan_op, num_items, at_cuda_detail::cub::Equality(), at::cuda::getCurrentCUDAStream());
+      keys, input, output, scan_op, num_items, NO_ROCM(::cuda)::std::equal_to<>(), at::cuda::getCurrentCUDAStream());
 #else
   CUB_WRAPPER(cub::DeviceScan::InclusiveScanByKey,
       keys, input, output, scan_op, num_items, hipcub::Equality(), at::cuda::getCurrentCUDAStream());
 #endif
 }
 
-#endif
 
 template <typename InputIteratorT, typename OutputIteratorT, typename NumSelectedIteratorT>
 void unique(InputIteratorT input, OutputIteratorT output,

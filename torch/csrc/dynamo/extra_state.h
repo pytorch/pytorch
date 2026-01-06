@@ -132,7 +132,7 @@ void destroy_extra_state(void* obj);
 // Clears the existing object sitting on the extra scratch spance and sets it
 // up with the new state. Note that _PyCode_SetExtra calls the
 // destroy_extra_state deleter internally, and therefore we don't call it
-// explicity here.
+// explicitly here.
 
 // Ownership contract
 // args
@@ -148,7 +148,7 @@ void destroy_extra_state(void* obj);
 // scratch space.
 void set_extra_state(PyCodeObject* code, ExtraState* extra_state);
 
-// Creates a new extra state and put it on the extra scrach space of the code
+// Creates a new extra state and put it on the extra scratch space of the code
 // object.
 
 // Ownership contract
@@ -202,5 +202,7 @@ void _load_precompile_entry(
     const py::handle& code_obj,
     py::object guard_manager,
     py::object dynamo_code);
+py::list _debug_get_precompile_entries(const py::handle& code_obj);
+void _set_lru_cache(py::object boolean);
 
 #endif

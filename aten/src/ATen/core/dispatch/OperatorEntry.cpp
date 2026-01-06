@@ -62,17 +62,7 @@ static const auto& getDispatchTableIndexToKey() {
 }
 
 OperatorEntry::OperatorEntry(OperatorName&& operator_name)
-: name_(std::move(operator_name))
-, schema_()
-#ifndef C10_MOBILE
-, tags_()
-#endif
-, dispatchTable_()
-, dispatchKeyExtractor_(DispatchKeyExtractor::makeUninitialized())
-, kernels_()
-, cpp_signature_()
-, sym_cpp_signature_()
-, is_observed_(ObservedOperators::isObserved(name_))
+: name_(std::move(operator_name)), dispatchTable_(), dispatchKeyExtractor_(DispatchKeyExtractor::makeUninitialized()), is_observed_(ObservedOperators::isObserved(name_))
 {
   // Pick up any backend fallbacks that were registered prior to this
   // OperatorEntry being created.
@@ -213,7 +203,8 @@ OperatorEntry::AnnotatedKernelContainerIterator OperatorEntry::registerKernel(
 #endif
     // Suppress the warning for Meta key as we are overriding C++ meta functions with python meta functions
     // for some ops
-    if (dispatch_key != DispatchKey::Meta) {
+    // Also suppress the warning for MTIA, as MTIA achieves CPU fallback by overriding registration.
+    if (dispatch_key != DispatchKey::Meta && dispatch_key != DispatchKey::MTIA) {
       TORCH_WARN_ONCE("Warning only once for all operators,  other operators may also be overridden.\n",
             "  Overriding a previously registered kernel for the same operator and the same dispatch key\n",
             "  operator: ", (schema_.has_value() ? toString(schema_->schema) : toString(name_)), "\n",
@@ -314,6 +305,42 @@ const AnnotatedKernel* OperatorEntry::getKernelForDispatchKey(DispatchKey dispat
   return nullptr;
 }
 
+SafeKernelFunction OperatorEntry::getComputedKernelForDispatchKey(
+    DispatchKey k) const {
+  TORCH_CHECK(
+      !isAliasDispatchKey(k),
+      "Alias keys do not have runtime kernel registrations.");
+  const auto dispatch_ix = getDispatchTableIndexForDispatchKey(k);
+  TORCH_CHECK(
+      dispatchTable_[dispatch_ix].isValid(),
+      "no kernel for ",
+      k,
+      " for ",
+      name_);
+
+  // Get the KernelFunction object from kernels_ to pass to SafeKernelFunction
+
+  // The KernelFunction object in dispatchTable_ is a copy of the KernelFunction
+  // in the AnnotatedKernel in kernels_. A KernelFunction is only truly
+  // deregistered when the kernel is removed from kernels_. However, the
+  // KernelFunction in dispatchTable_ might be removed before it is deregistered
+  // (when a newer kernel is registered). Therefore, here we want to return a
+  // SafeKernelFunction that is backed by the original KernelFunction in
+  // kernels_, so that we only invalidate it when the kernel is deregistered.
+  auto [annotatedKernel, _] =
+      computeDispatchTableEntryWithDebug(c10::Dispatcher::singleton(), k);
+
+  // Use findSchemaOrThrow to get OpHandle for the OperatorEntry
+  auto& dispatcher = c10::Dispatcher::singleton();
+  auto opHandle = dispatcher.findSchemaOrThrow(
+      name_.name.c_str(), name_.overload_name.c_str());
+
+  return SafeKernelFunction(
+      &annotatedKernel.kernel,
+      annotatedKernel.debug,
+      std::make_shared<OperatorHandle>(opHandle));
+}
+
 const std::vector<at::Tag>& OperatorEntry::getTags() const {
   #if defined C10_MOBILE
     TORCH_CHECK(false, "tags are not saved for Mobile");
@@ -338,7 +365,7 @@ std::pair<const AnnotatedKernel&, const char*> OperatorEntry::computeDispatchTab
   //          For autograd keys, we only use kernel from CompositeImplicitAutograd when there's no direct registration
   //          to its corresponding backend key or CompositeExplicitAutograd. See Note [CompositeExplicitAutograd and CompositeImplicitAutograd].
   //          For AutogradOther, we eagerly return ambiguousAutogradOtherKernel() if there's registration to any of
-  //          its backends and ask backend extender to request a decicated Autograd key for the backend.
+  //          its backends and ask backend extender to request a dedicated Autograd key for the backend.
   //          See Note [Ambiguity in AutogradOther kernel] for more details.
   //          A CompositeExplicitAutograd kernel prevents CompositeImplicitAutograd kernel being used for Autograd keys, but it doesn't
   //          cause confusion for AutogradOther. It's pretty straightforward to use Autograd (if available)
@@ -543,7 +570,7 @@ void OperatorEntry::checkInvariants() const {
 
 std::string OperatorEntry::listAllDispatchKeys() const {
   std::ostringstream str;
-  str << "[";
+  str << '[';
 
   bool has_kernels = false;
   for (auto k : allDispatchKeysInFullSet()) {
@@ -557,7 +584,7 @@ std::string OperatorEntry::listAllDispatchKeys() const {
     str << k;
     has_kernels = true;
   }
-  str << "]";
+  str << ']';
   return str.str();
 }
 
@@ -656,12 +683,12 @@ void OperatorEntry::setReportErrorCallback_(std::unique_ptr<c10::SafePyObject> c
 // This WON'T report backend fallbacks.
 std::string OperatorEntry::dumpState() const {
   std::ostringstream oss;
-  oss << "name: " << name_ << "\n";
+  oss << "name: " << name_ << '\n';
   if (schema_) {
-    oss << "schema: " << schema_->schema << "\n";
-    oss << "debug: " << schema_->debug << "\n";
+    oss << "schema: " << schema_->schema << '\n';
+    oss << "debug: " << schema_->debug << '\n';
     oss << "alias analysis kind: " << toString(schema_->schema.aliasAnalysis())
-        << (schema_->schema.isDefaultAliasAnalysisKind() ? " (default)" : "") << "\n";
+        << (schema_->schema.isDefaultAliasAnalysisKind() ? " (default)" : "") << '\n';
   } else {
     oss << "schema: (none)\n";
   }

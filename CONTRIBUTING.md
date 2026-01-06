@@ -11,15 +11,18 @@ aspects of contributing to PyTorch.
 <!-- toc -->
 
 - [Developing PyTorch](#developing-pytorch)
-  - [Setup the development environment](#setup-the-development-environment)
   - [Tips and Debugging](#tips-and-debugging)
 - [Nightly Checkout & Pull](#nightly-checkout--pull)
 - [Codebase structure](#codebase-structure)
+- [Spin](#spin)
+  - [Linting](#linting)
+    - [default lint](#default-lint)
+  - [Regenerating](#regenerating)
 - [Unit testing](#unit-testing)
   - [Python Unit Testing](#python-unit-testing)
   - [Better local unit tests with `pytest`](#better-local-unit-tests-with-pytest)
   - [Local linting](#local-linting)
-    - [Running `mypy`](#running-mypy)
+    - [Running `pyrefly`](#running-pyrefly)
   - [C++ Unit Testing](#c-unit-testing)
   - [Run Specific CI Jobs](#run-specific-ci-jobs)
 - [Merging your Change](#merging-your-change)
@@ -67,41 +70,23 @@ aspects of contributing to PyTorch.
 
 Follow the instructions for [installing PyTorch from source](https://github.com/pytorch/pytorch#from-source). If you get stuck when developing PyTorch on your machine, check out the [tips and debugging](#tips-and-debugging) section below for common solutions.
 
-### Setup the development environment
-
-First, you need to [fork the PyTorch project on GitHub](https://github.com/pytorch/pytorch/fork) and follow the instructions at [Connecting to GitHub with SSH](https://docs.github.com/en/authentication/connecting-to-github-with-ssh) to setup your SSH authentication credentials.
-
-Then clone the PyTorch project and setup the development environment:
-
-```bash
-git clone git@github.com:<USERNAME>/pytorch.git
-cd pytorch
-git remote add upstream git@github.com:pytorch/pytorch.git
-
-make setup-env
-# Or run `make setup-env-cuda` for pre-built CUDA binaries
-# Or run `make setup-env-rocm` for pre-built ROCm binaries
-source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
-```
-
 ### Tips and Debugging
 
 * If you want to have no-op incremental rebuilds (which are fast), see [Make no-op build fast](#make-no-op-build-fast) below.
 
-* When installing with `python setup.py develop` (in contrast to `python setup.py install`) Python runtime will use
+* When installing with `python -m pip install -e . -v --no-build-isolation` (in contrast to `python -m pip install . -v --no-build-isolation`) Python runtime will use
   the current local source-tree when importing `torch` package. (This is done by creating [`.egg-link`](https://wiki.python.org/moin/PythonPackagingTerminology#egg-link) file in `site-packages` folder)
   This way you do not need to repeatedly install after modifying Python files (`.py`).
-  However, you would need to reinstall if you modify Python interface (`.pyi`, `.pyi.in`) or
-   non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
+  However, you would need to reinstall if you modify Python interface (`.pyi`, `.pyi.in`) or non-Python files (`.cpp`, `.cc`, `.cu`, `.h`, ...).
 
 
-  One way to avoid running `python setup.py develop` every time one makes a change to C++/CUDA/ObjectiveC files on Linux/Mac,
+  One way to avoid running `python -m pip install -e . -v --no-build-isolation` every time one makes a change to C++/CUDA/ObjectiveC files on Linux/Mac,
   is to create a symbolic link from `build` folder to `torch/lib`, for example, by issuing following:
   ```bash
-   pushd torch/lib; sh -c "ln -sf ../../build/lib/libtorch_cpu.* ."; popd
+  pushd torch/lib; sh -c "ln -sf ../../build/lib/libtorch_cpu.* ."; popd
   ```
-   Afterwards rebuilding a library (for example to rebuild `libtorch_cpu.so` issue `ninja torch_cpu` from `build` folder),
-   would be sufficient to make change visible in `torch` package.
+  Afterwards rebuilding a library (for example to rebuild `libtorch_cpu.so` issue `ninja torch_cpu` from `build` folder),
+  would be sufficient to make change visible in `torch` package.
 
 
   To reinstall, first uninstall all existing PyTorch installs. You may need to run `pip
@@ -115,9 +100,9 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
   pip uninstall torch
   ```
 
-  Next run `python setup.py clean`. After that, you can install in `develop` mode again.
+  Next run `python setup.py clean`. After that, you can install in editable mode again.
 
-* If you run into errors when running `python setup.py develop`, here are some debugging steps:
+* If you run into errors when running `python -m pip install -e . -v --no-build-isolation`, here are some debugging steps:
   1. Run `printf '#include <stdio.h>\nint main() { printf("Hello World");}'|clang -x c -; ./a.out` to make sure
   your CMake works and can compile this simple Hello World program without errors.
   2. Nuke your `build` directory. The `setup.py` script compiles binaries into the `build` folder and caches many
@@ -130,15 +115,22 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
       git clean -xdf
       python setup.py clean
       git submodule update --init --recursive
-      python setup.py develop
+      python -m pip install --group dev
+      python -m pip install --no-build-isolation -v -e .
       ```
-  4. The main step within `python setup.py develop` is running `make` from the `build` directory. If you want to
+  4. The main step within `python -m pip install -e . -v --no-build-isolation` is running `make` from the `build` directory. If you want to
     experiment with some environment variables, you can pass them into the command:
       ```bash
-      ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* python setup.py develop
+      ENV_KEY1=ENV_VAL1[, ENV_KEY2=ENV_VAL2]* CMAKE_FRESH=1 python -m pip install --no-build-isolation -v -e .
+      ```
+  5. Try installing PyTorch without build isolation by adding `--no-build-isolation` to the `pip install` command.
+  This will use the current environment's packages instead of creating a new isolated environment for the build.
+      ```bash
+      python -m pip install --no-build-isolation -v -e .
       ```
 
-* If you run into issue running `git submodule update --init --recursive`. Please try the following:
+
+* If you run into an issue running `git submodule update --init --recursive`, please try the following:
   - If you encounter an error such as
     ```
     error: Submodule 'third_party/pybind11' could not be updated
@@ -150,8 +142,8 @@ source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
     ```
     fatal: unable to access 'https://github.com/pybind/pybind11.git': could not load PEM client certificate ...
     ```
-    this is likely that you are using HTTP proxying and the certificate expired. To check if the certificate is valid, run
-    `git config --global --list` and search for config like `http.proxysslcert=<cert_file>`. Then check certificate valid date by running
+    it is likely that you are using HTTP proxying and the certificate expired. To check if the certificate is valid, run
+    `git config --global --list` and search for config like `http.proxysslcert=<cert_file>`. Then check certificate validity dates by running
     ```bash
     openssl x509 -noout -in <cert_file> -dates
     ```
@@ -176,28 +168,36 @@ You can use this script to check out a new nightly branch with the following:
 
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch
-source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 ```
 
 To install the nightly binaries built with CUDA, you can pass in the flag `--cuda`:
 
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch --cuda
-source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 ```
 
 To install the nightly binaries built with ROCm, you can pass in the flag `--rocm`:
 
 ```bash
 ./tools/nightly.py checkout -b my-nightly-branch --rocm
-source venv/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 ```
 
 You can also use this tool to pull the nightly commits into the current branch:
 
 ```bash
-./tools/nightly.py pull -p my-env
-source my-env/bin/activate  # or `& .\venv\Scripts\Activate.ps1` on Windows
+./tools/nightly.py pull
+source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
+```
+
+To create the virtual environment with a specific Python interpreter, you can
+pass in the `--python` argument:
+
+```bash
+./tools/nightly.py --python /path/to/python3.12
+source venv/bin/activate  # or `. .\venv\Scripts\activate` on Windows
 ```
 
 Pulling will recreate a fresh virtual environment and reinstall the development
@@ -228,6 +228,8 @@ dependencies as well as the nightly binaries into the repo directory.
           details.
         * [cuda](aten/src/ATen/native/cuda) - CUDA implementations of
           operators.
+        * [mps](aten/src/ATen/native/mps) - MPS implementations of
+          operators for Apple's Metal GPU family.
         * [sparse](aten/src/ATen/native/sparse) - CPU and CUDA
           implementations of COO sparse tensor operations
         * [mkl](aten/src/ATen/native/mkl) [mkldnn](aten/src/ATen/native/mkldnn)
@@ -251,6 +253,7 @@ dependencies as well as the nightly binaries into the repo directory.
       support for PyTorch.
 * [tools](tools) - Code generation scripts for the PyTorch library.
   See [README](tools/README.md) of this directory for more details.
+* [torchgen](torchgen) - contains the logic and tooling for generating PyTorch's low-level C++ and Python bindings from operator definitions, typically specified in native_functions.yaml
 * [test](test) - Python unit tests for PyTorch Python frontend.
   * [test_torch.py](test/test_torch.py) - Basic tests for PyTorch
     functionality.
@@ -275,6 +278,47 @@ dependencies as well as the nightly binaries into the repo directory.
   * ...
 * [.circleci](.circleci) - CircleCI configuration management. [README](.circleci/README.md)
 
+## Spin
+
+[Spin](https://github.com/scientific-python/spin) is a developer cli tool that
+helps running common tasks.
+To list the available tasks, run `spin --help`.
+Currently, we support the following tasks with Spin:
+
+### Linting
+
+Spin helps with linting by making sure that lintrunner is installed correctly
+and by isolating the lintrunner environment from the general development
+environment using uv.
+You can pass additional arguments to lintrunner by adding them after a
+separating double dash (`--`), for example `spin quicklint -- --take CLANGTIDY`.
+
+|command||
+|-|-|
+|`lint`|perform default lint (see below)|
+|`quicklint`|perform lint on all files changed in the latest commit and the working directory|
+|`quickfix`|autofix issues on all files changed in the latest commit and the working directory|
+
+#### default lint
+
+Since some linters take a long time to run, we categorize all linters as either
+fast or slow. In the default lint, only the fast linters are run on all files;
+the slow linters are run on the changed files only.
+
+### Regenerating
+
+Pytorch makes use of a number of code generations, which range from the version
+information in `torch/version.py` over type stubs and other linter support to
+github workflows.
+With Spin, we offer a unified interface to these tasks.
+
+|command||
+|-|-|
+|`regenerate-version`|regenerate `torch/version.py`|
+|`regenerate-type-stubs`|regenerates type stubs for use by static type checkers|
+|`regenerate-clangtidy-files`|regenerates clang related files needed for linting|
+|`regenerate-github-workflows`|regenerates github workflows from jinja templates|
+
 ## Unit testing
 
 ### Python Unit Testing
@@ -282,11 +326,11 @@ dependencies as well as the nightly binaries into the repo directory.
 **Prerequisites**:
 The following packages should be installed with `pip`:
 - `expecttest` and `hypothesis` - required to run tests
-- `mypy` - recommended for linting
+- `pyrefly` - recommended for type checking. [Pyrefly](https://pyrefly.org/)
 - `pytest` - recommended to run tests more selectively
 Running
 ```
-pip install -r requirements.txt
+pip install --group dev
 ```
 will install these dependencies for you.
 
@@ -343,13 +387,7 @@ command runs tests such as `TestNN.test_BCELoss` and
 
 ### Local linting
 
-Install all prerequisites by running
-
-```bash
-make setup-lint
-```
-
-You can now run the same linting steps that are used in CI locally via `make`:
+You can run the same linting steps that are used in CI locally via `make`:
 
 ```bash
 make lint
@@ -357,15 +395,32 @@ make lint
 
 Learn more about the linter on the [lintrunner wiki page](https://github.com/pytorch/pytorch/wiki/lintrunner)
 
-#### Running `mypy`
+#### Running `pyrefly`
 
-`mypy` is an optional static type checker for Python. We have multiple `mypy`
-configs for the PyTorch codebase that are automatically validated against whenever the linter is run.
+[Pyrefly](https://pyrefly.org/) is a high-performance static type checker for Python. It provides fast type checking along with IDE features like autocomplete and instant error feedback.
+
+PyTorch uses Pyrefly for type checking across the codebase. The configuration is managed in `pyrefly.toml` at the root of the repository.
+
+**Getting Started with Pyrefly:**
+
+To run type checking on the PyTorch codebase:
+```bash
+pyrefly check
+```
+
+For more detailed error information with summaries:
+```bash
+pyrefly check --summarize-errors
+```
+
+**Learn More:**
+- [Pyrefly Configuration](https://pyrefly.org/en/docs/configuration/) - Detailed configuration options
+- [Pyrefly IDE Features](https://pyrefly.org/en/docs/IDE-features/) - Set up Pyrefly in your editor for real-time type checking
+- [Python Typing Tutorial](https://pyrefly.org/en/docs/typing-for-python-developers/) - Learn about Python type annotations
 
 See [Guide for adding type annotations to
 PyTorch](https://github.com/pytorch/pytorch/wiki/Guide-for-adding-type-annotations-to-PyTorch)
-for more information on how to set up `mypy` and tackle type annotation
-tasks.
+for PyTorch-specific guidance on how to set up `pyrefly` and tackle type annotation tasks in this codebase.
 
 ### C++ Unit Testing
 
@@ -643,9 +698,9 @@ can be selected interactively with your mouse to zoom in on a particular part of
 the program execution timeline. The `--native` command-line option tells
 `py-spy` to record stack frame entries for PyTorch C++ code. To get line numbers
 for C++ code it may be necessary to compile PyTorch in debug mode by prepending
-your `setup.py develop` call to compile PyTorch with `DEBUG=1`. Depending on
-your operating system it may also be necessary to run `py-spy` with root
-privileges.
+your `python -m pip install -e . -v --no-build-isolation` call to compile
+PyTorch with `DEBUG=1`. Depending on your operating system it may also be
+necessary to run `py-spy` with root privileges.
 
 `py-spy` can also work in an `htop`-like "live profiling" mode and can be
 tweaked to adjust the stack sampling rate, see the `py-spy` readme for more
@@ -653,10 +708,10 @@ details.
 
 ## Managing multiple build trees
 
-One downside to using `python setup.py develop` is that your development
-version of PyTorch will be installed globally on your account (e.g., if
-you run `import torch` anywhere else, the development version will be
-used).
+One downside to using `python -m pip install -e . -v --no-build-isolation` is
+that your development version of PyTorch will be installed globally on your
+account (e.g., if you run `import torch` anywhere else, the development version
+will be used).
 
 If you want to manage multiple builds of PyTorch, you can make use of
 [venv environments](https://docs.python.org/3/library/venv.html) to maintain
@@ -667,7 +722,7 @@ specific build of PyTorch. To set one up:
 python -m venv pytorch-myfeature
 source pytorch-myfeature/bin/activate  # or `& .\pytorch-myfeature\Scripts\Activate.ps1` on Windows
 # if you run python now, torch will NOT be installed
-python setup.py develop
+python -m pip install --no-build-isolation -v -e .
 ```
 
 ## C++ development tips
@@ -705,7 +760,9 @@ variables `DEBUG`, `USE_DISTRIBUTED`, `USE_MKLDNN`, `USE_CUDA`, `USE_FLASH_ATTEN
 For example:
 
 ```bash
-DEBUG=1 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 USE_XNNPACK=0 python setup.py develop
+DEBUG=1 USE_DISTRIBUTED=0 USE_MKLDNN=0 USE_CUDA=0 BUILD_TEST=0 \
+    USE_FBGEMM=0 USE_NNPACK=0 USE_QNNPACK=0 USE_XNNPACK=0 \
+    python -m pip install --no-build-isolation -v -e .
 ```
 
 For subsequent builds (i.e., when `build/CMakeCache.txt` exists), the build
@@ -715,7 +772,7 @@ options.
 
 ### Code completion and IDE support
 
-When using `python setup.py develop`, PyTorch will generate
+When using `python -m pip install -e . -v --no-build-isolation`, PyTorch will generate
 a `compile_commands.json` file that can be used by many editors
 to provide command completion and error highlighting for PyTorch's
 C++ code. You need to `pip install ninja` to generate accurate
@@ -732,7 +789,7 @@ with `pip install ninja`.  If PyTorch was already built, you will need
 to run `python setup.py clean` once after installing ninja for builds to
 succeed.
 
-Note: Make sure to use a machine with a larger number of CPU cores, this will significantly reduce your build times.
+Note: Make sure to use a machine with a larger number of CPU cores;this will significantly reduce your build times.
 
 #### Use CCache
 
@@ -740,7 +797,7 @@ Even when dependencies are tracked with file modification, there are many
 situations where files get rebuilt when a previous compilation was exactly the
 same. Using ccache in a situation like this is a real time-saver.
 
-Before building pytorch, install ccache from your package manager of choice:
+Before building PyTorch, install ccache from your package manager of choice:
 
 ```bash
 sudo apt install ccache
@@ -759,7 +816,7 @@ ccache -M 25Gi  # -M 0 for unlimited
 ccache -F 0
 ```
 
-To check this is working, do two clean builds of pytorch in a row. The second
+To check this is working, do two clean builds of PyTorch in a row. The second
 build should be substantially and noticeably faster than the first build. If
 this doesn't seem to be the case, check the `CMAKE_<LANG>_COMPILER_LAUNCHER`
 rules in `build/CMakeCache.txt`, where `<LANG>` is `C`, `CXX` and `CUDA`.
@@ -776,7 +833,7 @@ If not, you can define these variables on the command line before invoking `setu
 export CMAKE_C_COMPILER_LAUNCHER=ccache
 export CMAKE_CXX_COMPILER_LAUNCHER=ccache
 export CMAKE_CUDA_COMPILER_LAUNCHER=ccache
-python setup.py develop
+python -m pip install --no-build-isolation -v -e .
 ```
 
 #### Use a faster linker
@@ -789,7 +846,7 @@ If you are editing a single file and rebuilding in a tight loop, the time spent 
 Starting with CMake 3.29, you can specify the linker type using the [`CMAKE_LINKER_TYPE`](https://cmake.org/cmake/help/latest/variable/CMAKE_LINKER_TYPE.html) variable. For example, with `mold` installed:
 
 ```sh
-CMAKE_LINKER_TYPE=MOLD python setup.py develop
+CMAKE_LINKER_TYPE=MOLD python -m pip install --no-build-isolation -v -e .
 ```
 
 #### Use pre-compiled headers
@@ -801,15 +858,15 @@ setting `USE_PRECOMPILED_HEADERS=1` either on first setup, or in the
 `CMakeCache.txt` file.
 
 ```sh
-USE_PRECOMPILED_HEADERS=1 python setup.py develop
+USE_PRECOMPILED_HEADERS=1 python -m pip install --no-build-isolation -v -e .
 ```
 
 This adds a build step where the compiler takes `<ATen/ATen.h>` and essentially
 dumps its internal AST to a file so the compiler can avoid repeating itself for
 every `.cpp` file.
 
-One caveat is that when enabled, this header gets included in every file by default.
-Which may change what code is legal, for example:
+One caveat is that when enabled, this header gets included in every file by default,
+which may change what code is legal, for example:
 - internal functions can never alias existing names in `<ATen/ATen.h>`
 - names in `<ATen/ATen.h>` will work even if you don't explicitly include it.
 
@@ -824,16 +881,16 @@ A compiler-wrapper to fix this is provided in `tools/nvcc_fix_deps.py`. You can 
 this as a compiler launcher, similar to `ccache`
 ```bash
 export CMAKE_CUDA_COMPILER_LAUNCHER="python;`pwd`/tools/nvcc_fix_deps.py;ccache"
-python setup.py develop
+python -m pip install --no-build-isolation -v -e .
 ```
 
 ### Rebuild few files with debug information
 
-While debugging a problem one often had to maintain a debug build in a separate folder.
-But often only a few files needs to be rebuild with debug info to get a symbolicated backtrace or enable source debugging
+While debugging a problem, one often has to maintain a debug build in a separate folder.
+But often only a few files need to be rebuilt with debug info to get a symbolicated backtrace or enable source debugging.
 One can easily solve this with the help of `tools/build_with_debinfo.py`
 
-For example, suppose one wants to debug what is going on while tensor index is selected, which can be achieved by setting a breakpoint at `applySelect` function:
+For example, suppose one wants to debug what is going on while a tensor index is selected, which can be achieved by setting a breakpoint at `applySelect` function:
 ```
 % lldb -o "b applySelect" -o "process launch" -- python3 -c "import torch;print(torch.rand(5)[3])"
 (lldb) target create "python"
@@ -855,7 +912,7 @@ libtorch_python.dylib`at::indexing::impl::applySelect:
 Target 0: (python) stopped.
 Process 87729 launched: '/usr/bin/python' (arm64)
 ```
-Which is not very informative, but can be easily remedied by rebuilding `python_variable_indexing.cpp` with debug information
+This is not very informative, but can be easily remedied by rebuilding `python_variable_indexing.cpp` with debug information.
 ```
 % ./tools/build_with_debinfo.py torch/csrc/autograd/python_variable_indexing.cpp
 [1 / 2] Building caffe2/torch/CMakeFiles/torch_python.dir/csrc/autograd/python_variable_indexing.cpp.o
@@ -885,7 +942,7 @@ Process 87741 stopped
 Target 0: (python) stopped.
 Process 87741 launched: '/usr/bin/python3' (arm64)
 ```
-Which is much more useful, isn't it?
+This is much more useful, isn't it?
 
 ### C++ frontend development tips
 
@@ -899,10 +956,10 @@ Please follow the lead of the other tests to see how to write a new test case.
 
 ### GDB integration
 
-If you are debugging pytorch inside GDB, you might be interested in
+If you are debugging PyTorch inside GDB, you might be interested in
 [pytorch-gdb](tools/gdb/pytorch-gdb.py). This script introduces some
-pytorch-specific commands which you can use from the GDB prompt. In
-particular, `torch-tensor-repr` prints a human-readable repr of an at::Tensor
+PyTorch-specific commands which you can use from the GDB prompt. In
+particular, `torch-tensor-repr` prints a human-readable representation of an at::Tensor
 object. Example of usage:
 
 ```
@@ -936,7 +993,7 @@ tensor([1., 2., 3., 4.], dtype=torch.float64)
 ```
 
 GDB tries to automatically load `pytorch-gdb` thanks to the
-[.gdbinit](.gdbinit) at the root of the pytorch repo. However, auto-loadings is disabled by default, because of security reasons:
+[.gdbinit](.gdbinit) at the root of the PyTorch repository. However, auto-loading is disabled by default, because of security reasons:
 
 ```bash
 $ gdb
@@ -977,7 +1034,7 @@ If you are working on the CUDA code, here are some useful CUDA debugging tips:
    `std::tuple` etc. in device code. Many of such features are possible because of the
    [--expt-relaxed-constexpr](https://docs.nvidia.com/cuda/cuda-c-programming-guide/index.html#constexpr-functions)
    nvcc flag. There is a known [issue](https://github.com/ROCm/hip/issues/374)
-   that ROCm errors out on device code, which uses such stl functions.
+   that ROCm errors out on device code, which uses such STL functions.
 4. A good performance metric for a CUDA kernel is the
    [Effective Memory Bandwidth](https://devblogs.nvidia.com/how-implement-performance-metrics-cuda-cc/).
    It is useful for you to measure this metric whenever you are writing/optimizing a CUDA
@@ -1175,7 +1232,7 @@ build_with_asan()
   CFLAGS="-fsanitize=address -fno-sanitize-recover=all -shared-libasan -pthread" \
   CXX_FLAGS="-pthread" \
   USE_CUDA=0 USE_OPENMP=0 USE_DISTRIBUTED=0 DEBUG=1 \
-  python setup.py develop
+  python -m pip install --no-build-isolation -v -e .
 }
 
 run_with_asan()
@@ -1232,7 +1289,7 @@ More information can be found
 
 We need `LD_PRELOAD` because there is a cmake check that ensures that a
 simple program builds and runs. If we are building with ASAN as a shared
-library, we need to `LD_PRELOAD` the runtime library, otherwise there will
+library, we need to use `LD_PRELOAD` to load the runtime library, otherwise there will be
 dynamic linker errors and the check will fail.
 
 We don’t actually need either of these if we fix the cmake checks.
@@ -1304,7 +1361,7 @@ There are two possible choices for which commit to use:
 For all practical purposes, most people can think of the commit being used as
 commit `B` (choice **1**).
 
-However, if workflow files (which govern CI behavior) were modified (either by your PR or since dev branch were created ) there's
+However, if workflow files (which govern CI behavior) were modified (either by your PR or since dev branch was created) there's
 a nuance to know about:
 The workflow files themselves get taken from checkpoint `C`, the merger of your
 PR and the `main` branch. But only the workflow files get taken from that merged

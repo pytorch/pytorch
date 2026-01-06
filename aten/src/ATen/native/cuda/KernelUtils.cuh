@@ -6,11 +6,12 @@
 #endif
 
 // ROCm 6.3 is planned to have these functions, but until then here they are.
-#if defined(USE_ROCM) && ROCM_VERSION >= 60201
+#if defined(USE_ROCM)
 #include <device_functions.h>
 #include <hip/hip_fp16.h>
 #include <hip/hip_bf16.h>
 
+#if ROCM_VERSION < 60400
 __device__ inline __hip_bfloat162 preview_unsafeAtomicAdd(__hip_bfloat162* address, __hip_bfloat162 value) {
 #if (defined(__gfx942__)) && \
   __has_builtin(__builtin_amdgcn_flat_atomic_fadd_v2bf16)
@@ -68,6 +69,9 @@ __device__ inline __half2 preview_unsafeAtomicAdd(__half2* address, __half2 valu
 #endif
 }
 #define ATOMICADD preview_unsafeAtomicAdd
+#else
+#define ATOMICADD unsafeAtomicAdd
+#endif
 #define NATIVE_ZERO_BF16 __float2bfloat16(0.0f)
 #else
 #define ATOMICADD atomicAdd
@@ -115,9 +119,7 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
     index_t index,
     const index_t numel,
     scalar_t value) {
-#if (                      \
-    (defined(USE_ROCM) && ROCM_VERSION < 60201) || \
-    (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700)))
+#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 700))
   gpuAtomicAddNoReturn(
       reinterpret_cast<at::Half*>(tensor) + index,
       static_cast<at::Half>(value));
@@ -160,9 +162,7 @@ __device__ __forceinline__ void fastSpecializedAtomicAdd(
     index_t index,
     const index_t numel,
     scalar_t value) {
-#if (                      \
-    (defined(USE_ROCM) && ROCM_VERSION < 60201) || \
-    (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800)))
+#if (defined(__CUDA_ARCH__) && (__CUDA_ARCH__ < 800))
   gpuAtomicAddNoReturn(
       reinterpret_cast<at::BFloat16*>(tensor) + index,
       static_cast<at::BFloat16>(value));
@@ -223,6 +223,41 @@ __device__ __forceinline__ void fastAtomicAdd(
   }
 }
 
+
+#ifdef USE_ROCM
+// This function implements a committed store.
+// Upon returning, the store is committed to global memory.
+// This is useful in avoiding the need for fences.
+template <typename T>
+__device__ inline void cmtdStore(void* address, T value) {
+      int constexpr num_long_per_val = sizeof(value)/sizeof(long);
+      int constexpr num_int_per_val = sizeof(value)/sizeof(int);
+      int constexpr num_short_per_val = sizeof(value)/sizeof(short);
+      int constexpr num_char_per_val = sizeof(value)/sizeof(char);
+      union pnr { T v;
+                  long l[num_long_per_val];
+                  int i[num_int_per_val];
+                  short s[num_short_per_val];
+                  char c[num_char_per_val]; }
+            _pnr = {.v = value };
+      if constexpr (num_long_per_val*sizeof(long) == sizeof(value))
+        for (int i=0; i<num_long_per_val; i++)
+          __hip_atomic_store(reinterpret_cast<long *>(address)+i, _pnr.l[i], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+      else if constexpr (num_int_per_val*sizeof(int) == sizeof(value))
+        for (int i=0; i<num_int_per_val; i++)
+          __hip_atomic_store(reinterpret_cast<int *>(address)+i, _pnr.i[i], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+      else if constexpr (num_short_per_val*sizeof(short) == sizeof(value))
+        for (int i=0; i<num_short_per_val; i++)
+          __hip_atomic_store(reinterpret_cast<short *>(address)+i, _pnr.s[i], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+      else if constexpr (num_char_per_val*sizeof(char) == sizeof(value))
+        for (int i=0; i<num_char_per_val; i++)
+          __hip_atomic_store(reinterpret_cast<char *>(address)+i, _pnr.c[i], __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+      __atomic_signal_fence(__ATOMIC_SEQ_CST);
+      asm volatile("s_waitcnt vmcnt(0)" ::: "memory");
+      __atomic_signal_fence(__ATOMIC_SEQ_CST);
+}
+#endif
+
 #if (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__))
 // This function implements warp-level opportunistic fastatomics
 // To reduce contention on an atomicAdd, this replaces per-thread atomicAdd with a per-warp atomicAdd.
@@ -238,7 +273,7 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
 
     scalar_t* dst = self_ptr + index;
 
-    //pack coalseced bf16 and fp16
+    //pack coalesced bf16 and fp16
     if constexpr (std::is_same<scalar_t, c10::BFloat16>::value || std::is_same<scalar_t, c10::Half>::value)
     {
         typedef unsigned short __attribute__((ext_vector_type(2))) vec_short2;
@@ -281,7 +316,15 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
         }
     }
 
-    // not coalsced, so now let try to capture lane-matches...
+    // not coalesced, so now let try to capture lane-matches...
+
+    if (numel > 16 /*<-hueristic threshold*/ * 64 ) {
+      // well shucks, unlikely to capture same-dest atomics in a wave.
+      // fall back to direct fastAtomic...
+      fastAtomicAdd(self_ptr, index, numel, value, true);
+      return;
+    }
+
     // __activemask() -- finds the set of threads in the warp that are about to perform atomicAdd
     // __match_any_sync() -- returns bit mask of the threads that have same dest addr
     auto mask = __match_any_sync(__activemask(), (int64_t)dst);

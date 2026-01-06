@@ -1,5 +1,4 @@
 # Owner(s): ["module: dynamo"]
-import sys
 import unittest
 from unittest.mock import MagicMock, patch
 
@@ -8,7 +7,7 @@ import torch._dynamo
 import torch._dynamo.backends
 import torch._dynamo.test_case
 from torch._dynamo.backends.debugging import ExplainWithBackend
-from torch._dynamo.backends.onnxrt import has_onnxruntime
+from torch._dynamo.backends.registry import lookup_backend
 from torch._dynamo.backends.tvm import has_tvm
 from torch._dynamo.testing import same
 from torch.fx._lazy_graph_module import _force_skip_lazy_graph_module
@@ -17,10 +16,7 @@ from torch.testing._internal.common_device_type import (
     onlyHPU,
 )
 from torch.testing._internal.common_utils import skipIfHpu
-from torch.testing._internal.inductor_utils import HAS_CUDA
-
-
-requires_cuda = unittest.skipUnless(HAS_CUDA, "requires cuda")
+from torch.testing._internal.triton_utils import requires_cuda_and_triton
 
 
 class Seq(torch.nn.Module):
@@ -104,24 +100,42 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
         self.assertTrue(same(r1, r2))
         self.assertTrue(same(r1, r3))
 
-    def _check_backend_works(self, backend, device, options=None):
+    def _check_backend_works(self, backend, device, boxed=True, options=None):
         model = Seq().eval()
         model.to(device)
-        input = torch.randn(2, 10, device=device)
-        r1 = model(input)
-        r2 = torch.compile(model, backend=backend, options=options)(input)
+
+        if not boxed:
+            compiled_model = torch.compile(model, backend=backend, options=options)
+        else:
+
+            def boxed_assert(gm, *example_args):
+                fn = lookup_backend(backend)(gm, *example_args)
+                assert fn._boxed_call
+                return fn
+
+            compiled_model = torch.compile(model, backend=boxed_assert, options=options)
+
+        input1 = torch.randn(2, 10, device=device, requires_grad=True)
+        input2 = input1.detach().clone().requires_grad_(True)
+
+        r1 = model(input1)
+        r2 = compiled_model(input2)
         self.assertTrue(same(r1, r2.float(), tol=0.01))
 
+        r1.sum().backward()
+        r2.sum().backward()
+        self.assertTrue(same(input1.grad, input2.grad.float(), tol=0.01))
+
     def test_eager(self, device):
-        self._check_backend_works("eager", device)
+        self._check_backend_works("eager", device, boxed=False)
 
     def test_eager_noexcept(self, device):
-        self._check_backend_works("eager_noexcept", device)
+        self._check_backend_works("eager_noexcept", device, boxed=False)
 
     @skipIfHpu
     @_force_skip_lazy_graph_module()
     def test_torchscript(self, device):
-        self._check_backend_works("ts", device)
+        self._check_backend_works("ts", device, boxed=False)
 
     def test_aot_eager(self, device):
         self._check_backend_works("aot_eager", device)
@@ -134,13 +148,9 @@ class TestOptimizations(torch._dynamo.test_case.TestCase):
     def test_aot_ts(self, device):
         self._check_backend_works("aot_ts", device)
 
-    @requires_cuda
+    @requires_cuda_and_triton
     def test_aot_cudagraphs(self, device):
         self._check_backend_works("cudagraphs", device)
-
-    @unittest.skipIf(not has_onnxruntime(), "requires onnxruntime")
-    def test_onnxrt(self, device):
-        self._check_backend_works("onnxrt", device)
 
     @unittest.skipIf(not has_tvm(), "requires tvm")
     def test_tvm(self, device):
@@ -241,10 +251,18 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
 
     def test_register_backend_api(self):
         from torch._dynamo import register_backend
+        from torch._dynamo.backends import registry as backend_registry
 
         backend_run = False
+        backend_name = "my_custom_backend"
 
-        @register_backend
+        def cleanup_backend():
+            backend_registry._COMPILER_FNS.pop(backend_name, None)
+            backend_registry._BACKENDS.pop(backend_name, None)
+
+        self.addCleanup(cleanup_backend)
+
+        @register_backend(name=backend_name)
         def my_custom_backend(gm, example_inputs):
             nonlocal backend_run
             backend_run = True
@@ -313,26 +331,31 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         backends_group = "torch_dynamo_backends"
         name = "mycustombackend"
 
-        mock_3_9 = MagicMock()
-        mock_3_9.load.return_value = lambda: "mocked 3.9"
-        mock_3_9.name = name
-
         mock_3_10 = MagicMock()
         mock_3_10.load.return_value = lambda: "mocked 3.10"
 
         def mock_eps(group=None):
-            if sys.version_info < (3, 10):
-                return {backends_group: [mock_3_9]}
-            else:
-                assert group == backends_group, group
-                mock_group = MagicMock()
-                mock_group.names = [name]
-                mock_group[name] = mock_3_10
-                # mock_group[name].load.return_value = lambda: "mocked 3.10"
-                return mock_group
+            assert group == backends_group, group
+            mock_group = MagicMock()
+            mock_group.names = [name]
+            mock_group[name] = mock_3_10
+            return mock_group
 
         with patch("importlib.metadata.entry_points", mock_eps):
             from torch._dynamo.backends import registry
+
+            orig_backends = dict(registry._BACKENDS)
+            orig_compiler_fns = dict(registry._COMPILER_FNS)
+
+            def restore_registry():
+                registry._BACKENDS.clear()
+                registry._BACKENDS.update(orig_backends)
+                registry._COMPILER_FNS.clear()
+                registry._COMPILER_FNS.update(orig_compiler_fns)
+                registry._lazy_import.cache_clear()
+                registry._discover_entrypoint_backends.cache_clear()
+
+            self.addCleanup(restore_registry)
 
             registry._lazy_import.cache_clear()
             registry._discover_entrypoint_backends.cache_clear()
@@ -394,7 +417,7 @@ class TestCustomBackendAPI(torch._dynamo.test_case.TestCase):
         self.assertTrue(backend_run)
 
 
-devices = ["cpu", "cuda", "hpu"]
+devices = ["cpu", "cuda", "hpu", "xpu"]
 instantiate_device_type_tests(TestOptimizations, globals(), only_for=devices)
 
 if __name__ == "__main__":

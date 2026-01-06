@@ -46,7 +46,7 @@ def define_targets(rules):
                 "util/typeid_test.cpp",
             ],
         ),
-        copts = ["-Wno-deprecated-declarations"],
+        copts = ["-Wno-deprecated-declarations", "-Wno-ctad-maybe-unsupported"],
         deps = [
             ":Macros",
             ":complex_math_test_common",
@@ -62,6 +62,15 @@ def define_targets(rules):
         srcs = ["util/bit_cast_test.cpp"],
         deps = [
             "//c10/util:bit_cast",
+            "@com_google_googletest//:gtest_main",
+        ],
+    )
+
+    rules.cc_test(
+        name = "util/nofatal_test",
+        srcs = ["util/nofatal_test.cpp"],
+        deps = [
+            "//c10/util:base",
             "@com_google_googletest//:gtest_main",
         ],
     )

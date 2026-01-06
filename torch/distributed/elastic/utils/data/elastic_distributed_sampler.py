@@ -8,7 +8,7 @@
 
 import math
 from collections.abc import Iterator, Sized
-from typing import cast, Optional, TypeVar
+from typing import cast, TypeVar
 
 import torch
 from torch.utils.data import Dataset
@@ -44,8 +44,8 @@ class ElasticDistributedSampler(DistributedSampler[T]):
     def __init__(
         self,
         dataset: Dataset[T],
-        num_replicas: Optional[int] = None,
-        rank: Optional[int] = None,
+        num_replicas: int | None = None,
+        rank: int | None = None,
         start_index: int = 0,
     ):
         super().__init__(dataset=dataset, num_replicas=num_replicas, rank=rank)
@@ -53,6 +53,7 @@ class ElasticDistributedSampler(DistributedSampler[T]):
             raise TypeError("Dataset must be an instance of collections.abc.Sized")
 
         # Cast to Sized for mypy
+
         sized_dataset = cast(Sized, dataset)
 
         if start_index >= len(sized_dataset):
@@ -62,8 +63,8 @@ class ElasticDistributedSampler(DistributedSampler[T]):
 
         self.start_index = start_index
         sized_dataset = cast(Sized, self.dataset)
-        self.num_samples = int(
-            math.ceil(float(len(sized_dataset) - self.start_index) / self.num_replicas)
+        self.num_samples = math.ceil(
+            float(len(sized_dataset) - self.start_index) / self.num_replicas
         )
         self.total_size = self.num_samples * self.num_replicas
 

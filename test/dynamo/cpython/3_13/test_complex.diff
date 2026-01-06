@@ -1,13 +1,16 @@
 diff --git a/test/dynamo/cpython/3_13/test_complex.py b/test/dynamo/cpython/3_13/test_complex.py
-index 6ff1a8ab29d..ab5bd3dab62 100644
+index 6ff1a8ab29d..1572433c5ae 100644
 --- a/test/dynamo/cpython/3_13/test_complex.py
 +++ b/test/dynamo/cpython/3_13/test_complex.py
-@@ -1,16 +1,143 @@
+@@ -1,16 +1,147 @@
 +# ======= BEGIN Dynamo patch =======
 +# Owner(s): ["module: dynamo"]
 +
 +# ruff: noqa
 +# flake8: noqa
++
++# Test copied from
++# https://raw.githubusercontent.com/python/cpython/refs/tags/v3.13.5/Lib/test/test_complex.py
 +
 +import sys
 +import torch
@@ -16,6 +19,7 @@ index 6ff1a8ab29d..ab5bd3dab62 100644
 +from torch._dynamo.test_case import CPythonTestCase
 +from torch.testing._internal.common_utils import (
 +    run_tests,
++    slowTest,
 +    xfailIfTorchDynamo,
 +)
 +
@@ -39,7 +43,7 @@ index 6ff1a8ab29d..ab5bd3dab62 100644
 +    "test.test_iter",
 +    "test.typinganndata.ann_module",
  )
- 
+
 +class RedirectImportFinder(importlib.abc.MetaPathFinder):
 +    def find_spec(self, fullname, path, target=None):
 +        # Check if the import is the problematic one
@@ -70,7 +74,7 @@ index 6ff1a8ab29d..ab5bd3dab62 100644
  from math import isnan, copysign
 +import math
  import operator
- 
+
 +VALID_UNDERSCORE_LITERALS = [
 +    '0_0_0',
 +    '4_2',
@@ -151,10 +155,10 @@ index 6ff1a8ab29d..ab5bd3dab62 100644
  INF = float("inf")
  NAN = float("nan")
  DBL_MAX = sys.float_info.max
-@@ -45,7 +172,40 @@ class WithComplex:
+@@ -45,7 +176,40 @@ class WithComplex:
      def __complex__(self):
          return self.value
- 
+
 -class ComplexTest(ComplexesAreIdenticalMixin, unittest.TestCase):
 +class ComplexTest(__TestCase):
 +
@@ -190,13 +194,13 @@ index 6ff1a8ab29d..ab5bd3dab62 100644
 +        """
 +        self.assertFloatIdentical(x.real, y.real)
 +        self.assertFloatIdentical(x.imag, y.imag)
- 
+
      def assertAlmostEqual(self, a, b):
          if isinstance(a, complex):
-@@ -74,6 +234,29 @@ class ComplexTest(ComplexesAreIdenticalMixin, unittest.TestCase):
+@@ -74,6 +238,29 @@ class ComplexTest(ComplexesAreIdenticalMixin, unittest.TestCase):
          # check that relative difference < eps
          self.assertTrue(abs((x-y)/y) < eps)
- 
+
 +    def assertFloatsAreIdentical(self, x, y):
 +        """assert that floats x and y are identical, in the sense that:
 +        (1) both x and y are nans, or
@@ -223,9 +227,102 @@ index 6ff1a8ab29d..ab5bd3dab62 100644
      def assertClose(self, x, y, eps=1e-9):
          """Return true iff complexes x and y "are close"."""
          self.assertCloseAbs(x.real, y.real, eps)
-@@ -855,4 +1038,4 @@ class ComplexTest(ComplexesAreIdenticalMixin, unittest.TestCase):
- 
- 
+@@ -93,6 +280,7 @@ class ComplexTest(ComplexesAreIdenticalMixin, unittest.TestCase):
+             q = z.__truediv__(y)
+             self.assertClose(q, x)
+
++    @slowTest
+     def test_truediv(self):
+         simple_real = [float(i) for i in range(-5, 6)]
+         simple_complex = [complex(x, y) for x in simple_real for y in simple_real]
+@@ -338,7 +526,10 @@ class ComplexTest(ComplexesAreIdenticalMixin, unittest.TestCase):
+
+     def test_boolcontext(self):
+         for i in range(100):
+-            self.assertTrue(complex(random() + 1e-6, random() + 1e-6))
++            with torch._dynamo.error_on_graph_break(False):
++                r1 = random()
++                r2 = random()
++            self.assertTrue(complex(r1 + 1e-6, r2 + 1e-6))
+         self.assertTrue(not complex(0.0, 0.0))
+         self.assertTrue(1j)
+
+@@ -431,12 +622,13 @@ class ComplexTest(ComplexesAreIdenticalMixin, unittest.TestCase):
+         self.assertRaises(TypeError, complex, WithComplex(1), object())
+         self.assertRaises(TypeError, complex, WithComplex(None), object())
+
+-        class EvilExc(Exception):
+-            pass
++        with torch._dynamo.error_on_graph_break(False):
++            class EvilExc(Exception):
++                pass
+
+-        class evilcomplex:
+-            def __complex__(self):
+-                raise EvilExc
++            class evilcomplex:
++                def __complex__(self):
++                    raise EvilExc
+
+         self.assertRaises(EvilExc, complex, evilcomplex())
+
+@@ -460,31 +652,33 @@ class ComplexTest(ComplexesAreIdenticalMixin, unittest.TestCase):
+         self.assertRaises(TypeError, complex, WithIndex(None), 1.5)
+         self.assertRaises(TypeError, complex, 1.5, WithIndex(None))
+
+-        class MyInt:
+-            def __int__(self):
+-                return 42
++        with torch._dynamo.error_on_graph_break(False):
++            class MyInt:
++                def __int__(self):
++                    return 42
+
+         self.assertRaises(TypeError, complex, MyInt())
+         self.assertRaises(TypeError, complex, MyInt(), 1.5)
+         self.assertRaises(TypeError, complex, 1.5, MyInt())
+
+-        class complex0(complex):
+-            """Test usage of __complex__() when inheriting from 'complex'"""
+-            def __complex__(self):
+-                return 42j
+-
+-        class complex1(complex):
+-            """Test usage of __complex__() with a __new__() method"""
+-            def __new__(self, value=0j):
+-                return complex.__new__(self, 2*value)
+-            def __complex__(self):
+-                return self
+-
+-        class complex2(complex):
+-            """Make sure that __complex__() calls fail if anything other than a
+-            complex is returned"""
+-            def __complex__(self):
+-                return None
++        with torch._dynamo.error_on_graph_break(False):
++            class complex0(complex):
++                """Test usage of __complex__() when inheriting from 'complex'"""
++                def __complex__(self):
++                    return 42j
++
++            class complex1(complex):
++                """Test usage of __complex__() with a __new__() method"""
++                def __new__(self, value=0j):
++                    return complex.__new__(self, 2*value)
++                def __complex__(self):
++                    return self
++
++            class complex2(complex):
++                """Make sure that __complex__() calls fail if anything other than a
++                complex is returned"""
++                def __complex__(self):
++                    return None
+
+         check(complex(complex0(1j)), 0.0, 42.0)
+         with self.assertWarns(DeprecationWarning):
+@@ -855,4 +1049,4 @@ class ComplexTest(ComplexesAreIdenticalMixin, unittest.TestCase):
+
+
  if __name__ == "__main__":
 -    unittest.main()
 +    run_tests()

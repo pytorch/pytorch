@@ -6,7 +6,14 @@ from contextlib import contextmanager
 from typing import Optional
 
 import torch
-from torch.backends import __allow_nonbracketed_mutation, ContextProp, PropModule
+from torch.backends import (
+    __allow_nonbracketed_mutation,
+    _FP32Precision,
+    _get_fp32_precision_getter,
+    _set_fp32_precision_setter,
+    ContextProp,
+    PropModule,
+)
 
 
 try:
@@ -27,8 +34,11 @@ if _cudnn is not None:
     def _init():
         global __cudnn_version
         if __cudnn_version is None:
+            # pyrefly: ignore [missing-attribute]
             __cudnn_version = _cudnn.getVersionInt()
+            # pyrefly: ignore [missing-attribute]
             runtime_version = _cudnn.getRuntimeVersion()
+            # pyrefly: ignore [missing-attribute]
             compile_version = _cudnn.getCompileVersion()
             runtime_major, runtime_minor, _ = runtime_version
             compile_major, compile_minor, _ = compile_version
@@ -37,6 +47,7 @@ if _cudnn is not None:
             # Not sure about MIOpen (ROCm), so always do a strict check
             if runtime_major != compile_major:
                 cudnn_compatible = False
+            # pyrefly: ignore [missing-attribute]
             elif runtime_major < 7 or not _cudnn.is_cuda:
                 cudnn_compatible = runtime_minor == compile_minor
             else:
@@ -71,6 +82,20 @@ if _cudnn is not None:
                         )
                 else:
                     raise RuntimeError(base_error_msg)
+            # Check if cuDNN version is compatible with available CUDA devices
+            if torch.cuda.is_available() and not torch.version.hip:
+                min_cc = min(
+                    [
+                        torch.cuda.get_device_capability(i)
+                        for i in range(torch.cuda.device_count())
+                    ]
+                )
+                if __cudnn_version >= 91100 and min_cc < (7, 5):
+                    raise RuntimeError(
+                        f"cuDNN version {__cudnn_version} is not compatible with devices with SM < 7.5. "
+                        f"Please install a version of PyTorch with a compatible cuDNN version. "
+                        f"https://github.com/pytorch/pytorch/blob/main/RELEASE.md#release-compatibility-matrix"
+                    )
 
         return True
 
@@ -107,7 +132,8 @@ def is_acceptable(tensor):
     if not is_available():
         warnings.warn(
             "PyTorch was compiled without cuDNN/MIOpen support. To use cuDNN/MIOpen, rebuild "
-            "PyTorch making sure the library is visible to the build system."
+            "PyTorch making sure the library is visible to the build system.",
+            stacklevel=2,
         )
         return False
     if not _init():
@@ -116,7 +142,8 @@ def is_acceptable(tensor):
                 libpath={"darwin": "DYLD_LIBRARY_PATH", "win32": "PATH"}.get(
                     sys.platform, "LD_LIBRARY_PATH"
                 )
-            )
+            ),
+            stacklevel=2,
         )
         return False
     return True
@@ -128,6 +155,7 @@ def set_flags(
     _benchmark_limit=None,
     _deterministic=None,
     _allow_tf32=None,
+    _fp32_precision="none",
 ):
     orig_flags = (
         torch._C._get_cudnn_enabled(),
@@ -135,6 +163,7 @@ def set_flags(
         None if not is_available() else torch._C._cuda_get_cudnn_benchmark_limit(),
         torch._C._get_cudnn_deterministic(),
         torch._C._get_cudnn_allow_tf32(),
+        torch._C._get_fp32_precision_getter("cuda", "all"),
     )
     if _enabled is not None:
         torch._C._set_cudnn_enabled(_enabled)
@@ -146,6 +175,8 @@ def set_flags(
         torch._C._set_cudnn_deterministic(_deterministic)
     if _allow_tf32 is not None:
         torch._C._set_cudnn_allow_tf32(_allow_tf32)
+    if _fp32_precision is not None:
+        torch._C._set_fp32_precision_setter("cuda", "all", _fp32_precision)
     return orig_flags
 
 
@@ -156,10 +187,16 @@ def flags(
     benchmark_limit=10,
     deterministic=False,
     allow_tf32=True,
+    fp32_precision="none",
 ):
     with __allow_nonbracketed_mutation():
         orig_flags = set_flags(
-            enabled, benchmark, benchmark_limit, deterministic, allow_tf32
+            enabled,
+            benchmark,
+            benchmark_limit,
+            deterministic,
+            allow_tf32,
+            fp32_precision,
         )
     try:
         yield
@@ -175,9 +212,6 @@ def flags(
 
 
 class CudnnModule(PropModule):
-    def __init__(self, m, name):
-        super().__init__(m, name)
-
     enabled = ContextProp(torch._C._get_cudnn_enabled, torch._C._set_cudnn_enabled)
     deterministic = ContextProp(
         torch._C._get_cudnn_deterministic, torch._C._set_cudnn_deterministic
@@ -193,6 +227,12 @@ class CudnnModule(PropModule):
         )
     allow_tf32 = ContextProp(
         torch._C._get_cudnn_allow_tf32, torch._C._set_cudnn_allow_tf32
+    )
+    conv = _FP32Precision("cuda", "conv")
+    rnn = _FP32Precision("cuda", "rnn")
+    fp32_precision = ContextProp(
+        _get_fp32_precision_getter("cuda", "all"),
+        _set_fp32_precision_setter("cuda", "all"),
     )
 
 

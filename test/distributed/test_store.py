@@ -43,7 +43,7 @@ from torch.testing._internal.common_utils import (
 
 # load_tests from common_utils is used to automatically filter tests for
 # sharding on sandcastle. This line silences flake warnings
-load_tests = load_tests
+load_tests = load_tests  # noqa: PLW0127
 
 if platform == "darwin":
     LOOPBACK = "lo0"
@@ -54,6 +54,8 @@ DEFAULT_HOSTNAME = "localhost"
 
 torch.backends.cuda.matmul.allow_tf32 = False
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 
 def gpus_for_rank(world_size):
     """Multigpu tests are designed to simulate the multi nodes with multi
@@ -61,8 +63,8 @@ def gpus_for_rank(world_size):
     On a single node, all visible GPUs are evenly
     divided to subsets, each process only uses a subset.
     """
-    visible_devices = list(range(torch.cuda.device_count()))
-    gpus_per_process = torch.cuda.device_count() // world_size
+    visible_devices = list(range(torch.accelerator.device_count()))
+    gpus_per_process = torch.accelerator.device_count() // world_size
     gpus_for_rank = []
     for rank in range(world_size):
         gpus_for_rank.append(
@@ -251,6 +253,14 @@ class StoreTestBase:
         a.set("foo", "bar")
         self.assertEqual(b.get("foo"), b"bar")
 
+    def test_list_keys(self):
+        a = self._create_store()
+        a.set("foo", "bar")
+        a.set("baz", "qux")
+        keys = a.list_keys()
+        self.assertIn("foo", keys)
+        self.assertIn("baz", keys)
+
     # This is the number of keys used in test_set_get. Adding this as a class
     # property instead of hardcoding in the test since some Store
     # implementations will have differing number of keys. In the base case,
@@ -263,7 +273,8 @@ class StoreTestBase:
 class FileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
         super().setUp()
-        self.file = tempfile.NamedTemporaryFile(delete=False)
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            self.file = f
 
     def _create_store(self):
         store = dist.FileStore(self.file.name, 1)
@@ -271,34 +282,34 @@ class FileStoreTest(TestCase, StoreTestBase):
         return store
 
     def test_init_pg_and_rpc_with_same_file(self):
-        file = tempfile.NamedTemporaryFile(delete=False)
-        # Init RPC using file
-        rpc_backend_options = rpc.TensorPipeRpcBackendOptions()
-        rpc_backend_options.init_method = f"file://{file.name}"
-        rpc_backend_options._transports = tp_transports()
-        rpc.init_rpc(
-            "worker", rank=0, world_size=1, rpc_backend_options=rpc_backend_options
-        )
+        with tempfile.NamedTemporaryFile(delete=False) as file:
+            # Init RPC using file
+            rpc_backend_options = rpc.TensorPipeRpcBackendOptions()
+            rpc_backend_options.init_method = f"file://{file.name}"
+            rpc_backend_options._transports = tp_transports()
+            rpc.init_rpc(
+                "worker", rank=0, world_size=1, rpc_backend_options=rpc_backend_options
+            )
 
-        # Init PG using file
-        dist.init_process_group(
-            "gloo", rank=0, world_size=1, init_method=f"file://{file.name}"
-        )
-        dist.destroy_process_group()
-        assert os.path.exists(file.name)
+            # Init PG using file
+            dist.init_process_group(
+                "gloo", rank=0, world_size=1, init_method=f"file://{file.name}"
+            )
+            dist.destroy_process_group()
+            assert os.path.exists(file.name)
 
-        rpc.shutdown()
-        os.remove(file.name)
+            rpc.shutdown()
+            os.remove(file.name)
 
     def test_refcount(self):
-        file = tempfile.NamedTemporaryFile(delete=False)
-        store = dist.FileStore(file.name, 1)
-        store2 = dist.FileStore(file.name, 1)
+        with tempfile.NamedTemporaryFile(delete=False) as file:
+            store = dist.FileStore(file.name, 1)
+            store2 = dist.FileStore(file.name, 1)
 
-        del store
-        assert os.path.exists(file.name)
-        del store2
-        assert not os.path.exists(file.name)
+            del store
+            assert os.path.exists(file.name)
+            del store2
+            assert not os.path.exists(file.name)
 
     @property
     def num_keys_total(self):
@@ -315,8 +326,10 @@ class HashStoreTest(TestCase, StoreTestBase):
 
 class PrefixStoreTest(TestCase):
     def setUp(self):
+        super().setUp()
         # delete is false as FileStore will automatically clean up the file
-        self.file = tempfile.NamedTemporaryFile(delete=False)
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            self.file = f
 
     def test_get_underlying_store(self):
         tcp_store = dist.TCPStore(
@@ -337,7 +350,8 @@ class PrefixStoreTest(TestCase):
 class PrefixFileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
         super().setUp()
-        self.file = tempfile.NamedTemporaryFile(delete=False)
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            self.file = f
         self.filestore = dist.FileStore(self.file.name, 1)
         self.prefix = "test_prefix"
         self.filestore.set_timeout(timedelta(seconds=300))
@@ -372,12 +386,8 @@ class TCPStoreTest(TestCase, StoreTestBase):
             # Use noqa to silence flake8.
             # Need to store in an unused variable here to ensure the first
             # object is not destroyed before the second object is created.
-            store1 = dist.TCPStore(
-                addr, port, 1, True, use_libuv=self._use_libuv
-            )  # noqa: F841
-            store2 = dist.TCPStore(
-                addr, port, 1, True, use_libuv=self._use_libuv
-            )  # noqa: F841
+            store1 = dist.TCPStore(addr, port, 1, True, use_libuv=self._use_libuv)  # noqa: F841
+            store2 = dist.TCPStore(addr, port, 1, True, use_libuv=self._use_libuv)  # noqa: F841
             self.assertEqual(store1.libuvBackend, self._use_libuv)
             self.assertEqual(store2.libuvBackend, self._use_libuv)
 
@@ -767,7 +777,7 @@ class RendezvousFileTest(TestCase):
 
     def test_nominal(self):
         with tempfile.NamedTemporaryFile(delete=False) as file:
-            url = f'file:///{file.name.replace(os.path.sep, "/")}?world_size=2'
+            url = f"file:///{file.name.replace(os.path.sep, '/')}?world_size=2"
             gen0 = dist.rendezvous(url + "&rank=0")
             store0, rank0, size0 = next(gen0)
             self.assertEqual(0, rank0)
@@ -841,9 +851,9 @@ class RendezvousTCPTest(TestCase):
         # not respected, it will take much longer to timeout.
         start = time.time()
         with self.assertRaisesRegex(
-            DistStoreError, "wait timeout after 100ms, keys: /nonexistant key"
+            DistStoreError, "wait timeout after 100ms, keys: /nonexistent key"
         ):
-            store0.get("nonexistant key")
+            store0.get("nonexistent key")
 
         end = time.time()
         time_diff = end - start
@@ -970,7 +980,7 @@ class TestPythonStore(TestCase):
 
 
 class TestMultiThreadedWait(MultiThreadedTestCase):
-    file_store = dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1)
+    file_store = dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1)  # noqa: SIM115
     hash_store = dist.HashStore()
 
     tcp_store = create_tcp_store(use_libuv=False)
@@ -1051,7 +1061,7 @@ class TimeoutTest(TestCase):
                 else:
                     my_store.wait(["foo"], datetime.timedelta(seconds=10))
                 rank_res[rank] = True
-            except Error as e:  # noqa: F821
+            except BaseException as e:  # noqa: B036,E261
                 rank_res[rank] = e
             time.sleep(1)
 
@@ -1070,7 +1080,7 @@ class TimeoutTest(TestCase):
             wait_for_workers=False,
         )
 
-        ths = []
+        threads = []
         for i in range(2):
             t = threading.Thread(
                 target=run,
@@ -1080,16 +1090,16 @@ class TimeoutTest(TestCase):
                 ),
             )
             t.start()
-            ths.append(t)
+            threads.append(t)
 
         def handler(a, b):
             pass
 
         signal.signal(signal.SIGUSR1, handler)
         time.sleep(1)
-        signal.pthread_kill(ths[1].ident, signal.SIGUSR1)
+        signal.pthread_kill(threads[1].ident, signal.SIGUSR1)
 
-        for t in ths:
+        for t in threads:
             t.join()
         self.assertTrue(rank_res[0], "rank0")
         self.assertTrue(rank_res[1], "rank1")
@@ -1178,8 +1188,8 @@ class TestClientProtocol(TestCase):
 
 
 if __name__ == "__main__":
-    assert (
-        not torch.cuda._initialized
-    ), "test_distributed must not have initialized CUDA context on main process"
-
+    if device_type != "cpu":
+        assert not torch.get_device_module()._initialized, (
+            f"test_distributed must not have initialized {device_type} context on main process"
+        )
     run_tests()

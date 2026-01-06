@@ -9,6 +9,7 @@ from torch._dynamo.utils import same
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
+from torch.testing._internal.common_utils import serialTest
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
@@ -211,6 +212,7 @@ class InplacePaddingTest(TestCase):
 
     @requires_cuda_with_enough_memory(2e10)
     @inductor_config.patch(force_shape_pad=True)
+    @serialTest()
     def test_linear_and_cel(self):
         # Use nan for torch.empty
         torch.use_deterministic_algorithms(True)
@@ -231,9 +233,9 @@ class InplacePaddingTest(TestCase):
             loss.backward()
             return loss
 
-        x = torch.randn(B * T, C, requires_grad=True).cuda().bfloat16()
+        x = torch.randn(B * T, C, requires_grad=True).to(GPU_TYPE).bfloat16()
         x.retain_grad()
-        y = torch.randint(0, V, (B * T,)).cuda()
+        y = torch.randint(0, V, (B * T,)).to(GPU_TYPE)
 
         opt_f = torch.compile(f)
 

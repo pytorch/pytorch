@@ -1,6 +1,7 @@
 #include <torch/csrc/autograd/python_legacy_variable.h>
 
 #include <ATen/ATen.h>
+#include <fmt/format.h>
 
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/python_function.h>
@@ -57,8 +58,9 @@ static PyObject* THPVariable_pynew(
       !is_volatile || !requires_grad,
       "Variable can't be volatile and require_grad at the same time!");
   if (grad_fn && !THPFunction_Check(grad_fn)) {
-    throw TypeError(
-        "_grad_fn has to be a Function object or None, but got %s",
+    TORCH_CHECK_TYPE(
+        false,
+        "_grad_fn has to be a Function object or None, but got ",
         Py_TYPE(grad_fn)->tp_name);
   }
   Variable var;
@@ -74,8 +76,10 @@ static PyObject* THPVariable_pynew(
   } else if (THPVariable_Check(data)) {
     var = THPVariable_Unpack(data).detach();
   } else {
-    throw torch::TypeError(
-        "Variable data has to be a tensor, but got %s", Py_TYPE(data)->tp_name);
+    TORCH_CHECK_TYPE(
+        false,
+        "Variable data has to be a tensor, but got ",
+        Py_TYPE(data)->tp_name);
   }
   // We set `tensor`'s `allow_tensor_metadata_change` to true here, because we
   // want to allow the following use case for backward compatibility:

@@ -11,6 +11,8 @@ from torch.testing._internal.common_utils import slowTest
 from torch.testing._internal.inductor_utils import GPU_TYPE, RUN_GPU
 
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
 try:
     try:
         from . import (
@@ -61,6 +63,19 @@ class TestGpuWrapper(InductorTestCase):
             }
         )(test_fn)
         comp()
+
+    def test_non_tensor_args_wrapped_on_cpu(self):
+        if not RUN_GPU:
+            self.skipTest("GPU not available")
+
+        def test_fn(x, s):
+            return (x + s).sum()
+
+        compiled = torch.compile(options={"cpp_wrapper": True})(test_fn)
+        x = torch.randn(4, device=self.device)
+        with torch.utils._device.DeviceContext(self.device):
+            _, code = test_torchinductor.run_and_get_cpp_code(compiled, x, 3)
+        self.assertIn("torch.tensor(arg, device='cpu')", code)
 
 
 class DynamicShapesGpuWrapperGpuTests(InductorTestCase):
@@ -125,7 +140,7 @@ def make_test_case(
     assert callable(func), "not a callable"
     func = slowTest(func) if slow else func
 
-    @config.patch(cpp_wrapper=True, search_autotune_cache=False)
+    @config.patch(cpp_wrapper=True)
     def fn(self):
         tests.setUpClass()
         tests.setUp()
@@ -172,12 +187,7 @@ if RUN_GPU:
 
     # XPU Not implemented yet
     XPU_BASE_TEST_SKIP = [
-        "test_foreach_cpp_wrapper",
-        "test_enable_dynamic_shapes_cpp_wrapper",
         "test_dynamic_shapes_persistent_reduction_mixed_x_dim",
-        "test_cat_slice_cat",
-        "test_fft_real_input",
-        "test_fft_real_input_real_output",
     ]
 
     # Maintain two separate test lists for cuda and cpp for now
@@ -186,7 +196,8 @@ if RUN_GPU:
         BaseTest("test_add_complex4"),
         BaseTest("test_as_strided"),  # buffer reuse
         BaseTest("test_batch_norm_2d_2"),
-        BaseTest("test_bernoulli1"),
+        BaseTest("test_bernoulli1_combo_kernels_False"),
+        BaseTest("test_bernoulli1_combo_kernels_True"),
         BaseTest("test_bitwise"),  # int32
         BaseTest("test_bmm1"),
         BaseTest("test_bmm2"),
@@ -298,16 +309,16 @@ if RUN_GPU:
 
     from torch._inductor.utils import is_big_gpu
 
-    if GPU_TYPE == "cuda" and is_big_gpu():
+    if GPU_TYPE in ("cuda", "xpu") and is_big_gpu():
         skip_list = ["test_addmm", "test_linear_relu"]
         # need to skip instead of omit, otherwise fbcode ci can be flaky
         for test_name in skip_list:
-            test_failures_gpu_wrapper[
-                f"{test_name}_cuda"
-            ] = test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=True)
-            test_failures_gpu_wrapper[
-                f"{test_name}_gpu_dynamic_shapes"
-            ] = test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=True)
+            test_failures_gpu_wrapper[f"{test_name}_{device_type}"] = (
+                test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=True)
+            )
+            test_failures_gpu_wrapper[f"{test_name}_gpu_dynamic_shapes"] = (
+                test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=True)
+            )
 
     test_torchinductor.copy_tests(
         GpuWrapperTemplate, TestGpuWrapper, "gpu_wrapper", test_failures_gpu_wrapper

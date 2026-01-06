@@ -2,7 +2,8 @@
 
 import math
 import warnings
-from typing import Callable, Literal, Optional as _Optional, TypeVar, Union
+from collections.abc import Callable
+from typing import Literal, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -64,9 +65,9 @@ _FanMode = Literal["fan_in", "fan_out"]
 # These no_grad_* functions are necessary as wrappers around the parts of these
 # functions that use `with torch.no_grad()`. The JIT doesn't support context
 # managers, so these need to be implemented as builtins. Using these wrappers
-# lets us keep those builtins small and re-usable.
+# lets us keep those builtins small and reusable.
 def _no_grad_uniform_(
-    tensor: Tensor, a: float, b: float, generator: _Optional[torch.Generator] = None
+    tensor: Tensor, a: float, b: float, generator: torch.Generator | None = None
 ) -> Tensor:
     with torch.no_grad():
         return tensor.uniform_(a, b, generator=generator)
@@ -76,7 +77,7 @@ def _no_grad_normal_(
     tensor: Tensor,
     mean: float,
     std: float,
-    generator: _Optional[torch.Generator] = None,
+    generator: torch.Generator | None = None,
 ) -> Tensor:
     with torch.no_grad():
         return tensor.normal_(mean, std, generator=generator)
@@ -88,7 +89,7 @@ def _no_grad_trunc_normal_(
     std: float,
     a: float,
     b: float,
-    generator: _Optional[torch.Generator] = None,
+    generator: torch.Generator | None = None,
 ) -> Tensor:
     # Method based on https://people.sc.fsu.edu/~jburkardt/presentations/truncated_normal.pdf
     def norm_cdf(x: float) -> float:
@@ -137,7 +138,7 @@ def _no_grad_zero_(tensor: Tensor) -> Tensor:
 
 
 def calculate_gain(
-    nonlinearity: _NonlinearityType, param: _Optional[Union[int, float]] = None
+    nonlinearity: _NonlinearityType, param: int | float | None = None
 ) -> float:
     r"""Return the recommended gain value for the given nonlinearity function.
 
@@ -214,7 +215,7 @@ def uniform_(
     tensor: Tensor,
     a: float = 0.0,
     b: float = 1.0,
-    generator: _Optional[torch.Generator] = None,
+    generator: torch.Generator | None = None,
 ) -> Tensor:
     r"""Fill the input Tensor with values drawn from the uniform distribution.
 
@@ -241,7 +242,7 @@ def normal_(
     tensor: Tensor,
     mean: float = 0.0,
     std: float = 1.0,
-    generator: _Optional[torch.Generator] = None,
+    generator: torch.Generator | None = None,
 ) -> Tensor:
     r"""Fill the input Tensor with values drawn from the normal distribution.
 
@@ -270,7 +271,7 @@ def trunc_normal_(
     std: float = 1.0,
     a: float = -2.0,
     b: float = 2.0,
-    generator: _Optional[torch.Generator] = None,
+    generator: torch.Generator | None = None,
 ) -> Tensor:
     r"""Fill the input Tensor with values drawn from a truncated normal distribution.
 
@@ -437,7 +438,7 @@ def _calculate_fan_in_and_fan_out(tensor: Tensor) -> tuple[int, int]:
 def xavier_uniform_(
     tensor: Tensor,
     gain: float = 1.0,
-    generator: _Optional[torch.Generator] = None,
+    generator: torch.Generator | None = None,
 ) -> Tensor:
     r"""Fill the input `Tensor` with values using a Xavier uniform distribution.
 
@@ -459,14 +460,6 @@ def xavier_uniform_(
     Examples:
         >>> w = torch.empty(3, 5)
         >>> nn.init.xavier_uniform_(w, gain=nn.init.calculate_gain("relu"))
-
-    Note:
-        Be aware that ``fan_in`` and ``fan_out`` are calculated assuming
-        that the weight matrix is used in a transposed manner,
-        (i.e., ``x @ w.T`` in ``Linear`` layers, where ``w.shape = [fan_out, fan_in]``).
-        This is important for correct initialization.
-        If you plan to use ``x @ w``, where ``w.shape = [fan_in, fan_out]``,
-        pass in a transposed weight matrix, i.e. ``nn.init.xavier_uniform_(w.T, ...)``.
     """
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
     std = gain * math.sqrt(2.0 / float(fan_in + fan_out))
@@ -478,7 +471,7 @@ def xavier_uniform_(
 def xavier_normal_(
     tensor: Tensor,
     gain: float = 1.0,
-    generator: _Optional[torch.Generator] = None,
+    generator: torch.Generator | None = None,
 ) -> Tensor:
     r"""Fill the input `Tensor` with values using a Xavier normal distribution.
 
@@ -499,14 +492,6 @@ def xavier_normal_(
     Examples:
         >>> w = torch.empty(3, 5)
         >>> nn.init.xavier_normal_(w)
-
-    Note:
-        Be aware that ``fan_in`` and ``fan_out`` are calculated assuming
-        that the weight matrix is used in a transposed manner,
-        (i.e., ``x @ w.T`` in ``Linear`` layers, where ``w.shape = [fan_out, fan_in]``).
-        This is important for correct initialization.
-        If you plan to use ``x @ w``, where ``w.shape = [fan_in, fan_out]``,
-        pass in a transposed weight matrix, i.e. ``nn.init.xavier_normal_(w.T, ...)``.
     """
     fan_in, fan_out = _calculate_fan_in_and_fan_out(tensor)
     std = gain * math.sqrt(2.0 / float(fan_in + fan_out))
@@ -515,6 +500,7 @@ def xavier_normal_(
 
 
 def _calculate_correct_fan(tensor: Tensor, mode: _FanMode) -> int:
+    # pyrefly: ignore [bad-assignment]
     mode = mode.lower()
     valid_modes = ["fan_in", "fan_out"]
     if mode not in valid_modes:
@@ -529,7 +515,7 @@ def kaiming_uniform_(
     a: float = 0,
     mode: _FanMode = "fan_in",
     nonlinearity: _NonlinearityType = "leaky_relu",
-    generator: _Optional[torch.Generator] = None,
+    generator: torch.Generator | None = None,
 ) -> Tensor:
     r"""Fill the input `Tensor` with values using a Kaiming uniform distribution.
 
@@ -579,7 +565,7 @@ def kaiming_uniform_(
         )
 
     if 0 in tensor.shape:
-        warnings.warn("Initializing zero-element tensors is a no-op")
+        warnings.warn("Initializing zero-element tensors is a no-op", stacklevel=2)
         return tensor
     fan = _calculate_correct_fan(tensor, mode)
     gain = calculate_gain(nonlinearity, a)
@@ -594,7 +580,7 @@ def kaiming_normal_(
     a: float = 0,
     mode: _FanMode = "fan_in",
     nonlinearity: _NonlinearityType = "leaky_relu",
-    generator: _Optional[torch.Generator] = None,
+    generator: torch.Generator | None = None,
 ) -> Tensor:
     r"""Fill the input `Tensor` with values using a Kaiming normal distribution.
 
@@ -633,7 +619,7 @@ def kaiming_normal_(
         pass in a transposed weight matrix, i.e. ``nn.init.kaiming_normal_(w.T, ...)``.
     """
     if 0 in tensor.shape:
-        warnings.warn("Initializing zero-element tensors is a no-op")
+        warnings.warn("Initializing zero-element tensors is a no-op", stacklevel=2)
         return tensor
     fan = _calculate_correct_fan(tensor, mode)
     gain = calculate_gain(nonlinearity, a)
@@ -645,7 +631,7 @@ def kaiming_normal_(
 def orthogonal_(
     tensor: Tensor,
     gain: float = 1,
-    generator: _Optional[torch.Generator] = None,
+    generator: torch.Generator | None = None,
 ) -> Tensor:
     r"""Fill the input `Tensor` with a (semi) orthogonal matrix.
 
@@ -697,7 +683,7 @@ def sparse_(
     tensor: Tensor,
     sparsity: float,
     std: float = 0.01,
-    generator: _Optional[torch.Generator] = None,
+    generator: torch.Generator | None = None,
 ) -> Tensor:
     r"""Fill the 2D input `Tensor` as a sparse matrix.
 
@@ -720,7 +706,7 @@ def sparse_(
         raise ValueError("Only tensors with 2 dimensions are supported")
 
     rows, cols = tensor.shape
-    num_zeros = int(math.ceil(sparsity * rows))
+    num_zeros = math.ceil(sparsity * rows)
 
     with torch.no_grad():
         tensor.normal_(0, std, generator=generator)

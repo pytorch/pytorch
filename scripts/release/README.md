@@ -10,8 +10,7 @@ These are a collection of scripts that are to be used for release activities.
 ### Order of Execution
 
 1. Run cut-release-branch.sh to cut the release branch
-2. Run tag-docker-images.sh to tag current docker images with release tag and push them to docker.io. These images will be used to build the release.
-3. Run apply-release-changes.sh to apply release only changes to create a PR with release only changes similar to this [PR](https://github.com/pytorch/pytorch/pull/149056)
+2. Run apply-release-changes.sh to apply release only changes to create a PR with release only changes similar to this [PR](https://github.com/pytorch/pytorch/pull/149056)
 
 #### Promoting packages
 

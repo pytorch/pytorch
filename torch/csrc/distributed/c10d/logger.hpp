@@ -10,7 +10,7 @@ namespace c10d {
 // A struct to hold the latest status of the process group.
 struct ProcessGroupStatus {
   // the sequential number of the last collective enqueued into workMetaList_
-  // This is useful for indentifying a rank that has not join a collective
+  // This is useful for identifying a rank that has not join a collective
   // initialized to be -1 to indicate no collective has been enqueued
   int64_t lastEnqueuedSeq{-1};
   // the sequential number of the last collective started as the kernel
@@ -153,7 +153,7 @@ class TORCH_API C10dLogger {
   virtual ~C10dLogger() = default;
   virtual void log(const C10dLoggingData& data);
   static C10dLogger* getLogger();
-  static void registerLogger(std::unique_ptr<C10dLogger>);
+  static void registerLogger(std::unique_ptr<C10dLogger> /*logger*/);
 
  protected:
   // singletion, hide constructor from the public

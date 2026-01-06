@@ -235,9 +235,17 @@ class MicroPipelineTPTest(TestCase):
             self.assertEqual(eager_stride, compiled_stride)
 
         if gather_dim == A_dims - 1:
-            # Decomposing the matmul on the K dimension is not supported
+            # Decomposing the matmul on the K dimension is not supported.
+            # The view optimization in _maybe_view_chunk_cat allows the
+            # all_gather to be optimized away entirely, so we only check that
+            # fused_all_gather_matmul is NOT used.
             self.assertNotIn("fused_all_gather_matmul", code)
-            self.assertIn("all_gather_into_tensor", code)
+        elif gather_dim == 1:
+            # When gather_dim == 1, the view optimization in _maybe_view_chunk_cat
+            # allows the all_gather to be optimized away entirely (since there are
+            # no dimensions between dim 0 and gather_dim that need to be moved).
+            # This results in no all_gather_into_tensor appearing in the code.
+            self.assertNotIn("fused_all_gather_matmul", code)
         else:
             self.assertIn("fused_all_gather_matmul", code)
             self.assertNotIn("all_gather_into_tensor", code)
@@ -352,7 +360,7 @@ class MicroPipelineTPTest(TestCase):
     @parametrize("scatter_dim", [0, 1, 2])
     @fresh_cache()
     def test_fuse_scaled_matmul_reduce_scatter(self, A_dims, scatter_dim):
-        if scatter_dim >= A_dims:
+        if scatter_dim >= A_dims - 1:
             return
 
         group = dist.group.WORLD
@@ -402,7 +410,7 @@ class MicroPipelineTPTest(TestCase):
 
     @runOnRocmArch(MI300_ARCH)
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @parametrize("scatter_dim", [0, 1, 2])
+    @parametrize("scatter_dim", [0, 1])
     @fresh_cache()
     def test_fuse_scaled_matmul_reduce_scatter_rowwise_scales_reshape_mm_reshape(
         self, scatter_dim
@@ -492,6 +500,56 @@ class MicroPipelineTPTest(TestCase):
         self.assertNotIn("all_gather_into_tensor", code)
         self.assertIn("fused_matmul_reduce_scatter", code)
         self.assertNotIn("reduce_scatter_tensor", code)
+
+
+@instantiate_parametrized_tests
+class MicroPipelineTP4GPUTest(TestCase):
+    def setUp(self):
+        torch._inductor.config._micro_pipeline_tp = True
+
+        self.rank = 0
+        self.world_size = 4
+        torch.cuda.set_device("cuda:0")
+
+        store = FakeStore()
+        dist.init_process_group(
+            backend="fake",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+        )
+
+    def tearDown(self):
+        dist.destroy_process_group()
+
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    @fresh_cache()
+    def test_extra_collectives(self):
+        device_mesh = DeviceMesh(
+            "cuda",
+            torch.arange(0, self.world_size).view(2, -1),
+            mesh_dim_names=("tp", "other"),
+        )
+
+        def func(inp: torch.Tensor, w1: torch.Tensor, w2: torch.Tensor) -> torch.Tensor:
+            hidden = all_gather_tensor(inp, 0, (device_mesh, 0)) @ w1.t()
+            full_hidden = all_gather_tensor(hidden, 0, (device_mesh, 1))
+            full_hidden /= full_hidden.pow(2).sum().sqrt()
+            hidden = reduce_scatter_tensor(full_hidden, "avg", 0, (device_mesh, 1))
+            return reduce_scatter_tensor(hidden @ w2.t(), "avg", 0, (device_mesh, 0))
+
+        inp = torch.rand(8, 10, device="cuda")
+        w1 = torch.rand(7, 10, device="cuda")
+        w2 = torch.rand(10, 7, device="cuda")
+
+        with _test_mode(group_names={device_mesh["tp"].get_group().group_name}):
+            compiled = torch.compile(func)
+            code = run_and_get_triton_code(compiled, inp, w1, w2)
+
+        self.assertIn("fused_all_gather_matmul", code)
+        self.assertIn("all_gather_into_tensor", code)
+        self.assertIn("fused_matmul_reduce_scatter", code)
+        self.assertIn("reduce_scatter_tensor", code)
 
 
 if __name__ == "__main__":

@@ -80,7 +80,6 @@ def define_targets(rules):
         deps = [
             ":ScalarType",
             "//third_party/cpuinfo",
-            "//:torch_standalone_headers",
             "//c10/macros",
             "//c10/util:TypeCast",
             "//c10/util:base",

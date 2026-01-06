@@ -1,19 +1,23 @@
+import functools
 import inspect
 import time
+from collections.abc import Callable
 from functools import cached_property, wraps
 from itertools import chain
 from statistics import median
-from typing import Any, Callable
-from typing_extensions import Concatenate, ParamSpec, Self, TypeVar
+from typing import Any, Concatenate, Optional, Union
+from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
+import torch._inductor.config as inductor_config
+import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters, dynamo_timed
-from torch._inductor.config import use_experimental_benchmarker
+from torch.utils._debug_mode import DebugMode
 
 
 logger = torch._logging.getArtifactLogger(__name__, "benchmarking")
 use_experimental_benchmarker = (
-    use_experimental_benchmarker and torch.cuda.is_available()
+    inductor_config.use_experimental_benchmarker and torch.cuda.is_available()
 )
 
 
@@ -21,6 +25,55 @@ MILLISECONDS_PER_SECOND = 1000
 
 P = ParamSpec("P")
 T = TypeVar("T")
+
+
+def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any]:
+    from torch._inductor import config
+
+    if config.test_configs.distort_benchmarking_result == "":
+        return fn
+
+    def distort(
+        ms: list[float] | tuple[float, ...] | float,
+    ) -> list[float] | tuple[float, ...] | float:
+        if isinstance(ms, (list, tuple)):
+            return type(ms)(distort(val) for val in ms)  # type: ignore[misc]
+
+        distort_method = config.test_configs.distort_benchmarking_result
+        assert isinstance(ms, float)
+        if distort_method == "inverse":
+            return 1.0 / ms if ms else 0.0
+        elif distort_method == "random":
+            import random
+
+            return random.random()
+        else:
+            raise RuntimeError(f"Unrecognized distort method {distort_method}")
+
+    @functools.wraps(fn)
+    def wrapper(
+        *args: list[Any], **kwargs: dict[str, Any]
+    ) -> list[float] | tuple[float, ...] | float:
+        ms = fn(*args, **kwargs)
+
+        return distort(ms)
+
+    return wrapper
+
+
+def may_ban_benchmarking() -> None:
+    if torch._inductor.config.deterministic:
+        raise RuntimeError("""In the deterministic mode of Inductor, we will avoid those
+        benchmarkings that would cause non deterministic results. Only benchmarkings in the vetted
+        scenarios are allowed. Example include autotuning for triton configs of pointwise kernels.
+
+        When you see this exception, you can do one of the following two things:
+        1. if the benchmarking you are doing does not introduce any non-determinism, you can just
+        add is_vetted_benchmarking=True to you benchmark_gpu call. That would solve the issue.
+
+        2. if the benchmarking you are doing indeed introduces non-determinism, you'll need to disable
+        such feature in deterministic mode or find an alternative implementation that is deterministic.
+        """)
 
 
 def time_and_count(
@@ -42,15 +95,45 @@ def time_and_count(
 
 
 class Benchmarker:
+    """
+    A device-agnostic benchmarking utility for measuring the runtime of
+    inductor generated callables.
+    """
+
     def __init__(self: Self) -> None:
         pass
+
+    def infer_device(self, *fn_args: Any, **fn_kwargs: Any) -> torch.device:
+        inferred_device: Optional[torch.device] = None
+        for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
+            # Some callables take nested structures as arguments so use the
+            # flattened form to find any tensors
+            for arg_or_kwarg_leaf in pytree.tree_leaves(arg_or_kwarg):
+                if not isinstance(arg_or_kwarg_leaf, torch.Tensor):
+                    continue
+                if inferred_device is None:
+                    inferred_device = arg_or_kwarg_leaf.device
+                elif arg_or_kwarg_leaf.device != inferred_device:
+                    raise ValueError(
+                        "Can't safely infer the device type of `fn` with multiple device types in `fn_args` and `fn_kwargs`!"
+                    )
+
+        if inferred_device is None:
+            raise ValueError(
+                "Can't safely infer the device type of `fn` with no device types"
+                " in `fn_args` or `fn_kwargs`. Use a direct benchmarking method instead e.g. "
+                "`Benchmarker.benchmark_cpu` or `Benchmarker.benchmark_gpu`."
+            )
+
+        return inferred_device
 
     @time_and_count
     def benchmark(
         self: Self,
         fn: Callable[..., Any],
-        fn_args: tuple[Any, ...],
-        fn_kwargs: dict[str, Any],
+        fn_args: Optional[tuple[Any, ...]] = None,
+        fn_kwargs: Optional[dict[str, Any]] = None,
+        device: Optional[Union[str, torch.device]] = None,
         **kwargs: Any,
     ) -> float:
         """Benchmark `fn(*fn_args, *fn_kwargs)` and return the runtime, in milliseconds (the
@@ -59,7 +142,14 @@ class Benchmarker:
         device-specific implementations, like `benchmark_cpu` and `benchmark_gpu`. Raises
         `ValueError(...)` if we can't safely infer the device type of `fn`; for example,
         if multiple device types are found in `fn_args` and `fn_kwargs`, or if no device
-        types are found.
+        types are found. To bypass device inference, provide the device to the `device`
+        parameter.
+
+        WARNING: if `fn` mutates `fn_args` or `fn_kwargs`, benchmarking may fail unexpectedly.
+        For example, if `fn` clears a mutable object, subsequent invocations of `fn` during
+        benchmarking will fail. In such cases, `fn` should handle cloning its arguments internally.
+        If device inference is required, `Benchmarker.infer_device` can be used prior to calling
+        this method without any arguments for `fn_args` and `fn_kwargs`.
 
         Arguments:
         - fn: The function to benchmark.
@@ -67,32 +157,50 @@ class Benchmarker:
         - fn_kwargs: The function's kwargs.
 
         Keyword Arguments:
+        - device: Which device to use for benchmarking. If not provided the device will be attempted
+        to be inferred from `fn_args` and `fn_kwargs`.
         - **kwargs: The benchmarking implementation's kwargs.
 
         Returns:
         - The runtime of `fn(*fn_args, **fn_kwargs)`, in milliseconds.
         """
-        inferred_device = None
-        for arg_or_kwarg in chain(fn_args, fn_kwargs.values()):
-            if not isinstance(arg_or_kwarg, torch.Tensor):
-                continue
-            if inferred_device is None:
-                inferred_device = arg_or_kwarg.device
-            elif arg_or_kwarg.device != inferred_device:
-                raise ValueError(
-                    "Can't safely infer the device type of `fn` with multiple device types in `fn_args` and `fn_kwargs`!"
-                )
-        if inferred_device is None:
-            raise ValueError(
-                "Can't safely infer the device type of `fn` with no device types in `fn_args` or `fn_kwargs`! You should be calling `.benchmark_cpu` or `.benchmark_gpu` directly."  # noqa: B950
+        inferred_device: Optional[torch.device] = None
+        if device is not None:
+            inferred_device = (
+                torch.device(device) if isinstance(device, str) else device
             )
-        _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
-        if inferred_device == torch.device("cpu"):
-            return self.benchmark_cpu(_callable, **kwargs)
-        # TODO(nmacchioni): For non-CPU functions we default to using the GPU-specific benchmarking
-        # implementation which was written specifically with CUDA devices in mind, we may want to
-        # explore alternate implementations for other device types.
-        return self.benchmark_gpu(_callable, **kwargs)
+        else:
+            if fn_args is None and fn_kwargs is None:
+                raise ValueError(
+                    "`fn_args` and `fn_kwargs` cannot both be None if `device` is not provided."
+                )
+
+            fn_args = fn_args or tuple()
+            fn_kwargs = fn_kwargs or {}
+            inferred_device = self.infer_device(*fn_args, **fn_kwargs)
+
+        assert isinstance(inferred_device, torch.device)
+
+        fn_args = fn_args or tuple()
+        fn_kwargs = fn_kwargs or {}
+
+        # No need to wrap if the callable takes no arguments
+        if len(fn_args) == 0 and len(fn_kwargs) == 0:
+            _callable = fn
+        else:
+            _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
+
+        warmup = kwargs.pop("warmup", inductor_config.inductor_default_autotune_warmup)
+        rep = kwargs.pop("rep", inductor_config.inductor_default_autotune_rep)
+
+        # Surfacing all kernels during autotuning is super noisy; filtering these out.
+        with DebugMode._benchmarking_inductor():
+            if inferred_device == torch.device("cpu"):
+                return self.benchmark_cpu(_callable, warmup=warmup, rep=rep, **kwargs)
+            # TODO(nmacchioni): For non-CPU functions we default to using the GPU-specific benchmarking
+            # implementation which was written specifically with CUDA devices in mind, we may want to
+            # explore alternate implementations for other device types.
+            return self.benchmark_gpu(_callable, warmup=warmup, rep=rep, **kwargs)
 
     @time_and_count
     def benchmark_cpu(
@@ -144,8 +252,15 @@ class TritonBenchmarker(Benchmarker):
             raise NotImplementedError("requires Triton") from e
         return do_bench
 
+    @may_distort_benchmarking_result
     @time_and_count
-    def benchmark_gpu(self: Self, _callable: Callable[[], Any], **kwargs: Any) -> float:
+    # pyrefly: ignore [bad-override]
+    def benchmark_gpu(
+        self: Self,
+        _callable: Callable[[], Any],
+        is_vetted_benchmarking: bool = False,
+        **kwargs: Any,
+    ) -> float:
         """Benchmark the GPU callable, `_callable`, and return the runtime, in milliseconds.
 
         Arguments:
@@ -162,6 +277,9 @@ class TritonBenchmarker(Benchmarker):
         this is the first requested quantile. Else, if `kwargs["return_mode"]` is specified,
         this is the requested return mode. Otherwise, this is the median.
         """
+        if not is_vetted_benchmarking:
+            may_ban_benchmarking()
+
         do_bench_params = inspect.signature(self.triton_do_bench).parameters
         for kwarg in list(kwargs.keys()):
             if kwarg not in do_bench_params:
@@ -173,7 +291,7 @@ class TritonBenchmarker(Benchmarker):
         return self.triton_do_bench(_callable, **kwargs, return_mode="median")
 
 
-class InductorBenchmarker(TritonBenchmarker):
+class InductorBenchmarker(TritonBenchmarker):  # noqa: docstring_linter
     @cached_property
     def L2_cache_size(self: Self) -> int:
         """Get the L2 cache size, in bytes, of the current device."""
@@ -204,16 +322,20 @@ class InductorBenchmarker(TritonBenchmarker):
             ]
         )
 
+    @may_distort_benchmarking_result
     @time_and_count
-    def benchmark_gpu(
+    def benchmark_gpu(  # type: ignore[override]
         self: Self,
         _callable: Callable[[], Any],
         estimation_iters: int = 5,
         memory_warmup_iters: int = 100,
         benchmark_iters: int = 100,
         max_benchmark_duration: int = 25,
+        return_mode: str = "min",
+        grad_to_none: list[torch.Tensor] | None = None,
+        is_vetted_benchmarking: bool = False,
         **kwargs: Any,
-    ) -> float:
+    ) -> float | list[float]:
         """Benchmark a GPU callable using a custom benchmarking implementation.
 
         Arguments:
@@ -230,12 +352,23 @@ class InductorBenchmarker(TritonBenchmarker):
         in milliseconds. An estimated duration is calculated based on the values
         of `memory_warmup_iters` and `benchmark_iters`, along with the estimated
         runtime of `_callable` and various other factors, and we then shrink
-        `benchmark_iters` to fit in the alloted maximum duration.
+        `benchmark_iters` to fit in the allotted maximum duration.
+        - return_mode: Return mode for benchmark results. Options are "min" (default),
+        "all" (returns all measurements).
+        - grad_to_none: Optionally, a list of tensors whose gradients should be cleared
+        before each benchmark iteration.
+        - is_vetted_benchmarking: in deterministic mode, we only allow
+        benchmarking in vetted cases.
         - **kwargs: Additional kwargs that may be passed to the fallback.
 
         Returns:
-        - The minimum runtime of `_callable`, in milliseconds.
+        - If return_mode="min": The minimum runtime of `_callable`, in milliseconds.
+        - If return_mode="all": List of all runtime measurements, in milliseconds.
         """
+
+        if not is_vetted_benchmarking:
+            may_ban_benchmarking()
+
         # we don't want any outside errors propagating into benchmarking
         torch.cuda.synchronize()
 
@@ -250,6 +383,10 @@ class InductorBenchmarker(TritonBenchmarker):
         # estimate the runtime of `_callable`
         event_pairs = self.get_event_pairs(estimation_iters)
         for start_event, end_event in event_pairs:
+            # Clear gradients before timing (matches triton.testing.do_bench)
+            if grad_to_none is not None:
+                for x in grad_to_none:
+                    x.grad = None
             buffer.zero_()
             start_event.record()
             _callable()
@@ -269,20 +406,37 @@ class InductorBenchmarker(TritonBenchmarker):
         # benchmark `_callable`
         event_pairs = self.get_event_pairs(benchmark_iters)
         for start_event, end_event in event_pairs:
+            # Clear gradients before timing (matches triton.testing.do_bench)
+            if grad_to_none is not None:
+                for x in grad_to_none:
+                    x.grad = None
             buffer.zero_()
             start_event.record()
             _callable()
             end_event.record()
         torch.cuda.synchronize()
-        benchmarked_timing = self.get_event_pairs_min_timing(event_pairs)
 
         # explicitly delete the buffer, sometimes helps memory
         # footprint metrics in OSS Inductor performance benchmarks
         del buffer
 
-        # return the minimum of `estimated_timing` and `benchmarked_timing`,
-        # we just want the minimum timing overall so we might as well check both
-        return min(estimated_timing, benchmarked_timing)
+        # Return based on the requested mode
+        if return_mode == "all":
+            # Get all timings from event pairs
+            all_timings = [
+                start_event.elapsed_time(end_event)
+                for start_event, end_event in event_pairs
+            ]
+            return all_timings
+        elif return_mode == "min":
+            benchmarked_timing = self.get_event_pairs_min_timing(event_pairs)
+            # return the minimum of `estimated_timing` and `benchmarked_timing`,
+            # we just want the minimum timing overall so we might as well check both
+            return min(estimated_timing, benchmarked_timing)
+        else:
+            raise ValueError(
+                f"Unsupported return_mode: {return_mode}. Use 'min' or 'all'."
+            )
 
 
 benchmarker = (

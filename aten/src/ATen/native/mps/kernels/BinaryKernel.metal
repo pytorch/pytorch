@@ -39,6 +39,13 @@ struct lerp_alpha_functor {
   }
 };
 
+struct native_dropout_mask_and_scale_functor {
+  template <typename TI, typename TA>
+  inline TA operator()(const TI a, const TI b, const TA scale) {
+    return static_cast<TA>(a) * static_cast<TA>(b) * scale;
+  }
+};
+
 struct fmax_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
@@ -50,6 +57,20 @@ struct fmin_functor {
   template <typename T>
   inline T operator()(const T a, const T b) {
     return static_cast<T>(::metal::fmin(a, b));
+  }
+};
+
+struct maximum_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return max(a, b);
+  }
+};
+
+struct minimum_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return min(a, b);
   }
 };
 
@@ -76,6 +97,28 @@ struct zeta_functor {
   template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
   inline float operator()(const T a, const T b) {
     return c10::metal::zeta(float(a), float(b));
+  }
+};
+
+struct logaddexp_functor {
+  template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
+  inline T operator()(const T a, const T b) {
+    return c10::metal::logaddexp(a, b);
+  }
+  template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
+  inline float operator()(const T a, const T b) {
+    return c10::metal::logaddexp(float(a), float(b));
+  }
+};
+
+struct logaddexp2_functor {
+  template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
+  inline T operator()(const T a, const T b) {
+    return c10::metal::logaddexp2(a, b);
+  }
+  template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
+  inline float operator()(const T a, const T b) {
+    return c10::metal::logaddexp2(float(a), float(b));
   }
 };
 
@@ -134,6 +177,58 @@ struct chebyshev_polynomial_w_functor {
   }
 };
 
+struct shifted_chebyshev_polynomial_t_functor {
+  template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(
+        c10::metal::shifted_chebyshev_polynomial_t_forward(a, b));
+  }
+  template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
+  inline float operator()(const T a, const T b) {
+    return c10::metal::shifted_chebyshev_polynomial_t_forward(
+        float(a), float(b));
+  }
+};
+
+struct shifted_chebyshev_polynomial_u_functor {
+  template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(
+        c10::metal::shifted_chebyshev_polynomial_u_forward(a, b));
+  }
+  template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
+  inline float operator()(const T a, const T b) {
+    return c10::metal::shifted_chebyshev_polynomial_u_forward(
+        float(a), float(b));
+  }
+};
+
+struct shifted_chebyshev_polynomial_v_functor {
+  template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(
+        c10::metal::shifted_chebyshev_polynomial_v_forward(a, b));
+  }
+  template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
+  inline float operator()(const T a, const T b) {
+    return c10::metal::shifted_chebyshev_polynomial_v_forward(
+        float(a), float(b));
+  }
+};
+
+struct shifted_chebyshev_polynomial_w_functor {
+  template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(
+        c10::metal::shifted_chebyshev_polynomial_w_forward(a, b));
+  }
+  template <typename T, enable_if_t<is_integral_v<T>, bool> = true>
+  inline float operator()(const T a, const T b) {
+    return c10::metal::shifted_chebyshev_polynomial_w_forward(
+        float(a), float(b));
+  }
+};
+
 struct hermite_polynomial_h_functor {
   template <typename T, enable_if_t<is_floating_point_v<T>, bool> = true>
   inline T operator()(const T a, const T b) {
@@ -157,38 +252,16 @@ struct hermite_polynomial_he_functor {
 };
 
 struct nextafter_functor {
-#if __METAL_VERSION__ < 310
-  template <typename U>
-  struct bit_type {};
-  template <>
-  struct bit_type<float> {
-    using type = int;
-  };
-  template <>
-  struct bit_type<half> {
-    using type = short;
-  };
-#endif
   template <typename T>
   inline T operator()(const T a, const T b) {
-#if __METAL_VERSION__ >= 310
     return static_cast<T>(::metal::nextafter(a, b));
-#else
-    using U = typename bit_type<T>::type;
-    if (a == b) {
-      return a;
-    }
-    if (::metal::isunordered(a, b)) {
-      return NAN;
-    }
-    if (a == 0) {
-      constexpr auto eps = as_type<T>(static_cast<U>(1));
-      return b > 0 ? eps : -eps;
-    }
-    auto bits = as_type<U>(a);
-    (a > 0) ^ (a > b) ? bits++ : bits--;
-    return as_type<T>(bits);
-#endif
+  }
+};
+
+struct hypot_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return static_cast<T>(precise::sqrt(float(a) * a + float(b) * b));
   }
 };
 
@@ -292,12 +365,19 @@ struct fmod_functor {
   }
 };
 
-// Some helper defines
-#if __METAL_VERSION__ >= 310
-#define _METAL_310_PLUS(x) x
-#else
-#define _METAL_310_PLUS(x)
-#endif
+struct igamma_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return c10::metal::igamma(a, b);
+  }
+};
+
+struct igammac_functor {
+  template <typename T>
+  inline T operator()(const T a, const T b) {
+    return c10::metal::igammac(a, b);
+  }
+};
 
 #define REGISTER_INTEGER_BINARY_OP(NAME)  \
   REGISTER_BINARY_OP(NAME, long, long);   \
@@ -318,20 +398,29 @@ struct fmod_functor {
 #define REGISTER_FLOAT_BINARY_OP(NAME)    \
   REGISTER_BINARY_OP(NAME, float, float); \
   REGISTER_BINARY_OP(NAME, half, half);   \
-  _METAL_310_PLUS(REGISTER_BINARY_OP(NAME, bfloat, bfloat))
+  REGISTER_BINARY_OP(NAME, bfloat, bfloat)
 
 #define REGISTER_OPMATH_FLOAT_BINARY_OP(NAME)    \
   REGISTER_OPMATH_BINARY_OP(NAME, float, float); \
   REGISTER_OPMATH_BINARY_OP(NAME, half, half);   \
-  _METAL_310_PLUS(REGISTER_OPMATH_BINARY_OP(NAME, bfloat, bfloat))
+  REGISTER_OPMATH_BINARY_OP(NAME, bfloat, bfloat)
 
+REGISTER_FLOAT_BINARY_OP(hypot);
 REGISTER_FLOAT_BINARY_OP(copysign);
 REGISTER_INT2FLOAT_BINARY_OP(copysign);
 REGISTER_FLOAT_BINARY_OP(fmax);
 REGISTER_FLOAT_BINARY_OP(fmin);
+REGISTER_FLOAT_BINARY_OP(maximum);
+REGISTER_INTEGER_BINARY_OP(maximum);
+REGISTER_FLOAT_BINARY_OP(minimum);
+REGISTER_INTEGER_BINARY_OP(minimum);
 REGISTER_FLOAT_BINARY_OP(nextafter);
 REGISTER_FLOAT_BINARY_OP(zeta);
 REGISTER_INT2FLOAT_BINARY_OP(zeta);
+REGISTER_FLOAT_BINARY_OP(logaddexp);
+REGISTER_INT2FLOAT_BINARY_OP(logaddexp);
+REGISTER_FLOAT_BINARY_OP(logaddexp2);
+REGISTER_INT2FLOAT_BINARY_OP(logaddexp2);
 REGISTER_FLOAT_BINARY_OP(xlog1py);
 REGISTER_INT2FLOAT_BINARY_OP(xlog1py);
 REGISTER_FLOAT_BINARY_OP(chebyshev_polynomial_t);
@@ -342,6 +431,14 @@ REGISTER_FLOAT_BINARY_OP(chebyshev_polynomial_v);
 REGISTER_INT2FLOAT_BINARY_OP(chebyshev_polynomial_w);
 REGISTER_FLOAT_BINARY_OP(chebyshev_polynomial_w);
 REGISTER_INT2FLOAT_BINARY_OP(chebyshev_polynomial_v);
+REGISTER_FLOAT_BINARY_OP(shifted_chebyshev_polynomial_t);
+REGISTER_INT2FLOAT_BINARY_OP(shifted_chebyshev_polynomial_t);
+REGISTER_FLOAT_BINARY_OP(shifted_chebyshev_polynomial_u);
+REGISTER_INT2FLOAT_BINARY_OP(shifted_chebyshev_polynomial_u);
+REGISTER_FLOAT_BINARY_OP(shifted_chebyshev_polynomial_v);
+REGISTER_INT2FLOAT_BINARY_OP(shifted_chebyshev_polynomial_v);
+REGISTER_FLOAT_BINARY_OP(shifted_chebyshev_polynomial_w);
+REGISTER_INT2FLOAT_BINARY_OP(shifted_chebyshev_polynomial_w);
 REGISTER_FLOAT_BINARY_OP(hermite_polynomial_h);
 REGISTER_INT2FLOAT_BINARY_OP(hermite_polynomial_h);
 REGISTER_FLOAT_BINARY_OP(hermite_polynomial_he);
@@ -362,6 +459,8 @@ REGISTER_OPMATH_FLOAT_BINARY_OP(remainder);
 REGISTER_INTEGER_BINARY_OP(remainder);
 REGISTER_OPMATH_FLOAT_BINARY_OP(fmod);
 REGISTER_INTEGER_BINARY_OP(fmod);
+REGISTER_OPMATH_FLOAT_BINARY_OP(igamma);
+REGISTER_OPMATH_FLOAT_BINARY_OP(igammac);
 REGISTER_BINARY_ALPHA_OP(add_alpha, long, long, long);
 REGISTER_BINARY_ALPHA_OP(add_alpha, int, int, int);
 REGISTER_BINARY_ALPHA_OP(add_alpha, float, float, float);
@@ -387,11 +486,13 @@ REGISTER_BINARY_ALPHA_OP(lerp_alpha, uchar, uchar, uchar);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, char, char, char);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, bool, bool, bool);
 
-#if __METAL_VERSION__ >= 310
+REGISTER_BINARY_ALPHA_OP(native_dropout_mask_and_scale, float, float, float);
+REGISTER_BINARY_ALPHA_OP(native_dropout_mask_and_scale, bfloat, bfloat, bfloat);
+REGISTER_BINARY_ALPHA_OP(native_dropout_mask_and_scale, half, half, half);
+
 REGISTER_BINARY_ALPHA_OP(add_alpha, bfloat, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(sub_alpha, bfloat, bfloat, bfloat);
 REGISTER_BINARY_ALPHA_OP(lerp_alpha, bfloat, bfloat, bfloat);
-#endif
 
 // Complex binary functions
 REGISTER_BINARY_OP(polar, float, float2);
@@ -406,6 +507,8 @@ REGISTER_BINARY_OP(add, float2, float2);
 REGISTER_BINARY_OP(add, half2, half2);
 REGISTER_BINARY_OP(sub, float2, float2);
 REGISTER_BINARY_OP(sub, half2, half2);
+REGISTER_BINARY_OP(logaddexp, float2, float2);
+REGISTER_BINARY_OP(logaddexp, half2, half2);
 REGISTER_BINARY_ALPHA_OP(add_alpha, float2, float2, float2);
 REGISTER_BINARY_ALPHA_OP(add_alpha, half2, half2, half2);
 REGISTER_BINARY_ALPHA_OP(sub_alpha, float2, float2, float2);

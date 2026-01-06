@@ -29,12 +29,14 @@ InputMetadata::InputMetadata(
     const at::TensorOptions& options,
     MetadataShape input_shape,
     bool is_tensor_subclass,
-    bool is_nested)
+    bool is_nested,
+    std::optional<at::ScalarType> grad_dtype)
     : options_{options},
       shape_{std::move(input_shape)},
       is_tensor_subclass_{is_tensor_subclass},
       is_nested_{is_nested},
-      was_default_constructed_{false} {
+      was_default_constructed_{false},
+      grad_dtype_{grad_dtype} {
   auto device_ = options.device();
   stream_ = c10::impl::getDeviceGuardImpl(device_.type())->getStream(device_);
 }
@@ -44,7 +46,8 @@ InputMetadata::InputMetadata(const at::Tensor& t)
           t.options(),
           compute_variant_shape(t),
           is_python_dispatch(t),
-          t.is_nested()) {}
+          t.is_nested(),
+          t.grad_dtype()) {}
 
 at::Tensor InputMetadata::zeros_like() const {
   TORCH_CHECK(

@@ -3,21 +3,29 @@
 import copy
 import functools
 import unittest
-from typing import Callable
+from collections.abc import Callable
 
 import torch
 import torch.distributed as dist
 import torch.nn as nn
 from torch.distributed.fsdp import fully_shard
 from torch.distributed.tensor.experimental import implicit_replication
-from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
+from torch.testing._internal.common_distributed import (
+    skip_if_lt_x_gpu,
+    skip_if_rocm_arch_multiprocess,
+)
 from torch.testing._internal.common_fsdp import (
     FSDPTest,
     get_devtype,
     patch_all_gather,
     patch_reduce_scatter,
 )
-from torch.testing._internal.common_utils import get_cycles_per_ms, run_tests, TEST_HPU
+from torch.testing._internal.common_utils import (
+    get_cycles_per_ms,
+    MI200_ARCH,
+    run_tests,
+    TEST_HPU,
+)
 
 
 device_type = torch.device(get_devtype())
@@ -43,6 +51,7 @@ class TestFullyShardOverlap(FSDPTest):
     def world_size(self) -> int:
         return min(2, torch.get_device_module(device_type).device_count())
 
+    @skip_if_rocm_arch_multiprocess(MI200_ARCH)
     @skip_if_lt_x_gpu(2)
     @unittest.skipIf(TEST_HPU, "Sleep is not supported on HPU")
     def test_fully_shard_training_overlap(self):
@@ -139,8 +148,9 @@ class TestFullyShardOverlap(FSDPTest):
                     dist.reduce_scatter_tensor(dummy_rs_output, dummy_rs_input)
 
         def fwd_bwd():
-            with patch_all_gather(delayed_all_gather), patch_reduce_scatter(
-                delayed_reduce_scatter
+            with (
+                patch_all_gather(delayed_all_gather),
+                patch_reduce_scatter(delayed_reduce_scatter),
             ):
                 loss = model(inp).sum()
                 loss.backward()

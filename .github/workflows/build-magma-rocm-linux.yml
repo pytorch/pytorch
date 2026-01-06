@@ -29,12 +29,12 @@ concurrency:
 jobs:
   build-linux-magma-rocm:
     if: github.repository_owner == 'pytorch'
-    runs-on: linux.12xlarge
+    runs-on: linux.2xlarge
     permissions:
       id-token: write
     strategy:
       matrix:
-        rocm_version: ["64", "63"]
+        rocm_version: ["71", "70"]
     steps:
       - name: Checkout PyTorch
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2

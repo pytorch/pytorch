@@ -7,7 +7,7 @@ import os
 import re
 from dataclasses import dataclass
 from functools import lru_cache
-from typing import Callable, cast, Optional, TYPE_CHECKING, Union
+from typing import Optional, TYPE_CHECKING, Union
 
 from torch._inductor import config
 from torch._inductor.utils import get_benchmark_name
@@ -16,6 +16,9 @@ from torch.utils._ordered_set import OrderedSet
 
 # Prevent circular import
 if TYPE_CHECKING:
+    from collections.abc import Callable
+
+    from torch._inductor.runtime.triton_compat import Config
     from torch._inductor.scheduler import BaseSchedulerNode
 
 # counter for tracking how many kernels have been generated
@@ -50,9 +53,12 @@ num_comprehensive_padding = 0
 num_matches_for_scatter_upon_const_tensor = 0
 
 num_loop_reordering = 0
+num_auto_chunking: int = 0
 
 # counter for parallel reduction.
 parallel_reduction_count = 0
+
+codegen_mix_order_reduction = 0
 
 
 # reset all counters
@@ -67,6 +73,8 @@ def reset() -> None:
     global num_matches_for_scatter_upon_const_tensor
     global num_loop_reordering
     global parallel_reduction_count
+    global codegen_mix_order_reduction
+    global num_auto_chunking
 
     generated_kernel_count = 0
     generated_cpp_vec_kernel_count = 0
@@ -80,6 +88,8 @@ def reset() -> None:
     num_matches_for_scatter_upon_const_tensor = 0
     num_loop_reordering = 0
     parallel_reduction_count = 0
+    codegen_mix_order_reduction = 0
+    num_auto_chunking = 0
 
 
 @dataclass
@@ -153,8 +163,8 @@ class MetricTable:
         bn = get_benchmark_name()
         # assert bn is not None
         row = [bn] + [row_dict[column_name] for column_name in self.column_names]
-        assert all(isinstance(i, str) for i in row)
-        self._write_row(cast(list[str], row))
+        assert all(isinstance(i, (str, float, type(None))) for i in row)
+        self._write_row(row)
 
     def output_filename(self) -> str:
         return f"metric_table_{self.table_name}.csv"
@@ -165,7 +175,7 @@ class MetricTable:
             writer = csv.writer(fd, lineterminator="\n")
             writer.writerow(["model_name"] + self.column_names)
 
-    def _write_row(self, row: list[str]) -> None:
+    def _write_row(self, row: list[str | float | None]) -> None:
         filename = self.output_filename()
         if self.num_rows_added == 0 and not os.path.exists(filename):
             self.write_header()
@@ -452,3 +462,27 @@ def is_metric_table_enabled(name: str) -> bool:
 def get_metric_table(name: str) -> MetricTable:
     assert name in REGISTERED_METRIC_TABLES, f"Metric table {name} is not defined"
     return REGISTERED_METRIC_TABLES[name]
+
+
+MetricTable.register_table(
+    "kernel_autotune",
+    [
+        "kernel_path",
+        "kernel_name",
+        "triton_config",
+        "latency_ms",
+    ],
+)
+
+
+def log_kernel_autotune_result(
+    kernel_path: str, kernel_name: str, config: Config, latency: float
+) -> None:
+    get_metric_table("kernel_autotune").add_row(
+        lambda: {
+            "kernel_path": kernel_path,
+            "kernel_name": kernel_name,
+            "triton_config": str(config),
+            "latency_ms": latency,
+        }
+    )

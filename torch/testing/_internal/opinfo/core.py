@@ -8,12 +8,12 @@ import math
 import operator
 import unittest
 from abc import ABC, abstractmethod
-from collections.abc import Iterable
+from collections.abc import Callable, Iterable
 from dataclasses import asdict, dataclass, field
 from enum import Enum
 from functools import partial
 from itertools import product
-from typing import Any, Callable, Optional, TypeVar, Union
+from typing import Any, Optional, TypeVar, Union
 
 import torch
 from torch.testing import make_tensor
@@ -162,13 +162,11 @@ class SampleInput:
         # Allow calling either as SampleInput(input, args=args, kwargs=kwargs), or as
         # SampleInput(input, *args, **kwargs) but not to mix the two forms
         if args is not None or kwargs is not None:
-            assert (
-                not var_args and not var_kwargs
-            ), """
+            assert not var_args and not var_kwargs, """
 A SampleInput can be constructed "naturally" with *args and **kwargs or by
 explicitly setting the "args" and "kwargs" parameters, but the two
 methods of construction cannot be mixed!"""
-        elif len(var_args) or len(var_kwargs):
+        elif var_args or var_kwargs:
             assert (
                 output_process_fn_grad is None
                 and broadcasts_input is None
@@ -226,7 +224,7 @@ cannot specify additional metadata in keyword arguments"""
             f"name={repr(self.name)}",
         ]
 
-        return f'SampleInput({", ".join(a for a in arguments if a is not None)})'
+        return f"SampleInput({', '.join(a for a in arguments if a is not None)})"
 
     def __repr__(self):
         return self._repr_helper(lambda x: x)
@@ -482,7 +480,7 @@ class AliasInfo:
 #   set with small tensors. An elaborated set of sample inputs
 #   can be specified using the "reference_inputs_func" attribute.
 #   The "reference inputs" for an operation are an extended
-#   set of sample inputs that can more exhausively test an
+#   set of sample inputs that can more exhaustively test an
 #   operator. They are used by only a few tests that are careful
 #   not to take too long to run. Adding reference inputs
 #   is highly encouraged!
@@ -851,7 +849,7 @@ class OpInfo:
     # tolerance for nondeterminism while performing gradcheck
     gradcheck_nondet_tol: float = 0.0
 
-    # Whether to use the fast implmentation for gradcheck/gradgradcheck.
+    # Whether to use the fast implementation for gradcheck/gradgradcheck.
     # When set to None, defers to the default value provided by the wrapper
     # function around gradcheck (testing._internal.common_utils.gradcheck)
     gradcheck_fast_mode: bool = None
@@ -1469,7 +1467,7 @@ def test_foo(self, device, dtype, op):
         sample_inputs_sparse_(coo|csr|csc|bsr|bsc)_func.
 
         To avoid this, either define the corresponding sample function,
-        or re-map unsupported samples to error inputs in an appropiate
+        or re-map unsupported samples to error inputs in an appropriate
 
           opinfo/definitions/sparse.py:_validate_sample_input_sparse_<op>
 
@@ -1536,7 +1534,10 @@ def test_foo(self, device, dtype, op):
         device_type = torch.device(device_type).type
         if device_type == "cuda" and TEST_WITH_ROCM:
             device_type = "rocm"
-        return self.dtypesIf.get(device_type, self.dtypes)
+        result = self.dtypesIf.get(device_type, self.dtypes)
+        if device_type == "mps":
+            return result - {torch.float64, torch.cdouble}
+        return result
 
     def supported_backward_dtypes(self, device_type):
         if not self.supports_autograd:
@@ -1554,6 +1555,8 @@ def test_foo(self, device, dtype, op):
             )
         elif device_type == "hpu":
             backward_dtypes = self.backward_dtypesIfHpu
+        elif device_type == "mps":
+            backward_dtypes = self.backward_dtypes - {torch.double, torch.cdouble}
         else:
             backward_dtypes = self.backward_dtypes
 
@@ -1601,13 +1604,11 @@ class SampleRule(ABC):
 
     # returns a string identifier of the rule type
     @abstractmethod
-    def type(self) -> str:
-        ...
+    def type(self) -> str: ...
 
     # returns an appropriate context that handles the xfail, skips, etc.
     @abstractmethod
-    def get_context(self, test_case):
-        ...
+    def get_context(self, test_case): ...
 
 
 # useful for specifying xfails
@@ -1791,8 +1792,10 @@ class ReductionOpInfo(OpInfo):
         # kwargs to use when calling the op. This is required for operators that
         # have other required parameters besides the input tensor.
         generate_args_kwargs: Callable = lambda t, dim=None, keepdim=False: (
-            yield (),
-            {},
+            yield (
+                (),
+                {},
+            )
         ),
         # Options from the OpInfo base class
         **kwargs,
@@ -2476,9 +2479,9 @@ class BinaryUfuncInfo(OpInfo):
             self.supports_one_python_scalar = True
 
         if self.supports_one_python_scalar:
-            assert (
-                supports_rhs_python_scalar
-            ), "Can't support lhs and rhs Python scalars but not rhs scalars!"
+            assert supports_rhs_python_scalar, (
+                "Can't support lhs and rhs Python scalars but not rhs scalars!"
+            )
 
 
 # The following functions and classes are for testing elementwise unary operators.

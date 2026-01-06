@@ -1,11 +1,8 @@
 #pragma once
 
-#include <unordered_map>
-
 #include <c10/util/FbcodeMaps.h>
 #include <c10/util/Logging.h>
 #include <caffe2/serialize/inline_container.h>
-#include <torch/nativert/executor/Placement.h>
 
 #include <torch/nativert/graph/Graph.h>
 
@@ -23,11 +20,12 @@ using WeightVersion = int;
  */
 class Weights {
  public:
-  explicit Weights(
+  Weights(
       const Graph* graph,
       const std::optional<std::unordered_map<std::string, c10::IValue>>&
           stateDict = std::nullopt,
-      Placement placement = Placement());
+      const std::optional<std::unordered_map<std::string, c10::IValue>>&
+          constants = std::nullopt);
 
   // Arguments
   // - pytorchStreamReader: the reader for the model archive
@@ -38,8 +36,6 @@ class Weights {
   // - constantPaths: a map from constant name to file path in the archive
   // - constantPathPrefix: a prefix that will be prepended to paths in
   // constantPathPrefix
-  // - placement: the device placement of the weights, default to follow the
-  //   original device in the weight's metadata
   explicit Weights(
       const Graph* graph,
       std::shared_ptr<caffe2::serialize::PyTorchStreamReader>
@@ -48,9 +44,12 @@ class Weights {
       std::string_view stateDictPathPrefix,
       const std::unordered_map<std::string, std::string>& constantPaths,
       std::string_view constantPathPrefix,
-      Placement placement = Placement(),
       std::function<bool(const std::string&)> skipSizeCheck = {},
-      std::function<bool(const std::string&)> skipDtypeCheck = {});
+      std::function<bool(const std::string&)> skipDtypeCheck = {},
+      std::shared_ptr<std::unordered_map<
+          std::string,
+          std::shared_ptr<torch::nativert::TensorMeta>>> maybeNewWeightsMeta =
+          nullptr);
 
   at::Tensor at(const std::string& name) const;
   at::Tensor& at(const std::string& name);
@@ -71,6 +70,10 @@ class Weights {
    * Replace the value stored at the weight with name "name".
    */
   void setValue(const std::string& name, const at::Tensor& newValue);
+  void setValue(
+      const std::string& name,
+      const at::Tensor& newValue,
+      bool skipDeviceCheck);
 
   /*
    * Update the value stored at the weight with name "name".
@@ -82,6 +85,10 @@ class Weights {
       const std::unordered_map<std::string, at::Tensor>& newValues);
 
   void validateValue(const std::string& name, const at::Tensor& newValue) const;
+  void validateValue(
+      const std::string& name,
+      const at::Tensor& newValue,
+      bool skipDeviceCheck) const;
 
   void validateAllWeightsLoaded();
 
@@ -109,14 +116,13 @@ class Weights {
  private:
   const Graph* graph_;
   const std::unordered_map<std::string, TensorMeta>& weightsMeta_;
-  Placement placement_;
 
   // keys are parameter/buffer/constant names, not graph input names!
   std::unordered_map<std::string, at::Tensor> allValues_;
 
   std::unordered_map<std::string, c10::IValue> customObjs_;
 
-  // contains CustomClassHolder map from a file name to an arbitray
+  // contains CustomClassHolder map from a file name to an arbitrary
   // key in customObjs_ that hold the loaded content of the file.
   // This is used in AOTIDelegateExecutor.
   std::unordered_map<std::string, std::string> customObjsPaths_;
@@ -135,8 +141,8 @@ class Weights {
   // every instance of Weight has a unique version number
   static WeightVersion globalVersion_;
 
-  std::function<bool(const std::string&)> skipSizeCheck_ = {};
-  std::function<bool(const std::string&)> skipDtypeCheck_ = {};
+  std::function<bool(const std::string&)> skipSizeCheck_;
+  std::function<bool(const std::string&)> skipDtypeCheck_;
 
   // save the names of unused weights
   std::unordered_set<std::string> unusedWeights_;

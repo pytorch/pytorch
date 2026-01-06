@@ -142,6 +142,7 @@ Tensor _pack_padded_sequence_backward_symint(const Tensor& grad, c10::SymIntArra
 std::tuple<Tensor, Tensor> _pad_packed_sequence(const Tensor& data, const Tensor& _batch_sizes, bool batch_first, const Scalar& padding_value, int64_t total_length) {
   auto batch_sizes_t = _batch_sizes.contiguous();
   checkLongTensor(batch_sizes_t);
+  TORCH_CHECK(batch_sizes_t.numel() > 0, "batch_sizes can not be empty");
 
   int64_t * batch_sizes = batch_sizes_t.data_ptr<int64_t>();
   int64_t max_batch_size = batch_sizes[0];

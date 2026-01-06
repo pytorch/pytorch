@@ -204,7 +204,8 @@ import itertools
 import operator
 import unittest
 import io
-from typing import Callable, Optional
+from typing import Optional
+from collections.abc import Callable
 
 class BinaryOp(torch.nn.Module):
     def __init__(self, binary_op, ibinary_op, is_inplace, is_scalar):
@@ -522,7 +523,7 @@ class TestFuseFx(QuantizationTestCase):
     @skipIfNoONEDNN
     def test_fuse_conv_bn_add_relu_lowering(self):
         """ Test fusion and lowering of Conv2d - (bn -) ReLU
-            by FX. For onednn backedn only.
+            by FX. For onednn backend only.
         """
         from torch.ao.quantization.backend_config import get_onednn_backend_config
         qconfig_mapping = get_default_qconfig_mapping('onednn')
@@ -826,8 +827,8 @@ class TestFuseFx(QuantizationTestCase):
         # check conv module has two inputs
         named_modules = dict(m.named_modules())
         for node in m.graph.nodes:
-            if node.op == "call_module" and type(named_modules[node.target]) == torch.nn.Conv2d:
-                self.assertTrue(len(node.args) == 2), "Expecting the fused op to have two arguments"
+            if node.op == "call_module" and type(named_modules[node.target]) is torch.nn.Conv2d:
+                self.assertTrue(len(node.args) == 2, msg="Expecting the fused op to have two arguments")
 
     def test_fusion_pattern_with_matchallnode(self):
         """This test tests that the node matched by MatchAllNode will be regared as an input
@@ -917,7 +918,7 @@ class TestQuantizeFx(QuantizationTestCase):
         m = torch.fx.symbolic_trace(M())
         modules = dict(m.named_modules())
         for n in m.graph.nodes:
-            if n.op == 'call_module' and type(modules[n.target]) == nn.ReLU:
+            if n.op == 'call_module' and type(modules[n.target]) is nn.ReLU:
                 self.assertTrue(_is_match(modules, n, pattern))
 
     def test_pattern_match_constant(self):
@@ -1221,7 +1222,7 @@ class TestQuantizeFx(QuantizationTestCase):
             def checkSerDeser(model, is_dynamic):
                 for module_name in ("linear", "conv"):
                     if hasattr(model, module_name):
-                        # make sure seralization works
+                        # make sure serialization works
                         state_dict = copy.deepcopy(model.state_dict())
                         all_keys = _get_keys(module_name, is_dynamic)
                         for key in all_keys:
@@ -1484,7 +1485,7 @@ class TestQuantizeFx(QuantizationTestCase):
             def checkSerDeser(model, is_dynamic):
                 module_name = "deconv"
                 if hasattr(model, module_name):
-                    # make sure seralization works
+                    # make sure serialization works
                     state_dict = copy.deepcopy(model.state_dict())
                     all_keys = _get_keys(module_name, is_dynamic)
                     for key in all_keys:
@@ -1569,7 +1570,7 @@ class TestQuantizeFx(QuantizationTestCase):
             def checkSerDeser(model, is_dynamic):
                 module_name = "deconv"
                 if hasattr(model, module_name):
-                    # make sure seralization works
+                    # make sure serialization works
                     state_dict = copy.deepcopy(model.state_dict())
                     all_keys = _get_keys(module_name, is_dynamic)
                     for key in all_keys:
@@ -3475,7 +3476,7 @@ class TestQuantizeFx(QuantizationTestCase):
     def test_non_traceable_module(self):
         class NonTraceable(torch.nn.Module):
             def forward(self, x):
-                for k in x.keys():
+                for k in x:
                     print(x[k])
                 return x
 
@@ -4672,13 +4673,13 @@ class TestQuantizeFx(QuantizationTestCase):
             m = prepare(m, {"": qconfig}, example_inputs=example_inputs)
             # check that there is a duplicated observer instance
             actpp_module_count = 0
-            for name, module in m.named_modules(remove_duplicate=False):
+            for module in m.modules(remove_duplicate=False):
                 if isinstance(module, actpp_module_class):
                     actpp_module_count += 1
             self.assertEqual(actpp_module_count, 2)
 
             actpp_module_count = 0
-            for name, module in m.named_modules():
+            for module in m.modules():
                 if isinstance(module, actpp_module_class):
                     actpp_module_count += 1
             self.assertEqual(actpp_module_count, 1)
@@ -4999,7 +5000,7 @@ class TestQuantizeFx(QuantizationTestCase):
             self.assertTrue(all(arg.target == "dequantize" for arg in node.args))
             # Match following quantize with the specific qparams and dtypes
             expected_scale, expected_zp, expected_dtype = node_name_to_expected_quantize_args[node.name]
-            for user in node.users.keys():
+            for user in node.users:
                 self.assertEqual(user.target, torch.quantize_per_tensor)
                 if expected_scale is not None:
                     self.assertEqual(getattr(cell, user.args[1].target), expected_scale)
@@ -5692,12 +5693,12 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertTrue(
             type(mod_prep.untraceable_module_class.linear)
             is not torch.ao.nn.qat.modules.linear.Linear,
-            "prepare_qat_fx shold not convert anything inside untraced module classes",
+            "prepare_qat_fx should not convert anything inside untraced module classes",
         )
         self.assertTrue(
             type(mod_prep.untraceable_module_name.linear)
             is not torch.ao.nn.qat.modules.linear.Linear,
-            "prepare_qat_fx shold not convert anything inside modules named in untraced_module_names",
+            "prepare_qat_fx should not convert anything inside modules named in untraced_module_names",
         )
 
     def test_qconfig_dict_setup(self):
@@ -5732,7 +5733,7 @@ class TestQuantizeFx(QuantizationTestCase):
                 m = M().eval()
                 qconfig_dict = func(backend)
                 m = prepare_fx(m, qconfig_dict, example_inputs=(torch.randn(1, 1, 1, 1)))
-                for name, mod in m.named_modules():
+                for mod in m.modules():
                     if _is_activation_post_process(mod) and mod.dtype == torch.quint8:
                         if backend == "fbgemm":
                             lower_bnd = 0
@@ -6314,7 +6315,7 @@ class TestQuantizeFx(QuantizationTestCase):
     @skipIfNoONEDNN
     def test_linear_leaky_relu_lowering(self):
         """ Test fusion and lowering of Linear - (bn -) LeakyReLU
-            by FX. For onednn backedn only.
+            by FX. For onednn backend only.
         """
         from torch.ao.quantization.backend_config import get_onednn_backend_config
         qconfig_mapping = get_default_qconfig_mapping('onednn')
@@ -6333,7 +6334,7 @@ class TestQuantizeFx(QuantizationTestCase):
     @skipIfNoONEDNN
     def test_linear_tanh_lowering(self):
         """ Test fusion and lowering of Linear - Tanh
-            by FX. For onednn backedn only.
+            by FX. For onednn backend only.
         """
         from torch.ao.quantization.backend_config import get_onednn_backend_config
         qconfig_mapping = get_default_qconfig_mapping('onednn')
@@ -6648,7 +6649,7 @@ class TestQuantizeFx(QuantizationTestCase):
             """
 
             def __init__(self, input_dim, output_dim):
-                super(__class__, self).__init__()
+                super().__init__()
                 self.w = nn.Parameter(torch.randn(input_dim, output_dim))
                 self.b = nn.Parameter(torch.randn(input_dim))
 
@@ -6661,7 +6662,7 @@ class TestQuantizeFx(QuantizationTestCase):
             """
 
             def __init__(self, input_dim, hidden_dim, output_dim):
-                super(__class__, self).__init__()
+                super().__init__()
                 self.submodule_1 = SubModule(hidden_dim, input_dim)
                 setattr(self, 'submodule|2', SubModule(hidden_dim, hidden_dim))
                 setattr(self, 'submodule/3', SubModule(hidden_dim, hidden_dim))
@@ -8806,7 +8807,7 @@ class TestQuantizeFxOps(QuantizationTestCase):
 
         # check it works in None and static qconfig
         for qconfig in [None, default_qconfig]:
-            qconfig_dict = {"": default_qconfig}
+            qconfig_dict = {"": qconfig}
             m = M().eval()
             m = prepare_fx(model, qconfig_dict, example_inputs=example_inputs)
             self.checkGraphModuleNodes(m, expected_node_occurrence={
@@ -9435,7 +9436,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
             criterion = nn.CrossEntropyLoss()
             train_one_epoch(prepared, criterion, optimizer, [(input_value, output_value)], torch.device('cpu'), 1)
         else:
-            for i in range(10):
+            for _ in range(10):
                 prepared(input_value)
 
         # print('after observation root:', prepared.root)
@@ -9480,7 +9481,7 @@ class TestQuantizeFxModels(QuantizationTestCase):
                 optimizer = torch.optim.SGD(qeager.parameters(), lr=0.0001)
                 train_one_epoch(qeager, criterion, optimizer, [(input_value, output_value)], torch.device('cpu'), 1)
             else:
-                for i in range(10):
+                for _ in range(10):
                     qeager(input_value)
 
             # print('ref after observation:', qeager)
@@ -9645,6 +9646,11 @@ class TestQuantizeFxModels(QuantizationTestCase):
     @override_qengines
     def test_qat_embeddingbag_linear(self):
         for device in get_supported_device_types():
+            # Quantization backends (qnnpack, fbgemm, onednn) only support CPU tensors
+            # Skip other device for quantization tests (e.g. CUDA)
+            if device != 'cpu':
+                continue
+
             class EmbeddingBagLinear(torch.nn.Module):
                 def __init__(self) -> None:
                     super().__init__()
@@ -9662,10 +9668,10 @@ class TestQuantizeFxModels(QuantizationTestCase):
                 .set_global(get_default_qat_qconfig(qengine)) \
                 .set_object_type(torch.nn.EmbeddingBag, default_embedding_qat_qconfig)
 
-            train_indices = [[torch.randint(0, 10, (12, 12)), torch.randn((12, 1))] for _ in range(2)]
-            eval_output = [[torch.randint(0, 10, (12, 1))]]
+            train_indices = [[torch.randint(0, 10, (12, 12), device=device), torch.randn((12, 1), device=device)] for _ in range(2)]
+            eval_output = [[torch.randint(0, 10, (12, 1), device=device)]]
 
-            model = EmbeddingBagLinear().train()
+            model = EmbeddingBagLinear().to(device).train()
             prepared_fx_model = prepare_qat_fx(model, qconfig_dict, example_inputs=(train_indices[0][0],))
             test_only_train_fn(prepared_fx_model, train_indices)
             quant_model = convert_fx(prepared_fx_model,

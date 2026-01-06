@@ -1,12 +1,8 @@
 #!/usr/bin/python3
 # mypy: allow-untyped-defs
-import atexit
-import importlib
-import logging
-import os
+import importlib.abc
+import importlib.util
 import sys
-import tempfile
-from typing import Optional
 
 import torch
 from torch.distributed.nn.jit.templates.remote_module_template import (
@@ -14,15 +10,7 @@ from torch.distributed.nn.jit.templates.remote_module_template import (
 )
 
 
-logger = logging.getLogger(__name__)
-
-
 _FILE_PREFIX = "_remote_module_"
-_TEMP_DIR = tempfile.TemporaryDirectory()
-INSTANTIATED_TEMPLATE_DIR_PATH = _TEMP_DIR.name
-atexit.register(_TEMP_DIR.cleanup)
-logger.info("Created a temporary directory at %s", INSTANTIATED_TEMPLATE_DIR_PATH)
-sys.path.append(INSTANTIATED_TEMPLATE_DIR_PATH)
 
 
 def get_arg_return_types_from_interface(module_interface):
@@ -63,40 +51,62 @@ def get_arg_return_types_from_interface(module_interface):
     return args_str, arg_types_str, return_type_str
 
 
-def _write(out_path, text):
-    old_text: Optional[str]
-    try:
-        with open(out_path) as f:
-            old_text = f.read()
-    except OSError:
-        old_text = None
-    if old_text != text:
-        with open(out_path, "w") as f:
-            logger.info("Writing %s", out_path)
-            f.write(text)
-    else:
-        logger.info("Skipped writing %s", out_path)
+class _StringLoader(importlib.abc.SourceLoader):
+    """
+    A custom loader for dynamically generated Python source code.
+
+    Inherits from SourceLoader for API compatibility but overrides exec_module()
+    to avoid bytecode caching issues. The default SourceLoader.exec_module() calls
+    cache_from_source() which fails with IndexError when the filename doesn't
+    correspond to a real filesystem path with a .py extension.
+    """
+
+    def __init__(self, data: str) -> None:
+        self.data = data
+
+    def get_source(self, fullname: str) -> str:
+        return self.data
+
+    def get_data(self, path: str) -> bytes:
+        return self.data.encode("utf-8")
+
+    def get_filename(self, fullname: str) -> str:
+        return f"<{fullname}>.py"
+
+    def path_stats(self, path: str) -> dict:
+        # Raise OSError since source is dynamically generated (no filesystem stats)
+        raise OSError("dynamically generated module has no filesystem stats")
+
+    def exec_module(self, module) -> None:
+        """
+        Execute the module by compiling and running the source directly.
+
+        This overrides SourceLoader.exec_module() to bypass the problematic
+        get_code() -> cache_from_source() code path that fails on dynamic modules.
+        """
+        source = self.get_source(module.__name__)
+        filename = self.get_filename(module.__name__)
+        code = compile(source, filename, "exec", dont_inherit=True)
+        exec(code, module.__dict__)
 
 
 def _do_instantiate_remote_module_template(
     generated_module_name, str_dict, enable_moving_cpu_tensors_to_cuda
 ):
-    generated_code_text = get_remote_module_template(
-        enable_moving_cpu_tensors_to_cuda
-    ).format(**str_dict)
-    out_path = os.path.join(
-        INSTANTIATED_TEMPLATE_DIR_PATH, f"{generated_module_name}.py"
-    )
-    _write(out_path, generated_code_text)
+    if generated_module_name in sys.modules:
+        return sys.modules[generated_module_name]
 
-    # From importlib doc,
-    # > If you are dynamically importing a module that was created since
-    # the interpreter began execution (e.g., created a Python source file),
-    # you may need to call invalidate_caches() in order for the new module
-    # to be noticed by the import system.
-    importlib.invalidate_caches()
-    generated_module = importlib.import_module(f"{generated_module_name}")
-    return generated_module
+    loader = _StringLoader(
+        get_remote_module_template(enable_moving_cpu_tensors_to_cuda).format(**str_dict)
+    )
+    spec = importlib.util.spec_from_loader(
+        generated_module_name, loader, origin="torch-git"
+    )
+    assert spec is not None
+    module = importlib.util.module_from_spec(spec)
+    sys.modules[generated_module_name] = module
+    loader.exec_module(module)
+    return module
 
 
 def instantiate_scriptable_remote_module_template(

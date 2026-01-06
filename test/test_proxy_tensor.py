@@ -32,6 +32,7 @@ import re
 
 import functools
 import itertools
+from pathlib import Path
 
 aten = torch.ops.aten
 
@@ -60,9 +61,7 @@ def process_failures():
 
     and processes them into a list of opinfo xfails
     """
-    f = open('pytest_failures')
-    failures = f.readlines()
-    failures = [i.strip() for i in failures]
+    failures = [i.strip() for i in Path('pytest_failures').read_text().splitlines()]
 
     def process_failure_string(s, matcher):
         out = re.search(matcher, s)
@@ -797,6 +796,27 @@ def forward(self, x_1):
 
         self._test(f, [torch.randn(1, 10), torch.zeros(1, dtype=torch.long)])
 
+    @unittest.skipIf(not HAS_CUDA, 'CUDA-only test')
+    def test_T244632748(self):
+        class TestModule(torch.nn.Module):
+            def forward(self, x):
+                return x + (x.shape[0] * 2)
+
+        mod = TestModule()
+        sample = torch.randn((5, 5)).to("cuda")
+        dim0 = torch.export.Dim.DYNAMIC(max=100)
+        dynamic_shapes = {"x": (dim0, torch.export.Dim.STATIC)}
+        ep = torch.export.export(mod, (sample,), dynamic_shapes=dynamic_shapes)
+        gm = ep.module()
+        symint = list(gm.graph.nodes)[3].meta["val"]
+        list(gm.graph.nodes)[3].replace_all_uses_with(symint)
+        gm.graph.eliminate_dead_code()
+
+        inductor_fx = torch._inductor.aot_compile(
+            gm, (sample,), options={"fx_wrapper": True, "compile_threads": 1}
+        )
+
+
 class TestGenericProxyTensorReal(TestGenericProxyTensor):
     tracing_mode = "real"
 
@@ -1128,9 +1148,6 @@ def forward(self, y_1, x_1):
             a = _a.item()
             b = _b.item()
             stride = _stride.item()
-            torch._check_is_size(a)
-            torch._check_is_size(b)
-            torch._check_is_size(stride)
             ta = torch.randn(a * stride)
             tb = torch.randn(b * stride)
             r = torch.cat([ta, tb])
@@ -1370,8 +1387,8 @@ def forward(self, crop_camera_1, mask_1):
     view_1 = torch.ops.aten.view.default(expand_1, [sym_size_int, sym_size_int_1, sym_size_int_2]);  expand_1 = sym_size_int_1 = sym_size_int_2 = None
     bmm = torch.ops.aten.bmm.default(view, view_1);  view = view_1 = None
     view_2 = torch.ops.aten.view.default(bmm, [sym_size_int, 3, 3]);  bmm = None
-    mul_6 = sym_size_int * 3
-    view_3 = torch.ops.aten.view.default(view_2, [mul_6, 3]);  view_2 = mul_6 = None
+    mul_9 = sym_size_int * 3
+    view_3 = torch.ops.aten.view.default(view_2, [mul_9, 3]);  view_2 = mul_9 = None
     mm = torch.ops.aten.mm.default(view_3, eye);  view_3 = eye = None
     _unsafe_view = torch.ops.aten._unsafe_view.default(mm, [sym_size_int, 3, 3]);  mm = sym_size_int = None
     index_put_ = torch.ops.aten.index_put_.default(crop_camera_1, [mask_1], _unsafe_view);  crop_camera_1 = mask_1 = _unsafe_view = index_put_ = None
@@ -1476,9 +1493,9 @@ def forward(self, x_1, y_1):
         # See https://github.com/pytorch/pytorch/issues/123651
         def f(x):
             i0 = x.item()
-            torch._check_is_size(i0)
             # To trigger the original issue, the max bound has to
             # be chosen such that 448 / 447 < 2 (which it is.)
+            torch._check(i0 > 0)
             torch._check(i0 <= 448)
             return torch.zeros(256 * i0).view(-1, 447)
         make_fx(f, tracing_mode="symbolic")(torch.tensor(256 * 447, device="cuda"))
@@ -1559,9 +1576,6 @@ def forward(self, x_1, y_1):
         def f(lengths, values):
             # tolist not directly supported atm
             sizes = [lengths[i].item() for i in range(lengths.size(0))]
-            for s in sizes:
-                # TODO(avik): no assertion generated with torch._check_is_size?
-                torch._constrain_as_size(s)
             return torch.split(values, sizes)
 
         r = str(make_fx(f, tracing_mode="symbolic")(
@@ -1576,9 +1590,6 @@ def forward(self, lengths_1, values_1):
     _local_scalar_dense_1 = torch.ops.aten._local_scalar_dense.default(select_1);  select_1 = None
     select_2 = torch.ops.aten.select.int(lengths_1, 0, 2);  lengths_1 = None
     _local_scalar_dense_2 = torch.ops.aten._local_scalar_dense.default(select_2);  select_2 = None
-    sym_constrain_range_for_size = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense);  sym_constrain_range_for_size = None
-    sym_constrain_range_for_size_1 = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense_1);  sym_constrain_range_for_size_1 = None
-    sym_constrain_range_for_size_2 = torch.ops.aten.sym_constrain_range_for_size.default(_local_scalar_dense_2);  sym_constrain_range_for_size_2 = None
     split_with_sizes = torch.ops.aten.split_with_sizes.default(values_1, [_local_scalar_dense, _local_scalar_dense_1, _local_scalar_dense_2]);  values_1 = _local_scalar_dense = _local_scalar_dense_1 = _local_scalar_dense_2 = None
     getitem = split_with_sizes[0]
     getitem_1 = split_with_sizes[1]
@@ -1867,7 +1878,7 @@ L['a'].size()[1] > L['a'].size()[0]
             show_guards(tensor),
             """\
 L['a'].size()[1] < L['a'].size()[0]
-L['a'].size()[0] <= 19
+3 <= L['a'].size()[0] and L['a'].size()[0] <= 19
 L['a'].size()[1] <= 18""")
 
     def test_sym_storage_offset(self):
@@ -1973,7 +1984,6 @@ make_fx_failures = {
     skip('item'),
     xfail('cov'),
     xfail('nn.functional.gaussian_nll_loss'),
-    xfail('tensor_split'),
     xfail('corrcoef'),
     xfail('quantile'),
     xfail('nanquantile'),
@@ -1993,10 +2003,11 @@ make_fx_failures = {
 
 only_real_tensor_failures = {
     xfail('narrow'),
+    xfail('tensor_split'),
 }
 
 only_fake_tensor_failures = {
-    xfail('narrow'),
+    xfail('tensor_split'),
 }
 
 fake_tensor_failures = set()

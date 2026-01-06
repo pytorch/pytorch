@@ -182,7 +182,7 @@ class OptionalDeviceGuard {
   }
 
  private:
-  impl::InlineOptionalDeviceGuard<impl::VirtualGuardImpl> guard_{};
+  impl::InlineOptionalDeviceGuard<impl::VirtualGuardImpl> guard_;
 };
 
 // Note [Whither the DeviceGuard boilerplate]

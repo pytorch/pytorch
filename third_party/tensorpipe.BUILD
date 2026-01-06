@@ -7,6 +7,7 @@ LIBUV_COMMON_SRCS = [
     "third_party/libuv/src/inet.c",
     "third_party/libuv/src/random.c",
     "third_party/libuv/src/strscpy.c",
+    "third_party/libuv/src/strtok.c",
     "third_party/libuv/src/threadpool.c",
     "third_party/libuv/src/timer.c",
     "third_party/libuv/src/uv-common.c",
@@ -37,9 +38,7 @@ LIBUV_POSIX_SRCS = [
 
 LIBUV_LINUX_SRCS = LIBUV_POSIX_SRCS + [
     "third_party/libuv/src/unix/proctitle.c",
-    "third_party/libuv/src/unix/linux-core.c",
-    "third_party/libuv/src/unix/linux-inotify.c",
-    "third_party/libuv/src/unix/linux-syscalls.c",
+    "third_party/libuv/src/unix/linux.c",
     "third_party/libuv/src/unix/procfs-exepath.c",
     "third_party/libuv/src/unix/random-getrandom.c",
     "third_party/libuv/src/unix/random-sysctl-linux.c",
@@ -60,6 +59,7 @@ cc_library(
             "third_party/libuv/src/unix/*.h",
         ],
     ),
+    copts = ["-D_GNU_SOURCE"],
     visibility = ["//visibility:public"],
 )
 
@@ -151,7 +151,7 @@ cc_library(
         ".",
     ],
     copts = [
-        "-std=c++14",
+        "-std=c++17",
     ],
     visibility = ["//visibility:public"],
     deps = [
@@ -168,7 +168,7 @@ cc_library(
         ".",
     ],
     copts = [
-        "-std=c++14",
+        "-std=c++17",
     ],
     visibility = ["//visibility:public"],
     deps = [

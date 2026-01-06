@@ -15,14 +15,42 @@ std::enable_if_t<
         std::is_base_of_v<Base, Child>,
     std::unique_ptr<Base>>
 make_unique_base(Args&&... args) {
-  return std::unique_ptr<Base>(new Child(std::forward<Args>(args)...));
+  return std::make_unique<Child>(std::forward<Args>(args)...);
 }
 } // namespace detail
 
 inline KernelFunction::KernelFunction()
-    : boxed_kernel_func_(),
-      unboxed_kernel_func_(nullptr),
-      sym_unboxed_kernel_func_(nullptr) {}
+    : unboxed_kernel_func_(nullptr), sym_unboxed_kernel_func_(nullptr) {}
+
+inline KernelFunction::~KernelFunction() {
+  if (tokens_) {
+    for (auto& weak_token : *tokens_) {
+      if (auto token = weak_token.lock()) {
+        token->invalidate();
+      }
+    }
+  }
+}
+
+inline KernelFunction::KernelFunction(const KernelFunction& other)
+    : boxed_kernel_func_(other.boxed_kernel_func_),
+      unboxed_kernel_func_(other.unboxed_kernel_func_),
+      sym_unboxed_kernel_func_(other.sym_unboxed_kernel_func_) {
+  // tokens_ is intentionally not copied as we only care about invalidating
+  // tokens if the original KernelFunction is destroyed
+}
+
+inline KernelFunction& KernelFunction::operator=(const KernelFunction& other) {
+  if (this != &other) {
+    boxed_kernel_func_ = other.boxed_kernel_func_;
+    unboxed_kernel_func_ = other.unboxed_kernel_func_;
+    sym_unboxed_kernel_func_ = other.sym_unboxed_kernel_func_;
+
+    // tokens_ is intentionally not copied as we only care about invalidating
+    // tokens if the original KernelFunction is destroyed
+  }
+  return *this;
+}
 
 inline KernelFunction::KernelFunction(
     std::unique_ptr<OperatorKernel> functor,
@@ -86,25 +114,25 @@ inline typename remove_symint<T>::type unpackSymInt(T x) {
 }
 
 template <>
-inline typename remove_symint<c10::SymInt>::type unpackSymInt(c10::SymInt x) {
+inline remove_symint<c10::SymInt>::type unpackSymInt(c10::SymInt x) {
   return x.guard_int(__FILE__, __LINE__);
 }
 
 template <>
-inline typename remove_symint<c10::SymIntArrayRef>::type unpackSymInt(
+inline remove_symint<c10::SymIntArrayRef>::type unpackSymInt(
     c10::SymIntArrayRef x) {
   return C10_AS_INTARRAYREF_SLOW(x);
 }
 
 template <>
-inline typename remove_symint<std::optional<c10::SymInt>>::type unpackSymInt(
+inline remove_symint<std::optional<c10::SymInt>>::type unpackSymInt(
     std::optional<c10::SymInt> x) {
   return x.has_value() ? std::make_optional(x->guard_int(__FILE__, __LINE__))
                        : std::nullopt;
 }
 
 template <>
-inline typename remove_symint<at::OptionalSymIntArrayRef>::type unpackSymInt(
+inline remove_symint<at::OptionalSymIntArrayRef>::type unpackSymInt(
     at::OptionalSymIntArrayRef x) {
   return x.has_value() ? std::make_optional(C10_AS_INTARRAYREF_SLOW(*x))
                        : std::nullopt;
@@ -155,6 +183,14 @@ C10_ALWAYS_INLINE Return KernelFunction::call(
       opHandle,
       dispatchKeySet,
       std::forward<Args>(args)...);
+}
+
+inline void KernelFunction::registerToken(
+    std::weak_ptr<KernelToken> token) const {
+  if (!tokens_) {
+    tokens_ = std::make_unique<std::vector<std::weak_ptr<KernelToken>>>();
+  }
+  tokens_->push_back(std::move(token));
 }
 
 inline KernelFunction KernelFunction::makeFromBoxedKernel(
@@ -315,6 +351,40 @@ KernelFunction::makeFromUnboxedLambda(Lambda&& lambda) {
           OperatorKernel,
           impl::WrapFunctionIntoRuntimeFunctor<std::decay_t<Lambda>>>(
           std::forward<Lambda>(lambda)));
+}
+
+inline bool KernelToken::isValid() const {
+  return !invalid_.load(std::memory_order_acquire);
+}
+
+inline void KernelToken::invalidate() {
+  invalid_.store(true, std::memory_order_release);
+}
+
+inline SafeKernelFunction::SafeKernelFunction(
+    const KernelFunction* kernel,
+    std::string debug,
+    std::shared_ptr<OperatorHandle> opHandle)
+    : kernel_(kernel ? *kernel : KernelFunction()),
+      token_(std::make_shared<KernelToken>()),
+      debug_(std::move(debug)),
+      opHandle_(std::move(opHandle)) {
+  // Register the token with the original kernel so it gets invalidated when the
+  // kernel is destroyed
+  if (kernel) {
+    kernel->registerToken(token_);
+  }
+}
+
+inline void SafeKernelFunction::callBoxed(
+    const OperatorHandle& opHandle,
+    DispatchKeySet dispatchKeySet,
+    Stack* stack) const {
+  TORCH_CHECK(
+      token_ && token_->isValid(),
+      "SafeKernelFunction has been invalidated ",
+      debug_);
+  kernel_.callBoxed(opHandle, dispatchKeySet, stack);
 }
 
 } // namespace c10

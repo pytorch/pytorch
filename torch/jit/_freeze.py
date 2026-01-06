@@ -125,7 +125,7 @@ def freeze(
 
 def run_frozen_optimizations(
     mod, optimize_numerics: bool = True, preserved_methods: Optional[list[str]] = None
-):
+) -> None:
     r"""
     Run a series of optimizations looking for patterns that occur in frozen graphs.
 
@@ -150,7 +150,7 @@ def run_frozen_optimizations(
         None
 
     Note:
-        In rare occassions, this can result in slower execution.
+        In rare occasions, this can result in slower execution.
 
     Example (Freezing a module with Conv->Batchnorm)
     .. code-block:: python

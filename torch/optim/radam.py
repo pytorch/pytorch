@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 r"""Implementation for the RAdam algorithm."""
 
-from typing import cast, Optional, Union
+from typing import cast
 
 import torch
 from torch import Tensor
@@ -32,17 +32,17 @@ class RAdam(Optimizer):  # noqa: D101
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 1e-3,
+        lr: float | Tensor = 1e-3,
         betas: tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 0,
         decoupled_weight_decay: bool = False,
         *,
-        foreach: Optional[bool] = None,
+        foreach: bool | None = None,
         maximize: bool = False,
         capturable: bool = False,
         differentiable: bool = False,
-    ):  # noqa: D107
+    ) -> None:  # noqa: D107
         if isinstance(lr, Tensor) and lr.numel() != 1:
             raise ValueError("Tensor lr must be 1-element")
         if not 0.0 <= lr:
@@ -56,17 +56,17 @@ class RAdam(Optimizer):  # noqa: D101
         if not 0.0 <= weight_decay:
             raise ValueError(f"Invalid weight_decay value: {weight_decay}")
 
-        defaults = dict(
-            lr=lr,
-            betas=betas,
-            eps=eps,
-            weight_decay=weight_decay,
-            maximize=maximize,
-            foreach=foreach,
-            capturable=capturable,
-            decoupled_weight_decay=decoupled_weight_decay,
-            differentiable=differentiable,
-        )
+        defaults = {
+            "lr": lr,
+            "betas": betas,
+            "eps": eps,
+            "weight_decay": weight_decay,
+            "maximize": maximize,
+            "foreach": foreach,
+            "capturable": capturable,
+            "decoupled_weight_decay": decoupled_weight_decay,
+            "differentiable": differentiable,
+        }
         super().__init__(params, defaults)
 
     def __setstate__(self, state):  # noqa: D105
@@ -270,7 +270,7 @@ def _single_tensor_radam(
     maximize: bool,
     capturable: bool,
     has_complex: bool,
-):
+) -> None:
     if not torch.jit.is_scripting():
         lr = _to_scalar(lr)
 
@@ -283,12 +283,13 @@ def _single_tensor_radam(
         # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
         if not torch.compiler.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
-            assert (
+            if not (
                 param.device.type == step_t.device.type
                 and param.device.type in capturable_supported_devices
-            ), (
-                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-            )
+            ):
+                raise AssertionError(
+                    f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+                )
 
         if torch.is_complex(param):
             param = torch.view_as_real(param)
@@ -322,6 +323,7 @@ def _single_tensor_radam(
         rho_t = rho_inf - 2 * step * (beta2**step) / bias_correction2
 
         def _compute_rect():
+            # pyrefly: ignore [unsupported-operation]
             return (
                 (rho_t - 4)
                 * (rho_t - 2)
@@ -336,6 +338,7 @@ def _single_tensor_radam(
             else:
                 exp_avg_sq_sqrt = exp_avg_sq_sqrt.add_(eps)
 
+            # pyrefly: ignore [unsupported-operation]
             return (bias_correction2**0.5) / exp_avg_sq_sqrt
 
         # Compute the variance rectification term and update parameters accordingly
@@ -374,24 +377,26 @@ def _multi_tensor_radam(
     maximize: bool,
     capturable: bool,
     has_complex: bool,
-):
+) -> None:
     if len(params) == 0:
         return
 
-    assert not differentiable, "_foreach ops don't support autograd"
+    if differentiable:
+        raise AssertionError("_foreach ops don't support autograd")
 
     # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
     if not torch.compiler.is_compiling() and capturable:
         capturable_supported_devices = _get_capturable_supported_devices(
             supports_xla=False
         )
-        assert all(
+        if not all(
             p.device.type == step.device.type
             and p.device.type in capturable_supported_devices
-            for p, step in zip(params, state_steps)
-        ), (
-            f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
-        )
+            for p, step in zip(params, state_steps, strict=True)
+        ):
+            raise AssertionError(
+                f"If capturable=True, params and state_steps must be on supported devices: {capturable_supported_devices}."
+            )
 
     lr = _to_scalar(lr)
 
@@ -433,9 +438,9 @@ def _multi_tensor_radam(
         # maximum length of the approximated SMA
         rho_inf = 2 / (1 - beta2) - 1
         # compute the length of the approximated SMA
-        bias_correction1: Union[tuple[Tensor, ...], list[Tensor]]
-        bias_correction2: Union[tuple[Tensor, ...], list[Tensor]]
-        rho_t_list: Union[tuple[Tensor, ...], list[Tensor]]
+        bias_correction1: tuple[Tensor, ...] | list[Tensor]
+        bias_correction2: tuple[Tensor, ...] | list[Tensor]
+        rho_t_list: tuple[Tensor, ...] | list[Tensor]
         if capturable:
             bias_correction1 = torch._foreach_pow(beta2, grouped_state_steps)
             torch._foreach_neg_(bias_correction1)
@@ -461,7 +466,7 @@ def _multi_tensor_radam(
             if decoupled_weight_decay:
                 torch._foreach_mul_(grouped_params, 1 - lr * weight_decay)
             else:
-                # Re-use the intermediate memory (grouped_grads) already allocated for maximize
+                # Reuse the intermediate memory (grouped_grads) already allocated for maximize
                 if maximize:
                     torch._foreach_add_(
                         grouped_grads, grouped_params, alpha=weight_decay
@@ -496,7 +501,8 @@ def _multi_tensor_radam(
 
             # TODO(mlazos): we should try and get a foreach_where op https://github.com/pytorch/pytorch/issues/117884
             rect = [
-                torch.where(rho_t > 5.0, n, 0.0) for n, rho_t in zip(num, rho_t_list)
+                torch.where(rho_t > 5.0, n, 0.0)
+                for n, rho_t in zip(num, rho_t_list, strict=True)
             ]
             del num
             del rho_t_list
@@ -539,11 +545,14 @@ def _multi_tensor_radam(
                 1 - beta1 ** _get_value(step) for step in grouped_state_steps
             ]
             unrect_step_size = [
-                (lr * rect / bc) * -1 for rect, bc in zip(unrectified, bias_correction1)
+                (lr * rect / bc) * -1
+                for rect, bc in zip(unrectified, bias_correction1, strict=True)
             ]
             bias_correction2 = [
                 ((1 - beta2 ** _get_value(step)) ** 0.5) * (lr * rect / bc) * -1
-                for step, rect, bc in zip(grouped_state_steps, rect, bias_correction1)
+                for step, rect, bc in zip(
+                    grouped_state_steps, rect, bias_correction1, strict=True
+                )
             ]
 
         buffer = torch._foreach_sqrt(grouped_exp_avg_sqs)
@@ -566,7 +575,7 @@ def radam(
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
     decoupled_weight_decay: bool = False,
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
     differentiable: bool = False,
     capturable: bool = False,
     has_complex: bool = False,
@@ -577,7 +586,7 @@ def radam(
     lr: float,
     weight_decay: float,
     eps: float,
-):
+) -> None:
     r"""Functional API that performs RAdam algorithm computation.
 
     See :class:`~torch.optim.RAdam` for details.

@@ -7,8 +7,9 @@
 # LICENSE file in the root directory of this source tree.
 
 import contextlib
+from collections.abc import Callable
 from functools import partial, wraps
-from typing import Any, Callable, Optional, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.autograd.forward_ad as fwAD
@@ -233,7 +234,7 @@ def vjp(func: Callable, *primals, has_aux: bool = False):
         >>> x = torch.randn([5])
         >>> f = lambda x: x.sin().sum()
         >>> (_, vjpfunc) = torch.func.vjp(f, x)
-        >>> grad = vjpfunc(torch.tensor(1.))[0]
+        >>> grad = vjpfunc(torch.tensor(1.0))[0]
         >>> assert torch.allclose(grad, torch.func.grad(f)(x))
 
     However, :func:`vjp` can support functions with multiple outputs by
@@ -248,9 +249,9 @@ def vjp(func: Callable, *primals, has_aux: bool = False):
     :func:`vjp` can even support outputs being Python structs
 
         >>> x = torch.randn([5])
-        >>> f = lambda x: {'first': x.sin(), 'second': x.cos()}
+        >>> f = lambda x: {"first": x.sin(), "second": x.cos()}
         >>> (_, vjpfunc) = torch.func.vjp(f, x)
-        >>> cotangents = {'first': torch.ones([5]), 'second': torch.ones([5])}
+        >>> cotangents = {"first": torch.ones([5]), "second": torch.ones([5])}
         >>> vjps = vjpfunc(cotangents)
         >>> assert torch.allclose(vjps[0], x.cos() + -x.sin())
 
@@ -274,7 +275,7 @@ def vjp(func: Callable, *primals, has_aux: bool = False):
         >>>
         >>> (_, vjpfunc) = torch.func.vjp(f, x)
         >>> vjps = vjpfunc(torch.ones_like(x))
-        >>> assert torch.allclose(vjps[0], torch.full(x.shape, 4.))
+        >>> assert torch.allclose(vjps[0], torch.full(x.shape, 4.0))
 
     .. note::
         Using PyTorch ``torch.no_grad`` together with ``vjp``.
@@ -336,7 +337,7 @@ def _vjp_with_argnums(
 ):
     # This is the same function as vjp but also accepts an argnums argument
     # All args are the same as vjp except for the added argument
-    # argnums (Optional[int or tuple[int]]): Optional, specifies the argument(s) to compute gradients with respect to.
+    # argnums (Optional[int or tuple[int,...]]): Optional, specifies the argument(s) to compute gradients with respect to.
     #         If None, computes the gradients with respect to all inputs (used for vjp). Default: None
     #
     # WARN: Users should NOT call this function directly and should just be calling vjp.
@@ -429,7 +430,7 @@ def error_if_complex(func_name, args, is_input):
 @exposed_in("torch.func")
 def jacrev(
     func: Callable,
-    argnums: Union[int, tuple[int]] = 0,
+    argnums: Union[int, tuple[int, ...]] = 0,
     *,
     has_aux=False,
     chunk_size: Optional[int] = None,
@@ -447,7 +448,7 @@ def jacrev(
     Args:
         func (function): A Python function that takes one or more arguments,
             one of which must be a Tensor, and returns one or more Tensors
-        argnums (int or Tuple[int]): Optional, integer or tuple of integers,
+        argnums (int or tuple[int, ...]): Optional, integer or tuple of integers,
             saying which arguments to get the Jacobian with respect to.
             Default: 0.
         has_aux (bool): Flag indicating that ``func`` returns a
@@ -930,8 +931,7 @@ def assert_output_is_tensor_or_tensors(output: Any, api: str) -> None:
         return
     if not isinstance(output, tuple):
         raise RuntimeError(
-            f"{api}: Expected output of f to be a Tensor or Tensors, got "
-            f"{type(output)}"
+            f"{api}: Expected output of f to be a Tensor or Tensors, got {type(output)}"
         )
     if len(output) == 0:
         raise RuntimeError(
@@ -1023,10 +1023,10 @@ def jvp(
 
         >>> from torch.func import jvp
         >>> x = torch.randn([])
-        >>> f = lambda x: x * torch.tensor([1., 2., 3])
-        >>> value, grad = jvp(f, (x,), (torch.tensor(1.),))
+        >>> f = lambda x: x * torch.tensor([1.0, 2.0, 3])
+        >>> value, grad = jvp(f, (x,), (torch.tensor(1.0),))
         >>> assert torch.allclose(value, f(x))
-        >>> assert torch.allclose(grad, torch.tensor([1., 2, 3]))
+        >>> assert torch.allclose(grad, torch.tensor([1.0, 2, 3]))
 
     :func:`jvp` can support functions with multiple inputs by passing in the
     tangents for each of the inputs
@@ -1056,7 +1056,7 @@ def _jvp_with_argnums(
 ):
     # This is the same function as jvp but also accepts an argnums argument
     # Most args are the same as jvp except for the added argument
-    # argnums (Optional[int or tuple[int]]): Optional, specifies the argument(s) to compute gradients with respect to.
+    # argnums (int or tuple[int, ...]): Optional, specifies the argument(s) to compute gradients with respect to.
     #         If None, computes the gradients with respect to all inputs (used for jvp). Default: None
     # Because of this, tangents must be of length argnums and matches up to the corresponding primal whose index is
     # given by argnums
@@ -1152,7 +1152,7 @@ def jacfwd(
     Args:
         func (function): A Python function that takes one or more arguments,
             one of which must be a Tensor, and returns one or more Tensors
-        argnums (int or Tuple[int]): Optional, integer or tuple of integers,
+        argnums (int or tuple[int, ...]): Optional, integer or tuple of integers,
             saying which arguments to get the Jacobian with respect to.
             Default: 0.
         has_aux (bool): Flag indicating that ``func`` returns a
@@ -1322,7 +1322,7 @@ def hessian(func, argnums=0):
     Args:
         func (function): A Python function that takes one or more arguments,
             one of which must be a Tensor, and returns one or more Tensors
-        argnums (int or Tuple[int]): Optional, integer or tuple of integers,
+        argnums (int or tuple[int, ...]): Optional, integer or tuple of integers,
             saying which arguments to get the Hessian with respect to.
             Default: 0.
 
@@ -1594,7 +1594,7 @@ def functionalize(func: Callable, *, remove: str = "mutations") -> Callable:
           If you call `functionalize(f)` on a function that takes views / mutations of
           non-local state, functionalization will simply no-op and pass the view/mutation
           calls directly to the backend.
-          One way to work around this is is to ensure that any non-local state creation
+          One way to work around this is to ensure that any non-local state creation
           is wrapped into a larger function, which you then call functionalize on.
       (3) `resize_()` has some limitations: functionalize will only work on programs
           that use resize_()` as long as the tensor being resized is not a view.

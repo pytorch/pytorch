@@ -17,6 +17,8 @@ from torch.utils import _pytree as torch_pytree
 
 class _WithExport:
     def export(self, model, args=(), kwargs=None, **options) -> torch.onnx.ONNXProgram:
+        if isinstance(model, torch.nn.Module):
+            model = model.eval()
         onnx_program = torch.onnx.export(
             model,
             args,
@@ -230,8 +232,8 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
         onnx_program = self.export(Float4Module(), optimize=False)
         output = onnx_program.model.graph.outputs[0]
         self.assertEqual(output.dtype, ir.DataType.FLOAT4E2M1)
-        # The shape is [*shape, 2] because ONNX stores the shape of the unpacked tensor
-        self.assertEqual(output.shape.dims, [1, 2])
+        # The shape is [*shape[:-1], shape[-1]*2] because ONNX stores the shape of the unpacked tensor
+        self.assertEqual(output.shape.numpy(), [2])
 
     def test_bfloat16_support(self):
         class BfloatModel(torch.nn.Module):
@@ -618,6 +620,35 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
             [node.op_type for node in onnx_program.model.graph],
         )
 
+    def test_export_sym_sum(self):
+        class SymSumModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.sym_sum(x.shape)
+
+        inputs = (torch.zeros((2, 3, 4)),)
+        dynamic_shapes = ({0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},)
+        onnx_program = self.export(SymSumModel(), inputs, dynamic_shapes=dynamic_shapes)
+        onnx_testing.assert_onnx_program(onnx_program)
+        self.assertIn(
+            "Add",
+            [node.op_type for node in onnx_program.model.graph],
+        )
+
+    def test_export_sym_ite(self):
+        class SymIteModel(torch.nn.Module):
+            def forward(self, x):
+                condition = x.shape[0] > x.shape[1]
+                return torch.sym_ite(condition, x.shape[0], x.shape[1])
+
+        inputs = (torch.zeros((3, 2)),)
+        dynamic_shapes = ({0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},)
+        onnx_program = self.export(SymIteModel(), inputs, dynamic_shapes=dynamic_shapes)
+        onnx_testing.assert_onnx_program(onnx_program)
+        self.assertIn(
+            "Where",
+            [node.op_type for node in onnx_program.model.graph],
+        )
+
     def test_scan_cdist_add(self):
         def dist(unused: torch.Tensor, x: torch.Tensor, samex: torch.Tensor):
             sub = samex - x.reshape((1, -1))
@@ -709,6 +740,34 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
         onnx_program = self.export(ep)
         onnx_testing.assert_onnx_program(onnx_program)
 
+    def test_complex_initializer(self):
+        class ComplexInitModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buffer = torch.nn.parameter.Buffer(
+                    torch.complex(
+                        torch.tensor([1.0, 2.0, 3.0]), torch.tensor([4.0, 5.0, 6.0])
+                    )
+                )
+                self.weight = torch.nn.Parameter(
+                    torch.complex(
+                        torch.tensor([7.0, 8.0, 9.0]), torch.tensor([10.0, 11.0, 12.0])
+                    )
+                )
+
+            def forward(self, x):
+                constant = torch.complex(
+                    torch.tensor([11.0, 12.0, 13.0]), torch.tensor([14.0, 15.0, 16.0])
+                )
+                return (x + constant + self.buffer) * self.weight
+
+        x = torch.complex(
+            torch.tensor([10.0, 20.0, 30.0]), torch.tensor([40.0, 50.0, 60.0])
+        )
+
+        onnx_program = self.export(ComplexInitModel(), (x,))
+        onnx_testing.assert_onnx_program(onnx_program)
+
 
 @common_utils.instantiate_parametrized_tests
 class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
@@ -726,7 +785,7 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
             [node.op_type for node in onnx_program.model.graph],
         )
 
-    def test_graph_attention_opset_23(self):
+    def test_attention_opset_23(self):
         class Model(torch.nn.Module):
             def forward(self, query, key, value):
                 return torch.nn.functional.scaled_dot_product_attention(
@@ -738,22 +797,89 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
         value = torch.rand(32, 8, 128, 64, dtype=torch.float16)
 
         onnx_program = self.export(Model(), (query, key, value), opset_version=23)
-        self.assertIn("Attention", [node.op_type for node in onnx_program.model.graph])
+        self.assertEqual(["Attention"], [n.op_type for n in onnx_program.model.graph])
 
-    @pytest.mark.xfail(reason="Expected to fail until opset 23 is supported by ORT.")
-    def test_graph_accuracy_attention_opset_23(self):
+        onnx_testing.assert_onnx_program(onnx_program, atol=1e-2, rtol=1)
+
+    def test_rms_norm(self):
+        """Test RMS normalization with various configurations."""
+
+        class RMSNormModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.rms_norm(x, [3])
+
+        x = torch.randn(2, 5, 3)
+        onnx_program = self.export(RMSNormModel(), (x,), opset_version=23)
+        onnx_testing.assert_onnx_program(onnx_program)
+
+        # Test with multi-dimensional normalized_shape
+        class RMSNormModel2D(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.rms_norm(x, [7, 3])
+
+        x = torch.randn(2, 5, 7, 3)
+        onnx_program = self.export(RMSNormModel2D(), (x,), opset_version=23)
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_rms_norm_with_weight(self):
+        """Test RMS normalization with weight parameter."""
+
+        class RMSNormWithWeight(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.ones(3))
+
+            def forward(self, x):
+                return torch.nn.functional.rms_norm(x, [3], weight=self.weight)
+
+        x = torch.randn(2, 5, 3)
+
+        onnx_program = self.export(RMSNormWithWeight(), (x,), opset_version=23)
+
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_rms_norm_with_eps(self):
+        """Test RMS normalization with custom epsilon."""
+
+        class RMSNormWithEps(torch.nn.Module):
+            def forward(self, x):
+                return torch.nn.functional.rms_norm(x, [3], eps=1e-5)
+
+        x = torch.randn(2, 5, 3)
+
+        onnx_program = self.export(RMSNormWithEps(), (x,), opset_version=23)
+
+        onnx_testing.assert_onnx_program(onnx_program)
+
+    def test_enable_gqa_in_attention_23_with_dropout(self):
         class Model(torch.nn.Module):
-            def forward(self, query, key, value):
-                return torch.nn.functional.scaled_dot_product_attention(
-                    query, key, value
+            def forward(self, q, k, v):
+                return torch.nn.functional.scaled_dot_product_attention(  # pylint: disable=not-callable
+                    q, k, v, enable_gqa=True, dropout_p=0.1
                 )
 
-        query = torch.rand(32, 8, 128, 64, dtype=torch.float16)
-        key = torch.rand(32, 8, 128, 64, dtype=torch.float16)
-        value = torch.rand(32, 8, 128, 64, dtype=torch.float16)
+        model = Model()
 
-        onnx_program = self.export(Model(), (query, key, value), opset_version=23)
-        onnx_testing.assert_onnx_program(onnx_program, atol=1e-3, rtol=1)
+        query = torch.randn(2, 4, 8, 16)
+        key = torch.randn(2, 2, 8, 16)
+        value = torch.randn(2, 2, 8, 16)
+
+        onnx_program = self.export(
+            model,
+            (
+                query,
+                key,
+                value,
+            ),
+            opset_version=23,
+        )
+        # opset23 only uses manually gqa path when dropout is enabled,
+        # and dropout makes the output non-deterministic,
+        # so we check for the presence of the ops used in that path.
+        all_ops = [node.op_type for node in onnx_program.model.graph]
+        self.assertIn("Unsqueeze", all_ops)
+        self.assertIn("Expand", all_ops)
+        self.assertIn("Reshape", all_ops)
 
 
 if __name__ == "__main__":

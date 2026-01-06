@@ -5,7 +5,8 @@ import math
 import operator
 import sys
 import typing
-from typing import Any, Callable, Optional, TypeVar, Union
+from collections.abc import Callable
+from typing import Any, Optional, TypeAlias, TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -34,11 +35,8 @@ from torch._prims_common import (
     ELEMENTWISE_TYPE_PROMOTION_KIND,
     type_to_dtype,
 )
-from torch.fx.experimental.symbolic_shapes import (
-    guard_or_false,
-    guard_size_oblivious,
-    statically_known_true,
-)
+from torch._refs import native_layer_norm as decomp_native_layer_norm
+from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
 
 from . import config, inductor_prims
 from .utils import (
@@ -50,6 +48,10 @@ from .utils import (
 
 _T = TypeVar("_T")
 _P = ParamSpec("_P")
+
+_GenericOperator: TypeAlias = Union[
+    torch._ops.OperatorBase, torch._ops.OpOverloadPacket
+]
 
 log = logging.getLogger(__name__)
 aten = torch.ops.aten
@@ -74,6 +76,7 @@ inductor_decompositions = get_decompositions(
         aten.gelu,
         aten.hardtanh,
         aten.lcm,
+        aten.ldexp,
         aten.leaky_relu,
         aten.linalg_vector_norm,
         aten._log_softmax,
@@ -108,7 +111,7 @@ decompositions = {**core_aten_decompositions(), **inductor_decompositions}
 
 # Remove unwanted decompositions included via the core ATen decompositions from
 # the Inductor decomp table.
-decomps_to_exclude = [
+decomps_to_exclude: list[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacket]] = [
     aten._unsafe_index,
     aten._unsafe_masked_index,
     aten._unsafe_masked_index_put_accumulate,
@@ -117,6 +120,7 @@ decomps_to_exclude = [
     aten.clamp_max,
     aten.clamp_min,
     aten.embedding_dense_backward,  # we fall back on xpu
+    aten.native_layer_norm,  # we fall back on mtia
     aten.index_add,  # we conditionally call this decomp
     aten.glu,  # inductor lowers this directly
     aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
@@ -132,9 +136,9 @@ remove_decompositions(decompositions, decomps_to_exclude)
 
 
 def register_decomposition(
-    ops: list[Union[torch._ops.OperatorBase, torch._ops.OpOverloadPacket]],
+    ops: Union[_GenericOperator, list[_GenericOperator]],
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
-    for op in [ops] if callable(ops) else ops:  # type: ignore[attr-defined]
+    for op in ops if isinstance(ops, list) else [ops]:
         if op in decompositions:
             log.warning("duplicate decomp: %s", ops)
     return decomp.register_decomposition(ops, decompositions)
@@ -158,17 +162,18 @@ def _embedding_dense_backward(
     )
 
 
-# TODO: for now, inductor doesn't handle asserts
-# because the condition is symbol -> tensor in the graph.
-@register_decomposition([aten._assert_async.msg])
-def assert_async_msg_decomp(tensor: torch.Tensor, msg: str) -> None:
-    return
-
-
-# Following `assert_async_msg_decomp` and implement as non-op.
-@register_decomposition([aten._functional_assert_async.msg])
-def functional_assert_async_msg_decomp(tensor: torch.Tensor, msg: str) -> None:
-    return
+@register_decomposition(aten.native_layer_norm)
+def _native_layer_norm(
+    input: torch.Tensor,
+    normalized_shape: utils.ShapeType,
+    weight: Optional[torch.Tensor],
+    bias: Optional[torch.Tensor],
+    eps: float,
+) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    if input.is_mtia:
+        return NotImplemented
+    # We can write a util function to update decomp table if we have more ops to fallback.
+    return decomp_native_layer_norm(input, normalized_shape, weight, bias, eps)
 
 
 @register_decomposition([aten.sym_constrain_range_for_size.default])
@@ -236,10 +241,15 @@ def empty_permuted(
     physical_layout: list[int],
     **kwargs: Any,
 ) -> torch.Tensor:
-    perm = [0] * len(size)
-    for p, l in enumerate(physical_layout):
-        perm[l] = p
-    return torch.empty([size[l] for l in physical_layout], **kwargs).permute(perm)
+    is_identity = list(physical_layout) == list(range(len(physical_layout)))
+
+    if is_identity:
+        return torch.empty(size, **kwargs)
+    else:
+        perm = [0] * len(size)
+        for p, l in enumerate(physical_layout):
+            perm[l] = p
+        return torch.empty([size[l] for l in physical_layout], **kwargs).permute(perm)
 
 
 @register_decomposition([aten.convolution_backward])
@@ -363,7 +373,7 @@ def mm(
             and guard_or_false((torch.numel(self) + torch.numel(input2)) <= 32)
         ):
             counters["inductor"]["decompose_mm"] += 1
-            return torch.cat([self[i, :] * input2 for i in range(self.size(0))])
+            return self * input2
         if statically_known_true(self.size(0) == 1) and statically_known_true(
             input2.size(-1) == 1
         ):
@@ -400,10 +410,10 @@ def cat(
         # runtime assert forcing u0 to be zero.  So if this hasn't happened,
         # we know that the unbacked SymInt has appropriate size and there are
         # no problems.
-        if len(x.shape) == 1 and guard_size_oblivious(x.shape[0] == 0):
+        if len(x.shape) == 1 and guard_or_false(x.shape[0] == 0):
             return False
 
-        if dim < len(x.shape) and guard_size_oblivious(x.shape[dim] == 0):
+        if dim < len(x.shape) and guard_or_false(x.shape[dim] == 0):
             return False
 
         return True
@@ -472,10 +482,29 @@ def add(
     y_is_complex_tensor = torch.is_tensor(y) and y.is_complex()
     if not x_is_complex_tensor or not y_is_complex_tensor:
         return NotImplemented
+
+    def _requires_fallback(tensor: torch.Tensor) -> bool:
+        if tensor.ndim == 0:
+            return False
+        # Viewing complex tensors as their real dtype requires the last stride to be 1.
+        return tensor.stride()[-1] != 1
+
+    output_size_zero = False
+    if x.ndim == 0 and y.ndim == 0:
+        output_size_zero = True
+
+    if x.ndim == 0:
+        x = x.reshape(1)
+    if y.ndim == 0:
+        y = y.reshape(1)
+
     z = y
     if alpha is not None:
         z = alpha * y
     complex_type = torch.promote_types(x.dtype, y.dtype)
+
+    if _requires_fallback(x) or _requires_fallback(z):
+        return NotImplemented
 
     # For complex typed `x`, `x.view(x.real.dtype)` doubles the last dimension and can cause problem
     # when broadcasting the add.
@@ -503,6 +532,9 @@ def add(
     x_reshaped = reshape_tensor_complex(x.view(x.real.dtype))
     z_reshaped = reshape_tensor_complex(z.view(y.real.dtype))
     result = torch.flatten(x_reshaped + z_reshaped, start_dim=-2).view(complex_type)
+
+    if output_size_zero:
+        return result[0]
     return result
 
 
@@ -576,49 +608,17 @@ def view_copy_dtype(
     return self.to(dtype).clone()
 
 
-def get_like_layout(
-    tensor: torch.Tensor,
-    memory_format: Optional[torch.memory_format] = None,
-) -> torch.memory_format:
-    # TODO: _to_copy tensor to stride permutation
-    if memory_format is torch.preserve_format or memory_format is None:
-        return utils.suggest_memory_format(tensor)
-    else:
-        return memory_format
-
-
-@register_decomposition(aten.rand_like)
-def rand_like(
+def _get_shape_permutation_like(
     self: torch.Tensor,
-    *,
-    dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
-    memory_format: Optional[torch.memory_format] = None,
-    **kwargs: Any,
-) -> torch.Tensor:
-    return torch.rand(
-        [*self.size()],
-        dtype=dtype or self.dtype,
-        device=device or self.device,
-        **kwargs,
-    ).to(memory_format=get_like_layout(self, memory_format))
+) -> tuple[utils.ShapeType, utils.StrideType]:
+    physical_layout, _ = utils.compute_elementwise_output_logical_to_physical_perm(self)
+    shape = [self.shape[l] for l in physical_layout]
 
+    permutation = [0] * len(shape)
+    for p, l in enumerate(physical_layout):
+        permutation[l] = p
 
-@register_decomposition(aten.randn_like)
-def randn_like(
-    self: torch.Tensor,
-    *,
-    dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
-    memory_format: Optional[torch.memory_format] = None,
-    **kwargs: Any,
-) -> torch.Tensor:
-    return torch.randn(
-        [*self.size()],
-        dtype=dtype or self.dtype,
-        device=device or self.device,
-        **kwargs,
-    ).to(memory_format=get_like_layout(self, memory_format))
+    return (shape, permutation)
 
 
 @register_decomposition(aten.full_like)
@@ -633,55 +633,91 @@ def full_like(
     requires_grad: bool = False,
     memory_format: torch.memory_format = torch.preserve_format,
 ) -> torch.Tensor:
-    return torch.full(
-        [*self.size()],
-        fill_value,
-        dtype=dtype or self.dtype,
-        layout=layout or self.layout,
-        device=device or self.device,
-        requires_grad=requires_grad,
-    ).to(memory_format=get_like_layout(self, memory_format))
+    dtype = self.dtype if dtype is None else dtype
+    layout = self.layout if layout is None else layout
+    device = self.device if device is None else device
+
+    if memory_format != torch.preserve_format:
+        result = torch.full(
+            self.shape,
+            fill_value,
+            dtype=dtype,
+            layout=layout,
+            device=device,
+            pin_memory=pin_memory,
+            requires_grad=requires_grad,
+        )
+        return result.to(memory_format=memory_format)
+
+    else:
+        assert layout == torch.strided
+        shape, permutation = _get_shape_permutation_like(self)
+        result = torch.full(
+            shape,
+            fill_value,
+            dtype=dtype,
+            layout=layout,
+            device=device,
+            pin_memory=pin_memory,
+            requires_grad=requires_grad,
+        )
+        if permutation == list(range(len(permutation))):
+            return result
+        return result.permute(permutation).clone()
 
 
-@register_decomposition(aten.randint_like.default)
-def randint_like(
+def _rand_like(
+    rand_fn: Callable[..., torch.Tensor],
     self: torch.Tensor,
-    high: int,
     *,
     dtype: Optional[torch.dtype] = None,
     device: Optional[torch.device] = None,
-    memory_format: Optional[torch.memory_format] = None,
+    memory_format: torch.memory_format = torch.preserve_format,
     **kwargs: Any,
 ) -> torch.Tensor:
-    return aten.randint.low(
-        0,
-        high,
-        [*self.size()],
-        dtype=dtype or self.dtype,
-        device=device or self.device,
+    dtype = self.dtype if dtype is None else dtype
+    device = self.device if device is None else device
+
+    if memory_format != torch.preserve_format:
+        return rand_fn(
+            self.shape,
+            dtype=dtype,
+            device=device,
+            **kwargs,
+        ).to(memory_format=memory_format)
+
+    shape, permutation = _get_shape_permutation_like(self)
+    result = rand_fn(
+        shape,
+        dtype=dtype,
+        device=device,
         **kwargs,
-    ).to(memory_format=get_like_layout(self, memory_format))
+    )
+    if permutation == list(range(len(permutation))):
+        return result
+    return result.permute(permutation).clone()
+
+
+@register_decomposition(aten.rand_like)
+def rand_like(self: torch.Tensor, **kwargs: Any) -> torch.Tensor:
+    return _rand_like(torch.rand, self, **kwargs)
+
+
+@register_decomposition(aten.randn_like)
+def randn_like(self: torch.Tensor, **kwargs: Any) -> torch.Tensor:
+    return _rand_like(torch.randn, self, **kwargs)
+
+
+@register_decomposition(aten.randint_like.default)
+def randint_like(self: torch.Tensor, high: int, **kwargs: Any) -> torch.Tensor:
+    return _rand_like(functools.partial(aten.randint.low, 0, high), self, **kwargs)
 
 
 @register_decomposition(aten.randint_like.low_dtype)
 def randint_like_low(
-    self: torch.Tensor,
-    low: int,
-    high: int,
-    *,
-    dtype: Optional[torch.dtype] = None,
-    device: Optional[torch.device] = None,
-    memory_format: Optional[torch.memory_format] = None,
-    **kwargs: Any,
+    self: torch.Tensor, low: int, high: int, **kwargs: Any
 ) -> torch.Tensor:
-    return aten.randint.low(
-        low,
-        high,
-        [*self.size()],
-        dtype=dtype or self.dtype,
-        device=device or self.device,
-        **kwargs,
-    ).to(memory_format=get_like_layout(self, memory_format))
+    return _rand_like(functools.partial(aten.randint.low, low, high), self, **kwargs)
 
 
 @register_decomposition(aten.randint.default)
@@ -697,7 +733,7 @@ def randint(
 def linear_dynamic_fp16_unpacked_weight(
     input: torch.Tensor,
     weight: torch.Tensor,
-    bias: torch.Tensor,
+    bias: Optional[torch.Tensor] = None,
 ) -> torch.Tensor:
     packed_weight = torch.ops._quantized.wrapped_fbgemm_pack_gemm_matrix_fp16(weight)
     return torch.ops._quantized.wrapped_fbgemm_linear_fp16_weight(
@@ -872,6 +908,10 @@ def select_decomp_table() -> dict[Any, Callable[..., Any]]:
     """decomps can change based on config"""
     if config.fallback_random:
         return decompositions
+    if config.fallback_embedding_bag_byte_unpack:
+        # remove q_embedding_bag_byte_unpack_decomp from decompositions
+        decompositions.pop(torch.ops.quantized.embedding_bag_byte_unpack.default, None)
+        return decompositions
     return fast_random_decomps()
 
 
@@ -992,6 +1032,7 @@ def index_reduce(
     ):
         return NotImplemented
 
+    # pyrefly: ignore [missing-attribute]
     repeats = self.shape[dim + 1 :].numel() * self.shape[:dim].numel()
     index_shape = (index.numel(), *self.shape[dim + 1 :], *self.shape[:dim])
     perm = (*range(self.ndim - dim, self.ndim), 0, *range(1, self.ndim - dim))
@@ -1028,9 +1069,13 @@ def _max_pool_with_indices(
     if not stride:
         stride = kernel_size
 
+    # pyrefly: ignore [bad-assignment]
     kernel_size = pad_listlike(kernel_size, dim)
+    # pyrefly: ignore [bad-assignment]
     dilation = pad_listlike(dilation, dim)
+    # pyrefly: ignore [bad-assignment]
     padding = pad_listlike(padding, dim)
+    # pyrefly: ignore [bad-assignment]
     stride = pad_listlike(stride, dim)
 
     window_size = functools.reduce(operator.mul, kernel_size)
@@ -1146,3 +1191,71 @@ def rrelu_with_noise_functional(
     else:
         negative_slope = (lower + upper) / 2
         return aten.leaky_relu(self, negative_slope), torch.Tensor()
+
+
+@register_decomposition(aten.repeat_interleave.Tensor)
+def repeat_interleave_Tensor(
+    repeat: torch.Tensor,
+    output_size: Optional[int] = None,
+) -> torch.Tensor:
+    if config.triton.autotune_at_compile_time:
+        # We can't compile-time auto-tune this because
+        # it expects specific data in `repeat`
+        return NotImplemented
+    if output_size is None or type(output_size) is not int:
+        return NotImplemented
+    if repeat.device.type == "mps":
+        return NotImplemented
+    assert repeat.dtype in [torch.int32, torch.int64]
+    assert repeat.ndim == 1
+    cumsum = repeat.cumsum(0)
+    pos = torch.arange(output_size, device=repeat.device)
+    indices = torch.searchsorted(
+        cumsum, pos, out_int32=(repeat.dtype == torch.int32), right=True
+    )
+    return torch.clamp(indices, max=repeat.size(0) - 1)
+
+
+# intentionally not regiestered
+def conv1d_to_conv2d(
+    input: torch.Tensor,
+    weight: torch.Tensor,
+    bias: Optional[torch.Tensor] = None,
+    stride: tuple[int] = (1,),
+    padding: tuple[int] = (0,),
+    dilation: tuple[int] = (1,),
+    groups: int = 1,
+) -> torch.Tensor:
+    # Shapes:
+    # input:  (N, C_in, L_in)
+    # weight: (C_out, C_in // groups, K)
+    # bias:   (C_out,)
+    assert input.dim() == 3 and weight.dim() == 3, (
+        "Expect (N,C_in,L) and (C_out,C_in//groups,K)"
+    )
+
+    # pyrefly: ignore [bad-assignment]
+    stride = stride[0]
+    # pyrefly: ignore [bad-assignment]
+    padding = padding[0]
+    # pyrefly: ignore [bad-assignment]
+    dilation = dilation[0]
+
+    # Unsqueeze to make input 2D: (N,C,L) -> (N,C,L,1)
+    input_2d = input.unsqueeze(-1)
+    # Unsqueeze kernel: (C_out,C_in/groups,K) -> (C_out,C_in/groups,K,1)
+    weight_2d = weight.unsqueeze(-1)
+
+    # Call conv2d with adjusted args
+    out_2d = aten.conv2d.default(
+        input_2d,
+        weight_2d,
+        bias,
+        stride=(stride, 1),
+        padding=(padding, 0),
+        dilation=(dilation, 1),
+        groups=groups,
+    )
+
+    # Squeeze dummy dimension back out: (N,C_out,L_out,1) -> (N,C_out,L_out)
+    return out_2d.squeeze(-1)

@@ -32,7 +32,9 @@ class Vectorized<float> {
   static constexpr size_type size() {
     return 16;
   }
-  Vectorized() {}
+  Vectorized() {
+    values = _mm512_setzero_ps();
+  }
   Vectorized(__m512 v) : values(v) {}
   Vectorized(float val) {
     values = _mm512_set1_ps(val);
@@ -309,6 +311,60 @@ class Vectorized<float> {
   }
   Vectorized<float> expm1() const {
     return Vectorized<float>(Sleef_expm1f16_u10(values));
+  }
+  Vectorized<float> fexp_u20() const {
+    const __m512 vec_c0 = _mm512_set1_ps(0.00010703434948458272f);
+    const __m512 vec_c1 = _mm512_set1_ps(0.30354260500649682f);
+    const __m512 vec_c2 = _mm512_set1_ps(-0.22433836478672356);
+    const __m512 vec_c3 = _mm512_set1_ps(-0.079204240219773236);
+
+    const __m512 vec_exp_log2ef =
+        _mm512_castsi512_ps(_mm512_set1_epi32(0x3fb8aa3b)); // log2(e)
+
+    const __m512 vec_a = _mm512_set1_ps(std::pow(2, 23) / std::log2(2));
+    const __m512 vec_b = _mm512_set1_ps(std::pow(2, 23) * 127.f);
+
+    const __m512 vec_ln_flt_min =
+        _mm512_castsi512_ps(_mm512_set1_epi32(0xc2aeac50));
+    const __m512 vec_ln_flt_max =
+        _mm512_castsi512_ps(_mm512_set1_epi32(0x42b17218));
+    __m512i vec_infinity = _mm512_set1_epi32(0x7F800000);
+    __m512i vec_zero = _mm512_setzero_epi32();
+
+    // Fast Exponential Computation on SIMD Architectures
+    // A. Cristiano I. Malossi, Yves Ineichen, Costas Bekas, and Alessandro
+    // Curioni exp(x) = 2**(x * log2(e))
+    //        = 2**xi * 2**xf   - TIPS we are using  the EEEE floating point
+    //        representation with identification to the exponent and the
+    //        mentissa
+    //  2**xf will be approximated to a polynomial of degree 3 computed with
+    //  Horner method
+    // mask for the boundary condition
+    auto min_mask = _mm512_cmp_ps_mask(values, vec_ln_flt_min, _CMP_LT_OS);
+    auto max_mask = _mm512_cmp_ps_mask(values, vec_ln_flt_max, _CMP_GT_OS);
+
+    // transformation with log2(e)
+    auto vec_src = _mm512_mul_ps(values, vec_exp_log2ef);
+    auto vec_fractional = _mm512_sub_ps(vec_src, _mm512_floor_ps(vec_src));
+
+    // compute polynomial using Horner Scheme, for superscalar processor
+    auto vec_res = _mm512_fmadd_ps(vec_fractional, vec_c3, vec_c2);
+    vec_res = _mm512_fmadd_ps(vec_fractional, vec_res, vec_c1);
+    vec_res = _mm512_fmadd_ps(vec_fractional, vec_res, vec_c0);
+
+    vec_src = _mm512_sub_ps(vec_src, vec_res);
+    // the tips is here, headache in perspective
+    auto tmp = _mm512_fmadd_ps(vec_a, vec_src, vec_b);
+    // headache bis - we loose precision with the cast but it "fits", but ok
+    // after f32 -> f16 later
+    __m512i casted_integer = _mm512_cvttps_epi32(tmp);
+    // boundary condition, lower than the min -> 0
+    casted_integer = _mm512_mask_mov_epi32(casted_integer, min_mask, vec_zero);
+    // boundary condition, larger than the max -> +oo
+    casted_integer =
+        _mm512_mask_mov_epi32(casted_integer, max_mask, vec_infinity);
+    // final interpretation to float
+    return _mm512_castsi512_ps(casted_integer);
   }
   Vectorized<float> exp_u20() const {
     // A faster version of exp with ULP=20
@@ -694,11 +750,27 @@ Vectorized<float> inline fmadd(
 }
 
 template <>
+Vectorized<float> inline fnmadd(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return _mm512_fnmadd_ps(a, b, c);
+}
+
+template <>
 Vectorized<float> inline fmsub(
     const Vectorized<float>& a,
     const Vectorized<float>& b,
     const Vectorized<float>& c) {
   return _mm512_fmsub_ps(a, b, c);
+}
+
+template <>
+Vectorized<float> inline fnmsub(
+    const Vectorized<float>& a,
+    const Vectorized<float>& b,
+    const Vectorized<float>& c) {
+  return _mm512_fnmsub_ps(a, b, c);
 }
 
 // TODO: rewrite with ATEN vectorized (need to add unpack and shuffle)

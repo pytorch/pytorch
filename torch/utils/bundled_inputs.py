@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # mypy: allow-untyped-defs
-from typing import Any, TypeVar, Optional, NamedTuple, Union, Callable
-from collections.abc import Sequence
+from typing import Any, TypeVar, NamedTuple
+from collections.abc import Callable, Sequence
 import textwrap
 import torch
 from torch._C import TupleType, ListType
@@ -40,10 +40,10 @@ class InflatableArg(NamedTuple):
 
 def bundle_inputs(
         model: torch.jit.ScriptModule,
-        inputs: Union[Optional[Sequence[tuple[Any, ...]]], dict[Callable, Optional[Sequence[tuple[Any, ...]]]]],
-        info: Optional[Union[list[str], dict[Callable, list[str]]]] = None,
+        inputs: Sequence[tuple[Any, ...]] | dict[Callable, Sequence[tuple[Any, ...]] | None] | None,
+        info: list[str] | dict[Callable, list[str]] | None = None,
         *,
-        _receive_inflate_expr: Optional[list[str]] = None,
+        _receive_inflate_expr: list[str] | None = None,
 ) -> torch.jit.ScriptModule:
     """Create and return a copy of the specified model with inputs attached.
 
@@ -116,21 +116,23 @@ def bundle_inputs(
     )
 
     # The above cloning function returns a torch._C.scriptmodule and we need a torch.jit.scriptmodule.
-    # Fortunately theres a function in _recursive that does exactly that conversion.
+    # Fortunately there is a function in _recursive that does exactly that conversion.
     cloned_module = wrap_cpp_module(clone)
     if isinstance(inputs, dict):
-        assert isinstance(info, dict) or info is None
+        if not isinstance(info, dict) and info is not None:
+            raise AssertionError("If inputs is a dict, info must be a dict or None")
         augment_many_model_functions_with_bundled_inputs(cloned_module, inputs, _receive_inflate_expr, info)
     else:
-        assert isinstance(info, list) or info is None
+        if not isinstance(info, list) and info is not None:
+            raise AssertionError("If inputs is a list, info must be a list or None")
         augment_model_with_bundled_inputs(cloned_module, inputs, _receive_inflate_expr, info)
     return cloned_module
 
 def augment_model_with_bundled_inputs(
         model: torch.jit.ScriptModule,
-        inputs: Optional[Sequence[tuple[Any, ...]]] = None,
-        _receive_inflate_expr: Optional[list[str]] = None,  # For debugging.
-        info: Optional[list[str]] = None,  # Optional argument to provide info about forward or its inputs
+        inputs: Sequence[tuple[Any, ...]] | None = None,
+        _receive_inflate_expr: list[str] | None = None,  # For debugging.
+        info: list[str] | None = None,  # Optional argument to provide info about forward or its inputs
         skip_size_check=False,
 ) -> None:
     """Add bundled sample inputs to a model for the forward function.
@@ -182,9 +184,9 @@ def augment_model_with_bundled_inputs(
 
 def augment_many_model_functions_with_bundled_inputs(
         model: torch.jit.ScriptModule,
-        inputs: dict[Callable, Optional[Sequence[tuple[Any, ...]]]],
-        _receive_inflate_expr: Optional[list[str]] = None,  # For debugging.
-        info: Optional[dict[Callable, list[str]]] = None,  # Optional argument to provide info about the function or its inputs
+        inputs: dict[Callable, Sequence[tuple[Any, ...]] | None],
+        _receive_inflate_expr: list[str] | None = None,  # For debugging.
+        info: dict[Callable, list[str]] | None = None,  # Optional argument to provide info about the function or its inputs
         skip_size_check=False,
 ) -> None:
     """Add bundled sample inputs to a model for an arbitrary list of public functions.
@@ -364,7 +366,7 @@ def augment_many_model_functions_with_bundled_inputs(
 
 def _inflate_expr(
     arg: T, ref: str, inflate_helper_fn_name: str, skip_size_check: bool = False
-) -> tuple[Union[T, torch.Tensor], str, Optional[str]]:
+) -> tuple[T | torch.Tensor, str, str | None]:
     # Allow custom inflation expressions any object.
     # For example, calling custom image-decoding ops.
     # Or just use "{}" as the format string to ignore size limits.

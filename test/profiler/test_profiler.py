@@ -27,6 +27,7 @@ import torch.nn as nn
 import torch.optim
 import torch.utils.data
 from torch._C._profiler import _ExperimentalConfig, _ExtraFields_PyCall
+from torch._inductor.utils import is_big_gpu
 from torch.autograd.profiler import KinetoStepTracker, profile as _profile
 from torch.autograd.profiler_legacy import profile as _profile_legacy
 from torch.profiler import (
@@ -65,8 +66,10 @@ from torch.testing._internal.common_utils import (
     skipIfTorchDynamo,
     TemporaryDirectoryName,
     TemporaryFileName,
+    TEST_CUDA,
     TEST_WITH_CROSSREF,
     TEST_WITH_ROCM,
+    TEST_XPU,
     TestCase,
 )
 
@@ -79,7 +82,7 @@ if TYPE_CHECKING:
 # This causes an issue in the multithreading test because we check all events
 # in that test with their tids. The events that correspond to these lingering
 # threads all have TID of (uint64_t)(-1) which is invalid.
-# The work around is turnning off monitoring thread when tqdm is loaded.
+# The work around is turning off monitoring thread when tqdm is loaded.
 # Since these are unit tests, it is safe to turn off monitor thread.
 try:
     import tqdm
@@ -106,7 +109,7 @@ class TestProfilerCUDA(TestCase):
         t = torch.rand(1, 1).cuda()
         p = psutil.Process()
         last_rss = collections.deque(maxlen=5)
-        for outer_idx in range(10):
+        for _ in range(10):
             with _profile(use_cuda=True):
                 for _ in range(1024):
                     t = torch.mm(t, t)
@@ -526,7 +529,7 @@ class TestProfiler(TestCase):
                 found_mm = True
             if "gemm" in e.name.lower() or "Cijk" in e.name:
                 found_gemm = True
-            if "memcpy" in e.name.lower():
+            if "memcpy" in e.name.lower() or "__amd_rocclr_copyBuffer" in e.name:
                 found_memcpy = True
         if use_cuda:
             self.assertTrue(found_gemm)
@@ -907,14 +910,13 @@ class TestProfiler(TestCase):
             for e in prof.function_events:
                 if "#" in e.name:
                     key = e.name
-                    if key in expected_event_count.keys():
+                    if key in expected_event_count:
                         actual_event_count[key] = (
                             actual_event_count.setdefault(key, 0) + 1
                         )
             for key, count in expected_event_count.items():
                 self.assertTrue(
-                    (key in actual_event_count.keys())
-                    and (count == actual_event_count[key])
+                    (key in actual_event_count) and (count == actual_event_count[key])
                 )
 
         with _profile(use_kineto=kineto_available()) as prof:
@@ -964,7 +966,7 @@ class TestProfiler(TestCase):
         profiler_output = prof.key_averages(group_by_input_shape=True).table(
             sort_by="cpu_time_total", row_limit=10
         )
-        self.assertIn("Total MFLOPs", profiler_output)
+        self.assertRegex(profiler_output, "Total M?FLOPs")
         if not (kineto_available() and torch.cuda.is_available()):
             return
 
@@ -980,7 +982,51 @@ class TestProfiler(TestCase):
         profiler_output = kineto_profiler.key_averages().table(
             sort_by="self_cuda_time_total", row_limit=-1
         )
-        self.assertIn("Total MFLOPs", profiler_output)
+        self.assertRegex(profiler_output, "Total M?FLOPs")
+
+    def test_override_time_units(self):
+        US_IN_SECOND = 1000.0 * 1000.0
+        US_IN_MS = 1000.0
+
+        model = torch.nn.Sequential(
+            nn.Conv2d(16, 33, 18),
+            nn.ReLU(),
+            nn.Linear(243, 243),
+            nn.ReLU(),
+        )
+        inputs = torch.randn(40, 16, 18, 260)
+        with _profile() as prof:
+            model(inputs)
+
+        profiler_output = prof.key_averages().table(time_unit="s")
+        self.assertRegex(profiler_output, r".*(\.[0-9]{3}s).*")
+        self.assertNotRegex(profiler_output, r".*(\.[0-9]{3}ms).*")
+        self.assertNotRegex(profiler_output, r".*(\.[0-9]{3}us).*")
+        for event in prof.key_averages():
+            cpu_time_str_s = f"{event.cpu_time / US_IN_SECOND:.3f}s"
+            cpu_time_total_str_s = f"{event.cpu_time_total / US_IN_SECOND:.3f}s"
+            self.assertTrue(cpu_time_str_s in profiler_output)
+            self.assertTrue(cpu_time_total_str_s in profiler_output)
+
+        profiler_output = prof.key_averages().table(time_unit="ms")
+        self.assertNotRegex(profiler_output, r".*(\.[0-9]{3}s).*")
+        self.assertRegex(profiler_output, r".*(\.[0-9]{3}ms).*")
+        self.assertNotRegex(profiler_output, r".*(\.[0-9]{3}us).*")
+        for event in prof.key_averages():
+            cpu_time_str_ms = f"{event.cpu_time / US_IN_MS:.3f}ms"
+            cpu_time_total_str_ms = f"{event.cpu_time_total / US_IN_MS:.3f}ms"
+            self.assertTrue(cpu_time_str_ms in profiler_output)
+            self.assertTrue(cpu_time_total_str_ms in profiler_output)
+
+        profiler_output = prof.key_averages().table(time_unit="us")
+        self.assertNotRegex(profiler_output, r".*(\.[0-9]{3}s).*")
+        self.assertNotRegex(profiler_output, r".*(\.[0-9]{3}ms).*")
+        self.assertRegex(profiler_output, r".*(\.[0-9]{3}us).*")
+        for event in prof.key_averages():
+            cpu_time_str_us = f"{event.cpu_time:.3f}us"
+            cpu_time_total_str_us = f"{event.cpu_time_total:.3f}us"
+            self.assertTrue(cpu_time_str_us in profiler_output)
+            self.assertTrue(cpu_time_total_str_us in profiler_output)
 
     @patch.dict(os.environ, {"KINETO_USE_DAEMON": "1"})
     @patch.dict(os.environ, {"KINETO_DAEMON_INIT_DELAY_S": "1"})
@@ -1007,7 +1053,7 @@ class TestProfiler(TestCase):
             schedule=torch.profiler.schedule(wait=1, warmup=1, active=2),
             on_trace_ready=trace_handler,
         ) as p:
-            for idx in range(8):
+            for _ in range(8):
                 self.payload(use_cuda=use_cuda)
                 p.step()
 
@@ -1097,14 +1143,14 @@ class TestProfiler(TestCase):
             # See https://github.com/pytorch/pytorch/issues/88446
             optimizer_step()
 
-        for idx in range(niters):
+        for _ in range(niters):
             run_batch()
 
         with profile(
             activities=supported_activities(),
             schedule=torch.profiler.schedule(wait=1, warmup=1, active=2),
         ) as p:
-            for idx in range(niters):
+            for _ in range(niters):
                 run_batch()
                 p.step()
 
@@ -1161,8 +1207,8 @@ class TestProfiler(TestCase):
                     parts[-4].isdigit() and int(parts[-4]) > 0,
                     "Wrong tracing file name pattern",
                 )
-                self.assertEqual(parts[-3:], ["pt", "trace", "json"])
-                file_num += 1
+                if parts[-3:] == ["pt", "trace", "json"]:
+                    file_num += 1
             self.assertEqual(file_num, 3)
 
         # test case for gzip file format
@@ -1359,10 +1405,7 @@ class TestProfiler(TestCase):
                 s_ts_2 = flow_s_to_ts[2]
                 f_ts_2 = flow_f_to_ts[2]
                 self.assertTrue(
-                    all(
-                        ts in ts_to_name.keys()
-                        for ts in [s_ts_1, f_ts_1, s_ts_2, f_ts_2]
-                    )
+                    all(ts in ts_to_name for ts in [s_ts_1, f_ts_1, s_ts_2, f_ts_2])
                 )
                 self.assertTrue(
                     ts_to_name[s_ts_1] == "aten::binary_cross_entropy_with_logits"
@@ -1421,7 +1464,7 @@ class TestProfiler(TestCase):
                     cats = {e.get("cat", None) for e in j["traceEvents"]}
             self.assertTrue(
                 "cuda_sync" in cats,
-                "Expected to find cuda_sync event" f" found = {cats}",
+                f"Expected to find cuda_sync event found = {cats}",
             )
 
         print("Testing enable_cuda_sync_events in _ExperimentalConfig")
@@ -1449,7 +1492,7 @@ class TestProfiler(TestCase):
 
     def test_profiler_correlation_id(self):
         """
-        We expect the correlation_id to be unique across multiple invokation of the profiler,
+        We expect the correlation_id to be unique across multiple invocation of the profiler,
         So we will reuse id_uniqueness_set.
         """
         id_uniqueness_set = set()
@@ -1461,7 +1504,7 @@ class TestProfiler(TestCase):
         )
         inputs = torch.randn(40, 16, 18, 260)
         uint32_max = 2**32 - 1
-        for i in range(5):
+        for _ in range(5):
             with profile() as prof:
                 model(inputs)
             for event in prof.profiler.kineto_results.events():
@@ -1717,25 +1760,27 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             with open(fname) as f:
                 j = json.load(f)
                 op_events = [
-                    e for e in j["traceEvents"] if e.get("cat", "") == "cpu_op"
+                    e
+                    for e in j["traceEvents"]
+                    if e.get("name", "") == "add_test_kwinputs"
                 ]
+                self.assertTrue(len(op_events) > 0)
                 for e in op_events:
-                    if e["name"] == "add_test_kwinputs":
-                        # print(e["args"])
-                        args = e["args"]
-                        self.assertTrue("stream" in args)
-                        self.assertTrue("grid" in args)
-                        self.assertTrue("boolean" in args)
-                        self.assertTrue(args["stream"] == 0)
-                        self.assertTrue(args["grid"] == "lambda x : x + 1")
-                        self.assertTrue(args["debug"] == "None")
-                        self.assertTrue(args["boolean"])
+                    args = e["args"]
+                    self.assertTrue("stream" in args)
+                    self.assertTrue("grid" in args)
+                    self.assertTrue("boolean" in args)
+                    self.assertTrue(args["stream"] == 0)
+                    self.assertTrue(args["grid"] == "lambda x : x + 1")
+                    self.assertTrue(args["debug"] == "None")
+                    self.assertTrue(args["boolean"])
+                    self.assertTrue(e["cat"] == "cpu_op")
 
         with profile(record_shapes=True) as p1:
             cm = torch._C._profiler._RecordFunctionFast(
                 "add_test_kwinputs",
                 [x, y],
-                {"stream": "test", "grid": [1, 2]},
+                {"stream": "test", "grid": [1, 2], "scope": "user_scope"},
             )
             for _ in range(4):
                 with cm:
@@ -1745,14 +1790,92 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             with open(fname1) as f1:
                 j = json.load(f1)
                 op_events = [
-                    e for e in j["traceEvents"] if e.get("cat", "") == "cpu_op"
+                    e
+                    for e in j["traceEvents"]
+                    if e.get("name", "") == "add_test_kwinputs"
                 ]
+                self.assertTrue(len(op_events) > 0)
                 for e in op_events:
-                    if e["name"] == "add_test_kwinputs":
-                        # print(e["args"])
-                        args = e["args"]
-                        self.assertTrue("stream" not in args)
-                        self.assertTrue("grid" not in args)
+                    args = e["args"]
+                    self.assertTrue("stream" not in args)
+                    self.assertTrue("grid" not in args)
+                    self.assertTrue(e["cat"] == "user_annotation")
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    def test_profiler_op_event_kwargs_list_of_strings(self):
+        x, y = (torch.rand((4, 4)) for _ in range(2))
+        with profile(record_shapes=True) as p:
+            cm = torch._C._profiler._RecordFunctionFast(
+                "add_test_kwinputs_string_list",
+                [x, y],
+                {
+                    "string_list": ["hello", "world", "test"],
+                    "int_param": 42,
+                    "string_param": "single_string",
+                },
+            )
+            for _ in range(4):
+                with cm:
+                    x.add(y)
+        with TemporaryFileName(mode="w+") as fname:
+            p.export_chrome_trace(fname)
+            with open(fname) as f:
+                j = json.load(f)
+                op_events = [
+                    e
+                    for e in j["traceEvents"]
+                    if e.get("name", "") == "add_test_kwinputs_string_list"
+                ]
+                self.assertTrue(len(op_events) > 0)
+                for e in op_events:
+                    args = e["args"]
+                    self.assertTrue("string_list" in args)
+                    self.assertTrue("int_param" in args)
+                    self.assertTrue("string_param" in args)
+                    # Check that the list of strings is properly serialized
+                    # The list should be formatted as a JSON array by ivalueListToStr
+                    self.assertEqual(args["string_list"], ["hello", "world", "test"])
+                    self.assertEqual(args["int_param"], 42)
+                    self.assertEqual(args["string_param"], "single_string")
+                    self.assertTrue(e["cat"] == "cpu_op")
+
+        # Test mixed types that should be filtered out
+        with profile(record_shapes=True) as p1:
+            cm = torch._C._profiler._RecordFunctionFast(
+                "add_test_kwinputs_string_list_filtered",
+                [x, y],
+                {
+                    "valid_string_list": ["valid1", "valid2"],
+                    "mixed_list": ["string", 123],  # Should be filtered out
+                    "non_string_list": [1, 2, 3],  # Should be filtered out
+                    "valid_int": 100,
+                },
+            )
+            for _ in range(4):
+                with cm:
+                    x.add(y)
+        with TemporaryFileName(mode="w+") as fname1:
+            p1.export_chrome_trace(fname1)
+            with open(fname1) as f1:
+                j = json.load(f1)
+                op_events = [
+                    e
+                    for e in j["traceEvents"]
+                    if e.get("name", "") == "add_test_kwinputs_string_list_filtered"
+                ]
+                self.assertTrue(len(op_events) > 0)
+                for e in op_events:
+                    args = e["args"]
+                    # Only valid types should be present
+                    self.assertTrue("valid_string_list" in args)
+                    self.assertTrue("valid_int" in args)
+                    # Invalid lists should be filtered out
+                    self.assertTrue("mixed_list" not in args)
+                    self.assertTrue("non_string_list" not in args)
+                    # Check values
+                    self.assertEqual(args["valid_string_list"], ["valid1", "valid2"])
+                    self.assertEqual(args["valid_int"], 100)
+                    self.assertTrue(e["cat"] == "cpu_op")
 
     def test_is_profiler_enabled(self):
         self.assertFalse(torch.autograd.profiler._is_profiler_enabled)
@@ -1803,7 +1926,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         event_list.table()
 
     def _check_all_gpu_present(self, gpu_dict, max_gpu_count):
-        for i in range(0, max_gpu_count):
+        for i in range(max_gpu_count):
             self.assertEqual(gpu_dict["GPU " + str(i)], 1)
 
     # Do json sanity testing. Checks that all events are between profiler start and end
@@ -1882,6 +2005,10 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 report = json.load(f)
                 self._validate_basic_json(report["traceEvents"], with_cuda)
 
+    @unittest.skipIf(
+        torch.xpu.is_available(),
+        "XPU Trace event ends too late! Refer https://github.com/intel/torch-xpu-ops/issues/2263",
+    )
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_basic_chrome_trace(self):
@@ -1896,7 +2023,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
         WAIT_TIME = 10
         with profile() as p:
             with torch.profiler.record_function("test_span"):
-                for i in range(WAIT_TIME):
+                for _ in range(WAIT_TIME):
                     torch.rand(4, 4)
                     time.sleep(1)
         events = p.events()
@@ -1945,7 +2072,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             ),
             acc_events=acc_events,
         ) as prof:
-            for i in range(100):
+            for _ in range(100):
                 torch.add(1, 2)
                 prof.step()
         # print(prof.key_averages())
@@ -1997,7 +2124,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                 adjust_profiler_step=True
             ),
         ) as prof:
-            for i in range(5):
+            for _ in range(5):
                 self._step_helper_func(prof)
         with TemporaryFileName(mode="w+") as fname:
             prof.export_chrome_trace(fname)
@@ -2012,8 +2139,8 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
                         step_helper_funcs.append(event)
             self.assertEqual(len(prof_steps), 5)
             self.assertEqual(len(step_helper_funcs), 5)
-            for i in range(0, len(step_helper_funcs)):
-                for j in range(0, len(step_helper_funcs)):
+            for i in range(len(step_helper_funcs)):
+                for j in range(len(step_helper_funcs)):
                     self.assertTrue(
                         not self._partial_overlap(prof_steps[i], step_helper_funcs[j])
                     )
@@ -2031,11 +2158,14 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             else:
                 self.assertFalse(evt.is_user_annotation)
 
-    @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
+    @unittest.skipUnless(TEST_CUDA or TEST_XPU, "requires gpu")
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_basic_profile(self):
         # test a really basic profile to make sure no erroneous aten ops are run
-        x = torch.randn(4, device="cuda")
+        acc = torch.accelerator.current_accelerator()
+        self.assertIsNotNone(acc)
+        device = acc.type
+        x = torch.randn(4, device=device)
         with torch.profiler.profile(with_stack=True) as p:
             x *= 2
         names = [e.name for e in p.events()]
@@ -2047,35 +2177,39 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA is required")
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_dynamic_toggle(self):
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as p:
+        acc = torch.accelerator.current_accelerator()
+        self.assertIsNotNone(acc)
+        device = acc.type
+        gpu_activity = getattr(ProfilerActivity, device.upper(), None)
+        self.assertIsNotNone(gpu_activity)
+        activities = [ProfilerActivity.CPU, gpu_activity]
+        with profile(activities=activities) as p:
             with torch.profiler.record_function("test_user_annotation"):
-                x, y = (torch.rand(4, 4).to("cuda") for _ in range(2))
+                x, y = (torch.rand(4, 4).to(device) for _ in range(2))
                 torch.add(x, y)
 
         self.assertTrue(any("aten" in e.name for e in p.events()))
 
-        self.assertTrue(any("cuda" in e.name for e in p.events()))
+        self.assertTrue(any(device in e.name.lower() for e in p.events()))
 
-        self.assertTrue(any("kernel" in e.name for e in p.events()))
+        self.assertTrue(any("kernel" in e.name.lower() for e in p.events()))
 
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as p1:
-            p1.toggle_collection_dynamic(False, [ProfilerActivity.CUDA])
+        with profile(activities=activities) as p1:
+            p1.toggle_collection_dynamic(False, [gpu_activity])
             with torch.profiler.record_function("test_user_annotation"):
-                x, y = (torch.rand(4, 4).to("cuda") for _ in range(2))
+                x, y = (torch.rand(4, 4).to(device) for _ in range(2))
                 torch.add(x, y)
 
         self.assertTrue(any("aten" in e.name for e in p1.events()))
 
-        self.assertTrue(all("cuda" not in e.name for e in p1.events()))
+        self.assertTrue(all(device not in e.name for e in p1.events()))
 
-        self.assertTrue(all("kernel" not in e.name for e in p1.events()))
+        self.assertTrue(all("kernel" not in e.name.lower() for e in p1.events()))
 
-        with profile(activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA]) as p2:
-            p2.toggle_collection_dynamic(
-                False, [ProfilerActivity.CUDA, ProfilerActivity.CPU]
-            )
+        with profile(activities=activities) as p2:
+            p2.toggle_collection_dynamic(False, activities)
             with torch.profiler.record_function("test_user_annotation"):
-                x, y = (torch.rand(4, 4).to("cuda") for _ in range(2))
+                x, y = (torch.rand(4, 4).to(device) for _ in range(2))
                 torch.add(x, y)
         self.assertTrue(len(p2.events()) == 0)
 
@@ -2098,6 +2232,7 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
     @unittest.skipIf(
         torch.cuda.is_available(), "CUDA complains about forking after init"
     )
+    @unittest.skipIf(torch.xpu.is_available(), "XPU complains about forking after init")
     @unittest.skipIf(IS_WINDOWS, "can't use os.fork() on Windows")
     def test_forked_process(self):
         # Induce a pid cache by running the profiler with payload
@@ -2181,9 +2316,15 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             if "cat" in event and event["cat"] in cuda_external_id_events:
                 if disable_external_correlation:
                     self.assertTrue("External id" not in event["args"])
-                elif event["name"] != "cudaDeviceSynchronize":
-                    self.assertTrue("External id" in event["args"])
-                    self.assertTrue(event["args"]["External id"] > 0)
+                else:
+                    excluded_events = (
+                        {"hipDeviceSynchronize"}
+                        if TEST_WITH_ROCM
+                        else {"cudaDeviceSynchronize"}
+                    )
+                    if event["name"] not in excluded_events:
+                        self.assertTrue("External id" in event["args"])
+                        self.assertTrue(event["args"]["External id"] > 0)
 
         def validate_json(prof, disable_external_correlation):
             with TemporaryFileName(mode="w+") as fname:
@@ -2284,6 +2425,74 @@ assert KinetoStepTracker.current_step() == initial_step + 2 * niters
             # test spawning thread from within the profiled region
             events = main_with_thread_fn(profile_all_threads)
             verify_events(events)
+
+    @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    @unittest.skipIf(not kineto_available(), "Kineto is required")
+    def test_python_gc_event(self):
+        activities = [ProfilerActivity.CPU]
+
+        def payload():
+            x = torch.randn(10, 10)
+            y = torch.randn(10, 10)
+            with record_function("pre_gc"):
+                torch.mm(x, y)
+            gc.collect()
+            with record_function("post_gc"):
+                torch.mm(x, y)
+
+        def validate_json(prof, gc_collection_on):
+            with TemporaryFileName(mode="w+") as fname:
+                prof.export_chrome_trace(fname)
+                with open(fname) as f:
+                    events = json.load(f)["traceEvents"]
+                    # Find required events
+                    if gc_collection_on:
+                        pre_gc = next(
+                            (e for e in events if e["name"] == "pre_gc"), None
+                        )
+                        post_gc = next(
+                            (e for e in events if e["name"] == "post_gc"), None
+                        )
+                        python_gc_events = [
+                            e for e in events if e["name"] == "Python GC"
+                        ]
+                        # Assert all required events are present
+                        self.assertIsNotNone(pre_gc, "pre_gc event is missing")
+                        self.assertIsNotNone(post_gc, "post_gc event is missing")
+                        self.assertTrue(
+                            len(python_gc_events) > 0, "No Python GC events found"
+                        )
+                        # Calculate boundaries
+                        pre_gc_end = pre_gc["ts"] + pre_gc.get("dur", 0)
+                        post_gc_start = post_gc["ts"]
+                        # Assert each Python GC event is correctly placed
+                        for python_gc in python_gc_events:
+                            python_gc_start = python_gc["ts"]
+                            python_gc_end = python_gc["ts"] + python_gc.get("dur", 0)
+                            self.assertTrue(
+                                python_gc_start > pre_gc_end
+                                and python_gc_end < post_gc_start,
+                                f"Python GC event at {python_gc_start} is not correctly placed.",
+                            )
+                    else:
+                        python_gc_events = [
+                            e for e in events if e["name"] == "Python GC"
+                        ]
+                        self.assertTrue(
+                            len(python_gc_events) == 0,
+                            "Python GC event found when flag off",
+                        )
+
+        for gc_flag in [True, False]:
+            with profile(
+                activities=activities,
+                experimental_config=torch._C._profiler._ExperimentalConfig(
+                    record_python_gc_info=gc_flag
+                ),
+                with_stack=True,
+            ) as prof:
+                payload()
+            validate_json(prof, gc_flag)
 
 
 class SimpleNet(nn.Module):
@@ -2899,7 +3108,7 @@ aten::mm""",
                 report = json.load(f)
 
             # It is platform dependent whether the path will include "profiler/"
-            keys = [k for k in report.keys() if k.endswith("test_profiler.py")]
+            keys = [k for k in report if k.endswith("test_profiler.py")]
             self.assertEqual(len(keys), 1, f"{keys}")
             entry = report[keys[0]]
 
@@ -2962,7 +3171,7 @@ aten::mm""",
         r.seed(1)
         text_sections = get_text_sections()
         addrs = []
-        for i in range(200):
+        for _ in range(200):
             s = r.randrange(0, len(text_sections))
             start, size = text_sections[s]
             addr = r.randrange(start, start + size)
@@ -3038,6 +3247,87 @@ aten::mm""",
             assert len(key_averages) == 3
             assert "Overload Name" in key_averages.table()
             validate_json(prof)
+
+    def test_expose_kineto_event_metadata(self):
+        def check_metadata(prof, op_name, metadata_key):
+            with TemporaryFileName(mode="w+") as fname:
+                prof.export_chrome_trace(fname)
+                with open(fname) as f:
+                    events = json.load(f)["traceEvents"]
+                    found_op = False
+                    for e in events:
+                        if "name" in e and "args" in e and e["name"] == op_name:
+                            assert metadata_key in e["args"], (
+                                f"Metadata for '{op_name}' in Chrome trace did not contain '{metadata_key}'."
+                            )
+                            found_op = True
+                    assert found_op, f"Could not find op '{op_name}' in Chrome trace."
+                found_op = False
+                for event in prof.events():
+                    if event.name == op_name:
+                        assert metadata_key in event.metadata_json, (
+                            f"Metadata for '{op_name}' in FunctionEvent did not contain '{metadata_key}'."
+                        )
+                        found_op = True
+                assert found_op, f"Could not find op '{op_name}' in prof.events()."
+
+        experimental_config = torch._C._profiler._ExperimentalConfig(
+            expose_kineto_event_metadata=True
+        )
+        with profile(
+            experimental_config=experimental_config,
+            activities=[ProfilerActivity.CPU],
+        ) as prof:
+            torch.add(1, 5)
+
+        check_metadata(prof, op_name="aten::add", metadata_key="Ev Idx")
+
+    @unittest.skipIf(not torch.cuda.is_available(), "requires CUDA")
+    def test_profiler_debug_autotuner(self):
+        """
+        This test makes sure that profiling events will be present when the kernel is run using the DebugAutotuner.
+        """
+        if not is_big_gpu():
+            raise unittest.SkipTest("requires large gpu to max-autotune")
+        in1 = torch.randn((256, 512), device="cuda", dtype=torch.float16)
+        in2 = torch.randn((512, 768), device="cuda", dtype=torch.float16)
+
+        def mm():
+            return torch.mm(in1, in2)
+
+        pb_mm = torch.compile(
+            mm,
+            options={
+                "benchmark_kernel": True,
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+                "profile_bandwidth": True,
+            },
+        )
+        comp_mm = torch.compile(
+            mm,
+            options={
+                "benchmark_kernel": True,
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "TRITON",
+            },
+        )
+
+        with profile() as prof1:
+            pb_mm()
+        with profile() as prof2:
+            comp_mm()
+
+        def names(prof):
+            return {
+                ev.name
+                for ev in prof.events()
+                if "mm" in ev.name or "triton" in ev.name
+            }
+
+        n1 = names(prof1)
+        n2 = names(prof2)
+        self.assertEqual(n1, n2)
 
 
 if __name__ == "__main__":

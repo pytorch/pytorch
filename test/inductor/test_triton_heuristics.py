@@ -3,16 +3,24 @@
 import functools
 import sys
 import unittest
+from unittest import skipUnless
 from unittest.mock import MagicMock, patch
 
 import torch
 from torch._dynamo.testing import rand_strided
 from torch._inductor.runtime.triton_compat import HAS_WARP_SPEC
 from torch._inductor.utils import clone_preserve_strides
-from torch.testing._internal.common_utils import IS_LINUX, runOnRocm, skipIfXpu
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    IS_LINUX,
+    parametrize,
+    runOnRocm,
+    skipIfXpu,
+)
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU,
+    HAS_GPU_AND_TRITON,
     requires_cuda_with_enough_memory,
 )
 
@@ -67,6 +75,7 @@ def get_autotuned_amd_sqr_kernel():
     )(amd_sqr_kernel)
 
 
+@instantiate_parametrized_tests
 class TestTritonHeuristics(TestCase):
     device_type = GPU_TYPE
 
@@ -118,11 +127,11 @@ class TestTritonHeuristics(TestCase):
         ]
         self.assertEqual(forward(*args), foo_c(*args))
 
-    @skipIfXpu
+    # @skipIfXpu
     def test_artificial_zgrid(self):
         self._test_artificial_zgrid()
 
-    @skipIfXpu
+    # @skipIfXpu
     @config.patch("cpp_wrapper", True)
     def test_artificial_grid_cpp_wrapper(self):
         self._test_artificial_zgrid()
@@ -142,7 +151,7 @@ class TestTritonHeuristics(TestCase):
 
         triton_meta = {
             "signature": {"in_ptr0": "*fp32", "out_ptr0": "*fp32", "xnumel": "i32"},
-            "device": DeviceProperties.create(torch.device("cuda")),
+            "device": DeviceProperties.create(torch.device(GPU_TYPE)),
             "constants": {},
             "configs": [
                 AttrsDescriptorWrapper(divisible_by_16=(0, 1, 2), equal_to_1=())
@@ -168,7 +177,7 @@ class TestTritonHeuristics(TestCase):
             "inductor_meta": inductor_meta,
         }
 
-    @skipIfXpu
+    # @skipIfXpu
     def test_pre_hook_assert(self):
         # assert if any of the configs passed to the CachingAutotuner have pre-hooks
         args = self._get_cos_kernel_caching_autotuner_args()
@@ -257,10 +266,41 @@ class TestTritonHeuristics(TestCase):
         def fn(x):
             return triton_sqr(x)
 
-        x = torch.randn(32, device="cuda")
+        x = torch.randn(32, device=GPU_TYPE)
         ref = fn(x)
         res = torch.compile(fn)(x)
         self.assertEqual(ref, res)
+
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/2331")
+    @skipUnless(HAS_GPU_AND_TRITON, "requires gpu and triton")
+    @parametrize("do_pruning", [False, True])
+    def test_prune_configs_over_shared_memory_limit(self, do_pruning):
+        from torch._inductor.template_heuristics.triton import (
+            CUDAConfigHeuristic,
+            GemmConfig,
+            ROCmConfigHeuristic,
+        )
+
+        expected_count = 1 if do_pruning else 2
+        mm_configs = [
+            GemmConfig(32, 32, 32, 1, 8, group_m=8),
+            GemmConfig(
+                128, 128, 128, 100, 8, group_m=4
+            ),  # intentionally large to exceed shared memory limit
+        ]
+        with config.patch(
+            {"max_autotune_prune_choices_based_on_shared_mem": do_pruning}
+        ):
+            if torch.version.hip:
+                config_heuristic = ROCmConfigHeuristic()
+            else:
+                config_heuristic = CUDAConfigHeuristic()
+            config_heuristic.should_scale_configs = False
+            config_heuristic.mm_configs = mm_configs
+            configs = list(
+                config_heuristic.get_mm_configs()(3, 3, 3, dtype_size=4, op_name="mm")
+            )
+            self.assertEqual(len(configs), expected_count)
 
 
 class TestArgumentCloneAndRestore(TestCase):
@@ -288,7 +328,7 @@ class TestArgumentCloneAndRestore(TestCase):
         return out
 
     def _do_test(self, gpu_tensor):
-        torch.cuda.reset_peak_memory_stats()
+        torch.get_device_module(GPU_TYPE).reset_peak_memory_stats()
         autotuner = self._create_caching_autotuner()
 
         old_storage_offset = gpu_tensor.storage_offset()
@@ -310,7 +350,7 @@ class TestArgumentCloneAndRestore(TestCase):
 
         # Note: torch.allclose somehow allocates large amount of extra memory.
         # Record peak memory before that.
-        peak_mem_after = torch.cuda.max_memory_allocated()
+        peak_mem_after = torch.get_device_module(GPU_TYPE).max_memory_allocated()
 
         self.assertTrue(torch.allclose(gpu_tensor, gpu_tensor_clone))
         self.assertTrue(

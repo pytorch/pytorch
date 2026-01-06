@@ -83,14 +83,14 @@ inline bool operator!=(const OperatorName& lhs, const OperatorName& rhs) {
 }
 
 TORCH_API std::string toString(const OperatorName& opName);
-TORCH_API std::ostream& operator<<(std::ostream&, const OperatorName&);
+TORCH_API std::ostream& operator<<(std::ostream& /*os*/, const OperatorName& /*opName*/);
 
 } // namespace c10
 
 namespace std {
 template <>
 struct hash<::c10::OperatorName> {
-  size_t operator()(const ::c10::OperatorName& x) const {
+  size_t operator()(const ::c10::OperatorName& x) const noexcept {
     return std::hash<std::string>()(x.name) ^
         (~std::hash<std::string>()(x.overload_name));
   }

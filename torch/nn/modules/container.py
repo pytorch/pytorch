@@ -4,7 +4,7 @@ from __future__ import annotations
 import operator
 from collections import abc as container_abcs, OrderedDict
 from itertools import chain, islice
-from typing import Any, Optional, overload, TYPE_CHECKING, TypeVar, Union
+from typing import Any, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import deprecated, Self
 
 import torch
@@ -109,6 +109,7 @@ class Sequential(Module):
     def __init__(self, *args: Module) -> None: ...
 
     @overload
+    # pyrefly: ignore [inconsistent-overload]
     def __init__(self, arg: OrderedDict[str, Module]) -> None: ...
 
     def __init__(self, *args):
@@ -130,7 +131,7 @@ class Sequential(Module):
         return next(islice(iterator, idx, None))
 
     @_copy_to_script_wrapper
-    def __getitem__(self, idx: Union[slice, int]) -> Union[Sequential, Module]:
+    def __getitem__(self, idx: slice | int) -> Sequential | Module:
         if isinstance(idx, slice):
             return self.__class__(OrderedDict(list(self._modules.items())[idx]))
         else:
@@ -140,7 +141,7 @@ class Sequential(Module):
         key: str = self._get_item_by_idx(self._modules.keys(), idx)
         return setattr(self, key, module)
 
-    def __delitem__(self, idx: Union[slice, int]) -> None:
+    def __delitem__(self, idx: slice | int) -> None:
         if isinstance(idx, slice):
             for key in list(self._modules.keys())[idx]:
                 delattr(self, key)
@@ -149,7 +150,9 @@ class Sequential(Module):
             delattr(self, key)
         # To preserve numbering
         str_indices = [str(i) for i in range(len(self._modules))]
-        self._modules = OrderedDict(list(zip(str_indices, self._modules.values())))
+        self._modules = OrderedDict(
+            zip(str_indices, self._modules.values(), strict=True)
+        )
 
     @_copy_to_script_wrapper
     def __len__(self) -> int:
@@ -169,7 +172,10 @@ class Sequential(Module):
                 f"of Sequential class, but {str(type(other))} is given."
             )
 
-    def pop(self, key: Union[int, slice]) -> Module:
+    def pop(self, key: int | slice) -> Module:
+        """
+        Pop ``key`` from self.
+        """
         v = self[key]
         del self[key]
         return v
@@ -240,6 +246,9 @@ class Sequential(Module):
     # TestScript.test_sequential_intermediary_types).  Cannot annotate
     # with Any as TorchScript expects a more precise type
     def forward(self, input):
+        """
+        Runs the forward pass.
+        """
         for module in self:
             input = module(input)
         return input
@@ -349,7 +358,7 @@ class ModuleList(Module):
 
     _modules: dict[str, Module]  # type: ignore[assignment]
 
-    def __init__(self, modules: Optional[Iterable[Module]] = None) -> None:
+    def __init__(self, modules: Iterable[Module] | None = None) -> None:
         super().__init__()
         if modules is not None:
             self += modules
@@ -370,7 +379,7 @@ class ModuleList(Module):
     def __getitem__(self, idx: int) -> Module: ...
 
     @_copy_to_script_wrapper
-    def __getitem__(self, idx: Union[int, slice]) -> Union[Module, ModuleList]:
+    def __getitem__(self, idx: int | slice) -> Module | ModuleList:
         if isinstance(idx, slice):
             return self.__class__(list(self._modules.values())[idx])
         else:
@@ -380,7 +389,7 @@ class ModuleList(Module):
         idx = self._get_abs_string_index(idx)
         return setattr(self, str(idx), module)
 
-    def __delitem__(self, idx: Union[int, slice]) -> None:
+    def __delitem__(self, idx: int | slice) -> None:
         if isinstance(idx, slice):
             for k in range(len(self._modules))[idx]:
                 delattr(self, str(k))
@@ -388,7 +397,9 @@ class ModuleList(Module):
             delattr(self, self._get_abs_string_index(idx))
         # To preserve numbering, self._modules is being reconstructed with modules after deletion
         str_indices = [str(i) for i in range(len(self._modules))]
-        self._modules = OrderedDict(list(zip(str_indices, self._modules.values())))
+        self._modules = OrderedDict(
+            zip(str_indices, self._modules.values(), strict=True)
+        )
 
     @_copy_to_script_wrapper
     def __len__(self) -> int:
@@ -425,7 +436,9 @@ class ModuleList(Module):
 
         lines = []
         main_str = self._get_name() + "("
-        for (start_id, end_id), b in zip(start_end_indices, repeated_blocks):
+        for (start_id, end_id), b in zip(
+            start_end_indices, repeated_blocks, strict=True
+        ):
             local_repr = f"({start_id}): {b}"  # default repr
 
             if start_id != end_id:
@@ -465,7 +478,7 @@ class ModuleList(Module):
         self.add_module(str(len(self)), module)
         return self
 
-    def pop(self, key: Union[int, slice]) -> Module:
+    def pop(self, key: int | slice) -> Module:
         v = self[key]
         del self[key]
         return v
@@ -486,7 +499,7 @@ class ModuleList(Module):
             self.add_module(str(offset + i), module)
         return self
 
-    # remove forward alltogether to fallback on Module's _forward_unimplemented
+    # remove forward altogether to fallback on Module's _forward_unimplemented
 
 
 class ModuleDict(Module):
@@ -501,13 +514,12 @@ class ModuleDict(Module):
     * the order of insertion, and
 
     * in :meth:`~torch.nn.ModuleDict.update`, the order of the merged
-      ``OrderedDict``, ``dict`` (started from Python 3.6) or another
+      ``OrderedDict``, ``dict`` or another
       :class:`~torch.nn.ModuleDict` (the argument to
       :meth:`~torch.nn.ModuleDict.update`).
 
     Note that :meth:`~torch.nn.ModuleDict.update` with other unordered mapping
-    types (e.g., Python's plain ``dict`` before Python version 3.6) does not
-    preserve the order of the merged mapping.
+    types does not preserve the order of the merged mapping.
 
     Args:
         modules (iterable, optional): a mapping (dictionary) of (string: module)
@@ -533,7 +545,7 @@ class ModuleDict(Module):
 
     _modules: dict[str, Module]  # type: ignore[assignment]
 
-    def __init__(self, modules: Optional[Mapping[str, Module]] = None) -> None:
+    def __init__(self, modules: Mapping[str, Module] | None = None) -> None:
         super().__init__()
         if modules is not None:
             self.update(modules)
@@ -617,16 +629,18 @@ class ModuleDict(Module):
                         "ModuleDict update sequence element "
                         "#" + str(j) + " should be Iterable; is" + type(m).__name__
                     )
+                # pyrefly: ignore [bad-argument-type]
                 if not len(m) == 2:
                     raise ValueError(
                         "ModuleDict update sequence element "
+                        # pyrefly: ignore [bad-argument-type]
                         "#" + str(j) + " has length " + str(len(m)) + "; 2 is required"
                     )
                 # modules can be Mapping (what it's typed at), or a list: [(name1, module1), (name2, module2)]
                 # that's too cumbersome to type correctly with overloads, so we add an ignore here
                 self[m[0]] = m[1]  # type: ignore[assignment]
 
-    # remove forward alltogether to fallback on Module's _forward_unimplemented
+    # remove forward altogether to fallback on Module's _forward_unimplemented
 
 
 class ParameterList(Module):
@@ -659,7 +673,7 @@ class ParameterList(Module):
                 return x
     """
 
-    def __init__(self, values: Optional[Iterable[Any]] = None) -> None:
+    def __init__(self, values: Iterable[Any] | None = None) -> None:
         super().__init__()
         self._size = 0
         if values is not None:
@@ -678,6 +692,7 @@ class ParameterList(Module):
     def __getitem__(self, idx: int) -> Any: ...
 
     @overload
+    # pyrefly: ignore [inconsistent-overload]
     def __getitem__(self: T, idx: slice) -> T: ...
 
     def __getitem__(self, idx):
@@ -746,6 +761,9 @@ class ParameterList(Module):
         return self
 
     def extra_repr(self) -> str:
+        """
+        Return the extra representation of the module.
+        """
         child_lines = []
         for k, p in enumerate(self):
             if isinstance(p, torch.Tensor):
@@ -760,9 +778,11 @@ class ParameterList(Module):
                     size_str,
                     device_str,
                 )
+                # pyrefly: ignore [bad-argument-type]
                 child_lines.append("  (" + str(k) + "): " + parastr)
             else:
                 child_lines.append(
+                    # pyrefly: ignore [bad-argument-type]
                     "  (" + str(k) + "): Object of type: " + type(p).__name__
                 )
 
@@ -868,7 +888,7 @@ class ParameterDict(Module):
     def __contains__(self, key: str) -> bool:
         return key in self._keys
 
-    def setdefault(self, key: str, default: Optional[Any] = None) -> Any:
+    def setdefault(self, key: str, default: Any | None = None) -> Any:
         """Set the default for a key in the Parameterdict.
 
         If key is in the ParameterDict, return its value.
@@ -907,17 +927,17 @@ class ParameterDict(Module):
         del self[k]
         return k, val
 
-    def get(self, key: str, default: Optional[Any] = None) -> Any:
+    def get(self, key: str, default: Any | None = None) -> Any:
         r"""Return the parameter associated with key if present. Otherwise return default if provided, None if not.
 
         Args:
             key (str): key to get from the ParameterDict
             default (Parameter, optional): value to return if key not present
         """
-        return self[key] if key in self else default
+        return self[key] if key in self else default  # noqa: SIM401
 
     def fromkeys(
-        self, keys: Iterable[str], default: Optional[Any] = None
+        self, keys: Iterable[str], default: Any | None = None
     ) -> ParameterDict:
         r"""Return a new ParameterDict with the keys provided.
 
@@ -939,7 +959,7 @@ class ParameterDict(Module):
         r"""Return an iterable of the ParameterDict values."""
         return (self[k] for k in self._keys)
 
-    def update(self, parameters: Union[Mapping[str, Any], ParameterDict]) -> None:
+    def update(self, parameters: Mapping[str, Any] | ParameterDict) -> None:
         r"""Update the :class:`~torch.nn.ParameterDict` with key-value pairs from ``parameters``, overwriting existing keys.
 
         .. note::
@@ -970,9 +990,11 @@ class ParameterDict(Module):
                         "ParameterDict update sequence element "
                         "#" + str(j) + " should be Iterable; is" + type(p).__name__
                     )
+                # pyrefly: ignore [bad-argument-type]
                 if not len(p) == 2:
                     raise ValueError(
                         "ParameterDict update sequence element "
+                        # pyrefly: ignore [bad-argument-type]
                         "#" + str(j) + " has length " + str(len(p)) + "; 2 is required"
                     )
                 # parameters as length-2 list too cumbersome to type, see ModuleDict.update comment
@@ -993,9 +1015,11 @@ class ParameterDict(Module):
                     size_str,
                     device_str,
                 )
+                # pyrefly: ignore [bad-argument-type]
                 child_lines.append("  (" + str(k) + "): " + parastr)
             else:
                 child_lines.append(
+                    # pyrefly: ignore [bad-argument-type]
                     "  (" + str(k) + "): Object of type: " + type(p).__name__
                 )
         tmpstr = "\n".join(child_lines)

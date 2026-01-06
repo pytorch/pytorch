@@ -5,10 +5,11 @@ import functools
 import inspect
 import logging
 import math
+import sys
 from collections import defaultdict
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import contextmanager
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -24,6 +25,7 @@ from torch._export.passes.lift_constants_pass import ConstantAttrMap
 from torch._export.utils import _fakify_params_buffers
 from torch._guards import Source
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_type
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.export import Constraint
 from torch.export.dynamic_shapes import (
@@ -97,10 +99,12 @@ class _KeyPathTrie:
 
     def get(self, kp: KeyPath) -> tuple[Source, KeyPath]:
         node = self.root
+        # pyrefly: ignore [bad-assignment]
         while not isinstance(node, Source):
             assert len(kp) > 0
             k, *kp = kp  # type: ignore[assignment]
             node = node[k]
+        # pyrefly: ignore [bad-return]
         return node, kp
 
 
@@ -139,6 +143,7 @@ def key_path_to_source(
         source: Source = LocalSource("args")
     else:
         source, kp = sourced_prefixes.get(kp)
+
     for k in kp:
         if isinstance(k, SequenceKey):
             source = GetItemSource(source, k.idx)
@@ -165,11 +170,18 @@ def fakify(
     sourced_prefixes: Optional[_KeyPathTrie] = None,
 ):
     source = key_path_to_source(kp, sourced_prefixes=sourced_prefixes)
-    if _is_constant_argument(t) or isinstance(t, (torch.ScriptObject, torch.nn.Module)):
+    if (
+        _is_constant_argument(t)
+        or isinstance(t, (torch.ScriptObject, torch.nn.Module))
+        or is_opaque_type(type(t))
+    ):
         return t
 
     if isinstance(t, _IntWrapper):
-        if t.dynamism is not None and t.dynamism.type in (_DimHintType.DYNAMIC, _DimHintType.AUTO):  # type: ignore[union-attr]
+        if t.dynamism is not None and t.dynamism.type in (  # type: ignore[union-attr]
+            _DimHintType.DYNAMIC,
+            _DimHintType.AUTO,
+        ):
             symint = mode.shape_env.create_unspecified_symint_and_symbol(  # type: ignore[union-attr]
                 t.val, source, DimDynamic.DYNAMIC
             )
@@ -196,9 +208,31 @@ def fakify(
             "To register a constant input, use torch.utils._pytree.register_constant"
         )
 
+    # Create symbolic context (handles subclass recursion internally)
+    symbolic_context = _create_symbolic_context_for_tensor(
+        t, source, t_constraints, sources, mode
+    )
+
+    fake = mode.from_tensor(t, source=source, symbolic_context=symbolic_context)
+    mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))  # type: ignore[union-attr]
+    return fake
+
+
+def _create_symbolic_context_for_tensor(t, source, t_constraints, sources, mode):
+    """Helper function to create symbolic context for a tensor."""
+    from torch._dynamo.source import AttrSource
+    from torch.fx.experimental.symbolic_shapes import (
+        DimDynamic,
+        RelaxedUnspecConstraint,
+        SubclassSymbolicContext,
+    )
+    from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+    # Common dynamic dimension logic for both regular tensors and subclasses
     n_dims = len(t.shape)
     dynamic_sizes = []
     constraint_sizes = [None] * n_dims
+
     for i in range(n_dims):
         if i in getattr(t, "_dynamo_weak_dynamic_indices", {}):
             dynamic_sizes.append(DimDynamic.DYNAMIC)
@@ -210,12 +244,38 @@ def fakify(
             constraint_sizes[i] = RelaxedUnspecConstraint(warn_only=False)  # type: ignore[call-overload]
         else:
             dynamic_sizes.append(DimDynamic.STATIC)
-    symbolic_context: StatelessSymbolicContext = (  # make mypy happy
-        StatelessSymbolicContext(
+
+    # Handle nested subclasses
+    if is_traceable_wrapper_subclass(t):
+        # Get inner contexts recursively
+        inner_contexts = {}
+        attrs, _ = type(t).__tensor_flatten__(t)
+
+        # Propagate outer tensor constraints to inner tensors if not already present
+        for attr in attrs:
+            inner_tensor = getattr(t, attr)
+            inner_source = AttrSource(source, attr)
+            inner_contexts[attr] = _create_symbolic_context_for_tensor(
+                inner_tensor, inner_source, t_constraints, sources, mode
+            )
+
+        symbolic_context = SubclassSymbolicContext(
             dynamic_sizes=dynamic_sizes,
             constraint_sizes=constraint_sizes,  # type: ignore[arg-type]
+            view_base_context=None,
+            tensor_source=source,
+            shape_env_to_source_to_symbol_cache={},
+            inner_contexts=inner_contexts,
         )
-    )
+    else:
+        symbolic_context: StatelessSymbolicContext = (  # type: ignore[no-redef]
+            StatelessSymbolicContext(
+                dynamic_sizes=dynamic_sizes,
+                constraint_sizes=constraint_sizes,  # type: ignore[arg-type]
+            )
+        )
+
+    # Apply constraints (common logic)
     t_id = id(t)
     assert mode.shape_env is not None
     if t_id in t_constraints:
@@ -225,10 +285,9 @@ def fakify(
             if isinstance(constraint, _RelaxedConstraint):
                 continue
             symbolic_context.constraint_sizes[i] = constraint.constraint_range
-            mode.shape_env.source_name_to_debug_name[src.name()] = constraint.name  # type: ignore[assignment]
-    fake = mode.from_tensor(t, source=source, symbolic_context=symbolic_context)
-    mode.shape_env.tracked_fakes.append(TrackedFake(fake, source, symbolic_context))  # type: ignore[union-attr]
-    return fake
+            mode.shape_env.source_name_to_debug_name[src.name] = constraint.name  # type: ignore[assignment]
+
+    return symbolic_context
 
 
 def _is_unbacked_symint(symbol):
@@ -304,10 +363,12 @@ def _override_builtin_ops():
     original_min = builtins.min
     original_pow = math.pow
 
+    # pyrefly: ignore [bad-assignment]
     builtins.max = functools.partial(
         _tensor_min_max, real_callable=original_max, tensor_callable=torch.maximum
     )
 
+    # pyrefly: ignore [bad-assignment]
     builtins.min = functools.partial(
         _tensor_min_max, real_callable=original_min, tensor_callable=torch.minimum
     )
@@ -327,8 +388,7 @@ def make_fake_inputs(
     args,
     kwargs,
     dynamic_shapes,
-    _is_torch_jit_trace=False,
-    allow_complex_guards_as_runtime_asserts=False,
+    prefer_deferred_runtime_asserts_over_guards=False,
 ):
     """
     Given an nn module, example inputs, and constraints, return a new fake mode,
@@ -363,10 +423,19 @@ def make_fake_inputs(
         # a toplevel TracingContext with a fake mode, so we do not want to
         # create another fake mode.
         fake_mode = context.fake_mode
-    elif not _is_torch_jit_trace:
+        assert fake_mode is not None
+    else:
         if isinstance(nn_module.forward, functools.partial):
             # functools handles nesting by itself, no need to recurse
             code = nn_module.forward.func.__code__
+        elif (
+            sys.version_info >= (3, 14)
+            and (fwd := getattr(nn_module.forward, "__func__", None))
+            and isinstance(fwd, functools.partial)
+        ):
+            # functools.partial is now a method descriptor:
+            # https://docs.python.org/3/whatsnew/3.14.html#changes-in-the-python-api
+            code = fwd.func.__code__
         else:
             code = nn_module.forward.__code__
         co_fields = {
@@ -379,23 +448,11 @@ def make_fake_inputs(
                 shape_env=ShapeEnv(
                     tracked_fakes=[],
                     co_fields=co_fields,
-                    prefer_deferred_runtime_asserts_over_guards=True,
-                    allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
+                    prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,
                     trace_asserts=True,
                 ),
                 allow_non_fake_inputs=True,
                 export=True,
-            )
-    else:
-        with _config.patch(fake_tensor_allow_unsafe_data_ptr_access=False):
-            fake_mode = FakeTensorMode(
-                shape_env=ShapeEnv(
-                    tracked_fakes=[],
-                    prefer_deferred_runtime_asserts_over_guards=True,
-                    allow_complex_guards_as_runtime_asserts=allow_complex_guards_as_runtime_asserts,
-                    trace_asserts=True,
-                ),
-                allow_non_fake_inputs=True,
             )
     if fake_mode.shape_env is None or fake_mode.shape_env.tracked_fakes is None:
         raise ValueError(
@@ -405,11 +462,7 @@ def make_fake_inputs(
         )
 
     with fake_mode:
-        # FIXME(ycao) ScriptMethod doesn't have signature, I am using an empty one to unblock
-        if not _is_torch_jit_trace:
-            original_signature = inspect.signature(nn_module.forward)
-        else:
-            original_signature = None
+        original_signature = inspect.signature(nn_module.forward)
         sources: dict[tuple[int, int], list[Source]] = defaultdict(list)
         sourced_prefixes = make_sourced_prefixes(nn_module, args, kwargs)
         fake_args, fake_kwargs = tree_map_with_path(
@@ -490,7 +543,6 @@ def produce_guards_and_solve_constraints(
     dynamic_shapes: Union[dict[str, Any], tuple[Any], list[Any], None],
     equalities_inputs: EqualityConstraint,
     original_signature: inspect.Signature,
-    _is_torch_jit_trace=False,
 ):
     """
     Given a fake mode, sources pairs corresponding to equal dynamic shape dimensions,
@@ -531,18 +583,21 @@ def produce_guards_and_solve_constraints(
         raise constraint_violation_error
     dim_constraints.solve()
     forced_specializations = dim_constraints.forced_specializations()
-    if not _is_torch_jit_trace:
-        msg = dim_constraints.prettify_results(
-            original_signature,
-            dynamic_shapes,  # type: ignore[arg-type]
-            constraint_violation_error,
-            forced_specializations,  # type: ignore[arg-type]
-        )
-    else:
-        # FIXME(ycao): This is a hack to get around missing signature from ScriptMethod
-        msg = "dummy constraint violation message"
+
+    msg = dim_constraints.prettify_results(
+        original_signature,
+        dynamic_shapes,  # type: ignore[arg-type]
+        constraint_violation_error,
+        forced_specializations,  # type: ignore[arg-type]
+    )
+
     if constraint_violation_error:
-        constraint_violation_error.args = (constraint_violation_error.args[0] + msg,)
+        if constraint_violation_error.args:
+            constraint_violation_error.args = (
+                constraint_violation_error.args[0] + msg,
+            )
+        else:
+            constraint_violation_error.args = (msg,)
     elif forced_specializations:
         constraint_violation_error = ConstraintViolationError(msg)
     if constraint_violation_error:
@@ -868,7 +923,7 @@ def _fakify_script_objects(
     mod: torch.nn.Module,
     args: Sequence[Any],
     kwargs: dict[Any, Any],
-    fake_mode: torch._subclasses.fake_tensor.FakeTensorMode,
+    fake_mode: Optional[torch._subclasses.fake_tensor.FakeTensorMode],
 ):
     # This context manager is used to fakify script objects into FakeScriptObject.
     # Inputs:
@@ -911,7 +966,9 @@ def _fakify_script_objects(
 
     try:
         for obj, fqns in constant_attrs.items():
-            if torch._library.fake_class_registry._is_script_object(obj):
+            if torch._library.fake_class_registry._is_script_object(
+                obj
+            ) or is_opaque_type(obj):
                 fake_script_obj = _maybe_fakify_obj(obj)
                 for fqn in fqns:
                     cur_mod, attr = _leaf_mod_and_attr(mod, fqn)
@@ -999,34 +1056,66 @@ class _NonStrictTorchFunctionHandler(torch.overrides.TorchFunctionMode):
 
             def rewrite(dim, item):
                 # Redirect to torch.select for indexing.
+                if item is None:
+                    return dim + 1, (torch.unsqueeze, [dim])
                 if isinstance(item, (int, torch.SymInt)):
                     return dim, (torch.select, [dim, item])
                 # Redirect to torch.ops.aten.slice for slicing.
                 if isinstance(item, slice):
+                    step = item.step or 1
+                    if item.start is None and item.stop is None and step == 1:
+                        # no-op
+                        return dim + 1, (lambda t: t, [])
                     return dim + 1, (
                         torch.ops.aten.slice,
-                        [dim, item.start, item.stop, item.step or 1],
+                        [dim, item.start, item.stop, step],
                     )
                 # Otherwise do nothing.
 
-            items = args[1] if isinstance(args[1], tuple) else (args[1],)
-            dim = 0
-            # Sequence rewrites.
-            sequence = []
-            for item in items:
-                if (r := rewrite(dim, item)) is None:
-                    return func, args, kwargs
-                dim, call_spec = r
-                sequence.append(call_spec)
+            items = list(args[1]) if isinstance(args[1], tuple) else [args[1]]
 
-            def run():
-                # Run sequence.
-                t = args[0]
-                for _method, _args in sequence:
-                    t = _method(t, *_args)
-                return t
+            has_symint = False
+            index_ellipsis = None
+            t = args[0]
+            n_none_slices = t.ndim + 1
+            for i, item in enumerate(items):
+                if isinstance(item, torch.SymInt) or (
+                    isinstance(item, slice)
+                    and any(
+                        isinstance(s, torch.SymInt)
+                        for s in (item.start, item.stop, item.step)
+                    )
+                ):
+                    has_symint = True
+                if item is Ellipsis:
+                    index_ellipsis = i
+                if item is not None:
+                    n_none_slices -= 1
 
-            return run, [], {}
+            # only rewrite when there are symints
+            if has_symint:
+                if index_ellipsis is not None:
+                    none_slices = [slice(None)] * n_none_slices
+                    items[index_ellipsis : index_ellipsis + 1] = none_slices
+
+                dim = 0
+                # Sequence rewrites.
+                sequence = []
+                for item in items:
+                    if (r := rewrite(dim, item)) is None:
+                        return func, args, kwargs
+                    dim, call_spec = r
+                    sequence.append(call_spec)
+
+                def run():
+                    # Run sequence.
+                    # pyrefly: ignore [bad-index, index-error]
+                    t = args[0]
+                    for _method, _args in sequence:
+                        t = _method(t, *_args)
+                    return t
+
+                return run, [], {}
 
         return func, args, kwargs
 

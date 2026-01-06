@@ -649,7 +649,7 @@ inline InferredType tryToInferContainerType(
           "."));
     } else {
       // TODO: this message is not correct anymore, since this InferredType is
-      // used from a bunch of circumstances unrelated to tracing. We can re-use
+      // used from a bunch of circumstances unrelated to tracing. We can reuse
       // this instead of the attribute_failure stuff in concreteType
       return InferredType(c10::str(
           "Only tensors and (possibly nested) tuples of tensors, lists, or dicts ",
@@ -1277,8 +1277,23 @@ TORCH_PYTHON_API std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
     const py::args& args,
     const py::kwargs& kwargs);
 
+// Efficient overload (does not require vector allocation) of the
+// above for use from C++ code.
+std::pair<std::shared_ptr<Operator>, Stack> getOpWithStack(
+    c10::ArrayRef<std::shared_ptr<Operator>> operations,
+    const py::args& args,
+    const py::kwargs& kwargs);
+
 TORCH_PYTHON_API py::object invokeOperatorFromPython(
     const std::vector<std::shared_ptr<Operator>>& operations,
+    const py::args& args,
+    const py::kwargs& kwargs,
+    std::optional<c10::DispatchKey> dk = std::nullopt);
+
+// Efficient overload (does not require vector allocation) of the
+// above for use from C++ code.
+py::object invokeOperatorFromPython(
+    c10::ArrayRef<std::shared_ptr<Operator>> operations,
     const py::args& args,
     const py::kwargs& kwargs,
     std::optional<c10::DispatchKey> dk = std::nullopt);
@@ -1298,6 +1313,16 @@ TORCH_PYTHON_API bool checkSchemaAllowFakeScriptObject(
 
 TORCH_PYTHON_API py::object _get_operation_for_overload_or_packet(
     const std::vector<std::shared_ptr<Operator>>& operations,
+    Symbol symbol,
+    const py::args& args,
+    const py::kwargs& kwargs,
+    bool is_overload,
+    std::optional<c10::DispatchKey> dk = std::nullopt);
+
+// Efficient overload (does not require vector allocation) of the
+// above for use from C++ code.
+py::object _get_operation_for_overload_or_packet(
+    c10::ArrayRef<std::shared_ptr<Operator>> operations,
     Symbol symbol,
     const py::args& args,
     const py::kwargs& kwargs,

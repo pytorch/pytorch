@@ -1,4 +1,4 @@
-# Owner(s): ["module: unknown"]
+# Owner(s): ["module: sparse"]
 import copy
 import random
 
@@ -158,7 +158,7 @@ class TestBaseStructuredSparsifier(TestCase):
             assert parametrize.is_parametrized(module)
             assert hasattr(module, "parametrizations")
             # Assume that this is the 1st/only parametrization
-            assert type(module.parametrizations.weight[0]) == FakeStructuredSparsity
+            assert type(module.parametrizations.weight[0]) is FakeStructuredSparsity
 
     def _check_pruner_valid_before_step(self, model, pruner, device):
         for config in pruner.groups:
@@ -1055,9 +1055,9 @@ class TestFPGMPruner(TestCase):
         mask1 = pruner.groups[0]["module"].parametrizations.weight[0].mask[-1]
         mask2 = pruner.groups[0]["module"].parametrizations.weight[0].mask[-2]
         # Check if either of the least-norm filters is not pruned
-        assert (
-            mask1.item() is not False or mask2.item() is not False
-        ), "Do not prune all least-norm filters"
+        assert mask1.item() is not False or mask2.item() is not False, (
+            "Do not prune all least-norm filters"
+        )
 
         # fusion step
         pruned_model = pruner.prune()

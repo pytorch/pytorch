@@ -132,17 +132,26 @@ def check_changed_files(sha: str) -> bool:
     # Return true if all the changed files are in the list of allowed files to
     # be changed to reuse the old whl
 
-    # Removing any files is not allowed since rsync will not remove files
+    # Removing files in the torch folder is not allowed since rsync will not
+    # remove files
     removed_files = (
         subprocess.check_output(
-            ["git", "diff", "--name-only", sha, "HEAD", "--diff-filter=D"],
+            [
+                "git",
+                "diff",
+                "--name-only",
+                sha,
+                "HEAD",
+                "--diff-filter=D",
+                "--no-renames",
+            ],
             text=True,
             stderr=subprocess.DEVNULL,
         )
         .strip()
         .split()
     )
-    if removed_files:
+    if any(file.startswith("torch/") for file in removed_files):
         print(
             f"Removed files between {sha} and HEAD: {removed_files}, cannot reuse old whl"
         )
@@ -150,7 +159,7 @@ def check_changed_files(sha: str) -> bool:
 
     changed_files = (
         subprocess.check_output(
-            ["git", "diff", "--name-only", sha, "HEAD"],
+            ["git", "diff", "--name-only", sha, "HEAD", "--no-renames"],
             text=True,
             stderr=subprocess.DEVNULL,
         )
@@ -255,7 +264,7 @@ def unzip_artifact_and_replace_files() -> None:
         change_content_to_new_version(f"artifacts/dist/{old_stem}/torch/version.py")
 
         for file in Path(f"artifacts/dist/{old_stem}").glob(
-            "*.dist-info/**",
+            "*.dist-info/*",
         ):
             change_content_to_new_version(file)
 
@@ -295,8 +304,7 @@ def unzip_artifact_and_replace_files() -> None:
 
 
 def set_output() -> None:
-    # Disable for now so we can monitor first
-    # pass
+    print("Setting output reuse=true")
     if os.getenv("GITHUB_OUTPUT"):
         with open(str(os.getenv("GITHUB_OUTPUT")), "a") as env:
             print("reuse=true", file=env)

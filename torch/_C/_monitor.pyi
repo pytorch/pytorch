@@ -1,9 +1,9 @@
 # Defined in torch/csrc/monitor/python_init.cpp
 
 import datetime
+from collections.abc import Callable
 from enum import Enum
 from types import TracebackType
-from typing import Callable
 
 class Aggregation(Enum):
     VALUE = ...

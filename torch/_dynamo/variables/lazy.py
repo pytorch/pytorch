@@ -1,12 +1,19 @@
+from __future__ import annotations
+
 import collections
 import functools
 import inspect
-from typing import Any, Callable, final, Optional, Union
-from typing_extensions import Self
+from typing import Any, TYPE_CHECKING
 
 from ..utils import is_function_or_wrapper
-from .base import VariableTracker
-from .tensor import SymNodeVariable
+from .base import VariableTracker, VariableTrackerMeta
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+    from typing_extensions import Self
+
+    from .tensor import SymNodeVariable
 
 
 class LazyCache:
@@ -17,7 +24,8 @@ class LazyCache:
             assert source
         self.value = value
         self.source = source
-        self.vt: Optional[VariableTracker] = None
+        self.name_hint: str | None = None
+        self.vt: VariableTracker | None = None
 
     def realize(self) -> None:
         assert self.vt is None
@@ -31,12 +39,15 @@ class LazyCache:
         else:
             self.vt = builder.VariableBuilder(tx, self.source)(self.value)
 
+        if self.name_hint is not None:
+            self.vt.set_name_hint(self.name_hint)
+
         del self.value
         del self.source
+        del self.name_hint
 
 
-@final
-class LazyVariableTracker(VariableTracker):
+class LazyVariableTracker(VariableTracker, metaclass=VariableTrackerMeta):
     """
     A structure that defers the creation of the actual VariableTracker
     for a given underlying value until it is accessed.
@@ -50,10 +61,12 @@ class LazyVariableTracker(VariableTracker):
     VariableTrackers right away.
     """
 
+    # Flag to prevent implicit realization in isinstance checks (inherited by subclasses)
+    _no_implicit_realize = True
     _nonvar_fields = {"_cache", *VariableTracker._nonvar_fields}
 
     @staticmethod
-    def create(value: Any, source: Any, **options: Any) -> "LazyVariableTracker":
+    def create(value: Any, source: Any, **options: Any) -> LazyVariableTracker:
         return LazyVariableTracker(LazyCache(value, source), source=source, **options)
 
     def __init__(self, _cache: LazyCache, **kwargs: Any) -> None:
@@ -68,7 +81,11 @@ class LazyVariableTracker(VariableTracker):
             assert self._cache.vt is not None
         return self._cache.vt
 
-    def unwrap(self) -> Union[VariableTracker, Self]:
+    def lazy_isinstance(self, cls: type) -> bool:
+        """Check isinstance after realizing, used by ImplicitRealizingVariableTrackerMeta"""
+        return type.__instancecheck__(cls, self.realize())
+
+    def unwrap(self) -> VariableTracker | Self:
         """Return the real VariableTracker if it already exists"""
         if self.is_realized():
             assert self._cache.vt is not None
@@ -92,10 +109,20 @@ class LazyVariableTracker(VariableTracker):
         assert not self.is_realized()
         return self._cache.value
 
-    def __str__(self) -> str:
+    def set_name_hint(self, name: str) -> None:
         if self.is_realized():
-            return repr(self.unwrap())
-        return super().__repr__()
+            self._cache.vt.set_name_hint(name)  # type: ignore[union-attr]
+        else:
+            self._cache.name_hint = name
+
+    def __str__(self) -> str:
+        variable_info = "LazyVariableTracker("
+        if self.is_realized():
+            variable_info += f"realized: {repr(self.unwrap())})"
+        else:
+            variable_info += f"unrealized: {self.peek_type()})"
+
+        return variable_info
 
     def __getattr__(self, item: str) -> Any:
         return getattr(self.realize(), item)
@@ -108,7 +135,7 @@ class LazyVariableTracker(VariableTracker):
     def realize_all(
         cls,
         value: Any,
-        cache: Optional[dict[int, tuple[Any, Any]]] = None,
+        cache: dict[int, tuple[Any, Any]] | None = None,
     ) -> Any:
         """
         Walk an object and realize all LazyVariableTrackers inside it.

@@ -51,7 +51,11 @@ void initAOTIRunnerBindings(PyObject* module) {
           &AOTIModelContainerRunnerCpu::swap_constant_buffer)
       .def(
           "free_inactive_constant_buffer",
-          &AOTIModelContainerRunnerCpu::free_inactive_constant_buffer);
+          &AOTIModelContainerRunnerCpu::free_inactive_constant_buffer)
+      .def(
+          "update_constant_buffer_from_blob",
+          &AOTIModelContainerRunnerCpu::update_constant_buffer_from_blob,
+          py::arg("weights_path"));
 
 #ifdef USE_CUDA
   py::class_<AOTIModelContainerRunnerCuda>(m, "AOTIModelContainerRunnerCuda")
@@ -62,6 +66,12 @@ void initAOTIRunnerBindings(PyObject* module) {
            int,
            const std::string&,
            const std::string&>())
+      .def(py::init<
+           const std::string&,
+           int,
+           const std::string&,
+           const std::string&,
+           const bool>())
       .def(
           "run",
           &AOTIModelContainerRunnerCuda::run,
@@ -91,7 +101,11 @@ void initAOTIRunnerBindings(PyObject* module) {
           &AOTIModelContainerRunnerCuda::swap_constant_buffer)
       .def(
           "free_inactive_constant_buffer",
-          &AOTIModelContainerRunnerCuda::free_inactive_constant_buffer);
+          &AOTIModelContainerRunnerCuda::free_inactive_constant_buffer)
+      .def(
+          "update_constant_buffer_from_blob",
+          &AOTIModelContainerRunnerCuda::update_constant_buffer_from_blob,
+          py::arg("weights_path"));
 #endif
 #ifdef USE_XPU
   py::class_<AOTIModelContainerRunnerXpu>(m, "AOTIModelContainerRunnerXpu")
@@ -131,10 +145,14 @@ void initAOTIRunnerBindings(PyObject* module) {
           &AOTIModelContainerRunnerXpu::swap_constant_buffer)
       .def(
           "free_inactive_constant_buffer",
-          &AOTIModelContainerRunnerXpu::free_inactive_constant_buffer);
-
+          &AOTIModelContainerRunnerXpu::free_inactive_constant_buffer)
+      .def(
+          "update_constant_buffer_from_blob",
+          &AOTIModelContainerRunnerXpu::update_constant_buffer_from_blob,
+          py::arg("weights_path"));
 #endif
-#if defined(__APPLE__) && !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
+#if defined(USE_MPS) && defined(__APPLE__) && \
+    !(defined(FBCODE_CAFFE2) || defined(OVRSOURCE))
   py::class_<AOTIModelContainerRunnerMps>(m, "AOTIModelContainerRunnerMps")
       .def(py::init<const std::string&, int>())
       .def(
@@ -166,8 +184,11 @@ void initAOTIRunnerBindings(PyObject* module) {
           &AOTIModelContainerRunnerMps::swap_constant_buffer)
       .def(
           "free_inactive_constant_buffer",
-          &AOTIModelContainerRunnerMps::free_inactive_constant_buffer);
-
+          &AOTIModelContainerRunnerMps::free_inactive_constant_buffer)
+      .def(
+          "update_constant_buffer_from_blob",
+          &AOTIModelContainerRunnerMps::update_constant_buffer_from_blob,
+          py::arg("weights_path"));
 #endif
 
   m.def(

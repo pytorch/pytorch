@@ -5,11 +5,11 @@ import io
 import itertools
 import os
 import warnings
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from contextlib import contextmanager
 from functools import wraps
 from pstats import Stats
-from typing import Any, Callable, cast, Optional, TypeVar, Union
+from typing import Any, cast, TypeVar
 
 import torch
 import torch.distributed as dist
@@ -32,7 +32,7 @@ R = TypeVar("R")
 
 
 def _get_failure_dict(
-    results: list[Union[T, WRAPPED_EXCEPTION]],
+    results: list[T | WRAPPED_EXCEPTION],
 ) -> dict[int, WRAPPED_EXCEPTION]:
     return cast(
         dict[int, WRAPPED_EXCEPTION],
@@ -41,7 +41,7 @@ def _get_failure_dict(
 
 
 def _all_gather_keys(
-    local_dict: dict[str, Any], group: Optional[dist.ProcessGroup] = None
+    local_dict: dict[str, Any], group: dist.ProcessGroup | None = None
 ) -> set[str]:
     """Gathers all keys, and returns them sorted."""
     keys = list(local_dict.keys())
@@ -52,7 +52,7 @@ def _all_gather_keys(
 
 
 def _assert_same_keys(
-    state_dict: dict[str, Any], process_group: Optional[dist.ProcessGroup] = None
+    state_dict: dict[str, Any], process_group: dist.ProcessGroup | None = None
 ) -> None:
     """
     Asserts that all ranks have the same keys in their state dict.
@@ -84,7 +84,7 @@ class _DistWrapper:
 
     def __init__(
         self,
-        group: Optional[dist.ProcessGroup],
+        group: dist.ProcessGroup | None,
         use_dist: bool,
         coordinator_rank: int,
     ):
@@ -112,7 +112,7 @@ class _DistWrapper:
             return dist.get_world_size(self.group)
         return 1
 
-    def broadcast_object(self, object: Optional[T]) -> T:
+    def broadcast_object(self, object: T | None) -> T:
         """Implement functionality similar to c10d::broadcast_object_list but without distributed enabled."""
         object_list = [object]
         if self.use_dist:
@@ -123,7 +123,7 @@ class _DistWrapper:
             )
         return cast(T, object_list[0])
 
-    def gather_object(self, object: T) -> Optional[list[T]]:
+    def gather_object(self, object: T) -> list[T] | None:
         """Implement functionality similar to c10d::gather_object but without distributed enabled."""
         if self.use_dist:
             gather_objs = (
@@ -155,7 +155,7 @@ class _DistWrapper:
             gather_objs = [object]
         return gather_objs
 
-    def scatter_object(self, object_list: Optional[list[T]]) -> T:
+    def scatter_object(self, object_list: list[T] | None) -> T:
         """Implement functionality similar to c10d::scatter_object but without distributed enabled."""
         if self.use_dist:
             gather_result = cast(list[T], [None])
@@ -168,7 +168,8 @@ class _DistWrapper:
 
             local_reply = gather_result[0]
         else:
-            assert object_list is not None
+            if object_list is None:
+                raise AssertionError("object_list is None")
             local_reply = object_list[0]
         return local_reply
 
@@ -187,26 +188,27 @@ class _DistWrapper:
             Call ``reduce_fun`` on all those values
             Scatter to each rank part of the result.
         """
-        local_data: Union[WRAPPED_EXCEPTION, T]
+        local_data: WRAPPED_EXCEPTION | T
         try:
             local_data = map_fun()
-        except BaseException as e:
+        except BaseException as e:  # noqa: B036
             local_data = _wrap_exception(e)
 
         all_data = self.gather_object(local_data)
-        all_results: Optional[list[Union[R, CheckpointException]]] = None
+        all_results: list[R | CheckpointException] | None = None
         if self.is_coordinator:
-            assert all_data is not None
+            if all_data is None:
+                raise AssertionError("all_data is None")
             node_failures = _get_failure_dict(all_data)
 
             if len(node_failures) == 0:
                 try:
                     # N.B. why can't mypy cast List[R] to List[Union[R, WRAPPED_EXCEPTION]]?
                     all_results = cast(
-                        list[Union[R, CheckpointException]],
+                        list[R | CheckpointException],
                         reduce_fun(cast(list[T], all_data)),
                     )
-                except BaseException as e:
+                except BaseException as e:  # noqa: B036
                     node_failures[self.rank] = _wrap_exception(e)
 
             if len(node_failures) > 0:
@@ -234,26 +236,28 @@ class _DistWrapper:
             Call ``reduce_fun`` on all those values
             Broadcast the reduced value to all ranks.
         """
-        local_data: Union[T, WRAPPED_EXCEPTION]
+        local_data: T | WRAPPED_EXCEPTION
         try:
             local_data = map_fun()
-        except BaseException as e:
+        except BaseException as e:  # noqa: B036
             local_data = _wrap_exception(e)
 
         all_data = self.gather_object(local_data)
-        result: Optional[Union[R, CheckpointException]] = None
+        result: R | CheckpointException | None = None
         if self.is_coordinator:
-            assert all_data is not None
+            if all_data is None:
+                raise AssertionError("all_data is None")
             node_failures = _get_failure_dict(all_data)
             if len(node_failures) == 0:
                 try:
                     result = reduce_fun(cast(list[T], all_data))
-                except BaseException as e:
+                except BaseException as e:  # noqa: B036
                     node_failures[self.rank] = _wrap_exception(e)
 
             if len(node_failures) > 0:
                 result = CheckpointException(step, node_failures)
 
+        # pyrefly: ignore [bad-argument-type]
         final_result = self.broadcast_object(result)
         if isinstance(final_result, CheckpointException):
             raise final_result
@@ -271,10 +275,10 @@ class _DistWrapper:
             Run ``map_cp`` on all ranks
             all_gather the values to all ranks
         """
-        result: Union[T, WRAPPED_EXCEPTION]
+        result: T | WRAPPED_EXCEPTION
         try:
             result = map_fun()
-        except BaseException as e:
+        except BaseException as e:  # noqa: B036
             result = _wrap_exception(e)
 
         all_results = self.all_gather_object(result)
@@ -296,12 +300,13 @@ class _DistWrapper:
             Run ``map_cp`` on rank 0
             broadcast the value
         """
-        result: Optional[Union[T, CheckpointException]] = None
+        result: T | CheckpointException | None = None
         if self.is_coordinator:
             try:
                 result = map_fun()
-            except BaseException as e:
+            except BaseException as e:  # noqa: B036
                 result = CheckpointException(step, {self.rank: _wrap_exception(e)})
+        # pyrefly: ignore [bad-argument-type]
         final_result = self.broadcast_object(result)
         if isinstance(final_result, CheckpointException):
             raise final_result
@@ -436,7 +441,7 @@ ENABLE_PROFILE = False
 @contextmanager
 def _profile():
     # Only log the profiling when it is enable and is on rank0  or dist is not
-    # avaiable.
+    # available.
     if ENABLE_PROFILE and (not dist.is_available() or dist.get_rank() == 0):
         profiler = cProfile.Profile()
         profiler.enable()
@@ -456,17 +461,20 @@ def _api_bc_check(func):
         if len(args) == 2:
             warnings.warn(
                 f"The argument order of {func.__name__} has been changed. "
-                "Please check the document to avoid future breakages."
+                "Please check the document to avoid future breakages.",
+                stacklevel=2,
             )
             sig = inspect.signature(func)
             kwonlyargs = [
                 p.name for p in sig.parameters.values() if p.kind == p.KEYWORD_ONLY
             ]
             if "storage_writer" in kwonlyargs:
-                assert "storage_writer" not in kwargs, (args, kwargs)
+                if "storage_writer" in kwargs:
+                    raise AssertionError(f"storage_writer in kwargs: {(args, kwargs)}")
                 kwargs["storage_writer"] = args[1]
             elif "storage_reader" in kwonlyargs:
-                assert "storage_reader" not in kwargs, (args, kwargs)
+                if "storage_reader" in kwargs:
+                    raise AssertionError(f"storage_reader in kwargs: {(args, kwargs)}")
                 kwargs["storage_reader"] = args[1]
             else:
                 raise RuntimeError(f"Unexpected kwonlyargs = {kwonlyargs}")

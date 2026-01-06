@@ -2,6 +2,10 @@
 from torch._functorch._activation_checkpointing.graph_info_provider import (
     GraphInfoProvider,
 )
+from torch._functorch._activation_checkpointing.knapsack import (
+    dp_knapsack,
+    dp_knapsack_sliding_hirschberg,
+)
 from torch._functorch._activation_checkpointing.knapsack_evaluator import (
     KnapsackEvaluator,
 )
@@ -124,9 +128,7 @@ class TestGraphInfoProvider(TestCase):
         )
 
     def test_recomputable_node_only_graph_with_larger_graph_context(self):
-        recomputable_node_only_graph_with_larger_graph_context = (
-            self.graph_info_provider.recomputable_node_only_graph_with_larger_graph_context
-        )
+        recomputable_node_only_graph_with_larger_graph_context = self.graph_info_provider.recomputable_node_only_graph_with_larger_graph_context  # noqa: B950
         expected_nodes = self.all_recomputable_banned_nodes
         # node1 does not have an indirect path to node5 because of node2
         # node2 has an indirect path to node5
@@ -326,6 +328,83 @@ class TestKnapsackEvaluator(TestCase):
         for result_item, expected_result_item in zip(result, expected_result):
             self.assertAlmostEqual(result_item[0], expected_result_item[0])
             self.assertEqual(result_item[1], expected_result_item[1])
+
+
+class TestActivationCheckpointingKnapsack(TestCase):
+    def setUp(self):
+        # (memory, runtime, max_memory, expected_runtime, expected_saved, expected_recomputable)
+        self.test_cases = [
+            ([2, 3, 2, 4, 1], [1, 2, 1, 3, 2], 5, 5.0, [3, 4], [2, 1, 0]),
+            ([1, 1, 1], [1, 2, 3], 3, 6.0, [0, 1, 2], []),
+            ([10, 20, 30], [1, 2, 3], 5, 0.0, [], [2, 1, 0]),
+            ([1, 2, 3], [10, 20, 30], 1, 10.0, [0], [2, 1]),
+            ([1, 1, 1], [2, 2, 2], 2, 4.0, [0, 1], [2]),
+            ([0, 2, 3], [5, 2, 3], 5, 10.0, [0, 1, 2], []),
+            ([1, 2, 3], [0, 2, 3], 3, 3.0, [2], [0, 1]),
+            ([100, 200, 300], [1000, 2000, 3000], 500, 5000.0, [1, 2], [0]),
+            ([0.5, 1.5, 2.0], [1.0, 2.0, 3.0], 2.0, 3.0, [1, 0], [2]),
+            ([], [], 10, 0.0, [], []),
+            ([1, 2, 3], [1, 2, 3], 0, 0.0, [], [2, 1, 0]),
+            ([0, 0, 0], [1, 2, 3], 0, 6.0, [0, 1, 2], []),
+            ([1, 2, 3], [0, 0, 0], 6, 0.0, [], [2, 1, 0]),
+        ]
+
+    def _run_knapsack_and_check(
+        self,
+        func,
+        memory,
+        runtime,
+        max_memory,
+        expected_runtime,
+        expected_saved,
+        expected_recomputable,
+    ):
+        result_runtime, result_saved, result_recomputable = func(
+            memory, runtime, max_memory
+        )
+        self.assertEqual(result_runtime, expected_runtime)
+        self.assertEqual(sorted(result_saved), sorted(expected_saved))
+        self.assertEqual(sorted(result_recomputable), sorted(expected_recomputable))
+
+    def test_dp_knapsack(self):
+        for i, (
+            memory,
+            runtime,
+            max_memory,
+            expected_runtime,
+            expected_saved,
+            expected_recomputable,
+        ) in enumerate(self.test_cases):
+            with self.subTest(f"dp_knapsack_case_{i}"):
+                self._run_knapsack_and_check(
+                    dp_knapsack,
+                    memory,
+                    runtime,
+                    max_memory,
+                    expected_runtime,
+                    expected_saved,
+                    expected_recomputable,
+                )
+
+    def test_dp_knapsack_sliding_hirschberg(self):
+        for i, (
+            memory,
+            runtime,
+            max_memory,
+            expected_runtime,
+            expected_saved,
+            expected_recomputable,
+        ) in enumerate(self.test_cases):
+            with self.subTest(f"dp_knapsack_sliding_hirschberg_case_{i}"):
+                self._run_knapsack_and_check(
+                    dp_knapsack_sliding_hirschberg,
+                    memory,
+                    runtime,
+                    max_memory,
+                    expected_runtime,
+                    expected_saved,
+                    expected_recomputable,
+                )
 
 
 if __name__ == "__main__":

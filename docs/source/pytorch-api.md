@@ -1,9 +1,16 @@
 (pytorch_api)=
-# Python API
+# Reference API
+
+```{toctree}
+:maxdepth: 1
+
+C++ <https://docs.pytorch.org/cppdocs/>
+```
 
 ```{toctree}
 :glob:
 :maxdepth: 1
+:caption: Python API
 
 torch
 nn
@@ -22,9 +29,10 @@ mps
 xpu
 mtia
 mtia.memory
+mtia.mtia_graph
 meta
 torch.backends <backends>
-torch.export <export>
+torch.export <user_guide/torch_compiler/export>
 torch.distributed <distributed>
 torch.distributed.tensor <distributed.tensor>
 torch.distributed.algorithms.join <distributed.algorithms.join>
@@ -34,9 +42,10 @@ torch.distributed.fsdp.fully_shard <distributed.fsdp.fully_shard>
 torch.distributed.tensor.parallel <distributed.tensor.parallel>
 torch.distributed.optim <distributed.optim>
 torch.distributed.pipelining <distributed.pipelining>
+torch.distributed._symmetric_memory <symmetric_memory>
 torch.distributed.checkpoint <distributed.checkpoint>
 torch.distributions <distributions>
-torch.compiler <torch.compiler>
+torch.compiler <torch.compiler_api>
 torch.fft <fft>
 torch.func <func>
 futures
@@ -49,6 +58,7 @@ torch.monitor <monitor>
 torch.signal <signal>
 torch.special <special>
 torch.overrides
+torch.nativert <nativert>
 torch.package <package>
 profiler
 nn.init
@@ -68,7 +78,6 @@ storage
 torch.testing <testing>
 torch.utils <utils>
 torch.utils.benchmark <benchmark_utils>
-torch.utils.bottleneck <bottleneck>
 torch.utils.checkpoint <checkpoint>
 torch.utils.cpp_extension <cpp_extension>
 torch.utils.data <data>

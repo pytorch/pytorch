@@ -21,7 +21,7 @@ std::string cuGDSFileGetErrorString(T status) {
                                : std::string(c10::utils::str_error(errno));
 }
 
-// To get error message for Buf/Handle registeration APIs that return
+// To get error message for Buf/Handle registration APIs that return
 // CUfileError_t
 template <
     class T,
@@ -47,7 +47,7 @@ void gds_load_storage(
   const size_t nbytes = storage.nbytes();
 
   // Read the binary file
-  ssize_t ret = cuFileRead(cf_handle, (void*)dataPtr, nbytes, offset, 0);
+  ssize_t ret = cuFileRead(cf_handle, dataPtr, nbytes, offset, 0);
   TORCH_CHECK(ret >= 0, "cuFileRead failed: ", cuGDSFileGetErrorString(ret));
 }
 
@@ -91,8 +91,7 @@ void gds_deregister_buffer(const at::Storage& storage) {
 
 int64_t gds_register_handle(int fd) {
   CUfileDescr_t cf_descr;
-  // NOLINTNEXTLINE(cppcoreguidelines-init-variables)
-  CUfileHandle_t cf_handle;
+  CUfileHandle_t cf_handle{};
   memset((void*)&cf_descr, 0, sizeof(CUfileDescr_t));
   cf_descr.handle.fd = fd;
   cf_descr.type = CU_FILE_HANDLE_TYPE_OPAQUE_FD;

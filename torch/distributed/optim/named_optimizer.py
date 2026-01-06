@@ -1,8 +1,8 @@
 import logging
 import warnings
-from collections.abc import Collection, Mapping
+from collections.abc import Callable, Collection, Mapping
 from copy import deepcopy
-from typing import Any, Callable, Optional, overload, Union
+from typing import Any, overload
 
 import torch
 import torch.nn as nn
@@ -62,10 +62,10 @@ class _NamedOptimizer(optim.Optimizer):
 
     def __init__(
         self,
-        named_parameters: Mapping[str, Union[torch.Tensor, ShardedTensor]],
+        named_parameters: Mapping[str, torch.Tensor | ShardedTensor],
         optimizer_class: optim.Optimizer,
-        param_groups: Optional[Collection[Mapping[str, Any]]] = None,
-        module: Optional[nn.Module] = None,
+        param_groups: Collection[Mapping[str, Any]] | None = None,
+        module: nn.Module | None = None,
         *args: tuple[Any, ...],
         **kwargs: dict[str, Any],
     ) -> None:
@@ -87,7 +87,8 @@ class _NamedOptimizer(optim.Optimizer):
         else:
             warnings.warn(
                 "Since we pass in param_groups, we will use param_groups to "
-                "initialize the optimizer, not all parameters of the module."
+                "initialize the optimizer, not all parameters of the module.",
+                stacklevel=2,
             )
             param_to_key = {param: key for key, param in self.named_parameters.items()}  # type: ignore[misc, has-type]
             ordered_param_keys = []
@@ -151,7 +152,7 @@ class _NamedOptimizer(optim.Optimizer):
     @overload
     def step(self, closure: Callable[[], float]) -> float: ...
 
-    def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
+    def step(self, closure: Callable[[], float] | None = None) -> float | None:
         """
         Perform a single optimization step.
 
@@ -202,7 +203,7 @@ class _NamedOptimizer(optim.Optimizer):
 
         for idx, param_key in enumerate(self.ordered_param_keys):
             # When the conditional training is performed, not all parameters are updated in the optim.
-            if param_key not in state.keys():
+            if param_key not in state:
                 continue
             if len(state[param_key]) != len(new_state[idx]):
                 raise ValueError(
@@ -323,5 +324,5 @@ class _NamedOptimizer(optim.Optimizer):
 
 
 def _gen_param_group_key(param_keys: list[str]) -> str:
-    """Concatenate all param keys as a unique indentifier for one param group."""
+    """Concatenate all param keys as a unique identifier for one param group."""
     return "/".join(sorted(param_keys))

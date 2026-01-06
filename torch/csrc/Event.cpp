@@ -1,9 +1,6 @@
-#include <pybind11/pybind11.h>
 #include <torch/csrc/Device.h>
 #include <torch/csrc/Event.h>
 #include <torch/csrc/Stream.h>
-#include <torch/csrc/THP.h>
-#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
 
@@ -12,7 +9,6 @@
 
 #include <c10/core/DeviceType.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
-#include <structmember.h>
 #include <string>
 
 PyTypeObject* THPEventClass = nullptr;
@@ -48,7 +44,8 @@ static PyObject* THPEvent_pynew(
     TORCH_CHECK(ptr, "Failed to allocate memory for Event");
   }
 
-  THPEvent* self = (THPEvent*)ptr.get();
+  THPEvent* self = reinterpret_cast<THPEvent*>(ptr.get());
+  self->weakreflist = nullptr;
 
   // TODO: blocking and interprocess are not supported yet. To support them, the
   // flag system of c10::Event needs to be refactored. C10::Event should also
@@ -64,15 +61,16 @@ static PyObject* THPEvent_pynew(
       (enable_timing ? c10::EventFlag::BACKEND_DEFAULT
                      : c10::EventFlag::PYTORCH_DEFAULT));
 
-  return (PyObject*)ptr.release();
+  return static_cast<PyObject*>(ptr.release());
   END_HANDLE_TH_ERRORS
 }
 
 PyObject* THPEvent_new(c10::DeviceType device_type, c10::EventFlag flag) {
-  auto type = (PyTypeObject*)&THPEventType;
+  auto type = &THPEventType;
   auto self = THPObjectPtr{type->tp_alloc(type, 0)};
   TORCH_CHECK(self, "Failed to allocate memory for Event");
   auto self_ = reinterpret_cast<THPEvent*>(self.get());
+  self_->weakreflist = nullptr;
   new (&self_->event) c10::Event(device_type, flag);
   return self.release();
 }
@@ -82,7 +80,8 @@ static void THPEvent_dealloc(THPEvent* self) {
     pybind11::gil_scoped_release no_gil{};
     self->event.~Event();
   }
-  Py_TYPE(self)->tp_free((PyObject*)self);
+  PyObject_ClearWeakRefs((PyObject*)self);
+  Py_TYPE(self)->tp_free(reinterpret_cast<PyObject*>(self));
 }
 
 static PyObject* THPEvent_get_device(THPEvent* self, void* unused) {
@@ -96,7 +95,7 @@ static PyObject* THPEvent_record(
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  auto self = (THPEvent*)_self;
+  auto self = reinterpret_cast<THPEvent*>(_self);
   PyObject* _stream = Py_None;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
   constexpr const char* accepted_args[] = {"stream", nullptr};
@@ -111,7 +110,7 @@ static PyObject* THPEvent_record(
     return nullptr;
   }
   if (_stream != Py_None) {
-    auto stream = (THPStream*)_stream;
+    auto stream = reinterpret_cast<THPStream*>(_stream);
     self->event.record(c10::Stream::unpack3(
         stream->stream_id,
         static_cast<c10::DeviceIndex>(stream->device_index),
@@ -130,7 +129,7 @@ static PyObject* THPEvent_from_ipc_handle(
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  auto type = (PyTypeObject*)_type;
+  auto type = reinterpret_cast<PyTypeObject*>(_type);
 
   static torch::PythonArgParser parser({
       "from_ipc_handle(Device device, std::string ipc_handle)",
@@ -146,13 +145,13 @@ static PyObject* THPEvent_from_ipc_handle(
   if (!ptr) {
     return nullptr;
   }
-  THPEvent* self = (THPEvent*)ptr.get();
+  THPEvent* self = reinterpret_cast<THPEvent*>(ptr.get());
 
   // TODO: for constructing event from ipc handle, the c10::Event needs to have
   // more general constructor to achieve that.
   new (&self->event) c10::Event(device.type(), c10::EventFlag::PYTORCH_DEFAULT);
 
-  return (PyObject*)ptr.release();
+  return static_cast<PyObject*>(ptr.release());
   END_HANDLE_TH_ERRORS
 }
 
@@ -174,7 +173,7 @@ static PyObject* THPEvent_wait(
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS {
-    auto self = (THPEvent*)_self;
+    auto self = reinterpret_cast<THPEvent*>(_self);
     PyObject* _stream = Py_None;
     // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
     constexpr const char* accepted_args[] = {"stream", nullptr};
@@ -189,7 +188,7 @@ static PyObject* THPEvent_wait(
       return nullptr;
     }
     if (_stream != Py_None) {
-      auto stream = (THPStream*)_stream;
+      auto stream = reinterpret_cast<THPStream*>(_stream);
       self->event.block(c10::Stream::unpack3(
           stream->stream_id,
           static_cast<c10::DeviceIndex>(stream->device_index),
@@ -206,15 +205,15 @@ static PyObject* THPEvent_wait(
 
 static PyObject* THPEvent_query(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = (THPEvent*)_self;
+  auto self = reinterpret_cast<THPEvent*>(_self);
   return PyBool_FromLong(self->event.query());
   END_HANDLE_TH_ERRORS
 }
 
 static PyObject* THPEvent_elapsed_time(PyObject* _self, PyObject* _other) {
   HANDLE_TH_ERRORS
-  auto self = (THPEvent*)_self;
-  auto other = (THPEvent*)_other;
+  auto self = reinterpret_cast<THPEvent*>(_self);
+  auto other = reinterpret_cast<THPEvent*>(_other);
   return PyFloat_FromDouble(self->event.elapsedTime(other->event));
   END_HANDLE_TH_ERRORS
 }
@@ -222,7 +221,7 @@ static PyObject* THPEvent_elapsed_time(PyObject* _self, PyObject* _other) {
 static PyObject* THPEvent_synchronize(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS {
     pybind11::gil_scoped_release no_gil{};
-    auto self = (THPEvent*)_self;
+    auto self = reinterpret_cast<THPEvent*>(_self);
     self->event.synchronize();
   }
   Py_RETURN_NONE;
@@ -231,7 +230,7 @@ static PyObject* THPEvent_synchronize(PyObject* _self, PyObject* noargs) {
 
 static PyObject* THPEvent_evend_id(PyObject* _self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto self = (THPEvent*)_self;
+  auto self = reinterpret_cast<THPEvent*>(_self);
   return PyLong_FromVoidPtr(self->event.eventId());
   END_HANDLE_TH_ERRORS
 }
@@ -251,41 +250,50 @@ static PyObject* THPEvent_repr(THPEvent* self) {
 
 // NOLINTNEXTLINE(*c-arrays*, *global-variables)
 static struct PyGetSetDef THPEvent_properties[] = {
-    {"device", (getter)THPEvent_get_device, nullptr, nullptr, nullptr},
-    {"event_id", (getter)THPEvent_evend_id, nullptr, nullptr, nullptr},
+    {"device",
+     reinterpret_cast<getter>(THPEvent_get_device),
+     nullptr,
+     nullptr,
+     nullptr},
+    {"event_id",
+     reinterpret_cast<getter>(THPEvent_evend_id),
+     nullptr,
+     nullptr,
+     nullptr},
     {nullptr}};
 
 // NOLINTNEXTLINE(*c-arrays*, *global-variables)
 static PyMethodDef THPEvent_methods[] = {
-    {(char*)"from_ipc_handle",
+    {"from_ipc_handle",
      castPyCFunctionWithKeywords(THPEvent_from_ipc_handle),
      METH_CLASS | METH_VARARGS | METH_KEYWORDS,
      nullptr},
-    {(char*)"record",
+    {"record",
      castPyCFunctionWithKeywords(THPEvent_record),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
-    {(char*)"wait",
+    {"wait",
      castPyCFunctionWithKeywords(THPEvent_wait),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
-    {(char*)"query", THPEvent_query, METH_NOARGS, nullptr},
-    {(char*)"elapsed_time", THPEvent_elapsed_time, METH_O, nullptr},
-    {(char*)"synchronize", THPEvent_synchronize, METH_NOARGS, nullptr},
-    {(char*)"ipc_handle", THPEvent_ipc_handle, METH_NOARGS, nullptr},
+    {"query", THPEvent_query, METH_NOARGS, nullptr},
+    {"elapsed_time", THPEvent_elapsed_time, METH_O, nullptr},
+    {"synchronize", THPEvent_synchronize, METH_NOARGS, nullptr},
+    {"ipc_handle", THPEvent_ipc_handle, METH_NOARGS, nullptr},
     {nullptr}};
-
+#pragma GCC diagnostic push
+#pragma GCC diagnostic ignored "-Winvalid-offsetof"
 PyTypeObject THPEventType = {
     PyVarObject_HEAD_INIT(nullptr, 0)
     "torch.Event", /* tp_name */
     sizeof(THPEvent), /* tp_basicsize */
     0, /* tp_itemsize */
-    (destructor)THPEvent_dealloc, /* tp_dealloc */
+    reinterpret_cast<destructor>(THPEvent_dealloc), /* tp_dealloc */
     0, /* tp_vectorcall_offset */
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
     nullptr, /* tp_reserved */
-    (reprfunc)THPEvent_repr, /* tp_repr */
+    reinterpret_cast<reprfunc>(THPEvent_repr), /* tp_repr */
     nullptr, /* tp_as_number */
     nullptr, /* tp_as_sequence */
     nullptr, /* tp_as_mapping */
@@ -300,7 +308,7 @@ PyTypeObject THPEventType = {
     nullptr, /* tp_traverse */
     nullptr, /* tp_clear */
     nullptr, /* tp_richcompare */
-    0, /* tp_weaklistoffset */
+    offsetof(THPEvent, weakreflist), /* tp_weaklistoffset */
     nullptr, /* tp_iter */
     nullptr, /* tp_iternext */
     THPEvent_methods, /* tp_methods */
@@ -315,6 +323,7 @@ PyTypeObject THPEventType = {
     nullptr, /* tp_alloc */
     THPEvent_pynew, /* tp_new */
 };
+#pragma GCC diagnostic pop
 
 void THPEvent_init(PyObject* module) {
   THPEventClass = &THPEventType;
@@ -322,7 +331,8 @@ void THPEvent_init(PyObject* module) {
     throw python_error();
   }
   Py_INCREF(&THPEventType);
-  if (PyModule_AddObject(module, "Event", (PyObject*)&THPEventType) < 0) {
+  if (PyModule_AddObject(
+          module, "Event", reinterpret_cast<PyObject*>(&THPEventType)) < 0) {
     throw python_error();
   }
 }

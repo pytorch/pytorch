@@ -73,14 +73,6 @@ from torch.jit._dataclass_impls import DATACLASS_MAGIC_METHODS
 from torch.jit._monkeytype_config import get_qualified_name, monkeytype_trace
 
 
-_IS_ASTUNPARSE_INSTALLED = False
-try:
-    import astunparse  # type: ignore[import]
-
-    _IS_ASTUNPARSE_INSTALLED = True
-except ImportError:
-    pass
-
 # Borrowed from cPython implementation
 # https://github.com/python/cpython/blob/561612d8456cfab5672c9b445521113b847bd6b3/Lib/textwrap.py#L411#
 
@@ -123,6 +115,7 @@ node_start_tokens = {
     ast.Continue: "continue",
 }
 
+# pyrefly: ignore [no-matching-overload]
 pretty_node_names.update(
     {
         ast.AsyncFunctionDef: "async function definitions",
@@ -133,6 +126,7 @@ pretty_node_names.update(
     }
 )
 
+# pyrefly: ignore [no-matching-overload]
 node_start_tokens.update(
     {
         ast.AsyncFunctionDef: "async def",
@@ -143,6 +137,7 @@ node_start_tokens.update(
     }
 )
 
+# pyrefly: ignore [no-matching-overload]
 pretty_node_names.update(
     {
         ast.AnnAssign: "annotated assignments",
@@ -152,7 +147,7 @@ pretty_node_names.update(
 
 
 class FrontendError(Exception):
-    def __init__(self, source_range, msg):
+    def __init__(self, source_range, msg) -> None:
         self.source_range = source_range
         self.msg = msg
 
@@ -160,7 +155,7 @@ class FrontendError(Exception):
         # call stack when the FrontendError was raised
         self.error_report = torch._C.ErrorReport(self.source_range)
 
-    def __str__(self):
+    def __str__(self) -> str:
         return self.msg + self.error_report.what().lstrip()
 
 
@@ -169,7 +164,7 @@ class NotSupportedError(FrontendError):
 
 
 class UnsupportedNodeError(NotSupportedError):
-    def __init__(self, ctx, offending_node, reason=""):
+    def __init__(self, ctx, offending_node, reason="") -> None:
         # If we don't have a specific token, we default to length of 1
         node_type = type(offending_node)
         range_len = len(node_start_tokens.get(node_type, " "))
@@ -234,7 +229,7 @@ def get_class_properties(cls, self_name):
 def get_class_assigns(ctx, cls_ast):
     assigns = []
 
-    def maybe_build_assign(builder, entry):
+    def maybe_build_assign(builder, entry) -> None:
         nonlocal assigns
         try:
             assigns.append(builder(ctx, entry))
@@ -390,7 +385,7 @@ def get_jit_def(fn, def_name, self_name=None, is_classmethod=False):
 
 
 # TODO: more robust handling of recognizing ignore context manager
-def is_torch_jit_ignore_context_manager(stmt):
+def is_torch_jit_ignore_context_manager(stmt) -> bool:
     # checks if the statement is torch.jit.ignore context manager
     if isinstance(stmt.items[0].context_expr, ast.Call):
         # extract torch part
@@ -438,7 +433,11 @@ def build_def(ctx, py_def, type_line, def_name, self_name=None, pdt_arg_types=No
     is_method = self_name is not None
     if type_line is not None:
         type_comment_decl = torch._C.parse_type_comment(type_line)
-        decl = torch._C.merge_type_from_type_comment(decl, type_comment_decl, is_method)
+        decl = torch._C.merge_type_from_type_comment(
+            decl,  # type: ignore[arg-type]
+            type_comment_decl,
+            is_method,  # type: ignore[assignment]
+        )
 
     return Def(Ident(r, def_name), decl, build_stmts(ctx, body))
 
@@ -536,7 +535,7 @@ def build_ignore_context_manager(ctx, stmt):
                 outputs.append(OutputType(var_name, var_ann))
         return inputs, outputs
 
-    def create_unique_name_ext(ctx, stmt):
+    def create_unique_name_ext(ctx, stmt) -> str:
         # extension will be based on the full path filename plus
         # the line number of original context manager
         fn = re.sub(r"[^a-zA-Z0-9_]", "_", ctx.filename)
@@ -587,7 +586,7 @@ def build_ignore_context_manager(ctx, stmt):
 from typing import List, Dict, Tuple
 
 @torch.jit.ignore
-{astunparse.unparse(ignore_function)}
+{ast.unparse(ignore_function)}
 """
     g = copy.copy(globals())
     exec(ignore_func_str, g)  # noqa: P204
@@ -715,7 +714,7 @@ class StmtBuilder(Builder):
 
         # Disallow type annotations on instance attributes outside of __init__
         if (
-            type(stmt.target) == ast.Attribute
+            type(stmt.target) is ast.Attribute
             and stmt.target.value.id == "self"  # type: ignore[attr-defined]
             and ctx.funcname != "__init__"
         ):
@@ -842,11 +841,6 @@ class StmtBuilder(Builder):
         r = ctx.make_range(stmt.lineno, stmt.col_offset, stmt.col_offset + len("with"))
         # Handle ignore context manager
         if is_torch_jit_ignore_context_manager(stmt):
-            if not _IS_ASTUNPARSE_INSTALLED:
-                raise RuntimeError(
-                    "torch.jit._IgnoreContextManager requires installing Python library `astunparse`, \
-                                   please install it in your Python environment"
-                )
             assign_ast = build_ignore_context_manager(ctx, stmt)
             return build_stmt(ctx, assign_ast)
         return With(r, build_withitems(ctx, stmt.items), build_stmts(ctx, stmt.body))
@@ -868,6 +862,7 @@ class ExprBuilder(Builder):
         ast.RShift: ">>",
     }
 
+    # pyrefly: ignore [unsupported-operation]
     binop_map[ast.MatMult] = "@"
 
     unop_map = {
@@ -1040,6 +1035,7 @@ class ExprBuilder(Builder):
     def build_Compare(ctx, expr):
         operands = [build_expr(ctx, e) for e in [expr.left] + list(expr.comparators)]
         result = None
+        # pyrefly: ignore [bad-assignment]
         for lhs, op_, rhs in zip(operands, expr.ops, operands[1:]):
             op = type(op_)
             op_token = ExprBuilder.cmpop_map.get(op)
@@ -1055,12 +1051,12 @@ class ExprBuilder(Builder):
                 in_expr = BinOp("in", lhs, rhs)
                 cmp_expr = UnaryOp(r, "not", in_expr)
             else:
-                cmp_expr = BinOp(op_token, lhs, rhs)
+                cmp_expr = BinOp(op_token, lhs, rhs)  # type: ignore[assignment]
 
             if result is None:
                 result = cmp_expr
             else:
-                result = BinOp("and", result, cmp_expr)
+                result = BinOp("and", result, cmp_expr)  # type: ignore[assignment]
         return result
 
     @staticmethod
@@ -1135,7 +1131,7 @@ class ExprBuilder(Builder):
             return Subscript(base, [build_SliceExpr(ctx, base, expr.slice)])
         elif sub_type is ast.ExtSlice:
             return Subscript(base, build_ExtSlice(ctx, base, expr.slice))
-        else:  # In Python3.9 array indicies are not wrapped in ast.Index
+        else:  # In Python3.9 array indices are not wrapped in ast.Index
             if sub_type is ast.Tuple:
                 # N-dimensional indexing using Tuple: x[(i, j, k)] is equivalent to x[i, j, k]
                 indices = []
@@ -1229,6 +1225,7 @@ class ExprBuilder(Builder):
                 s += "{}"
                 args.append(build_expr(ctx, value.value))
             elif isinstance(value, ast.Constant):
+                # pyrefly: ignore [unsupported-operation]
                 s += value.value
             else:
                 raise NotSupportedError(r, "Unsupported value in JoinedStr")

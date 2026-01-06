@@ -271,7 +271,7 @@ struct TensorDataContainer {
           "TensorDataContainer_pretty_print_scalar",
           [&] { stream << scalar_.to<scalar_t>(); });
     } else if (is_init_list()) {
-      stream << "{";
+      stream << '{';
       for (const TensorDataContainer* it = init_list_.begin();
            it != init_list_.end();
            it++) {
@@ -279,9 +279,9 @@ struct TensorDataContainer {
         if (std::next(it) != init_list_.end())
           stream << ", ";
       }
-      stream << "}";
+      stream << '}';
     } else if (is_tensor()) {
-      stream << "{";
+      stream << '{';
       for (const auto i : c10::irange(tensor_.sizes()[0])) {
         AT_DISPATCH_ALL_TYPES_AND3(
             at::kBool,
@@ -293,7 +293,7 @@ struct TensorDataContainer {
         if (i != tensor_.sizes()[0] - 1)
           stream << ", ";
       }
-      stream << "}";
+      stream << '}';
     } else {
       TORCH_INTERNAL_ASSERT(false, "Invalid TensorDataContainer type");
     }

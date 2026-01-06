@@ -6,6 +6,7 @@ This file contains utilities related to functionalization in AOTAutograd:
 3. regenerating/replaying views from their base
 4. checking if a graph is functional i.e. whether it contains any mutation ops
 """
+
 from __future__ import annotations
 
 from dataclasses import dataclass
@@ -13,6 +14,7 @@ from typing import Optional
 
 import torch
 from torch import Tensor
+from torch._C import _functionalization
 from torch._logging import getArtifactLogger
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
@@ -223,9 +225,9 @@ def gen_alias_from_base(
     aliased_base_tensor,
     target_meta_tensor,
     target_requires_grad,
-    target_functional_tensor: Optional[FunctionalTensorMetadataEq] = None,
+    target_view_meta_sequence: ViewMetaSequence | None = None,
     *,
-    replay_views,
+    replay_views: bool,
 ):
     # Patch the correct requires_grad field of the output tensor, depending on whether:
     # (i) the reconstructed output (out) was came from a tensor that requires grad or not;
@@ -244,13 +246,11 @@ def gen_alias_from_base(
     # to replay them (view functions) on the aliased_base_tensor.
     if (
         replay_views
-        and target_functional_tensor is not None
-        and not torch._functionalize_is_symbolic(target_functional_tensor.tensor)
+        and target_view_meta_sequence is not None
+        and not any(vm.has_symbolic_inputs for vm in target_view_meta_sequence.sequence)
     ):
-        functional_tensor = target_functional_tensor.tensor
-
-        out = torch._functionalize_apply_view_metas(
-            functional_tensor, aliased_base_tensor
+        out = _functionalization.apply_view_meta_sequence(
+            aliased_base_tensor, target_view_meta_sequence.sequence
         )
         # If re-applying the ViewMeta sequence succeeded, there should be no more
         # problems going forward. We just check we got to the target shape and
@@ -337,8 +337,8 @@ class MetadataKey:
     layout: torch.layout
     is_sparse: bool
     # these are empty when is_sparse
-    stride: Optional[tuple[SymIntEqByExpr, ...]]
-    storage_offset: Optional[SymIntEqByExpr]
+    stride: tuple[SymIntEqByExpr, ...] | None
+    storage_offset: SymIntEqByExpr | None
     is_conj: bool
     is_neg: bool
 
@@ -356,25 +356,45 @@ class MetadataKey:
         )
 
 
-# Wrapper around a FunctionalTensorWrapper for comparing only the resulting metadata
-# after applying all the ViewMeta operations.
-class FunctionalTensorMetadataEq:
-    def __init__(self, tensor: torch.Tensor) -> None:
-        assert torch._is_functional_tensor(tensor)
-        self.tensor = tensor
+# ViewMeta sequence wrapper for equality comparisons.
+#
+# Even though we can compare each ViewMeta instance, we compare the resulting
+# tensor metadata, instead. That's because the creation of synthetic bases + the
+# re-generation of input views might end-up creating a different sequence of
+# ViewMeta that is semantically equivalent. i.e. gets to a tensor with the same
+# metadata.
+#
+# Therefore, we store what the end result should look like as serializable
+# metadata.
+#
+# When logging, this class should look like:
+#
+#     ViewMetaSequence(view, select_int, slice_Tensor)
+#
+# i.e. a parenthesized list of view operations within that ViewMeta sequence.
+class ViewMetaSequence:
+    def __init__(self, tensor: FunctionalTensor) -> None:
+        assert torch._is_functional_tensor(tensor.elem)
+        self.sequence = _functionalization.get_view_meta_sequence(tensor.elem)
+        self.metadata = MetadataKey.make(tensor)
+
+    def __repr__(self) -> str:
+        suffix = len("_ViewMeta")
+        types = ", ".join(type(vm).__name__[:-suffix] for vm in self.sequence)
+        return f"ViewMetaSequence({types})"
 
     def __eq__(self, other: object) -> bool:
         # If other is None, then it probably means that we weren't able to recreate
-        # the FunctionalTensorMetadataEq. One of this cases is when we update the
-        # view metadata by calling: create_synthetic_base_metadata.
+        # the ViewMeta sequence. One example is when we update the view metadata by
+        # calling: create_synthetic_base_metadata.
         if other is None:
             return True
 
-        # Comparison agains any other type is not implemented.
-        if not isinstance(other, FunctionalTensorMetadataEq):
+        # Comparison against any other type is not implemented.
+        if not isinstance(other, ViewMetaSequence):
             return NotImplemented
 
-        return has_same_metadata(self.tensor, other.tensor)
+        return self.metadata == other.metadata
 
 
 # new_arg and arg here are either:
@@ -430,7 +450,7 @@ def was_tensor_metadata_updated(arg, new_arg):
 
 
 # Returns the number of detected copy_
-def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
+def _is_functional_graph(fx_g: torch.fx.Graph) -> tuple[Optional[str], int]:
     allowed_mutation_ops = [
         torch.ops.aten.copy_.default,
         torch.ops.aten.set_.source_Tensor,
@@ -443,6 +463,7 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
     # NB: It would also be nice to verify that the mutations all happen at the
     # end, but we also do some administrative views after mutations so this
     # isn't actually true.  (TODO: Could this cause problems for Inductor?)
+    error = None
     for n in fx_g.nodes:
         if n.op == "placeholder":
             placeholders.add(n)
@@ -452,14 +473,18 @@ def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
                 # this is mostly a hack to avoid failing XLA tests.
                 # See https://github.com/pytorch/pytorch/pull/122434#issuecomment-2101012113
                 if "set_buffer_donor_" not in str(n.args[0]):
-                    assert (
-                        n.args[0] in placeholders
-                    ), f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
+                    if n.args[0] not in placeholders:
+                        error = f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
                 mutation_count += 1
             else:
-                assert (
-                    not n.target._schema.is_mutable
-                ), f"aot_autograd expected to have an entirely functional graph, but found {n.format_node()}"
+                if n.target._schema.is_mutable:
+                    error = f"aot_autograd expected to have an entirely functional graph, but found {n.format_node()}"
+    return error, mutation_count
+
+
+def assert_functional_graph(fx_g: torch.fx.Graph) -> int:
+    error, mutation_count = _is_functional_graph(fx_g)
+    assert error is None, error
     return mutation_count
 
 
@@ -472,9 +497,9 @@ def propagate_input_mutation_stacktraces(fx_g: torch.fx.Graph) -> None:
             if n.target is torch.ops.aten.copy_.default:
                 # Can only copy_ into an input, and can only do so once
                 if "set_buffer_donor_" not in str(n.args[0]):
-                    assert (
-                        n.args[0] in placeholders
-                    ), f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
+                    assert n.args[0] in placeholders, (
+                        f"n={str(n)}, n.args[0]={str(n.args[0])}, placeholders={str(placeholders)}, graph={str(fx_g)}"
+                    )
                     placeholders.remove(n.args[0])
                 copy_from_node = n.args[1]
                 # Pre-condition: every node has a "stack_trace" field in its meta,

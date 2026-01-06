@@ -10,7 +10,10 @@ from torch.distributed.pipelining._backward import (
     stage_backward_input,
     stage_backward_weight,
 )
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
+from torch.testing._internal.common_device_type import (
+    instantiate_device_type_tests,
+    skipXPUIf,
+)
 from torch.testing._internal.common_utils import run_tests, TestCase
 
 
@@ -19,6 +22,7 @@ batch_size = 256
 
 
 class StageBackwardTests(TestCase):
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1682")
     def test_stage_backward(self, device):
         # MLP as a stage module
         mod = MLPModule(d_hid).to(device)
@@ -93,6 +97,7 @@ class StageBackwardTests(TestCase):
             # Check that the weight gradients were not updated
             self.assertEqual(p.grad, None)
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1682")
     def test_stage_backward_weight(self, device):
         # MLP as a stage module
         mod = MLPModule(d_hid).to(device)
@@ -133,6 +138,7 @@ class StageBackwardTests(TestCase):
                 print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
                 raise
 
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/1682")
     def test_stage_backward_weight_multiple_iters(self, device):
         # MLP as a stage module
         mod = MLPModule(d_hid).to(device)
@@ -183,9 +189,49 @@ class StageBackwardTests(TestCase):
                 print(f"Gradient test failed for {name}: {p.grad} vs {ref_p.grad}")
                 raise
 
+    def test_stage_backward_weight_grad_validation(self, device):
+        test_cases = [
+            (
+                "size >= 2",
+                lambda: [
+                    (
+                        torch.randn(batch_size, d_hid, device=device),
+                        torch.randn(batch_size, d_hid, device=device),
+                    )
+                ],
+            ),
+            ("size = 1", lambda: [(torch.randn(batch_size, d_hid, device=device),)]),
+            (
+                "1 grad, 1 None",
+                lambda: [(torch.randn(batch_size, d_hid, device=device), None)],
+            ),
+        ]
+
+        for description, mock_grads_factory in test_cases:
+            with self.subTest(description=description):
+                mod = MLPModule(d_hid).to(device)
+                x = torch.randn(batch_size, d_hid, device=device)
+                x.requires_grad_(True)
+                out = mod(x)
+                loss = torch.sum(out)
+                dinputs, param_groups = stage_backward_input(
+                    stage_outputs_or_loss=[loss],
+                    output_grads=None,
+                    input_values=[x],
+                    weights=mod.parameters(),
+                )
+
+                # Set up mock grads
+                for param_group in param_groups:
+                    param_group["grads"] = mock_grads_factory()
+
+                stage_backward_weight(mod.parameters(), param_groups)
+
 
 devices = ["cpu", "cuda", "hpu", "xpu"]
-instantiate_device_type_tests(StageBackwardTests, globals(), only_for=devices)
+instantiate_device_type_tests(
+    StageBackwardTests, globals(), only_for=devices, allow_xpu=True
+)
 
 if __name__ == "__main__":
     run_tests()

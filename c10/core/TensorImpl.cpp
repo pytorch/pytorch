@@ -9,7 +9,6 @@
 #include <c10/core/impl/TorchDispatchModeTLS.h>
 #include <c10/util/Logging.h>
 #include <c10/util/accumulate.h>
-#include <c10/util/irange.h>
 #include <optional>
 
 #include <utility>
@@ -278,7 +277,6 @@ void TensorImpl::release_resources() {
   if (storage_) {
     storage_ = {};
   }
-  pyobj_slot_.maybe_destroy_pyobj();
 }
 
 #ifndef C10_DISABLE_TENSORIMPL_EXTENSIBILITY
@@ -310,12 +308,21 @@ void TensorImpl::throw_data_ptr_access_error() const {
       false, "Cannot access data pointer of Tensor that doesn't have storage");
 }
 
-bool TensorImpl::is_contiguous_custom(at::MemoryFormat memory_format) const {
+c10::SymBool TensorImpl::sym_is_contiguous_custom(
+    at::MemoryFormat memory_format) const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
-    return pyobj_slot_.load_pyobj_interpreter()->is_contiguous(
-        this, memory_format);
+    // TO reduce BC breaking and reduce having to introduce
+    // sym_is_contiguous. call is_contiguous when tensor does not
+    if (C10_UNLIKELY(has_symbolic_sizes_strides_)) {
+      return pyobj_slot_.load_pyobj_interpreter()->sym_is_contiguous(
+          this, memory_format);
+    } else {
+      return pyobj_slot_.load_pyobj_interpreter()->is_contiguous(
+          this, memory_format);
+    }
   }
-  return is_contiguous_default(memory_format);
+
+  return sym_is_contiguous_default(memory_format);
 }
 
 bool TensorImpl::is_strides_like_custom(at::MemoryFormat memory_format) const {
@@ -326,12 +333,12 @@ bool TensorImpl::is_strides_like_custom(at::MemoryFormat memory_format) const {
   return is_strides_like_default(memory_format);
 }
 
-bool TensorImpl::is_non_overlapping_and_dense_custom() const {
+c10::SymBool TensorImpl::sym_is_non_overlapping_and_dense_custom() const {
   if (C10_UNLIKELY(matches_python_custom(SizesStridesPolicy::CustomStrides))) {
     return pyobj_slot_.load_pyobj_interpreter()->is_non_overlapping_and_dense(
         this);
   }
-  return is_non_overlapping_and_dense_default();
+  return sym_is_non_overlapping_and_dense_default();
 }
 
 IntArrayRef TensorImpl::sizes_custom() const {
@@ -979,6 +986,30 @@ void TensorImpl::empty_tensor_restride_symint(MemoryFormat memory_format) {
     default:
       break;
   }
+}
+
+void TensorImpl::incref_pyobject() const noexcept {
+  // Because intrusive_ptr incref uses relaxed memory order, we need to
+  // do an acquire fence to ensure that the kHasPyObject bit was
+  // observed before the load of the PyObject* below.
+  // NB: This is a no-op on x86/x86-64
+  std::atomic_thread_fence(std::memory_order_acquire);
+
+  PyObject* obj = pyobj_slot_.load_pyobj();
+  (*pyobj_slot_.pyobj_interpreter())->incref(obj);
+}
+
+void TensorImpl::decref_pyobject() const noexcept {
+  PyObject* obj = pyobj_slot_.load_pyobj();
+  (*pyobj_slot_.pyobj_interpreter())->decref(obj);
+}
+
+bool TensorImpl::try_incref_pyobject() const noexcept {
+  c10::impl::PyInterpreter* interp = pyobj_slot_.pyobj_interpreter();
+  if (C10_UNLIKELY(!interp)) {
+    return false;
+  }
+  return (*interp)->try_incref(pyobj_slot_);
 }
 
 namespace impl {

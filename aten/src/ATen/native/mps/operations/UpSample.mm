@@ -1,7 +1,6 @@
 //  Copyright © 2023 Apple Inc.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/UpSample.h>
-#include <ATen/native/mps/MPSGraphVenturaOps.h>
 #include <ATen/native/mps/OperationUtils.h>
 #include <fmt/format.h>
 
@@ -42,6 +41,8 @@
 #include <ATen/ops/upsample_nearest2d_native.h>
 #include <ATen/ops/upsample_nearest3d_backward_native.h>
 #include <ATen/ops/upsample_nearest3d_native.h>
+#include <ATen/ops/upsample_trilinear3d_backward_native.h>
+#include <ATen/ops/upsample_trilinear3d_native.h>
 #endif
 
 #include <ATen/native/mps/kernels/UpSample.h>
@@ -59,6 +60,7 @@ static void upsample_out_template(const Tensor& input,
                                   const Tensor& output,
                                   bool align_corners,
                                   const std::string_view resize_mode_str) {
+  TORCH_CHECK_NOT_IMPLEMENTED(!input.is_complex(), "upsample for MPS does not support complex inputs");
   if (input.numel() == 0) {
     return;
   }
@@ -596,6 +598,28 @@ TORCH_IMPL_FUNC(_upsample_nearest_exact3d_backward_out_mps)(const Tensor& grad_o
                                                             const Tensor& grad_input) {
   mps::upsample_kernel_backward_out_template(
       grad_input, grad_output, output_size, input_size, false, scales_d, scales_h, scales_w, "nearest_exact_3d");
+}
+
+TORCH_IMPL_FUNC(upsample_trilinear3d_out_mps)(const Tensor& input,
+                                              IntArrayRef output_size,
+                                              bool align_corners,
+                                              std::optional<double> scales_d,
+                                              std::optional<double> scales_h,
+                                              std::optional<double> scales_w,
+                                              const Tensor& output) {
+  mps::upsample_kernel_out_template(
+      input, output_size, align_corners, scales_d, scales_h, scales_w, output, "trilinear");
+}
+TORCH_IMPL_FUNC(upsample_trilinear3d_backward_out_mps)(const Tensor& grad_output,
+                                                       IntArrayRef output_size,
+                                                       IntArrayRef input_size,
+                                                       bool align_corners,
+                                                       std::optional<double> scales_d,
+                                                       std::optional<double> scales_h,
+                                                       std::optional<double> scales_w,
+                                                       const Tensor& grad_input) {
+  mps::upsample_kernel_backward_out_template(
+      grad_input, grad_output, output_size, input_size, align_corners, scales_d, scales_h, scales_w, "trilinear");
 }
 
 } // namespace at::native

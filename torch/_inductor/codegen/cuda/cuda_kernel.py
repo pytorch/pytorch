@@ -3,8 +3,9 @@ import functools
 import itertools
 import logging
 from collections import defaultdict
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Callable, Literal, Optional, TYPE_CHECKING, Union
+from typing import Any, Literal, Optional, TYPE_CHECKING, Union
 
 from sympy import Expr, symbols
 
@@ -176,6 +177,9 @@ class CUDAKernel(Kernel):
     def get_dynamic_shape_args(self) -> list[Union[Expr, int]]:
         return [*self.get_layout_args(), *self.size_args]
 
+    def get_offset_args(self) -> list[Expr]:
+        return [node.get_layout().offset for node in self.named_nodes.values()]
+
     @staticmethod
     def find_ld_idx(node: IRNode) -> int:
         strides = node.get_stride()
@@ -263,6 +267,7 @@ class CUDATemplateKernel(CUDAKernel):
                            In this case, the `input_reorder` would be [2, 0, 1].
             additional_size_args: Additional size arguments for epilogue inputs
         """
+        # NB: name order matters here, it's used to match up offsets
         names = [x.strip() for x in names_str.strip().split(",")]
         if len(inputs) + len(outputs) != len(names):
             raise RuntimeError(
@@ -284,6 +289,7 @@ class CUDATemplateKernel(CUDAKernel):
         free_symbols: OrderedSet[Expr] = OrderedSet()
         for name, node in zip(names[len(inputs) : len(inputs) + len(outputs)], outputs):
             if node is not None:
+                # NB: named nodes must be populated in the order of names
                 self.named_nodes[name] = node
                 self.args.output_buffers[node.get_name()] = name
 
@@ -305,14 +311,17 @@ class CUDATemplateKernel(CUDAKernel):
         size_vars.extend(str(s) for s in free_symbols)
         self.size_args.extend(free_symbols)
         size_args = [f"const int {s}" for s in size_vars]
-
+        offset_args = [f"const int {name}_offset" for name in self.named_nodes]
         runtime_arg_decls = ",".join(
             [f"{arg.ty} {arg.name}" for arg in self.runtime_arg_info]
         )
         if runtime_arg_decls:
             runtime_arg_decls += ", "
 
-        signature = f"int {self.kernel_name}({', '.join(arg_defs + size_args)}, {runtime_arg_decls}{self._EXTRA_CPP_ARGS})"
+        signature = (
+            f"int {self.kernel_name}({', '.join(arg_defs + size_args + offset_args)},\
+ {runtime_arg_decls}{self._EXTRA_CPP_ARGS})"
+        )
         self.signature = signature
         return signature
 
@@ -345,10 +354,13 @@ class CUDATemplateKernel(CUDAKernel):
             _, call_args, _, arg_types = self.args.python_argdefs()
 
         dynamic_shape_args = self.get_dynamic_shape_args()
+        offset_args = self.get_offset_args()
         call_args.extend(dynamic_shape_args)  # type: ignore[arg-type]
+        call_args.extend(offset_args)  # type: ignore[arg-type]
         for arg in self.runtime_arg_values:
-            call_args.append(arg)
-        arg_types.extend("int" for _ in dynamic_shape_args)
+            call_args.append(str(arg))
+        arg_types.extend("const int" for _ in dynamic_shape_args)
+        arg_types.extend("const int" for _ in offset_args)
         for arg in self.runtime_arg_info:
             arg_types.append(arg.ty)
         # dynamo wraps unspec variable as 0d CPU tensor, need convert to scalar
@@ -424,15 +436,6 @@ class CUDATemplateKernel(CUDAKernel):
             max_valid_offset += (node.get_size()[i] - 1) * node.get_stride()[i]
         return max_valid_offset
 
-    def offset(self, node: IRNode) -> str:
-        """
-        Generates code which represents offset of a given node.
-        """
-
-        if node is None:
-            return "0"
-        return str(node.get_layout().offset)  # type: ignore[union-attr]
-
     def ptr(self, node: IRNode) -> str:
         """
         Generates code which represents pointer of a given node.
@@ -443,8 +446,7 @@ class CUDATemplateKernel(CUDAKernel):
         arg_name = self.arg_name(node)
         if arg_name is None:
             return "nullptr"
-        offset = self.offset(node)
-        return arg_name if offset == "0" else f"{arg_name} + {offset}"
+        return f"{arg_name} + {arg_name}_offset"
 
     def size(
         self,
@@ -630,16 +632,26 @@ class CUDATemplateCaller(ChoiceCaller):
         """
         Return kernel hash key that does not depend on swizzle.
         """
+        swizzle_str: str = (
+            str(self.info_kwargs.get("swizzle"))
+            if isinstance(self.info_kwargs, dict)
+            else "None"
+        )
         return "-".join(
             [
                 self.category,
                 self.bmreq.hash_key,
-                str(self.info_dict().get("swizzle")),
+                swizzle_str,
             ]
         )
 
     def info_dict(self) -> dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]:
-        """Information returned here is logged to the autotune log file when that is enabled."""
+        """
+        Information returned here is logged to the autotune log file when that is enabled.
+
+        In general, we should avoid calling this function as it is expensive to compute,
+        and can add up very fast.
+        """
         if self.info_kwargs is not None and "op" in self.info_kwargs:
             op: Any = self.info_kwargs["op"]
             return {
@@ -662,13 +674,15 @@ class CUDATemplateCaller(ChoiceCaller):
 
     def output_node(self) -> TensorBox:
         self.bmreq.update_workspace_size()
-        return TensorBox.create(
-            CUDATemplateBuffer(
-                layout=self.layout,
-                inputs=self.input_nodes,
-                make_kernel_render=self.make_kernel_render,
-                workspace_size=self.bmreq.workspace_size,
-                supports_epilogue_fusion=self.supports_epilogue_fusion,
-                template=self.template,
-            )
+        buffer = CUDATemplateBuffer(
+            layout=self.layout,
+            inputs=self.input_nodes,
+            make_kernel_render=self.make_kernel_render,
+            workspace_size=self.bmreq.workspace_size,
+            supports_epilogue_fusion=self.supports_epilogue_fusion,
+            template=self.template,
         )
+        # Pass KTC annotation to the buffer for encoding
+        if "ktc" in self.annotations:
+            buffer.annotations["ktc"] = self.annotations["ktc"]
+        return TensorBox.create(buffer)

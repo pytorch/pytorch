@@ -143,7 +143,7 @@ struct LoopView {
  private:
   Node* node_;
 
-  // adjust index_ordering by adding indices 0 - thorugh adjust, and
+  // adjust index_ordering by adding indices 0 - thorough adjust, and
   // incrementing all existing inputs by adjust
   static std::vector<size_t> adjustIndices(
       size_t adjust,

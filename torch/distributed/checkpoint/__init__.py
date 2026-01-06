@@ -1,5 +1,4 @@
 from . import _extension
-from ._hf_planner import _HuggingFaceLoadPlanner, _HuggingFaceSavePlanner
 from .api import CheckpointException
 from .default_planner import DefaultLoadPlanner, DefaultSavePlanner
 from .filesystem import FileSystemReader, FileSystemWriter
@@ -12,6 +11,11 @@ from .metadata import (
 )
 from .optimizer import load_sharded_optimizer_state_dict
 from .planner import LoadPlan, LoadPlanner, ReadItem, SavePlan, SavePlanner, WriteItem
+from .quantized_hf_storage import QuantizedHuggingFaceStorageReader
+
+# pyrefly: ignore [deprecated]
 from .state_dict_loader import load, load_state_dict
+
+# pyrefly: ignore [deprecated]
 from .state_dict_saver import async_save, save, save_state_dict
 from .storage import StorageReader, StorageWriter

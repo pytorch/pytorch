@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import warnings
-from typing import Optional
 
 import torch
 import torch.jit  # this is needed to avoid a circular import
@@ -67,8 +66,8 @@ class MultiheadAttention(nn.MultiheadAttention):
         bias: bool = True,
         add_bias_kv: bool = False,
         add_zero_attn: bool = False,
-        kdim: Optional[int] = None,
-        vdim: Optional[int] = None,
+        kdim: int | None = None,
+        vdim: int | None = None,
         batch_first: bool = False,
         device=None,
         dtype=None,
@@ -96,6 +95,7 @@ class MultiheadAttention(nn.MultiheadAttention):
             self.vdim, self.embed_dim, bias=bias, **factory_kwargs
         )
         # for the type: ignore, see https://github.com/pytorch/pytorch/issues/58969
+        # pyrefly: ignore [bad-assignment]
         self.out_proj = nn.Linear(
             self.embed_dim, self.embed_dim, bias=bias, **factory_kwargs
         )  # type: ignore[assignment]
@@ -116,7 +116,7 @@ class MultiheadAttention(nn.MultiheadAttention):
 
     @classmethod
     def from_float(cls, other):
-        assert type(other) == cls._FLOAT_MODULE
+        assert type(other) is cls._FLOAT_MODULE
         assert hasattr(other, "qconfig"), "The float module must have 'qconfig'"
         # Setting the dropout to 0.0!
         observed = cls(
@@ -170,8 +170,11 @@ class MultiheadAttention(nn.MultiheadAttention):
             observed.linear_K.weight = nn.Parameter(other.k_proj_weight)
             observed.linear_V.weight = nn.Parameter(other.v_proj_weight)
             if other.in_proj_bias is None:
+                # pyrefly: ignore [bad-assignment]
                 observed.linear_Q.bias = None
+                # pyrefly: ignore [bad-assignment]
                 observed.linear_K.bias = None
+                # pyrefly: ignore [bad-assignment]
                 observed.linear_V.bias = None
             else:
                 observed.linear_Q.bias = nn.Parameter(
@@ -214,7 +217,7 @@ class MultiheadAttention(nn.MultiheadAttention):
             fp.bias_v = nn.Parameter(self.bias_v.dequantize())
 
         # Set the linear weights
-        # Note: Because the linear layers are quantized, mypy does not nkow how
+        # Note: Because the linear layers are quantized, mypy does not know how
         # to deal with them -- might need to ignore the typing checks.
         # for the type: ignore[has-type], see https://github.com/pytorch/pytorch/issues/58969
         w, b = self.out_proj._weight_bias()  # type: ignore[operator, has-type]
@@ -234,6 +237,7 @@ class MultiheadAttention(nn.MultiheadAttention):
             _end = _start + fp.embed_dim
             fp.in_proj_weight[_start:_end, :] = wQ
             if fp.in_proj_bias is not None:
+                # pyrefly: ignore [bad-argument-type]
                 assert all(bQ == 0)
                 fp.in_proj_bias[_start:_end] = bQ
 
@@ -241,12 +245,14 @@ class MultiheadAttention(nn.MultiheadAttention):
             _end = _start + fp.embed_dim
             fp.in_proj_weight[_start:_end, :] = wK
             if fp.in_proj_bias is not None:
+                # pyrefly: ignore [bad-argument-type]
                 assert all(bK == 0)
                 fp.in_proj_bias[_start:_end] = bK
 
             _start = _end
             fp.in_proj_weight[_start:, :] = wV
             if fp.in_proj_bias is not None:
+                # pyrefly: ignore [bad-argument-type]
                 assert all(bV == 0)
                 fp.in_proj_bias[_start:] = bV
         else:
@@ -254,8 +260,11 @@ class MultiheadAttention(nn.MultiheadAttention):
             fp.k_proj_weight = nn.Parameter(wK)
             fp.v_proj_weight = nn.Parameter(wV)
             if fp.in_proj_bias is None:
+                # pyrefly: ignore [bad-assignment]
                 self.linear_Q.bias = None
+                # pyrefly: ignore [bad-assignment]
                 self.linear_K.bias = None
+                # pyrefly: ignore [bad-assignment]
                 self.linear_V.bias = None
             else:
                 fp.in_proj_bias[0 : fp.embed_dim] = bQ
@@ -280,12 +289,12 @@ class MultiheadAttention(nn.MultiheadAttention):
         query: Tensor,
         key: Tensor,
         value: Tensor,
-        key_padding_mask: Optional[Tensor] = None,
+        key_padding_mask: Tensor | None = None,
         need_weights: bool = True,
-        attn_mask: Optional[Tensor] = None,
+        attn_mask: Tensor | None = None,
         average_attn_weights: bool = True,
         is_causal: bool = False,
-    ) -> tuple[Tensor, Optional[Tensor]]:
+    ) -> tuple[Tensor, Tensor | None]:
         r"""
         Note::
             Please, refer to :func:`~torch.nn.MultiheadAttention.forward` for more
@@ -348,12 +357,12 @@ class MultiheadAttention(nn.MultiheadAttention):
         query: Tensor,
         key: Tensor,
         value: Tensor,
-        key_padding_mask: Optional[Tensor] = None,
+        key_padding_mask: Tensor | None = None,
         need_weights: bool = True,
-        attn_mask: Optional[Tensor] = None,
+        attn_mask: Tensor | None = None,
         average_attn_weights: bool = True,
         is_causal: bool = False,
-    ) -> tuple[Tensor, Optional[Tensor]]:
+    ) -> tuple[Tensor, Tensor | None]:
         # This version will not deal with the static key/value pairs.
         # Keeping it here for future changes.
         #
@@ -471,17 +480,29 @@ class MultiheadAttention(nn.MultiheadAttention):
 
         if self.add_zero_attn:
             src_len += 1
+
             k_zeros = torch.zeros((k.size(0), 1) + k.size()[2:])
+
             if k.is_quantized:
                 k_zeros = torch.quantize_per_tensor(
-                    k_zeros, k.q_scale(), k.q_zero_point(), k.dtype
+                    k_zeros,
+                    k.q_scale(),
+                    k.q_zero_point(),
+                    k.dtype,
                 )
+
             k = torch.cat([k, k_zeros], dim=1)
+
             v_zeros = torch.zeros((v.size(0), 1) + k.size()[2:])
+
             if v.is_quantized:
                 v_zeros = torch.quantize_per_tensor(
-                    v_zeros, v.q_scale(), v.q_zero_point(), v.dtype
+                    v_zeros,
+                    v.q_scale(),
+                    v.q_zero_point(),
+                    v.dtype,
                 )
+
             v = torch.cat([v, v_zeros], dim=1)
 
             if attn_mask is not None:

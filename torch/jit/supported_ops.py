@@ -57,7 +57,7 @@ def _emit_schema(mod, name, schema, arg_start=0, padding=4):
 
 
 def _get_tensor_ops():
-    def is_tensor_method(schema):
+    def is_tensor_method(schema) -> bool:
         if len(schema.arguments) == 0:
             return False
         self = schema.arguments[0]
@@ -243,8 +243,8 @@ def _get_global_builtins():
         "getattr": "Attribute name must be a literal string",
         "hasattr": "Attribute name must be a literal string",
         "isinstance": "Result is static",
-        "zip": "Arguments must be iterable. See :ref:`Iterables <jit_iterables>` for details.",
-        "enumerate": "Arguments must be iterable. See :ref:`Iterables <jit_iterables>` for details.",
+        "zip": "Arguments must be iterable.",
+        "enumerate": "Arguments must be iterable.",
         "range": "Can only be used as an iterator in a for loop",
     }
 
@@ -261,6 +261,7 @@ def _get_global_builtins():
 
     magic_methods_rows = []
     for fn, magic_method in magic_methods:
+        # pyrefly: ignore [bad-argument-type]
         magic_methods_rows.append(f'"{fn}", "``{magic_method}``"')
 
     schematized_ops = []
@@ -279,6 +280,7 @@ def _get_global_builtins():
             table_row = (
                 f'":external+python:py:obj:`{fn}`", "{schemaless_op_explanations[fn]}"'
             )
+            # pyrefly: ignore [bad-argument-type]
             schemaless_ops.append(table_row)
 
     schematized_ops_str = "\n".join(schematized_ops)
@@ -295,7 +297,7 @@ The functions in the following table are supported but do not have a static sche
 
 {schemaless_ops_str}
 
-The following functions will use the corresponding magic method on :any:`TorchScript classes`
+The following functions will use the corresponding magic method on TorchScript classes
 
 .. csv-table::
     :header: "Function", "Magic Method"

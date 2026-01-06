@@ -39,13 +39,20 @@ finally:
     from timm.models import create_model
 
 TIMM_MODELS = {}
-filename = os.path.join(os.path.dirname(__file__), "timm_models_list.txt")
 
+# Run only this selected group of models, leave this empty to run everything
+TORCHBENCH_ONLY_MODELS = [
+    m.strip() for m in os.getenv("TORCHBENCH_ONLY_MODELS", "").split(",") if m.strip()
+]
+
+filename = os.path.join(os.path.dirname(__file__), "timm_models_list.txt")
 with open(filename) as fh:
     lines = fh.readlines()
     lines = [line.rstrip() for line in lines]
     for line in lines:
         model_name, batch_size = line.split(" ")
+        if TORCHBENCH_ONLY_MODELS and model_name not in TORCHBENCH_ONLY_MODELS:
+            continue
         TIMM_MODELS[model_name] = int(batch_size)
 
 
@@ -53,84 +60,46 @@ with open(filename) as fh:
 
 BATCH_SIZE_DIVISORS = {
     "beit_base_patch16_224": 2,
-    "convit_base": 2,
-    "convmixer_768_32": 2,
-    "convnext_base": 2,
-    "cspdarknet53": 2,
     "deit_base_distilled_patch16_224": 2,
     "gluon_xception65": 2,
     "mobilevit_s": 2,
-    "pnasnet5large": 2,
-    "poolformer_m36": 2,
-    "resnest101e": 2,
     "swin_base_patch4_window7_224": 2,
-    "swsl_resnext101_32x16d": 2,
-    "vit_base_patch16_224": 2,
-    "volo_d1_224": 2,
-    "jx_nest_base": 4,
 }
 
 REQUIRE_HIGHER_TOLERANCE = {
-    "crossvit_9_240",
-    "fbnetv3_b",
-    "gmixer_24_224",
-    "hrnet_w18",
     "inception_v3",
-    "mixer_b16_224",
     "mobilenetv3_large_100",
-    "sebotnet33ts_256",
-    "selecsls42b",
-    "convnext_base",
-    "cait_m36_384",
 }
 
-REQUIRE_HIGHER_TOLERANCE_AMP = {
-    "poolformer_m36",
+REQUIRE_HIGHER_TOLERANCE_FP16_XPU = {
+    "botnet26t_256",
 }
+
+REQUIRE_HIGHER_TOLERANCE_AMP = {}
 
 REQUIRE_EVEN_HIGHER_TOLERANCE = {
-    "levit_128",
-    "sebotnet33ts_256",
-    "beit_base_patch16_224",
-    "cspdarknet53",
+    "deit_base_distilled_patch16_224",
+    "vit_base_patch16_siglip_256",
 }
 
 # These models need higher tolerance in MaxAutotune mode
-REQUIRE_EVEN_HIGHER_TOLERANCE_MAX_AUTOTUNE = {
-    "gluon_inception_v3",
-}
+REQUIRE_EVEN_HIGHER_TOLERANCE_MAX_AUTOTUNE = {}
 
 REQUIRE_HIGHER_TOLERANCE_FOR_FREEZING = {
     "adv_inception_v3",
-    "botnet26t_256",
-    "gluon_inception_v3",
-    "selecsls42b",
-    "swsl_resnext101_32x16d",
 }
 
 SCALED_COMPUTE_LOSS = {
-    "ese_vovnet19b_dw",
-    "fbnetc_100",
-    "mnasnet_100",
     "mobilevit_s",
-    "sebotnet33ts_256",
 }
 
-FORCE_AMP_FOR_FP16_BF16_MODELS = {
-    "convit_base",
-    "xcit_large_24_p8_224",
-}
+FORCE_AMP_FOR_FP16_BF16_MODELS = {}
 
-SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {
-    "xcit_large_24_p8_224",
-}
+SKIP_ACCURACY_CHECK_AS_EAGER_NON_DETERMINISTIC_MODELS = {}
 
 REQUIRE_LARGER_MULTIPLIER_FOR_SMALLER_TENSOR = {
     "inception_v3",
     "mobilenetv3_large_100",
-    "cspdarknet53",
-    "gluon_inception_v3",
-    "cait_m36_384",
 }
 
 
@@ -231,6 +200,14 @@ class TimmRunner(BenchmarkRunner):
         return self._config["skip"]
 
     @property
+    def skip_models_for_cpu(self):
+        return self._skip["device"]["cpu"]
+
+    @property
+    def skip_models_for_cpu_aarch64(self):
+        return self._skip["device"]["cpu_aarch64"]
+
+    @property
     def skip_models(self):
         return self._skip["all"]
 
@@ -254,15 +231,11 @@ class TimmRunner(BenchmarkRunner):
 
     @property
     def guard_on_nn_module_models(self):
-        return {
-            "convit_base",
-        }
+        return {}
 
     @property
     def inline_inbuilt_nn_modules_models(self):
-        return {
-            "lcnet_050",
-        }
+        return {}
 
     @download_retry_decorator
     def _download_model(self, model_name):
@@ -303,8 +276,6 @@ class TimmRunner(BenchmarkRunner):
             memory_format=torch.channels_last if channels_last else None,
         )
 
-        self.num_classes = model.num_classes
-
         data_config = resolve_data_config(
             vars(self._args) if timmversion >= "0.8.0" else self._args,
             model=model,
@@ -334,7 +305,6 @@ class TimmRunner(BenchmarkRunner):
         example_inputs = [
             example_inputs,
         ]
-        self.target = self._gen_target(batch_size, device)
 
         self.loss = torch.nn.CrossEntropyLoss().to(device)
 
@@ -389,7 +359,9 @@ class TimmRunner(BenchmarkRunner):
         if is_training:
             from torch._inductor import config as inductor_config
 
-            if name in REQUIRE_EVEN_HIGHER_TOLERANCE or (
+            if name == "beit_base_patch16_224":
+                tolerance = 16 * 1e-2
+            elif name in REQUIRE_EVEN_HIGHER_TOLERANCE or (
                 inductor_config.max_autotune
                 and name in REQUIRE_EVEN_HIGHER_TOLERANCE_MAX_AUTOTUNE
             ):
@@ -398,14 +370,15 @@ class TimmRunner(BenchmarkRunner):
                 self.args.amp and name in REQUIRE_HIGHER_TOLERANCE_AMP
             ):
                 tolerance = 4 * 1e-2
+            elif (
+                name in REQUIRE_HIGHER_TOLERANCE_FP16_XPU
+                and self.args.float16
+                and current_device == "xpu"
+            ):
+                tolerance = 4 * 1e-2
             else:
                 tolerance = 1e-2
         return tolerance, cosine
-
-    def _gen_target(self, batch_size, device):
-        return torch.empty((batch_size,) + (), device=device, dtype=torch.long).random_(
-            self.num_classes
-        )
 
     def compute_loss(self, pred):
         # High loss values make gradient checking harder, as small changes in

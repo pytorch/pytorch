@@ -9,6 +9,7 @@
 #include <ATen/native/TransposeType.h>
 #include <ATen/native/Unfold3d.h>
 #include <c10/util/irange.h>
+#include <c10/util/safe_numerics.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -27,7 +28,7 @@ namespace at::native {
 
 namespace {
 
-static Tensor compute_columns3d(
+Tensor compute_columns3d(
     const Tensor& input_,
     IntArrayRef stride,
     IntArrayRef padding,
@@ -107,7 +108,7 @@ static Tensor compute_columns3d(
   return columns;
 }
 
-static inline void slow_conv3d_shape_check(
+inline void slow_conv3d_shape_check(
     const Tensor& input,
     const Tensor& grad_output,
     const Tensor& weight,
@@ -174,6 +175,23 @@ static inline void slow_conv3d_shape_check(
   const int64_t input_height = input.size(dim_height);
   const int64_t input_width = input.size(dim_width);
 
+  constexpr int64_t MAX_SAFE_PAD = (1LL << 61);
+
+  TORCH_CHECK_VALUE(
+    pad_height <= MAX_SAFE_PAD,
+    "Padding height too large: pad_height=",
+    pad_height);
+
+  TORCH_CHECK_VALUE(
+    pad_width <= MAX_SAFE_PAD,
+    "Padding width too large: pad_width=",
+    pad_width);
+
+  TORCH_CHECK_VALUE(
+    pad_depth <= MAX_SAFE_PAD,
+    "Padding depth too large: pad_depth=",
+    pad_depth);
+
   const int64_t exact_input_depth = input_depth + 2 * pad_depth;
   const int64_t exact_input_height = input_height + 2 * pad_height;
   const int64_t exact_input_width = input_width + 2 * pad_width;
@@ -221,6 +239,14 @@ static inline void slow_conv3d_shape_check(
       output_width,
       "). Output size is too small");
 
+  uint64_t kernel_product;
+  TORCH_CHECK(
+    !c10::mul_overflows(kernel_height, kernel_width, &kernel_product),
+    "Kernel height x width product is too large: kernel_height=",
+    kernel_height,
+    ", kernel_width=",
+    kernel_width);
+
   if (weight.defined()) {
     int64_t n_input_plane = weight.size(1);
     if (weight.dim() == 2) {
@@ -247,7 +273,7 @@ static inline void slow_conv3d_shape_check(
   }
 }
 
-static Tensor view_weight_2d(const Tensor& weight_) {
+Tensor view_weight_2d(const Tensor& weight_) {
   Tensor weight = weight_.contiguous();
   if (weight.dim() == 5) {
     const int64_t s1 = weight.size(0);
@@ -260,7 +286,7 @@ static Tensor view_weight_2d(const Tensor& weight_) {
 }
 
 template <typename scalar_t>
-static void slow_conv3d_update_output_frame(
+void slow_conv3d_update_output_frame(
     TensorAccessor<const scalar_t, 4> input,
     TensorAccessor<scalar_t, 4> output,
     TensorAccessor<const scalar_t, 2> weight,
@@ -489,7 +515,7 @@ void slow_conv3d_backward_weight_frame(
       grad_weight.data(), ldc, grad_weight.stride(0) * n);
 }
 
-static void slow_conv3d_backward_parameters_out_cpu_template(
+void slow_conv3d_backward_parameters_out_cpu_template(
     Tensor& grad_weight,
     const Tensor& input,
     const Tensor& grad_output,

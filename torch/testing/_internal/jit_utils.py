@@ -197,20 +197,24 @@ class JitTestCase(JitCommonTestCase):
     def _compared_saved_loaded(self, m):
         def extract_files(buffer):
             # crack open the zip format to get at the main module code
-            archive = zipfile.ZipFile(buffer)
-            # check that we have no duplicate names
-            self.assertEqual(len(set(archive.namelist())), len(archive.namelist()))
-            files = list(filter(lambda x: x.startswith('archive/code/'), archive.namelist()))
-            # unwrap all the code files into strings
-            code_files_str = filter(lambda x: x.endswith('.py'), files)
-            code_files_stream = (archive.open(f) for f in code_files_str)
-            code_files = ("".join([line.decode() for line in file]) for file in code_files_stream)
+            with zipfile.ZipFile(buffer) as archive:
+                # check that we have no duplicate names
+                self.assertEqual(len(set(archive.namelist())), len(archive.namelist()))
+                files = list(filter(lambda x: x.startswith('archive/code/'), archive.namelist()))
+                # unwrap all the code files into strings
+                code_files_str = filter(lambda x: x.endswith('.py'), files)
+                code_files = []
+                for f in code_files_str:
+                    with archive.open(f) as stream:
+                        code_files.append("".join([line.decode() for line in stream]))
 
-            # unpickled all the debug files
-            debug_files_str = filter(lambda f: f.endswith('.debug_pkl'), files)
-            debug_files_stream = (archive.open(f) for f in debug_files_str)
-            debug_files = (pickle.load(f) for f in debug_files_stream)
-            return code_files, debug_files
+                # unpickled all the debug files
+                debug_files_str = filter(lambda f: f.endswith('.debug_pkl'), files)
+                debug_files = []
+                for f in debug_files_str:
+                    with archive.open(f) as stream:
+                        debug_files.append(pickle.load(stream))
+                return code_files, debug_files
 
         # disable the hook while we parse code, otherwise we will re-enter the hook
         with torch._jit_internal._disable_emit_hooks():
@@ -249,7 +253,7 @@ class JitTestCase(JitCommonTestCase):
             saved_module_buffer_2.seek(0)
             code_files_2, _debug_files_2 = extract_files(saved_module_buffer_2)
 
-            for a, b in zip(code_files, code_files_2):
+            for a, b in zip(code_files, code_files_2, strict=True):
                 self.assertMultiLineEqual(a, b)
 
             if isinstance(m, torch._C.ScriptModule):
@@ -281,13 +285,13 @@ class JitTestCase(JitCommonTestCase):
         # Ideally we would like to not have to manually delete the file, but NamedTemporaryFile
         # opens the file, and it cannot be opened multiple times in Windows. To support Windows,
         # close the file after creation and try to remove it manually
-        f = tempfile.NamedTemporaryFile(delete=False)
-        try:
-            f.close()
-            imported.save(f.name)
-            result = torch.jit.load(f.name, map_location=map_location)
-        finally:
-            os.unlink(f.name)
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            try:
+                f.close()
+                imported.save(f.name)
+                result = torch.jit.load(f.name, map_location=map_location)
+            finally:
+                os.unlink(f.name)
 
         result.apply(lambda s: s._unpack() if s._c._has_method('_unpack') else None)
         return result
@@ -439,7 +443,7 @@ class JitTestCase(JitCommonTestCase):
         state = model.get_debug_state()
         plan = get_execution_plan(state)
         num_bailouts = plan.code.num_bailouts()
-        for i in range(0, num_bailouts):
+        for i in range(num_bailouts):
             plan.code.request_bailout(i)
             bailout_outputs = model(*inputs)
             self.assertEqual(bailout_outputs, expected)
@@ -459,70 +463,69 @@ class JitTestCase(JitCommonTestCase):
         Checks that a given script generates the same output as the Python
         version using the given inputs.
         """
-        with torch.jit.optimized_execution(optimize):
-            with enable_profiling_mode_for_profiling_tests():
-                extra_profile_runs = any(isinstance(x, torch.Tensor) and x.requires_grad for x in inputs)
-                if isinstance(script, str):
-                    # Compile the string to a Script function
-                    # with enable_profiling_mode():
-                    cu = torch.jit.CompilationUnit(script, _frames_up=frames_up)
+        with torch.jit.optimized_execution(optimize), enable_profiling_mode_for_profiling_tests():
+            extra_profile_runs = any(isinstance(x, torch.Tensor) and x.requires_grad for x in inputs)
+            if isinstance(script, str):
+                # Compile the string to a Script function
+                # with enable_profiling_mode():
+                cu = torch.jit.CompilationUnit(script, _frames_up=frames_up)
 
-                    # Execute the Python function so we can run it later and get its
-                    # outputs
+                # Execute the Python function so we can run it later and get its
+                # outputs
 
-                    frame = self.get_frame_vars(frames_up)
-                    the_locals: dict[str, Any] = {}
-                    execWrapper(script, glob=frame, loc=the_locals)
-                    frame.update(the_locals)
+                frame = self.get_frame_vars(frames_up)
+                the_locals: dict[str, Any] = {}
+                execWrapper(script, glob=frame, loc=the_locals)
+                frame.update(the_locals)
 
-                    python_fn = frame[name]
-                    scripted_fn = getattr(cu, name)
-                else:
+                python_fn = frame[name]
+                scripted_fn = getattr(cu, name)
+            else:
 
-                    # Check the string frontend first
-                    source = textwrap.dedent(inspect.getsource(script))
-                    self.checkScript(
-                        source,
-                        inputs,
-                        script.__name__,
-                        optimize=optimize,
-                        inputs_requires_grad=inputs_requires_grad,
-                        capture_output=capture_output,
-                        profiling=profiling,
-                        frames_up=2)
+                # Check the string frontend first
+                source = textwrap.dedent(inspect.getsource(script))
+                self.checkScript(
+                    source,
+                    inputs,
+                    script.__name__,
+                    optimize=optimize,
+                    inputs_requires_grad=inputs_requires_grad,
+                    capture_output=capture_output,
+                    profiling=profiling,
+                    frames_up=2)
 
-                    # Continue checking the Python frontend
-                    scripted_fn = torch.jit.script(script, _frames_up=1)
-                    python_fn = script
+                # Continue checking the Python frontend
+                scripted_fn = torch.jit.script(script, _frames_up=1)
+                python_fn = script
 
-                if inputs_requires_grad:
-                    recording_inputs = do_input_map(lambda t: t.detach().requires_grad_(), inputs)
-                else:
-                    recording_inputs = inputs
+            if inputs_requires_grad:
+                recording_inputs = do_input_map(lambda t: t.detach().requires_grad_(), inputs)
+            else:
+                recording_inputs = inputs
 
-                if capture_output:
-                    with self.capture_stdout() as script_stdout:
-                        script_outputs = scripted_fn(*recording_inputs)
-                    with self.capture_stdout():
-                        opt_script_outputs = scripted_fn(*recording_inputs)
-                    with self.capture_stdout():
-                        python_outputs = python_fn(*inputs)
-                    if not IS_WINDOWS:
-                        self.assertExpected(script_stdout[0], subname='stdout')
-                    self.assertEqual(python_outputs, opt_script_outputs, atol=atol, rtol=rtol)
-                else:
-                    # profiling run
+            if capture_output:
+                with self.capture_stdout() as script_stdout:
                     script_outputs = scripted_fn(*recording_inputs)
-                    if inputs_requires_grad or extra_profile_runs:
-                        opt_script_outputs = scripted_fn(*recording_inputs)
-                    # optimized run
+                with self.capture_stdout():
                     opt_script_outputs = scripted_fn(*recording_inputs)
-                    if TEST_BAILOUTS:
-                        self.checkBailouts(scripted_fn, inputs, opt_script_outputs)
+                with self.capture_stdout():
                     python_outputs = python_fn(*inputs)
-                self.assertEqual(python_outputs, script_outputs, atol=atol, rtol=rtol)
-                self.assertEqual(script_outputs, opt_script_outputs, atol=atol, rtol=rtol)
-                return scripted_fn
+                if not IS_WINDOWS:
+                    self.assertExpected(script_stdout[0], subname='stdout')
+                self.assertEqual(python_outputs, opt_script_outputs, atol=atol, rtol=rtol)
+            else:
+                # profiling run
+                script_outputs = scripted_fn(*recording_inputs)
+                if inputs_requires_grad or extra_profile_runs:
+                    opt_script_outputs = scripted_fn(*recording_inputs)
+                # optimized run
+                opt_script_outputs = scripted_fn(*recording_inputs)
+                if TEST_BAILOUTS:
+                    self.checkBailouts(scripted_fn, inputs, opt_script_outputs)
+                python_outputs = python_fn(*inputs)
+            self.assertEqual(python_outputs, script_outputs, atol=atol, rtol=rtol)
+            self.assertEqual(script_outputs, opt_script_outputs, atol=atol, rtol=rtol)
+            return scripted_fn
 
     def checkTrace(self, func, reference_tensors, input_tensors=None,
                    drop=None, allow_unused=False, verbose=False,
@@ -617,7 +620,7 @@ class JitTestCase(JitCommonTestCase):
         self.assertEqual(outputs, outputs_ge)
         if inputs_require_grads:
             self.assertEqual(grads, grads_ge, atol=grad_atol, rtol=grad_rtol)
-            for g2, g2_ge in zip(grads2, grads2_ge):
+            for g2, g2_ge in zip(grads2, grads2_ge, strict=True):
                 if g2 is None and g2_ge is None:
                     continue
                 self.assertEqual(g2, g2_ge, atol=8e-4, rtol=8e-4)
@@ -693,7 +696,7 @@ def _tmp_donotuse_dont_inline_everything(fn):
             fn(*args, **kwargs)
     return wrapper
 
-# make it easy to quicky define/trace a function for these tests
+# make it easy to quickly define/trace a function for these tests
 def _trace(*args, **kwargs):
     def wrapper(func):
         return torch.jit.trace(func, args, **kwargs)

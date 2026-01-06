@@ -77,7 +77,9 @@ Single-node multi-worker
 .. note:: ``--nproc-per-node`` may be
           ``"gpu"`` (spawn one process per GPU),
           ``"cpu"`` (spawn one process per CPU),
+          ``"xpu"`` (spawn one process per XPU),
           ``"auto"`` (equivalent to ``"gpu"`` if CUDA is available,
+          else equivalent to ``"xpu"`` if XPU is available,
           else equivalent to ``"cpu"``),
           or an integer specifying the number of processes.
           See `torch.distributed.run.determine_local_world_size
@@ -371,8 +373,8 @@ import os
 import sys
 import uuid
 from argparse import ArgumentParser, REMAINDER
+from collections.abc import Callable
 from importlib import metadata
-from typing import Callable, Optional, Union
 
 import torch
 from torch.distributed.argparse_util import check_env, env
@@ -382,6 +384,10 @@ from torch.distributed.elastic.rendezvous.utils import _parse_rendezvous_config
 from torch.distributed.elastic.utils import macros
 from torch.distributed.elastic.utils.logging import get_logger
 from torch.distributed.launcher.api import elastic_launch, LaunchConfig
+from torch.numa.binding import (
+    AffinityMode as _AffinityMode,  # Signify as private with _
+    NumaOptions as _NumaOptions,
+)
 from torch.utils.backend_registration import _get_custom_mod_func
 
 
@@ -391,6 +397,13 @@ logger = get_logger(__name__)
 def get_args_parser() -> ArgumentParser:
     """Parse the command line options."""
     parser = ArgumentParser(description="Torch Distributed Elastic Training Launcher")
+
+    def comma_separated_list(value):
+        placeholder = "<COMMA_PLACEHOLDER>"
+        value = value.replace(",,", placeholder)
+        items = value.split(",")
+        items = [item.replace(placeholder, ",") for item in items]
+        return items
 
     #
     # Worker/node size related arguments.
@@ -409,7 +422,7 @@ def get_args_parser() -> ArgumentParser:
         action=env,
         type=str,
         default="1",
-        help="Number of workers per node; supported values: [auto, cpu, gpu, int].",
+        help="Number of workers per node; supported values: [auto, cpu, gpu, xpu, int].",
     )
 
     #
@@ -531,7 +544,7 @@ def get_args_parser() -> ArgumentParser:
         type=str,
         default=None,
         help="Base directory to use for log files (e.g. /var/log/torch/elastic). The same "
-        "directory is re-used for multiple runs (a unique job-level sub-directory is created with "
+        "directory is reused for multiple runs (a unique job-level sub-directory is created with "
         "rdzv_id as the prefix).",
     )
     parser.add_argument(
@@ -562,6 +575,28 @@ def get_args_parser() -> ArgumentParser:
         help="Only show logs from specified ranks in console (e.g. [--local_ranks_filter=0,1,2] will "
         "only show logs from rank 0, 1 and 2). This will only apply to stdout and stderr, not to"
         "log files saved via --redirect or --tee",
+    )
+
+    parser.add_argument(
+        "--duplicate-stdout-filters",
+        "--duplicate_stdout_filters",
+        action=env,
+        type=comma_separated_list,
+        default=[],
+        help="Duplicates logs streamed to stdout to another specified file with a list of filters (e.g. "
+        "[--duplicate_stdout_filters 'apple,orange'] will duplicate log lines matching 'apple' "
+        "OR 'orange'. An empty filters list won't duplicate any lines. Use double comma to escape a comma) ",
+    )
+
+    parser.add_argument(
+        "--duplicate-stderr-filters",
+        "--duplicate_stderr_filters",
+        action=env,
+        type=comma_separated_list,
+        default=[],
+        help="Duplicates logs streamed to stderr to another specified file with a list of filters (e.g. "
+        "[--duplicate_stdout_filters 'apple,orange'] will duplicate log lines matching 'apple' "
+        "OR 'orange'. An empty filters list won't duplicate any lines. Use double comma to escape a comma) ",
     )
 
     #
@@ -616,6 +651,51 @@ def get_args_parser() -> ArgumentParser:
         "Can be used to override custom logging behavior.",
     )
 
+    parser.add_argument(
+        "--numa-binding",
+        "--numa_binding",
+        type=str,
+        choices=[mode.value for mode in _AffinityMode],
+        default=None,
+        help="""
+        If provided, we will affinitize the worker processes based on NUMA nodes
+        for better performance. (E.g., preferring to allocate memory locally and run on CPUs on the
+        same NUMA node.)
+
+        NOTE: This is currently only supported for GPUs, and we assume
+        that the LOCAL_RANK process corresponds to the GPU with index LOCAL_RANK. If this is not
+        accurate for your workload, this feature may be a pessimization.
+
+        Available options are:
+          - node: Processes are bound to cpu cores within a NUMA node. This is a good starting point,
+          but other options may perform even slightly better in some cases.
+          - socket: Processes are bound to cpu cores within a socket.
+          - exclusive: Processes are bound to exclusive sets of cpu cores within a NUMA node.
+          - core-complex: Processes are bound to cpu cores in a core-complex.
+          NOTE: The core-complex option might not achieve optimal performance on architectures
+          featuring a single L3 cache per socket.""",
+    )
+
+    parser.add_argument(
+        "--signals-to-handle",
+        "--signals_to_handle",
+        action=env,
+        type=str,
+        default="SIGTERM,SIGINT,SIGHUP,SIGQUIT",
+        help="Comma-separated list of signals to handle and forward to subprocesses. "
+        "Default: SIGTERM,SIGINT,SIGHUP,SIGQUIT. "
+        "Common additional signals: SIGUSR1,SIGUSR2 (used in SLURM environments).",
+    )
+
+    parser.add_argument(
+        "--virtual-local-rank",
+        "--virtual_local_rank",
+        action=check_env,
+        help="Enable virtual local rank mode for workers. When enabled, LOCAL_RANK is set to 0 "
+        "for all workers and CUDA_VISIBLE_DEVICES is adjusted so each worker accesses its "
+        "assigned GPU at device index 0.",
+    )
+
     #
     # Positional arguments.
     #
@@ -665,21 +745,20 @@ def determine_local_world_size(nproc_per_node: str):
                 raise ValueError("Cuda is not available.") from e
             device_type = "gpu"
             num_proc = torch.cuda.device_count()
+        elif nproc_per_node == "xpu":
+            if not torch.xpu.is_available():
+                raise ValueError("Xpu is not available.") from e
+            device_type = "xpu"
+            num_proc = torch.xpu.device_count()
         elif nproc_per_node == torch._C._get_privateuse1_backend_name():
             if not _get_custom_mod_func("is_available")():
                 raise ValueError(f"{nproc_per_node} is not available.") from e
             device_type = nproc_per_node
             num_proc = _get_custom_mod_func("device_count")()
         elif nproc_per_node == "auto":
-            if torch.cuda.is_available():
-                num_proc = torch.cuda.device_count()
-                device_type = "gpu"
-            elif (
-                hasattr(torch, torch._C._get_privateuse1_backend_name())
-                and _get_custom_mod_func("is_available")()
-            ):
-                num_proc = _get_custom_mod_func("device_count")()
-                device_type = torch._C._get_privateuse1_backend_name()
+            if torch.accelerator.is_available():
+                num_proc = torch.accelerator.device_count()
+                device_type = torch.accelerator.current_accelerator().type  # type: ignore[union-attr]
             else:
                 num_proc = os.cpu_count()
                 device_type = "cpu"
@@ -718,9 +797,9 @@ def get_use_env(args) -> bool:
     return args.use_env
 
 
-def _get_logs_specs_class(logs_specs_name: Optional[str]) -> type[LogsSpecs]:
+def _get_logs_specs_class(logs_specs_name: str | None) -> type[LogsSpecs]:
     """
-    Attemps to load `torchrun.logs_spec` entrypoint with key of `logs_specs_name` param.
+    Attempts to load `torchrun.logs_spec` entrypoint with key of `logs_specs_name` param.
     Provides plugin mechanism to provide custom implementation of LogsSpecs.
 
     Returns `DefaultLogsSpecs` when logs_spec_name is None.
@@ -729,14 +808,10 @@ def _get_logs_specs_class(logs_specs_name: Optional[str]) -> type[LogsSpecs]:
     logs_specs_cls = None
     if logs_specs_name is not None:
         eps = metadata.entry_points()
-        if hasattr(eps, "select"):  # >= 3.10
-            group = eps.select(group="torchrun.logs_specs")
-            if group.select(name=logs_specs_name):
-                logs_specs_cls = group[logs_specs_name].load()
-
-        elif specs := eps.get("torchrun.logs_specs"):  # < 3.10
-            if entrypoint_list := [ep for ep in specs if ep.name == logs_specs_name]:
-                logs_specs_cls = entrypoint_list[0].load()
+        group = eps.select(group="torchrun.logs_specs")
+        if group.select(name=logs_specs_name):
+            # pyrefly: ignore [bad-index]
+            logs_specs_cls = group[logs_specs_name].load()
 
         if logs_specs_cls is None:
             raise ValueError(
@@ -752,11 +827,15 @@ def _get_logs_specs_class(logs_specs_name: Optional[str]) -> type[LogsSpecs]:
     return logs_specs_cls
 
 
-def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str]]:
+def config_from_args(args) -> tuple[LaunchConfig, Callable | str, list[str]]:
     # If ``args`` not passed, defaults to ``sys.argv[:1]``
     min_nodes, max_nodes = parse_min_max_nnodes(args.nnodes)
-    assert 0 < min_nodes <= max_nodes
-    assert args.max_restarts >= 0
+    if not (0 < min_nodes <= max_nodes):
+        raise AssertionError(
+            f"min_nodes must be > 0 and <= max_nodes, got min_nodes={min_nodes}, max_nodes={max_nodes}"
+        )
+    if args.max_restarts < 0:
+        raise AssertionError("max_restarts must be >= 0")
 
     if (
         hasattr(args, "master_addr")
@@ -792,22 +871,29 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
 
     rdzv_endpoint = get_rdzv_endpoint(args)
 
-    ranks: Optional[set[int]] = None
+    ranks: set[int] | None = None
     if args.local_ranks_filter:
         try:
             ranks = set(map(int, args.local_ranks_filter.split(",")))
-            assert ranks
+            if not ranks:
+                raise AssertionError("ranks set cannot be empty")
         except Exception as e:
             raise ValueError(
                 "--local_ranks_filter must be a comma-separated list of integers e.g. --local_ranks_filter=0,1,2"
             ) from e
 
     logs_specs_cls: type[LogsSpecs] = _get_logs_specs_class(args.logs_specs)
+
     logs_specs = logs_specs_cls(
         log_dir=args.log_dir,
         redirects=Std.from_str(args.redirects),
         tee=Std.from_str(args.tee),
         local_ranks_filter=ranks,
+    )
+    numa_options = (
+        None
+        if args.numa_binding is None
+        else _NumaOptions(affinity_mode=_AffinityMode(args.numa_binding))
     )
 
     config = LaunchConfig(
@@ -826,10 +912,15 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
         local_addr=args.local_addr,
         logs_specs=logs_specs,
         event_log_handler=args.event_log_handler,
+        numa_options=numa_options,
+        signals_to_handle=args.signals_to_handle,
+        duplicate_stdout_filters=args.duplicate_stdout_filters,
+        duplicate_stderr_filters=args.duplicate_stderr_filters,
+        virtual_local_rank=args.virtual_local_rank,
     )
 
     with_python = not args.no_python
-    cmd: Union[Callable, str]
+    cmd: Callable | str
     cmd_args = []
     use_env = get_use_env(args)
     if args.run_path:

@@ -4,7 +4,7 @@ from __future__ import annotations
 import functools
 import logging
 from ctypes import byref, c_int, c_size_t, c_void_p
-from typing import Any, Callable, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
 from torch._inductor import config
@@ -17,7 +17,7 @@ from torch._inductor.codecache import DLLWrapper, ROCmCodeCache
 
 
 if TYPE_CHECKING:
-    from collections.abc import Iterable
+    from collections.abc import Callable, Iterable
 
 
 log = logging.getLogger(__name__)
@@ -96,7 +96,7 @@ class ROCmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest):
             return
         self.ensure_dll_loaded()
         unique_input_count = len(
-            {meta.name for meta in self.input_tensor_meta}  # noqa: set_linter
+            dict.fromkeys(meta.name for meta in self.input_tensor_meta)
         )
         args = [c_void_p(None) for _ in range(unique_input_count + 1)]
         stream_ptr = c_void_p(torch.cuda.current_stream().cuda_stream)

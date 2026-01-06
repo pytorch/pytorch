@@ -14,6 +14,13 @@ DISTRIBUTED = [
 ]
 
 register_log(
+    "async_compile",
+    [
+        "torch._inductor.async_compile",
+        "torch._inductor.compile_worker.tracked_process_pool",
+    ],
+)
+register_log(
     "cache", ("torch._inductor.remote_cache", "torch._inductor.fb.remote_cache")
 )
 register_log("dynamo", ["torch._dynamo", *DYNAMIC])
@@ -176,6 +183,7 @@ register_artifact(
 )
 register_artifact("perf_hints", "", off_by_default=True)
 register_artifact("onnx_diagnostics", "", off_by_default=True)
+register_artifact("compute_dependencies", "", off_by_default=True)
 register_artifact(
     "fusion",
     "Detailed Inductor fusion decisions. More detailed than 'schedule'",
@@ -189,6 +197,12 @@ register_artifact(
 register_artifact(
     "loop_tiling",
     "Logs related to loop ordering",
+    off_by_default=True,
+)
+
+register_artifact(
+    "auto_chunker",
+    "Logs related to the auto chunker",
     off_by_default=True,
 )
 
@@ -218,6 +232,11 @@ register_artifact(
     off_by_default=True,
 )
 register_artifact(
+    "node_runtime_estimation",
+    "Node runtime estimation for compile-time optimization decisions.",
+    off_by_default=True,
+)
+register_artifact(
     "autotuning",
     "Autotuning choice logs, such as kernel source, perf, and tuning parameters.",
     off_by_default=True,
@@ -238,4 +257,14 @@ register_artifact(
     "Logs debug info for hierarchical compilation",
     off_by_default=True,
 )
+register_artifact(
+    "annotation",
+    "Logs detailed steps of the creating annotation on graph nodes",
+    off_by_default=True,
+)
 register_artifact("custom_format_test_artifact", "Testing only", log_format="")
+register_artifact(
+    "caching",
+    "Detailed Inductor caching information.",
+    off_by_default=True,
+)
