@@ -1,5 +1,6 @@
 # flake8: noqa
 """Reveal tests for torch.linalg, torch.fft, and torch.special return types."""
+
 import torch
 
 
@@ -54,4 +55,3 @@ reveal_type(gammaln_val)  # E: torch._tensor.Tensor
 
 i0_val = torch.special.i0(v)
 reveal_type(i0_val)  # E: torch._tensor.Tensor
-
