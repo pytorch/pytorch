@@ -1764,8 +1764,9 @@ class triton:
     proton_profiling: bool = (
         os.environ.get("TORCHINDUCTOR_TRITON_PROTON_PROFILING", "0") == "1"
     )
-    proton_output_dir: str = os.environ.get(
-        "TORCHINDUCTOR_TRITON_PROTON_OUTPUT_DIR", ""
+    # If not specified, proton traces will be saved to the debug directory
+    proton_output_dir: Optional[str] = os.environ.get(
+        "TORCHINDUCTOR_TRITON_PROTON_OUTPUT_DIR"
     )
     # Group CTAs by SM in proton trace files.
     proton_group_by_sm: bool = (

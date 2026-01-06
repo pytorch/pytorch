@@ -9,6 +9,7 @@ import functools
 import inspect
 import logging
 import operator
+import os
 import random
 import re
 import tempfile
@@ -23,7 +24,7 @@ import torch
 import torch._ops
 import torch.utils._pytree as pytree
 from torch import dtype as torch_dtype
-from torch._dynamo.utils import counters, dynamo_timed
+from torch._dynamo.utils import counters, dynamo_timed, get_debug_dir
 from torch._inductor.codegen.debug_utils import DebugPrinterManager
 from torch._inductor.codegen.multi_kernel import MultiKernelState
 from torch._inductor.runtime.runtime_utils import cache_dir
@@ -1255,15 +1256,14 @@ class PythonWrapperCodegen(CodeGen):
             self.header.writeline("import os")
             self.header.writeline(
                 "triton.set_allocator(lambda size, align, stream: "
-                "torch.empty(size, dtype=torch.uint8, device='cuda').data_ptr())"
+                "torch.empty(size, dtype=torch.uint8, device='cuda'))"
             )
-            output_dir = config.triton.proton_output_dir
-            if output_dir:
-                proton_name = f'os.path.join("{output_dir}", "inductor")'
-                trace_path = f'os.path.join("{output_dir}", "inductor.chrome_trace")'
-            else:
-                proton_name = '"inductor"'
-                trace_path = '"inductor.chrome_trace"'
+            output_dir = config.triton.proton_output_dir or os.path.join(
+                get_debug_dir(), "proton"
+            )
+            self.header.writeline(f'os.makedirs("{output_dir}", exist_ok=True)')
+            proton_name = f'os.path.join("{output_dir}", "inductor")'
+            trace_path = f'os.path.join("{output_dir}", "inductor.chrome_trace")'
             group_by_sm = config.triton.proton_group_by_sm
             split_invocations = config.triton.proton_split_invocations
             per_cta_occupancy = config.triton.proton_per_cta_occupancy
