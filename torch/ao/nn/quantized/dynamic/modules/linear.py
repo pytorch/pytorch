@@ -122,9 +122,8 @@ class Linear(nnq.Linear):
             raise AssertionError("Input float module must have qconfig defined")
         if type(mod) is nni.LinearReLU:
             mod = mod[0]
-        # pyrefly: ignore [missing-attribute]
+
         if mod.qconfig is not None and mod.qconfig.weight is not None:
-            # pyrefly: ignore [not-callable]
             weight_observer = mod.qconfig.weight()
         else:
             # We have the circular import issues if we import the qconfig in the beginning of this file:
@@ -148,7 +147,7 @@ class Linear(nnq.Linear):
                 "Unsupported dtype specified for dynamic quantized Linear!"
             )
         qlinear = cls(mod.in_features, mod.out_features, dtype=dtype)
-        # pyrefly: ignore [bad-argument-type]
+
         qlinear.set_weight_bias(qweight, mod.bias)
         return qlinear
 
