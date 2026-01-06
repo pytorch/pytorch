@@ -610,7 +610,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
             return SymFloatArgument(name=new_ph.name)
         elif isinstance(old_arg, SymBoolArgument):
             return SymBoolArgument(name=new_ph.name)
-        raise RuntimeError(f"Type of old_arg not supported: {type(old_arg)}")
+        raise RuntimeError(f"Type of old_arg not supported: {type(old_arg).__name__} (got {old_arg})")
 
     new_placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
     new_outputs: tuple[torch.fx.Node, ...] = tuple(gm.graph.output_node().args[0])  # type: ignore[arg-type]
