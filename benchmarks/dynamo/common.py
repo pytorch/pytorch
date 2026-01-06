@@ -2005,7 +2005,7 @@ class BenchmarkRunner:
             self.model_iter_fn(model, example_inputs)
         except Exception as e:
             exception_string = str(e)
-            raise RuntimeError(f"Eager run failed: {exception_string}")
+            raise RuntimeError(f"Eager run failed: {exception_string}") from e
 
     def maybe_cast(self, model, example_inputs):
         model, example_inputs = self.cast_based_on_args(model, example_inputs)
