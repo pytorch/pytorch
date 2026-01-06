@@ -396,7 +396,7 @@ def cudagraph_mark_step_begin():
             torch.compiler.cudagraph_mark_step_begin()
             rand_foo() + rand_foo()
 
-    For more details, see `torch.compiler_cudagraph_trees <https://pytorch.org/docs/main/torch.compiler_cudagraph_trees.html>`__
+    For more details, see `torch.compiler_cudagraph_trees <https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_cudagraph_trees.html>`__  # noqa: B950
     """
     from torch._inductor import cudagraph_trees
 
