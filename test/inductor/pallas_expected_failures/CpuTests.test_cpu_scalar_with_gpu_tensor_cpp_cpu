@@ -1,5 +1,0 @@
-ERROR
-    _run_compile_cmd(cmd_line, cwd)
-  File "/home/oulgen/dev/pytorch/torch/_inductor/cpp_builder.py", line 631, in _run_compile_cmd
-    raise exc.CppCompileError(cmd, output) from e
-torch._inductor.exc.InductorError: CppCompileError: C++ compile error

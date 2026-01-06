@@ -1,5 +1,3 @@
-ERROR
-  File "/tmp/tmp_gcxgmc5/ql/cqlh77gp5ega5vscigzl636fhru4i62w6raotxn5y3ngsjy2rc7v.py", line 14, in pallas_fused_avg_pool3d_backward_6916c3b1_kernel
-    tmp1 = max(0, (-1) + max(0, (-1) + x2))*max(0, (-1) + max(0, (-1) + y1))*min(20, 2 + max(0, (-1) + z0)) + max(0, (-1) + max(0, (-1) + x2))*max(0, (-1) + max(0, (-1) + z0))*min(20, 2 + max(0, (-1) + y1)) + max(0, (-1) + max(0, (-1) + y1))*max(0, (-1) + max(0, (-1) + z0))*min(15, 2 + max(0, (-1) + x2)) + min(15, 2 + max(0, (-1) + x2))*min(20, 2 + max(0, (-1) + y1))*min(20, 2 + max(0, (-1) + z0)) + ((-1)*max(0, (-1) + max(0, (-1) + x2))*max(0, (-1) + max(0, (-1) + y1))*max(0, (-1) + max(0, (-1) + z0))) + ((-1)*max(0, (-1) + max(0, (-1) + x2))*min(20, 2 + max(0, (-1) + y1))*min(20, 2 + max(0, (-1) + z0))) + ((-1)*max(0, (-1) + max(0, (-1) + y1))*min(15, 2 + max(0, (-1) + x2))*min(20, 2 + max(0, (-1) + z0))) + ((-1)*max(0, (-1) + max(0, (-1) + z0))*min(15, 2 + max(0, (-1) + x2))*min(20, 2 + max(0, (-1) + y1)))
-                         ^^^^^^^^^^^^^^^^^
-ValueError: The truth value of an array with more than one element is ambiguous. Use a.any() or a.all()
+FAIL
+AssertionError: Tensor-likes are not close!
+Numerical accuracy issue in avg_pool backward
