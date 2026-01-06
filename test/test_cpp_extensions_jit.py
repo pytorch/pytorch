@@ -1485,6 +1485,78 @@ class TestCppExtensionJIT(common.TestCase):
                 "Command injection vulnerability detected!",
             )
 
+    def test_torch_check_eq_stacktrace(self):
+        """Test that TORCH_CHECK_EQ includes C++ stack trace when TORCH_SHOW_CPP_STACKTRACES=1.
+
+        When TORCH_SHOW_CPP_STACKTRACES=1, errors from TORCH_CHECK_EQ should include
+        a C++ stack trace via DealWithFatal's call to GetFetchStackTrace.
+        Since this env var is cached on first use, we use subprocess to test both cases.
+        """
+        test_script = """
+import torch
+import torch.utils.cpp_extension
+
+cpp_source = '''
+#include <c10/util/Exception.h>
+
+void trigger_torch_check_eq_failure() {
+    int a = 1;
+    int b = 2;
+    TORCH_CHECK_EQ(a, b) << "This check should fail";
+}
+'''
+
+module = torch.utils.cpp_extension.load_inline(
+    name="test_torch_check_eq_stacktrace",
+    cpp_sources=cpp_source,
+    functions=["trigger_torch_check_eq_failure"],
+    verbose=False,
+)
+
+try:
+    module.trigger_torch_check_eq_failure()
+except RuntimeError as e:
+    print(str(e))
+"""
+
+        for show_cpp_stacktraces in [False, True]:
+            with self.subTest(show_cpp_stacktraces=show_cpp_stacktraces):
+                env = os.environ.copy()
+                env["TORCH_SHOW_CPP_STACKTRACES"] = "1" if show_cpp_stacktraces else "0"
+                env["PYTHONPATH"] = os.pathsep.join(sys.path)
+
+                result = subprocess.run(
+                    [sys.executable, "-c", test_script],
+                    capture_output=True,
+                    text=True,
+                    env=env,
+                )
+
+                error_message = result.stdout + result.stderr
+
+                # The error message should always contain the check failure message
+                self.assertIn(
+                    "Check failed: a == b",
+                    error_message,
+                    f"Expected 'Check failed: a == b' in error message, got: {error_message}",
+                )
+
+                if show_cpp_stacktraces:
+                    # When stacktraces are enabled, we should see the C++ traceback
+                    self.assertTrue(
+                        "C++ CapturedTraceback:" in error_message
+                        or "frame #" in error_message.lower()
+                        or "trigger_torch_check_eq_failure" in error_message,
+                        f"Expected C++ stack trace info in error message when TORCH_SHOW_CPP_STACKTRACES=1, got: {error_message}",  # noqa: B950
+                    )
+                else:
+                    # When stacktraces are disabled, we should NOT see detailed traceback
+                    self.assertNotIn(
+                        "C++ CapturedTraceback:",
+                        error_message,
+                        f"Did not expect 'C++ CapturedTraceback:' in error message when TORCH_SHOW_CPP_STACKTRACES=0, got: {error_message}",  # noqa: B950
+                    )
+
 
 if __name__ == "__main__":
     common.run_tests()
