@@ -4557,6 +4557,30 @@ class CommonTemplate:
         self.assertTrue(r3.size() == (2, 3))
         self.assertTrue(r4.size() == (2, 1))
 
+    def test_split_zero_size_empty_tensor(self):
+        def fn(x):
+            return torch.unsafe_split(x, split_size=0, dim=-1)
+
+        x = torch.ones((0,), device=self.device)
+
+        eager_result = fn(x)
+        self.assertEqual(len(eager_result), 1)
+        self.assertEqual(eager_result[0].shape, torch.Size([0]))
+
+        self.common(fn, (x,))
+
+    def test_split_zero_size_multi_dim(self):
+        def fn(x):
+            return torch.split(x, 0, dim=1)
+
+        x = torch.ones((3, 0, 5), device=self.device)
+
+        eager_result = fn(x)
+        self.assertEqual(len(eager_result), 1)
+        self.assertEqual(eager_result[0].shape, torch.Size([3, 0, 5]))
+
+        self.common(fn, (x,))
+
     def test_split_failed(self):
         @torch.compile(backend="inductor")
         def fn(a):

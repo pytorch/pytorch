@@ -2041,10 +2041,14 @@ def split(x, sizes, dim=0):
     # by computing what the actual size of each chunk should be.
     if not isinstance(sizes, (list, tuple)):
         x_size = x.get_size()[dim]
-        chunks = V.graph.sizevars.guard_int(FloorDiv(x_size + sizes - 1, sizes))
-        sizes_ = [sizes] * chunks
-        # The last chunk might have a smaller size than the rest.
-        sizes_[-1] = x_size - (chunks - 1) * sizes
+        if sizes == 0:
+            chunks = 1
+            sizes_ = [x_size]
+        else:
+            chunks = V.graph.sizevars.guard_int(FloorDiv(x_size + sizes - 1, sizes))
+            sizes_ = [sizes] * chunks
+            # The last chunk might have a smaller size than the rest.
+            sizes_[-1] = x_size - (chunks - 1) * sizes
 
     # From this point, we assume that the sum of the sizes of all chunks
     # equals the size of the base tensor.
