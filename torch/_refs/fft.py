@@ -95,7 +95,10 @@ def _resize_fft_input(
     Fixes the shape of x such that x.size(dims[i]) == sizes[i],
     either by zero-padding, or by slicing x starting from 0.
     """
-    assert len(dims) == len(sizes)
+    if len(dims) != len(sizes):
+        raise AssertionError(
+            f"dims and sizes must have the same length, got {len(dims)} and {len(sizes)}"
+        )
     must_copy = False
     x_sizes = x.shape
     pad_amount = [0] * len(x_sizes) * 2

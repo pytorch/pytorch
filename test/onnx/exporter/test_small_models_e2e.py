@@ -620,6 +620,35 @@ class DynamoExporterTest(common_utils.TestCase, _WithExport):
             [node.op_type for node in onnx_program.model.graph],
         )
 
+    def test_export_sym_sum(self):
+        class SymSumModel(torch.nn.Module):
+            def forward(self, x):
+                return torch.sym_sum(x.shape)
+
+        inputs = (torch.zeros((2, 3, 4)),)
+        dynamic_shapes = ({0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},)
+        onnx_program = self.export(SymSumModel(), inputs, dynamic_shapes=dynamic_shapes)
+        onnx_testing.assert_onnx_program(onnx_program)
+        self.assertIn(
+            "Add",
+            [node.op_type for node in onnx_program.model.graph],
+        )
+
+    def test_export_sym_ite(self):
+        class SymIteModel(torch.nn.Module):
+            def forward(self, x):
+                condition = x.shape[0] > x.shape[1]
+                return torch.sym_ite(condition, x.shape[0], x.shape[1])
+
+        inputs = (torch.zeros((3, 2)),)
+        dynamic_shapes = ({0: torch.export.Dim.DYNAMIC, 1: torch.export.Dim.DYNAMIC},)
+        onnx_program = self.export(SymIteModel(), inputs, dynamic_shapes=dynamic_shapes)
+        onnx_testing.assert_onnx_program(onnx_program)
+        self.assertIn(
+            "Where",
+            [node.op_type for node in onnx_program.model.graph],
+        )
+
     def test_scan_cdist_add(self):
         def dist(unused: torch.Tensor, x: torch.Tensor, samex: torch.Tensor):
             sub = samex - x.reshape((1, -1))

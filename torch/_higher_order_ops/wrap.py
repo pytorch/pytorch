@@ -55,6 +55,7 @@ class InductorCompiledCode(HigherOrderOperator):
         super().__init__("inductor_compiled_code")
 
     def __call__(self, func, *args, **kwargs):
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(func, *args, **kwargs)
 
 
@@ -289,6 +290,7 @@ class TagActivationCheckpoint(HigherOrderOperator):
         )
         dispatch_key = dispatch_key_set.highestPriorityTypeId()
         if dispatch_key == torch._C.DispatchKey.PreDispatch:
+            # pyrefly: ignore [missing-attribute]
             return super().__call__(gmod, *args, **kwargs)
 
         return tag_activation_checkpoint_impl(gmod, *args, **kwargs)
