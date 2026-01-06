@@ -78,6 +78,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
     skipIfCrossRef,
+    skipIfRocm,
     skipIfXpu,
     TEST_TRANSFORMERS,
     TEST_WITH_CROSSREF,
@@ -8124,6 +8125,84 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             ):
                 _ = export(mod, inp, strict=True)
 
+    @requires_gpu
+    @skipIfRocm
+    @testing.expectedFailureSerDer
+    @testing.expectedFailureSerDerNonStrict
+    def test_export_lstm_gpu(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rnn = torch.nn.LSTM(
+                    input_size=4, hidden_size=5, num_layers=1, batch_first=True
+                )
+
+            def forward(self, x):
+                out, _ = self.rnn(x)
+                return out
+
+        m = M().to(GPU_TYPE)
+        x = torch.randn(2, 3, 4, device=GPU_TYPE)
+
+        ep = export(m, (x,))
+        self.assertTrue(callable(ep.module()))
+
+        eager_out = m(x)
+        export_out = ep.module()(x)
+        self.assertEqual(eager_out, export_out)
+
+    @requires_gpu
+    @skipIfRocm
+    @testing.expectedFailureSerDer
+    @testing.expectedFailureSerDerNonStrict
+    def test_export_gru_gpu(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rnn = torch.nn.GRU(
+                    input_size=4, hidden_size=5, num_layers=1, batch_first=True
+                )
+
+            def forward(self, x):
+                out, _ = self.rnn(x)
+                return out
+
+        m = M().to(GPU_TYPE)
+        x = torch.randn(2, 3, 4, device=GPU_TYPE)
+
+        ep = export(m, (x,))
+        self.assertTrue(callable(ep.module()))
+
+        eager_out = m(x)
+        export_out = ep.module()(x)
+        self.assertEqual(eager_out, export_out)
+
+    @requires_gpu
+    @skipIfRocm
+    @testing.expectedFailureSerDer
+    @testing.expectedFailureSerDerNonStrict
+    def test_export_rnn_flatten_parameters_gpu(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = torch.nn.LSTM(
+                    input_size=3, hidden_size=4, num_layers=2, batch_first=True
+                )
+
+            def forward(self, x):
+                self.lstm.flatten_parameters()
+                out, (h, c) = self.lstm(x)
+                return out
+
+        m = M().to(GPU_TYPE)
+        x = torch.randn(1, 5, 3, device=GPU_TYPE)
+
+        ep = export(m, (x,), strict=False)
+
+        eager_out = m(x)
+        export_out = ep.module()(x)
+        self.assertEqual(eager_out, export_out)
+
     def test_device_to_static(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -8749,7 +8828,7 @@ def forward(self, x):
     bn_num_batches_tracked = self.bn.num_batches_tracked;  bn_num_batches_tracked = None
     _guards_fn = self._guards_fn(x);  _guards_fn = None
     conv2d = torch.ops.aten.conv2d.default(x, conv_weight, conv_bias);  x = conv_weight = conv_bias = None
-    batch_norm = torch.ops.aten.batch_norm.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, False, 0.1, 1e-05, True);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
+    batch_norm = torch.ops.aten.batch_norm.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, False, 0.1, 1e-05, False);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
     return pytree.tree_unflatten((batch_norm,), self._out_spec)""",
         )
 
@@ -8770,7 +8849,7 @@ def forward(self, x):
     _guards_fn = self._guards_fn(x);  _guards_fn = None
     conv2d = torch.ops.aten.conv2d.default(x, conv_weight, conv_bias);  x = conv_weight = conv_bias = None
     add_ = torch.ops.aten.add_.Tensor(bn_num_batches_tracked, 1);  bn_num_batches_tracked = add_ = None
-    batch_norm = torch.ops.aten.batch_norm.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, True, 0.1, 1e-05, True);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
+    batch_norm = torch.ops.aten.batch_norm.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, True, 0.1, 1e-05, False);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
     return pytree.tree_unflatten((batch_norm,), self._out_spec)""",
         )
 
