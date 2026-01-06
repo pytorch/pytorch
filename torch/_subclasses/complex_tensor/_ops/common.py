@@ -215,13 +215,13 @@ def register_error(op: OpType, exc_type: type[Exception] = NotImplementedError):
 def register_binary_nonlinear(op: OpType) -> Callable:
     """Register a "multiplication-style" op, e.g. aten.mul, aten.mm, ..."""
 
-    def impl(lhs: ComplexTensor, rhs: ComplexTensor, *args, **kwargs) -> ComplexTensor:
-        a_r, a_i = split_complex_arg(lhs)
-        b_r, b_i = split_complex_arg(rhs)
-        out_dt, (a_r, a_i, b_r, b_i) = promote_tensors(a_r, a_i, b_r, b_i)
+    def impl(a: ComplexTensor, b: ComplexTensor, *args, **kwargs) -> ComplexTensor:
+        out_dt, (a, b) = promote_tensors(a, b)
+        a_r, a_i = split_complex_arg(a)
+        b_r, b_i = split_complex_arg(b)
         real = op(a_r, b_r, *args, **kwargs) - op(a_i, b_i, *args, **kwargs)
         imag = op(a_r, b_i, *args, **kwargs) + op(a_i, b_r, *args, **kwargs)
-        return ComplexTensor(real.to(out_dt), imag.to(out_dt))
+        return ComplexTensor(real, imag).to(out_dt)  # type: ignore[bad-return]
 
     func_name = _get_func_name(op)
     impl.__name__ = func_name
@@ -280,6 +280,25 @@ def _as_interleaved(arg: ComplexTensor | Any) -> Tensor | Any:
     if isinstance(arg, ComplexTensor):
         return arg.as_interleaved()
     return arg
+
+
+class WrapComplexMode(TorchDispatchMode):
+    def __torch_dispatch__(
+        self,
+        func: OpOverload,
+        types: tuple[type],
+        args: tuple = (),
+        kwargs: dict[str, Any] | None = None,
+    ):
+        if kwargs is None:
+            kwargs = {}
+        if func.overloadpacket == torch.ops.aten.complex:
+            from .._core import Complex
+
+            return Complex.apply(*args)
+        args = tree_map(_as_complex_tensor, args)
+        kwargs = tree_map(_as_complex_tensor, kwargs)
+        return tree_map(_as_complex_tensor, func(*args, **kwargs))
 
 
 class ComplexTensorMode(TorchDispatchMode):

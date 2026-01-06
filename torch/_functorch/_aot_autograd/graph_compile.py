@@ -69,6 +69,7 @@ from .runtime_wrappers import (
     AOTSyntheticBaseWrapper,
     AutogradLazyBackwardCompileInfo,
     CompilerWrapper,
+    ComplexWrapper,
     DebugAssertWrapper,
     EffectTokensWrapper,
     FakifiedOutWrapper,
@@ -166,7 +167,11 @@ def _create_wrappers_for_dispatch(needs_autograd: bool) -> list[CompilerWrapper]
     """
     Wrappers that run on every dispatch function
     """
-    return [AOTDedupeWrapper(), AOTSyntheticBaseWrapper(trace_joint=needs_autograd)]
+    return [
+        ComplexWrapper(),
+        AOTDedupeWrapper(),
+        AOTSyntheticBaseWrapper(trace_joint=needs_autograd),
+    ]
 
 
 def aot_stage1_graph_capture(
