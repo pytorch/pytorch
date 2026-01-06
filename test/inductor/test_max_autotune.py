@@ -34,6 +34,7 @@ from torch._inductor.autotune_process import (
 from torch._inductor.graph import GraphLowering
 from torch._inductor.ir import Buffer, ChoiceCaller, FixedLayout, FlexibleLayout
 from torch._inductor.kernel.mm_plus_mm import aten_mm_plus_mm
+from torch._inductor.runtime.triton_heuristics import CachingAutotuner
 from torch._inductor.select_algorithm import (
     add_feedback_saver,
     add_preprocessing_fn,
@@ -47,9 +48,12 @@ from torch._inductor.select_algorithm import (
 )
 from torch._inductor.template_heuristics.registry import override_template_heuristics
 from torch._inductor.template_heuristics.triton import (
+    CUDAAddmmPersistentTMATemplateConfigHeuristic,
+    CUDAAddMMTemplateConfigHeuristic,
     CUDAMMTemplateConfigHeuristic,
     CUDAPersistentTMATemplateConfigHeuristic,
     GemmConfig,
+    get_shared_memory_checker_opts,
 )
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
@@ -2173,26 +2177,6 @@ class TestMaxAutotune(TestCase):
             out, code = run_and_get_code(compiled_f, a, b)
             torch.testing.assert_close(out, mm(a, b), atol=1e-2, rtol=1e-2)
 
-    @config.patch(
-        max_autotune_gemm=True,
-        max_autotune_prune_choices_based_on_shared_mem=True,
-    )
-    def test_max_autotune_prune_choices(self):
-        def mm(x, y):
-            return x @ y
-
-        M, K, N = (3, 3, 3)
-
-        x = torch.rand([M, K], device=GPU_TYPE, dtype=torch.float32)
-        y = torch.rand([K, N], device=GPU_TYPE, dtype=torch.float32)
-
-        compiled_f = torch.compile(mm)
-        compiled_f(x, y)
-
-        self.assertEqual(
-            counters["inductor"]["select_algorithm_num_precompilation_exceptions"], 0
-        )
-
     @parametrize("op", ("mm", "addmm", "bmm", "baddbmm", "mm_plus_mm"))
     @parametrize("max_autotune", (False, True))
     @config.patch(
@@ -2381,6 +2365,262 @@ class TestMaxAutotune(TestCase):
 
         self.assertObjectIn(k, (15, 16))
         self.assertEqual("'EVEN_K': True" in cache_key, k == 16 and not dynamic)
+
+
+@instantiate_parametrized_tests
+class TestTemplateConfigPruning(TestCase):
+    """Test class for pruning logic in GEMM autotuning."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        # Initialize heuristics once for all tests
+        cls.addmm_tma_heuristic = CUDAAddmmPersistentTMATemplateConfigHeuristic()
+        cls.addmm_heuristic = CUDAAddMMTemplateConfigHeuristic()
+        cls.mm_tma_heuristic = CUDAPersistentTMATemplateConfigHeuristic()
+        cls.mm_heuristic = CUDAMMTemplateConfigHeuristic()
+
+        block_sizes = [64, 128, 256]
+        num_stages = [4, 5]
+        from itertools import product
+
+        cls.gemm_configs = [
+            GemmConfig(BLOCK_M, BLOCK_N, BLOCK_K, stage, 8)
+            for BLOCK_M, BLOCK_N, BLOCK_K, stage in product(
+                block_sizes, block_sizes, block_sizes, num_stages
+            )
+            # Don't test for very large block sizes nor very small ones
+            if BLOCK_M + BLOCK_N + BLOCK_K < 512 and BLOCK_M + BLOCK_N + BLOCK_K > 192
+        ]
+
+    def setUp(self):
+        super().setUp()
+        # Save original configs to restore in tearDown
+        self.original_tma_mm_configs = self.mm_tma_heuristic.mm_configs
+        self.original_mm_mm_configs = self.mm_heuristic.mm_configs
+        self.original_addmm_tma_configs = self.addmm_tma_heuristic.mm_configs
+        self.original_addmm_configs = self.addmm_heuristic.mm_configs
+
+    def tearDown(self):
+        # Restore original configs
+        self.addmm_tma_heuristic.mm_configs = self.original_addmm_tma_configs
+        self.addmm_heuristic.mm_configs = self.original_addmm_configs
+        self.mm_tma_heuristic.mm_configs = self.original_tma_mm_configs
+        self.mm_heuristic.mm_configs = self.original_mm_mm_configs
+        super().tearDown()
+
+    @contextlib.contextmanager
+    def pruning_config_context(self):
+        """Context manager for shared memory pruning configuration."""
+        with (
+            config.patch(
+                {
+                    "max_autotune_prune_choices_based_on_shared_mem": False,
+                    "triton.enable_persistent_tma_matmul": True,
+                    "inductor_default_autotune_warmup": 0,
+                    "inductor_default_autotune_rep": 1,
+                }
+            ),
+            fresh_cache(),
+        ):
+            yield
+
+    def create_test_tensors(
+        self,
+        M,
+        N,
+        K,
+        include_bias=False,
+        dtype=torch.bfloat16,
+        mat1_transposed=False,
+        mat2_transposed=False,
+    ):
+        if mat1_transposed:
+            mat1 = torch.randn(K, M, dtype=dtype, device=GPU_TYPE).t()
+        else:
+            mat1 = torch.randn(M, K, dtype=dtype, device=GPU_TYPE)
+
+        if mat2_transposed:
+            mat2 = torch.randn(N, K, dtype=dtype, device=GPU_TYPE).t()
+        else:
+            mat2 = torch.randn(K, N, dtype=dtype, device=GPU_TYPE)
+
+        if include_bias:
+            bias_1d = torch.randn(N, dtype=dtype, device=GPU_TYPE)
+            return bias_1d, mat1, mat2
+        return mat1, mat2
+
+    def test_max_autotune_prune_choices(self):
+        def mm(x, y):
+            return x @ y
+
+        M, K, N = (3, 3, 3)
+
+        x = torch.rand([M, K], device=GPU_TYPE, dtype=torch.float32)
+        y = torch.rand([K, N], device=GPU_TYPE, dtype=torch.float32)
+
+        compiled_f = torch.compile(mm, mode="max-autotune")
+        compiled_f(x, y)
+
+        self.assertEqual(
+            counters["inductor"]["select_algorithm_num_precompilation_exceptions"], 0
+        )
+
+    @parametrize("dtype", (torch.float32, torch.bfloat16))
+    @parametrize("mat1_transposed", (False, True))
+    @parametrize("mat2_transposed", (False, True))
+    @parametrize("use_tma", (False, True))
+    def test_shared_memory_pruning_addmm(
+        self,
+        dtype: torch.dtype,
+        mat1_transposed: bool,
+        mat2_transposed: bool,
+        use_tma: bool,
+    ):
+        """Test shared memory pruning for addmm operation."""
+
+        if use_tma and (dtype == torch.float32 or not has_triton_tma_device()):
+            return
+
+        def addmm_op(bias, mat1, mat2):
+            return torch.addmm(bias, mat1, mat2)
+
+        M, K, N = 512, 512, 512
+        bias_1d, mat1, mat2 = self.create_test_tensors(
+            M,
+            N,
+            K,
+            include_bias=True,
+            dtype=dtype,
+            mat1_transposed=mat1_transposed,
+            mat2_transposed=mat2_transposed,
+        )
+        dtype_size = mat1.dtype.itemsize
+
+        if use_tma:
+            self.addmm_heuristic.mm_configs = []
+            heuristic = self.addmm_tma_heuristic
+        else:
+            self.addmm_tma_heuristic.mm_configs = []
+            heuristic = self.addmm_heuristic
+
+        shared_memory_checker_opts = get_shared_memory_checker_opts("addmm", dtype_size)
+
+        self.run_op_shared_mem_pruning_check(
+            heuristic,
+            addmm_op,
+            (bias_1d, mat1, mat2),
+            dtype_size,
+            shared_memory_checker_opts,
+        )
+
+    @parametrize("dtype", (torch.float32, torch.bfloat16))
+    @parametrize("mat1_transposed", (False, True))
+    @parametrize("mat2_transposed", (False, True))
+    @parametrize("use_tma", (False, True))
+    def test_shared_memory_pruning_mm(
+        self,
+        dtype: torch.dtype,
+        mat1_transposed: bool,
+        mat2_transposed: bool,
+        use_tma: bool,
+    ):
+        if use_tma and (dtype == torch.float32 or not has_triton_tma_device()):
+            return
+
+        def mm_op(mat1, mat2):
+            return mat1 @ mat2
+
+        M, K, N = 512, 512, 512
+        mat1, mat2 = self.create_test_tensors(
+            M,
+            N,
+            K,
+            include_bias=False,
+            dtype=dtype,
+            mat1_transposed=mat1_transposed,
+            mat2_transposed=mat2_transposed,
+        )
+        dtype_size = mat1.dtype.itemsize
+
+        if use_tma:
+            self.mm_heuristic.mm_configs = []
+            heuristic = self.mm_tma_heuristic
+        else:
+            self.mm_tma_heuristic.mm_configs = []
+            heuristic = self.mm_heuristic
+
+        shared_memory_checker_opts = get_shared_memory_checker_opts("mm", dtype_size)
+
+        self.run_op_shared_mem_pruning_check(
+            heuristic, mm_op, (mat1, mat2), dtype_size, shared_memory_checker_opts
+        )
+
+    def run_op_shared_mem_pruning_check(
+        self, heuristic, op, inputs, dtype_size, shared_memory_checker_opts
+    ):
+        exceeds_checker = heuristic._get_exceeding_shared_memory_checker(
+            **shared_memory_checker_opts
+        )
+        for c in self.gemm_configs:
+            smem_estimation = heuristic.get_shared_memory_estimation(
+                c, dtype_size, **shared_memory_checker_opts
+            )
+            # Configure heuristics to use only this specific config
+            heuristic.mm_configs = [c]
+            exceeds = exceeds_checker(c, dtype_size)
+
+            original_precompile = CachingAutotuner.precompile
+            original_autotune = AlgorithmSelectorCache.autotune
+
+            captured_smem = 0
+            triton_compilation_fails = True
+
+            def mock_precompile(self, *args, **kwargs):
+                original_precompile(self, *args, **kwargs)
+                # Access compile_results after precompilation
+                for result in self.compile_results:
+                    # Get shared memory from the compiled kernel
+                    kernel = result.kernel
+                    shared_mem = (
+                        kernel.shared
+                        if hasattr(kernel, "shared")
+                        else kernel.metadata.shared
+                    )
+                    nonlocal captured_smem
+                    captured_smem = shared_mem
+
+            def mock_autotune(self, *args, **kwargs):
+                timings = original_autotune(self, *args, **kwargs)
+                nonlocal triton_compilation_fails
+                for caller, time in timings.items():
+                    if isinstance(caller, TritonTemplateCaller) and time != float(
+                        "inf"
+                    ):
+                        triton_compilation_fails = False
+                return timings
+
+            with (
+                self.pruning_config_context(),
+                mock.patch.object(CachingAutotuner, "precompile", mock_precompile),
+                mock.patch.object(AlgorithmSelectorCache, "autotune", mock_autotune),
+            ):
+                torch._dynamo.reset()
+                counters.clear()
+                compiled_fn = torch.compile(op, mode="max-autotune")
+                run_and_get_code(compiled_fn, *inputs)
+
+            if triton_compilation_fails:
+                self.assertTrue(
+                    exceeds,
+                    f"Config {c} failed to compile due to shared memory, "
+                    "but the checker predicted it would NOT exceed shared memory limits.",
+                )
+            else:
+                self.assertTrue(
+                    captured_smem <= smem_estimation,
+                    f"Estimated maximum smem should exceed actual smem used for config {c}",
+                )
 
 
 class TestMaxAutotunePrecompile(TestCase):

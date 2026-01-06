@@ -507,9 +507,11 @@ max_autotune_report_choices_stats = (
     os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_REPORT_CHOICES_STATS", "1") == "1"
 )
 
-# Prune configs that require more shared memory than the hardware limit
+# Prune configs that have a theoretical maximum shared memory usage than the hardware limit
+# Will over-prune - pruning some valid configs with theoretical shared memory usage higher
+# than real shared memory usage, ensuring that invalid configs are not possibly autotuned
 max_autotune_prune_choices_based_on_shared_mem = (
-    os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_PRUNE_CHOICES_BASED_ON_SHARED_MEM", "1")
+    os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_PRUNE_CHOICES_BASED_ON_SHARED_MEM", "0")
     == "1"
 )
 
