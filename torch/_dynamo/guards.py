@@ -207,6 +207,7 @@ if TYPE_CHECKING:
 
 
 guard_manager_testing_hook_fn: Optional[Callable[[Any, Any, Any], Any]] = None
+install_guard_testing_hook_fn: Optional[Callable[[Guard], Guard]] = None
 
 try:
     import numpy as np
@@ -4759,4 +4760,10 @@ def install_guard(*guards: Guard, skip: int = 0) -> None:
         assert isinstance(guard, Guard)
         if is_from_skip_guard_source(guard.originating_source):
             continue
+
+        # Call testing hook if registered and use the returned guard
+        # This allows testing to clone the guard and verify the clone works properly
+        if install_guard_testing_hook_fn is not None:
+            guard = install_guard_testing_hook_fn(guard)
+
         add(guard, collect_debug_stack=collect_debug_stack, skip=skip + 1)

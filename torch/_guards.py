@@ -438,6 +438,35 @@ class Guard:
             )
         self.obj_weakref = obj_weakref
 
+    def clone(self, transform_fn: Callable[[Source], Source] | None = None) -> Guard:
+        """
+        Clone the guard, optionally applying a transformation to the originating_source.
+
+        Args:
+            transform_fn: Optional function to transform the originating_source during cloning.
+
+        Returns:
+            A new Guard instance with the cloned/transformed source.
+        """
+        # Clone the originating_source
+        cloned_source = self.originating_source.clone(transform_fn)
+
+        # Create a new Guard with the cloned source
+        # Note: We create a new Guard instance with the same create_fn but cloned source
+        # The _hash is reset to None so it will be recomputed
+        return Guard(
+            originating_source=cloned_source,
+            create_fn=self.create_fn,
+            guard_types=self.guard_types.copy() if self.guard_types else None,
+            code_list=self.code_list.copy() if self.code_list else None,
+            obj_weakref=self.obj_weakref,
+            guarded_class_weakref=self.guarded_class_weakref,
+            stack=self.stack,
+            user_stack=self.user_stack,
+            _hash=None,  # Reset hash so it gets recomputed
+            _unserializable=self._unserializable,
+        )
+
 
 T = TypeVar("T")
 
@@ -1226,6 +1255,23 @@ class Source:
         """True if you can guard on attributes of this"""
         return self.guard_source != GuardSource.SYNTHETIC_LOCAL
 
+    def clone(self, transform_fn: Callable[[Source], Source] | None = None) -> Source:
+        """
+        Clone the source, optionally applying a transformation function.
+
+        Args:
+            transform_fn: Optional function to transform the source. If None, performs identity clone.
+
+        Returns:
+            The cloned/transformed source.
+        """
+        # For frozen dataclasses, returning self is effectively a clone
+        # Subclasses should override this if they have mutable state or need custom clone logic
+        result = self
+        if transform_fn is not None:
+            result = transform_fn(result)
+        return result
+
 
 # Subclasses can be found in torch/_dynamo/source.py
 @dataclass_with_cached_hash(frozen=True)
@@ -1271,6 +1317,29 @@ class ChainedSource(Source):
         del locals[tmpvar]
         cache[self] = value
         return value
+
+    def clone(self, transform_fn: Callable[[Source], Source] | None = None) -> Source:
+        """
+        Clone the chained source, recursively cloning the base source.
+
+        Args:
+            transform_fn: Optional function to transform sources during cloning.
+
+        Returns:
+            The cloned/transformed source.
+        """
+        # Clone the base recursively
+        cloned_base = self.base.clone(transform_fn)
+
+        # Create a new instance with the cloned base
+        # Using dataclasses.replace to create a new frozen dataclass instance
+        result = dataclasses.replace(self, base=cloned_base)
+
+        # Apply transform_fn to the result if provided
+        if transform_fn is not None:
+            result = transform_fn(result)
+
+        return result
 
 
 def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
