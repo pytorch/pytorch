@@ -1337,6 +1337,7 @@ def aot_compile_joint_with_descriptors(
         SerializableCallable,
     )
     from torch._functorch._aot_autograd.schemas import AOTAutogradCacheInfo
+    from torch._guards import detect_fake_mode
     from torch._inductor.output_code import OutputCode
 
     fw_compiler = SerializableAOTDispatchCompiler(OutputCode, fw_compiler)
@@ -1357,7 +1358,21 @@ def aot_compile_joint_with_descriptors(
             }
         )
 
-    with cache_ctx:
+    # Set up a TracingContext if one isn't already available.
+    # This is needed for compilers (like regional_inductor) that call
+    # standalone_compile with dynamic_shapes="from_tracing_context".
+    tracing_context = torch._guards.TracingContext.try_get()
+    if tracing_context is None:
+        fake_mode = detect_fake_mode(jd._aot_state.flat_args)
+        if fake_mode is not None:
+            tracing_context = torch._guards.TracingContext(fake_mode)
+            tracing_ctx = torch._guards.tracing(tracing_context)
+        else:
+            tracing_ctx = nullcontext()
+    else:
+        tracing_ctx = nullcontext()
+
+    with cache_ctx, tracing_ctx:
         compiled_fn, _ = aot_stage2_compile(
             jd._aot_state,
             jd._aot_graph_capture,
