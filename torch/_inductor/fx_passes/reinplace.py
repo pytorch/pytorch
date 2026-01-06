@@ -499,7 +499,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 return True
         return False
 
-    def can_inplace(node, mutated_arg, requires_all=True):
+    def can_inplace(node, mutated_arg):
         # ls should be a list of tensors that all shares the same storage.
         def _overlap(ls) -> bool:
             try:
@@ -516,9 +516,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 # We can probably do better (that is, reinplace one of them and clone the other)
                 # but that requires more work and mutable List[Tensor] are not that common.
                 return False
-            return (all if requires_all else any)(
-                can_inplace(node, arg) for arg in mutated_arg
-            )
+            return all(can_inplace(node, arg) for arg in mutated_arg)
 
         if get_node_storage(mutated_arg) is None:
             return False
@@ -561,9 +559,6 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
     def all_can_inplace(node, mutated_args):
         return all(can_inplace(node, arg) for arg in mutated_args)
-
-    def any_can_inplace(node, mutated_args):
-        return any(can_inplace(node, arg, requires_all=False) for arg in mutated_args)
 
     def log_inplace_results(
         node_name,
@@ -743,19 +738,10 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 # Get the mutated arg indices, offset by 2 (token + op)
                 mutated_arg_indices = inplaceable_op.mutated_args
 
-                if not inplaceable_op.extra_check(node) or not any_can_inplace(
-                    node, [node.args[idx + 2] for idx in mutated_arg_indices]
-                ):
-                    log.debug(
-                        "reinplace with_effects: either extra_check failed or no args are inplaceable"
-                    )
-                    continue
-
                 # Build flat list of tensors for can_inplace check
                 # and a mapping of output index -> replacement tensor(s)
                 mutated_tensors_flat = []
                 output_idx_to_replacement: dict[int, Any] = {}
-                kwargs = {}
 
                 for position, idx in enumerate(mutated_arg_indices):
                     actual_idx = idx + 2  # offset for token and op
@@ -770,158 +756,109 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
 
                     # Flatten for can_inplace check
                     if isinstance(arg, (list, tuple)):
-                        for i, v in enumerate(arg):
-                            mutated_tensors_flat.append(v)
-                            kwargs[(actual_idx, i)] = v
+                        mutated_tensors_flat.extend(arg)
                     else:
                         mutated_tensors_flat.append(arg)
-                        kwargs[actual_idx] = arg
 
-                # Use reinplace_and_refine_tensors_to_clone to determine which need cloning
-                tensors_to_clone = OrderedSet(
-                    reinplace_and_refine_tensors_to_clone(
-                        list(kwargs.keys()),
-                        kwargs,
-                        str(inner_op),
-                        ReInplaceTrigger.OTHER,
-                    )
-                )
+                # Check if all mutated args can be inplaced
+                all_can_inplace = all_can_inplace(node, mutated_tensors_flat)
 
                 log.debug(
-                    "reinplace with_effects: tensors_to_clone=%s",
-                    tensors_to_clone,
+                    "reinplace with_effects: mutated_tensors=%s, all_can_inplace=%s",
+                    [str(a) for a in mutated_tensors_flat],
+                    all_can_inplace,
                 )
 
-                # should never be >= since any_can_inplace returned false by now
-                assert len(tensors_to_clone) < len(mutated_tensors_flat)
-
-                for position, idx in enumerate(mutated_arg_indices):
-                    actual_idx = idx + 2  # offset for token and op
-                    assert actual_idx < len(node.args), (
-                        f"mutated arg idx {actual_idx} out of range {len(node.args)}"
+                if all_can_inplace and inplaceable_op.extra_check(node):
+                    log.debug(
+                        "reinplace with_effects: converting %s -> %s",
+                        inner_op,
+                        inplaceable_op.inplace_op,
                     )
-                    arg = node.args[actual_idx]
+                    # Update the inner op to inplace version
+                    node.update_arg(1, inplaceable_op.inplace_op)
 
-                    # Output index is position + 1 (index 0 is the token)
-                    output_idx = position + 1
+                    # The output structure changes: functional returns (token, tensors),
+                    # inplace returns (token, None). We need to redirect tensor uses
+                    # to the input tensors.
 
-                    # Flatten for can_inplace check
-                    if isinstance(arg, (list, tuple)):
-                        new_list = []
-                        num_cloned = 0
-                        for i, item in enumerate(arg):
-                            key = (actual_idx, i)
-                            if key in tensors_to_clone:
-                                with graph.inserting_before(node):
-                                    clone = graph.call_function(
-                                        torch.ops.aten.clone.default, (item,)
-                                    )
-                                new_list.append(clone)
-                                num_cloned += 1
+                    def get_index_from_node(n):
+                        """Extract the index from a getitem node."""
+                        if n.target is operator.getitem:
+                            return n.args[1]
+                        return None
+
+                    def is_getitem_node(n, parent):
+                        """Check if node n is a getitem indexing into parent."""
+                        return n.target is operator.getitem and n.args[0] is parent
+
+                    def replace_and_collect(current_node, replacement_tensors):
+                        """
+                        Collect replacements for getitem nodes into replace_dict.
+                        Nodes are added in child-first order so children are erased before parents.
+                        """
+                        # Find all users that are getitem nodes indexing into current_node
+                        getitem_users = [
+                            u
+                            for u in current_node.users
+                            if is_getitem_node(u, current_node)
+                        ]
+
+                        if not getitem_users:
+                            # Leaf node - add to replace_dict with actual replacement
+                            if isinstance(replacement_tensors, (list, tuple)):
+                                if len(replacement_tensors) == 1:
+                                    replace_dict[current_node] = replacement_tensors[0]
+                                    return True
+                                else:
+                                    # Multiple tensors but no indexing - can't replace
+                                    return False
                             else:
-                                new_list.append(item)
-                        # don't need update at all if no members were cloned
-                        if num_cloned > 0:
-                            node.update_arg(actual_idx, new_list)
-                            output_idx_to_replacement[output_idx] = new_list
-                    else:
-                        if actual_idx in tensors_to_clone:
-                            with graph.inserting_before(node):
-                                clone = graph.call_function(
-                                    torch.ops.aten.clone.default, (arg,)
-                                )
-                            node.update_arg(actual_idx, clone)
-                            output_idx_to_replacement[output_idx] = clone
-
-                log.debug(
-                    "reinplace with_effects: converting %s -> %s",
-                    inner_op,
-                    inplaceable_op.inplace_op,
-                )
-                # Update the inner op to inplace version
-                node.update_arg(1, inplaceable_op.inplace_op)
-
-                # The output structure changes: functional returns (token, tensors),
-                # inplace returns (token, None). We need to redirect tensor uses
-                # to the input tensors.
-
-                def get_index_from_node(n):
-                    """Extract the index from a getitem node."""
-                    if n.target is operator.getitem:
-                        return n.args[1]
-                    return None
-
-                def is_getitem_node(n, parent):
-                    """Check if node n is a getitem indexing into parent."""
-                    return n.target is operator.getitem and n.args[0] is parent
-
-                def replace_and_collect(current_node, replacement_tensors):
-                    """
-                    Collect replacements for getitem nodes into replace_dict.
-                    Nodes are added in child-first order so children are erased before parents.
-                    """
-                    # Find all users that are getitem nodes indexing into current_node
-                    getitem_users = [
-                        u
-                        for u in current_node.users
-                        if is_getitem_node(u, current_node)
-                    ]
-
-                    if not getitem_users:
-                        # Leaf node - add to replace_dict with actual replacement
-                        if isinstance(replacement_tensors, (list, tuple)):
-                            if len(replacement_tensors) == 1:
-                                replace_dict[current_node] = replacement_tensors[0]
+                                replace_dict[current_node] = replacement_tensors
                                 return True
-                            else:
-                                # Multiple tensors but no indexing - can't replace
-                                return False
-                        else:
-                            replace_dict[current_node] = replacement_tensors
-                            return True
 
-                    # Process children first (so they're added to replace_dict before parent)
-                    all_children_replaced = True
-                    first_replacement = None
-                    for getitem_user in getitem_users:
-                        idx = get_index_from_node(getitem_user)
-                        if idx is None or not isinstance(idx, int):
-                            all_children_replaced = False
+                        # Process children first (so they're added to replace_dict before parent)
+                        all_children_replaced = True
+                        first_replacement = None
+                        for getitem_user in getitem_users:
+                            idx = get_index_from_node(getitem_user)
+                            if idx is None or not isinstance(idx, int):
+                                all_children_replaced = False
+                                continue
+
+                            if not isinstance(replacement_tensors, (list, tuple)):
+                                all_children_replaced = False
+                                continue
+
+                            if idx >= len(replacement_tensors):
+                                all_children_replaced = False
+                                continue
+
+                            if first_replacement is None:
+                                first_replacement = replacement_tensors[idx]
+
+                            if not replace_and_collect(
+                                getitem_user, replacement_tensors[idx]
+                            ):
+                                all_children_replaced = False
+
+                        # Add this node to replace_dict after children (even if it has non-getitem users)
+                        # Non-getitem users will have their input replaced via replace_all_uses_with
+                        if all_children_replaced and first_replacement is not None:
+                            replace_dict[current_node] = first_replacement
+
+                        return all_children_replaced
+
+                    # Find getitem nodes that extract tensor results
+                    # Use the output_idx_to_replacement mapping built above
+                    for user in list(node.users):
+                        if not is_getitem_node(user, node):
                             continue
-
-                        if not isinstance(replacement_tensors, (list, tuple)):
-                            all_children_replaced = False
+                        idx = get_index_from_node(user)
+                        if idx is None or idx not in output_idx_to_replacement:
                             continue
-
-                        if idx >= len(replacement_tensors):
-                            all_children_replaced = False
-                            continue
-
-                        if first_replacement is None:
-                            first_replacement = replacement_tensors[idx]
-
-                        if not replace_and_collect(
-                            getitem_user, replacement_tensors[idx]
-                        ):
-                            all_children_replaced = False
-
-                    # Add this node to replace_dict after children (even if it has non-getitem users)
-                    # Non-getitem users will have their input replaced via replace_all_uses_with
-                    if all_children_replaced and first_replacement is not None:
-                        replace_dict[current_node] = first_replacement
-
-                    return all_children_replaced
-
-                # Find getitem nodes that extract tensor results
-                # Use the output_idx_to_replacement mapping built above
-                for user in list(node.users):
-                    if not is_getitem_node(user, node):
-                        continue
-                    idx = get_index_from_node(user)
-                    if idx is None or idx not in output_idx_to_replacement:
-                        continue
-                    replacement = output_idx_to_replacement[idx]
-                    replace_and_collect(user, replacement)
+                        replacement = output_idx_to_replacement[idx]
+                        replace_and_collect(user, replacement)
         elif node.target in inplaceable_triton_ops:
             kernel_idx = node.kwargs["kernel_idx"]
             kernel = kernel_side_table.get_kernel(kernel_idx)
