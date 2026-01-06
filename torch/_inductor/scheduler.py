@@ -2841,20 +2841,6 @@ def is_template_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
     return is_epilogue_fusion(node1, node2) or is_prologue_fusion(node1, node2)
 
 
-def _should_defer_template_fusion(
-    fused_node1: BaseSchedulerNode,
-    fused_node2: BaseSchedulerNode,
-    pending_fusions: dict[BaseSchedulerNode, list[PendingFusion]],
-):
-    if is_template_fusion(fused_node1, fused_node2):
-        pending_fusion = pending_fusions.get(
-            fused_node2, pending_fusions.get(fused_node1)
-        )
-        return pending_fusion and pending_fusion[0].future
-
-    return False
-
-
 class Scheduler:
     """
     A Scheduler is a graph of BaseSchedulerNodes. It is responsible for
@@ -4248,11 +4234,27 @@ class Scheduler:
         self.name_to_fused_node.update({n.get_name(): node3 for n in node3.get_nodes()})
         return node3
 
+    def fuse_if_speedup(
+        self,
+        node1: BaseSchedulerNode,
+        node2: BaseSchedulerNode,
+        speedup_fn: Callable[[], bool],
+        fused_nodes: OrderedSet[BaseSchedulerNode],
+    ):
+        if (
+            self.can_fuse(node1, node2)
+            and not self.will_fusion_create_cycle(node1, node2)
+            and speedup_fn()
+        ):
+            self.fuse_two_nodes(node1, node2, fused_nodes)
+            return True
+
+        return False
+
     def evaluate_pending_template_fusions(
         self,
-        template_fusion_candidates: OrderedSet[BaseSchedulerNode],
+        template_fusion_candidates: dict[BaseSchedulerNode, list[PendingFusion]],
         fused_nodes: OrderedSet[BaseSchedulerNode],
-        pending_fusions: dict[BaseSchedulerNode, list[PendingFusion]],
     ) -> None:
         """
         Evaluate pending template fusions for a set of fusion candidate nodes.
@@ -4260,47 +4262,43 @@ class Scheduler:
         or prologue fusions
         """
 
-        def fuse_if_speedup(node1, node2, speedup_fn):
-            if (
-                self.can_fuse(node1, node2)
-                and not self.will_fusion_create_cycle(node1, node2)
-                and speedup_fn()
-            ):
-                self.fuse_two_nodes(node1, node2, fused_nodes)
-                return True
+        template_futures: list[Future] = []
+        future_to_pending_fusion: dict[Future, PendingFusion] = {}
 
-            return False
-
-        while len(template_fusion_candidates):
-            template_futures: list[Future] = []
-            future_to_pending_fusion: dict[Future, PendingFusion] = {}
-
+        while template_fusion_candidates:
             fusions_to_remove: OrderedSet[BaseSchedulerNode] = OrderedSet()
-            for fusion_node in template_fusion_candidates:
-                assert len(pending_fusions[fusion_node]) >= 1
+            for candidate in template_fusion_candidates:
+                assert (
+                    candidate in template_fusion_candidates
+                    and len(template_fusion_candidates[candidate]) >= 1
+                )
+                pending_fusion = template_fusion_candidates[candidate].pop(0)
 
-                pending_fusion = pending_fusions[fusion_node].pop(0)
+                if len(template_fusion_candidates[candidate]) == 0:
+                    fusions_to_remove.add(candidate)
+
                 node1, node2 = pending_fusion.get_fusion_nodes()
 
-                # Since prologue fusion happens after epilogue
-                # node1 should always be the fused node previous to template fusion
-                assert self.get_fused_node(node1) is node1
-                if is_epilogue_fusion(node1, node2):
-                    assert self.get_fused_node(node2) is node2
-                    template_node = node1
-                else:
-                    # In prologue fusion cases, the template node can change
-                    # from fusion with an epilogue
-                    node2 = self.get_fused_node(node2)
-                    template_node = node2
+                if node2 == candidate:
+                    assert (
+                        is_epilogue_fusion(node1, node2)
+                        and self.get_fused_node(node2) is node2
+                    )
 
-                # Remove fusion candidate if template node doesn't exist
-                # Another epilogue/prologue has been fused respectively
-                # TODO (PaulZhang12): Does not support fusions of templates with
-                # multiple potential epilogues
-                if template_node not in fused_nodes:
-                    fusions_to_remove.add(fusion_node)
-                    continue
+                    # Template fused with previous epilogue, no longer fusible
+                    # TODO (PaulZhang12): Does not support fusions of templates with
+                    # multiple potential epilogues
+                    if self.get_fused_node(node1) is not node1:
+                        continue
+                else:
+                    assert (
+                        is_prologue_fusion(node1, node2)
+                        and self.get_fused_node(node1) is node1
+                    )
+
+                    # In prologue case, either template could have been previously fused with epilogue
+                    # or could have been fused with prologue
+                    node2 = self.get_fused_node(node2)
 
                 if pending_fusion.future:
                     f = pending_fusion.future.future
@@ -4309,24 +4307,24 @@ class Scheduler:
                     future_to_pending_fusion[f] = pending_fusion
                 else:
                     # Non AsyncCompile path, perform fusion
-                    if fuse_if_speedup(node1, node2, pending_fusion.callable_fn):
-                        fusions_to_remove.add(fusion_node)
-
-                # Template fusion candidate is done fusing if no more possible candidates
-                if len(pending_fusions[fusion_node]) == 0:
-                    fusions_to_remove.add(fusion_node)
+                    if self.fuse_if_speedup(
+                        node1, node2, pending_fusion.callable_fn, fused_nodes
+                    ):
+                        fusions_to_remove.add(candidate)
 
             # Evaluate fusion candidates as async_compile completes
             for f in as_completed(template_futures):
                 pending_fusion = future_to_pending_fusion[f]
-                if fuse_if_speedup(
+                if self.fuse_if_speedup(
                     self.get_fused_node(pending_fusion.node1),
                     self.get_fused_node(pending_fusion.node2),
                     pending_fusion.callable_fn,
+                    fused_nodes,
                 ):
-                    fusions_to_remove.add(fusion_node)
+                    fusions_to_remove.add(candidate)
 
-            template_fusion_candidates = template_fusion_candidates - fusions_to_remove
+            for f in fusions_to_remove:
+                template_fusion_candidates.pop(f)
 
     def fuse_nodes_once(
         self,
@@ -4350,20 +4348,26 @@ class Scheduler:
         # These are potential fusions which we are async compiling,
         # and which we will benchmark profitability of.
         # Maps node -> (is_speedup_fn, LambdaFuture, node1, node2)
+        # Only used in the case of benchmark_kernel=True
         pending_fusions: dict[
             BaseSchedulerNode,
-            list[PendingFusion],
+            PendingFusion,
         ] = {}
 
-        epilogue_fusion_nodes: OrderedSet[BaseSchedulerNode] = OrderedSet()
-        prologue_fusion_nodes: OrderedSet[BaseSchedulerNode] = OrderedSet()
+        epilogue_fusion_nodes: dict[BaseSchedulerNode, list[PendingFusion]] = (
+            collections.defaultdict(list)
+        )
+        prologue_fusion_nodes: dict[BaseSchedulerNode, list[PendingFusion]] = (
+            collections.defaultdict(list)
+        )
 
         def resolve_pending_fusions(
             node1: BaseSchedulerNode, node2: BaseSchedulerNode
         ) -> None:
-            if _should_defer_template_fusion(
-                self.get_fused_node(node1), self.get_fused_node(node2), pending_fusions
+            if is_template_fusion(
+                self.get_fused_node(node1), self.get_fused_node(node2)
             ):
+                # Defer template fusions by default, will be handled later
                 return
 
             while (
@@ -4374,10 +4378,14 @@ class Scheduler:
                     self.get_fused_node(node1),
                     pending_fusions.get(self.get_fused_node(node2)),
                 )
-                assert pending_fusion is not None and len(pending_fusion) == 1
+                assert pending_fusion is not None
 
-                node_key1, node_key2 = pending_fusion[0].get_fusion_nodes()
-                is_speedup = pending_fusion[0].callable_fn
+                node_key1, node_key2 = pending_fusion.get_fusion_nodes()
+                is_speedup = pending_fusion.callable_fn
+
+                fusion_log.error(
+                    f"Removing node {node_key1} {node_key2} from pending_fusions"
+                )
 
                 pending_fusions.pop(node_key1, None)
                 pending_fusions.pop(node_key2, None)
@@ -4393,15 +4401,6 @@ class Scheduler:
         def evaluate_lazy_fusions(node1, node2, fusion_res: FusionResult):
             assert fusion_res.callable_fn is not None
 
-            if is_template_fusion(node1, node2):
-                assert (node1, node2) not in self.seen_template_fusions
-                self.seen_template_fusions.add((node1, node2))
-
-                if is_epilogue_fusion(node1, node2):
-                    epilogue_fusion_nodes.add(node2)
-                else:
-                    prologue_fusion_nodes.add(node1)
-
             pending_fusion = PendingFusion(
                 callable_fn=fusion_res.callable_fn,
                 node1=node1,
@@ -4409,13 +4408,17 @@ class Scheduler:
                 future=fusion_res.future,
             )
 
-            if node1 not in pending_fusions:
-                pending_fusions[node1] = []
-            if node2 not in pending_fusions:
-                pending_fusions[node2] = []
+            if is_template_fusion(node1, node2):
+                assert (node1, node2) not in self.seen_template_fusions
+                self.seen_template_fusions.add((node1, node2))
 
-            pending_fusions[node1].append(pending_fusion)
-            pending_fusions[node2].append(pending_fusion)
+                if is_epilogue_fusion(node1, node2):
+                    epilogue_fusion_nodes[node2].append(pending_fusion)
+                else:
+                    prologue_fusion_nodes[node1].append(pending_fusion)
+            else:
+                pending_fusions[node1] = pending_fusion
+                pending_fusions[node2] = pending_fusion
 
         for node1, node2 in self.get_possible_fusions(nodes, is_reorder_round):
             # if either node is in a pending fusion, resolve it.
@@ -4446,35 +4449,26 @@ class Scheduler:
 
         seen_pair_speedup_fn: OrderedSet[Callable[[], bool]] = OrderedSet()
 
-        # Resolve pending fusions for non templates
+        # Resolve pending fusions for non templates in case of benchmark_kernel=True
         for pending_fusion in pending_fusions.values():
-            node_key1, node_key2 = pending_fusion[0].get_fusion_nodes()
-            is_speedup_fn = pending_fusion[0].callable_fn
+            node_key1, node_key2 = pending_fusion.get_fusion_nodes()
+            is_speedup_fn = pending_fusion.callable_fn
 
             if is_speedup_fn in seen_pair_speedup_fn or is_template_fusion(
                 node_key1, node_key2
             ):
                 continue
 
-            assert len(pending_fusion) == 1
-
             seen_pair_speedup_fn.add(is_speedup_fn)
 
             assert self.get_fused_node(node_key1) is node_key1
             assert self.get_fused_node(node_key2) is node_key2
 
-            if is_speedup_fn() and not self.will_fusion_create_cycle(
-                node_key1, node_key2
-            ):
-                self.fuse_two_nodes(node_key1, node_key2, fused_nodes)
+            self.fuse_if_speedup(node_key1, node_key2, is_speedup_fn, fused_nodes)
 
         # Evaluate epilogue template fusions first, and then prologue
-        self.evaluate_pending_template_fusions(
-            epilogue_fusion_nodes, fused_nodes, pending_fusions
-        )
-        self.evaluate_pending_template_fusions(
-            prologue_fusion_nodes, fused_nodes, pending_fusions
-        )
+        self.evaluate_pending_template_fusions(epilogue_fusion_nodes, fused_nodes)
+        self.evaluate_pending_template_fusions(prologue_fusion_nodes, fused_nodes)
 
         nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         nodes = self.topological_sort_schedule(nodes)
