@@ -1751,8 +1751,10 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 outputs_with_sources, stop_at=inputs_grad_fns
             )
 
-            # Check if any external grad_fn (that isn't an input) is reachable.
-            # If so, the autograd graph extends beyond the compiled region.
+            # Check if any graph input's grad_fn is in the consumed set.
+            # If so, autograd.grad would need to traverse through external autograd nodes,
+            # which we cannot trace. (If a graph input is also an autograd.grad input,
+            # its grad_fn is already excluded from consumed_grad_fns via stop_at.)
             external_in_consumed = consumed_grad_fns & external_grad_fns
 
             if external_in_consumed:
