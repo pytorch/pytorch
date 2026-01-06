@@ -672,10 +672,17 @@ class ViewAndMutationMeta:
     @property
     def tensors_saved_for_backwards_slice(self):
         assert self.num_symints_saved_for_bw is not None
-        if self.num_symints_saved_for_bw > 0:
-            return slice(self.num_forward, -self.num_symints_saved_for_bw)
-        else:
-            return slice(self.num_forward, None)
+        assert self.num_tensors_saved_with_no_vc_check is not None
+        # Fast-path: if no tensors without VC check, just return the VC check slice
+        if self.num_tensors_saved_with_no_vc_check == 0:
+            return self.tensors_saved_for_backwards_with_vc_check_slice
+        # Invariant: total tensors activations = (acts_with_vc_check, acts_no_vc_check)
+        vc_slice = self.tensors_saved_for_backwards_with_vc_check_slice
+        no_vc_slice = self.tensors_saved_for_backwards_no_vc_check_slice
+        # Start should be the same (self.num_forward)
+        assert vc_slice.start == self.num_forward
+        # End is the end of the no_vc_check slice
+        return slice(vc_slice.start, no_vc_slice.stop)
 
     @property
     def tensors_saved_for_backwards_with_vc_check_slice(self):
@@ -1289,7 +1296,8 @@ class SerializableAOTDispatchCompiler(AOTDispatchCompiler):
         gm: torch.fx.GraphModule,
         example_inputs: Sequence[InputType],
     ) -> OutputCode:
-        return self.compiler_fn(gm, example_inputs)
+        output_code = self.compiler_fn(gm, example_inputs)
+        return output_code
 
 
 class FlatFn(Protocol):
