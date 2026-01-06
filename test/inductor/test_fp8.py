@@ -395,7 +395,9 @@ class TestFP8Types(TestCase):
             f"LN only Inductor: {ln_latency}ms."
         )
 
-    @unittest.skipIf(not SM90OrLater, "PDL requires SM 9.0+")
+    @unittest.skipIf(
+        not SM90OrLater or torch.version.hip, "PDL requires NVIDIA SM 9.0+"
+    )
     @onlyOn(["cuda", "xpu"])
     def test_scaled_mm_pdl_handles_none_bias(self, device):
         dtype_float8 = _fix_fp8_dtype_for_rocm(torch.float8_e4m3fn, device)

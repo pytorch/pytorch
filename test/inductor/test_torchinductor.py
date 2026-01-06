@@ -15003,7 +15003,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         FileCheck().check_regex(r"tl\.store\(.*xmask\)").run(code)
 
     @requires_cuda_and_triton
-    @skipCUDAIf(not SM90OrLater, "Requires sm90")
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @config.patch({"triton.enable_pdl": True})
     def test_pdl_mutation(self):
         def fn(a, b, c):
@@ -15034,7 +15034,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         ).run(code)
 
     @requires_cuda_and_triton
-    @skipCUDAIf(not SM90OrLater, "Requires sm90")
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
     @config.patch(
         {
             "triton.enable_pdl": True,
