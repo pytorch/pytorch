@@ -652,20 +652,20 @@ bool plan_errata_exception(
   // rule_id is an arbitrary string, here we use the issue number if there is
   // one
   static auto hardcoded_errata_json_handle = nlohmann::json::parse(R"(
-            { "version" : 1, 
-              "rules"   : 
-                [ 
-                    { "rule_id"             : "163539", 
+            { "version" : 1,
+              "rules"   :
+                [
+                    { "rule_id"             : "163539",
                       "operation"           : "ConvFwd",
-                      "engine"              : 23, 
-                      "cudnn_version_start" : 90800, 
-                      "cudnn_version_end"   : 91500 
+                      "engine"              : 23,
+                      "cudnn_version_start" : 90800,
+                      "cudnn_version_end"   : 91500
                     },
-                    { "rule_id"             : "ConvBwdData", 
+                    { "rule_id"             : "ConvBwdData",
                       "operation"           : "ConvBwdData",
-                      "engine"              : 23, 
-                      "cudnn_version_start" : 8000, 
-                      "cudnn_version_end"   : -1 
+                      "engine"              : 23,
+                      "cudnn_version_start" : 8000,
+                      "cudnn_version_end"   : -1
                     }
                 ]
             })");
