@@ -313,7 +313,7 @@ void MessageLogger::DealWithFatal() {
   if (exit_on_fatal_) {
     LOG(FATAL) << stream_.str();
   } else {
-    throw c10::Error(stream_.str(), nullptr, nullptr);
+    throw c10::Error(stream_.str(), GetFetchStackTrace()(), nullptr);
   }
 }
 
