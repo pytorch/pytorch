@@ -6045,8 +6045,7 @@ Tensor linalg_solve_jvp(
     const Tensor& X,
     const Tensor& LU,
     const Tensor& pivots,
-    const bool left,
-    const bool use_A_T) {
+    const bool left) {
   at::NoTF32Guard disable_tf32;
   // For left=True (left=False is analogous)
   // dX = A^{-1}(dB - dAX)
@@ -6068,8 +6067,7 @@ Tensor linalg_solve_jvp(
   auto X_ = vector_to_matrix(X);
   auto dB_ = vector_to_matrix(dB);
   auto R_ = left ? dA.matmul(X_) : X_.matmul(dA);
-  auto dX_ =
-      at::linalg_lu_solve(LU, pivots, dB_ - R_, left, /*adjoint*/ use_A_T);
+  auto dX_ = at::linalg_lu_solve(LU, pivots, dB_ - R_, left);
   return matrix_to_vector(dX_);
 }
 
@@ -6107,9 +6105,8 @@ std::tuple<Tensor, Tensor> linalg_solve_backward(
   if (at::GradMode::is_enabled()) {
     gB_ = at::linalg_solve(A.mH(), vector_to_matrix(gX), left);
   } else {
-    const auto use_A_T = A.is_contiguous() && !A.is_complex();
     gB_ = at::linalg_lu_solve(
-        LU, pivots, vector_to_matrix(gX), left, /*adjoint*/ !use_A_T);
+        LU, pivots, vector_to_matrix(gX), left, /*adjoint*/ true);
   }
 
   Tensor gA_;
