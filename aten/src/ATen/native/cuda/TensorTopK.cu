@@ -22,6 +22,10 @@
 #include <rocprim/block/block_scan.hpp>
 #endif
 
+#if defined(USE_ROCM)
+#include <rocprim/block/block_scan.hpp>
+#endif
+
 using namespace at::native;
 
 namespace at::native {
@@ -55,6 +59,11 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   // int32, regardless of IndexType
 #if defined(USE_ROCM)
   __shared__ int smem[64];
+  // For ROCm, replace manual prefix scans with rocPRIM block scans.
+  // Use a fixed block size for ROCm path (configured in launch).
+  using BlockScan = rocprim::block_scan<int, 256>;
+  __shared__ typename BlockScan::storage_type scan_storage;
+  __shared__ int carry_shared;
 #else
   __shared__ int smem[32]; // one per each warp, up to warp limit
 #endif
@@ -119,8 +128,19 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
 
     int index;
     int carry;
+#if defined(USE_ROCM)
+    const int flag = hasTopK ? 1 : 0;
+    int block_total = 0;
+    BlockScan().exclusive_scan(flag, index, 0, block_total, scan_storage);
+    if (threadIdx.x == blockDim.x - 1) {
+      carry_shared = block_total;
+    }
+    __syncthreads();
+    carry = carry_shared;
+#else
     at::cuda::exclusiveBinaryPrefixScan<int, true>(
         smem, hasTopK, &index, &carry, AddOp<int>());
+#endif
 
     if (hasTopK) {
       int writeIndex = writeIndexStart + index;
@@ -153,8 +173,19 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
 
     int index;
     int carry;
+#if defined(USE_ROCM)
+    const int flag = hasTopK ? 1 : 0;
+    int block_total = 0;
+    BlockScan().exclusive_scan(flag, index, 0, block_total, scan_storage);
+    if (threadIdx.x == blockDim.x - 1) {
+      carry_shared = block_total;
+    }
+    __syncthreads();
+    carry = carry_shared;
+#else
     at::cuda::exclusiveBinaryPrefixScan<int, true>(
         smem, hasTopK, &index, &carry, AddOp<int>());
+#endif
 
     if (hasTopK && index < topKRemaining) {
       int writeIndex = writeIndexStart + index;
@@ -195,8 +226,13 @@ void launch(
 
     dim3 grid;
     TORCH_INTERNAL_ASSERT(getGridFromTiles(numInputSlices, grid), "Too many slices for topk");
+#if defined(USE_ROCM)
+    // Use fixed block size to match rocPRIM block_scan configuration in kernel
+    dim3 block(256);
+#else
     int warp_size = at::cuda::warp_size();
     dim3 block(std::min(at::ceil_div((int64_t)inputSliceSize, (int64_t)warp_size) * (int64_t)warp_size, (int64_t)1024));
+#endif
     gatherTopK<T, IndexType, Dim, /* WithKthValues= */false><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
         input,
         inputSliceSize,
@@ -453,13 +489,25 @@ __global__ void computeBlockDigitCounts(
   static_assert(MAX_ITEMS_PER_THREAD * BLOCK_THREADS < std::numeric_limits<short>::max(),
     "blockwise counter too large");
   union __align__(16) TempStorage {
-    uint32_t digit_counters[RADIX_DIGITS];
+    uint32_t digit_counters[
+#if defined(USE_ROCM)
+      RADIX_DIGITS + (RADIX_DIGITS / 32)
+#else
+      RADIX_DIGITS
+#endif
+    ];
   };
   __shared__ TempStorage temp_storage;
 
   // fill digit_counters with zeros
   if (tidx < RADIX_DIGITS) {
-    temp_storage.digit_counters[tidx] = 0;
+    temp_storage.digit_counters[
+#if defined(USE_ROCM)
+      tidx + tidx / 32
+#else
+      tidx
+#endif
+    ] = 0;
   }
   __syncthreads();
 
@@ -477,7 +525,13 @@ __global__ void computeBlockDigitCounts(
       bool has_val = ((val & desiredMask) == (desired & desiredMask));
       Bitwise digit = at::cuda::Bitfield<Bitwise>::getBitfield(val, current_bit, RADIX_BITS);
       if (has_val) {
-        atomicAdd(&temp_storage.digit_counters[digit], 1);
+        atomicAdd(&temp_storage.digit_counters[
+#if defined(USE_ROCM)
+          digit + digit / 32
+#else
+          digit
+#endif
+        ], 1);
       }
     }
   }
@@ -488,7 +542,13 @@ __global__ void computeBlockDigitCounts(
   static_assert(RADIX_DIGITS <= BLOCK_THREADS, "this kernel requires RADIX_DIGITS <= BLOCK_THREADS");
   uint32_t digit_count = 0;
   if (tidx < RADIX_DIGITS) {
-    digit_count = temp_storage.digit_counters[tidx];
+    digit_count = temp_storage.digit_counters[
+#if defined(USE_ROCM)
+      tidx + tidx / 32
+#else
+      tidx
+#endif
+    ];
   }
 
   // We always write out counts regardless if blocks_per_slice == 1 because
@@ -1006,6 +1066,191 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   }
 }
 
+#ifdef USE_ROCM
+
+
+
+//fused radix pass
+template <typename T, typename IndexType, typename Bitwise, int Dim>
+C10_LAUNCH_BOUNDS_1(BLOCK_THREADS)
+__attribute__((amdgpu_flat_work_group_size(64, 1024)))
+__global__ void fusedRadixPassKernel(
+    at::cuda::detail::TensorInfo<const T, IndexType> input,
+    uint32_t slice_size,
+    uint32_t num_slices,
+    IndexType withinSliceStride,
+    int current_bit,
+    int items_per_thread,
+    uint32_t blocks_per_slice,
+    bool largest,
+    Bitwise desiredMask,
+    Bitwise* desires_in,
+    uint32_t* ks_to_find_in,
+    // outputs:
+    Bitwise* desires_out,
+    uint32_t* ks_to_find_out,
+    T* kthValues,
+    uint32_t* withinKCounts,
+    short* counts_out) {
+
+  const uint32_t tidx = threadIdx.x;
+  const uint32_t block_idx = getLinearBlockId<uint32_t>();
+  const uint32_t slice_idx = block_idx / blocks_per_slice;
+  const uint32_t blk_idx_in_slice = block_idx % blocks_per_slice;
+  if (slice_idx >= num_slices) return;
+
+  //phase 1
+  const Bitwise desired = desires_in[slice_idx];
+  const IndexType slice_start_index =
+      at::cuda::detail::IndexToOffset<const T, IndexType, Dim>::get(slice_idx, input);
+  const T* data = &input.data[slice_start_index];
+
+  __shared__ uint32_t digit_counters[
+      RADIX_DIGITS
+      #if defined(USE_ROCM)
+        + (RADIX_DIGITS / 32)
+      #endif
+  ];
+  if (tidx < RADIX_DIGITS)
+    digit_counters[
+      #if defined(USE_ROCM)
+        tidx + tidx / 32
+      #else
+        tidx
+      #endif
+    ] = 0;
+  __syncthreads();
+
+  const int items_per_block = items_per_thread * BLOCK_THREADS;
+  const int local_items_per_thread =
+      (blk_idx_in_slice + 1 < blocks_per_slice)
+          ? items_per_thread
+          : at::ceil_div(
+                (int64_t)(slice_size - blk_idx_in_slice * items_per_block),
+                (int64_t)BLOCK_THREADS);
+
+  for (int i = 0; i < local_items_per_thread; ++i) {
+    const IndexType idx =
+        blk_idx_in_slice * items_per_block + i * BLOCK_THREADS + tidx;
+    if (idx < slice_size) {
+      const Bitwise val =
+          TopKTypeConfig<T>::convert(doLdg(&data[idx * withinSliceStride]));
+      if ((val & desiredMask) == (desired & desiredMask)) {
+        const Bitwise digit =
+            at::cuda::Bitfield<Bitwise>::getBitfield(val, current_bit, RADIX_BITS);
+        atomicAdd(&digit_counters[
+          #if defined(USE_ROCM)
+            digit + digit / 32
+          #else
+            digit
+          #endif
+        ], 1);
+      }
+    }
+  }
+  __syncthreads();
+
+  // Write block-local histogram to global counts buffer
+  if (tidx < RADIX_DIGITS)
+    counts_out[block_idx * RADIX_DIGITS + tidx] = static_cast<short>(
+        digit_counters[
+          #if defined(USE_ROCM)
+            tidx + tidx / 32
+          #else
+            tidx
+          #endif
+        ]);
+
+  //phase 2
+  if (blk_idx_in_slice == 0) {
+    __syncthreads();
+    
+    // Accumulate counts across all blocks for this slice
+    uint32_t digit_total = 0;
+    if (tidx < RADIX_DIGITS) {
+      uint32_t total = 0;
+      for (uint32_t blk = 0; blk < blocks_per_slice; ++blk) {
+        total += static_cast<uint32_t>(
+            counts_out[(slice_idx * blocks_per_slice + blk) * RADIX_DIGITS + tidx]);
+      }
+      digit_total = total;
+    }
+
+    // Inclusive scan using rocPRIM
+    using BlockScan = rocprim::block_scan<uint32_t, RADIX_DIGITS>;
+    __shared__ typename BlockScan::storage_type scan_storage;
+    uint32_t digit_cumsum = 0;
+    BlockScan().inclusive_scan(digit_total, digit_cumsum, scan_storage);
+    __syncthreads();
+
+    __shared__ uint32_t digit_cumsum_shared[RADIX_DIGITS];
+    if (tidx < RADIX_DIGITS)
+      digit_cumsum_shared[tidx] = digit_cumsum;
+    __syncthreads();
+
+    const uint32_t k_to_find = ks_to_find_in[slice_idx];
+
+    if (tidx < RADIX_DIGITS) {
+      const uint32_t left = (tidx == 0) ? 0 : digit_cumsum_shared[tidx - 1];
+      const uint32_t right = digit_cumsum_shared[tidx];
+      if (left < k_to_find && k_to_find <= right) {
+        Bitwise updated = desires_in[slice_idx];
+        updated = at::cuda::Bitfield<Bitwise>::setBitfield(updated, tidx, current_bit, RADIX_BITS);
+        desires_out[slice_idx] = updated;
+        if (current_bit > 0)
+          ks_to_find_out[slice_idx] = k_to_find - left;
+        else
+          kthValues[slice_idx] = TopKTypeConfig<T>::deconvert(updated);
+      }
+    }
+  }
+
+
+  //phase 3
+  const Bitwise slice_desired = desires_out[slice_idx];
+  const Bitwise desired_digit =
+      at::cuda::Bitfield<Bitwise>::getBitfield(slice_desired, current_bit, RADIX_BITS);
+
+  // Each block computes its own count
+  bool thread_is_active = false;
+  if (tidx < RADIX_DIGITS) {
+    if (largest)
+      thread_is_active = (tidx > desired_digit);
+    else
+      thread_is_active = (tidx < desired_digit);
+  }
+
+  uint32_t my_count = 0;
+  if (thread_is_active) {
+    // Read THIS block's count for this digit
+    my_count = static_cast<uint32_t>(
+        counts_out[block_idx * RADIX_DIGITS + tidx]);
+  }
+
+  // Warp reduction
+  for (int offset = C10_WARP_SIZE / 2; offset > 0; offset /= 2)
+    my_count += WARP_SHFL_DOWN(my_count, offset);
+
+  // Reduce warp results
+  constexpr int NUM_WARPS = RADIX_DIGITS / C10_WARP_SIZE;
+  __shared__ uint32_t warp_sum[NUM_WARPS];
+  if (tidx % C10_WARP_SIZE == 0 && tidx / C10_WARP_SIZE < NUM_WARPS)
+    warp_sum[tidx / C10_WARP_SIZE] = my_count;
+  __syncthreads();
+
+  if (tidx < NUM_WARPS) {
+    uint32_t val = warp_sum[tidx];
+    for (int offset = NUM_WARPS / 2; offset > 0; offset /= 2)
+      val += WARP_SHFL_DOWN(val, offset);
+    if (tidx == 0) {
+      // Each block writes its own withinKCount
+      withinKCounts[block_idx] = val;
+    }
+  }
+
+}
+#endif // USE_ROCM
+
 int get_items_per_thread(uint64_t num_slices, uint64_t slice_size) {
   // Occupancy of this kernel is limited by registers per thread
   // Platform-specific tuning for optimal register pressure
@@ -1142,6 +1387,16 @@ void launch(
 
   // iterate radix bits for multiple passes
   for (int current_bit = sizeof(T) * 8 - RADIX_BITS; current_bit >= 0; current_bit -= RADIX_BITS) {
+  #ifdef USE_ROCM
+    fusedRadixPassKernel<T, IndexType, Bitwise, Dim>
+        <<<grid, block, 0, stream>>>(
+            input, inputSliceSize, numInputSlices, inputWithinSliceStride,
+            current_bit, items_per_thread, blocks_per_slice, largest, desiredMask,
+            desired_in, ks_to_find_in, desired_out, ks_to_find_out, kthValues,
+            withinKCounts, counts);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+  #else
+    
     computeBlockDigitCounts<T, IndexType, Bitwise, Dim><<<grid, block, 0, stream>>>(
         input,
         inputSliceSize,
@@ -1176,6 +1431,7 @@ void launch(
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 #endif
     // swap desired/ks_to_find in and out for next iter
+    #endif
     auto tmp_desired = desired_in;
     desired_in = desired_out;
     desired_out = tmp_desired;
