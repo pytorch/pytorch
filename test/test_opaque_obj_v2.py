@@ -104,7 +104,7 @@ class NestedCounters:
 
     def get_c(self):
         return self.c
-    
+
     def get_starts(self):
         if isinstance(self.c, list):
             return [c.start for c in self.c]
