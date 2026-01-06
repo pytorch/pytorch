@@ -1,3 +1,4 @@
+#include <ATen/core/CachingHostAllocator.h>
 #include <ATen/xpu/XPUGeneratorImpl.h>
 #include <ATen/xpu/XPUGraph.h>
 #include <ATen/Functions.h>
@@ -64,9 +65,15 @@ void XPUGraph::capture_begin(MempoolId_t pool) {
     TORCH_INTERNAL_ASSERT(mempool_id_.first > 0);
   }
 
-  c10::xpu::XPUCachingAllocator::beginAllocateToPool(capture_dev_, mempool_id_, [this](sycl::queue* queue) {
+  auto filter = [this](sycl::queue* queue) {
     // Compare queue pointers rather than queue objects to avoid expensive queue comparison operations.
     return queue->ext_oneapi_get_state() == queue_state::recording && queue == &capture_stream_.queue();
+  };
+
+  c10::xpu::XPUCachingAllocator::beginAllocateToPool(capture_dev_, mempool_id_, filter);
+
+  at::getHostAllocator(at::kXPU)->begin_allocate_to_pool(mempool_id_, [filter](c10::Stream stream) {
+    return filter(XPUStream(XPUStream::UNCHECKED, stream));
   });
 
   auto graph_impl = xpuGraph_t(capture_stream_.queue());
@@ -85,6 +92,7 @@ void XPUGraph::capture_end() {
   graph_->end_recording();
 
   c10::xpu::XPUCachingAllocator::endAllocateToPool(capture_dev_, mempool_id_);
+  at::getHostAllocator(at::kXPU)->end_allocate_to_pool(mempool_id_);
 
   TORCH_CHECK(graph_ != nullptr, "Invalid capture.");
 
@@ -146,6 +154,7 @@ void XPUGraph::replay() {
 void XPUGraph::reset() {
   if (capture_ended_) {
     c10::xpu::XPUCachingAllocator::releasePool(capture_dev_, mempool_id_);
+    at::getHostAllocator(at::kXPU)->release_pool(mempool_id_);
     capture_ended_ = false;
   }
   if (has_graph_) {
