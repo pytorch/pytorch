@@ -76,6 +76,7 @@ from .base import raise_type_error_exc, typestr, VariableTracker
 from .ctx_manager import (
     AutocastModeVariable,
     ProfilerContextVariable,
+    ProfilerRecordFunctionContextVariable,
     TorchFunctionDisableVariable,
 )
 from .dicts import ConstDictVariable
@@ -414,12 +415,15 @@ class TorchCtxManagerClassVariable(BaseTorchVariable):
             # pyrefly: ignore [bad-argument-type]
             return AutocastModeVariable.create(self.value, args, kwargs)
         elif self.value in (
-            # NOTE any class added here must align with the semantic
-            # requirements of `ProfilerContextVariable`.
-            torch.profiler.profile,
             torch.profiler.record_function,
-            torch.autograd.profiler.profile,
             torch.autograd.profiler.record_function,
+        ):
+            return ProfilerRecordFunctionContextVariable.create(
+                func=self.value, record_args=args, record_kwargs=kwargs
+            )
+        elif self.value in (
+            torch.profiler.profile,
+            torch.autograd.profiler.profile,
         ):
             warning_once(log, "Profiler function %s will be ignored", self.value)
             return ProfilerContextVariable()
@@ -679,6 +683,27 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 explanation="Attempted to call `torch.compile` with > 1 args. Dynamo does not support this.",
                 hints=[
                     "Remove the torch.compile call or its additional args.",
+                    *graph_break_hints.SUPPORTABLE,
+                ],
+            )
+
+        @register(torch.library.wrap_triton)
+        def handle_wrap_triton(
+            self,
+            tx: "InstructionTranslator",
+            *args: VariableTracker,
+            **kwargs: VariableTracker,
+        ) -> VariableTracker:
+            if len(args) == 1:
+                # torch.library.wrap_triton is a no-op in dynamo
+                return args[0]
+
+            unimplemented(
+                gb_type="torch.library.wrap_triton call with > 1 args",
+                context=f"args={args}, kwargs={kwargs}",
+                explanation="Attempted to call `torch.library.wrap_triton` with > 1 args. Dynamo does not support this.",
+                hints=[
+                    "Remove the torch.library.wrap_triton call or its additional args.",
                     *graph_break_hints.SUPPORTABLE,
                 ],
             )
@@ -1194,7 +1219,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 return
 
             return variables.ConstantVariable.create(
-                # pyrefly: ignore [bad-argument-type]
                 torch.fx.experimental.symbolic_shapes.has_static_value(val)
             )
 
