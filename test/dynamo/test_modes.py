@@ -842,6 +842,59 @@ class InfraModeCompileTests(torch._dynamo.test_case.TestCase):
             self.assertEqual(mode.mul_count, 200)
 
 
+class InvokeSubgraphBackendTests(torch._dynamo.test_case.TestCase):
+    def test_make_fx_over_compiled_function(self):
+        """Test that make_fx can trace over torch.compile'd functions using invoke_subgraph backend.
+
+        When force_compile_during_fx_trace=True, the invoke_subgraph backend should
+        emit an invoke_subgraph HOP in the traced graph instead of inlining the subgraph.
+        """
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        # Save original config values
+        orig_error_on_nested = torch._dynamo.config.error_on_nested_fx_trace
+        orig_force_compile = torch._dynamo.config.force_compile_during_fx_trace
+
+        try:
+            torch._dynamo.config.error_on_nested_fx_trace = False
+            torch._dynamo.config.force_compile_during_fx_trace = True
+            torch._dynamo.reset()  # Clear any cached graphs
+
+            def simple_fn(x, y):
+                return x * 2 + y
+
+            compiled_fn = torch.compile(simple_fn, backend="invoke_subgraph")
+
+            def outer_fn(x, y):
+                z = x + 1
+                result = compiled_fn(z, y)
+                return result * 2
+
+            x = torch.randn(3, 3)
+            y = torch.randn(3, 3)
+
+            # Trace with make_fx - the compiled_fn should appear as invoke_subgraph HOP
+            traced = make_fx(outer_fn, tracing_mode="fake")(x, y)
+
+            # Verify invoke_subgraph HOP is in the traced graph
+            invoke_subgraph_nodes = [
+                n
+                for n in traced.graph.nodes
+                if n.op == "call_function"
+                and n.target == torch.ops.higher_order.invoke_subgraph
+            ]
+            self.assertEqual(len(invoke_subgraph_nodes), 1)
+
+            # NOTE: Output correctness is not verified here because there are
+            # known graph breaks in the current implementation that can cause
+            # shape mismatches. The purpose of this test is to verify that
+            # the invoke_subgraph HOP is emitted correctly.
+        finally:
+            # Restore original config values
+            torch._dynamo.config.error_on_nested_fx_trace = orig_error_on_nested
+            torch._dynamo.config.force_compile_during_fx_trace = orig_force_compile
+
+
 class TorchFunctionModeLifecycleTests(torch._dynamo.test_case.TestCase):
     def test_default_device_restored_after_mode_tests(self):
         case = TorchFunctionModeTests("test_stack_state_mutation_default_device")

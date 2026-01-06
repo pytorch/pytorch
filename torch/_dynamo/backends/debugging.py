@@ -149,6 +149,64 @@ def torchscript(
     return torch.jit.script(gm)
 
 
+# Counter for unique subgraph names in invoke_subgraph backend
+_invoke_subgraph_counter = 0
+
+
+@register_backend
+def invoke_subgraph(
+    gm: torch.fx.GraphModule, fake_tensor_inputs: list[torch.Tensor], **kwargs: Any
+) -> Callable[..., Any]:
+    """Backend that wraps the graph in invoke_subgraph HOP when traced by make_fx.
+
+    This backend is useful for recursive Dynamo tracing scenarios where you want
+    the compiled subgraph to appear as an invoke_subgraph HOP in the outer trace
+    rather than being inlined.
+
+    Requires:
+    - torch._dynamo.config.force_compile_during_fx_trace = True
+    - torch._dynamo.config.error_on_nested_fx_trace = False
+    """
+    from torch._higher_order_ops.invoke_subgraph import (
+        invoke_subgraph as invoke_subgraph_hop,
+    )
+    from torch.fx.experimental.proxy_tensor import get_proxy_mode
+
+    global _invoke_subgraph_counter
+    _invoke_subgraph_counter += 1
+    name = f"invoke_subgraph_{_invoke_subgraph_counter}"
+
+    if kwargs:
+        log.warning("invoke_subgraph backend ignoring extra kwargs %s", kwargs)
+
+    # Wrap the GraphModule to return a tuple (required by invoke_subgraph HOP)
+    captured_gm = gm
+
+    class TupleWrappedGM(torch.nn.Module):
+        def forward(self, *args: Any) -> tuple[Any, ...]:
+            result = captured_gm(*args)
+            if isinstance(result, tuple):
+                return result
+            return (result,)
+
+    tuple_gm = TupleWrappedGM()
+
+    @torch._dynamo.allow_in_graph
+    def invoke_subgraph_wrapper(*args: Any) -> Any:
+        proxy_mode = get_proxy_mode()
+        if proxy_mode is not None:
+            # When being traced by make_fx, emit invoke_subgraph HOP
+            result = invoke_subgraph_hop(tuple_gm, name, *args)  # type: ignore[arg-type]
+            if len(result) == 1:
+                return result[0]
+            return result
+        else:
+            # Normal execution path
+            return captured_gm(*args)
+
+    return invoke_subgraph_wrapper
+
+
 # used boxed call to discard inputs when they are no longer needed
 def boxed_nop(
     fx_g: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
