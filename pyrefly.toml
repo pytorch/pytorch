@@ -23,15 +23,10 @@ project-includes = [
 project-excludes = [
   # ==== below will be enabled directory by directory ====
   # ==== to test Pyrefly on a specific directory, simply comment it out ====
-  "torch/_inductor/codegen/triton.py",
-  "tools/linter/adapters/test_device_bias_linter.py",
   "tools/code_analyzer/gen_operators_yaml.py",
   "torch/_inductor/runtime/triton_heuristics.py",
   "torch/_inductor/runtime/triton_helpers.py",
   "torch/_inductor/runtime/halide_helpers.py",
-  "torch/utils/tensorboard/summary.py",
-  "torch/ao/quantization/pt2e/qat_utils.py",
-  "torch/_inductor/codegen/common.py",
   "torch/utils/data/typing.ipynb",
   "torch/utils/data/dataframes_pipes.ipynb",
   "torch/utils/data/standard_pipes.ipynb",
@@ -113,6 +108,7 @@ ignore-missing-imports = [
     "dill.*",
     "usort.*",
     "cutlass_library.*",
+    "cutlass_api.*",
     "deeplearning.*",
     "einops.*",
     "libfb.*",
