@@ -8,8 +8,6 @@ on:
     tags:
       - ciflow/vllm/*
   workflow_dispatch:
-  schedule:
-    - cron: '0 */8 * * *'  # every 8 hours at minute 0 (UTC)
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.ref_name }}-${{ github.ref_type == 'branch' && github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
