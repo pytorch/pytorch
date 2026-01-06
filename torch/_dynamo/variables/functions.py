@@ -26,6 +26,7 @@ import functools
 import inspect
 import itertools
 import logging
+import os
 import sys
 import traceback
 import types
@@ -118,6 +119,7 @@ CO_VARKEYWORDS = 0x08
 _SUPPORTED_TREE_MAP_KWARGS = frozenset({"namespace", "none_is_leaf", "is_leaf"})
 _TREE_MAP_ONLY_SUPPORTED_KWARGS = frozenset({"is_leaf"})
 
+PT2_ISSUE_TRACKER_URL = "https://github.com/pytorch/pytorch/issues/new?&labels=oncall%3A+pt2&projects=&template=pt2-bug-report.yml"
 
 # Module-level cache keyed by the function object
 _spec_cache: WeakKeyDictionary[Any, Any] = WeakKeyDictionary()
@@ -647,7 +649,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                         "`torch.compile` region",
                     ],
                 )
-            # pyrefly: ignore[missing-attribute]
+
             fn = fn_var.fn
             return variables.TorchInGraphFunctionVariable(fn, nonstrict_traceable=True)
 
@@ -947,12 +949,11 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         from torch._dynamo.side_effects import disallow_side_effects_in_generator
         from torch._dynamo.symbolic_convert import (
-            InstructionTranslator,
             save_and_restart_speculation_log,
             temporarely_allow_writes_to_output_graph,
         )
 
-        tx = InstructionTranslator.current_tx()
+        tx = codegen.tx
         save = save_and_restart_speculation_log(tx)
         disallow = disallow_side_effects_in_generator(tx)
         temp = temporarely_allow_writes_to_output_graph(tx)
@@ -977,7 +978,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def python_type(self) -> type:
         return types.GeneratorType
 
-    def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
+    def next_variable(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         tracer = self.inline_tracer
 
         if self._is_generator_exhausted():
@@ -993,7 +994,16 @@ class LocalGeneratorObjectVariable(VariableTracker):
             raise e
         except InfiniteGeneratorError:
             # test/dynamo/test_misc.py::test_iterator_limit
-            raise
+            unimplemented(
+                gb_type="infinite generator detected",
+                context="",
+                explanation="Dynamo traced the YIELD_VALUE bytecode too many times. This could mean "
+                "that we have attempted to trace an infinite generator.",
+                hints=[
+                    f"If you are sure that your generator is not infinite, please report a bug at {PT2_ISSUE_TRACKER_URL}.",
+                    *graph_break_hints.USER_ERROR,
+                ],
+            )
         except Unsupported as e:
             torch._dynamo.eval_frame.skip_code(self.get_code())
             e.skip_frame = True
@@ -1015,14 +1025,14 @@ class LocalGeneratorObjectVariable(VariableTracker):
         return True
 
     def force_unpack_var_sequence(
-        self, tx: "InstructionTranslator"
+        self, tx: "InstructionTranslatorBase"
     ) -> list[VariableTracker]:
         result: list[VariableTracker] = []
         self.force_apply_to_var_sequence(tx, result.append)
         return result
 
     def force_apply_to_var_sequence(
-        self, tx: "InstructionTranslator", fn: Callable[[VariableTracker], Any]
+        self, tx: "InstructionTranslatorBase", fn: Callable[[VariableTracker], Any]
     ) -> None:
         while True:
             try:
@@ -1797,9 +1807,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             codegen.extend_output(create_call_function(1, True))
 
         # codegen attributes
-        from torch._dynamo.symbolic_convert import InstructionTranslator
-
-        tx = InstructionTranslator.current_tx()
+        tx = codegen.tx
         if tx.output.side_effects.has_pending_mutation(self):
             for name, value in tx.output.side_effects.store_attr_mutations[
                 self
@@ -2124,12 +2132,18 @@ class WrapperUserFunctionVariable(VariableTracker):
             module_name = getattr(target_fn, "__module__", "") or ""
 
             if module_name.split(".", maxsplit=1)[0] != "torch":
+                frame_summary = tx.frame_summary()
+                filename = os.path.basename(frame_summary.filename)
+                lineno = frame_summary.lineno
                 msg = (
                     "Dynamo detected a call to a `functools.lru_cache`-wrapped "
-                    "function. Dynamo ignores the cache wrapper and directly "
-                    "traces the wrapped function. Silent incorrectness is only "
-                    "a *potential* risk, not something we have observed. "
-                    'Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.'
+                    f"function at '{filename}:{lineno}'. Dynamo ignores the "
+                    "cache wrapper and directly traces the wrapped function. "
+                    "Silent incorrectness is only a *potential* risk, not "
+                    "something we have observed. "
+                    "Enable TORCH_LOGS=+dynamo for a DEBUG stack trace.\n\n"
+                    "This call originates from:\n"
+                    f"{''.join(traceback.format_list([frame_summary]))}"
                 )
 
                 torch._dynamo.utils.warn_once(msg)
@@ -2527,7 +2541,7 @@ class PolyfilledFunctionVariable(VariableTracker):
             raise RuntimeError(
                 f"Polyfill handler {handler} does not have a traceable function"
             )
-        # pyrefly: ignore[invalid-type-var]
+
         self.wrapped_fn = handler
         # pyrefly: ignore[invalid-type-var]
         self.traceable_fn: _F = traceable_fn
@@ -2725,6 +2739,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
     ) -> VariableTracker:
         from .builder import VariableBuilder
 
+        assert tx is not None
         wrapped_user_obj = VariableBuilder(
             tx, AttrSource(variable.kernel_source, f"{name}")
         )._wrap(user_obj)
