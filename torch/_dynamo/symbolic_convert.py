@@ -1536,48 +1536,48 @@ class InstructionTranslatorBase(
                 ]
             )
 
-            # add the leaf_resume result to frame N-1 stack
+            # current frame state
+            # cells, frame_values, leaf_resume result
+            # extract frame N-1 stack
             num_stack = all_stack_locals_metadata[1].num_stack
             cg.extend_output(
                 [
-                    create_instruction("BUILD_LIST", arg=1),
                     *create_copy(2),
                     cg.create_load_const(0),
                     cg.create_binary_subscr(),
-                    *create_binary_slice(num_stack, num_stack, True),
+                    *create_binary_slice(0, num_stack),
+                ]
+            )
+
+            # current frame state
+            # cells, frame_values, leaf_resume result, frame N-1 stack
+            # add the leaf_resume result to frame N-1 stack
+            cg.extend_output(
+                [
+                    *create_swap(2),
+                    create_instruction("LIST_APPEND", arg=1),
                 ]
             )
             self.parent.push(UnknownVariable())
             all_stack_locals_metadata[1].num_stack += 1
 
             # current frame state
-            # cells, frame_values
-            # extract frame N-1 stack to stack
-            cg.extend_output(
-                [
-                    create_dup_top(),
-                    cg.create_load_const(0),
-                    cg.create_binary_subscr(),
-                    *create_binary_slice(0, num_stack + 1),
-                ]
-            )
-
-            # current frame state
             # cells, frame_values, frame N-1 stack + leaf_resume result
             # remove frame N-1 stack from frame_values
-            cg.extend_output(
-                # frame_values[0] = frame_values[0][num_stack + 1:]
-                [
-                    *create_copy(2),
-                    cg.create_load_const(0),
-                    cg.create_binary_subscr(),
-                    create_dup_top(),
-                    *create_binary_slice(num_stack + 1, None),
-                    *create_swap(2),
-                    cg.create_load_const(0),
-                    create_instruction("STORE_SUBSCR"),
-                ]
-            )
+            if num_stack > 0:
+                cg.extend_output(
+                    # frame_values[0] = frame_values[0][num_stack:]
+                    [
+                        *create_copy(2),
+                        cg.create_load_const(0),
+                        cg.create_binary_subscr(),
+                        create_dup_top(),
+                        *create_binary_slice(num_stack, None),
+                        *create_swap(2),
+                        cg.create_load_const(0),
+                        create_instruction("STORE_SUBSCR"),
+                    ]
+                )
 
             # current frame state
             # cells, frame_values, frame N-1 stack + leaf_resume result

@@ -709,6 +709,32 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
         self.assertEqual(cnts.op_count, 4)
         self.assertEqual(torch._dynamo.utils.counters["frames"]["total"], 3)
 
+    def test_nested_step_graph_break_diff_args(self):
+        global inner, outer
+
+        def inner(x1, x2):
+            torch._dynamo.step_unsupported()
+            return x1 + x2
+
+        class Foo:
+            def __init__(self):
+                self.attr = 1
+
+        def outer(x):
+            z = Foo()
+            y = inner(x + 1, x + 2)
+            y = y + z.attr
+            return y
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(outer)
+        x = torch.zeros(3)
+        res = outer(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 3)
+
     def test_generator_nested_graph_break(self):
         def gen(x):
             yield x + 1
