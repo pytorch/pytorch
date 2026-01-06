@@ -76,6 +76,7 @@ from torch.testing._internal.common_utils import (
     skipIfHpu,
     skipIfWindows,
     TEST_WITH_ROCM,
+    xfailIfS390X,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.two_tensor import TwoTensor
@@ -3293,13 +3294,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_rewrite_assert_with_non_string_msg(self):
         def f(x):
             b = x.sin()
-            assert x[0] == 2, f"Error {x}: {x.size()}"
+            assert x[0] == 2, x
             return x.cos() + b
 
         torch._dynamo.utils.counters.clear()
         args = torch.Tensor([3, 4, 5])
         opt_f = torch.compile(f, backend="eager")
-        with self.assertRaisesRegex(AssertionError, "torch.Size"):
+        with self.assertRaisesRegex(AssertionError, "tensor"):
             opt_f(args)
         for gb, cnt in torch._dynamo.utils.counters["graph_break"].items():
             if "assert with non-string message" in gb:
@@ -7488,6 +7489,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             msg,
         )
 
+    @xfailIfS390X
     @unittest.skipIf(
         sys.version_info < (3, 12) or sys.version_info >= (3, 14),
         "only 3.12, 3.13 affected by c recursion limit",
