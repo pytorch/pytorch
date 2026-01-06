@@ -649,7 +649,8 @@ bool plan_errata_exception(
     const std::string& executionPlanTag) {
   static bool has_json =
       cudnn_frontend::load_from_config(errata_json_handle, "");
-  // rule_id is an arbitrary string, here we use the issue number if there is one
+  // rule_id is an arbitrary string, here we use the issue number if there is
+  // one
   static auto hardcoded_errata_json_handle = nlohmann::json::parse(R"(
             { "version" : 1, 
               "rules"   : 
@@ -675,10 +676,7 @@ bool plan_errata_exception(
         });
   } else {
     return cudnn_frontend::check_errata(
-               errata_json_handle,
-               executionPlanTag,
-               handle,
-               []() { return true; });
+        errata_json_handle, executionPlanTag, handle, []() { return true; });
   }
 }
 
