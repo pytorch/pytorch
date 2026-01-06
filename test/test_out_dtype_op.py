@@ -8,7 +8,7 @@ import torch._inductor.decomposition
 from torch._higher_order_ops.out_dtype import out_dtype
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing._internal.common_utils import (
-    run_tests, TestCase, IS_WINDOWS, TEST_WITH_ROCM, IS_FBCODE, IS_REMOTE_GPU, TEST_CUDA
+    run_tests, TestCase, IS_WINDOWS, IS_FBCODE, IS_REMOTE_GPU, TEST_CUDA
 )
 from torch.testing._internal.common_quantization import skipIfNoDynamoSupport
 from torch.testing import FileCheck
@@ -163,7 +163,6 @@ class TestOutDtypeOp(TestCase):
             loss.backward()
 
     @unittest.skipIf(IS_WINDOWS, "_int_mm unavailable")
-    @unittest.skipIf(TEST_WITH_ROCM, "_int_mm unavailable")
     @unittest.skipIf(not SM80OrLater, "_int_mm unavailable")
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "cublas runtime error")
     @unittest.skipIf(_get_torch_cuda_version() >= (11, 7), "_int_mm unavailable")
