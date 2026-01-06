@@ -330,7 +330,7 @@ static PyObject* THPVariable_asarray(
   HANDLE_TH_ERRORS
   static PythonArgParser parser(
       {
-          "asarray(PyObject* obj, *, ScalarType? dtype=None, Device? device=None, bool? copy=None, bool requires_grad=False)",
+          "asarray(PyObject* obj, *, ScalarType? dtype=None, Device? device=None, bool? copy=None, bool? requires_grad=None)",
       },
       /*traceable=*/false);
 
@@ -347,7 +347,7 @@ static PyObject* THPVariable_asarray(
     auto dtype = r.scalartypeOptional(1);
     auto device = r.deviceOptional(2);
     auto copy = r.toBoolOptional(3);
-    auto requires_grad = r.toBool(4);
+    auto requires_grad = r.toBoolOptional(4);
     return wrap(torch::utils::asarray(obj, dtype, device, copy, requires_grad));
   }
 

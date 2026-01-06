@@ -1070,7 +1070,7 @@ def gen_pyi(
                         "dtype: _dtype | None = None",
                         "device: DeviceLikeType | None = None",
                         "copy: _bool | None = None",
-                        "requires_grad: _bool = False",
+                        "requires_grad: _bool | None = None",
                     ],
                     "Tensor",
                 )
