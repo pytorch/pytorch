@@ -799,6 +799,66 @@ class TestFullyShard1DTrainingCompose(FSDPTest):
                     self, ref_model, model, prefixes_to_ignore=prefixes_to_ignore
                 )
 
+    @skip_if_lt_x_gpu(2)
+    def test_double_forward_with_nested_fsdp_and_checkpoint(self):
+        """
+        Tests that calling model.forward() twice before backward() works correctly
+        when using nested FSDP with activation checkpointing.
+        This pattern is common in DPO training.
+        """
+        self.run_subtests(
+            {
+                "reshard_after_forward": [True, False],
+                "checkpoint_impl": ["composable", "utils"],
+            },
+            self._test_double_forward_with_nested_fsdp_and_checkpoint,
+        )
+
+    def _test_double_forward_with_nested_fsdp_and_checkpoint(
+        self,
+        reshard_after_forward: bool,
+        checkpoint_impl: str,
+    ):
+        torch.manual_seed(42)
+        vocab_size = 1024
+        with torch.device(device_type):
+            model_args = ModelArgs(
+                n_layers=3,
+                n_heads=4,
+                vocab_size=vocab_size,
+                max_seq_len=64,
+                dropout_p=0,
+                checkpoint_activations=(checkpoint_impl == "utils"),
+            )
+            model = Transformer(model_args)
+
+        if checkpoint_impl == "composable":
+            for module in model.modules():
+                if isinstance(module, TransformerBlock):
+                    checkpoint(module)
+
+        for layer in model.layers:
+            fully_shard(layer.attention, reshard_after_forward=reshard_after_forward)
+            fully_shard(layer.feed_forward, reshard_after_forward=reshard_after_forward)
+            fully_shard(layer, reshard_after_forward=reshard_after_forward)
+        fully_shard(model, reshard_after_forward=reshard_after_forward)
+
+        torch.manual_seed(42 + self.rank)
+        inp1 = torch.randint(0, vocab_size, (2, 32), device=device_type.type)
+        inp2 = torch.randint(0, vocab_size, (2, 32), device=device_type.type)
+
+        # DPO pattern
+        out1 = model(inp1)
+        out2 = model(inp2)
+
+        # DPO-style loss that combines both outputs
+        loss = (out1.sum() - out2.sum()).pow(2)
+        loss.backward()
+
+        for param in model.parameters():
+            if param.requires_grad:
+                self.assertIsNotNone(param.grad)
+
 
 class TestFullyShardShardPlacementFnMultiProcess(FSDPTest):
     @property

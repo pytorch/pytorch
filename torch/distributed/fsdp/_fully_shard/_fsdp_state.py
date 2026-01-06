@@ -237,6 +237,12 @@ class FSDPState(_State):
         # When composing with module-hook-based activation checkpointing, the
         # pre-backward hook is responsible for the unshard
         if self._training_state == TrainingState.PRE_BACKWARD:
+            # With nested FSDP and multiple forward passes before backward,
+            # the params might have been resharded by a previous post_backward.
+            # We need to ensure params are unsharded for AC recomputation.
+            if self._fsdp_param_group and not self._fsdp_param_group.is_unsharded:
+                self._fsdp_param_group.unshard()
+                self._fsdp_param_group.wait_for_unshard()
             return args, kwargs
         self._training_state = TrainingState.FORWARD
         args, kwargs = self._root_pre_forward(module, args, kwargs)
