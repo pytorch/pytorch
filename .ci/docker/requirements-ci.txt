@@ -389,9 +389,6 @@ dataclasses_json==0.6.7
 #Pinned versions: 0.6.7
 #test that import:
 
-cmake==3.31.6
-#Description: required for building
-
 tlparse==0.4.0
 #Description: required for log parsing
 
