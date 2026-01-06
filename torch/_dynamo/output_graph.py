@@ -243,7 +243,7 @@ def collect_reachable_grad_fns(
 
     Args:
         tensors_with_sources: List of (tensor, source_name) tuples to start search from.
-        stop_at: Optional set of grad_fns where traversal should stop (still included in result).
+        stop_at: Optional set of grad_fns where traversal should stop (excluded from result).
 
     Returns:
         Set of all reachable grad_fns.
