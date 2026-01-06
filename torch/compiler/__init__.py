@@ -663,7 +663,7 @@ def skip_all_guards_unsafe(guard_entries):
 
 
 def nested_compile_region(
-    fn=None, options: Optional[NestedCompileRegionOptions] = None
+    fn=None, options: Optional[NestedCompileRegionOptions] = None, is_pure=False
 ):
     """
     Tells **``torch.compile``** that the marked set of operations forms a nested
@@ -690,10 +690,16 @@ def nested_compile_region(
     compilation cost only when required.
 
     Args:
-        fn: The function to wrap
+        fn: The function to be marked as a nested compile region. Can be None
+            when used as a decorator.
         options: Optional backend to use for compiling the subgraph.
             Warning: this is an experimental feature under development and
             not ready for use yet.
+        is_pure: If True, indicates that the function is pure (has no side effects
+            and produces the same output for the same inputs). This allows the
+            compiler to apply additional tracing optimizations in the compiler
+            frontend (specifically TorchDynamo) to assume that a single traced
+            graph is sound to be reused again.
     """
 
     if options is not None:
@@ -708,7 +714,7 @@ def nested_compile_region(
         mark_compile_region as _mark_compile_region,
     )
 
-    return _mark_compile_region(fn, options=options)
+    return _mark_compile_region(fn, options=options, is_pure=is_pure)
 
 
 def load_compiled_function(
