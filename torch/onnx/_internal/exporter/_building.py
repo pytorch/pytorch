@@ -376,7 +376,14 @@ def _process_python_sequences(
     type_binding: Mapping[_schemas.TypeConstraintParam, ir.TypeProtocol],
     constant_farm: dict[
         tuple[
-            bool | int | float | str | ir.TensorProtocol | tuple[int] | tuple[float],
+            bool
+            | int
+            | float
+            | str
+            | ir.TensorProtocol
+            | tuple[bool, ...]
+            | tuple[int, ...]
+            | tuple[float, ...],
             ir.DataType,
         ],
         ir.Value,

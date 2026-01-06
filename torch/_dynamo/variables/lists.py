@@ -192,8 +192,6 @@ class BaseListVariable(VariableTracker):
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
         if name == "__getitem__":
-            from .tensor import TensorVariable
-
             if kwargs or len(args) != 1:
                 raise_args_mismatch(
                     tx,
@@ -202,7 +200,7 @@ class BaseListVariable(VariableTracker):
                     f"{len(args)} args and {len(kwargs)} kwargs",
                 )
 
-            if isinstance(args[0], TensorVariable):
+            if args[0].is_tensor():
                 value = get_fake_value(args[0].as_proxy().node, tx)
                 if value.constant is not None and value.constant.numel() == 1:
                     value = variables.ConstantVariable.create(value.constant.item())
@@ -365,7 +363,9 @@ class RangeVariable(BaseListVariable):
 
         def maybe_as_int(x: VariableTracker) -> VariableTracker:
             return (
-                ConstantVariable(int(x.value)) if isinstance(x, ConstantVariable) else x
+                ConstantVariable.create(int(x.as_python_constant()))
+                if x.is_python_constant()
+                else x
             )
 
         # cast each argument to an integer
@@ -453,13 +453,12 @@ class RangeVariable(BaseListVariable):
 
         return [start, stop, step]
 
-    def apply_index(self, index: int) -> VariableTracker:
+    def apply_index(self, tx: "InstructionTranslator", index: int) -> VariableTracker:
         length = self.range_length()
         if index < 0:
             index = length + index
 
         if index < 0 or index >= length:
-            tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
             raise_observed_exception(
                 IndexError,
                 tx,
@@ -501,7 +500,7 @@ class RangeVariable(BaseListVariable):
         if isinstance(index, slice):
             return self.apply_slice(index)
         elif isinstance(index, int):
-            return self.apply_index(index)
+            return self.apply_index(tx, index)
         else:
             msg = ConstantVariable("range indices must be integers or slices")
             raise_observed_exception(TypeError, tx, args=[msg])
@@ -698,6 +697,7 @@ class CommonListMethodsVariable(BaseListVariable):
             else:
                 const_idx = idx.as_python_constant()
             tx.output.side_effects.mutation(self)
+            # type: ignore[arg-type]
             self.items.insert(const_idx, value)
             return ConstantVariable.create(None)
         elif name == "pop" and self.is_mutable():
@@ -752,6 +752,7 @@ class CommonListMethodsVariable(BaseListVariable):
             key, value = args
             tx.output.side_effects.mutation(self)
             if isinstance(key, SymNodeVariable):
+                # pyrefly: ignore[unsupported-operation]
                 self.items[key.evaluate_expr()] = value
             elif isinstance(key, SliceVariable):
                 if key.is_python_constant():
@@ -790,7 +791,8 @@ class CommonListMethodsVariable(BaseListVariable):
                     idx = args[0].as_python_constant()
 
                 try:
-                    self.items.__delitem__(idx)
+                    self.items.__delitem__(idx)  # type: ignore[arg-type]
+
                 except (IndexError, ValueError) as exc:
                     raise_observed_exception(
                         type(exc),
@@ -905,6 +907,7 @@ class ListVariable(CommonListMethodsVariable):
                     key = key.as_python_constant()
 
                 try:
+                    # pyrefly: ignore[unsupported-operation]
                     self.items[key] = value
                 except (IndexError, TypeError) as e:
                     raise_observed_exception(
@@ -922,10 +925,7 @@ class ListVariable(CommonListMethodsVariable):
             if len(kwargs) != 0:
                 raise_args_mismatch(tx, name, "0 kwargs", f"{len(kwargs)} kwargs")
 
-            if (
-                key_fn_var.is_python_constant()
-                and key_fn_var.as_python_constant() is None
-            ):
+            if key_fn_var.is_constant_none():
                 keys = self.items.copy()
             else:
                 keys = [key_fn_var.call_function(tx, [x], {}) for x in self.items]
@@ -954,20 +954,23 @@ class ListVariable(CommonListMethodsVariable):
                     hints=["Use something else as the key."],
                 )
 
-            tx.output.side_effects.mutation(self)
-            sorted_items_with_keys = sorted(
-                (
+            try:
+                tx.output.side_effects.mutation(self)
+                sorted_items_with_keys = sorted(
                     (
-                        x,
-                        k.as_python_constant(),
-                        -i if reverse else i,  # extra key to ensure stable sort
-                    )
-                    for i, (k, x) in enumerate(zip(keys, self.items))
-                ),
-                key=operator.itemgetter(1, 2),
-                reverse=reverse,
-            )
-            self.items[:] = [x for x, *_ in sorted_items_with_keys]
+                        (
+                            x,
+                            k.as_python_constant(),
+                            -i if reverse else i,  # extra key to ensure stable sort
+                        )
+                        for i, (k, x) in enumerate(zip(keys, self.items))
+                    ),
+                    key=operator.itemgetter(1, 2),
+                    reverse=reverse,
+                )
+                self.items[:] = [x for x, *_ in sorted_items_with_keys]
+            except Exception as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
             return ConstantVariable.create(None)
 
         if name == "__init__" and self.is_mutable():
@@ -1294,8 +1297,8 @@ class SizeVariable(TupleVariable):
         sym_sizes = []
 
         for v in self.items:
-            if isinstance(v, ConstantVariable):
-                const_result *= v.value
+            if v.is_python_constant():
+                const_result *= v.as_python_constant()
             else:
                 assert isinstance(v, SymNodeVariable), type(v)
                 # Delay proxy calls  until we know it will be necessary
@@ -1346,10 +1349,22 @@ class SizeVariable(TupleVariable):
     def get_item_dyn(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
-        from .tensor import SymNodeVariable
+        from .tensor import SymNodeVariable, TensorVariable
 
         if isinstance(arg, SymNodeVariable):
             index = arg.sym_num
+        elif isinstance(arg, TensorVariable):
+            value = get_fake_value(arg.as_proxy().node, tx)
+            if value.constant is None or value.constant.numel() != 1:
+                unimplemented(
+                    gb_type="Indexing torch.Size with non-scalar tensor",
+                    context=f"get_item_dyn {self} {arg}",
+                    explanation=(
+                        "Attempted to index torch.Size with a tensor that is not a scalar constant."
+                    ),
+                    hints=[*graph_break_hints.USER_ERROR],
+                )
+            index = value.constant.item()
         else:
             index = arg.as_python_constant()
 
@@ -1568,7 +1583,6 @@ class NamedTupleVariable(TupleVariable):
                     variables.UserDefinedClassVariable(self.tuple_cls),
                 )
             elif isinstance(method, staticmethod):
-                # pyrefly: ignore[bad-argument-type]
                 return UserFunctionVariable(method.__func__)
             elif inspect.isfunction(method):
                 return UserMethodVariable(method, self)
@@ -1636,17 +1650,17 @@ class SliceVariable(VariableTracker):
 
         # Convert TensorVariable to SymIntVariable by calling .item()
         # This decomposes a[:t] to u=t.item(); a[:u] at the dynamo level
-        if isinstance(start, variables.TensorVariable):
+        if start.is_tensor():
             assert tx is not None, (
                 "tx is required when slice indices are TensorVariables"
             )
             start = start.call_method(tx, "item", [], {})
-        if isinstance(stop, variables.TensorVariable):
+        if stop.is_tensor():
             assert tx is not None, (
                 "tx is required when slice indices are TensorVariables"
             )
             stop = stop.call_method(tx, "item", [], {})
-        if isinstance(step, variables.TensorVariable):
+        if step.is_tensor():
             assert tx is not None, (
                 "tx is required when slice indices are TensorVariables"
             )

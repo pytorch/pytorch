@@ -22,6 +22,7 @@ from torch.testing._internal.common_utils import (
     IS_JETSON,
     run_tests,
     skipIfTorchDynamo,
+    TEST_WITH_ROCM,
     TestCase,
 )
 from torch.utils.dlpack import DLDeviceType, from_dlpack, to_dlpack
@@ -303,14 +304,21 @@ class TestTorchDlPack(TestCase):
 
     @skipMeta
     @onlyCUDA
-    @skipCUDAIfRocm
     def test_dlpack_cuda_per_thread_stream(self, device):
         # Test whether we raise an error if we are trying to use per-thread default
         # stream, which is currently not supported by PyTorch.
         x = make_tensor((5,), dtype=torch.float32, device=device)
-        with self.assertRaisesRegex(
-            BufferError, "per-thread default stream is not supported"
-        ):
+
+        if TEST_WITH_ROCM:
+            context = self.assertRaisesRegex(
+                AssertionError, r"unsupported stream on ROCm: 2"
+            )
+        else:
+            context = self.assertRaisesRegex(
+                BufferError, "per-thread default stream is not supported"
+            )
+
+        with context:
             x.__dlpack__(stream=2)
 
     @skipMeta
@@ -330,11 +338,18 @@ class TestTorchDlPack(TestCase):
 
     @skipMeta
     @onlyCUDA
-    @skipCUDAIfRocm
     def test_dlpack_invalid_cuda_streams(self, device):
         x = make_tensor((5,), dtype=torch.float32, device=device)
-        with self.assertRaisesRegex(AssertionError, r"unsupported stream on CUDA: \d"):
-            x.__dlpack__(stream=0)
+
+        if TEST_WITH_ROCM:
+            # On ROCm, stream=0 is valid (default stream).
+            self.assertIsNotNone(x.__dlpack__(stream=0))
+        else:
+            # CUDA raises AssertionError for stream=0
+            with self.assertRaisesRegex(
+                AssertionError, r"unsupported stream on CUDA: \d"
+            ):
+                x.__dlpack__(stream=0)
 
     @skipMeta
     def test_dlpack_invalid_cpu_stream(self):
@@ -354,7 +369,7 @@ class TestTorchDlPack(TestCase):
         with self.assertRaisesRegex(
             BufferError, r"Can't export tensors on a different CUDA device"
         ):
-            with torch.device(dev1):
+            with torch.cuda.device(dev1):
                 x.__dlpack__()
 
     # TODO: add interchange tests once NumPy 1.22 (dlpack support) is required
@@ -516,6 +531,24 @@ class TestTorchDlPack(TestCase):
         with self.assertRaisesRegex(ValueError, r"cannot move .* tensor from .*"):
             self._test_from_dlpack(device, out_device="cpu", copy=False)
 
+    def test_dlpack_copy_fallback(self):
+        """Test that copy parameter works even with producers that don't support it"""
+        import numpy as np
+
+        # Test copy=True - should work even if NumPy doesn't support copy parameter
+        np_array = np.array([1.0, 2.0, 3.0], dtype=np.float32)
+        t = from_dlpack(np_array, copy=True)
+
+        # Verify it's a copy by modifying tensor and checking NumPy unchanged
+        t[0] = 999.0
+        self.assertEqual(np_array[0], 1.0)
+
+        # Test copy=None (default) - should be zero-copy view
+        np_array2 = np.array([10.0, 20.0, 30.0], dtype=np.float32)
+        t2 = from_dlpack(np_array2)
+        t2[0] = 999.0
+        self.assertEqual(np_array2[0], 999.0)
+
     @skipMeta
     @onlyNativeDeviceTypes
     def test_unsupported_device_error(self, device):
@@ -542,8 +575,8 @@ class TestTorchDlPack(TestCase):
     def test_dlpack_exchange_api(self, device):
         """Comprehensive test of all DLPack Exchange API functions using inline C++"""
         # Check that the C API capsule exists and get it
-        self.assertTrue(hasattr(torch.Tensor, "__c_dlpack_exchange_api__"))
-        api_capsule = torch.Tensor.__c_dlpack_exchange_api__
+        self.assertTrue(hasattr(torch.Tensor, "__dlpack_c_exchange_api__"))
+        api_capsule = torch.Tensor.__dlpack_c_exchange_api__
         self.assertEqual(
             type(api_capsule).__name__, "PyCapsule", "API should be a PyCapsule"
         )
@@ -769,6 +802,81 @@ class TestTorchDlPack(TestCase):
 
         # Run the comprehensive C++ test
         module.test_dlpack_exchange_api(tensor, api_capsule, device.startswith("cuda"))
+
+    @skipMeta
+    @onlyCUDA
+    def test_numpy_cross_device_transfer(self, device):
+        """Test cross-device transfer from NumPy (CPU) to PyTorch (CUDA).
+
+        This tests the fix for issue #169186 where torch.from_dlpack(numpy_array, device="cuda")
+        would fail with "unsupported device requested" because PyTorch incorrectly asked
+        NumPy to create a CUDA DLPack capsule instead of handling the device transfer itself.
+
+        According to the DLPack spec, the consumer (PyTorch) is responsible for constructing
+        the final array on the target device, not the producer (NumPy).
+        """
+        import numpy as np
+
+        np_array = np.arange(10, dtype=np.float32)
+        expected = torch.arange(10, dtype=torch.float32, device=device)
+
+        # Test 1: copy=None (default) - should allow copy for cross-device
+        t1 = from_dlpack(np_array, device=device)
+        self.assertEqual(t1.device.type, "cuda")
+        self.assertEqual(t1, expected)
+
+        # Test 2: copy=True - explicit copy
+        t2 = from_dlpack(np_array, device=device, copy=True)
+        self.assertEqual(t2.device.type, "cuda")
+        self.assertEqual(t2, expected)
+
+        # Test 3: copy=False - should raise ValueError (can't do cross-device without copy)
+        with self.assertRaisesRegex(
+            ValueError, r"cannot move .* tensor from .* to .* without copying"
+        ):
+            from_dlpack(np_array, device=device, copy=False)
+
+        # Test 4: device as string vs torch.device object (both should work)
+        t_str = from_dlpack(np_array, device="cuda")
+        t_obj = from_dlpack(np_array, device=torch.device("cuda"))
+        self.assertEqual(t_str.device.type, "cuda")
+        self.assertEqual(t_obj.device.type, "cuda")
+        self.assertEqual(t_str, t_obj)
+
+        # Test 5: Regression - CPU -> CPU should still be zero-copy (share memory)
+        np_array2 = np.arange(5, dtype=np.float32)
+        t_cpu = from_dlpack(np_array2, device="cpu", copy=None)
+        self.assertEqual(t_cpu.device.type, "cpu")
+        # Should share memory
+        self.assertEqual(t_cpu.data_ptr(), torch.from_numpy(np_array2).data_ptr())
+        # Mutation should affect both
+        t_cpu[0] = 999
+        self.assertEqual(np_array2[0], 999)
+
+    @skipMeta
+    @onlyCUDA
+    @deviceCountAtLeast(2)
+    def test_numpy_cross_device_multi_gpu(self, devices):
+        """Test cross-device transfer to specific CUDA devices (cuda:0, cuda:1, etc)."""
+        import numpy as np
+
+        dev0, dev1 = devices[:2]
+        np_array = np.arange(5, dtype=np.float32)
+
+        # Test transfer to cuda:0
+        t0 = from_dlpack(np_array, device=dev0)
+        self.assertEqual(t0.device, torch.device(dev0))
+        expected = torch.arange(5, dtype=torch.float32, device=dev0)
+        self.assertEqual(t0, expected)
+
+        # Test transfer to cuda:1
+        t1 = from_dlpack(np_array, device=dev1)
+        self.assertEqual(t1.device, torch.device(dev1))
+        expected = torch.arange(5, dtype=torch.float32, device=dev1)
+        self.assertEqual(t1, expected)
+
+        # Verify they're on different devices
+        self.assertNotEqual(t0.device, t1.device)
 
 
 instantiate_device_type_tests(TestTorchDlPack, globals(), allow_mps=True)

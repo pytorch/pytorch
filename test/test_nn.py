@@ -2291,8 +2291,30 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertTrue(gradcheck(lambda x: F.normalize(x, p=1, dim=-1), (inputs,)))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
-    @skipIfRocm
+    def test_data_parallel_with_empty_parameter_shapes(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param_2d = nn.Parameter(torch.zeros(0, 16))
+                self.param_3d = nn.Parameter(torch.zeros(3, 0, 8))
+                self.param_4d = nn.Parameter(torch.zeros(2, 0, 4, 5))
+                self.param_normal = nn.Parameter(torch.ones(2, 3))
+
+            def forward(self, x):
+                return x + self.param_normal.sum()
+
+        model = MyModule()
+        devices = [0, 1]
+        model_parallel = nn.DataParallel(model, device_ids=devices)
+        model_parallel.cuda(devices[0])
+        input_tensor = torch.ones(4, 2, device=f'cuda:{devices[0]}')
+        output = model_parallel(input_tensor)
+        self.assertEqual(model_parallel.module.param_2d.shape, torch.Size([0, 16]))
+        self.assertEqual(model_parallel.module.param_3d.shape, torch.Size([3, 0, 8]))
+        self.assertEqual(model_parallel.module.param_4d.shape, torch.Size([2, 0, 4, 5]))
+        self.assertEqual(model_parallel.module.param_normal.shape, torch.Size([2, 3]))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_broadcast_double_backwards_gpu(self):
         tensors = (torch.randn(4, 4, device='cuda', requires_grad=True, dtype=torch.double),
                    torch.randn(4, 4, device='cuda', requires_grad=True, dtype=torch.double),
@@ -5202,16 +5224,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 self.skipTest("Failed on CUDA")
 
         if torch.version.hip:
-            if self._testMethodName in ("test_batchnorm_2D_train_NCHW_vs_cpu_mixed_bfloat16",
-                                        "test_batchnorm_3D_train_NCHW_vs_cpu_mixed_bfloat16",
-                                        "test_batchnorm_2D_train_NHWC_vs_NCHW_mixed_bfloat16",
-                                        "test_batchnorm_3D_train_NHWC_vs_NCHW_mixed_bfloat16") \
-                    and _get_torch_rocm_version() < (6, 4):
-                # NCHW bfloat16 path uses native kernels for rocm<=6.3
-                # train failed on rocm<=6.3 due to native accuracy issue
-                # https://github.com/pytorch/pytorch/issues/156513
-                self.skipTest("bfloat16 NHWC train failed on ROCm <= 6.3")
-
             if self._testMethodName in ("test_batchnorm_2D_train_NCHW_vs_native_mixed_bfloat16",
                                         "test_batchnorm_3D_train_NCHW_vs_native_mixed_bfloat16") \
                     and _get_torch_rocm_version() >= (6, 4):
@@ -7530,6 +7542,39 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with warnings.catch_warnings(record=True) as w:
             pickle.loads(pickle.dumps(torch.nn.Linear(10, 10)))
         self.assertEqual(len(w), 0)
+
+    def test_rnn_cell_gate_weights_size(self):
+        def test_rnn_cell(cell_fn, gate_count):
+            input_size = 8
+            hidden_size = 16
+            x = torch.randn(4, input_size)
+            hx = torch.randn(4, hidden_size)
+            cx = torch.randn(4, hidden_size)
+
+            w_ih_invalid = torch.randn((gate_count * hidden_size) + 1, 8)
+            w_ih = torch.randn(gate_count * hidden_size, 8)
+            w_hh_invalid = torch.randn((gate_count * hidden_size) + 1, 16)
+            w_hh = torch.randn(gate_count * hidden_size, 16)
+            b_ih = torch.randn(gate_count * hidden_size)
+            b_hh = torch.randn(gate_count * hidden_size)
+
+            if cell_fn is torch.lstm_cell:
+                state = (hx, cx)
+            else:
+                state = hx
+
+            with self.assertRaisesRegex(RuntimeError, "weight_ih"):
+                cell_fn(x, state, w_ih_invalid, w_hh, b_ih, b_hh)
+
+            with self.assertRaisesRegex(RuntimeError, "weight_hh"):
+                cell_fn(x, state, w_ih, w_hh_invalid, b_ih, b_hh)
+        for cell_fn, gate_count in [
+            (torch.lstm_cell, 4),
+            (torch.gru_cell, 3),
+            (torch.rnn_relu_cell, 1),
+            (torch.rnn_tanh_cell, 1),
+        ]:
+            test_rnn_cell(cell_fn, gate_count)
 
 class TestFusionEval(TestCase):
     @set_default_dtype(torch.double)

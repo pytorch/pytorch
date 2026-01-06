@@ -220,6 +220,8 @@ class TORCH_API Tensor: public TensorBase {
   Tensor& operator=(const Tensor &rhs) && {
     return copy_(rhs);
   }
+
+  // NOLINTNEXTLINE(performance-noexcept-move-constructor)
   Tensor& operator=(Tensor&& rhs) && {
     return copy_(rhs);
   }
