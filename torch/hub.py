@@ -145,20 +145,23 @@ def _safe_extract_zip(zip_file, extract_to):
         filename = os.path.normpath(member.filename)
 
         # Check for directory traversal attempts
-        if filename.startswith('/') or filename.startswith('\\'):
+        if filename.startswith("/") or filename.startswith("\\"):
             raise ValueError(f"Archive entry has absolute path: {member.filename}")
 
-        if '..' in re.split("[/\\\\]", filename):
-            raise ValueError(f"Archive entry contains directory traversal: {member.filename}")
+        if len(filename) >= 2 and filename[1] == ":" and filename[0].isalpha():
+            raise ValueError(f"Archive entry has absolute path: {member.filename}")
 
-        # Check for null bytes (another attack vector)
-        if '\0' in filename:
-            raise ValueError(f"Archive entry contains null byte: {member.filename}")
+        if ".." in re.split("[/\\\\]", filename):
+            raise ValueError(
+                f"Archive entry contains directory traversal: {member.filename}"
+            )
 
         # Construct the full extraction path and verify it's within extract_to
         full_path = os.path.abspath(os.path.join(extract_to, filename))
         if not full_path.startswith(extract_to + os.sep) and full_path != extract_to:
-            raise ValueError(f"Archive entry would extract outside target directory: {member.filename}")
+            raise ValueError(
+                f"Archive entry would extract outside target directory: {member.filename}"
+            )
 
         # Extract the member safely
         zip_file.extract(member, extract_to)

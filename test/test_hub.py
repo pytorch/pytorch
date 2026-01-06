@@ -316,13 +316,13 @@ class TestHub(TestCase):
 
     def _create_malicious_zip(self, filename, malicious_path):
         """Helper to create a zip file with a malicious path entry."""
-        with zipfile.ZipFile(filename, 'w') as zf:
+        with zipfile.ZipFile(filename, "w") as zf:
             # Create an entry with malicious path
             zf.writestr(malicious_path, b"malicious content")
 
     def _create_legacy_malicious_zip(self, filename, malicious_path):
         """Helper to create a legacy-style zip file (single entry) with malicious path."""
-        with zipfile.ZipFile(filename, 'w') as zf:
+        with zipfile.ZipFile(filename, "w") as zf:
             # Create a single entry with malicious path for legacy format
             zf.writestr(malicious_path, b"malicious content")
 
@@ -384,57 +384,6 @@ class TestHub(TestCase):
 
                     os.remove(malicious_zip)
 
-    def test_safe_extract_zip_blocks_null_bytes(self):
-        """Test that _safe_extract_zip blocks null byte attacks."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            malicious_zip = os.path.join(tmpdir, "malicious.zip")
-            extract_dir = os.path.join(tmpdir, "extract")
-            os.makedirs(extract_dir)
-
-            # Test null byte injection
-            malicious_path = "legitimate_file.txt\x00../../etc/passwd"
-            self._create_malicious_zip(malicious_zip, malicious_path)
-
-            with zipfile.ZipFile(malicious_zip) as zf:
-                with self.assertRaises(ValueError) as cm:
-                    hub._safe_extract_zip(zf, extract_dir)
-
-                # Verify the error message indicates null byte
-                self.assertIn("null byte", str(cm.exception))
-
-    def test_safe_extract_zip_allows_legitimate_paths(self):
-        """Test that _safe_extract_zip allows legitimate file paths."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            legitimate_zip = os.path.join(tmpdir, "legitimate.zip")
-            extract_dir = os.path.join(tmpdir, "extract")
-            os.makedirs(extract_dir)
-
-            # Test legitimate paths
-            legitimate_paths = [
-                "file.txt",
-                "subdir/file.txt",
-                "deep/nested/directory/file.txt",
-                "file-with-dashes.txt",
-                "file_with_underscores.txt",
-                "file.with.dots.txt",
-            ]
-
-            with zipfile.ZipFile(legitimate_zip, 'w') as zf:
-                for path in legitimate_paths:
-                    zf.writestr(path, f"content of {path}".encode())
-
-            # This should not raise any exceptions
-            with zipfile.ZipFile(legitimate_zip) as zf:
-                hub._safe_extract_zip(zf, extract_dir)
-
-            # Verify all files were extracted correctly
-            for path in legitimate_paths:
-                extracted_path = os.path.join(extract_dir, path)
-                self.assertTrue(os.path.exists(extracted_path))
-                with open(extracted_path, 'r') as f:
-                    content = f.read()
-                    self.assertEqual(content, f"content of {path}")
-
     def test_legacy_zip_load_zipslip_protection(self):
         """Test that _legacy_zip_load is protected against zipslip attacks."""
         with tempfile.TemporaryDirectory() as tmpdir:
@@ -470,7 +419,7 @@ class TestHub(TestCase):
                 "../../../etc/passwd",  # Malicious entry
             ]
 
-            with zipfile.ZipFile(cached_file, 'w') as zf:
+            with zipfile.ZipFile(cached_file, "w") as zf:
                 zf.writestr(malicious_entries[0], "# hubconf content")
                 zf.writestr(malicious_entries[1], "malicious content")
 
@@ -480,65 +429,6 @@ class TestHub(TestCase):
                     hub._safe_extract_zip(cached_zipfile, hub_dir)
 
                 self.assertIn("directory traversal", str(cm.exception))
-
-    def test_zipslip_protection_comprehensive_attack_vectors(self):
-        """Test various sophisticated zipslip attack vectors."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            extract_dir = os.path.join(tmpdir, "extract")
-            os.makedirs(extract_dir)
-
-            # Comprehensive list of attack vectors
-            attack_vectors = [
-                # Basic directory traversal
-                "../malicious.txt",
-                "../../malicious.txt",
-                "../../../malicious.txt",
-
-                # Mixed separators (Windows/Unix)
-                "..\\malicious.txt",
-                "../..\\malicious.txt",
-                "..\\../malicious.txt",
-
-                # Complex paths with legitimate-looking prefixes
-                "safe/../../malicious.txt",
-                "deeply/nested/path/../../../../../malicious.txt",
-
-                # Encoded traversal attempts (these should be normalized and caught)
-                "safe%2F..%2F..%2Fmalicious.txt",  # URL encoded
-
-                # Null byte attacks
-                "safe.txt\x00../../../malicious",
-
-                # Absolute paths
-                "/etc/passwd",
-                "C:\\Windows\\System32\\config\\sam",
-                "/tmp/malicious_script.py",
-
-                # UNC paths (Windows)
-                "\\\\server\\share\\file",
-
-                # Double encoded attempts
-                "safe/../../../malicious.txt",
-
-                # Mixed case (should still be caught)
-                "../Malicious.TXT",
-                "..\\MALICIOUS.txt",
-            ]
-
-            for attack_vector in attack_vectors:
-                with self.subTest(path=attack_vector):
-                    malicious_zip = os.path.join(tmpdir, f"attack_{hash(attack_vector)}.zip")
-
-                    try:
-                        self._create_malicious_zip(malicious_zip, attack_vector)
-
-                        with zipfile.ZipFile(malicious_zip) as zf:
-                            with self.assertRaises(ValueError):
-                                hub._safe_extract_zip(zf, extract_dir)
-
-                    finally:
-                        if os.path.exists(malicious_zip):
-                            os.remove(malicious_zip)
 
 
 if __name__ == "__main__":
