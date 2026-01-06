@@ -53,14 +53,16 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     markDynamoStrictTest,
+    MI200_ARCH,
+    MI300_ARCH,
     NestedTensorTestCase,
     parametrize,
     run_tests,
     serialTest,
+    skipIfRocmArch,
     skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
     subtest,
-    TEST_WITH_ROCM,
     xfailIfTorchDynamo,
     xfailIfWindows,
 )
@@ -6621,11 +6623,6 @@ class TestNestedTensorSubclass(NestedTensorTestCase):
         ):
             a.copy_(b)
 
-    # This can't happen in the opinfo tests due to subprocess creation
-    @unittest.skipIf(
-        TEST_WITH_ROCM,
-        "In ROCm, kernel asserts are disabled due to performance overhead",
-    )
     def test_index_put_error(self, device):
         import subprocess
 
@@ -6779,12 +6776,7 @@ torch.cuda.synchronize()
         check_results(fn, compiled_fn, generate_inp(20))
         self.assertEqual(compile_counter.frame_count, frame_count_2)
 
-    # Note 1: Math fallback doesn't work with bfloat16 on CUDA
-    # Note 2: ROCm doesn't support flash attention or mem_efficient attention for NT
-    @unittest.skipIf(
-        TEST_WITH_ROCM,
-        "ROCm doesn't support flash attention or mem_efficient attention for NT",
-    )
+    # Note: Math fallback doesn't work with bfloat16 on CUDA
     @tf32_on_and_off(0.005)
     @dtypes(
         *(
@@ -7054,9 +7046,7 @@ torch.cuda.synchronize()
 
     @skipIfTorchDynamo("SDPA test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    # Guarding with sqrt() doesn't work on ROCm?
     @xfailIfWindows
-    @skipCUDAIfRocm
     @onlyCUDA
     @dtypes(
         *(
@@ -7243,9 +7233,9 @@ torch.cuda.synchronize()
     @decorateIf(xfailIfWindows, lambda params: params["dtype"] == torch.float32)
     @skipIfTorchDynamo("SDPA test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    # mha_varlen_fwd not supported on ROCm
-    @skipCUDAIfRocm
     @onlyCUDA
+    # efficient_attention_forward meta kernel shape mismatch on CDNA - see issue #171568
+    @skipIfRocmArch(MI200_ARCH + MI300_ARCH)
     @dtypes(
         *(
             [torch.float16, torch.bfloat16, torch.float32]
@@ -7275,8 +7265,9 @@ torch.cuda.synchronize()
         "Platform doesn't support flash or mem-efficient attention",
     )
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @skipCUDAIfRocm
     @onlyCUDA
+    # flash_attention_forward meta kernel shape mismatch on CDNA - see issue #171568
+    @skipIfRocmArch(MI200_ARCH + MI300_ARCH)
     @skipIfTorchDynamo()
     def test_sdpa_autocast(self, device):
         def fn_nt(values32, values16, offsets):
@@ -7358,7 +7349,6 @@ torch.cuda.synchronize()
         "Platform doesn't support flash or mem-efficient attention",
     )
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @skipCUDAIfRocm
     @onlyCUDA
     @skipIfTorchDynamo()
     def test_sdpa_flop_counter(self, device):
@@ -7780,8 +7770,9 @@ torch.cuda.synchronize()
 
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
+    # efficient_attention_forward meta kernel shape mismatch on CDNA - see issue #171568
+    @skipIfRocmArch(MI200_ARCH + MI300_ARCH)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @skipCUDAIfRocm
     def test_compile_preserves_metadata_cache(self, device, dtype):
         # shape (B, *, D)
         nt = random_nt_from_dims(
@@ -7808,7 +7799,6 @@ torch.cuda.synchronize()
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @skipCUDAIfRocm
     def test_compile_with_dynamic_max_seq_len(self, device, dtype):
         # shape (B, *, D)
         # max seq len: 18
@@ -7841,7 +7831,6 @@ torch.cuda.synchronize()
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @skipCUDAIfRocm
     def test_compile_with_dynamic_min_seq_len(self, device, dtype):
         # shape (B, *, D)
         # min seq len: 7
@@ -7874,7 +7863,6 @@ torch.cuda.synchronize()
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @skipCUDAIfRocm
     def test_compile_with_propagated_dynamic_max_seq_len(self, device, dtype):
         # shape (B, *, D)
         # max seq len: 18
@@ -8001,7 +7989,6 @@ torch.cuda.synchronize()
     @torch._dynamo.utils.disable_cache_limit()
     @skipIfTorchDynamo("SDPA test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @skipCUDAIfRocm
     @dtypes(torch.float32, torch.double, torch.half)
     @parametrize("nt_dim", [2, 3, 4])
     @parametrize("requires_grad", [False, True])
@@ -8103,7 +8090,6 @@ torch.cuda.synchronize()
     @dtypes(torch.float32)
     @skipIfTorchDynamo("Test compiles internally")
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
-    @skipCUDAIfRocm
     def test_compile_padded_dense_conversion_preserves_metadata_cache(
         self, device, dtype
     ):
