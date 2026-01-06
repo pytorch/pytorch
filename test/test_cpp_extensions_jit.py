@@ -1541,11 +1541,14 @@ except RuntimeError as e:
                 )
 
                 if show_cpp_stacktraces:
-                    self.assertTrue(
-                        "C++ CapturedTraceback:" in error_message
-                        or "frame #" in error_message.lower()
-                        or "trigger_torch_check_eq_failure" in error_message,
+                    self.assertIn(
+                        "C++ CapturedTraceback:",
+                        error_message,
                         f"Expected C++ stack trace info in error message when TORCH_SHOW_CPP_STACKTRACES=1, got: {error_message}",  # noqa: B950
+                    )
+                    self.assertRegex(
+                        error_message,
+                        r"Exception raised from .*/main.cpp at trigger_torch_check_eq_failure:8",
                     )
                 else:
                     self.assertNotIn(
