@@ -258,7 +258,7 @@ class TestOpaqueObject(TestCase):
             elif config.mode == "double":
                 return x + x
             else:
-                return x
+                return x.clone()
 
         @torch.library.register_fake(
             "_TestOpaqueObject::process_with_config", lib=self.lib
@@ -289,7 +289,7 @@ class TestOpaqueObject(TestCase):
             elif config.config.mode == "double":
                 return x + x
             else:
-                return x
+                return x.clone()
 
         @torch.library.register_fake(
             "_TestOpaqueObject::process_nested_config", lib=self.lib
@@ -317,9 +317,10 @@ class TestOpaqueObject(TestCase):
             if config is None:
                 return x.clone()
             else:
+                x_res = x.clone()
                 for size in config:
-                    x += size.size
-                return x
+                    x_res += size.size
+                return x_res
 
         @torch.library.register_fake(
             "_TestOpaqueObject::process_multiple_sizes", lib=self.lib
@@ -760,11 +761,17 @@ def forward(self, primals, tangents):
             x: int
 
         pytree.register_dataclass(Bad1)
-        with self.assertRaisesRegex(
-            ValueError,
-            "cannot be registered as an opaque object as it has been registered as a pytree.",
-        ):
-            register_opaque_type(Bad1, typ="reference")
+        try:
+            with self.assertRaisesRegex(
+                ValueError,
+                "cannot be registered as an opaque object as it has been registered as a pytree.",
+            ):
+                register_opaque_type(Bad1, typ="reference")
+        finally:
+            # Clean up pytree registration to avoid leaking state to other tests
+            pytree.SUPPORTED_NODES.pop(Bad1, None)
+            pytree.SUPPORTED_SERIALIZED_TYPES.pop(Bad1, None)
+            pytree.CONSTANT_NODES.discard(Bad1)
 
         @dataclass
         class Bad2:

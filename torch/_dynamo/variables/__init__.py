@@ -30,6 +30,7 @@ from .ctx_manager import (
     ErrorOnGraphBreakVariable,
     FSDPParamGroupUseTrainingStateVariable,
     FxTracebackAnnotateVariable,
+    GenericContextWrappingVariable,
     GradIncrementNestingCtxManagerVariable,
     GradInplaceRequiresGradCtxManagerVariable,
     GradModeVariable,
@@ -49,6 +50,7 @@ from .dicts import (
     FrozensetVariable,
     MappingProxyVariable,
     NNModuleHooksDictVariable,
+    OrderedSetVariable,
     SetVariable,
 )
 from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable
@@ -118,6 +120,7 @@ from .misc import (
     StringFormatVariable,
     SuperVariable,
     TorchVersionVariable,
+    TracebackVariable,
     TypingVariable,
     UnknownVariable,
     WeakRefVariable,

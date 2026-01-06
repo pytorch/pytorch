@@ -156,6 +156,7 @@ def register_run_and_save_rng_state_op():
             super().__init__("run_and_save_rng_state", cacheable=True)
 
         def __call__(self, op, *args, **kwargs):
+            # pyrefly: ignore [missing-attribute]
             return super().__call__(op, *args, **kwargs)
 
     run_and_save_rng_state = RunAndSaveRngState()
@@ -220,6 +221,7 @@ def register_run_with_rng_state_op():
             super().__init__("run_with_rng_state", cacheable=True)
 
         def __call__(self, rng_state, op, *args, **kwargs):
+            # pyrefly: ignore [missing-attribute]
             return super().__call__(rng_state, op, *args, **kwargs)
 
     run_with_rng_state = RunWithRngState()
@@ -320,6 +322,7 @@ def register_graphsafe_run_with_rng_state_op():
             super().__init__("graphsafe_run_with_rng_state")
 
         def __call__(self, op, *args, rng_state=None, **kwargs):
+            # pyrefly: ignore [missing-attribute]
             return super().__call__(op, *args, rng_state=rng_state, **kwargs)
 
     graphsafe_run_with_rng_state = GraphSafeRunWithRngState()

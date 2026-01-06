@@ -2706,6 +2706,19 @@ def _replace_operation_buffer(
     V.graph.name_to_op[orig_op_name] = new_node
 
 
+def _estimate_fused_epilogue_runtime(node1, node2, epilogue_runtime) -> float:
+    # If no extra memory read by epilogue, assume epilogue is free
+    # if extra memory is read by epilogue, add to minimum choice
+    total_read_bytes = node2.get_read_buffer_sizes()
+    template_write_bytes = node1.get_write_buffer_sizes()
+    extra_bytes = total_read_bytes - template_write_bytes
+    extra_bytes_ratio = extra_bytes / template_write_bytes
+
+    # Smoothly approaches 1 as extra_bytes_ratio increases
+    extra_memory_ratio = extra_bytes_ratio / (1 + extra_bytes_ratio)
+    return extra_memory_ratio * epilogue_runtime
+
+
 @dataclasses.dataclass
 class NodeUser:
     node: Union[BaseSchedulerNode, OutputNode]
@@ -2743,6 +2756,43 @@ _post_grad_graph_counter = itertools.count()
 
 def used_non_deterministic_runtime_estimations() -> bool:
     return config.runtime_estimations_mms_benchmark
+
+
+def get_layout_symints(node: ir.IRNode) -> OrderedSet[sympy.Symbol]:
+    """Get free symbols from a node's layout (size, stride, offset)."""
+    free_symbol_uses: OrderedSet[sympy.Symbol] = OrderedSet()
+    layout = node.maybe_get_layout()
+    if isinstance(layout, ir.Layout):
+        free_symbol_uses.update(
+            free_symbols(layout.size)
+            | free_symbols(layout.stride)
+            | free_symbols(layout.offset)
+        )
+        if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
+            # symint may be used as index in layout.target
+            free_symbol_uses.update(get_layout_symints(layout.target))
+    else:
+        assert layout is None, f"Expect layout to be None but found layout={layout}"
+    return free_symbol_uses
+
+
+def get_scheduler_node_symbol_uses(
+    node: BaseSchedulerNode,
+) -> OrderedSet[sympy.Symbol]:
+    """
+    Gets symbols used in a scheduler node, including free symbols from
+    the node's operations and layout symints from outputs.
+    """
+    if isinstance(node, FusedSchedulerNode):
+        return OrderedSet().union(
+            *(get_scheduler_node_symbol_uses(snode) for snode in node.snodes)
+        )
+    assert node.node is not None
+    free_symbol_uses = node.node.get_free_symbol_uses()
+    free_symbol_uses.update(
+        *(get_layout_symints(ir_node) for ir_node in node.node.get_outputs())
+    )
+    return free_symbol_uses
 
 
 class Scheduler:
@@ -2847,6 +2897,11 @@ class Scheduler:
 
         self.merge_loops()
         self.finalize_multi_template_buffers()
+        if (
+            config.max_autotune_gemm or config.max_autotune
+        ) and config.pipeline_max_autotune_gemm:
+            torch._inductor.select_algorithm.PrecompileThreadPool.shutdown_instance()
+
         if config.combo_kernels:
             with dynamo_timed(
                 "Scheduler.create_combo_kernel_nodes",
@@ -3894,12 +3949,23 @@ class Scheduler:
 
             # Eagerly compile and benchmark non-template nodes
             choice_timings = multi_node.choice_timings()
-            _, ms1 = multi_node.get_min_choice()
-            ms2, path2 = (
-                self.benchmark_fused_nodes(node_list_2)
-                if epilogue_fusion
-                else self.benchmark_fused_nodes(node_list_1)
-            )
+            min_choice, ms1 = multi_node.get_min_choice()
+
+            ms2 = float("inf")
+            bench_epilogue = config.benchmark_epilogue_fusion
+            if bench_epilogue:
+                ms2, path2 = (
+                    self.benchmark_fused_nodes(node_list_2)
+                    if epilogue_fusion
+                    else self.benchmark_fused_nodes(node_list_1)
+                )
+            else:
+                # By default, don't do prologue fusion. Generally slower
+                if not epilogue_fusion:
+                    return False
+
+                ms2 = node2._get_estimated_runtime()
+                ms2_fused = _estimate_fused_epilogue_runtime(node1, node2, ms2)
 
             # Start compiling choices in parallel
             future_choices: list[tuple[Any, Optional[LambdaFuture], ModuleType]] = []
@@ -3922,7 +3988,7 @@ class Scheduler:
                 ):
                     continue
 
-                if unfused_time >= ms1 + ms2:
+                if bench_epilogue and unfused_time >= ms1 + ms2:
                     break
 
                 triton_choices += 1
@@ -3938,13 +4004,17 @@ class Scheduler:
             def benchmark_when_ready() -> bool:
                 min_ms_fused = float("inf")
                 ms_fused_choice = None
-
                 new_timings = {}
                 # Benchmark each choice after compilation completes
                 for choice, future, mod_fused in future_choices:
                     try:
                         if future is not None:
-                            future.result()
+                            res = future.result()
+                        elif not bench_epilogue:
+                            res = mod_fused.triton_
+                            res.precompile()
+                        else:
+                            res = None
 
                     # Ideally we would more narrowly catch Exceptions here but
                     # triton  will unpredictably error with valid prologue fusions
@@ -3956,21 +4026,42 @@ class Scheduler:
                                 str(e),
                             )
                         continue
-                    # pyrefly: ignore [missing-attribute]
-                    with multi_node.swap_as_triton_caller(choice):
-                        ms_fused, path = self.benchmark_codegened_module(
-                            mod_fused,
-                            # pyrefly: ignore [bad-argument-type]
-                            device,
+
+                    if bench_epilogue:
+                        # pyrefly: ignore [missing-attribute]
+                        with multi_node.swap_as_triton_caller(choice):
+                            ms_fused, path = self.benchmark_codegened_module(
+                                mod_fused,
+                                # pyrefly: ignore [bad-argument-type]
+                                device,
+                            )
+                            new_timings[choice] = ms_fused
+                            if ms_fused < min_ms_fused:
+                                min_ms_fused = ms_fused
+                                ms_fused_choice = choice
+                    else:
+                        fusible_choice = (
+                            min_choice == choice
+                            or ms2 + ms1 > choice_timings[choice] + ms2_fused
                         )
-                        new_timings[choice] = ms_fused
-                        if ms_fused < min_ms_fused:
-                            min_ms_fused = ms_fused
+
+                        if (
+                            res
+                            # pyrefly: ignore [missing-attribute]
+                            and len(res.launchers) == 1
+                            # pyrefly: ignore [bad-index]
+                            and res.launchers[0].n_spills <= 8
+                            and fusible_choice
+                        ):
                             ms_fused_choice = choice
+                            break
 
-                log_fusion(min_ms_fused, ms1, ms2)
+                if bench_epilogue:
+                    log_fusion(min_ms_fused, ms1, ms2)
 
-                if min_ms_fused < (ms1 + ms2) and ms_fused_choice is not None:
+                if (
+                    not bench_epilogue or min_ms_fused < (ms1 + ms2)
+                ) and ms_fused_choice is not None:
                     if config.multi_kernel_hints:
                         hint_override_best_fusion_choice[None] = ms_fused_choice
                         # pyrefly: ignore [missing-attribute]
@@ -4124,7 +4215,7 @@ class Scheduler:
             ):
                 pending_fusion = pending_fusions.get(
                     self.get_fused_node(node1),
-                    pending_fusions.get(self.get_fused_node(node2), None),
+                    pending_fusions.get(self.get_fused_node(node2)),
                 )
                 assert pending_fusion is not None
 
@@ -5494,7 +5585,7 @@ class Scheduler:
             not torch._inductor.config.triton.cudagraphs
             and _unstable_customized_partition_wrapper.wrapper is None
         ):
-            return "cudagraphs disabled"
+            return "partition includes all ops when cudagraphs is disabled"
 
         if isinstance(node, FusedSchedulerNode):
             for snode in node.snodes:
@@ -5519,6 +5610,11 @@ class Scheduler:
 
         if is_cudagraph_unsafe_op(node.node):
             return "CUDAGraph-unsafe custom ops"
+
+        # Partition around nodes with dynamic shapes when cudagraph_skip_dynamic_graphs is enabled
+        if config.triton.cudagraph_skip_dynamic_graphs:
+            if get_scheduler_node_symbol_uses(node):
+                return "dynamic shape ops"
 
         return None
 
@@ -5591,41 +5687,6 @@ class Scheduler:
         - free symbols in partition input/node shapes, strides, and offsets. This is needed
           for recording cudagraphs for tensors with dynamic shapes.
         """
-
-        def get_layout_symints(node: ir.IRNode) -> OrderedSet[sympy.Symbol]:
-            free_symbol_uses: OrderedSet[sympy.Symbol] = OrderedSet()
-            layout = node.maybe_get_layout()
-            if isinstance(layout, ir.Layout):
-                free_symbol_uses.update(
-                    free_symbols(layout.size)
-                    | free_symbols(layout.stride)
-                    | free_symbols(layout.offset)
-                )
-                if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
-                    # symint may be used as index in layout.target
-                    free_symbol_uses.update(get_layout_symints(layout.target))
-            else:
-                assert layout is None, (
-                    f"Expect layout to be None but found layout={layout}"
-                )
-            return free_symbol_uses
-
-        def get_scheduler_node_symbol_uses(
-            node: BaseSchedulerNode,
-        ) -> OrderedSet[sympy.Symbol]:
-            """
-            Gets symbols used in node.
-            """
-            if isinstance(node, FusedSchedulerNode):
-                return OrderedSet().union(
-                    *(get_scheduler_node_symbol_uses(snode) for snode in node.snodes)
-                )
-            assert node.node is not None
-            free_symbol_uses = node.node.get_free_symbol_uses()
-            free_symbol_uses.update(
-                *(get_layout_symints(ir_node) for ir_node in node.node.get_outputs())
-            )
-            return free_symbol_uses
 
         def get_input_node_symbols(
             node: Union[ir.IRNode, sympy.Expr, ir.TorchBindObject],
@@ -6028,6 +6089,12 @@ class Scheduler:
         if not cudagraphs_log.isEnabledFor(logging.DEBUG):
             return
 
+        # Don't log partition reasons for CPU-only graphs since cudagraph
+        # partitioning is not relevant when there are no GPU devices
+        has_gpu_device = any(is_gpu(device) for device in V.graph.device_types)
+        if not has_gpu_device:
+            return
+
         cudagraphable_count = sum(1 for s in signatures if not s.skip_cudagraph)
         non_cudagraphable_count = len(signatures) - cudagraphable_count
         cudagraphs_log.debug(
@@ -6206,6 +6273,9 @@ class Scheduler:
         each function.
         """
         partitions, signatures = self.graph_partition()
+
+        if len(partitions) > 1:
+            counters["inductor"]["cudagraph_partitions"] += len(partitions)
 
         with self.use_default_device_context(partitions, signatures):
             for partition, signature in zip(partitions, signatures):

@@ -417,6 +417,11 @@ for pkg in /$WHEELHOUSE_DIR/torch_no_python*.whl /$WHEELHOUSE_DIR/torch*linux*.w
         zip -rq $pkg_name $PREIX*
         rm -f $pkg
         mv $pkg_name $(dirname $pkg)/$pkg_name
+    elif [[ $PLATFORM == "manylinux_2_28_aarch64" ]]; then
+        pkg_name=$(echo $(basename $pkg) | sed -e s#linux_aarch64#"${PLATFORM}"#)
+        zip -rq $pkg_name $PREIX*
+        rm -f $pkg
+        mv $pkg_name $(dirname $pkg)/$pkg_name
     else
         # zip up the wheel back
         zip -rq $(basename $pkg) $PREIX*

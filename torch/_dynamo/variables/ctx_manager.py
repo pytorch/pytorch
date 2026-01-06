@@ -217,22 +217,29 @@ class RepararametrizeModuleContextVariable(GenericContextWrappingVariable):
         # We don't call super().__init__() because we're delegating most methods to cm_vt
 
     def enter(self, tx: "InstructionTranslator") -> VariableTracker:
-        # Custom enter implementation with side effects
-
-        self.old_parameters_var = self.mod.var_getattr(tx, "_parameters").realize()
-        self.old_buffer_var = self.mod.var_getattr(tx, "_buffers").realize()
-        tx.output.side_effects.ignore_mutations_on(self.old_parameters_var)
-        tx.output.side_effects.ignore_mutations_on(self.old_buffer_var)
-        return self.cm_vt.enter(tx)
+        # Custom enter implementation with side effects. Additionally, do not
+        # worry about side effects for the hop, as they cancel each other out.
+        with torch._dynamo.variables.higher_order_ops.dynamo_allow_side_effects_in_hop(
+            tx
+        ):
+            self.old_parameters_var = self.mod.var_getattr(tx, "_parameters").realize()
+            self.old_buffer_var = self.mod.var_getattr(tx, "_buffers").realize()
+            tx.output.side_effects.ignore_mutations_on(self.old_parameters_var)
+            tx.output.side_effects.ignore_mutations_on(self.old_buffer_var)
+            return self.cm_vt.enter(tx)
 
     def exit(
         self, tx: "InstructionTranslator", *args: VariableTracker
     ) -> VariableTracker:
-        # Custom exit implementation with side effects
-        x = self.cm_vt.exit(tx, *args)
-        tx.output.side_effects.stop_ignoring_mutations_on(self.old_buffer_var)
-        tx.output.side_effects.stop_ignoring_mutations_on(self.old_parameters_var)
-        return x
+        # Custom enter implementation with side effects. Additionally, do not
+        # worry about side effects for the hop, as they cancel each other out.
+        with torch._dynamo.variables.higher_order_ops.dynamo_allow_side_effects_in_hop(
+            tx
+        ):
+            x = self.cm_vt.exit(tx, *args)
+            tx.output.side_effects.stop_ignoring_mutations_on(self.old_buffer_var)
+            tx.output.side_effects.stop_ignoring_mutations_on(self.old_parameters_var)
+            return x
 
     # Forward all other method calls to self.cm_vt
     def __getattr__(self, name: str) -> Any:
@@ -796,6 +803,7 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
         tx: "InstructionTranslator", **kwargs: Any
     ) -> "TorchFunctionDisableVariable":
         var = TorchFunctionDisableVariable(
+            tx,
             target_values=[],
             initial_values=[],
             **kwargs,
@@ -804,6 +812,7 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
 
     def __init__(
         self,
+        tx: "InstructionTranslator",
         target_values: Sized,
         initial_values: Optional[Sized] = None,
         only_subclass: bool = True,
@@ -811,9 +820,6 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
     ) -> None:
         assert len(target_values) == 0
         assert initial_values is not None and len(initial_values) == 0
-        from ..symbolic_convert import InstructionTranslator
-
-        tx = InstructionTranslator.current_tx()
         self.only_subclass = only_subclass
         self.initial_torch_function_subclass_enabled = (
             tx.symbolic_torch_function_state.torch_function_subclass_enabled
@@ -1577,7 +1583,7 @@ class WithEnterFunctionVariable(VariableTracker):
         assert not kwargs
         # NOTE: we assume that the instruction immediately after the current CALL instruction
         # is the first instruction of the block.
-        # pyrefly: ignore [bad-argument-type]
+
         return tx.enter_ctx(self.ctx, tx.current_instruction)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
