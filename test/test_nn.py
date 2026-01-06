@@ -2315,8 +2315,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(model_parallel.module.param_normal.shape, torch.Size([2, 3]))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
-    @skipIfRocm
     def test_broadcast_double_backwards_gpu(self):
         tensors = (torch.randn(4, 4, device='cuda', requires_grad=True, dtype=torch.double),
                    torch.randn(4, 4, device='cuda', requires_grad=True, dtype=torch.double),
