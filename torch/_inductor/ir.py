@@ -9419,7 +9419,7 @@ class NonTensorObj(IRNode):
 @ir_dataclass
 class TorchBindObject(NonTensorObj):
     name: str
-    value: Union[FakeScriptObject, torch.ScriptObject]
+    value: Union[FakeScriptObject, torch.ScriptObject, Any]
 
     def get_name(self) -> str:
         return self.name
@@ -9427,7 +9427,7 @@ class TorchBindObject(NonTensorObj):
     def codegen_reference(self, writer: Optional[IndentedBuffer] = None) -> str:
         return self.name
 
-    def get_value(self) -> Union[FakeScriptObject, torch.ScriptObject]:
+    def get_value(self) -> Union[FakeScriptObject, torch.ScriptObject, Any]:
         return self.value
 
     def get_real_obj(self) -> torch.ScriptObject:

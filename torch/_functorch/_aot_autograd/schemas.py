@@ -436,6 +436,9 @@ class ViewAndMutationMeta:
 
     num_symints_saved_for_bw: Optional[int] = None
 
+    # Number of opaque objects (like FakeScriptObject) saved for backward
+    num_opaque_objects_saved_for_bw: Optional[int] = None
+
     # The grad_enabled mutation that will be emitted in the runtime_wrapper epilogue
     # NOTE: AOTAutograd will assume that the ambient `is_grad_enabled` is the grad mode
     # that is intended to be in effect prior to running the graph, in keeping with
@@ -665,10 +668,25 @@ class ViewAndMutationMeta:
     @property
     def tensors_saved_for_backwards_slice(self):
         assert self.num_symints_saved_for_bw is not None
-        if self.num_symints_saved_for_bw > 0:
-            return slice(self.num_forward, -self.num_symints_saved_for_bw)
+        num_opaque = self.num_opaque_objects_saved_for_bw or 0
+        num_symints = self.num_symints_saved_for_bw
+        num_trailing = num_opaque + num_symints
+        if num_trailing > 0:
+            return slice(self.num_forward, -num_trailing)
         else:
             return slice(self.num_forward, None)
+
+    @property
+    def opaque_objects_saved_for_backwards_slice(self):
+        num_opaque = self.num_opaque_objects_saved_for_bw or 0
+        num_symints = self.num_symints_saved_for_bw or 0
+        if num_opaque > 0:
+            if num_symints > 0:
+                return slice(-num_opaque - num_symints, -num_symints)
+            else:
+                return slice(-num_opaque, None)
+        else:
+            return slice(0, 0)  # empty slice
 
     @property
     def symints_saved_for_backwards_slice(self):
