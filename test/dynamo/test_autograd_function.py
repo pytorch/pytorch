@@ -2009,6 +2009,43 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(ref, res)
 
 
+class TestCompileNestedAutograd(torch._dynamo.test_case.TestCase):
+    def test_compile_grad_nested_autograd_function(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/169783
+        class impl(torch.autograd.Function):
+            @staticmethod
+            def forward(x):
+                return x.sin()
+
+            @staticmethod
+            def setup_context(ctx, inputs, output):
+                (x,) = inputs
+                ctx.save_for_backward(x)
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                (x,) = ctx.saved_tensors
+                return grad_output * x.cos()
+
+        def f(x):
+            return impl.apply(x)
+
+        def g(x):
+            return f(f(x))
+
+        def h(x):
+            return g(x).sum()
+
+        x = torch.randn(4, 4, requires_grad=True)
+        # Verify it runs without error
+        opt_h = torch.compile(torch.func.grad(h), fullgraph=True, backend="aot_eager")
+        res = opt_h(x)
+
+        # Verify correctness against eager
+        expected = torch.func.grad(h)(x)
+        self.assertEqual(res, expected)
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
