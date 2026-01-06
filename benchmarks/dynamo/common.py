@@ -3240,6 +3240,11 @@ def parse_args(args=None):
         help="Use same settings as --inductor for baseline comparisons",
     )
     parser.add_argument(
+        "--cinder-jit",
+        action="store_true",
+        help="Enable CinderX JIT via cinderx.jit.auto() before running benchmarks",
+    )
+    parser.add_argument(
         "--suppress-errors",
         action="store_true",
         help="Suppress errors instead of raising them",
@@ -3792,6 +3797,13 @@ def run(runner, args, original_dir=None):
     torch._dynamo.reset()
     runner.args = args
 
+    if args.cinder_jit:
+        import cinderx.jit
+
+        # cinderx.jit.auto()
+        cinderx.jit.compile_after_n_calls(10)
+        log.info("CinderX JIT enabled via cinderx.jit.auto()")
+
     args.filter = args.filter or [r"."]
     args.exclude = args.exclude or [r"^$"]
     args.exclude_exact = args.exclude_exact or []
@@ -4170,14 +4182,16 @@ def run(runner, args, original_dir=None):
             write_outputs(output_filename, [], [args.only, batch_size])
         return
 
+    should_profile_details = args.profile_details
     args.profile_details = {}
     if args.export_profiler_trace:
-        if args.profile_details:
+        if should_profile_details:
             args.profile_details = {
                 "record_shapes": True,
                 "profile_memory": True,
                 "with_stack": True,
                 "with_modules": True,
+                "activities": [torch.profiler.ProfilerActivity.CPU, torch.profiler.ProfilerActivity.CUDA],
             }
 
         if args.profiler_trace_name is None:
