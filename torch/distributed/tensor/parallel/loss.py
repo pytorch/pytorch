@@ -115,7 +115,7 @@ def _propagate_tensor_meta(
     assert op_info.schema is not None, (
         "op_info.schema should not be None after unwrap_to_op_info"
     )
-    tensor_meta = DTensor._op_dispatcher.sharding_propagator.propagate_tensor_meta(
+    tensor_meta = DTensor._op_dispatcher.sharding_propagator._propagate_tensor_meta(
         op_info.schema
     )
     if isinstance(tensor_meta, TensorMeta):

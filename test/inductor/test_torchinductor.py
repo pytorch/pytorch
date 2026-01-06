@@ -8796,6 +8796,23 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             ],
         )
 
+    @skipIfMPS  # MPS does not support float64
+    def test_select_scatter_dtype_consistency(self):
+        def fn(x, a):
+            return (torch.select_scatter(x, a, 1, 0),)
+
+        for dtype in [
+            torch.int64,
+            torch.float64,
+        ]:
+            self.common(
+                fn,
+                [
+                    torch.randn((8, 197, 38)).to(dtype),
+                    torch.randn((8, 38), dtype=torch.float32),
+                ],
+            )
+
     @skip_if_gpu_halide  # accuracy issue
     def test_slice_scatter(self):
         def fn(x, a):
@@ -15514,6 +15531,18 @@ if RUN_GPU:
             self.assertTrue("out_ptr1" in code)
             self.assertFalse("out_ptr0" in code)
             self.assertEqual(fn_opt(*inps), fn(*inps))
+
+        def test_reduction_hint_inner_with_high_tiling_ratio(self):
+            """Test inner reduction hint with high tiling score ratio."""
+
+            def f(x, y):
+                return x.sum(dim=-1, keepdim=True) + (x + y[..., None])
+
+            x = torch.randn(2048, 128, 1024, device=GPU_TYPE)
+            y = torch.randn(128, 2048, device=GPU_TYPE).t()
+
+            code = run_and_get_triton_code(torch.compile(f), x, y)
+            self.assertIn("ReductionHint.INNER", code)
 
         def test_numpy_on_gpu(self):
             x = np.arange(10, dtype=np.float32)

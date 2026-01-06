@@ -803,6 +803,7 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
         tx: "InstructionTranslator", **kwargs: Any
     ) -> "TorchFunctionDisableVariable":
         var = TorchFunctionDisableVariable(
+            tx,
             target_values=[],
             initial_values=[],
             **kwargs,
@@ -811,6 +812,7 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
 
     def __init__(
         self,
+        tx: "InstructionTranslator",
         target_values: Sized,
         initial_values: Optional[Sized] = None,
         only_subclass: bool = True,
@@ -818,9 +820,6 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
     ) -> None:
         assert len(target_values) == 0
         assert initial_values is not None and len(initial_values) == 0
-        from ..symbolic_convert import InstructionTranslator
-
-        tx = InstructionTranslator.current_tx()
         self.only_subclass = only_subclass
         self.initial_torch_function_subclass_enabled = (
             tx.symbolic_torch_function_state.torch_function_subclass_enabled
@@ -1534,7 +1533,7 @@ class WithEnterFunctionVariable(VariableTracker):
         assert not kwargs
         # NOTE: we assume that the instruction immediately after the current CALL instruction
         # is the first instruction of the block.
-        # pyrefly: ignore [bad-argument-type]
+
         return tx.enter_ctx(self.ctx, tx.current_instruction)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:

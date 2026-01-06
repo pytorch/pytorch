@@ -991,7 +991,7 @@ class _TorchDynamoContext:
                     while cur_exn.__cause__ is not None:
                         cur_exn.__cause__.with_traceback(None)
                         cur_exn = cur_exn.__cause__
-                    # pyrefly: ignore [invalid-inheritance]
+
                     raise e.with_traceback(None) from e.__cause__  # User compiler error
                 except ShortenTraceback as e:
                     # Failures in the backend likely don't have useful

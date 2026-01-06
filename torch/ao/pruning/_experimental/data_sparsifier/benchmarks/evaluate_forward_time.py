@@ -27,7 +27,7 @@ def run_forward(model, **batch):
             model(X, lS_o, lS_i)
         end = time.time()
         time_taken = end - start
-        # pyrefly: ignore [bad-argument-type]
+
         time_list.append(time_taken)
     avg_time = np.mean(time_list[1:])
     return avg_time

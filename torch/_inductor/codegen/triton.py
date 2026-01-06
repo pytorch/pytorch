@@ -45,6 +45,7 @@ from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import (
     AutotuneHint,
     DeviceProperties,
+    ReductionHint,
     TRITON_MAX_BLOCK,
     TRITON_MAX_RSPLIT,
 )
@@ -125,6 +126,10 @@ perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 async_compile = AsyncCompile()
+
+# Threshold for detecting inner reductions based on tiling score ratio.
+# If r0_tiling_score / x_tiling_score >= this value, upgrade DEFAULT hint to INNER.
+INNER_REDUCTION_RATIO_THRESHOLD = 8
 
 
 def get_triton_reduction_function(reduction_type):
@@ -808,6 +813,7 @@ class TritonPrinter(PythonPrinter):
 
     def _print_ToFloat(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
+        # pyrefly: ignore [bad-argument-type]
         s = self.parenthesize(expr.args[0], PRECEDENCE["Atom"] - 0.5)
         return f"{s}.to(tl.float64)"
 
@@ -1990,6 +1996,7 @@ class TritonKernelOverrides(TritonOverrides):
         return (mantissa, exponent)
 
     @staticmethod
+    # pyrefly: ignore [bad-override]
     def partial_accumulate(
         name: str,
         reduction_type: str,
@@ -3880,6 +3887,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             """
             Generate a reduction and assign it to an existing variable.
             """
+            # pyrefly: ignore [bad-assignment]
             value, _, _ = final_reduction(buffer, value, result_type)
             buffer.splice(f"{result_var} = {value}")
 
@@ -3946,11 +3954,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     shape=value.shape,
                 )
 
-            masked_value: Union[CSEVariable, Sequence[CSEVariable]]
+            masked_value: Union[CSEVariable, Sequence[CSEVariable], None]
             if reduction_type == "online_softmax_reduce":
                 # Don't generate mask value for online_softmax since we
                 # will fallback below
-                pass
+                masked_value = None
             elif isinstance(value, tuple):
                 masked_value = [_mask_value(v, d) for v, d in zip(value, default)]  # type: ignore[arg-type]
             elif reduction_type == "dot":
@@ -5258,6 +5266,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             ):
                 mutated_args.add(argname.name)
 
+        # pyrefly: ignore [bad-assignment]
         mutated_args = sorted(mutated_args)
 
         for tree in self.active_range_trees():
@@ -5352,12 +5361,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 # large rblock inhibits xblock size, dont attempt if there is a decent amount of
                 # reads coalesced by xblock
                 r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
-                contiguous_red = r_coalesce_ratio >= 8.0
+                contiguous_red = r_coalesce_ratio >= INNER_REDUCTION_RATIO_THRESHOLD
             else:
-                from torch._inductor.runtime.hints import ReductionHint
-
                 contiguous_red = (
-                    self.features.get_reduction_hint() == ReductionHint.INNER
+                    self.features.get_reduction_hint(tiling_scores)
+                    == ReductionHint.INNER
                 )
 
             looped_mem = memory_stats.looped.memory.bytes
@@ -5442,7 +5450,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 @triton.jit
             """
         elif self.inside_reduction:
-            reduction_hint = self.features.get_reduction_hint()
+            reduction_hint = self.features.get_reduction_hint(self.tiling_scores)
             heuristics_line = f"""
                 @triton_heuristics.{self._get_heuristic()}(
                     size_hints={size_hints!r},
@@ -6202,6 +6210,7 @@ class TritonScheduling(SIMDScheduling):
             only_gen_src_code=True,
         )
 
+        # pyrefly: ignore [bad-assignment]
         for src_code, _, node_group in kernel_code_list:
             fused_node_lists = [node.get_nodes() for node in node_group]
             names = [n.get_name() for nodes in fused_node_lists for n in nodes]
