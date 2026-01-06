@@ -5778,7 +5778,7 @@ def win_safe_rmtree(path):
         """
         # exc_info is a tuple: (type, value, traceback)
         exc_type, exc_value, exc_traceback = exc_info
-        
+
         # 1. Attempt to fix permission issues (e.g., read-only files)
         try:
             # S_IWRITE ensures the file is writable, bypassing WinError 5 for attributes
@@ -5794,7 +5794,7 @@ def win_safe_rmtree(path):
         # WinError 32: The file is being used by another process (Sharing Violation)
         # WinError 5: Access is denied (Common when a DLL/.pyd is loaded in memory)
         winerror = getattr(exc_value, 'winerror', None)
-        
+
         if winerror in (5, 32):
             log.warning(
                 "Cleanup skipped: Build artifact is locked. "
@@ -5813,8 +5813,8 @@ def win_safe_rmtree(path):
     # Execute rmtree using the logic above
     try:
         shutil.rmtree(path, onerror=handle_error)
-    except Exception as e:
-        log.error("Fatal exception during directory traversal for %s: %s", path, e)
+    except Exception:
+        log.exception("Fatal exception during directory traversal for %s", path)
 
 def remove_cpp_extensions_build_root():
     """
