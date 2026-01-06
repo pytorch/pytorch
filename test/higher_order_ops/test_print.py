@@ -3,6 +3,7 @@ import io
 from unittest.mock import patch
 
 import torch
+from torch._dynamo.testing import AotEagerAndRecordGraphs, EagerAndRecordGraphs, normalize_gm
 from torch._functorch.aot_autograd import aot_export_module
 from torch._inductor.utils import run_and_get_code
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -12,6 +13,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     TestCase,
+    TEST_WITH_CROSSREF,
 )
 
 
@@ -339,6 +341,108 @@ x = add_1, y = add_2);  getitem = None
             merged_code,
             "Generated code should not call torch.ops.higher_order.print directly",
         )
+
+    def test_print_dynamo_graph(self):
+        """Test capturing the actual Dynamo graph for print HOP.
+
+        This test captures the Dynamo graph using EagerAndRecordGraphs backend,
+        which shows how Dynamo traces the print HOP through bytecode analysis.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                torch._higher_order_ops.print("moo {x} {y}", x=1, y=2)
+                res = x + x
+                torch._higher_order_ops.print("values {} {}", 3, res)
+                return (res,)
+
+        inputs = (torch.randn(3),)
+
+        # Capture actual Dynamo graph using EagerAndRecordGraphs
+        backend = EagerAndRecordGraphs()
+        compiled_m = torch.compile(M(), backend=backend, fullgraph=True)
+
+        with patch("sys.stdout", new_callable=io.StringIO):
+            compiled_m(*inputs)
+
+        # Verify we captured a graph
+        self.assertEqual(len(backend.graphs), 1)
+
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "f32[3]"):
+        l_x_ = L_x_
+
+        print_1 = torch.ops.higher_order.print('moo {x} {y}', x = 1, y = 2);  print_1 = None
+
+        res: "f32[3]" = l_x_ + l_x_;  l_x_ = None
+
+        print_2 = torch.ops.higher_order.print('values {} {}', 3, res);  print_2 = None
+        return (res,)
+""",
+            )
+
+    def test_print_aot_autograd_graph(self):
+        """Test capturing the AOT Autograd graph for print HOP.
+
+        This test captures the AOT Autograd forward graph using AotEagerAndRecordGraphs,
+        which shows how AOT Autograd functionalizes the print HOP with with_effects.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                torch._higher_order_ops.print("moo {x} {y}", x=1, y=2)
+                res = x + x
+                torch._higher_order_ops.print("values {} {}", 3, res)
+                return (res,)
+
+        inputs = (torch.randn(3, requires_grad=True),)
+
+        # Capture AOT Autograd graphs using AotEagerAndRecordGraphs
+        backend = AotEagerAndRecordGraphs()
+        compiled_m = torch.compile(M(), backend=backend, fullgraph=True)
+
+        with patch("sys.stdout", new_callable=io.StringIO):
+            res = compiled_m(*inputs)
+            # Run backward to capture backward graph
+            res[0].sum().backward()
+
+        # Verify we captured graphs
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertEqual(len(backend.fw_graphs), 1)
+        self.assertEqual(len(backend.bw_graphs), 1)
+
+        if not TEST_WITH_CROSSREF:
+            # Check forward graph - should have with_effects wrapping print
+            self.assertExpectedInline(
+                normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, primals_1: "f32[0]", primals_2: "f32[3]"):
+        with_effects = torch.ops.higher_order.with_effects(primals_1, torch.ops.higher_order.print, 'moo {x} {y}', x = 1, y = 2);  primals_1 = None
+        getitem: "f32[0]" = with_effects[0];  with_effects = None
+
+        add: "f32[3]" = torch.ops.aten.add.Tensor(primals_2, primals_2);  primals_2 = None
+
+        with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.print, 'values {} {}', 3, add);  getitem = None
+        getitem_2: "f32[0]" = with_effects_1[0];  with_effects_1 = None
+        return (getitem_2, add)
+""",
+            )
+
+            # Check backward graph - print HOP doesn't contribute to gradients
+            self.assertExpectedInline(
+                normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
+                """\
+class GraphModule(torch.nn.Module):
+    def forward(self, tangents_1: "f32[3]"):
+        add_1: "f32[3]" = torch.ops.aten.add.Tensor(tangents_1, tangents_1);  tangents_1 = None
+        return (add_1,)
+""",
+            )
 
 
 if __name__ == "__main__":
