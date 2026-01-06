@@ -1237,6 +1237,56 @@ class TestNestedTensorDeviceType(NestedTensorTestCase):
 
         self.assertEqual(result_argmin, expected_argmin)
 
+    @dtypes(torch.int64)
+    def test_jagged_max_extreme_values(self, device, dtype):
+        # Values beyond 2^53 expose an issue where finite padding sentinels
+        # (1 << 53) - 1 would be incorrectly selected as the max/min
+        large_neg = -(2**60)
+
+        t1 = torch.tensor(
+            [large_neg, large_neg + 1, large_neg + 2], dtype=dtype, device=device
+        )
+        t2 = torch.tensor([large_neg, large_neg + 5], dtype=dtype, device=device)
+        t3 = torch.tensor(
+            [large_neg, large_neg + 10, large_neg + 3, large_neg + 7],
+            dtype=dtype,
+            device=device,
+        )
+
+        x = torch.nested.nested_tensor([t1, t2, t3], layout=torch.jagged)
+
+        result_max = x.max(dim=1)
+        expected_max = torch.tensor(
+            [large_neg + 2, large_neg + 5, large_neg + 10], dtype=dtype, device=device
+        )
+
+        self.assertEqual(result_max.values, expected_max)
+
+    @dtypes(torch.int64)
+    def test_jagged_min_extreme_values(self, device, dtype):
+        # Values beyond 2^53 expose an issue where finite padding sentinels
+        # (1 << 53) - 1 would be incorrectly selected as the max/min
+        large_pos = 2**60
+
+        t1 = torch.tensor(
+            [large_pos, large_pos - 1, large_pos - 2], dtype=dtype, device=device
+        )
+        t2 = torch.tensor([large_pos, large_pos - 5], dtype=dtype, device=device)
+        t3 = torch.tensor(
+            [large_pos, large_pos - 10, large_pos - 3, large_pos - 7],
+            dtype=dtype,
+            device=device,
+        )
+
+        x = torch.nested.nested_tensor([t1, t2, t3], layout=torch.jagged)
+
+        result_min = x.min(dim=1)
+        expected_min = torch.tensor(
+            [large_pos - 2, large_pos - 5, large_pos - 10], dtype=dtype, device=device
+        )
+
+        self.assertEqual(result_min.values, expected_min)
+
     @skipMeta
     @torch.inference_mode()
     @dtypes(*floating_types_and_half())
