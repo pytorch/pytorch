@@ -7140,7 +7140,7 @@ class TestLinalg(TestCase):
         ]:
             # skip tests that are known to fail with the basic LOBCG
             # method due to insufficient accuracy
-            if method == 'basic' and (m, n, k, density) in [(1000, 7, 3, 0.01)]:
+            if method == 'basic' and (m, n, k, density) == (1000, 7, 3, 0.01):
                 continue
             A = random_sparse_pd_matrix(m, density=density, device=device, dtype=dtype)
             B = random_sparse_pd_matrix(m, density=density, device=device, dtype=dtype)

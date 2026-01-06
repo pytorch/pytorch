@@ -1728,7 +1728,6 @@ class TestTorchDeviceType(TestCase):
             'embedding_bag_backward_cuda_max',
             torch.device(device).type == 'cuda')
 
-    @skipIfRocmArch(MI300_ARCH)
     @skipIfTorchInductor("https://github.com/pytorch/pytorch/issues/113707")
     @onlyCUDA
     def test_deterministic_cumsum(self, device):
@@ -2304,7 +2303,6 @@ class TestTorchDeviceType(TestCase):
 
     @skipIfMPS
     @skipIfNoSciPy
-    @skipRocmIfTorchInductor
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_lognormal_kstest(self, device, dtype):
         from scipy import stats
@@ -2331,7 +2329,6 @@ class TestTorchDeviceType(TestCase):
 
     @skipIfMPS
     @skipIfNoSciPy
-    @skipRocmIfTorchInductor
     @dtypes(*floating_types_and(torch.half, torch.bfloat16))
     def test_cauchy_kstest(self, device, dtype):
         from scipy import stats
@@ -2368,7 +2365,7 @@ class TestTorchDeviceType(TestCase):
 
     @skipIfMPS
     @skipIfNoSciPy
-    @skipRocmIfTorchInductor
+    @skipIfTorchDynamo("FIXME: Skip due to dynamo failure on scipy.stats: https://github.com/pytorch/pytorch/issues/170509")
     @dtypes(*all_types_and(torch.half, torch.bfloat16))
     def test_geometric_kstest(self, device, dtype):
         from scipy import stats
@@ -6181,7 +6178,7 @@ class TestTorchDeviceType(TestCase):
                 if dtype in (torch.half, torch.complex32):
                     rtol = 1e-3
                     atol = 1e-3
-                if dtype in (torch.bfloat16,):
+                if dtype == torch.bfloat16:
                     rtol = 1e-2
                     atol = 1e-2
                 self.assertEqual(src, dst.copy_(t), rtol=rtol, atol=atol)
