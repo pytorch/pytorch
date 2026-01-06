@@ -6,9 +6,10 @@ from logging import getLogger
 from typing import Optional
 
 import torch
+from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import _get_device_handle, DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
-from torch.distributed.tensor.placement_types import Shard
+from torch.distributed.tensor.placement_types import _StridedShard, Shard
 
 
 logger = getLogger(__name__)
@@ -400,7 +401,7 @@ class OffsetBasedRNGTracker(_RNGStateTracker):
 def _calc_first_shard_size(spec: DTensorSpec) -> list[int]:
     local_size_on_rank_0 = list(spec.shape)
     for idx, placement in enumerate(spec.placements):
-        if isinstance(placement, Shard):
+        if isinstance(placement, Shard | _StridedShard):
             mesh_dim_size = spec.mesh.size(idx)
             shard_dim = placement.dim
             local_size_on_rank_0[shard_dim], _ = placement._local_shard_size_and_offset(
@@ -419,7 +420,7 @@ def _calc_shard_info(
     # case. Replace the custom logic with dim_map once we support it.
     dim_map: list[int | list[int]] = [-1] * spec.ndim
     for i, placement in enumerate(spec.placements):
-        if isinstance(placement, Shard):
+        if isinstance(placement, Shard | _StridedShard):
             shard_dim = placement.dim
             if dim_map[shard_dim] == -1:
                 dim_map[shard_dim] = [i]
@@ -469,4 +470,9 @@ def _resolve_device(device_mesh: DeviceMesh) -> torch.device:
     device_handle = _get_device_handle(device_type)
     assert device_handle is not None
     device_idx = device_mesh.get_rank() % device_handle.device_count()
-    return torch.device(f"{device_type}:{device_idx:d}")
+
+    @maybe_run_for_local_tensor
+    def get_device(device_idx):
+        return torch.device(f"{device_type}:{device_idx:d}")
+
+    return get_device(device_idx)

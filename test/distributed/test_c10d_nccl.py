@@ -258,7 +258,8 @@ class ProcessGroupNCCLNoGPUTest(TestCase):
         super().setUp()
         self.rank = self.MAIN_PROCESS_RANK
         self.world_size = 1
-        self.file = tempfile.NamedTemporaryFile(delete=False)
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            self.file = f
 
     def tearDown(self):
         pass
@@ -348,10 +349,16 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
 
         # These tests are expected to throw SIGABRT(6);
         # But if we are in Sandcastle, `skip_but_pass_in_sandcastle` would return 0.
+        #
+        # CUDA: Uses native __trap() instruction → CUDA runtime catches it →
+        #       clean exit(6) → exit code 6
+        # ROCm: No native trap instruction, uses assert(0) (NanCheck.cu:24-27) →
+        #       calls abort() → OS sends SIGABRT signal → process killed by signal →
+        #       exit code -6
         TEST_NAN_ASSERT_RETURN = (
             0
             if (IS_SANDCASTLE and not (TEST_MULTIGPU and CUDA_12_AND_ABOVE))
-            else signal.SIGABRT
+            else (-signal.SIGABRT if torch.version.hip else signal.SIGABRT)
         )
         self.special_return_code_checks = {
             self.test_nan_assert_float16.__wrapped__: TEST_NAN_ASSERT_RETURN,
@@ -473,7 +480,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             dist.all_reduce(t)
 
     @requires_nccl()
-    @skip_if_rocm_multiprocess
     @skip_but_pass_in_sandcastle_if(not TEST_MULTIGPU, "NCCL test requires 2+ GPUs")
     def test_restart_pg(self):
         # Note: restart test passes steadily only for blocking mode for now.
@@ -561,7 +567,6 @@ class ProcessGroupNCCLGroupTest(MultiProcessTestCase):
             torch.float8_e5m2,
         ],
     )
-    @skip_if_rocm_multiprocess
     def test_nan_assert(self, type):
         # Expecting a device-side error when NaN is detected
         os.environ["TORCH_NCCL_NAN_CHECK"] = "1"
@@ -3047,7 +3052,6 @@ class DistributedDataParallelTest(
 
     @requires_nccl()
     @skip_if_lt_x_gpu(4)
-    @skip_if_rocm_multiprocess
     def test_grad_layout_2devicemodule(self):
         int_devices = gpus_for_rank(self.world_size)[self.rank][:2]
         dev0 = torch.device("cuda:" + str(int_devices[0]))
@@ -3791,7 +3795,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(3)
-    @skip_if_rocm_multiprocess
     def test_send_recv_non_dense_tensor(self):
         store = c10d.FileStore(self.file_name, self.world_size)
         device = torch.device("cuda", self.rank % torch.cuda.device_count())
@@ -3847,7 +3850,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @requires_nccl()
     @skip_if_lt_x_gpu(3)
-    @skip_if_rocm_multiprocess
     def test_nccl_errors_blocking(self):
         self._reduce_timeout()
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "0"
@@ -3962,7 +3964,6 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
-    @skip_if_rocm_multiprocess
     @skip_if_lt_x_gpu(3)
     def test_restart_pg_after_error(self):
         self._reduce_timeout()
@@ -4001,8 +4002,9 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
             self.assertEqual(nccl_backend.get_error(), ErrorType.TIMEOUT)
             # we need a brand new fileStore for the new PG
             # the new file name is shared through the old fileStore
-            new_file_name = tempfile.NamedTemporaryFile(delete=False).name
-            store.set("file", new_file_name)
+            with tempfile.NamedTemporaryFile(delete=False) as f:
+                new_file_name = f.name
+                store.set("file", new_file_name)
         else:
             # other ranks not exiting before rank 0 timeout, this is to avoid
             # nccl error happening before rank 0 timeouts
@@ -4059,21 +4061,21 @@ class NcclErrorHandlingTest(MultiProcessTestCase):
 class NcclUserBufferRegistrationTest(MultiProcessTestCase):
     def setUp(self):
         super().setUp()
-        nccl_debug_file = tempfile.NamedTemporaryFile()
-        nccl_env = {
-            # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
-            # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
-            "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
-            "NCCL_ALGO": "NVLS",
-            "NCCL_DEBUG": "INFO",
-            "NCCL_DEBUG_SUBSYS": "NVLS",
-            "NCCL_DEBUG_FILE": nccl_debug_file.name,
-        }
-        if torch.cuda.nccl.version() >= (2, 24, 3):
-            nccl_env["NCCL_DEBUG_SUBSYS"] = "REG,TUNING"
-        self.env_patcher = mock.patch.dict(os.environ, nccl_env)
-        self.env_patcher.start()
-        self._spawn_processes()
+        with tempfile.NamedTemporaryFile(delete=False) as nccl_debug_file:
+            nccl_env = {
+                # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
+                # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
+                "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
+                "NCCL_ALGO": "NVLS",
+                "NCCL_DEBUG": "INFO",
+                "NCCL_DEBUG_SUBSYS": "NVLS",
+                "NCCL_DEBUG_FILE": nccl_debug_file.name,
+            }
+            if torch.cuda.nccl.version() >= (2, 24, 3):
+                nccl_env["NCCL_DEBUG_SUBSYS"] = "REG,TUNING"
+            self.env_patcher = mock.patch.dict(os.environ, nccl_env)
+            self.env_patcher.start()
+            self._spawn_processes()
 
     def tearDown(self):
         self.env_patcher.stop()
@@ -4445,15 +4447,15 @@ class CommTest(test_c10d_common.AbstractCommTest, MultiProcessTestCase):
         pg_opts.config.cga_cluster_size = 2
         pg_opts.config.net_name = "Socket"
         pg_opts.config.split_share = 1
-        nccl_debug_file = tempfile.NamedTemporaryFile()
         os.environ["NCCL_DEBUG"] = "INFO"
-        os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
+        with tempfile.NamedTemporaryFile() as nccl_debug_file:
+            os.environ["NCCL_DEBUG_FILE"] = nccl_debug_file.name
 
-        # Tests functionality when passing nccl config
-        self._test_pass_nccl_options(pg_opts)
+            # Tests functionality when passing nccl config
+            self._test_pass_nccl_options(pg_opts)
 
-        # Tests if comms were configured
-        nccl_debug_file_content = nccl_debug_file.read()
+            # Tests if comms were configured
+            nccl_debug_file_content = nccl_debug_file.read()
         max_ctas = re.search(rb"Max CTAs.*(\d+)|$", nccl_debug_file_content).group(1)
         min_ctas = re.search(rb"Min CTAs.*(\d+)|$", nccl_debug_file_content).group(1)
         split_share = re.search(
@@ -5236,6 +5238,80 @@ class SparseCollective(MultiProcessTestCase):
             else:
                 # Rethrow the exception if it's a different error
                 raise
+
+
+class ProcessGroupNCCLOneRankTest(MultiProcessTestCase):
+    @property
+    def world_size(self):
+        return 1
+
+    def setUp(self):
+        super().setUp()
+        # TORCH_NCCL_BLOCKING_WAIT overrides TORCH_NCCL_ASYNC_ERROR_HANDLING hence tests
+        # that use TORCH_NCCL_BLOCKING_WAIT will test it as expected.
+        os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
+        # self.num_gpus = torch.cuda.device_count()
+        self._spawn_processes()
+
+    def tearDown(self):
+        super().tearDown()
+        try:
+            os.remove(self.file_name)
+        except OSError:
+            pass
+
+    @requires_nccl()
+    @skip_if_lt_x_gpu(1)
+    def test_reduce_scatter(self):
+        """
+        This is testing against a known bug in NCCL.
+
+        TODO: remove once this is fixed upstream
+
+        https://github.com/pytorch/pytorch/issues/168092
+        https://github.com/NVIDIA/nccl/issues/1950
+        """
+        device = torch.device(f"cuda:{self.rank:d}")
+
+        store = dist.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            "nccl",
+            world_size=self.world_size,
+            rank=self.rank,
+            store=store,
+            device_id=device,
+        )
+
+        size = 8192 + 1  # known bad size
+        input_tensor = torch.randn(size, dtype=torch.bfloat16, device=device)
+
+        with self.subTest("reduce_scatter"):
+            output_tensor = torch.zeros(size, dtype=torch.bfloat16, device=device)
+            dist.reduce_scatter(
+                output=output_tensor,
+                input_list=[input_tensor],
+                op=dist.ReduceOp.AVG,
+            )
+            torch.testing.assert_close(output_tensor, input_tensor)
+
+        with self.subTest("reduce_scatter_tensor"):
+            output_tensor = torch.zeros(size, dtype=torch.bfloat16, device=device)
+            dist.reduce_scatter_tensor(
+                output=output_tensor,
+                input=input_tensor,
+                op=dist.ReduceOp.AVG,
+            )
+            torch.testing.assert_close(output_tensor, input_tensor)
+
+        with self.subTest("reduce_scatter_tensor_coalesced"):
+            output_tensor = torch.zeros(size, dtype=torch.bfloat16, device=device)
+            with dist._coalescing_manager():
+                dist.reduce_scatter_tensor(
+                    output=output_tensor,
+                    input=input_tensor,
+                    op=dist.ReduceOp.AVG,
+                )
+            torch.testing.assert_close(output_tensor, input_tensor)
 
 
 class NCCLTraceTestBase(MultiProcessTestCase):
@@ -6265,7 +6341,7 @@ class NCCLTraceTestDumpOnTimeoutBase(NCCLTraceTestBase):
         return pg
 
     @check_if_test_is_skipped
-    def _check_return_codes(self, elapsed_time):
+    def _check_return_codes(self, fn, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
         # but we want rank0 to abort and rank1 to exit cleanly in this test
         self.assertEqual(self.processes[0].exitcode, -6)
@@ -6334,7 +6410,7 @@ instantiate_parametrized_tests(NCCLTraceTest)
 @skip_but_pass_in_sandcastle
 class NCCLTraceTestTimeoutDumpOnStuckRanks(NCCLTraceTestDumpOnTimeoutBase):
     @check_if_test_is_skipped
-    def _check_return_codes(self, elapsed_time):
+    def _check_return_codes(self, fn, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
         # but we want rank0 to abort and rank1 to exit cleanly in this test
         self.assertEqual(self.processes[0].exitcode, -6)
@@ -6395,7 +6471,7 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
             return None
 
     @check_if_test_is_skipped
-    def _check_return_codes(self, elapsed_time):
+    def _check_return_codes(self, fn, elapsed_time):
         # the base test infra assumes processes exit with matching return codes,
         # but we want rank0 to abort with exception and rank1 to exit with exit 1
         self.assertEqual(self.processes[0].exitcode, -6)
@@ -6404,7 +6480,6 @@ class NcclErrorDumpTest(NCCLTraceTestBase):
     @requires_nccl()
     @requires_nccl_version((2, 4, 0), "Need NCCL 2.4+ for error checking")
     @skip_if_lt_x_gpu(2)
-    @skip_if_rocm_multiprocess
     def test_nccl_errors_dump(self):
         os.environ["TORCH_NCCL_ASYNC_ERROR_HANDLING"] = "1"
         os.environ["TORCH_NCCL_TRACE_BUFFER_SIZE"] = "1000"

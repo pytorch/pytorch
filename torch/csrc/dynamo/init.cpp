@@ -11,8 +11,6 @@
 #include <torch/csrc/dynamo/extra_state.h>
 #include <torch/csrc/dynamo/guards.h>
 #include <torch/csrc/dynamo/python_compiled_autograd.h>
-#include <torch/csrc/utils/pybind.h>
-#include <torch/csrc/utils/python_compat.h>
 #include <torch/csrc/utils/python_numbers.h>
 
 static struct PyModuleDef _module =
@@ -83,12 +81,6 @@ template <typename F>
 THPObjectPtr _unicode_dispatch(PyObject* str) {
   if (!PyUnicode_Check(str)) {
     PyErr_SetString(PyExc_TypeError, "String expected");
-    return THPObjectPtr();
-  }
-
-  // Remove this when we're 3.10+
-  if (PyUnicode_READY(str) != 0) {
-    // Returns -1 with an exception set on failure
     return THPObjectPtr();
   }
 

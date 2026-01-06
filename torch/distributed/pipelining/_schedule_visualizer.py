@@ -66,13 +66,19 @@ def get_schedule_ops(
     if issubclass(schedule_class, PipelineScheduleSingle):
         if num_stages_per_rank is None:
             num_stages_per_rank = 1
-        assert num_stages_per_rank == 1
+        if not num_stages_per_rank == 1:
+            raise AssertionError(
+                f"Expected num_stages_per_rank to be 1, got {num_stages_per_rank}"
+            )
         stages = mock_pipeline_stage
         stages.num_stages = num_stages_per_rank * pp_degree
     elif issubclass(schedule_class, PipelineScheduleMulti):
         if num_stages_per_rank is None:
             num_stages_per_rank = 2
-        assert num_stages_per_rank >= 2
+        if not num_stages_per_rank >= 2:
+            raise AssertionError(
+                f"Expected num_stages_per_rank >= 2, got {num_stages_per_rank}"
+            )
         stages = [mock_pipeline_stage for _ in range(num_stages_per_rank)]
         for stage in stages:
             stage.num_stages = num_stages_per_rank * pp_degree
@@ -83,7 +89,8 @@ def get_schedule_ops(
     # Instantiate the schedule class
     # pyrefly: ignore [bad-instantiation, bad-argument-type]
     schedule_instance = schedule_class(stages, num_microbatches)
-    assert schedule_instance.pipeline_order is not None
+    if schedule_instance.pipeline_order is None:
+        raise AssertionError("Expected pipeline_order to not be None")
 
     # Convert to List[List[_Action]]
     all_actions: list[list[_Action | None]] = []
@@ -189,7 +196,8 @@ def add_schedule_op_spacing(
         mb_idx = action.microbatch_index
 
         # Ensure mb_idx is not None for dependency tracking
-        assert mb_idx is not None, f"Action {action} has None microbatch_index"
+        if mb_idx is None:
+            raise AssertionError(f"Action {action} has None microbatch_index")
 
         # First stage forward has no dependencies
         if stage_idx == 0 and comp_type == _ComputationType.FORWARD:
@@ -237,9 +245,10 @@ def add_schedule_op_spacing(
             dependencies = get_dependencies(action)
             return all(is_dependency_ready(dep, timestep) for dep in dependencies)
         elif action.computation_type == _ComputationType.OVERLAP_F_B:
-            assert action.sub_actions is not None, (
-                f"OVERLAP_F_B action {action} has None sub_actions"
-            )
+            if action.sub_actions is None:
+                raise AssertionError(
+                    f"OVERLAP_F_B action {action} has None sub_actions"
+                )
             dep_list: list[bool] = []
             for sub_action in action.sub_actions:
                 dep_list.append(is_action_ready(sub_action, timestep))
@@ -256,14 +265,16 @@ def add_schedule_op_spacing(
 
         if comp_type == _ComputationType.OVERLAP_F_B:
             # For overlap actions, schedule each sub-action with cumulative timing
-            assert action.sub_actions is not None, (
-                f"OVERLAP_F_B action {action} has None sub_actions"
-            )
+            if action.sub_actions is None:
+                raise AssertionError(
+                    f"OVERLAP_F_B action {action} has None sub_actions"
+                )
             cumulative_time = 0
             for sub_action in action.sub_actions:
-                assert sub_action.microbatch_index is not None, (
-                    f"Sub-action {sub_action} has None microbatch_index"
-                )
+                if sub_action.microbatch_index is None:
+                    raise AssertionError(
+                        f"Sub-action {sub_action} has None microbatch_index"
+                    )
                 sub_comp_time = action_type_to_color_mapping[
                     sub_action.computation_type
                 ].width
@@ -276,9 +287,8 @@ def add_schedule_op_spacing(
                     )
                 ] = timestep + cumulative_time
         else:
-            assert action.microbatch_index is not None, (
-                f"Action {action} has None microbatch_index"
-            )
+            if action.microbatch_index is None:
+                raise AssertionError(f"Action {action} has None microbatch_index")
             scheduled_ops[
                 OpKey(action.stage_index, comp_type, action.microbatch_index)
             ] = completion_time

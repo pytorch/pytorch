@@ -836,7 +836,7 @@ class MultiprocessContext(PContext):
                 " of fn: %s (start_method: %s)",
                 failed_proc.exitcode,
                 failed_local_rank,
-                e.pid,
+                e.error_pid,
                 fn_name,
                 self.start_method,
             )
@@ -846,7 +846,7 @@ class MultiprocessContext(PContext):
                 failures={
                     failed_local_rank: ProcessFailure(
                         local_rank=failed_local_rank,
-                        pid=e.pid,
+                        pid=e.error_pid,
                         exitcode=failed_proc.exitcode,
                         error_file=error_filepath,
                     )

@@ -37,7 +37,7 @@ change_wheel_version() {
   # Update the version in METADATA and its SHA256 hash
   sed -i "s/Version: ${f_version}/Version: ${t_version}/g" METADATA
   # then add PyTorch nightly dependency of vLLM
-  if [[ "${package}" == vllm ]] || [[ "${package}" == xformers ]]; then
+  if [[ "${package}" == vllm ]]; then
     sed -i "/License-File/a\Requires-Dist: torch==${torch_version}" METADATA
   fi
   sed -i '/METADATA,sha256/d' RECORD
@@ -88,7 +88,7 @@ repackage_wheel() {
 ${PYTHON_EXECUTABLE} -mpip install wheel==0.45.1
 
 pushd externals/vllm/wheels
-for package in xformers vllm; do
+for package in vllm; do
   repackage_wheel $package
 done
 popd

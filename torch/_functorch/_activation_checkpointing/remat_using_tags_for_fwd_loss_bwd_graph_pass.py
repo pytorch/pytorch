@@ -48,21 +48,6 @@ def remat_using_tags_for_fwd_loss_bwd_graph(gm: fx.GraphModule) -> fx.GraphModul
     if not has_recomputable_ops(gm):
         return gm
 
-    if has_recomputable_rng_ops(gm):
-        raise RuntimeError(
-            "Activation checkpoint rematerializing in `forward-loss-backward` graph does not support RNG ops "
-            "in checkpointed regions. Please move RNG operations outside "
-            "of checkpoint regions, or use joint graph mode (where partitioner handles RNG)."
-        )
-
-    # Use partitioner pass to normalize AC node tags.
-    gm = cleanup_recompute_tags(gm, is_default_partition=True)
-
-    if not config.unsafe_allow_optimization_of_collectives:
-        force_save_collectives(gm)
-
-    force_save_bw_mutation_src(gm)
-
     # Find backward boundary and build ordering
     bwd_start: int | None = None
     order = {}
@@ -78,6 +63,21 @@ def remat_using_tags_for_fwd_loss_bwd_graph(gm: fx.GraphModule) -> fx.GraphModul
             "Returning graph unchanged."
         )
         return gm
+
+    if has_recomputable_rng_ops(gm):
+        raise RuntimeError(
+            "Activation checkpoint rematerializing in `forward-loss-backward` graph does not support RNG ops "
+            "in checkpointed regions. Please move RNG operations outside "
+            "of checkpoint regions, or use joint graph mode (where partitioner handles RNG)."
+        )
+
+    # Use partitioner pass to normalize AC node tags.
+    gm = cleanup_recompute_tags(gm, is_default_partition=True)
+
+    if not config.unsafe_allow_optimization_of_collectives:
+        force_save_collectives(gm)
+
+    force_save_bw_mutation_src(gm)
 
     new_graph = fx.Graph()
     env: dict[fx.Node, fx.Node] = {}

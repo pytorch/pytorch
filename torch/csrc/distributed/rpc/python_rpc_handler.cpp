@@ -1,7 +1,6 @@
 #include <torch/csrc/distributed/rpc/python_rpc_handler.h>
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/jit/python/pybind_utils.h>
-#include <torch/csrc/utils/python_compat.h>
 
 namespace torch::distributed::rpc {
 
@@ -95,7 +94,7 @@ void PythonRpcHandler::init() {
   }
 }
 
-PythonRpcHandler::PythonRpcHandler() : initialized_(false) {}
+PythonRpcHandler::PythonRpcHandler() = default;
 
 void PythonRpcHandler::cleanup() {
   std::lock_guard<std::mutex> guard(init_lock_);

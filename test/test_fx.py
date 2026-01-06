@@ -796,6 +796,21 @@ class TestFX(JitTestCase):
             self.assertTrue(node.stack_trace is not None)
             assert "test_fx.py" in node.stack_trace
 
+    def test_node_pickle_type_preservation(self):
+        g = Graph()
+        n = g.placeholder("x")
+        n.type = torch.Tensor
+
+        dumped_node = pickle.dumps(n)
+        restored_node = pickle.loads(dumped_node)
+        self.assertEqual(restored_node.type, torch.Tensor)
+        self.assertNotEqual(restored_node.type, restored_node.target)
+
+        dumped_graph = pickle.dumps(g)
+        restored_graph = pickle.loads(dumped_graph)
+        restored_n = next(iter(restored_graph.nodes))
+        self.assertEqual(restored_n.type, torch.Tensor)
+
     def test_lineno_map(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
@@ -1914,7 +1929,7 @@ class TestFX(JitTestCase):
             # NB: the implementation of conv may not preserve the memory format,
             # unfortunately. The best we can do is just check that the placeholder
             # node is channels-last
-            if node.op in {"placeholder"}:
+            if node.op == "placeholder":
                 self.assertEqual(
                     node.meta["tensor_meta"].memory_format, torch.channels_last
                 )
@@ -1975,7 +1990,7 @@ class TestFX(JitTestCase):
             # NB: the implementation of conv may not preserve the memory format,
             # unfortunately. The best we can do is just check that the placeholder
             # node is channels-last
-            if node.op in {"placeholder"}:
+            if node.op == "placeholder":
                 self.assertEqual(
                     node.meta["tensor_meta"].memory_format, torch.channels_last_3d
                 )
@@ -2380,6 +2395,16 @@ class TestFX(JitTestCase):
         output : torch.fx.Node = graph.output(b)
 
         self.assertTrue("typing.List[float]" in str(graph))
+
+    def test_typename_print_union(self):
+        graph: torch.fx.Graph = torch.fx.Graph()
+        x: torch.fx.Node = graph.create_node("placeholder", "x")
+        b: torch.fx.Node = graph.create_node(
+            "call_function", target=torch.relu, args=(x,), type_expr=float|torch.Tensor|None
+        )
+        output: torch.fx.Node = graph.output(b)
+
+        self.assertTrue('float | torch.Tensor | None' in str(graph))
 
     def test_layout(self):
         class M(torch.nn.Module):
@@ -4616,7 +4641,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
 
         if origin in {tuple, tuple}:
             return f"Tuple{contained_type_str}"
-        if origin in {typing.Union}:
+        if origin == typing.Union:
             # Annoying hack to detect Optional
             if len(contained) == 2 and (contained[0] is type(None)) ^ (
                 contained[1] is type(None)
@@ -5165,7 +5190,7 @@ class TestVisionTracing(JitTestCase):
             test_name = "test_torchvision_models_" + k
             x = (
                 torch.rand(1, 3, 299, 299)
-                if k in ["inception_v3"]
+                if k == "inception_v3"
                 else torch.rand(1, 3, 224, 224)
             )
             kwargs = dict(num_classes=50)

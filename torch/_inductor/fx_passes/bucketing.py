@@ -17,11 +17,14 @@ from torch._inductor.comm_analysis import (
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch._logging import trace_structured
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.traceback import NodeSource, NodeSourceAction
 from torch.utils._ordered_set import OrderedSet
 
 
 logger: logging.Logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
+
+overlap_log = torch._logging.getArtifactLogger(__name__, "overlap")
 
 BucketMode: TypeAlias = Literal["default", "custom_ops", "custom_ops_multidtype"]
 
@@ -72,6 +75,53 @@ def _schedulable_wait_node(node: torch.fx.Node) -> bool:
     coll: NCCL_COLL = get_collective_type_from_kernel_name(node.args[0].target.name())
     is_collective: bool = coll != NCCL_COLL.UNSUPPORTED
     return is_callable and is_collective
+
+
+def _populate_node_meta(
+    bucket_nodes: list[torch.fx.Node], new_nodes: list[torch.fx.Node]
+):
+    if bucket_nodes:
+        for n in new_nodes:
+            # For the following keys, we only store the information of the first node so
+            # gm.print_readable shows some information
+            # Full information are stored in "bucketing_{key}_sources"
+            for key, default in [
+                ("nn_module_stack", ""),
+                ("fwd_nn_module_stack", ""),
+                ("stack_trace", ""),
+                ("custom", {}),
+            ]:
+                n.meta[key] = bucket_nodes[0].meta.get(key, default)
+
+                # Collect sources from all bucket nodes for this metadata key, for debugging purposes only
+                bucketing_sources_key = f"bucketing_{key}_sources"
+                # Use set to remove duplicates
+                if key == "stack_trace":
+                    sources = OrderedSet(
+                        [
+                            node.meta.get(key, default)
+                            for node in bucket_nodes
+                            if node.meta.get(key, default)
+                        ]
+                    )
+                else:
+                    # type might not be hashable
+                    sources = [
+                        node.meta.get(key, default)
+                        for node in bucket_nodes
+                        if node.meta.get(key, default)
+                    ]
+                n.meta[bucketing_sources_key] = sources
+
+            # used by inductor provenance tracking
+            n.meta["from_node"] = [
+                NodeSource(
+                    original_node,
+                    "bucketing_pass",
+                    [NodeSourceAction.CREATE, NodeSourceAction.REPLACE],
+                )
+                for original_node in bucket_nodes
+            ]
 
 
 def bucket_key(node: torch.fx.Node, mode: BucketMode | None = None) -> object | None:
@@ -841,6 +891,15 @@ def process_collective_bucket(
             nodes_to_move = new_nodes[wait_start_idx:]
             for node in nodes_to_move:
                 wait_insertion_point.prepend(node)
+
+    # Preserve metadata from original collective nodes to new bucketed nodes
+    if bucket_nodes:
+        overlap_log.debug(
+            "Bucketing nodes: %s, New nodes: %s",
+            ",".join([n.name for n in bucket_nodes]),
+            ",".join([n.name for n in new_nodes]),
+        )
+    _populate_node_meta(bucket_nodes, new_nodes)
 
     # Erase old nodes
     for node, wait_n in zip(bucket_nodes, bucket_waits):
