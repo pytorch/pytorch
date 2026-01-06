@@ -103,6 +103,9 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
     fi
   fi
 
+  # Needs to be installed here so pip can build 3.14t wheels
+  conda_install cmake=3.31.6
+
   # Install some other packages, including those needed for Python test reporting
   pip_install -r /opt/conda/requirements-ci.txt
 
