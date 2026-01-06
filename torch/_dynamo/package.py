@@ -1013,13 +1013,13 @@ class InMemoryDynamoStore(DynamoStore):
 
     def write(
         self,
-        entry: PrecompileCacheEntry,
+        cache_entry: PrecompileCacheEntry,
         path: str,
     ) -> None:
         """
         Store the dynamo cache entry and backends in memory instead of writing to disk.
         """
-        self.packages[path] = entry
+        self.packages[path] = cache_entry
 
     def read(self, path: str) -> PrecompileCacheEntry:
         """
@@ -1036,7 +1036,7 @@ class DiskDynamoStore(DynamoStore):
     A DynamoStore implementation that keeps state about CompilePackages on disk.
     """
 
-    def __init__(self, path_prefix: str = ""):
+    def __init__(self, path_prefix: str = "") -> None:
         """
         Initialize a DiskDynamoStore with a path prefix.
 
@@ -1057,14 +1057,14 @@ class DiskDynamoStore(DynamoStore):
 
     def write(
         self,
-        entry: PrecompileCacheEntry,
+        cache_entry: PrecompileCacheEntry,
         path: str,
     ) -> None:
         """
         Write dynamo cache entry and backends to disk.
         """
         try:
-            pickled_content: bytes = pickle.dumps(entry)
+            pickled_content: bytes = pickle.dumps(cache_entry)
             CacheArtifactManager.record_artifact(
                 PrecompileCacheArtifact.type(), path, pickled_content
             )
