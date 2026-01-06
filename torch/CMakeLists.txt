@@ -469,7 +469,7 @@ if(NOT TORCH_PYTHON_LINK_FLAGS STREQUAL "")
     set_target_properties(torch_python PROPERTIES LINK_FLAGS ${TORCH_PYTHON_LINK_FLAGS})
 endif()
 
-install(TARGETS torch_python EXPORT Caffe2Targets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
+install(TARGETS torch_python EXPORT TorchPythonTargets DESTINATION "${TORCH_INSTALL_LIB_DIR}")
 
 # Generate torch/version.py from the appropriate CMake cache variables.
 if(${CMAKE_BUILD_TYPE} STREQUAL "Debug")

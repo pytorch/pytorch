@@ -70,6 +70,6 @@ endif()
 set_target_properties(torch_shm_manager PROPERTIES
   INSTALL_RPATH "${_rpath_portable_origin}/../lib")
 
-install(TARGETS shm EXPORT Caffe2Targets LIBRARY DESTINATION ${LIBSHM_INSTALL_LIB_SUBDIR})
+install(TARGETS shm EXPORT TorchPythonTargets LIBRARY DESTINATION ${LIBSHM_INSTALL_LIB_SUBDIR})
 install(FILES libshm.h DESTINATION "include")
 install(TARGETS torch_shm_manager DESTINATION "bin")

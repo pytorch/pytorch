@@ -1385,6 +1385,13 @@ if(BUILD_SHARED_LIBS)
       FILE Caffe2Targets.cmake
       COMPONENT dev)
   endif()
+  if(BUILD_PYTHON)
+    install(
+      EXPORT TorchPythonTargets
+      DESTINATION share/cmake/Torch
+      FILE TorchPythonTargets.cmake
+      COMPONENT python)
+  endif()
 else()
   message(WARNING "Generated cmake files are only available when building "
                   "shared libs.")
