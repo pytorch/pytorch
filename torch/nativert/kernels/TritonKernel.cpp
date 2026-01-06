@@ -37,7 +37,7 @@ TritonKernel::TritonKernel(
   size_t num_double_attrs = 0;
   for (const auto& attr : node_->attributes()) {
     if (attr.name.empty() && std::holds_alternative<double>(attr.value)) {
-        ++num_double_attrs;
+      ++num_double_attrs;
     }
   }
   float_attrs_.reserve(num_double_attrs);
@@ -138,8 +138,7 @@ TritonKernel::TritonKernel(
         tmp_dir + kernel_name + ".so",
         tmp_dir + kernel_name + ".launcher.so");
     TORCH_CHECK(
-        loader_ != nullptr,
-        "couldn't find CPU loader -- is this a cpu build?");
+        loader_ != nullptr, "couldn't find CPU loader -- is this a cpu build?");
   } else if (reader->hasRecord(kernel_prefix + "/" + kernel_name + ".bin")) {
     loader_ = TritonKernelManagerRegistry()->Create(
         at::kMTIA, symbol_name, tmp_dir + kernel_name + ".bin", "");
@@ -161,7 +160,8 @@ void TritonKernel::computeInternal(ExecutionFrame& executionFrame) const {
 
   auto* loader = const_cast<TritonKernelManager*>(loader_.get());
 
-  auto inputs = loader->create_inputs(num_inputs, num_attrs, kernel_input_params_);
+  auto inputs =
+      loader->create_inputs(num_inputs, num_attrs, kernel_input_params_);
 
   for (const auto i : c10::irange(num_inputs)) {
     inputs->add_tensor_arg(input(i, executionFrame).toTensor());

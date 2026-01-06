@@ -778,10 +778,7 @@ def forward(self, x):
         # Verify the triton node was serialized
         triton_node = None
         for node in serialized.exported_program.graph_module.graph.nodes:
-            if (
-                node.target
-                == "torch.ops.higher_order.triton_kernel_wrapper_functional"
-            ):
+            if node.target == "torch.ops.higher_order.triton_kernel_wrapper_functional":
                 triton_node = node
                 break
         self.assertIsNotNone(triton_node)

@@ -888,7 +888,9 @@ class GraphModuleSerializer(metaclass=Final):
 
                 if hasattr(kernel_cache_metadata, "shared"):
                     if isinstance(kernel_cache_metadata.shared, bool):
-                        kwargs_new["shared_memory_bytes"] = int(kernel_cache_metadata.shared)
+                        kwargs_new["shared_memory_bytes"] = int(
+                            kernel_cache_metadata.shared
+                        )
                     else:
                         kwargs_new["shared_memory_bytes"] = kernel_cache_metadata.shared
 
