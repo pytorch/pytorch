@@ -8,15 +8,7 @@ PYTORCH_ROOT="${PYTORCH_ROOT:-$(cd "$SCRIPT_DIR/../.." && pwd)}"
 
 CUDA_VERSIONS=("12.6" "13.0")
 
-ARCH=$(uname -m)
-if [[ "$ARCH" == "x86_64" ]]; then
-    export WHEEL_PLAT="x86_64"
-elif [[ "$ARCH" == "aarch64" ]]; then
-    export WHEEL_PLAT="aarch64"
-else
-    echo "warning: unknown architecture $ARCH, defaulting to x86_64"
-    export WHEEL_PLAT="x86_64"
-fi
+export WHEEL_PLAT=$(uname -m)
 
 get_arch_list() {
     local cuda_version=$1
@@ -25,7 +17,7 @@ get_arch_list() {
             echo "8.0;8.6;9.0"
             ;;
         13.0)
-            echo "8.0;8.6;9.0;10.0+PTX" # check this
+            echo "8.0;8.6;9.0;10.0"
             ;;
         *)
             echo "8.0;8.6;9.0"

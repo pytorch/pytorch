@@ -1,15 +1,4 @@
 #!/bin/bash
-# Build FA3 wheel for Linux
-#
-# Required environment variables:
-#   FA_FINAL_PACKAGE_DIR  - Output directory for wheel
-#   WHEEL_PLAT            - Platform for wheel (e.g., x86_64, aarch64)
-#
-# Optional environment variables:
-#   TORCH_CUDA_ARCH_LIST  - GPU architectures to compile for
-#   FLASH_ATTENTION_DISABLE_*  - Feature flags to disable features
-#   NVCC_THREADS          - Parallel NVCC threads (default: 4)
-#   MAX_JOBS              - Max parallel jobs (default: nproc)
 
 set -ex -o pipefail
 
