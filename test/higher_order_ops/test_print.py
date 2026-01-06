@@ -3,7 +3,12 @@ import io
 from unittest.mock import patch
 
 import torch
-from torch._dynamo.testing import AotEagerAndRecordGraphs, EagerAndRecordGraphs, normalize_gm
+from torch._dynamo.testing import (
+    AotEagerAndRecordGraphs,
+    EagerAndRecordGraphs,
+    InductorAndRecordGraphs,
+    normalize_gm,
+)
 from torch._functorch.aot_autograd import aot_export_module
 from torch._inductor.utils import run_and_get_code
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -441,6 +446,59 @@ class GraphModule(torch.nn.Module):
     def forward(self, tangents_1: "f32[3]"):
         add_1: "f32[3]" = torch.ops.aten.add.Tensor(tangents_1, tangents_1);  tangents_1 = None
         return (add_1,)
+""",
+            )
+
+    @skipIfTorchDynamo("Skipped under Dynamo")
+    def test_print_inductor_graph(self):
+        """Test capturing the Inductor graph for print HOP.
+
+        This test captures the Inductor graph using InductorAndRecordGraphs backend,
+        which shows the final lowered graph that Inductor compiles.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                torch._higher_order_ops.print("moo {x} {y}", x=1, y=2)
+                res = x + x
+                torch._higher_order_ops.print("values {} {}", 3, res)
+                return (res,)
+
+        inputs = (torch.randn(3, requires_grad=False),)
+
+        # Capture Inductor graph using InductorAndRecordGraphs
+        backend = InductorAndRecordGraphs()
+        compiled_m = torch.compile(M(), backend=backend, fullgraph=True)
+
+        with patch("sys.stdout", new_callable=io.StringIO):
+            compiled_m(*inputs)
+
+        # Verify we captured a graph
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertGreaterEqual(len(backend.inductor_graphs), 1)
+
+        if not TEST_WITH_CROSSREF:
+            # Check inductor graph - print should be lowered with with_effects
+            # Inductor creates/sinks tokens internally rather than passing as args
+            self.assertExpectedInline(
+                normalize_gm(
+                    backend.inductor_graphs[0].print_readable(print_output=False)
+                ),
+                """\
+class <lambda>(torch.nn.Module):
+    def forward(self, arg1_1: "f32[3]"):
+        _make_token_default: "f32[0]" = torch.ops.prims._make_token.default()
+
+        with_effects = torch.ops.higher_order.with_effects(_make_token_default, torch.ops.higher_order.print, 'moo {x} {y}', x = 1, y = 2);  _make_token_default = None
+        getitem: "f32[0]" = with_effects[0];  with_effects = None
+
+        add: "f32[3]" = torch.ops.aten.add.Tensor(arg1_1, arg1_1);  arg1_1 = None
+
+        with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.print, 'values {} {}', 3, add);  getitem = None
+        getitem_2: "f32[0]" = with_effects_1[0];  with_effects_1 = None
+
+        _sink_tokens_default = torch.ops.prims._sink_tokens.default([getitem_2]);  getitem_2 = _sink_tokens_default = None
+        return (add,)
 """,
             )
 
