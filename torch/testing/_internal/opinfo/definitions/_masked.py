@@ -52,7 +52,15 @@ def sample_inputs_softmax_variant(
         ((S, M, S), (2,)),
         *([((S, 0, 0), (-1,))] if use_zero_dimensions else []),
     ]
-    kwargs = dict(dtype=torch.float64) if with_dtype else None
+    kwargs = (
+        dict(
+            dtype=(
+                torch.bfloat16 if torch.device(device).type == "mps" else torch.float64
+            )
+        )
+        if with_dtype
+        else None
+    )
 
     # PyTorch on XLA throws an error when passed with dim argument for 0d tensor.
     # See https://github.com/pytorch/xla/issues/3061 for more details.
