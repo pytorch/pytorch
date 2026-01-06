@@ -225,7 +225,7 @@ ContextConv2D create(
       weight_reordered.size(Layout::Filter::input),                   // group_output_channels
       weight_reordered.size(Layout::Filter::output),                  // input_pixel_stride
       weight_reordered.size(Layout::Filter::input) * groups,          // output_pixel_stride
-      weight_reordered.const_data_ptr<float>(),                             // kernel
+      weight_reordered.const_data_ptr<float>(),                       // kernel
       (bias && bias->defined())
           ? bias->contiguous().const_data_ptr<float>()
           : nullptr,                                                  // bias
@@ -255,7 +255,7 @@ ContextConv2D create(
       weight_nhwc.size(Layout::Filter::output) / groups,              // group_output_channels
       weight_nhwc.size(Layout::Filter::input) * groups,               // input_pixel_stride
       weight_nhwc.size(Layout::Filter::output),                       // output_pixel_stride
-      weight_nhwc.const_data_ptr<float>(),                                  // kernel
+      weight_nhwc.const_data_ptr<float>(),                            // kernel
       (bias && bias->defined())
           ? bias->contiguous().const_data_ptr<float>()
           : nullptr,                                                  // bias
