@@ -57,9 +57,9 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     NAVI_ARCH,
     parametrize,
+    random_matrix_with_scaled_reduction_space,
     skipIfRocmArch,
     TEST_WITH_ROCM,
-    random_matrix_with_scaled_reduction_space,
 )
 from torch.testing._internal.logging_utils import multiple_logs_to_string
 from torch.utils._triton import (
