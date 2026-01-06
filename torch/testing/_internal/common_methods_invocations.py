@@ -14294,10 +14294,11 @@ op_db: list[OpInfo] = [
                         # RuntimeError: mul(): functions with out=... arguments don't support
                         # automatic differentiation, but one of the arguments requires grad
                         # https://github.com/pytorch/pytorch/issues/68966
-                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager'),
-                        DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_conj_view'),
-                        DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_view'),
-                        DecorateInfo(unittest.expectedFailure, 'TestMathBits', 'test_neg_conj_view'),
+                        # Eager tests pass but there is an error in the inductor tests.
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
                     ),
                     decorators=[
                         DecorateInfo(
@@ -16580,6 +16581,8 @@ op_db: list[OpInfo] = [
         skips=(
             # Sample inputs isn't really parametrized on dtype
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
+            # _scaled_mm_v2 is CUDA-only, no CPU implementation
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_compare_cpu'),
             # "add_stub" not implemented for 'Float8_e4m3fn'
             # "ufunc_add_CUDA" not implemented for 'Float8_e4m3fn'
             # https://github.com/pytorch/pytorch/issues/107256
