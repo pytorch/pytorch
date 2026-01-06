@@ -1231,8 +1231,14 @@ class TestMaxAutotune(TestCase):
 
             M, N, K = sizes
 
-            a = torch.randn(M, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
-            b = torch.randn(K, N, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+            # K can be huge huge, and we also operate with reduced precision reductions.
+            # This is why the data distribution is set to iid N(0, K ** 0.5),
+            # which makes the result of reductions distributed as N(0, 1).
+            atol = 1e-4
+            rtol = 1e-4
+            red_scale = K ** 0.5
+            a = torch.randn(M, K, dtype=dtype, device=GPU_TYPE, requires_grad=True) / red_scale
+            b = torch.randn(K, N, dtype=dtype, device=GPU_TYPE, requires_grad=True) / red_scale
 
             possible_splits = range(2, min(K // M, K // N) + 1)
 
@@ -1265,7 +1271,7 @@ class TestMaxAutotune(TestCase):
                     "triton_.*_fused_0.run"
                 ).check("decompose_k").run(code[0])
                 check_divisors(code)
-                torch.testing.assert_close(out, a @ b, atol=1e-2, rtol=1e-2)
+                torch.testing.assert_close(out, a @ b, atol=atol, rtol=rtol)
 
             # Test adding epilogue also equivalent to eager
             compiled_func = torch.compile(lambda a, b: (a @ b).relu(), dynamic=dynamic)
@@ -1280,7 +1286,7 @@ class TestMaxAutotune(TestCase):
                 ).check("decompose_k").run(code[0])
                 check_divisors(code)
                 torch.testing.assert_close(
-                    compiled_func(a, b), (a @ b).relu(), atol=1e-2, rtol=1e-2
+                    compiled_func(a, b), (a @ b).relu(), atol=atol, rtol=rtol
                 )
 
             # Test adding reinterpret view before subgraph
@@ -1302,8 +1308,8 @@ class TestMaxAutotune(TestCase):
                 torch.testing.assert_close(
                     compiled_func(a, b),
                     (a.transpose(0, 1) @ b).relu(),
-                    atol=1e-2,
-                    rtol=1e-2,
+                    atol=atol,
+                    rtol=rtol,
                 )
 
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
