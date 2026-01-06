@@ -2302,8 +2302,7 @@ class BenchmarkRunner:
                 is_same = False
 
             if not is_same:
-                exception_string = str(e)
-                accuracy_status = f"eager_two_runs_differ: {exception_string}"
+                accuracy_status = "eager_two_runs_differ"
                 return record_status(accuracy_status, dynamo_start_stats=start_stats)
 
             correct_rerun_result = None
