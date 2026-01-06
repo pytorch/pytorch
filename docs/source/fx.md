@@ -1168,6 +1168,7 @@ The set of leaf modules can be customized by overriding
 .. py:module:: torch.fx.passes.shape_prop
 .. py:module:: torch.fx.passes.split_module
 .. py:module:: torch.fx.passes.split_utils
+.. autofunction:: torch.fx.passes.split_utils.move_non_tensor_nodes_on_boundary
 .. py:module:: torch.fx.passes.splitter_base
 .. py:module:: torch.fx.passes.tests.test_pass_manager
 .. py:module:: torch.fx.passes.tools_common

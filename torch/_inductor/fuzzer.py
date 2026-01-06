@@ -6,6 +6,7 @@ import random
 import signal
 import string
 import traceback
+import types
 from collections.abc import Callable, KeysView, Sequence
 from enum import Enum
 from functools import partial, wraps
@@ -287,7 +288,7 @@ class SamplingMethod(Enum):
                 )
                 for _ in range(random.randint(0, 3))
             }
-        elif is_type(type_hint, Union):
+        elif is_type(type_hint, Union) or is_type(type_hint, types.UnionType):
             # do whatever is not the type of default
             try:
                 assert len(type_hint.__args__) > 1

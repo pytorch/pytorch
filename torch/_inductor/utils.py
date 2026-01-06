@@ -33,6 +33,7 @@ from collections.abc import (
     MutableSet,
 )
 from datetime import datetime
+from functools import lru_cache
 from io import StringIO
 from typing import (
     Any,
@@ -140,7 +141,11 @@ _T = TypeVar("_T")
 VarRanges = dict[sympy.Expr, sympy.Expr]
 InputType = Optional[Union[torch.Tensor, int, torch.SymInt]]
 
-GPU_KERNEL_BIN_EXTS = {"cuda": ".cubin", "xpu": ".spv"}
+XPU_KERNEL_FORMAT = (
+    "spv" if _IS_WINDOWS else os.getenv("TORCHINDUCTOR_XPU_KERNEL_FORMAT", "zebin")
+)
+
+GPU_KERNEL_BIN_EXTS = {"cuda": ".cubin", "xpu": f".{XPU_KERNEL_FORMAT}"}
 
 GPU_ALIGN_BYTES = 16
 ALIGNMENT = 16
@@ -712,7 +717,9 @@ def cache_on_self(fn: Callable[Concatenate[Any, P], RV]) -> CachedMethod[P, RV]:
     return wrapper  # type: ignore[return-value]
 
 
-def cache_property_on_self(fn: Callable[P, RV]) -> CachedMethod[P, RV]:
+def cache_property_on_self(
+    fn: Callable[Concatenate[Any, P], RV],
+) -> CachedMethod[P, RV]:
     """
     Variant of cache_on_self for properties. The only difference is the type signature.
     """
@@ -1958,7 +1965,20 @@ def ensure_cute_available() -> bool:
     in the same interpreter to retry the import.
     """
     try:
-        return importlib.util.find_spec("cutlass.cute") is not None
+        return importlib.util.find_spec("cutlass") is not None
+    except ImportError:
+        return False
+
+
+@functools.lru_cache(maxsize=1)
+def ensure_nv_universal_gemm_available() -> bool:
+    """Check if NVIDIA Universal GEMM (cutlass_api) is importable; cache the result for reuse.
+
+    Call ensure_nv_universal_gemm_available.cache_clear() after installing cutlass_api
+    in the same interpreter to retry the import.
+    """
+    try:
+        return importlib.util.find_spec("cutlass_api") is not None
     except ImportError:
         return False
 
@@ -2061,6 +2081,76 @@ def use_cutlass_template(layout: Layout, m: int, n: int, k: int) -> bool:
     return res
 
 
+def use_nv_universal_gemm_template(
+    layout: Layout, m: _IntLike, n: _IntLike, k: _IntLike, mat_a: IRNode, mat_b: IRNode
+) -> bool:
+    """
+    Returns True if we can use the NVIDIA Universal GEMM kernel for gemm.
+    Required conditions:
+        1. NVGEMM backend is enabled
+        2. cutlass_api is available
+        3. We are on a NVIDIA GPU
+        4. The dtype is fp16 or bf16
+        5. Max autotune or max autotune gemm is enabled
+        6. We are not using dynamic shapes
+        7. A and B base pointers are 16B aligned
+        8. n and k are divisible by 16
+        9. Non-unit strides are divisible by 16
+        10. Not in AOT Inductor mode (requires runtime JIT compilation)
+    """
+    if not ensure_cute_available():
+        return False
+
+    if not ensure_nv_universal_gemm_available():
+        return False
+
+    if not _use_autotune_backend("NVGEMM"):
+        return False
+
+    from .virtualized import V
+
+    if V.aot_compilation:
+        return False
+
+    if layout.device.type != "cuda" or torch.version.hip:
+        return False
+
+    layout_dtypes = [torch.float16, torch.bfloat16]
+    if not _use_template_for_gpu(layout, layout_dtypes):
+        return False
+
+    if not (config.max_autotune or config.max_autotune_gemm):
+        return False
+
+    # TODO(nikhilap) Enable dynamic shapes
+    if any(is_dynamic(x) for x in [mat_a, mat_b]):
+        return False
+
+    if any(m.get_name() in V.graph.unaligned_buffers for m in [mat_a, mat_b]):
+        return False
+
+    # TODO(nikhilap) There is a bug in cutlass_api, their compatibility check does not catch these failure cases
+    if not V.graph.sizevars.statically_known_true(sympy.Eq(n % 16, 0)):
+        return False
+    if not V.graph.sizevars.statically_known_true(sympy.Eq(k % 16, 0)):
+        return False
+
+    a_layout = mat_a.get_layout()
+    b_layout = mat_b.get_layout()
+
+    for stride in a_layout.stride:
+        if stride != 1:
+            if not V.graph.sizevars.statically_known_true(sympy.Eq(stride % 16, 0)):
+                return False
+
+    for stride in b_layout.stride:
+        if stride != 1:
+            if not V.graph.sizevars.statically_known_true(sympy.Eq(stride % 16, 0)):
+                return False
+
+    return True
+
+
 def _use_cutlass_for_op(op_name: str) -> bool:
     """Check if CUTLASS should be used for the given operation."""
     enabled_ops = config.cuda.cutlass_enabled_ops.upper()
@@ -2081,8 +2171,7 @@ def use_decompose_k_choice(
     decompose_k_threshold = config.triton.decompose_k_threshold * threshold_multiple
 
     return (
-        not torch.version.hip
-        and V.graph.sizevars.statically_known_true(
+        V.graph.sizevars.statically_known_true(
             sympy.And(
                 sympy.Ge(k, decompose_k_threshold * m),
                 sympy.Ge(k, decompose_k_threshold * n),
@@ -2323,7 +2412,7 @@ def use_cpp_gemm_template(
         return False
 
     int8_gemm = mat1.get_dtype() in [torch.uint8, torch.int8]
-    layout_dtypes = [torch.float32, torch.bfloat16, torch.half, torch.uint8]
+    layout_dtypes = [torch.float32, torch.bfloat16, torch.half, torch.uint8, torch.int8]
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1,
         mat2,
@@ -2683,14 +2772,14 @@ def get_device_tflops(dtype: torch.dtype) -> float:
             return get_max_simd_tflops(torch.float32, sm_clock)
     else:
         if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
-            # pyrefly: ignore  # missing-argument
+            # pyrefly: ignore [missing-argument]
             return get_max_tensorcore_tflops(dtype)
 
         if torch.backends.cuda.matmul.allow_tf32:
-            # pyrefly: ignore  # missing-argument
+            # pyrefly: ignore [missing-argument]
             return get_max_tensorcore_tflops(torch.float32)
         else:
-            # pyrefly: ignore  # missing-argument
+            # pyrefly: ignore [missing-argument]
             return get_max_simd_tflops(torch.float32)
 
 
@@ -2704,7 +2793,7 @@ def get_gpu_dram_gbps() -> int:
 def get_gpu_shared_memory() -> int:
     from triton.runtime import driver
 
-    # pyrefly: ignore  # missing-attribute
+    # pyrefly: ignore [missing-attribute]
     return driver.active.utils.get_device_properties(0).get("max_shared_mem", 0)
 
 
@@ -3060,6 +3149,8 @@ def device_need_guard(device: str) -> bool:
 def needs_fallback_due_to_atomic_add_limitations(dtype: torch.dtype) -> bool:
     if dtype == torch.bfloat16 and torch.cuda.is_available():
         return torch.cuda.get_device_capability() < (9, 0)
+    elif dtype == torch.bfloat16 and torch.xpu.is_available():
+        return True
     else:
         return dtype in (torch.int64, torch.bool)
 
@@ -4222,3 +4313,18 @@ COLLECTIVE_OPS = OrderedSet(
 def is_collective_op(op_name: str) -> bool:
     """Check if an operation is a collective operation."""
     return op_name in COLLECTIVE_OPS
+
+
+@lru_cache
+def tlx_only_cuda_options() -> list[str]:
+    if config.is_fbcode():
+        try:
+            from torch._inductor.fb.tlx_templates.registry import tlx_only_cuda_options
+
+            return tlx_only_cuda_options
+
+        except ImportError:
+            return []
+
+    else:
+        return []

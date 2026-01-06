@@ -1758,6 +1758,10 @@ Tensor asarray(
   }
   bool return_requires_grad =
       requires_grad.value_or(tensor.defined() ? tensor.requires_grad() : false);
+  if (return_requires_grad && !requires_grad) {
+    TORCH_WARN_ONCE(
+        "Unspecified requires_grad now defaults to obj.requires_grad, not False!")
+  }
 
 #ifdef USE_NUMPY
   if (!tensor.defined() && is_numpy_available()) {
