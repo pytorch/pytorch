@@ -1294,6 +1294,11 @@ def is_from_skip_guard_source(source: Source) -> bool:
     if isinstance(source, SkipGuardSource):
         return True
 
+    # SPIKE: Skip guards from TorchFunctionModeStackSource to enable recursive tracing
+    # The torch_fn_counts dict changes during tracing, causing guard failures
+    if isinstance(source, TorchFunctionModeStackSource):
+        return True
+
     if isinstance(source, ChainedSource):
         return is_from_skip_guard_source(source.base)
 

@@ -178,6 +178,18 @@ trace_call_log = torch._logging.getArtifactLogger(__name__, "trace_call")
 
 RootGuardManager = guards.RootGuardManager
 
+# Global cache for invoke_subgraph wrappers keyed by code object id
+# Used for recursive Dynamo tracing - stores the GraphModule and name
+# so inline_user_function_return can use invoke_subgraph instead of inlining
+from dataclasses import dataclass as _dataclass
+
+@_dataclass
+class _InvokeSubgraphCacheEntry:
+    gm: Any  # GraphModule
+    name: str  # Unique identifier for the subgraph
+
+_invoke_subgraph_cache: dict[int, _InvokeSubgraphCacheEntry] = {}
+
 
 # Capture fn pointer at import time
 # This is to guard against trying to mark the iterated tensors
@@ -794,9 +806,11 @@ class OutputGraph(OutputGraphCommon):
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.DEFAULT_DEVICE))
 
         self.guards.add(GlobalStateSource().make_guard(GuardBuilder.GLOBAL_STATE))
-        self.guards.add(
-            GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
-        )
+        # Commented out for recursive Dynamo tracing spike - this guard
+        # invalidates when ProxyTorchDispatchMode is active during tracing
+        # self.guards.add(
+        #     GlobalStateSource().make_guard(GuardBuilder.TORCH_FUNCTION_STATE)
+        # )
 
         ci = torch._C._functorch.peek_interpreter_stack()
         if ci is not None:
@@ -2243,6 +2257,35 @@ class OutputGraph(OutputGraphCommon):
                 compiled_fn = self.call_user_compiler(gm, self.example_inputs())
 
             from torch.fx._lazy_graph_module import _LazyGraphModule
+            from torch._higher_order_ops.invoke_subgraph import invoke_subgraph
+            from torch.fx._symbolic_trace import is_fx_symbolic_tracing
+            from torch.fx.experimental.proxy_tensor import get_proxy_mode
+            from torch._dynamo import allow_in_graph
+
+            # Create a wrapper that uses invoke_subgraph when being FX traced
+            # This enables recursive Dynamo tracing
+            captured_gm = gm
+            code_id = id(self.root_tx.f_code)
+
+            @allow_in_graph
+            def invoke_subgraph_wrapper(*args):
+                # Check if we're being traced by make_fx (ProxyTorchDispatchMode)
+                # or by FX symbolic tracer
+                proxy_mode = get_proxy_mode()
+                fx_tracing = is_fx_symbolic_tracing()
+                if proxy_mode is not None or fx_tracing:
+                    # When being traced, emit invoke_subgraph HOP
+                    return invoke_subgraph(captured_gm, name, *args)
+                else:
+                    # Normal execution path
+                    # compiled_fn may take args as a list or as *args depending on backend
+                    try:
+                        return compiled_fn(list(args))
+                    except TypeError:
+                        return compiled_fn(*args)
+
+            # Store the GraphModule and name in the global cache for access during recursive tracing
+            _invoke_subgraph_cache[code_id] = _InvokeSubgraphCacheEntry(gm=gm, name=name)
 
             if isinstance(compiled_fn, _LazyGraphModule) or (
                 isinstance(getattr(compiled_fn, "__self__", None), _LazyGraphModule)
@@ -2268,9 +2311,11 @@ class OutputGraph(OutputGraphCommon):
             if self.package is not None:
                 self.package.add_backend_id(name, compiled_fn)
 
-            compiled_fn = disable(
-                compiled_fn, reason="do not trace Dynamo-compiled graph"
-            )
+            # Don't use disable() - instead use invoke_subgraph_wrapper which
+            # handles tracing by emitting invoke_subgraph HOP
+            # compiled_fn = disable(
+            #     compiled_fn, reason="do not trace Dynamo-compiled graph"
+            # )
 
             counters["stats"]["unique_graphs"] += 1
             assert old_fake_mode.shape_env is not None
@@ -2334,7 +2379,8 @@ class OutputGraph(OutputGraphCommon):
                 self.install_global_unsafe(name, specialized_dispatch)
             else:
                 # This is safe because we pre-process name to be unique
-                self.install_global_unsafe(name, compiled_fn)
+                # Use invoke_subgraph_wrapper for recursive tracing support
+                self.install_global_unsafe(name, invoke_subgraph_wrapper)
 
             assert self.root_tx is not None
             cg = PyCodegen(self.root_tx)

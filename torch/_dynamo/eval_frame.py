@@ -926,14 +926,19 @@ class _TorchDynamoContext:
                         if torch._guards.TracingContext.try_get() is not None:
                             return fn(*args, **kwargs)
                 # Skip nested compile - just inline the function
-                if is_fx_symbolic_tracing():
-                    if config.error_on_nested_fx_trace:
-                        raise RuntimeError(
-                            "Detected that you are using FX to symbolically trace "
-                            "a dynamo-optimized function. This is not supported at the moment."
-                        )
-                    else:
-                        return fn(*args, **kwargs)
+                # For recursive Dynamo tracing, we want to use the cached
+                # compiled code. Let the normal guard check happen.
+                # from torch.fx.experimental.proxy_tensor import get_proxy_mode
+                # if is_fx_symbolic_tracing() or get_proxy_mode() is not None:
+                #     # Try to get the cached wrapper from output_graph
+                #     from .output_graph import _invoke_subgraph_cache
+                #     code_id = id(fn.__code__)
+                #     if code_id in _invoke_subgraph_cache:
+                #         # Use the cached wrapper which will emit invoke_subgraph HOP
+                #         return _invoke_subgraph_cache[code_id](*args, **kwargs)
+                #     else:
+                #         # No cached wrapper, fall back to original function
+                #         return fn(*args, **kwargs)
 
                 if is_jit_tracing():
                     raise RuntimeError(
