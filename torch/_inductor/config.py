@@ -1311,15 +1311,15 @@ torchinductor_worker_logpath: str = Config(
 
 
 class auto_chunker:
-    enable = os.environ.get("TORCHINDUCTOR_AUTO_CHUNKER") == "1"
+    enable: bool = os.environ.get("TORCHINDUCTOR_AUTO_CHUNKER") == "1"
 
     # Don't chunk from a node if the output size is not large enough
-    output_size_threshold = 1024 * 1024
+    output_size_threshold: int = 1024 * 1024
 
     # Don't chunk from a node if it does not 'amplify' the inputs a lot
-    amplify_ratio_threshold = 8
+    amplify_ratio_threshold: int = 8
 
-    num_chunk = (
+    num_chunk: int | None = (
         int(os.environ.get("TORCHINDUCTOR_CHUNKER_NUM_CHUNKS"))  # type: ignore[arg-type]
         if os.environ.get("TORCHINDUCTOR_CHUNKER_NUM_CHUNKS") is not None
         else None
@@ -1706,8 +1706,6 @@ class triton:
     # Should TMA store be enable from templates. TODO: Remove once we
     # can autotune over the result.
     enable_template_tma_store = os.environ.get("ENABLE_TEMPLATE_TMA_STORE", "0") == "1"
-    # Use epilogue subtiling. We allow disabling it due to limited B200 testing.
-    enable_epilogue_subtiling = os.environ.get("ENABLE_EPILOGUE_SUBTILING", "1") == "1"
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 
