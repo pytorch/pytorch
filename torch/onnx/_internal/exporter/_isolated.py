@@ -5,8 +5,8 @@ from __future__ import annotations
 import multiprocessing
 import os
 import warnings
-from typing import Any, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import ParamSpec, TypeVarTuple, Unpack
+from typing import Any, TYPE_CHECKING, TypeVar, TypeVarTuple, Union, Unpack
+from typing_extensions import ParamSpec
 
 
 if TYPE_CHECKING:

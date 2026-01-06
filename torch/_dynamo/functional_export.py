@@ -3,9 +3,9 @@ import logging
 import sys
 import traceback
 from collections import namedtuple
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable
 from dataclasses import dataclass
-from typing import Any, Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, Optional, TYPE_CHECKING, Union
 
 import sympy
 
@@ -29,14 +29,13 @@ from torch.fx.experimental.symbolic_shapes import (
     StatelessSymbolicContext,
 )
 from torch.fx.graph import _ExportCodeGen, _PyTreeCodeGen, _PyTreeInfo
-from torch.fx.node import Argument, Target
 from torch.utils._pytree import TreeSpec
 
 
 if TYPE_CHECKING:
     from torch._subclasses.fake_tensor import FakeTensorMode
 
-T = TypeVar("T")
+
 log = logging.getLogger(__name__)
 
 
@@ -45,7 +44,7 @@ def post_process_error_msg(
     func: Callable[..., Any],
     args: Any,
     kwargs: Any,
-) -> ConstraintViolationError:
+):
     """
     Because we trace a different callable, the sources are all messed up.
     Manually patch them so the error message looks correct.
@@ -77,7 +76,7 @@ def clean_export_root_string(text: str) -> str:
 
 
 def clean_nn_module_stack_and_source_fn(
-    graph_module: torch.fx.GraphModule, is_inline_builtin: bool = False
+    graph_module: torch.fx.GraphModule, is_inline_builtin=False
 ) -> torch.fx.GraphModule:
     """
     Clean up nn_module_stack metadata by removing export_root references.
@@ -104,9 +103,7 @@ def clean_nn_module_stack_and_source_fn(
         The cleaned GraphModule (modified in-place)
     """
 
-    def _process_nn_module_stack(
-        nn_module_stack: dict[str, tuple[str, T]],
-    ) -> dict[str, tuple[str, T]]:
+    def _process_nn_module_stack(nn_module_stack):
         if "L__self____export_root" in nn_module_stack:
             del nn_module_stack["L__self____export_root"]
 
@@ -126,17 +123,15 @@ def clean_nn_module_stack_and_source_fn(
             cleaned_stack[clean_key] = (clean_name, child_class)
         return cleaned_stack
 
-    def _process_source_fn(source_fn_stack: Iterable[T]) -> Iterable[T]:
+    def _process_source_fn(source_fn_stack):
         cleaned_stack = []
         for item in source_fn_stack:
             if isinstance(item, tuple) and len(item) == 2:
                 name, cls = item
                 if isinstance(name, str):
                     clean_name = clean_export_root_string(name)
-                    # pyrefly: ignore[bad-argument-type]
                     cleaned_stack.append((clean_name, cls))
                 else:
-                    # pyrefly: ignore[bad-argument-type]
                     cleaned_stack.append(item)
             else:
                 cleaned_stack.append(item)
@@ -313,9 +308,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
                 new_placeholder = self.new_input_nodes[user_input_idx]
                 self.old_to_new_mapping[old_placeholder] = new_placeholder
 
-    def placeholder(
-        self, target: Target, args: tuple[Argument, ...], kwargs: dict[str, Any]
-    ) -> Any:
+    def placeholder(self, target, args, kwargs) -> Any:
         """Replace old placeholders with new flattened ones."""
         # Return the corresponding new placeholder
         if self.current_node in self.old_to_new_mapping:
@@ -335,9 +328,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
             # Shouldn't happen if mapping is correct, but fallback
             return super().placeholder(target, args, kwargs)
 
-    def output(
-        self, target: Target, args: Sequence[Any], kwargs: dict[str, Any]
-    ) -> Any:
+    def output(self, target, args, kwargs) -> Any:
         """Transform output according to graph_output_map."""
         original_outputs = args[0]
 
@@ -356,20 +347,20 @@ class DynamoGraphTransformer(torch.fx.Transformer):
 
         return super().output(target, (tuple(new_outputs),), {})
 
-    def run_node(self, n: Node) -> Any:
+    def run_node(self, node: Node) -> Any:
         """Run node transformation and preserve metadata."""
-        self.current_node = n
-        result = super().run_node(n)
+        self.current_node = node
+        result = super().run_node(node)
 
         # Copy important metadata
-        if hasattr(result, "node") and result.node is not n:
+        if hasattr(result, "node") and result.node is not node:
             for key in ["val", "example_value", "unbacked_bindings"]:
-                if key in n.meta:
-                    result.node.meta[key] = n.meta[key]
+                if key in node.meta:
+                    result.node.meta[key] = node.meta[key]
 
             # Preserve node names (except output)
-            if n.op != "output" and hasattr(n, "name"):
-                result.node._rename(n.name)
+            if node.op != "output" and hasattr(node, "name"):
+                result.node._rename(node.name)
 
         return result
 
@@ -401,13 +392,13 @@ class DynamoGraphTransformer(torch.fx.Transformer):
 
 def _suggest_or_raise_constraint_violation(
     module_to_trace: torch.nn.Module,
-    orig_callable: Callable[..., Any],
+    orig_callable: Callable,  # type: ignore[type-arg]
     fake_mode: Optional["FakeTensorMode"],
     graph_capture_output: CaptureOutput,
     args: Any,
     kwargs: Any,
     dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]],
-) -> None:
+):
     constraint_violation_error = None
     try:
         # Check if we have any constraint violations
@@ -523,18 +514,18 @@ def pytreeify(
         pass
 
     class InShuffle(torch.nn.Module):
-        def __init__(self) -> None:
+        def __init__(self):
             super().__init__()
             self.mod = mod
             self.num_inputs = len(flat_real_args)
             self.gm_inputs = None
 
-        def forward(self, *flat_proxy_args: Any) -> tuple[Any, ...]:
+        def forward(self, *flat_proxy_args):
             args, kwargs = pytree.tree_unflatten(
                 [flat_proxy_args[i] for i in range(self.num_inputs)], in_spec
             )
 
-            def backend_dummy(*example_inputs: Any) -> Any:
+            def backend_dummy(*example_inputs):
                 # pyrefly: ignore [bad-assignment]
                 self.gm_inputs = example_inputs
                 raise Yield
@@ -562,19 +553,19 @@ def pytreeify(
     output_node = next(iter(reversed(backend_input.graph_module.graph.nodes)))
 
     class OutShuffle(torch.nn.Module):
-        def __init__(self) -> None:
+        def __init__(self):
             super().__init__()
             self.num_inputs = len(flat_real_args)
 
             self.num_outputs = len(output_node.args[0])
             self.out_spec: Optional[TreeSpec] = None
 
-        def forward(self, *flat_proxy_args: Any) -> list[Any]:
+        def forward(self, *flat_proxy_args):
             args, kwargs = pytree.tree_unflatten(
                 [flat_proxy_args[i] for i in range(self.num_inputs)], in_spec
             )
 
-            def backend_dummy(*example_inputs: Any) -> Any:
+            def backend_dummy(*example_inputs):
                 return [
                     flat_proxy_args[self.num_inputs + i]
                     for i in range(self.num_outputs)
@@ -621,7 +612,7 @@ def pytreeify(
     )
 
 
-def normalize_graph_module(gm: torch.fx.GraphModule) -> None:
+def normalize_graph_module(gm):
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             node.meta["val"] = node.meta["example_value"]

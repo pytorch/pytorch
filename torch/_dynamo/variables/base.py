@@ -722,7 +722,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         else:
             return variables.LazyVariableTracker.create(value, source)
 
-    def is_python_hashable(self) -> bool:
+    def is_python_hashable(self):
         """
         Unlike the variable tracker's own __hash__, this method checks whether
         the underlying Python object referenced by this variable tracker is hashable.
@@ -744,7 +744,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
-    def get_python_hash(self) -> int:
+    def get_python_hash(self):
         """
         Unlike the variable tracker’s own __hash__, this method is used by
         ConstDictVariableTracker to compute the hash of the underlying key object.
@@ -761,7 +761,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
-    def is_python_equal(self, other: object) -> bool:
+    def is_python_equal(self, other):
         """
         NB - Deliberately not overriding the __eq__ method because that can
         disable the __hash__ for the vt itself.

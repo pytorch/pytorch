@@ -76,7 +76,6 @@ from typing import ParamSpec, TypeVar
 
 P = ParamSpec("P")
 R = TypeVar("R")
-HOP_VT_Alias = TypeVar("HOP_VT_Alias", bound="TorchHigherOrderOperatorVariable")
 
 log = logging.getLogger(__name__)
 hc_log = torch._logging.getArtifactLogger(__name__, "hierarchical_compile")
@@ -252,7 +251,7 @@ def add_call_function(
     kwargs: dict[str, Any],
     flat_example_value: Any,
     config: Optional[NestedCompileRegionOptions] = None,
-) -> VariableTracker:
+):
     from .builder import wrap_fx_proxy
 
     proxy = tx.output.create_proxy(
@@ -278,15 +277,12 @@ def add_call_function(
     return flat_variable
 
 
-def overwrite_tensor_vt_requires_grad(
-    graph_output_vts: Iterable[VariableTracker], flat_variable: VariableTracker
-) -> None:
+def overwrite_tensor_vt_requires_grad(graph_output_vts, flat_variable):
     # All outputs of autograd.Function have requires_grad=True. We turn off
     # grad_mode in autograd.Function, so our outputs naively have
     # requires_grad=False. So we hackily force them back on here. A better
     # solution would be to write python code that Dynamo could trace but we
     # decided that it wasn't worth it.
-    # pyrefly: ignore[missing-attribute]
     for orig_vt, subgraph_vt in zip(graph_output_vts, flat_variable.items):
         if isinstance(orig_vt, variables.TensorVariable):
             assert isinstance(subgraph_vt, variables.TensorVariable)
@@ -295,9 +291,7 @@ def overwrite_tensor_vt_requires_grad(
                 orig_vt.has_grad_fn = True
 
 
-def overwrite_tensor_vt_proxy(
-    graph_output_vts: Iterable[VariableTracker], flat_variable: VariableTracker
-) -> None:
+def overwrite_tensor_vt_proxy(graph_output_vts, flat_variable):
     # wrap_fx_proxy creates fresh variable trackers. However, the main program
     # after the speculate subgraph can still use the original tensor vts that
     # are still pointing to the nodes present in the subgraph. So, we reproxify
@@ -313,7 +307,6 @@ def overwrite_tensor_vt_proxy(
     # By overwriting the proxies of VTs in `body_r` with the proxies from the
     # HOP call, we ensure the outer graph correctly references the HOP outputs
     # while still allowing `body_r` to contain arbitrary Python objects.
-    # pyrefly: ignore[missing-attribute]
     for orig_vt, subgraph_vt in zip(graph_output_vts, flat_variable.items):
         if isinstance(orig_vt, (variables.SymNodeVariable, variables.TensorVariable)):
             assert subgraph_vt.is_tensor() or isinstance(subgraph_vt, SymNodeVariable)
@@ -355,7 +348,6 @@ def _call_function_with_auto_output_flattening(
 
     flat_variable = add_call_function(tx, fn, args, kwargs, flat_example_value, config)
     if body_r is not None:
-        # pyrefly: ignore[bad-argument-type]
         overwrite_tensor_vt_proxy(graph_output_vts, flat_variable)
     return body_r
 
@@ -481,7 +473,7 @@ class StorageAliasingTracker:
     """
 
     def __init__(self) -> None:
-        self.excluded_storages: set[StorageWeakRef] = set()
+        self.excluded_storages: set = set()
 
     def _collect_storages_from_tensor(self, example_value: torch.Tensor) -> None:
         self.excluded_storages.update(get_tensor_storages(example_value))
@@ -671,9 +663,7 @@ def _call_while_loop(
 
     with discard_graph_changes(tx):
         # Note: this must be run under discard graph changes.
-        def unspecialize_carried_inputs(
-            tx: "InstructionTranslator", carry: VariableTracker
-        ) -> VariableTracker:
+        def unspecialize_carried_inputs(tx, carry) -> VariableTracker:
             # See NOTE [unspecialize int carry with unbacked symints]
             if (
                 carry.is_python_constant()
@@ -690,7 +680,6 @@ def _call_while_loop(
                 # See NOTE [unspecialize constant tensor carry]
                 assert carry.is_tensor()
                 cloned_carry = carry.clone()
-                # type: ignore[attr-defined]
                 cloned_carry.proxy.node.meta["example_value"].constant = None
                 return cloned_carry
 
@@ -2009,7 +1998,7 @@ def make_attr(tx: "InstructionTranslator", name: str) -> Proxy:
     return node
 
 
-def add_hop_context(cls: type[HOP_VT_Alias]) -> type[HOP_VT_Alias]:
+def add_hop_context(cls):
     """
     Class decorator that adds HOP context to exceptions raised in call_function.
 
@@ -2029,7 +2018,7 @@ def add_hop_context(cls: type[HOP_VT_Alias]) -> type[HOP_VT_Alias]:
     original_call_function = cls.call_function
 
     @functools.wraps(original_call_function)
-    def wrapped_call_function(self, *args: Any, **kwargs: Any) -> VariableTracker:
+    def wrapped_call_function(self, *args, **kwargs):
         try:
             return original_call_function(self, *args, **kwargs)
         except UncapturedHigherOrderOpError as e:
@@ -2070,7 +2059,7 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
     # HOPs will fall back to eager.
     _ALLOW_FALLBACK_TO_EAGER: bool = True
 
-    def __init_subclass__(cls, **kwargs: Any) -> None:
+    def __init_subclass__(cls, **kwargs):
         super().__init_subclass__(**kwargs)
         add_hop_context(cls)
 
@@ -2139,11 +2128,8 @@ class TorchHigherOrderOperatorVariable(VariableTracker):
     def get_python_hash(self) -> int:
         return hash(self.as_python_constant())
 
-    def is_python_equal(self, other: object) -> bool:
-        return (
-            isinstance(other, VariableTracker)
-            and self.as_python_constant() == other.as_python_constant()
-        )
+    def is_python_equal(self, other: VariableTracker) -> bool:
+        return self.as_python_constant() == other.as_python_constant()
 
 
 class CustomFunctionHigherOrderOperatorVariable(TorchHigherOrderOperatorVariable):
@@ -4376,9 +4362,7 @@ class AutogradFunctionApplyVariable(VariableTracker):
         flat_variable = add_call_function(
             tx, autograd_function_apply, p_args, kwargs_for_fn, example_value
         )
-        # type: ignore[arg-type]
         overwrite_tensor_vt_proxy(fwd_graph_output_vts, flat_variable)
-        # type: ignore[arg-type]
         overwrite_tensor_vt_requires_grad(fwd_graph_output_vts, flat_variable)
         return fwd_out
 
@@ -5386,7 +5370,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             "Please adjust the input placements to match what the traced graph sees: \n{gm_str}."
         )
 
-        def make_error_msg(*args: Any) -> str:
+        def make_error_msg(*args):
             expected_num, actual_num, inputs_or_outputs = args
             gm_str = body_gmod.print_readable(print_output=False)
             return template.format(

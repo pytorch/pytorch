@@ -351,22 +351,19 @@ its type to `common_constant_types`.
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
-    def is_python_hashable(self) -> Literal[True]:
+    def is_python_hashable(self):
         return True
 
-    def get_python_hash(self) -> int:
+    def get_python_hash(self):
         return hash(self.value)
 
-    def is_python_equal(self, other: object) -> bool:
+    def is_python_equal(self, other):
         # Could be an EnumVariable as well
         from .tensor import SymNodeVariable
 
         if isinstance(other, SymNodeVariable):
             return self.as_python_constant() == other.evaluate_expr()
-        return (
-            isinstance(other, VariableTracker)
-            and self.as_python_constant() == other.as_python_constant()
-        )
+        return self.as_python_constant() == other.as_python_constant()
 
 
 class EnumVariable(VariableTracker):
@@ -417,15 +414,12 @@ class EnumVariable(VariableTracker):
         source = self.source and AttrSource(self.source, name)
         return VariableTracker.build(tx, member, source=source)
 
-    def is_python_hashable(self) -> Literal[True]:
+    def is_python_hashable(self):
         raise_on_overridden_hash(self.value, self)
         return True
 
-    def get_python_hash(self) -> int:
+    def get_python_hash(self):
         return hash(self.as_python_constant())
 
-    def is_python_equal(self, other: object) -> bool:
-        return (
-            isinstance(other, VariableTracker)
-            and self.as_python_constant() == other.as_python_constant()
-        )
+    def is_python_equal(self, other):
+        return self.as_python_constant() == other.as_python_constant()

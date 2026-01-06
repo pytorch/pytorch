@@ -33,12 +33,11 @@ import itertools
 import random
 import sys
 import threading
-import traceback
 import types
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, Literal, TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 from typing_extensions import is_typeddict
 
 import torch._dynamo.config
@@ -962,13 +961,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return self.value.__name__
         return super().const_getattr(tx, name)
 
-    def is_python_hashable(self) -> Literal[True]:
+    def is_python_hashable(self):
         return True
 
-    def get_python_hash(self) -> int:
+    def get_python_hash(self):
         return hash(self.value)
 
-    def is_python_equal(self, other: object) -> bool:
+    def is_python_equal(self, other):
         return (
             isinstance(other, variables.UserDefinedClassVariable)
             and self.value is other.value
@@ -1851,18 +1850,16 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             handle_observed_exception(tx)
             return variables.ConstantVariable.create(False)
 
-    def is_python_hashable(self) -> bool:
+    def is_python_hashable(self):
         raise_on_overridden_hash(self.value, self)
         return True
 
-    def get_python_hash(self) -> int:
+    def get_python_hash(self):
         # default hash
         return hash(self.value)
 
-    def is_python_equal(self, other: object) -> bool:
+    def is_python_equal(self, other):
         # id check
-        if not isinstance(other, UserDefinedVariable):
-            return False
         return self.value is other.value
 
     def call_tree_map_branch(
@@ -2120,16 +2117,14 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"
 
-    def is_python_hashable(self) -> Literal[True]:
+    def is_python_hashable(self):
         # TODO - Check corner cases like eq=False, hash=False etc
         return True
 
-    def get_python_hash(self) -> int:
+    def get_python_hash(self):
         return hash(tuple(arg.get_python_hash() for arg in self.fields.values()))
 
-    def is_python_equal(self, other: object) -> bool:
-        if not isinstance(other, FrozenDataClassVariable):
-            return False
+    def is_python_equal(self, other):
         is_class_same = self.python_type() is other.python_type()
         is_field_name_same = self.fields.keys() == other.fields.keys()
         is_field_value_same = all(
@@ -2218,11 +2213,11 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
         return self.exc_vt.exc_type
 
     @property
-    def python_stack(self) -> traceback.StackSummary | None:
+    def python_stack(self):
         return self.exc_vt.python_stack
 
     @python_stack.setter
-    def python_stack(self, value: traceback.StackSummary) -> None:
+    def python_stack(self, value):
         self.exc_vt.python_stack = value
 
 
@@ -2277,17 +2272,17 @@ class RemovableHandleVariable(VariableTracker):
     def call_method(
         self,
         tx: "InstructionTranslator",
-        name: str,
+        method_name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if name == "remove":
+        if method_name == "remove":
             if self.idx != self.REMOVED:
                 assert self.idx is not None
                 tx.output.side_effects.remove_hook(self.idx)
                 self.idx = self.REMOVED
             return variables.ConstantVariable.create(None)
-        return super().call_method(tx, name, args, kwargs)
+        return super().call_method(tx, method_name, args, kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if self.idx == self.REMOVED:
@@ -2385,7 +2380,7 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
     ) -> None:
         return self._dict_vt.install_dict_contains_guard(tx, args)
 
-    def is_python_hashable(self) -> Literal[False]:
+    def is_python_hashable(self):
         raise_on_overridden_hash(self.value, self)
         return False
 
@@ -2470,14 +2465,14 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
     ) -> None:
         return self._set_vt.install_dict_contains_guard(tx, args)
 
-    def is_python_hashable(self) -> bool:
+    def is_python_hashable(self):
         raise_on_overridden_hash(self.value, self)
         return self._set_vt.is_python_hashable()
 
-    def get_python_hash(self) -> int:
+    def get_python_hash(self):
         return self._set_vt.get_python_hash()
 
-    def is_python_equal(self, other: object) -> bool:
+    def is_python_equal(self, other):
         return isinstance(
             other, UserDefinedSetVariable
         ) and self._set_vt.is_python_equal(other._set_vt)
@@ -2526,7 +2521,7 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
     def is_underlying_vt_modified(self, side_effects: "SideEffects") -> bool:
         return side_effects.is_modified(self._list_vt)
 
-    def is_python_hashable(self) -> Literal[False]:
+    def is_python_hashable(self):
         raise_on_overridden_hash(self.value, self)
         return False
 
@@ -2588,14 +2583,14 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             return self._tuple_vt.unpack_var_sequence(tx)
         raise NotImplementedError
 
-    def is_python_hashable(self) -> bool:
+    def is_python_hashable(self):
         raise_on_overridden_hash(self.value, self)
         return self._tuple_vt.is_python_hashable()
 
-    def get_python_hash(self) -> int:
+    def get_python_hash(self):
         return self._tuple_vt.get_python_hash()
 
-    def is_python_equal(self, other: object) -> bool:
+    def is_python_equal(self, other):
         return isinstance(
             other, UserDefinedTupleVariable
         ) and self._tuple_vt.is_python_equal(other._tuple_vt)

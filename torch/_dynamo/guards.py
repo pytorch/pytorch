@@ -39,7 +39,14 @@ from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
 from typing import Any, NamedTuple, NoReturn, Optional, TYPE_CHECKING, Union
-from typing_extensions import LiteralString, TypeAliasType, TypeVar
+
+
+try:
+    from typing import LiteralString
+except ImportError:
+    from typing_extensions import LiteralString
+
+from typing_extensions import TypeAliasType, TypeVar
 from weakref import ReferenceType
 
 import torch
@@ -2592,9 +2599,7 @@ class GuardBuilder(GuardBuilderBase):
         assert output_graph is not None
         global_state = output_graph.global_state_guard
         self.check_fn_manager.global_state = global_state
-
         code = [
-            # pyrefly: ignore[missing-attribute]
             f"___check_global_state() against {self.check_fn_manager.global_state.__getstate__()}"
         ]
 
@@ -3677,7 +3682,7 @@ class CheckFunctionManager:
         save_guards: bool = False,
         strict_error: bool = False,
         source_get_cache: Optional[dict[str, Any]] = None,
-    ) -> None:
+    ):
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
 

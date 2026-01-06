@@ -2,9 +2,9 @@
 Python polyfills for traceback
 """
 
+from __future__ import annotations
+
 import traceback
-from traceback import FrameSummary
-from types import TracebackType
 
 from ..decorators import substitute_in_graph
 
@@ -13,9 +13,7 @@ __all__ = ["extract_tb", "clear_frames"]
 
 
 @substitute_in_graph(traceback.extract_tb, can_constant_fold_through=True)
-def extract_tb(
-    tb: TracebackType | None, limit: int | None = None
-) -> list[FrameSummary]:
+def extract_tb(tb, limit=None):
     if tb is None:
         return []
     frame_summary = []
@@ -35,6 +33,6 @@ def extract_tb(
 
 
 @substitute_in_graph(traceback.clear_frames, can_constant_fold_through=True)
-def clear_frames(tb: traceback.FrameSummary | None) -> None:
+def clear_frames(tb):
     # no-op
     return None

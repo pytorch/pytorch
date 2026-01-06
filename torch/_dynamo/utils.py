@@ -953,7 +953,7 @@ ANSI_ESCAPE_PATTERN = re.compile(
 class StripAnsiFormatter(logging.Formatter):
     """Logging formatter that strips ANSI escape codes."""
 
-    def format(self, record: logging.LogRecord) -> str:
+    def format(self, record):
         msg = super().format(record)
         return ANSI_ESCAPE_PATTERN.sub("", msg)
 
@@ -1084,7 +1084,6 @@ def istype(obj: object, allowed_types: Any) -> bool:
     return type(obj) is allowed_types
 
 
-_builtin_final_typing_classes: tuple[Any, ...] = tuple()
 if sys.version_info >= (3, 12):
     # Some typing classes moved to C in 3.12,
     # which no longer have the _Final mixin.
@@ -3453,7 +3452,7 @@ def get_concrete_sizes_from_symints(
     shape_env = fake_mode.shape_env
     var_to_val = shape_env.var_to_val
 
-    def replace_sym(match: Any) -> str:
+    def replace_sym(match):
         sym_name = f"s{match.group(1)}"
         val = next(
             (v for k, v in var_to_val.items() if k.name == sym_name),
@@ -4253,7 +4252,6 @@ def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
 
     import ast
 
-    tree: Any | None = None
     try:
         # Without brackets, `segment` is parsed as a statement.
         # We expect an expression, so wrap `segment` in
@@ -4261,7 +4259,6 @@ def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
         tree = ast.parse("(\n" + segment + "\n)")
     except SyntaxError:
         return None
-    assert tree is not None
 
     if len(tree.body) != 1:
         return None
@@ -4408,7 +4405,7 @@ def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> s
         result = textwrap.indent(textwrap.dedent(result), indent)
         return result
 
-    assert hasattr(inst, "positions") and inst.positions is not None
+    assert inst.positions is not None
     if inst.positions.lineno is None:
         return ""
     # The rstrip + "\n" pattern is used throughout this function to handle

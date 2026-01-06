@@ -39,7 +39,7 @@ import types
 import unittest
 import warnings
 import weakref
-from collections.abc import Generator, Sized
+from collections.abc import Sized
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
@@ -207,7 +207,7 @@ def get_example_inputs(key: str) -> list[Any]:
 
 
 @contextlib.contextmanager
-def _set_in_optimized_module() -> Generator[None, None, None]:
+def _set_in_optimized_module():
     # Set in dynamo's OptimizedModule forward, to have better coverage than is_compiling().
     # Prevents graph-breaking forward hooks from being registered & traced.
     # TODO(pianpwk): subsume this flag with better is_compiling() coverage
@@ -551,14 +551,14 @@ class OptimizedModule(torch.nn.Module):
             return self._modules["_orig_mod"]
         return getattr(self._orig_mod, name)
 
-    def __setattr__(self, name: str, value: Any) -> None:
+    def __setattr__(self, name: str, val: Any) -> None:
         # Allow patching over class attributes
         if hasattr(type(self), name):
-            return super().__setattr__(name, value)
+            return super().__setattr__(name, val)
 
         if name in OptimizedModule._opt_mod_attributes:
-            return super().__setattr__(name, value)
-        return setattr(self._orig_mod, name, value)
+            return super().__setattr__(name, val)
+        return setattr(self._orig_mod, name, val)
 
     def __delattr__(self, name: str) -> None:
         # This mirrors `__setattr__`
