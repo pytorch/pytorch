@@ -540,7 +540,6 @@ else:
             if self is other:
                 return True
             if not isinstance(other, DeviceMesh):
-                raise RuntimeError(f"other not a DeviceMesh, instead got {type(other)}")
                 return False
             return (
                 self._flatten_rank_map == other._flatten_rank_map
