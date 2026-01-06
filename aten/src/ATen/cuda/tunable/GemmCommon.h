@@ -277,6 +277,9 @@ static bool NumericalCheck(ScalarType dtype, void* c, void* other_c, int64_t siz
 template <typename T>
 struct GemmParams : OpParams {
   GemmParams() = default;
+  GemmParams(const GemmParams&) = default;
+  GemmParams& operator=(const GemmParams&) = default;
+  ~GemmParams() override = default;
 
   std::string BLASSignature() const override {
     std::string alpha_str = to_string_opmath<T>(alpha);
@@ -319,8 +322,7 @@ struct GemmParams : OpParams {
   }
 
   GemmParams* DeepCopy(bool duplicate_inputs) const {
-    GemmParams* copy = new GemmParams;
-    *copy = *this;
+    GemmParams* copy = new GemmParams(*this);
     c10::DeviceIndex device = 0;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
     size_t c_size = GetSizeC();
@@ -374,6 +376,13 @@ private:
 
 template <typename T>
 struct GemmAndBiasParams : OpParams {
+  GemmAndBiasParams() = default;
+  GemmAndBiasParams(const GemmAndBiasParams&) = default;
+  GemmAndBiasParams(GemmAndBiasParams&&) noexcept = default;
+  GemmAndBiasParams& operator=(const GemmAndBiasParams&) = default;
+  GemmAndBiasParams& operator=(GemmAndBiasParams&&) noexcept = default;
+  ~GemmAndBiasParams() override = default;
+
   std::string BLASSignature() const override {
     std::string alpha_str = to_string_opmath<T>(alpha);
     std::string beta_str = to_string_opmath<T>(beta);
@@ -416,8 +425,7 @@ struct GemmAndBiasParams : OpParams {
   }
 
   GemmAndBiasParams* DeepCopy(bool duplicate_inputs) const {
-    GemmAndBiasParams* copy = new GemmAndBiasParams;
-    *copy = *this;
+    GemmAndBiasParams* copy = new GemmAndBiasParams(*this);
     c10::DeviceIndex device = 0;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
     size_t c_size = GetSizeC();
@@ -474,6 +482,13 @@ private:
 
 template <typename T, typename C_Dtype = T>
 struct GemmStridedBatchedParams : OpParams {
+  GemmStridedBatchedParams() = default;
+  GemmStridedBatchedParams(const GemmStridedBatchedParams&) = default;
+  GemmStridedBatchedParams(GemmStridedBatchedParams&&) noexcept = default;
+  GemmStridedBatchedParams& operator=(const GemmStridedBatchedParams&) = default;
+  GemmStridedBatchedParams& operator=(GemmStridedBatchedParams&&) noexcept = default;
+  ~GemmStridedBatchedParams() override = default;
+
   std::string BLASSignature() const override {
     std::string alpha_str = to_string_opmath<T>(alpha);
     std::string beta_str = to_string_opmath<T>(beta);
@@ -515,8 +530,7 @@ struct GemmStridedBatchedParams : OpParams {
   }
 
   GemmStridedBatchedParams* DeepCopy(bool duplicate_inputs) const {
-    GemmStridedBatchedParams* copy = new GemmStridedBatchedParams;
-    *copy = *this;
+    GemmStridedBatchedParams* copy = new GemmStridedBatchedParams(*this);
     c10::DeviceIndex device = 0;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
     size_t c_size = GetSizeC();
@@ -577,6 +591,11 @@ private:
 template <typename T>
 struct ScaledGemmParams : OpParams {
   ScaledGemmParams() = default;
+  ScaledGemmParams(const ScaledGemmParams&) = default;
+  ScaledGemmParams(ScaledGemmParams&&) noexcept = default;
+  ScaledGemmParams& operator=(const ScaledGemmParams&) = default;
+  ScaledGemmParams& operator=(ScaledGemmParams&&) noexcept = default;
+  ~ScaledGemmParams() override = default;
 
   std::string BLASSignature() const override {
     // Excluding use_fast_accum and use_rowise booleans for now
@@ -636,8 +655,7 @@ struct ScaledGemmParams : OpParams {
   }
 
   ScaledGemmParams* DeepCopy(bool duplicate_inputs) const {
-    ScaledGemmParams* copy = new ScaledGemmParams;
-    *copy = *this;
+    ScaledGemmParams* copy = new ScaledGemmParams(*this);
     c10::DeviceIndex device = 0;
     AT_CUDA_CHECK(c10::cuda::GetDevice(&device));
     size_t c_size = GetSizeC();

@@ -76,6 +76,7 @@ from torch.testing._internal.common_utils import (
     skipIfHpu,
     skipIfWindows,
     TEST_WITH_ROCM,
+    xfailIfS390X,
 )
 from torch.testing._internal.logging_utils import LoggingTestCase, make_logging_test
 from torch.testing._internal.two_tensor import TwoTensor
@@ -103,6 +104,8 @@ if HAS_MSGSPEC:
 HAS_OMEGACONG = importlib.util.find_spec("omegaconf")
 if HAS_OMEGACONG:
     from omegaconf import OmegaConf
+
+HAS_CUDA = torch.cuda.is_available()
 
 
 def exists(val):
@@ -3291,13 +3294,13 @@ class ReproTests(torch._dynamo.test_case.TestCase):
     def test_rewrite_assert_with_non_string_msg(self):
         def f(x):
             b = x.sin()
-            assert x[0] == 2, f"Error {x}: {x.size()}"
+            assert x[0] == 2, x
             return x.cos() + b
 
         torch._dynamo.utils.counters.clear()
         args = torch.Tensor([3, 4, 5])
         opt_f = torch.compile(f, backend="eager")
-        with self.assertRaisesRegex(AssertionError, "torch.Size"):
+        with self.assertRaisesRegex(AssertionError, "tensor"):
             opt_f(args)
         for gb, cnt in torch._dynamo.utils.counters["graph_break"].items():
             if "assert with non-string message" in gb:
@@ -7486,6 +7489,7 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
             msg,
         )
 
+    @xfailIfS390X
     @unittest.skipIf(
         sys.version_info < (3, 12) or sys.version_info >= (3, 14),
         "only 3.12, 3.13 affected by c recursion limit",
@@ -7703,6 +7707,50 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
                     functools.partial(policy, set_type([torch.ops.aten.mm.default])),
                 ),
             )
+
+    # https://github.com/pytorch/pytorch/issues/151296
+    def test_select_scatter_mixed_dtype(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                src = torch.tensor([0])
+                out = torch.select_scatter(x, src, 1, 0)
+                return out
+
+        model = Model()
+        x = torch.randn(1, 10)
+        inputs = [x]
+
+        compiled_model = torch.compile(model, backend="eager")
+
+        self.assertEqual(model(*inputs), compiled_model(*inputs))
+
+    # https://github.com/pytorch/pytorch/issues/151670
+    @requires_cuda
+    def test_diagonal_scatter_single_elem_cpu_with_cuda_tensor(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+
+            def forward(self, x):
+                y = torch.ones(x.size(0))
+                x = torch.diagonal_scatter(x, y)
+                return x
+
+        model = Model()
+
+        x = torch.rand(1, 2)
+        inputs = [x]
+
+        device = "cuda"
+        model = model.to(device)
+        inputs = [x.to(device) for x in inputs]
+
+        compiled_model = torch.compile(model, backend="eager")
+
+        self.assertEqual(model(*inputs), compiled_model(*inputs))
 
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
@@ -8509,6 +8557,78 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         self.assertTrue(torch.allclose(result, expected))
         # Should compile successfully with fullgraph=True
         self.assertEqual(cnt.frame_count, 1)
+
+    @unittest.skipIf(not HAS_CUDA, "Tests moving from cuda to cpu and back")
+    def test_move_tensor_subclass_parameter_after_compile(self):
+        aten = torch.ops.aten
+
+        class Subclass(torch.Tensor):
+            def __new__(cls, data):
+                return torch.Tensor._make_wrapper_subclass(
+                    cls, data.shape, dtype=data.dtype, device=data.device
+                )
+
+            def __init__(self, data):
+                self._data = data
+
+            def __repr__(self):
+                return f"{self.__class__.__name__}(data={self._data})"
+
+            def __tensor_flatten__(self):
+                return ["_data"], []
+
+            @classmethod
+            def __tensor_unflatten__(cls, inner_tensors, ctx, outer_size, outer_stride):
+                return cls(inner_tensors["_data"])
+
+            def __torch_function__(self, func, types, args, kwargs=None):
+                if func == torch.nn.functional.linear:
+                    return func(args[0], args[1]._data, *args[2:])
+
+                with torch._C.DisableTorchFunctionSubclass():
+                    return func(*args, **(kwargs or dict()))
+
+            def __torch_dispatch__(self, func, types, args, kwargs):
+                if func in (aten._to_copy.default, aten.detach.default):
+                    args = [x._data if isinstance(x, Subclass) else x for x in args]
+                    out = func(*args, **kwargs)
+                    return Subclass(out)
+
+                raise NotImplementedError(f"{func=}")
+
+        # Compile on cuda
+        device = "cuda"
+        linear = torch.nn.Linear(2, 2, device=device)
+        linear.weight = torch.nn.Parameter(Subclass(linear.weight.detach()))
+        linear.compile()
+        linear(torch.randn(1, 2, device=device))
+
+        # TODO @azahed98: We wish to test that there are no weakrefs, but there are known issues
+        # with weakrefs from
+        # 1. TracingContext.tensor_to_context
+        # 2. MetaTensorDescriber.lookup_tensor
+
+        # Check for weakrefs
+        t1 = linear.weight
+        self.assertEqual(len(weakref.getweakrefs(t1)), 2)
+
+        # TODO @azahed98: Once the aforementioned issue is fixed, we can remove the self.assertRaises
+        with self.assertRaises(RuntimeError):
+            # Move to cpu. Should work with no weakrefs
+            linear.cpu()
+
+            # Move back to cuda and check that there is no recompile
+            linear.to(device)
+            prev_frame_count = torch._dynamo.utils.counters.get("frames", {}).get(
+                "ok", 0
+            )
+            linear(torch.randn(1, 2, device=device))
+            new_frame_count = torch._dynamo.utils.counters.get("frames", {}).get(
+                "ok", 0
+            )
+            assert new_frame_count == prev_frame_count, (
+                "linear() call caused a recompile"
+            )
 
 
 instantiate_parametrized_tests(ReproTests)

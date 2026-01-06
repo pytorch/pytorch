@@ -805,7 +805,6 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
 
   TORCH_CHECK(result.is_contiguous(), "Expected result to be contiguous.");
 
-#if defined(CUDA_VERSION) || defined(USE_ROCM)
   cublasCommonArgs args(self, mat2, result);
 
   at::cuda::blas::int8_gemm(
@@ -824,14 +823,6 @@ Tensor& _int_mm_out_cuda(const Tensor& self, const Tensor& mat2, Tensor& result)
   if (!result.is_same(*args.result)) {
     result.copy_(*args.result);
   }
-#else
-#if !defined(USE_ROCM) && defined(CUDA_VERSION)
-  TORCH_CHECK(false, "_int_mm_out_cuda not compiled for CUDA ", CUDA_VERSION);
-#else
-  TORCH_CHECK(false, "_int_mm_out_cuda not compiled for this platform.");
-#endif
-#endif
-
   return result;
 }
 
