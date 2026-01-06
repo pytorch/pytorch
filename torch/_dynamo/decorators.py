@@ -863,10 +863,11 @@ def _allow_in_graph_einops() -> None:
 
 def _force_trace_einops(einops):
     # einops register some of its methods using "allow_in_graph". Remove them
-    # so Dynamo can trace it
+    # so Dynamo can trace it.
 
-    # trigger backend registration
     if hasattr(einops, "einops") and hasattr(einops.einops, "get_backend"):
+        # trigger backend registration up front to avoid a later guard failure
+        # that would otherwise cause a recompilation
         einops.einops.get_backend(torch.tensor(1))
 
     trace_rules._force_trace_callable_ids.add(id(einops.rearrange))

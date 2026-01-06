@@ -817,13 +817,6 @@ class DictSubclassGetItemSource(ChainedSource):
             return f"dict.__getitem__({{0}}, {_esc_str(self.index.name)})"
         else:
             return f"{{0}}[{_esc_str(self.index, apply_repr=True)}]"
-        # elif isinstance(self.index, type):
-        #     # UserDefinedClassVariable
-        #     assert str(self.index).startswith("<class"), self.index
-        #     idx = str(self.index).removeprefix("<class '").removesuffix("'>")
-        #     return f"{self.base.name()}[{idx}]"
-        # else:
-        #     raise AssertionError(f"unhandled index type: {type(self.index)}")
 
 
 @dataclass_with_cached_hash(frozen=True)
