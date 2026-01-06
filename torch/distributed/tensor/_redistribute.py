@@ -123,7 +123,7 @@ def get_redistribute_planner(
     """
     Factory function to get or create a DTensorRedistributePlanner instance.
     This function provides transparent caching of planner instances based on
-    device_mesh and tensor_dimension. Multiple calls with the same parameters
+    device mesh and dtensor meta. Multiple calls with the same parameters
     will return the same cached instance for better performance.
     Args:
         device_mesh: The device mesh for the planner
@@ -133,9 +133,8 @@ def get_redistribute_planner(
     """
     if _are_we_tracing():
         return DTensorRedistributePlanner(device_mesh, dtensor_meta)
-    # Use the underlying shape (torch.Size) from TensorMeta for the cache key
-    cache_key = (weakref.ref(device_mesh), dtensor_meta)
 
+    cache_key = (weakref.ref(device_mesh), dtensor_meta)
     if cache_key not in _planner_cache:
         planner = DTensorRedistributePlanner(device_mesh, dtensor_meta)
         _planner_cache[cache_key] = planner
