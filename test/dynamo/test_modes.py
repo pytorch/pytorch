@@ -834,11 +834,11 @@ class InfraModeCompileTests(torch._dynamo.test_case.TestCase):
 
         mode = MutableInfraMode()
         with mode:
-            result1 = compiled_fn(x)
+            compiled_fn(x)
             # NB: not 200, which would happen if the infra mode was on inside
             # during compilation!
             self.assertEqual(mode.mul_count, 100)
-            result2 = compiled_fn(x)
+            compiled_fn(x)
             self.assertEqual(mode.mul_count, 200)
 
 

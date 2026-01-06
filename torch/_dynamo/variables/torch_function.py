@@ -305,9 +305,9 @@ class SymbolicTorchFunctionState:
             # creating guards on their internal state during FX tracing
             if not type(val).is_infra_mode():
                 self.mode_stack.append(
-                    LazyVariableTracker.create(
+                    LazyVariableTracker.create(  # type: ignore[arg-type]
                         val, source=TorchFunctionModeStackSource(i)
-                    )  # type: ignore[arg-type]
+                    )
                 )
 
     def in_torch_function_mode(self) -> bool:
