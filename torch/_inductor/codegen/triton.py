@@ -49,12 +49,7 @@ from ..runtime.hints import (
     TRITON_MAX_RSPLIT,
 )
 from ..runtime.runtime_utils import get_max_y_grid, next_power_of_2
-from ..scheduler import (
-    BaseSchedulerNode,
-    FusedSchedulerNode,
-    Scheduler,
-    SchedulerNode,
-)
+from ..scheduler import BaseSchedulerNode, FusedSchedulerNode, Scheduler, SchedulerNode
 from ..shape_propagation import get_broadcasted_shape
 from ..utils import (
     cache_on_self,
@@ -3363,10 +3358,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             )
 
         assert dependencies
-        need_wait = (
-            prev_node is None
-            or any(matching_dep(d) for d in dependencies)
-        )
+        need_wait = prev_node is None or any(matching_dep(d) for d in dependencies)
         if not need_wait:
             return
         # hoist before the loop
@@ -3386,7 +3378,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         # the issue is that we need to (a) make sure this happens
         # but (b) do not know if this is last yet
-        # so we need to remenber this (has_wait), which tells use
+        # so we need to remember this (has_wait), which tells use
         # whether we would have needed it, and check if we are last
         launch_buffer.writeline(self.GDC_WAIT)
         launch_buffer.writeline(self.GDC_LAUNCH)
@@ -3407,7 +3399,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 previous_launch = len(new_lines)
             new_lines.append(l)
         code._lines = new_lines
-
 
     def partial_accumulate(
         self, name: str, reduction_type, val, extra_meta: dict[str, Any]
