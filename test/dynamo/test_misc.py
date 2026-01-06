@@ -9613,6 +9613,30 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         for name, expect_obj in test_case:
             self.assertEqual(strip_function_call(name), expect_obj)
 
+    def test_resume_on_custom_binary_op(self):
+        class Foo:
+            def __eq__(self, other):
+                torch._dynamo.graph_break()
+                return True
+
+            def __add__(self, other):
+                torch._dynamo.graph_break()
+                return self
+
+        @torch.compile(backend="eager")
+        def fn(x, a, b):
+            x = x + 1
+            cmp = a == b
+            if not torch.compiler.is_compiling():
+                assert False
+            x = x + 2
+            sum = a + b
+            if not torch.compiler.is_compiling():
+                assert False
+            return x + 4
+
+        fn(torch.ones(3), Foo(), Foo())
+
     def test_int_neg(self):
         def int_neg(a, b):
             x = a.shape[0]
