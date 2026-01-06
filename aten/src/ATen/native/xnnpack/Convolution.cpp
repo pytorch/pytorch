@@ -349,8 +349,8 @@ Tensor run(
 
     setup_status = xnn_setup_deconvolution2d_nhwc_f32(
       context.op.get(),                                      // operator
-      padded_input_nhwc.const_data_ptr<float>(),                   // input
-      output.mutable_data_ptr<float>());                             // output
+      padded_input_nhwc.const_data_ptr<float>(),             // input
+      output.mutable_data_ptr<float>());                     // output
   } else {
     size_t workspace_size = SIZE_MAX;
     size_t workspace_alignment = SIZE_MAX;
@@ -369,8 +369,8 @@ Tensor run(
     setup_status = xnn_setup_convolution2d_nhwc_f32(
       context.op.get(),                                      // operator
       nullptr,                                               // workspace
-      padded_input_nhwc.const_data_ptr<float>(),                   // input
-      output.mutable_data_ptr<float>());                             // output
+      padded_input_nhwc.const_data_ptr<float>(),             // input
+      output.mutable_data_ptr<float>());                     // output
   }
 
   TORCH_CHECK(
