@@ -933,14 +933,15 @@ def register_pointwise(
     return fn
 
 
+register_op_dtype_propagation_rules(
+    "ldexp",
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    override_return_dtype=None,
+)
+
+
 @register_lowering(aten.ldexp, broadcast=True, type_promotion_kind=None)
 def ldexp_lowering(x: TensorBox, n: TensorBox):
-    register_op_dtype_propagation_rules(
-        "ldexp",
-        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
-        override_return_dtype=None,
-    )
-
     ldexp_fn = ops_wrapper("ldexp")
 
     x_dtype = x.get_dtype()
