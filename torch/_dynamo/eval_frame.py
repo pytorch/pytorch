@@ -642,6 +642,15 @@ def make_set_enable_dynamic(enable: bool) -> Any:
         )
 
 
+@contextlib.contextmanager
+def set_enable_dynamic(enable: bool):
+    cleanup = make_set_enable_dynamic(enable)()
+    try:
+        yield
+    finally:
+        cleanup()
+
+
 # A thread local storage that serves to store information as Dynamo traces
 # through a user provided function.
 class DynamoTLS(threading.local):
@@ -839,6 +848,7 @@ class _TorchDynamoContext:
                 backend=innermost_fn(
                     self.callback, unaltered_fn_attr="_torchdynamo_orig_backend"
                 ),
+                dynamic=self._dynamic,
             )
 
         # add context containing GraphModule to any GraphModule forward functions
@@ -981,7 +991,7 @@ class _TorchDynamoContext:
                     while cur_exn.__cause__ is not None:
                         cur_exn.__cause__.with_traceback(None)
                         cur_exn = cur_exn.__cause__
-                    # pyrefly: ignore [invalid-inheritance]
+
                     raise e.with_traceback(None) from e.__cause__  # User compiler error
                 except ShortenTraceback as e:
                     # Failures in the backend likely don't have useful

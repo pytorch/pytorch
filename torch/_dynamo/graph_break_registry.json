@@ -687,6 +687,17 @@
       ]
     }
   ],
+  "GB4197": [
+    {
+      "Gb_type": "Unsupported Tensor.share_memory_() call",
+      "Context": "call_method {self} share_memory_",
+      "Explanation": "Dynamo does not support Tensor.share_memory_() which modifies tensor storage for IPC",
+      "Hints": [
+        "Move share_memory_() call outside the compiled region. ",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0062": [
     {
       "Gb_type": "Failed to unpack object for UNPACK_EX",
@@ -1761,6 +1772,59 @@
       "Explanation": "Dynamo encountered a super().__init__() call on {objvar} that resolved to a `torch.nn.Module.__init__()` call that we cannot trace.",
       "Hints": [
         "This graph break may be difficult to debug. Please report an issue to PyTorch for assistance."
+      ]
+    }
+  ],
+  "GB2533": [
+    {
+      "Gb_type": "reconstructing @contextmanager object",
+      "Context": "object: {value}",
+      "Explanation": "Returning a @contextmanager object from a compiled function is not supported.",
+      "Hints": [
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB7312": [
+    {
+      "Gb_type": "failed to bind arguments when attempting to inline",
+      "Context": "func='{func.get_name()}' {func.get_filename()}:{func.get_code().co_firstlineno}; args = {[arg.python_type() for arg in args]}; kwargs = {kwargs}",
+      "Explanation": "Argument mismatch when attempting to trace function {func.get_name()}.",
+      "Hints": [
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB8335": [
+    {
+      "Gb_type": "Generator reconstruction with mutations",
+      "Context": "mutating object: {item}",
+      "Explanation": "Cannot reconstruct a generator with variable mutations. Dynamo needs to fully exhaust the generator, which may cause unintended variable modifications.",
+      "Hints": [
+        "Remove mutations from the generator.",
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
+      ]
+    }
+  ],
+  "GB2549": [
+    {
+      "Gb_type": "infinite generator detected",
+      "Context": "",
+      "Explanation": "Dynamo traced the YIELD_VALUE bytecode too many times. This could mean that we have attempted to trace an infinite generator.",
+      "Hints": [
+        "If you are sure that your generator is not infinite, please report a bug at {PT2_ISSUE_TRACKER_URL}.",
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB1177": [
+    {
+      "Gb_type": "nn.Module mutation in HigherOrderOp",
+      "Context": "nn.Module: {obj}",
+      "Explanation": "Inplace modifying nn.Module params/buffers inside HigherOrderOps is not allowed.",
+      "Hints": [
+        "Remove the mutation or move it outside of the HigherOrderOp.",
+        "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
       ]
     }
   ],
