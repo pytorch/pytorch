@@ -86,6 +86,9 @@ jobs:
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
+      - name: Login to ECR
+        uses: ./.github/actions/ecr-login
+
       - name: Pull Docker image
         uses: pytorch/test-infra/.github/actions/pull-docker-image@main
         with:
@@ -171,7 +174,7 @@ jobs:
 
       - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
-          name: pytorch-triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}-${{ env.PLATFORM }}
+          name: triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}-${{ env.PLATFORM }}
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/wheelhouse/*
 
@@ -258,7 +261,7 @@ jobs:
           mv ./*.whl "${RUNNER_TEMP}/artifacts/"
       - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
-          name: pytorch-triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}
+          name: triton-wheel-${{ matrix.py_vers }}-${{ matrix.device }}
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/*
 
@@ -302,7 +305,7 @@ jobs:
         run: |
           set -x
           mkdir -p "${RUNNER_TEMP}/artifacts/"
-          mv "${RUNNER_TEMP}"/artifacts-all/pytorch-triton-wheel-*/* "${RUNNER_TEMP}/artifacts/"
+          mv "${RUNNER_TEMP}"/artifacts-all/triton-wheel-*/* "${RUNNER_TEMP}/artifacts/"
 
       - name: Set DRY_RUN (only for tagged pushes)
         if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/main' || startsWith(github.event.ref, 'refs/tags/v')) }}

@@ -1,5 +1,5 @@
 # mypy: disable-error-code=import-not-found
-# pyrefly: ignore [import-error]
+# pyrefly: ignore [import-error, missing-import]
 import cutlass.cute as cute
 
 
@@ -11,7 +11,7 @@ def ssa_to_indexable(ssa_value: cute.TensorSSA, dtype: str) -> cute.Numeric:
     Workaround for lack of gather support: SSA values cannot be used directly
     as indices in tensor loads. This converts SSA → fragment → scalar for indexing.
     """
-    frag = cute.make_fragment(1, dtype)
+    frag = cute.make_rmem_tensor(1, dtype)
     frag.store(ssa_value)
     return frag[0]
 
@@ -24,6 +24,6 @@ def result_to_ssa(value: cute.Numeric, dtype: str) -> cute.TensorSSA:
     After performing operations with non-SSA values (like indexed loads),
     convert the result back to SSA form for further computation.
     """
-    frag = cute.make_fragment(1, dtype)
+    frag = cute.make_rmem_tensor(1, dtype)
     frag[0] = value
     return frag.load()

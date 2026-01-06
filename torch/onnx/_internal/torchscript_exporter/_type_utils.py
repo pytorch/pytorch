@@ -153,7 +153,7 @@ class JitScalarType(enum.IntEnum):
         """
         if dtype not in _DTYPE_TO_SCALAR_TYPE:
             raise errors.OnnxExporterError(f"Unknown dtype: {dtype}")
-        # pyrefly: ignore [index-error]
+        # pyrefly: ignore [bad-index, index-error]
         return _DTYPE_TO_SCALAR_TYPE[dtype]
 
     @classmethod
@@ -177,7 +177,7 @@ class JitScalarType(enum.IntEnum):
 
     @classmethod
     def from_value(
-        cls, value: None | torch._C.Value | torch.Tensor, default=None
+        cls, value: torch._C.Value | torch.Tensor | None, default=None
     ) -> JitScalarType:
         """Create a JitScalarType from an value's scalar type.
 

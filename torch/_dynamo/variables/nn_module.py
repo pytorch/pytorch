@@ -112,9 +112,11 @@ def initialize_lazy_module(
             raise_observed_exception(
                 AttributeError,
                 tx,
-                msg=str(e)
-                if str(e)
-                else "AttributeError during lazy module initialization",
+                args=[
+                    str(e)
+                    if str(e)
+                    else "AttributeError during lazy module initialization"
+                ],
             )
 
 
@@ -122,7 +124,7 @@ def initialize_lazy_module(
 def record_nn_module_stack(
     module_key: str, source: Source, tx: "InstructionTranslator", mod: torch.nn.Module
 ) -> Any:
-    fully_qualified_name = source.name()
+    fully_qualified_name = source.name
     # Remove redundant namings
     fully_qualified_name = re.sub(
         r"\._(?:modules|parameters|buffers)\[(['\"])([^'\"\]]+)\1\]",
@@ -341,7 +343,7 @@ class NNModuleVariable(VariableTracker):
             )
 
         options = {"source": AttrSource(obj_source, "__getattr__")}
-        # pyrefly: ignore[bad-argument-type]
+
         return variables.UserMethodVariable(getattr_fn, self, **options).call_function(
             tx, [variables.ConstantVariable.create(name)], {}
         )
@@ -397,7 +399,7 @@ class NNModuleVariable(VariableTracker):
                 raise_observed_exception(
                     AttributeError,
                     tx,
-                    msg=f"'{type(base).__name__}' object has no attribute '{name}'",
+                    args=[f"'{type(base).__name__}' object has no attribute '{name}'"],
                 )
 
         if name == "forward":
@@ -437,7 +439,6 @@ class NNModuleVariable(VariableTracker):
                 )
             elif istype(subobj, staticmethod):
                 return variables.UserFunctionVariable(
-                    # pyrefly: ignore[bad-argument-type]
                     subobj.__get__(base),
                     source=source,
                 )
@@ -531,11 +532,6 @@ class NNModuleVariable(VariableTracker):
                 tx.output.is_root_tracer()
                 and mod.__module__.startswith(("torch.nn.", "torch.ao."))
                 and mod.__module__ != "torch.nn.utils.parametrize"
-                # this basically means we are using the new strict export tracer which wraps the
-                # user callable, so we shouldn't directly proxy in the fx graph
-                and not isinstance(
-                    mod, torch.ao.quantization.pt2e.export_utils._WrapperModule
-                )
             ):
                 if nnmodule_has_hooks(
                     mod, check_forward_hooks=True, check_backward_hooks=True
@@ -570,7 +566,6 @@ class NNModuleVariable(VariableTracker):
                 else:
                     assert istype(fn, types.FunctionType)
                 return tx.inline_user_function_return(
-                    # pyrefly: ignore[bad-argument-type]
                     variables.UserFunctionVariable(fn, source=fn_source),
                     args,
                     kwargs,
@@ -859,7 +854,7 @@ class NNModuleVariable(VariableTracker):
             # pyrefly: ignore[missing-attribute]
             if type(module).__getitem__ not in builtin_supported:
                 if not (
-                    isinstance(args[0], variables.ConstantVariable)
+                    args[0].is_python_constant()
                     and isinstance(args[0].as_python_constant(), (str, int))
                 ):
                     unimplemented(
@@ -963,10 +958,7 @@ class NNModuleVariable(VariableTracker):
         elif (
             name in module.__class__.__dict__
             and callable(module.__class__.__dict__[name])
-            and all(
-                isinstance(x, variables.TensorVariable)
-                for x in itertools.chain(args, kwargs.values())
-            )
+            and all(x.is_tensor() for x in itertools.chain(args, kwargs.values()))
         ):
             return generic_call_method_helper(name)
         else:
@@ -1117,7 +1109,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     or globals_vt.var_getattr(tx, "_global_forward_pre_hooks").len()  # type: ignore[attr-defined]
                 ):
                     name = "forward"
-                    fn = self.value_type.forward
+                    fn = self.value_type.forward  # type: ignore[attr-defined]
 
         if self.source:
             source = self.get_source_by_walking_mro(name)
@@ -1208,8 +1200,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                 # This is reverse engineered by looking at nn module __setattr__
                 # logic.
                 if (
-                    isinstance(value, variables.TensorVariable)
-                    and value.python_type() is torch.nn.Parameter
+                    value.is_tensor() and value.python_type() is torch.nn.Parameter
                 ) or attr_name in self.value.__dict__["_parameters"]:
                     # Handle parameters
                     self.is_state_mutated = True
@@ -1330,7 +1321,9 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             raise_observed_exception(
                 AttributeError,
                 tx,
-                msg=f"'{type(self.value).__name__}' object has no attribute '{name}'",
+                args=[
+                    f"'{type(self.value).__name__}' object has no attribute '{name}'"
+                ],
             )
         assert out is not None
         return out
