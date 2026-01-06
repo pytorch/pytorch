@@ -26,7 +26,7 @@ from .hooks import Hooks
 
 if TYPE_CHECKING:
     from .guards import GuardManagerWrapper
-    from .package import SourceInfo
+    from .package import SerializedCode, SourceInfo
 
 
 log = logging.getLogger(__name__)
@@ -60,17 +60,15 @@ class CompileArtifacts:
 
 
 class AOTCompilePickler(pickle.Pickler):
-    def __init__(
-        self, external_data: dict[str, Any], *args: Any, **kwargs: Any
-    ) -> None:
-        super().__init__(*args, **kwargs)
+    def __init__(self, external_data: dict[str, object], buf: io.BytesIO) -> None:
+        super().__init__(buf)
         self.external_data = external_data
         self.id_map: dict[int, str] = {
             id(value): key for key, value in external_data.items()
         }
         self.errors = {}
 
-    def persistent_id(self, obj):
+    def persistent_id(self, obj: object) -> int | str | None:
         if id(obj) in self.id_map:
             return self.id_map[id(obj)]
         elif isinstance(obj, torch.nn.Module):
@@ -80,31 +78,36 @@ class AOTCompilePickler(pickle.Pickler):
             return None
 
     @classmethod
-    def _unpickle_cell(cls, val: Any) -> Any:
-        def _() -> Any:
+    def _unpickle_cell(cls, val: object) -> object:
+        def _() -> object:
             return val
 
         assert _.__closure__ is not None
         return _.__closure__[0]
 
     @classmethod
-    def _unpickle_bound_method(cls, func: Any, base: Any) -> Any:
+    def _unpickle_bound_method(cls, func: Callable, base: object) -> types.MethodType:
         return types.MethodType(func, base)
 
     @classmethod
-    def _unpickle_module(cls, name: str) -> Any:
+    def _unpickle_module(cls, name: str) -> types.ModuleType:
         return importlib.import_module(name)
 
     @classmethod
-    def _unpickle_code(cls, serialized_code):
+    def _unpickle_code(cls, serialized_code: "SerializedCode") -> types.CodeType:
         from torch._dynamo.package import SerializedCode
 
         return SerializedCode.to_code_object(serialized_code)
 
     @classmethod
     def _unpickle_nested_function(
-        cls, code, module: str, qualname: str, argdefs, closure
-    ) -> Any:
+        cls,
+        code: types.CodeType,
+        module: str,
+        qualname: str,
+        argdefs: tuple[object, ...] | None,
+        closure: tuple[types.CellType, ...] | None,
+    ) -> types.FunctionType:
         f_globals = importlib.import_module(module).__dict__
         return types.FunctionType(code, f_globals, qualname, argdefs, closure)
 
@@ -197,7 +200,6 @@ class AOTCompiledFunction:
 
         self._artifacts.check_compatibility()
 
-        # pyrefly: ignore [read-only]
         self.fn = self._artifacts.runtime_env.forward_callable(
             self._artifacts.backend_id,
             self._artifacts.compiled_fn,

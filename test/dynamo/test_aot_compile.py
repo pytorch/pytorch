@@ -9,6 +9,7 @@ import pickle
 import tempfile
 import unittest
 from collections import namedtuple
+from collections.abc import Callable
 from contextlib import contextmanager
 from unittest.mock import patch
 
@@ -299,7 +300,7 @@ class RedistributeModel(torch.nn.Module):
         return x, y
 
 
-def wrap_forward_function(fn):
+def wrap_forward_function(fn: Callable):
     @functools.wraps(fn, assigned=("__doc__", "__annotations__", "__type_params__"))
     def wrapped(*args, **kwargs):
         return fn(*args, **kwargs)

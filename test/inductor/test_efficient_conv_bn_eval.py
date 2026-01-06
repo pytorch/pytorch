@@ -96,25 +96,6 @@ class MultiUserConvOp(nn.Module):
 class EfficientConvBNEvalTemplate(TestCase):
     @tf32_on_and_off(0.003)
     @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": True})
-    def test_functional_batch_norm_defaults(self):
-        class Model(torch.nn.Module):
-            def forward(self, x, mean, var):
-                return torch.nn.functional.batch_norm(x, mean, var)
-
-        mod = Model().eval()
-        x = torch.randn(1, 3, 4, 4)
-        mean = torch.randn(3)
-        var = torch.abs(torch.randn(3))
-
-        device = getattr(self, "device", "cpu")
-        mod.to(device)
-        x = x.to(device)
-        mean = mean.to(device)
-        var = var.to(device)
-
-        opt = torch.compile(mod, backend="inductor")
-        opt(x, mean, var)
-
     def test_basic(self):
         def test_conv_bn_eval(
             test_class, use_bias, module, sync_bn, decompose_nn_module

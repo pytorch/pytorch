@@ -50,7 +50,6 @@ from torch._inductor.utils import (
     output_node,
     set_tracing_context_output_strides,
 )
-from torch.autograd.profiler import record_function
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_in_torch_dispatch_mode
 
@@ -630,8 +629,9 @@ class CompiledFxGraph(OutputCode):
         try:
             # Checking the profiler directly is faster than nullcontext
             if torch.autograd.profiler._is_profiler_enabled:
-                with record_function(
-                    f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##"
+                with torch._C._profiler._RecordFunctionFast(
+                    f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##",
+                    keyword_values={"scope": "user_scope"},
                 ):
                     return self.current_callable(inputs)
             else:
