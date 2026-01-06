@@ -158,6 +158,83 @@ def _get_num_tensor_inputs(op_schema: OpSchema) -> int:
     return num_inputs
 
 
+def extract_shard_order_patterns(
+    op_schema: OpSchema,
+) -> frozenset[tuple[tuple[int, ...], tuple[type, ...]]]:
+    """
+    Extract shard order patterns from input specs with type normalization.
+
+    For each input spec with multi-dimensional sharding (shard_order is not None),
+    extracts the (mesh_dims, placement_types) pattern. _StridedShard is normalized
+    to Shard for semantic type comparison.
+
+    Only extracts patterns that differ from the default left-to-right ordering,
+    to avoid generating redundant strategy variants.
+
+    Args:
+        op_schema: The op schema containing input strategies
+
+    Returns:
+        Set of patterns as (mesh_dims, types) tuples. Empty set if no patterns found.
+
+    Example:
+        >>> # Input with shard_order: ((1, 0),) and placements: (_StridedShard(0), Shard(0))
+        >>> patterns = extract_shard_order_patterns(op_schema)
+        >>> patterns
+        frozenset({((1, 0), (Shard, Shard))})  # _StridedShard normalized to Shard
+    """
+    patterns: set[tuple[tuple[int, ...], tuple[type, ...]]] = set()
+
+    def _extract_from_strategy(obj: Any) -> None:
+        if isinstance(obj, DTensorSpec):
+            if obj.shard_order is not None:
+                # Compute default shard_order to compare against
+                default_shard_order = DTensorSpec.compute_default_shard_order(
+                    obj.placements
+                )
+
+                # Only extract patterns that differ from default
+                for entry in obj.shard_order:
+                    mesh_dims = entry.mesh_dims
+
+                    # Find the corresponding default entry
+                    default_entry = None
+                    if default_shard_order is not None:
+                        for de in default_shard_order:
+                            if de.tensor_dim == entry.tensor_dim:
+                                default_entry = de
+                                break
+
+                    # Skip if this matches the default ordering
+                    if (
+                        default_entry is not None
+                        and entry.mesh_dims == default_entry.mesh_dims
+                    ):
+                        continue
+
+                    # Extract types with normalization
+                    types = []
+                    for md in mesh_dims:
+                        placement = obj.placements[md]
+                        # Normalize _StridedShard → Shard for semantic comparison
+                        if isinstance(placement, _StridedShard):
+                            types.append(Shard)
+                        else:
+                            types.append(type(placement))
+                    patterns.add((mesh_dims, tuple(types)))
+        elif isinstance(obj, OpStrategy):
+            for strategy in obj.strategies:
+                _extract_from_strategy(strategy.output_spec)
+        elif isinstance(obj, TupleStrategy):
+            for child in obj.children:
+                _extract_from_strategy(child)
+
+    for obj in op_schema.args_schema:
+        _extract_from_strategy(obj)
+
+    return frozenset(patterns)
+
+
 def _expand_single_dim_strategy_to_mesh(
     mesh: DeviceMesh,
     op_schema: OpSchema,
@@ -221,11 +298,16 @@ def _expand_single_dim_strategy_to_mesh(
             # Note: does not support `allow_unbacked_sharding` which is needed by matmul rules for some compile test
             # currently, we should probably change that test though, since it seems wrong to me to allow sharding unbacked
             # dims
+
+            # Extract shard order patterns from inputs
+            shard_order_patterns = extract_shard_order_patterns(op_schema)
+
             return expand_to_full_mesh_op_strategy(
                 mesh,
                 op_schema,
                 cast(list[PlacementList], expanded_strategies_over_one_mesh_dim),
                 output_tensor_meta=output_tensor_meta,
+                shard_order_patterns=shard_order_patterns,
             )
 
         return expanded_strategy

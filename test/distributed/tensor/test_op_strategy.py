@@ -848,5 +848,118 @@ class TestOpSchemaMetaProperties(TestCase):
         self.assertEqual(kwargs_meta["alpha"], 1.0)
 
 
+class TestShardOrderPreservation(TestCase):
+    """Test shard_order preservation in expand_to_full_mesh_op_strategy."""
+
+    def test_find_compatible_ordering(self):
+        """Test prefix/suffix matching logic."""
+        from torch.distributed.tensor._ops.utils import find_compatible_ordering
+
+        # Exact match
+        self.assertEqual(
+            find_compatible_ordering((1, 0, 2), frozenset({0, 1, 2})), (1, 0, 2)
+        )
+
+        # Suffix removal (output is prefix)
+        self.assertEqual(find_compatible_ordering((1, 0, 2), frozenset({0, 1})), (1, 0))
+
+        # Suffix extension
+        self.assertEqual(
+            find_compatible_ordering((1, 0), frozenset({0, 1, 2})), (1, 0, 2)
+        )
+
+        # Incompatible (scattered subset, not a contiguous prefix)
+        self.assertIsNone(find_compatible_ordering((1, 0, 2), frozenset({0, 2})))
+
+        # Incompatible (disjoint sets)
+        self.assertIsNone(find_compatible_ordering((0, 1), frozenset({2, 3})))
+
+    def test_matches_placement_types(self):
+        """Test type matching with _StridedShard normalization."""
+        from torch.distributed.tensor._ops.utils import matches_placement_types
+        from torch.distributed.tensor.placement_types import _StridedShard, Partial
+
+        # Match: both Shard
+        self.assertTrue(
+            matches_placement_types(
+                (Shard, Shard), (Shard(0), Shard(0), Replicate()), (0, 1)
+            )
+        )
+
+        # Match: _StridedShard normalized to Shard
+        self.assertTrue(
+            matches_placement_types(
+                (Shard, Shard),
+                (_StridedShard(0, split_factor=2), Shard(0), Replicate()),
+                (0, 1),
+            )
+        )
+
+        # No match: different types
+        self.assertFalse(
+            matches_placement_types(
+                (Shard, Partial), (Shard(0), Shard(0), Replicate()), (0, 1)
+            )
+        )
+
+    def test_shard_order_preserved_in_expansion(self):
+        """Test that shard_order is preserved through expansion."""
+        from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
+        from torch.distributed.tensor._ops.utils import generate_shard_order_variants
+
+        # Input pattern: (1, 0) with both Shard
+        patterns = frozenset({((1, 0), (Shard, Shard))})
+
+        # Output placements: multi-sharded on tensor_dim=0 across mesh_dims {0, 1, 2}
+        output_placements = (Shard(0), Shard(0), Shard(0))
+
+        # Generate variants
+        variants = generate_shard_order_variants(output_placements, patterns)
+
+        # Should produce one variant with extended ordering (1, 0, 2)
+        self.assertEqual(len(variants), 1)
+        self.assertIsNotNone(variants[0])
+        self.assertEqual(len(variants[0]), 1)
+        entry = variants[0][0]
+        self.assertIsInstance(entry, ShardOrderEntry)
+        self.assertEqual(entry.tensor_dim, 0)
+        self.assertEqual(entry.mesh_dims, (1, 0, 2))
+
+    def test_shard_order_variants_integration(self):
+        """Integration test: verify shard_order variants are generated correctly."""
+        from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
+        from torch.distributed.tensor._ops.utils import generate_shard_order_variants
+
+        # Test multiple patterns
+        patterns = frozenset(
+            {
+                ((1, 0), (Shard, Shard)),
+                ((0, 1, 2), (Shard, Shard, Shard)),
+            }
+        )
+
+        # Output placements: multi-sharded on tensor_dim=0 across mesh_dims {0, 1, 2}
+        output_placements = (Shard(0), Shard(0), Shard(0))
+
+        # Generate variants
+        variants = generate_shard_order_variants(output_placements, patterns)
+
+        # Should produce two variants: one from each pattern
+        self.assertEqual(len(variants), 2)
+
+        # Extract the mesh_dims from each variant
+        mesh_dims_set = set()
+        for variant in variants:
+            self.assertIsNotNone(variant)
+            self.assertEqual(len(variant), 1)
+            entry = variant[0]
+            self.assertIsInstance(entry, ShardOrderEntry)
+            self.assertEqual(entry.tensor_dim, 0)
+            mesh_dims_set.add(entry.mesh_dims)
+
+        # Should have both (1, 0, 2) and (0, 1, 2)
+        self.assertEqual(mesh_dims_set, {(1, 0, 2), (0, 1, 2)})
+
+
 if __name__ == "__main__":
     run_tests()
