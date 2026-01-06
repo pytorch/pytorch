@@ -9,11 +9,11 @@ import unittest
 import functools
 from contextlib import redirect_stderr
 from torch.testing import make_tensor, FileCheck
-from torch.testing._internal.common_cuda import SM53OrLater, SM80OrLater, TEST_CUSPARSE_GENERIC
+from torch.testing._internal.common_cuda import SM80OrLater, TEST_CUSPARSE_GENERIC
 from torch.testing._internal.common_utils import \
     (TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, TEST_CUDA_CUDSS, TEST_SCIPY, TEST_NUMPY, TEST_MKL, IS_WINDOWS, TestCase,
      run_tests, load_tests, coalescedonoff, parametrize, subtest, skipIfTorchDynamo,
-     skipIfRocmVersionLessThan, IS_FBCODE, IS_REMOTE_GPU, suppress_warnings)
+     IS_FBCODE, IS_REMOTE_GPU, suppress_warnings)
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoSparseGeneric,
      precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse, largeTensorTest)
@@ -87,7 +87,7 @@ def _test_addmm_addmv(
     """
     dtype = t.dtype
     numpy_dtype = dtype
-    if dtype in {torch.bfloat16}:
+    if dtype == torch.bfloat16:
         numpy_dtype = torch.float
     if dtype.is_complex:
         alpha = 0.9 + 0.3j if alpha is None else alpha
@@ -1467,7 +1467,7 @@ class TestSparseCSR(TestCase):
     @skipCUDAIfNoSparseGeneric
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
-                  *[torch.half] if SM53OrLater else [],
+                  *[torch.half] if not TEST_WITH_ROCM else [],
                   *[torch.bfloat16] if SM80OrLater else []))
     def test_csr_matvec(self, device, dtype):
 
@@ -1532,7 +1532,6 @@ class TestSparseCSR(TestCase):
 
     @onlyCUDA
     @skipCUDAIfNoSparseGeneric
-    @skipIfRocmVersionLessThan((6, 3))
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_bmm(self, device, dtype):
         def run_test(a, a_batched, b, op_b=False, op_out=False, *, dtype=None, device=None):
@@ -1599,7 +1598,7 @@ class TestSparseCSR(TestCase):
     @skipIfTorchDynamo("raises 'sparse matrix length is ambiguous; use getnnz()'")
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
-                  *[torch.half] if SM53OrLater else [],
+                  *[torch.half] if not TEST_WITH_ROCM else [],
                   *[torch.bfloat16] if SM80OrLater else []))
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-5, torch.complex128: 1e-5,
@@ -1820,7 +1819,6 @@ class TestSparseCSR(TestCase):
                 run_test(a, b, upper, unitriangular, transpose, op_out)
 
     @skipCPUIfNoMklSparse
-    @skipIfRocmVersionLessThan((6, 3))
     @dtypes(torch.double)
     def test_mm(self, device, dtype):
         def test_shape(di, dj, dk, nnz0=None, nnz1=None):
@@ -1921,7 +1919,7 @@ class TestSparseCSR(TestCase):
     @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
-                  *[torch.half] if SM53OrLater and TEST_CUSPARSE_GENERIC else [],
+                  *[torch.half] if not TEST_WITH_ROCM else [],
                   *[torch.bfloat16] if SM80OrLater and TEST_CUSPARSE_GENERIC else []))
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
     def test_sparse_mm(self, device, dtype):
@@ -1940,7 +1938,7 @@ class TestSparseCSR(TestCase):
 
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
-                  *[torch.half] if SM53OrLater and TEST_CUSPARSE_GENERIC else [],
+                  *[torch.half] if not TEST_WITH_ROCM else [],
                   *[torch.bfloat16] if SM80OrLater and TEST_CUSPARSE_GENERIC else []))
     @precisionOverride({torch.bfloat16: 3.5e-2, torch.float16: 1e-2})
     def test_sparse_addmm(self, device, dtype):
@@ -1970,13 +1968,12 @@ class TestSparseCSR(TestCase):
             test_shape(7, 8, 9, 20, True, index_dtype, (1, 1))
 
     @skipCPUIfNoMklSparse
-    @skipIfRocmVersionLessThan((6, 3))
     @dtypes(*floating_and_complex_types())
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_types_and(torch.complex64,
                                       *[torch.bfloat16] if (SM80OrLater and not TEST_WITH_ROCM) else [],
-                                      *[torch.half] if (SM53OrLater and not TEST_WITH_ROCM) else [],
+                                      *[torch.half] if not TEST_WITH_ROCM else [],
                                       *[torch.complex128]
                                       if CUSPARSE_SPMM_COMPLEX128_SUPPORTED or HIPSPARSE_SPMM_COMPLEX128_SUPPORTED
                                       else []))
@@ -2052,7 +2049,7 @@ class TestSparseCSR(TestCase):
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_types_and(torch.complex64,
                                       *[torch.bfloat16] if SM80OrLater and not TEST_WITH_ROCM else [],
-                                      *[torch.half] if SM53OrLater and not TEST_WITH_ROCM else [],
+                                      *[torch.half] if not TEST_WITH_ROCM else [],
                                       *[torch.complex128]
                                       if CUSPARSE_SPMM_COMPLEX128_SUPPORTED or HIPSPARSE_SPMM_COMPLEX128_SUPPORTED
                                       else []))
@@ -4066,11 +4063,11 @@ class TestSparseCompressedTritonKernels(TestCase):
         else:
             BM, BK = (blocksize,) * 2
 
-        if op in {"bsr_dense_linear"} and BM != BK:
+        if op == "bsr_dense_linear" and BM != BK:
             # todo: eliminate this skip
             self.skipTest(f"{op} does not support non-square blocks")
 
-        if op in {"bsr_dense_linear"} and dtype is torch.int8:
+        if op == "bsr_dense_linear" and dtype is torch.int8:
             # todo: eliminate this skip
             self.skipTest(f"{op} does not support int8")
 
