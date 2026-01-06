@@ -933,7 +933,7 @@ custom_ops = {
     aten._scaled_dot_product_cudnn_attention.default: _sdpa_handler,
     aten._scaled_dot_product_cudnn_attention_backward.default: _sdpa_handler,
 }
-exitsing_custom_ops = DTensor._op_dispatcher._custom_op_handlers
+existing_custom_ops = DTensor._op_dispatcher._custom_op_handlers
 
 
 ArgsType = tuple[Any, ...]
@@ -991,7 +991,7 @@ def _enable_cp_dtensor_dispatcher() -> None:
     """Enables DTensor dispatcher to dispatch SDPA to CP."""
     # Enable custom op handlers for CP
     DTensor._op_dispatcher._custom_op_handlers = {
-        **exitsing_custom_ops,
+        **existing_custom_ops,
         **custom_ops,
     }
     # Register CP-specific sharding rules
@@ -1003,7 +1003,7 @@ def _enable_cp_dtensor_dispatcher() -> None:
 def _disable_cp_dtensor_dispatcher() -> None:
     """Disables DTensor dispatcher to dispatch SDPA to CP."""
     # Restore original custom op handlers
-    DTensor._op_dispatcher._custom_op_handlers = exitsing_custom_ops
+    DTensor._op_dispatcher._custom_op_handlers = existing_custom_ops
 
     # TODO: unregister_cp_sharding_rules(clear_the_cache=True) will cause
     # all DTensor sharding propagation cache being invalidated. It is not

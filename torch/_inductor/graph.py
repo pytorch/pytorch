@@ -1780,7 +1780,7 @@ class GraphLowering(torch.fx.Interpreter):
                     allow_padding = (
                         config.pad_outputs or not is_user_visible
                     ) and not is_input_for_as_strided
-                    dense = torch._prims_common.is_non_overlapping_and_dense(
+                    dense = torch._prims_common.is_non_overlapping_and_dense_or_false(
                         n.meta["val"]
                     )
                     unbacked_symbols_in_strides = (
