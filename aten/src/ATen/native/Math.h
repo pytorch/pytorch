@@ -189,8 +189,8 @@ Date:  February 1996
 #endif
   }
   /* Two steps of Newton-Raphson correction */
-  x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)/static_cast<T>(std::sqrt(c10::pi<double>)))*std::exp(-x*x));
-  x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)/static_cast<T>(std::sqrt(c10::pi<double>)))*std::exp(-x*x));
+  x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)*c10::frac_1_sqrt_pi<T>)*std::exp(-x*x));
+  x = x - (std::erf(x) - y) / ((static_cast<T>(2.0)*c10::frac_1_sqrt_pi<T>)*std::exp(-x*x));
 
   return x;
 }
