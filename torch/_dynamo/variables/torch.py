@@ -1581,10 +1581,12 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             1. Early graph break if previous attempt detected consumed-grad_fn issue
             2. Graph break if compiled_autograd is enabled (incompatible features)
             3. Reject external GradientEdge objects (can't trace external autograd nodes)
-            4. Collect external grad_fns from graph inputs
-            5. Compute "consumed" grad_fns: all nodes reachable from outputs, stopping at inputs
-            6. Validate: no external grad_fn (except inputs) is in consumed set
-            7. Track consumed grad_fns for output validation at graph compilation time
+            4. Collect grad_fns from graph inputs (tensors entering compiled region from outside)
+            5. Compute "consumed" grad_fns: all nodes reachable from autograd.grad outputs,
+               excluding autograd.grad inputs (traversal stops there)
+            6. Validate: no graph input's grad_fn is in consumed set
+            7. Track consumed grad_fns to later check if returned tensor's grad_fn is in the
+               consumed set (autograd.grad already used that grad_fn, so it can't be used again)
 
             Safe vs Unsafe Cases:
 
