@@ -149,15 +149,21 @@ def tracing_with_real(x: torch.ScriptObject) -> bool:
     return x.tracing_mode() == "real"
 
 
-def _construct_fake_opaque_object(
-    wrapped_obj: Any,
-    script_class_name: str,
-    real_obj: Any,
-    real_type: type,
-    allowed_members: set[str],
-) -> FakeScriptObject:
+def _construct_fake_opaque_object(real_obj: Any) -> FakeScriptObject:
+    from torch._library.opaque_object import (
+        FakeOpaqueObject,
+        get_opaque_obj_info,
+        get_opaque_type_name,
+    )
+
+    real_type = type(real_obj)
+    opaque_info = get_opaque_obj_info(real_type)
+    allowed_members = set(opaque_info.members.keys()) if opaque_info else set()
+
+    script_class_name = get_opaque_type_name(real_type)
+
     FakeClass = _create_fake_opaque_class(real_type, allowed_members)
-    fake_obj = FakeClass(wrapped_obj, script_class_name, real_obj)
+    fake_obj = FakeClass(FakeOpaqueObject(), script_class_name, real_obj)
 
     # Set the allowed members onto the fake object
     for attr_name in allowed_members:
@@ -195,16 +201,7 @@ def _create_fake_opaque_class(real_type: type, allowed_members: set[str]) -> typ
             FakeScriptObject.__setattr__(self, name, value)
 
     def fake_reduce(self):
-        return (
-            _construct_fake_opaque_object,
-            (
-                self.wrapped_obj,
-                self.script_class_name,
-                self.real_obj,
-                real_type,
-                allowed_members,
-            ),
-        )
+        return (_construct_fake_opaque_object, (self.real_obj,))
 
     return type(
         f"Fake{real_type.__name__}",
@@ -229,26 +226,11 @@ def maybe_to_fake_obj(
     if tracing_with_real(x):
         return x
 
-    from torch._library.opaque_object import (
-        FakeOpaqueObject,
-        get_opaque_obj_info,
-        get_opaque_type_name,
-        is_opaque_type,
-        OpaqueTypeStr,
-    )
+    from torch._library.opaque_object import is_opaque_type
 
     x_type = type(x)
     if is_opaque_type(x_type):
-        type_name = OpaqueTypeStr if x is None else get_opaque_type_name(x_type)
-
-        opaque_info = get_opaque_obj_info(x_type)
-        allowed_members = set(opaque_info.members.keys()) if opaque_info else set()
-
-        fake_x_wrapped = _construct_fake_opaque_object(
-            FakeOpaqueObject(), type_name, x, x_type, allowed_members
-        )
-
-        return fake_x_wrapped
+        return _construct_fake_opaque_object(x)
     else:
         # x.__obj_flatten__() could be calling some tensor operations inside but we don't
         # want to call these ops in surrounding dispatch modes when executing it.
