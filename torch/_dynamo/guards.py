@@ -106,7 +106,7 @@ from torch._guards import (
     StorageOverlap,
 )
 from torch._inductor.utils import IndentedBuffer
-from torch._library.opaque_object import is_opaque_value_type
+from torch._library.opaque_object import get_opaque_obj_info, is_opaque_value_type
 from torch._logging import structured
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental.symbolic_shapes import (
@@ -2241,6 +2241,30 @@ class GuardBuilder(GuardBuilderBase):
             guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
+    def OPAQUE_OBJ_GUARD_FN_MATCH(self, guard: Guard) -> None:
+        """Guard on the values returned by the opaque object's guard_fn."""
+
+        value = self.get(guard)
+        opaque_info = get_opaque_obj_info(type(value))
+
+        if not opaque_info or not opaque_info.guard_fn:
+            return
+
+        original_values = deepcopy(opaque_info.guard_fn(value))
+
+        def opaque_guard_checker(x: Any) -> bool:
+            current_values = opaque_info.guard_fn(  # pyrefly: ignore[missing-attribute]
+                x
+            )
+            return current_values == original_values
+
+        global_name = f"___check_opaque_guard_fn_{id(opaque_guard_checker)}_c{CompileContext.current_compile_id()}"
+        self.get_guard_manager(guard).add_lambda_guard(
+            opaque_guard_checker,
+            get_verbose_code_parts(global_name, guard),
+            guard.user_stack,
+        )
+
     def EQUALS_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None) -> None:
         ref = self.arg_ref(guard)
         val = self.get(guard)
@@ -2281,7 +2305,7 @@ class GuardBuilder(GuardBuilderBase):
         )
 
         if torch.distributed.is_available():
-            from torch.distributed.device_mesh import _MeshLayout, DeviceMesh
+            from torch.distributed.device_mesh import DeviceMesh
             from torch.distributed.tensor.placement_types import (
                 _StridedShard,
                 Partial,
@@ -2295,7 +2319,6 @@ class GuardBuilder(GuardBuilderBase):
                 Partial,
                 DeviceMesh,
                 _StridedShard,
-                _MeshLayout,
             )
 
         from torch.export.dynamic_shapes import _IntWrapper

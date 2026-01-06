@@ -169,7 +169,6 @@ def maybe_to_fake_obj(
         is_opaque_type,
         OpaqueTypeStr,
     )
-    from torch._subclasses.fake_tensor import unset_fake_temporarily
 
     x_type = type(x)
     if is_opaque_type(x_type):
@@ -182,10 +181,12 @@ def maybe_to_fake_obj(
             opaque_info = get_opaque_obj_info(x_type)
             assert opaque_info is not None
             for attr_name in opaque_info.members:
-                # Need to unset fake mode as we don't want @property methods
-                # will get evaluated with the fake mode
-                with unset_fake_temporarily():
-                    object.__setattr__(fake_x_wrapped, attr_name, getattr(x, attr_name))
+                if not hasattr(x, attr_name):
+                    raise TypeError(
+                        f"Opaque object of type '{type_name}' was specified to have member "
+                        f"'{attr_name}', but this doesn't actually exist in the object."
+                    )
+                object.__setattr__(fake_x_wrapped, attr_name, getattr(x, attr_name))
 
         return fake_x_wrapped
     else:
