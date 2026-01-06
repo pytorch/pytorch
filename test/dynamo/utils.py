@@ -64,3 +64,13 @@ def install_guard_manager_testing_hook(hook_fn):
         yield
     finally:
         torch._dynamo.guards.guard_manager_testing_hook_fn = old_value
+
+
+@contextmanager
+def install_install_guard_testing_hook(hook_fn):
+    old_value = torch._dynamo.guards.install_guard_testing_hook_fn
+    try:
+        torch._dynamo.guards.install_guard_testing_hook_fn = hook_fn
+        yield
+    finally:
+        torch._dynamo.guards.install_guard_testing_hook_fn = old_value
