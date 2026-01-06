@@ -83,18 +83,18 @@ _T_co = TypeVar("_T_co", covariant=True)
 
 # Protocol for nested sequences (matches numpy._typing._NestedSequence)
 @runtime_checkable
-class NestedSequence(Protocol[_T_co]):
+class _NestedSequence(Protocol[_T_co]):
     """A protocol for representing nested sequences of elements."""
 
     def __len__(self, /) -> int: ...
-    def __getitem__(self, index: int, /) -> "_T_co | NestedSequence[_T_co]": ...
+    def __getitem__(self, index: int, /) -> "_T_co | _NestedSequence[_T_co]": ...
     def __contains__(self, x: object, /) -> bool: ...
-    def __iter__(self, /) -> "Iterator[_T_co | NestedSequence[_T_co]]": ...
+    def __iter__(self, /) -> "Iterator[_T_co | _NestedSequence[_T_co]]": ...
 
 
 # Protocol for objects that support the array protocol (__array__ method)
 @runtime_checkable
-class SupportsArray(Protocol):
+class _SupportsArray(Protocol):
     """A protocol for objects that can be converted to arrays via __array__."""
 
     def __array__(self) -> Any: ...
@@ -104,15 +104,15 @@ class SupportsArray(Protocol):
 # This includes:
 #   - Tensor: PyTorch tensors
 #   - numpy.ndarray: NumPy arrays (via import)
-#   - SupportsArray: Objects with __array__ method (e.g., custom array types)
-#   - NestedSequence: Nested lists/tuples of numbers
+#   - _SupportsArray: Objects with __array__ method (e.g., custom array types)
+#   - _NestedSequence: Nested lists/tuples of numbers
 #   - Scalar types: bool, int, float, complex
 #   - bytes/bytearray: For certain dtype conversions
 ArrayLike: TypeAlias = Union[
     Tensor,
     "numpy.ndarray[Any, Any]",  # noqa: F821  # pyrefly: ignore[unknown-name]  # numpy is optional
-    SupportsArray,
-    NestedSequence[Union[bool, int, float, complex]],
+    _SupportsArray,
+    _NestedSequence[Union[bool, int, float, complex]],
     bool,
     int,
     float,
