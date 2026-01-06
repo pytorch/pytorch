@@ -1026,10 +1026,10 @@ def _div_aten(a, b):
     )
 
     if is_integral:
-        # pyrefly: ignore [bad-argument-type]
+
         return torch.div(a, b, rounding_mode="trunc")
     else:
-        # pyrefly: ignore [bad-argument-type]
+
         return torch.true_divide(a, b)
 
 
