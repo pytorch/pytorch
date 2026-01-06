@@ -549,15 +549,15 @@ class TestProfiler(TestCase):
                 z = x.matmul(y)
                 torch.cuda.synchronize(gpu_id)
 
-        is_rocm = getattr(torch.version, "hip", None) is not None
+        is_rocm = torch.version.hip is not None
         # on ROCm, Gemm shader is hipblaslt Shader, so we use UserArgs_MT to match.
-        gemm_string = "UserArgs_MT" if is_rocm else "gemm"
+        gemm_string = "userargs_mt" if is_rocm else "gemm"
         device_string = "hip" if is_rocm else "cuda"
 
         device_indices = set()
         found_cuda = False
         for evt in prof.events():
-            if gemm_string in evt.name and evt.device_type == DeviceType.CUDA:
+            if gemm_string in evt.name.lower() and evt.device_type == DeviceType.CUDA:
                 device_indices.add(evt.device_index)
             if device_string in evt.name.lower() and evt.device_type == DeviceType.CPU:
                 found_cuda = True
