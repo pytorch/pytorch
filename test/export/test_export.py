@@ -746,6 +746,20 @@ class TestExport(TestCase):
                 )
                 self.assertEqual(node.meta["from_node"][-1].graph_id, graph_id)
 
+    def test_fx_annotate(self):
+        class Foo(torch.nn.Module):
+            def forward(self, x):
+                x += 1
+                with torch.fx.traceback.annotate({"a": "b"}):
+                    x += 1
+                x += 1
+                return x
+
+        ep = export(Foo(), (torch.randn(2),))
+
+        add_1 = list(ep.graph.nodes)[2]
+        self.assertTrue("custom" in add_1.meta and add_1.meta["custom"].get("a") == "b")
+   
     def test_annotate_on_assert(self):
         # nodes added in `apply_runtime_assertion_pass` will be annotated
         class M(torch.nn.Module):

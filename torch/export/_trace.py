@@ -833,7 +833,10 @@ def _export_to_torch_ir(
             or torch._export.config.use_legacy_dynamo_graph_capture
         )
 
-    with torch._dynamo.config.patch(dataclasses.asdict(dynamo_cfg)):
+    with (
+        torch._dynamo.config.patch(dataclasses.asdict(dynamo_cfg)),
+        torch.fx.traceback.preserve_node_meta(),
+    ):
         try:
             module_call_specs: dict[str, dict[str, pytree.TreeSpec]] = (
                 _ExportModuleSpecTrackerDict()
@@ -2016,9 +2019,8 @@ def _non_strict_export(
                             in mod._forward_pre_hooks.values()
                         ):
                             _check_input_constraints_pre_hook(mod, args, kwargs)
-                        with torch.fx.traceback.preserve_node_meta():
-                            args = (*args, *kwargs.values())
-                            tree_out = torch.fx.Interpreter(mod).run(*args)
+                        args = (*args, *kwargs.values())
+                        tree_out = torch.fx.Interpreter(mod).run(*args)
                     else:
                         tree_out = mod(*args, **kwargs)
                     flat_outs, out_spec = pytree.tree_flatten(tree_out)
@@ -2115,6 +2117,7 @@ def _non_strict_export(
             ),
             _fakify_module_inputs(fake_args, fake_kwargs, fake_mode),
             _override_builtin_ops(),
+            torch.fx.traceback.preserve_node_meta(),
         ):
             # _to_aten_func is _export_to_aten_ir when using the default non-strict export
             # We need to pass positional args correctly
