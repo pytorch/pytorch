@@ -598,7 +598,7 @@ DEVICE_INLINE bool walk_down_tensor_storage_tree_(
     const int flattened_jagged_idx,
     const StackArray<int64_t>& jagged_dims,
     const StackArray<index_t*>& x_offsets) {
-  // compute coorindates
+  // compute coordinates
   int jagged_coords[NUM_JAGGED_DIM];
   int j_temp = flattened_jagged_idx;
 #pragma unroll
