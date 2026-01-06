@@ -66,12 +66,12 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
  public:
   NCCLPeerAllocInfo(
       NCCLAllocation* allocation,
-      const std::string& group_name,
+      const std::string group_name,
       ncclWindow_t buffer_handle,
       ncclWindow_t signal_handle)
       : buffer_size_(allocation->buffer_size),
         device_idx_(allocation->device_idx),
-        group_name_(group_name),
+        group_name_(std::move(group_name)),
         buffer_handle_(buffer_handle),
         signal_handle_(signal_handle)
   {
@@ -130,34 +130,48 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
 #endif
   }
 
-  private:
-   size_t buffer_size_;
-   int device_idx_;
-   int rank_;
-   int world_size_;
-   std::vector<void*> buffers_;
-   std::vector<void*> signal_pads_;
-   void** buffers_dev_;
-   void** signal_pads_dev_;
-   std::string group_name_;
-   ncclWindow_t buffer_handle_;
-   ncclWindow_t signal_handle_;
-   std::vector<int> rank_to_global_rank_;
+  // Exact copy is not needed / supported
+  NCCLPeerAllocInfo(const NCCLPeerAllocInfo& other) = delete;
 
-   friend class NCCLSymmetricMemory;
+ private:
+  size_t buffer_size_;
+  int device_idx_;
+  int rank_;
+  int world_size_;
+  std::vector<void*> buffers_;
+  std::vector<void*> signal_pads_;
+  void** buffers_dev_;
+  void** signal_pads_dev_;
+  const std::string group_name_;
+  ncclWindow_t buffer_handle_;
+  ncclWindow_t signal_handle_;
+  std::vector<int> rank_to_global_rank_;
+
+  friend class NCCLSymmetricMemory;
 };
 
 class NCCLSymmetricMemory : public SymmetricMemory {
  public:
   NCCLSymmetricMemory(
-      const c10::intrusive_ptr<NCCLPeerAllocInfo>& pai,
+      c10::intrusive_ptr<NCCLPeerAllocInfo> pai,
       size_t offset)
-      : pai_(pai),
+      : pai_(std::move(pai)),
         offset_(offset),
-        rank_(pai->rank_),
-        world_size_(pai->world_size_),
-        device_idx_(pai->device_idx_) {
-    TORCH_INTERNAL_ASSERT(offset_ < pai->buffer_size_, "offset out of range");
+        rank_(pai_->rank_),
+        world_size_(pai_->world_size_),
+        device_idx_(pai_->device_idx_) {
+    TORCH_INTERNAL_ASSERT(offset_ < pai_->buffer_size_, "offset out of range");
+  }
+
+  // Exact copy is not needed / supported
+  NCCLSymmetricMemory(const NCCLSymmetricMemory& other) = delete;
+
+  std::vector<void*> get_buffer_ptrs() override {
+    return pai_->buffers_;
+  }
+
+  std::vector<void*> get_signal_pad_ptrs() override {
+    return pai_->signal_pads_;
   }
 
   void** get_buffer_ptrs_dev() override {
@@ -314,8 +328,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     mr.try_emplace_devcomm(group_name, comm);
 #endif
 
-    auto pai = c10::make_intrusive<NCCLPeerAllocInfo>(alloc, group_name, std::move(handle), std::move(signal_handle));
-    return pai;
+    return c10::make_intrusive<NCCLPeerAllocInfo>(alloc, group_name, std::move(handle), std::move(signal_handle));
   }
 
   c10::intrusive_ptr<SymmetricMemory> rendezvous(
@@ -343,13 +356,12 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     auto pai_it = symm_mems_.find(key);
     if (pai_it == symm_mems_.end()) {
       auto pai = make_peer_alloc_info(allocation.get(), *group_name);
-      pai_it = symm_mems_.insert({key, std::move(pai)}).first;
+      pai_it = symm_mems_.emplace(key, std::move(pai)).first;
     }
 
     auto& pai = pai_it->second;
     size_t offset = reinterpret_cast<uintptr_t>(ptr) - reinterpret_cast<uintptr_t>(allocation->ptr);
-    auto symm_mem = c10::make_intrusive<NCCLSymmetricMemory>(pai, offset);
-    return symm_mem;
+    return c10::make_intrusive<NCCLSymmetricMemory>(pai, offset);
   }
 
   bool has_multicast_support(int device_idx) override {
