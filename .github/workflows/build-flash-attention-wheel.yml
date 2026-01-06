@@ -19,30 +19,43 @@ jobs:
       curr_ref_type: ${{ github.ref_type }}
 
   build-wheel:
-    name: "Build FA3 ${{ matrix.cuda_version }}"
+    name: "Build FA3 ${{ matrix.cuda_version }} ${{ matrix.arch }}"
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}linux.4xlarge"
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ matrix.runner }}"
     strategy:
       fail-fast: false
       matrix:
-        cuda_version: ["12.6", "13.0"]
         include:
           - cuda_version: "12.6"
+            arch: "x86_64"
             cuda_short: "126"
-            torch_cuda_arch_list: "8.0;8.6;9.0"
+            torch_cuda_arch_list: "9.0"
             docker_image: "pytorch/manylinux2_28-builder:cuda12.6"
+            runner: "linux.4xlarge"
           - cuda_version: "13.0"
+            arch: "x86_64"
             cuda_short: "130"
-            torch_cuda_arch_list: "8.0;8.6;9.0;10.0+PTX"
+            torch_cuda_arch_list: "9.0;10.0"
             docker_image: "pytorch/manylinux2_28-builder:cuda13.0"
+            runner: "linux.4xlarge"
+          - cuda_version: "12.6"
+            arch: "aarch64"
+            cuda_short: "126"
+            torch_cuda_arch_list: "9.0"
+            docker_image: "pytorch/manylinuxaarch64-builder:cuda12.6"
+            runner: "linux.arm64.2xlarge"
+          - cuda_version: "13.0"
+            arch: "aarch64"
+            cuda_short: "130"
+            torch_cuda_arch_list: "9.0;10.0"
+            docker_image: "pytorch/manylinuxaarch64-builder:cuda13.0"
+            runner: "linux.arm64.2xlarge"
     timeout-minutes: 60
     env:
       DOCKER_IMAGE: ${{ matrix.docker_image }}
       CUDA_VERSION: ${{ matrix.cuda_version }}
       CUDA_SHORT: ${{ matrix.cuda_short }}
       TORCH_CUDA_ARCH_LIST: ${{ matrix.torch_cuda_arch_list }}
-      PYTHON_VERSION: "3.12"
-      PYTORCH_VERSION: "2.9"
     steps:
       - name: Setup SSH (Click me for login details)
         uses: pytorch/test-infra/.github/actions/setup-ssh@main
@@ -76,12 +89,12 @@ jobs:
           )
 
           docker exec -t "${container_name}" bash -c \
-            "pip install --index-url https://download.pytorch.org/whl/cu${CUDA_SHORT}/ torch==${PYTORCH_VERSION}"
+            "pip install torch --index-url https://download.pytorch.org/whl/cu${CUDA_SHORT}"
 
           docker exec -t \
             -e TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" \
             -e FA_FINAL_PACKAGE_DIR="/artifacts" \
-            -e WHEEL_PLAT="x86_64" \
+            -e WHEEL_PLAT="${{ matrix.arch }}" \
             -e PYTORCH_ROOT="/pytorch" \
             "${container_name}" bash -c \
             "bash /pytorch/.ci/flash-attention/build.sh"
@@ -90,7 +103,7 @@ jobs:
 
       - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
         with:
-          name: flash-attn-3-wheel-cu${{ matrix.cuda_short }}
+          name: flash-attn-3-wheel-cu${{ matrix.cuda_short }}-${{ matrix.arch }}
           if-no-files-found: error
           path: ${{ runner.temp }}/artifacts/*.whl
 
