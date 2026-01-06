@@ -51,18 +51,17 @@ def get_arg_return_types_from_interface(module_interface):
     return args_str, arg_types_str, return_type_str
 
 
-class _StringLoader(importlib.abc.SourceLoader):
+class _StringLoader(importlib.abc.Loader):
     def __init__(self, data):
         self.data = data
 
-    def get_source(self, fullname):
-        return self.data
+    def create_module(self, spec):
+        return None  # Use default module creation
 
-    def get_data(self, path):
-        return self.data.encode("utf-8")
-
-    def get_filename(self, fullname):
-        return fullname
+    def exec_module(self, module):
+        # Compile and execute the source code directly without caching
+        code = compile(self.data, module.__name__, "exec")
+        exec(code, module.__dict__)
 
 
 def _do_instantiate_remote_module_template(
