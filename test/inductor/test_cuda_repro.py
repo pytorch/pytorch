@@ -50,7 +50,7 @@ from torch.testing._internal.common_utils import (
     TEST_XPU,
 )
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
-
+from torch.testing._internal.common_device_type import expectedFailureXPU
 
 if TEST_WITH_ROCM:
     config.force_layout_optimization = 1
@@ -2734,6 +2734,8 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
                 self.assertEqual(eager_div, compiled_div)
 
+    # Expected failure on XPU due to different implementation of floating point division
+    @expectedFailureXPU
     @config.patch({"emulate_divison_rounding": False})
     def test_truediv_base_not_bitwise_equivalent(self):
         from decimal import Decimal
@@ -2750,7 +2752,6 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         )
         compiled_div = Decimal(compile_out.item())
         eager_div = Decimal((x_ten / y_ten).item())
-
         self.assertNotEqual(eager_div, compiled_div)
         self.assertTrue("div_rn" not in code)
 
