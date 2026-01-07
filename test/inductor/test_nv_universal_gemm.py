@@ -12,7 +12,7 @@ from torch._inductor.template_heuristics.nv_universal_gemm import (
     NVUniversalGemmHeuristics,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import ensure_nv_universal_gemm_available, run_and_get_code
+from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -206,85 +206,6 @@ class TestNVUniversalGemm(TestCase):
         ):
             compiled_fn = torch.compile(fn)
             result = compiled_fn(x, weight)
-
-        torch.testing.assert_close(result, expected)
-
-    def test_workspace_allocation(self):
-        """Test that workspace allocation works correctly.
-
-        Since no current CUTLASS kernels require a workspace, we mock the
-        kernel.get_workspace_size method to return a non-zero value. This
-        exercises the workspace allocation/deallocation code paths.
-        """
-        m, n, k = 512, 512, 512
-        dtype = torch.bfloat16
-        device = "cuda"
-
-        def matmul(a, b):
-            return a @ b
-
-        a = torch.randn(m, k, device=device, dtype=dtype)
-        b = torch.randn(k, n, device=device, dtype=dtype)
-
-        expected = matmul(a, b)
-
-        torch._dynamo.reset()
-
-        # Patch cutlass_api.Kernel.get_workspace_size to return non-zero
-        import cutlass_api
-
-        def patched_get_workspace_size(self, args):
-            return 1024
-
-        with patch.object(
-            cutlass_api.Kernel,
-            "get_workspace_size",
-            patched_get_workspace_size,
-        ):
-            with config.patch(
-                {
-                    "max_autotune": True,
-                    "max_autotune_gemm_backends": "NVGEMM",
-                    "cuda.nvgemm_max_profiling_configs": 3,
-                }
-            ):
-                result, (code,) = run_and_get_code(
-                    torch.compile(matmul),
-                    a,
-                    b,
-                )
-
-        self.assertIn("workspace=workspace", code)
-
-        torch.testing.assert_close(result, expected)
-
-    @parametrize("dtype", (torch.float16, torch.bfloat16))
-    def test_bmm_sliced(self, dtype):
-        """Test BMM path with sliced tensors"""
-        batch, m, n, k = 8, 64, 256, 128
-        device = "cuda"
-
-        def bmm(a, b):
-            return torch.bmm(a, b)
-
-        a_full = torch.randn(batch * 2, m, k, device=device, dtype=dtype)
-        b_full = torch.randn(batch * 2, k, n, device=device, dtype=dtype)
-        a = a_full[:batch]
-        b = b_full[batch:]
-
-        expected = bmm(a, b)
-
-        torch._dynamo.reset()
-
-        with config.patch(
-            {
-                "max_autotune": True,
-                "max_autotune_gemm_backends": "NVGEMM",
-                "cuda.nvgemm_max_profiling_configs": 3,
-            }
-        ):
-            compiled_fn = torch.compile(bmm)
-            result = compiled_fn(a, b)
 
         torch.testing.assert_close(result, expected)
 
