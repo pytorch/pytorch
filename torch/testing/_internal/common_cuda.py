@@ -5,7 +5,7 @@ r"""This file is allowed to initialize CUDA context when imported."""
 import functools
 import torch
 import torch.cuda
-from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS
+from torch.testing._internal.common_utils import LazyVal, TEST_NUMBA, TEST_WITH_ROCM, TEST_CUDA, IS_WINDOWS, IS_MACOS, TEST_XPU
 import inspect
 import contextlib
 import os
@@ -67,6 +67,8 @@ def evaluate_platform_supports_flash_attention():
         return evaluate_gfx_arch_within(arch_list)
     if TEST_CUDA:
         return not IS_WINDOWS and SM80OrLater
+    if TEST_XPU:
+        return True
     return False
 
 def evaluate_platform_supports_efficient_attention():
@@ -75,7 +77,7 @@ def evaluate_platform_supports_efficient_attention():
         if os.environ.get("TORCH_ROCM_AOTRITON_ENABLE_EXPERIMENTAL", "0") != "0":
             arch_list += ["gfx1100", "gfx1101", "gfx1102", "gfx1150", "gfx1151", "gfx1200"]
         return evaluate_gfx_arch_within(arch_list)
-    if TEST_CUDA:
+    if TEST_CUDA or TEST_XPU:
         return True
     return False
 
