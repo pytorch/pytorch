@@ -196,12 +196,12 @@ kernel_side_table = KernelSideTable()
 # Mutation Tracker
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class Param:
     idx: int
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class Intermediate:
     idx: int
 
@@ -209,7 +209,7 @@ class Intermediate:
         return self.idx < 0
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class Op:
     name: str
     fn_call_name: Optional[str]
