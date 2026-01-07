@@ -1,4 +1,3 @@
-# mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 import torch
@@ -19,11 +18,26 @@ torch.library.define(
 def _runtime_compute_coordinate_on_dim_fake(
     full_mesh: torch.Tensor, index: int
 ) -> SymInt:
+    from torch.fx.experimental.symbolic_shapes import _constrain_range_for_size
+
     ctx = torch._custom_op.impl.get_ctx()
-    sz = ctx.new_dynamic_size()
+    shape_env = ctx._shape_env
+
+    # Bypass allow_dynamic_output_shape_ops check by directly creating the symint.
+    # This is intentional - the coordinate is always valid and bounded.
+    sz = shape_env.create_unbacked_symint()
+
+    # Apply size constraints - coordinate is bounded by mesh size on the given dimension.
+    # The full_mesh tensor has an extra batch dimension at the front, so the actual
+    # mesh dimensions start at index 1. mesh.size(index) = full_mesh.size(index + 1)
+    mesh_size = full_mesh.size(index + 1)
+    _constrain_range_for_size(
+        sz, min=0, max=mesh_size - 1 if isinstance(mesh_size, int) else None
+    )
+
     # We may or may not actually end up returning/using this symbol - so
     # mark it as ignorable.
-    ctx._shape_env.ignorable_fresh_unbacked_symbols.append(sz.node._expr)
+    shape_env.ignorable_fresh_unbacked_symbols.append(sz.node._expr)
     return sz
 
 

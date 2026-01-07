@@ -13,11 +13,13 @@ import sympy
 
 import torch
 import torch.fx
+import torch.nn as nn
 import torch.nn.functional as F
 from torch import sym_int, SymBool, SymFloat, SymInt
 from torch._C import _disabled_torch_function_impl
 from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend
 from torch._inductor.utils import fresh_cache
+from torch.export import export
 from torch.fx.experimental import sym_node
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.sym_node import method_to_operator, SymNode, to_node
@@ -915,9 +917,9 @@ def forward(self, x_1):
             )
         )
 
-    def test_prims_non_overlapping_and_dense(self):
+    def test_prims_is_non_overlapping_and_dense_or_false(self):
         shape_env = ShapeEnv()
-        cf = torch._prims_common.is_non_overlapping_and_dense
+        cf = torch._prims_common.is_non_overlapping_and_dense_or_false
 
         # backed case
         a0 = create_symint(shape_env, 5)
@@ -1612,7 +1614,7 @@ class TestSymNumberMagicMethods(TestCase):
         ) and fn in sym_node.only_float_magic_methods:
             self.skipTest(f"{fn} is not an int method")
 
-        if second_type == "float" and fn in ["mod"]:
+        if second_type == "float" and fn == "mod":
             self.skipTest(f"{fn} only handles int")
 
         if fn in sym_node.bitwise_ops and (first_type != "int" or second_type != "int"):
@@ -4684,6 +4686,46 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         res1 = torch.compile(fn, fullgraph=True)(torch.ones((12,)))
         res2 = fn(torch.ones((12,)))
         self.assertEqual(res1, res2)
+
+    def test_hint_int(self):
+        class FunModule(nn.Module):
+            def forward(self, x, y):
+                d = torch.ones([x.item()])
+                return d * 10, torch.ones([x.item() * 2])
+
+        # Create example inputs
+        x = torch.tensor(3)
+        y = torch.tensor([1.0, 2.0, 3.0])
+
+        # Create module instance
+        mod = FunModule()
+
+        # Export the module
+        exported_program = export(mod, args=(x, y))
+
+        def test_pass(graph: torch.fx.Graph):
+            cnt = 0
+            for node in graph.nodes:
+                print(node.name)
+                if node.name == "ones":
+                    cnt += 1
+                    self.assertEqual(
+                        torch.fx.experimental.symbolic_shapes.hint_int(
+                            node.meta["val"].shape[0], fallback=300
+                        ),
+                        300,
+                    )
+                if node.name == "ones_1":
+                    self.assertEqual(
+                        torch.fx.experimental.symbolic_shapes.hint_int(
+                            node.meta["val"].shape[0], fallback=300
+                        ),
+                        600,
+                    )
+                    cnt += 1
+            self.assertEqual(cnt, 2)
+
+        test_pass(exported_program.graph_module.graph)
 
 
 instantiate_parametrized_tests(TestUnbacked)
