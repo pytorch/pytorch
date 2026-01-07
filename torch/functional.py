@@ -1309,7 +1309,10 @@ def tensordot(  # noqa: F811
     if isinstance(dims, torch.Tensor):
         num_elements = dims.numel()
         if num_elements > 1:
-            assert dims.size()[0] == 2
+            if dims.size()[0] != 2:
+                raise AssertionError(
+                    f"dims tensor must have size 2 in first dimension, got {dims.size()[0]}"
+                )
             dims_a = torch.jit.annotate(list[int], dims[0].tolist())
             dims_b = torch.jit.annotate(list[int], dims[1].tolist())
         else:

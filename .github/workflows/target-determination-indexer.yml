@@ -33,6 +33,9 @@ jobs:
       - name: Setup Linux
         uses: ./pytorch/.github/actions/setup-linux
 
+      - name: Login to ECR
+        uses: ./pytorch/.github/actions/ecr-login
+
       - name: Calculate docker image
         id: calculate-docker-image
         uses: pytorch/test-infra/.github/actions/calculate-docker-image@main

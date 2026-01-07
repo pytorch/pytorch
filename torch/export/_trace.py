@@ -178,11 +178,14 @@ DEFAULT_EXPORT_DYNAMO_CONFIG.reorderable_logging_functions = {
 def _ignore_backend_decomps():
     orig_mkldnn_flag = torch.backends.mkldnn.set_flags(False)
     orig_nnpack_flag = torch.backends.nnpack.set_flags(False)
+    orig_cudnn_flag = torch.backends.cudnn.set_flags(False)
+
     try:
         yield
     finally:
         torch.backends.mkldnn.set_flags(*orig_mkldnn_flag)
         torch.backends.nnpack.set_flags(*orig_nnpack_flag)
+        torch.backends.cudnn.set_flags(*orig_cudnn_flag)
 
 
 @contextmanager
@@ -660,6 +663,7 @@ def _rename_constants_nodes(
             n = 1
             while (dup_name := f"{name}_{n}") in node_names:
                 n += 1
+            # pyrefly: ignore [unbound-name]
             name = dup_name
         node_names.add(name)
         return name
@@ -1521,6 +1525,7 @@ def _strict_export(
     """
 
     gm_torch_level = _export_to_torch_ir(
+        # pyrefly: ignore [bad-argument-type]
         mod,
         args,
         kwargs,
