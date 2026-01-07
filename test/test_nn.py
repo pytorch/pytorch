@@ -2315,8 +2315,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertEqual(model_parallel.module.param_normal.shape, torch.Size([2, 3]))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
-    @skipIfRocm
     def test_broadcast_double_backwards_gpu(self):
         tensors = (torch.randn(4, 4, device='cuda', requires_grad=True, dtype=torch.double),
                    torch.randn(4, 4, device='cuda', requires_grad=True, dtype=torch.double),
@@ -11923,7 +11921,6 @@ class TestNNDeviceType(NNTestCase):
             gradcheck(ctc_after_softmax, [x])
 
     @onlyCUDA
-    @skipCUDAIfRocm(msg="skipped Cudnn test on ROCm")
     def test_ctc_loss_cudnn(self, device):
         batch_size = 16
         input_length = 30
@@ -11942,12 +11939,14 @@ class TestNNDeviceType(NNTestCase):
             grad_native, = torch.autograd.grad(loss_native, log_probs, grad_out)
         loss_cudnn = torch.nn.functional.ctc_loss(log_probs, targets.to('cpu', torch.int32),
                                                   input_lengths, target_lengths, reduction='none')
-        self.assertTrue("Cudnn" in str(loss_cudnn.grad_fn))
+        # ROCm uses MIOpen (MiopenCtcLossBackward), CUDA uses cuDNN (CudnnCtcLossBackward)
+        grad_fn_str = str(loss_cudnn.grad_fn)
+        self.assertTrue("Miopen" in grad_fn_str or "Cudnn" in grad_fn_str,
+                        f"Expected MiopenCtcLossBackward or CudnnCtcLossBackward, got {grad_fn_str}")
         grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
         self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
 
     @onlyCUDA
-    @skipCUDAIfRocm(msg="skipped Cudnn test on ROCm")
     def test_ctc_loss_cudnn_tensor_cuda(self):
         batch_size = 16
         input_length = 30
@@ -11970,12 +11969,14 @@ class TestNNDeviceType(NNTestCase):
                                                   input_lengths.to('cuda', torch.int32),
                                                   target_lengths.to('cuda', torch.int32),
                                                   reduction='none')
-        self.assertTrue("Cudnn" in str(loss_cudnn.grad_fn))
+        # ROCm uses MIOpen (MiopenCtcLossBackward), CUDA uses cuDNN (CudnnCtcLossBackward)
+        grad_fn_str = str(loss_cudnn.grad_fn)
+        self.assertTrue("Miopen" in grad_fn_str or "Cudnn" in grad_fn_str,
+                        f"Expected MiopenCtcLossBackward or CudnnCtcLossBackward, got {grad_fn_str}")
         grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
         self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
 
     @onlyCUDA
-    @skipCUDAIfRocm(msg="skipped Cudnn test on ROCm")
     def test_ctc_loss_cudnn_tensor_cpu_length_cuda(self):
         # batch size
         N = 50

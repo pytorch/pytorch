@@ -39,14 +39,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
 from typing import Any, NamedTuple, NoReturn, Optional, TYPE_CHECKING, Union
-
-
-try:
-    from typing import LiteralString
-except ImportError:
-    from typing_extensions import LiteralString
-
-from typing_extensions import TypeAliasType, TypeVar
+from typing_extensions import LiteralString, TypeAliasType, TypeVar
 from weakref import ReferenceType
 
 import torch
@@ -2599,6 +2592,7 @@ class GuardBuilder(GuardBuilderBase):
         assert output_graph is not None
         global_state = output_graph.global_state_guard
         self.check_fn_manager.global_state = global_state
+
         code = [
             f"___check_global_state() against {self.check_fn_manager.global_state.__getstate__()}"
         ]
@@ -3413,6 +3407,10 @@ class GuardsStatePickler(pickle.Pickler):
         return getattr(torch.ops._C, name)
 
     @classmethod
+    def _unpickle_op(cls, namespace: str, opname: str, overloadname: str) -> Any:
+        return getattr(getattr(getattr(torch.ops, namespace), opname), overloadname)
+
+    @classmethod
     def _unpickle_bound_method(cls, func: Any, base: Any) -> Any:
         return types.MethodType(func, base)
 
@@ -3489,6 +3487,15 @@ class GuardsStatePickler(pickle.Pickler):
             if id(obj) not in self.guard_tree_values:
                 return _Missing, ("module guard tree",)
 
+            for attr in obj.__dict__.values():
+                if isinstance(attr, (torch.Tensor, torch.nn.Module)):
+                    continue
+                if id(attr) in self.guard_tree_values:
+                    continue
+                if callable(attr):
+                    continue
+                self.missing_values[id(attr)] = attr
+
             # DDP module is a special case because it tries to restore unneeded
             # data in custom __setstate__. We cannot skip ddp module because it
             # is often a toplevel module.
@@ -3538,6 +3545,13 @@ class GuardsStatePickler(pickle.Pickler):
             obj, torch._ops.OpOverloadPacket
         ) and obj._qualified_op_name.startswith("_C::"):
             return type(self)._unpickle_c_op, (obj.__name__,)
+
+        elif isinstance(obj, torch._ops.OpOverload):
+            return type(self)._unpickle_op, (
+                obj.namespace,
+                obj._opname,
+                obj._overloadname,
+            )
 
         elif (
             obj.__class__.__module__ == "builtins"
@@ -3662,7 +3676,7 @@ class CheckFunctionManager:
         save_guards: bool = False,
         strict_error: bool = False,
         source_get_cache: Optional[dict[str, Any]] = None,
-    ):
+    ) -> None:
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
 
