@@ -9,7 +9,10 @@ from torch._C import _acceleratorGraph
 class Graph(_acceleratorGraph):
     r"""
     Wrapper around an :ref:`accelerator<accelerators>` graph that supports capture and replay.
-    Can also be used as a context manager to capture work on the current stream of the current device.
+
+    A graph captures a sequence of operations and their dependencies, allowing them to be
+    replayed efficiently with reduced overhead. This class can be used as a context manager
+    to automatically capture operations on the current stream.
 
     Arguments:
         keep_graph (bool, optional): If ``False``, the underlying graph is destroyed and the
@@ -18,6 +21,9 @@ class Graph(_acceleratorGraph):
             the executable graph is not instantiated automatically; it must be explicitly created
             by calling ``instantiate``, or it will be instantiated on the first call to ``replay``.
             Defaults to ``False``.
+        pool (tuple[int, int], optional): Memory pool identifier for this graph. Multiple graphs
+            can share the same pool by passing the same identifier, which can reduce memory overhead.
+            Defaults to ``None``.
 
     Example::
 
@@ -32,20 +38,30 @@ class Graph(_acceleratorGraph):
         >>> graph.replay()
     """
 
-    def __new__(cls, keep_graph: bool = False) -> Self:
+    def __new__(
+        cls, keep_graph: bool = False, *, pool: tuple[int, int] | None = None
+    ) -> Self:
         return super().__new__(cls, keep_graph)
+
+    def __init__(
+        self, keep_graph: bool = False, *, pool: tuple[int, int] | None = None
+    ) -> None:
+        self.pool = pool
 
     def capture_begin(
         self,
-        pool: tuple[int, int] | None = None,
         capture_error_mode: Literal[
             "default", "global", "thread_local", "relaxed"
         ] = "default",
     ) -> None:
-        r"""Begin capturing work on the current stream of the current device.
+        r"""
+        Begin graph capture on the current stream.
+
+        All operations executed on the current stream of the current device after this call
+        will be recorded into the graph until ``capture_end`` is called. By default, capture
+        uses the memory pool provided at construction time.
 
         Arguments:
-            pool (tuple[int, int], optional): Memory pool that this graph may share. Defaults to ``None``.
             capture_error_mode (Literal["default", "global", "thread_local", "relaxed"], optional):
                 Specifies the behavior of graph capture. The exact semantics are backend-specific.
                 Defaults to `"default"`.
@@ -57,17 +73,19 @@ class Graph(_acceleratorGraph):
                 `relaxed`, the current thread is allowed to make potentially unsafe API calls, except for
                 calls that inherently conflict with stream capture.
         """
-        super().capture_begin(pool=pool, capture_error_mode=capture_error_mode)
+        super().capture_begin(pool=self.pool, capture_error_mode=capture_error_mode)
 
     def capture_end(self) -> None:
-        r"""End graph capture on the current stream of the current device.
+        r"""
+        End graph capture on the current stream of the current device.
 
-        After ``capture_end``, ``replay`` may be called on this instance.
+        After this call, the graph can be replayed via ``replay``.
         """
         super().capture_end()
 
     def instantiate(self) -> None:
-        r"""Instantiate the underlying graph. Will be called by ``capture_end``
+        r"""
+        Instantiate the underlying graph. Will be called by ``capture_end``
         if ``keep_graph=False``, or by ``replay`` if ``keep_graph=True`` and
         ``instantiate`` has not already been explicitly called.
         """
@@ -82,10 +100,22 @@ class Graph(_acceleratorGraph):
         super().reset()
 
     def pool(self) -> tuple[int, int]:
-        r"""Return an opaque token representing the id of this graph's memory pool.
+        r"""
+        Return an opaque token representing the id of this graph's memory pool.
 
         This id can optionally be passed to another graph's ``capture_begin``,
         which hints the other graph may share the same memory pool.
+
+        Example::
+            >>> # xdoctest: +SKIP
+            >>> g1 = torch.accelerator.Graph()
+            >>> g1.capture_begin()
+            >>> # ... operations ...
+            >>> g1.capture_end()
+
+            >>> # Share g1's memory pool with a new graph
+            >>> pool_id = g1.pool()
+            >>> g2 = torch.accelerator.Graph(pool=pool_id)
         """
         return super().pool()
 
