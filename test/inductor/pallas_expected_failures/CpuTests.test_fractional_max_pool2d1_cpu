@@ -1,5 +1,1 @@
-ERROR
-  File "<string>", line 7, in __init__
-  File "/home/oulgen/py312/lib/python3.12/site-packages/jax/_src/state/indexing.py", line 176, in __post_init__
-    raise ValueError(f"Out of bound slice: start={value}, dim={s}.")
-ValueError: Out of bound slice: start=1, dim=1.
+# see https://github.com/pytorch/pytorch/issues/148801

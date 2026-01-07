@@ -34,8 +34,11 @@ struct BlockPool {
 
   std::set<Block*, Comparison> blocks;
   std::set<Block*, Comparison> unmapped;
+  // NOLINTNEXTLINE(cppcoreguidelines-avoid-const-or-ref-data-members)
   const bool is_small;
   PrivatePool* owner_PrivatePool;
+
+  MempoolId_t owner_MempoolId() const;
 };
 
 struct ExpandableSegment;
@@ -53,6 +56,13 @@ struct Block {
   Block* prev{nullptr}; // prev block if split from a larger allocation
   Block* next{nullptr}; // next block if split from a larger allocation
   int event_count{0}; // number of outstanding XPU events
+  // The stack context at the time this block was most recently allocated from
+  // the caching pool
+  std::shared_ptr<GatheredContext> context_when_allocated;
+  // Only set for the first block in a segment (when prev == nullptr). Record
+  // the stack context at the time the underlying memory segment was first
+  // allocated (e.g., via sycl::aligned_alloc_device and map).
+  std::shared_ptr<GatheredContext> context_when_segment_allocated;
   ExpandableSegment* expandable_segment{nullptr}; // owning expandable segment
 
   Block(
@@ -63,7 +73,6 @@ struct Block {
       void* ptr)
       : device(device),
         queue(queue),
-        stream_uses(),
         size(size),
         requested_size(0),
         pool(pool),
@@ -71,11 +80,7 @@ struct Block {
 
   // constructor for search key
   Block(DeviceIndex device, sycl::queue* queue, size_t size)
-      : device(device),
-        queue(queue),
-        stream_uses(),
-        size(size),
-        requested_size(0) {}
+      : device(device), queue(queue), size(size), requested_size(0) {}
 
   bool is_split() const {
     return (prev != nullptr) || (next != nullptr);
@@ -142,7 +147,8 @@ struct ExpandableSegment {
     // The extra 1/8 allows flexibility for remapping or moving pages within the
     // segment when unmapping earlier regions.
     constexpr float kVirtualMemOversubscriptFactor = 1.125f; // 1 + 1/8
-    max_handles_ = numSegments(device_total * kVirtualMemOversubscriptFactor);
+    max_handles_ = numSegments(static_cast<size_t>(
+        static_cast<float>(device_total) * kVirtualMemOversubscriptFactor));
     ptr_ = sycl::ext::oneapi::experimental::reserve_virtual_mem(
         segment_size_ * max_handles_, xpu::get_device_context());
   }
@@ -168,15 +174,16 @@ struct ExpandableSegment {
     // Allocate and map physical memory for each segment.
     for (const auto i : c10::irange(begin, end)) {
       TORCH_INTERNAL_ASSERT(!handles_.at(i));
+      auto& handle = handles_.at(i);
       try {
         // Allocate physical memory for each segment. Construct the physical_mem
         // in-place to avoid copies.
-        handles_.at(i).emplace(
+        auto& mem = handle.emplace(
             xpu::get_raw_device(device_),
             xpu::get_device_context(),
             segment_size_);
         // Map the allocated physical memory into the virtual address space.
-        handles_.at(i).value().map(
+        mem.map(
             ptr_ + i * segment_size_,
             segment_size_,
             sycl::ext::oneapi::experimental::address_access_mode::read_write);
@@ -187,13 +194,14 @@ struct ExpandableSegment {
         // Note: constructing physical_mem may over-subscribe device memory but
         // not immediately trigger OOM. The actual OOM can occur during map().
         // Roll back all segments allocated or mapped in this operation.
-        handles_.at(i) = std::nullopt;
+        handle.reset();
         for (const auto j : c10::irange(begin, i)) {
           sycl::ext::oneapi::experimental::unmap(
+              // NOLINTNEXTLINE(performance-no-int-to-ptr)
               reinterpret_cast<void*>(ptr_ + segment_size_ * j),
               segment_size_,
               xpu::get_device_context());
-          handles_.at(j) = std::nullopt;
+          handles_.at(j).reset();
         }
         trimHandles();
         return rangeFromHandles(begin, begin);
@@ -245,6 +253,7 @@ struct ExpandableSegment {
       // ranges. Users must explicitly call unmap on all ranges before
       // destroying the physical_mem object.
       sycl::ext::oneapi::experimental::unmap(
+          // NOLINTNEXTLINE(performance-no-int-to-ptr)
           reinterpret_cast<void*>(ptr_ + segment_size_ * i),
           segment_size_,
           xpu::get_device_context());
@@ -318,9 +327,9 @@ struct ExpandableSegment {
   size_t max_handles_{0};
   // Physical memory handles for the segments.
   std::vector<std::optional<sycl::ext::oneapi::experimental::physical_mem>>
-      handles_{};
+      handles_;
   // Peer devices on which this memory could be accessible, reserved.
-  std::vector<c10::DeviceIndex> peers_{};
+  std::vector<c10::DeviceIndex> peers_;
 };
 
 struct AllocParams {
@@ -330,10 +339,7 @@ struct AllocParams {
       sycl::queue* queue,
       BlockPool* pool,
       size_t alloc_size)
-      : search_key(device, queue, size),
-        pool(pool),
-        alloc_size(alloc_size),
-        block(nullptr) {}
+      : search_key(device, queue, size), pool(pool), alloc_size(alloc_size) {}
 
   DeviceIndex device() const {
     return search_key.device;
@@ -350,7 +356,7 @@ struct AllocParams {
   Block search_key;
   BlockPool* pool;
   size_t alloc_size;
-  Block* block;
+  Block* block{nullptr};
   StatTypes stat_types = {};
 };
 
@@ -385,6 +391,15 @@ struct PrivatePool {
     return allocator_;
   }
 };
+
+MempoolId_t BlockPool::owner_MempoolId() const {
+  if (owner_PrivatePool) {
+    return owner_PrivatePool->id;
+  } else {
+    return {0, 0};
+  }
+}
+
 struct MempoolIdHash {
   std::size_t operator()(const MempoolId_t& mempool_id) const noexcept {
     return mempool_id.first != 0 ? mempool_id.first : mempool_id.second;
@@ -411,6 +426,61 @@ void deletePrimitive(void* ptr, BlockPool* pool) {
   }
 }
 
+template <class T>
+class RingBuffer {
+ public:
+  RingBuffer() {
+    // alloc_trace is a pointer because we need to intentionally
+    // leak this on deallocation it can hold references to Python
+    // state which will already be destroyed when we are in exit handlers
+    // NOLINTNEXTLINE(cppcoreguidelines-prefer-member-initializer)
+    alloc_trace = new std::vector<T>();
+  }
+
+  void setMaxEntries(size_t size) {
+    std::lock_guard<std::mutex> lk(alloc_trace_lock);
+    alloc_trace_max_entries_ = std::max(static_cast<size_t>(1), size);
+  }
+
+  void insertEntries(const T& entry) {
+    std::lock_guard<std::mutex> lk(alloc_trace_lock);
+    if (alloc_trace->size() < alloc_trace_max_entries_) {
+      alloc_trace->emplace_back(entry);
+    } else {
+      (*alloc_trace)[alloc_trace_next++] = entry;
+      if (alloc_trace_next == alloc_trace_max_entries_) {
+        alloc_trace_next = 0;
+      }
+    }
+  }
+
+  void getEntries(std::vector<T>& result) const {
+    std::lock_guard<std::mutex> lk(alloc_trace_lock);
+    result.reserve(result.size() + alloc_trace->size());
+    std::rotate_copy(
+        alloc_trace->begin(),
+        std::next(alloc_trace->begin(), alloc_trace_next),
+        alloc_trace->end(),
+        std::back_inserter(result));
+  }
+
+  void clear() {
+    std::lock_guard<std::mutex> lk(alloc_trace_lock);
+    alloc_trace_next = 0;
+    alloc_trace->clear();
+  }
+
+ private:
+  size_t alloc_trace_max_entries_ = 1;
+
+  // Both alloc_trace and alloc_trace_next needs to be used
+  // under alloc_trace_lock.
+  mutable std::mutex alloc_trace_lock;
+  size_t alloc_trace_next = 0;
+  // Leaked on deallocation to avoid issues with Python shutdown
+  std::vector<T>* alloc_trace;
+};
+
 } // anonymous namespace
 
 class DeviceCachingAllocator {
@@ -427,6 +497,11 @@ class DeviceCachingAllocator {
   bool set_fraction = false;
   std::vector<ExpandableSegment*> expandable_segments;
   std::vector<c10::DeviceIndex> devices_with_peer_access; // reserved
+  bool record_history = false;
+  std::atomic<CreateContextFn> context_recorder_;
+  RecordContext record_context_ = RecordContext::NEVER;
+  RingBuffer<TraceEntry> alloc_buffer;
+  std::unordered_set<TraceEntry::Action> skip_actions_list;
   std::vector<std::pair<MempoolId_t, std::function<bool(sycl::queue*)>>>
       captures_underway;
   ska::flat_hash_map<MempoolId_t, std::unique_ptr<PrivatePool>, MempoolIdHash>
@@ -448,6 +523,8 @@ class DeviceCachingAllocator {
       if (dst->prev) {
         dst->prev->next = dst;
       }
+      dst->context_when_segment_allocated =
+          std::move(src->context_when_segment_allocated);
     } else { // [dst src]
       dst->next = src->next;
       if (dst->next) {
@@ -464,31 +541,89 @@ class DeviceCachingAllocator {
     return subsumed_size;
   }
 
-  void free_block(Block* block) {
+  std::vector<Block*> get_all_blocks() const {
+    std::vector<Block*> blocks;
+    blocks.insert(
+        blocks.end(), small_blocks.blocks.begin(), small_blocks.blocks.end());
+    blocks.insert(
+        blocks.end(), large_blocks.blocks.begin(), large_blocks.blocks.end());
+    blocks.insert(blocks.end(), active_blocks.begin(), active_blocks.end());
+    return blocks;
+  }
+
+  void free_block(
+      Block* block,
+      const std::shared_ptr<GatheredContext>& context) {
     TORCH_INTERNAL_ASSERT(
         !block->allocated && block->event_count == 0 &&
         block->stream_uses.empty());
 
+    record_trace(
+        TraceEntry::FREE_COMPLETED,
+        reinterpret_cast<size_t>(block->ptr),
+        block->requested_size,
+        block->queue,
+        block->device,
+        block->pool->owner_MempoolId(),
+        context ? context : block->context_when_allocated);
+    block->context_when_allocated = nullptr;
+
     size_t original_block_size = block->size;
     size_t requested_size = block->requested_size;
+    int64_t net_change_inactive_split_blocks = 0;
+    int64_t net_change_inactive_split_size = 0;
+
     auto& pool = *block->pool;
     const std::array<Block*, 2> merge_candidates = {block->prev, block->next};
     for (Block* merge_candidate : merge_candidates) {
-      try_merge_blocks(block, merge_candidate, pool);
+      const auto subsumed_size = try_merge_blocks(block, merge_candidate, pool);
+      if (subsumed_size > 0) {
+        net_change_inactive_split_blocks -= 1;
+        net_change_inactive_split_size -= static_cast<int64_t>(subsumed_size);
+      }
     }
 
     active_blocks.erase(block);
     bool inserted = pool.blocks.insert(block).second;
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
 
+    if (block->is_split()) {
+      net_change_inactive_split_blocks += 1;
+      net_change_inactive_split_size += static_cast<int64_t>(block->size);
+    }
+
     StatTypes stat_types = get_stat_types_for_pool(pool);
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
+      // `inactive_split` is intended to reflect blocks that cannot be
+      // immediately released even when a free is requested. However, expandable
+      // segments behave differently: any fully free page within an expandable
+      // segment can always be safely released. Accurately tracking expandable
+      // segments in this statistic would significantly complicate the
+      // bookkeeping logic, so we intentionally exclude expandable segments from
+      // the `inactive_split` metric.
+      if (!block->expandable_segment) {
+        if (net_change_inactive_split_blocks > 0) {
+          stats.inactive_split[stat_type].increase(
+              static_cast<size_t>(net_change_inactive_split_blocks));
+        } else if (net_change_inactive_split_blocks < 0) {
+          stats.inactive_split[stat_type].decrease(
+              static_cast<size_t>(-net_change_inactive_split_blocks));
+        }
+        if (net_change_inactive_split_size > 0) {
+          stats.inactive_split_bytes[stat_type].increase(
+              static_cast<size_t>(net_change_inactive_split_size));
+        } else if (net_change_inactive_split_size < 0) {
+          stats.inactive_split_bytes[stat_type].decrease(
+              static_cast<size_t>(-net_change_inactive_split_size));
+        }
+      }
+      stats.active[stat_type].decrease(1);
       stats.active_bytes[stat_type].decrease(original_block_size);
       stats.requested_bytes[stat_type].decrease(requested_size);
     });
   }
 
-  void process_events() {
+  void process_events(const std::shared_ptr<GatheredContext>& context) {
     using namespace sycl::info;
     for (auto it = xpu_events.begin(); it != xpu_events.end();) {
       while (!it->second.empty()) {
@@ -501,7 +636,7 @@ class DeviceCachingAllocator {
         }
         block->event_count--;
         if (block->event_count == 0) {
-          free_block(block);
+          free_block(block, context);
         }
         it->second.pop_front();
       }
@@ -548,7 +683,7 @@ class DeviceCachingAllocator {
         }
       }
     }
-    if (size < kSmallSize) {
+    if (size <= kSmallSize) {
       return small_blocks;
     } else {
       return large_blocks;
@@ -604,8 +739,14 @@ class DeviceCachingAllocator {
     return candidate;
   }
 
-  bool map_block(Block* to_map, size_t size) {
+  bool map_block(
+      Block* to_map,
+      size_t size,
+      const std::shared_ptr<GatheredContext>& context) {
     TORCH_INTERNAL_ASSERT(!to_map->mapped && size <= to_map->size);
+    TORCH_INTERNAL_ASSERT(
+        !to_map->context_when_allocated,
+        "Unapped blocks must no hold allocation context.");
     auto mapped_range =
         to_map->expandable_segment->map(SegmentRange{to_map->ptr, size});
     // Failed to map the memory
@@ -644,6 +785,18 @@ class DeviceCachingAllocator {
       stats.reserved_bytes[stat_type].increase(mapped_range.size);
     });
 
+    record_trace(
+        TraceEntry::SEGMENT_MAP,
+        reinterpret_cast<size_t>(mapped_range.ptr),
+        mapped_range.size,
+        to_map->queue,
+        to_map->device,
+        to_map->pool->owner_MempoolId(),
+        context);
+    if (!to_map->prev && !to_map->context_when_segment_allocated) {
+      to_map->context_when_segment_allocated = context;
+    }
+
     return true;
   }
 
@@ -651,7 +804,8 @@ class DeviceCachingAllocator {
       c10::DeviceIndex device,
       sycl::queue* queue,
       BlockPool* pool,
-      size_t size) {
+      size_t size,
+      const std::shared_ptr<GatheredContext>& context) {
     // Candidate points to the start of a chain of contiguous blocks with
     // sufficient virtual address space (>= size). The chain may consist of:
     // Case 1: [Unmapped Block] -> null
@@ -662,7 +816,7 @@ class DeviceCachingAllocator {
     // Map first block if unmapped (Case 1 & 2), use std::min to avoid
     // over-mapping.
     if (!candidate->mapped &&
-        !map_block(candidate, std::min(candidate->size, size))) {
+        !map_block(candidate, std::min(candidate->size, size), context)) {
       return nullptr;
     }
     TORCH_INTERNAL_ASSERT(candidate->mapped);
@@ -674,7 +828,10 @@ class DeviceCachingAllocator {
       auto remaining = size - candidate->size;
       auto new_candidate = candidate->next;
       // Map only what we need from the `new_candidate` block.
-      if (!map_block(new_candidate, std::min(remaining, new_candidate->size))) {
+      if (!map_block(
+              new_candidate,
+              std::min(remaining, new_candidate->size),
+              context)) {
         return nullptr;
       }
       candidate = new_candidate;
@@ -729,7 +886,10 @@ class DeviceCachingAllocator {
     return true;
   }
 
-  bool alloc_block(AllocParams& p, bool isRetry) {
+  bool alloc_block(
+      AllocParams& p,
+      bool isRetry,
+      const std::shared_ptr<GatheredContext>& context) {
     auto size = p.alloc_size;
     void* ptr = nullptr;
 
@@ -748,7 +908,7 @@ class DeviceCachingAllocator {
           !active_pool,
           "torch.xpu.MemPool doesn't currently support expandable_segments.");
       p.block = try_allocate_expandable_block(
-          p.device(), p.queue(), p.pool, p.size());
+          p.device(), p.queue(), p.pool, p.size(), context);
       if (p.block && p.pool->owner_PrivatePool) {
         // The block is used only for XPU graph's PrivatePool.
         p.pool->owner_PrivatePool->allocation_count++;
@@ -766,13 +926,27 @@ class DeviceCachingAllocator {
     }
     p.block = new Block(p.device(), p.queue(), size, p.pool, ptr);
     for_each_selected_stat_type(p.stat_types, [&](size_t stat_type) {
+      stats.segment[stat_type].increase(1);
       stats.reserved_bytes[stat_type].increase(size);
     });
     TORCH_INTERNAL_ASSERT(p.block != nullptr && p.block->ptr != nullptr);
+
+    record_trace(
+        TraceEntry::SEGMENT_ALLOC,
+        reinterpret_cast<size_t>(p.block->ptr),
+        p.block->size,
+        p.queue(),
+        p.device(),
+        p.pool->owner_MempoolId(),
+        context);
+    p.block->context_when_segment_allocated = context;
+
     return true;
   }
 
-  void synchronize_and_free_events(PrivatePool* pool = nullptr) {
+  void synchronize_and_free_events(
+      const std::shared_ptr<GatheredContext>& context,
+      PrivatePool* pool = nullptr) {
     for (auto& xe : xpu_events) {
       for (auto& e : xe.second) {
         auto event = e.first;
@@ -783,7 +957,7 @@ class DeviceCachingAllocator {
         event.wait();
         block->event_count--;
         if (block->event_count == 0) {
-          free_block(block);
+          free_block(block, context);
         }
       }
     }
@@ -811,7 +985,9 @@ class DeviceCachingAllocator {
     delete block;
   }
 
-  void release_block(Block* block) {
+  void release_block(
+      Block* block,
+      const std::shared_ptr<GatheredContext>& context) {
     /*
      * Note [Safe to Free Blocks on BlockPool]
      *
@@ -822,6 +998,16 @@ class DeviceCachingAllocator {
      * guarantee that all kernels can access to the blocks have finished.
      */
     TORCH_INTERNAL_ASSERT(!block->expandable_segment);
+
+    record_trace(
+        TraceEntry::SEGMENT_FREE,
+        reinterpret_cast<size_t>(block->ptr),
+        block->size,
+        block->queue,
+        block->device,
+        block->pool->owner_MempoolId(),
+        context ? context : block->context_when_segment_allocated);
+
     auto* pool = block->pool;
     deletePrimitive(block->ptr, pool);
 
@@ -833,13 +1019,16 @@ class DeviceCachingAllocator {
 
     StatTypes stat_types = get_stat_types_for_pool(*pool);
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
+      stats.segment[stat_type].decrease(1);
       stats.reserved_bytes[stat_type].decrease(block->size);
     });
 
     delete block;
   }
 
-  void unmap_block(Block* block) {
+  void unmap_block(
+      Block* block,
+      const std::shared_ptr<GatheredContext>& context) {
     auto unmapped =
         block->expandable_segment->unmap(SegmentRange{block->ptr, block->size});
     if (unmapped.size == 0) {
@@ -895,9 +1084,20 @@ class DeviceCachingAllocator {
           block->pool->owner_PrivatePool->allocation_count > 0);
       block->pool->owner_PrivatePool->allocation_count--;
     }
+
+    record_trace(
+        TraceEntry::SEGMENT_UNMAP,
+        reinterpret_cast<size_t>(unmapped.ptr),
+        unmapped.size,
+        block->queue,
+        block->device,
+        block->pool->owner_MempoolId(),
+        context ? context : block->context_when_segment_allocated);
   }
 
-  void release_blocks(BlockPool& pool) {
+  void release_blocks(
+      BlockPool& pool,
+      const std::shared_ptr<GatheredContext>& context) {
     std::vector<Block*> to_unmap;
     // Frees all non-split blocks in the given pool.
     auto it = pool.blocks.begin();
@@ -909,11 +1109,11 @@ class DeviceCachingAllocator {
         // to avoid iterator invalidation.
         to_unmap.push_back(block);
       } else if (!block->prev && !block->next) {
-        release_block(block);
+        release_block(block, context);
       }
     }
     for (Block* block : to_unmap) {
-      unmap_block(block);
+      unmap_block(block, context);
       // After unmap_block(), expandable segment blocks with no neighbors are
       // also released.
       if (!block->prev && !block->next) {
@@ -922,17 +1122,19 @@ class DeviceCachingAllocator {
     }
   }
 
-  bool release_cached_blocks(MempoolId_t mempool_id) {
+  bool release_cached_blocks(
+      const std::shared_ptr<GatheredContext>& context,
+      MempoolId_t mempool_id) {
     bool streams_synced = false;
     if (mempool_id.first == 0 && mempool_id.second == 0 &&
         captures_underway.empty()) {
-      synchronize_and_free_events();
+      synchronize_and_free_events(context);
       // See Note [Safe to Free Blocks on BlockPool]
       c10::xpu::syncStreamsOnDevice(device_index);
       streams_synced = true;
 
-      release_blocks(large_blocks);
-      release_blocks(small_blocks);
+      release_blocks(large_blocks, context);
+      release_blocks(small_blocks, context);
     }
 
     for (auto it = graph_pools_freeable.begin();
@@ -941,7 +1143,7 @@ class DeviceCachingAllocator {
         if (it->first == mempool_id) {
           // If there is an active mempool, we sync only the events
           // associated with the pool
-          synchronize_and_free_events(it->second);
+          synchronize_and_free_events(context, it->second);
         } else {
           // otherwise we move on
           ++it;
@@ -955,8 +1157,8 @@ class DeviceCachingAllocator {
         streams_synced = true;
       }
       TORCH_INTERNAL_ASSERT(it->second->use_count == 0);
-      release_blocks(it->second->small_blocks);
-      release_blocks(it->second->large_blocks);
+      release_blocks(it->second->small_blocks, context);
+      release_blocks(it->second->large_blocks, context);
       if (it->second->allocation_count == 0) {
         auto erase_count = graph_pools.erase(it->first);
         TORCH_INTERNAL_ASSERT(erase_count == 1);
@@ -987,8 +1189,9 @@ class DeviceCachingAllocator {
   }
 
   Block* alloc_found_block(
-      AllocParams params,
+      const AllocParams& params,
       size_t orig_size,
+      std::shared_ptr<GatheredContext> context,
       bool split_remainder) {
     auto size = params.size();
     auto device = params.device();
@@ -1000,6 +1203,7 @@ class DeviceCachingAllocator {
     Block* block = params.block;
     Block* remaining = nullptr;
 
+    const bool already_split = block->is_split();
     if (split_remainder) {
       remaining = block;
 
@@ -1016,14 +1220,49 @@ class DeviceCachingAllocator {
       remaining->size -= size;
       bool inserted = pool->blocks.insert(remaining).second;
       TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted);
+
+      if (already_split && !block->expandable_segment) {
+        // Allocate from an existing inactive split block: decrease inactive
+        // split bytes.
+        for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
+          stats.inactive_split_bytes[stat_type].decrease(block->size);
+        });
+      } else if (!block->expandable_segment) {
+        // First time split a non-expandable block: create a new inactive
+        // split block (the remaining part), so increase the inactive split
+        // count and bytes.
+        for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
+          stats.inactive_split[stat_type].increase(1);
+          stats.inactive_split_bytes[stat_type].increase(remaining->size);
+        });
+      }
+    } else if (already_split && !block->expandable_segment) {
+      // Allocate the whole inactive split block: decrease both count and bytes.
+      for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
+        stats.inactive_split[stat_type].decrease(1);
+        stats.inactive_split_bytes[stat_type].decrease(block->size);
+      });
     }
 
     block->allocated = true;
     block->requested_size = orig_size;
+
+    block->context_when_allocated = std::move(context);
+    record_trace(
+        TraceEntry::ALLOC,
+        reinterpret_cast<size_t>(block->ptr),
+        orig_size,
+        block->queue,
+        block->device,
+        block->pool->owner_MempoolId(),
+        block->context_when_allocated);
+
     bool inserted = active_blocks.insert(block).second;
     TORCH_INTERNAL_ASSERT_DEBUG_ONLY(inserted)
 
     for_each_selected_stat_type(params.stat_types, [&](size_t stat_type) {
+      stats.allocation[stat_type].increase(1);
+      stats.active[stat_type].increase(1);
       stats.allocated_bytes[stat_type].increase(block->size);
       stats.active_bytes[stat_type].increase(block->size);
       stats.requested_bytes[stat_type].increase(block->requested_size);
@@ -1047,6 +1286,29 @@ class DeviceCachingAllocator {
       xpu_events[stream].emplace_back(
           stream.queue().ext_oneapi_submit_barrier(), block);
     }
+  }
+
+  std::vector<Block*> get_private_pool_head_blocks(PrivatePool* pool) const {
+    std::vector<Block*> blocks;
+    for (Block* b : active_blocks) {
+      if ((b->pool == &pool->small_blocks || b->pool == &pool->large_blocks) &&
+          b->prev == nullptr) {
+        blocks.push_back(b);
+      }
+    }
+
+    for (Block* b : pool->small_blocks.blocks) {
+      if (b->prev == nullptr) {
+        blocks.push_back(b);
+      }
+    }
+    for (Block* b : pool->large_blocks.blocks) {
+      if (b->prev == nullptr) {
+        blocks.push_back(b);
+      }
+    }
+
+    return blocks;
   }
 
   void create_or_incref_pool(
@@ -1073,6 +1335,16 @@ class DeviceCachingAllocator {
     return it->second.get();
   }
 
+  // This function must be called with the mutex unlocked. Holding the mutex
+  // here can cause deadlocks, especially when interacting with Python code that
+  // may acquire the GIL or invoke callbacks.
+  std::shared_ptr<GatheredContext> maybeGatherContext(RecordContext level) {
+    if (record_context_ < level) {
+      return nullptr;
+    }
+    return context_recorder_.load()();
+  }
+
  public:
   DeviceCachingAllocator(DeviceIndex device_index)
       : large_blocks(/* small */ false),
@@ -1080,9 +1352,12 @@ class DeviceCachingAllocator {
         device_index(device_index) {}
 
   Block* malloc(DeviceIndex device, size_t orig_size, sycl::queue& queue) {
+    // Outside mutex to avoid deadlocks.
+    auto context = maybeGatherContext(RecordContext::STATE);
+
     std::scoped_lock<std::recursive_mutex> lock(mutex);
     if (C10_LIKELY(captures_underway.empty())) {
-      process_events();
+      process_events(context);
     }
     size_t size = round_size(orig_size);
     auto& pool = get_pool(size, &queue);
@@ -1094,8 +1369,9 @@ class DeviceCachingAllocator {
     bool block_found = get_free_block(params);
     // Can't reuse an existing block, try to get a new one.
     if (!block_found) {
-      block_found = alloc_block(params, false) ||
-          (release_cached_blocks({0, 0}) && alloc_block(params, true));
+      block_found = alloc_block(params, false, context) ||
+          (release_cached_blocks(context, {0, 0}) &&
+           alloc_block(params, true, context));
     }
     if (!block_found) {
       const auto& raw_device = c10::xpu::get_raw_device(device);
@@ -1124,6 +1400,15 @@ class DeviceCachingAllocator {
           stats.reserved_bytes[static_cast<size_t>(StatType::AGGREGATE)]
               .current;
 
+      record_trace(
+          TraceEntry::OOM,
+          device_free,
+          params.size(),
+          params.queue(),
+          params.device(),
+          params.pool->owner_MempoolId(),
+          std::move(context));
+
       c10::reportOutOfMemoryToProfiler(
           static_cast<int64_t>(size),
           allocated_bytes,
@@ -1151,10 +1436,14 @@ class DeviceCachingAllocator {
           " Please use `empty_cache` to release all unoccupied cached memory.");
     }
     bool split_remainder = should_split(params.block, params.size());
-    return alloc_found_block(std::move(params), orig_size, split_remainder);
+    return alloc_found_block(
+        params, orig_size, std::move(context), split_remainder);
   }
 
   void free(Block* block) {
+    // Outside mutex to avoid deadlocks.
+    auto context = maybeGatherContext(RecordContext::ALL);
+
     std::scoped_lock<std::recursive_mutex> lock(mutex);
     block->allocated = false;
 
@@ -1163,13 +1452,23 @@ class DeviceCachingAllocator {
 
     StatTypes stat_types = get_stat_types_for_pool(*block->pool);
     for_each_selected_stat_type(stat_types, [&](size_t stat_type) {
+      stats.allocation[stat_type].decrease(1);
       stats.allocated_bytes[stat_type].decrease(block->size);
     });
+
+    record_trace(
+        TraceEntry::FREE_REQUESTED,
+        reinterpret_cast<size_t>(block->ptr),
+        block->requested_size,
+        block->queue,
+        block->device,
+        block->pool->owner_MempoolId(),
+        context ? context : block->context_when_allocated);
 
     if (!block->stream_uses.empty()) {
       insert_events(block);
     } else {
-      free_block(block);
+      free_block(block, context);
     }
 
     c10::reportMemoryUsageToProfiler(
@@ -1189,8 +1488,11 @@ class DeviceCachingAllocator {
   }
 
   void emptyCache(MempoolId_t mempool_id) {
+    // Outside mutex to avoid deadlocks.
+    auto context = maybeGatherContext(RecordContext::ALL);
+
     std::scoped_lock<std::recursive_mutex> lock(mutex);
-    release_cached_blocks(mempool_id);
+    release_cached_blocks(context, mempool_id);
   }
 
   DeviceStats getStats() {
@@ -1203,9 +1505,14 @@ class DeviceCachingAllocator {
 
     for (const auto statType :
          c10::irange(static_cast<size_t>(StatType::NUM_TYPES))) {
+      stats.allocation[statType].reset_accumulated();
+      stats.segment[statType].reset_accumulated();
+      stats.active[statType].reset_accumulated();
+      stats.inactive_split[statType].reset_accumulated();
       stats.allocated_bytes[statType].reset_accumulated();
       stats.reserved_bytes[statType].reset_accumulated();
       stats.active_bytes[statType].reset_accumulated();
+      stats.inactive_split_bytes[statType].reset_accumulated();
       stats.requested_bytes[statType].reset_accumulated();
     }
     stats.num_alloc_retries = 0;
@@ -1216,10 +1523,171 @@ class DeviceCachingAllocator {
 
     for (const auto statType :
          c10::irange(static_cast<size_t>(StatType::NUM_TYPES))) {
+      stats.allocation[statType].reset_peak();
+      stats.segment[statType].reset_peak();
+      stats.active[statType].reset_peak();
+      stats.inactive_split[statType].reset_peak();
       stats.allocated_bytes[statType].reset_peak();
       stats.reserved_bytes[statType].reset_peak();
       stats.active_bytes[statType].reset_peak();
+      stats.inactive_split_bytes[statType].reset_peak();
       stats.requested_bytes[statType].reset_peak();
+    }
+  }
+
+  void record_trace(
+      TraceEntry::Action action,
+      size_t addr,
+      size_t size,
+      sycl::queue* queue,
+      c10::DeviceIndex device,
+      MempoolId_t mempool_id,
+      std::shared_ptr<GatheredContext> context) {
+    if (!record_history)
+      return;
+    bool should_skip = skip_actions_list.count(action) > 0;
+    if (should_skip)
+      return;
+    TraceEntry te(
+        action,
+        device,
+        addr,
+        size,
+        queue,
+        mempool_id,
+        getApproximateTime(),
+        record_context_ >= RecordContext::ALLOC ? std::move(context) : nullptr);
+    alloc_buffer.insertEntries(te);
+  }
+
+  std::vector<SegmentInfo> snapshot(MempoolId_t mempool_id) {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+
+    std::vector<Block*> all_blocks;
+
+    if (mempool_id.first != 0 || mempool_id.second != 0) {
+      // If there is an active mempool, we find the corresponding PrivatePool
+      // in graph_pools and only return the blocks from it.
+      auto pool = graph_pools.find(mempool_id);
+      if (pool != graph_pools.end()) {
+        all_blocks = get_private_pool_head_blocks(pool->second.get());
+      }
+    } else {
+      // When snapshot is called with non-default mempool_id, we return
+      // all the blocks from all pools.
+      all_blocks = get_all_blocks();
+    }
+
+    size_t total_active = 0;
+    std::vector<SegmentInfo> result;
+
+    for (const Block* const head_block : all_blocks) {
+      // For expandable segments, we report one segment for each contiguous
+      // mapped range of memory
+      if (head_block->prev && head_block->prev->mapped) {
+        continue;
+      }
+      result.emplace_back();
+      SegmentInfo& segment_info = result.back();
+      segment_info.device = head_block->device;
+      segment_info.address = reinterpret_cast<size_t>(head_block->ptr);
+      segment_info.queue = head_block->queue;
+      segment_info.is_large = (!head_block->pool->is_small);
+      segment_info.is_expandable = head_block->expandable_segment;
+      segment_info.context_when_allocated =
+          head_block->context_when_segment_allocated;
+      MempoolId_t id = head_block->pool->owner_MempoolId();
+      if ((mempool_id.first == 0 && mempool_id.second == 0) ||
+          id == mempool_id) {
+        segment_info.owner_private_pool_id = id;
+      }
+
+      const Block* block = head_block;
+      while (block != nullptr && block->mapped) {
+        segment_info.blocks.emplace_back();
+        BlockInfo& block_info = segment_info.blocks.back();
+
+        block_info.size = block->size;
+        block_info.requested_size = block->requested_size;
+        block_info.allocated = block->allocated;
+        block_info.active = block->allocated || (block->event_count > 0) ||
+            !block->stream_uses.empty();
+
+        segment_info.total_size += block_info.size;
+        if (block_info.allocated) {
+          segment_info.allocated_size += block_info.size;
+        }
+        if (block_info.active) {
+          segment_info.active_size += block_info.size;
+          segment_info.requested_size += block_info.requested_size;
+        }
+        block_info.context_when_allocated = block->context_when_allocated;
+        block = block->next;
+      }
+      total_active += segment_info.active_size;
+    }
+
+    std::sort(
+        result.begin(),
+        result.end(),
+        [](const SegmentInfo& a, const SegmentInfo& b) {
+          return a.address < b.address;
+        });
+
+    record_trace(
+        TraceEntry::SNAPSHOT, 0, total_active, nullptr, 0, mempool_id, nullptr);
+    return result;
+  }
+
+  std::vector<TraceEntry> trace(
+      const std::function<time_t(approx_time_t)>& tsc_to_us) const {
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    std::vector<TraceEntry> result;
+    alloc_buffer.getEntries(result);
+
+    // Convert all the timestamps from tsc to epoch time in microseconds.
+    for (auto& te : result) {
+      te.time_.t_ = tsc_to_us(te.time_.approx_t_);
+    }
+    return result;
+  }
+
+  void recordHistory(
+      bool enabled,
+      CreateContextFn context_recorder,
+      size_t alloc_buffer_max_entries,
+      RecordContext when,
+      bool clearHistory,
+      const std::vector<std::string>& skip_actions) {
+    std::unique_lock<std::recursive_mutex> lock(mutex);
+    TORCH_CHECK(when == RecordContext::NEVER || context_recorder);
+    record_history = enabled;
+
+    static const std::unordered_map<std::string, TraceEntry::Action>
+        kActionMap = {
+            {"alloc", TraceEntry::Action::ALLOC},
+            {"free_requested", TraceEntry::Action::FREE_REQUESTED},
+            {"free_completed", TraceEntry::Action::FREE_COMPLETED},
+            {"segment_alloc", TraceEntry::Action::SEGMENT_ALLOC},
+            {"segment_free", TraceEntry::Action::SEGMENT_FREE},
+            {"segment_map", TraceEntry::Action::SEGMENT_MAP},
+            {"segment_unmap", TraceEntry::Action::SEGMENT_UNMAP},
+            {"snapshot", TraceEntry::Action::SNAPSHOT},
+            {"oom", TraceEntry::Action::OOM},
+        };
+
+    skip_actions_list.clear();
+    for (const auto& action_str : skip_actions) {
+      auto it = kActionMap.find(action_str);
+      TORCH_CHECK(it != kActionMap.end(), "Unknown skip action: ", action_str);
+      skip_actions_list.insert(it->second);
+    }
+
+    context_recorder_.store(record_history ? context_recorder : nullptr);
+    alloc_buffer.setMaxEntries(alloc_buffer_max_entries);
+    record_context_ = enabled ? when : RecordContext::NEVER;
+    if (!enabled || clearHistory) {
+      alloc_buffer.clear();
     }
   }
 
@@ -1254,7 +1722,8 @@ class DeviceCachingAllocator {
     const auto device_total =
         xpu::get_raw_device(device_index)
             .get_info<sycl::info::device::global_mem_size>();
-    allowed_memory_maximum = static_cast<size_t>(fraction * device_total);
+    allowed_memory_maximum =
+        static_cast<size_t>(fraction * static_cast<double>(device_total));
     set_fraction = true;
   }
 
@@ -1322,6 +1791,7 @@ class NativeCachingAllocator : public XPUAllocator {
  private:
   alignas(hardware_destructive_interference_size) std::mutex mutex;
   ska::flat_hash_map<void*, Block*> allocated_blocks;
+  c10::ApproximateClockToUnixTimeConverter clock_converter;
 
   void add_allocated_block(Block* block) {
     std::lock_guard<std::mutex> lock(mutex);
@@ -1477,6 +1947,30 @@ class NativeCachingAllocator : public XPUAllocator {
     device_allocators[device]->resetAccumulatedStats();
   }
 
+  SnapshotInfo snapshot(MempoolId_t mempool_id) {
+    // Set-up converter to convert timestamps from tsc to microseconds.
+    auto tsc_to_ns = clock_converter.makeConverter();
+    auto tsc_to_us = [=](approx_time_t t_approx) {
+      return tsc_to_ns(t_approx) / 1000;
+    };
+
+    SnapshotInfo result;
+
+    // Get the device_traces' TraceEntry lists.
+    for (auto& da : device_allocators) {
+      result.device_traces.emplace_back(da->trace(tsc_to_us));
+      auto snap = da->snapshot(mempool_id);
+      result.segments.insert(result.segments.end(), snap.begin(), snap.end());
+    }
+
+    auto& md = result.config_metadata;
+    md.expandable_segments =
+        AcceleratorAllocatorConfig::use_expandable_segments();
+    md.last_allocator_settings =
+        AcceleratorAllocatorConfig::last_allocator_settings();
+    return result;
+  }
+
   void enablePeerAccess(c10::DeviceIndex dev, c10::DeviceIndex dev_to_access) {
     assertValidDevice(dev);
     assertValidDevice(dev_to_access);
@@ -1502,6 +1996,24 @@ class NativeCachingAllocator : public XPUAllocator {
         fraction,
         ". Please set within (0, 1].");
     device_allocators[device]->setMemoryFraction(fraction);
+  }
+
+  void recordHistory(
+      bool enabled,
+      CreateContextFn context_recorder,
+      size_t alloc_buffer_max_entries,
+      RecordContext when,
+      bool clearHistory,
+      const std::vector<std::string>& skip_actions) {
+    for (auto& allocator : device_allocators) {
+      allocator->recordHistory(
+          enabled,
+          context_recorder,
+          alloc_buffer_max_entries,
+          when,
+          clearHistory,
+          skip_actions);
+    }
   }
 
   void createOrIncrefPool(
@@ -1565,6 +2077,26 @@ double getMemoryFraction(DeviceIndex device) {
 
 void setMemoryFraction(double fraction, DeviceIndex device) {
   return native_allocator.setMemoryFraction(fraction, device);
+}
+
+void recordHistory(
+    bool enabled,
+    CreateContextFn context_recorder,
+    size_t alloc_trace_max_entries,
+    RecordContext when,
+    bool clearHistory,
+    const std::vector<std::string>& skip_actions) {
+  native_allocator.recordHistory(
+      enabled,
+      context_recorder,
+      alloc_trace_max_entries,
+      when,
+      clearHistory,
+      skip_actions);
+}
+
+SnapshotInfo snapshot(MempoolId_t mempool_id) {
+  return native_allocator.snapshot(mempool_id);
 }
 
 void createOrIncrefPool(
