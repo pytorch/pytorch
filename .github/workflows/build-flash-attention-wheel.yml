@@ -3,7 +3,7 @@ name: Build Flash Attention 3 wheels
 on:
   workflow_dispatch:
   # TODO: Remove this trigger before merging - only for testing from PR branch
-  push:
+  pull_request:
     branches:
       - flash-attn3
 
