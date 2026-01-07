@@ -734,6 +734,120 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
         compute_rankwise_if_local_tensor(weight_local, self.rank)
 
 
+class DTensorRandomOpsSeedConsistencyTest(DTensorTestBase):
+    @property
+    def world_size(self):
+        return 8
+
+    @skip_if_lt_x_gpu(8)
+    @with_comms
+    def test_thread_rng_tracker_sharding_spec(self):
+        """
+        Test that RNG state with sharding specification can be saved and restored correctly.
+
+        This test verifies that:
+        1. Sharding spec (local_shape, global_offset, global_shape, global_strides) can be
+           serialized into the RNG state tensor along with seed and offset.
+        2. The serialized state tensor has the correct format and length.
+        3. After restoring the RNG state, distributed random operations produce
+           reproducible results.
+
+        RNG State Tensor Layout:
+        ========================
+        The state tensor is a byte tensor with the following layout:
+        - Bytes [0:8]:   seed (uint64_t, 8 bytes)
+        - Bytes [8:16]:  philox offset (int64_t, 8 bytes)
+        - Bytes [16:16+num_dims*8]:      local_shape (num_dims x uint64_t)
+        - Bytes [16+num_dims*8:...]:     global_offset (num_dims x uint64_t)
+        - Bytes [...:...]:               global_shape (num_dims x uint64_t)
+        - Bytes [...:16+num_dims*8*4]:   global_strides (num_dims x uint64_t)
+
+        Total size = 16 + (num_dims * 8 * 4) bytes
+                   = 16 + (3 * 8 * 4) = 112 bytes for 3D tensors
+
+        Sharding Spec Parameters:
+        =========================
+        - local_shape: Shape of the local tensor shard on this rank (e.g., (1, 1, 1))
+        - global_offset: Offset of local shard in the global tensor (e.g., (0, 0, 0))
+        - global_shape: Shape of the full global tensor (e.g., (8, 8, 8))
+        - global_strides: Strides for computing linear index in global tensor (e.g., (4, 2, 1))
+        """
+        import copy
+
+        from torch.distributed.tensor._random import _PhiloxState, _RNGStateTracker
+
+        # For 8 GPUs: mesh_shape = (2, 2, 2)
+        device_mesh = init_device_mesh(
+            self.device_type,
+            mesh_shape=(self.world_size // 4, 2, 2),
+        )
+
+        # Get the current RNG state from the device
+        tracker = _RNGStateTracker(torch.device("cuda"))
+        device_handle = tracker._device_handle
+        state = _PhiloxState(device_handle.get_rng_state().to(self.device_type))
+
+        # Define sharding specification for a 3D distributed tensor
+        # - local_shape: each rank holds a 1x1x1 piece
+        # - global_offset: starting position (0,0,0) - will vary per rank in practice
+        # - global_shape: the full tensor is 8x8x8
+        # - global_strides: row-major strides for 3D indexing
+        local_shape = tuple([1] * 3)
+        global_offset = tuple([0] * 3)
+        global_shape = tuple([8] * 3)
+        global_strides = (4, 2, 1)  # strides for (dim0, dim1, dim2)
+        sharding_spec = (local_shape, global_offset, global_shape, global_strides)
+
+        # Build the serialized state tensor
+        # Extract seed (first 8 bytes) and current offset from existing state
+        offset = state.offset
+        seed_tensor = (state.state)[0:8]  # 8 bytes for seed
+
+        # Concatenate offset with all sharding spec arrays into a single tensor
+        # sum(sharding_spec, start=(offset,)) flattens: (offset, *local_shape, *global_offset, *global_shape, *global_strides)
+        spec_tensor = torch.tensor(sum(sharding_spec, start=(offset,))).view(
+            torch.uint8
+        )
+
+        # Combine seed + (offset + sharding_spec) into final state tensor
+        state_tensor = torch.cat([seed_tensor, spec_tensor])
+
+        # Verify state tensor has correct size
+        # Expected: 2*8 (seed+offset) + 3*8*4 (4 arrays of 3 uint64_t each) = 112 bytes
+        expected_length = 2 * 8 + 3 * 8 * 4
+        self.assertEqual(len(state_tensor), expected_length)
+        self.assertEqual(state_tensor.dtype, torch.uint8)
+
+        # Set the RNG state with sharding spec
+        state._state = state_tensor
+        device_handle.set_rng_state(state.state)
+
+        # Create a distributed tensor and fill with random values, save reference copy of the first random tensor
+        dtensor = distribute_tensor(
+            torch.empty([self.world_size], device=self.device_type),
+            device_mesh,
+            [Shard(0), Shard(0), Shard(0)],
+        )
+        dtensor.uniform_(0, 1)
+        reference_dt = copy.deepcopy(dtensor)
+
+        # Advance RNG state by generating more random values
+        for _ in range(5):
+            dtensor.uniform_(0, 1)
+
+        # Restore the same RNG state, create a new distributed tensor with the restored state
+        device_handle.set_rng_state(state.state)
+        new_dtensor = distribute_tensor(
+            torch.empty([self.world_size], device=self.device_type),
+            device_mesh,
+            [Shard(0), Shard(0), Shard(0)],
+        )
+        new_dtensor.uniform_(0, 1)
+
+        # Verify reproducibility - should match the reference
+        self.assertEqual(reference_dt, new_dtensor)
+
+
 DistTensorRandomInitTestWithLocalTensor = create_local_tensor_test_class(
     DistTensorRandomInitTest,
 )
