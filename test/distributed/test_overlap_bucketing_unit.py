@@ -370,7 +370,6 @@ class TestOverlapPreservingBucketing(InductorTestCase):
             collective_info,
             scheduled,
         )
-
         bucketer.bucket_collectives()
 
         graph_str = str(traced.graph)
@@ -456,10 +455,11 @@ class TestOverlapPreservingBucketing(InductorTestCase):
 
         # Verify: should have 1 bucketed all_reduce
         # After bucketing, there should be only one all_reduce node (the bucketed one)
+        # Check for cat (bucketing input) and split_with_sizes (bucketing output)
         graph_str = str(traced.graph)
-        FileCheck().check_count("%all_reduce", 1, exactly=True).check_count(
-            "%mm", 2
-        ).run(graph_str)
+        FileCheck().check("cat.default").check("all_reduce.default").check(
+            "split_with_sizes"
+        ).check_count("%mm", 2).run(graph_str)
 
     def test_can_bucket_multidtype_collectives(self):
         """
@@ -714,11 +714,12 @@ class TestOverlapPreservingBucketing(InductorTestCase):
 
         graph_str = str(traced.graph)
 
+        # Expect: ag1 (separate, hidden by convert1) -> wait -> ag2+ag3 bucketed (hidden by mm)
+        # Check for pre_bucket (for ag2+ag3) and all_gather_into_tensor_out (bucketed)
         f = FileCheck()
-        f.check_count("%all_gather_into_tensor", 1, exactly=True)
-        f.check("pre_bucket_all_gather").check("wait_tensor").check(
-            "%all_gather_into_tensor_out"
-        ).run(graph_str)
+        f.check("all_gather_into_tensor.default").check("wait_tensor")
+        f.check("pre_bucket_all_gather").check("all_gather_into_tensor_out")
+        f.run(graph_str)
 
 
 @requires_accelerator_dist_backend(["nccl", "xccl"])
@@ -797,7 +798,7 @@ class TestCrossPGOverlap(InductorTestCase):
 
         def custom_runtime(node: fx.Node, override_size: int | None) -> float | None:
             if "all_gather" in str(node.target):
-                return 10.0
+                return 10.0  # Long collective to ensure exposed wait
             return 0.0
 
         # Run overlap scheduler
@@ -820,6 +821,200 @@ class TestCrossPGOverlap(InductorTestCase):
         ).check("%wait_tensor").run(str(out.graph))
 
         self.assertEqual(counters["inductor"]["overlap_scheduling_exposed"], 1)
+
+    def test_two_queue_scheduling_off_path_nodes(self):
+        """
+        Test that off-path nodes (reduce_scatters whose results don't block compute)
+        are scheduled near their original position rather than drifting to the end.
+
+        Without two-queue scheduling, off-path nodes get domination=inf and drift
+        to end. With two-queue, they stay near original position.
+        """
+
+        def func(a, b):
+            group_name = "0"
+            group_size = 2
+
+            # On-path: all_gather whose result is used by compute
+            ag = torch.ops._c10d_functional.all_gather_into_tensor(
+                b, group_size, group_name
+            )
+            ag_out = torch.ops._c10d_functional.wait_tensor(ag)
+
+            # mm1 uses all_gather result (makes ag on-path)
+            mm1 = torch.mm(a, ag_out[:4, :4])
+
+            # Off-path: reduce_scatter result not used by further compute
+            rs1 = torch.ops._c10d_functional.reduce_scatter_tensor(
+                mm1, "sum", group_size, group_name
+            )
+
+            mm2 = torch.mm(a, a)
+            rs2 = torch.ops._c10d_functional.reduce_scatter_tensor(
+                mm2, "sum", group_size, group_name
+            )
+
+            mm3 = torch.mm(a, a)
+
+            # Waits at end (like gradient outputs)
+            rs1_out = torch.ops._c10d_functional.wait_tensor(rs1)
+            rs2_out = torch.ops._c10d_functional.wait_tensor(rs2)
+
+            return mm3.sum() + rs1_out.sum() + rs2_out.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(4, 4, device=self.device)
+            b = torch.ones(4, 4, device=self.device)
+            traced = make_fx(func)(a, b)
+
+        from torch._inductor.fx_passes.overlap_scheduling import (
+            schedule_overlap_bucketing,
+        )
+
+        def custom_runtime(node: fx.Node, override_size: int | None) -> float | None:
+            if "all_gather" in str(node.target) or "reduce_scatter" in str(node.target):
+                return 1.0
+            return 0.0
+
+        out = schedule_overlap_bucketing(
+            traced, custom_runtime_estimation=custom_runtime
+        )
+
+        # Get scheduled order
+        node_names = [n.name for n in out.graph.nodes if n.op == "call_function"]
+        rs_starts = [
+            i
+            for i, name in enumerate(node_names)
+            if "reduce_scatter" in name and "wait" not in name
+        ]
+        mm_positions = [i for i, name in enumerate(node_names) if name.startswith("mm")]
+
+        # Off-path reduce_scatters should be interspersed with compute, not all at end
+        last_mm = max(mm_positions)
+        self.assertTrue(
+            any(p < last_mm for p in rs_starts),
+            f"Off-path reduce_scatters drifted to end: rs={rs_starts}, mm={mm_positions}, names={node_names}",
+        )
+
+
+@requires_accelerator_dist_backend(["nccl", "xccl"])
+@unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+class TestFusibleNodeOverlap(InductorTestCase):
+    """Test that fusible nodes are used for overlapping with collectives."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        from torch.testing._internal.distributed.fake_pg import FakeStore
+
+        store = FakeStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=2, store=store)
+        cls.device = "cuda"
+
+    @classmethod
+    def tearDownClass(cls):
+        super().tearDownClass()
+        dist.destroy_process_group()
+
+    def test_fusible_nodes_hide_collective(self):
+        """Test that fusible (non-mm) nodes can hide collectives."""
+
+        def func(a):
+            group_name = "0"
+            group_size = 1
+
+            ag = torch.ops._c10d_functional.all_gather_into_tensor(
+                a, group_size, group_name
+            )
+            # Chain of pointwise ops - should be estimated and used for overlap
+            b = a + 1
+            b = b * 2
+            b = b - 3
+            ag_out = torch.ops._c10d_functional.wait_tensor(ag)
+            return ag_out.sum() + b.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(1024, 1024, device=self.device)
+            traced = make_fx(func)(a)
+
+        from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
+
+        scheduler = OverlapScheduler(
+            traced,
+            max_in_flight_gb=5.0,
+            max_compute_pre_fetch=200,
+            collective_bucketing=False,
+            insert_overlap_deps=False,
+            compute_overlap_multipler=1.0,
+            max_coll_distance=200,
+            custom_runtime_estimation=None,
+            collective_estimator="analytical",
+        )
+        scheduler.run()
+
+        # The collective should have hiding nodes (the pointwise chain)
+        (ag_start,) = traced.graph.find_nodes(
+            op="call_function",
+            target=torch.ops._c10d_functional.all_gather_into_tensor.default,
+        )
+        info = scheduler.collective_info[ag_start]
+        self.assertGreater(
+            len(info.hiding_nodes), 0, "Fusible nodes should hide the collective"
+        )
+
+        # Verify graph structure: ag -> pointwise ops -> wait
+        graph_str = str(traced.graph)
+        FileCheck().check("all_gather_into_tensor").check("add").check("mul").check(
+            "sub"
+        ).check("wait_tensor").run(graph_str)
+
+    def test_fusion_regions_hide_collective(self):
+        """Test that fusion regions can hide collectives when enabled."""
+
+        def func(a):
+            group_name = "0"
+            group_size = 1
+
+            ag = torch.ops._c10d_functional.all_gather_into_tensor(
+                a, group_size, group_name
+            )
+            b = a + 1
+            b = b * 2
+            b = b - 3
+            ag_out = torch.ops._c10d_functional.wait_tensor(ag)
+            return ag_out.sum() + b.sum()
+
+        with FakeTensorMode():
+            a = torch.ones(1024, 1024, device=self.device)
+            traced = make_fx(func)(a)
+
+        from torch._inductor.fx_passes.overlap_scheduling import OverlapScheduler
+
+        scheduler = OverlapScheduler(
+            traced,
+            max_in_flight_gb=5.0,
+            max_compute_pre_fetch=200,
+            collective_bucketing=False,
+            insert_overlap_deps=False,
+            compute_overlap_multipler=1.0,
+            max_coll_distance=200,
+            custom_runtime_estimation=None,
+            collective_estimator="analytical",
+            enable_fusion_regions=True,
+        )
+        ag_start = next(iter(scheduler.collective_info.keys()))
+        info = scheduler.collective_info[ag_start]
+        scheduler.run()
+
+        self.assertGreater(
+            len(info.hiding_nodes), 0, "Fusion region should hide the collective"
+        )
+
+        # Verify graph structure: ag -> pointwise ops -> wait
+        graph_str = str(traced.graph)
+        FileCheck().check("all_gather_into_tensor").check("add").check("mul").check(
+            "sub"
+        ).check("wait_tensor").run(graph_str)
 
 
 if __name__ == "__main__":

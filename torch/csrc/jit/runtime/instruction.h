@@ -83,12 +83,11 @@ enum OpCode : uint8_t {
 
 struct Instruction {
   OpCode op;
-  uint8_t unused;
+  uint8_t unused{0};
   uint16_t N;
   int32_t X;
   // TODO: check for overflow
-  Instruction(OpCode op, int32_t X, uint16_t N)
-      : op(op), unused(0), N(N), X(X) {}
+  Instruction(OpCode op, int32_t X, uint16_t N) : op(op), N(N), X(X) {}
 };
 std::ostream& operator<<(std::ostream& out, Instruction inst);
 

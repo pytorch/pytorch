@@ -147,7 +147,7 @@ function install_128 {
 }
 
 function install_130 {
-  CUDNN_VERSION=9.13.0.50
+  CUDNN_VERSION=9.15.1.9
   echo "Installing CUDA 13.0 and cuDNN ${CUDNN_VERSION} and NVSHMEM and NCCL and cuSparseLt-0.7.1"
   # install CUDA 13.0 in the same container
   install_cuda 13.0.2 cuda_13.0.2_580.95.05_linux
