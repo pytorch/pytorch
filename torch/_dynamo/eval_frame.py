@@ -39,7 +39,7 @@ import types
 import unittest
 import warnings
 import weakref
-from collections.abc import Sized
+from collections.abc import Generator, Sized
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
@@ -98,6 +98,7 @@ from .code_context import code_context
 from .exc import (
     CondOpArgsMismatchError,
     ShortenTraceback,
+    UncapturedHigherOrderOpError,
     Unsupported,
     UserError,
     UserErrorType,
@@ -206,7 +207,7 @@ def get_example_inputs(key: str) -> list[Any]:
 
 
 @contextlib.contextmanager
-def _set_in_optimized_module():
+def _set_in_optimized_module() -> Generator[None, None, None]:
     # Set in dynamo's OptimizedModule forward, to have better coverage than is_compiling().
     # Prevents graph-breaking forward hooks from being registered & traced.
     # TODO(pianpwk): subsume this flag with better is_compiling() coverage
@@ -550,14 +551,14 @@ class OptimizedModule(torch.nn.Module):
             return self._modules["_orig_mod"]
         return getattr(self._orig_mod, name)
 
-    def __setattr__(self, name: str, val: Any) -> None:
+    def __setattr__(self, name: str, value: Any) -> None:
         # Allow patching over class attributes
         if hasattr(type(self), name):
-            return super().__setattr__(name, val)
+            return super().__setattr__(name, value)
 
         if name in OptimizedModule._opt_mod_attributes:
-            return super().__setattr__(name, val)
-        return setattr(self._orig_mod, name, val)
+            return super().__setattr__(name, value)
+        return setattr(self._orig_mod, name, value)
 
     def __delattr__(self, name: str) -> None:
         # This mirrors `__setattr__`
@@ -639,6 +640,15 @@ def make_set_enable_dynamic(enable: bool) -> Any:
         return config._make_closure_patcher(
             automatic_dynamic_shapes=False, assume_static_by_default=True
         )
+
+
+@contextlib.contextmanager
+def set_enable_dynamic(enable: bool) -> Generator[None, None, None]:
+    cleanup = make_set_enable_dynamic(enable)()
+    try:
+        yield
+    finally:
+        cleanup()
 
 
 # A thread local storage that serves to store information as Dynamo traces
@@ -838,6 +848,7 @@ class _TorchDynamoContext:
                 backend=innermost_fn(
                     self.callback, unaltered_fn_attr="_torchdynamo_orig_backend"
                 ),
+                dynamic=self._dynamic,
             )
 
         # add context containing GraphModule to any GraphModule forward functions
@@ -972,7 +983,7 @@ class _TorchDynamoContext:
 
                 try:
                     return fn(*args, **kwargs)
-                except Unsupported as e:
+                except (Unsupported, UncapturedHigherOrderOpError) as e:
                     if config.verbose:
                         raise
                     # strip internal tracebacks from causes
@@ -980,7 +991,7 @@ class _TorchDynamoContext:
                     while cur_exn.__cause__ is not None:
                         cur_exn.__cause__.with_traceback(None)
                         cur_exn = cur_exn.__cause__
-                    # pyrefly: ignore [invalid-inheritance]
+
                     raise e.with_traceback(None) from e.__cause__  # User compiler error
                 except ShortenTraceback as e:
                     # Failures in the backend likely don't have useful
@@ -1188,14 +1199,21 @@ class DisableContext(_TorchDynamoContext):
             try:
                 _maybe_set_eval_frame(_callback_from_stance(self.callback))
                 try:
-                    if torch.compiler.is_exporting():
+                    fn_name = getattr(fn, "__name__", type(fn).__name__)
+                    # Skip annotation for __torch_dispatch__ to avoid polluting
+                    # node metadata during export. The disable on __torch_dispatch__
+                    # is an internal implementation detail, not user-facing.
+                    # TODO: Ideally we shouldn't need this check because nested
+                    # annotate() calls shouldn't override existing keys.
+                    if (
+                        torch.compiler.is_exporting()
+                        and fn_name != "__torch_dispatch__"
+                    ):
                         with fx_traceback.annotate(
                             {
                                 "_torchdynamo_disable": True,
                                 "_torchdynamo_disable_recursive": True,
-                                "_torchdynamo_disable_method": getattr(
-                                    fn, "__name__", type(fn).__name__
-                                ),
+                                "_torchdynamo_disable_method": fn_name,
                             }
                         ):
                             return fn(*args, **kwargs)

@@ -917,9 +917,9 @@ def forward(self, x_1):
             )
         )
 
-    def test_prims_non_overlapping_and_dense(self):
+    def test_prims_is_non_overlapping_and_dense_or_false(self):
         shape_env = ShapeEnv()
-        cf = torch._prims_common.is_non_overlapping_and_dense
+        cf = torch._prims_common.is_non_overlapping_and_dense_or_false
 
         # backed case
         a0 = create_symint(shape_env, 5)
@@ -1614,7 +1614,7 @@ class TestSymNumberMagicMethods(TestCase):
         ) and fn in sym_node.only_float_magic_methods:
             self.skipTest(f"{fn} is not an int method")
 
-        if second_type == "float" and fn in ["mod"]:
+        if second_type == "float" and fn == "mod":
             self.skipTest(f"{fn} only handles int")
 
         if fn in sym_node.bitwise_ops and (first_type != "int" or second_type != "int"):

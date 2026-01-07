@@ -124,6 +124,7 @@ decomps_to_exclude: list[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacke
     aten.glu,  # inductor lowers this directly
     aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
     aten.slice_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
+    aten.silu,  # inductor uses exact eager decomposition
     aten.split.Tensor,  # inductor lowers this directly
     aten.squeeze,  # inductor lowers this directly
     aten.sum,  # inductor lowers this directly
@@ -197,6 +198,15 @@ def clamp(
     if max is not None:
         x = x.clamp_max(max)
     return x
+
+
+# Inductor-specific SiLU decomposition for exact eager matching.
+# The core decomposition uses x * sigmoid(x), but this form
+# x / (1 + exp(-x)) matches eager execution more precisely.
+@register_decomposition([aten.silu])
+@pw_cast_for_opmath
+def silu(x: torch.Tensor) -> torch.Tensor:
+    return x / (1 + x.neg().exp())
 
 
 @register_decomposition([aten.full])
