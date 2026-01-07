@@ -3017,6 +3017,25 @@ except RuntimeError as e:
         finally:
             _utils.worker._worker_info = old
 
+    @unittest.skipIf(not TEST_NUMPY, "numpy unavailable")
+    def test_default_collate_non_writeable_numpy(self):
+        import warnings
+
+        import numpy as np
+
+        arr = np.arange(5.0)
+        arr.flags.writeable = False
+
+        with warnings.catch_warnings(record=True) as w:
+            warnings.simplefilter("always")
+            dataloader.default_collate([arr])
+
+            # check that no warning about non-writeable numpy arrays was raised
+            numpy_writable_warnings = [
+                warning for warning in w if "given NumPy array" in str(warning.message)
+            ]
+            self.assertEqual(len(numpy_writable_warnings), 0)
+
     def test_excessive_thread_creation_warning(self):
         with self.assertWarnsRegex(
             UserWarning,
