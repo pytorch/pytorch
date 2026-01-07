@@ -11,7 +11,6 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/GroupedMMUtils.h>
 #include <ATen/BlasBackend.h>
-#include <ATen/cpu/ScaledBlas.h>
 #if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
@@ -49,9 +48,6 @@ TORCH_META_FUNC(addmv)(const Tensor &self, const Tensor &mat, const Tensor &vec,
   set_output_raw_strided(0, IntArrayRef(mat.sizes().data(), 1), {}, vec.options(), names);
 }
 } // namespace at::meta
-
-using at::blas::ScalingType;
-using at::blas::SwizzleType;
 
 namespace at::native {
 
