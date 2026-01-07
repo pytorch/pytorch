@@ -110,6 +110,9 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         Matches on (tile_m, tile_n, tile_k, cluster_m, cluster_n).
         Returns kernels sorted by estimated runtime.
 
+        If nvMatmulHeuristics is not installed or max_autotune is disabled,
+        returns the first `count` kernels without heuristic ranking.
+
         Args:
             kernels: List of cutlass_api.Kernel objects
             inputs: MMKernelInputs with matrix shapes, dtypes, and strides
