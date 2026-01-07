@@ -1232,7 +1232,7 @@
   self: mvlgamma_backward(grad, self, p)
   result: auto_element_wise
 
-- name: nan_to_num(Tensor self, float? nan=None, float? posinf=None, float? neginf=None) -> Tensor
+- name: nan_to_num(Tensor self, Scalar? nan=None, Scalar? posinf=None, Scalar? neginf=None) -> Tensor
   self: grad * at::isfinite(self)
   result: auto_element_wise
 
