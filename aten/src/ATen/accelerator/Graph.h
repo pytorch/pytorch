@@ -39,8 +39,4 @@ struct TORCH_API Graph {
   std::unique_ptr<at::GraphImplInterface> impl_;
 };
 
-// Return true if the current accelerator backend supports graph capture and
-// replay, false otherwise.
-TORCH_API bool isGraphAvailable();
-
 } // namespace at::accelerator

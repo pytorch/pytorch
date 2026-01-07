@@ -227,10 +227,6 @@ void initModule(PyObject* module) {
       .def(
           "pool",
           torch::wrap_pybind_function_no_gil(&at::accelerator::Graph::pool));
-
-  m.def("_accelerator_isGraphAvailable", []() {
-    return at::accelerator::isGraphAvailable();
-  });
 }
 
 } // namespace torch::accelerator

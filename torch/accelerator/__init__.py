@@ -9,7 +9,7 @@ from typing_extensions import deprecated
 import torch
 
 from ._utils import _device_t, _get_device_index
-from .graphs import Graph, is_graph_available
+from .graphs import Graph
 from .memory import (
     empty_cache,
     empty_host_cache,
@@ -37,7 +37,6 @@ __all__ = [
     "empty_host_cache",
     "get_memory_info",
     "is_available",
-    "is_graph_available",
     "max_memory_allocated",
     "max_memory_reserved",
     "memory_allocated",
