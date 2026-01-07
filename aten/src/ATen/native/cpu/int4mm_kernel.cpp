@@ -779,7 +779,7 @@ bool can_use_kleidiai(
     const int64_t K,
     const int64_t block_size) {
   bool ret = false;
-  if (cpuinfo_has_arm_neon_dot()) {
+  if (cpuinfo_initialize() && cpuinfo_has_arm_neon_dot()) {
     // The Groupwise kernel requires BFloat16 Scales and Channelwise kernel
     // requires Float32 Scales. If not provided, we will use fallback
     // implementation.
@@ -1311,7 +1311,7 @@ void dyn_quant_matmul_4bit_kernel(
 #if AT_KLEIDIAI_ENABLED()
   const int64_t weight_packed_size =
       kleidiai::kai_pack_rhs_int4_size(N, K, block_size, inp.scalar_type());
-  if (weight_packed_size == packed_weights.numel() && cpuinfo_has_arm_bf16()) {
+  if (weight_packed_size == packed_weights.numel() && cpuinfo_initialize() && cpuinfo_has_arm_bf16()) {
     // KleidiAI interface internally handles the Channelwise and groupwise
     // distinction
     kleidiai::kai_quant_pack_lhs_int4_mm(output, inp, packed_weights, M, N, K, block_size);
