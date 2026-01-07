@@ -776,6 +776,71 @@ autograd.grad with external GradientEdge
             self.assertEqual(g_eager, g_compiled)
 
     @skipIfCrossRef
+    def test_autograd_grad_with_tensor_subclass(self):
+        torch._dynamo.reset()
+
+        from torch.testing._internal.two_tensor import TwoTensor
+
+        inner_a = torch.randn(4, requires_grad=True)
+        inner_b = torch.randn(4, requires_grad=True)
+        two_tensor = TwoTensor(inner_a, inner_b)
+
+        def fn(tt, param):
+            result = tt.a * param + tt.b
+            loss = result.sum()
+            grad = torch.autograd.grad(loss, param)
+            return grad[0]
+
+        param = torch.randn(4, requires_grad=True)
+
+        # Verify eager behavior
+        result_eager = fn(two_tensor, param)
+        self.assertEqual(result_eager, two_tensor.a)
+
+        # Verify compiled matches eager
+        compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+        result_compiled = compiled_fn(two_tensor, param)
+        self.assertEqual(result_compiled, two_tensor.a)
+
+    @skipIfCrossRef
+    def test_autograd_grad_double_consumption_detected(self):
+        torch._dynamo.reset()
+
+        def fn(x):
+            y = x * 2
+            z = y * 3
+            # First autograd.grad consumes MulBackward from z and y
+            grad1 = torch.autograd.grad(z.sum(), x)
+            # Second autograd.grad tries to consume the same grad_fns - error!
+            grad2 = torch.autograd.grad(z.sum(), x)
+            return grad1[0] + grad2[0]
+
+        # Verify eager fails with "backward through graph a second time"
+        x_eager = torch.randn(4, requires_grad=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Trying to backward through the graph a second time",
+        ):
+            fn(x_eager)
+
+        # Compiled should detect this at compile time
+        x = torch.randn(4, requires_grad=True)
+
+        msg = textwrap.dedent(
+            """\
+            autograd.grad with already consumed grad_fn
+              Explanation: torch.autograd.grad() is trying to consume grad_fns that were already consumed by a previous autograd.grad() call. This would cause 'backward through graph a second time' errors at runtime.
+              Hint: Use retain_graph=True in the first autograd.grad() call if you need to compute gradients through the same graph multiple times."""  # noqa: B950
+        )
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            re.escape(msg),
+        ):
+            compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+            compiled_fn(x)
+
+    @skipIfCrossRef
     def test_tensor_backward_basic(self):
         mod = torch.nn.Linear(4, 4)
         x = torch.randn(2, 4)

@@ -1079,9 +1079,9 @@ class TensorVariable(VariableTracker):
         Collect unique leaf tensors from vars_iter for backward.
 
         Only collects leaf tensors (no grad_fn). Non-leaf tensors are skipped
-        (or error if error_on_non_leaf=True) since the accumulate_grad polyfill
-        cannot handle .grad access on non-leaf tensors as Dynamo creates generic
-        GetAttrVariable (https://github.com/pytorch/pytorch/issues/171204).
+        (or error if error_on_non_leaf=True) because when auto-detecting inputs,
+        we must not stop gradients at non-leafs - they are intermediates, and the
+        real leaf tensors (parameters) are further up the autograd graph.
 
         Deduplicates by proxy.node.
         Returns list of unique leaf tensor variables.
@@ -1092,16 +1092,13 @@ class TensorVariable(VariableTracker):
         seen_nodes: set = set()
         for var in vars_iter:
             if isinstance(var, TensorVariable) and var.requires_grad:
-                # We need to filter out tensors where accumulate_grad polyfill won't work.
-                # The polyfill accesses tensor.grad (see torch/_dynamo/polyfills/__init__.py).
-                # For these cases, .grad becomes a GetAttrVariable instead of TensorVariable,
-                # and tensor operations on it fail. This is a Dynamo coverage gap that could
-                # be fixed by properly tracking .grad as TensorVariable:
+                # Non-leaf tensors (has_grad_fn=True) must be skipped because:
+                # 1. Semantically: they're intermediates, not the leaves we want gradients for
+                # 2. Implementation: accumulate_grad polyfill can't handle .grad on non-leafs
+                #    (Dynamo creates GetAttrVariable instead of TensorVariable)
                 #
-                # 1. Non-leaf tensors (has_grad_fn=True): .grad is GetAttrVariable.
-                #
-                # 2. In-graph created tensors (SyntheticLocalSource): subguards_allowed()
-                #    returns False, so dynamic_getattr fails.
+                # In-graph created tensors without proper source also can't be handled
+                # because subguards_allowed() returns False for SyntheticLocalSource.
                 if var.has_grad_fn:
                     if error_on_non_leaf:
                         unimplemented(
@@ -1171,6 +1168,11 @@ class TensorVariable(VariableTracker):
             )
 
         # Step 1: Collect leaf tensors to compute gradients for
+        #
+        # Note: We rely on the autograd.grad handler to validate that the generated
+        # autograd.grad call is legal (i.e., doesn't traverse external grad_fns).
+        # If the loss depends on leaves we don't know about, the autograd.grad
+        # handler will catch it via the external_grad_fns check.
         auto_detect = inputs is None
         if auto_detect:
             # Sources can be either user inputs (params are included here)
@@ -1181,6 +1183,9 @@ class TensorVariable(VariableTracker):
             )
             input_vars = self._collect_backward_inputs(all_vars)
             if not input_vars:
+                # No leaf tensors found - nothing to accumulate gradients into.
+                # This matches eager behavior where backward() is a no-op if there
+                # are no leaves requiring grad.
                 return ConstantVariable.create(None)
         else:
             provided_vars = (
@@ -1191,6 +1196,17 @@ class TensorVariable(VariableTracker):
             input_vars = self._collect_backward_inputs(
                 provided_vars, error_on_non_leaf=True
             )
+            if not input_vars:
+                # User explicitly provided inputs but none were valid leaf tensors.
+                # This would cause "grad requires non-empty inputs" error at runtime.
+                unimplemented(
+                    gb_type="backward() with empty inputs",
+                    context="backward(inputs=[...]) resulted in no valid leaf tensors",
+                    explanation="backward(inputs=[...]) requires at least one valid leaf tensor.",
+                    hints=[
+                        "Ensure at least one tensor in inputs is a leaf (requires_grad=True, no grad_fn)",
+                    ],
+                )
 
         # Build autograd.grad call
         grad_kwargs = {"allow_unused": VariableTracker.build(tx, auto_detect)}

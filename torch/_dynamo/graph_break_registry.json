@@ -2995,6 +2995,27 @@
       ]
     }
   ],
+  "GB6663": [
+    {
+      "Gb_type": "autograd.grad with unsupported argument type",
+      "Context": "got {type(var).__name__}",
+      "Explanation": "torch.autograd.grad() received an argument of type {type(var).__name__} which is not supported. Expected tensor or sequence of tensors.",
+      "Hints": [
+        "Ensure outputs and inputs arguments are tensors or sequences of tensors."
+      ]
+    }
+  ],
+  "GB1381": [
+    {
+      "Gb_type": "autograd.grad with already consumed grad_fn",
+      "Context": "double consumed grad_fns: {len(double_consumed)}",
+      "Explanation": "torch.autograd.grad() is trying to consume grad_fns that were already consumed by a previous autograd.grad() call. This would cause 'backward through graph a second time' errors at runtime.",
+      "Hints": [
+        "Use retain_graph=True in the first autograd.grad() call if you ",
+        "need to compute gradients through the same graph multiple times."
+      ]
+    }
+  ],
   "GB0262": [
     {
       "Gb_type": "unsupported contextlib.* API",
@@ -4106,6 +4127,16 @@
       "Hints": [
         "Consider using a different type of object as the dictionary key instead of {self.python_type()}.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0442": [
+    {
+      "Gb_type": "backward() with empty inputs",
+      "Context": "backward(inputs=[...]) resulted in no valid leaf tensors",
+      "Explanation": "backward(inputs=[...]) requires at least one valid leaf tensor.",
+      "Hints": [
+        "Ensure at least one tensor in inputs is a leaf (requires_grad=True, no grad_fn)"
       ]
     }
   ],
