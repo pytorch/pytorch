@@ -649,8 +649,31 @@ bool plan_errata_exception(
     const std::string& executionPlanTag) {
   static bool has_json =
       cudnn_frontend::load_from_config(errata_json_handle, "");
+  // rule_id is an arbitrary string, here we use the issue number if there is
+  // one
+  static auto hardcoded_errata_json_handle = nlohmann::json::parse(R"(
+            { "version" : 1,
+              "rules"   :
+                [
+                    { "rule_id"             : "163539",
+                      "operation"           : "ConvFwd",
+                      "engine"              : 23,
+                      "cudnn_version_start" : 90800,
+                      "cudnn_version_end"   : 91500
+                    },
+                    { "rule_id"             : "ConvBwdData",
+                      "operation"           : "ConvBwdData",
+                      "engine"              : 23,
+                      "cudnn_version_start" : 8000,
+                      "cudnn_version_end"   : -1
+                    }
+                ]
+            })");
   if (!has_json) {
-    return false;
+    return cudnn_frontend::check_errata(
+        hardcoded_errata_json_handle, executionPlanTag, handle, []() {
+          return true;
+        });
   } else {
     return cudnn_frontend::check_errata(
         errata_json_handle, executionPlanTag, handle, []() { return true; });
