@@ -1048,7 +1048,7 @@ class TestLinalg(TestCase):
     def test_det_backward(self):
         # Regression test for #80761.
         input = torch.tensor([[0.]], dtype=torch.float64, requires_grad=True)
-        self.assertTrue(torch.autograd.gradcheck(torch.det, inputs=(input)))
+        self.assertTrue(torch.autograd.gradcheck(torch.det, inputs=input))
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
