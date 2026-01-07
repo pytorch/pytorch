@@ -458,37 +458,32 @@ x = add_1, y = add_2);  getitem = None
         merged_no_print = "\n".join(codes_no_print)
         merged_with_print = "\n".join(codes_with_print)
 
-        # Count number of cpp_fused kernels in each version
-        # Pattern matches kernel names like "cpp_fused_add_mul_pow_0"
-        kernel_pattern = r"cpp_fused_[\w_]+\d+"
-        kernels_no_print = re.findall(kernel_pattern, merged_no_print)
-        kernels_with_print = re.findall(kernel_pattern, merged_with_print)
+        # Extract kernel names - pattern matches names like "cpp_fused_add_mul_pow_0"
+        kernel_pattern = r"cpp_fused_([\w_]+?)_\d+"
 
-        # Get unique kernel names (deduplicated)
-        unique_kernels_no_print = set(kernels_no_print)
-        unique_kernels_with_print = set(kernels_with_print)
+        # Extract the fusion patterns (the ops being fused, not including the trailing number)
+        def extract_fusion_ops(code):
+            """Extract the set of fused operation patterns from kernel names."""
+            matches = re.findall(kernel_pattern, code)
+            # Each match is the ops part like "add_mul_pow"
+            return set(matches)
 
-        # The number of unique fused kernels should be the same
+        fusion_ops_no_print = extract_fusion_ops(merged_no_print)
+        fusion_ops_with_print = extract_fusion_ops(merged_with_print)
+
+        # Log for debugging
+        print(f"Fusion ops without print: {fusion_ops_no_print}")
+        print(f"Fusion ops with print: {fusion_ops_with_print}")
+
+        # Verify that the fusion patterns are the same
+        # The print version should have the same fused ops as the no-print version
         self.assertEqual(
-            len(unique_kernels_no_print),
-            len(unique_kernels_with_print),
-            f"Number of fused kernels differs: without print has {unique_kernels_no_print}, "
-            f"with print has {unique_kernels_with_print}",
+            fusion_ops_no_print,
+            fusion_ops_with_print,
+            f"Fusion patterns differ!\n"
+            f"Without print: {fusion_ops_no_print}\n"
+            f"With print: {fusion_ops_with_print}",
         )
-
-        # Verify that operations are still fused (mul, add, pow should be in same kernel)
-        # Look for kernels that contain mul, add, and pow
-        for kernel in unique_kernels_no_print:
-            # Check if this is a fused kernel with multiple ops
-            if "mul" in kernel and "add" in kernel:
-                # Found a fused kernel, verify same pattern exists in with_print version
-                found_matching = any(
-                    "mul" in k and "add" in k for k in unique_kernels_with_print
-                )
-                self.assertTrue(
-                    found_matching,
-                    f"Fused kernel pattern {kernel} not found in version with print",
-                )
 
         # Verify the with_print version has print calls
         self.assertIn("print(", merged_with_print)
@@ -543,22 +538,24 @@ x = add_1, y = add_2);  getitem = None
         merged_no_print = "\n".join(codes_no_print)
         merged_with_print = "\n".join(codes_with_print)
 
-        # Count fused kernels
-        kernel_pattern = r"cpp_fused_[\w_]+\d+"
-        kernels_no_print = set(re.findall(kernel_pattern, merged_no_print))
-        kernels_with_print = set(re.findall(kernel_pattern, merged_with_print))
+        # Extract fusion patterns
+        kernel_pattern = r"cpp_fused_([\w_]+?)_\d+"
 
-        # Print versions may have more kernels if fusion is broken by print
-        # But ideally, the number should be similar
-        # At minimum, verify that fusion still happens (kernels have multiple ops)
-        has_fusion_no_print = any(
-            kernel.count("_") > 2
-            for kernel in kernels_no_print  # e.g., cpp_fused_mul_add_0
-        )
-        has_fusion_with_print = any(
-            kernel.count("_") > 2 for kernel in kernels_with_print
-        )
+        def extract_fusion_ops(code):
+            """Extract the set of fused operation patterns from kernel names."""
+            return set(re.findall(kernel_pattern, code))
 
+        fusion_ops_no_print = extract_fusion_ops(merged_no_print)
+        fusion_ops_with_print = extract_fusion_ops(merged_with_print)
+
+        # Verify the fusion patterns are the same
+        self.assertEqual(
+            fusion_ops_no_print,
+            fusion_ops_with_print,
+            f"Fusion patterns differ!\n"
+            f"Without print: {fusion_ops_no_print}\n"
+            f"With print: {fusion_ops_with_print}",
+        )
 
         # Verify results are the same
         result_no_print = compiled_no_print(a, b, c, d)
@@ -569,6 +566,7 @@ x = add_1, y = add_2);  getitem = None
         self.assertTrue(torch.allclose(result_no_print, result_with_print))
         self.assertIn("mul result:", printed)
         self.assertIn("sub result:", printed)
+
 
 if __name__ == "__main__":
     run_tests()
