@@ -98,10 +98,12 @@ def autograd_grad_with_mixed_inputs(
 
 def create_fn_with_grad(
     fn: Callable,
+    input_requires_grad_indices: set[int],
     input_spec: pytree.TreeSpec,
     include_key_set: DispatchKeySet,
     exclude_key_set: DispatchKeySet,
     python_dispatcher_active: bool,
+    is_fake: bool,
 ) -> tuple[Callable, Callable]:
     import functools
 
@@ -111,7 +113,12 @@ def create_fn_with_grad(
     @functools.wraps(fn)
     def fw_fn(*args):
         nonlocal leaf_fn_fw_inputs
-        leaf_fn_fw_inputs = args
+        leaf_fn_fw_inputs = tuple(
+            [
+                arg.requires_grad_(True) if idx in input_requires_grad_indices else arg
+                for idx, arg in enumerate(args)
+            ]
+        )
 
         # Compute the effective include/exclude sets
         # If PythonDispatcher was active in forward but TLS is no longer set up,
@@ -145,6 +152,16 @@ def create_fn_with_grad(
             raise RuntimeError(
                 "For invoke_leaf_funcion, backward fn expects fw outputs/inputs to be set in forward."
             )
+
+        if is_fake:
+            return tuple(
+                torch.empty_like(leaf_fn_fw_inputs[i])
+                if i in input_requires_grad_indices
+                else None
+                for i in range(len(leaf_fn_fw_inputs))
+            )
+
+        # Actually run autograd engine
         return autograd_grad_with_mixed_inputs(
             outputs=leaf_fn_fw_outputs,
             inputs=leaf_fn_fw_inputs,
@@ -227,19 +244,31 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
         exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
         python_dispatcher_active = include_key_set.has(DispatchKey.PythonDispatcher)
 
+        # We need to explicitly track the require gradness of inputs in graph
+        # because aot_eager backend runtime is an autograd.Function that disables
+        # gradient computation for forward.
+        input_requires_grad_indices = {
+            i
+            for i, arg in enumerate(flat_args)
+            if isinstance(arg, torch.Tensor) and arg.requires_grad
+        }
         real_fn_with_grad, bw_real_fn = create_fn_with_grad(
             real_fn,
+            input_requires_grad_indices,
             input_spec,
             include_key_set,
             exclude_key_set,
             python_dispatcher_active,
+            is_fake=False,
         )
         fake_fn_with_grad, bw_fake_fn = create_fn_with_grad(
             fake_fn,
+            input_requires_grad_indices,
             input_spec,
             include_key_set,
             exclude_key_set,
             python_dispatcher_active,
+            is_fake=True,
         )
 
         _, new_real_fn_spec = func_to_graphable(real_fn_with_grad)

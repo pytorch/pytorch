@@ -507,7 +507,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
         self,
         value: Callable[..., Any],
         nonstrict_traceable: bool | None = None,
-        leaf_function: bool | None =None,
+        leaf_function: bool | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(value, **kwargs)
@@ -2345,15 +2345,15 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         ).unpack_var_sequence(tx)
         flat_proxies = [arg.as_proxy() for arg in flat_args.unpack_var_sequence(tx)]
 
+        real_fn_spec_proxy = tx.output.register_static_attr_and_return_proxy(
+            "real_fn", real_fn_spec
+        )
+        fake_fn_spec_proxy = tx.output.register_static_attr_and_return_proxy(
+            "fake_fn", fake_fn_spec
+        )
         input_spec_proxy = tx.output.register_static_attr_and_return_proxy(
             fn.__name__ + "_input_spec",
             input_spec.as_python_constant(),  # pyrefly: ignore [unbound-name]
-        )
-        fake_fn_spec_proxy = tx.output.register_static_attr_and_return_proxy(
-            f"{fake_fn.__name__}_spec", fake_fn_spec
-        )
-        real_fn_spec_proxy = tx.output.register_static_attr_and_return_proxy(
-            f"{real_fn.__name__}_spec", real_fn_spec
         )
         input_spec_proxy.node.type = type(input_spec.as_python_constant())
         fake_fn_spec_proxy.node.type = type(fake_fn_spec)
