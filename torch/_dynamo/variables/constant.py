@@ -221,7 +221,7 @@ its type to `common_constant_types`.
                 return ConstantVariable.create(method(*const_args, **const_kwargs))
             except Exception as e:
                 raise_observed_exception(type(e), tx)
-        elif isinstance(self.value, (float, int)):
+        elif isinstance(self.value, (float, int)) and hasattr(self.value, name):
             if not (args or kwargs):
                 try:
                     return ConstantVariable.create(getattr(self.value, name)())
@@ -264,8 +264,11 @@ its type to `common_constant_types`.
                 raise_observed_exception(type(e), tx)
 
         if name == "__len__" and not (args or kwargs):
-            # pyrefly: ignore [bad-argument-type]
-            return ConstantVariable.create(len(self.value))
+            try:
+                # pyrefly: ignore [bad-argument-type]
+                return ConstantVariable.create(len(self.value))
+            except TypeError as e:
+                raise_observed_exception(type(e), tx, args=list(e.args))
         elif name == "__round__" and len(args) == 1 and args[0].is_python_constant():
             try:
                 return ConstantVariable.create(
@@ -348,13 +351,13 @@ its type to `common_constant_types`.
         result = hasattr(self.value, name)
         return variables.ConstantVariable.create(result)
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> Literal[True]:
         return True
 
-    def get_python_hash(self):
+    def get_python_hash(self) -> int:
         return hash(self.value)
 
-    def is_python_equal(self, other):
+    def is_python_equal(self, other: object) -> bool:
         from .tensor import SymNodeVariable
 
         if isinstance(other, SymNodeVariable):
@@ -364,7 +367,9 @@ its type to `common_constant_types`.
         # Delegate to other's is_python_equal - this handles cases like
         # StringFormatVariable which can compare against constants and
         # install guards for any lazy constants it contains.
-        return other.is_python_equal(self)
+        if isinstance(other, VariableTracker):
+            return other.is_python_equal(self)
+        return False
 
 
 class EnumVariable(VariableTracker):
@@ -415,12 +420,15 @@ class EnumVariable(VariableTracker):
         source = self.source and AttrSource(self.source, name)
         return VariableTracker.build(tx, member, source=source)
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> Literal[True]:
         raise_on_overridden_hash(self.value, self)
         return True
 
-    def get_python_hash(self):
+    def get_python_hash(self) -> int:
         return hash(self.as_python_constant())
 
-    def is_python_equal(self, other):
-        return self.as_python_constant() == other.as_python_constant()
+    def is_python_equal(self, other: object) -> bool:
+        return (
+            isinstance(other, VariableTracker)
+            and self.as_python_constant() == other.as_python_constant()
+        )
