@@ -1205,15 +1205,16 @@ from user code:
                 mesh_dim_names=("dp",),
             )
 
-            model = Transformer(
-                vocab_size,
-                embed_dim,
-                num_heads,
-                num_layers,
-                max_seq_len,
-                num_kv_heads=num_kv_heads,
-                device_mesh=device_mesh,
-            ).to(device)
+            with torch.device("meta"):
+                model = Transformer(
+                    vocab_size,
+                    embed_dim,
+                    num_heads,
+                    num_layers,
+                    max_seq_len,
+                    num_kv_heads=num_kv_heads,
+                    device_mesh=device_mesh,
+                )
 
             dtensorify_module(
                 model,
@@ -1224,6 +1225,9 @@ from user code:
 
             outer_fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
             with outer_fake_mode:
+                # Convert meta tensors -> fake tensors on target device
+                model.to_empty(device=device)
+
                 local_input_ids = torch.randint(
                     0, vocab_size, (batch_size, seq_len), device=device
                 )
@@ -1287,6 +1291,16 @@ from user code:
             )
             input_ids_dt = DTensor.from_local(local_input_ids, device_mesh, [Shard(0)])
             targets = torch.randint(0, vocab_size, (batch_size, seq_len), device=device)
+            model = Transformer(
+                vocab_size,
+                embed_dim,
+                num_heads,
+                num_layers,
+                max_seq_len,
+                num_kv_heads=num_kv_heads,
+                device_mesh=device_mesh,
+            )
+            model.to_empty(device=device)
 
             (logits_dt,) = loaded_fn(
                 *model.parameters(), *model.buffers(), input_ids_dt
