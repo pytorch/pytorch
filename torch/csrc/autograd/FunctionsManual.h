@@ -604,6 +604,11 @@ at::Tensor _cudnn_ctc_loss_backward(
     const at::Tensor& loss,
     const at::Tensor& raw_grad,
     bool zero_infinity);
+at::Tensor _miopen_ctc_loss_backward(
+    const at::Tensor& grad_out,
+    const at::Tensor& loss,
+    const at::Tensor& raw_grad,
+    bool zero_infinity);
 at::Tensor elu_double_backward(
     const Tensor& grad,
     const Tensor& grad_output,
