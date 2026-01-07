@@ -1884,12 +1884,10 @@ class DimDynamic(Enum):
     DUCK = 1
     # Treat the dimension statically based on its hint
     STATIC = 2
-    # Treat the dimension as a size-like unbacked
-    SIZE_LIKE_UNBACKED = 3
+    # Treat the dimension as unbacked
+    UNBACKED = 3
     # Infer the strides from stride. If size is static, strides will be static as well.
     INFER_STRIDE = 4
-    # Like SIZE_LIKE_UNBACKED, but there's a hint
-    OBLIVIOUS_SIZE = 5
 
 
 # NB: These constraints affect both clients and backends: given some
@@ -3818,10 +3816,6 @@ class ShapeEnv:
         # Like var_to_val, but only set when propagate_real_tensors is on.
         # Used as last resort to avoid GuardOnDataDependent error
         self.unbacked_var_to_val: dict[sympy.Symbol, sympy.Integer] = {}
-        # Like above, but used exclusively for OBLIVIOUS_SIZE.  These
-        # potentially could be put together but I am not sure, writing out
-        # the logic individually before abstracting.
-        self.oblivious_var_to_val: dict[sympy.Symbol, sympy.Integer] = {}
         # Maps symbolic ints to their min/max range.  These ranges
         # are conservative: the int MUST fall in the range, but the
         # range may contain ints which may not actually appear in
@@ -5085,7 +5079,7 @@ class ShapeEnv:
                 source_name
             ]
 
-        if dynamic_dim in (DimDynamic.SIZE_LIKE_UNBACKED, DimDynamic.OBLIVIOUS_SIZE):
+        if dynamic_dim is DimDynamic.UNBACKED:
             out = self.create_unbacked_symint(source).node.expr
             self._constrain_range_for_size(out)
 
@@ -5095,8 +5089,6 @@ class ShapeEnv:
                 symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][
                     source_name
                 ] = out
-            if dynamic_dim is DimDynamic.OBLIVIOUS_SIZE:
-                self.oblivious_var_to_val[out] = val
             return out
 
         if do_not_specialize_zero_one:
@@ -6589,34 +6581,6 @@ class ShapeEnv:
             if allow_none:
                 return None
 
-            if self.oblivious_var_to_val:
-                # See https://github.com/pytorch/pytorch/issues/137100#issuecomment-2495778113
-                correct_hint = result_expr.xreplace(self.oblivious_var_to_val)
-                counterfactual_hint = result_expr.xreplace(
-                    {k: max(v, 2) for k, v in self.oblivious_var_to_val.items()}
-                )
-                if (
-                    not correct_hint.free_symbols
-                    and not counterfactual_hint.free_symbols
-                ):
-                    if correct_hint == counterfactual_hint:
-                        log.info("oblivious_size hit %s -> %s", expr, correct_hint)
-                        return correct_hint
-                    else:
-                        log.info(
-                            "oblivious_size counterfactual failed %s -> %s != %s",
-                            expr,
-                            correct_hint,
-                            counterfactual_hint,
-                        )
-                else:
-                    log.info(
-                        "oblivious_size miss %s -> %s (counterfactual: %s)",
-                        expr,
-                        correct_hint,
-                        counterfactual_hint,
-                    )
-
             if self.unbacked_var_to_val:
                 unsound_expr = result_expr.xreplace(self.unbacked_var_to_val)
                 if not unsound_expr.free_symbols:
@@ -7612,36 +7576,6 @@ class ShapeEnv:
                     if not ok and fallback_value is not None:
                         self._log_suppressed_dde(orig_expr, fallback_value)
                         return fallback_value
-
-                    # oblivious_var_to_val will be defined iff we have sizes with DimDynamic.OBLIVIOUS_SIZE type.
-                    # See https://github.com/pytorch/pytorch/issues/137100#issuecomment-2495778113
-                    if (
-                        self.oblivious_var_to_val
-                        and not (
-                            correct_hint := orig_expr.xreplace(
-                                self.oblivious_var_to_val
-                            )
-                        ).free_symbols
-                        and not (
-                            counterfactual_hint := orig_expr.xreplace(
-                                {
-                                    k: max(2, v)
-                                    for k, v in self.oblivious_var_to_val.items()
-                                }
-                            )
-                        ).free_symbols
-                        and correct_hint == counterfactual_hint
-                    ):
-                        # TODO: better logging
-                        log.info(
-                            "oblivious_size %s -> %s (passed counterfactual)",
-                            orig_expr,
-                            correct_hint,
-                        )
-
-                        concrete_val = correct_hint
-                        # NB: do NOT transmute into runtime assert
-                        ok = True
 
                     # unbacked_var_to_val is not None iff propagate_real_tensors is on.
                     # if propagate_real_tensors is on, we check the example values to generate (unsound_result)

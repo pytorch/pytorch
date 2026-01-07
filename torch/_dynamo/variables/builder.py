@@ -2128,7 +2128,7 @@ class VariableBuilder:
 
             if is_unbacked_source(self.source.name):
                 log.debug("%s marked unbacked via source whitelist", self.source.name)
-                return self.wrap_symint(value, dynamism=DimDynamic.SIZE_LIKE_UNBACKED)
+                return self.wrap_symint(value, dynamism=DimDynamic.UNBACKED)
 
             if not config.specialize_int:
                 # unspecializing int by default, but still
@@ -3463,9 +3463,7 @@ def get_automatic_dynamic_shapes_mark_as() -> DimDynamic:
     if config.automatic_dynamic_shapes_mark_as == "dynamic":
         return DimDynamic.DYNAMIC
     elif config.automatic_dynamic_shapes_mark_as == "unbacked":
-        return DimDynamic.SIZE_LIKE_UNBACKED
-    elif config.automatic_dynamic_shapes_mark_as == "oblivious":
-        return DimDynamic.OBLIVIOUS_SIZE
+        return DimDynamic.UNBACKED
     else:
         raise ValueError(
             f"invalid automatic_dynamic_shapes_mark_as = {config.automatic_dynamic_shapes_mark_as}"
@@ -3814,7 +3812,7 @@ def _automatic_dynamic(
         constraint_strides.append(constraint_stride)
 
         if marked_unbacked or is_unbacked_source(name):
-            dynamic_size = DimDynamic.SIZE_LIKE_UNBACKED
+            dynamic_size = DimDynamic.UNBACKED
         elif (
             constraint_size is not None
             or marked_dynamic
