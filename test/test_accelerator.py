@@ -257,12 +257,15 @@ class TestAccelerator(TestCase):
 
     @unittest.skipIf(not TEST_CUDA_GRAPH or TEST_CUDAMALLOCASYNC)
     def test_graph_three_successive(self):
+        gc.collect()
+        torch.accelerator.empty_cache()
         size = 1000
         acc = torch.accelerator.current_accelerator()
-        a = torch.ones((size,), device=acc)
 
         s = torch.Stream()
+        # Run once with independent graphs, then once with an explicit shared pool handle.
         for pool in [None, torch.accelerator.generate_graph_pool_handle()]:
+            a = torch.ones((size,), device=acc)
             g0 = torch.accelerator.Graph(pool=pool)
             g1 = torch.accelerator.Graph(pool=pool)
             g2 = torch.accelerator.Graph(pool=pool)
@@ -285,21 +288,24 @@ class TestAccelerator(TestCase):
             self.assertEqual(e.sum().item(), size * 5)
             self.assertEqual(f.sum().item(), size * 7)
 
-            # Tests that replaying as g0, g2, g1 is only valid if they don't share a pool
+            # Replaying in a different order than captured is only safe when the graphs
+            # do not share memory pools.
             g0.replay()
             g2.replay()
             g1.replay()
 
             expect_corruption = pool is not None
-            # If we used the native allocator and shared mempools, g2's capture should have reused c's memory for f.
-            # We replayed g2 then g1, so we expect g1's captured "e = c + 3" mistakenly filled e with "f's vals + 3".
+            # With a shared pool handle, the captures are allowed to reuse the same
+            # underlying memory. In this test, g2 may reuse the storage that g1's
+            # capture expects for `c`. Replaying g2 before g1 can therefore corrupt
+            # g1's outputs.
             self.assertEqual(
                 e.sum().item(), size * (7 + 3) if expect_corruption else size * 5
             )
             self.assertEqual(f.sum().item(), size * 7)
 
             del a, b, d, e, f, g0, g1, g2
-            torch.accelerator.synchronize()
+            gc.collect()
             torch.accelerator.empty_cache()
 
 

@@ -63,6 +63,16 @@ struct TORCH_API GraphImplInterface {
 
   // Return the memory pool associated with the captured graph.
   virtual MempoolId_t pool() const = 0;
+
+  // Enable backend-specific debug behavior for graph capture/replay.
+  // Implementations may enable extra validation and/or logging to help diagnose
+  // issues. Backends that do not support debug mode could implement this as a
+  // no-op.
+  virtual void enable_debug_mode() = 0;
+
+  // Dump the captured graph to a file for debugging purposes. The file format
+  // and content are backend-specific.
+  virtual void debug_dump(const std::string& path) = 0;
 };
 
 TORCH_DECLARE_REGISTRY(GraphImplRegistry, GraphImplInterface, GraphImplArgs);
