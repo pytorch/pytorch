@@ -1,5 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <algorithm>
+#include <vector>
 
 #include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
@@ -184,6 +185,22 @@ inline void norm_two_reduce_step(Vectorized<float>& acc_fvec, Vectorized<BFloat1
   acc_fvec += data_fvec1 * data_fvec1;
 }
 
+// Pairwise summation to reduce rounding error accumulation
+template <typename acc_t>
+acc_t pairwise_sum(acc_t* data, int64_t n) {
+  if (n <= 8) {
+    acc_t sum = acc_t(0);
+    for (int64_t i = 0; i < n; i++) {
+      sum += data[i];
+    }
+    return sum;
+  }
+
+  int64_t mid = n / 2;
+
+  return pairwise_sum(data, mid) + pairwise_sum(data + mid, n - mid);
+}
+
 template <typename scalar_t, typename out_t=typename scalar_value_type<scalar_t>::type>
 void norm_kernel_cpu_impl(TensorIterator& iter, const double& val) {
   // This reduction accumulates results as the type `acc_t`.
@@ -230,27 +247,46 @@ void norm_kernel_tensor_iterator_impl(
         // use float as accumulate type for BFloat16
         using acc_t = at::opmath_type<scalar_t>;
         binary_kernel_reduce_lastdim(iter, [](char* result_data_bytes, char* self_data_bytes, int64_t size) {
+          constexpr int64_t kChunkSize = 512;
+
           scalar_t* result_data = (scalar_t*)result_data_bytes;
           scalar_t* self_data = (scalar_t*)self_data_bytes;
 
           using Vec = Vectorized<scalar_t>;
           using fVec = Vectorized<acc_t>;
-          fVec acc_vec{acc_t(0)};
-          acc_t buffer[fVec::size()];
-          int64_t d = 0;
-          for (; d < size - (size % Vec::size()); d += Vec::size()) {
-            Vec data_vec = Vec::loadu(self_data + d);
-            norm_two_reduce_step(acc_vec, data_vec);
+
+          auto reduce_chunk = [&](int64_t start, int64_t end) -> acc_t {
+            fVec acc_vec{acc_t(0)};
+            acc_t buffer[fVec::size()];
+
+            int64_t d = start;
+            for (; d < end - ((end - start) % Vec::size()); d += Vec::size()) {
+              Vec data_vec = Vec::loadu(self_data + d);
+              norm_two_reduce_step(acc_vec, data_vec);
+            }
+            acc_vec.store(buffer);
+            for (int j = 1; j < fVec::size(); j++) {
+              buffer[0] = buffer[0] + buffer[j];
+            }
+            for (; d < end; d++) {
+              acc_t data_val = acc_t(self_data[d]);
+              buffer[0] += data_val * data_val;
+            }
+
+            return buffer[0];
+          };
+
+          int64_t num_chunks = (size + kChunkSize - 1) / kChunkSize;
+          std::vector<acc_t> chunk_sums(num_chunks);
+          for (int64_t chunk = 0; chunk < num_chunks; chunk++) {
+            int64_t start = chunk * kChunkSize;
+            int64_t end = std::min(start + kChunkSize, size);
+            chunk_sums[chunk] = reduce_chunk(start, end);
           }
-          acc_vec.store(buffer);
-          for (int j = 1; j < fVec::size(); j++) {
-            buffer[0] = buffer[0] + buffer[j];
-          }
-          for (; d < size; d++) {
-            acc_t data_val = acc_t(self_data[d]);
-            buffer[0] += data_val * data_val;
-          }
-          result_data[0] = scalar_t(std::sqrt(buffer[0]));
+
+          acc_t total = pairwise_sum(chunk_sums.data(), num_chunks);
+
+          result_data[0] = scalar_t(std::sqrt(total));
         });
       });
   } else {
