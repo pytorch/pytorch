@@ -179,30 +179,18 @@ def invoke_subgraph(
     if kwargs:
         log.warning("invoke_subgraph backend ignoring extra kwargs %s", kwargs)
 
-    # Wrap the GraphModule to return a tuple (required by invoke_subgraph HOP)
-    captured_gm = gm
+    from torch._dynamo import disable
 
-    class TupleWrappedGM(torch.nn.Module):
-        def forward(self, *args: Any) -> tuple[Any, ...]:
-            result = captured_gm(*args)
-            if isinstance(result, tuple):
-                return result
-            return (result,)
-
-    tuple_gm = TupleWrappedGM()
-
+    @disable
     @torch._dynamo.allow_in_graph
     def invoke_subgraph_wrapper(*args: Any) -> Any:
         proxy_mode = get_proxy_mode()
         if proxy_mode is not None:
             # When being traced by make_fx, emit invoke_subgraph HOP
-            result = invoke_subgraph_hop(tuple_gm, name, *args)  # type: ignore[arg-type]
-            if len(result) == 1:
-                return result[0]
-            return result
+            return invoke_subgraph_hop(gm, name, *args)  # type: ignore[arg-type]
         else:
             # Normal execution path
-            return captured_gm(*args)
+            return gm(*args)
 
     return invoke_subgraph_wrapper
 
