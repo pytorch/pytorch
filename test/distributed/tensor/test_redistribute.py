@@ -22,7 +22,11 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor._collective_utils import shard_dim_alltoall
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
 from torch.distributed.tensor._redistribute import (
+    _find_flattened_mesh_for_contiguous_dims,
+    _FlattenedTransformInfo,
     _gen_transform_infos,
+    _optimize_transform_infos_for_flattened_reductions,
+    _TransformInfo,
     use_min_cost_redistribution_plan,
 )
 from torch.distributed.tensor.debug import CommDebugMode
@@ -1285,6 +1289,189 @@ MultiDimRedistributeTestWithLocalTensor = create_local_tensor_test_class(
 DistributeWithDeviceOrderTestWithLocalTensor = create_local_tensor_test_class(
     DistributeWithDeviceOrderTest,
 )
+
+
+class FlattenedReductionOptimizationTest(DTensorTestBase):
+    """Test the optimization that uses flattened mesh dims for consecutive reductions."""
+
+    @property
+    def world_size(self) -> int:
+        return 8
+
+    @with_comms
+    def test_find_flattened_mesh_for_contiguous_dims(self):
+        """Test the helper function that finds flattened meshes for contiguous dims."""
+        mesh = init_device_mesh(
+            self.device_type, (2, 2, 2), mesh_dim_names=("dp", "cp", "tp")
+        )
+
+        # Create a flattened mesh for dims 0 and 1 (dp and cp)
+        dp_cp_mesh = mesh["dp", "cp"]._flatten("dp_cp")
+
+        # Test finding the flattened mesh
+        flattened = _find_flattened_mesh_for_contiguous_dims(mesh, [0, 1])
+        self.assertIsNotNone(flattened)
+        self.assertEqual(flattened._mesh_dim_names, ("dp_cp",))
+
+        # Test that non-contiguous dims return None
+        flattened = _find_flattened_mesh_for_contiguous_dims(mesh, [0, 2])
+        self.assertIsNone(flattened)
+
+        # Test that a single dim returns None
+        flattened = _find_flattened_mesh_for_contiguous_dims(mesh, [0])
+        self.assertIsNone(flattened)
+
+        # Test that dims without a flattened mesh return None
+        flattened = _find_flattened_mesh_for_contiguous_dims(mesh, [1, 2])
+        self.assertIsNone(flattened)
+
+    @with_comms
+    def test_optimize_transform_infos_for_flattened_reductions(self):
+        """Test that consecutive Partial->Replicate transforms get optimized."""
+        mesh = init_device_mesh(
+            self.device_type, (2, 2, 2), mesh_dim_names=("dp", "cp", "tp")
+        )
+
+        # Create a flattened mesh for dims 0 and 1 (dp and cp)
+        dp_cp_mesh = mesh["dp", "cp"]._flatten("dp_cp")
+
+        # Create transform infos that should be optimized:
+        # Two consecutive Partial -> Replicate on mesh dims 0 and 1
+        transform_infos = [
+            _TransformInfo(
+                mesh_dim=0,
+                src_dst_placements=(Partial(), Replicate()),
+                logical_shape=[16, 8],
+            ),
+            _TransformInfo(
+                mesh_dim=1,
+                src_dst_placements=(Partial(), Replicate()),
+                logical_shape=[16, 8],
+            ),
+            _TransformInfo(
+                mesh_dim=2,
+                src_dst_placements=(Shard(0), Replicate()),
+                logical_shape=[16, 8],
+            ),
+        ]
+
+        optimized = _optimize_transform_infos_for_flattened_reductions(
+            transform_infos, mesh
+        )
+
+        # Should have 2 infos: one flattened reduction and one Shard->Replicate
+        self.assertEqual(len(optimized), 2)
+
+        # First should be a _FlattenedTransformInfo
+        self.assertIsInstance(optimized[0], _FlattenedTransformInfo)
+        self.assertEqual(optimized[0].original_mesh_dims, [0, 1])
+        self.assertEqual(optimized[0].flattened_mesh, dp_cp_mesh)
+
+        # Second should be the unchanged Shard->Replicate
+        self.assertEqual(optimized[1].mesh_dim, 2)
+
+    @with_comms
+    def test_no_optimization_without_flattened_mesh(self):
+        """Test that optimization is skipped when no flattened mesh exists."""
+        mesh = init_device_mesh(
+            self.device_type, (2, 2, 2), mesh_dim_names=("dp", "cp", "tp")
+        )
+
+        # Don't create a flattened mesh
+
+        transform_infos = [
+            _TransformInfo(
+                mesh_dim=0,
+                src_dst_placements=(Partial(), Replicate()),
+                logical_shape=[16, 8],
+            ),
+            _TransformInfo(
+                mesh_dim=1,
+                src_dst_placements=(Partial(), Replicate()),
+                logical_shape=[16, 8],
+            ),
+        ]
+
+        optimized = _optimize_transform_infos_for_flattened_reductions(
+            transform_infos, mesh
+        )
+
+        # Should be unchanged since no flattened mesh exists
+        self.assertEqual(len(optimized), 2)
+        self.assertNotIsInstance(optimized[0], _FlattenedTransformInfo)
+        self.assertNotIsInstance(optimized[1], _FlattenedTransformInfo)
+
+    @with_comms
+    def test_no_optimization_for_different_reduce_ops(self):
+        """Test that optimization is skipped when reduce ops differ."""
+        mesh = init_device_mesh(
+            self.device_type, (2, 2, 2), mesh_dim_names=("dp", "cp", "tp")
+        )
+
+        # Create a flattened mesh
+        mesh["dp", "cp"]._flatten("dp_cp")
+
+        # Create transform infos with different reduce ops
+        transform_infos = [
+            _TransformInfo(
+                mesh_dim=0,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[16, 8],
+            ),
+            _TransformInfo(
+                mesh_dim=1,
+                src_dst_placements=(Partial("max"), Replicate()),
+                logical_shape=[16, 8],
+            ),
+        ]
+
+        optimized = _optimize_transform_infos_for_flattened_reductions(
+            transform_infos, mesh
+        )
+
+        # Should be unchanged since reduce ops differ
+        self.assertEqual(len(optimized), 2)
+        self.assertNotIsInstance(optimized[0], _FlattenedTransformInfo)
+
+    @with_comms
+    def test_flattened_reduction_e2e(self):
+        """End-to-end test that flattened reduction uses a single collective."""
+        mesh = init_device_mesh(
+            self.device_type, (2, 2, 2), mesh_dim_names=("dp", "cp", "tp")
+        )
+
+        # Create flattened mesh for dp and cp
+        mesh["dp", "cp"]._flatten("dp_cp")
+
+        # Create a partial tensor on both dp and cp dims
+        local_tensor = torch.ones(16, 8, device=self.device_type)
+        partial_dt = DTensor.from_local(
+            local_tensor, mesh, [Partial(), Partial(), Replicate()]
+        )
+
+        comm_mode = CommDebugMode()
+
+        # Redistribute to replicate on both dims
+        with comm_mode:
+            replicate_dt = partial_dt.redistribute(
+                mesh, [Replicate(), Replicate(), Replicate()]
+            )
+
+        # With the optimization, we should have only 1 all-reduce (on the flattened mesh)
+        # instead of 2 separate all-reduces
+        all_reduce_count = comm_mode.get_comm_counts().get(funcol.all_reduce, 0)
+        self.assertEqual(all_reduce_count, 1)
+
+        # Verify correctness: the result should be the local tensor multiplied by 4
+        # (since we reduced over dp*cp = 2*2 = 4 ranks)
+        expected = local_tensor * 4
+        self.assertEqual(replicate_dt.to_local(), expected)
+
+
+FlattenedReductionOptimizationTestWithLocalTensor = create_local_tensor_test_class(
+    FlattenedReductionOptimizationTest,
+)
+
 
 if __name__ == "__main__":
     run_tests()

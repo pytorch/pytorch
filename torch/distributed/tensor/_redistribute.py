@@ -33,6 +33,7 @@ from torch.utils._debug_mode import get_active_debug_mode
 
 logger = logging.getLogger(__name__)
 
+
 # Global configuration flag to control the redistribution planning strategy.
 # When True, forces the graph-based algorithm using Dijkstra's shortest path.
 # When False, prefers the greedy algorithm for faster planning. Uses the graph-based algorithm
@@ -105,6 +106,172 @@ class _TransformInfo(NamedTuple):
     src_dst_placements: tuple[Placement, Placement]
     # logical_shape on this mesh dimension
     logical_shape: list[int]
+
+
+class _FlattenedTransformInfo(_TransformInfo):
+    """
+    A special transform info that represents a reduction on a flattened mesh dimension.
+
+    This is used when consecutive Partial → Replicate transforms on contiguous mesh
+    dimensions are optimized to use a single all-reduce on the flattened mesh.
+    """
+
+    flattened_mesh: DeviceMesh
+    original_mesh_dims: list[int]
+
+    def __new__(
+        cls,
+        mesh_dim: int,
+        src_dst_placements: tuple[Placement, Placement],
+        logical_shape: list[int],
+        flattened_mesh: DeviceMesh,
+        original_mesh_dims: list[int],
+    ):
+        instance = super().__new__(cls, mesh_dim, src_dst_placements, logical_shape)
+        # Use object.__setattr__ since NamedTuple is immutable
+        object.__setattr__(instance, "flattened_mesh", flattened_mesh)
+        object.__setattr__(instance, "original_mesh_dims", original_mesh_dims)
+        return instance
+
+
+def _find_flattened_mesh_for_contiguous_dims(
+    device_mesh: DeviceMesh,
+    mesh_dims: list[int],
+) -> DeviceMesh | None:
+    """
+    Check if there's a flattened mesh/PG that covers the given contiguous mesh dimensions.
+
+    Args:
+        device_mesh: The device mesh to check for flattened meshes.
+        mesh_dims: A list of mesh dimension indices that should be contiguous and
+            covered by a single flattened mesh.
+
+    Returns:
+        The flattened DeviceMesh if one exists that covers exactly the given mesh_dims,
+        None otherwise.
+    """
+    if len(mesh_dims) < 2:
+        return None
+
+    # Check that the mesh dims are contiguous
+    for i in range(1, len(mesh_dims)):
+        if mesh_dims[i] != mesh_dims[i - 1] + 1:
+            return None
+
+    root_mesh = device_mesh._get_root_mesh()
+    if not root_mesh._flatten_mapping:
+        return None
+
+    # Check each flattened mesh to see if it covers exactly our mesh dims
+    mesh_dim_names = device_mesh._mesh_dim_names
+    if mesh_dim_names is None:
+        return None
+
+    target_dim_names = tuple(mesh_dim_names[d] for d in mesh_dims)
+
+    for flattened_name, flattened_mesh in root_mesh._flatten_mapping.items():
+        # Check if this flattened mesh was created from exactly these dimensions
+        # The flattened mesh name is typically the concatenation of dim names with "_"
+        expected_name = "_".join(target_dim_names)
+        if flattened_name == expected_name:
+            return flattened_mesh
+
+    return None
+
+
+def _optimize_transform_infos_for_flattened_reductions(
+    transform_infos: list[_TransformInfo],
+    device_mesh: DeviceMesh,
+) -> list[_TransformInfo]:
+    """
+    Optimize transform_infos by merging consecutive all-reduce operations on
+    contiguous mesh dimensions when a flattened mesh/PG exists for those dimensions.
+
+    When we have multiple consecutive Partial → Replicate transforms on contiguous
+    mesh dimensions (e.g., mesh dims 0 and 1), and there exists a flattened mesh
+    covering those dimensions, we can replace the multiple all-reduce operations
+    with a single all-reduce on the flattened mesh dimension.
+
+    Args:
+        transform_infos: The list of transform_infos to optimize.
+        device_mesh: The device mesh being used.
+
+    Returns:
+        An optimized list of transform_infos.
+    """
+    if len(transform_infos) < 2:
+        return transform_infos
+
+    optimized_infos: list[_TransformInfo] = []
+    i = 0
+
+    while i < len(transform_infos):
+        current_info = transform_infos[i]
+        current_src, current_target = current_info.src_dst_placements
+
+        # Check if this is a Partial → Replicate transform (all-reduce)
+        if not (current_src.is_partial() and current_target.is_replicate()):
+            optimized_infos.append(current_info)
+            i += 1
+            continue
+
+        # Look for consecutive Partial → Replicate transforms on contiguous mesh dims
+        reduction_group = [current_info]
+        j = i + 1
+        while j < len(transform_infos):
+            next_info = transform_infos[j]
+            next_src, next_target = next_info.src_dst_placements
+
+            # Check if next transform is also Partial → Replicate
+            if not (next_src.is_partial() and next_target.is_replicate()):
+                break
+
+            # Check if mesh dims are contiguous
+            prev_mesh_dim = transform_infos[j - 1].mesh_dim
+            curr_mesh_dim = next_info.mesh_dim
+            if curr_mesh_dim != prev_mesh_dim + 1:
+                break
+
+            # Check if reduce_ops are the same
+            prev_partial = cast(Partial, transform_infos[j - 1].src_dst_placements[0])
+            curr_partial = cast(Partial, next_src)
+            if prev_partial.reduce_op != curr_partial.reduce_op:
+                break
+
+            reduction_group.append(next_info)
+            j += 1
+
+        # If we found multiple consecutive reductions, try to optimize
+        if len(reduction_group) >= 2:
+            mesh_dims = [info.mesh_dim for info in reduction_group]
+            flattened_mesh = _find_flattened_mesh_for_contiguous_dims(
+                device_mesh, mesh_dims
+            )
+
+            if flattened_mesh is not None:
+                # Replace multiple reductions with a single one on flattened mesh
+                # Use the logical shape from the first transform (before any reductions)
+                first_info = reduction_group[0]
+                first_partial = cast(Partial, first_info.src_dst_placements[0])
+
+                # Create a special transform info that will be handled specially
+                flattened_info = _FlattenedTransformInfo(
+                    mesh_dim=first_info.mesh_dim,  # First mesh dim of the group
+                    src_dst_placements=(first_partial, Replicate()),
+                    logical_shape=first_info.logical_shape,
+                    flattened_mesh=flattened_mesh,
+                    original_mesh_dims=mesh_dims,
+                )
+                optimized_infos.append(flattened_info)
+                i = j
+                continue
+
+        # No optimization possible, add all infos as-is
+        for info in reduction_group:
+            optimized_infos.append(info)
+        i = j
+
+    return optimized_infos
 
 
 # Global cache for DTensorRedistributePlanner instances
@@ -823,6 +990,11 @@ def redistribute_local_tensor(
             current_spec, target_spec, use_graph_based_transform
         )
 
+    # Optimize transform_infos to use flattened mesh dims for consecutive reductions
+    transform_infos = _optimize_transform_infos_for_flattened_reductions(
+        transform_infos, device_mesh
+    )
+
     debug_mode = get_active_debug_mode()
     redistribute_context = (
         debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
@@ -842,6 +1014,24 @@ def redistribute_local_tensor(
 
     with redistribute_context:
         for transform_info in transform_infos:
+            # Handle flattened reduction case specially
+            if isinstance(transform_info, _FlattenedTransformInfo):
+                current, target = transform_info.src_dst_placements
+                partial_spec = cast(Partial, current)
+                flattened_mesh = transform_info.flattened_mesh
+                # Perform all-reduce on the flattened mesh (mesh_dim=0 since it's 1D)
+                new_local_tensor = funcol.all_reduce(
+                    local_tensor,
+                    reduceOp=partial_spec.reduce_op,
+                    group=(flattened_mesh, 0),
+                )
+                if not async_op and isinstance(
+                    new_local_tensor, funcol.AsyncCollectiveTensor
+                ):
+                    new_local_tensor = new_local_tensor.wait()
+                local_tensor = new_local_tensor
+                continue
+
             i = transform_info.mesh_dim
             current, target = transform_info.src_dst_placements
             num_chunks = device_mesh.size(mesh_dim=i)
