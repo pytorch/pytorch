@@ -399,6 +399,292 @@ torch._inductor.exc.InductorError: LoweringException: AssertionError:
 
         self.assertEqual(len(records), 1)
 
+    @make_logging_test(side_effects=True)
+    def test_side_effects(self, records):
+        my_list = [1, 2, 3]
+
+        @torch.compile(backend="eager")
+        def fn(x, lst):
+            lst.append(4)
+            return x + len(lst)
+
+        fn(torch.ones(1), my_list)
+
+        self.assertEqual(len(records), 1)
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage()),
+            """\
+Mutating object of type list (source name: L['lst'])
+
+      File "test_logging.py", line N, in test_side_effects
+        fn(torch.ones(1), my_list)
+      File "test_logging.py", line N, in fn
+        lst.append(4)
+""",
+        )
+
+    @make_logging_test(side_effects=True)
+    def test_side_effects_nested_calls(self, records):
+        outer_list = [1]
+
+        def inner(lst):
+            lst.append(2)
+            return len(lst)
+
+        @torch.compile(backend="eager")
+        def outer(x, my_list):
+            result = inner(my_list)
+            my_list.append(3)
+            return x + result + len(my_list)
+
+        outer(torch.ones(1), outer_list)
+
+        self.assertEqual(len(records), 1)
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage()),
+            """\
+Mutating object of type list (source name: L['my_list'])
+
+      File "test_logging.py", line N, in test_side_effects_nested_calls
+        outer(torch.ones(1), outer_list)
+      File "test_logging.py", line N, in outer
+        result = inner(my_list)
+      File "test_logging.py", line N, in inner
+        lst.append(2)
+
+    ********
+
+      File "test_logging.py", line N, in test_side_effects_nested_calls
+        outer(torch.ones(1), outer_list)
+      File "test_logging.py", line N, in outer
+        my_list.append(3)
+""",
+        )
+
+    @make_logging_test(side_effects=True)
+    def test_side_effects_multiple_mutations_same_object(self, records):
+        my_list = [1, 2, 3]
+
+        @torch.compile(backend="eager")
+        def fn(x, lst):
+            lst.append(4)
+            lst.append(5)
+            lst.extend([6, 7])
+            lst.pop()
+            return x + len(lst)
+
+        fn(torch.ones(1), my_list)
+
+        self.assertEqual(len(records), 1)
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage()),
+            """\
+Mutating object of type list (source name: L['lst'])
+
+      File "test_logging.py", line N, in test_side_effects_multiple_mutations_same_object
+        fn(torch.ones(1), my_list)
+      File "test_logging.py", line N, in fn
+        lst.append(4)
+
+    ********
+
+      File "test_logging.py", line N, in test_side_effects_multiple_mutations_same_object
+        fn(torch.ones(1), my_list)
+      File "test_logging.py", line N, in fn
+        lst.append(5)
+
+    ********
+
+      File "test_logging.py", line N, in test_side_effects_multiple_mutations_same_object
+        fn(torch.ones(1), my_list)
+      File "test_logging.py", line N, in fn
+        lst.extend([6, 7])
+
+    ********
+
+      File "test_logging.py", line N, in test_side_effects_multiple_mutations_same_object
+        fn(torch.ones(1), my_list)
+      File "test_logging.py", line N, in fn
+        lst.pop()
+""",
+        )
+
+    @make_logging_test(side_effects=True)
+    def test_side_effects_dict_mutations(self, records):
+        my_dict = {"a": 1}
+
+        @torch.compile(backend="eager")
+        def fn(x, d):
+            d["b"] = 2
+            d["c"] = 3
+            return x + len(d)
+
+        fn(torch.ones(1), my_dict)
+
+        self.assertEqual(len(records), 1)
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage()),
+            """\
+Mutating object of type dict (source name: L['d'])
+
+      File "test_logging.py", line N, in test_side_effects_dict_mutations
+        fn(torch.ones(1), my_dict)
+      File "test_logging.py", line N, in fn
+        d["b"] = 2
+
+    ********
+
+      File "test_logging.py", line N, in test_side_effects_dict_mutations
+        fn(torch.ones(1), my_dict)
+      File "test_logging.py", line N, in fn
+        d["c"] = 3
+""",
+        )
+
+    @make_logging_test(side_effects=True)
+    def test_side_effects_attribute_mutations(self, records):
+        class MyClass:
+            def __init__(self):
+                self.value = 10
+                self.count = 0
+
+        obj = MyClass()
+
+        @torch.compile(backend="eager")
+        def fn(x, o):
+            o.value = 20
+            o.count = 1
+            o.count = 2
+            return x + o.value + o.count
+
+        fn(torch.ones(1), obj)
+
+        self.assertEqual(len(records), 1)
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage()),
+            """\
+Mutating object of type MyClass (source name: L['o'])
+
+      File "test_logging.py", line N, in test_side_effects_attribute_mutations
+        fn(torch.ones(1), obj)
+      File "test_logging.py", line N, in fn
+        o.value = 20
+
+    ********
+
+      File "test_logging.py", line N, in test_side_effects_attribute_mutations
+        fn(torch.ones(1), obj)
+      File "test_logging.py", line N, in fn
+        o.count = 1
+
+    ********
+
+      File "test_logging.py", line N, in test_side_effects_attribute_mutations
+        fn(torch.ones(1), obj)
+      File "test_logging.py", line N, in fn
+        o.count = 2
+""",
+        )
+
+    @make_logging_test(side_effects=True)
+    def test_side_effects_local_list_no_log(self, records):
+        """Test that lists created inside compiled region don't log side effects."""
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            my_list = [1, 2, 3]  # Created inside compiled region
+            my_list.append(4)
+            return x + len(my_list)
+
+        fn(torch.ones(1))
+
+        # Should NOT have logged the list mutation since it's a local variable
+        self.assertEqual(len(records), 0)
+
+    @make_logging_test(side_effects=True)
+    def test_side_effects_local_object_with_log(self, records):
+        """Test that returned objects created inside compiled region still log attribute mutations."""
+
+        class MyClass:
+            def __init__(self):
+                self.value = 10
+
+        @torch.compile(backend="eager")
+        def fn(x):
+            obj = MyClass()  # Created inside compiled region
+            obj.value = 20
+            return x + obj.value, obj
+
+        fn(torch.ones(1))
+
+        self.assertEqual(len(records), 1)
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage()),
+            """\
+Mutating object of type MyClass (source: created in torch.compile region)
+
+      File "test_logging.py", line N, in test_side_effects_local_object_with_log
+        fn(torch.ones(1))
+      File "test_logging.py", line N, in fn
+        obj = MyClass()  # Created inside compiled region
+      File "test_logging.py", line N, in __init__
+        self.value = 10
+
+    ********
+
+      File "test_logging.py", line N, in test_side_effects_local_object_with_log
+        fn(torch.ones(1))
+      File "test_logging.py", line N, in fn
+        obj.value = 20
+""",
+        )
+
+    @make_logging_test(side_effects=True)
+    def test_side_effects_nn_module_buffer(self, records):
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer("buf", torch.rand(2, 2))
+
+            def forward(self, x):
+                self.buf += 1
+                return x + self.buf
+
+        @torch.compile(backend="eager")
+        def fn(mod, x):
+            return mod(x)
+
+        fn(Mod(), torch.ones(1))
+
+        self.assertEqual(len(records), 1)
+        self.assertExpectedInline(
+            munge_exc(records[0].getMessage()),
+            """\
+Mutating object of type dict (source name: L['mod']._buffers)
+
+      File "test_logging.py", line N, in test_side_effects_nn_module_buffer
+        fn(Mod(), torch.ones(1))
+      File "test_logging.py", line N, in fn
+        return mod(x)
+      File "test_logging.py", line N, in forward
+        self.buf += 1
+""",
+        )
+
+    @make_logging_test(side_effects=True)
+    @torch._dynamo.config.patch(side_effect_replay_policy="silent")
+    def test_side_effects_silent_config(self, records):
+        my_list = [1, 2, 3]
+
+        @torch.compile(backend="eager")
+        def fn(x, lst):
+            lst.append(4)
+            return x + len(lst)
+
+        fn(torch.ones(1), my_list)
+
+        self.assertEqual(len(records), 0)
+
     @make_settings_test("torch._dynamo.utils")
     def test_dump_compile_times(self, records):
         fn_opt = torch.compile(example_fn, backend="inductor")
@@ -1054,6 +1340,7 @@ exclusions = {
     "recompiles",
     "recompiles_verbose",
     "graph_breaks",
+    "side_effects",
     "graph",
     "graph_code",
     "graph_code_verbose",
