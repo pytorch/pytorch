@@ -1117,7 +1117,10 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
         spec = DTensorSpec(device_mesh, tuple(placements), tensor_meta=tensor_meta)
 
         if random.is_rng_supported_mesh(device_mesh) and not random._rng_tracker:
-            random._rng_tracker = random.OffsetBasedRNGTracker(device_mesh)
+            if random._USE_THREAD_RNG_TRACKER:
+                random._rng_tracker = random.ThreadBasedRNGTracker(device_mesh)
+            else:
+                random._rng_tracker = random.OffsetBasedRNGTracker(device_mesh)
 
         assert random._rng_tracker is not None
         with random._rng_tracker._distribute_region(spec):
