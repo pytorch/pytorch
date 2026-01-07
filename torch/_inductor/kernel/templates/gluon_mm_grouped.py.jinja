@@ -20,7 +20,7 @@ from triton.experimental.gluon.language.nvidia.blackwell import (
 {%- if USE_RAGGED_TENSOR_DESCRIPTOR %}
 from triton.experimental.gluon.tools.ragged_tma import (
     create_ragged_descriptor_device_2d,
-    to_ragged_indices,
+    to_ragged_coords,
 )
 {%- endif %}
 
@@ -218,9 +218,8 @@ class Counter:
 {%- if USE_RAGGED_TENSOR_DESCRIPTOR %}
 @gluon.jit
 def store_ragged(TMA, slice_off, slice_size, coords, data, ragged_dim: gl.constexpr = 0):
-    c0, c1, c2 = to_ragged_indices(slice_off, slice_size, coords[ragged_dim])
-    full_coords = [c0, c1] + coords[:ragged_dim] + [c2] + coords[ragged_dim + 1:]
-    tma.async_copy_shared_to_global(TMA, full_coords, data)
+    ragged_coords = to_ragged_coords(slice_off, slice_size, coords, ragged_dim)
+    tma.async_copy_shared_to_global(TMA, ragged_coords, data)
 {%- endif %}
 
 
