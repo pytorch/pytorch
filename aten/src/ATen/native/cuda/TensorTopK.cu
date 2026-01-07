@@ -55,6 +55,10 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   // int32, regardless of IndexType
 #if defined(USE_ROCM)
   __shared__ int smem[64];
+  constexpr int WARP_SIZE = 64;
+  constexpr int WARP_BITS = 6; // = log2(WARP_SIZE)
+  __shared__ int warp_bases[1024 >> WARP_BITS]; // 1024 >> WARP_BITS = 1024/WARP_SIZE = max warps per block. Variable warp_bases is used for intra-warp communication of write indices.
+  __shared__ int writeIndexStart; // index to track where to write results. This is shared by all threads in the block.
 #else
   __shared__ int smem[32]; // one per each warp, up to warp limit
 #endif
@@ -103,7 +107,17 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   // but not necessarily in the load; hence loop bounds being rounded
   // up to a multiple of the block dim.
   IndexType numIterations = round_up(inputSliceSize, (IndexType) blockDim.x);
+#ifdef USE_ROCM
+  int warp_id = threadIdx.x >> WARP_BITS; // = threadIdx.x / WARP_SIZE
+  int lane_id = threadIdx.x & (WARP_SIZE - 1); // = threadIdx.x % WARP_SIZE
+  // Initialize writeIndexStart to 0 by the first thread in the block.
+  if (threadIdx.x == 0) {
+    writeIndexStart = 0;
+  }
+  __syncthreads();
+#else
   IndexType writeIndexStart = 0;
+#endif
 
   for (IndexType i = threadIdx.x; i < numIterations; i += blockDim.x) {
     bool inRange = (i < inputSliceSize);
@@ -117,6 +131,30 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
       hasTopK = inRange && (convertedV < topKConverted);
     }
 
+#ifdef USE_ROCM
+    uint64_t ballot = WARP_BALLOT(hasTopK); // a bitmask of threads that have hasTopK == true within the warp.
+    int warp_count = __popcll(ballot); // count the number of threads that have hasTopK == true within the warp.
+
+    // if > 0 threads have hasTopK == true within the warp, 
+    // reserve space for them by incrementing writeIndexStart atomically + saving the old value in warp_bases.
+    if (lane_id == 0 && warp_count > 0) { 
+      warp_bases[warp_id] = atomicAdd(&writeIndexStart, warp_count);
+    }
+    __syncwarp();
+
+    // now warp has reserved space for itself. If hasTopK == true, we need to find the index to write the result to.
+    if (hasTopK) {
+      uint64_t warp_offset = (1ULL << lane_id) - 1; // a bitmask: [0, 0, 0, ..., 0, 1, 1, 1, ..., 1] with (64-lane_id) 0s and lane_id 1s.
+      int my_offset = __popcll(ballot & warp_offset); // count the number of threads that have hasTopK == true to the right of the current thread in bitmask.
+      int writeIndex = warp_bases[warp_id] + my_offset; // the index to write the result to.
+      CUDA_KERNEL_ASSERT(writeIndex < outputSliceSize);
+      IndexType topKOffset = writeIndex * topKWithinSliceStride;
+      IndexType indexOffset = writeIndex * indicesWithinSliceStride;
+
+      topKSliceStart[topKOffset] = v;
+      indicesSliceStart[indexOffset] = i;
+    }
+#else
     int index;
     int carry;
     at::cuda::exclusiveBinaryPrefixScan<int, true>(
@@ -134,6 +172,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
     }
 
     writeIndexStart += carry;
+#endif
   }
 
   // We need to fill in the rest with actual == top-K values.
@@ -141,8 +180,13 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   // writeIndexStart. There might be more than that number available,
   // in which case we have to choose the first seen set. We do this
   // via a prefix sum to calculate indices for writing results.
+#ifdef USE_ROCM
+  __syncthreads(); // make sure phase 1 is completed before phase 2.
+  // this synchronization is not needed for the other path using exclusiveBinaryPrefixScan since it is done in exclusiveBinaryPrefixScan under the hood.
+#else
   CUDA_KERNEL_ASSERT(outputSliceSize >= writeIndexStart);
   IndexType topKRemaining = (outputSliceSize - writeIndexStart);
+#endif
 
   for (IndexType i = threadIdx.x; i < numIterations; i += blockDim.x) {
     bool inRange = (i < inputSliceSize);
@@ -151,6 +195,37 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
     const auto convertedV = at::native::TopKTypeConfig<T>::convert(v);
     bool hasTopK = inRange && (convertedV == topKConverted);
 
+#ifdef USE_ROCM
+    uint64_t ballot = WARP_BALLOT(hasTopK); // a bitmask of threads that have hasTopK == true within the warp.
+    int warp_count = __popcll(ballot); // count the number of threads that have hasTopK == true within the warp.
+
+    if (warp_count > 0){ // if > 0 threads have hasTopK == true within the warp,
+      // reserve space for them by incrementing writeIndexStart atomically + saving the old value in warp_bases.
+      if (lane_id == 0){
+        warp_bases[warp_id] = atomicAdd(&writeIndexStart, warp_count);
+      }
+      __syncwarp();
+      // now warp has reserved space for itself.
+    
+      // if warp_bases[warp_id] overshoots outputSliceSize, there is no space to add topk values. Break out of the loop.
+      if (outputSliceSize <= warp_bases[warp_id]){
+        break;
+      }
+      // if hasTopK == true, we need to find the index to write the result to.
+      if (hasTopK){
+        int slots_available = outputSliceSize - warp_bases[warp_id]; // the number of slots available to write the result to.
+        uint64_t warp_offset = (1ULL << lane_id) - 1; // a bitmask: [0, 0, 0, ..., 0, 1, 1, 1, ..., 1] with (64-lane_id) 0s and lane_id 1s.
+        int my_offset = __popcll(ballot & warp_offset); // count the number of threads that have hasTopK == true to the right of the current thread in bitmask.
+        if (my_offset < slots_available){
+          IndexType writeIndex = warp_bases[warp_id] + my_offset; // the index to write the result to.
+          IndexType topKOffset = writeIndex * topKWithinSliceStride;
+          IndexType indexOffset = writeIndex * indicesWithinSliceStride;
+          topKSliceStart[topKOffset] = v;
+          indicesSliceStart[indexOffset] = i;
+        }
+      }
+  }
+#else
     int index;
     int carry;
     at::cuda::exclusiveBinaryPrefixScan<int, true>(
@@ -173,6 +248,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
 
     topKRemaining -= carry;
     writeIndexStart += carry;
+#endif
   }
 
 }
