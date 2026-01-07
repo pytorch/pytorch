@@ -103,7 +103,8 @@ class DeviceBiasVisitor(ast.NodeVisitor):
         val = subnode.value
         if isinstance(val, ast.Constant) and any(
             # pyrefly: ignore [not-iterable, unsupported-operation]
-            bias in val.value for bias in DEVICE_BIAS
+            bias in val.value
+            for bias in DEVICE_BIAS
         ):
             self.record(
                 subnode,
@@ -138,7 +139,8 @@ class DeviceBiasVisitor(ast.NodeVisitor):
             arg = subnode.args[0]
             if isinstance(arg, ast.Constant) and any(
                 # pyrefly: ignore [not-iterable, unsupported-operation]
-                bias in arg.value for bias in DEVICE_BIAS
+                bias in arg.value
+                for bias in DEVICE_BIAS
             ):
                 self.record(
                     subnode,
