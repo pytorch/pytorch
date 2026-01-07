@@ -5,8 +5,12 @@ This module contains the registration system for flash attention implementations
 It has no torch dependencies to avoid circular imports during initialization.
 """
 
+import logging
 from collections.abc import Callable
 from typing import Literal, Protocol
+
+
+logger = logging.getLogger(__name__)
 
 
 class FlashAttentionHandle(Protocol):
@@ -18,8 +22,7 @@ _FlashAttentionImpl = Literal["FA4"]
 
 _FLASH_ATTENTION_IMPLS: dict[str, _RegisterFn] = {}
 
-_FLASH_ATTENTION_ACTIVE: str | None = None
-_FLASH_ATTENTION_HANDLES: dict[str, FlashAttentionHandle] = {}
+_FLASH_ATTENTION_ACTIVE: tuple[str, FlashAttentionHandle] | None = None
 
 
 def register_flash_attention_impl(
@@ -51,6 +54,7 @@ def register_flash_attention_impl(
         ...     "MyImpl", register_fn=my_impl_register
         ... )  # doctest: +SKIP
     """
+    global _FLASH_ATTENTION_IMPLS
     _FLASH_ATTENTION_IMPLS[impl] = register_fn
 
 
@@ -77,22 +81,22 @@ def activate_flash_attention_impl(
     Example:
         >>> activate_flash_attention_impl("FA4")  # doctest: +SKIP
     """
-    global _FLASH_ATTENTION_ACTIVE
+    global _FLASH_ATTENTION_ACTIVE, _FLASH_ATTENTION_IMPLS
+
+    restore_flash_attention_impl(
+        _raise_warn=False
+    )  # first restore any prev overrides (if any) to default
+
     register_fn = _FLASH_ATTENTION_IMPLS.get(impl)
     if register_fn is None:
         raise ValueError(
             f"Unknown flash attention impl '{impl}'. "
             f"Available implementations: {list_flash_attention_impls()}"
         )
-    # TODO: The only way to actually register a new impl is to unregister the current impl
-    # reinstall the default impl and then register the new impl
-    if _FLASH_ATTENTION_ACTIVE == impl:
-        return
 
     handle = register_fn()
     if handle is not None:
-        _FLASH_ATTENTION_HANDLES[impl] = handle
-    _FLASH_ATTENTION_ACTIVE = impl
+        _FLASH_ATTENTION_ACTIVE = (impl, handle)
 
 
 def list_flash_attention_impls() -> list[str]:
@@ -106,4 +110,28 @@ def current_flash_attention_impl() -> str | None:
 
     ``None`` indicates that no custom impl has been activated.
     """
-    return _FLASH_ATTENTION_ACTIVE
+    return (
+        _FLASH_ATTENTION_ACTIVE[0]
+        if _FLASH_ATTENTION_ACTIVE is not None
+        else _FLASH_ATTENTION_ACTIVE
+    )
+
+
+def restore_flash_attention_impl(_raise_warn: bool = True) -> None:
+    """
+    Restore the default FA2 implementation
+    """
+    global _FLASH_ATTENTION_ACTIVE
+
+    handle = None
+    if _FLASH_ATTENTION_ACTIVE is not None:
+        handle = _FLASH_ATTENTION_ACTIVE[1]
+
+    if handle is not None:
+        handle.remove()
+    elif _raise_warn:
+        logger.warning(
+            "Trying to restore default FA2 impl when no custom impl was activated"
+        )
+
+    _FLASH_ATTENTION_ACTIVE = None  # default

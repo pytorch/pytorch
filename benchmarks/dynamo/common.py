@@ -789,7 +789,7 @@ class Stats:
         return [cls.totals["aot_autograd"]["total"], cls.totals["aot_autograd"]["ok"]]
 
 
-def coverage_experiment(args, model_iter_fn, model, example_inputs):
+def coverage_experiment(args, model_iter_fn, model, example_inputs, **kwargs):
     """
     Test operator/model coverage of TorchDynamo and record statistics
     taken from a profiler.  This target is mainly intended to check
@@ -2216,6 +2216,7 @@ class BenchmarkRunner:
                 log.warning(
                     "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
                     name,
+                    exc_info=True,
                 )
                 self.args.cosine = True
                 fp64_outputs = None
@@ -3777,7 +3778,8 @@ def setup_determinism_for_accuracy_test(args):
     }:
         # some of the models do not support use_deterministic_algorithms
         torch.use_deterministic_algorithms(True)
-    if args.devices == ["xpu"]:
+
+    if args.devices == ["rocm"] or args.devices == ["xpu"]:
         torch.use_deterministic_algorithms(True, warn_only=True)
 
     torch.backends.cudnn.deterministic = True
