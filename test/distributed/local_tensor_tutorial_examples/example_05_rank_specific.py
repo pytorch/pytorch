@@ -17,6 +17,7 @@ import torch
 from torch.distributed._local_tensor import (
     LocalTensorMode,
     maybe_disable_local_tensor_mode,
+    maybe_run_for_local_tensor,
 )
 
 
@@ -108,6 +109,45 @@ def use_maybe_disable():
 # [end_core_maybe_disable]
 
 
+# [core_maybe_run_decorator]
+def use_maybe_run_decorator(world_size: int = 4):
+    """Use @maybe_run_for_local_tensor for rank-specific computations.
+
+    The decorator runs a function once per rank when inside LocalTensorMode,
+    automatically handling LocalTensor inputs and collecting per-rank outputs.
+
+    Returns: (result_values, expected_values)
+    """
+
+    @maybe_run_for_local_tensor
+    def compute_rank_offset(data: torch.Tensor, rank: int) -> torch.Tensor:
+        """Compute offset into data based on rank - non-SPMD behavior."""
+        chunk_size = data.shape[0] // 4  # Assume 4 ranks
+        start = rank * chunk_size
+        return data[start : start + chunk_size]
+
+    full_data = torch.arange(16).float()
+
+    with LocalTensorMode(world_size) as mode:
+        ranks = mode.rank_map(lambda r: torch.tensor(r))
+        result = compute_rank_offset(full_data, ranks)
+
+        values = {
+            rank: result._local_tensors[rank].tolist() for rank in range(world_size)
+        }
+
+    expected = {
+        0: [0.0, 1.0, 2.0, 3.0],
+        1: [4.0, 5.0, 6.0, 7.0],
+        2: [8.0, 9.0, 10.0, 11.0],
+        3: [12.0, 13.0, 14.0, 15.0],
+    }
+    return values, expected
+
+
+# [end_core_maybe_run_decorator]
+
+
 if __name__ == "__main__":
     print("=== use_rank_map ===")
     values, expected = use_rank_map()
@@ -124,3 +164,7 @@ if __name__ == "__main__":
     print("\n=== use_maybe_disable ===")
     (outside, inside), (exp_out, exp_in) = use_maybe_disable()
     print(f"Outside: {outside}={exp_out}, Inside: {inside}={exp_in}")
+
+    print("\n=== use_maybe_run_decorator ===")
+    values, expected = use_maybe_run_decorator()
+    print(f"Values match: {values == expected}")

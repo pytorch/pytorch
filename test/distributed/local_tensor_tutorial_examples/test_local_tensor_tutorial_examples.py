@@ -43,6 +43,7 @@ from example_04_uneven_sharding import (
 from example_05_rank_specific import (
     disable_mode_temporarily,
     use_maybe_disable,
+    use_maybe_run_decorator,
     use_rank_map,
     use_tensor_map,
 )
@@ -238,6 +239,11 @@ class TestExample05RankSpecific(TestCase):
 
         self.assertEqual(outside, exp_outside)
         self.assertEqual(inside, exp_inside)
+
+    def test_use_maybe_run_decorator(self):
+        """Test @maybe_run_for_local_tensor decorator."""
+        values, expected = use_maybe_run_decorator()
+        self.assertEqual(values, expected)
 
 
 class TestExample06MultidimMesh(TestCase):
