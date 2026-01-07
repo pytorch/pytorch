@@ -41,9 +41,9 @@ class FakeScriptObject:
                 f"Tried to call __getattr__ with attr '{name}' on a FakeScriptObject, "
                 "implying that you are calling this inside of a fake kernel. "
                 "The fake kernel should not depend on the contents of the "
-                "OpaqueObject at all, so we're erroring out. If you need this"
-                "functionality, consider creating a custom TorchBind Object instead"
-                "(but note that this is more difficult)."
+                "OpaqueObject at all, so we're erroring out. If this attr is "
+                "a method or constant attribute, you can allow this member access by "
+                "registering it via `register_opaque_type(members=...)`."
             ) from e
 
     def __setattr__(self, name, value):
