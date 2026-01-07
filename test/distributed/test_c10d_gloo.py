@@ -512,25 +512,27 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         # Single input tests
         tests = simple_reduce_tests(self.rank, self.world_size)
         for op, input, expected in tests:
-            opts = c10d.AllreduceOptions()
-            opts.reduceOp = op
-            tensor = fn(input)
-            fut = pg.allreduce([tensor], opts).get_future()
-            fut.wait()
-            result = fut.value()
-            self.assertEqual(expected, result[0])
+            with self.subTest(op=op):
+                opts = c10d.AllreduceOptions()
+                opts.reduceOp = op
+                tensor = fn(input)
+                fut = pg.allreduce([tensor], opts).get_future()
+                fut.wait()
+                result = fut.value()
+                self.assertEqual(expected, result[0])
 
         # Multi input tests
         tests = simple_multi_input_reduce_tests(self.rank, self.world_size)
         for op, inputs, output in tests:
-            opts = c10d.AllreduceOptions()
-            opts.reduceOp = op
-            tensors = [fn(input) for input in inputs]
-            fut = pg.allreduce(tensors, opts).get_future()
-            fut.wait()
-            result = fut.value()
-            for tensor in result:
-                self.assertEqual(output, tensor)
+            with self.subTest(op=op, multi_input=True):
+                opts = c10d.AllreduceOptions()
+                opts.reduceOp = op
+                tensors = [fn(input) for input in inputs]
+                fut = pg.allreduce(tensors, opts).get_future()
+                fut.wait()
+                result = fut.value()
+                for tensor in result:
+                    self.assertEqual(output, tensor)
 
         # Test overloaded convenience function (defaults to using sum)
         x = fn(torch.tensor([self.rank + 1.0]))
@@ -821,15 +823,45 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         )
         torch.manual_seed(42)
 
-        # variable size per rank
-        inputs = [torch.rand(i) for i in range(self.world_size)]
-        output = torch.empty(self.rank)
+        for op in (
+            c10d.ReduceOp.SUM,
+            c10d.ReduceOp.AVG,
+            c10d.ReduceOp.MIN,
+            c10d.ReduceOp.MAX,
+            c10d.ReduceOp.PRODUCT,
+        ):
+            with self.subTest(op=op):
+                inputs = [
+                    torch.full((3,), float(self.rank + i + 1))
+                    for i in range(self.world_size)
+                ]
+                output = torch.empty(3)
 
-        work = dist.reduce_scatter(output, inputs, async_op=True)
-        work.wait()
+                work = dist.reduce_scatter(output, inputs, op=op, async_op=True)
+                work.wait()
 
-        expect = inputs[self.rank] * self.world_size
-        self.assertTrue(torch.allclose(output, expect))
+                r = self.rank
+                ws = self.world_size
+                values = [float(r + k + 1) for k in range(ws)]
+
+                if op == c10d.ReduceOp.SUM:
+                    expected_val = sum(values)
+                elif op == c10d.ReduceOp.AVG:
+                    expected_val = sum(values) / ws
+                elif op == c10d.ReduceOp.MIN:
+                    expected_val = min(values)
+                elif op == c10d.ReduceOp.MAX:
+                    expected_val = max(values)
+                elif op == c10d.ReduceOp.PRODUCT:
+                    expected_val = reduce(operator.mul, values, 1.0)
+                else:
+                    raise ValueError(f"Unsupported op: {op}")
+
+                expect = torch.full((3,), expected_val)
+                self.assertTrue(
+                    torch.allclose(output, expect),
+                    f"op={op}, rank={self.rank}: output={output}, expected={expect}",
+                )
 
     @requires_gloo()
     def test_reduce_scatter_tensor(self):
@@ -841,19 +873,48 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             world_size=self.world_size,
         )
         torch.manual_seed(42)
-        out_shape = (20, 20)
-        in_shape = (out_shape[0] * self.world_size,) + out_shape[1:]
 
-        output = torch.empty(out_shape)
-        input = torch.rand(in_shape)
-        work = dist.reduce_scatter_tensor(output, input, async_op=True)
-        work.wait()
+        for op in [
+            c10d.ReduceOp.SUM,
+            c10d.ReduceOp.AVG,
+            c10d.ReduceOp.MIN,
+            c10d.ReduceOp.MAX,
+            c10d.ReduceOp.PRODUCT,
+        ]:
+            with self.subTest(op=op):
+                out_size = 10
+                in_size = out_size * self.world_size
 
-        expect = (
-            input.view(self.world_size, *out_shape).chunk(self.world_size)[self.rank]
-            * self.world_size
-        )
-        self.assertTrue(torch.allclose(output, expect))
+                input = torch.empty(in_size)
+                for i in range(self.world_size):
+                    input[i * out_size : (i + 1) * out_size] = float(self.rank + i + 1)
+                output = torch.empty(out_size)
+
+                work = dist.reduce_scatter_tensor(output, input, op=op, async_op=True)
+                work.wait()
+
+                r = self.rank
+                ws = self.world_size
+                values = [float(r + k + 1) for k in range(ws)]
+
+                if op == c10d.ReduceOp.SUM:
+                    expected_val = sum(values)
+                elif op == c10d.ReduceOp.AVG:
+                    expected_val = sum(values) / ws
+                elif op == c10d.ReduceOp.MIN:
+                    expected_val = min(values)
+                elif op == c10d.ReduceOp.MAX:
+                    expected_val = max(values)
+                elif op == c10d.ReduceOp.PRODUCT:
+                    expected_val = reduce(operator.mul, values, 1.0)
+                else:
+                    raise ValueError(f"Unsupported op: {op}")
+
+                expect = torch.full((out_size,), expected_val)
+                self.assertTrue(
+                    torch.allclose(output, expect),
+                    f"op={op}, rank={self.rank}: output={output[0]}, expected={expect[0]}",
+                )
 
     @requires_gloo()
     def test_reduce_scatter_tensor_coalesced(self):
@@ -865,22 +926,58 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
             world_size=self.world_size,
         )
         torch.manual_seed(42)
-        out_shapes = [(5, 5), (10, 10), (15, 15)]
-        in_shapes = [(s[0] * self.world_size,) + s[1:] for s in out_shapes]
 
-        outputs = [torch.empty(s) for s in out_shapes]
-        inputs = [torch.rand(s) for s in in_shapes]
-        work = dist.group.WORLD.reduce_scatter_tensor_coalesced(outputs, inputs)
-        work.wait()
+        for op in (
+            c10d.ReduceOp.SUM,
+            c10d.ReduceOp.AVG,
+            c10d.ReduceOp.MIN,
+            c10d.ReduceOp.MAX,
+            c10d.ReduceOp.PRODUCT,
+        ):
+            with self.subTest(op=op):
+                out_sizes = [5, 10, 15]
+                in_sizes = [s * self.world_size for s in out_sizes]
 
-        for output, input in zip(outputs, inputs):
-            expect = (
-                input.view(self.world_size, *output.shape).chunk(self.world_size)[
-                    self.rank
-                ]
-                * self.world_size
-            )
-            self.assertTrue(torch.allclose(output, expect))
+                outputs = [torch.empty(s) for s in out_sizes]
+                inputs = []
+                for in_size, out_size in zip(in_sizes, out_sizes, strict=True):
+                    inp = torch.empty(in_size)
+                    for i in range(self.world_size):
+                        inp[i * out_size : (i + 1) * out_size] = float(
+                            self.rank + i + 1
+                        )
+                    inputs.append(inp)
+
+                opts = c10d.ReduceScatterOptions()
+                opts.reduceOp = op
+                work = dist.group.WORLD.reduce_scatter_tensor_coalesced(
+                    outputs, inputs, opts
+                )
+                work.wait()
+
+                r = self.rank
+                ws = self.world_size
+                values = [float(r + k + 1) for k in range(ws)]
+
+                if op == c10d.ReduceOp.SUM:
+                    expected_val = sum(values)
+                elif op == c10d.ReduceOp.AVG:
+                    expected_val = sum(values) / ws
+                elif op == c10d.ReduceOp.MIN:
+                    expected_val = min(values)
+                elif op == c10d.ReduceOp.MAX:
+                    expected_val = max(values)
+                elif op == c10d.ReduceOp.PRODUCT:
+                    expected_val = reduce(operator.mul, values, 1.0)
+                else:
+                    raise ValueError(f"Unsupported op: {op}")
+
+                for output, out_size in zip(outputs, out_sizes, strict=True):
+                    expect = torch.full((out_size,), expected_val)
+                    self.assertTrue(
+                        torch.allclose(output, expect),
+                        f"op={op}, rank={self.rank}: output={output[0]}, expected={expect[0]}",
+                    )
 
     @requires_gloo()
     def test_scatter_checks(self):
@@ -1043,6 +1140,47 @@ class ProcessGroupGlooTest(MultiProcessTestCase):
         self.assertEqual(pg.options._timeout, timedelta(seconds=50))
         pg._set_default_timeout(timedelta(seconds=23))
         self.assertEqual(pg.options._timeout, timedelta(seconds=23))
+
+    @requires_gloo()
+    def test_gloo_set_pg_timeout_api(self):
+        """
+        Test _set_pg_timeout API for Gloo backend (issue #165422).
+        This test demonstrates that dynamically changing timeout via _set_pg_timeout
+        actually affects operation timeouts by:
+        1. verifying operations complete successfully with normal timeout
+        2. setting a very short timeout via _set_pg_timeout
+        3. demonstrating that operations timeout with the new short timeout value
+        """
+        store = c10d.FileStore(self.file_name, self.world_size)
+        dist.init_process_group(
+            backend="gloo",
+            store=store,
+            rank=self.rank,
+            world_size=self.world_size,
+            timeout=timedelta(seconds=50),
+        )
+
+        pg = dist.distributed_c10d._get_default_group()
+        backend = pg._get_backend(torch.device("cpu"))
+        self.assertEqual(backend.options._timeout, timedelta(seconds=50))
+
+        # operations work normally with default timeout
+        tensor = torch.rand(10)
+        pg.allreduce(tensor).wait()
+
+        # change timeout to a very short value using _set_pg_timeout
+        # this is the API from issue #165422
+        c10d.distributed_c10d._set_pg_timeout(timedelta(milliseconds=1), pg)
+        self.assertEqual(backend.options._timeout, timedelta(milliseconds=1))
+
+        # demonstrate that the new timeout is actually enforced
+        # only rank 0 participates - this will cause a timeout
+        if self.rank == 0:
+            t1 = torch.zeros([1], dtype=torch.float32)
+            with self.assertRaisesRegex(RuntimeError, "Timed out waiting 1ms"):
+                pg.allreduce([t1]).wait()
+
+        dist.destroy_process_group()
 
     @requires_gloo()
     def test_scatter_stress(self):

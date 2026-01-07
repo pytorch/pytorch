@@ -355,7 +355,7 @@ class _RemoteModule(nn.Module):
 
     def register_backward_hook(  # type: ignore[return]
         self,
-        hook: Callable[[Module, _grad_t, _grad_t], None | _grad_t],
+        hook: Callable[[Module, _grad_t, _grad_t], _grad_t | None],
         # pyrefly: ignore [bad-return]
     ) -> RemovableHandle:
         _raise_not_supported(self.register_backward_hook.__name__)

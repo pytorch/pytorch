@@ -227,6 +227,42 @@ kernel, the decorator will search your system paths for the NVSHMEM device
 library. If it is available, Triton will include the necessary device assembly
 to use the NVSHMEM functions.
 
+## Using Memory Pool
+
+Memory pool allows PyTorch SymmMem to cache memory allocations that have been
+rendezvoused, saving time when creating new tensors.  For convenience, PyTorch
+SymmMem has added a `get_mem_pool` API to return a symmetric memory pool. Users
+can use the returned MemPool with the `torch.cuda.use_mem_pool` context manager.
+In the example below, tensor `x` will be created from symmetric memory:
+
+```python
+    import torch.distributed._symmetric_memory as symm_mem
+
+    mempool = symm_mem.get_mem_pool(device)
+
+    with torch.cuda.use_mem_pool(mempool):
+        x = torch.arange(128, device=device)
+
+    torch.ops.symm_mem.one_shot_all_reduce(x, "sum", group_name)
+```
+
+Similarly, you can put a compute operation under the MemPool context, and the
+result tensor will be created from symmetric memory too.
+
+```python
+    dim = 1024
+    w = torch.ones(dim, dim, device=device)
+    x = torch.ones(1, dim, device=device)
+
+    mempool = symm_mem.get_mem_pool(device)
+    with torch.cuda.use_mem_pool(mempool):
+        # y will be in symmetric memory
+        y = torch.mm(x, w)
+```
+
+As of torch 2.11, the `CUDA` and `NVSHMEM` backends support MemPool. MemPool
+support of the `NCCL` backend is in progress.
+
 ## API Reference
 
 ```{eval-rst}
@@ -251,6 +287,10 @@ to use the NVSHMEM functions.
 
 ```{eval-rst}
 .. autofunction:: get_backend
+```
+
+```{eval-rst}
+.. autofunction:: get_mem_pool
 ```
 
 ## Op Reference
@@ -376,5 +416,54 @@ them directly via `torch.ops.symm_mem.<op_name>`.
     :param Tensor in_splits_offsets: Tensor containing the splits and offsets of data to send to each expert. Must be symmetric. Must be of size (2, group_size * ne), where `ne` is the number of experts. The rows are (in order): input splits and input offsets. The splits are in the unit of elements in the 1st dimension.
     :param Tensor out_splits_offsets: Tensor containing the splits and offsets of data received from each peer. Must be symmetric. Must be of size (2, group_size * ne). The rows are (in order): output splits and output offsets.
     :param str group_name: Name of the group to perform all-to-all on.
+
+
+.. py:function:: tile_reduce(in_tile: Tensor, out_tile: Tensor, root: int, group_name: str, [reduce_op: str = 'sum']) -> None
+
+    Reduces a 2D tile from all ranks to a specified root rank within a process group.
+
+    :param Tensor in_tile: Input 2D tensor to be reduced. Must be symmetrically allocated.
+    :param Tensor out_tile: Output 2D tensor to contain the result of the reduction. Must be symmetric and have the same shape, dtype, and device as `in_tile`.
+    :param int root: The rank of the process in the specified group that will receive the reduced result.
+    :param str group_name: The name of the symmetric memory process group to perform the reduction in.
+    :param str reduce_op: The reduction operation to perform. Currently, only ``"sum"`` is supported. Defaults to ``"sum"``.
+
+    This function reduces `in_tile` tensors from all members of the group, writing the result to `out_tile` at the root rank. All ranks must participate and provide the same `group_name` and tensor shapes.
+
+    Example::
+
+        >>> # doctest: +SKIP
+        >>> # Reduce the bottom-right quadrant of a tensor
+        >>> tile_size = full_size // 2
+        >>> full_inp = symm_mem.empty(full_size, full_size)
+        >>> full_out = symm_mem.empty(full_size, full_size)
+        >>> s = slice(tile_size, 2 * tile_size)
+        >>> in_tile = full_inp[s, s]
+        >>> out_tile = full_out[s, s]
+        >>> torch.ops.symm_mem.tile_reduce(in_tile, out_tile, root=0, group_name)
+
+
+.. py:function:: multi_root_tile_reduce(in_tiles: list[Tensor], out_tile: Tensor, roots: list[int], group_name: str, [reduce_op: str = 'sum']) -> None
+
+    Perform multiple tile reductions concurrently, with each tile reduced to a separate root.
+
+    : param list[Tensor] in_tiles: A list of input tensors.
+    : param Tensor out_tile: Output tensor to contain the reduced tile.
+    : param list[int] roots: A list of root ranks each corresponding to an input tile in `in_tiles`, in the same order. A rank cannot be a root more than once.
+    : param str group_name: Name of the group to use for the collective operation.
+    : param str reduce_op: Reduction operation to perform. Currently only "sum" is supported.
+
+    Example::
+
+        >>> # doctest: +SKIP
+        >>> # Reduce four quadrants of a tensor, each to a different root
+        >>> tile_size = full_size // 2
+        >>> full_inp = symm_mem.empty(full_size, full_size)
+        >>> s0 = slice(0, tile_size)
+        >>> s1 = slice(tile_size, 2 * tile_size)
+        >>> in_tiles = [ full_inp[s0, s0], full_inp[s0, s1], full_inp[s1, s0], full_inp[s1, s1] ]
+        >>> out_tile = symm_mem.empty(tile_size, tile_size)
+        >>> roots = [0, 1, 2, 3]
+        >>> torch.ops.symm_mem.multi_root_tile_reduce(in_tiles, out_tile, roots, group_name)
 
 ```
