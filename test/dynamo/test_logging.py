@@ -68,6 +68,21 @@ def munge_shape_guards(s: str) -> str:
     return "\n".join([line for line, nsubs in lines if nsubs > 0])
 
 
+def munge_global_state_json(text):
+    import re
+
+    match = re.search(r"\+- GLOBAL_STATE:.*", text)
+    if not match:
+        return ""
+
+    line = match.group(0)
+    while "[" in line:
+        line = re.sub(r"\[[^\[\]]*\]", '"#"', line)
+
+    line = re.sub(r':\s*(\d+|true|false|"[^"]*")', r': "#"', line)
+    return line
+
+
 LOG_PREFIX_PATTERNS = [
     re.compile(r"^\[rank\d+\]:\s*"),
     re.compile(r"^[A-Z]+:[^:]+:\s*"),
@@ -333,6 +348,23 @@ torch._inductor.exc.InductorError: LoweringException: AssertionError:
         logger = logging.getLogger("torch.utils")
         logger.info("hi")
         self.assertEqual(len(records), 1)
+
+    @make_settings_test("torch._logging")
+    def test_directory_based_logging(self, records):
+        # Test that the package itself can log
+        logger = logging.getLogger("torch._logging")
+        logger.info("package log")
+
+        # Test that submodules can also log
+        sublogger = logging.getLogger("torch._logging._internal")
+        sublogger.info("submodule log")
+
+        # We should have at least 2 records (one from package, one from submodule)
+        self.assertGreaterEqual(len(records), 2)
+
+        # Verify both loggers are registered and have handlers
+        self.assertTrue(len(logger.handlers) > 0 or logger.propagate)
+        self.assertTrue(len(sublogger.handlers) > 0 or sublogger.propagate)
 
     @make_logging_test(all=logging.DEBUG, dynamo=logging.INFO)
     def test_all(self, _):
@@ -821,6 +853,20 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
 +- __SHAPE_GUARD__: 3 <= L['y'].size()[0] <= 14  # torch._check(x.size(0) > 5)  # #:# in # #:# in # and torch._check(x.size(0) < 30)  # #:# in # #:# in #""",  # noqa: B950
         )
 
+    @make_logging_test(guards=True)
+    def test_global_state_guard_logging(self, records):
+        @torch.compile(backend="eager")
+        def f(x):
+            return x + 1
+
+        f(torch.randn(3))
+
+        record = self.getRecord(records, "TREE_GUARD_MANAGER")
+        self.assertExpectedInline(
+            munge_global_state_json(record.getMessage()),
+            """+- GLOBAL_STATE: ___check_global_state() against {"allow_bf16_reduce": "#","allow_fp16_reduce": "#","allow_tf32": "#","autocast_state":{"cached_enabled": "#","dtype": "#","enabled": "#"},"default_dtype": "#","deterministic_algorithms": "#","deterministic_algorithms_warn_only": "#","grad_mode": "#","num_threads": "#","torch_function": "#","torch_function_all_disabled": "#"}""",  # noqa: B950
+        )
+
     @make_logging_test(cudagraph_static_inputs=True)
     def test_cudagraph_static_inputs(self, records):
         @torch.compile(mode="reduce-overhead")
@@ -1030,12 +1076,14 @@ exclusions = {
     "benchmarking",
     "loop_ordering",
     "loop_tiling",
+    "auto_chunker",
     "autotuning",
     "graph_region_expansion",
     "hierarchical_compile",
     "compute_dependencies",
     "annotation",
     "node_runtime_estimation",
+    "caching",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

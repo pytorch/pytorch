@@ -83,7 +83,10 @@ class PackagePickler(_PyTorchLegacyPickler):
         if self.proto >= 2:  # type: ignore[attr-defined]
             code = _extension_registry.get((module_name, name))
             if code:
-                assert code > 0
+                if code <= 0:
+                    raise AssertionError(
+                        f"expected positive extension code, got {code}"
+                    )
                 if code <= 0xFF:
                     write(EXT1 + pack("<B", code))
                 elif code <= 0xFFFF:
