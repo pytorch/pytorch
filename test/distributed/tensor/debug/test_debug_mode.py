@@ -1115,6 +1115,27 @@ class TestDTensorDebugModeNCCLBackend(MultiProcessTestCase):
 
         self._destroy_process_group()
 
+    @requires_nccl()
+    @skip_if_lt_x_gpu(2)
+    def test_tensor_hash_waits_on_collective(self):
+        self._init_process_group()
+        mesh = DeviceMesh(self.device, list(range(self.world_size)))
+
+        local_tensor = torch.ones(16, device=self.device)
+        dt = DTensor.from_local(local_tensor, mesh, [Shard(0)], run_check=False)
+
+        tensor = torch.ones(10, device=self.device)
+        output_tensor = torch.zeros(10 * self.world_size, device=self.device)
+
+        # This doesn't actually test that we synchronize on collectives.
+        # I found this hard to test robustly since previously we would race.
+        # However, it does test that we do not crash.
+        # This doesn't actually test that we synchronize on collectives,
+        with DebugMode(), DebugMode.log_tensor_hashes():
+            dt.redistribute(mesh, [Replicate()])
+            dist.all_gather_into_tensor(output_tensor, tensor)
+            dist.all_gather_into_tensor(output_tensor, tensor, async_op=True)
+
 
 instantiate_parametrized_tests(TestDTensorDebugMode)
 

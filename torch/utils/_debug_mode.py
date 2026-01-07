@@ -52,7 +52,13 @@ from torch.utils._python_dispatch import (
     _get_current_dispatch_mode_stack,
     TorchDispatchMode,
 )
-from torch.utils._pytree import keystr, tree_all, tree_map, tree_map_with_path
+from torch.utils._pytree import (
+    keystr,
+    tree_all,
+    tree_leaves,
+    tree_map,
+    tree_map_with_path,
+)
 from torch.utils._traceback import CapturedTraceback
 from torch.utils.weak import WeakIdRef
 
@@ -1212,7 +1218,9 @@ class DebugMode(TorchDispatchMode):
     @staticmethod
     @contextlib.contextmanager
     def log_tensor_hashes(
-        hash_fn: Callable | str | list[str] = "norm", hash_inputs: bool = False
+        hash_fn: Callable | str | list[str] = "norm",
+        hash_inputs: bool = False,
+        wait_on_collectives: bool = True,
     ):
         """
         Installs hook for tensor hash logging.
@@ -1226,6 +1234,8 @@ class DebugMode(TorchDispatchMode):
         hash_inputs: if True, also hashes tensors in (args, kwargs), storing them in "input_hash".
         Input hashes are captured before the operation executes, so they reflect the state before
         any in-place mutations.
+        wait_on_collectives: if True (default), waits on async collectives before hashing.
+        NOTE: this is currently a post-hook, so e.g. inplace ops will log the "output" hashes.
         """
 
         def hash_fn_option(hash_type):
@@ -1275,6 +1285,36 @@ class DebugMode(TorchDispatchMode):
                 return None
 
             out = {}
+            if wait_on_collectives:
+                # Force a sync on functional collectives before computing hashes for them
+                if func.namespace == "_c10d_functional":
+                    for t in tree_leaves(result):
+                        if isinstance(t, torch.Tensor):
+                            torch.ops._c10d_functional.wait_tensor.default(t)
+                # For a sync on non-functional collectives before computing hashes for them
+                # Note that we can only do this when asyncOp=True,
+                # since otherwise the non-functional collectives return a nullptr Work object
+                for i, a in enumerate(func._schema.arguments):
+                    # Annoying, async_op is not a kwarg in the non-functional collectives.
+                    # I'm using OpOverload._schema to figure out if it exists
+                    if a.name == "async_op" and type(a.type) is torch.BoolType:
+                        # Determine async_op value from args, kwargs, or default
+                        if i < len(args):
+                            async_op_value = args[i]
+                        elif "async_op" in kwargs:
+                            async_op_value = kwargs["async_op"]
+                        elif a.has_default_value():
+                            async_op_value = a.default_value
+                        else:
+                            async_op_value = False
+
+                        if async_op_value:
+                            for item in result:
+                                if isinstance(item, torch.ScriptObject) and hasattr(
+                                    item, "wait"
+                                ):
+                                    item.wait()
+                        break
             out["hash"] = _tree_hash(result)
 
             if tree_all(lambda x: x is None, out.values()):
