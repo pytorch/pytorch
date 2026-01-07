@@ -4944,7 +4944,7 @@ def random_matrix(rows, columns, *batch_dims, **kwargs):
     return (u * s.unsqueeze(-2)) @ vh
 
 
-def random_matrix_with_scaled_reduction_space(rows, columns, *batch_dims, **kwargs):
+def random_matrix_with_scaled_reduction_dim(rows, columns, *batch_dims, **kwargs):
     """Return rectangular matrix or batches of rectangular matrices
     with entries being iid and sampled from N(0, sigma^2) such that
     the variance of (A @ A.T)[..., i, j] is 1 if reduction_dim=-1, or
@@ -4953,7 +4953,7 @@ def random_matrix_with_scaled_reduction_space(rows, columns, *batch_dims, **kwar
     Parameters:
       dtype - the data type
       device - the device kind
-      requires_grad - whether output requries grad
+      requires_grad - whether output requires grad
       reduction_dim - the row/column dimension to re-scale.
                     Expected to be either -1 (columns) or -2 (rows).
     """
