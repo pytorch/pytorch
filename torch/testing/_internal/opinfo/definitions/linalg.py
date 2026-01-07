@@ -1579,6 +1579,9 @@ op_db: list[OpInfo] = [
         aten_name="linalg_multi_dot",
         dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
         dtypesIfCUDA=floating_and_complex_types_and(torch.half, torch.bfloat16),
+        dtypesIfXPU=floating_and_complex_types_and(
+            torch.half, torch.bfloat16, torch.int8, torch.uint8
+        ),
         supports_inplace_autograd=False,
         # Batched grad checks fail for empty input tensors (see https://github.com/pytorch/pytorch/issues/53407)
         check_batched_grad=False,
@@ -2297,6 +2300,12 @@ op_db: list[OpInfo] = [
         decorators=[
             skipCUDAIfNoMagmaAndNoCusolver,
             skipCPUIfNoLapack,
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03)}),
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="xpu",
+            ),
             DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=1e-03, rtol=1e-03)}),
                 "TestCommon",
