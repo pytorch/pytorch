@@ -376,6 +376,35 @@ def forward(self, b_parametrizations_buffer_original0, x):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
+    def test_dtensor_input_mutations(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        # test passing in DTensor as inputs/outputs and run some tensor computation
+        def fn(x, y):
+            out = x.sin()
+            y.add_(2)
+            return out
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+
+        x_ref = DTensor.from_local(
+            torch.randn(4), mesh, [Shard(0)], run_check=False
+        ).requires_grad_(True)
+        y_ref = DTensor.from_local(
+            torch.randn(4), mesh, [Shard(0)], run_check=False
+        ).requires_grad_(False)
+
+        x = x_ref.clone().detach().requires_grad_(True)
+        y = y_ref.clone().detach().requires_grad_(False)
+
+        ref = fn(x_ref.clone(), y_ref)
+        res = opt_fn(x.clone(), y)
+        self.assertEqual(res, ref)
+
+        ref.sum().backward()
+        res.sum().backward()
+        self.assertEqual(x.grad, x_ref.grad)
+
     @skipIfHpu
     def test_dtensor_dynamic(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -1524,6 +1553,32 @@ class TestDTensorCompileE2E(DTensorTestBase):
         replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
         output = sharded_net(replicated_inp)
         self.assertEqual(output.full_tensor(), ref_out)
+
+    @with_comms
+    def test_split_with_symint_split_size(self):
+        """
+        Test that split works with symbolic integer split_size when using
+        torch.compile with dynamic=True.
+        """
+        mesh = self.build_device_mesh()
+        placements = [Replicate()]
+
+        global_tensor = torch.randn(8, 8, device=self.device_type)
+        input_dt = distribute_tensor(global_tensor, mesh, placements)
+
+        def split_fn(x, split_size):
+            return torch.split(x, split_size, dim=0)
+
+        compiled_split_fn = torch.compile(split_fn, dynamic=True)
+
+        # Test with different split sizes: evenly divisible and not evenly divisible
+        for split_size in [2, 3, 4]:
+            expected = split_fn(global_tensor, split_size)
+            result = compiled_split_fn(input_dt, split_size)
+
+            self.assertEqual(len(result), len(expected))
+            for dt_chunk, tensor_chunk in zip(result, expected):
+                self.assertEqual(dt_chunk.full_tensor(), tensor_chunk)
 
 
 if __name__ == "__main__":
