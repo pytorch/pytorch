@@ -921,20 +921,28 @@ def break_graph_if_unsupported(
             cg = PyCodegen(self.output.root_tx)
             cleanup: list[Instruction] = []
             # Reconstruct the context variable CLASS in the block stack
-            for b in self.block_stack:
-                # Don't exit any modes we have entered,
-                # output bytecode will mutate the tf mode stack accordingly
-                if isinstance(b.with_context, TorchFunctionModeVariable):
-                    cg.extend_output(
-                        b.resume_fn().try_except_torch_function_mode(
-                            cg.code_options, cleanup
+            all_txes: list[InstructionTranslatorBase] = []
+            cur_tx: Optional[InstructionTranslatorBase] = self
+            while cur_tx is not None:
+                all_txes.append(cur_tx)
+                cur_tx = cur_tx.parent
+            for tx in reversed(all_txes):
+                for b in tx.block_stack:
+                    # Don't exit any modes we have entered,
+                    # output bytecode will mutate the tf mode stack accordingly
+                    if isinstance(b.with_context, TorchFunctionModeVariable):
+                        cg.extend_output(
+                            b.resume_fn().try_except_torch_function_mode(
+                                cg.code_options, cleanup
+                            )
                         )
+                        continue
+                    assert b.with_context is not None
+                    assert isinstance(b.with_context, (ContextWrappingVariable))
+                    b.with_context.reconstruct_type(cg)
+                    cg.extend_output(
+                        b.resume_fn().try_finally(cg.code_options, cleanup)
                     )
-                    continue
-                assert b.with_context is not None
-                assert isinstance(b.with_context, (ContextWrappingVariable))
-                b.with_context.reconstruct_type(cg)
-                cg.extend_output(b.resume_fn().try_finally(cg.code_options, cleanup))
             self.output.add_output_instructions(cg.get_instructions())
             del cg
 
