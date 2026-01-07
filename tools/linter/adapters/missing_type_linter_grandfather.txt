@@ -2415,10 +2415,6 @@ torch.cuda.nvtx.range_pop
 torch.cuda.nvtx.range_push
 torch.cuda.nvtx.range_push(msg=)
 torch.cuda.nvtx.range_start(msg=)
-torch.cuda.profiler.init
-torch.cuda.profiler.init(flags=)
-torch.cuda.profiler.init(output_file=)
-torch.cuda.profiler.init(output_mode=)
 torch.cuda.profiler.profile
 torch.cuda.profiler.start
 torch.cuda.profiler.stop
