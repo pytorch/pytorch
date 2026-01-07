@@ -46,12 +46,19 @@ export FLASH_ATTENTION_ENABLE_VCOLMAJOR="${FLASH_ATTENTION_ENABLE_VCOLMAJOR:-FAL
 export FLASH_ATTENTION_DISABLE_HDIMDIFF64="${FLASH_ATTENTION_DISABLE_HDIMDIFF64:-FALSE}"
 export FLASH_ATTENTION_DISABLE_HDIMDIFF192="${FLASH_ATTENTION_DISABLE_HDIMDIFF192:-FALSE}"
 
-export NVCC_THREADS="${NVCC_THREADS:-4}"
-export MAX_JOBS="${MAX_JOBS:-$(nproc)}"
+export NVCC_THREADS="${NVCC_THREADS:-2}"
+export MAX_JOBS="${MAX_JOBS:-4}"
 
 pushd "$FLASH_ATTENTION_HOPPER_DIR"
 
 git submodule update --init ../csrc/cutlass
+
+# Patch setup.py to use system CUDA for 12.8+ (including 13.0)
+# The original condition only skips nvcc download for exactly 12.8, but CUDA 13.0
+# also needs the system toolchain because the downloaded nvcc 12.6 lacks libcudacxx
+# headers required by CUTLASS 4.0
+sed -i 's/bare_metal_version != Version("12.8")/bare_metal_version < Version("12.8")/' \
+    "$FLASH_ATTENTION_HOPPER_DIR/setup.py"
 
 python setup.py bdist_wheel \
     -d "$FA_FINAL_PACKAGE_DIR" \
