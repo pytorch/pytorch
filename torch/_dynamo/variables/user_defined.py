@@ -1521,10 +1521,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             getattribute_fn = inspect.getattr_static(
                 type(self.value), "__getattribute__"
             )
-            if self.source:
-                new_source: AttrSource | None = AttrSource(
-                    self.source, "__getattribute__"
-                )
+            new_source: AttrSource | None = AttrSource(self.source , "__getattribute__") if self.source else None
 
             try:
                 return variables.UserMethodVariable(

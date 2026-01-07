@@ -3965,11 +3965,26 @@ class SourcelessBuilder:
         if isinstance(value, VariableTracker):
             # This is always valid to call, and useful for recursive calls.
             return value
-        if is_opaque_value_type(type(value)):
-            return TorchScriptObjectVariable.create(
-                value,
-                value,
-            )
+        elif is_opaque_type(type(value)):
+            if is_opaque_value_type(type(value)):
+                return TorchScriptObjectVariable.create(
+                    value,  # type: ignore[arg-type]
+                    value,
+                )
+            else:
+                fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
+                    tx.output.fake_mode, value
+                )
+
+                proxy = tx.output.register_static_attr_and_return_proxy(
+                    "opaque_obj",
+                    fake_script_obj,
+                )
+
+                return TorchScriptObjectVariable.create(
+                    proxy,
+                    fake_script_obj,
+                )
         # type: ignore[attr-defined]
         elif isinstance(value, dataclasses._HAS_DEFAULT_FACTORY_CLASS):
             return UserDefinedObjectVariable(value)
