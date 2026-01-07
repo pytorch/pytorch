@@ -425,6 +425,54 @@ def tuned_mm_params_encoder(
     return _encode_kernel_inputs(kernel_inputs)
 
 
+def tuned_addmm_params_encoder(
+    inp: Buffer,
+    mat1: Buffer,
+    mat2: Buffer,
+    *,
+    alpha: float | int = 1,
+    beta: float | int = 1,
+    layout: Layout | None = None,
+) -> TunedKernelEncodedParams:
+    """Encode parameters for tuned_addmm into a human-readable dict.
+
+    This encoder mirrors the behavior of tuned_addmm:
+    1. First calls mm_args to realize the matrices (just like tuned_addmm does)
+    2. Creates MMKernelInputs with the realized matrices and scalars
+    3. Extracts the same information used by _generate_kernel_inputs_key
+
+    The encoding includes:
+    - nodes: dtype, shape (hinted), and stride (hinted) for each input node
+    - scalars: alpha and beta values
+
+    Args:
+        inp: Input bias buffer
+        mat1: First matrix buffer
+        mat2: Second matrix buffer
+        alpha: Scalar multiplier for mat1 @ mat2
+        beta: Scalar multiplier for inp
+        layout: Optional layout
+
+    Returns:
+        A dict containing the encoded parameters in human-readable form
+    """
+    from torch._inductor.kernel.mm_common import mm_args
+    from torch._inductor.kernel_inputs import MMKernelInputs
+
+    # First call mm_args to realize the matrices, exactly as done in tuned_addmm
+    _m, _n, _k, _layout, mat1_realized, mat2_realized, inp_expanded = mm_args(
+        mat1, mat2, inp, layout=layout
+    )
+
+    # Create MMKernelInputs with the realized matrices
+    kernel_inputs = MMKernelInputs(
+        [inp_expanded, mat1_realized, mat2_realized],
+        scalars=dict(alpha=alpha, beta=beta),
+    )
+
+    return _encode_kernel_inputs(kernel_inputs)
+
+
 def tuned_kernel_result_encoder(
     fn: Callable[_P, TensorBox],
 ) -> Callable[

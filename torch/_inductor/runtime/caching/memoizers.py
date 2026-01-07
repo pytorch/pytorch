@@ -8,3 +8,6 @@ should_pad_memoizer = PersistentMemoizer(sub_dir=Path("should_pad"))
 
 # Memoizer for tuned_mm in kernel/mm
 tuned_mm_memoizer = PersistentMemoizer(sub_dir=Path("tuned_mm"))
+
+# Memoizer for tuned_addmm in kernel/mm
+tuned_addmm_memoizer = PersistentMemoizer(sub_dir=Path("tuned_addmm"))
