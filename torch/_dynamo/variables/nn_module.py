@@ -343,7 +343,7 @@ class NNModuleVariable(VariableTracker):
             )
 
         options = {"source": AttrSource(obj_source, "__getattr__")}
-        # pyrefly: ignore[bad-argument-type]
+
         return variables.UserMethodVariable(getattr_fn, self, **options).call_function(
             tx, [variables.ConstantVariable.create(name)], {}
         )
@@ -439,7 +439,6 @@ class NNModuleVariable(VariableTracker):
                 )
             elif istype(subobj, staticmethod):
                 return variables.UserFunctionVariable(
-                    # pyrefly: ignore[bad-argument-type]
                     subobj.__get__(base),
                     source=source,
                 )
@@ -533,11 +532,6 @@ class NNModuleVariable(VariableTracker):
                 tx.output.is_root_tracer()
                 and mod.__module__.startswith(("torch.nn.", "torch.ao."))
                 and mod.__module__ != "torch.nn.utils.parametrize"
-                # this basically means we are using the new strict export tracer which wraps the
-                # user callable, so we shouldn't directly proxy in the fx graph
-                and not isinstance(
-                    mod, torch.ao.quantization.pt2e.export_utils._WrapperModule
-                )
             ):
                 if nnmodule_has_hooks(
                     mod, check_forward_hooks=True, check_backward_hooks=True
@@ -572,7 +566,6 @@ class NNModuleVariable(VariableTracker):
                 else:
                     assert istype(fn, types.FunctionType)
                 return tx.inline_user_function_return(
-                    # pyrefly: ignore[bad-argument-type]
                     variables.UserFunctionVariable(fn, source=fn_source),
                     args,
                     kwargs,
@@ -1117,7 +1110,8 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     # When the forward method is marked as leaf_function,
                     # we don't do the short circuit.
                     # The alternative would be directly construct a TorchInGraphVariable
-                    or id(self.value_type.forward) in trace_rules._leaf_function_ids
+                    or id(self.value_type.forward)  # type: ignore[attr-defined]
+                    in trace_rules._leaf_function_ids
                 ):
                     name = "forward"
                     fn = self.value_type.forward  # type: ignore[attr-defined]

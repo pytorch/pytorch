@@ -2223,8 +2223,8 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
             fn: A function that takes (mod, *args) and returns the output to test
             args_fn: A callable that returns fresh input args for each test run
         """
-        from torch._dynamo.testing import AotEagerAndRecordGraphs
         import torch.utils._pytree as pytree
+        from torch._dynamo.testing import AotEagerAndRecordGraphs
 
         mod_eager = mod_class()
         mod_compile_eager = mod_class()
@@ -2233,21 +2233,25 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
         mod_compile_aot.load_state_dict(dict(mod_eager.state_dict()))
 
         args = args_fn()
-        args_clone = pytree.tree_map(lambda x: x.clone().detach().requires_grad_(x.requires_grad), args)
-        args_clone2 = pytree.tree_map(lambda x: x.clone().detach().requires_grad_(x.requires_grad), args)
+        args_clone = pytree.tree_map(
+            lambda x: x.clone().detach().requires_grad_(x.requires_grad), args
+        )
+        args_clone2 = pytree.tree_map(
+            lambda x: x.clone().detach().requires_grad_(x.requires_grad), args
+        )
 
         out_eager = mod_eager(*args)
         loss_fn(out_eager).backward()
 
-        out_compile_eager = torch.compile(mod_compile_eager,  backend="eager", fullgraph=True)(
-            *args_clone
-        )
+        out_compile_eager = torch.compile(
+            mod_compile_eager, backend="eager", fullgraph=True
+        )(*args_clone)
         loss_fn(out_compile_eager).backward()
 
         backend = AotEagerAndRecordGraphs()
-        out_compile_aot = torch.compile(mod_compile_aot, backend=backend, fullgraph=True)(
-            *args_clone2
-        )
+        out_compile_aot = torch.compile(
+            mod_compile_aot, backend=backend, fullgraph=True
+        )(*args_clone2)
         loss_fn(out_compile_aot).backward()
 
         self.assertEqual(out_eager, out_compile_eager)
@@ -2272,8 +2276,20 @@ Detected recompile when torch.compile stance is 'fail_on_recompile'. filename: '
                 msg=f"Gradient mismatch for {name_eager} between eager and compile_aot",
             )
 
-        pytree.tree_map(lambda x, compile_x: self.assertEqual(x.grad, compile_x.grad) if isinstance(x, torch.Tensor) and x.requires_grad else None, args, args_clone)
-        pytree.tree_map(lambda x, compile_x: self.assertEqual(x.grad, compile_x.grad) if isinstance(x, torch.Tensor) and x.requires_grad else None, args, args_clone2)
+        pytree.tree_map(
+            lambda x, compile_x: self.assertEqual(x.grad, compile_x.grad)
+            if isinstance(x, torch.Tensor) and x.requires_grad
+            else None,
+            args,
+            args_clone,
+        )
+        pytree.tree_map(
+            lambda x, compile_x: self.assertEqual(x.grad, compile_x.grad)
+            if isinstance(x, torch.Tensor) and x.requires_grad
+            else None,
+            args,
+            args_clone2,
+        )
 
     def test_leaf_function_simple(self):
         class NonTracable(torch.nn.Module):

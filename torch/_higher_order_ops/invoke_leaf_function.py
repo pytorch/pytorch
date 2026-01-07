@@ -98,19 +98,20 @@ def autograd_grad_with_mixed_inputs(
 
 def create_fn_with_grad(
     fn: Callable,
+    input_spec: pytree.TreeSpec,
     include_key_set: DispatchKeySet,
     exclude_key_set: DispatchKeySet,
     python_dispatcher_active: bool,
-) -> Callable:
+) -> tuple[Callable, Callable]:
     import functools
 
+    leaf_fn_fw_inputs = None
+    leaf_fn_fw_outputs = None
+
     @functools.wraps(fn)
-    def fn_with_grad(*args, **kwargs):
-        pytree.tree_map_only_(
-            torch.Tensor,
-            lambda t: t.detach().requires_grad_(t.requires_grad),
-            (args, kwargs),
-        )
+    def fw_fn(*args):
+        nonlocal leaf_fn_fw_inputs
+        leaf_fn_fw_inputs = args
 
         # Compute the effective include/exclude sets
         # If PythonDispatcher was active in forward but TLS is no longer set up,
@@ -135,9 +136,23 @@ def create_fn_with_grad(
 
         with torch._C._ForceDispatchKeyGuard(effective_include, effective_exclude):
             with torch.enable_grad():
-                return fn(*args, **kwargs)
+                nonlocal leaf_fn_fw_outputs
+                leaf_fn_fw_outputs = invoke_with_flattened_inputs(fn, input_spec, *args)
+        return leaf_fn_fw_outputs
 
-    return fn_with_grad
+    def bw_fn(*grads):
+        if leaf_fn_fw_inputs is None or leaf_fn_fw_outputs is None:
+            raise RuntimeError(
+                "For invoke_leaf_funcion, backward fn expects fw outputs/inputs to be set in forward."
+            )
+        return autograd_grad_with_mixed_inputs(
+            outputs=leaf_fn_fw_outputs,
+            inputs=leaf_fn_fw_inputs,
+            grad_outputs=grads,
+            allow_unused=True,
+        )
+
+    return fw_fn, bw_fn
 
 
 def unwrap_fn_spec(fn_spec: pytree.TreeSpec) -> Callable:
@@ -148,37 +163,41 @@ def unwrap_fn_spec(fn_spec: pytree.TreeSpec) -> Callable:
 def reconstruct_original_args(input_spec, flat_args):
     reparametrize_contexts = []
     try:
-        args, kwargs = pytree.tree_unflatten(flat_args, input_spec)
+        if input_spec is None:
+            yield flat_args, {}
 
-        def _retrive_orig_module(source: str):
-            # We need a way to pass around the locals and globals from user code
-            mod = leaf_function_module_inputs[source]
-            assert isinstance(mod, torch.nn.Module), (
-                f"Expeting the object reference by source {source} to nn.Module."
-            )
-            return mod
+        else:
+            args, kwargs = pytree.tree_unflatten(flat_args, input_spec)
 
-        new_args = []
-        for arg in args:
-            if (
-                isinstance(arg, dict)
-                and "source_name" in arg
-                and "named_parameters" in arg
-                and "named_buffers" in arg
-            ):
-                orig_module = _retrive_orig_module(arg["source_name"])
-                named_parameters = arg["named_parameters"]
-                named_buffers = arg["named_buffers"]
-                # Enter _reparametrize_module context
-                ctx = _reparametrize_module(
-                    orig_module, {**named_parameters, **named_buffers}
+            def _retrive_orig_module(source: str):
+                # We need a way to pass around the locals and globals from user code
+                mod = leaf_function_module_inputs[source]
+                assert isinstance(mod, torch.nn.Module), (
+                    f"Expecting the object reference by source {source} to nn.Module."
                 )
-                ctx.__enter__()
-                reparametrize_contexts.append(ctx)
-                new_args.append(orig_module)
-            else:
-                new_args.append(arg)
-        yield new_args, kwargs
+                return mod
+
+            new_args = []
+            for arg in args:
+                if (
+                    isinstance(arg, dict)
+                    and "source_name" in arg
+                    and "named_parameters" in arg
+                    and "named_buffers" in arg
+                ):
+                    orig_module = _retrive_orig_module(arg["source_name"])
+                    named_parameters = arg["named_parameters"]
+                    named_buffers = arg["named_buffers"]
+                    # Enter _reparametrize_module context
+                    ctx = _reparametrize_module(
+                        orig_module, {**named_parameters, **named_buffers}
+                    )
+                    ctx.__enter__()
+                    reparametrize_contexts.append(ctx)
+                    new_args.append(orig_module)
+                else:
+                    new_args.append(arg)
+            yield new_args, kwargs
 
     finally:
         # Exit all _reparametrize_module contexts in reverse order
@@ -191,7 +210,7 @@ class InvokeLeafFunction(HigherOrderOperator):
         super().__init__("invoke_leaf_function")
 
     def __call__(self, real_fn_spec, fake_fn_spec, input_spec, *flat_args):
-        return super().__call__(real_fn_spec, fake_fn_spec, input_spec, *flat_args)
+        return super().__call__(real_fn_spec, fake_fn_spec, input_spec, *flat_args)  # type: ignore[attr-defined]
 
 
 invoke_leaf_function = InvokeLeafFunction()
@@ -208,60 +227,46 @@ class InvokeLeafFunctionAutogradOp(torch.autograd.Function):
         exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
         python_dispatcher_active = include_key_set.has(DispatchKey.PythonDispatcher)
 
-        real_fn_with_grad = create_fn_with_grad(
-            real_fn, include_key_set, exclude_key_set, python_dispatcher_active
+        real_fn_with_grad, bw_real_fn = create_fn_with_grad(
+            real_fn,
+            input_spec,
+            include_key_set,
+            exclude_key_set,
+            python_dispatcher_active,
         )
-        fake_fn_with_grad = create_fn_with_grad(
-            fake_fn, include_key_set, exclude_key_set, python_dispatcher_active
+        fake_fn_with_grad, bw_fake_fn = create_fn_with_grad(
+            fake_fn,
+            input_spec,
+            include_key_set,
+            exclude_key_set,
+            python_dispatcher_active,
         )
 
         _, new_real_fn_spec = func_to_graphable(real_fn_with_grad)
         _, new_fake_fn_spec = func_to_graphable(fake_fn_with_grad)
+        new_input_spec = None
 
         with torch._C._AutoDispatchBelowAutograd():
             fw_outputs = invoke_leaf_function(
-                new_real_fn_spec, new_fake_fn_spec, input_spec, *flat_args
+                new_real_fn_spec, new_fake_fn_spec, new_input_spec, *flat_args
             )
 
-        # TODO: backward will be wrong if the checkpoints are updated.
-        # We need to clone them with the help of alias/mutation info provided by users.
         ctx.fw_inputs = (new_real_fn_spec, new_fake_fn_spec, input_spec, *flat_args)
-        ctx.fw_outputs = fw_outputs
+        ctx.bw_real_fn = bw_real_fn
+        ctx.bw_fake_fn = bw_fake_fn
 
-        return pytree.tree_map_only(
-            torch.Tensor,
-            lambda t: t.detach().requires_grad_(t.requires_grad),
-            fw_outputs,
-        )
+        return fw_outputs
 
     @staticmethod
     # pyrefly: ignore [bad-override]
     def backward(ctx, *grads):
-        backward_all_args = (ctx.fw_outputs, ctx.fw_inputs, grads)
-
-        def real_fn_backward(fw_outputs, fw_inputs, grads):
-            return autograd_grad_with_mixed_inputs(
-                outputs=fw_outputs,
-                inputs=fw_inputs,
-                grad_outputs=grads,
-                allow_unused=True,
-            )
-
-        def fake_fn_backward(fw_outputs, fw_inputs, grads):
-            return autograd_grad_with_mixed_inputs(
-                outputs=fw_outputs,
-                inputs=fw_inputs,
-                grad_outputs=grads,
-                allow_unused=True,
-            )
-
-        _, new_real_fn_spec = func_to_graphable(real_fn_backward)
-        _, new_fake_fn_spec = func_to_graphable(fake_fn_backward)
-        flat_args, new_input_spec = pytree.tree_flatten((backward_all_args, {}))
+        _, bw_real_fn_spec = func_to_graphable(ctx.bw_real_fn)
+        _, bw_fake_fn_spec = func_to_graphable(ctx.bw_fake_fn)
+        new_input_spec = None
         fw_grads = invoke_leaf_function(
-            new_real_fn_spec, new_fake_fn_spec, new_input_spec, *flat_args
+            bw_real_fn_spec, bw_fake_fn_spec, new_input_spec, *grads
         )
-        return fw_grads
+        return None, None, None, *fw_grads
 
 
 @invoke_leaf_function.py_autograd_impl
@@ -291,13 +296,26 @@ def invoke_leaf_function_proxy_mode(proxy_mode, *all_args):
     return track_tensor_tree(out, proxy, constant=None, tracer=proxy_mode.tracer)
 
 
+def _maybe_detach_tensor_args(args: tuple[Any, ...]):
+    return pytree.tree_map(
+        lambda t: t.detach().requires_grad_(t.requires_grad)
+        if isinstance(t, torch.Tensor)
+        else t,
+        args,
+    )
+
+
 @register_fake(invoke_leaf_function)
 def invoke_leaf_function_fake(real_fn_spec, fake_fn_spec, input_spec, *flat_args):
     fake_fn = unwrap_fn_spec(fake_fn_spec)
-    return invoke_with_flattened_inputs(fake_fn, input_spec, *flat_args)
+    flat_args = _maybe_detach_tensor_args(flat_args)
+    out = invoke_with_flattened_inputs(fake_fn, input_spec, *flat_args)
+    return _maybe_detach_tensor_args(out)
 
 
 @invoke_leaf_function.py_impl(DispatchKey.CompositeExplicitAutograd)
 def invoke_leaf_function_dense(real_fn_spec, fake_fn_spec, input_spec, *flat_args):
     real_fn = unwrap_fn_spec(real_fn_spec)
-    return invoke_with_flattened_inputs(real_fn, input_spec, *flat_args)
+    flat_args = _maybe_detach_tensor_args(flat_args)
+    out = invoke_with_flattened_inputs(real_fn, input_spec, *flat_args)
+    return _maybe_detach_tensor_args(out)

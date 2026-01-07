@@ -1,3 +1,0 @@
-# see https://github.com/pytorch/pytorch/issues/148801
-# Bug: kernel computes indices based on original tensor strides (20, 1, 4)
-# but tensor is made contiguous with strides (20, 5, 1) before indexing
