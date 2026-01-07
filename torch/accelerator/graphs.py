@@ -115,7 +115,9 @@ class Graph(_acceleratorGraph):
                 `relaxed`, the current thread is allowed to make potentially unsafe API calls, except for
                 calls that inherently conflict with stream capture.
         """
-        super().capture_begin(pool=self.graph_pool, capture_error_mode=capture_error_mode)
+        super().capture_begin(
+            pool=self.graph_pool, capture_error_mode=capture_error_mode
+        )
 
     def capture_end(self) -> None:
         r"""
