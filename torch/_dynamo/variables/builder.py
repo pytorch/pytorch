@@ -1764,6 +1764,7 @@ class VariableBuilder:
             else:
                 raise RuntimeError(f"Undefined dynamism {value.dynamism}")
         elif istype(value, object):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
             return ObjectVariable(value, source=self.source)
         else:
             return self.wrap_user_defined(value)
