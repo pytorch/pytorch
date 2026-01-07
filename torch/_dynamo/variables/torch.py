@@ -1806,12 +1806,18 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             # Track consumed grad_fns for later validation
             # (to detect returning tensors whose grad_fn was consumed by autograd.grad)
-            # Skip if retain_graph=True since the graph is not consumed in that case.
+            # Skip if retain_graph=True or create_graph=True since the graph is not
+            # consumed in those cases and can be traversed again.
             retain_graph = kwargs.get("retain_graph")
-            if not (
+            create_graph = kwargs.get("create_graph")
+            graph_preserved = (
                 isinstance(retain_graph, ConstantVariable)
                 and retain_graph.value is True
-            ):
+            ) or (
+                isinstance(create_graph, ConstantVariable)
+                and create_graph.value is True
+            )
+            if not graph_preserved:
                 # Filter out AccumulateGrad nodes - they're never actually "consumed"
                 # by autograd. They just accumulate gradients into leaf.grad and can
                 # be traversed multiple times without issues.
