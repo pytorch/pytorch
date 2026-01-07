@@ -158,9 +158,14 @@ class DistMatrixOpsTest(DTensorTestBase):
         shard1_spec = Shard(1)
         replica_spec = Replicate()
 
-        t1 = torch.randn(512, 512, requires_grad=True)
-        t2 = torch.randn(512, 512, requires_grad=True)
+        t1 = torch.randn(512, 512, device=self.device_type, requires_grad=True)
+        t2 = torch.randn(512, 512, device=self.device_type, requires_grad=True)
         local_res = torch.mm(t1, t2)
+
+        # Compute reference result in float64 for accuracy comparison
+        t1_fp64 = t1.to(torch.float64)
+        t2_fp64 = t2.to(torch.float64)
+        reference_res = torch.mm(t1_fp64, t2_fp64).to(torch.float32)
 
         def test_placement_comb(
             placements1: list[Placement], placements2: list[Placement]
@@ -170,11 +175,18 @@ class DistMatrixOpsTest(DTensorTestBase):
             dist_res: DTensor = cast(DTensor, torch.mm(dt1, dt2)).redistribute(
                 device_mesh, [replica_spec]
             )
+            dist_res_local = dist_res.to_local()
+
             # Relaxed tolerances for large tensors: 512x512x512 = 134M operations
             # vs 12x8x16 = 1.5K operations in test_mm (87,000x more operations)
             # Different computation order in distributed setting leads to different
             # floating-point rounding, requiring looser tolerances
-            self.assertEqual(dist_res.to_local(), local_res, atol=1e-3, rtol=1e-2)
+            self.assertEqual(dist_res_local, local_res, atol=1e-3, rtol=1e-2)
+
+            # Ensure both results are within reasonable bounds of the float64 reference
+            self.assertEqual(local_res, reference_res, atol=1e-3, rtol=1e-2)
+            self.assertEqual(dist_res_local, reference_res, atol=1e-3, rtol=1e-2)
+
             # backward
             grad_dist_res = torch.ones_like(dist_res)
             dist_res.backward(grad_dist_res)
