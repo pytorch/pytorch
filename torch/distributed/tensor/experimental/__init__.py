@@ -28,17 +28,8 @@ def implicit_replication() -> Iterator[None]:
 
 
 
-context_parallel = TypeAliasType(
-    "context_parallel", _context_parallel, module=__name__
-)
-
-local_map = TypeAliasType(
-    "local_map", _local_map, module=__name__
-)
-
-register_sharding = TypeAliasType(
-    "register_sharding", _register_sharding, module=__name__
-)
-
+context_parallel = TypeAliasType("context_parallel", _context_parallel)
+local_map = TypeAliasType("local_map", _local_map)
+register_sharding = TypeAliasType("register_sharding", _register_sharding)
 
 implicit_replication.__module__ = __name__
