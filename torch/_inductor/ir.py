@@ -4235,11 +4235,11 @@ class CommBufferLayout(FixedLayout):
 
     def __init__(
         self,
-        layout: FlexibleLayout,
+        layout: Union[FlexibleLayout, FixedLayout],
         comm_buffer_type: CommBufferType,
         group_name: str,
     ):
-        fixed = layout.as_fixed()
+        fixed = layout.as_fixed() if isinstance(layout, FlexibleLayout) else layout
         super().__init__(
             device=fixed.device,
             dtype=fixed.dtype,

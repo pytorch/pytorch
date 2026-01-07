@@ -399,6 +399,9 @@ def register_comm_lowerings():
 
 
 def register_symm_mem_lowerings():
+    """
+    Register lowerings for symmetric memory (symm_mem) operations.
+    """
     try:
         symm_mem = torch.ops.symm_mem
     except AttributeError:
@@ -409,13 +412,13 @@ def register_symm_mem_lowerings():
 
     def _maybe_realize_symm_mem(
         inp: ir.TensorBox,
-        group_name: str,
+        group_name: str,  # type: ignore[arg-type]
     ) -> None:
         """
         Helper to realize an input as symmetric memory buffer if possible.
         """
         if can_realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM):
-            realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM, group_name)
+            realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM, group_name)  # type: ignore[arg-type]
 
     @register_lowering(symm_mem.one_shot_all_reduce)
     def _symm_mem_one_shot_all_reduce(

@@ -111,7 +111,7 @@ def buffer_reuse_key(node: BufferLike) -> ReuseKey:
     )
 
 
-def comm_buffer_reuse_key(node: ir.Buffer) -> CommBufferReuseKey:
+def comm_buffer_reuse_key(node: BufferLike) -> CommBufferReuseKey:
     # Comm buffers can only be reused by other comm buffers with the same (device, dtype, size, comm_buffer_type, group_name).
     storage_size = V.graph.get_allocation_storage_size(node)
     layout = node.get_output_spec()
@@ -816,6 +816,9 @@ class AllocateLine(MemoryPlanningLine):
         """Generate allocation code for comm buffers."""
         name = self.node.get_name()
         device = self.node.get_device()
+        assert device is not None and device.index is not None, (
+            f"Comm buffer requires a valid CUDA device with index, got {device}"
+        )
         dtype = self.node.get_dtype()
         shape = tuple(self.node.get_size())
         stride = tuple(self.node.get_stride())
