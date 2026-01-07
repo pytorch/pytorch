@@ -1127,7 +1127,16 @@ def default_partition(
             k for k, v in joint_module.named_modules()
         ):
             continue
-        if node.target is torch.ops.aten._assert_scalar.default:
+        if node.target in (
+            torch.ops.aten._assert_scalar.default,
+            # Profiler record_function ops are technically impure (they set up
+            # profiling spans), but they're safe to duplicate during AC recompute.
+            # We skip both enter and exit to keep profiling spans balanced.
+            torch.ops.profiler._record_function_enter_new.default,
+            torch.ops.profiler._record_function_enter.default,
+            torch.ops.profiler._record_function_exit.default,
+            torch.ops.profiler._record_function_exit._RecordFunction,
+        ):
             continue
         if is_sym_node(node):
             # Symints must be kept separate from tensors so that PythonFunction only calls
