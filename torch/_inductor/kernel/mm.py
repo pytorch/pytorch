@@ -606,6 +606,11 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 
 
 @register_lowering(aten.addmm, type_promotion_kind=None)
+@memoizers.tuned_addmm_memoizer.memoize(
+    custom_params_encoder=encoders.tuned_addmm_params_encoder,
+    custom_result_encoder=encoders.tuned_kernel_result_encoder,
+    custom_result_decoder=decoders.tuned_addmm_result_decoder,
+)
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     """
     Lowering for autotuning aten.addmm with different backends (Aten, Triton, CUTLASS, etc.)
