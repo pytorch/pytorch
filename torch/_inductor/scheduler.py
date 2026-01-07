@@ -1303,7 +1303,7 @@ def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> Optional[float
         if mm_fn is None:
             return None
         bench_fn = mm_fn
-        # pyrefly: ignore [unbound-name]
+
         args_kwargs_fn = lambda: snode_args_kwargs(snode)  # noqa: E731
     else:
         return None
@@ -5893,7 +5893,6 @@ class Scheduler:
             signatures.append(partition_signature)
 
             unmet_output_names = partition_input_names.union(
-                # pyrefly: ignore [unsupported-operation]
                 unmet_output_names - returned_output_names
             )
 
