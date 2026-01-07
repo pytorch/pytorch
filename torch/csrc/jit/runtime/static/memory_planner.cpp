@@ -131,8 +131,7 @@ std::vector<StorageGroup> assignStorageToManagedTensors(
   return managed_tensor_groups;
 }
 
-ManagedStorages::ManagedStorages()
-    : storages_(nullptr), size_(0), capacity_(0) {}
+ManagedStorages::ManagedStorages() = default;
 
 ManagedStorages::~ManagedStorages() {
   deallocate();

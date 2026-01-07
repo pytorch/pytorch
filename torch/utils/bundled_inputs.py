@@ -40,7 +40,7 @@ class InflatableArg(NamedTuple):
 
 def bundle_inputs(
         model: torch.jit.ScriptModule,
-        inputs: Sequence[tuple[Any, ...]] | None | dict[Callable, Sequence[tuple[Any, ...]] | None],
+        inputs: Sequence[tuple[Any, ...]] | dict[Callable, Sequence[tuple[Any, ...]] | None] | None,
         info: list[str] | dict[Callable, list[str]] | None = None,
         *,
         _receive_inflate_expr: list[str] | None = None,
