@@ -3830,6 +3830,19 @@ class Scheduler:
             # TODO support benchmarking epilogue fusion
             return True
 
+        # For MultiTemplateBuffer where the winning choice is not a TritonTemplateCaller
+        # (e.g., NVUniversalGemmCaller), skip benchmarking and allow fusion
+        if is_multi_template and node1.is_template():
+            template_node = node1.get_template_node()
+            if isinstance(template_node, ir.MultiTemplateBuffer):
+                try:
+                    min_choice, _ = template_node.get_min_choice()
+                    if not isinstance(min_choice, ir.TritonTemplateCallerBase):
+                        # Non-Triton template (e.g., NVGEMM) - allow fusion without benchmarking
+                        return True
+                except Exception:
+                    pass
+
         node_list_1 = node1.get_nodes()
         device = node_list_1[0].get_device()
         assert device

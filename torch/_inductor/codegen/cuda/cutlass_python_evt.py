@@ -320,7 +320,8 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
             op_v.value for op_v in self.store_name_to_value.values()
         )
         assert "D" in return_vars
-        return f"return {', '.join(return_vars)}"
+        # Add 4-space indentation to match the function body (IndentedBuffer uses 4 spaces)
+        return f"    return {', '.join(return_vars)}"
 
     def _tmp_var(self) -> str:
         return f"tmp_{next(self.var_counter)}"
