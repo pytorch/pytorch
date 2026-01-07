@@ -5,14 +5,8 @@
 #include <c10/util/irange.h>
 #include <torch/enum.h>
 #include <torch/expanding_array.h>
-#include <torch/nn/init.h>
-#include <torch/types.h>
-#include <torch/utils.h>
 
-#include <cmath>
 #include <cstdint>
-#include <functional>
-#include <utility>
 #include <vector>
 
 namespace F = torch::nn::functional;

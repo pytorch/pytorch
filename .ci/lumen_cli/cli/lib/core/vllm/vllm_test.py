@@ -82,7 +82,6 @@ class VllmTestRunner(BaseRunner):
 
         # Match the structure of the artifacts.zip from vllm external build
         self.VLLM_TEST_WHLS_REGEX = [
-            "xformers/*.whl",
             "vllm/vllm*.whl",
         ]
 
@@ -222,14 +221,13 @@ def preprocess_test_in(
     """
     This modifies the target_file file in place in vllm work directory.
     It removes torch and unwanted packages in target_file and replace with local torch whls
-    package  with format "$WHEEL_PACKAGE_NAME @ file://<LOCAL_PATH>"
+    package with format "$WHEEL_PACKAGE_NAME @ file://<LOCAL_PATH>"
     """
     additional_package_to_move = list(additional_packages or ())
     pkgs_to_remove = [
         "torch",
         "torchvision",
         "torchaudio",
-        "xformers",
         "mamba_ssm",
     ] + additional_package_to_move
     # Read current requirements
@@ -273,7 +271,7 @@ def check_versions():
     check installed packages version
     """
     logger.info("Double check installed packages")
-    patterns = ["torch", "xformers", "torchvision", "torchaudio", "vllm"]
+    patterns = ["torch", "torchvision", "torchaudio", "vllm"]
     for pkg in patterns:
         pkg_exists(pkg)
     logger.info("Done. checked installed packages")

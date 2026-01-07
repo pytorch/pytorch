@@ -811,15 +811,15 @@ def softmin(
 
 __all__ += ["softmin"]
 
-def softsign(input: Any): ...
+def softsign(input: Any) -> Tensor: ...
 
 __all__ += ["softsign"]
 
-def tanh(input: Any): ...
+def tanh(input: Any) -> Tensor: ...
 
 __all__ += ["tanh"]
 
-def tanhshrink(input: Any): ...
+def tanhshrink(input: Any) -> Tensor: ...
 
 __all__ += ["tanhshrink"]
 
@@ -874,7 +874,7 @@ def upsample_bilinear(
     input: Any,
     size: Any | None = ...,
     scale_factor: Any | None = ...,
-): ...
+) -> Tensor: ...
 
 __all__ += ["upsample_bilinear"]
 
@@ -882,7 +882,7 @@ def upsample_nearest(
     input: Any,
     size: Any | None = ...,
     scale_factor: Any | None = ...,
-): ...
+) -> Tensor: ...
 
 __all__ += ["upsample_nearest"]
 
@@ -892,7 +892,7 @@ def upsample(
     scale_factor: Any | None = ...,
     mode: str = ...,
     align_corners: Any | None = ...,
-): ...
+) -> Tensor: ...
 
 __all__ += ["upsample"]
 
