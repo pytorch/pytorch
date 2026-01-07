@@ -30,6 +30,11 @@ struct MempoolIdHash {
   }
 };
 
+// Generate a unique MemPoolId that are never recycled to avoid reuse hazards.
+// If `is_user_created` is true, the ID represents a user-created pool.
+// Otherwise, the ID represents an internally-created pool.
+MempoolId_t C10_API generate_mempool_id(bool is_user_created);
+
 // A DataPtr is a unique pointer (with an attached deleter and some
 // context for the deleter) to some memory, which also records what
 // device is for its data.

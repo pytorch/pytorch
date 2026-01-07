@@ -6,6 +6,20 @@ import torch
 from torch._C import _acceleratorGraph
 
 
+def generate_graph_pool_handle() -> tuple[int, int]:
+    r"""
+    Returns a unique handle that identifies a graph memory pool.
+
+    This function does not create an actual memory pool and does not allocate any resources.
+    The returned handle is purely an identifier and intended to be passed to graph capture APIs
+    to control memory sharing and isolation between graphs.
+
+    Returns:
+        tuple[int, int]: An unique identifier for a graph memory pool.
+    """
+    return torch._C._accelerator_generateGraphPoolHandle()
+
+
 class Graph(_acceleratorGraph):
     r"""
     Wrapper around an :ref:`accelerator<accelerators>` graph that supports capture and replay.
@@ -115,4 +129,4 @@ def is_graph_available() -> bool:
     return torch._C._accelerator_isGraphAvailable()
 
 
-__all__ = ["Graph", "is_graph_available"]
+__all__ = ["Graph", "generate_graph_pool_handle", "is_graph_available"]

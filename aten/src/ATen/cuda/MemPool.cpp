@@ -1,4 +1,3 @@
-#include <ATen/core/MemPool.h>
 #include <ATen/cuda/MemPool.h>
 
 namespace at::cuda {
@@ -10,7 +9,7 @@ MemPool::MemPool(
     bool no_split)
     : allocator_(allocator),
       is_user_created_(is_user_created),
-      id_(create_mempool_id(is_user_created)) {
+      id_(c10::generate_mempool_id(is_user_created)) {
   device_ = c10::cuda::current_device();
   CUDACachingAllocator::createOrIncrefPool(device_, id_, allocator);
   if (use_on_oom) {
@@ -49,7 +48,7 @@ c10::DeviceIndex MemPool::device() {
 }
 
 MempoolId_t MemPool::graph_pool_handle(bool is_user_created) {
-  return at::create_mempool_id(is_user_created);
+  return c10::generate_mempool_id(is_user_created);
 }
 
 } // namespace at::cuda

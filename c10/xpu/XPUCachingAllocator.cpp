@@ -2142,12 +2142,9 @@ MemPool::MemPool(
     XPUCachingAllocator::XPUAllocator* allocator,
     bool is_user_created,
     bool use_on_oom)
-    : allocator_(allocator), is_user_created_(is_user_created) {
-  if (is_user_created_) {
-    id_ = {0, uid_++};
-  } else {
-    id_ = {uuid_++, 0};
-  }
+    : allocator_(allocator),
+      is_user_created_(is_user_created),
+      id_(c10::generate_mempool_id(is_user_created)) {
   device_ = c10::xpu::current_device();
   XPUCachingAllocator::createOrIncrefPool(device_, id_, allocator);
   if (use_on_oom) {
@@ -2180,10 +2177,7 @@ c10::DeviceIndex MemPool::device() {
 }
 
 MempoolId_t MemPool::graph_pool_handle(bool is_user_created) {
-  if (is_user_created) {
-    return {0, uid_++};
-  }
-  return {uuid_++, 0};
+  return c10::generate_mempool_id(is_user_created);
 }
 
 } // namespace c10::xpu
