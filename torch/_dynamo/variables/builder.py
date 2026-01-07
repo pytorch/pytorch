@@ -1947,9 +1947,7 @@ class VariableBuilder:
         # As long as this runs before AOT this is sound
         if value in self.tx.output.side_effects:
             var = self.tx.output.side_effects[value]
-            # type: ignore[attr-defiend]
             var.proxy.node.meta["tensor_dict"]["_dynamo_static_input_type"] = (
-                # type: ignore[attr-defiend]
                 value._dynamo_static_input_type
             )
 
