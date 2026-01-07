@@ -2,6 +2,10 @@ name: Build Flash Attention 3 wheels
 
 on:
   workflow_dispatch:
+  # TODO: Remove this trigger before merging - only for testing from PR branch
+  push:
+    branches:
+      - flash-attn3
 
 concurrency:
   group: ${{ github.workflow }}
