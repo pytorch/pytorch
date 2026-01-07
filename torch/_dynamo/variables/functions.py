@@ -33,7 +33,7 @@ import types
 from collections import namedtuple
 from collections.abc import Callable, Sequence
 from types import CellType, FunctionType
-from typing import Any, cast, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, cast, Literal, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 from weakref import WeakKeyDictionary
 
@@ -131,14 +131,14 @@ class ClosureConversionError(NotImplementedError):
 
 
 @functools.lru_cache
-def get_pytree_SUPPORTED_NODES_source():
+def get_pytree_SUPPORTED_NODES_source() -> AttrSource:
     return AttrSource(
         AttrSource(AttrSource(TorchSource(), "utils"), "_pytree"), "SUPPORTED_NODES"
     )
 
 
 class FunctionSpec:
-    def __init__(self, func: FunctionType):
+    def __init__(self, func: FunctionType) -> None:
         code = func.__code__
         vn = code.co_varnames
 
@@ -388,7 +388,7 @@ class BaseUserFunctionVariable(VariableTracker):
     def get_name(self) -> str:
         return self.get_code().co_name  # type: ignore[attr-defined]
 
-    def get_globals(self):
+    def get_globals(self) -> dict[str, Any]:
         raise NotImplementedError
 
     def call_function(
@@ -424,7 +424,7 @@ class BaseUserFunctionVariable(VariableTracker):
     # Override to set whether or not nested graph breaks should be allowed
     # if we create an inlining tx for this BaseUserFunctionVariable.
     # See symbolic_convert.py for where this function is called.
-    def should_allow_nested_graph_breaks(self):
+    def should_allow_nested_graph_breaks(self) -> bool:
         return True
 
 
@@ -824,13 +824,13 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return collected
         return None
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> Literal[True]:
         return True
 
-    def get_python_hash(self):
+    def get_python_hash(self) -> int:
         return hash(self.fn)
 
-    def is_python_equal(self, other):
+    def is_python_equal(self, other: object) -> bool:
         return isinstance(other, variables.UserFunctionVariable) and self.fn is other.fn
 
 
@@ -1042,7 +1042,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 break
 
     # no nested graph breaks in generators
-    def should_allow_nested_graph_breaks(self):
+    def should_allow_nested_graph_breaks(self) -> Literal[False]:
         return False
 
     def _setup_exception(
@@ -1280,7 +1280,7 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         self.vt = vt
         self.generator_cls = generator_cls
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         if name in self.__class__.__dict__:
             return getattr(self, name)
         return getattr(self.vt, name)
@@ -1343,7 +1343,7 @@ class FunctionDecoratedByContextlibContextManagerVariable(
         This is only used when the function is annotated with @contextlib.contextmanager
     """
 
-    def __init__(self, vt: VariableTracker, **kwargs: Any):
+    def __init__(self, vt: VariableTracker, **kwargs: Any) -> None:
         super().__init__(
             vt,
             generator_cls=ContextlibContextManagerLocalGeneratorObjectVariable,
@@ -1597,13 +1597,13 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def self_args(self) -> list[VariableTracker]:
         return []
 
-    def as_python_constant(self):
+    def as_python_constant(self) -> types.FunctionType:
         return self.get_function()
 
     def get_code(self) -> types.CodeType:
         return self.code.as_python_constant()
 
-    def python_type(self) -> type:
+    def python_type(self) -> type[types.FunctionType]:
         return types.FunctionType
 
     def get_function(self, _converting: set[int] | None = None) -> types.FunctionType:
@@ -2057,14 +2057,17 @@ class SkipFunctionVariable(VariableTracker):
 
         return fn_var_getattr(tx, self.value, self.source, name)
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> bool:
         return True
 
-    def get_python_hash(self):
+    def get_python_hash(self) -> int:
         return hash(self.value)
 
-    def is_python_equal(self, other):
-        return self.as_python_constant() == other.as_python_constant()
+    def is_python_equal(self, other: object) -> bool:
+        return (
+            isinstance(other, VariableTracker)
+            and self.as_python_constant() == other.as_python_constant()
+        )
 
 
 class WrappedSkipFunctionVariable(SkipFunctionVariable):
@@ -2477,15 +2480,16 @@ class FunctoolsPartialVariable(VariableTracker):
             and all(value.is_python_hashable() for value in self.keywords.values())
         )
 
-    def get_python_hash(self):
+    def get_python_hash(self) -> int:
         func_hash = self.func.get_python_hash()
         args_hash = (arg.get_python_hash() for arg in self.args)
         values_hash = (value.get_python_hash() for value in self.keywords.values())
         return hash((func_hash, *args_hash, *values_hash))
 
-    def is_python_equal(self, other):
+    def is_python_equal(self, other: object) -> bool:
         return (
-            self.func.is_python_equal(other.func)
+            isinstance(other, FunctoolsPartialVariable)
+            and self.func.is_python_equal(other.func)
             and all(
                 arg_a.is_python_equal(arg_b)
                 for (arg_a, arg_b) in zip(self.args, other.args)
@@ -2664,6 +2668,7 @@ class SysFunctionVariable(VariableTracker):
     ) -> VariableTracker:
         if self.value is sys.exc_info:
             return self.exc_info(tx)
+
         assert self.value is sys.exception
         return self.exception(tx)
 
@@ -2788,7 +2793,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
         self,
         variable: "TritonKernelVariable",
         grids: Any,
-        combined_args_raw: dict[str, Any],
+        combined_args: dict[str, Any],
         tx: "InstructionTranslator",
     ) -> "variables.ConstantVariable":
         from .dicts import ConstDictVariable
@@ -2800,17 +2805,16 @@ class DynamoTritonHOPifier(TritonHOPifier):
         # TMA descriptor-related metadata to a separate argument,
         # so that we can reconstruct the TMA descriptors downstream
         tma_descriptor_metadata: TMADescriptorMetadata = {}
-        for k in list(combined_args_raw.keys()):
-            v = combined_args_raw[k]
+        for k in list(combined_args.keys()):
+            v = combined_args[k]
             if isinstance(
                 v, (TMADescriptorExperimentalVariable, TMADescriptorStableVariable)
             ):
                 tma_descriptor_metadata[k] = v.to_metadata()
-                combined_args_raw[k] = v.get_tensor()
+                combined_args[k] = v.get_tensor()
 
-        combined_args = {
-            variables.ConstantVariable.create(k): v
-            for k, v in combined_args_raw.items()
+        combined_args_vt = {
+            variables.ConstantVariable.create(k): v for k, v in combined_args.items()
         }
 
         from torch._higher_order_ops.triton_kernel_wrap import (
@@ -2823,12 +2827,12 @@ class DynamoTritonHOPifier(TritonHOPifier):
         # parameters of the wrapper function
         constant_args = {
             k: v.as_python_constant()
-            for k, v in combined_args_raw.items()
+            for k, v in combined_args.items()
             if isinstance(v, VariableTracker) and v.is_python_constant()
         }
         non_constant_args = {
             k: v
-            for k, v in combined_args.items()
+            for k, v in combined_args_vt.items()
             if not (isinstance(v, VariableTracker) and v.is_python_constant())
         }
 

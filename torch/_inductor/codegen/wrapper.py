@@ -326,14 +326,12 @@ def user_defined_triton_kernel_transitive_closure_source_code(kernel) -> str:
                 if isinstance(symbol, JITFunction):
                     compile_wrapper.newline()
                     compile_wrapper.writeline("@triton.jit")
-                    # pyrefly: ignore [missing-attribute]
+
                     compile_wrapper.splice(symbol.src, strip=True)
                     symbols_included.add(symbol_name)
                     traverse(symbol)
                 elif hasattr(triton, "constexpr_function") and isinstance(
-                    # pyrefly: ignore [missing-attribute]
                     symbol,
-                    # pyrefly: ignore [missing-attribute]
                     triton.runtime.jit.ConstexprFunction,
                 ):
                     compile_wrapper.newline()

@@ -78,7 +78,7 @@ def get_all_input_and_grad_nodes(
                 continue
             if isinstance(desc, SubclassGetAttrAOTInput):
                 _raise_autograd_subclass_not_implemented(n, desc)
-            # pyrefly: ignore [unsupported-operation]
+
             input_index[desc] = (n, None)
         elif n.op == "output":
             assert "desc" in n.meta, (n, n.meta)
@@ -130,7 +130,7 @@ def get_all_output_and_tangent_nodes(
                     continue
                 if isinstance(sub_d, SubclassGetAttrAOTOutput):
                     _raise_autograd_subclass_not_implemented(sub_n, sub_d)
-                # pyrefly: ignore [unsupported-operation]
+
                 output_index[sub_d] = (sub_n, None)
     for n in g.nodes:
         if n.op == "placeholder":
