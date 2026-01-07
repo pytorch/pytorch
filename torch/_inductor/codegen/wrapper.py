@@ -70,6 +70,7 @@ from .common import (
     WorkspaceZeroMode,
 )
 from .cpp_utils import cexpr
+from .custom_extern_kernel_codegen import CUSTOM_EXTERN_KERNEL_CODEGEN
 from .triton_utils import config_of, should_unwrap_unspec_arg, signature_to_meta
 
 
@@ -325,14 +326,12 @@ def user_defined_triton_kernel_transitive_closure_source_code(kernel) -> str:
                 if isinstance(symbol, JITFunction):
                     compile_wrapper.newline()
                     compile_wrapper.writeline("@triton.jit")
-                    # pyrefly: ignore [missing-attribute]
+
                     compile_wrapper.splice(symbol.src, strip=True)
                     symbols_included.add(symbol_name)
                     traverse(symbol)
                 elif hasattr(triton, "constexpr_function") and isinstance(
-                    # pyrefly: ignore [missing-attribute]
                     symbol,
-                    # pyrefly: ignore [missing-attribute]
                     triton.runtime.jit.ConstexprFunction,
                 ):
                     compile_wrapper.newline()
@@ -1548,6 +1547,13 @@ class PythonWrapperCodegen(CodeGen):
         return
 
     def generate_fallback_kernel(self, node: ir.FallbackKernel) -> None:
+        # Check if this op has a custom codegen implementation
+        op_name = node.python_kernel_name
+        if op_name is not None and op_name in CUSTOM_EXTERN_KERNEL_CODEGEN:
+            custom_codegen = CUSTOM_EXTERN_KERNEL_CODEGEN[op_name].python
+            if custom_codegen is not None:
+                custom_codegen(node, self.writeline)
+                return
         self.writeline(ExternKernelAllocLine(self, node))
 
     def generate_extern_kernel_alloc(self, node: ir.ExternKernelAlloc):
