@@ -3,6 +3,7 @@ import copyreg
 import functools
 import importlib
 import logging
+import math
 import sys
 import traceback
 import warnings
@@ -82,9 +83,8 @@ def _to(self, device, non_blocking=False):
         return untyped_storage
 
     device_module = getattr(torch, device.type, None)
-    assert device_module is not None, (
-        f"{device.type.upper()} device module is not loaded"
-    )
+    if device_module is None:
+        raise AssertionError(f"{device.type.upper()} device module is not loaded")
     with device_module.device(device):
         if self.is_sparse and hasattr(device_module, "sparse"):
             new_type = getattr(device_module.sparse, self.__class__.__name__)
@@ -96,9 +96,10 @@ def _to(self, device, non_blocking=False):
             )
             return new_type(indices, values, self.size())
         else:
-            assert not self.is_sparse, (
-                f"sparse storage is not supported for {device.type.upper()} tensors"
-            )
+            if self.is_sparse:
+                raise AssertionError(
+                    f"sparse storage is not supported for {device.type.upper()} tensors"
+                )
             untyped_storage = torch.UntypedStorage(self.size(), device=device)
             untyped_storage.copy_(self, non_blocking)
             return untyped_storage
@@ -137,7 +138,10 @@ def _get_restore_location(device):
         elif isinstance(map_location, (str, torch.device)):
             return map_location
         else:
-            assert callable(map_location)
+            if not callable(map_location):
+                raise AssertionError(
+                    f"expected callable map_location, got {type(map_location).__name__}"
+                )
             raise RuntimeError(
                 "Callable map_location not supported with _rebuild_wrapper_subclass "
                 "or _rebuild_device_tensor_from_numpy"
@@ -193,14 +197,17 @@ def get_tensor_metadata(tensor):
     # Tensor's Metadata for serializing.
     # Currently, this only returns a dict[string, bool] specifying whether
     # `conj` or `neg` bit is set.
-    assert isinstance(tensor, torch.Tensor)
+    if not isinstance(tensor, torch.Tensor):
+        raise AssertionError(f"expected torch.Tensor, got {type(tensor).__name__}")
     return torch._C._get_tensor_metadata(tensor)  # type: ignore[attr-defined]
 
 
 def set_tensor_metadata(tensor, metadata):
     # See `get_tensor_metadata` above
-    assert isinstance(metadata, dict)
-    assert isinstance(tensor, torch.Tensor)
+    if not isinstance(metadata, dict):
+        raise AssertionError(f"expected dict, got {type(metadata).__name__}")
+    if not isinstance(tensor, torch.Tensor):
+        raise AssertionError(f"expected torch.Tensor, got {type(tensor).__name__}")
     torch._C._set_tensor_metadata(tensor, metadata)  # type: ignore[attr-defined]
 
 
@@ -1066,7 +1073,8 @@ def try_import(module_name: str) -> ModuleType | None:
 
         # https://docs.python.org/3/library/importlib.html#importlib.machinery.ModuleSpec.loader
         # "The finder should always set this attribute"
-        assert spec.loader is not None, "The loader attribute should always be set"
+        if spec.loader is None:
+            raise AssertionError("The loader attribute should always be set")
         spec.loader.exec_module(module)
         return module
 
@@ -1115,3 +1123,69 @@ NAME_MAPPING = {
     ("exceptions", "StandardError"): ("builtins", "Exception"),
     ("UserDict", "UserDict"): ("collections", "UserDict"),
 }
+
+
+def _maybe_view_chunk_cat(
+    res: "torch.Tensor", group_size: int, gather_dim: int
+) -> "torch.Tensor":
+    """
+    This is intuitively the same as torch.cat(torch.chunk(res, group_size,
+    dim=0), dim=gather_dim), but returns a view if data movement is not
+    necessary.  This operation arises in NCCL all_gather, where you always get
+    a result which is concatenated on dim=0, even though actually you may need
+    to undo this concatenation and then re-cat on the gather dim.
+
+    When is data-movement not necessary?  Intuitively, we need to understand if
+    the unflatten in this reference implementation of this code triggers a
+    copy or not:
+
+        chunks = torch.unflatten(res, 0, [group_size, -1])
+        return torch.flatten(torch.movedim(chunks, 0, gather_dim), gather_dim, gather_dim + 1)
+
+    Assume res is contiguous (it will be coming out of the collective).  We
+    essentially need to know if the movedim maintains the contiguity of the
+    tensor.  Moving a dimension typically does NOT preserve contiguity, unless
+    EVERY dimension it is moved across is size 1.
+
+    Example: shape [4, d1, d2] with group_size=4, gather_dim=1 -> [1, 4*d1, d2]
+
+        [4, d1, d2] -> [4, 1, d1, d2] -> [1, 4, d1, d2] (contiguous!)
+
+    Example: shape [4, 2, d2] with group_size=4, gather_dim=2 -> [1, 2, 4*d2]
+
+        [4, 2, d2] -> [4, 1, 2, d2] -> [1, 2, 4, d2] (not contiguous!)
+
+    Args:
+        res: Tensor with gathered data in dim 0, shape [group_size, ...]
+        group_size: Number of ranks in the group
+        gather_dim: Dimension to gather along in the output
+
+    Returns:
+        Tensor with data rearranged to gather along gather_dim
+    """
+
+    if gather_dim == 0:
+        # When gather_dim is 0, chunk+cat is a no-op
+        return res
+
+    shape = list(res.shape)
+
+    # Optimization: Can use view instead of split+cat when:
+    # 1. res.shape[0] == group_size (invariant after all_gather)
+    # 2. All dims between 0 and gather_dim (exclusive) have size 1
+    numel_between = math.prod(shape[1:gather_dim]) if gather_dim > 1 else 1
+
+    if shape[0] == group_size and numel_between == 1:
+        # View optimization: reshape to collapse dim 0 into gather_dim
+        final_shape = (
+            [1]  # Dim 0 becomes 1
+            + shape[1:gather_dim]  # Dims 1 to gather_dim-1 unchanged
+            + [shape[0] * shape[gather_dim]]  # gather_dim gets multiplied by group_size
+            + shape[gather_dim + 1 :]  # Rest unchanged
+        )
+        return res.view(final_shape)
+    else:
+        # General case: fall back to split + cat
+        # This is better than torch.flatten as cat can be vectorized, whereas
+        # the contiguous kernel is always bad.
+        return torch.cat(torch.chunk(res, group_size, dim=0), dim=gather_dim)

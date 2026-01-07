@@ -482,7 +482,7 @@ def get_isa_from_cpu_capability(
         "avx512": "avx512",
     }
     if capability in capability_to_isa_str:
-        # pyrefly: ignore [index-error]
+        # pyrefly: ignore [bad-index, index-error]
         isa_str = capability_to_isa_str[capability]
         if isa_str == "INVALID_VEC_ISA":
             return invalid_vec_isa

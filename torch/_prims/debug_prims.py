@@ -1,18 +1,18 @@
 import contextlib
 from collections.abc import Generator, Sequence
-from typing import Optional
 
 import torch
 from torch.utils._content_store import ContentStoreReader
 
 
-LOAD_TENSOR_READER: Optional[ContentStoreReader] = None
+LOAD_TENSOR_READER: ContentStoreReader | None = None
 
 
 @contextlib.contextmanager
 def load_tensor_reader(loc: str) -> Generator[None, None, None]:
     global LOAD_TENSOR_READER
-    assert LOAD_TENSOR_READER is None
+    if LOAD_TENSOR_READER is not None:
+        raise AssertionError("LOAD_TENSOR_READER is already set")
     # load_tensor is an "op", and we will play merry hell on
     # Inductor's memory planning if we return a tensor that
     # aliases another tensor that we previously returned from
@@ -49,9 +49,12 @@ def register_debug_prims() -> None:
 
             # device argument here takes care of coercion
             r = LOAD_TENSOR_READER.read_tensor(name, device=device)
-            assert list(r.size()) == size, f"{r.size()} != {size}"
-            assert list(r.stride()) == stride, f"{r.stride()} != {stride}"
-            assert r.device == device, f"{r.device} != {device}"
+            if list(r.size()) != size:
+                raise AssertionError(f"{r.size()} != {size}")
+            if list(r.stride()) != stride:
+                raise AssertionError(f"{r.stride()} != {stride}")
+            if r.device != device:
+                raise AssertionError(f"{r.device} != {device}")
 
             # Unlike the other properties, we will do coercions for dtype
             # mismatch

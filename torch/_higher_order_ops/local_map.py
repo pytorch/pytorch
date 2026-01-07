@@ -178,6 +178,7 @@ class LocalMapHOP(HigherOrderOperator):
         super().__init__("local_map_hop")
 
     def __call__(self, gm: GraphModule, *args: Any, **kwargs: Any) -> Any:
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(gm, *args, **kwargs)
 
 

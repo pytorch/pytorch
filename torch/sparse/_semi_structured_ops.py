@@ -33,10 +33,15 @@ def fallback_dispatcher(func, types, args, kwargs):
 
 
 def semi_sparse_values(func, types, args=(), kwargs=None) -> torch.Tensor:
-    assert len(args) == 1
+    if len(args) != 1:
+        raise AssertionError(f"expected 1 arg, got {len(args)}")
     A = args[0]
-    assert isinstance(A, torch.sparse.SparseSemiStructuredTensor)
-    assert A.packed is not None
+    if not isinstance(A, torch.sparse.SparseSemiStructuredTensor):
+        raise AssertionError(
+            f"expected SparseSemiStructuredTensor, got {type(A).__name__}"
+        )
+    if A.packed is None:
+        raise AssertionError("A.packed must not be None")
     if A.meta is None:
         m, k = A.shape
         num_kept_elements = m * k // 2
@@ -46,10 +51,15 @@ def semi_sparse_values(func, types, args=(), kwargs=None) -> torch.Tensor:
 
 
 def semi_sparse_indices(func, types, args=(), kwargs=None) -> torch.Tensor:
-    assert len(args) == 1
+    if len(args) != 1:
+        raise AssertionError(f"expected 1 arg, got {len(args)}")
     A = args[0]
-    assert isinstance(A, torch.sparse.SparseSemiStructuredTensor)
-    assert A.packed is not None
+    if not isinstance(A, torch.sparse.SparseSemiStructuredTensor):
+        raise AssertionError(
+            f"expected SparseSemiStructuredTensor, got {type(A).__name__}"
+        )
+    if A.packed is None:
+        raise AssertionError("A.packed must not be None")
     if A.meta is None:
         m, k = A.shape
         num_kept_elements = m * k // 2
@@ -60,10 +70,15 @@ def semi_sparse_indices(func, types, args=(), kwargs=None) -> torch.Tensor:
 
 
 def semi_sparse_t(func, types, args=(), kwargs=None) -> torch.Tensor:
-    assert len(args) == 1
+    if len(args) != 1:
+        raise AssertionError(f"expected 1 arg, got {len(args)}")
     self = args[0]
-    assert isinstance(self, torch.sparse.SparseSemiStructuredTensor)
-    assert len(self.shape) == 2
+    if not isinstance(self, torch.sparse.SparseSemiStructuredTensor):
+        raise AssertionError(
+            f"expected SparseSemiStructuredTensor, got {type(self).__name__}"
+        )
+    if len(self.shape) != 2:
+        raise AssertionError(f"expected 2D tensor, got {len(self.shape)}D")
     # Because we cannot go from the compressed representation back to the dense representation currently,
     # we just keep track of how many times we have been transposed. Depending on whether the sparse matrix
     # is the first or second argument, we expect an even / odd number of calls to transpose respectively.
@@ -85,7 +100,8 @@ def semi_sparse_t(func, types, args=(), kwargs=None) -> torch.Tensor:
 
 
 def semi_sparse_view(func, types, args=(), kwargs=None) -> torch.Tensor:
-    assert len(args) == 2
+    if len(args) != 2:
+        raise AssertionError(f"expected 2 args, got {len(args)}")
     self, shape = args
     if tuple(shape) != self.shape:
         raise NotImplementedError(
@@ -95,7 +111,8 @@ def semi_sparse_view(func, types, args=(), kwargs=None) -> torch.Tensor:
 
 
 def semi_sparse_detach(func, types, args, kwargs) -> torch.Tensor:
-    assert len(args) == 1
+    if len(args) != 1:
+        raise AssertionError(f"expected 1 arg, got {len(args)}")
     self = args[0]
     return self.__class__(
         shape=self.shape,
@@ -111,7 +128,8 @@ def semi_sparse_detach(func, types, args, kwargs) -> torch.Tensor:
 
 
 def semi_sparse_mm(func, types, args=(), kwargs=None) -> torch.Tensor:
-    assert len(args) == 2
+    if len(args) != 2:
+        raise AssertionError(f"expected 2 args, got {len(args)}")
     A, B = args
     if A.ndim != 2 or B.ndim != 2:
         raise NotImplementedError(
@@ -124,7 +142,10 @@ def semi_sparse_mm(func, types, args=(), kwargs=None) -> torch.Tensor:
         return res[:, :col]
     else:
         B_t = B.t()
-        assert isinstance(B_t, torch.sparse.SparseSemiStructuredTensor)
+        if not isinstance(B_t, torch.sparse.SparseSemiStructuredTensor):
+            raise AssertionError(
+                f"expected SparseSemiStructuredTensor, got {type(B_t).__name__}"
+            )
         row, col = A.shape
         A_padded = B._pad_dense_input(A)
         res = B_t._mm(A_padded.t()).t()
@@ -132,7 +153,8 @@ def semi_sparse_mm(func, types, args=(), kwargs=None) -> torch.Tensor:
 
 
 def semi_sparse_addmm(func, types, args=(), kwargs=None) -> torch.Tensor:
-    assert len(args) == 3
+    if len(args) != 3:
+        raise AssertionError(f"expected 3 args, got {len(args)}")
     bias, A, B = args
     if A.ndim != 2 or B.ndim != 2:
         raise NotImplementedError(
@@ -147,7 +169,10 @@ def semi_sparse_addmm(func, types, args=(), kwargs=None) -> torch.Tensor:
             "`SparseSemiStructuredTensor` matmul: only operand B of `addmm` can be sparse"
         )
     B_t = B.t()
-    assert isinstance(B_t, torch.sparse.SparseSemiStructuredTensor)
+    if not isinstance(B_t, torch.sparse.SparseSemiStructuredTensor):
+        raise AssertionError(
+            f"expected SparseSemiStructuredTensor, got {type(B_t).__name__}"
+        )
     row, _col = A.shape
     A_padded = B_t._pad_dense_input(A)
     result = B_t._mm(A_padded.t(), bias=bias).t()
@@ -155,7 +180,8 @@ def semi_sparse_addmm(func, types, args=(), kwargs=None) -> torch.Tensor:
 
 
 def semi_sparse_linear(func, types, args=(), kwargs=None) -> torch.Tensor:
-    assert len(args) in [2, 3]
+    if len(args) not in [2, 3]:
+        raise AssertionError(f"expected 2 or 3 args, got {len(args)}")
     A, B = args[:2]
     bias = args[2] if len(args) == 3 else None
 
@@ -178,14 +204,26 @@ def semi_sparse_scaled_mm(func, types, args=(), kwargs=None) -> torch.Tensor:
     # pull all args, excluding use_fast_accum flag if set.
     A, B, A_scale, B_scale, bias, scale_result, out_dtype = args[:7]
 
-    assert A.dtype == torch.float8_e4m3fn
-    assert B.dtype == torch.float8_e4m3fn
+    if A.dtype != torch.float8_e4m3fn:
+        raise AssertionError(f"expected A.dtype float8_e4m3fn, got {A.dtype}")
+    if B.dtype != torch.float8_e4m3fn:
+        raise AssertionError(f"expected B.dtype float8_e4m3fn, got {B.dtype}")
     # only cuSPARSELt supports float8_e4m3fn currently
-    assert isinstance(A, torch.sparse.SparseSemiStructuredTensorCUSPARSELT)
-    assert A.packed is not None
+    if not isinstance(A, torch.sparse.SparseSemiStructuredTensorCUSPARSELT):
+        raise AssertionError(
+            f"expected SparseSemiStructuredTensorCUSPARSELT, got {type(A).__name__}"
+        )
+    if A.packed is None:
+        raise AssertionError("A.packed must not be None")
     # Currently we only support per-tensor scaling, with float32 scales
-    assert A_scale.numel() == 1 and B_scale.numel() == 1
-    assert A_scale.dtype == torch.float32 and B_scale.dtype == torch.float32
+    if A_scale.numel() != 1 or B_scale.numel() != 1:
+        raise AssertionError(
+            f"expected A_scale and B_scale to have numel 1, got {A_scale.numel()} and {B_scale.numel()}"
+        )
+    if A_scale.dtype != torch.float32 or B_scale.dtype != torch.float32:
+        raise AssertionError(
+            f"expected A_scale and B_scale dtype float32, got {A_scale.dtype} and {B_scale.dtype}"
+        )
 
     # cuSPARSELt lacks the A and B operand scaling support, so instead we use alpha to scale the result.
     # Note that this limits us to per-tensor scalig only.

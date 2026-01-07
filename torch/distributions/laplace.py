@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -51,9 +50,9 @@ class Laplace(Distribution):
 
     def __init__(
         self,
-        loc: Union[Tensor, float],
-        scale: Union[Tensor, float],
-        validate_args: Optional[bool] = None,
+        loc: Tensor | float,
+        scale: Tensor | float,
+        validate_args: bool | None = None,
     ) -> None:
         self.loc, self.scale = broadcast_all(loc, scale)
         if isinstance(loc, _Number) and isinstance(scale, _Number):
