@@ -600,7 +600,7 @@ def _sfdp_replacement_21(query, key, value, attn_mask, dropout_p):
     key = key.permute(0, 2, 1, 3)
     value = value.permute(0, 2, 1, 3)
     if attn_mask.device.type == "xpu":
-        attn_mask = attn_mask.contiguous()  
+        attn_mask = attn_mask.contiguous()
     return _scaled_dot_product_attention(
         query,
         key,
