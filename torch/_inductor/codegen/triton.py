@@ -54,7 +54,6 @@ from ..scheduler import BaseSchedulerNode, FusedSchedulerNode, Scheduler, Schedu
 from ..shape_propagation import get_broadcasted_shape
 from ..utils import (
     cache_on_self,
-    DelayMaybeLine,
     DelayReplaceLine,
     get_bounds_index_expr,
     get_fused_kernel_name,
@@ -779,13 +778,6 @@ def triton_reshape(
             expand.append("None")
     assert idx == len(old_shape_str)
     return f"{value}[{', '.join(expand)}]"
-
-
-def enable_pdl_codegen():
-    if not torch._inductor.config.triton.enable_pdl:
-        return False
-    major, _ = torch.cuda.get_device_capability(torch.cuda.current_device())
-    return major >= 9
 
 
 # NB: Inheriting from PythonPrinter is somewhat dangerous, because there are a
@@ -1615,6 +1607,10 @@ class TritonOverrides(OpOverrides):
     @maybe_upcast_float32()
     def log2(x):
         return f"libdevice.log2({x})"
+
+    @staticmethod
+    def ldexp(x, n):
+        return f"libdevice.ldexp({x}, {n}.to(tl.int32))"
 
     @staticmethod
     @maybe_upcast_float32()
@@ -2532,7 +2528,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.tma_min_block_sizes = dict[str, int]()
         self.hint_override = hint_override
         self._load_counts: collections.Counter[str] = collections.Counter()
-        self._load_index = 0
+        self._pdl_load_index = 0
+        self._pdl_has_wait = False
 
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints = OrderedSet[AutotuneHint]()
@@ -3336,26 +3333,84 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         else:
             return self.loads
 
-    def _handle_pdl_before_load(self, wait_buffer):
-        GDC_WAIT = "tl.extra.cuda.gdc_wait()"
-        self._load_index += 1
-        if self.inside_reduction:
+    GDC_WAIT = "tl.extra.cuda.gdc_wait()"
+    GDC_LAUNCH = "tl.extra.cuda.gdc_launch_dependents()"
+
+    def _enable_pdl_codegen(self):
+        if not torch._inductor.config.triton.enable_pdl:
+            return False
+        if isinstance(V.kernel, torch._inductor.select_algorithm.TritonTemplateKernel):
+            return False
+        # PDL uses CUDA-specific intrinsics (gdc_wait/gdc_launch), not available on ROCm
+        if torch.version.hip:
+            return False
+        return (
+            V.graph.get_current_device_or_throw().type == "cuda"
+            and torch.cuda.get_device_capability()[0] >= 9
+        )
+
+    def _handle_pdl_before_access(
+        self, wait_buffer, *dependencies, consider_reads=False
+    ):
+        if not self._enable_pdl_codegen():
+            return
+        current_node = V.kernel.current_node
+        prev_node = (
+            V.graph.scheduler.previous_node if V.graph.scheduler is not None else None
+        )
+
+        def matching_dep(dep):
+            assert prev_node is not None
+            prev_deps = prev_node.read_writes.writes
+            if consider_reads:
+                prev_deps = itertools.chain(prev_deps, prev_node.read_writes.reads)
+            return any(
+                dep == current_node.mutation_renames.get(w.name, w.name)
+                for w in prev_deps
+            )
+
+        assert dependencies
+        need_wait = prev_node is None or any(matching_dep(d) for d in dependencies)
+        if not need_wait:
+            return
+        # hoist before the loop
+        if self.inside_reduction and self.range_trees[-1].is_loop:
             wait_buffer = self.body
-        if enable_pdl_codegen():
-            if self._load_index == 1:
-                wait_buffer.writeline(GDC_WAIT)
+
+        wait_buffer.writeline(self.GDC_WAIT)
 
     def _handle_pdl_after_load(self, launch_buffer, result_var):
-        GDC_LAUNCH = "tl.extra.cuda.gdc_launch_dependents()"
-        if self.inside_reduction:
+        if not self._enable_pdl_codegen():
+            return
+        if result_var.use_count > 1:  # we already went through this
+            return
+        # hoist after the loop
+        if self.inside_reduction and self.range_trees[-1].is_loop:
             launch_buffer = self.post_loop_combine
-        if enable_pdl_codegen():
-            current_load_index = self._load_index
-            launch_if_last_load = DelayMaybeLine(
-                lambda: current_load_index == self._load_index,
-                f"0; {GDC_LAUNCH} # gdc launch for {result_var}",
-            )
-            self.cse.generate(launch_buffer, launch_if_last_load, dtype=torch.int32)
+
+        # the issue is that we need to (a) make sure this happens
+        # but (b) do not know if this is last yet
+        # so we need to remember this (has_wait), which tells use
+        # whether we would have needed it, and check if we are last
+        launch_buffer.writeline(self.GDC_WAIT)
+        launch_buffer.writeline(self.GDC_LAUNCH)
+
+    def _filter_pdl(self, code: IndentedBuffer):
+        new_lines = []
+        has_wait = False
+        previous_launch = None
+        for l in code._lines:
+            if type(l) is str and self.GDC_WAIT in l:
+                if has_wait:
+                    continue
+                else:
+                    has_wait = True
+            if type(l) is str and self.GDC_LAUNCH in l:
+                if previous_launch is not None:
+                    new_lines.pop(previous_launch)
+                previous_launch = len(new_lines)
+            new_lines.append(l)
+        code._lines = new_lines
 
     def partial_accumulate(
         self, name: str, reduction_type, val, extra_meta: dict[str, Any]
@@ -3515,7 +3570,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 dtype = torch.bool
 
         load_buffer = self.get_load_buffer(indexing)
-        self._handle_pdl_before_load(load_buffer)
+        self._handle_pdl_before_access(load_buffer, name)
         result_var = self.cse.generate(
             load_buffer, make_line(line), dtype=dtype, shape=shape
         )
@@ -3634,6 +3689,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if not self.inside_reduction and self.cooperative_reduction:
             exit_stack.enter_context(self.guard_cooperative_store(name, self.stores))
 
+        self._handle_pdl_before_access(self.stores, name, consider_reads=True)
         self.stores.writeline(DeferredLine(name, line))
 
         if not self.inside_reduction:
@@ -3701,7 +3757,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 "Bucketize only supports indexing with int32 and int64"
             )
 
-        self._handle_pdl_before_load(self.compute)
+        self._handle_pdl_before_access(
+            self.compute, boundaries[0], *([sorter[0]] if sorter else [])
+        )
         result = self.cse.generate(
             self.compute,
             f"triton_helpers.bucketize_binary_search({values}, "
@@ -4471,6 +4529,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             exit_stack.enter_context(
                 self.guard_cooperative_store(name, self.post_loop_store)
             )
+
+        self._handle_pdl_before_access(self.post_loop_store, var)
 
         if isinstance(indexing, (BlockPtrOptions, TensorDescriptorOptions)):
             self.post_loop_store.writeline(
@@ -5418,8 +5478,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         triton_meta["configs"] = [config_of(signature)]
 
-        if enable_pdl_codegen():
-            triton_meta["launch_pdl"] = True
+        triton_meta["launch_pdl"] = self._enable_pdl_codegen()
 
         # Triton compiler includes equal_to_1 args into constants even
         # when they are not constexpr. otherwise there may be a segfault
@@ -5434,6 +5493,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         self.codegen_prologue(self.body)
         self.codegen_body()
+        self._filter_pdl(self.body)
 
         for helper in self.helper_functions:
             code.writeline("")
