@@ -83,7 +83,7 @@ class AttentionBlock(nn.Module):
         seq_lengths: torch.Tensor,
         is_causal: bool = False,
         scale: float | None = None,
-        window_size: tuple[int, int] = -1,
+        window_size: tuple[int, int] = (-1, -1),
     ):
         batch_size, seq_len, _ = x_padded.shape
 
