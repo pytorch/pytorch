@@ -1235,6 +1235,16 @@ def pixel_shuffle(self: Tensor, upscale_factor: int):
         self.dim() >= 3,
         lambda: f"pixel_shuffle expects input to have at least 3 dimensions, but got input with {self.dim} dimension(s)",
     )
+    torch._check(
+        upscale_factor > 0,
+        lambda: f"pixel_shuffle expects a positive upscale_factor, but got {upscale_factor}",
+    )
+    # Check for overflow when squaring upscale_factor (INT64_MAX ≈ 9.2e18, sqrt ≈ 3.0e9)
+    INT64_MAX = 9223372036854775807
+    torch._check(
+        upscale_factor <= INT64_MAX // upscale_factor,
+        lambda: f"pixel_shuffle upscale_factor is too large, (upscale_factor)^2 would overflow: upscale_factor={upscale_factor}",
+    )
     batch = self.shape[:-3]
     C_out = self.shape[-3] // upscale_factor**2
     HW_out = (self.shape[-2] * upscale_factor, self.shape[-1] * upscale_factor)
