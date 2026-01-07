@@ -14,6 +14,7 @@ import unittest
 from functools import partial
 from pathlib import Path
 from typing import *  # noqa: F403
+from unittest.mock import patch
 
 import numpy as np
 import yaml
@@ -4670,6 +4671,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         ):
             self.assertTrue(optests.is_inside_opcheck_mode())
 
+    @patch("torch._functorch.config.check_custom_op_aliasing", False)
     def test_opcheck_bad_op(self):
         op = op_with_incorrect_schema(self, "foo")
         x = torch.randn(3)

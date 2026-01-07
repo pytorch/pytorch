@@ -261,7 +261,7 @@ def _get_gen_rand_values_fn(random_calls: Any) -> Callable[[], list[Any]]:
 class FakeRootModule(torch.nn.Module):
     """Trick the constructor of fx.GraphModule"""
 
-    def __init__(self, nn_modules: dict[str, torch.nn.Module]):
+    def __init__(self, nn_modules: dict[str, torch.nn.Module]) -> None:
         super().__init__()
         for k, v in nn_modules.items():
             setattr(self, k, v)
@@ -400,7 +400,9 @@ class ExportMetaData:
     # maps graph input index to its' source which is later
     # used in export to map to correct user input. In its' flat form,
     # just looks like GetItem(base=LocalSource("foo", idx=0))
-    graph_input_idx_to_local_source: dict[int, Source] = dc_field(default_factory=dict)
+    graph_input_idx_to_local_source: dict[int, Source | None] = dc_field(
+        default_factory=dict
+    )
     # maps user output idx to what type of output it is. There are 3 options:
     # 1) graph out
     # 2) user input
@@ -467,7 +469,7 @@ class OutputGraphCommon(OutputGraphGuardsState):
         shape_env: Optional[ShapeEnv] = None,
         export_metadata: Optional[ExportMetaData] = None,
         tracked_fakes_id_to_source: Optional[dict[int, list[Source]]] = None,
-    ):
+    ) -> None:
         super().__init__(
             output_graph_guards_state.local_scope,
             output_graph_guards_state.global_scope,
@@ -2447,10 +2449,10 @@ class OutputGraph(OutputGraphCommon):
                     "Report an issue to the backend compiler repo.",
                 ],
             )
-        except SkipFrame as e:
+        except SkipFrame:
             # The backend compiler has requested that we skip the frame, instead of
             # aborting execution.
-            raise e
+            raise
         except Exception as e:
             raise BackendCompilerFailed(
                 self.compiler_fn, e, inspect.currentframe()
@@ -2487,6 +2489,7 @@ class OutputGraph(OutputGraphCommon):
 
     def example_inputs(self) -> list[torch.Tensor]:
         result = [arg.example for arg in self.graphargs]
+        # pyrefly: ignore[bad-return]
         return result
 
     def remove_unused_get_attr_nodes(self) -> None:
@@ -3050,7 +3053,7 @@ class SubgraphTracer(fx.Tracer):
 
         self.tracked_tensor_or_symint_vt: OrderedSet[VariableTracker] = OrderedSet()
 
-    def record_tensor_or_symint_vt(self, vt: VariableTracker):
+    def record_tensor_or_symint_vt(self, vt: VariableTracker) -> None:
         self.tracked_tensor_or_symint_vt.add(vt)
 
     # preserve original meta if it is available
@@ -3286,14 +3289,14 @@ class SubgraphTracer(fx.Tracer):
 
     def create_node(
         self,
-        op: str,
+        kind: str,
         target: Target,
         args: Any = None,
         kwargs: Any = None,
         name: Optional[str] = None,
         type_expr: Optional[Any] = None,
     ) -> fx.Node:
-        check_pt2_compliant_op(self.output_graph, op, target, args, kwargs)
+        check_pt2_compliant_op(self.output_graph, kind, target, args, kwargs)
         if self.parent is not None:
             flat_args = pytree.arg_tree_leaves(*args, **kwargs)
             for arg in flat_args:
@@ -3303,7 +3306,7 @@ class SubgraphTracer(fx.Tracer):
                     "create_node using arg not from this SubgraphTracer"
                 )
 
-        node = super().create_node(op, target, args, kwargs, name, type_expr)
+        node = super().create_node(kind, target, args, kwargs, name, type_expr)
         node.meta["creation_timestamp"] = self.output_graph.timestamp
         self._used_names.add(node.name)
         return node
@@ -3442,7 +3445,9 @@ class SubgraphTracer(fx.Tracer):
                         e_source = None
                         if source:
                             e_source = GetItemSource(
-                                base=source, index=i, index_is_slice=False
+                                base=source,
+                                index=i,
+                                index_is_slice=False,
                             )
 
                         self._lift_basic_symbols(e, e_source)
