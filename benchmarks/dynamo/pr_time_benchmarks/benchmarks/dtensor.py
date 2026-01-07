@@ -99,6 +99,60 @@ class BenchmarkAddBackward(BenchmarkDTensorDispatch):
         out.sum().backward()
 
 
+class BenchmarkInplace(BenchmarkDTensorDispatch):
+    def __init__(self, world_size) -> None:
+        super().__init__(operator="inplace", world_size=world_size)
+
+    def _work(self) -> None:
+        self.a.add_(self.b)
+
+
+class BenchmarkView(BenchmarkDTensorDispatch):
+    def __init__(self, world_size) -> None:
+        super().__init__(operator="view", world_size=world_size)
+
+    def _work(self) -> None:
+        self.a.view(100)
+
+
+class BenchmarkRandom(BenchmarkDTensorDispatch):
+    def __init__(self, world_size) -> None:
+        super().__init__(operator="random", world_size=world_size)
+
+    def _work(self) -> None:
+        self.a.uniform_()
+
+
+class BenchmarkCustomHandler(BenchmarkDTensorDispatch):
+    def __init__(self, world_size) -> None:
+        super().__init__(operator="custom_handler", world_size=world_size)
+
+    def _work(self) -> None:
+        torch.ops.aten.is_same_size(self.a, self.b)
+
+
+class BenchmarkCacheMiss(BenchmarkDTensorDispatch):
+    def __init__(self, world_size) -> None:
+        super().__init__(operator="cache_miss", world_size=world_size)
+        self.size = 10
+
+    def _prepare(self) -> None:
+        self.size += 1
+        self.a = DTensor.from_local(
+            torch.ones(self.size, self.size, device=self.device()),
+            self.mesh,
+            [Replicate()],
+        )
+        self.b = DTensor.from_local(
+            torch.ones(self.size, self.size, device=self.device()),
+            self.mesh,
+            [Replicate()],
+        )
+
+    def _work(self) -> None:
+        self.a + self.b
+
+
 def main():
     world_size = 256
     fake_store = FakeStore()
@@ -116,6 +170,21 @@ def main():
         world_size
     ).enable_instruction_count().collect_all().append_results(result_path)
     BenchmarkAddBackward(
+        world_size
+    ).enable_instruction_count().collect_all().append_results(result_path)
+    BenchmarkInplace(
+        world_size
+    ).enable_instruction_count().collect_all().append_results(result_path)
+    BenchmarkView(world_size).enable_instruction_count().collect_all().append_results(
+        result_path
+    )
+    BenchmarkRandom(world_size).enable_instruction_count().collect_all().append_results(
+        result_path
+    )
+    BenchmarkCustomHandler(
+        world_size
+    ).enable_instruction_count().collect_all().append_results(result_path)
+    BenchmarkCacheMiss(
         world_size
     ).enable_instruction_count().collect_all().append_results(result_path)
     torch.distributed.destroy_process_group()
