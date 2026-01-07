@@ -3159,12 +3159,14 @@ def same(
                     union = (ref | res).sum().float()
                     if union == 0:
                         # Both masks are empty
-                        return intersection == 0
+                        return bool(intersection == 0)
                     iou = intersection / union
                     iou_threshold = 0.99
                     if iou < iou_threshold:
                         log_error(
-                            "IoU accuracy failed: %.4f < %.2f", iou.item(), iou_threshold
+                            "IoU accuracy failed: %.4f < %.2f",
+                            iou.item(),
+                            iou_threshold,
                         )
                         return False
                     return True
