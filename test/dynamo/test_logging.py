@@ -671,6 +671,20 @@ Mutating object of type dict (source name: L['mod']._buffers)
 """,
         )
 
+    @make_logging_test(side_effects=True)
+    @torch._dynamo.config.patch(side_effect_replay_policy="silent")
+    def test_side_effects_silent_config(self, records):
+        my_list = [1, 2, 3]
+
+        @torch.compile(backend="eager")
+        def fn(x, lst):
+            lst.append(4)
+            return x + len(lst)
+
+        fn(torch.ones(1), my_list)
+
+        self.assertEqual(len(records), 0)
+
     @make_settings_test("torch._dynamo.utils")
     def test_dump_compile_times(self, records):
         fn_opt = torch.compile(example_fn, backend="inductor")
@@ -1349,6 +1363,7 @@ exclusions = {
     "benchmarking",
     "loop_ordering",
     "loop_tiling",
+    "auto_chunker",
     "autotuning",
     "graph_region_expansion",
     "hierarchical_compile",

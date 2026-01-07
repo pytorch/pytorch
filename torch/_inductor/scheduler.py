@@ -2821,6 +2821,7 @@ class Scheduler:
             ]
         )
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
+        self.previous_node: Optional[BaseSchedulerNode] = None
         self.current_node: Optional[BaseSchedulerNode] = None
         self.update_zero_dim_cpu_tensor()
         # some new constants could have been created above
@@ -2837,6 +2838,7 @@ class Scheduler:
         self.name_to_node: dict[str, BaseSchedulerNode] = {
             n.get_name(): n for n in self.nodes
         }
+
         self.name_to_buf: dict[str, SchedulerBuffer] = {
             buf.get_name(): buf for node in self.nodes for buf in node.get_outputs()
         }
@@ -6274,6 +6276,7 @@ class Scheduler:
                 seen.add(key)
 
         self.current_device = self.default_device_context
+        assert self.previous_node is None
 
         # pyrefly: ignore [unbound-name]
         if self.default_device_context and config.triton.autotune_at_compile_time:
@@ -6365,6 +6368,11 @@ class Scheduler:
                 ):
                     self.flush()
 
+            if all(isinstance(n, SchedulerNode) for n in node.get_nodes()):
+                self.previous_node = node
+            else:
+                self.previous_node = None
+
         if self.current_device != self.default_device_context:
             # when default_device_context is not None, we are codegen
             # for graph partitions and all nodes must be on
@@ -6375,6 +6383,7 @@ class Scheduler:
                 # important for nested indentation codegen-ing.
                 V.graph.wrapper_code.codegen_device_guard_exit()
 
+        self.previous_node = None
         self.flush()
 
     def benchmark_combo_kernel(

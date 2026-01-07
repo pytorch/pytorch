@@ -44,12 +44,7 @@ from .bytecode_transformation import (
     create_instruction,
 )
 from .codegen import PyCodegen
-from .exc import (
-    collapse_resume_frames,
-    get_stack_above_dynamo,
-    SideEffectsError,
-    unimplemented,
-)
+from .exc import collapse_resume_frames, get_stack_above_dynamo, unimplemented
 from .source import GlobalSource, LocalCellSource, Source, TempLocalSource
 from .utils import is_frozen_dataclass, nn_module_new, object_new
 from .variables.base import (
@@ -178,6 +173,8 @@ class SideEffects:
 
     def _capture_user_stack(self, key: VariableTracker) -> None:
         """Capture the current user stack from the instruction translator."""
+        if config.side_effect_replay_policy == "silent":
+            return
         if key not in self.mutation_user_stacks:
             self.mutation_user_stacks[key] = []
         self.mutation_user_stacks[key].append(
@@ -274,10 +271,16 @@ class SideEffects:
         if self.is_reconstructing_generator():
             # This is missing the case where one mutates a tensor. See
             # test_generator.py::test_reconstruct_generator_tensor_mutation
-            raise SideEffectsError(
-                "Cannot reconstruct a generator with variable mutations. "
+            unimplemented(
+                gb_type="Generator reconstruction with mutations",
+                context=f"mutating object: {item}",
+                explanation="Cannot reconstruct a generator with variable mutations. "
                 "Dynamo needs to fully exhaust the generator, which may cause "
-                "unintended variable modifications."
+                "unintended variable modifications.",
+                hints=[
+                    "Remove mutations from the generator.",
+                    *graph_break_hints.FUNDAMENTAL,
+                ],
             )
         assert item.mutation_type is not None
         if not is_side_effect_safe(item.mutation_type):
@@ -432,6 +435,8 @@ class SideEffects:
         item: Any,
         variable: VariableTracker,
     ) -> VariableTracker:
+        # TODO: Modify this API so that we preserve type info of
+        # variable
         return self._track_obj(
             item,
             variable,
@@ -440,7 +445,7 @@ class SideEffects:
 
     def track_object_new(
         self,
-        cls_source: Source,
+        cls_source: Source | None,
         user_cls: Any,
         variable_cls: Any,
         options: dict[str, Any],
@@ -736,7 +741,6 @@ class SideEffects:
                     cg.add_cache(var)
                     var.source = TempLocalSource(cg.tempvars[var])  # type: ignore[attr-defined]
                 elif var.source is None:
-                    # pyrefly: ignore [bad-assignment]
                     var.source = LocalCellSource(var.local_name)
             elif var.is_tensor():
                 # NOTE: for historical reasons we never assigned local sources
@@ -899,9 +903,8 @@ class SideEffects:
 
     def _format_side_effect_message(self, var: VariableTracker) -> str:
         """Format a side effect log message with user stack."""
-        # NOTE: a KeyError in self.mutation_user_stacks or a NotImplementedError from var.source.name is a bug
-        # and must be fixed!
-        locations = self.mutation_user_stacks[var]
+        assert config.side_effect_replay_policy != "silent"
+        locations = self.mutation_user_stacks.get(var, [])
         description = f"Mutating object of type {var.python_type_name()}"
         source_info = " (no source)"
         if var.source is not None:
@@ -914,6 +917,7 @@ class SideEffects:
             ):
                 source_info = " (source: torch function mode stack mutation)"
             else:
+                # NOTE: NotImplementedError from var.source.name is a bug and must be fixed!
                 source_info = f" (source name: {var.source.name})"
 
         if locations:
@@ -959,7 +963,7 @@ class SideEffects:
 
         # NOTE: should only be called once per VT - only if a side effect actually gets codegen'd!
         def _maybe_log_side_effect(var: VariableTracker) -> None:
-            if log_side_effects:
+            if config.side_effect_replay_policy != "silent" and log_side_effects:
                 msg = self._format_side_effect_message(var)
                 side_effect_messages.append(msg)
                 # Log individual side effects for granular debugging
@@ -1096,7 +1100,6 @@ class SideEffects:
                 if isinstance(
                     var,
                     variables.UserDefinedDictVariable,
-                    # pyrefly: ignore [bad-argument-type]
                 ) and self.is_modified(var._dict_vt):
                     # Do dict related update manually here. The store_attr
                     # mutations will be applied later.
@@ -1129,7 +1132,6 @@ class SideEffects:
                         ]
                     )
 
-                    # pyrefly: ignore [bad-argument-type]
                     cg(var._dict_vt, allow_cache=False)  # Don't codegen via source
                     cg.extend_output(
                         [
@@ -1153,7 +1155,6 @@ class SideEffects:
                 elif isinstance(
                     var,
                     variables.UserDefinedListVariable,
-                    # pyrefly: ignore [bad-argument-type]
                 ) and self.is_modified(var._list_vt):
                     # Update the list to the updated items. Be careful in
                     # calling the list methods and not the overridden methods.
@@ -1170,7 +1171,6 @@ class SideEffects:
                         ]
                     )
 
-                    # pyrefly: ignore [bad-argument-type]
                     cg(var._list_vt, allow_cache=False)  # Don't codegen via source
                     cg.extend_output(
                         [
