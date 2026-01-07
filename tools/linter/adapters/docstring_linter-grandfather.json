@@ -48,16 +48,16 @@
     "def CppFlexAttentionTemplate.modification()": 102
   },
   "torch/_inductor/codegen/cpp_gemm_template.py": {
-    "def CppGemmTemplate.get_options()": 255
+    "def CppGemmTemplate.get_options()": 254
   },
   "torch/_inductor/codegen/cpp_grouped_gemm_template.py": {
-    "def CppGroupedGemmTemplate.render()": 157
+    "def CppGroupedGemmTemplate.render()": 155
   },
   "torch/_inductor/codegen/cpp_template.py": {
-    "class CppTemplate": 117
+    "class CppTemplate": 116
   },
   "torch/_inductor/codegen/cpp_template_kernel.py": {
-    "class CppTemplateKernel": 504
+    "class CppTemplateKernel": 503
   },
   "torch/_inductor/codegen/cpp_utils.py": {
     "def create_epilogue_with_attr()": 164
@@ -98,13 +98,13 @@
     "def SIMDScheduling.generate_node_schedule()": 95
   },
   "torch/_inductor/codegen/triton.py": {
-    "class TritonPrinter": 179,
-    "class TritonScheduling": 413,
+    "class TritonPrinter": 180,
+    "class TritonScheduling": 414,
     "def TritonScheduling.benchmark_codegened_module()": 88,
-    "def TritonScheduling.benchmark_combo_kernel()": 93
+    "def TritonScheduling.benchmark_combo_kernel()": 94
   },
   "torch/_inductor/codegen/triton_combo_kernel.py": {
-    "class ComboKernel": 871
+    "class ComboKernel": 868
   },
   "torch/_inductor/codegen/wrapper.py": {
     "def PythonWrapperCodegen.benchmark_compiled_module()": 96,
@@ -156,13 +156,13 @@
     "def move_reshape_out_of_split_stack()": 109
   },
   "torch/_inductor/graph.py": {
-    "class GraphLowering": 2224,
+    "class GraphLowering": 2223,
     "def GraphLowering.call_function()": 119,
     "def GraphLowering.create_deferred_runtime_asserts()": 84,
     "def GraphLowering.extract_autotune_inputs()": 94,
     "def GraphLowering.output()": 92,
     "def GraphLowering.placeholder()": 103,
-    "def GraphLowering.run_node()": 364
+    "def GraphLowering.run_node()": 363
   },
   "torch/_inductor/ir.py": {
     "class Buffer": 134,
@@ -170,7 +170,7 @@
     "class Reduction": 803,
     "class Scan": 199,
     "class Sort": 151,
-    "class UserDefinedTritonKernel": 204,
+    "class UserDefinedTritonKernel": 203,
     "class View": 180,
     "class WelfordReduction": 220,
     "def ExternKernel.process_kernel()": 125,
@@ -194,7 +194,7 @@
     "def avg_pool3d_backward()": 197,
     "def cat()": 122,
     "def index_put_impl_()": 117,
-    "def make_pointwise()": 88,
+    "def make_pointwise()": 87,
     "def max_pool2d_with_indices_backward()": 143,
     "def scatter_reduce_()": 114,
     "def sdpa_constraint()": 135,
@@ -205,7 +205,7 @@
     "def MkldnnRnnLayer.create()": 101
   },
   "torch/_inductor/mkldnn_lowerings.py": {
-    "def register_onednn_fusion_ops()": 1207
+    "def register_onednn_fusion_ops()": 1202
   },
   "torch/_inductor/mock_cache.py": {
     "class PatchCaches": 109
