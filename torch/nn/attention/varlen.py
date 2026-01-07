@@ -57,7 +57,9 @@ def _varlen_attn(
 
     if use_cudnn:
         log.info("Using cuDNN backend for varlen_attn")
-        assert window_size_left == -1 and window_size_right == -1, "cuDNN backend does not support windowed attention"
+        assert window_size_left == -1 and window_size_right == -1, (
+            "cuDNN backend does not support windowed attention"
+        )
         result = torch.ops.aten._cudnn_attention_forward(
             query,
             key,
@@ -110,6 +112,8 @@ def _varlen_attn_fake(
     max_k: int,
     is_causal: bool = False,
     scale: float | None = None,
+    window_size_left: int = -1,
+    window_size_right: int = -1,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -220,7 +224,17 @@ def varlen_attn(
     """
     window_size = kwargs.pop("window_size", (-1, -1))
     out, lse, _ = torch.ops.torch_attn._varlen_attn(
-        query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale, window_size[0], window_size[1], **kwargs
+        query,
+        key,
+        value,
+        cu_seq_q,
+        cu_seq_k,
+        max_q,
+        max_k,
+        is_causal,
+        scale,
+        window_size[0],
+        window_size[1],
     )
     if return_aux is not None and return_aux.lse:
         return out, lse
@@ -228,7 +242,19 @@ def varlen_attn(
 
 
 def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
-    query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale, window_size_left, window_size_right = inputs
+    (
+        query,
+        key,
+        value,
+        cu_seq_q,
+        cu_seq_k,
+        max_q,
+        max_k,
+        is_causal,
+        scale,
+        window_size_left,
+        window_size_right,
+    ) = inputs
     out, lse, rng_state = output
 
     ctx.save_for_backward(query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state)
@@ -263,6 +289,9 @@ def _varlen_attn_backward(
 
     use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
     if use_cudnn:
+        assert window_size_left == -1 and window_size_right == -1, (
+            "cuDNN backend does not support windowed attention"
+        )
         log.info("Using cuDNN backend for varlen_attn")
         dq, dk, dv = torch.ops.aten._cudnn_attention_backward(
             grad_out,
@@ -320,6 +349,8 @@ def _varlen_attn_backward_fake(
     is_causal: bool,
     rng_state: torch.Tensor,
     scale: float | None = None,
+    window_size_left: int = -1,
+    window_size_right: int = -1,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.

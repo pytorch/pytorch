@@ -71,7 +71,16 @@ class AttentionBlock(nn.Module):
         q, k, v = self.get_varlen_qkv(x_packed)
 
         attn_out = varlen_attn(
-            q, k, v, cu_seq, cu_seq, max_len, max_len, is_causal, scale=scale, window_size=window_size
+            q,
+            k,
+            v,
+            cu_seq,
+            cu_seq,
+            max_len,
+            max_len,
+            is_causal,
+            scale=scale,
+            window_size=window_size,
         )
         attn_out = attn_out.view(-1, self.embed_dim)
 
@@ -108,7 +117,9 @@ class AttentionBlock(nn.Module):
 
         # --- Window attention ---
         if window_size[0] >= 0 or window_size[1] >= 0:
-            window_mask = torch.zeros(seq_len, seq_len, dtype=torch.bool, device=x_padded.device)
+            window_mask = torch.zeros(
+                seq_len, seq_len, dtype=torch.bool, device=x_padded.device
+            )
             for i in range(seq_len):
                 start = i - window_size[0] if window_size[0] >= 0 else 0
                 end = i + window_size[1] + 1 if window_size[1] >= 0 else seq_len
