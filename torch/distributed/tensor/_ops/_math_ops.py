@@ -7,15 +7,22 @@ from enum import Enum
 from typing import cast, Union
 
 import torch
+from torch._ops import OpOverload
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor._dtensor_spec import DTensorSpec
+from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
+    ArgsType,
+    KwargsType,
     OpSchema,
     OpSpec,
     OpStrategy,
     PlacementList,
     RuntimeSchemaInfo,
     TupleStrategy,
+)
+from torch.distributed.tensor._ops.single_dim_strategy import (
+    _ShardingPlaceholder,
+    register_single_dim_strategy,
 )
 from torch.distributed.tensor._ops.utils import (
     as_list,
@@ -535,8 +542,6 @@ def foreach_max_strategy(op_schema: OpSchema) -> TupleStrategy:
 
 @register_op_strategy(
     [
-        aten._linalg_svd.default,
-        aten.linalg_qr.default,
         # TODO: The diagonal ops can have an improved sharding strategy for
         # shard placements that does not require redistributing to replicate.
         aten.diagonal_copy.default,
@@ -545,7 +550,6 @@ def foreach_max_strategy(op_schema: OpSchema) -> TupleStrategy:
         aten.diagonal.default,
         aten.tril.default,
         aten.triu.default,
-        aten._linalg_eigh.default,
         aten.upsample_bicubic2d.default,
         aten.upsample_bilinear2d.default,
         aten.upsample_linear1d.default,
@@ -555,10 +559,10 @@ def foreach_max_strategy(op_schema: OpSchema) -> TupleStrategy:
     ],
     schema_info=RuntimeSchemaInfo(1),
 )
-def linalg_replicate_strategy(op_schema: OpSchema) -> OpStrategy:
+def diagonal_upsample_replicate_strategy(op_schema: OpSchema) -> OpStrategy:
     """
-    Since we do not have a simple way to compute some linear algebra operations
-    like SVD or QR decomposition, always fall back to replicate.
+    For diagonal and upsample operations that don't yet have optimized sharding
+    strategies, fall back to replicate.
     """
     args_schema = op_schema.args_schema
     input_strategy = args_schema[0]
@@ -1401,4 +1405,192 @@ def logsumexp_strategy(op_schema: OpSchema) -> OpStrategy:
         reduce_dims,
         keep_dim=keep_dim,
         reduction_linear=False,
+    )
+
+
+# =============================================================================
+# Linalg operators (single_dim_strategy implementations)
+#
+# Key insight: Most linalg operations work on batched matrices where the
+# computation is independent across batch dimensions. This allows sharding
+# on batch dimensions while keeping the matrix dimensions (last 2 dims)
+# replicated across the mesh.
+#
+# Operators with decompositions (cross, vecdot, vector_norm, vander, pinv,
+# matrix_power) are skipped as they can leverage the decomposed ops' strategies.
+# =============================================================================
+
+
+def _batch_dim_rules(
+    num_batch_dims: int,
+    num_outputs: int,
+    num_inputs: int,
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """
+    Generate single-mesh-dim sharding rules for batched operations.
+
+    Returns rules for sharding on each batch dimension. The all-replicate
+    rule is automatically added by the framework.
+    """
+    total_specs = num_outputs + num_inputs
+    rules: list[list[Placement | _ShardingPlaceholder]] = []
+
+    for batch_dim in range(num_batch_dims):
+        batch_shard: list[Placement | _ShardingPlaceholder] = [
+            _ShardingPlaceholder(batch_dim)
+        ] * total_specs
+        rules.append(batch_shard)
+
+    return rules
+
+
+# =============================================================================
+# Single-input linalg operators (decompositions, factorizations, eigenvalues)
+# =============================================================================
+
+_SINGLE_INPUT_OP_TO_NUM_OUTPUTS: dict[OpOverload, int] = {
+    aten.linalg_eigvals.default: 1,
+    aten._linalg_eigvals.default: 1,
+    aten.linalg_cholesky_ex.default: 2,
+    aten.linalg_inv_ex.default: 2,
+    aten.linalg_eig.default: 2,
+    aten._linalg_eigh.default: 2,
+    aten.linalg_qr.default: 2,
+    aten._linalg_det.default: 3,
+    aten.linalg_lu_factor_ex.default: 3,
+    aten.linalg_lu.default: 3,
+    aten._linalg_svd.default: 3,
+    aten.linalg_ldl_factor_ex.default: 3,
+    aten._linalg_slogdet.default: 4,
+}
+
+
+@register_single_dim_strategy(
+    list(_SINGLE_INPUT_OP_TO_NUM_OUTPUTS.keys()),
+    schema_info=RuntimeSchemaInfo(1),
+)
+def single_input_linalg_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """
+    Strategy for single-input linalg ops that support batch dimension sharding.
+
+    All these ops take a batched matrix A (*batch, m, n) and return one or more
+    outputs. The computation is independent across batch dimensions.
+    """
+    input_meta = cast(TensorMeta, args_schema[0])
+    input_ndim = len(input_meta.shape)
+    num_batch_dims = max(0, input_ndim - 2)
+    num_outputs = _SINGLE_INPUT_OP_TO_NUM_OUTPUTS[op]
+
+    return _batch_dim_rules(
+        num_batch_dims=num_batch_dims,
+        num_outputs=num_outputs,
+        num_inputs=1,
+    )
+
+
+# =============================================================================
+# Two-input solve operators (A, B -> X or A, B -> (X, ...))
+# =============================================================================
+
+# Map from operator to number of outputs
+_TWO_INPUT_SOLVE_OP_TO_NUM_OUTPUTS: dict[OpOverload, int] = {
+    aten._linalg_solve_ex.default: 4,  # X, LU, pivots, info
+    aten.linalg_solve_triangular.default: 1,  # X
+}
+
+
+@register_single_dim_strategy(
+    list(_TWO_INPUT_SOLVE_OP_TO_NUM_OUTPUTS.keys()),
+    schema_info=RuntimeSchemaInfo(1),
+)
+def two_input_solve_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """
+    Strategy for solve operators with two matrix inputs (A, B).
+
+    Can shard on batch dimensions when both inputs shard on the same dim.
+    """
+    A_meta = cast(TensorMeta, args_schema[0])
+    B_meta = cast(TensorMeta, args_schema[1])
+    A_ndim = len(A_meta.shape)
+    B_ndim = len(B_meta.shape)
+    num_batch_dims = max(0, min(A_ndim - 2, B_ndim - 2))
+    num_outputs = _TWO_INPUT_SOLVE_OP_TO_NUM_OUTPUTS[op]
+
+    return _batch_dim_rules(
+        num_batch_dims=num_batch_dims,
+        num_outputs=num_outputs,
+        num_inputs=2,
+    )
+
+
+# =============================================================================
+# Three-input solve operators (LU/LD, pivots, B -> X)
+# =============================================================================
+
+# Map from operator to number of outputs
+_THREE_INPUT_SOLVE_OP_TO_NUM_OUTPUTS: dict[OpOverload, int] = {
+    aten.linalg_lu_solve.default: 1,  # LU, pivots, B -> X
+    aten.linalg_ldl_solve.default: 1,  # LD, pivots, B -> X
+}
+
+
+@register_single_dim_strategy(
+    list(_THREE_INPUT_SOLVE_OP_TO_NUM_OUTPUTS.keys()),
+    schema_info=RuntimeSchemaInfo(1),
+)
+def three_input_solve_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """
+    Strategy for solve operators using pre-computed factorizations.
+
+    Takes (LU/LD, pivots, B) and returns X. Can shard on batch dimensions.
+    """
+    # First arg is LU/LD matrix, third arg is B matrix
+    factor_meta = cast(TensorMeta, args_schema[0])
+    B_meta = cast(TensorMeta, args_schema[2])
+    factor_ndim = len(factor_meta.shape)
+    B_ndim = len(B_meta.shape)
+    num_batch_dims = max(0, min(factor_ndim - 2, B_ndim - 2))
+    num_outputs = _THREE_INPUT_SOLVE_OP_TO_NUM_OUTPUTS[op]
+
+    return _batch_dim_rules(
+        num_batch_dims=num_batch_dims,
+        num_outputs=num_outputs,
+        num_inputs=3,
+    )
+
+
+# =============================================================================
+# Householder product (special case: different input dimensions)
+# =============================================================================
+
+
+@register_single_dim_strategy(
+    [aten.linalg_householder_product.default],
+    schema_info=RuntimeSchemaInfo(1),
+)
+def linalg_householder_product_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """
+    Householder product: input (*batch, m, n), tau (*batch, k) -> output (*batch, m, n)
+
+    Special case because tau has 1 fewer trailing dim than input.
+    """
+    input_meta = cast(TensorMeta, args_schema[0])
+    tau_meta = cast(TensorMeta, args_schema[1])
+    input_ndim = len(input_meta.shape)
+    tau_ndim = len(tau_meta.shape)
+    # tau has 1 fewer trailing dim than input
+    num_batch_dims = max(0, min(input_ndim - 2, tau_ndim - 1))
+
+    return _batch_dim_rules(
+        num_batch_dims=num_batch_dims,
+        num_outputs=1,
+        num_inputs=2,
     )
