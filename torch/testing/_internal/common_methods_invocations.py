@@ -9970,7 +9970,6 @@ foreach_unary_op_db: list[OpInfo] = [
         supports_autograd=True,
         supports_inplace_autograd=True,
         supports_forward_ad=True,
-        supports_sparse=True,
         decorators=(
             DecorateInfo(
                 unittest.expectedFailure,
@@ -16581,6 +16580,8 @@ op_db: list[OpInfo] = [
         skips=(
             # Sample inputs isn't really parametrized on dtype
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_dtypes'),
+            # _scaled_mm_v2 is CUDA-only, no CPU implementation
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_compare_cpu'),
             # "add_stub" not implemented for 'Float8_e4m3fn'
             # "ufunc_add_CUDA" not implemented for 'Float8_e4m3fn'
             # https://github.com/pytorch/pytorch/issues/107256
@@ -20568,6 +20569,7 @@ op_db: list[OpInfo] = [
                                     active_if=TEST_SCIPY and version.parse(scipy.__version__) < version.parse("1.4.0")),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_small',
                                     active_if=TEST_SCIPY and version.parse(scipy.__version__) < version.parse("1.4.0")),
+                       DecorateInfo(unittest.expectedFailure, 'TestSparseUnaryUfuncs', 'test_sparse_fn_grad'),
                    )),
     OpInfo("nn.functional.smooth_l1_loss",
            ref=reference_smooth_l1_loss,
@@ -21364,6 +21366,11 @@ op_db: list[OpInfo] = [
             # FIXME: reduces all dimensions when dim=[]
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
+                device_type='xpu',
+                dtypes=[torch.int64]),
         ),
         error_inputs_func=error_inputs_aminmax_amax_amin,
     ),
@@ -21379,6 +21386,14 @@ op_db: list[OpInfo] = [
             # FIXME: reduces all dimensions when dim=[]
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+            DecorateInfo(
+                unittest.skip('Skipped!'),
+                'TestReductions',
+                'test_ref_small_input',
+                device_type='xpu',
+                dtypes=[torch.int64],
+            ),
         ),
         error_inputs_func=error_inputs_aminmax_amax_amin,
     ),
@@ -21390,6 +21405,18 @@ op_db: list[OpInfo] = [
         result_dtype=torch.int64,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.argmax, supports_keepdims=False),
+        skips=(
+            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+            DecorateInfo(
+                unittest.skip('Skipped!'),
+                'TestReductions',
+                'test_ref_small_input',
+                device_type='xpu',
+                dtypes=floating_types_and(
+                    torch.int64, torch.int8, torch.int16, torch.int32, torch.float16
+                ),
+            ),
+        ),
     ),
     ReductionOpInfo(
         'argmin',
@@ -21398,6 +21425,18 @@ op_db: list[OpInfo] = [
         result_dtype=torch.int64,
         dtypes=all_types_and(torch.float16, torch.bfloat16),
         ref=reference_reduction_numpy(np.argmin, supports_keepdims=False),
+        skips=(
+            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+            DecorateInfo(
+                unittest.skip('Skipped!'),
+                'TestReductions',
+                'test_ref_small_input',
+                device_type='xpu',
+                dtypes=floating_types_and(
+                    torch.int64, torch.int8, torch.int16, torch.int32, torch.float16
+                ),
+            ),
+        ),
     ),
     ReductionOpInfo(
         'count_nonzero',
@@ -21450,6 +21489,14 @@ op_db: list[OpInfo] = [
                          dtypes=[torch.float16]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_extremal_values',
                          device_type='cuda', dtypes=[torch.complex64]),
+            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+            DecorateInfo(
+                unittest.skip('Skipped!'),
+                'TestReductions',
+                'test_ref_small_input',
+                device_type='xpu',
+                dtypes=[torch.complex128],
+            ),
         ),
     ),
     ReductionOpInfo(
@@ -21480,6 +21527,11 @@ op_db: list[OpInfo] = [
                          device_type='cuda', dtypes=[torch.complex64]),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-5, rtol=4e-2)}),
                          "TestConsistency", "test_output_match", device_type="mps"),
+            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
+                device_type='xpu',
+                dtypes=[torch.complex128]),
         ),
     ),
     ReductionOpInfo(
@@ -21508,6 +21560,11 @@ op_db: list[OpInfo] = [
                          dtypes=(torch.float16,)),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values',
                          dtypes=(torch.float16,)),
+            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
+                device_type='xpu',
+                dtypes=[torch.float64]),
         ),
     ),
     ReductionOpInfo(
@@ -21610,6 +21667,11 @@ op_db: list[OpInfo] = [
             # FIXME: ValueError: The data in MaskedTensor a and Tensor b do not match
             DecorateInfo(unittest.skip("Skipped!"), 'TestOperators', 'test_reduction_all',
                          dtypes=[torch.float16]),
+            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
+                device_type='xpu',
+                dtypes=[torch.complex128, torch.int8, torch.int16, torch.int32, torch.int64]),
         ),
     ),
     ReductionOpInfo(
@@ -21642,6 +21704,11 @@ op_db: list[OpInfo] = [
                          dtypes=[torch.float16]),
             DecorateInfo(unittest.skip("Skipped!"), 'TestOperators', 'test_reduction_all',
                          dtypes=[torch.float32]),
+            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
+                device_type='xpu',
+                dtypes=[torch.complex128]),
         ),
     ),
     ReductionOpInfo(
@@ -21669,6 +21736,11 @@ op_db: list[OpInfo] = [
                          dtypes=[torch.float16]),
             DecorateInfo(toleranceOverride({torch.float16: tol(atol=3e-3, rtol=4e-2)}),
                          "TestConsistency", "test_output_match", device_type="mps"),
+            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
+                device_type='xpu',
+                dtypes=[torch.complex128]),
         ),
     ),
     ReductionOpInfo(
@@ -24677,6 +24749,11 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
             DecorateInfo(
                 unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
+                device_type='xpu',
+                dtypes=[torch.int64]),
         ),
     ),
     ReductionPythonRefInfo(
@@ -24689,6 +24766,11 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
             DecorateInfo(
                 unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
+                device_type='xpu',
+                dtypes=[torch.int64]),
         ),
     ),
     ReductionPythonRefInfo(
@@ -24735,6 +24817,11 @@ python_ref_db = [
                 unittest.expectedFailure, 'TestReductions', 'test_dim_empty'),
             DecorateInfo(
                 unittest.expectedFailure, 'TestReductions', 'test_dim_empty_keepdim'),
+            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
+                device_type='xpu',
+                dtypes=[torch.complex128]),
         ),
     ),
     ReductionPythonRefInfo(
@@ -24755,6 +24842,11 @@ python_ref_db = [
                 unittest.skip("Skipped!"), 'TestReductions',
                 'test_ref_duplicate_values',
                 dtypes=(torch.float16,)),
+            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
+                device_type='xpu',
+                dtypes=[torch.float64]),
         ),
     ),
     # std_mean and var_mean are not ReductionInfos
@@ -24784,6 +24876,12 @@ python_ref_db = [
             DecorateInfo(
                 unittest.skip("Skipped!"), 'TestOperators', 'test_reduction_all',
                 dtypes=[torch.float32]),
+            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
+                device_type='xpu',
+                dtypes=[torch.complex128]),
+
         ),
     ),
     PythonRefInfo(
@@ -24826,6 +24924,11 @@ python_ref_db = [
             DecorateInfo(
                 unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input',
                 dtypes=[torch.float16, torch.complex64]),
+            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+            DecorateInfo(
+                unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
+                device_type='xpu',
+                dtypes=[torch.int64, torch.int8, torch.int16, torch.int32, torch.complex128]),
         ),
     ),
     ReductionPythonRefInfo(

@@ -9,7 +9,7 @@
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 
 #include <ATen/ceil_div.h>
@@ -62,161 +62,141 @@ static __global__ void build_ptr_dev(
 }
 #endif
 
-class NCCLSymmetricMemory : public SymmetricMemory {
- public:
- NCCLSymmetricMemory(
-      NCCLAllocation* allocation,
-      const std::string& group_name,
-      ncclWindow_t buffer_handle,
-      ncclWindow_t signal_handle)
-      : buffer_size_(allocation->buffer_size),
-        device_idx_(allocation->device_idx),
-        group_name_(group_name),
-        buffer_handle_(buffer_handle),
-        signal_handle_(signal_handle)
-  {
-    // For logging only
-    static int exchanged_n_times = 0;
-    c10::cuda::CUDAGuard guard(allocation->device_idx);
+NCCLSymmetricMemory::NCCLSymmetricMemory(
+    NCCLAllocation* allocation,
+    const std::string& group_name,
+    ncclWindow_t buffer_handle,
+    ncclWindow_t signal_handle)
+    : buffer_size_(allocation->buffer_size),
+      device_idx_(allocation->device_idx),
+      group_name_(group_name),
+      buffer_win_(buffer_handle),
+      signal_handle_(signal_handle)
+{
+  // For logging only
+  static int exchanged_n_times = 0;
+  c10::cuda::CUDAGuard guard(allocation->device_idx);
 
-    auto global_rank = get_group_info("0").rank;
-    GroupInfo& group_info = get_group_info(group_name);
-    auto store = group_info.store;
-    rank_ = group_info.rank;
-    world_size_ = group_info.world_size;  // size of current group
-    // Exchange rank to global rank mapping for this group.
-    // If it is already available, skip the exchange.
-    if (group_info.rank_to_global_rank.empty()) {
-      group_info.rank_to_global_rank =
-          storeExchange.all_gather(store, rank_, world_size_, global_rank);
-      exchanged_n_times++;
-      if (rank_ == 0) {
-        LOG(INFO) << "[rank " << rank_ << ']'
-                  << " rank_to_global_rank: " << group_info.rank_to_global_rank
-                  << ", group_name: " << group_name
-                  << ", exchanged_n_times: " << exchanged_n_times;
-      }
+  auto global_rank = get_group_info("0").rank;
+  GroupInfo& group_info = get_group_info(group_name);
+  auto store = group_info.store;
+  rank_ = group_info.rank;
+  world_size_ = group_info.world_size;  // size of current group
+  // Exchange rank to global rank mapping for this group.
+  // If it is already available, skip the exchange.
+  if (group_info.rank_to_global_rank.empty()) {
+    group_info.rank_to_global_rank =
+        storeExchange.all_gather(store, rank_, world_size_, global_rank);
+    exchanged_n_times++;
+    if (rank_ == 0) {
+      LOG(INFO) << "[rank " << rank_ << ']'
+                << " rank_to_global_rank: " << group_info.rank_to_global_rank
+                << ", group_name: " << group_name
+                << ", exchanged_n_times: " << exchanged_n_times;
     }
+  }
 
-    TORCH_INTERNAL_ASSERT(!group_info.rank_to_global_rank.empty());
-    rank_to_global_rank_ = group_info.rank_to_global_rank;
+  TORCH_INTERNAL_ASSERT(!group_info.rank_to_global_rank.empty());
+  rank_to_global_rank_ = group_info.rank_to_global_rank;
 
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
-    const size_t arr_size = sizeof(void*) * world_size_;
-    buffers_dev_ = reinterpret_cast<void**>(
-        c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
-    signal_pads_dev_ = reinterpret_cast<void**>(
-        c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
-    buffers_.resize(world_size_);
-    signal_pads_.resize(world_size_);
+  const size_t arr_size = sizeof(void*) * world_size_;
+  buffers_dev_ = reinterpret_cast<void**>(
+      c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
+  signal_pads_dev_ = reinterpret_cast<void**>(
+      c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
+  buffers_.resize(world_size_);
+  signal_pads_.resize(world_size_);
 
-    int threads = std::min(128, world_size_);
-    auto stream = at::cuda::getCurrentCUDAStream();
-    build_ptr_dev<<<1, threads, 0, stream>>>(buffer_handle, 0, buffers_dev_, world_size_);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-    build_ptr_dev<<<1, threads, 0, stream>>>(signal_handle, 0, signal_pads_dev_, world_size_);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-    C10_CUDA_CHECK(cudaStreamSynchronize(stream));
-    C10_CUDA_CHECK(cudaMemcpy(
-      buffers_.data(),  // dst (host)
-      buffers_dev_,  // src (device)
-      arr_size,
-      cudaMemcpyDeviceToHost));
-    C10_CUDA_CHECK(cudaMemcpy(
-      signal_pads_.data(),  // dst (host)
-      signal_pads_dev_,  // src (device)
-      arr_size,
-      cudaMemcpyDeviceToHost));
+  int threads = std::min(128, world_size_);
+  auto stream = at::cuda::getCurrentCUDAStream();
+  build_ptr_dev<<<1, threads, 0, stream>>>(buffer_handle, 0, buffers_dev_, world_size_);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  build_ptr_dev<<<1, threads, 0, stream>>>(signal_handle, 0, signal_pads_dev_, world_size_);
+  C10_CUDA_KERNEL_LAUNCH_CHECK();
+  C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+  C10_CUDA_CHECK(cudaMemcpy(
+    buffers_.data(),  // dst (host)
+    buffers_dev_,  // src (device)
+    arr_size,
+    cudaMemcpyDeviceToHost));
+  C10_CUDA_CHECK(cudaMemcpy(
+    signal_pads_.data(),  // dst (host)
+    signal_pads_dev_,  // src (device)
+    arr_size,
+    cudaMemcpyDeviceToHost));
 #endif
-  }
+}
 
+std::vector<void*> NCCLSymmetricMemory::get_buffer_ptrs() {
+  return buffers_;
+}
 
-  ~NCCLSymmetricMemory() override = default;
+std::vector<void*> NCCLSymmetricMemory::get_signal_pad_ptrs() {
+  return signal_pads_;
+}
 
-  std::vector<void*> get_buffer_ptrs() override {
-    return buffers_;
-  }
+void** NCCLSymmetricMemory::get_buffer_ptrs_dev() {
+  return buffers_dev_;
+}
 
-  std::vector<void*> get_signal_pad_ptrs() override {
-    return signal_pads_;
-  }
+void** NCCLSymmetricMemory::get_signal_pad_ptrs_dev() {
+  return signal_pads_dev_;
+}
 
-  void** get_buffer_ptrs_dev() override {
-    return buffers_dev_;
-  }
+size_t NCCLSymmetricMemory::get_buffer_size() {
+  return buffer_size_;
+}
 
-  void** get_signal_pad_ptrs_dev() override {
-    return signal_pads_dev_;
-  }
+bool NCCLSymmetricMemory::has_multicast_support() {
+  // TODO
+  return false;
+}
 
-  size_t get_buffer_size() override {
-    return buffer_size_;
-  }
+void* NCCLSymmetricMemory::get_multicast_ptr() {
+  // TODO
+  return nullptr;
+}
 
-  bool has_multicast_support() override {
-    // TODO
-    return false;
-  }
+void NCCLSymmetricMemory::barrier(int channel, size_t timeout_ms) {
+  TORCH_CHECK(false, "NYI");
+}
 
-  void* get_multicast_ptr() override {
-    // TODO
-    return nullptr;
-  }
+void NCCLSymmetricMemory::put_signal(int dst_rank, int channel, size_t timeout_ms) {
+  TORCH_CHECK(false, "NYI");
+}
 
-  void barrier(int channel, size_t timeout_ms) override {
-    // TODO
-  }
+void NCCLSymmetricMemory::wait_signal(int src_rank, int channel, size_t timeout_ms) {
+  TORCH_CHECK(false, "NYI");
+}
 
-  void put_signal(int dst_rank, int channel, size_t timeout_ms) override {
-    // TODO
-  }
+int NCCLSymmetricMemory::get_rank() {
+  return rank_;
+}
 
-  void wait_signal(int src_rank, int channel, size_t timeout_ms) override {
-    // TODO
-  }
+int NCCLSymmetricMemory::get_world_size() {
+  return world_size_;
+}
 
-  int get_rank() override {
-    return rank_;
-  }
+c10::Device NCCLSymmetricMemory::get_device() {
+  return c10::Device(c10::DeviceType::CUDA, device_idx_);
+}
 
-  int get_world_size() override {
-    return world_size_;
-  }
+const std::vector<int>& NCCLSymmetricMemory::get_rank_to_global_rank() {
+  return rank_to_global_rank_;
+}
 
-  c10::Device get_device() override {
-    return c10::Device(c10::DeviceType::CUDA, device_idx_);
-  }
+int* NCCLSymmetricMemory::get_rank_to_global_rank_dev() {
+  return nullptr;
+}
 
-  const std::vector<int>& get_rank_to_global_rank() override {
-    return rank_to_global_rank_;
-  };
+ncclWindow_t NCCLSymmetricMemory::get_window() {
+  return buffer_win_;
+}
 
-  int* get_rank_to_global_rank_dev() override {
-    return nullptr;
-  };
-
-  ncclWindow_t get_buffer_handle() {
-    return buffer_handle_;
-  }
-
-  ncclWindow_t get_signal_pad_handle() {
-    return signal_handle_;
-  }
-
- private:
-  size_t buffer_size_;
-  int device_idx_;
-  int rank_;
-  int world_size_;
-  std::vector<void*> buffers_;
-  std::vector<void*> signal_pads_;
-  void** buffers_dev_;
-  void** signal_pads_dev_;
-  std::string group_name_;
-  ncclWindow_t buffer_handle_;
-  ncclWindow_t signal_handle_;
-  std::vector<int> rank_to_global_rank_;
-};
+ncclWindow_t NCCLSymmetricMemory::get_signal_pad_handle() {
+  return signal_handle_;
+}
 
 class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
  public:

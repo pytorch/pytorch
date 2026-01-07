@@ -1,6 +1,7 @@
 # Owner(s): ["module: __torch_dispatch__"]
 # ruff: noqa: F841
 
+import gc
 import pickle
 import sys
 import tempfile
@@ -598,6 +599,8 @@ class TestPythonRegistration(TestCase):
         with self.assertRaises(AssertionError):
             test_helper("")  # alias_analysis="FROM_SCHEMA"
 
+        # Run gc to make sure the previous Library is removed.  This is needed in dynamo-wrapped 3.14t
+        gc.collect()
         test_helper("CONSERVATIVE")
 
     def test_error_for_unsupported_ns_or_kind(self) -> None:
