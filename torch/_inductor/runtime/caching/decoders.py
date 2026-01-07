@@ -59,3 +59,4 @@ def tuned_kernel_result_decoder(
 tuned_mm_result_decoder = tuned_kernel_result_decoder
 tuned_addmm_result_decoder = tuned_kernel_result_decoder
 tuned_bmm_result_decoder = tuned_kernel_result_decoder
+tuned_baddbmm_result_decoder = tuned_kernel_result_decoder

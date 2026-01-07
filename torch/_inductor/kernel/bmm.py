@@ -229,6 +229,11 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
 
 
 @L.register_lowering(aten.baddbmm)
+@memoizers.tuned_baddbmm_memoizer.memoize(
+    custom_params_encoder=encoders.tuned_baddbmm_params_encoder,
+    custom_result_encoder=encoders.tuned_kernel_result_encoder,
+    custom_result_decoder=decoders.tuned_baddbmm_result_decoder,
+)
 def tuned_baddbmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     """
     Lowering for autotuning aten.mm with different backends (Aten, Triton, CUTLASS, etc.)
