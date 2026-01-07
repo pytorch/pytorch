@@ -37,7 +37,7 @@ class Graph(_acceleratorGraph):
             Defaults to ``False``.
         pool (tuple[int, int], optional): Memory pool identifier for this graph. Multiple graphs
             can share the same pool by passing the same identifier, which can reduce memory overhead.
-            Defaults to ``None``.
+            Obtain a pool identifier by calling ``generate_graph_pool_handle()``. Defaults to ``None``.
 
     Example::
 
