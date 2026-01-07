@@ -13,6 +13,7 @@ from typing_extensions import ParamSpec, TypedDict
 
 if TYPE_CHECKING:
     from collections.abc import Callable
+from typing_extensions import TypedDict
 
 import torch
 from torch import Tensor
