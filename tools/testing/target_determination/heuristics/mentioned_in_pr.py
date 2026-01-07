@@ -22,6 +22,7 @@ from tools.testing.test_run import TestRun
 # mentions "test_foo", test_foo will be rated 1.
 class MentionedInPR(HeuristicInterface):
     def __init__(self, **kwargs: Any) -> None:
+        # pyrefly: ignore [missing-attribute]
         super().__init__(**kwargs)
 
     def _search_for_linked_issues(self, s: str) -> list[str]:

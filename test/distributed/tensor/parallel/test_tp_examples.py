@@ -8,6 +8,7 @@ from typing import NamedTuple, Optional
 import torch
 import torch.distributed as dist
 import torch.nn.functional as F
+from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.algorithms._checkpoint.checkpoint_wrapper import (
     checkpoint_wrapper,
     CheckpointImpl,
@@ -34,6 +35,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
     MLPModule,
     ModelArgs,
@@ -475,15 +477,19 @@ class DistTensorParallelExampleTest(DTensorTestBase):
         torch.manual_seed(0)
         inp = torch.randint(16, input_size, device=self.device_type)
 
-        # Without weight tying.
-        self.assertNotEqual(
-            model.embedding.weight.to_local(), model.fc.weight.to_local()
-        )
+        @maybe_run_for_local_tensor
+        def assert_not_equal(a, b):
+            self.assertNotEqual(a, b)
+
+        assert_not_equal(model.embedding.weight.to_local(), model.fc.weight.to_local())
+
         output = model(inp)
         output.sum().backward()
-        self.assertNotEqual(
+
+        assert_not_equal(
             model.embedding.weight.grad.to_local(), model.fc.weight.grad.to_local()
         )
+
         model.zero_grad()
 
         # With weight tying.
@@ -554,6 +560,10 @@ class DistTensorParallelExampleTest(DTensorTestBase):
 
 
 instantiate_parametrized_tests(DistTensorParallelExampleTest)
+
+DistTensorParallelExampleTestWithLocalTensor = create_local_tensor_test_class(
+    DistTensorParallelExampleTest,
+)
 
 if __name__ == "__main__":
     run_tests()
