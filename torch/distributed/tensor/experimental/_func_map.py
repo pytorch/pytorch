@@ -31,6 +31,7 @@ def local_map(
     device_mesh: DeviceMesh | None = None,
     *,
     redistribute_inputs: bool = False,
+    track_variant_axes: bool = False,
 ):
     """
     :meth:`local_map` is an experimental API that allows users to pass :class:`DTensor` s
@@ -86,6 +87,13 @@ def local_map(
             their placements are different from the required input placements. If this
             value is ``False`` and some :class:`DTensor` input has a different placement,
             an exception will be raised. Default: False.
+        track_variant_axes (bool, optional):
+            If True, local tensors extracted from DTensors will be wrapped in
+            :class:`LTensor` to track variance axes through the computation. This enables
+            automatic gradient aggregation for invariant inputs (e.g., replicated weights)
+            when combined with variant tensors (e.g., sharded activations) during
+            backward pass. Useful for data parallel and tensor parallel patterns where
+            gradients need to be properly aggregated across ranks. Default: False.
 
     Returns:
         A ``Callable`` that applies ``func`` to each local shard of the input :class:`DTensor`
@@ -143,6 +151,7 @@ def local_map(
                 in_grad_placements=in_grad_placements,
                 device_mesh=device_mesh,
                 redistribute_inputs=redistribute_inputs,
+                track_variant_axes=track_variant_axes,
             )
 
         return decorated
@@ -155,6 +164,7 @@ def local_map(
         in_grad_placements,
         device_mesh,
         redistribute_inputs,
+        track_variant_axes,
     )
 
 
@@ -165,6 +175,7 @@ def _local_map_wrapped(
     in_grad_placements: InputPlacements,
     device_mesh: DeviceMesh | None,
     redistribute_inputs: bool,
+    track_variant_axes: bool,
     *args,
     **kwargs,
 ):
@@ -219,9 +230,11 @@ def _local_map_wrapped(
                 )
                 if not isinstance(spec, tuple):
                     spec = tuple(spec)
-                local_arg = arg.to_local(grad_placements=spec)
+                local_arg = arg.to_local(
+                    grad_placements=spec, track_variant_axes=track_variant_axes
+                )
             else:
-                local_arg = arg.to_local()
+                local_arg = arg.to_local(track_variant_axes=track_variant_axes)
 
             if isinstance(local_arg, AsyncCollectiveTensor):
                 local_arg = local_arg.wait()
