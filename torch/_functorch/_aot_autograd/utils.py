@@ -155,7 +155,7 @@ class PytreeThunk:
     is_really_simple: Optional[bool] = None  # if the output spec is a LeafSpec
 
     def set(self, spec: pytree.TreeSpec) -> None:
-        assert self.spec is None or self.spec == spec
+        assert self.spec is None or self.spec == spec, (self.spec, spec)
         assert spec is not None
         self.spec: pytree.TreeSpec = spec
         if self.spec.type in {tuple, list} and all(
