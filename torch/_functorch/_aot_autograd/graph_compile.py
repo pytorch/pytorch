@@ -1195,6 +1195,15 @@ def maybe_inline_graph_saved_tensors_hooks(
         inner_meta.num_symints_saved_for_bw = len(
             [n for n in fw_outs_saved_for_bw if is_sym_node(n)]
         )
+        # Count tensors with no version counter check (used in tensors_saved_for_backwards_slice)
+        inner_meta.num_tensors_saved_with_no_vc_check = len(
+            [
+                n
+                for n in fw_outs_saved_for_bw
+                if isinstance(n, torch.fx.Node)
+                and n.meta.get("saved_tensor_with_no_vc_check", False)
+            ]
+        )
         bw_donated_idxs = collect_bw_donated_buffer_idxs(
             fw_module,
             bw_module,
