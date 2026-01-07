@@ -31,6 +31,7 @@ class CallTorchBind(HigherOrderOperator):
         super().__init__("call_torchbind")
 
     def __call__(self, obj, method, *args, **kwargs):
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(obj, method, *args, **kwargs)
 
     @staticmethod

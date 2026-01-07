@@ -442,6 +442,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   BINARY_POINTWISE(gcd);
   BINARY_POINTWISE(igamma);
   BINARY_POINTWISE(igammac);
+  BINARY_POINTWISE2(ldexp, Tensor);
   BINARY_POINTWISE(logaddexp);
   BINARY_POINTWISE(logaddexp2);
   POINTWISE_BOXED(lerp.Scalar);
