@@ -3652,7 +3652,7 @@ class GraphModule(torch.nn.Module):
 
             self.assertEqual(
                 range[index],
-                range_variable.apply_index(index).as_python_constant(),
+                range_variable.apply_index(None, index).as_python_constant(),
             )
 
             if expected is not None:
@@ -4216,7 +4216,7 @@ class GraphModule(torch.nn.Module):
 
         compiled = torch.compile(fn, fullgraph=True, backend="eager")
 
-        x = torch.randn(1024, device="cuda")
+        x = torch.randn(1024, device=device_type)
         result = compiled(x)
 
         self.assertEqual(result, torch.sin(x))
