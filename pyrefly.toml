@@ -86,6 +86,7 @@ ignore-missing-imports = [
     "future.utils.*",
     "past.builtins.*",
     "numba.*",
+    "nvMatmulHeuristics",
     "PIL.*",
     "moviepy.*",
     "cv2.*",
