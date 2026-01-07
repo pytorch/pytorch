@@ -262,6 +262,33 @@ def _check_for_gradient_edge(var, arg_name="argument"):
             _check_for_gradient_edge(item, f"{arg_name}[{i}]")
 
 
+def _collect_all_grad_fns(tensor: torch.Tensor) -> set[torch.autograd.graph.Node]:
+    from torch._subclasses.fake_tensor import get_plain_tensors
+    from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+
+    grad_fns: set[torch.autograd.graph.Node] = set()
+
+    # Get all plain tensors (handles nested subclasses)
+    if is_traceable_wrapper_subclass(tensor):
+        plain_tensors: list = []
+        get_plain_tensors(tensor, out=plain_tensors)
+    else:
+        plain_tensors = [tensor]
+
+    for t in plain_tensors:
+        if not isinstance(t, torch.Tensor):
+            continue
+
+        if t.grad_fn is not None:
+            grad_fns.add(t.grad_fn)
+
+        # For views, also include the base tensor's grad_fn
+        if t._base is not None and t._base.grad_fn is not None:
+            grad_fns.add(t._base.grad_fn)
+
+    return grad_fns
+
+
 def _collect_tensors_with_sources(var):
     """Extract (fake_tensor, source_name) pairs from a VariableTracker.
 
@@ -275,15 +302,27 @@ def _collect_tensors_with_sources(var):
     results = []
     if isinstance(var, TensorVariable):
         fake_tensor = var.as_proxy().node.meta.get("example_value")
-        if fake_tensor is not None:
-            source_name = var.source.name if var.source else None
-            results.append((fake_tensor, source_name))
+        assert isinstance(fake_tensor, torch._subclasses.fake_tensor.FakeTensor)
+        source_name = var.source.name if var.source else None
+        results.append((fake_tensor, source_name))
     elif isinstance(var, LazyVariableTracker):
         # Realize the lazy var to get the actual TensorVariable
         results.extend(_collect_tensors_with_sources(var.realize()))
     elif isinstance(var, BaseListVariable):
         for item in var.items:
             results.extend(_collect_tensors_with_sources(item))
+    else:
+        unimplemented(
+            gb_type="autograd.grad with unsupported argument type",
+            context=f"got {type(var).__name__}",
+            explanation=(
+                f"torch.autograd.grad() received an argument of type {type(var).__name__} "
+                "which is not supported. Expected tensor or sequence of tensors."
+            ),
+            hints=[
+                "Ensure outputs and inputs arguments are tensors or sequences of tensors.",
+            ],
+        )
     return results
 
 
@@ -1573,35 +1612,23 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             NOTE [Tracing autograd.grad in dynamo]
 
-            Tracing autograd.grad is tricky because the autograd graph may extend beyond
-            the compiled region boundary. This handler validates that tracing is safe and
-            tracks consumed grad_fns for output validation.
+            We validate two things:
 
-            Algorithm Overview:
-            1. Early graph break if previous attempt detected consumed-grad_fn issue
-            2. Graph break if compiled_autograd is enabled (incompatible features)
-            3. Reject external GradientEdge objects (can't trace external autograd nodes)
-            4. Collect grad_fns from graph inputs (tensors entering compiled region from outside)
-            5. Compute "consumed" grad_fns: all nodes reachable from autograd.grad outputs,
-               excluding autograd.grad inputs (traversal stops there)
-            6. Validate: no graph input's grad_fn is in consumed set
-            7. Track consumed grad_fns to later check if returned tensor's grad_fn is in the
-               consumed set (autograd.grad already used that grad_fn, so it can't be used again)
+            1. External grad_fns cannot be consumed: The grad_fn on external inputs
+               could change at runtime, so we would need to guard on it if we wanted
+               to trace through it. For now, we reject this case.
+               We compute "consumed" grad_fns (reachable from outputs, excluding
+               autograd.grad inputs parameter) and verify no graph input's grad_fn is in this set.
+
+            2. Returned tensors cannot have consumed grad_fns: If autograd.grad
+               consumes a grad_fn and we return a tensor connected to it, the user
+               would get "backward through graph a second time" error. We track
+               consumed grad_fns and check at output time. If violated, we retry
+               with a graph break at autograd.grad.
 
             Safe vs Unsafe Cases:
 
-            autograd.grad(outputs, inputs) traverses the autograd graph starting from
-            outputs' grad_fns and stops AT the inputs' grad_fns. This means:
-
-            SAFE: External tensor IS an input to autograd.grad
-                grad(loss, external_input)  # autograd.grad won't go beyond external_input
-
-            UNSAFE: External tensor is in the path but NOT an input
-                grad(loss, params)  # where loss depends on external_input
-                # Must traverse through external_input's grad_fn to reach params
-                # But fake tensors have wrong grad_fn, so tracing would be incorrect
-
-            Case 1 - Safe (external input as grad target):
+            Case 1 - Safe (external tensor is autograd.grad input):
                 x = torch.randn(4, requires_grad=True)
                 external = x * 2  # has external grad_fn
 
@@ -1610,47 +1637,29 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                     loss = external_input.sum()
                     return torch.autograd.grad(loss, external_input)
 
-                Why safe: autograd.grad won't go beyond external_input, so the
-                gradient computation is fully contained.
+                Safe because autograd.grad stops at external_input, never consuming
+                its external grad_fn.
 
             Case 2 - Unsafe (external grad_fn in path):
-                mod = torch.nn.Linear(4, 4)
-                external = x * 2  # has external grad_fn
-
                 @torch.compile
                 def fn(external_input):
                     loss = mod(external_input).sum()
                     return torch.autograd.grad(loss, mod.weight)
 
-                Why unsafe: To compute grad w.r.t. mod.weight, autograd must traverse
-                through external_input's grad_fn. But fake tensors have a fake grad_fn
-                that doesn't connect to the real autograd graph, so the traced result
-                would be incorrect.
+                Unsafe because autograd.grad must traverse through external_input's
+                grad_fn to reach mod.weight. The external grad_fn could change at
+                runtime, so we would need to guard on it (like AOTAutograd does).
+                For now, we reject this case.
 
-            Case 3 - Unsafe (consumed grad_fn returned):
+            Case 3 - Unsafe (returning tensor with consumed grad_fn):
                 @torch.compile
                 def fn(x):
-                    y = x * 2  # y.grad_fn = MulBackward
-                    z = y + 1  # z.grad_fn = AddBackward -> MulBackward
-                    grad = torch.autograd.grad(z.sum(), x)  # consumes both grad_fns
-                    return y, grad  # UNSAFE: y's grad_fn was consumed!
+                    y = x * 2
+                    grad = torch.autograd.grad(y.sum(), x)
+                    return y, grad  # y's grad_fn was consumed!
 
-                Why unsafe: autograd.grad consumes MulBackward (y's grad_fn). If we
-                return y and later try to backward through it, we get "backward through
-                graph a second time" error. This is detected at output validation time.
-
-                Exception: With retain_graph=True, the graph is not consumed, so
-                returning tensors whose grad_fn would otherwise be consumed is safe.
-
-            Retry Mechanism for Case 3:
-
-            Since Case 3 can only be detected at output time (we don't know what will
-            be returned when processing autograd.grad), we use a retry mechanism:
-
-            1. First attempt: trace autograd.grad, track consumed grad_fns
-            2. At output validation: check if any returned tensor's grad_fn is consumed
-            3. If consumed: raise AutogradGradRestartAnalysis, set speculation flag
-            4. Retry: speculation flag causes graph break AT autograd.grad
+                Unsafe because y's grad_fn was consumed by autograd.grad. Trying to
+                backward through y later would error.
             """
             from .. import compiled_autograd, config
             from .builder import wrap_fx_proxy
@@ -1709,27 +1718,29 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
 
             # Check for external GradientEdge objects in outputs and inputs args
+            # if there is it will be a graph break
             if len(args) >= 1:
                 _check_for_gradient_edge(args[0], "outputs")
             if len(args) >= 2:
                 _check_for_gradient_edge(args[1], "inputs")
 
-            # Collect external grad_fn objects from graph inputs, along with their sources
+            # Collect external grad_fn objects from graph inputs, along with their sources.
+            # We need to collect ALL grad_fns associated with each input tensor:
+            # - Direct grad_fn, base tensor's grad_fn (for views)
+            # - Inner tensors (for subclasses)
             external_grad_fns: set[torch.autograd.graph.Node] = set()
             # Map grad_fn -> source name for better error messages
             grad_fn_to_source: dict[torch.autograd.graph.Node, str] = {}
             for var in tx.output.input_source_to_var.values():
-                if isinstance(var, TensorVariable) and var.has_grad_fn:
-                    # Get the fake tensor's grad_fn - this represents the external grad_fn
+                if isinstance(var, TensorVariable):
                     fake_tensor = var.as_proxy().node.meta.get("example_value")
-                    assert isinstance(
-                        fake_tensor, torch._subclasses.fake_tensor.FakeTensor
-                    )
-                    if fake_tensor.grad_fn is not None:
-                        external_grad_fns.add(fake_tensor.grad_fn)
-                        # Track source name for error messages
-                        if var.source is not None:
-                            grad_fn_to_source[fake_tensor.grad_fn] = var.source.name
+                    assert isinstance(fake_tensor, torch.Tensor)
+                    tensor_grad_fns = _collect_all_grad_fns(fake_tensor)
+                    external_grad_fns.update(tensor_grad_fns)
+                    # Track source name for error messages
+                    if var.source is not None:
+                        for gf in tensor_grad_fns:
+                            grad_fn_to_source[gf] = var.source.name
 
             # Collect tensors from outputs and inputs args
             from ..output_graph import collect_reachable_grad_fns
@@ -1741,14 +1752,24 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 _collect_tensors_with_sources(args[1]) if len(args) >= 2 else []
             )
 
-            # Collect grad_fns from the inputs tensors.
-            # autograd.grad won't go beyond these tensors, so we don't need to traverse past them.
+            # Collect grad_fns from the autograd.grad inputs tensors to use as stop points.
+            # For non-leaf tensors: we stop at their grad_fn
+            # For leaf tensors (requires_grad=True, grad_fn=None): we don't add anything here,
+            # but this is fine because their AccumulateGrad is created during fake tensor
+            # tracing and is not in external_grad_fns, so it won't trigger a false positive.
             inputs_grad_fns: set[torch.autograd.graph.Node] = set()
             for tensor, _ in inputs_with_sources:
                 if isinstance(tensor, torch.Tensor) and tensor.grad_fn is not None:
                     inputs_grad_fns.add(tensor.grad_fn)
 
             # Collect all consumed grad_fns that are reachable from outputs, stopping at inputs.
+            #
+            # Note: Do not try to "optimize" by only checking inputs in the `inputs` arg.
+            # Without guarding on the autograd graph, we can't distinguish:
+            #   Case 1: x, y are independent leaves -> OK, y's path not consumed
+            #   Case 2: y = x * 2 (y.grad_fn external) -> BAD, we hit external grad_fn
+            # Since the same compiled code could be called with either, we must check
+            # ALL graph inputs for external grad_fns.
             consumed_grad_fns = collect_reachable_grad_fns(
                 outputs_with_sources, stop_at=inputs_grad_fns
             )
@@ -1761,7 +1782,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
             if external_in_consumed:
                 sources = [
-                    grad_fn_to_source.get(grad_fn) for grad_fn in external_in_consumed
+                    grad_fn_to_source[gf]
+                    for gf in external_in_consumed
+                    if gf in grad_fn_to_source
                 ]
                 context = f"inputs with external grad_fn: {sources}" if sources else ""
                 unimplemented(
@@ -1789,7 +1812,34 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 isinstance(retain_graph, ConstantVariable)
                 and retain_graph.value is True
             ):
-                tx.output.autograd_grad_consumed_grad_fns.update(consumed_grad_fns)
+                # Filter out AccumulateGrad nodes - they're never actually "consumed"
+                # by autograd. They just accumulate gradients into leaf.grad and can
+                # be traversed multiple times without issues.
+                non_leaf_consumed = {
+                    gf
+                    for gf in consumed_grad_fns
+                    if gf.name() != "torch::autograd::AccumulateGrad"
+                }
+
+                # Check for double-consumption: if any grad_fn was already consumed
+                # by a previous autograd.grad, that's an error.
+                already_consumed = tx.output.autograd_grad_consumed_grad_fns
+                double_consumed = non_leaf_consumed & already_consumed
+                if double_consumed:
+                    unimplemented(
+                        gb_type="autograd.grad with already consumed grad_fn",
+                        context=f"double consumed grad_fns: {len(double_consumed)}",
+                        explanation=(
+                            "torch.autograd.grad() is trying to consume grad_fns that were "
+                            "already consumed by a previous autograd.grad() call. This would "
+                            "cause 'backward through graph a second time' errors at runtime."
+                        ),
+                        hints=[
+                            "Use retain_graph=True in the first autograd.grad() call if you "
+                            "need to compute gradients through the same graph multiple times.",
+                        ],
+                    )
+                tx.output.autograd_grad_consumed_grad_fns.update(non_leaf_consumed)
 
             return wrap_fx_proxy(
                 tx=tx,
