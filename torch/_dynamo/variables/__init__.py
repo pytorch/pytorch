@@ -30,6 +30,7 @@ from .ctx_manager import (
     ErrorOnGraphBreakVariable,
     FSDPParamGroupUseTrainingStateVariable,
     FxTracebackAnnotateVariable,
+    GenericContextWrappingVariable,
     GradIncrementNestingCtxManagerVariable,
     GradInplaceRequiresGradCtxManagerVariable,
     GradModeVariable,
