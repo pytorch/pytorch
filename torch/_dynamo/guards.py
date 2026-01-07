@@ -39,14 +39,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
 from typing import Any, NamedTuple, NoReturn, Optional, TYPE_CHECKING, Union
-
-
-try:
-    from typing import LiteralString
-except ImportError:
-    from typing_extensions import LiteralString
-
-from typing_extensions import TypeAliasType, TypeVar
+from typing_extensions import LiteralString, TypeAliasType, TypeVar
 from weakref import ReferenceType
 
 import torch
@@ -646,7 +639,7 @@ class GuardManagerWrapper:
                 if isinstance(guard, RelationalGuard):
                     if guard not in self.printed_relational_guards:
                         self.printed_relational_guards.add(guard)
-                        # pyrefly: ignore [bad-argument-type]
+
                         body.writelines(self.get_guard_lines(guard))
                     else:
                         body.writelines(
@@ -707,7 +700,6 @@ class GuardManagerWrapper:
             for guard in mgr.get_leaf_guards():
                 if isinstance(guard, RelationalGuard):
                     if guard not in relational_guards_seen:
-                        # pyrefly: ignore [bad-argument-type]
                         self.code_parts.extend(get_code_parts(guard))
                         relational_guards_seen.add(guard)
                 else:
@@ -2600,7 +2592,9 @@ class GuardBuilder(GuardBuilderBase):
         assert output_graph is not None
         global_state = output_graph.global_state_guard
         self.check_fn_manager.global_state = global_state
+
         code = [
+            # pyrefly: ignore[missing-attribute]
             f"___check_global_state() against {self.check_fn_manager.global_state.__getstate__()}"
         ]
 
@@ -3683,7 +3677,7 @@ class CheckFunctionManager:
         save_guards: bool = False,
         strict_error: bool = False,
         source_get_cache: Optional[dict[str, Any]] = None,
-    ):
+    ) -> None:
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
 

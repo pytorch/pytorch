@@ -26,6 +26,7 @@ import re
 import sys
 import traceback
 import types
+import weakref
 from collections.abc import Callable, Sequence
 from random import Random
 from types import BuiltinFunctionType
@@ -576,7 +577,7 @@ class ExceptionVariable(VariableTracker):
         self.__traceback__: VariableTracker = ConstantVariable(None)
         # The user stack at the time this exception was first raised.
         # Used to preserve the original exception location when re-raising.
-        self.python_stack = None
+        self.python_stack: traceback.StackSummary | None = None
 
     def set_context(self, context: "ExceptionVariable") -> None:
         self.__context__ = context
@@ -1492,8 +1493,11 @@ class MethodWrapperVariable(VariableTracker):
     def get_python_hash(self) -> int:
         return hash(self.as_python_constant())
 
-    def is_python_equal(self, other: VariableTracker) -> bool:
-        return self.as_python_constant() == other.as_python_constant()
+    def is_python_equal(self, other: object) -> bool:
+        return (
+            isinstance(other, VariableTracker)
+            and self.as_python_constant() == other.as_python_constant()
+        )
 
 
 class GetSetDescriptorVariable(VariableTracker):
@@ -1638,8 +1642,11 @@ class TypingVariable(VariableTracker):
     def get_python_hash(self) -> int:
         return hash(self.as_python_constant())
 
-    def is_python_equal(self, other: VariableTracker) -> bool:
-        return self.as_python_constant() == other.as_python_constant()
+    def is_python_equal(self, other: object) -> bool:
+        return (
+            isinstance(other, VariableTracker)
+            and self.as_python_constant() == other.as_python_constant()
+        )
 
 
 @functools.lru_cache(maxsize=1)
@@ -1826,8 +1833,11 @@ class NumpyVariable(VariableTracker):
     def get_python_hash(self) -> int:
         return hash(self.as_python_constant())
 
-    def is_python_equal(self, other: VariableTracker) -> bool:
-        return self.as_python_constant() == other.as_python_constant()
+    def is_python_equal(self, other: object) -> bool:
+        return (
+            isinstance(other, VariableTracker)
+            and self.as_python_constant() == other.as_python_constant()
+        )
 
 
 # Used to keep track of NULLs pushed on the stack for Python 3.11 function calls
@@ -2329,9 +2339,10 @@ class RandomVariable(VariableTracker):
 
 class WeakRefVariable(VariableTracker):
     @staticmethod
+    # pyrefly: ignore[bad-param-name-override]
     def build(
         tx: "InstructionTranslator",
-        weakref_value: Any,
+        weakref_value: weakref.ReferenceType[Any],
         source: Source | None,
         **options: Any,
     ) -> "WeakRefVariable":
@@ -2347,7 +2358,7 @@ class WeakRefVariable(VariableTracker):
 
     def __init__(
         self, referent_vt: VariableTracker, callback_vt: VariableTracker, **options: Any
-    ):
+    ) -> None:
         super().__init__(**options)
         self.referent_vt = referent_vt
         self.callback_vt = callback_vt
@@ -2373,7 +2384,7 @@ class WeakRefVariable(VariableTracker):
         # weakref relies on the referent's hash
         return self.referent_vt.get_python_hash()
 
-    def is_python_equal(self, other: VariableTracker) -> bool:
+    def is_python_equal(self, other: object) -> bool:
         if not isinstance(other, WeakRefVariable):
             return False
         return self.referent_vt.is_python_equal(other.referent_vt)

@@ -152,7 +152,7 @@ variable_list AccumulateGrad::apply_with_saved(
   variable_copy.mutable_grad() = grad_copy;
 
   // name() includes namespace for historical reasons:
-  // torch::autograd::AcumulateGrad For Compiled Autograd, we just want the op
+  // torch::autograd::AccumulateGrad For Compiled Autograd, we just want the op
   // name without the namespace
   std::string name = "AccumulateGrad";
 
