@@ -857,8 +857,10 @@ class DTensorRandomOpsSeedConsistencyTest(DTensorTestBase):
         1. DTensor random operations respect torch.manual_seed()
         2. DTensor randn produces the same global tensor as torch.randn with identical seeds
         3. Multiple consecutive random operations maintain consistency
+        4. _StridedShard placement raises an error (not yet supported)
         """
         from torch.distributed.tensor._random import _use_thread_rng_tracker
+        from torch.distributed.tensor.placement_types import _StridedShard
 
         mesh = torch.arange(self.world_size).view(2, 2, 2)
         device_mesh = DeviceMesh(self.device_type, mesh)
@@ -900,6 +902,21 @@ class DTensorRandomOpsSeedConsistencyTest(DTensorTestBase):
                     torch.allclose(reference_tensor_2, gathered_tensor_2),
                     f"Second DTensor randn call does not match torch.randn with same seed. "
                     f"Expected: {reference_tensor_2.tolist()}, Got: {gathered_tensor_2.tolist()}",
+                )
+
+            # Test that _StridedShard placement raises an error (not yet supported)
+            strided_shard_placements = [
+                Replicate(),
+                _StridedShard(0, split_factor=2),
+                Shard(0),
+            ]
+            torch.manual_seed(42)
+            with self.assertRaisesRegex(
+                NotImplementedError,
+                "ThreadBasedRNGTracker does not support _StridedShard yet",
+            ):
+                torch.distributed.tensor.randn(
+                    (8, 8), device_mesh=device_mesh, placements=strided_shard_placements
                 )
 
     @with_comms

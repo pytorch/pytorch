@@ -585,6 +585,11 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
             global_shape = spec.shape
             mesh = spec.mesh
             placements = spec.placements
+            if any([isinstance(placement, _StridedShard) for placement in placements]):
+                # TODO(mori360): support _StridedShard
+                raise NotImplementedError(
+                    "ThreadBasedRNGTracker does not support _StridedShard yet."
+                )
             my_coordinate = mesh.get_coordinate()
 
             if my_coordinate is None:
