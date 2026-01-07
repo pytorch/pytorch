@@ -182,10 +182,34 @@ void NCCLComm::waitReady(bool longInterval) {
   if (aborted_)
     return;
   // If timeout is reached, throw an exception.
-  if (longInterval) {
-    C10D_NCCL_CHECK_TIMEOUT_SLEEP(ncclInProgress, ncclComm_, std::nullopt);
-  } else {
-    C10D_NCCL_CHECK_TIMEOUT(ncclInProgress, ncclComm_, std::nullopt);
+  // (RohitRathore1) Note: We already hold the mutex_ lock here, so the direct
+  // call to ncclCommGetAsyncError is safe from concurrent access.
+  ncclResult_t result = ncclInProgress;
+  auto startTimepoint = std::chrono::steady_clock::now();
+  auto timeout = nccl_nonblocking_timeout();
+  while (result == ncclInProgress) {
+    auto currentTime = std::chrono::steady_clock::now();
+    auto timeElapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                           currentTime - startTimepoint)
+                           .count();
+    if (timeElapsed > timeout) {
+      std::string err = "NCCL timeout in: " + std::string(__FILE__) + ":" +
+          std::to_string(__LINE__);
+      TORCH_CHECK_WITH(DistBackendError, false, err);
+    }
+    if (longInterval) {
+      std::this_thread::sleep_for(
+          std::chrono::milliseconds(kCommInitBusyWaitMillis));
+    } else {
+      sched_yield();
+    }
+    ncclCommGetAsyncError(ncclComm_, &result);
+  }
+  if (result != ncclSuccess) {
+    std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +
+        std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(result) +
+        "\n" + getNcclErrorDetailStr(result, std::nullopt);
+    TORCH_CHECK_WITH(DistBackendError, false, err);
   }
 }
 
@@ -228,7 +252,7 @@ std::shared_ptr<NCCLComm> NCCLComm::split(
   //   https://github.com/NVIDIA/nccl/issues/1472
   C10D_NCCL_CHECK_TIMEOUT_SLEEP(
       ncclCommSplit(sourceComm, color_id, rank, &(comm->ncclComm_), &config),
-      sourceComm, // wait on parent comm
+      source, // wait on parent comm
       std::nullopt);
   if (color_id >= 0) {
     // Waiting for parent comm above still does not seem to guarantee the child
@@ -376,8 +400,30 @@ void NCCLComm::abort(std::optional<std::string> commFailureReason) {
 #ifndef NCCL_HAS_COMM_NONBLOCKING
   C10D_NCCL_CHECK(::ncclCommAbort(ncclComm_), commFailureReason_);
 #else
-  C10D_NCCL_CHECK_TIMEOUT(
-      ::ncclCommAbort(ncclComm_), ncclComm_, commFailureReason_);
+  // Note: We already hold the mutex_ lock here, so the direct call to
+  // ncclCommGetAsyncError is safe from concurrent access.
+  ncclResult_t result = ::ncclCommAbort(ncclComm_);
+  auto startTimepoint = std::chrono::steady_clock::now();
+  auto timeout = nccl_nonblocking_timeout();
+  while (result == ncclInProgress) {
+    auto currentTime = std::chrono::steady_clock::now();
+    auto timeElapsed = std::chrono::duration_cast<std::chrono::seconds>(
+                           currentTime - startTimepoint)
+                           .count();
+    if (timeElapsed > timeout) {
+      std::string err = "NCCL timeout in: " + std::string(__FILE__) + ":" +
+          std::to_string(__LINE__);
+      TORCH_CHECK_WITH(DistBackendError, false, err);
+    }
+    sched_yield();
+    ncclCommGetAsyncError(ncclComm_, &result);
+  }
+  if (result != ncclSuccess) {
+    std::string err = "NCCL error in: " + std::string(__FILE__) + ":" +
+        std::to_string(__LINE__) + ", " + ncclGetErrorWithVersion(result) +
+        "\n" + getNcclErrorDetailStr(result, commFailureReason_);
+    TORCH_CHECK_WITH(DistBackendError, false, err);
+  }
 #endif
   aborted_ = true;
   ncclComm_ = nullptr;
@@ -419,6 +465,11 @@ ncclResult_t NCCLComm::checkForNcclError() {
   // Always return success, if error checks are disabled.
   return ncclSuccess;
 #endif
+}
+
+ncclResult_t NCCLComm::getAsyncError(ncclResult_t* asyncError) {
+  LockType lock(mutex_);
+  return ncclCommGetAsyncError(ncclComm_, asyncError);
 }
 
 ncclResult_t NCCLComm::registerSegment(

@@ -109,9 +109,11 @@ def _import_module(name, path):
     from importlib.abc import Loader
 
     spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None
+    if spec is None:
+        raise AssertionError(f"failed to load spec from {path}")
     module = importlib.util.module_from_spec(spec)
-    assert isinstance(spec.loader, Loader)
+    if not isinstance(spec.loader, Loader):
+        raise AssertionError(f"expected Loader, got {type(spec.loader)}")
     spec.loader.exec_module(module)
     return module
 
