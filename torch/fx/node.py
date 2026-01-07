@@ -184,7 +184,11 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
         and func.__qualname__ == f"Tensor.{func.__name__}"
     ):
         return f"torch.Tensor.{func.__name__}"
-    name = func.__name__
+    name = func.__qualname__
+    # For OpOverloads the qualname is namespace::opname, but the namespace
+    # already exists in the module so we can just filter out the namespace.
+    name = name.split("::")[-1]
+
     if name == "<lambda>":
         # For lambdas, try to get their defining name in the module
         try:
