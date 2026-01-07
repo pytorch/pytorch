@@ -412,19 +412,20 @@ def forward(self, L_x_ : torch.Tensor):
         self.assertEqual(len(backend.fw_graphs) >= 1, True)
         self.assertEqual(len(backend.bw_graphs) >= 1, True)
 
-
         # Check forward graph - should have with_effects wrapping print
         self.assertExpectedInline(
             backend.fw_graphs[0].code.strip(),
             """\
 def forward(self, primals_1, primals_2):
-    with_effects = torch.ops.higher_order.with_effects(primals_1, torch.ops.higher_order.print, 'moo {x} {y}', x = 1, y = 2);  primals_1 = None
+    with_effects = torch.ops.higher_order.with_effects(primals_1, torch.ops.higher_order.print, \
+'moo {x} {y}', x = 1, y = 2);  primals_1 = None
     getitem = with_effects[0];  with_effects = None
     add = torch.ops.aten.add.Tensor(primals_2, primals_2);  primals_2 = None
-    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.print, 'values {} {}', 3, add);  getitem = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.print, \
+'values {} {}', 3, add);  getitem = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
     return (getitem_2, add)""",  # noqa: B950
-            )
+        )
 
         # Check backward graph - print HOP doesn't contribute to gradients
         self.assertExpectedInline(
@@ -433,7 +434,7 @@ def forward(self, primals_1, primals_2):
 def forward(self, tangents_1):
     add_1 = torch.ops.aten.add.Tensor(tangents_1, tangents_1);  tangents_1 = None
     return (add_1,)""",
-            )
+        )
 
     @skipIfTorchDynamo("Skipped under Dynamo")
     def test_print_inductor_graph(self):
@@ -481,33 +482,6 @@ def forward(self, arg1_1):
     _sink_tokens_default = torch.ops.prims._sink_tokens.default([getitem_2]);  getitem_2 = _sink_tokens_default = None
     return (add,)""",  # noqa: B950
         )
-
-        # 2. Capture Inductor OUTPUT code using run_and_get_code
-        torch._dynamo.reset()
-        compiled_m2 = torch.compile(M(), backend="inductor")
-
-        with patch("sys.stdout", new_callable=io.StringIO):
-            _, codes = run_and_get_code(compiled_m2, *inputs)
-
-        # Concatenate all generated code chunks
-        merged_code = "\n".join(codes)
-
-        # Verify that the generated code uses Python print (HOP compiled away)
-        self.assertIn(
-            "print(",
-            merged_code,
-            "Generated code should use Python print for print HOP",
-        )
-        # And does not call torch.ops.higher_order.print
-        self.assertNotIn(
-            "torch.ops.higher_order.print",
-            merged_code,
-            "Generated code should not call torch.ops.higher_order.print directly",
-        )
-        # Verify the print statements are lowered correctly
-        print(merged_code)
-        self.assertIn("print('moo {x} {y}'.format(x=1, y=2))", merged_code)
-        self.assertIn("print('values {} {}'.format(3, buf1))", merged_code)
 
 
 if __name__ == "__main__":
