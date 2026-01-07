@@ -46,7 +46,8 @@ class Graph(_acceleratorGraph):
     def __init__(
         self, keep_graph: bool = False, *, pool: tuple[int, int] | None = None
     ) -> None:
-        self.pool = pool
+        super().__init__(keep_graph)
+        self.graph_pool = pool
 
     def capture_begin(
         self,
@@ -73,7 +74,7 @@ class Graph(_acceleratorGraph):
                 `relaxed`, the current thread is allowed to make potentially unsafe API calls, except for
                 calls that inherently conflict with stream capture.
         """
-        super().capture_begin(pool=self.pool, capture_error_mode=capture_error_mode)
+        super().capture_begin(pool=self.graph_pool, capture_error_mode=capture_error_mode)
 
     def capture_end(self) -> None:
         r"""
@@ -118,6 +119,20 @@ class Graph(_acceleratorGraph):
             >>> g2 = torch.accelerator.Graph(pool=pool_id)
         """
         return super().pool()
+
+    def enable_debug_mode(self) -> None:
+        r"""Enable debugging mode for ``debug_dump``."""
+        return super().enable_debug_mode()
+
+    def debug_dump(self, path: str) -> None:
+        r"""
+        Dump the captured graph to a file for debugging purposes if the debugging is
+        enabled via ``enable_debug_mode``.
+
+        Arguments:
+            path (str): Path to dump the graph to.
+        """
+        return super().debug_dump(path)
 
     def __enter__(self) -> None:
         torch.accelerator.synchronize()
