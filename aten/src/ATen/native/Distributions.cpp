@@ -43,89 +43,8 @@
 #include <ATen/ops/zeros.h>
 #endif
 
+#include <random>
 #include <utility>
-
-namespace {
-/*
- * This section is a counterpart to Distributions.cu
- *
- */
-
-// The function `sample_poisson`
-// is adapted from Numpy's distributions.c implementation.
-// It is MIT licensed, so here is the copyright:
-
-/* Copyright 2005 Robert Kern (robert.kern@gmail.com)
- *
- * Permission is hereby granted, free of charge, to any person obtaining a
- * copy of this software and associated documentation files (the
- * "Software"), to deal in the Software without restriction, including
- * without limitation the rights to use, copy, modify, merge, publish,
- * distribute, sublicense, and/or sell copies of the Software, and to
- * permit persons to whom the Software is furnished to do so, subject to
- * the following conditions:
- *
- * The above copyright notice and this permission notice shall be included
- * in all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS
- * OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
- * MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
- * IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
- * CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
- * TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
- * SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
- */
-
-
-int64_t sample_poisson(double lambda, at::CPUGeneratorImpl* generator) {
-  TORCH_CHECK(lambda >= 0, "invalid Poisson rate, expected rate to be non-negative");
-  at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
-  if (lambda >= 10) {
-    // transformed rejection method, (Hoermann, 1993)
-
-    double slam = std::sqrt(lambda);
-    double loglam = std::log(lambda);
-    double b = 0.931 + 2.53 * slam;
-    double a = -0.059 + 0.02483 * b;
-    double invalpha = 1.1239 + 1.1328 / (b - 3.4);
-    double vr = 0.9277 - 3.6224 / (b - 2);
-
-    while (true) {
-      double U = standard_uniform(generator) - 0.5;
-      double V = standard_uniform(generator);
-      double us = 0.5 - std::fabs(U);
-      auto k = std::floor((2 * a / us + b) * U + lambda + 0.43);
-      if ((us >= 0.07) && (V <= vr)) {
-        return static_cast<int64_t>(k);
-      }
-      if ((k < 0) || ((us < 0.013) && (V > us))) {
-        continue;
-      }
-      if ((std::log(V) + std::log(invalpha) - std::log(a / (us * us) + b)) <=
-          (-lambda + k * loglam - std::lgamma(k + 1))) {
-        return static_cast<int64_t>(k);
-      }
-    }
-  } else if (lambda == 0) {
-    return 0;
-  } else {
-    auto enlam = std::exp(-lambda);
-    int64_t X = 0;
-    auto prod = 1.0;
-    while (true) {
-      auto U = standard_uniform(generator);
-      prod *= U;
-      if (prod > enlam) {
-        X += 1;
-      } else {
-        return X;
-      }
-    }
-  }
-}
-
-} // namespace
 
 namespace at::native {
 
@@ -442,15 +361,10 @@ Tensor _s_binomial_cpu(const Tensor& count, const Tensor& prob, std::optional<Ge
     CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    cpu_serial_kernel(iter, [generator](scalar_t count_val, scalar_t prob_val) -> scalar_t{
-      auto uniform_lambda = [generator] () {
-        at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
-        return standard_uniform(generator);
-      };
-      BaseSampler<double, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
-
-      auto sample = sample_binomial<scalar_t, double, decltype(uniform_lambda)>(count_val, prob_val, standard_uniform);
-      return static_cast<scalar_t>(sample);
+    std::mt19937 stdgenerator(generator->random());
+    cpu_serial_kernel(iter, [&stdgenerator](scalar_t count_val, scalar_t prob_val) -> scalar_t{
+      std::binomial_distribution<int64_t> dist(count_val, static_cast<double>(prob_val));
+      return dist(stdgenerator);
     });
   });
   return ret;
@@ -466,8 +380,10 @@ Tensor _s_poisson_cpu(const Tensor& lambda, std::optional<Generator> gen) {
     CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    cpu_serial_kernel(iter, [generator](scalar_t lambda_val) -> scalar_t{
-      return static_cast<scalar_t>(sample_poisson(static_cast<double>(lambda_val), generator));
+    std::mt19937 stdgenerator(generator->random());
+    cpu_serial_kernel(iter, [&stdgenerator](scalar_t lambda_val) -> scalar_t{
+      std::poisson_distribution<int64_t> dist(static_cast<double>(lambda_val));
+      return dist(stdgenerator);
     });
   });
   return ret;
@@ -483,20 +399,10 @@ Tensor _s_gamma_cpu(const Tensor& alpha, std::optional<Generator> gen) {
     CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    cpu_serial_kernel(iter, [generator](scalar_t alpha_val) -> scalar_t{
-      auto uniform_lambda = [generator] () {
-        at::uniform_real_distribution<double> standard_uniform(0.0, 1.0);
-        return standard_uniform(generator);
-      };
-      BaseSampler<double, decltype(uniform_lambda)> standard_uniform(uniform_lambda);
-
-      auto normal_lambda = [generator] () {
-        at::normal_distribution<double> normal(0.0, 1.0);
-        return normal(generator);
-      };
-      BaseSampler<double, decltype(normal_lambda)> standard_normal(normal_lambda);
-      auto sample = sample_gamma<scalar_t, double, decltype(uniform_lambda), decltype(normal_lambda)>(alpha_val, standard_uniform, standard_normal);
-      return std::max(std::numeric_limits<scalar_t>::min(), (scalar_t) sample);
+    std::mt19937 stdgenerator(generator->random());
+    cpu_serial_kernel(iter, [&stdgenerator](scalar_t alpha_val) -> scalar_t{
+      std::gamma_distribution<double> dist(alpha_val);
+      return std::max<scalar_t>(std::numeric_limits<scalar_t>::min(), dist(stdgenerator));
     });
   });
 
