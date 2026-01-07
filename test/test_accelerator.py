@@ -245,6 +245,14 @@ class TestAccelerator(TestCase):
         self.assertGreaterEqual(free_bytes, 0)
         self.assertGreaterEqual(total_bytes, 0)
 
+    def test_mempool_id(self):
+        pool1 = torch.accelerator.generate_graph_pool_handle()
+        self.assertGreater(pool1[1], 0)
+        self.assertEqual(pool1[0], 0)
+        pool2 = torch.accelerator.generate_graph_pool_handle()
+        self.assertGreater(pool2[1], pool1[1])
+        self.assertEqual(pool2[0], 0)
+
 
 if __name__ == "__main__":
     run_tests()
