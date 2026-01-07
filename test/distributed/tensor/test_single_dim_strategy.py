@@ -583,6 +583,29 @@ class TestExpandPlaceholder(TestCase):
 
         self.assertEqual(expanded_mixed, expected_mixed)
 
+    def test_opschema_hash_includes_placements(self):
+        """Test OpSchema hashing includes placements for LRU cache correctness."""
+        mesh = DeviceMesh("cpu", mesh=torch.arange(8).reshape(2, 2, 2))
+        meta = TensorMeta(torch.Size([8, 8]), (8, 1), torch.float32)
+
+        # Identical placements should hash the same
+        spec1 = DTensorSpec(mesh, (Shard(0), Replicate(), Replicate()), meta)
+        spec2 = DTensorSpec(mesh, (Shard(0), Replicate(), Replicate()), meta)
+        schema1 = OpSchema(
+            torch.ops.aten.add.Tensor, (OpStrategy([OpSpec(spec1)]),), {}
+        )
+        schema2 = OpSchema(
+            torch.ops.aten.add.Tensor, (OpStrategy([OpSpec(spec2)]),), {}
+        )
+        self.assertEqual(hash(schema1), hash(schema2))
+
+        # Different placements should hash differently
+        spec3 = DTensorSpec(mesh, (Replicate(), Shard(1), Replicate()), meta)
+        schema3 = OpSchema(
+            torch.ops.aten.add.Tensor, (OpStrategy([OpSpec(spec3)]),), {}
+        )
+        self.assertNotEqual(hash(schema1), hash(schema3))
+
 
 @torch.library.custom_op("mylib::dummy_add", mutates_args=())
 def dummy_add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:

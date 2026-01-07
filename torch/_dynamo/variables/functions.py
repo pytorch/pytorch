@@ -2295,6 +2295,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         if self.fn in (
             dist.all_reduce,
             dist.reduce_scatter_tensor,
+            # pyrefly: ignore [deprecated]
             dist._reduce_scatter_base,
         ):
             reduce_op_var = kwargs.get("op")
@@ -2668,7 +2669,7 @@ class SysFunctionVariable(VariableTracker):
     ) -> VariableTracker:
         if self.value is sys.exc_info:
             return self.exc_info(tx)
-        # pyrefly: ignore[missing-attribute]
+
         assert self.value is sys.exception
         return self.exception(tx)
 

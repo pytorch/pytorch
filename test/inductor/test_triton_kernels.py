@@ -2665,12 +2665,15 @@ def forward(self, arg0_1, arg1_1):
             dst_ptr,
             n_elements,
             stride,
+            clip_limit,
             BLOCK_SIZE: tl.constexpr,
         ):
             pid = tl.program_id(0)
             offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
             mask = offs < n_elements
             x = tl.load(src_ptr + offs * stride, mask=mask)
+            if clip_limit is not None:
+                x = tl.clamp(x, min=-1000.1, max=1000.1)
             tl.store(dst_ptr + offs * stride, x, mask=mask)
 
         t = torch.randn(1024, device=GPU_TYPE)
@@ -2681,6 +2684,7 @@ def forward(self, arg0_1, arg1_1):
             "dst_ptr": out,
             "n_elements": 1024,
             "stride": 1,
+            "clip_limit": None,
             "BLOCK_SIZE": 256,
         }
 
