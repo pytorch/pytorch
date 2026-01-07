@@ -230,9 +230,10 @@ class SubstringSet:
 DEVICE_SUPPORTS_BACKWARDS = SubstringSet(
     [
         "cuda",
-        # Note: CPU backward is NOT supported for compiled flex_attention.
-        # The eager implementation supports backward, but the compiled CPU
-        # template (CppFlexAttentionTemplate) does not return logsumexp needed for backward.
+        # Note: CPU backward is NOT supported for compiled flex_attention (torch.compile).
+        # The compiled CPU template (CppFlexAttentionTemplate) does not compute logsumexp
+        # needed for backward. Users should use eager mode for CPU training.
+        # CPU inference (forward-only) with torch.compile IS supported.
     ]
 )
 
@@ -3319,6 +3320,90 @@ class TestFlexAttention(InductorTestCase):
         self.assertFalse(torch.isinf(out).any(), f"Output contains Inf for doc_lens={doc_lens}")
 
     @supported_platform
+    @skip_on_cpu
+    def test_varlen_asymmetric_block_sizes(self, device):
+        """Test varlen with asymmetric Q and KV block sizes BLOCK_SIZE=(128, 256).
+
+        Note: The block sizes must be divisible by the Triton kernel's BLOCK_M and BLOCK_N
+        (typically 128). So we use (128, 256) for asymmetric testing.
+        """
+        torch.manual_seed(42)
+        Q_BLOCK_SIZE = 128
+        KV_BLOCK_SIZE = 256
+        HEAD_DIM = 64
+        NUM_HEADS = 2
+
+        # Use doc lengths that exercise different block boundaries for Q and KV
+        doc_lens = [200, 300, 250]
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        q_seq_lens = torch.tensor(doc_lens, device=device)
+        kv_seq_lens = torch.tensor(doc_lens, device=device)
+
+        block_mask = create_varlen_block_mask(
+            causal_mask,
+            B=1,
+            H=NUM_HEADS,
+            q_seq_lens=q_seq_lens,
+            kv_seq_lens=kv_seq_lens,
+            device=device,
+            BLOCK_SIZE=(Q_BLOCK_SIZE, KV_BLOCK_SIZE),
+        )
+
+        # Verify block mask structure with asymmetric block sizes
+        # Q blocks: ceil(200/128) + ceil(300/128) + ceil(250/128) = 2 + 3 + 2 = 7 blocks
+        # KV blocks: ceil(200/256) + ceil(300/256) + ceil(250/256) = 1 + 2 + 1 = 4 blocks
+        # Logical Q len: 2*128 + 3*128 + 2*128 = 896
+        # Logical KV len: 1*256 + 2*256 + 1*256 = 1024
+        expected_q_len = 256 + 384 + 256  # 896
+        expected_kv_len = 256 + 512 + 256  # 1024
+        self.assertEqual(block_mask.seq_lengths, (expected_q_len, expected_kv_len))
+
+        # Verify offsets shapes match block counts
+        num_q_blocks = expected_q_len // Q_BLOCK_SIZE  # 7
+        num_kv_blocks = expected_kv_len // KV_BLOCK_SIZE  # 4
+        self.assertEqual(block_mask.q_offsets.shape, (1, NUM_HEADS, num_q_blocks))
+        self.assertEqual(block_mask.kv_offsets.shape, (1, NUM_HEADS, num_kv_blocks))
+
+        # Verify limits shapes
+        self.assertEqual(block_mask.q_limits.shape, (1, NUM_HEADS, num_q_blocks))
+        self.assertEqual(block_mask.kv_limits.shape, (1, NUM_HEADS, num_kv_blocks))
+
+        # Physical tensor size (compact)
+        physical_len = sum(doc_lens)
+
+        query = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
+        key = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
+        value = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
+
+        # Test forward pass
+        compiled_flex = torch.compile(flex_attention)
+        out = compiled_flex(query, key, value, block_mask=block_mask)
+
+        self.assertEqual(out.shape, (1, NUM_HEADS, physical_len, HEAD_DIM))
+        self.assertFalse(torch.isnan(out).any(), "Output contains NaN")
+        self.assertFalse(torch.isinf(out).any(), "Output contains Inf")
+
+        # Test backward pass with asymmetric block sizes
+        query_grad = query.clone().requires_grad_(True)
+        key_grad = key.clone().requires_grad_(True)
+        value_grad = value.clone().requires_grad_(True)
+
+        out_grad = compiled_flex(query_grad, key_grad, value_grad, block_mask=block_mask)
+        grad_out = torch.randn_like(out_grad)
+        out_grad.backward(grad_out)
+
+        # Verify gradients are computed
+        self.assertEqual(query_grad.grad.shape, query.shape)
+        self.assertEqual(key_grad.grad.shape, key.shape)
+        self.assertEqual(value_grad.grad.shape, value.shape)
+        self.assertFalse(torch.isnan(query_grad.grad).any())
+        self.assertFalse(torch.isnan(key_grad.grad).any())
+        self.assertFalse(torch.isnan(value_grad.grad).any())
+
+    @supported_platform
     @common_utils.parametrize("device_str", ["cpu", "cuda"])
     def test_varlen_eager_forward(self, device, device_str):
         """Test varlen works in eager mode (without torch.compile).
@@ -3549,6 +3634,87 @@ class TestFlexAttention(InductorTestCase):
         self.assertEqual(out.shape, (1, NUM_HEADS, physical_len, HEAD_DIM))
         self.assertFalse(torch.isnan(out).any(), "CPU output contains NaN")
         self.assertFalse(torch.isinf(out).any(), "CPU output contains Inf")
+
+    @supported_platform
+    def test_cpu_compiled_backward_raises_error(self, device):
+        """Test that CPU backward with torch.compile raises a clear error.
+
+        CPU inference (forward-only) with torch.compile is supported, but
+        CPU training (backward) with torch.compile is not yet supported.
+        This test verifies the error message is clear.
+        """
+        cpu_device = "cpu"
+        HEAD_DIM = 64
+        SEQ_LEN = 128
+
+        query = torch.randn(1, 1, SEQ_LEN, HEAD_DIM, device=cpu_device, dtype=torch.float32, requires_grad=True)
+        key = torch.randn(1, 1, SEQ_LEN, HEAD_DIM, device=cpu_device, dtype=torch.float32, requires_grad=True)
+        value = torch.randn(1, 1, SEQ_LEN, HEAD_DIM, device=cpu_device, dtype=torch.float32, requires_grad=True)
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_block_mask(causal_mask, 1, 1, SEQ_LEN, SEQ_LEN, device=cpu_device)
+
+        # Compiled forward should work
+        compiled_flex = torch.compile(flex_attention)
+        out = compiled_flex(query, key, value, block_mask=block_mask)
+
+        # Verify forward output is valid
+        self.assertEqual(out.shape, (1, 1, SEQ_LEN, HEAD_DIM))
+        self.assertFalse(torch.isnan(out).any())
+
+        # Backward should raise NotImplementedError with clear message
+        grad_out = torch.randn_like(out)
+        with self.assertRaises(Exception) as context:
+            out.backward(grad_out)
+
+        # Check that error message mentions CPU backward is not supported
+        error_msg = str(context.exception)
+        self.assertTrue(
+            "CPU" in error_msg or "cpu" in error_msg,
+            f"Error message should mention CPU: {error_msg}"
+        )
+
+    @supported_platform
+    def test_cpu_eager_backward_works(self, device):
+        """Test that CPU backward with eager mode (no torch.compile) works.
+
+        This verifies the fallback path for CPU training.
+        """
+        cpu_device = "cpu"
+        HEAD_DIM = 64
+        SEQ_LEN = 64
+
+        query = torch.randn(1, 1, SEQ_LEN, HEAD_DIM, device=cpu_device, dtype=torch.float32, requires_grad=True)
+        key = torch.randn(1, 1, SEQ_LEN, HEAD_DIM, device=cpu_device, dtype=torch.float32, requires_grad=True)
+        value = torch.randn(1, 1, SEQ_LEN, HEAD_DIM, device=cpu_device, dtype=torch.float32, requires_grad=True)
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        block_mask = create_block_mask(causal_mask, 1, 1, SEQ_LEN, SEQ_LEN, device=cpu_device)
+
+        # Run in eager mode (no torch.compile)
+        import warnings
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore")
+            out = flex_attention(query, key, value, block_mask=block_mask)
+
+        # Backward should work in eager mode
+        grad_out = torch.randn_like(out)
+        out.backward(grad_out)
+
+        # Verify gradients are computed
+        self.assertIsNotNone(query.grad)
+        self.assertIsNotNone(key.grad)
+        self.assertIsNotNone(value.grad)
+        self.assertEqual(query.grad.shape, query.shape)
+        self.assertEqual(key.grad.shape, key.shape)
+        self.assertEqual(value.grad.shape, value.shape)
+        self.assertFalse(torch.isnan(query.grad).any())
+        self.assertFalse(torch.isnan(key.grad).any())
+        self.assertFalse(torch.isnan(value.grad).any())
 
     # ============== End of varlen document masking tests ==============
 

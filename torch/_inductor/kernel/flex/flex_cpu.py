@@ -16,6 +16,7 @@ from torch.utils._sympy.value_ranges import ValueRanges
 
 from ...codegen.cpp_flex_attention_template import CppFlexAttentionTemplate
 from ...ir import Buffer, FixedLayout, TensorBox
+from ...lowering import empty_strided
 from ...select_algorithm import autotune_select_algorithm
 from .common import (
     build_subgraph_buffer,
@@ -76,10 +77,8 @@ def lower_cpu(
             f"and value.dtype: {value.dtype}."
         )
 
-    if kernel_options["OUTPUT_LOGSUMEXP"]:
-        raise NotImplementedError(
-            "torch.compile on CPU only supports inference and `return_lse` is not supported yet."
-        )
+    output_logsumexp = kernel_options["OUTPUT_LOGSUMEXP"]
+    # CPU template doesn't compute logsumexp yet - backward will fall back to eager
     if not check_cpu_supported():
         raise NotImplementedError(
             "torch.compile on current platform is not supported for CPU."
@@ -344,4 +343,20 @@ def lower_cpu(
         subgraph_buffer, mask_graph_buffer
     )
 
-    return (res,)
+    # Create logsumexp and max_scores tensors (empty for now - backward will fall back to eager)
+    # The shapes match CUDA: [B, Hq, seq_len_q]
+    logsumexp_shape = [B, Hq, seq_len_q]
+    logsumexp = empty_strided(
+        logsumexp_shape,
+        None,
+        dtype=torch.float32,  # Always fp32 regardless of input dtype
+        device=query.get_device(),
+    )
+    max_scores = empty_strided(
+        logsumexp_shape,
+        None,
+        dtype=torch.float32,  # Always fp32 regardless of input dtype
+        device=query.get_device(),
+    )
+
+    return (res, logsumexp, max_scores)

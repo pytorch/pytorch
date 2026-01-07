@@ -226,8 +226,12 @@ def flex_attention(
     use_decode = (backend == "TRITON_DECODE") or (backend == "AUTO" and can_use_decode)
 
     if backend == "TRITON_DECODE" and not can_use_decode:
+        reason = ""
+        if has_varlen_offsets:
+            reason = "Varlen block masks (created with create_varlen_block_mask) are not supported with flex_decoding. "
         raise RuntimeError(
-            "BACKEND='TRITON_DECODE' was specified but flex_decoding cannot be used for this input. "
+            f"BACKEND='TRITON_DECODE' was specified but flex_decoding cannot be used for this input. "
+            f"{reason}"
             "flex_decoding is only available for short sequence lengths with specific configurations."
         )
 
@@ -672,6 +676,17 @@ def flex_attention_backward(*args, **kwargs):
         score_mod_other_buffers,
         mask_mod_other_buffers,
     ) = args
+
+    # CPU backward is not yet supported in compiled mode
+    # The CPU forward template doesn't compute logsumexp needed for backward
+    # Users should use eager mode for CPU training
+    if query.get_device().type == "cpu":
+        raise NotImplementedError(
+            "torch.compile backward for flex_attention on CPU is not yet supported. "
+            "For CPU training, disable torch.compile or use eager mode. "
+            "CPU inference (forward-only) with torch.compile is supported."
+        )
+
     (
         block_mask_q_length,
         block_mask_kv_length,

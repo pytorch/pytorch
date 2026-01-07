@@ -1352,6 +1352,9 @@ def create_varlen_block_mask(
             f"Got {num_docs} and {kv_seq_lens.shape[0]}"
         )
 
+    if (q_seq_lens <= 0).any() or (kv_seq_lens <= 0).any():
+        raise ValueError("All sequence lengths must be positive (> 0)")
+
     # Compute number of blocks per document
     q_blocks_per_doc = (q_seq_lens + Q_BLOCK_SIZE - 1) // Q_BLOCK_SIZE
     kv_blocks_per_doc = (kv_seq_lens + KV_BLOCK_SIZE - 1) // KV_BLOCK_SIZE
@@ -1569,10 +1572,9 @@ def _apply_kernel_options(
         # We used to check if q,k,v required grads but since captured buffers can require grad
         # we always write unless in no_grad
         kernel_options["OUTPUT_LOGSUMEXP"] = torch.is_grad_enabled()
-        if any_inputs_on_cpu_device:
-            # CPU with torch.compile now supports inference, and will not return lse
-            # TODO: support CPU for training and return lse
-            kernel_options["OUTPUT_LOGSUMEXP"] = False
+        # Note: CPU forward returns empty logsumexp tensors (not computed by C++ template).
+        # CPU backward will raise NotImplementedError in the inductor lowering.
+        # For CPU training with backward, users should use eager mode instead of torch.compile.
 
     # If forward kernel needs to return max is decided by this rule internally.
     if "OUTPUT_MAX" in kernel_options:
