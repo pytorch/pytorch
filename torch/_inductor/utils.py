@@ -111,7 +111,7 @@ def get_gpu_type() -> str:
     return gpu_type
 
 
-from torch._dynamo.device_interface import get_interface_for_device
+from torch._dynamo.device_interface import DeviceInterface, get_interface_for_device
 from torch._dynamo.utils import detect_fake_mode
 from torch.autograd import DeviceType
 from torch.autograd.profiler_util import EventList
@@ -3575,19 +3575,22 @@ def register_op_requires_libdevice_fp64(name: str) -> None:
     op_requires_libdevice_fp64.add(name)
 
 
-def get_current_backend(device_type: Optional[str] = None) -> str:
+def get_current_backend(device_type: str | None = None) -> str:
+    """Get the codegen backend for the given device type (or that of the current
+    graph if not specified), else throw."""
     from torch._inductor.virtualized import V
 
-    if not device_type:
+    if device_type is None:
         device_type = V.graph.get_current_device_or_throw().type
-    if device_type == "cpu":
-        return config.cpu_backend
-    elif device_type == "mps":
-        return "mps"
-    elif device_type == "xpu":
-        return config.xpu_backend
-    else:
-        return config.cuda_backend
+
+    device_interface: type[DeviceInterface] = get_interface_for_device(device_type)
+    device_inductor_backend: Optional[str] = device_interface.inductor_backend()
+
+    if device_inductor_backend is None:
+        raise ValueError(
+            f"Couldn't get an Inductor backend for device type {device_type}"
+        )
+    return device_inductor_backend
 
 
 def upcast_compute_type(dtype: torch.dtype) -> torch.dtype:
