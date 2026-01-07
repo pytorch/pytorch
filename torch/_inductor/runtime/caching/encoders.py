@@ -562,6 +562,55 @@ def tuned_baddbmm_params_encoder(
     return _encode_kernel_inputs(kernel_inputs)
 
 
+def tuned_mm_plus_mm_params_encoder(
+    mat1: Buffer,
+    mat2: Buffer,
+    mat3: Buffer,
+    mat4: Buffer,
+    *,
+    layout: Layout | None = None,
+) -> TunedKernelEncodedParams:
+    """Encode parameters for tuned_mm_plus_mm into a human-readable dict.
+
+    This encoder mirrors the behavior of tuned_mm_plus_mm:
+    1. First calls mm_args to realize all four matrices
+    2. Creates MMKernelInputs with all four realized matrices
+    3. Extracts the same information used by _generate_kernel_inputs_key
+
+    The encoding includes:
+    - nodes: dtype, shape (hinted), and stride (hinted) for each of the 4 input nodes
+
+    Args:
+        mat1: First matrix buffer (for first mm)
+        mat2: Second matrix buffer (for first mm)
+        mat3: Third matrix buffer (for second mm)
+        mat4: Fourth matrix buffer (for second mm)
+        layout: Optional layout
+
+    Returns:
+        A dict containing the encoded parameters in human-readable form
+    """
+    from torch._inductor.kernel.mm_common import mm_args
+    from torch._inductor.kernel_inputs import MMKernelInputs
+
+    # First call mm_args to realize the matrices, exactly as done in tuned_mm_plus_mm
+    _m1, _n1, _k1, _layout1, mat1_realized, mat2_realized = mm_args(
+        mat1, mat2, layout=layout
+    )
+    _m2, _n2, _k2, _layout2, mat3_realized, mat4_realized = mm_args(
+        mat3, mat4, layout=layout
+    )
+
+    # Create MMKernelInputs with all 4 realized matrices
+    kernel_inputs = MMKernelInputs(
+        [mat1_realized, mat2_realized, mat3_realized, mat4_realized],
+        mat1_idx=0,
+        mat2_idx=1,
+    )
+
+    return _encode_kernel_inputs(kernel_inputs)
+
+
 def tuned_kernel_result_encoder(
     fn: Callable[_P, TensorBox],
 ) -> Callable[
