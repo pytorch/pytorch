@@ -307,10 +307,3 @@ Common Pitfalls
 
 3. **Inner Tensor Gradients**: Creating LocalTensor from tensors with ``requires_grad=True``
    will raise an error.
-
-See Also
---------
-
-- :ref:`DTensor Tutorial <dtensor_tutorial>` - Learn about distributed tensors
-- :ref:`FSDP Tutorial <fsdp_tutorial>` - Fully Sharded Data Parallel training
-- :ref:`Device Mesh <device_mesh>` - Understanding device meshes
