@@ -1803,7 +1803,12 @@ def _raise_if_functorch_active():
 
 # NOTE: this function must be torch._dynamo.allow_in_graph-able. Non tensor/symnode inputs must be constants.
 def _backward_prologue_functional(
-    ctx_saved_tensors, ctx_symints, metadata, maybe_subclass_metadata, *flat_args
+    ctx_saved_tensors,
+    ctx_symints,
+    metadata,
+    maybe_subclass_metadata,
+    *flat_args,
+    ctx_saved_opaque=None,
 ):
     # Calling convention: we expect a grad_out passed to the backward:
     # - for every output of the fw that does *not* alias an input or graph intermediate
@@ -1900,9 +1905,11 @@ def _backward_prologue_functional(
     # Every dereference of ctx.saved_tensors incurs saved_tensors_hooks calls
     # There are tests that count these calls, saving to var.
     num_ctx_saved_tensors = len(ctx_saved_tensors)
+    num_opaque = len(ctx_saved_opaque) if ctx_saved_opaque else 0
     all_args = [
         *ctx_symints,
         *ctx_saved_tensors,
+        *(ctx_saved_opaque if ctx_saved_opaque else ()),
         *flat_bw_args_with_grads,
         *bw_tokens,
         *rng_args,
@@ -1936,7 +1943,7 @@ def _backward_prologue_functional(
     tangents_start_idx = (
         len(all_args) - num_flat_bw_args_with_grads - len(rng_args) - len(bw_tokens)
     )
-    assert tangents_start_idx == len(ctx_symints) + num_ctx_saved_tensors
+    assert tangents_start_idx == len(ctx_symints) + num_ctx_saved_tensors + num_opaque
     tangents_end_idx = len(all_args) - len(rng_args) - len(bw_tokens)
 
     # TODO: figure out how to refactor the backward properly
@@ -2272,6 +2279,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         *,
         fw_metadata: ViewAndMutationMeta,  # runtime metadata
         try_save_cache_entry: Optional[Callable],  # Serialization function
+        num_opaque_objects_saved_for_bw_: int,
     ):
         # For additional context see Note [CUDA Graph Safe RNG Functionalization]
         # Each pair forward, backward rng states must be equal prior to its invocation on any
@@ -2307,6 +2315,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             metadata: ViewAndMutationMeta = fw_metadata  # type: ignore[assignment]
             maybe_subclass_metadata: Optional[SubclassMeta] = maybe_subclass_meta
             num_symints_saved_for_bw = num_symints_saved_for_bw_
+            num_opaque_objects_saved_for_bw = num_opaque_objects_saved_for_bw_
             _aot_id = aot_config.aot_id
             _lazy_backward_info = lazy_backward_info
 
@@ -2370,6 +2379,8 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 ]
                 assert all(
                     isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards
+                ), (
+                    f"Expected all tensors, got: {[type(x) for x in tensors_saved_for_backwards]}"
                 )
 
                 def mark_dynamic_activations(activations: list[torch.Tensor]):
@@ -2397,6 +2408,13 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     for x in symint_outs
                 ), str([type(x) for x in symint_outs])
                 ctx.symints = symint_outs
+
+                # Save opaque objects (FakeScriptObject instances) for backward
+                opaque_outs = fw_outs[
+                    CompiledFunction.metadata.opaque_objects_saved_for_backwards_slice
+                ]
+                # Store opaque objects in ctx for backward
+                ctx.saved_opaque_objects = opaque_outs
 
                 raw_returns = fw_outs[0:num_forward_returns]
 
@@ -2480,6 +2498,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     CompiledFunction.metadata,
                     CompiledFunction.maybe_subclass_metadata,
                     *flat_args,
+                    ctx_saved_opaque=getattr(ctx, "saved_opaque_objects", None),
                 )
 
                 if num_rng:
