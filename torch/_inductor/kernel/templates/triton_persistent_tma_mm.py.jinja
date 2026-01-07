@@ -84,46 +84,48 @@
 
         rk = ki * BLOCK_K
 
-        {%- if TMA_EXPERIMENTAL_API %}
-        a = tl._experimental_descriptor_load(
-            a_desc_ptr,
-            [rm, rk] if A_ROW_MAJOR else [rk, rm],
-            [BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
-            A.dtype.element_ty,
-        )
-        b = tl._experimental_descriptor_load(
-            b_desc_ptr,
-            [rk, rn] if B_ROW_MAJOR else [rn, rk],
-            [BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
-            B.dtype.element_ty,
-        )
-        {%- else %}
-        a = tl.load_tensor_descriptor(
-            a_desc,
-            [rm, rk] if A_ROW_MAJOR else [rk, rm],
-        )
-        b = tl.load_tensor_descriptor(
-            b_desc,
-            [rk, rn] if B_ROW_MAJOR else [rn, rk],
-        )
-        {%- endif %}
-        acc += tl.dot(
-            a if A_ROW_MAJOR else a.T,
-            b if B_ROW_MAJOR else b.T,
-            allow_tf32=ALLOW_TF32,
-        )
+        if (rm < M and rn < N) and rk < K:
 
-        if ki == k_tiles - 1:
-            # inductor generates a suffix
             {%- if TMA_EXPERIMENTAL_API %}
-            # rematerialize rm and rn to save registers
-            rcm = rm + tl.arange(0, BLOCK_M)
-            rcn = rn + tl.arange(0, BLOCK_N)
-            idx_m = rcm[:, None]
-            idx_n = rcn[None, :]
-            mask = (idx_m < M) & (idx_n < N)
-            {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=12, val_shape=("BLOCK_M", "BLOCK_N"))}}
+            a = tl._experimental_descriptor_load(
+                a_desc_ptr,
+                [rm, rk] if A_ROW_MAJOR else [rk, rm],
+                [BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
+                A.dtype.element_ty,
+            )
+            b = tl._experimental_descriptor_load(
+                b_desc_ptr,
+                [rk, rn] if B_ROW_MAJOR else [rn, rk],
+                [BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
+                B.dtype.element_ty,
+            )
             {%- else %}
-            {{store_output(("rm", "rn"), "acc", indent_width=12, val_shape=("BLOCK_M", "BLOCK_N"), block_indexing=True)}}
+            a = tl.load_tensor_descriptor(
+                a_desc,
+                [rm, rk] if A_ROW_MAJOR else [rk, rm],
+            )
+            b = tl.load_tensor_descriptor(
+                b_desc,
+                [rk, rn] if B_ROW_MAJOR else [rn, rk],
+            )
             {%- endif %}
-            acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
+            acc += tl.dot(
+                a if A_ROW_MAJOR else a.T,
+                b if B_ROW_MAJOR else b.T,
+                allow_tf32=ALLOW_TF32,
+            )
+
+            if ki == k_tiles - 1:
+                # inductor generates a suffix
+                {%- if TMA_EXPERIMENTAL_API %}
+                # rematerialize rm and rn to save registers
+                rcm = rm + tl.arange(0, BLOCK_M)
+                rcn = rn + tl.arange(0, BLOCK_N)
+                idx_m = rcm[:, None]
+                idx_n = rcn[None, :]
+                mask = (idx_m < M) & (idx_n < N)
+                {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=16, val_shape=("BLOCK_M", "BLOCK_N"))}}
+                {%- else %}
+                {{store_output(("rm", "rn"), "acc", indent_width=16, val_shape=("BLOCK_M", "BLOCK_N"), block_indexing=True)}}
+                {%- endif %}
+                acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
