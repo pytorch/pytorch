@@ -610,7 +610,7 @@ class TestFP8Lowering(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(
         not has_triton_tma_device() or not is_big_gpu(),
-        "Need device-side TMA support in Triton and max-autotune"
+        "Need device-side TMA support in Triton and max-autotune",
     )
     @parametrize("dtype", (torch.bfloat16, torch.float32))
     @parametrize("shape", ("16,32,32", "1024,1024,512"))
@@ -771,7 +771,7 @@ class TestFP8Lowering(TestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(
         not has_triton_tma_device() or not is_big_gpu(),
-        "Need device-side TMA support in Triton and max-autotune"
+        "Need device-side TMA support in Triton and max-autotune",
     )
     @onlyCUDA
     @parametrize("shape", ("16,32,32", "1024,1024,512"))
