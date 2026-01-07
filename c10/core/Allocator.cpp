@@ -1,11 +1,36 @@
 #include <c10/core/Allocator.h>
-#include <array>
-
 #include <c10/util/ThreadLocalDebugInfo.h>
 
+#include <array>
+#include <atomic>
 #include <cstring>
 
 namespace c10 {
+
+namespace {
+
+// Counter for user-created memory pools (e.g., via at::cuda::MemPool() or
+// graph_pool_handle()).
+std::atomic<CaptureId_t> user_mempool_uid_{1};
+
+// Counter for internally-created memory pools, typically created
+// implicitly by Graph capture when the user does not provide a pool.
+std::atomic<CaptureId_t> internal_mempool_uid_{1};
+
+// NOTE: MempoolId_t {0, 0} is reserved to indicate "no mempool".
+// For example, it is used as the default value for capture_begin()
+// when neither the user nor the graph provides a memory pool.
+// Therefore, all generated mempool IDs must be non-zero.That's why
+// `user_mempool_uid_` and `internal_mempool_uid_` start at 1.
+
+} // anonymous namespace
+
+c10::MempoolId_t generate_mempool_id(bool is_user_created) {
+  if (is_user_created) {
+    return {0, user_mempool_uid_++};
+  }
+  return {internal_mempool_uid_++, 0};
+}
 
 DataPtr Allocator::clone(const void* data, std::size_t n) {
   DataPtr new_data = allocate(n);
