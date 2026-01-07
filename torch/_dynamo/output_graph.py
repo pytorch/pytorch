@@ -2166,7 +2166,13 @@ class OutputGraph(OutputGraphCommon):
 
             fake_tensor = var.as_proxy().node.meta.get("example_value")
             assert isinstance(fake_tensor, torch._subclasses.fake_tensor.FakeTensor)
-            if fake_tensor.grad_fn in self.autograd_grad_consumed_grad_fns:
+            if fake_tensor.grad_fn is None:
+                continue
+
+            # Traverse the entire autograd graph of the returned tensor to check
+            # if any node was consumed by autograd.grad
+            reachable_grad_fns = collect_reachable_grad_fns([(fake_tensor, None)])
+            if reachable_grad_fns & self.autograd_grad_consumed_grad_fns:
                 # Set the flag to graph break at autograd.grad on retry
                 tx.speculation_log.graph_break_on_autograd_grad = True
                 raise exc.AutogradGradRestartAnalysis(
