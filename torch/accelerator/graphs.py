@@ -16,6 +16,26 @@ def generate_graph_pool_handle() -> tuple[int, int]:
 
     Returns:
         tuple[int, int]: An unique identifier for a graph memory pool.
+
+    Example::
+
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
+        >>> x = torch.zeros([2000], device=0)
+
+        >>> stream = torch.Stream()
+        >>> pool = torch.accelerator.generate_graph_pool_handle()
+        >>> g0 = torch.accelerator.Graph(pool=pool)
+        >>> g1 = torch.accelerator.Graph(pool=pool)
+        >>> # Capture operations into g0, sharing memory pool handle 'pool'
+        >>> with stream, g0:
+        ...     x += 1
+
+        >>> # Capture operations into g1, sharing memory pool handle 'pool'
+        >>> with stream, g1:
+        ...     x *= 2
+
+        >>> g0.replay()
+        >>> g1.replay()
     """
     return torch._C._accelerator_generateGraphPoolHandle()
 
@@ -41,15 +61,22 @@ class Graph(_acceleratorGraph):
 
     Example::
 
-        >>> # xdoctest: +SKIP
+        >>> # xdoctest: +REQUIRES(env:TORCH_DOCTEST_CUDA)
         >>> x = torch.zeros([2000], device=0)
 
         >>> stream = torch.Stream()
-        >>> graph = torch.accelerator.Graph()
-        >>> with stream, graph:
+        >>> g0 = torch.accelerator.Graph()
+        >>> # Capture operations into g0
+        >>> with stream, g0:
         ...     x += 1
 
-        >>> graph.replay()
+        >>> g1 = torch.accelerator.Graph(g0.pool())
+        >>> # Capture operations into g1, sharing g0's memory pool
+        >>> with stream, g1:
+        ...     x *= 2
+
+        >>> g0.replay()
+        >>> g1.replay()
     """
 
     def __new__(
@@ -145,6 +172,18 @@ class Graph(_acceleratorGraph):
 
         Arguments:
             path (str): Path to dump the graph to.
+
+        Example::
+            >>> # xdoctest: +SKIP
+            >>> s = torch.Stream()
+            >>> g = torch.accelerator.Graph()
+            >>> g.enable_debug_mode()
+
+            >>> with s, g:
+            >>> # ... operations ...
+
+            >>> # Dump captured graph to a file "graph_dump.dot"
+            >>> g.debug_dump("graph_dump.dot")
         """
         return super().debug_dump(path)
 
