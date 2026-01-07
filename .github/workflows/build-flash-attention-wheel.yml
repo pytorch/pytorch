@@ -4,8 +4,6 @@ on:
   workflow_dispatch:
   # TODO: Remove this trigger before merging - only for testing from PR branch
   pull_request:
-    branches:
-      - flash-attn3
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
