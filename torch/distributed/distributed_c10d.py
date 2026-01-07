@@ -1197,7 +1197,7 @@ def _as_iterable(obj) -> collections.abc.Iterable:
 
 def _ensure_all_tensors_same_dtype(*tensors) -> None:
     last_dtype = None
-    # pyrefly: ignore [bad-assignment]
+
     for tensor in itertools.chain.from_iterable(map(_as_iterable, tensors)):
         tensor_dtype = tensor.dtype
         # Mixing complex and its element type is allowed
@@ -1879,7 +1879,6 @@ def _get_split_source(pg: ProcessGroup):
         split_from = pg._get_backend(pg.bound_device_id)
     elif pg is _world.default_pg:
         try:
-            # pyrefly: ignore [missing-attribute]
             split_from = pg._get_backend(torch.device("cuda"))
         except RuntimeError:
             # no cuda device associated with this backend
@@ -3392,7 +3391,7 @@ def gather_object(
 
     if object_gather_list is None:
         raise AssertionError("Must provide object_gather_list on dst rank")
-    # pyrefly: ignore  # unbound-name
+    # pyrefly: ignore [unbound-name]
     for i, tensor in enumerate(output_tensors):
         tensor = tensor.type(torch.uint8)
         tensor_size = object_size_list[i]

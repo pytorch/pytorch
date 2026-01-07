@@ -117,12 +117,14 @@ class EncodedAttrs:
                     raise ValueError(f"Unsupported sequence type for attribute {k}")
             else:
                 raise ValueError(f"Unsupported attribute type for {k}: {type(v)}")
-        assert len(encoded.attr_keys) == len(encoded.attr_types), (
-            f"Mismatch between number of attribute keys and types: {len(encoded.attr_keys)} != {len(encoded.attr_types)}"
-        )
-        assert len(encoded.attr_keys) == len(encoded.attr_pos), (
-            f"Mismatch between number of attribute keys and positions: {len(encoded.attr_keys)} != {len(encoded.attr_pos)}"
-        )
+        if len(encoded.attr_keys) != len(encoded.attr_types):
+            raise AssertionError(
+                f"Mismatch between number of attribute keys and types: {len(encoded.attr_keys)} != {len(encoded.attr_types)}"
+            )
+        if len(encoded.attr_keys) != len(encoded.attr_pos):
+            raise AssertionError(
+                f"Mismatch between number of attribute keys and positions: {len(encoded.attr_keys)} != {len(encoded.attr_pos)}"
+            )
         return encoded
 
     def to_dict(

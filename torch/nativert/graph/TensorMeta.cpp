@@ -1,7 +1,5 @@
 #include <torch/nativert/graph/TensorMeta.h>
 
-#include <c10/util/Logging.h>
-
 namespace torch::nativert {
 
 c10::ScalarType convertJsonScalarType(

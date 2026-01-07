@@ -91,6 +91,7 @@ from torch._inductor.utils import (
     determine_aoti_mmap_flags,
     is_linux,
     is_windows,
+    XPU_KERNEL_FORMAT,
 )
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import (
@@ -151,7 +152,7 @@ def get_kernel_bin_format(device: str) -> str:
     if device == "cuda":
         return "cubin" if torch.version.hip is None else "hsaco"
     elif device == "xpu":
-        return "spv"
+        return XPU_KERNEL_FORMAT
     else:
         return ""
 
@@ -353,7 +354,7 @@ def get_path(
 def get_hash(content: str | bytes, extra: str = "", hash_type: str = "code") -> str:
     if hash_type in {"amdgcn", "code", "ptx", "spv"}:
         return code_hash(content, extra)
-    if hash_type in {"cubin", "hsaco", "spv"}:
+    if hash_type in {"cubin", "hsaco", XPU_KERNEL_FORMAT}:
         return code_hash(repr(content))
     raise AssertionError(f"Unknown hash type {hash_type}")
 
@@ -1664,7 +1665,11 @@ class CudaKernelParamCache:
         basename, _ = get_name_and_dir_from_output_file_path(bin_path)
 
         if config.aot_inductor.emit_multi_arch_kernel:
-            bin_type_to_ext = {"cubin": ".fatbin", "spv": ".spv", "hsaco": ".hsaco"}
+            bin_type_to_ext = {
+                "cubin": ".fatbin",
+                "spv": f".{XPU_KERNEL_FORMAT}",
+                "hsaco": ".hsaco",
+            }
             assert bin_type in bin_type_to_ext, (
                 "multi_arch_kernel_binary only supported in CUDA/XPU/ROCm"
             )
@@ -2972,6 +2977,7 @@ class CppPythonBindingsCodeCache(CppCodeCache):
         #include <Python.h>
         #include <sstream>
         #include <cstdlib>
+        #include <cerrno>
 
         #ifndef _MSC_VER
         #if __cplusplus < 202002L
@@ -3043,9 +3049,14 @@ class CppPythonBindingsCodeCache(CppCodeCache):
                 PyErr_SetString(PyExc_RuntimeError, "_TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR must be set");
                 return nullptr;
             }}
-            std::istringstream iss(str_addr);
-            uintptr_t addr = 0;
-            iss >> addr;
+
+            char* endptr = nullptr;
+            errno = 0;
+            uintptr_t addr = std::strtoull(str_addr, &endptr, 10);
+            if(errno != 0 || endptr == str_addr || addr == 0) {{
+                PyErr_SetString(PyExc_RuntimeError, "Failed to parse _TORCHINDUCTOR_PYOBJECT_TENSOR_DATA_PTR");
+                return nullptr;
+            }}
             _torchinductor_pyobject_tensor_data_ptr =
                 reinterpret_cast<decltype(_torchinductor_pyobject_tensor_data_ptr)>(addr);
             PyObject* module = PyModule_Create(&py_module);

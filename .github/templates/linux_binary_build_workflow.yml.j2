@@ -138,15 +138,8 @@ jobs:
     steps:
       - name: Setup XPU
         uses: pytorch/pytorch/.github/actions/setup-xpu@main
-      - name: configure aws credentials
-        id: aws_creds
-        uses: aws-actions/configure-aws-credentials@v4
-        with:
-          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only
-          aws-region: us-east-1
-      - name: Login to Amazon ECR
-        id: login-ecr
-        uses: aws-actions/amazon-ecr-login@v2
+      - name: Login to ECR
+        uses: pytorch/pytorch/.github/actions/ecr-login@main
       - uses: !{{ common.download_artifact_action }}
         name: Download Build Artifacts
         with:

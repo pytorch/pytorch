@@ -960,6 +960,7 @@ def _all_in_parens(string: str) -> bool:
     return True
 
 
+# pyrefly: ignore [inconsistent-inheritance]
 class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
     @staticmethod
     def paren(string: OpVarT) -> OpVarT:
