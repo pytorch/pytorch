@@ -26,7 +26,7 @@ import sys
 import types
 from collections.abc import Callable, Generator, Iterator
 from contextlib import nullcontext
-from typing import Any, NewType, Optional, TYPE_CHECKING
+from typing import Any, NewType, Optional, TYPE_CHECKING, Union
 from typing_extensions import Never
 
 import torch
@@ -48,8 +48,10 @@ if TYPE_CHECKING:
 _CODE_CACHE = WeakIdKeyDictionary()
 
 
-def _code_cache(fn):
-    def _(cls, code):
+def _code_cache(fn: Callable[..., Any]) -> Callable[..., Any]:
+    def _(
+        cls: type[Any], code: Union["SerializedCode", types.CodeType]
+    ) -> Union["SerializedCode", types.CodeType]:
         if code in _CODE_CACHE:
             return _CODE_CACHE[code]
         res = fn(cls, code)
@@ -1028,13 +1030,13 @@ class InMemoryDynamoStore(DynamoStore):
 
     def write(
         self,
-        entry: PrecompileCacheEntry,
+        cache_entry: PrecompileCacheEntry,
         path: str,
     ) -> None:
         """
         Store the dynamo cache entry and backends in memory instead of writing to disk.
         """
-        self.packages[path] = entry
+        self.packages[path] = cache_entry
 
     def read(self, path: str) -> PrecompileCacheEntry:
         """
@@ -1051,7 +1053,7 @@ class DiskDynamoStore(DynamoStore):
     A DynamoStore implementation that keeps state about CompilePackages on disk.
     """
 
-    def __init__(self, path_prefix: str = ""):
+    def __init__(self, path_prefix: str = "") -> None:
         """
         Initialize a DiskDynamoStore with a path prefix.
 
@@ -1072,14 +1074,14 @@ class DiskDynamoStore(DynamoStore):
 
     def write(
         self,
-        entry: PrecompileCacheEntry,
+        cache_entry: PrecompileCacheEntry,
         path: str,
     ) -> None:
         """
         Write dynamo cache entry and backends to disk.
         """
         try:
-            pickled_content: bytes = pickle.dumps(entry)
+            pickled_content: bytes = pickle.dumps(cache_entry)
             CacheArtifactManager.record_artifact(
                 PrecompileCacheArtifact.type(), path, pickled_content
             )
