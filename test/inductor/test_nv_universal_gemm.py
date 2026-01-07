@@ -284,6 +284,198 @@ class TestNVUniversalGemm(TestCase):
 
         torch.testing.assert_close(result, expected)
 
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_epilogue_bias_add(self, dtype):
+        """Test epilogue fusion with bias addition.
+
+        This tests the basic epilogue fusion case: GEMM + elementwise add.
+        """
+        m, n, k = 512, 512, 512
+        device = "cuda"
+
+        def fn(a, b, bias):
+            return a @ b + bias
+
+        a = torch.randn(m, k, device=device, dtype=dtype)
+        b = torch.randn(k, n, device=device, dtype=dtype)
+        bias = torch.randn(m, n, device=device, dtype=dtype)
+
+        expected = fn(a, b, bias)
+
+        torch._dynamo.reset()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "NVGEMM",
+                "cuda.nvgemm_max_profiling_configs": 3,
+            }
+        ):
+            result, (code,) = run_and_get_code(
+                torch.compile(fn),
+                a,
+                b,
+                bias,
+            )
+
+        # Check that epilogue was fused - we should see EpilogueArguments in the code
+        self.assertIn("EpilogueArguments", code)
+
+        torch.testing.assert_close(result, expected, rtol=1e-2, atol=1e-2)
+
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_epilogue_relu(self, dtype):
+        """Test epilogue fusion with ReLU activation.
+
+        This tests epilogue fusion with a unary activation function.
+        """
+        m, n, k = 512, 512, 512
+        device = "cuda"
+
+        def fn(a, b):
+            return torch.relu(a @ b)
+
+        a = torch.randn(m, k, device=device, dtype=dtype)
+        b = torch.randn(k, n, device=device, dtype=dtype)
+
+        expected = fn(a, b)
+
+        torch._dynamo.reset()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "NVGEMM",
+                "cuda.nvgemm_max_profiling_configs": 3,
+            }
+        ):
+            result, (code,) = run_and_get_code(
+                torch.compile(fn),
+                a,
+                b,
+            )
+
+        # Check that epilogue was fused
+        self.assertIn("EpilogueArguments", code)
+
+        torch.testing.assert_close(result, expected, rtol=1e-2, atol=1e-2)
+
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_epilogue_scale_and_add(self, dtype):
+        """Test epilogue fusion with scale and add.
+
+        This tests a compound epilogue: alpha * (A @ B) + beta * C
+        """
+        m, n, k = 512, 512, 512
+        device = "cuda"
+
+        def fn(a, b, c, alpha, beta):
+            return alpha * (a @ b) + beta * c
+
+        a = torch.randn(m, k, device=device, dtype=dtype)
+        b = torch.randn(k, n, device=device, dtype=dtype)
+        c = torch.randn(m, n, device=device, dtype=dtype)
+        alpha = 0.5
+        beta = 0.3
+
+        expected = fn(a, b, c, alpha, beta)
+
+        torch._dynamo.reset()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "NVGEMM",
+                "cuda.nvgemm_max_profiling_configs": 3,
+            }
+        ):
+            result, (code,) = run_and_get_code(
+                torch.compile(fn),
+                a,
+                b,
+                c,
+                alpha,
+                beta,
+            )
+
+        # Check that epilogue was fused
+        self.assertIn("EpilogueArguments", code)
+
+        torch.testing.assert_close(result, expected, rtol=1e-2, atol=1e-2)
+
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_epilogue_sigmoid(self, dtype):
+        """Test epilogue fusion with sigmoid activation."""
+        m, n, k = 512, 512, 512
+        device = "cuda"
+
+        def fn(a, b):
+            return torch.sigmoid(a @ b)
+
+        a = torch.randn(m, k, device=device, dtype=dtype)
+        b = torch.randn(k, n, device=device, dtype=dtype)
+
+        expected = fn(a, b)
+
+        torch._dynamo.reset()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "NVGEMM",
+                "cuda.nvgemm_max_profiling_configs": 3,
+            }
+        ):
+            result, (code,) = run_and_get_code(
+                torch.compile(fn),
+                a,
+                b,
+            )
+
+        # Check that epilogue was fused
+        self.assertIn("EpilogueArguments", code)
+
+        torch.testing.assert_close(result, expected, rtol=1e-2, atol=1e-2)
+
+    @parametrize("dtype", (torch.float16, torch.bfloat16))
+    def test_epilogue_mul_and_relu(self, dtype):
+        """Test epilogue fusion with multiply and ReLU.
+
+        This tests a compound epilogue: relu(A @ B * scale)
+        """
+        m, n, k = 512, 512, 512
+        device = "cuda"
+
+        def fn(a, b, scale):
+            return torch.relu(a @ b * scale)
+
+        a = torch.randn(m, k, device=device, dtype=dtype)
+        b = torch.randn(k, n, device=device, dtype=dtype)
+        scale = torch.randn(m, n, device=device, dtype=dtype)
+
+        expected = fn(a, b, scale)
+
+        torch._dynamo.reset()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "NVGEMM",
+                "cuda.nvgemm_max_profiling_configs": 3,
+            }
+        ):
+            result, (code,) = run_and_get_code(
+                torch.compile(fn),
+                a,
+                b,
+                scale,
+            )
+
+        # Check that epilogue was fused
+        self.assertIn("EpilogueArguments", code)
+
+        torch.testing.assert_close(result, expected, rtol=1e-2, atol=1e-2)
+
 
 if __name__ == "__main__":
     run_tests()

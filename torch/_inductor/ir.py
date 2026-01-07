@@ -5474,7 +5474,13 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         return self.outputs
 
     def _make_kernel_render(
-        self, out_node: Any, hint_override: Optional[int] = None
+        self,
+        out_node: Any,
+        hint_override: Optional[int] = None,
+        epilogue_fn_code: Optional[str] = None,
+        epilogue_reads: Optional[list[str]] = None,
+        epilogue_writes: Optional[list[str]] = None,
+        epilogue_var_renames: Optional[dict[str, Any]] = None,
     ) -> tuple[Any, Any]:
         """
         Create a kernel renderer for code generation.
@@ -5482,6 +5488,14 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         Returns (kernel, render) tuple where:
         - kernel: NVUniversalGemmKernel object with call_kernel() method
         - render: function that returns source code string
+
+        Args:
+            out_node: The output node for the GEMM
+            hint_override: Optional hint override (unused)
+            epilogue_fn_code: Python function code string for epilogue
+            epilogue_reads: List of buffer names read by the epilogue
+            epilogue_writes: List of buffer names written by the epilogue
+            epilogue_var_renames: Mapping from Python var names to buffer names
         """
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             NVUniversalGemmKernel,
@@ -5505,6 +5519,10 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             kernel_metadata=self.kernel_metadata,
             accumulator_type=self.accumulator_type,
             workspace_size=self.workspace_size,
+            epilogue_fn_code=epilogue_fn_code,
+            epilogue_reads=epilogue_reads or [],
+            epilogue_writes=epilogue_writes or [],
+            epilogue_var_renames=epilogue_var_renames or {},
         )
 
         def render():
