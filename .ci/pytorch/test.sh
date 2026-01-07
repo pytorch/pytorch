@@ -819,6 +819,11 @@ test_dynamo_benchmark() {
   local shard_id="$1"
   shift
 
+  ### Perf benchmark 2.9.1 baseline
+  pip_uninstall torch torchvision torchaudio torchrec fbgemm-gpu triton pytorch-triton
+  pip_install torch==2.9.1 torchvision torchaudio torchrec fbgemm-gpu
+  pip freeze
+
   if [[ "${TEST_CONFIG}" == *perf_compare* ]]; then
     test_single_dynamo_benchmark "training" "$suite" "$shard_id" --training --amp "$@"
   elif [[ "${TEST_CONFIG}" == *perf* ]]; then
