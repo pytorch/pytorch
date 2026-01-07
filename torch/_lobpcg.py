@@ -535,8 +535,8 @@ def lobpcg(
             # The symmetrization is important for first-order optimization methods,
             # so that (A - alpha * A_grad) is still a symmetric matrix.
             # Same holds for `B`.
-            A_sym = (A + A.mT) / 2
-            B_sym = (B + B.mT) / 2 if (B is not None) else None
+            A_sym = (A + A.mH) / 2
+            B_sym = (B + B.mH) / 2 if (B is not None) else None
 
             return LOBPCGAutogradFunction.apply(
                 A_sym,
@@ -653,20 +653,21 @@ def _lobpcg(
 
     if not torch.jit.is_scripting():
         LOBPCG.call_tracker = LOBPCG_call_tracker  # type: ignore[method-assign]
-
     if len(A.shape) > 2:
         N = int(torch.prod(torch.tensor(A.shape[:-2])))
         bA = A.reshape((N,) + A.shape[-2:])
         bB = B.reshape((N,) + A.shape[-2:]) if B is not None else None
         bX = X.reshape((N,) + X.shape[-2:]) if X is not None else None
         bE = torch.empty((N, k), dtype=dtype, device=device)
-        bXret = torch.empty((N, m, k), dtype=dtype, device=device)
+        bXret = torch.empty((N, m, k), dtype=A.dtype, device=device)
 
         for i in range(N):
             A_ = bA[i]
             B_ = bB[i] if bB is not None else None
             X_ = (
-                torch.randn((m, n), dtype=dtype, device=device) if bX is None else bX[i]
+                    torch.randn((m, n), dtype=A.dtype, device=device)
+                    if bX is None
+                    else bX[i]
             )
             if not (len(X_.shape) == 2 and X_.shape == (m, n)):
                 raise AssertionError(
@@ -683,7 +684,7 @@ def _lobpcg(
 
         return bE.reshape(A.shape[:-2] + (k,)), bXret.reshape(A.shape[:-2] + (m, k))
 
-    X = torch.randn((m, n), dtype=dtype, device=device) if X is None else X
+    X = torch.randn((m, n), dtype=A.dtype, device=device) if X is None else X
     if not (len(X.shape) == 2 and X.shape == (m, n)):
         raise AssertionError(f"X shape mismatch: got {X.shape}, expected {(m, n)}")
 
@@ -726,7 +727,8 @@ class LOBPCG:
 
         # variable parameters
         self.X = X
-        self.E = torch.zeros((n,), dtype=X.dtype, device=X.device)
+        dtype = _utils.get_floating_dtype(X)
+        self.E = torch.zeros((n,), dtype=dtype, device=X.device)
         self.R = torch.zeros((m, n), dtype=X.dtype, device=X.device)
         self.S = torch.zeros((m, 3 * n), dtype=X.dtype, device=X.device)
         self.tvars: dict[str, Tensor] = {}
@@ -927,7 +929,7 @@ class LOBPCG:
             # Update E, X, P
             self.X[:, nc:] = mm(S_, Z[:, : n - nc])
             self.E[nc:] = E_[: n - nc]
-            P = mm(S_, mm(Z[:, n - nc :], _utils.basis(Z[: n - nc, n - nc :].mT)))
+            P = mm(S_, mm(Z[:, n - nc :], _utils.basis(Z[: n - nc, n - nc :].mH)))
             np = P.shape[-1]
 
             # check convergence
@@ -1047,7 +1049,7 @@ class LOBPCG:
 
         # The original algorithm 4 from [DuerschPhD2015].
         d_col = (d**-0.5).reshape(d.shape[0], 1)
-        DUBUD = (UBU * d_col) * d_col.mT
+        DUBUD = (UBU * d_col) * d_col.mH
         E, Z = _utils.symeig(DUBUD)
         t = tau * abs(E).max()
         if drop:
@@ -1061,7 +1063,7 @@ class LOBPCG:
             E[(torch.where(E < t))[0]] = t
 
         return torch.matmul(
-            U * d_col.mT,
+            U * d_col.mH,
             # pyrefly: ignore [unsupported-operation]
             Z * E**-0.5,
         )
@@ -1112,7 +1114,7 @@ class LOBPCG:
 
         BV_norm = torch.norm(mm_B(self.B, V))
         BU = mm_B(self.B, U)
-        VBU = mm(V.mT, BU)
+        VBU = mm(V.mH, BU)
         i = j = 0
         for i in range(i_max):
             U = U - mm(V, VBU)
@@ -1131,7 +1133,7 @@ class LOBPCG:
                     self.ivars["ortho_j"] = j
                     return U
                 BU = mm_B(self.B, U)
-                UBU = mm(U.mT, BU)
+                UBU = mm(U.mH, BU)
                 U_norm = torch.norm(U)
                 BU_norm = torch.norm(BU)
                 R = UBU - torch.eye(UBU.shape[-1], device=UBU.device, dtype=UBU.dtype)
@@ -1142,7 +1144,7 @@ class LOBPCG:
                 self.fvars[vkey] = rerr
                 if rerr < tau_ortho:
                     break
-            VBU = mm(V.mT, BU)
+            VBU = mm(V.mH, BU)
             VBU_norm = torch.norm(VBU)
             U_norm = torch.norm(U)
             rerr = float(VBU_norm) * float(BV_norm * U_norm) ** -1

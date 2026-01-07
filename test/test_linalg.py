@@ -7016,12 +7016,12 @@ class TestLinalg(TestCase):
 
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     def test_lobpcg_basic(self, device, dtype):
         self._test_lobpcg_method(device, dtype, 'basic')
 
     @skipCPUIfNoLapack
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     def test_lobpcg_ortho(self, device, dtype):
         if torch.version.hip:
             torch.backends.cuda.preferred_linalg_library('magma')
@@ -7030,7 +7030,8 @@ class TestLinalg(TestCase):
             torch.backends.cuda.preferred_linalg_library('default')
 
     def _test_lobpcg_method(self, device, dtype, method):
-        from torch.testing._internal.common_utils import random_symmetric_pd_matrix, random_sparse_pd_matrix
+        from torch.testing._internal.common_utils import (random_symmetric_pd_matrix,
+                                                          random_sparse_pd_matrix, random_hermitian_pd_matrix)
         from torch._linalg_utils import matmul, qform
         from torch._lobpcg import lobpcg
 
@@ -7104,14 +7105,19 @@ class TestLinalg(TestCase):
                 # input
                 if method == 'basic' and (m, n, k) in [(9, 2, 2), (100, 15, 5)]:
                     continue
-                A = random_symmetric_pd_matrix(m, *batches, device=device, dtype=dtype)
-                B = random_symmetric_pd_matrix(m, *batches, device=device, dtype=dtype)
+                if dtype == torch.double:
+                    A = random_symmetric_pd_matrix(m, *batches, device=device, dtype=dtype)
+                    B = random_symmetric_pd_matrix(m, *batches, device=device, dtype=dtype)
+                elif dtype == torch.cdouble:
+                    A = random_hermitian_pd_matrix(m, *batches, device=device, dtype=dtype)
+                    B = random_hermitian_pd_matrix(m, *batches, device=device, dtype=dtype)
 
                 # classical eigenvalue problem, smallest eigenvalues
                 E, V = lobpcg(A, k=k, n=n, largest=False)
                 self.assertEqual(E.shape, batches + (k,))
                 self.assertEqual(V.shape, batches + (m, k))
-                self.assertEqual(matmul(A, V), mm(V, E.diag_embed()), atol=prec, rtol=0)
+                Lambda = E.diag_embed().to(dtype=V.dtype, device=device)
+                self.assertEqual(matmul(A, V), mm(V, Lambda), atol=prec, rtol=0)
                 e = torch.linalg.eigvalsh(A)
                 e_smallest = e[..., :k]
                 self.assertEqual(E, e_smallest)
@@ -7120,15 +7126,18 @@ class TestLinalg(TestCase):
                 E, V = lobpcg(A, k=k, n=n, largest=True)
                 e_largest, _ = torch.sort(e[..., -k:], descending=True)
                 self.assertEqual(E, e_largest, atol=prec, rtol=0)
-                self.assertEqual(matmul(A, V), mm(V, E.diag_embed()), atol=prec, rtol=0)
+                Lambda = E.diag_embed().to(dtype=V.dtype, device=V.device)
+                self.assertEqual(matmul(A, V), mm(V, Lambda), atol=prec, rtol=0)
 
                 # generalized eigenvalue problem, smallest eigenvalues
                 E, V = lobpcg(A, B=B, k=k, n=n, largest=False)
-                self.assertEqual(matmul(A, V), mm(matmul(B, V), E.diag_embed()), atol=prec, rtol=0)
+                Lambda = E.diag_embed().to(dtype=V.dtype, device=V.device)
+                self.assertEqual(matmul(A, V), mm(matmul(B, V), Lambda), atol=prec, rtol=0)
 
                 # generalized eigenvalue problem, largest eigenvalues
                 E, V = lobpcg(A, B=B, k=k, n=n, largest=True)
-                self.assertEqual(matmul(A, V) / E.max(), mm(matmul(B, V), (E / E.max()).diag_embed()),
+                Lambda = (E / E.max()).diag_embed().to(dtype=V.dtype, device=V.device)
+                self.assertEqual(matmul(A, V) / E.max(), mm(matmul(B, V), Lambda),
                                  atol=prec, rtol=0)
 
         # check sparse input
@@ -7144,32 +7153,36 @@ class TestLinalg(TestCase):
                 continue
             A = random_sparse_pd_matrix(m, density=density, device=device, dtype=dtype)
             B = random_sparse_pd_matrix(m, density=density, device=device, dtype=dtype)
-            A_eigenvalues = torch.arange(1, m + 1, dtype=dtype) / m
+            A_eigenvalues = torch.arange(1, m + 1, dtype=torch.double) / m
             e_smallest = A_eigenvalues[..., :k]
             e_largest, _ = torch.sort(A_eigenvalues[..., -k:], descending=True)
 
             # classical eigenvalue problem, smallest eigenvalues
             E, V = lobpcg(A, k=k, n=n, largest=False)
             self.assertEqual(E, e_smallest)
-            self.assertEqual(matmul(A, V), mm(V, E.diag_embed()), atol=prec, rtol=0)
+            Lambda = E.diag_embed().to(dtype=V.dtype, device=V.device)
+            self.assertEqual(matmul(A, V), mm(V, Lambda), atol=prec, rtol=0)
 
             # classical eigenvalue problem, largest eigenvalues
             E, V = lobpcg(A, k=k, n=n, largest=True)
-            self.assertEqual(matmul(A, V), mm(V, E.diag_embed()), atol=prec, rtol=0)
+            Lambda = E.diag_embed().to(dtype=V.dtype, device=V.device)
+            self.assertEqual(matmul(A, V), mm(V, Lambda), atol=prec, rtol=0)
             self.assertEqual(E, e_largest)
 
             # generalized eigenvalue problem, smallest eigenvalues
             E, V = lobpcg(A, B=B, k=k, n=n, largest=False)
-            self.assertEqual(matmul(A, V), matmul(B, mm(V, E.diag_embed())), atol=prec, rtol=0)
+            Lambda = E.diag_embed().to(dtype=V.dtype, device=V.device)
+            self.assertEqual(matmul(A, V), matmul(B, mm(V, Lambda)), atol=prec, rtol=0)
 
             # generalized eigenvalue problem, largest eigenvalues
             E, V = lobpcg(A, B=B, k=k, n=n, largest=True)
-            self.assertEqual(matmul(A, V) / E.max(), mm(matmul(B, V), (E / E.max()).diag_embed()),
+            Lambda = (E / E.max()).diag_embed().to(dtype=V.dtype, device=V.device)
+            self.assertEqual(matmul(A, V) / E.max(), mm(matmul(B, V), Lambda),
                              atol=prec, rtol=0)
 
     @skipCPUIfNoLapack
     @onlyCPU
-    @dtypes(torch.double)
+    @dtypes(torch.double, torch.cdouble)
     def test_lobpcg_torchscript(self, device, dtype):
         from torch.testing._internal.common_utils import random_sparse_pd_matrix
         from torch._linalg_utils import matmul as mm
@@ -7181,7 +7194,7 @@ class TestLinalg(TestCase):
         A1 = random_sparse_pd_matrix(m, density=2.0 / m, device=device, dtype=dtype)
         X1 = torch.randn((m, k), dtype=dtype, device=device)
         E1, V1 = lobpcg(A1, X=X1)
-        eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / E1.max()
+        eq_err = torch.norm((mm(A1, V1) - V1 * E1), 2) / torch.linalg.norm(E1, float('inf'))
         self.assertLess(eq_err, 1e-6)
 
     @unittest.skipIf(not TEST_SCIPY or (TEST_SCIPY and version.parse(scipy.__version__) < version.parse('1.4.1')),
@@ -7217,12 +7230,9 @@ class TestLinalg(TestCase):
         A2 = toscipy(A1)
         B2 = toscipy(B1)
         X2 = toscipy(X1)
-
         lambdas1 = []
-
         def tracker(worker):
             lambdas1.append(worker.E[:])
-
         tol = 1e-8
         # tol for scipy lobpcg will be chosen so that the number of
         # iterations will be equal or very close to pytorch lobpcg
@@ -7246,17 +7256,14 @@ class TestLinalg(TestCase):
 
         # Generalized eigenvalue problem
         lambdas1 = []
-
         def tracker(worker):
             lambdas1.append(worker.E[:])
-
         E1, V1 = torch.lobpcg(A1, B=B1, X=X1, niter=niter, largest=True, tracker=tracker, tol=tol)
         E2, V2, lambdas2 = scipy_lobpcg(A2, X2, B=B2, maxiter=niter, largest=True, retLambdaHistory=True, tol=39 * tol)
         E2a, V2a = scipy_lobpcg(A2, X2, B=B2, maxiter=niter, largest=False)
         iters1 = len(lambdas1)
         iters2 = len(lambdas2)
         self.assertLess(abs(iters1 - iters2), 0.05 * max(iters1, iters2))
-
         eq_err = torch.norm((mm(A1, V1) - mm(B1, V1) * E1), 2) / E1.max()
         eq_err_scipy = (abs(A2.dot(V2) - B2.dot(V2) * E2)**2).sum() ** 0.5 / E2.max()
         self.assertLess(eq_err, 1e-6)        # general

@@ -22,6 +22,10 @@ def get_floating_dtype(A):
     Integer types map to float32.
     """
     dtype = A.dtype
+    if dtype == torch.complex128:
+        dtype = torch.float64
+    elif dtype == torch.complex64:
+        dtype =torch.float32
     if dtype in (torch.float16, torch.float32, torch.float64):
         return dtype
     return torch.float32
@@ -41,12 +45,12 @@ def matmul(A: Tensor | None, B: Tensor) -> Tensor:
 
 
 def bform(X: Tensor, A: Tensor | None, Y: Tensor) -> Tensor:
-    """Return bilinear form of matrices: :math:`X^T A Y`."""
-    return matmul(X.mT, matmul(A, Y))
+    """Return bilinear form of matrices: :math:`X^H A Y`."""
+    return matmul(X.mH, matmul(A, Y))
 
 
 def qform(A: Tensor | None, S: Tensor):
-    """Return quadratic form :math:`S^T A S`."""
+    """Return quadratic form :math:`S^H A S`."""
     return bform(S, A, S)
 
 
