@@ -1301,13 +1301,11 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
 
     for i, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
         if isinstance(m, FakeTensorMode):
-            # pyrefly: ignore [bad-argument-type]
             fake_modes.append((m, "active fake mode", i))
 
     flat_inputs = pytree.tree_leaves(inputs)
     for i, flat_input in enumerate(flat_inputs):
         if isinstance(flat_input, FakeTensor):
-            # pyrefly: ignore [bad-argument-type]
             fake_modes.append((flat_input.fake_mode, "fake tensor input", i))
         if is_traceable_wrapper_subclass(flat_input):
             out: list[torch.Tensor | int | torch.SymInt] = []
@@ -1316,7 +1314,6 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
                 x for x in out if isinstance(x, FakeTensor)
             ]
             fake_modes.extend(
-                # pyrefly: ignore [bad-argument-type]
                 [
                     (tensor.fake_mode, f"subclass input {i}", ix)
                     for ix, tensor in enumerate(fake_tensors)
@@ -1329,12 +1326,10 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
             if fake_mode is not m:
                 raise AssertionError(
                     f"fake mode ({fake_mode}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}\n\n"
-                    # pyrefly: ignore [missing-attribute]
                     f"fake mode from {desc1} {i1} allocated at:\n{fake_mode.stack}\n"
-                    # pyrefly: ignore [missing-attribute]
                     f"fake mode from {desc2} {i2} allocated at:\n{m.stack}"
                 )
-        # pyrefly: ignore [bad-return]
+
         return fake_mode
     else:
         return None
