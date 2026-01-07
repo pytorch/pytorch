@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import warnings
-from typing import Optional
 from typing_extensions import deprecated
 
 import torch
@@ -48,7 +47,7 @@ class Distribution:
         self,
         batch_shape: torch.Size = torch.Size(),
         event_shape: torch.Size = torch.Size(),
-        validate_args: Optional[bool] = None,
+        validate_args: bool | None = None,
     ) -> None:
         self._batch_shape = batch_shape
         self._event_shape = event_shape
@@ -130,7 +129,7 @@ class Distribution:
         raise NotImplementedError
 
     @property
-    def support(self) -> Optional[constraints.Constraint]:
+    def support(self) -> constraints.Constraint | None:
         """
         Returns a :class:`~torch.distributions.constraints.Constraint` object
         representing this distribution's support.
@@ -318,7 +317,8 @@ class Distribution:
                 stacklevel=2,
             )
             return
-        assert support is not None
+        if support is None:
+            raise AssertionError("support is unexpectedly None")
         valid = support.check(value)
         if not torch._is_all_true(valid):
             raise ValueError(

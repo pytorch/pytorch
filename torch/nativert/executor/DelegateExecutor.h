@@ -22,7 +22,7 @@ using MakeProxyExecutorFn =
 // This is the extension point for delegation backends.
 class DelegateExecutor {
  public:
-  virtual ~DelegateExecutor() {}
+  virtual ~DelegateExecutor() = default;
 
   // Runtime calls processWeights() to pass the weights to the delegate backend.
   // Typically, a backend would perform some form of validation and processing,

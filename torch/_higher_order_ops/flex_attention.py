@@ -94,6 +94,7 @@ class FlexAttentionHOP(HigherOrderOperator):
         mask_mod_other_buffers: tuple = (),
     ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
         validate_subgraph_args_types(score_mod_other_buffers + mask_mod_other_buffers)
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(
             query,
             key,
@@ -135,6 +136,7 @@ class FlexAttentionBackwardHOP(HigherOrderOperator):
     ]:
         validate_subgraph_args_types(score_mod_other_buffers + mask_mod_other_buffers)
 
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(
             query,
             key,
@@ -222,6 +224,10 @@ def math_attention(
         value: The value tensor
         score_mod: The score_mod function
         other_buffers: Other buffers that are passed to the score_mod function
+
+    Notes:
+        Query and Keys are dtype cast up to float64 (if query.dtype is float64) and float32 otherwise.
+        Scores and Values are dtype cast to input query.dtype at the end.
     """
     # broadcast query & key along head dim for GQA
     G = query.size(1) // key.size(1)
@@ -261,7 +267,7 @@ def math_attention(
     # for math impl we divide by log(2) because we will multiply by log(2)
 
     return (
-        post_mod_scores.to(query.dtype) @ value,
+        post_mod_scores.to(query.dtype) @ value.to(query.dtype),
         logsumexp / math.log(2),
         max_scores / math.log(2),
     )
@@ -622,6 +628,7 @@ def create_fw_bw_graph(
         joint_graph = make_fx(joint_f)(
             *unwrapped_score_mod_indexes, example_grad, *unwrapped_other_buffers
         )
+        # pyrefly: ignore [bad-return]
         return score_mod, joint_graph
 
 
@@ -841,6 +848,12 @@ def sdpa_dense_backward(
 ) -> tuple[
     torch.Tensor, torch.Tensor, torch.Tensor, tuple[Optional[torch.Tensor], ...]
 ]:
+    if query.dtype != key.dtype or query.dtype != value.dtype:
+        raise ValueError(
+            f"Backward pass with mixed query, key, and value dtype is not supported, "
+            f"got query.dtype={query.dtype}, key.dtype={key.dtype}, "
+            f"and value.dtype={value.dtype}"
+        )
     from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
     Bq, Hq, seq_len_q, qk_head_dim = query.shape
@@ -1206,7 +1219,9 @@ def flex_attention_backward_functionalize(
     assert isinstance(mask_mod_other_buffers_unwrapped, tuple)
 
     with ctx.redispatch_to_next():
+        # pyrefly: ignore [bad-argument-type]
         functional_fw_graph = ctx.functionalize(fw_graph)
+        # pyrefly: ignore [bad-argument-type]
         functional_joint_graph = ctx.functionalize(joint_graph)
 
         (

@@ -30,7 +30,6 @@ from ...ir import (
     IRNode,
     Layout,
     PrimitiveInfoType,
-    ShapeAsConstantBuffer,
     TensorBox,
 )
 from ...utils import sympy_product
@@ -673,15 +672,17 @@ class CUDATemplateCaller(ChoiceCaller):
         else:
             return {"backend": "CUDA", "op_type": "unknown"}
 
-    def output_node(self) -> Union[TensorBox, ShapeAsConstantBuffer]:
+    def output_node(self) -> TensorBox:
         self.bmreq.update_workspace_size()
-        return TensorBox.create(
-            CUDATemplateBuffer(
-                layout=self.layout,
-                inputs=self.input_nodes,
-                make_kernel_render=self.make_kernel_render,
-                workspace_size=self.bmreq.workspace_size,
-                supports_epilogue_fusion=self.supports_epilogue_fusion,
-                template=self.template,
-            )
+        buffer = CUDATemplateBuffer(
+            layout=self.layout,
+            inputs=self.input_nodes,
+            make_kernel_render=self.make_kernel_render,
+            workspace_size=self.bmreq.workspace_size,
+            supports_epilogue_fusion=self.supports_epilogue_fusion,
+            template=self.template,
         )
+        # Pass KTC annotation to the buffer for encoding
+        if "ktc" in self.annotations:
+            buffer.annotations["ktc"] = self.annotations["ktc"]
+        return TensorBox.create(buffer)
