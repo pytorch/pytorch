@@ -557,6 +557,11 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
 
 
 @register_lowering(aten._int_mm, type_promotion_kind=None)
+@memoizers.tuned_int_mm_memoizer.memoize(
+    custom_params_encoder=encoders.tuned_int_mm_params_encoder,
+    custom_result_encoder=encoders.tuned_kernel_result_encoder,
+    custom_result_decoder=decoders.tuned_int_mm_result_decoder,
+)
 def tuned_int_mm(mat1, mat2, *, layout=None):
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat1, mat2 = mm_args(
