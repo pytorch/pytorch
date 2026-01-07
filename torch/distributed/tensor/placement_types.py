@@ -1118,15 +1118,11 @@ class _MaskPartial(Partial):
         if not isinstance(other, _MaskPartial):
             return False
 
-        # if either data is not None, we invalidate the sharding cache, as this indicates
-        # the current _MaskPartial placement is still in use and should not be used for cache hit.
-        if self.mask_buffer.data is not None or other.mask_buffer.data is not None:
-            return False
-
         return (
             self.reduce_op == other.reduce_op
             and self.offset_shape == other.offset_shape
             and self.offset_dim == other.offset_dim
+            and self.mask_buffer is other.mask_buffer
         )
 
     def __hash__(self) -> int:
@@ -1135,6 +1131,7 @@ class _MaskPartial(Partial):
                 self.reduce_op,
                 self.offset_shape,
                 self.offset_dim,
+                id(self.mask_buffer),
             )
         )
 

@@ -32,6 +32,7 @@ from ..utils import (
     prefix_is_reduction,
     tlx_only_cuda_options,
     triton_version_uses_attrs_dict,
+    XPU_KERNEL_FORMAT,
 )
 from . import triton_helpers
 from .autotune_cache import AutotuneCache
@@ -773,6 +774,9 @@ class CachingAutotuner(KernelInterface):
             if "matrix_instr_nonkdim" in compile_meta:
                 options["matrix_instr_nonkdim"] = compile_meta["matrix_instr_nonkdim"]
 
+        if self.device_props.type == "xpu" and XPU_KERNEL_FORMAT == "zebin":
+            options["generate_native_code"] = True
+
         return options
 
     def _precompile_config(self, cfg: Config) -> CompileResult[_KernelType]:
@@ -1190,7 +1194,9 @@ class CachingAutotuner(KernelInterface):
         from torch._inductor import config
         from torch._inductor.codecache import CudaKernelParamCache
 
-        bin_type = {"hip": "hsaco", "xpu": "spv"}.get(self.device_props.type, "cubin")
+        bin_type = {"hip": "hsaco", "xpu": XPU_KERNEL_FORMAT}.get(
+            self.device_props.type, "cubin"
+        )
         binary = launcher.bin.asm[bin_type]
 
         # ROCm multi-arch: capture LLVM IR
@@ -1214,7 +1220,7 @@ class CachingAutotuner(KernelInterface):
         # Everything else: capture architecture-specific assembly
         else:
             asm_type = {"hip": "amdgcn", "cuda": "ptx", "xpu": "spv"}.get(
-                self.device_props.type, None
+                self.device_props.type
             )
             asm = launcher.bin.asm.get(asm_type, None)
 
@@ -1626,7 +1632,7 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
         triton_meta: dict[str, Any],
         heuristic_type: HeuristicType,
     ) -> StaticallyLaunchedCudaKernel | None:
-        if not torch._inductor.config.use_static_cuda_launcher:
+        if not torch._inductor.config.use_static_triton_launcher:
             return None
 
         def check_can_launch() -> StaticallyLaunchedCudaKernel:
@@ -1684,7 +1690,7 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
             return result
         except CannotStaticallyLaunchKernel as e:
             log.info("Bypassing StaticallyLaunchedCudaKernel due to %s", str(e))  # noqa: G200
-            if torch._inductor.config.strict_static_cuda_launcher:
+            if torch._inductor.config.strict_static_triton_launcher:
                 raise e
             return None
 
