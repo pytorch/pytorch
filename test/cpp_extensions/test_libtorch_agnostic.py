@@ -1,6 +1,7 @@
 # Owner(s): ["module: cpp"]
 
 import math
+import sysconfig
 import unittest
 from pathlib import Path
 
@@ -72,6 +73,10 @@ def skipIfTorchVersionLessThan(major, minor):
     return decorator
 
 
+@unittest.skipIf(
+    sysconfig.get_config_var("Py_GIL_DISABLED") == 1,
+    "Cpython limited API not available, see https://github.com/python/cpython/issues/111506",
+)
 class TestLibtorchAgnostic(TestCase):
     """
     Tests for versioned libtorch_agnostic extensions.
