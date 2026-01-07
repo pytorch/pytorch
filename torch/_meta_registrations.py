@@ -7512,12 +7512,23 @@ def linear_backward(input_, grad_output_, weight_, output_mask):
 
 @register_meta(aten.pixel_shuffle.default)
 def meta_pixel_shuffle(self, upscale_factor):
-    if not (
+    # Check for overflow when squaring upscale_factor
+    # INT64_MAX = 2^63 - 1 = 9223372036854775807
+    # sqrt(INT64_MAX) ≈ 3037000499
+    INT64_MAX = 9223372036854775807
+    torch._check(
+        upscale_factor > 0,
+        lambda: f"pixel_shuffle expects a positive upscale_factor, but got {upscale_factor}",
+    )
+    torch._check(
+        upscale_factor <= INT64_MAX // upscale_factor,
+        lambda: f"pixel_shuffle upscale_factor is too large, (upscale_factor)^2 would overflow: upscale_factor={upscale_factor}",
+    )
+    assert (
         len(self.shape) > 2 and self.shape[-3] % (upscale_factor * upscale_factor) == 0
-    ):
-        raise AssertionError(
-            f"Invalid input shape for pixel_shuffle: {self.shape} with upscale_factor = {upscale_factor}"
-        )
+    ), (
+        f"Invalid input shape for pixel_shuffle: {self.shape} with upscale_factor = {upscale_factor}"
+    )
 
     def is_channels_last(ten):
         return torch._prims_common.suggest_memory_format(ten) == torch.channels_last
