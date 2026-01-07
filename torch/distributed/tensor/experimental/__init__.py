@@ -1,11 +1,11 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 from collections.abc import Iterator
 from contextlib import contextmanager
-
+from typing_extensions import TypeAliasType
 from torch.distributed.tensor._api import DTensor
-from torch.distributed.tensor.experimental._attention import context_parallel
-from torch.distributed.tensor.experimental._func_map import local_map
-from torch.distributed.tensor.experimental._register_sharding import register_sharding
+from torch.distributed.tensor.experimental._attention import context_parallel as _context_parallel
+from torch.distributed.tensor.experimental._func_map import local_map as _local_map
+from torch.distributed.tensor.experimental._register_sharding import register_sharding as _register_sharding
 
 
 __all__ = ["context_parallel", "implicit_replication", "local_map", "register_sharding"]
@@ -27,8 +27,18 @@ def implicit_replication() -> Iterator[None]:
         DTensor._op_dispatcher._allow_implicit_replication = False
 
 
-# Set namespace for exposed private names
-context_parallel.__module__ = "torch.distributed.tensor.experimental"
-implicit_replication.__module__ = "torch.distributed.tensor.experimental"
-local_map.__module__ = "torch.distributed.tensor.experimental"
-register_sharding.__module__ = "torch.distributed.tensor.experimental"
+
+context_parallel = TypeAliasType(
+    "context_parallel", _context_parallel, module=__name__
+)
+
+local_map = TypeAliasType(
+    "local_map", _local_map, module=__name__
+)
+
+register_sharding = TypeAliasType(
+    "register_sharding", _register_sharding, module=__name__
+)
+
+
+implicit_replication.__module__ = __name__
