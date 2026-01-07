@@ -896,6 +896,15 @@ class {module_name}(torch.nn.Module):
             file_stem = f"{FX_GRAPH_MODULE_FILE_PREFIX}_{hash_value}"
             filename = f"/tmp/{file_stem}.py"
 
+            # Dump hash input data for debugging/diffing across runs
+            import json
+            hash_debug_file = f"/tmp/{file_stem}_hash_input.json"
+            hash_data = {
+                "code": self._code,
+                "node_metadata": node_metadata,
+            }
+            Path(hash_debug_file).write_text(json.dumps(hash_data, indent=2))
+
             # Only include co_filename to use it directly as the cache key
             co_fields = {
                 "co_filename": filename,
