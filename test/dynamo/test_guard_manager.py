@@ -1054,19 +1054,23 @@ class DuplicateGuardTest(torch._dynamo.test_case.TestCase):
 
 class RecursiveDictTagTests(torch._dynamo.test_case.TestCase):
     def setUp(self):
+        super().setUp()
         self._prev = torch._dynamo.config.use_recursive_dict_tags_for_guards
         torch._dynamo.config.use_recursive_dict_tags_for_guards = True
 
     def tearDown(self):
+        super().tearDown()
         torch._dynamo.config.use_recursive_dict_tags_for_guards = self._prev
 
 
 class TagSafetyChecks(RecursiveDictTagTests):
     def setUp(self):
+        super().setUp()
         self._prev = torch._dynamo.config.use_recursive_dict_tags_for_guards
         torch._dynamo.config.use_recursive_dict_tags_for_guards = True
 
     def tearDown(self):
+        super().tearDown()
         torch._dynamo.config.use_recursive_dict_tags_for_guards = self._prev
 
     def test_immutable_tag_safe(self):
