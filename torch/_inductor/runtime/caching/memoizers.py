@@ -17,3 +17,6 @@ tuned_bmm_memoizer = PersistentMemoizer(sub_dir=Path("tuned_bmm"))
 
 # Memoizer for tuned_baddbmm in kernel/bmm
 tuned_baddbmm_memoizer = PersistentMemoizer(sub_dir=Path("tuned_baddbmm"))
+
+# Memoizer for tuned_mm_plus_mm in kernel/mm_plus_mm
+tuned_mm_plus_mm_memoizer = PersistentMemoizer(sub_dir=Path("tuned_mm_plus_mm"))
