@@ -131,8 +131,8 @@ def get_redistribute_planner(
     Returns:
         A DTensorRedistributePlanner instance (potentially cached)
     """
-    if _are_we_tracing():
-        return DTensorRedistributePlanner(device_mesh, dtensor_meta)
+    # if _are_we_tracing():
+    # return DTensorRedistributePlanner(device_mesh, dtensor_meta)
 
     cache_key = (weakref.ref(device_mesh), dtensor_meta)
     if cache_key not in _planner_cache:
