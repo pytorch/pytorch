@@ -137,7 +137,7 @@ ALL_TESTS = ALL_TESTS[start:end]
 # or as specified by the user
 progress = 0
 if not args.ci:
-    logfile = open("result.log", "w")
+    logfile = open("result.log", "w")  # noqa:SIM115
     progressbar = tqdm.tqdm(total=len(ALL_TESTS))
 else:
     logfile = sys.stdout

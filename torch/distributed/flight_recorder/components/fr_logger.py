@@ -6,14 +6,14 @@
 
 import logging
 from collections.abc import Callable
-from typing import Any, Optional
+from typing import Any
 
 
 __all__ = ["FlightRecorderLogger"]
 
 
 class FlightRecorderLogger:
-    _instance: Optional[Any] = None
+    _instance: Any | None = None
     logger: logging.Logger
 
     def __init__(self) -> None:

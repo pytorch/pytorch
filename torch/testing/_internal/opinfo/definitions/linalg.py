@@ -12,15 +12,10 @@ from numpy import inf
 
 import torch
 from torch.testing import make_tensor
-from torch.testing._internal.common_cuda import (
-    _get_magma_version,
-    _get_torch_cuda_version,
-    with_tf32_off,
-)
+from torch.testing._internal.common_cuda import _get_magma_version, with_tf32_off
 from torch.testing._internal.common_device_type import (
     has_cusolver,
     skipCPUIfNoLapack,
-    skipCUDAIf,
     skipCUDAIfNoCusolver,
     skipCUDAIfNoMagma,
     skipCUDAIfNoMagmaAndNoCusolver,
@@ -256,7 +251,13 @@ def sample_inputs_lu_solve(op_info, device, dtype, requires_grad=False, **kwargs
 
     for n, batch, rhs in product(ns, batches, nrhs):
         A = make_a(*(batch + (n, n)))
-        LU, pivots = torch.linalg.lu_factor(A)
+        if torch.device(device).type == "mps":
+            # TODO: Fix lu_factor for MPS, because it does not work for all of
+            # these cases. So we resort to the CPU impl here and move the
+            # outputs back to MPS.
+            LU, pivots = (x.to(device) for x in torch.linalg.lu_factor(A.cpu()))
+        else:
+            LU, pivots = torch.linalg.lu_factor(A)
 
         B = make_b(batch + (n, rhs))
 
@@ -1071,7 +1072,7 @@ def sample_inputs_linalg_lu(op_info, device, dtype, requires_grad=False, **kwarg
         else:
             return output
 
-    batch_shapes = ((), (3,), (3, 3))
+    batch_shapes = ((), (3,), (3, 3), (0,))
     # pivot=False only supported in CUDA
     pivots = (True, False) if torch.device(device).type == "cuda" else (True,)
     deltas = (-2, -1, 0, +1, +2)
@@ -1478,9 +1479,6 @@ op_db: list[OpInfo] = [
         supports_autograd=False,
         sample_inputs_func=sample_inputs_linalg_ldl_solve,
         decorators=[
-            skipCUDAIf(
-                _get_torch_cuda_version() < (11, 4), "not available before CUDA 11.3.1"
-            ),
             skipCUDAIfNoCusolver,
             skipCUDAIfRocm,
             skipCPUIfNoLapack,

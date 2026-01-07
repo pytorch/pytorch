@@ -48,7 +48,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: x86-opbenchmark-build
     with:
-      build-environment: linux-jammy-py3.10-gcc11-build
+      build-environment: ${{ needs.x86-opbenchmark-build.outputs.build-environment }}
       docker-image: ${{ needs.x86-opbenchmark-build.outputs.docker-image }}
       test-matrix: ${{ needs.x86-opbenchmark-build.outputs.test-matrix }}
     secrets: inherit
@@ -72,7 +72,7 @@ jobs:
     uses: ./.github/workflows/_linux-test.yml
     needs: aarch64-opbenchmark-build
     with:
-      build-environment: linux-jammy-aarch64-py3.10
+      build-environment: ${{ needs.aarch64-opbenchmark-build.outputs.build-environment }}
       docker-image: ${{ needs.aarch64-opbenchmark-build.outputs.docker-image }}
       test-matrix: ${{ needs.aarch64-opbenchmark-build.outputs.test-matrix }}
     secrets: inherit

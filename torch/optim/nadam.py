@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 r"""Implementation for the NAdam algorithm."""
 
-from typing import cast, Optional, Union
+from typing import cast
 
 import torch
 from torch import Tensor
@@ -33,14 +33,14 @@ class NAdam(Optimizer):  # noqa: D101
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 2e-3,
+        lr: float | Tensor = 2e-3,
         betas: tuple[float, float] = (0.9, 0.999),
         eps: float = 1e-8,
         weight_decay: float = 0,
         momentum_decay: float = 4e-3,
         decoupled_weight_decay: bool = False,
         *,
-        foreach: Optional[bool] = None,
+        foreach: bool | None = None,
         maximize: bool = False,
         capturable: bool = False,
         differentiable: bool = False,
@@ -485,9 +485,9 @@ def _multi_tensor_nadam(
 
         exp_avg_sq_sqrt = torch._foreach_sqrt(grouped_exp_avg_sqs)
 
-        bias_correction_sqrt: Union[tuple[Tensor, ...], list[Tensor]]
-        mus: Union[tuple[Tensor, ...], list[Tensor]]
-        mu_nexts: Union[tuple[Tensor, ...], list[Tensor]]
+        bias_correction_sqrt: tuple[Tensor, ...] | list[Tensor]
+        mus: tuple[Tensor, ...] | list[Tensor]
+        mu_nexts: tuple[Tensor, ...] | list[Tensor]
         if capturable:
             # mus will be beta1 * (1 - 0.5 * 0.96 ** (step * momentum_decay))
             exponent = torch._foreach_mul(grouped_state_steps, momentum_decay)
@@ -612,7 +612,7 @@ def nadam(
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
     decoupled_weight_decay: bool = False,
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
     capturable: bool = False,
     differentiable: bool = False,
     has_complex: bool = False,

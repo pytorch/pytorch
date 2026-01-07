@@ -95,6 +95,7 @@ class AssociativeScanOp(HigherOrderOperator):
             else additional_inputs
         )
         validate_subgraph_args_types(additional_inputs)
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(combine_fn, xs, additional_inputs)
 
     # pyrefly: ignore [bad-override]
@@ -733,6 +734,7 @@ class AssociativeScanAutogradOp(torch.autograd.Function):
         # vmap joint graph over scan dimension to compute the individual
         # gradients for each time slice ``t`` in parallel.
         # This computation can be parallelized, as these are just the instantaneous gradients and not the full chain-rule
+        # pyrefly: ignore [bad-argument-type]
         mapped_combine_fn_bw_gm = torch.vmap(combine_fn_bw_gm, 0, 0)
 
         # 4.) Compute the single step bw (instantaneous gradients) at every step ``t``

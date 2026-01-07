@@ -101,6 +101,7 @@ GemmBlocking = namedtuple("GemmBlocking", ["block_m", "block_n", "block_k"])
 
 def get_promote_dtype(args):
     return (
+        # pyrefly: ignore [no-matching-overload]
         functools.reduce(
             torch.promote_types,  # type: ignore[arg-type]
             [n.dtype for n in args if isinstance(n, CppCSEVariable)],
