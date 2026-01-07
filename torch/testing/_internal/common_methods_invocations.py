@@ -16660,6 +16660,9 @@ op_db: list[OpInfo] = [
         supports_forward_ad=False,
         supports_fwgrad_bwgrad=True,
         check_batched_forward_grad=False,
+        # NOTE: since changing the sample inputs to not apply requires_grad on attn_mask, on CPU,
+        # the flash attention kernel is now used which materializes the attn_mask if it is COW
+        allow_cow_input_materialize_forward=["attn_mask"],
         decorators=[DecorateInfo(toleranceOverride(
             {torch.float32: tol(atol=5e-05, rtol=5e-6)}), 'TestCommon',), ],
         skips=(

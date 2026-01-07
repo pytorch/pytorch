@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+from dataclasses import dataclass
 from abc import abstractmethod
 import tempfile
 import unittest
@@ -30,6 +31,12 @@ from collections.abc import Sequence
 
 TemporaryFile = tempfile.TemporaryFile
 PRECISION = 1e-5
+
+
+@dataclass
+class NoRequiresGrad:
+    """Wraps a Tensor, indicating to InputVariableMixin that this tensor should not require grad."""
+    tensor: torch.Tensor
 
 
 def get_reduction(m):
@@ -2583,7 +2590,7 @@ def get_new_module_tests():
                                     .dim_feedforward(8)
                                     .dropout(0.0)
                                     .activation(torch::kReLU)''',
-            input_fn=lambda: (torch.rand(3, 3, 4), torch.rand(2, 3, 4), torch.rand(3, 3)),
+            input_fn=lambda: (torch.rand(3, 3, 4), torch.rand(2, 3, 4), NoRequiresGrad(torch.rand(3, 3))),
             check_gradgrad=False,
             desc='multilayer_coder',
             with_tf32=True,
@@ -3611,12 +3618,13 @@ class InputVariableMixin:
         input = TestBase._get_input(self, False)  # type: ignore[arg-type]
 
         def map_variables(i):
+            if isinstance(i, NoRequiresGrad):
+                return i.tensor
             if isinstance(i, torch.Tensor):
                 if i.is_floating_point() or i.is_complex():
                     i.requires_grad = True
                 return i
-            else:
-                return type(i)(map_variables(elem) for elem in i)
+            return type(i)(map_variables(elem) for elem in i)
 
         return map_variables(input)
 
