@@ -824,11 +824,12 @@ class TestFP8Lowering(TestCase):
     @xfailIf(
         torch.cuda.is_available() and torch.cuda.get_device_capability() != (9, 0)
     )  # cuBLAS 128-element blockwise scaling is only supported for CC 9.0
-    @parametrize("shape", ((16, 256, 256), (1024, 512, 1024)))
+    @parametrize("shape", ((16, 256, 256), (1024, 512, 1024), (32768, 4096, 4096)))
     @parametrize("use_fast_accum", (False, True))
     @parametrize(
-        "scaling_block_sizes", ((1, 128, 128, 128), (1, 128, 1, 128))
-    )  # (BlockWise1x128, BlockWise128x128), (BlockWise1x128, BlockWise1x128)
+        "scaling_block_sizes",
+        ((1, 128, 128, 128), (1, 128, 1, 128), (128, 128, 1, 128)),
+    )  # (BlockWise1x128, BlockWise128x128), (BlockWise1x128, BlockWise1x128), (BlockWise128x128, BlockWise1x128)
     def test_main_loop_scaling(
         self,
         shape: tuple[int, int, int],
