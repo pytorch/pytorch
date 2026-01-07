@@ -66,13 +66,12 @@ class AttentionBlock(nn.Module):
         max_len: int,
         is_causal: bool = False,
         scale: float | None = None,
-        window_size_left: int = -1,
-        window_size_right: int = -1,
+        window_size: tuple[int, int] = (-1, -1),
     ):
         q, k, v = self.get_varlen_qkv(x_packed)
 
         attn_out = varlen_attn(
-            q, k, v, cu_seq, cu_seq, max_len, max_len, is_causal, scale=scale, window_size_left=window_size_left, window_size_right=window_size_right
+            q, k, v, cu_seq, cu_seq, max_len, max_len, is_causal, scale=scale, window_size=window_size
         )
         attn_out = attn_out.view(-1, self.embed_dim)
 
@@ -84,8 +83,7 @@ class AttentionBlock(nn.Module):
         seq_lengths: torch.Tensor,
         is_causal: bool = False,
         scale: float | None = None,
-        window_size_left: int = -1,
-        window_size_right: int = -1,
+        window_size: tuple[int, int] = -1,
     ):
         batch_size, seq_len, _ = x_padded.shape
 
@@ -109,11 +107,11 @@ class AttentionBlock(nn.Module):
             attn_mask = attn_mask & causal_mask[None, None, :, :]
 
         # --- Window attention ---
-        if window_size_left >= 0 or window_size_right >= 0:
+        if window_size[0] >= 0 or window_size[1] >= 0:
             window_mask = torch.zeros(seq_len, seq_len, dtype=torch.bool, device=x_padded.device)
             for i in range(seq_len):
-                start = i - window_size_left if window_size_left >= 0 else 0
-                end = i + window_size_right + 1 if window_size_right >= 0 else seq_len
+                start = i - window_size[0] if window_size[0] >= 0 else 0
+                end = i + window_size[1] + 1 if window_size[1] >= 0 else seq_len
                 start = max(start, 0)
                 end = min(end, seq_len)
                 window_mask[i, start:end] = True
@@ -347,9 +345,8 @@ class TestVarlenAttention(NNTestCase):
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("is_causal", [False, True])
     @parametrize("scale", [None, 0.1])
-    @parametrize("window_size_left", [-1, 4])
-    @parametrize("window_size_right", [-1, 4])
-    def test_varlen_vs_sdpa(self, device, dtype, is_causal, scale, window_size_left, window_size_right):
+    @parametrize("window_size", [(-1, 4)])
+    def test_varlen_vs_sdpa(self, device, dtype, is_causal, scale, window_size):
         torch.manual_seed(42)
 
         shape = VarlenShape(
@@ -375,16 +372,14 @@ class TestVarlenAttention(NNTestCase):
             variable_length_batch_data["max_len"],
             is_causal=is_causal,
             scale=scale,
-            window_size_left=window_size_left,
-            window_size_right=window_size_right,
+            window_size=window_size,
         )
         sdpa_output = attention_block.forward_sdpa(
             variable_length_batch_data["x_padded"],
             variable_length_batch_data["seq_lengths"],
             is_causal=is_causal,
             scale=scale,
-            window_size_left=window_size_left,
-            window_size_right=window_size_right,
+            window_size=window_size,
         )
 
         golden_sdpa_output = golden_attention_block.forward_sdpa(
@@ -392,8 +387,7 @@ class TestVarlenAttention(NNTestCase):
             golden_variable_length_batch_data["seq_lengths"],
             is_causal=is_causal,
             scale=scale,
-            window_size_left=window_size_left,
-            window_size_right=window_size_right,
+            window_size=window_size,
         )
 
         start_idx = 0
