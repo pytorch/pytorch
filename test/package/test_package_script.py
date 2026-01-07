@@ -241,7 +241,7 @@ class TestPackageScript(PackageTestCase):
         """
         Test to verify saving multiple ScriptModules with same top module
         but different submodules works. Submodule is redefined to between
-        the defintion of the top module to check that the different concrete
+        the definition of the top module to check that the different concrete
         types of the modules are thoroughly recognized by serializaiton code.
         """
 

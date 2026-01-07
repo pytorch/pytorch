@@ -33,7 +33,6 @@ from torch.testing._internal.common_cuda import (
     SM80OrLater,
     TEST_CUDA,
     TEST_CUDNN,
-    TEST_CUDNN_VERSION,
 )
 from torch.testing._internal.common_quantization import (
     skipIfNoFBGEMM,
@@ -1448,7 +1447,6 @@ class TestQuantizedOps(TestCase):
            padding=st.integers(0, 2),
            ceil_mode=st.booleans())
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skipIf(TEST_CUDNN_VERSION <= 90100, "cuDNN maxpool2d mishandles -128 before v90100")
     @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
     def test_max_pool2d_cudnn(self, X, kernel, stride, dilation, padding, ceil_mode):
         X, (scale, zero_point, torch_type) = X
@@ -2163,7 +2161,7 @@ class TestQuantizedOps(TestCase):
 
         test_cases = itertools.product(x_dims, sides, dims, largest, sorted, dtypes, is_nhwc)
         k = 2
-        for x_dim, side, dim, larg, sort, dtype, nhwc in test_cases:
+        for x_dim, side, dim, large, sort, dtype, nhwc in test_cases:
             if nhwc and x_dim != 4:  # NHWC requires 4 dimensions
                 continue
             if dim >= x_dim:  # Dimension to find top-k for should exist
@@ -2176,12 +2174,12 @@ class TestQuantizedOps(TestCase):
                 qX = qX.permute([0, 3, 1, 2])
                 X = np.transpose(X, [0, 3, 1, 2])
 
-            unquantized_out = torch.topk(qX.dequantize(), k, dim=dim, largest=larg, sorted=sort)
+            unquantized_out = torch.topk(qX.dequantize(), k, dim=dim, largest=large, sorted=sort)
 
             values = torch.quantize_per_tensor(X, scale, zp, dtype)
             indices = torch.tensor(X).long()
 
-            quantized_out = torch.topk(qX, k, dim=dim, largest=larg, sorted=sort)
+            quantized_out = torch.topk(qX, k, dim=dim, largest=large, sorted=sort)
 
             assert len(unquantized_out) == len(quantized_out)
             torch.testing.assert_close(quantized_out[0].dequantize(), unquantized_out[0])
@@ -5983,7 +5981,7 @@ class TestQuantizedConv(TestCase):
             "out_channel:", out_channel,
             "kernel_size:", kernel_size,
             "height:", height,
-            "widht:", width
+            "width:", width
         )
         conv = torch.nn.Conv2d(in_channel, out_channel, kernel_size).cuda()
         input = torch.randn((batch_size, in_channel, height, width), device='cuda')
@@ -7868,7 +7866,7 @@ class TestQuantizedConv(TestCase):
     def _make_qconv_tensors_fp8(
         self, batch_size, input_channels_per_group, input_feature_map_shape,
         output_channels_per_group, groups, kernels, strides, pads, dilations,
-        use_bias, use_channelwise, use_transpose,
+        use_bias, use_channelwise, use_transpose, bfloat16_output,
         device=torch.device("cpu"),
     ):
         assert not (use_channelwise and use_transpose), \
@@ -7898,9 +7896,10 @@ class TestQuantizedConv(TestCase):
         X_q, X_scale = _quantize_fp8e4m3(X, channelwise=False)
         W = torch.randn(output_shape + kernels, device=device) * 0.1
         W_q, W_scale = _quantize_fp8e4m3(W, channelwise=use_channelwise)
-        bias_float = torch.randn((output_channels,), device=device) if use_bias else None
+        bias_dtype = torch.bfloat16 if bfloat16_output else torch.float
+        bias = torch.randn((output_channels,), dtype=bias_dtype, device=device) if use_bias else None
 
-        return X, W, X_q, W_q, X_scale, W_scale, bias_float
+        return X, W, X_q, W_q, X_scale, W_scale, bias
 
     def _test_qconv_impl_cpu_tensor_fp8(
         self,
@@ -7932,7 +7931,7 @@ class TestQuantizedConv(TestCase):
         batch_size = 3
         device = torch.device("cpu")
         use_transpose = False
-        X, W, X_q, W_q, X_scale, W_scale, bias_float = self._make_qconv_tensors_fp8(
+        X, W, X_q, W_q, X_scale, W_scale, bias = self._make_qconv_tensors_fp8(
             batch_size,
             input_channels_per_group,
             input_feature_map_shape,
@@ -7945,11 +7944,13 @@ class TestQuantizedConv(TestCase):
             use_bias,
             use_channelwise,
             use_transpose,
+            bfloat16_output,
             device=device,
         )
         # Assign weights
         dqW = _dequantize_fp8e4m3(W_q, W_scale)
         dqX = _dequantize_fp8e4m3(X_q, X_scale)
+        bias_float = bias.float() if use_bias and bfloat16_output else bias
         conv_op.weight = torch.nn.Parameter(dqW, requires_grad=False)
         conv_op.bias = (
             torch.nn.Parameter(bias_float, requires_grad=False) if use_bias else None
@@ -8030,7 +8031,7 @@ class TestQuantizedConv(TestCase):
                 W_scale,
                 torch.zeros([], dtype=torch.int8),  # W_zero_point
                 accum,
-                bias_float,
+                bias,
                 strides,
                 pads,
                 dilations,
@@ -8054,7 +8055,7 @@ class TestQuantizedConv(TestCase):
                 packed_weight,
                 W_scale,
                 torch.zeros([], dtype=torch.int8),  # W_zero_point
-                bias_float,
+                bias,
                 strides,
                 pads,
                 dilations,

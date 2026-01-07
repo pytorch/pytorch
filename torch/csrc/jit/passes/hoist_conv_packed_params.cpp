@@ -2,8 +2,6 @@
 
 #include <torch/csrc/jit/api/module.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/constant_pooling.h>
-#include <torch/csrc/jit/passes/constant_propagation.h>
 #include <torch/csrc/jit/passes/hoist_conv_packed_params.h>
 #include <torch/csrc/jit/passes/quantization/helper.h>
 

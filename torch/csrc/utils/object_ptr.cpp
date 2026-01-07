@@ -1,8 +1,6 @@
 #include <c10/macros/Macros.h>
 #include <torch/csrc/utils/object_ptr.h>
 
-#include <torch/csrc/python_headers.h>
-
 template <>
 TORCH_PYTHON_API void THPPointer<PyObject>::free() {
   if (ptr && C10_LIKELY(Py_IsInitialized()))

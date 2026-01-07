@@ -1,4 +1,3 @@
-#include <ATen/Utils.h>
 
 #include <ATen/code_template.h>
 #include <ATen/cuda/CUDAConfig.h>
@@ -8,7 +7,6 @@
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/frozen_conv_add_relu_fusion.h>
 #include <torch/csrc/jit/passes/graph_rewrite_helper.h>
-#include <torch/csrc/jit/passes/remove_mutation.h>
 #include <torch/csrc/jit/passes/subgraph_rewrite.h>
 
 namespace torch::jit {

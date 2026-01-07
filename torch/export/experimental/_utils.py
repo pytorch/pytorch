@@ -1,5 +1,4 @@
 import logging
-import typing
 
 from torch._inductor.utils import IndentedBuffer
 
@@ -12,7 +11,7 @@ def _get_main_cpp_file(
     package_name: str,
     model_names: list[str],
     cuda: bool,
-    example_inputs_map: typing.Optional[dict[str, int]],
+    example_inputs_map: dict[str, int] | None,
     is_hip: bool,
 ) -> str:
     """

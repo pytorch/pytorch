@@ -761,13 +761,14 @@ class TestAutoWrap(TestCase):
         os.environ["MASTER_ADDR"] = "localhost"
         os.environ["MASTER_PORT"] = str(find_free_port())
 
-        file_name = tempfile.NamedTemporaryFile(delete=False).name
-        torch.distributed.init_process_group(
-            backend=backend,
-            init_method=f"{FILE_SCHEMA}_{file_name}",
-            rank=0,
-            world_size=1,
-        )
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            file_name = f.name
+            torch.distributed.init_process_group(
+                backend=backend,
+                init_method=f"{FILE_SCHEMA}_{file_name}",
+                rank=0,
+                world_size=1,
+            )
 
         # NOTE: We move model to GPU after init with FSDP to simulate real use
         # cases where full model cannot be loaded onto GPU, but their shards can.

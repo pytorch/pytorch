@@ -25,6 +25,10 @@ set -eux -o pipefail
 # Pythonless binary, then it expects to be in the root folder of the unzipped
 # libtorch package.
 
+# ensure we don't link to system libraries, linked libraries should be found from RPATH
+# Save the old LD_LIBRARY_PATH to restore it later
+OLD_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
+unset LD_LIBRARY_PATH
 
 if [[ -z ${DESIRED_PYTHON:-} ]]; then
   export DESIRED_PYTHON=${MATRIX_PYTHON_VERSION:-}
@@ -46,7 +50,10 @@ if [[ "$PACKAGE_TYPE" == libtorch ]]; then
   export install_root="$PWD"
 else
 
-  if [[ $DESIRED_PYTHON =~ ([0-9].[0-9]+)t ]]; then
+  if [[ $DESIRED_PYTHON =~ ^cp([0-9])([0-9][0-9])(-cp[0-9]+)?t?$ ]]; then
+    # Handle inputs like cp310-cp310 or cp310-cp310t
+    py_dot="${BASH_REMATCH[1]}.${BASH_REMATCH[2]}"
+  elif [[ $DESIRED_PYTHON =~ ([0-9].[0-9]+)t ]]; then
     # For python that is maj.mint keep original version
     py_dot="$DESIRED_PYTHON"
   elif [[ $DESIRED_PYTHON =~ ([0-9].[0-9]+) ]];  then
@@ -302,4 +309,11 @@ except RuntimeError as e:
     echo "PyTorch doesn't support TLS_TCP transport, please build with USE_GLOO_WITH_OPENSSL=1"
     exit 1
   fi
+fi
+
+###############################################################################
+# Restore LD_LIBRARY_PATH to its original value
+###############################################################################
+if [[ -n "$OLD_LD_LIBRARY_PATH" ]]; then
+  export LD_LIBRARY_PATH="$OLD_LD_LIBRARY_PATH"
 fi

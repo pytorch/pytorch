@@ -29,7 +29,6 @@
 #define RESTRICT __restrict__
 #endif
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-variable")
 namespace at::native {
 
 namespace {
@@ -1385,4 +1384,3 @@ REGISTER_DISPATCH(dyn_quant_pack_4bit_weight_stub, &dyn_quant_pack_4bit_weight_k
 REGISTER_DISPATCH(dyn_quant_matmul_4bit_stub, &dyn_quant_matmul_4bit_kernel)
 
 } // at::native
-C10_DIAGNOSTIC_POP()

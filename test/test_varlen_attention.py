@@ -9,7 +9,7 @@ from torch.nn.attention.varlen import varlen_attn
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
-from torch.testing._internal.common_utils import parametrize, run_tests, skipIfRocm
+from torch.testing._internal.common_utils import parametrize, run_tests
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -65,10 +65,13 @@ class AttentionBlock(nn.Module):
         cu_seq: torch.Tensor,
         max_len: int,
         is_causal: bool = False,
+        scale: float | None = None,
     ):
         q, k, v = self.get_varlen_qkv(x_packed)
 
-        attn_out = varlen_attn(q, k, v, cu_seq, cu_seq, max_len, max_len, is_causal)
+        attn_out = varlen_attn(
+            q, k, v, cu_seq, cu_seq, max_len, max_len, is_causal, scale=scale
+        )
         attn_out = attn_out.view(-1, self.embed_dim)
 
         return self.out_proj(attn_out)
@@ -78,27 +81,36 @@ class AttentionBlock(nn.Module):
         x_padded: torch.Tensor,
         seq_lengths: torch.Tensor,
         is_causal: bool = False,
+        scale: float | None = None,
     ):
         batch_size, seq_len, _ = x_padded.shape
 
         qkv = self.qkv_proj(x_padded)
         q, k, v = qkv.chunk(3, dim=-1)
 
-        mask = (
+        padding_mask = (
             torch.arange(seq_len, device=x_padded.device)[None, :]
             < seq_lengths[:, None]
         )
 
-        attn_mask = mask[:, None, None, :].expand(
+        attn_mask = padding_mask[:, None, None, :].expand(
             batch_size, self.num_heads, seq_len, seq_len
         )
+
+        if is_causal:
+            causal_mask = torch.tril(
+                torch.ones(seq_len, seq_len, device=x_padded.device, dtype=torch.bool)
+            )
+            # Combine: attention allowed where BOTH padding is valid AND causal constraint is met
+            attn_mask = attn_mask & causal_mask[None, None, :, :]
 
         q = q.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         k = k.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
         v = v.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
 
+        # Don't pass is_causal since we already incorporated it into attn_mask
         attn_out = F.scaled_dot_product_attention(
-            q, k, v, attn_mask=attn_mask, is_causal=is_causal
+            q, k, v, attn_mask=attn_mask, scale=scale
         )
 
         attn_out = (
@@ -159,7 +171,6 @@ def create_variable_length_batch(
 
 
 class TestVarlenAttention(NNTestCase):
-    @skipIfRocm(msg="ROCM does not support variable length attention")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
@@ -208,7 +219,6 @@ class TestVarlenAttention(NNTestCase):
         self.assertEqual(varlen_grad.shape, x_packed.shape)
         self.assertEqual(varlen_grad.dtype, x_packed.dtype)
 
-    @skipIfRocm(msg="ROCM does not support variable length attention")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
@@ -266,7 +276,6 @@ class TestVarlenAttention(NNTestCase):
             test_utils=["test_schema", "test_faketensor"],
         )
 
-    @skipIfRocm(msg="ROCM does not support variable length attention")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
@@ -317,17 +326,17 @@ class TestVarlenAttention(NNTestCase):
         ) and any("torch_attn._varlen_attn_backward" in op for op in called_ops)
         assert custom_ops_called
 
-    @skipIfRocm(msg="ROCM does not support variable length attention")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("is_causal", [False, True])
-    def test_varlen_vs_sdpa(self, device, dtype, is_causal):
+    @parametrize("scale", [None, 0.1])
+    def test_varlen_vs_sdpa(self, device, dtype, is_causal, scale):
         torch.manual_seed(42)
 
         shape = VarlenShape(
-            batch_size=8, max_seq_len=2048, embed_dim=1024, num_heads=16
+            batch_size=4, max_seq_len=1024, embed_dim=1024, num_heads=16
         )
 
         attention_block = AttentionBlock(
@@ -348,17 +357,20 @@ class TestVarlenAttention(NNTestCase):
             variable_length_batch_data["cu_seq"],
             variable_length_batch_data["max_len"],
             is_causal=is_causal,
+            scale=scale,
         )
         sdpa_output = attention_block.forward_sdpa(
             variable_length_batch_data["x_padded"],
             variable_length_batch_data["seq_lengths"],
             is_causal=is_causal,
+            scale=scale,
         )
 
         golden_sdpa_output = golden_attention_block.forward_sdpa(
             golden_variable_length_batch_data["x_padded"],
             golden_variable_length_batch_data["seq_lengths"],
             is_causal=is_causal,
+            scale=scale,
         )
 
         start_idx = 0
@@ -376,7 +388,7 @@ class TestVarlenAttention(NNTestCase):
             varlen_error = (varlen_seq - fwd_atol).abs().max().item()
             sdpa_error = (sdpa_seq - fwd_atol).abs().max().item()
 
-            assert varlen_error <= 2 * sdpa_error + fwd_atol
+            self.assertLessEqual(varlen_error, 2 * sdpa_error + fwd_atol)
 
             start_idx = end_idx
 
@@ -432,11 +444,10 @@ class TestVarlenAttention(NNTestCase):
             varlen_error = (varlen_grad_seq - fwd_atol).abs().max().item()
             sdpa_error = (sdpa_grad_seq - fwd_atol).abs().max().item()
 
-            assert varlen_error <= sdpa_error + fwd_atol
+            self.assertLessEqual(varlen_error, sdpa_error + fwd_atol)
 
             start_idx = end_idx
 
-    @skipIfRocm(msg="ROCM does not support variable length attention")
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
