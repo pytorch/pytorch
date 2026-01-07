@@ -110,6 +110,7 @@ if typing.TYPE_CHECKING:
         ValuesView,
     )
 
+    from torch._dynamo.bytecode_transformation import Instruction
     from torch._dynamo.replay_record import ExecutionRecord
     from torch._dynamo.symbolic_convert import (
         InstructionTranslator,
@@ -1406,11 +1407,17 @@ class CompilationMetrics:
     log_format_version: int = LOG_FORMAT_VERSION
     inductor_config: Optional[str] = None
     remote_cache_version: Optional[int] = None
-    inductor_fx_remote_cache_hit_count: Optional[int] = None
-    inductor_fx_remote_cache_miss_count: Optional[int] = None
+    inductor_fx_remote_cache_hit_count: Optional[int] = 0
+    inductor_fx_remote_cache_miss_count: Optional[int] = 0
     inductor_fx_remote_cache_backend_type: Optional[str] = None
     inductor_fx_remote_cache_hit_keys: Optional[str] = None
     inductor_fx_remote_cache_miss_keys: Optional[str] = None
+    inductor_fx_local_cache_hit_count: Optional[int] = 0
+    inductor_fx_local_cache_miss_count: Optional[int] = 0
+    aotautograd_remote_cache_hit_count: Optional[int] = 0
+    aotautograd_remote_cache_miss_count: Optional[int] = 0
+    aotautograd_local_cache_hit_count: Optional[int] = 0
+    aotautograd_local_cache_miss_count: Optional[int] = 0
     cuda_version: Optional[str] = None
     triton_version: Optional[str] = None
     feature_usage: Optional[dict[str, bool]] = None
@@ -4369,7 +4376,7 @@ def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
     return None
 
 
-def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> str:
+def get_instruction_source_311(code: types.CodeType, inst: Instruction) -> str:
     """
     Python 3.11+ only. Returns lines of source code (from code object `code`)
     corresponding to `inst`'s location data, and underlines relevant code to `inst`.

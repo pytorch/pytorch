@@ -3253,7 +3253,6 @@ class TestSDPACudaOnly(NNTestCase):
 
         assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION.value
 
-    @skipIfRocm  # Missing triton.float32 ("triton" prefix is to locate skipped UTs), and deterministic algo
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")
     @parametrize("warn_only", [True, False])
     def test_sdp_choice_with_determinism(self, device, warn_only):
