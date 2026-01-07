@@ -252,7 +252,7 @@ static void THP_take_ownership(PyFrameObject* f, _PyInterpreterFrame* frame) {
     PyErr_SetRaisedException(exc);
   }
   if (!_PyObject_GC_IS_TRACKED((PyObject*)f)) {
-    _PyObject_GC_TRACK((PyObject*)f);
+    PyObject_GC_Track((PyObject*)f);
   }
   Py_END_CRITICAL_SECTION();
 }

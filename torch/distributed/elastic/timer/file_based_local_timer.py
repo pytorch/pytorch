@@ -68,24 +68,26 @@ class FileTimerRequest(TimerRequest):
     process.
     """
 
-    __slots__ = ["version", "worker_pid", "scope_id", "expiration_time", "signal"]
+    __slots__ = ["version", "signal"]
 
     def __init__(
         self, worker_pid: int, scope_id: str, expiration_time: float, signal: int = 0
     ) -> None:
+        super().__init__(
+            worker_id=worker_pid, scope_id=scope_id, expiration_time=expiration_time
+        )
         self.version = 1
-        self.worker_pid = worker_pid
-        self.scope_id = scope_id
-        self.expiration_time = expiration_time
         self.signal = signal
+
+    @property
+    def worker_pid(self) -> int:
+        return self.worker_id
 
     def __eq__(self, other) -> bool:
         if isinstance(other, FileTimerRequest):
             return (
-                self.version == other.version
-                and self.worker_pid == other.worker_pid
-                and self.scope_id == other.scope_id
-                and self.expiration_time == other.expiration_time
+                super().__eq__(other)
+                and self.version == other.version
                 and self.signal == other.signal
             )
         return False

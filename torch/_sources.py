@@ -3,7 +3,7 @@ import ast
 import functools
 import inspect
 from textwrap import dedent
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple
 
 from torch._C import ErrorReport
 from torch._C._jit_tree_views import SourceRangeFactory
@@ -11,8 +11,8 @@ from torch._C._jit_tree_views import SourceRangeFactory
 
 def get_source_lines_and_file(
     obj: Any,
-    error_msg: Optional[str] = None,
-) -> tuple[list[str], int, Optional[str]]:
+    error_msg: str | None = None,
+) -> tuple[list[str], int, str | None]:
     """
     Wrapper around inspect.getsourcelines and inspect.getsourcefile.
 
@@ -113,7 +113,7 @@ class ParsedDef(NamedTuple):
     ast: ast.Module
     ctx: SourceContext
     source: str
-    filename: Optional[str]
+    filename: str | None
     file_lineno: int
 
 

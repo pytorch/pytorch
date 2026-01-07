@@ -5,7 +5,7 @@ import sympy
 
 import torch
 
-from .ir import Pointwise, ShapeAsConstantBuffer, TensorBox
+from .ir import Pointwise, TensorBox
 from .virtualized import ops
 
 
@@ -26,7 +26,7 @@ def get_inverse_offsets(
     offsets: TensorBox,
     jagged_len: Union[int, sympy.Expr],
     realize: bool = True,
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox:
     """
     Returns "inverse_offsets" - the inverse of the offsets array.
     offsets maps batch index (dense) to jagged index (i.e. offset into jagged tensor).
@@ -118,7 +118,7 @@ def register_jagged_ops():
         jagged_offsets: list[TensorBox],
         max_lengths: list[int],  # list of ints/SymInts
         padding_value: float = 0.0,
-    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
+    ) -> TensorBox:
         device = jagged_values.get_device_or_error()
         dtype = jagged_values.get_dtype()
 
@@ -144,7 +144,7 @@ def register_jagged_ops():
                 padding_value,
             )
 
-        offsets: TensorBox = jagged_offsets[0]
+        offsets: TensorBox = jagged_offsets[0]  # type: ignore[assignment]
         offsets_len = offsets.get_size()[0]
         offsets_dtype = offsets.get_dtype()
         batch_size = offsets_len - 1
@@ -188,7 +188,7 @@ def register_jagged_ops():
         dense: TensorBox,
         jagged_offsets: list[TensorBox],
         jagged_len: Optional[int] = None,
-    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
+    ) -> TensorBox:
         device = dense.get_device_or_error()
         dtype = dense.get_dtype()
 
@@ -210,7 +210,7 @@ def register_jagged_ops():
                 jagged_len,
             )
 
-        offsets: TensorBox = jagged_offsets[0]
+        offsets: TensorBox = jagged_offsets[0]  # type: ignore[assignment]
         offsets_dtype = offsets.get_dtype()
         batch_size = dense_size[0]
         max_seq_len = dense_size[1]
@@ -261,7 +261,7 @@ def register_jagged_ops():
         dense: TensorBox,
         jagged_offsets: list[TensorBox],
         jagged_len: Optional[int] = None,
-    ) -> Union[TensorBox, ShapeAsConstantBuffer]:
+    ) -> TensorBox:
         return _dense_to_jagged_forward_impl(
             fallback_op=torch.ops.aten._padded_dense_to_jagged_forward.default,
             dense=dense,

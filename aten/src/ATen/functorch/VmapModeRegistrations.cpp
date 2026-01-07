@@ -5,11 +5,6 @@
 // LICENSE file in the root directory of this source tree.
 
 #include <torch/library.h>
-#include <ATen/ATen.h>
-#include <ATen/functorch/LegacyVmapTransforms.h>
-#include <ATen/functorch/BatchedTensorImpl.h>
-#include <ATen/functorch/PlumbingHelper.h>
-#include <ATen/functorch/DynamicLayer.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
 // functorch's vmap has two Dispatch Keys that implement it:

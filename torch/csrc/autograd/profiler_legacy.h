@@ -96,8 +96,9 @@ struct TORCH_API LegacyEvent {
         return "pop";
       case EventKind::MemoryAlloc:
         return "memory_alloc";
+      default:
+        TORCH_CHECK(false, "unknown event kind");
     }
-    TORCH_CHECK(false, "unknown event kind");
   }
 
   EventKind kind() const {

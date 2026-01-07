@@ -7,7 +7,7 @@ This is intended as a proving ground for more flexible and object oriented distr
 from collections.abc import Generator
 from contextlib import contextmanager
 from datetime import timedelta
-from typing import Protocol, Union
+from typing import Protocol
 
 import torch
 from torch._C._distributed_c10d import (
@@ -127,7 +127,7 @@ register_backend("nccl", _nccl_factory)
 def new_group(
     backend: str,
     timeout: timedelta,
-    device: Union[str, torch.device],
+    device: str | torch.device,
     **kwargs: object,
 ) -> ProcessGroup:
     """

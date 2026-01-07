@@ -4163,12 +4163,11 @@ class TestIO(TestCase):
             fourgbplus = 2**32 + 2**16
             testbytes = np.arange(8, dtype=np.int8)
             n = len(testbytes)
-            flike = tempfile.NamedTemporaryFile()
-            f = flike.file
-            np.tile(testbytes, fourgbplus // testbytes.nbytes).tofile(f)
-            flike.seek(0)
-            a = np.fromfile(f, dtype=np.int8)
-            flike.close()
+            with tempfile.NamedTemporaryFile() as flike:
+                f = flike.file
+                np.tile(testbytes, fourgbplus // testbytes.nbytes).tofile(f)
+                flike.seek(0)
+                a = np.fromfile(f, dtype=np.int8)
             assert_(len(a) == fourgbplus)
             # check only start and end for speed:
             assert_((a[:n] == testbytes).all())

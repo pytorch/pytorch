@@ -105,6 +105,7 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_mps_impl(
   params.feature_size = feature_size;
   params.mode = static_cast<EmbeddingBagMode>(mode);
   params.padding_idx = padding_idx;
+  params.num_weights = weight.size(0);
 
   auto num_threads = output.numel();
   MPSStream* stream = getCurrentMPSStream();
@@ -126,7 +127,8 @@ static std::tuple<Tensor, Tensor, Tensor, Tensor> _embedding_bag_mps_impl(
                   offset2bag,
                   bag_size,
                   max_indices,
-                  params);
+                  params,
+                  stream->getErrorBuffer());
 
       mtl_dispatch1DJob(computeEncoder, pipeline_state, num_threads);
       getMPSProfiler().endProfileKernel(pipeline_state);
