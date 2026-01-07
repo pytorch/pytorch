@@ -317,7 +317,8 @@ class RNNBase(Module):
                 and not torch._C._is_any_autocast_enabled()
             ):
                 raise ValueError(
-                    f"input must have the type {self._flat_weights[0].dtype}, got type {input.dtype}"  # type: ignore[union-attr]
+                    f"RNN input dtype ({input.dtype}) does not match weight dtype ({self._flat_weights[0].dtype}). "  # type: ignore[union-attr]
+                    f"Convert input: input.to({self._flat_weights[0].dtype}), or convert model: model.to({input.dtype})"  # type: ignore[union-attr]
                 )
         expected_input_dim = 2 if batch_sizes is not None else 3
         if input.dim() != expected_input_dim:
@@ -732,9 +733,11 @@ class RNN(RNNBase):
                 # the user believes he/she is passing in.
                 hx = self.permute_hidden(hx, sorted_indices)
 
-        assert hx is not None
+        if hx is None:
+            raise AssertionError("hx must not be None")
         self.check_forward_args(input, hx, batch_sizes)
-        assert self.mode == "RNN_TANH" or self.mode == "RNN_RELU"
+        if self.mode != "RNN_TANH" and self.mode != "RNN_RELU":
+            raise AssertionError(f"mode must be RNN_TANH or RNN_RELU, got {self.mode}")
         if batch_sizes is None:
             if self.mode == "RNN_TANH":
                 result = _VF.rnn_tanh(
