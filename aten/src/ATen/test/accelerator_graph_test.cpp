@@ -5,6 +5,7 @@
 static bool is_capture_begin_called = false;
 static bool is_capture_end_called = false;
 static bool keep_raw_graph = false;
+static bool graph_debug = false;
 
 struct DummyGraphImpl : public at::GraphImplInterface {
   DummyGraphImpl(const at::GraphImplArgs& args = {}) {
@@ -37,6 +38,14 @@ struct DummyGraphImpl : public at::GraphImplInterface {
   at::MempoolId_t pool() const override {
     return {10, 0};
   }
+
+  void enable_debug_mode() override {
+    graph_debug = true;
+  };
+
+  void debug_dump(const std::string& path) override {
+    TORCH_CHECK_NOT_IMPLEMENTED(false, "Not implemented");
+  }
 };
 
 namespace at {
@@ -59,4 +68,8 @@ TEST(AcceleratorGraphTest, graphRegistrationAndCapture) {
   EXPECT_EQ(graph.pool(), (at::MempoolId_t{10, 0}));
   auto graph1 = at::accelerator::Graph();
   EXPECT_EQ(keep_raw_graph, false);
+  EXPECT_EQ(graph_debug, false);
+  graph1.enable_debug_mode();
+  EXPECT_EQ(graph_debug, true);
+  ASSERT_THROW(graph1.debug_dump("abc"), c10::Error);
 }
