@@ -118,7 +118,10 @@ class TestConfigModule(TestCase):
         self.assertTrue(config2.e_env_force_multi)
 
     def test_save_config(self):
-        p = config.save_config()
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=FutureWarning)
+            p = config.save_config()
+
         self.assertDictEqual(
             pickle.loads(p),
             {
@@ -157,7 +160,10 @@ class TestConfigModule(TestCase):
         self.assertFalse(config.e_ignored)
 
     def test_save_config_portable(self):
-        p = config.save_config_portable()
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=FutureWarning)
+            p = config.save_config_portable()
+
         self.assertDictEqual(
             p,
             {
@@ -225,19 +231,23 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
 
     def test_get_hash(self):
         hash_value = b"#d\x8b\xd3\xbc'\xf5\x0c\xcd\xb6\x87zDw6g"
-        self.assertEqual(
-            config.get_hash(),
-            hash_value,
-        )
-        # Test cached value
-        self.assertEqual(
-            config.get_hash(),
-            hash_value,
-        )
-        self.assertEqual(
-            config.get_hash(),
-            hash_value,
-        )
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=FutureWarning)
+            self.assertEqual(
+                config.get_hash(),
+                hash_value,
+            )
+            # Test cached value
+            self.assertEqual(
+                config.get_hash(),
+                hash_value,
+            )
+            self.assertEqual(
+                config.get_hash(),
+                hash_value,
+            )
+
         config._hash_digest = "fake"
         self.assertEqual(config.get_hash(), "fake")
 
@@ -256,7 +266,12 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
         )
 
     def test_dict_copy_semantics(self):
-        p = config.shallow_copy_dict()
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=FutureWarning)
+            p = config.shallow_copy_dict()
+            p2 = config.to_dict()
+
         self.assertDictEqual(
             p,
             {
@@ -289,7 +304,6 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
                 "e_not_deprecated": False,
             },
         )
-        p2 = config.to_dict()
         self.assertEqual(
             p2,
             {
@@ -322,7 +336,11 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
                 "e_not_deprecated": False,
             },
         )
-        p3 = config.get_config_copy()
+
+        with warnings.catch_warnings():
+            warnings.filterwarnings("ignore", category=FutureWarning)
+            p3 = config.get_config_copy()
+
         self.assertEqual(
             p3,
             {
