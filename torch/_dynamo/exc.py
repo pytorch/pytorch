@@ -586,7 +586,7 @@ def unimplemented(
     hints: list[str],
     from_exc: Any = _NOTHING,
     log_warning: bool = False,
-    skip_frame=False,
+    skip_frame: bool = False,
 ) -> NoReturn:
     """
     Called within dynamo to cause a graph break.
