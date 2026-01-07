@@ -14,6 +14,7 @@ from typing_extensions import ParamSpec, TypedDict
 if TYPE_CHECKING:
     from collections.abc import Callable
 
+
 import torch
 from torch import Tensor
 from torch._inductor.runtime.caching.interfaces import DeferredRecording
