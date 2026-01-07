@@ -1772,7 +1772,6 @@ class GuardBuilder(GuardBuilderBase):
         return out
 
     def get_guard_manager(self, guard: Guard) -> GuardManager:
-        self._maybe_track_local_nn_module_for_cache(guard.originating_source)
         return self.get_guard_manager_from_source(guard.originating_source)
 
     def add_python_lambda_leaf_guard_to_root(
@@ -2062,51 +2061,6 @@ class GuardBuilder(GuardBuilderBase):
         self.get_guard_manager(guard).add_none_match_guard(
             get_verbose_code_parts(code, guard), guard.user_stack
         )
-
-    def _maybe_track_local_nn_module_for_cache(self, source: Source) -> None:
-        """Track nn.Module locals for cache-size accounting.
-
-        Dynamo's cache size logic applies `recompile_limit` per ID_MATCH'd object.
-        In practice, it is common to only guard on attributes of a local nn.Module
-        (e.g., `self.some_attr`) without installing an explicit ID_MATCH guard on
-        `self`. In such cases, a single code object can accumulate many cache
-        entries across many module instances and incorrectly hit the global
-        `recompile_limit`.
-
-        If a guard originates from (or is chained off of) a LocalSource whose
-        runtime value is an nn.Module, record a weakref for that local name so
-        cache-size accounting can distinguish cache entries by module instance.
-        """
-
-        root: Source = source
-        while isinstance(root, ChainedSource) and root.base is not None:
-            root = root.base
-
-        if not isinstance(root, LocalSource):
-            return
-
-        try:
-            val = self.get(root)
-        except Exception:
-            return
-
-        if not isinstance(val, torch.nn.Module):
-            return
-
-        local_name = root.local_name
-        if local_name in self.id_matched_objs:
-            # Already tracked for this builder; avoid allocating extra weakrefs.
-            return
-        # IMPORTANT: this is cache-size accounting only. Do NOT call id_ref()
-        # here, as it installs invalidation finalizers that would incorrectly
-        # invalidate cache entries when module instances are freed.
-        try:
-            weak_id: weakref.ref[object] | None = weakref.ref(val)
-        except TypeError:
-            weak_id = None
-
-        if weak_id is not None:
-            self.id_matched_objs[local_name] = weak_id
 
     def ID_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None) -> None:
         # TODO - Run a CI with the following uncommented to find the remaining places
