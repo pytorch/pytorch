@@ -1580,13 +1580,6 @@ def parse_args():
         help="Run tests with TorchInductor turned on",
     )
 
-    parser.add_argument(
-        "--dynamo-gc-after-compile",
-        action=argparse.BooleanOptionalAction,
-        default=sysconfig.get_config_var("Py_GIL_DISABLED") != 1,
-        help="Controls the run_gc_after_compile dynamo config option",
-    )
-
     args, extra = parser.parse_known_args()
     if "--" in extra:
         extra.remove("--")
@@ -2168,9 +2161,6 @@ def main():
 
     if options.dynamo:
         os.environ["PYTORCH_TEST_WITH_DYNAMO"] = "1"
-
-    if not options.dynamo_gc_after_compile:
-        os.environ["TORCH_DYNAMO_RUN_GC_AFTER_COMPILE"] = "0"
 
     elif options.inductor:
         os.environ["PYTORCH_TEST_WITH_INDUCTOR"] = "1"
