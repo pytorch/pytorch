@@ -876,6 +876,11 @@ def get_scaling_options(
 
 
 @register_lowering(aten._scaled_mm.default, type_promotion_kind=None)  # type: ignore[misc]
+@memoizers.tuned_scaled_mm_memoizer.memoize(
+    custom_params_encoder=encoders.tuned_scaled_mm_params_encoder,
+    custom_result_encoder=encoders.tuned_kernel_result_encoder,
+    custom_result_decoder=decoders.tuned_scaled_mm_result_decoder,
+)
 def tuned_scaled_mm(
     mat_a,
     mat_b,

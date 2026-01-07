@@ -651,6 +651,73 @@ def tuned_int_mm_params_encoder(
     return _encode_kernel_inputs(kernel_inputs)
 
 
+def tuned_scaled_mm_params_encoder(
+    mat_a: Buffer,
+    mat_b: Buffer,
+    scale_a: Buffer,
+    scale_b: Buffer,
+    bias: Buffer | None = None,
+    scale_result: Buffer | None = None,
+    out_dtype: torch.dtype | None = None,
+    use_fast_accum: bool = False,
+    layout: Layout | None = None,
+) -> TunedKernelEncodedParams:
+    """Encode parameters for tuned_scaled_mm into a human-readable dict.
+
+    This encoder mirrors the behavior of tuned_scaled_mm:
+    1. First calls mm_args to realize the matrices
+    2. Creates MMKernelInputs with all input nodes
+    3. Extracts the same information used by _generate_kernel_inputs_key
+
+    The encoding includes:
+    - nodes: dtype, shape (hinted), and stride (hinted) for mat_a, mat_b, scale_a, scale_b, and optional bias
+
+    Args:
+        mat_a: First matrix buffer (float8)
+        mat_b: Second matrix buffer (float8)
+        scale_a: Scale factor for mat_a
+        scale_b: Scale factor for mat_b
+        bias: Optional bias buffer
+        scale_result: Optional scale for result (unused in encoding)
+        out_dtype: Optional output dtype
+        use_fast_accum: Whether to use fast accumulation
+        layout: Optional layout
+
+    Returns:
+        A dict containing the encoded parameters in human-readable form
+    """
+    from torch._inductor.kernel.mm_common import mm_args
+    from torch._inductor.kernel_inputs import MMKernelInputs
+    from torch._inductor.select_algorithm import realize_inputs
+
+    # First call mm_args to realize the matrices
+    _m, _n, _k, _layout, mat_a_realized, mat_b_realized = mm_args(
+        mat_a, mat_b, layout=layout, out_dtype=out_dtype
+    )
+
+    scale_a_real, scale_b_real = realize_inputs(scale_a, scale_b)
+
+    input_nodes: list[Buffer]
+    if not bias:
+        input_nodes = [mat_a_realized, mat_b_realized, scale_a_real, scale_b_real]
+    else:
+        bias_real = realize_inputs(bias)
+        input_nodes = [
+            mat_a_realized,
+            mat_b_realized,
+            scale_a_real,
+            scale_b_real,
+            bias_real,
+        ]
+
+    # Create MMKernelInputs
+    kernel_inputs = MMKernelInputs(
+        input_nodes, mat1_idx=0, mat2_idx=1, out_dtype=out_dtype
+    )
+
+    return _encode_kernel_inputs(kernel_inputs)
+
+
 def tuned_kernel_result_encoder(
     fn: Callable[_P, TensorBox],
 ) -> Callable[

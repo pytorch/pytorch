@@ -23,3 +23,6 @@ tuned_mm_plus_mm_memoizer = PersistentMemoizer(sub_dir=Path("tuned_mm_plus_mm"))
 
 # Memoizer for tuned_int_mm in kernel/mm
 tuned_int_mm_memoizer = PersistentMemoizer(sub_dir=Path("tuned_int_mm"))
+
+# Memoizer for tuned_scaled_mm in kernel/mm
+tuned_scaled_mm_memoizer = PersistentMemoizer(sub_dir=Path("tuned_scaled_mm"))
