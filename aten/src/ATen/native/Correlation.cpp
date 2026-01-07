@@ -13,10 +13,12 @@
 #include <ATen/ops/cov_native.h>
 #include <ATen/ops/imag.h>
 #include <ATen/ops/mm.h>
+#include <ATen/ops/ones.h>
 #include <ATen/ops/real.h>
 #include <ATen/ops/scalar_tensor.h>
 #include <ATen/ops/sqrt.h>
 #include <ATen/ops/true_divide.h>
+#include <ATen/ops/zeros.h>
 #endif
 
 namespace at::native {
@@ -26,6 +28,7 @@ Tensor cov(
     int64_t correction,
     const std::optional<Tensor>& fweights,
     const std::optional<Tensor>& aweights) {
+  constexpr int64_t VARIABLES_DIM = 0;
   constexpr int64_t OBSERVATIONS_DIM = 1;
 
   TORCH_CHECK(
@@ -40,7 +43,32 @@ Tensor cov(
 
   // View input tensor as 2D (variables, observations)
   auto in = self.ndimension() < 2 ? self.view({1, -1}) : self;
+  const auto num_variables = in.size(VARIABLES_DIM);
   const auto num_observations = in.size(OBSERVATIONS_DIM);
+
+  // mimic numpy's behavior when (N − ddof) == 0 and fweights are None
+  // 2D input returns nan, 1D input returns inf
+  if (num_observations == correction && !fweights.has_value()) {
+    if (self.ndimension() == 2) {
+      // 2D input with single observation returns nans
+      if (num_observations == 1) {
+        auto zeros = at::zeros({num_variables, num_variables}, in.options());
+        return zeros / 0;
+      }
+      // 2D input with multiple observations returns inf on diagonal, -inf off-diagonal
+      else {
+        auto diag = at::zeros({num_variables, num_variables}, in.options());
+        diag -= 1;
+        diag.diagonal().fill_(1);
+        return diag / 0;
+      }
+    }
+    else {
+      // 1D input returns inf
+      auto one = at::scalar_tensor(1, in.options());
+      return one / 0;
+    }
+  }
 
   // The product of frequencies (fweights) and weights (aweights).
   Tensor w;
