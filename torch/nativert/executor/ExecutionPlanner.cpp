@@ -1,7 +1,5 @@
 #include <unordered_map>
 
-#include <c10/util/Logging.h>
-
 #include <c10/util/Enumerate.h>
 #include <torch/nativert/executor/ExecutionPlanner.h>
 

@@ -4,23 +4,25 @@ This package enables an interface for accessing MTIA backend in python
 """
 
 import threading
-import warnings
+import traceback
 from collections.abc import Callable
-from typing import Any, Optional, Union
+from typing import Any
 
 import torch
-from torch import device as _device, Tensor
-from torch._utils import _dummy_type, _LazySeedTracker, classproperty
+from torch import Tensor
+from torch._utils import _LazySeedTracker
 from torch.types import Device
 
 from ._utils import _get_device_index
 
 
-_device_t = Union[_device, str, int]
-
 # torch.mtia.Event/Stream is alias of torch.Event/Stream
 Event = torch.Event
 Stream = torch.Stream
+
+# Default generators are initialized inside _mtia_init
+default_generators: tuple[torch._C.Generator, ...] = ()  # type: ignore[assignment]
+
 
 _initialized = False
 _queued_calls: list[
@@ -58,6 +60,20 @@ def init():
 def is_initialized():
     r"""Return whether PyTorch's MTIA state has been initialized."""
     return _initialized and not _is_in_bad_fork()
+
+
+def _lazy_call(callable, **kwargs):
+    with _initialization_lock:
+        if is_initialized():
+            return callable()
+        else:
+            global _lazy_seed_tracker
+            if kwargs.get("seed_all", False):
+                _lazy_seed_tracker.queue_seed_all(callable, traceback.format_stack())
+            elif kwargs.get("seed", False):
+                _lazy_seed_tracker.queue_seed(callable, traceback.format_stack())
+            else:
+                _queued_calls.append((callable, traceback.format_stack()))
 
 
 def _is_in_bad_fork() -> bool:
@@ -132,7 +148,7 @@ def is_available() -> bool:
     return device_count() > 0
 
 
-def synchronize(device: Optional[_device_t] = None) -> None:
+def synchronize(device: Device = None) -> None:
     r"""Waits for all jobs in all streams on a MTIA device to complete."""
     with torch.mtia.device(device):
         return torch._C._mtia_deviceSynchronize()
@@ -149,7 +165,7 @@ def current_device() -> int:
     return torch._C._accelerator_hooks_get_current_device()
 
 
-def current_stream(device: Optional[_device_t] = None) -> Stream:
+def current_stream(device: Device = None) -> Stream:
     r"""Return the currently selected :class:`Stream` for a given device.
 
     Args:
@@ -161,7 +177,7 @@ def current_stream(device: Optional[_device_t] = None) -> Stream:
     return torch._C._mtia_getCurrentStream(_get_device_index(device, optional=True))
 
 
-def default_stream(device: Optional[_device_t] = None) -> Stream:
+def default_stream(device: Device = None) -> Stream:
     r"""Return the default :class:`Stream` for a given device.
 
     Args:
@@ -174,7 +190,7 @@ def default_stream(device: Optional[_device_t] = None) -> Stream:
 
 
 def record_memory_history(
-    enabled: Optional[str] = "all", stacks: str = "python", max_entries: int = 0
+    enabled: str | None = "all", stacks: str = "python", max_entries: int = 0
 ) -> None:
     r"""Enable/Disable the memory profiler on MTIA allocator
 
@@ -210,7 +226,7 @@ def is_bf16_supported(including_emulation: bool = True):
     return True
 
 
-def get_device_capability(device: Optional[_device_t] = None) -> tuple[int, int]:
+def get_device_capability(device: Device = None) -> tuple[int, int]:
     r"""Return capability of a given device as a tuple of (major version, minor version).
 
     Args:
@@ -227,7 +243,7 @@ def empty_cache() -> None:
 
 
 def set_stream(stream: Stream):
-    r"""Set the current stream.This is a wrapper API to set the stream.
+    r"""Set the current stream. This is a wrapper API to set the stream.
         Usage of this function is discouraged in favor of the ``stream``
         context manager.
 
@@ -240,7 +256,7 @@ def set_stream(stream: Stream):
     torch._C._mtia_setCurrentStream(stream)
 
 
-def set_device(device: _device_t) -> None:
+def set_device(device: Device) -> None:
     r"""Set the current device.
 
     Args:
@@ -252,7 +268,7 @@ def set_device(device: _device_t) -> None:
         torch._C._accelerator_hooks_set_current_device(device)
 
 
-def get_device_properties(device: Optional[_device_t] = None) -> dict[str, Any]:
+def get_device_properties(device: Device = None) -> dict[str, Any]:
     r"""Return a dictionary of MTIA device properties
 
     Args:
@@ -295,9 +311,9 @@ class StreamContext:
     .. note:: Streams are per-device.
     """
 
-    cur_stream: Optional["torch.mtia.Stream"]
+    cur_stream: Stream | None
 
-    def __init__(self, stream: Optional["torch.mtia.Stream"]):
+    def __init__(self, stream: Stream | None):
         self.cur_stream = None
         self.stream = stream
         self.idx = _get_device_index(None, True)
@@ -352,7 +368,7 @@ def _set_stream_by_id(stream_id, device_index, device_type):
     torch._C._mtia_setStream(stream_id, device_index, device_type)
 
 
-def stream(stream: Optional["torch.mtia.Stream"]) -> StreamContext:
+def stream(stream: Stream | None) -> StreamContext:
     r"""Wrap around the Context-manager StreamContext that selects a given stream.
 
     Arguments:
@@ -363,36 +379,150 @@ def stream(stream: Optional["torch.mtia.Stream"]) -> StreamContext:
     return StreamContext(stream)
 
 
-def get_rng_state(device: Union[int, str, torch.device] = "mtia") -> Tensor:
-    r"""Returns the random number generator state as a ByteTensor.
+def get_rng_state(device: Device = "mtia") -> Tensor:
+    r"""Returns the random number generator state of the specified MTIA device as a ByteTensor.
 
     Args:
         device (torch.device or int, optional): The device to return the RNG state of.
             Default: ``'mtia'`` (i.e., ``torch.device('mtia')``, the current mtia device).
+
+    .. warning::
+        This function eagerly initializes MTIA.
     """
-    warnings.warn(
-        "get_rng_state is not implemented in torch.mtia",
-        UserWarning,
-        stacklevel=2,
-    )
-    return torch.zeros([1], dtype=torch.uint8, device=device)
+    _lazy_init()
+    idx = _get_device_index(device, optional=True)
+    if idx is None:
+        idx = current_device()
+    default_generator = default_generators[idx]
+    return default_generator.get_state()
 
 
-def set_rng_state(
-    new_state: Tensor, device: Union[int, str, torch.device] = "mtia"
-) -> None:
-    r"""Sets the random number generator state.
+def get_rng_state_all() -> list[Tensor]:
+    r"""Returns a list of ByteTensor representing the random number states of all devices."""
+    results = [get_rng_state(i) for i in range(device_count())]
+    return results
+
+
+def set_rng_state(new_state: Tensor, device: Device = "mtia") -> None:
+    r"""Sets the random number generator state of the specified MTIA device.
 
     Args:
         new_state (torch.ByteTensor): The desired state
         device (torch.device or int, optional): The device to set the RNG state.
             Default: ``'mtia'`` (i.e., ``torch.device('mtia')``, the current mtia device).
     """
-    warnings.warn(
-        "set_rng_state is not implemented in torch.mtia",
-        UserWarning,
-        stacklevel=2,
-    )
+    if not is_initialized():
+        with torch._C._DisableFuncTorch():
+            # Clone the state because the callback will be triggered
+            # later when MTIA is lazy initialized.
+            new_state = new_state.clone(memory_format=torch.contiguous_format)
+
+    idx = _get_device_index(device, optional=True)
+    if idx is None:
+        idx = current_device()
+
+    def cb():
+        default_generator = default_generators[idx]
+        default_generator.set_state(new_state)
+
+    _lazy_call(cb)
+
+
+def set_rng_state_all(new_states: list[Tensor]) -> None:
+    r"""Sets the random number generator state of all devices.
+
+    Args:
+        new_states (Iterable of torch.ByteTensor): The desired state for each device.
+    """
+    for i, state in enumerate(new_states):
+        set_rng_state(state, i)
+
+
+def manual_seed(seed: int) -> None:
+    r"""Sets the seed for generating random numbers for the current MTIA device.
+    It's safe to call this function if MTIA is not available; in that case, it is silently ignored.
+
+    Args:
+        seed (int): The desired seed.
+
+    .. warning::
+        If you are working with a multi-GPU model, this function is insufficient
+        to get determinism.  To seed all GPUs, use :func:`manual_seed_all`.
+    """
+    seed = int(seed)
+
+    def cb():
+        idx = current_device()
+        default_generator = default_generators[idx]
+        default_generator.manual_seed(seed)
+
+    _lazy_call(cb, seed=True)
+
+
+def manual_seed_all(seed: int) -> None:
+    r"""Sets the seed for generating random numbers on all MTIA devices.
+    It's safe to call this function if MTIA is not available; in that case, it is silently ignored.
+
+    Args:
+        seed (int): The desired seed.
+    """
+    seed = int(seed)
+
+    def cb():
+        for i in range(device_count()):
+            default_generator = default_generators[i]
+            default_generator.manual_seed(seed)
+
+    _lazy_call(cb, seed_all=True)
+
+
+def seed() -> int:
+    r"""Sets the seed for generating random numbers to a random number for the current MTIA device.
+    It's safe to call this function if MTIA is not available; in that case, it is silently ignored.
+
+    .. warning::
+        If you are working with a multi-GPU model, this function will only initialize
+        the seed on one GPU.  To initialize all GPUs, use :func:`seed_all`.
+    """
+
+    def cb():
+        idx = current_device()
+        default_generator = default_generators[idx]
+        return default_generator.seed()
+
+    return _lazy_call(cb, seed=True)
+
+
+def seed_all() -> int:
+    r"""Sets the seed for generating random numbers to a random number on all MTIA devices.
+
+    It's safe to call this function if MTIA is not available; in that case, it is silently ignored.
+    """
+
+    def cb():
+        random_seed = 0
+        seeded = False
+        for i in range(device_count()):
+            default_generator = default_generators[i]
+            if not seeded:
+                random_seed = default_generator.seed()
+                seeded = True
+            else:
+                default_generator.manual_seed(random_seed)
+        return random_seed
+
+    return _lazy_call(cb, seed_all=True)
+
+
+def initial_seed() -> int:
+    r"""Returns the current random seed of the current MTIA device.
+
+    .. warning::
+        This function eagerly initializes MTIA.
+    """
+    _lazy_init()
+    idx = current_device()
+    return default_generators[idx].initial_seed()
 
 
 from .memory import *  # noqa: F403
@@ -424,6 +554,13 @@ __all__ = [
     "device",
     "set_rng_state",
     "get_rng_state",
+    "set_rng_state_all",
+    "get_rng_state_all",
+    "manual_seed",
+    "manual_seed_all",
+    "seed",
+    "seed_all",
+    "initial_seed",
     "is_bf16_supported",
     "MTIAGraph",
     "graph",
