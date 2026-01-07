@@ -16,6 +16,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfTorchDynamo,
+    TEST_WITH_CROSSREF,
     TestCase,
 )
 
@@ -345,6 +346,7 @@ x = add_1, y = add_2);  getitem = None
             "Generated code should not call torch.ops.higher_order.print directly",
         )
 
+    @skipIfTorchDynamo("Skipped under Dynamo")
     def test_print_dynamo_graph(self):
         """Test capturing the actual Dynamo graph for print HOP.
 
@@ -371,17 +373,19 @@ x = add_1, y = add_2);  getitem = None
         # Verify we captured a graph
         self.assertEqual(len(backend.graphs), 1)
 
-        self.assertExpectedInline(
-            backend.graphs[0].code.strip(),
-            """\
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                backend.graphs[0].code.strip(),
+                """\
 def forward(self, L_x_ : torch.Tensor):
     l_x_ = L_x_
     print_1 = torch.ops.higher_order.print('moo {x} {y}', x = 1, y = 2);  print_1 = None
     res = l_x_ + l_x_;  l_x_ = None
     print_2 = torch.ops.higher_order.print('values {} {}', 3, res);  print_2 = None
     return (res,)""",
-        )
+            )
 
+    @skipIfTorchDynamo("Skipped under Dynamo")
     def test_print_aot_autograd_graph(self):
         """Test capturing the AOT Autograd graph for print HOP.
 
