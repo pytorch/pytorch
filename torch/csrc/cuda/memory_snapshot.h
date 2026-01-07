@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <optional>
 #include <string>
+#include <vector>
 
 namespace torch::cuda {
 
@@ -17,7 +18,8 @@ TORCH_CUDA_CU_API void _record_memory_history(
     bool record_cpp_context = false,
     bool clearHistory = false,
     bool compileContext = false,
-    bool globalRecordAllocations = false);
+    bool globalRecordAllocations = false,
+    const std::vector<std::string>& skip_actions = {});
 
 TORCH_CUDA_CU_API void _record_memory_history(
     std::optional<std::string> enabled = "all",
@@ -26,7 +28,8 @@ TORCH_CUDA_CU_API void _record_memory_history(
     size_t max_entries = SIZE_MAX,
     bool clearHistory = false,
     bool compileContext = false,
-    bool globalRecordAllocations = false);
+    bool globalRecordAllocations = false,
+    const std::vector<std::string>& skip_actions = {});
 
 TORCH_CUDA_CU_API std::string _memory_snapshot_pickled();
 

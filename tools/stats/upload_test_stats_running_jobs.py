@@ -5,7 +5,6 @@ from typing import Any
 
 from tools.stats.test_dashboard import upload_additional_info
 from tools.stats.upload_stats_lib import get_s3_resource
-from tools.stats.upload_test_stats import get_tests
 
 
 BUCKET_PREFIX = "workflows_failing_pending_upload"
@@ -35,10 +34,9 @@ def put_object(key: str) -> None:
 
 def do_upload(workflow_id: int) -> None:
     workflow_attempt = 1
-    test_cases = get_tests(workflow_id, workflow_attempt)
     # Flush stdout so that any errors in upload show up last in the logs.
     sys.stdout.flush()
-    upload_additional_info(workflow_id, workflow_attempt, test_cases)
+    upload_additional_info(workflow_id, workflow_attempt)
 
 
 def get_workflow_ids(pending: bool = False) -> list[int]:

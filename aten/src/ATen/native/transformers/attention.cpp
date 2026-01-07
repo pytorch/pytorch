@@ -776,6 +776,18 @@ Tensor scaled_dot_product_attention(
     }
     case SDPBackend::math: {
 #ifdef USE_MPS
+      TORCH_CHECK_NOT_IMPLEMENTED(
+        c10::isFloatingType(query_.scalar_type()),
+        "scaled_dot_product_attention for MPS does not support dtype ",
+        query_.scalar_type());
+      TORCH_CHECK_NOT_IMPLEMENTED(
+        c10::isFloatingType(key.scalar_type()),
+        "scaled_dot_product_attention for MPS does not support dtype ",
+        key.scalar_type());
+      TORCH_CHECK_NOT_IMPLEMENTED(
+        c10::isFloatingType(value.scalar_type()),
+        "scaled_dot_product_attention for MPS does not support dtype ",
+        value.scalar_type());
       const auto any_nested = query_.is_nested() || key.is_nested() || value.is_nested();
       const bool any_inputs_require_grad = query_.requires_grad() || key.requires_grad() || value.requires_grad();
       const auto all_contiguous = query_.is_contiguous_or_false() && key.is_contiguous_or_false() && value.is_contiguous_or_false();
