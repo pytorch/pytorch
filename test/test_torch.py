@@ -6704,11 +6704,21 @@ class TestTorch(TestCase):
             ref_out = tensor.index_add(dim, index, source, alpha=2.) / 2.
             ref_out = ref_out.to(dtype=dtype)
             out = tensor.index_add(dim, index, source)
-            if device == 'cuda':
-                self.assertEqual(out, ref_out, atol=1e-2, rtol=1e-2)
+
+            # Determine tolerances based on dtype and device
+            # Low-precision types (float16, bfloat16) on GPU have non-deterministic
+            # accumulation order, leading to larger rounding differences.
+            # See: https://github.com/pytorch/pytorch/issues/91184
+            if device == 'cuda' and dtype in (torch.half, torch.bfloat16):
+                # Relaxed tolerance for low-precision GPU accumulation
+                atol, rtol = 1e-1, 1e-1
+            elif device == 'cuda':
+                atol, rtol = 1e-2, 1e-2
             else:
                 # scatter_add uses fp32 as accumulate type, while index_add doesn't.
-                self.assertEqual(out, ref_out.to(dtype=dtype), atol=1e-2, rtol=1e-2)
+                atol, rtol = 1e-2, 1e-2
+
+            self.assertEqual(out, ref_out.to(dtype=dtype), atol=atol, rtol=rtol)
 
         for dim in [-1, -2, -3]:
             for dtype in all_types_and_complex_and(torch.half, torch.bfloat16):
