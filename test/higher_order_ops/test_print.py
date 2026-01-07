@@ -7,7 +7,6 @@ from torch._dynamo.testing import (
     AotEagerAndRecordGraphs,
     EagerAndRecordGraphs,
     InductorAndRecordGraphs,
-    normalize_gm,
 )
 from torch._functorch.aot_autograd import aot_export_module
 from torch._inductor.utils import run_and_get_code
@@ -17,7 +16,6 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfTorchDynamo,
-    TEST_WITH_CROSSREF,
     TestCase,
 )
 
@@ -373,22 +371,16 @@ x = add_1, y = add_2);  getitem = None
         # Verify we captured a graph
         self.assertEqual(len(backend.graphs), 1)
 
-        if not TEST_WITH_CROSSREF:
-            self.assertExpectedInline(
-                normalize_gm(backend.graphs[0].print_readable(print_output=False)),
-                """\
-class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[3]"):
-        l_x_ = L_x_
-
-        print_1 = torch.ops.higher_order.print('moo {x} {y}', x = 1, y = 2);  print_1 = None
-
-        res: "f32[3]" = l_x_ + l_x_;  l_x_ = None
-
-        print_2 = torch.ops.higher_order.print('values {} {}', 3, res);  print_2 = None
-        return (res,)
-""",
-            )
+        self.assertExpectedInline(
+            backend.graphs[0].code.strip(),
+            """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    print_1 = torch.ops.higher_order.print('moo {x} {y}', x = 1, y = 2);  print_1 = None
+    res = l_x_ + l_x_;  l_x_ = None
+    print_2 = torch.ops.higher_order.print('values {} {}', 3, res);  print_2 = None
+    return (res,)""",
+        )
 
     def test_print_aot_autograd_graph(self):
         """Test capturing the AOT Autograd graph for print HOP.
@@ -420,35 +412,27 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(backend.fw_graphs) >= 1, True)
         self.assertEqual(len(backend.bw_graphs) >= 1, True)
 
-        if not TEST_WITH_CROSSREF:
-            # Check forward graph - should have with_effects wrapping print
-            self.assertExpectedInline(
-                normalize_gm(backend.fw_graphs[0].print_readable(print_output=False)),
-                """\
-class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "f32[0]", primals_2: "f32[3]"):
-        with_effects = torch.ops.higher_order.with_effects(primals_1, torch.ops.higher_order.print, 'moo {x} {y}', x = 1, y = 2);\
-  primals_1 = None
-        getitem: "f32[0]" = with_effects[0];  with_effects = None
 
-        add: "f32[3]" = torch.ops.aten.add.Tensor(primals_2, primals_2);  primals_2 = None
-
-        with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.print, 'values {} {}', 3, add);  \
-getitem = None
-        getitem_2: "f32[0]" = with_effects_1[0];  with_effects_1 = None
-        return (getitem_2, add)
-""",
+        # Check forward graph - should have with_effects wrapping print
+        self.assertExpectedInline(
+            backend.fw_graphs[0].code.strip(),
+            """\
+def forward(self, primals_1, primals_2):
+    with_effects = torch.ops.higher_order.with_effects(primals_1, torch.ops.higher_order.print, 'moo {x} {y}', x = 1, y = 2);  primals_1 = None
+    getitem = with_effects[0];  with_effects = None
+    add = torch.ops.aten.add.Tensor(primals_2, primals_2);  primals_2 = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.print, 'values {} {}', 3, add);  getitem = None
+    getitem_2 = with_effects_1[0];  with_effects_1 = None
+    return (getitem_2, add)""",  # noqa: B950
             )
 
-            # Check backward graph - print HOP doesn't contribute to gradients
-            self.assertExpectedInline(
-                normalize_gm(backend.bw_graphs[0].print_readable(print_output=False)),
-                """\
-class GraphModule(torch.nn.Module):
-    def forward(self, tangents_1: "f32[3]"):
-        add_1: "f32[3]" = torch.ops.aten.add.Tensor(tangents_1, tangents_1);  tangents_1 = None
-        return (add_1,)
-""",
+        # Check backward graph - print HOP doesn't contribute to gradients
+        self.assertExpectedInline(
+            backend.bw_graphs[0].code.strip(),
+            """\
+def forward(self, tangents_1):
+    add_1 = torch.ops.aten.add.Tensor(tangents_1, tangents_1);  tangents_1 = None
+    return (add_1,)""",
             )
 
     @skipIfTorchDynamo("Skipped under Dynamo")
@@ -482,32 +466,21 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(len(backend.graphs), 1)
         self.assertGreaterEqual(len(backend.inductor_graphs), 1)
 
-        if not TEST_WITH_CROSSREF:
-            # Check inductor INPUT graph - print wrapped with with_effects
-            # Inductor creates/sinks tokens internally rather than passing as args
-            self.assertExpectedInline(
-                normalize_gm(
-                    backend.inductor_graphs[0].print_readable(print_output=False)
-                ),
-                """\
-class <lambda>(torch.nn.Module):
-    def forward(self, arg1_1: "f32[3]"):
-        _make_token_default: "f32[0]" = torch.ops.prims._make_token.default()
-
-        with_effects = torch.ops.higher_order.with_effects(_make_token_default, torch.ops.higher_order.print, \
-'moo {x} {y}', x = 1, y = 2);  _make_token_default = None
-        getitem: "f32[0]" = with_effects[0];  with_effects = None
-
-        add: "f32[3]" = torch.ops.aten.add.Tensor(arg1_1, arg1_1);  arg1_1 = None
-
-        with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.print, 'values {} {}', 3, add);  \
-getitem = None
-        getitem_2: "f32[0]" = with_effects_1[0];  with_effects_1 = None
-
-        _sink_tokens_default = torch.ops.prims._sink_tokens.default([getitem_2]);  getitem_2 = _sink_tokens_default = None
-        return (add,)
-""",
-            )
+        # Check inductor INPUT graph - print wrapped with with_effects
+        # Inductor creates/sinks tokens internally rather than passing as args
+        self.assertExpectedInline(
+            backend.inductor_graphs[0].code.strip(),
+            """\
+def forward(self, arg1_1):
+    _make_token_default = torch.ops.prims._make_token.default()
+    with_effects = torch.ops.higher_order.with_effects(_make_token_default, torch.ops.higher_order.print, 'moo {x} {y}', x = 1, y = 2);  _make_token_default = None
+    getitem = with_effects[0];  with_effects = None
+    add = torch.ops.aten.add.Tensor(arg1_1, arg1_1);  arg1_1 = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.print, 'values {} {}', 3, add);  getitem = None
+    getitem_2 = with_effects_1[0];  with_effects_1 = None
+    _sink_tokens_default = torch.ops.prims._sink_tokens.default([getitem_2]);  getitem_2 = _sink_tokens_default = None
+    return (add,)""",  # noqa: B950
+        )
 
         # 2. Capture Inductor OUTPUT code using run_and_get_code
         torch._dynamo.reset()
