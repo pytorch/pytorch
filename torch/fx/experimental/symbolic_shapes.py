@@ -19,6 +19,7 @@ import atexit
 import collections
 import dis
 import functools
+import glob
 import hashlib
 import inspect
 import itertools
@@ -312,6 +313,7 @@ def lru_cache(
 def uninteresting_files() -> set[str]:
     import torch._compile
     import torch._dynamo.eval_frame
+    import torch._higher_order_ops
     import torch._inductor.sizevars
     import torch._library.custom_ops
     import torch._library.fake_impl
@@ -340,8 +342,15 @@ def uninteresting_files() -> set[str]:
     ]
     import torch._dynamo.guards
 
+    files = {inspect.getfile(m) for m in mods}
+
+    # Add all Python files in torch._higher_order_ops directory
+    higher_order_ops_dir = os.path.dirname(torch._higher_order_ops.__file__)
+    hop_files = glob.glob(os.path.join(higher_order_ops_dir, "*.py"))
+
     return (
-        {inspect.getfile(m) for m in mods}
+        files
+        | set(hop_files)
         | torch._dynamo.guards.uninteresting_files()
         | {"<string>"}
     )
@@ -369,7 +378,8 @@ def hint_int(a: Union[torch.SymInt, int], fallback: Optional[int] = None) -> int
     """
     Retrieve the hint for an int (based on the underlying real values as observed
     at runtime).  If no hint is available (e.g., because data dependent shapes),
-    if fallback is not None, use that instead (otherwise raise an error).
+    if fallback is not None, use that instead to hint each unbacked symbol individually
+    (otherwise raise an error).
     """
     if isinstance(a, torch.SymInt):
         return a.node.require_hint(fallback)
@@ -1358,19 +1368,24 @@ def compute_unbacked_bindings(
     if shape_env is None:
         return None
 
-    fs = shape_env.pending_fresh_unbacked_symbols
+    fresh_sym = shape_env.pending_fresh_unbacked_symbols
+    ign_sym = shape_env.ignorable_fresh_unbacked_symbols
 
-    pending = set(fs)
+    pending = set(fresh_sym)
+    ignorable = set(ign_sym)
+    if not peek:
+        if pending:
+            log.info("compute_unbacked_bindings %s", fresh_sym)
+        fresh_sym.clear()
+        ign_sym.clear()
+
     if not pending:
         return None
-
-    if not peek:
-        log.info("compute_unbacked_bindings %s", fs)
-        fs.clear()
 
     symbol_to_path = _free_unbacked_symbols_with_path(
         example_value, (), shape_env=shape_env, pending=pending, simplify=False
     )
+    pending -= ignorable
     if not peek and pending:
         extra = (
             repr((example_value.stride(), example_value.storage_offset()))
@@ -2254,9 +2269,9 @@ class TrackedFake:
     Used by shape guard computation.
     """
 
-    fake: Union[FakeTensor, SymInt]
+    fake: FakeTensor | SymInt | SymFloat
     source: Source
-    symbolic_context: Optional[SymbolicContext]
+    symbolic_context: SymbolicContext | None
 
     def __hash__(self) -> int:
         return hash((self.fake, self.source.name))
@@ -3904,6 +3919,9 @@ class ShapeEnv:
         # NB: fresh unbacked symbols NEVER get substitutions applied to them,
         # they are binding sites!
         self.pending_fresh_unbacked_symbols: list[sympy.Symbol] = []
+        # These are symbols which we'd like to process as pending, but if
+        # they're missing then it's okay too.
+        self.ignorable_fresh_unbacked_symbols: list[sympy.Symbol] = []
 
         # Version counter used to invalidate cached values
         self._prev_cache_key = self._get_key()
@@ -5150,7 +5168,7 @@ class ShapeEnv:
 
             if duck:
                 # Make sure to reuse this symbol for subsequent duck shaping
-                # pyrefly: ignore [unsupported-operation]
+
                 self.val_to_var[val] = sympy_expr
 
             if isinstance(val, int):
@@ -5394,7 +5412,6 @@ class ShapeEnv:
             for i, (t, context) in enumerate(zip(placeholders, input_contexts)):
                 if isinstance(t, Tensorlike):
                     if context is None:
-                        # pyrefly: ignore [bad-argument-type]
                         input_contexts[i] = _create_no_constraints_context(t)
                 else:
                     assert isinstance(t, (SymInt, int, SymFloat, float))

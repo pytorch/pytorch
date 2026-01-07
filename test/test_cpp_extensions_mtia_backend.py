@@ -140,6 +140,31 @@ class TestCppExtensionMTIABackend(common.TestCase):
         with torch.mtia.device(device_1):
             self.assertTrue(torch.mtia.current_device() == device_1.index)
 
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
+    def test_default_generators(self):
+        # Trigger lazy initialization first by calling current_stream()
+        torch.mtia.current_stream()
+        device_count = torch.mtia.device_count()
+
+        # Verify the interface exists and is properly initialized
+        self.assertTrue(hasattr(torch.mtia, "default_generators"))
+        self.assertIsInstance(torch.mtia.default_generators, tuple)
+        self.assertEqual(len(torch.mtia.default_generators), device_count)
+
+        # Verify we can access generators by device index
+        gen_0 = torch.mtia.default_generators[0]
+        gen_1 = torch.mtia.default_generators[1]
+        self.assertIsInstance(gen_0, torch.Generator)
+        self.assertIsInstance(gen_1, torch.Generator)
+        # Different devices should have different generator objects
+        self.assertIsNot(gen_0, gen_1)
+
+    @skipIfTorchDynamo("Not a TorchDynamo suitable test")
+    def test_new_generator(self):
+        # Verify we can create a generator via the hooks interface
+        gen = torch.Generator(device="mtia:0")
+        self.assertIsInstance(gen, torch.Generator)
+
 
 if __name__ == "__main__":
     common.run_tests()

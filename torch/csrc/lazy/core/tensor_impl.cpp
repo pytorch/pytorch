@@ -1,11 +1,8 @@
 #include <torch/csrc/lazy/core/tensor_impl.h>
 
-#include <c10/core/Allocator.h>
-#include <c10/core/ScalarType.h>
 #include <c10/core/impl/DeviceGuardImplInterface.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/lazy/core/ir_builder.h>
 #include <torch/csrc/lazy/core/tensor_util.h>
 
 namespace torch::lazy {

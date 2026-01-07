@@ -15,9 +15,6 @@
 #include <c10/util/env.h>
 #include <torch/version.h>
 
-#ifndef _WIN32
-#include <cxxabi.h>
-#endif
 
 #include <fstream>
 #include <sstream>
