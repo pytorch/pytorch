@@ -533,7 +533,11 @@ won't take effect even if it is set explicitly."
                             )
                             i += 1
                         cores = list(set(cores) - leftover_cores)
-                        assert len(cores) % args.ncores_per_instance == 0
+                        if len(cores) % args.ncores_per_instance != 0:
+                            raise AssertionError(
+                                f"Number of cores ({len(cores)}) must be divisible by "
+                                f"ncores_per_instance ({args.ncores_per_instance})"
+                            )
                         args.ninstances = len(cores) // args.ncores_per_instance
             else:
                 if args.ninstances * args.ncores_per_instance > len(cores):
@@ -626,9 +630,11 @@ won't take effect even if it is set explicitly."
                 if local_size > 1:
                     total_num_cores = len(core_list)
                     cores_per_rank = total_num_cores // local_size
-                    assert cores_per_rank >= 1, (
-                        "At least one core needs to be assigned to each rank"
-                    )
+                    if cores_per_rank < 1:
+                        raise AssertionError(
+                            f"At least one core needs to be assigned to each rank, "
+                            f"got {total_num_cores} cores for {local_size} ranks"
+                        )
                     core_list = core_list[
                         cores_per_rank * local_rank : cores_per_rank * (local_rank + 1)
                     ]
