@@ -4289,8 +4289,13 @@ class Scheduler:
                     if self.get_fused_node(node1) is not node1:
                         continue
                 else:
+                    assert node1 == candidate
                     assert is_prologue_fusion(node1, node2)
-                    assert self.get_fused_node(node1) is node1
+
+                    # Prologue could have been past epilogue, remove
+                    if self.get_fused_node(node1) is not node1:
+                        fusions_to_remove.add(candidate)
+                        continue
 
                     # In prologue case, either template could have been previously fused with epilogue
                     # or could have been fused with prologue
