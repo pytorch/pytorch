@@ -2131,28 +2131,31 @@ class OutputGraph(OutputGraphCommon):
 
             self.current_tracer._maybe_preserve_original_meta(tx, output_node)
             if not config.do_not_emit_runtime_asserts:
-                # There is a rare scenario where codegen_suffix adds a new entry
-                # to self.nn_modules while `root` knows only about the
-                # nn_modules at the time of its creation. This causes failures
-                # while creating the graph module because self.graph and root
-                # are out of sync. This only happens for `get_attr` nodes, so
-                # here we clean up the get_attr nodes that are unused.
-                for attr in dir(root):
-                    subgraph = getattr(root, attr)
-                    if isinstance(subgraph, fx.GraphModule):
-                        insert_deferred_runtime_asserts(
-                            subgraph,
-                            self.shape_env,
-                            name,
-                            export=self.export,
-                        )
-                self.remove_unused_get_attr_nodes()
-                insert_deferred_runtime_asserts(
-                    fx.GraphModule(root, self.graph),
-                    self.shape_env,
-                    name,
-                    export=self.export,
-                )
+                with dynamo_timed(
+                    "insert_deferred_runtime_asserts", log_pt2_compile_event=True
+                ):
+                    # There is a rare scenario where codegen_suffix adds a new entry
+                    # to self.nn_modules while `root` knows only about the
+                    # nn_modules at the time of its creation. This causes failures
+                    # while creating the graph module because self.graph and root
+                    # are out of sync. This only happens for `get_attr` nodes, so
+                    # here we clean up the get_attr nodes that are unused.
+                    for attr in dir(root):
+                        subgraph = getattr(root, attr)
+                        if isinstance(subgraph, fx.GraphModule):
+                            insert_deferred_runtime_asserts(
+                                subgraph,
+                                self.shape_env,
+                                name,
+                                export=self.export,
+                            )
+                    self.remove_unused_get_attr_nodes()
+                    insert_deferred_runtime_asserts(
+                        fx.GraphModule(root, self.graph),
+                        self.shape_env,
+                        name,
+                        export=self.export,
+                    )
             # NB: deferred runtime asserts can keep graphargs live, so make sure
             # those are inserted before pruning
             self.remove_unused_graphargs()

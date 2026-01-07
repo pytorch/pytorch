@@ -88,6 +88,8 @@ def _node_metadata_hook(
         ),
     )
 
+    node.meta["custom"] = node.meta.get("custom", arg_meta.get("custom", {}))
+
 
 @contextlib.contextmanager
 def _set_node_metadata_hook(gm: torch.fx.GraphModule, f):

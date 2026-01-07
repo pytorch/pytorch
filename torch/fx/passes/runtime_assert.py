@@ -161,30 +161,36 @@ def insert_deferred_runtime_asserts(
         elif "val" in node.meta:
             break
 
+    # Note: DO NOT register one _set_node_metadata_hook(_node_metadata_hook)
+    # for each nodes in the graph.
+    # _set_node_metadata_hook is expensive and this can cause compile
+    # time to regress significantly (S603290).
     def _node_metadata_hook(
         node: torch.fx.Node,
         stack_trace: Optional[str] = None,
         nn_module_stack: Optional[dict[str, Any]] = None,
         custom: Optional[dict[str, Any]] = None,
+        skip_val: bool = False,
     ) -> None:
-        fake_args = pytree.tree_map(
-            lambda arg: (
-                _get_example_value(arg) if isinstance(arg, torch.fx.Node) else arg
-            ),
-            node.args,
-        )
-        try:
-            target = node.target
-            if node.op == "call_method":
-                assert isinstance(node.target, str)
-                target = getattr(fake_args[0], node.target)
-                fake_args = fake_args[1:]
-            node.meta[val_key] = target(*fake_args)  # type: ignore[operator]
-        except NotImplementedError:
-            # This can happen when attempting to reify a symbol with an unsupported call_function node,
-            # e.g. with NestedTensors + sym_size.int via match_symbol().
-            # This seems to be fine, as the node gets CSE'd and deleted later in favor of a SymInt graph input.
-            pass
+        if not skip_val:
+            fake_args = pytree.tree_map(
+                lambda arg: (
+                    _get_example_value(arg) if isinstance(arg, torch.fx.Node) else arg
+                ),
+                node.args,
+            )
+            try:
+                target = node.target
+                if node.op == "call_method":
+                    assert isinstance(node.target, str)
+                    target = getattr(fake_args[0], node.target)
+                    fake_args = fake_args[1:]
+                node.meta[val_key] = target(*fake_args)  # type: ignore[operator]
+            except NotImplementedError:
+                # This can happen when attempting to reify a symbol with an unsupported call_function node,
+                # e.g. with NestedTensors + sym_size.int via match_symbol().
+                # This seems to be fine, as the node gets CSE'd and deleted later in favor of a SymInt graph input.
+                pass
         if stack_trace is not None:
             node.meta["stack_trace"] = stack_trace
         if nn_module_stack is not None:
@@ -260,7 +266,17 @@ def insert_deferred_runtime_asserts(
             else:
                 # Convert the sympy expression into a sequence of FX
                 # nodes
-                with _set_node_metadata_hook(gm, _node_metadata_hook):
+                with _set_node_metadata_hook(
+                    gm,
+                    functools.partial(
+                        _node_metadata_hook,
+                        stack_trace=node.meta.get("stack_trace"),
+                        nn_module_stack=node.meta.get("nn_module_stack"),
+                        # nodes added in `apply_runtime_assertion_pass` will have the same annotation
+                        # as the input node to the assertion
+                        custom=node.meta.get("custom"),
+                    ),
+                ):
                     res = _sympy_interp(expr_to_proxy, ra.expr).node
 
                     graph.call_function(
@@ -300,7 +316,17 @@ def insert_deferred_runtime_asserts(
                         )
                         and s not in expr_to_proxy
                     ):
-                        with _set_node_metadata_hook(gm, _node_metadata_hook):
+                        with _set_node_metadata_hook(
+                            gm,
+                            functools.partial(
+                                _node_metadata_hook,
+                                stack_trace=node.meta.get("stack_trace"),
+                                nn_module_stack=node.meta.get("nn_module_stack"),
+                                # nodes added in `apply_runtime_assertion_pass` will have the same annotation
+                                # as the input node to the assertion
+                                custom=node.meta.get("custom"),
+                            ),
+                        ):
                             expr_to_proxy[s] = fx.Proxy(cb(), tracer=tracer)
 
                         log.debug("expr_to_proxy[%s] = %s", s, expr_to_proxy[s])
@@ -401,6 +427,9 @@ def insert_deferred_runtime_asserts(
                                 _node_metadata_hook,
                                 stack_trace=node.meta.get("stack_trace"),
                                 nn_module_stack=node.meta.get("nn_module_stack"),
+                                # nodes added in `apply_runtime_assertion_pass` will have the same annotation
+                                # as the input node to the assertion
+                                custom=node.meta.get("custom"),
                             ),
                         ):
                             expr_to_proxy[sym_expr] = _sympy_interp(
@@ -526,7 +555,17 @@ def insert_deferred_runtime_asserts(
                             raise AssertionError(f"unrecognized keypath {keypath}")
 
                     if s not in expr_to_proxy:
-                        with _set_node_metadata_hook(gm, _node_metadata_hook):
+                        with _set_node_metadata_hook(
+                            gm,
+                            functools.partial(
+                                _node_metadata_hook,
+                                stack_trace=node.meta.get("stack_trace"),
+                                nn_module_stack=node.meta.get("nn_module_stack"),
+                                # nodes added in `apply_runtime_assertion_pass` will have the same annotation
+                                # as the input node to the assertion
+                                custom=node.meta.get("custom"),
+                            ),
+                        ):
                             expr_to_proxy[s] = fx.Proxy(
                                 go(node, keypath), tracer=tracer
                             )
@@ -577,15 +616,29 @@ def insert_deferred_runtime_asserts(
                     continue  # constrain symbol just once
 
                 if i0 in shape_env.size_like:
-                    if export:
-                        graph.call_function(
-                            torch.ops.aten.sym_constrain_range_for_size.default,
-                            (expr_to_proxy[i0].node,),
-                        )
-                    else:
-                        graph.call_function(
-                            torch._check_is_size, (expr_to_proxy[i0].node,)
-                        )
+                    with _set_node_metadata_hook(
+                        gm,
+                        functools.partial(
+                            _node_metadata_hook,
+                            stack_trace=node.meta.get("stack_trace"),
+                            nn_module_stack=node.meta.get("nn_module_stack"),
+                            # nodes added in `apply_runtime_assertion_pass` will have the same annotation
+                            # as the input node to the assertion
+                            custom=node.meta.get("custom"),
+                            # Could not extract specialized integer from data-dependent expression
+                            # e.g. test/dynamo/test_export.py -k test_export_preserve_constraints_as_metadata_tensor
+                            skip_val=True,
+                        ),
+                    ):
+                        if export:
+                            graph.call_function(
+                                torch.ops.aten.sym_constrain_range_for_size.default,
+                                (expr_to_proxy[i0].node,),
+                            )
+                        else:
+                            graph.call_function(
+                                torch._check_is_size, (expr_to_proxy[i0].node,)
+                            )
 
                 vr = shape_env.var_to_range[i0]
                 if vr.is_int and vr.upper == sys.maxsize - 1:
