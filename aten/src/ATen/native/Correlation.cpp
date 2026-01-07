@@ -46,7 +46,6 @@ Tensor cov(
   const auto num_observations = in.size(OBSERVATIONS_DIM);
 
   // mimic numpy's behavior when (N − ddof) == 0 and fweights are None
-  // 2D input returns nan, 1D input returns inf
   if (num_observations == correction && !fweights.has_value()) {
     if (self.ndimension() == 2) {
       // 2D input with single observation returns nans
