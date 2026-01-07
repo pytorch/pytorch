@@ -1262,11 +1262,6 @@ def create_block_mask(
     return block_mask
 
 
-def _round_up_to_multiple(x: int, multiple: int) -> int:
-    """Round x up to the nearest multiple."""
-    return ((x + multiple - 1) // multiple) * multiple
-
-
 def create_varlen_block_mask(
     mask_mod: _mask_mod_signature,
     B: int | None,
@@ -1581,10 +1576,7 @@ def _apply_kernel_options(
         raise AssertionError("OUTPUT_MAX must not be in kernel_options")
     kernel_options["OUTPUT_MAX"] = output_max
     if any_inputs_on_cpu_device and output_max:
-        # CPU doesn't support returning max yet
-        # TODO: support CPU for returning max
         raise NotImplementedError("Returning max scores is not supported on CPU.")
-        kernel_options["OUTPUT_MAX"] = False
 
     return kernel_options
 
