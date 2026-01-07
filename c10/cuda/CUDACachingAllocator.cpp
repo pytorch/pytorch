@@ -2570,14 +2570,14 @@ class DeviceCachingAllocator {
     // divide the space between these 2's power into equal divisions
     // If division is zero, return the power-of-2 ceiling.
     size_t power2_floor = llvm::PowerOf2Floor(size);
-    size_t power2_divison =
+    size_t power2_division =
         power2_floor >> (63 - llvm::countLeadingZeros(divisions));
-    if (C10_UNLIKELY(power2_divison == 0)) {
+    if (C10_UNLIKELY(power2_division == 0)) {
       return (power2_floor << 1);
     }
-    size_t round_size_floor = size & (~(power2_divison - 1));
+    size_t round_size_floor = size & (~(power2_division - 1));
     return (round_size_floor == size) ? size
-                                      : round_size_floor + power2_divison;
+                                      : round_size_floor + power2_division;
   }
 
   static size_t round_size(size_t size) {

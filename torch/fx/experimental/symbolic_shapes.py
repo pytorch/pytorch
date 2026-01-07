@@ -19,6 +19,7 @@ import atexit
 import collections
 import dis
 import functools
+import glob
 import hashlib
 import inspect
 import itertools
@@ -312,6 +313,7 @@ def lru_cache(
 def uninteresting_files() -> set[str]:
     import torch._compile
     import torch._dynamo.eval_frame
+    import torch._higher_order_ops
     import torch._inductor.sizevars
     import torch._library.custom_ops
     import torch._library.fake_impl
@@ -340,8 +342,15 @@ def uninteresting_files() -> set[str]:
     ]
     import torch._dynamo.guards
 
+    files = {inspect.getfile(m) for m in mods}
+
+    # Add all Python files in torch._higher_order_ops directory
+    higher_order_ops_dir = os.path.dirname(torch._higher_order_ops.__file__)
+    hop_files = glob.glob(os.path.join(higher_order_ops_dir, "*.py"))
+
     return (
-        {inspect.getfile(m) for m in mods}
+        files
+        | set(hop_files)
         | torch._dynamo.guards.uninteresting_files()
         | {"<string>"}
     )

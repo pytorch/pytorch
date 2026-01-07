@@ -174,9 +174,9 @@ pillow==11.0.0
 #Pinned versions: 11.0.0
 #test that import:
 
-protobuf==5.29.5
+protobuf==6.33.2
 #Description:  Google's data interchange format
-#Pinned versions: 5.29.5
+#Pinned versions: 6.33.2
 #test that import: test_tensorboard.py, test/onnx/*
 
 psutil
