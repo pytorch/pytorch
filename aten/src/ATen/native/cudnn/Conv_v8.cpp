@@ -680,7 +680,7 @@ bool plan_errata_exception(
         errata_json_handle, executionPlanTag, handle, []() { return true; });
   } else {
     return false;
- }
+  }
 }
 
 void generate_and_filter_plans(
