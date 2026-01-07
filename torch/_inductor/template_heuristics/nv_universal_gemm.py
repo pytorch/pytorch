@@ -281,14 +281,11 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         backend = lh.createBackend(nvMatmulHeuristics.NvMatmulHeuristicsTarget.CUTLASS3)
 
         validity_callback = self._make_validity_callback(valid_configs)
-        try:
-            lh.setBackendCallbackProperty(
-                backend,
-                nvMatmulHeuristics.NvMatmulHeuristicsBackendPropertyCallbackKind.KERNEL_ADDITIONAL_VALIDITY_CHECK,
-                validity_callback,
-            )
-        except RuntimeError:
-            log.debug("Could not set validity callback", exc_info=True)
+        lh.setBackendCallbackProperty(
+            backend,
+            nvMatmulHeuristics.NvMatmulHeuristicsBackendPropertyCallbackKind.KERNEL_ADDITIONAL_VALIDITY_CHECK,
+            validity_callback,
+        )
 
         layout = self._get_layout_enum(layout_a, layout_b)
 
