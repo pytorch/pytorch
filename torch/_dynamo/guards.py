@@ -214,6 +214,7 @@ if TYPE_CHECKING:
 
     from torch._C import DispatchKeySet
     from torch._dynamo.output_graph import OutputGraphCommon, OutputGraphGuardsState
+    from torch._dynamo.package import SerializedCode
 
 T = TypeVar("T")
 log = logging.getLogger(__name__)
@@ -3423,15 +3424,20 @@ class GuardsStatePickler(pickle.Pickler):
         return collections.namedtuple(name, fields)
 
     @classmethod
-    def _unpickle_code(cls, serialized_code):
+    def _unpickle_code(cls, serialized_code: SerializedCode) -> types.CodeType:
         from torch._dynamo.package import SerializedCode
 
         return SerializedCode.to_code_object(serialized_code)
 
     @classmethod
     def _unpickle_nested_function(
-        cls, code, module: str, qualname: str, argdefs, closure
-    ) -> Any:
+        cls,
+        code: types.CodeType,
+        module: str,
+        qualname: str,
+        argdefs: tuple[object, ...] | None,
+        closure: tuple[types.CellType, ...] | None,
+    ) -> types.FunctionType:
         f_globals = importlib.import_module(module).__dict__
         return types.FunctionType(code, f_globals, qualname, argdefs, closure)
 
