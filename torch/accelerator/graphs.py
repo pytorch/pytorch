@@ -131,6 +131,18 @@ class Graph(_acceleratorGraph):
 
         Arguments:
             path (str): Path to dump the graph to.
+
+        Example::
+            >>> # xdoctest: +SKIP
+            >>> s = torch.Stream()
+            >>> g = torch.accelerator.Graph()
+            >>> g.enable_debug_mode()
+
+            >>> with s, g:
+            >>> # ... operations ...
+
+            >>> # Dump captured graph to a file "graph_dump.dot"
+            >>> g.debug_dump("graph_dump.dot")
         """
         return super().debug_dump(path)
 
