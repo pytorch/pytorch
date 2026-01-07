@@ -1674,7 +1674,9 @@ class TestFullyShardCudaGraph(FSDPTest):
         return 2
 
     @skip_if_lt_x_gpu(2)
-    @unittest.skipIf(not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs")
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     def test_two_layer_fully_shard_cudagraph(self):
         if device_type.type == "cuda":
             torch.cuda.set_device(self.rank)
