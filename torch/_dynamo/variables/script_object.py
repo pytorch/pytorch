@@ -280,10 +280,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 is_opaque_type(type(arg)) for arg in args_const
             ) or any(is_opaque_type(type(v)) for v in kwargs_const.values())
 
-            if (
-                self.source
-                and not has_opaque_args
-            ):
+            if self.source and not has_opaque_args:
                 # convert to tuple to make it hashable
                 kwargs_tuple = tuple(sorted(kwargs_const.items()))
                 call_source = CallMethodSource(
