@@ -712,7 +712,7 @@ print(t.is_pinned())
 
         # check valid config
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":128:8:64:16:32:32"
-        self.assertLess(check_workspace_size(a) - (3072 * 1024)), 524288)
+        self.assertLess(check_workspace_size(a) - (3072 * 1024), 524288)
         self.assertLess(abs(check_workspace_size(a) - (3072 * 1024)), 524288)
 
         torch._C._cuda_clearCublasWorkspaces()
