@@ -16699,6 +16699,49 @@ if RUN_CPU:
                         ret_opt = fn_opt(pytype, dtype)
 
                 self.assertEqual(ret_opt, fn(pytype, dtype))
+        
+        def test_compile_autocast_bf16_no_nan_cpu_mps(self):
+        import torch.nn as nn
+        
+        class SimpleModel(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = nn.Linear(768, 768)
+                self.fc2 = nn.Linear(768, 768)
+            
+            def forward(self, x):
+                x = self.fc1(x)
+                x = torch.nn.functional.gelu(x)
+                x = self.fc2(x)
+                return x.sum()
+        
+        device = 'cpu'
+        model = SimpleModel().to(device)
+        model_compiled = torch.compile(model)
+        
+        optimizer = torch.optim.AdamW(model_compiled.parameters(), lr=3e-4)
+        
+        for i in range(10):
+            x = torch.randn(16, 128, 768, device=device)
+            
+            optimizer.zero_grad()
+            
+            with torch.autocast(device_type=device, dtype=torch.bfloat16):
+                loss = model_compiled(x)
+            
+            self.assertTrue(torch.isfinite(loss).all(), 
+                           f"Loss became NaN at step {i}: {loss.item()}")
+            
+            loss.backward()
+
+            for name, param in model_compiled.named_parameters():
+                if param.grad is not None:
+                    self.assertTrue(
+                        torch.isfinite(param.grad).all(),
+                        f"NaN gradient in {name} at step {i}"
+                    )
+            
+            optimizer.step()
 
 
 def _strip_tmp_path(code: str) -> str:

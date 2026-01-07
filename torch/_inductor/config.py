@@ -519,6 +519,8 @@ max_autotune_prune_choices_based_on_shared_mem = (
 triton_disable_device_detection = (
     os.environ.get("TORCHINDUCTOR_TRITON_DISABLE_DEVICE_DETECTION", "0") == "1"
 )
+disable_bf16_reductions_on_cpu = True
+force_fp32_accumulation_on_mps = True
 
 # enable inductor graph partition to allow multiple inductor graphs for the same dynamo graph
 graph_partition: bool = (

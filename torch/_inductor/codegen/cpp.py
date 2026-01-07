@@ -194,7 +194,22 @@ def reduction_init(reduction_type, dtype):
 
 
 def reduction_acc_type(reduction_type, dtype):
-    scalar_type = DTYPE_TO_CPP[DTYPE_TO_COMPUTATION_DTYPE[dtype]]
+    """
+    Determine accumulation type for reductions.
+    
+    For bfloat16, force FP32 accumulation on CPU/MPS to prevent NaN.
+    Fixes: https://github.com/pytorch/pytorch/issues/171764
+    """
+    from torch._inductor import config
+    
+    
+    if dtype == torch.bfloat16 and config.disable_bf16_reductions_on_cpu:
+        computation_dtype = torch.float32
+    else:
+        computation_dtype = DTYPE_TO_COMPUTATION_DTYPE[dtype]
+    
+    scalar_type = DTYPE_TO_CPP[computation_dtype]
+    
     if is_welford_reduction(reduction_type):
         return f"Welford<{scalar_type}>"
     if reduction_type in ("argmin", "argmax"):
