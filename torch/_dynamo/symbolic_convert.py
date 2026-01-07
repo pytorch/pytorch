@@ -2317,7 +2317,7 @@ class InstructionTranslatorBase(
             val = self.stack[-2]
             assert self._isinstance_exception(val)
             typ = BuiltinVariable(val.exc_type)  # type: ignore[attr-defined]
-            # pyrefly: ignore[bad-argument-type]
+
             tb = val.var_getattr(self, "__traceback__")
 
         args += [typ, val, tb]
@@ -2429,7 +2429,7 @@ class InstructionTranslatorBase(
                     # Traceback is currently mapped to UnknownVariable
                     self.push(variables.UnknownVariable())
                     self.push(old_exception)
-                    # pyrefly: ignore[missing-attribute]
+
                     self.push(variables.BuiltinVariable(old_exception.exc_type))
                 else:
                     # Push empty exception tb, value, type
@@ -2441,7 +2441,7 @@ class InstructionTranslatorBase(
                 # Traceback is currently mapped to UnknownVariable
                 self.push(variables.UnknownVariable())
                 self.push(exception_var)
-                # pyrefly: ignore[missing-attribute]
+
                 self.push(variables.BuiltinVariable(exception_var.exc_type))
 
                 # Jump to target
@@ -4356,7 +4356,6 @@ class InstructionTranslatorBase(
             )
         else:
             user_stack = get_stack_above_dynamo() + user_stack  # type: ignore[assignment]
-            # pyrefly: ignore [bad-argument-type]
             user_stack = collapse_resume_frames(user_stack)
         user_stack_formatted = "".join(traceback.format_list(user_stack))
 
