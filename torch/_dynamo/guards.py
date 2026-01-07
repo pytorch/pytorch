@@ -39,14 +39,7 @@ from contextlib import contextmanager
 from copy import deepcopy
 from inspect import currentframe
 from typing import Any, NamedTuple, NoReturn, Optional, TYPE_CHECKING, Union
-
-
-try:
-    from typing import LiteralString
-except ImportError:
-    from typing_extensions import LiteralString
-
-from typing_extensions import TypeAliasType, TypeVar
+from typing_extensions import LiteralString, TypeAliasType, TypeVar
 from weakref import ReferenceType
 
 import torch
@@ -646,7 +639,7 @@ class GuardManagerWrapper:
                 if isinstance(guard, RelationalGuard):
                     if guard not in self.printed_relational_guards:
                         self.printed_relational_guards.add(guard)
-                        # pyrefly: ignore [bad-argument-type]
+
                         body.writelines(self.get_guard_lines(guard))
                     else:
                         body.writelines(
@@ -707,7 +700,6 @@ class GuardManagerWrapper:
             for guard in mgr.get_leaf_guards():
                 if isinstance(guard, RelationalGuard):
                     if guard not in relational_guards_seen:
-                        # pyrefly: ignore [bad-argument-type]
                         self.code_parts.extend(get_code_parts(guard))
                         relational_guards_seen.add(guard)
                 else:
@@ -2600,6 +2592,7 @@ class GuardBuilder(GuardBuilderBase):
         assert output_graph is not None
         global_state = output_graph.global_state_guard
         self.check_fn_manager.global_state = global_state
+
         code = [
             f"___check_global_state() against {self.check_fn_manager.global_state.__getstate__()}"
         ]
@@ -3414,6 +3407,10 @@ class GuardsStatePickler(pickle.Pickler):
         return getattr(torch.ops._C, name)
 
     @classmethod
+    def _unpickle_op(cls, namespace: str, opname: str, overloadname: str) -> Any:
+        return getattr(getattr(getattr(torch.ops, namespace), opname), overloadname)
+
+    @classmethod
     def _unpickle_bound_method(cls, func: Any, base: Any) -> Any:
         return types.MethodType(func, base)
 
@@ -3490,6 +3487,15 @@ class GuardsStatePickler(pickle.Pickler):
             if id(obj) not in self.guard_tree_values:
                 return _Missing, ("module guard tree",)
 
+            for attr in obj.__dict__.values():
+                if isinstance(attr, (torch.Tensor, torch.nn.Module)):
+                    continue
+                if id(attr) in self.guard_tree_values:
+                    continue
+                if callable(attr):
+                    continue
+                self.missing_values[id(attr)] = attr
+
             # DDP module is a special case because it tries to restore unneeded
             # data in custom __setstate__. We cannot skip ddp module because it
             # is often a toplevel module.
@@ -3539,6 +3545,13 @@ class GuardsStatePickler(pickle.Pickler):
             obj, torch._ops.OpOverloadPacket
         ) and obj._qualified_op_name.startswith("_C::"):
             return type(self)._unpickle_c_op, (obj.__name__,)
+
+        elif isinstance(obj, torch._ops.OpOverload):
+            return type(self)._unpickle_op, (
+                obj.namespace,
+                obj._opname,
+                obj._overloadname,
+            )
 
         elif (
             obj.__class__.__module__ == "builtins"
@@ -3663,7 +3676,7 @@ class CheckFunctionManager:
         save_guards: bool = False,
         strict_error: bool = False,
         source_get_cache: Optional[dict[str, Any]] = None,
-    ):
+    ) -> None:
         guards = output_graph.guards if output_graph else None
         self._weakrefs: dict[int, ReferenceType[object]] = {}
 
@@ -4436,6 +4449,30 @@ def strip_local_scope(s: str) -> str:
     return re.sub(pattern, r"\1", s)
 
 
+def format_user_stack_trace(
+    user_stack: traceback.StackSummary | None,
+) -> str:
+    """
+    Format the user stack trace for display in guard failure messages.
+
+    Returns a formatted string representation of the stack trace,
+    or an empty string if no user stack is available.
+    """
+    if user_stack is None or len(user_stack) == 0:
+        return ""
+
+    lines: list[str] = []
+    for frame in user_stack:
+        filename = frame.filename
+        lineno = frame.lineno
+        name = frame.name
+        source_line = frame.line.strip() if frame.line else ""
+        lines.append(f'  File "{filename}", line {lineno}, in {name}')
+        if source_line:
+            lines.append(f"    {source_line}")
+    return "\n".join(lines)
+
+
 def get_guard_fail_reason_helper(
     guard_manager: GuardManagerWrapper,
     f_locals: dict[str, object],
@@ -4447,6 +4484,7 @@ def get_guard_fail_reason_helper(
     Updates `guard_failures` with the generated reason.
     Only the first failed check of guard_manager is reported.
     """
+
     assert guard_manager.global_scope is not None
     assert guard_manager.closure_vars is not None
     scope = {"L": f_locals, "G": guard_manager.global_scope["G"]}
@@ -4461,6 +4499,8 @@ def get_guard_fail_reason_helper(
 
     verbose_code_parts: list[str] = []
     guard_debug_info = guard_manager.check_verbose(f_locals)
+    user_stack_str = ""
+
     # For test_export_with_map_cond, the check_verbose fail even without the
     # C++ guard manager. We need to fix the issue to remove the comment.
     # assert not guard_debug_info.result
@@ -4479,6 +4519,10 @@ def get_guard_fail_reason_helper(
             else:
                 reasons = verbose_code_parts
                 verbose_code_parts = []
+
+        # Format user stack trace if available and recompile logging is enabled
+        if guard_debug_info.user_stack:
+            user_stack_str = format_user_stack_trace(guard_debug_info.user_stack)
     elif cache_entry_backend != backend:
         # None of the guard entries failed - a backend match issue
         reason = (
@@ -4524,7 +4568,14 @@ def get_guard_fail_reason_helper(
                 if not is_recompiles_verbose_enabled():
                     break
 
-    reason_str = f"{compile_id}: " + "; ".join(reasons)
+    # Build reason string - simple format for normal logging
+    # Use singular "reason" when there's only one, plural "reasons" for multiple
+    if len(reasons) == 1:
+        reason_str = f"{compile_id}: {reasons[0]}"
+    else:
+        reason_str = f"{compile_id}: " + "; ".join(reasons)
+    if user_stack_str:
+        reason_str += f"\nUser stack trace:\n{user_stack_str}"
     return strip_local_scope(reason_str)
 
 
@@ -4619,7 +4670,7 @@ def get_and_maybe_log_recompilation_reasons(
             "name": "recompile_reasons",
             "encoding": "json",
         },
-        payload_fn=lambda: reasons,
+        payload_fn=lambda: reasons[0] if len(reasons) == 1 else reasons,
     )
 
     return reasons

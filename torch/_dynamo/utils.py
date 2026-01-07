@@ -170,7 +170,7 @@ counters: collections.defaultdict[str, Counter[str]] = collections.defaultdict(
 )
 optimus_scuba_log: dict[str, Any] = {}
 troubleshooting_url = "https://docs.pytorch.org/docs/main/user_guide/torch_compiler/compile/programming_model.recompilation.html"
-nnmodule_doc_url = "https://pytorch.org/docs/main/torch.compiler_nn_module.html"
+nnmodule_doc_url = "https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_nn_module.html"
 nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitations."
 log = logging.getLogger(__name__)
 
@@ -953,7 +953,7 @@ ANSI_ESCAPE_PATTERN = re.compile(
 class StripAnsiFormatter(logging.Formatter):
     """Logging formatter that strips ANSI escape codes."""
 
-    def format(self, record):
+    def format(self, record: logging.LogRecord) -> str:
         msg = super().format(record)
         return ANSI_ESCAPE_PATTERN.sub("", msg)
 
@@ -1084,6 +1084,7 @@ def istype(obj: object, allowed_types: Any) -> bool:
     return type(obj) is allowed_types
 
 
+_builtin_final_typing_classes: tuple[Any, ...] = tuple()
 if sys.version_info >= (3, 12):
     # Some typing classes moved to C in 3.12,
     # which no longer have the _Final mixin.
@@ -1405,11 +1406,17 @@ class CompilationMetrics:
     log_format_version: int = LOG_FORMAT_VERSION
     inductor_config: Optional[str] = None
     remote_cache_version: Optional[int] = None
-    inductor_fx_remote_cache_hit_count: Optional[int] = None
-    inductor_fx_remote_cache_miss_count: Optional[int] = None
+    inductor_fx_remote_cache_hit_count: Optional[int] = 0
+    inductor_fx_remote_cache_miss_count: Optional[int] = 0
     inductor_fx_remote_cache_backend_type: Optional[str] = None
     inductor_fx_remote_cache_hit_keys: Optional[str] = None
     inductor_fx_remote_cache_miss_keys: Optional[str] = None
+    inductor_fx_local_cache_hit_count: Optional[int] = 0
+    inductor_fx_local_cache_miss_count: Optional[int] = 0
+    aotautograd_remote_cache_hit_count: Optional[int] = 0
+    aotautograd_remote_cache_miss_count: Optional[int] = 0
+    aotautograd_local_cache_hit_count: Optional[int] = 0
+    aotautograd_local_cache_miss_count: Optional[int] = 0
     cuda_version: Optional[str] = None
     triton_version: Optional[str] = None
     feature_usage: Optional[dict[str, bool]] = None
@@ -3452,7 +3459,7 @@ def get_concrete_sizes_from_symints(
     shape_env = fake_mode.shape_env
     var_to_val = shape_env.var_to_val
 
-    def replace_sym(match):
+    def replace_sym(match: Any) -> str:
         sym_name = f"s{match.group(1)}"
         val = next(
             (v for k, v in var_to_val.items() if k.name == sym_name),
@@ -4252,6 +4259,7 @@ def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
 
     import ast
 
+    tree: Any | None = None
     try:
         # Without brackets, `segment` is parsed as a statement.
         # We expect an expression, so wrap `segment` in
@@ -4259,6 +4267,7 @@ def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
         tree = ast.parse("(\n" + segment + "\n)")
     except SyntaxError:
         return None
+    assert tree is not None
 
     if len(tree.body) != 1:
         return None
@@ -4405,7 +4414,7 @@ def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> s
         result = textwrap.indent(textwrap.dedent(result), indent)
         return result
 
-    assert inst.positions is not None
+    assert hasattr(inst, "positions") and inst.positions is not None
     if inst.positions.lineno is None:
         return ""
     # The rstrip + "\n" pattern is used throughout this function to handle

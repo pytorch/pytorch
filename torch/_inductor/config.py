@@ -507,9 +507,11 @@ max_autotune_report_choices_stats = (
     os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_REPORT_CHOICES_STATS", "1") == "1"
 )
 
-# Prune configs that require more shared memory than the hardware limit
+# Prune configs that have a theoretical maximum shared memory usage than the hardware limit
+# Will over-prune - pruning some valid configs with theoretical shared memory usage higher
+# than real shared memory usage, ensuring that invalid configs are not possibly autotuned
 max_autotune_prune_choices_based_on_shared_mem = (
-    os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_PRUNE_CHOICES_BASED_ON_SHARED_MEM", "1")
+    os.environ.get("TORCHINDUCTOR_MAX_AUTOTUNE_PRUNE_CHOICES_BASED_ON_SHARED_MEM", "0")
     == "1"
 )
 
@@ -1706,8 +1708,6 @@ class triton:
     # Should TMA store be enable from templates. TODO: Remove once we
     # can autotune over the result.
     enable_template_tma_store = os.environ.get("ENABLE_TEMPLATE_TMA_STORE", "0") == "1"
-    # Use epilogue subtiling. We allow disabling it due to limited B200 testing.
-    enable_epilogue_subtiling = os.environ.get("ENABLE_EPILOGUE_SUBTILING", "1") == "1"
     # Skip L1 cache for buffers that are used only once.  Disabled by default
     skip_l1_cache = os.environ.get("TORCHINDUCTOR_SKIP_L1", "0") == "1"
 
@@ -1734,7 +1734,7 @@ class triton:
     # Programmatic Dependent Launch improves launch latency on Nvidia Hopper+ devices
     # If set to true, will generate PDL code on devices that support it.
     # If set to false, will never generate PDL code.
-    enable_pdl = False
+    enable_pdl = os.environ.get("TORCHINDUCTOR_ENABLE_PDL", "0") == "1"
 
     mix_order_reduction = (
         os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION", "0" if is_fbcode() else "1")
@@ -1751,6 +1751,15 @@ class triton:
     enable_tlx_templates: bool = (
         os.environ.get("TORCHINDUCTOR_ENABLE_TLX_TEMPLATES", "0") == "1"
     )
+
+    # Map for storing the amount of kernel runs with dumped input tensors
+    # Based on hash of Triton source code to avoid bloating the folder
+    debug_dump_kernel_inputs: dict[str, int] = {}
+
+    # Value for the maximum amount of runs with dumped kernel input tensors
+    # When the maximum is reached the first values get overwritten
+    # This ensures the last N runs are saved, where N is this value
+    max_kernel_dump_occurrences = 3
 
 
 class aot_inductor:

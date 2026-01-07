@@ -12,12 +12,14 @@ import json
 import logging
 import pickle
 import shutil
+import threading
+import weakref
 from collections.abc import Callable
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from hashlib import sha256
 from os import PathLike
 from pathlib import Path
-from typing import cast, TypedDict
+from typing import cast, Generic, Protocol, TypedDict
 from typing_extensions import ParamSpec, TypeVar
 
 from filelock import FileLock
@@ -86,6 +88,264 @@ class CacheEntry:
     encoded_result: object
 
 
+@dataclass
+class InterimResult(Generic[_R]):
+    """Wrapper for an available interim result from a DeferredRecording.
+
+    When get_interim_result() returns an InterimResult, it means the
+    make_interim_result callable was provided and has been invoked.
+    The wrapped value is the result of that invocation.
+
+    This allows distinguishing between:
+    - No interim result configured: get_interim_result() returns None
+    - Interim result available: get_interim_result() returns InterimResult(value)
+      where value may itself be None if the callable returns None.
+
+    Attributes:
+        value: The value returned by calling make_interim_result().
+               May legitimately be None if the callable returns None.
+    """
+
+    value: _R
+
+
+@dataclass
+class DeferredRecording(Generic[_R, _EncodedR]):
+    """Signals that recording should happen at a later time.
+
+    When returned from a custom_result_encoder, the memoizer will:
+    1. Skip immediate caching
+    2. Register a completion callback on this object
+
+    The encoder is responsible for calling `finalize(encoded_result)`
+    when the actual result is ready to be cached. This is useful when
+    the function returns a value whose final encoded form is not yet
+    available (e.g., an object containing a pending computation),
+    allowing the expensive work to remain hidden while still enabling caching.
+
+    This class handles the race condition where the computation might complete
+    before the memoizer has registered its callback. If finalize() is called
+    first, the result is stored and the callbacks are invoked when registered.
+
+    Multiple callbacks can be registered - they will all be invoked when
+    finalize() is called (or immediately if already completed). Callbacks are
+    guaranteed to be invoked in registration order.
+
+    Optionally, a `make_interim_result` callable can be provided to handle
+    subsequent calls while the deferred recording is pending. When a memoized
+    function is called again with the same parameters while a deferred recording
+    is still pending, the memoizer can use this callable to construct an
+    appropriate return value instead of re-executing the function. The callable
+    does not necessarily return the same object - it provides a way to derive
+    a suitable response based on the pending deferred recording's context.
+
+    This class is thread-safe: concurrent calls to finalize() and
+    register_callback() are properly synchronized.
+
+    WARNING: Callbacks are executed while holding the internal lock to ensure
+    ordering guarantees. Callbacks MUST NOT call back into this DeferredRecording
+    instance (e.g., calling finalize() or register_callback() from within a
+    callback) as this will cause a deadlock.
+
+    Example usage in an encoder:
+        def my_encoder(*args, **kwargs):
+            def encode(result: _R) -> DeferredRecording[_R, _EncodedR]:
+                deferred: DeferredRecording[_R, _EncodedR] = DeferredRecording(
+                        # Construct an appropriate return for subsequent calls while pending
+                        make_interim_result=lambda: result
+                    )
+
+                def on_complete():
+                    encoded_result: _EncodedR = _encode_result(result)
+                    deferred.finalize(encoded_result)
+
+                result.add_completion_callback(on_complete)
+                return deferred
+
+            return encode
+
+    Attributes:
+        _callbacks: List of callbacks to invoke when finalize() is called.
+                   Set to None after finalize() is called to indicate completion.
+        _encoded_result: The encoded result passed to finalize().
+        _lock: Lock for thread-safe access to mutable state.
+        make_interim_result: Optional callable that constructs a return value for subsequent
+                           calls while the deferred recording is pending. If set, the memoizer
+                           calls this instead of re-executing the function. The callable may
+                           return the same object or construct a new appropriate response.
+    """
+
+    _callbacks: list[Callable[[_EncodedR], None]] | None = field(
+        default_factory=list, repr=False
+    )
+    _encoded_result: _EncodedR | None = field(default=None, repr=False)
+    _lock: threading.Lock = field(default_factory=threading.Lock, repr=False)
+    make_interim_result: Callable[[], _R] | None = field(default=None, repr=False)
+
+    def finalize(self, encoded_result: _EncodedR) -> None:
+        """Finalize the deferred recording with the encoded result.
+
+        This method should be called by the encoder (typically via a completion
+        callback) when the actual result is ready to be cached.
+
+        All registered callbacks are invoked with the encoded result in
+        registration order. If no callbacks are registered yet, the result is
+        stored and callbacks will be invoked when registered.
+
+        This method is thread-safe.
+
+        WARNING: Callbacks are executed while holding the internal lock.
+        Do not call finalize() or register_callback() from within a callback,
+        as this will cause a deadlock.
+
+        Args:
+            encoded_result: The encoded result to cache.
+        """
+        with self._lock:
+            if self._callbacks is None:
+                raise RuntimeError(
+                    "finalize() called multiple times on DeferredRecording"
+                )
+
+            # Store the result and get callbacks to invoke
+            self._encoded_result = encoded_result
+            callbacks_to_invoke = self._callbacks
+            self._callbacks = None
+
+            # Execute callbacks inside the lock to ensure ordering:
+            # - All pre-finalize callbacks execute in registration order
+            # - Any callback registered during/after finalize will see
+            #   _callbacks=None and execute immediately (also under lock)
+            for callback in callbacks_to_invoke:
+                callback(encoded_result)
+
+    def register_callback(self, callback: Callable[[_EncodedR], None]) -> None:
+        """Register a completion callback.
+
+        This method is called by memoizers to register callbacks that
+        will insert cache entries. Multiple callbacks can be registered.
+
+        If finalize() has already been called (e.g., the computation was fast),
+        the callback is invoked immediately with the stored result.
+
+        This method is thread-safe. Callbacks are guaranteed to be invoked
+        in registration order.
+
+        WARNING: Callbacks are executed while holding the internal lock.
+        Do not call finalize() or register_callback() from within a callback,
+        as this will cause a deadlock.
+
+        Args:
+            callback: The function to call with the encoded result.
+        """
+        with self._lock:
+            if self._callbacks is None:
+                # Already finalized - invoke immediately while holding lock
+                # to maintain ordering with respect to other callbacks
+                callback(cast(_EncodedR, self._encoded_result))
+            else:
+                self._callbacks.append(callback)
+
+    def get_interim_result(self) -> InterimResult[_R] | None:
+        """Try to get an interim result for use while deferred recording is pending.
+
+        When a memoized function is called again with the same parameters while
+        a deferred recording is still pending, the memoizer uses this method to
+        check if an interim result can be returned instead of re-executing the
+        function.
+
+        This method provides thread-safe access to the make_interim_result
+        callable. It atomically checks if the callable was provided and invokes
+        it if so.
+
+        This method is thread-safe.
+
+        Returns:
+            InterimResult wrapping the value if make_interim_result was provided,
+            or None if no interim result is available.
+
+        Note:
+            The callable is invoked each time this method is called, so if
+            make_interim_result returns a new object each time, callers will
+            receive different objects. To return the same object, the callable
+            should capture and return a reference to a single object.
+        """
+        with self._lock:
+            if self.make_interim_result is not None:
+                return InterimResult(self.make_interim_result())
+            return None
+
+
+class ResultEncoderFactory(Protocol[_P, _R, _EncodedR]):
+    """Protocol for custom result encoder factories.
+
+    A result encoder factory is a callable with the following signature:
+        factory(fn) -> params_to_encoder(*args, **kwargs) -> encoder(result) -> encoded
+
+    The three levels are:
+    1. factory(fn): Takes the underlying unwrapped function, returns a params_to_encoder
+    2. params_to_encoder(*args, **kwargs): Takes the memoized function's arguments,
+       returns an encoder function
+    3. encoder(result): Converts the result R -> _EncodedR (or DeferredRecording)
+
+    The `fn` parameter allows the encoder to call the underlying function without
+    triggering memoization, which is useful when the encoder needs to re-execute
+    the function (e.g., to get a fresh result for DeferredRecording).
+
+    Example:
+        def my_encoder_factory(fn: Callable) -> Callable:
+            def params_to_encoder(*args, **kwargs) -> Callable:
+                def encode(result: R) -> EncodedR:
+                    return {"encoded": result}
+                return encode
+            return params_to_encoder
+
+        @memoizer.record(custom_result_encoder=my_encoder_factory)
+        def compute(x: int) -> int:
+            return x * 2
+    """
+
+    def __call__(
+        self,
+        fn: Callable[_P, _R],
+    ) -> Callable[_P, Callable[[_R], _EncodedR | DeferredRecording[_R, _EncodedR]]]: ...
+
+
+class ResultDecoderFactory(Protocol[_P, _R, _EncodedR]):
+    """Protocol for custom result decoder factories.
+
+    A result decoder factory is a callable with the following signature:
+        factory(fn) -> params_to_decoder(*args, **kwargs) -> decoder(encoded) -> result
+
+    The three levels are:
+    1. factory(fn): Takes the underlying unwrapped function, returns a params_to_decoder
+    2. params_to_decoder(*args, **kwargs): Takes the memoized function's arguments,
+       returns a decoder function
+    3. decoder(encoded): Converts the encoded result _EncodedR -> R
+
+    The `fn` parameter allows the decoder to call the underlying function without
+    triggering memoization, which is useful for fallback paths when the cached
+    result cannot be fully decoded.
+
+    Example:
+        def my_decoder_factory(fn: Callable) -> Callable:
+            def params_to_decoder(*args, **kwargs) -> Callable:
+                def decode(encoded_result: EncodedR) -> R:
+                    return encoded_result["value"]
+                return decode
+            return params_to_decoder
+
+        @memoizer.replay(custom_result_decoder=my_decoder_factory)
+        def compute(x: int) -> int:
+            return x * 2
+    """
+
+    def __call__(
+        self,
+        fn: Callable[_P, _R],
+    ) -> Callable[_P, Callable[[_EncodedR], _R]]: ...
+
+
 class _BaseMemoizer:
     """Base class for memoization interfaces.
 
@@ -128,7 +388,7 @@ class _BaseMemoizer:
     def record(
         self,
         custom_params_encoder: Callable[_P, object] | None = None,
-        custom_result_encoder: Callable[_P, Callable[[_R], _EncodedR]] | None = None,
+        custom_result_encoder: ResultEncoderFactory[_P, _R, _EncodedR] | None = None,
     ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
         """Record a function call result. Must be implemented by subclasses.
 
@@ -142,7 +402,7 @@ class _BaseMemoizer:
     def replay(
         self,
         custom_params_encoder: Callable[_P, object] | None = None,
-        custom_result_decoder: Callable[_P, Callable[[_EncodedR], _R]] | None = None,
+        custom_result_decoder: ResultDecoderFactory[_P, _R, _EncodedR] | None = None,
     ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
         """Replay a cached function result. Must be implemented by subclasses.
 
@@ -156,8 +416,8 @@ class _BaseMemoizer:
     def memoize(
         self,
         custom_params_encoder: Callable[_P, object] | None = None,
-        custom_result_encoder: Callable[_P, Callable[[_R], _EncodedR]] | None = None,
-        custom_result_decoder: Callable[_P, Callable[[_EncodedR], _R]] | None = None,
+        custom_result_encoder: ResultEncoderFactory[_P, _R, _EncodedR] | None = None,
+        custom_result_decoder: ResultDecoderFactory[_P, _R, _EncodedR] | None = None,
     ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
         """Memoize a function with record and replay functionality.
 
@@ -265,6 +525,13 @@ class Memoizer(_BaseMemoizer):
         )
         # Optional sub_key for nested cache structure
         self._sub_key: str | None = sub_key
+        # Track pending deferred recordings by cache key.
+        # Uses WeakValueDictionary to prevent memory leaks: if the DeferredRecording
+        # is no longer referenced elsewhere (e.g., the async computation was cancelled
+        # or failed and garbage collected), the entry is automatically removed.
+        self._pending_deferred: weakref.WeakValueDictionary[str, DeferredRecording] = (
+            weakref.WeakValueDictionary()
+        )
         # Register atexit handler to dump cache on program exit
         if config.IS_DUMP_MEMOIZER_CACHE_ENABLED():
             atexit.register(self._dump_to_disk)
@@ -280,6 +547,31 @@ class Memoizer(_BaseMemoizer):
         the fresh_cache() context manager via clear_on_fresh_cache registration.
         """
         self._cache._memory.clear()
+
+    def _finalize_deferred_recording(
+        self,
+        cache_key: str,
+        encoded_params: object,
+        encoded_result: _EncodedR,
+    ) -> None:
+        """Finalize a deferred recording by inserting the cache entry.
+
+        This method is called when a DeferredRecording's finalize() method is invoked.
+        It creates the cache entry and inserts it into the in-memory cache.
+
+        Args:
+            cache_key: The cache key for the entry.
+            encoded_params: The encoded function parameters.
+            encoded_result: The final encoded result to cache.
+        """
+        # Remove from pending tracking
+        self._pending_deferred.pop(cache_key, None)
+        # Insert into cache
+        cache_entry = CacheEntry(
+            encoded_params=encoded_params,
+            encoded_result=encoded_result,
+        )
+        self._cache.insert(cache_key, cache_entry)
 
     @functools.cached_property
     def _shared_cache_filepath(self) -> Path:
@@ -528,7 +820,7 @@ class Memoizer(_BaseMemoizer):
     def record(
         self,
         custom_params_encoder: Callable[_P, object] | None = None,
-        custom_result_encoder: Callable[_P, Callable[[_R], _EncodedR]] | None = None,
+        custom_result_encoder: ResultEncoderFactory[_P, _R, _EncodedR] | None = None,
     ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
         """Record a function call result with custom encoding.
 
@@ -539,8 +831,9 @@ class Memoizer(_BaseMemoizer):
             custom_params_encoder: Optional encoder for function parameters.
                                   If None, parameters are pickled directly.
             custom_result_encoder: Optional encoder factory for function results.
-                                  Takes function parameters and returns an encoder
-                                  function that converts R -> _EncodedR.
+                                  First receives the underlying function, then takes
+                                  function parameters and returns an encoder function
+                                  that converts R -> _EncodedR.
 
         Returns:
             A decorator function that can be applied to functions.
@@ -567,6 +860,7 @@ class Memoizer(_BaseMemoizer):
             if not config.IS_CACHING_MODULE_ENABLED():
                 return fn
 
+            @functools.wraps(fn)
             def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
                 """Call the original function and cache the result.
 
@@ -594,11 +888,28 @@ class Memoizer(_BaseMemoizer):
 
                 # Encode the result if encoder is provided
                 if custom_result_encoder is not None:
-                    # Get the encoder function by calling the factory with params
-                    encoder_fn = custom_result_encoder(*args, **kwargs)
+                    # Get the encoder function by calling the factory factory:
+                    # 1. First call with fn to get params_to_encoder factory
+                    # 2. Second call with params to get the encoder function
+                    params_to_encoder = custom_result_encoder(fn)
+                    encoder_fn = params_to_encoder(*args, **kwargs)
                     encoded_result = encoder_fn(result)
                 else:
                     encoded_result = result
+
+                # Check for deferred recording
+                if isinstance(encoded_result, DeferredRecording):
+                    # Track the pending deferred recording
+                    self._pending_deferred[cache_key] = encoded_result
+                    # Register the callback - handles race condition if encoded_result already completed
+                    encoded_result.register_callback(
+                        functools.partial(
+                            self._finalize_deferred_recording,
+                            cache_key,
+                            encoded_params,
+                        )
+                    )
+                    return result  # Return without caching
 
                 # Store CacheEntry in cache
                 cache_entry = CacheEntry(
@@ -617,7 +928,7 @@ class Memoizer(_BaseMemoizer):
     def replay(
         self,
         custom_params_encoder: Callable[_P, object] | None = None,
-        custom_result_decoder: Callable[_P, Callable[[_EncodedR], _R]] | None = None,
+        custom_result_decoder: ResultDecoderFactory[_P, _R, _EncodedR] | None = None,
     ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
         """Replay a cached function result without executing the function.
 
@@ -628,8 +939,9 @@ class Memoizer(_BaseMemoizer):
             custom_params_encoder: Optional encoder for function parameters.
                                   If None, parameters are pickled directly.
             custom_result_decoder: Optional decoder factory for cached results.
-                                  Takes function parameters and returns a decoder
-                                  function that converts _EncodedR -> R.
+                                  First receives the underlying function, then takes
+                                  function parameters and returns a decoder function
+                                  that converts _EncodedR -> R.
 
         Returns:
             A decorator function that can be applied to functions.
@@ -655,11 +967,13 @@ class Memoizer(_BaseMemoizer):
             # If caching is disabled, always raise KeyError (cache miss)
             if not config.IS_CACHING_MODULE_ENABLED():
 
+                @functools.wraps(fn)
                 def always_miss(*args: _P.args, **kwargs: _P.kwargs) -> _R:
                     raise KeyError("Caching is disabled")
 
                 return always_miss
 
+            @functools.wraps(fn)
             def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
                 """Retrieve the cached result without calling the function.
 
@@ -678,18 +992,29 @@ class Memoizer(_BaseMemoizer):
 
                 # Check if result is cached
                 cached_hit = self._cache.get(cache_key)
-                if cached_hit is None:
-                    raise KeyError(f"No cached result found for key: {cache_key}")
+                if cached_hit is not None:
+                    # Extract the cached value
+                    cache_entry = cast(CacheEntry, cached_hit.value)
 
-                # Extract the cached value
-                cache_entry = cast(CacheEntry, cached_hit.value)
+                    # Decode and return the cached result
+                    if custom_result_decoder is not None:
+                        # Get the decoder function by calling the factory factory:
+                        # 1. First call with fn to get params_to_decoder factory
+                        # 2. Second call with params to get the decoder function
+                        params_to_decoder = custom_result_decoder(fn)
+                        decoder_fn = params_to_decoder(*args, **kwargs)
+                        return decoder_fn(cast(_EncodedR, cache_entry.encoded_result))
+                    return cast(_R, cache_entry.encoded_result)
 
-                # Decode and return the cached result
-                if custom_result_decoder is not None:
-                    # Get the decoder function by calling the factory with params
-                    decoder_fn = custom_result_decoder(*args, **kwargs)
-                    return decoder_fn(cast(_EncodedR, cache_entry.encoded_result))
-                return cast(_R, cache_entry.encoded_result)
+                # Check for pending deferred recording with interim result
+                pending = self._pending_deferred.get(cache_key)
+                if pending is not None:
+                    pending = cast(DeferredRecording[_R, _EncodedR], pending)
+                    interim = pending.get_interim_result()
+                    if interim is not None:
+                        return interim.value
+
+                raise KeyError(f"No cached result found for key: {cache_key}")
 
             return inner
 
@@ -752,7 +1077,7 @@ class PersistentMemoizer(_BaseMemoizer):
     def record(
         self,
         custom_params_encoder: Callable[_P, object] | None = None,
-        custom_result_encoder: Callable[_P, Callable[[_R], _EncodedR]] | None = None,
+        custom_result_encoder: ResultEncoderFactory[_P, _R, _EncodedR] | None = None,
     ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
         """Record a function call result with custom encoding to both caches.
 
@@ -760,12 +1085,17 @@ class PersistentMemoizer(_BaseMemoizer):
         with custom encoding/decoding logic. Results are stored in both
         the in-memory cache and the on-disk cache.
 
+        This method delegates to the underlying Memoizer for memory caching,
+        then adds disk persistence. For deferred recordings, it registers
+        an additional callback to persist to disk when the recording completes.
+
         Args:
             custom_params_encoder: Optional encoder for function parameters.
                                   If None, parameters are pickled directly.
             custom_result_encoder: Optional encoder factory for function results.
-                                  Takes function parameters and returns an encoder
-                                  function that converts R -> _EncodedR.
+                                  First receives the underlying function, then takes
+                                  function parameters and returns an encoder function
+                                  that converts R -> _EncodedR.
 
         Returns:
             A decorator function that can be applied to functions.
@@ -797,6 +1127,7 @@ class PersistentMemoizer(_BaseMemoizer):
                 custom_params_encoder, custom_result_encoder
             )(fn)
 
+            @functools.wraps(fn)
             def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
                 """Call the original function and cache the result in both caches.
 
@@ -813,15 +1144,20 @@ class PersistentMemoizer(_BaseMemoizer):
                 # Also store in disk cache
                 cache_key = self._make_key(custom_params_encoder, *args, **kwargs)
 
-                # Get the cache entry from memory cache
-                # We know it must be there since memory_record_fn just cached it
-                cached_hit = self._memoizer._cache.get(cache_key)
-                assert cached_hit, "Cache entry must exist in memory cache"
-                cache_entry = cast(CacheEntry, cached_hit.value)
+                # Check if this was a deferred recording
+                pending = self._memoizer._pending_deferred.get(cache_key)
+                if pending is not None:
+                    pending = cast(DeferredRecording[_R, _EncodedR], pending)
+                    # Deferred recording - register our own callback for disk persistence
+                    # By the time our callback runs, Memoizer's callback will have
+                    # already inserted the cache entry, so we just read and persist it
+                    pending.register_callback(
+                        functools.partial(self._persist_to_disk, cache_key)
+                    )
+                    return result
 
-                # Store the full CacheEntry in disk cache for easier debugging
-                pickled_entry: bytes = pickle.dumps(cache_entry)
-                self._disk_cache.insert(cache_key, pickled_entry)
+                # Persist the cache entry to disk
+                self._persist_to_disk(cache_key)
 
                 return result
 
@@ -829,10 +1165,37 @@ class PersistentMemoizer(_BaseMemoizer):
 
         return wrapper
 
+    def _persist_to_disk(
+        self,
+        cache_key: str,
+        _callback_result: object = None,
+    ) -> None:
+        """Persist a cache entry to disk.
+
+        This method handles disk persistence for both immediate and deferred recordings:
+        - For immediate recordings: called directly after memory caching
+        - For deferred recordings: registered as a callback that runs after the
+          Memoizer's callback has inserted the entry into memory
+
+        Args:
+            cache_key: The cache key for the entry.
+            _callback_result: Unused. When called as a callback from DeferredRecording,
+                             this receives the encoded result, but we ignore it and
+                             read the full CacheEntry from the Memoizer's cache instead.
+        """
+        # Always read from memory cache - Memoizer's callback has already inserted it
+        cached_hit = self._memoizer._cache.get(cache_key)
+        assert cached_hit, "Cache entry must exist in memory cache"
+        cache_entry = cast(CacheEntry, cached_hit.value)
+
+        # Store the full CacheEntry in disk cache for easier debugging
+        pickled_entry: bytes = pickle.dumps(cache_entry)
+        self._disk_cache.insert(cache_key, pickled_entry)
+
     def replay(
         self,
         custom_params_encoder: Callable[_P, object] | None = None,
-        custom_result_decoder: Callable[_P, Callable[[_EncodedR], _R]] | None = None,
+        custom_result_decoder: ResultDecoderFactory[_P, _R, _EncodedR] | None = None,
     ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
         """Replay a cached function result without executing the function.
 
@@ -845,8 +1208,9 @@ class PersistentMemoizer(_BaseMemoizer):
             custom_params_encoder: Optional encoder for function parameters.
                                   If None, parameters are pickled directly.
             custom_result_decoder: Optional decoder factory for cached results.
-                                  Takes function parameters and returns a decoder
-                                  function that converts _EncodedR -> R.
+                                  First receives the underlying function, then takes
+                                  function parameters and returns a decoder function
+                                  that converts _EncodedR -> R.
 
         Returns:
             A decorator function that can be applied to functions.
@@ -872,6 +1236,7 @@ class PersistentMemoizer(_BaseMemoizer):
             # If caching is disabled, always raise KeyError (cache miss)
             if not config.IS_CACHING_MODULE_ENABLED():
 
+                @functools.wraps(fn)
                 def always_miss(*args: _P.args, **kwargs: _P.kwargs) -> _R:
                     raise KeyError("Caching is disabled")
 
@@ -882,6 +1247,7 @@ class PersistentMemoizer(_BaseMemoizer):
                 custom_params_encoder, custom_result_decoder
             )(fn)
 
+            @functools.wraps(fn)
             def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
                 """Retrieve the cached result without calling the function.
 
@@ -917,7 +1283,11 @@ class PersistentMemoizer(_BaseMemoizer):
 
                     # Decode and return
                     if custom_result_decoder is not None:
-                        decoder_fn = custom_result_decoder(*args, **kwargs)
+                        # Get the decoder function by calling the factory factory:
+                        # 1. First call with fn to get params_to_decoder factory
+                        # 2. Second call with params to get the decoder function
+                        params_to_decoder = custom_result_decoder(fn)
+                        decoder_fn = params_to_decoder(*args, **kwargs)
                         return decoder_fn(cast(_EncodedR, cache_entry.encoded_result))
                     return cast(_R, cache_entry.encoded_result)
 
