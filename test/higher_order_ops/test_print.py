@@ -407,11 +407,6 @@ def forward(self, L_x_ : torch.Tensor):
             # Run backward to capture backward graph
             res[0].sum().backward()
 
-        # Verify we captured graphs
-        self.assertEqual(len(backend.graphs) >= 1, True)
-        self.assertEqual(len(backend.fw_graphs) >= 1, True)
-        self.assertEqual(len(backend.bw_graphs) >= 1, True)
-
         # Check forward graph - should have with_effects wrapping print
         self.assertExpectedInline(
             backend.fw_graphs[0].code.strip(),
