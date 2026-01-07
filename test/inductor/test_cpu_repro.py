@@ -5814,6 +5814,17 @@ class CPUReproTests(TestCase):
         result = compiled_func(xs, Ls)
         torch.testing.assert_close(result, expected)
 
+    def test_special_float_pow(self):
+        def fn(exp: float) -> None:
+            val = torch.randn(10)
+            torch.testing.assert_close(
+                aten.pow(val, exp), torch.compile(aten.pow)(val, exp), equal_nan=True
+            )
+
+        fn(-math.inf)
+        fn(math.inf)
+        fn(math.nan)
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests

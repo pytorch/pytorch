@@ -462,6 +462,21 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"
             ),
+            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestReductions",
+                "test_ref_small_input",
+                device_type="xpu",
+                dtypes=[torch.complex128],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestReductions",
+                "test_reference_masked",
+                device_type="xpu",
+                dtypes=[torch.complex128],
+            ),
         ),
         decorators=[
             DecorateInfo(
@@ -536,6 +551,27 @@ op_db: list[OpInfo] = [
                 "test_mask_layout",
                 device_type="cuda",
                 dtypes=(torch.bool, *integral_types(), *complex_types()),
+            ),
+            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestReductions",
+                "test_reference_masked",
+                device_type="xpu",
+                dtypes=(torch.complex128, torch.int64, torch.uint8),
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestReductions",
+                "test_ref_small_input",
+                device_type="xpu",
+                dtypes=(
+                    torch.int64,
+                    torch.int32,
+                    torch.int16,
+                    torch.int8,
+                    torch.complex128,
+                ),
             ),
         ),
         decorators=[
@@ -665,6 +701,21 @@ op_db: list[OpInfo] = [
                 "test_mask_layout",
                 dtypes=(torch.bool, *integral_types(), *complex_types()),
             ),
+            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestReductions",
+                "test_reference_masked",
+                device_type="xpu",
+                dtypes=[torch.int64],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestReductions",
+                "test_ref_small_input",
+                device_type="xpu",
+                dtypes=[torch.int64],
+            ),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
         sample_inputs_sparse_coo_func=sample_inputs_sparse_coo_masked_reduction,
@@ -704,6 +755,21 @@ op_db: list[OpInfo] = [
                 "test_mask_layout",
                 dtypes=(torch.bool, *integral_types(), *complex_types()),
             ),
+            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestReductions",
+                "test_reference_masked",
+                device_type="xpu",
+                dtypes=[torch.int64],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestReductions",
+                "test_ref_small_input",
+                device_type="xpu",
+                dtypes=[torch.int64],
+            ),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
         sample_inputs_sparse_coo_func=sample_inputs_sparse_coo_masked_reduction,
@@ -731,6 +797,16 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"
             ),
+            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestReductions",
+                "test_ref_small_input",
+                device_type="xpu",
+                dtypes=floating_types_and(
+                    torch.int8, torch.int16, torch.int32, torch.int64, torch.float16
+                ),
+            ),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
         gradcheck_wrapper=gradcheck_wrapper_masked_operation,
@@ -755,6 +831,16 @@ op_db: list[OpInfo] = [
             # NotSupportedError: Compiled functions can't ... use keyword-only arguments with defaults
             DecorateInfo(
                 unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"
+            ),
+            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestReductions",
+                "test_ref_small_input",
+                device_type="xpu",
+                dtypes=floating_types_and(
+                    torch.int8, torch.int16, torch.int32, torch.int64, torch.float16
+                ),
             ),
         ),
         sample_inputs_func=sample_inputs_masked_reduction,
@@ -794,6 +880,21 @@ op_db: list[OpInfo] = [
                 "TestMasked",
                 "test_mask_layout",
                 dtypes=(torch.bool, *integral_types(), *complex_types()),
+            ),
+            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestReductions",
+                "test_ref_small_input",
+                device_type="xpu",
+                dtypes=[torch.complex128],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestReductions",
+                "test_reference_masked",
+                device_type="xpu",
+                dtypes=[torch.complex128],
             ),
         ),
         decorators=[
@@ -913,6 +1014,21 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"
             ),
+            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestReductions",
+                "test_ref_small_input",
+                device_type="xpu",
+                dtypes=[torch.complex128],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestReductions",
+                "test_reference_masked",
+                device_type="xpu",
+                dtypes=[torch.complex128],
+            ),
         ),
         decorators=[
             DecorateInfo(
@@ -997,6 +1113,21 @@ op_db: list[OpInfo] = [
             # RuntimeError: undefined value tensor
             DecorateInfo(
                 unittest.expectedFailure, "TestJit", "test_variant_consistency_jit"
+            ),
+            # Driver issue of XPU, see https://github.com/intel/torch-xpu-ops/issues/2295
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestReductions",
+                "test_ref_small_input",
+                device_type="xpu",
+                dtypes=[torch.complex128],
+            ),
+            DecorateInfo(
+                unittest.skip("Skipped!"),
+                "TestReductions",
+                "test_reference_masked",
+                device_type="xpu",
+                dtypes=[torch.complex128],
             ),
         ),
         decorators=[
