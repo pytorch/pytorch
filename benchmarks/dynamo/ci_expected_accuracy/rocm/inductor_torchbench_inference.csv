@@ -106,11 +106,11 @@ dlrm,pass,0
 
 
 
-doctr_det_predictor,eager_fail_to_run,3
+doctr_det_predictor,pass,3
 
 
 
-doctr_reco_predictor,eager_fail_to_run,1
+doctr_reco_predictor,pass,1
 
 
 

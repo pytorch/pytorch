@@ -34,7 +34,7 @@ def parse_expr_with_index_symbols(expr):
         return expr.subs(int_symbols)
 
 
-def wrap_with_tensorbox(node) -> Union[ir.TensorBox, ir.ShapeAsConstantBuffer]:
+def wrap_with_tensorbox(node) -> ir.TensorBox:
     return (
         ir.TensorBox.create(node) if isinstance(node, ir.Buffer) else ir.TensorBox(node)
     )
@@ -437,7 +437,7 @@ class CppTemplateKernel(CppKernel):
         epilogue_nodes: Optional[list[ir.IRNode]] = None,
         offsets: Optional[list[Any]] = None,
         reindexers: Optional[list[Optional[Callable[[list[Any]], list[Any]]]]] = None,
-        multi_output_buffers: Optional[tuple[ir.MultiOutput]] = None,
+        multi_output_buffers: Optional[tuple[ir.MultiOutput, ...]] = None,
     ):
         assert isinstance(dst, Iterable)
         assert all(_dst.get_size() == _src.get_size() for _src, _dst in zip(src, dst))
@@ -609,13 +609,15 @@ class CppTemplateCaller(ir.ChoiceCaller):
     ) -> dict[str, Union[ir.PrimitiveInfoType, list[ir.PrimitiveInfoType]]]:
         return {"backend": "CPP", "op_type": "unknown"}
 
-    def output_node(self) -> Union[ir.TensorBox, ir.ShapeAsConstantBuffer]:
-        return ir.TensorBox.create(
-            ir.CppTemplateBuffer(
-                layout=self.layout,
-                inputs=self.input_nodes,
-                make_kernel_render=self.make_kernel_render,
-                template=self.template,
-                choice=self,
-            )
+    def output_node(self) -> ir.TensorBox:
+        buffer = ir.CppTemplateBuffer(
+            layout=self.layout,
+            inputs=self.input_nodes,
+            make_kernel_render=self.make_kernel_render,
+            template=self.template,
+            choice=self,
         )
+        # Pass KTC annotation to the buffer for encoding
+        if "ktc" in self.annotations:
+            buffer.annotations["ktc"] = self.annotations["ktc"]
+        return ir.TensorBox.create(buffer)

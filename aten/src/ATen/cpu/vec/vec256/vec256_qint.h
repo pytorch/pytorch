@@ -989,7 +989,7 @@ struct VectorizedQuantizedConverter {
   }
 
  protected:
-  VectorizedQuantizedConverter() {}
+  VectorizedQuantizedConverter() = default;
 };
 
 template <>
