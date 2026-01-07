@@ -1599,12 +1599,9 @@ def _validate_device(query: Tensor, key: Tensor, value: Tensor) -> None:
     """TODO: Remove once non cuda/cpu devices support is added
     We only need to check query since we have already that q,k,v are on the same device
     """
-    if query.device.type == "cpu" and (
-        query.requires_grad or key.requires_grad or value.requires_grad
-    ):
-        raise NotImplementedError(
-            "FlexAttention does not support backward on CPU. Please set the input requires_grad to False or use another device."
-        )
+    # CPU backward is supported via eager mode implementation (sdpa_dense_backward).
+    # For compiled mode, CPU lowering will raise a proper error in flex_cpu.py
+    # when OUTPUT_LOGSUMEXP is requested (which backward requires).
     supported_devices = {"cuda", "cpu", "xpu", "hpu"}
     if query.device.type not in supported_devices:
         raise ValueError(

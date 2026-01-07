@@ -161,15 +161,22 @@
     )
     {%- endif %}
 
+    # For flex_decode, we don't support varlen (HAS_OFFSETS=False)
+    # kv_start=0 and kv_offset=off_n gives kv_base_offset = off_n (the logical starting position)
     acc, l_i, m_i = forward_inner(
         {{gen_argdefs()}},
-        q, K, V, desc_k, desc_v, Q_LEN, KV_LEN,
-        # accumulatd values
+        q, K, V,
+        None,  # KV_OFFSETS not used since HAS_OFFSETS=False
+        desc_k, desc_v, Q_LEN, KV_LEN,
+        # accumulated values
         acc, l_i, m_i,
-        #offsets
-        off_z, offs_hq[:, None], offs_m[:, None], offs_n[None, :],
+        # offsets
+        off_z, offs_hq[:, None], sparse_idx_h, offs_m[:, None], offs_n[None, :],
+        # kv_start, first_kv_block_idx (both unused since HAS_OFFSETS=False)
+        0, 0,
+        # kv_offset = off_n (initial logical position)
         off_n,
-        #block sparse data
+        # block sparse data
         kv_indices, kv_num_blocks,
         block_n_start, block_n_end if block_n_end <= block_n_last_valid else block_n_last_valid,
         MATMUL_PRECISION,
@@ -198,13 +205,18 @@
 
         acc, l_i, m_i = forward_inner(
             {{gen_argdefs()}},
-            q, K, V, desc_k, desc_v, Q_LEN, KV_LEN,
-            # accumulatd values
+            q, K, V,
+            None,  # KV_OFFSETS not used since HAS_OFFSETS=False
+            desc_k, desc_v, Q_LEN, KV_LEN,
+            # accumulated values
             acc, l_i, m_i,
-            #offsets
-            off_z, offs_hq[:, None], offs_m[:, None], offs_n[None, :],
+            # offsets
+            off_z, offs_hq[:, None], sparse_idx_h, offs_m[:, None], offs_n[None, :],
+            # kv_start, first_kv_block_idx (both unused since HAS_OFFSETS=False)
+            0, 0,
+            # kv_offset = off_n (initial logical position)
             off_n,
-            #block sparse data
+            # block sparse data
             kv_indices, kv_num_blocks,
             block_n_start, block_n_end if block_n_end <= block_n_last_valid else block_n_last_valid,
             MATMUL_PRECISION,

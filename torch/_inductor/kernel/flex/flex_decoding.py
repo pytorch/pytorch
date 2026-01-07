@@ -202,6 +202,12 @@ def create_flex_decoding_kernel(*args, **kwargs):
     # Determine if there are "full" blocks where we only need to apply score_mod, and can skip mask_mod
     has_full_blocks = full_kv_num_blocks is not None
     kernel_options.setdefault("HAS_FULL_BLOCKS", has_full_blocks)
+
+    # Flex decoding doesn't support varlen offsets (checked in _use_flex_decoding)
+    kernel_options.setdefault("HAS_OFFSETS", False)
+    # For non-varlen, logical = physical sequence lengths
+    kernel_options.setdefault("LOGICAL_Q_LEN", V.graph.sizevars.guard_int(seq_len_q))
+    kernel_options.setdefault("LOGICAL_KV_LEN", V.graph.sizevars.guard_int(seq_len_kv))
     if not has_full_blocks:
         # Create a plackeholder full block list in case it is empty
         full_kv_num_blocks, full_kv_indices = (

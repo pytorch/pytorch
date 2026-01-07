@@ -174,10 +174,11 @@
     acc, l_i, m_i = forward_inner(
         {{gen_argdefs()}},
         q, K, V,
+        KV_OFFSETS,
         desc_k, desc_v, Q_LEN, KV_LEN,
         acc, l_i, m_i,
-        off_zq, off_hq, offs_m[:, None], offs_n[None, :],
-        kv_start,
+        off_zq, off_hq, sparse_idx_hq, offs_m[:, None], offs_n[None, :],
+        kv_start, first_kv_block_idx,
         kv_offset,
         kv_indices, kv_num_blocks,
         0, block_n_end,
@@ -210,10 +211,11 @@
         acc, l_i, m_i = forward_inner(
             {{gen_argdefs()}},
             q, K, V,
+            KV_OFFSETS,
             desc_k, desc_v, Q_LEN, KV_LEN,
             acc, l_i, m_i,
-            off_zq, off_hq, offs_m[:, None], offs_n[None, :],
-            kv_start,
+            off_zq, off_hq, sparse_idx_hq, offs_m[:, None], offs_n[None, :],
+            kv_start, first_full_kv_block_idx,
             kv_offset_full,
             kv_indices, kv_num_blocks,
             0, block_n_end,
@@ -237,10 +239,15 @@
     idx_d = tl.arange(0, V_HEAD_DIM_ROUNDED)[None, :].to(INDEX_DTYPE)
 
     # Mask for output storage: must be within Q_LEN AND within block's valid limit
-    # Local position within block = [0, 1, ..., BLOCK_M-1]
-    local_m_1d = tl.arange(0, BLOCK_M).to(INDEX_DTYPE)
+    {%- if HAS_OFFSETS %}
+    # Local position within sparse block (not just thread block)
+    # This is needed because q_limit is for the entire sparse block, not the thread block
+    local_m_1d = ((q_start % SPARSE_Q_MULTIPLE) * BLOCK_M + tl.arange(0, BLOCK_M)).to(INDEX_DTYPE)
     local_m_2d = local_m_1d[:, None]
     mask = (idx_m < Q_LEN) & (idx_d < V_HEAD_DIM) & (local_m_2d < q_limit)
+    {%- else %}
+    mask = (idx_m < Q_LEN) & (idx_d < V_HEAD_DIM)
+    {%- endif %}
 
     tl.static_assert(acc.shape == [BLOCK_M, V_HEAD_DIM_ROUNDED])
     {{store_output(("idx_zq", "idx_hq", "idx_m", "idx_d"), "acc", "mask", val_shape=("BLOCK_M", "V_HEAD_DIM_ROUNDED"))}}
@@ -251,7 +258,11 @@
         l_ptrs = LSE + off_hz * Q_LEN + offs_m_physical
         lse = m_i + tl.math.log2(l_i)
         # Mask must check both physical bounds and block limit
+        {%- if HAS_OFFSETS %}
         lse_mask = (offs_m_physical < Q_LEN) & (local_m_1d < q_limit)
+        {%- else %}
+        lse_mask = offs_m_physical < Q_LEN
+        {%- endif %}
         tl.store(l_ptrs, lse, mask=lse_mask)
 
     if OUTPUT_MAX:
@@ -259,5 +270,9 @@
         # Use physical positions for MAX storage
         max_ptrs = MAX + off_hz * Q_LEN + offs_m_physical
         # Mask must check both physical bounds and block limit
+        {%- if HAS_OFFSETS %}
         max_mask = (offs_m_physical < Q_LEN) & (local_m_1d < q_limit)
+        {%- else %}
+        max_mask = offs_m_physical < Q_LEN
+        {%- endif %}
         tl.store(max_ptrs, m_i, mask=max_mask)

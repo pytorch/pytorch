@@ -128,14 +128,15 @@ def forward_block_mn(
 def forward_inner(
     {{gen_argdefs()}},
     q, K, V,
+    KV_OFFSETS,
     desc_k, desc_v, Q_LEN, KV_LEN,
     # accumulated values
     acc, l_i, m_i,
     # Offsets used as inputs to score_mod & mask_mod
     # of size [BLOCK_M, BLOCK_N] or scalar.
-    off_z, off_h, offs_m, offs_n,
+    off_z, off_h, sparse_idx_hq, offs_m, offs_n,
     # Offsets needed for TMA loads
-    kv_start,
+    kv_start, first_kv_block_idx,
     # Initial kv_offset for physical memory access (logical + offset = physical)
     kv_offset,
     # blocksparse data
@@ -155,6 +156,15 @@ def forward_inner(
 
     if PRESCALE_QK:
         q = (q * SM_SCALE * RCP_LN2).to(MATMUL_PRECISION)
+
+    # Track current sparse block index for varlen offset updates
+    current_sparse_block_idx = first_kv_block_idx
+    {%- if HAS_OFFSETS %}
+    stride_kv_offsets_z = {{stride("KV_OFFSETS", 0)}}
+    stride_kv_offsets_h = {{stride("KV_OFFSETS", 1)}}
+    # Track current kv_offset for pointer adjustments when crossing sparse block boundaries
+    current_kv_offset = kv_offset
+    {%- endif %}
 
     # loop over k, v and update accumulator until block_n_end
     for start_n in range(block_n_start, block_n_end):
@@ -206,5 +216,19 @@ def forward_inner(
         offs_n = offs_n + offset
         kv_offset += offset
 
+        # Update sparse block index and adjust kv_offset for physical offset change when crossing sparse block boundaries
+        {%- if HAS_OFFSETS %}
+        # Check if we crossed a sparse block boundary
+        if (start_n + 1) % SPARSE_KV_MULTIPLE == 0:
+            current_sparse_block_idx += 1
+            # Load new offset for the next sparse block
+            new_kv_offset_ptr = KV_OFFSETS + off_z * stride_kv_offsets_z + sparse_idx_hq * stride_kv_offsets_h + current_sparse_block_idx
+            new_kv_offset = tl.load(new_kv_offset_ptr).to(INDEX_DTYPE)
+            # Adjust kv_offset for the change in physical offset
+            # When crossing document boundaries, physical memory is not contiguous
+            offset_diff = new_kv_offset - current_kv_offset
+            kv_offset += offset_diff
+            current_kv_offset = new_kv_offset
+        {%- endif %}
 
     return acc, l_i, m_i

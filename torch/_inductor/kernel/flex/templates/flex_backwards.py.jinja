@@ -144,9 +144,6 @@
         # Physical Q positions (used for memory access)
         offs_m2_physical = offs_m2 + q_offset
 
-        # Local position within the Q block for limit checking
-        local_m2 = tl.arange(0, BLOCK_M2)
-
         # load Q and do: they stay in SRAM throughout the inner loop.
         q = load_checked_2d(Q2, offs_m2_physical, offs_k, stride_qm, stride_qd, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, QK_HEAD_DIM)
         do = load_checked_2d(DO2, offs_m2_physical, offs_v, stride_dom, stride_dod, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, V_HEAD_DIM)
@@ -233,6 +230,9 @@
         dq *= SM_SCALE
         # For varlen, also check local position against q_limit to mask out invalid positions
         {%- if HAS_OFFSETS %}
+        # Local position within sparse block (not just thread block)
+        # This is needed because q_limit is for the entire sparse block, not the thread block
+        local_m2 = (start_m2_block % SPARSE_Q_MULTIPLE) * BLOCK_M2 + tl.arange(0, BLOCK_M2)
         dq_mask = (offs_m2_physical[:, None] < Q_LEN) & (offs_k[None, :] < QK_HEAD_DIM) & (local_m2[:, None] < q_limit)
         tl.store(dq_ptrs, dq, mask=dq_mask)
         {%- else %}
@@ -279,9 +279,6 @@
 
         # Physical KV positions (used for memory access)
         offs_n1_physical = offs_n1 + kv_offset_dkdv
-
-        # Local position within the KV block for limit checking
-        local_n1 = tl.arange(0, BLOCK_N1)
 
         # load K and V: they stay in SRAM throughout the inner loop.
         # Use physical indices for memory access
@@ -388,6 +385,9 @@
 
         # For varlen, also check local position against kv_limit to mask out invalid positions
         {%- if HAS_OFFSETS %}
+        # Local position within sparse block (not just thread block)
+        # This is needed because kv_limit is for the entire sparse block, not the thread block
+        local_n1 = (pid % SPARSE_KV_MULTIPLE) * BLOCK_N1 + tl.arange(0, BLOCK_N1)
         dv_mask = (index_n < KV_LEN) & (index_v < V_HEAD_DIM) & (local_n1[:, None] < kv_limit_dkdv)
         tl.store(dv_ptrs, dv, mask=dv_mask)
         {%- else %}
@@ -459,6 +459,12 @@ def bwd_dq_inner(
     {%- if HAS_OFFSETS %}
     stride_kv_limits_z = {{stride("KV_LIMITS", 0)}}
     stride_kv_limits_h = {{stride("KV_LIMITS", 1)}}
+    stride_kv_offsets_z = {{stride("KV_OFFSETS", 0)}}
+    stride_kv_offsets_h = {{stride("KV_OFFSETS", 1)}}
+    # Track current kv_offset for pointer adjustments when crossing sparse block boundaries
+    current_kv_offset = kv_offset
+    {%- else %}
+    current_kv_offset = 0
     {%- endif %}
 
     for start_n in range(0, hi):
@@ -477,7 +483,7 @@ def bwd_dq_inner(
             stride_kn, stride_kd, stride_vn, stride_vd,
             kv_indices, sparse_kv_num_blocks,
             MATMUL_PRECISION, RCP_LN2,
-            IS_FULL_BLOCKS, kv_limit,
+            IS_FULL_BLOCKS, kv_limit, current_kv_offset,
         )
 
         # Increment pointers.
@@ -491,11 +497,20 @@ def bwd_dq_inner(
 
         offs_n2 += offset
 
-        # Update sparse block index for next iteration
+        # Update sparse block index and adjust pointers for offset change
         {%- if HAS_OFFSETS %}
         # Check if we crossed a sparse block boundary
         if (start_n + 1) % SPARSE_KV_MULTIPLE == 0:
             current_sparse_block_idx += 1
+            # Load new offset for the next sparse block
+            new_kv_offset_ptr = KV_OFFSETS + off_z * stride_kv_offsets_z + sparse_idx_hq * stride_kv_offsets_h + current_sparse_block_idx
+            new_kv_offset = tl.load(new_kv_offset_ptr).to(INDEX_DTYPE)
+            # Adjust pointers for the change in physical offset
+            # When crossing document boundaries, physical memory is not contiguous
+            offset_diff = new_kv_offset - current_kv_offset
+            kT_ptrs += offset_diff * stride_kn
+            vT_ptrs += offset_diff * stride_vn
+            current_kv_offset = new_kv_offset
         {%- endif %}
 
     return dq
@@ -509,18 +524,16 @@ def bwd_dq_block_mn(
     stride_kn, stride_kd, stride_vn, stride_vd,
     kv_indices, sparse_kv_num_blocks,
     MATMUL_PRECISION, RCP_LN2,
-    IS_FULL_BLOCKS, kv_limit,
+    IS_FULL_BLOCKS, kv_limit, kv_offset,
 ):
     {{gen_defines() | indent_except_first(1)}}
 
-    # Local position within the KV block for limit checking (varlen)
-    local_n2 = tl.arange(0, BLOCK_N2)
-
     # NB reversed order to since K is transposed
-    # Use global indices (offs_n2) for memory access via kT_ptrs
-    # For varlen, use logical length for bounds checking since offs_n2 are logical positions
+    # For varlen, use physical positions for bounds checking since kT_ptrs was computed with physical offsets
     {%- if HAS_OFFSETS %}
-    kT = load_checked_2d(kT_ptrs, offs_k, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, LOGICAL_KV_LEN)
+    # Compute physical KV positions from logical positions + offset
+    offs_n2_physical = offs_n2 + kv_offset
+    kT = load_checked_2d(kT_ptrs, offs_k, offs_n2_physical, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, KV_LEN)
     {%- else %}
     kT = load_checked_2d(kT_ptrs, offs_k, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, KV_LEN)
     {%- endif %}
@@ -593,9 +606,9 @@ def bwd_dq_block_mn(
     p = tl.math.exp2(post_mod_scores - lse)
     # Compute dP and dS.
     # NB reversed order to since V is transposed
-    # For varlen, use logical length for bounds checking since offs_n2 are logical positions
+    # For varlen, use physical positions for bounds checking since vT_ptrs was computed with physical offsets
     {%- if HAS_OFFSETS %}
-    vT = load_checked_2d(vT_ptrs, offs_v, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, V_HEAD_DIM, LOGICAL_KV_LEN)
+    vT = load_checked_2d(vT_ptrs, offs_v, offs_n2_physical, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, V_HEAD_DIM, KV_LEN)
     {%- else %}
     vT = load_checked_2d(vT_ptrs, offs_v, offs_n2, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, V_HEAD_DIM, KV_LEN)
     {%- endif %}
@@ -706,6 +719,10 @@ def bwd_dkdv_inner(
     {%- if HAS_OFFSETS %}
     stride_q_limits_z = {{stride("Q_LIMITS", 0)}}
     stride_q_limits_h = {{stride("Q_LIMITS", 1)}}
+    stride_q_offsets_z = {{stride("Q_OFFSETS", 0)}}
+    stride_q_offsets_h = {{stride("Q_OFFSETS", 1)}}
+    # Track current q_offset for pointer adjustments when crossing sparse block boundaries
+    current_q_offset = q_offset
     {%- endif %}
 
     for start_m in range(0, hi):
@@ -724,7 +741,7 @@ def bwd_dkdv_inner(
             stride_qm, stride_qd, stride_dom, stride_dod,
             q_indices, sparse_q_num_blocks,
             MATMUL_PRECISION, RCP_LN2,
-            IS_FULL_BLOCKS, q_limit,
+            IS_FULL_BLOCKS, q_limit, start_m,
         )
         # Increment pointers.
         offset = get_offset_for_next_block(
@@ -737,11 +754,21 @@ def bwd_dkdv_inner(
         offs_m1 += offset
         offs_m1_physical += offset
 
-        # Update sparse block index for next iteration
+        # Update sparse block index and adjust pointers for offset change
         {%- if HAS_OFFSETS %}
         # Check if we crossed a sparse block boundary
         if (start_m + 1) % SPARSE_Q_MULTIPLE == 0:
             current_sparse_block_idx += 1
+            # Load new offset for the next sparse block
+            new_q_offset_ptr = Q_OFFSETS + off_z * stride_q_offsets_z + sparse_idx_hq * stride_q_offsets_h + current_sparse_block_idx
+            new_q_offset = tl.load(new_q_offset_ptr).to(INDEX_DTYPE)
+            # Adjust pointers for the change in physical offset
+            # When crossing document boundaries, physical memory is not contiguous
+            offset_diff = new_q_offset - current_q_offset
+            qT_ptrs += offset_diff * stride_qm
+            do_ptrs += offset_diff * stride_dom
+            offs_m1_physical += offset_diff
+            current_q_offset = new_q_offset
         {%- endif %}
 
     return dk, dv
@@ -755,18 +782,20 @@ def bwd_dkdv_block_mn(
     stride_qm, stride_qd, stride_dom, stride_dod,
     q_indices, sparse_q_num_blocks,
     MATMUL_PRECISION, RCP_LN2,
-    IS_FULL_BLOCKS, q_limit,
+    IS_FULL_BLOCKS, q_limit, start_m,
 ):
     {{gen_defines() | indent_except_first(1) }}
 
-    # Local position within the Q block for limit checking (varlen)
-    local_m1 = tl.arange(0, BLOCK_M1)
+    # Local position within sparse block (not just thread block)
+    # This is needed because q_limit is for the entire sparse block, not the thread block
+    SPARSE_Q_MULTIPLE_LOCAL: tl.constexpr = (SPARSE_Q_BLOCK_SIZE // BLOCK_M1)
+    local_m1 = (start_m % SPARSE_Q_MULTIPLE_LOCAL) * BLOCK_M1 + tl.arange(0, BLOCK_M1)
 
     # NB reversed order since Q is transposed
-    # Use global indices (offs_m1) for memory access via qT_ptrs
-    # For varlen, use logical length for bounds checking since offs_m1 are logical positions
+    # Use physical positions for bounds checking since qT_ptrs was computed with physical offsets
+    # For varlen, check against Q_LEN (physical tensor size) using offs_m1_physical
     {%- if HAS_OFFSETS %}
-    qT = load_checked_2d(qT_ptrs, offs_k, offs_m1, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, LOGICAL_Q_LEN)
+    qT = load_checked_2d(qT_ptrs, offs_k, offs_m1_physical, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, Q_LEN)
     {%- else %}
     qT = load_checked_2d(qT_ptrs, offs_k, offs_m1, None, None, SAFE_HEAD_DIM, IS_DIVISIBLE, QK_HEAD_DIM, Q_LEN)
     {%- endif %}
@@ -841,9 +870,9 @@ def bwd_dkdv_block_mn(
     if not PRESCALE_QK:
         post_mod_scores *= RCP_LN2
     pT = tl.math.exp2(post_mod_scores - lse[None, :])
-    # For varlen, use logical length for bounds checking since offs_m1 are logical positions
+    # For varlen, use physical positions for bounds checking since do_ptrs was computed with physical offsets
     {%- if HAS_OFFSETS %}
-    do = load_checked_2d(do_ptrs, offs_m1, offs_v, None, None, IS_DIVISIBLE, SAFE_HEAD_DIM, LOGICAL_Q_LEN, V_HEAD_DIM)
+    do = load_checked_2d(do_ptrs, offs_m1_physical, offs_v, None, None, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, V_HEAD_DIM)
     {%- else %}
     do = load_checked_2d(do_ptrs, offs_m1, offs_v, None, None, IS_DIVISIBLE, SAFE_HEAD_DIM, Q_LEN, V_HEAD_DIM)
     {%- endif %}

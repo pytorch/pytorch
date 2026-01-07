@@ -142,8 +142,8 @@ def flex_attention(
         )
 
     (
-        _,  # q_length
-        _,  # kv_length
+        block_mask_q_length,
+        block_mask_kv_length,
         kv_num_blocks,
         kv_indices,
         full_kv_num_blocks,
@@ -388,12 +388,10 @@ def flex_attention(
         logical_seq_len_q = seq_len_q
         logical_seq_len_kv = seq_len_kv
     else:
-        # For varlen, logical sequence length = num_sparse_blocks * SPARSE_Q_BLOCK_SIZE
-        # kv_num_blocks has shape [B, H, num_q_sparse_blocks]
-        num_q_sparse_blocks = kv_num_blocks.get_size()[2]
-        logical_seq_len_q = num_q_sparse_blocks * SPARSE_Q_BLOCK_SIZE
-        # For simplicity, assume KV has same number of sparse blocks (symmetric case)
-        logical_seq_len_kv = logical_seq_len_q
+        # For varlen, use the logical sequence lengths from the block_mask
+        # These are set by create_varlen_block_mask and represent the padded iteration space
+        logical_seq_len_q = block_mask_q_length
+        logical_seq_len_kv = block_mask_kv_length
     # Pass logical sequence lengths to kernel for mask_mod bounds checking
     kernel_options.setdefault("LOGICAL_Q_LEN", V.graph.sizevars.guard_int(logical_seq_len_q))
     kernel_options.setdefault("LOGICAL_KV_LEN", V.graph.sizevars.guard_int(logical_seq_len_kv))
@@ -675,8 +673,8 @@ def flex_attention_backward(*args, **kwargs):
         mask_mod_other_buffers,
     ) = args
     (
-        _,  # q_length
-        _,  # kv_length
+        block_mask_q_length,
+        block_mask_kv_length,
         kv_num_blocks,
         kv_indices,
         full_kv_num_blocks,
@@ -910,12 +908,10 @@ def flex_attention_backward(*args, **kwargs):
         logical_seq_len_q = seq_len_q
         logical_seq_len_kv = seq_len_kv
     else:
-        # For varlen, logical sequence length = num_sparse_blocks * SPARSE_Q_BLOCK_SIZE
-        # kv_num_blocks has shape [B, H, num_q_sparse_blocks]
-        num_q_sparse_blocks = kv_num_blocks.get_size()[2]
-        logical_seq_len_q = num_q_sparse_blocks * SPARSE_Q_BLOCK_SIZE
-        # For simplicity, assume KV has same number of sparse blocks (symmetric case)
-        logical_seq_len_kv = logical_seq_len_q
+        # For varlen, use the logical sequence lengths from the block_mask
+        # These are set by create_varlen_block_mask and represent the padded iteration space
+        logical_seq_len_q = block_mask_q_length
+        logical_seq_len_kv = block_mask_kv_length
     # Pass logical sequence lengths to kernel for mask_mod bounds checking
     kernel_options.setdefault("LOGICAL_Q_LEN", V.graph.sizevars.guard_int(logical_seq_len_q))
     kernel_options.setdefault("LOGICAL_KV_LEN", V.graph.sizevars.guard_int(logical_seq_len_kv))
