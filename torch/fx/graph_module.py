@@ -69,6 +69,9 @@ class _EvalCacheLoader:
                 # If only co_filename is provided, use it directly as the key
                 if "co_firstlineno" not in co_fields or "co_name" not in co_fields:
                     key = co_fields["co_filename"]
+                    # Write fx_generated files to /tmp so they appear in backtraces
+                    if FX_GRAPH_MODULE_FILE_PREFIX in key:
+                        Path(key).write_text(src)
                 else:
                     # Full co_fields with all three components
                     key += f" from {co_fields['co_filename']}:{co_fields['co_firstlineno']} in {co_fields['co_name']}"
@@ -891,7 +894,7 @@ class {module_name}(torch.nn.Module):
             # This ensures the same code+metadata always generates the same filename
             hash_value = _metadata_hash(self._code, node_metadata)
             file_stem = f"{FX_GRAPH_MODULE_FILE_PREFIX}_{hash_value}"
-            filename = f"{file_stem}.py"
+            filename = f"/tmp/{file_stem}.py"
 
             # Only include co_filename to use it directly as the cache key
             co_fields = {

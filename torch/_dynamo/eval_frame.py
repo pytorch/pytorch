@@ -928,7 +928,7 @@ class _TorchDynamoContext:
                         return fn(*args, **kwargs)
                 # Skip nested compile during export (but not HOP internal compile)
                 # Only skip if there's an active TracingContext (nested), not for top-level export
-                if torch.compiler.is_exporting():
+                if torch.compiler.is_exporting() and not config.force_compile_during_fx_trace:
                     from torch._higher_order_ops.utils import _in_hop_compile
 
                     if not _in_hop_compile():
