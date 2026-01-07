@@ -896,6 +896,11 @@ test_dynamo_benchmark() {
   local shard_id="$1"
   shift
 
+  ### Perf benchmark 2.9.1 baseline
+  pip_uninstall torch torchvision torchaudio torchrec fbgemm-gpu triton pytorch-triton
+  pip_install torch==2.9.1 torchvision torchaudio torchrec fbgemm-gpu
+  pip freeze
+
   # Exclude torchrec_dlrm for CUDA 13 as FBGEMM is not compatible
   local extra_args=()
   if [[ "$BUILD_ENVIRONMENT" == *cuda13* ]]; then
