@@ -6,6 +6,7 @@ import torch
 from torch._dynamo.utils import counters
 from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from torch._inductor.kernel.mm_common import load_kernel_template
+from torch._inductor.runtime.caching import decoders, encoders, memoizers
 
 from .. import config as inductor_config, ir, lowering as L
 from ..kernel_inputs import MMKernelInputs
@@ -69,6 +70,11 @@ aten_baddbmm = ExternKernelChoice(
 
 
 @L.register_lowering(aten.bmm)
+@memoizers.tuned_bmm_memoizer.memoize(
+    custom_params_encoder=encoders.tuned_bmm_params_encoder,
+    custom_result_encoder=encoders.tuned_kernel_result_encoder,
+    custom_result_decoder=decoders.tuned_bmm_result_decoder,
+)
 def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     """
     Lowering for autotuning aten.bmm with different backends (Aten, Triton, CUTLASS, etc.)
