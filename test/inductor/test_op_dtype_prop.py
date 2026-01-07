@@ -209,10 +209,6 @@ class TestCase(InductorTestCase):
                 # torch.sqrt lowers to tl.sqrt_rn after switching away from libdevice.sqrt
                 "sqrt": "sqrt_rn",
             },
-            "xpu": {
-                "round": "nearbyint",
-                "sqrt": "sqrt",
-            },
         }
         if GPU_TYPE in triton_op_name_overrides:
             override = triton_op_name_overrides[GPU_TYPE].get(op_name)
