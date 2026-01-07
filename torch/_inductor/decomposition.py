@@ -76,6 +76,7 @@ inductor_decompositions = get_decompositions(
         aten.gelu,
         aten.hardtanh,
         aten.lcm,
+        aten.ldexp,
         aten.leaky_relu,
         aten.linalg_vector_norm,
         aten._log_softmax,
@@ -240,10 +241,15 @@ def empty_permuted(
     physical_layout: list[int],
     **kwargs: Any,
 ) -> torch.Tensor:
-    perm = [0] * len(size)
-    for p, l in enumerate(physical_layout):
-        perm[l] = p
-    return torch.empty([size[l] for l in physical_layout], **kwargs).permute(perm)
+    is_identity = list(physical_layout) == list(range(len(physical_layout)))
+
+    if is_identity:
+        return torch.empty(size, **kwargs)
+    else:
+        perm = [0] * len(size)
+        for p, l in enumerate(physical_layout):
+            perm[l] = p
+        return torch.empty([size[l] for l in physical_layout], **kwargs).permute(perm)
 
 
 @register_decomposition([aten.convolution_backward])
@@ -1026,6 +1032,7 @@ def index_reduce(
     ):
         return NotImplemented
 
+    # pyrefly: ignore [missing-attribute]
     repeats = self.shape[dim + 1 :].numel() * self.shape[:dim].numel()
     index_shape = (index.numel(), *self.shape[dim + 1 :], *self.shape[:dim])
     perm = (*range(self.ndim - dim, self.ndim), 0, *range(1, self.ndim - dim))

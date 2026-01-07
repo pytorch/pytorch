@@ -36,7 +36,6 @@ from torch.testing._internal.common_utils import (
     run_tests,
     skipIfTorchDynamo,
     TEST_CUDA,
-    TEST_WITH_ROCM,
     TestCase,
 )
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
@@ -301,7 +300,6 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         res.sum().backward()
 
     @unittest.skipIf(IS_WINDOWS, "triton")
-    @unittest.skipIf(TEST_WITH_ROCM, "triton")
     @unittest.skipIf(not SM80OrLater, "triton")
     @unittest.skipIf(not TEST_CUDA, "triton")
     @skipIfNoDynamoSupport
@@ -560,6 +558,43 @@ def forward(self, tangents_1, tangents_2, tangents_token):
     clone_1 = torch.ops.aten.clone.default(tangents_2)
     return (clone, clone_1, tangents_1, tangents_2, getitem_6)""",
             )
+
+    def test_dce(self):
+        # If an operator is marked as side effectful, it should not get DCEd by
+        # FX's eliminate_dead_code
+
+        with torch.library._scoped_library("mylib", "FRAGMENT") as m:
+            log3 = []
+
+            @torch.library.custom_op(
+                "mylib::my_logger3",
+                mutates_args=(),
+            )
+            def my_logger3(s: str, t: torch.Tensor) -> torch.Tensor:
+                log3.append(s)
+                return torch.zeros(1)
+
+            @my_logger3.register_fake
+            def my_logger3(s, t) -> torch.Tensor:
+                return torch.zeros(1)
+
+            # Registering an op as being effectful should also prevent FX DCE
+            from torch._library.effects import EffectType
+
+            torch.library._register_effectful_op(
+                "mylib::my_logger3", EffectType.ORDERED
+            )
+
+            def foo(x):
+                b = torch.scalar_tensor(x.shape[0])
+                torch.ops.mylib.my_logger3("moo", b)
+                return x + x
+
+            gm = make_fx(foo, tracing_mode="symbolic")(torch.ones(3, 3))
+            gm.graph.eliminate_dead_code()
+            gm.recompile()
+            gm(torch.ones(3, 3))
+            self.assertTrue(len(log3), 1)
 
     def test_effects_and_input_mutation_return(self):
         def fn(a, b):

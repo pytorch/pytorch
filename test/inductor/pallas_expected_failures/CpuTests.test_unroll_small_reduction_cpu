@@ -1,5 +1,0 @@
-ERROR
-  File "/home/oulgen/py312/lib/python3.12/site-packages/jax/_src/numpy/ufuncs.py", line 1687, in minimum
-    return lax.min(*promote_args("minimum", x, y))
-           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
-TypeError: min got incompatible shapes for broadcasting: (3, 3), (2, 3).
