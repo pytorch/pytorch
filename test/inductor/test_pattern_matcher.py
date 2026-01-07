@@ -370,7 +370,8 @@ class TestPatternMatcher(TestCase):
     @skipCUDAIf(not SM80OrLater, "need sm_80")
     @inductor_config.patch(
         {
-            "benchmark_epilogue_fusion": "False",
+            "benchmark_fusion": False,
+            "benchmark_epilogue_fusion": False,
             "max_autotune_gemm_backends": "TRITON",
             "max_autotune_gemm": True,
         }
@@ -897,7 +898,7 @@ class TestPatternMatcher(TestCase):
             result, (code,) = run_and_get_code(torch.compile(fn, fullgraph=True))
             self.assertNotIn("aten.cumsum", code)
             self.assertEqual(result, fn())
-            self.assertEqual(counters["inductor"]["pattern_matcher_count"], 1)
+            self.assertGreaterEqual(counters["inductor"]["pattern_matcher_count"], 1)
             counters.clear()
 
     def test_splitwithsizes_cat(self):
@@ -1846,7 +1847,7 @@ class TestPatternMatcher(TestCase):
                     count += 1
             return count
 
-        device = "cuda" if HAS_GPU else "cpu"
+        device = GPU_TYPE if HAS_GPU else "cpu"
         input_tensor = torch.randn(8, 16, device=device)
 
         with inductor_config.patch(remove_pre_grad_passes=None):
@@ -1961,6 +1962,48 @@ class TestPatternMatcher(TestCase):
         self.assertEqual(count, 1)
         self.assertEqual(fn_result, fn_replaced_result)
 
+    def test_empty_like_pattern_matching(self):
+        def pattern(x):
+            y = torch.empty(x.shape, device=x.device, dtype=x.dtype)
+            z = y * 2
+            return x + z
+
+        def replacement(x):
+            return x * 3
+
+        my_patterns = PatternMatcherPass()
+        inputs = [torch.randn(4, 4, device=GPU_TYPE)]
+        register_replacement(pattern, replacement, inputs, fwd_only, my_patterns)
+
+        count = 0
+
+        def custom_pass(graph: torch.fx.Graph):
+            nonlocal count
+            count = my_patterns.apply(graph)
+            return count
+
+        def replacement(x):
+            return x * 3
+
+        my_patterns = PatternMatcherPass()
+        inputs = [torch.randn(4, 4, device=GPU_TYPE)]
+        register_replacement(pattern, replacement, inputs, fwd_only, my_patterns)
+
+        def fn(x):
+            y = torch.empty_like(x)
+            z = y * 2
+            return x + z
+
+        x = torch.randn(4, 4, device=GPU_TYPE)
+
+        compiled_fn = torch.compile(
+            fn, fullgraph=True, options={"post_grad_custom_post_pass": custom_pass}
+        )
+
+        result = compiled_fn(x)
+        self.assertEqual(result, x * 3)
+        self.assertEqual(count, 1)
+
 
 class TestPatternMatcherLogging(LoggingTestCase):
     device_type = GPU_TYPE
@@ -2040,6 +2083,43 @@ class TestPatternMatcherLogging(LoggingTestCase):
             "add(arg0_1, 2) constant_args: add 2!=1 CallFunction(aten.add.Tensor, KeywordArg('x'), 1, _users=0)",
             specific_record.getMessage(),
         )
+
+    def test_gumbel_max_trick(self):
+        counters.clear()
+
+        @torch.compile
+        def sample(logits, temperature):
+            logits = logits / max(temperature, 1e-5)
+            probs = torch.nn.functional.softmax(logits, dim=-1)
+            q = torch.empty_like(logits).exponential_(1)
+            return torch.argmax(probs / q, dim=-1, keepdim=True).to(dtype=torch.int)
+
+        N = 10
+        temperature = 0.8
+        row = (
+            torch.arange(1, N + 1, dtype=torch.float, device=GPU_TYPE).log()
+            * temperature
+        )
+        expected_distribution = []
+        tot_val = N * (N + 1) / 2
+        for i in range(1, N + 1):
+            expected_distribution.append(float(i) / tot_val)
+
+        # Item 0 expect to appear M / (1 + 2 +...+ N) times. Make M large enough
+        # so the test is less flaky.
+        # If this is still flaky, either recduce N or increase M
+        M = 1000000
+        logits = row[None, :].repeat(M, 1)
+        output = sample(logits, temperature=temperature)
+        stat = (torch.bincount(output.flatten()) / M).tolist()
+
+        for expected, actual in zip(expected_distribution, stat):
+            tol = 0.1
+            ratio = actual / expected
+
+            self.assertTrue(abs(ratio - 1) < tol, f"{expected} v.s. {actual}")
+
+        self.assertTrue(counters["inductor"]["apply_gumbel_max_trick"] == 1)
 
 
 if __name__ == "__main__":

@@ -1,9 +1,14 @@
 # Owner(s): ["module: inductor"]
 
 import unittest
+from unittest.mock import patch
 
 import torch
 from torch._dynamo.utils import counters
+from torch._inductor.config import (
+    inductor_default_autotune_rep,
+    inductor_default_autotune_warmup,
+)
 from torch._inductor.runtime.benchmarking import Benchmarker, TritonBenchmarker
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing._internal.common_utils import (
@@ -103,6 +108,47 @@ class TestBenchmarker(TestCase):
         many_devices_kwargs = cpu_kwargs
         many_devices_kwargs.update(gpu_kwargs)
         benchmarker.benchmark(fn, many_devices_args, many_devices_kwargs)
+
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    def test_benchmark_warmup_and_rep_defaults(self):
+        """Test that benchmark_gpu receives default warmup and rep values when not specified."""
+        captured_kwargs = {}
+
+        def capture_benchmark_gpu(self, _callable, **kwargs):
+            captured_kwargs.update(kwargs)
+            return 1.0  # Return a dummy timing
+
+        benchmarker = TritonBenchmarker()
+        (fn, fn_args, fn_kwargs), _ = self.make_params(GPU_TYPE)
+
+        with patch.object(TritonBenchmarker, "benchmark_gpu", capture_benchmark_gpu):
+            benchmarker.benchmark(fn, fn_args, fn_kwargs)
+
+        self.assertEqual(captured_kwargs["warmup"], inductor_default_autotune_warmup)
+        self.assertEqual(captured_kwargs["rep"], inductor_default_autotune_rep)
+
+    @unittest.skipIf(not HAS_GPU, "requires GPU")
+    def test_benchmark_warmup_and_rep_custom_values(self):
+        """Test that benchmark_gpu receives custom warmup and rep values when specified."""
+        captured_kwargs = {}
+
+        def capture_benchmark_gpu(self, _callable, **kwargs):
+            captured_kwargs.update(kwargs)
+            return 1.0  # Return a dummy timing
+
+        benchmarker = TritonBenchmarker()
+        (fn, fn_args, fn_kwargs), _ = self.make_params(GPU_TYPE)
+
+        custom_warmup = 50
+        custom_rep = 200
+
+        with patch.object(TritonBenchmarker, "benchmark_gpu", capture_benchmark_gpu):
+            benchmarker.benchmark(
+                fn, fn_args, fn_kwargs, warmup=custom_warmup, rep=custom_rep
+            )
+
+        self.assertEqual(captured_kwargs["warmup"], custom_warmup)
+        self.assertEqual(captured_kwargs["rep"], custom_rep)
 
 
 if __name__ == "__main__":

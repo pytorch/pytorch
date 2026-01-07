@@ -158,11 +158,11 @@ This format captures everything present in the Node class, with the exception of
 
 Concretely:
 
-- **<name>** is the name of the node as it would appear in `node.name`.
-- **<op_name>** is the `node.op` field, which must be one of these:
+- **&lt;name&gt;** is the name of the node as it would appear in `node.name`.
+- **&lt;op_name&gt;** is the `node.op` field, which must be one of these:
   `<call_function>`, `<placeholder>`,
   `<get_attr>`, or `<output>`.
-- **<target>** is the target of the node as `node.target`. The meaning of this
+- **&lt;target&gt;** is the target of the node as `node.target`. The meaning of this
   field depends on `op_name`.
 - **args1, … args 4…** are what is listed in the `node.args` tuple. If a
   value in the list is an {class}`torch.fx.Node`, then it will be especially
