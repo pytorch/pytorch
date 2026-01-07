@@ -5638,13 +5638,16 @@ class TestMemPool(TestCase):
     def test_mempool_id(self):
         pool1 = torch.cuda.graph_pool_handle()
         pool2 = torch.cuda.MemPool().id
+        pool3 = torch.accelerator.generate_graph_pool_handle()
 
         # first value of id in a user created pool is always zero
         self.assertEqual(pool1[0] == 0, pool2[0] == 0)
+        self.assertEqual(pool1[0] == 0, pool3[0] == 0)
 
-        # each call to torch.cuda.graph_pool_handle() or torch.cuda.MemPool()
-        # increments the id
-        self.assertTrue(abs(pool2[1] - pool1[1]) > 0)
+        # each call to torch.cuda.graph_pool_handle(), torch.cuda.MemPool()
+        # or torch.accelerator.generate_graph_pool_handle() increments the id
+        self.assertTrue((pool2[1] - pool1[1]) > 0)
+        self.assertTrue((pool3[1] - pool2[1]) > 0)
 
     def get_dummy_allocator(self, check_vars):
         dummy_allocator_source_vars = """
