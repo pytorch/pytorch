@@ -16,6 +16,7 @@ import functools
 import hashlib
 import importlib
 import inspect
+import itertools
 import json
 import logging
 import os
@@ -332,8 +333,11 @@ def _get_code_source(code: types.CodeType) -> tuple[str, str]:
                         return res
 
             if inspect.isclass(obj):
-                for name, value in obj.__dict__.items():
-                    value = getattr(obj, name)
+                for name in itertools.chain(obj.__dict__.keys(), dir(obj)):
+                    try:
+                        value = getattr(obj, name)
+                    except AttributeError:
+                        continue
                     if not (
                         inspect.isfunction(value)
                         or inspect.isclass(value)
