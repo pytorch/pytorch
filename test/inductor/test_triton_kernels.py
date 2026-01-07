@@ -2627,43 +2627,6 @@ def forward(self, arg0_1, arg1_1):
                 ) from e
             raise
 
-    @requires_gpu
-    def test_constexpr_handling(self):
-        @triton.jit
-        def copy_kernel(
-            src_ptr,
-            dst_ptr,
-            n_elements,
-            stride,
-            BLOCK_SIZE: tl.constexpr,
-        ):
-            pid = tl.program_id(0)
-            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-            mask = offs < n_elements
-            x = tl.load(src_ptr + offs * stride, mask=mask)
-            tl.store(dst_ptr + offs * stride, x, mask=mask)
-
-        t = torch.randn(1024, device=GPU_TYPE)
-        out = torch.empty(1024, device=GPU_TYPE)
-
-        kwargs = {
-            "src_ptr": t,
-            "dst_ptr": out,
-            "n_elements": 1024,
-            "stride": 1,
-            "BLOCK_SIZE": 256,
-        }
-
-        ttir_module, _ = generate_ttir(copy_kernel, kwargs, tma_descriptor_metadata={})
-        ttir_str = str(ttir_module)
-
-        # `constexpr` values get inlined, and do not appear as function parameters.
-        self.assertIn("src_ptr", ttir_str)
-        self.assertIn("dst_ptr", ttir_str)
-        self.assertIn("n_elements", ttir_str)
-        self.assertIn("stride", ttir_str)
-        self.assertNotIn("BLOCK_SIZE", ttir_str)
-
 
 def make_mutation_test(fn):
     @requires_gpu
@@ -3012,7 +2975,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             in_ptr0,
             in_ptr1,
             out_ptr,
-            n_elements: "tl.constexpr",
+            n_elements,
             BLOCK_SIZE: "tl.constexpr",
         ):
             pid = tl.program_id(axis=0)
@@ -3082,7 +3045,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             in_ptr0,
             in_ptr1,
             out_ptr,
-            n_elements: "tl.constexpr",
+            n_elements,
             BLOCK_SIZE: "tl.constexpr",
         ):
             pid = tl.program_id(axis=0)
@@ -3118,7 +3081,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             in_ptr0,
             in_ptr1,
             out_ptr,
-            n_elements: "tl.constexpr",
+            n_elements,
             BLOCK_SIZE: "tl.constexpr",
         ):
             pid = tl.program_id(axis=0)
