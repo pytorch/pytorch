@@ -11,8 +11,8 @@ from ..scheduler import (
     SchedulerNode,
 )
 from .cutedsl.cutedsl_scheduling import CuteDSLScheduling
-from .nv_universal_gemm.nv_universal_gemm_scheduling import NVUniversalGemmScheduling
 from .cutlass.scheduling import CUTLASSScheduling
+from .nv_universal_gemm.nv_universal_gemm_scheduling import NVUniversalGemmScheduling
 from .rocm.rocm_cpp_scheduling import ROCmCPPScheduling
 from .triton import TritonScheduling
 
