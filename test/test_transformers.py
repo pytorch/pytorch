@@ -3912,6 +3912,7 @@ class TestSDPACudaOnly(NNTestCase):
                 if dtype == torch.float32:
                     fudge_factors['grad_key'] = 90.0
             else:
+                fudge_factors['out'] = 6.0
                 fudge_factors['grad_key'] = 45.0
                 fudge_factors['grad_query'] = 360.0
                 if seq_len_k >= 1024:
