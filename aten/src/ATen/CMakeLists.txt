@@ -273,16 +273,17 @@ endif()
 
 # FBGEMM GenAI
 IF(USE_FBGEMM_GENAI)
-  set(FBGEMM_THIRD_PARTY ${PROJECT_SOURCE_DIR}/third_party/fbgemm/external/)
-  set(FBGEMM_GENAI_SRCS ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize)
+  set(FBGEMM_THIRD_PARTY ${PROJECT_SOURCE_DIR}/third_party/mslk/external/)
+  set(FBGEMM_GENAI_SRCS ${PROJECT_SOURCE_DIR}/third_party/mslk/csrc/gemm/)
+  set(MSLK_INCLUDE ${PROJECT_SOURCE_DIR}/third_party/mslk/include/)
 
   if(USE_CUDA)
     # To avoid increasing the build time/binary size unnecessarily, use an allow-list of kernels to build.
     # If you want to integrate a kernel from FBGEMM into torch, you have to add it here.
     set(FBGEMM_CUTLASS_KERNELS_REGEX ".*(mx8mx8bf16_grouped|f4f4bf16_grouped|f4f4bf16).*")
     file(GLOB_RECURSE fbgemm_genai_native_cuda_cu
-      "${FBGEMM_GENAI_SRCS}/cutlass_extensions/*.cu"
-      "${FBGEMM_GENAI_SRCS}/cutlass_extensions/**/*.cu")
+      "${FBGEMM_GENAI_SRCS}/cutlass/*.cu"
+      "${FBGEMM_GENAI_SRCS}/cutlass/**/*.cu")
     list(FILTER fbgemm_genai_native_cuda_cu INCLUDE REGEX ${FBGEMM_CUTLASS_KERNELS_REGEX})
 
     # PyTorch is not built for 10.0a in CI, due to lack of portability,
@@ -309,8 +310,8 @@ IF(USE_FBGEMM_GENAI)
     set_target_properties(fbgemm_genai PROPERTIES POSITION_INDEPENDENT_CODE ON)
 
     set(fbgemm_genai_cuh
-      "${FBGEMM_GENAI_SRCS}/cutlass_extensions/mx8mx8bf16_grouped/"
-      "${FBGEMM_GENAI_SRCS}/cutlass_extensions/f4f4bf16_grouped/"
+      "${FBGEMM_GENAI_SRCS}/cutlass/mx8mx8bf16_grouped/"
+      "${FBGEMM_GENAI_SRCS}/cutlass/f4f4bf16_grouped/"
       "${FBGEMM_GENAI_SRCS}/"
     )
 
@@ -318,13 +319,11 @@ IF(USE_FBGEMM_GENAI)
       ${FBGEMM_THIRD_PARTY}/cutlass/include
       ${FBGEMM_THIRD_PARTY}/cutlass/tools/util/include
       ${fbgemm_genai_cuh}
-      ${FBGEMM_GENAI_SRCS}/common/include/   # includes fbgemm_gpu/quantize/utils.h, fbgemm_gpu/quantize/tuning_cache.hpp
-      ${FBGEMM_GENAI_SRCS}/include/          # includes fbgemm_gpu/torch_ops.h
+      ${MSLK_INCLUDE} # includes mslk/gemm/gemm_torch.h, mslk/utils/utils.h, mslk/utils/tuning_cache.hpp
     )
 
-    # Add FBGEMM_GENAI include directories for torch_ops.h
-    list(APPEND ATen_CUDA_INCLUDE ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/include)
-    list(APPEND ATen_CUDA_INCLUDE ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/common/include)
+    # Add MSLK include directories for gemm_torch.h
+    list(APPEND ATen_CUDA_INCLUDE ${MSLK_INCLUDE})
   elseif(USE_ROCM)
     # Path to vendored CK
     set(FBGEMM_CK_DIR "${FBGEMM_THIRD_PARTY}/composable_kernel")
@@ -334,8 +333,8 @@ IF(USE_FBGEMM_GENAI)
     )
     # Only include the kernels we want to build to avoid increasing binary size.
     file(GLOB_RECURSE fbgemm_genai_native_rocm_hip
-      "${FBGEMM_GENAI_SRCS}/ck_extensions/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped*.hip"
-      "${FBGEMM_GENAI_SRCS}/ck_extensions/fp8_rowwise_grouped/fp8_rowwise_grouped_gemm.hip")
+      "${FBGEMM_GENAI_SRCS}/ck/fp8_rowwise_grouped/kernels/fp8_rowwise_grouped*.hip"
+      "${FBGEMM_GENAI_SRCS}/ck/fp8_rowwise_grouped/fp8_rowwise_grouped_gemm.hip")
     set_source_files_properties(${fbgemm_genai_native_rocm_hip} PROPERTIES HIP_SOURCE_PROPERTY_FORMAT 1)
 
     # Add additional HIPCC compiler flags for performance
@@ -372,13 +371,11 @@ IF(USE_FBGEMM_GENAI)
       ${FBGEMM_THIRD_PARTY}/composable_kernel/library/include
       ${FBGEMM_THIRD_PARTY}/cutlass/include
       ${FBGEMM_THIRD_PARTY}/cutlass/tools/util/include
-      ${FBGEMM_GENAI_SRCS}/common/include/   # includes fbgemm_gpu/quantize/utils.h, fbgemm_gpu/quantize/tuning_cache.hpp
-      ${FBGEMM_GENAI_SRCS}/include/          # includes fbgemm_gpu/torch_ops.h
+      ${MSLK_INCLUDE} # includes mslk/gemm/gemm_torch.h, mslk/utils/utils.h, mslk/utils/tuning_cache.hpp
     )
 
-    # Add FBGEMM_GENAI include directories for torch_ops.h
-    list(APPEND ATen_HIP_INCLUDE ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/include)
-    list(APPEND ATen_HIP_INCLUDE ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/common/include)
+    # Add MSLK include directories for gemm_torch.h
+    list(APPEND ATen_HIP_INCLUDE ${MSLK_INCLUDE})
   endif()
 
   # Ensure torch_cpu is built before fbgemm_genai to avoid race conditions
