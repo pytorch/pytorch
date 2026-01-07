@@ -167,14 +167,44 @@ template <>
 at::vec::Vectorized<uint8_t> inline convert_float_to_int8(
     at::vec::Vectorized<float> src) {
   // The type of *_val should be int32_t to ensure correct clamping behavior.
-  constexpr auto min_val = std::numeric_limits<uint8_t>::min();
-  constexpr auto max_val = std::numeric_limits<uint8_t>::max();
+  constexpr auto min_val = std::numeric_limits<int32_t>::min();
+  constexpr auto max_val = std::numeric_limits<int32_t>::max();
   __m512 float32_min_val = _mm512_set1_ps(float(min_val));
   __m512 float32_max_val = _mm512_set1_ps(float(max_val));
   __m512 float32_src = _mm512_max_ps(src, float32_min_val);
   float32_src = _mm512_min_ps(float32_src, float32_max_val);
   __m512i int32_src_clamped = _mm512_cvttps_epi32(float32_src);
   __m128i int8_src = _mm512_cvtepi32_epi8(int32_src_clamped);
+  return _mm512_castsi128_si512(int8_src);
+}
+
+template <typename T>
+at::vec::Vectorized<T> inline round_convert_float_to_int8(
+    at::vec::Vectorized<float> src);
+
+template <>
+at::vec::Vectorized<int8_t> inline round_convert_float_to_int8(
+    at::vec::Vectorized<float> src) {
+  // Convert from float32 to int32 with round nearest
+  __m512i int32_src_clamped = _mm512_cvt_roundps_epi32(
+      src, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+  // Convert from int32 to int8 with saturate
+  __m128i int8_src = _mm512_cvtsepi32_epi8(int32_src_clamped);
+  return _mm512_castsi128_si512(int8_src);
+}
+
+template <>
+at::vec::Vectorized<uint8_t> inline round_convert_float_to_int8(
+    at::vec::Vectorized<float> src) {
+  // Clamp float32 to unsigned int range
+  constexpr auto min_val = std::numeric_limits<uint8_t>::min();
+  __m512 float32_min_val = _mm512_set1_ps(float(min_val));
+  __m512 float32_src = _mm512_max_ps(src, float32_min_val);
+  // Convert from float32 to int32 with round nearest
+  __m512i int32_src_clamped = _mm512_cvt_roundps_epi32(
+      float32_src, (_MM_FROUND_TO_NEAREST_INT | _MM_FROUND_NO_EXC));
+  // Convert from int32 to int8 with saturate
+  __m128i int8_src = _mm512_cvtusepi32_epi8(int32_src_clamped);
   return _mm512_castsi128_si512(int8_src);
 }
 

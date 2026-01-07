@@ -1753,6 +1753,8 @@ def quantized_decomposed_quantize_per_tensor_tensor(
     scale_loader = scale.make_loader()
     zero_point_loader = zero_point.make_loader()
 
+    is_cpu_device = input.get_device().type == "cpu"
+
     def inner_fn(idx):
         input = input_loader(idx)
         _scale = scale_loader((0,) if len(scale.get_size()) == 1 else ())
@@ -1761,8 +1763,11 @@ def quantized_decomposed_quantize_per_tensor_tensor(
             _scale = ops.to_dtype(_scale, torch.float32)
         if zero_point.dtype != torch.float32:
             _zero_point = ops.to_dtype(_zero_point, torch.float32)
-        val = ops.round(input * ops.reciprocal(_scale)) + _zero_point
-        return ops.to_dtype(val, dtype)
+        if is_cpu_device:
+            return ops.round_to_int(input * ops.reciprocal(_scale)+_zero_point,dtype)
+        else:
+            val = ops.round(input * ops.reciprocal(_scale)) + _zero_point
+            return ops.to_dtype(val, dtype)
 
     return Pointwise.create(
         device=input.get_device(),
