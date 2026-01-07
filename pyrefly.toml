@@ -10,7 +10,7 @@ project-includes = [
     "test/test_bundled_inputs.py",
     "test/test_complex.py",
     "test/test_datapipe.py",
-    # "test/test_futures.py", # uncomment when enabling pyrefly
+    "test/test_futures.py",
     "test/test_numpy_interop.py",
     # We exclude test_torch.py because it is full of errors, but most functions lack type signatures,
     # and mypy.ini specifies `check_untyped_defs = False` for this file.
@@ -18,7 +18,7 @@ project-includes = [
     # "test/test_torch.py",
     "test/test_type_hints.py",
     "test/test_type_info.py",
-    # "test/test_utils.py", # uncomment when enabling pyrefly
+    "test/test_utils.py",
 ]
 project-excludes = [
   # ==== below will be enabled directory by directory ====
