@@ -324,7 +324,7 @@ import dataclasses
 # that works correctly in those cases.
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class AOTInput:
     """Describes where an input from an AOTAutograd produced FX graph comes from"""
 
@@ -348,12 +348,12 @@ class AOTInput:
 # very good, so feel free to rely on runtime tests instead.
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class DifferentiableAOTInput(AOTInput):
     """A subclass that classifies AOTInput that can be wrapped by GradAOTOutput"""
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class AOTOutput:
     """Describes where an output from an AOTAutograd produced FX graph will
     eventually be bundled into the final output"""
@@ -366,7 +366,7 @@ class AOTOutput:
         return False
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class DifferentiableAOTOutput(AOTOutput):
     """A subclass that classifies AOTOutput that can be wrapped by TangentAOTInput"""
 
@@ -378,7 +378,7 @@ class DifferentiableAOTOutput(AOTOutput):
 # ------------
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class ParamAOTInput(DifferentiableAOTInput):
     """The input is a parameter, whose FQN is target"""
 
@@ -394,7 +394,7 @@ class ParamAOTInput(DifferentiableAOTInput):
         return False
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class BufferAOTInput(DifferentiableAOTInput):
     """The input is a buffer, whose FQN is target"""
 
@@ -410,7 +410,7 @@ class BufferAOTInput(DifferentiableAOTInput):
         return True
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class DummyAOTInput(AOTInput):
     """In some circumstances, we want to call into a function that expects AOTInput, but
     we don't actually care about that logic (most typically, because some code is being used
@@ -424,7 +424,7 @@ class DummyAOTInput(AOTInput):
         return f"__dummy{self.idx}"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class PlainAOTInput(DifferentiableAOTInput):
     """The input is a plain input, corresponding to a particular positional index.
 
@@ -440,7 +440,7 @@ class PlainAOTInput(DifferentiableAOTInput):
         return f"args[{self.idx}]"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class SubclassGetAttrAOTInput(AOTInput):
     """Subclass inputs get unpacked into their constituent pieces before going into an FX
     graph.  This tells you which particular attribute of the subclass this particular
@@ -463,7 +463,7 @@ class SubclassGetAttrAOTInput(AOTInput):
         return self.base.is_tangent()
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class SubclassSizeAOTInput(AOTInput):
     """Which subclass this particular outer size SymInt input (at dim idx) came from."""
 
@@ -474,7 +474,7 @@ class SubclassSizeAOTInput(AOTInput):
         return f"{self.base.expr()}.size({self.idx})"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class SubclassStrideAOTInput(AOTInput):
     """Which subclass this particular outer stride SymInt input (at dim idx) came from."""
 
@@ -485,7 +485,7 @@ class SubclassStrideAOTInput(AOTInput):
         return f"{self.base.expr()}.stride({self.idx})"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class ViewBaseAOTInput(DifferentiableAOTInput):
     """
     When multiple differentiable inputs are views of the same input, AOTAutograd will replace all of these
@@ -501,7 +501,7 @@ class ViewBaseAOTInput(DifferentiableAOTInput):
         return f"{self.base_of.expr()}._base"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class SyntheticBaseAOTInput(DifferentiableAOTInput):
     """This is similar to ViewBaseAOTInput, but this happens when none of the views were differentiable, so
     we weren't able to get our hands on the true original view and constructed a synthetic one instead
@@ -514,7 +514,7 @@ class SyntheticBaseAOTInput(DifferentiableAOTInput):
         return f"__make_synthetic_base({self.base_of.expr()})"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class PhiloxForwardSeedAOTInput(AOTInput):
     """The seed for functionalized Philox RNG calls, specifically for forward graph."""
 
@@ -522,7 +522,7 @@ class PhiloxForwardSeedAOTInput(AOTInput):
         return "__philox_forward_seed"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class PhiloxForwardBaseOffsetAOTInput(AOTInput):
     """The offset for functionalized Philox RNG calls, specifically for forward graph."""
 
@@ -530,7 +530,7 @@ class PhiloxForwardBaseOffsetAOTInput(AOTInput):
         return "__philox_forward_base_offset"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class PhiloxBackwardSeedAOTInput(AOTInput):
     """The seed for functionalized Philox RNG calls, specifically for backward graph."""
 
@@ -538,7 +538,7 @@ class PhiloxBackwardSeedAOTInput(AOTInput):
         return "__philox_backward_seed"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class PhiloxBackwardBaseOffsetAOTInput(AOTInput):
     """The offset for functionalized Philox RNG calls, specifically for backward graph."""
 
@@ -546,7 +546,7 @@ class PhiloxBackwardBaseOffsetAOTInput(AOTInput):
         return "__philox_backward_base_offset"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class ForwardTokenAOTInput(AOTInput):
     """The world token which is threaded through side-effectful operations"""
 
@@ -556,7 +556,7 @@ class ForwardTokenAOTInput(AOTInput):
         return f"__forward_token{self.idx}"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class BackwardTokenAOTInput(AOTInput):
     """The world token which is threaded through side-effectful operations, for backwards"""
 
@@ -571,7 +571,7 @@ class BackwardTokenAOTInput(AOTInput):
 # NB: this is marked differentiable as it /would/ be differentiable if we
 # support double backwards, but we never generate this today because we
 # don't support double backwards.
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class TangentAOTInput(DifferentiableAOTInput):
     """An input to the joint graph representing the tangent of an output."""
 
@@ -594,7 +594,7 @@ class TangentAOTInput(DifferentiableAOTInput):
 # ------------
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class PlainAOTOutput(DifferentiableAOTOutput):
     """A plain tensor output at position idx of the output tuple"""
 
@@ -604,7 +604,7 @@ class PlainAOTOutput(DifferentiableAOTOutput):
         return f"output[{self.idx}]"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class InputMutationAOTOutput(DifferentiableAOTOutput):
     """The mutated value of an input tensor, returned so we can appropriately propagate autograd."""
 
@@ -614,7 +614,7 @@ class InputMutationAOTOutput(DifferentiableAOTOutput):
         return f"__input_mutation({self.mutated_input.expr()})"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class IntermediateBaseAOTOutput(DifferentiableAOTOutput):
     """An intermediate base of multiple outputs which alias each other.  We only report ONE of
     the outputs that contributed to this base"""
@@ -627,7 +627,7 @@ class IntermediateBaseAOTOutput(DifferentiableAOTOutput):
 
 # TODO: it's a little dodgy this is differentiable lol, but we do generate
 # these BEFORE autograd is handled
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class MetadataMutationAOTOutput(DifferentiableAOTOutput):
     idx: int
 
@@ -638,7 +638,7 @@ class MetadataMutationAOTOutput(DifferentiableAOTOutput):
 # NB: this is marked differentiable as it /would/ be differentiable if we
 # support double backwards, but we never generate this today because we
 # don't support double backwards.
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class GradAOTOutput(DifferentiableAOTOutput):
     """An output representing the computed gradient for a differentiable input, in the joint graph"""
 
@@ -654,7 +654,7 @@ class GradAOTOutput(DifferentiableAOTOutput):
         return True
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class PhiloxUpdatedForwardOffsetAOTOutput(AOTOutput):
     """The final offset from the functionalized RNG calls, forward only"""
 
@@ -662,7 +662,7 @@ class PhiloxUpdatedForwardOffsetAOTOutput(AOTOutput):
         return "__philox_updated_forward_offset"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class PhiloxUpdatedBackwardOffsetAOTOutput(AOTOutput):
     """The final offset from the functionalized RNG calls, backward only"""
 
@@ -670,7 +670,7 @@ class PhiloxUpdatedBackwardOffsetAOTOutput(AOTOutput):
         return "__philox_updated_backward_offset"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class ForwardTokenAOTOutput(AOTOutput):
     """The world token output for side-effectful calls, returned so we cannot DCE it, forward only"""
 
@@ -680,7 +680,7 @@ class ForwardTokenAOTOutput(AOTOutput):
         return f"__forward_token{self.idx}"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class BackwardTokenAOTOutput(AOTOutput):
     """The world token output for side-effectful calls, returned so we cannot DCE it, backward only"""
 
@@ -694,7 +694,7 @@ class BackwardTokenAOTOutput(AOTOutput):
 # think about it is that a subclass could be an input or an output, and they
 # get exploded into plain tensors on the way in and out.  So we need
 # descriptors for both.
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class SubclassGetAttrAOTOutput(AOTOutput):
     """This output will be bundled into a subclass at this location"""
 
@@ -708,7 +708,7 @@ class SubclassGetAttrAOTOutput(AOTOutput):
         return self.base.is_grad()
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class SubclassSizeAOTOutput(AOTOutput):
     """This output size will be bundled into a subclass at this location"""
 
@@ -719,7 +719,7 @@ class SubclassSizeAOTOutput(AOTOutput):
         return f"{self.base.expr()}.size({self.idx})"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class SubclassStrideAOTOutput(AOTOutput):
     """This output stride will be bundled into a subclass at this location"""
 
@@ -730,7 +730,7 @@ class SubclassStrideAOTOutput(AOTOutput):
         return f"{self.base.expr()}.stride({self.idx})"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class DummyAOTOutput(AOTOutput):
     """For cases when you don't actually care about descriptor propagation, do not use under normal
     circumstances."""
@@ -741,7 +741,7 @@ class DummyAOTOutput(AOTOutput):
         return f"__dummy{self.idx}"
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class SavedForBackwardsAOTOutput(AOTOutput):
     idx: int
 

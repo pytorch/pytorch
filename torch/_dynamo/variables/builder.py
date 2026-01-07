@@ -582,12 +582,12 @@ class VariableBuilder:
 
         return result
 
-    def wrap_regex_pattern(self, value: re.Pattern) -> ConstantLikeVariable:
+    def wrap_regex_pattern(self, value: re.Pattern[Any]) -> ConstantLikeVariable:
         # TODO(jansel): something like a REPR_MATCH might be more robust here
         self.install_guards(GuardBuilder.ID_MATCH)
         return ConstantLikeVariable(value)
 
-    def wrap_weakref(self, value: weakref.ReferenceType) -> WeakRefVariable:
+    def wrap_weakref(self, value: weakref.ReferenceType[Any]) -> WeakRefVariable:
         self.install_guards(GuardBuilder.TYPE_MATCH)
         return WeakRefVariable.build(self.tx, value, source=self.source)
 
@@ -629,7 +629,9 @@ class VariableBuilder:
                 ],
             )
 
-        def build_key_value(k, v):
+        def build_key_value(
+            k: Any, v: Any
+        ) -> tuple[VariableTracker, LazyVariableTracker]:
             key = ConstantVariable.create(k)
             source_key = k
 
@@ -641,6 +643,7 @@ class VariableBuilder:
         items = dict(build_key_value(k, v) for k, v in value.items())
 
         # Create a dict_vt to be used in the mapping proxy variable
+        # pyrefly: ignore[bad-argument-type]
         dict_vt = ConstDictVariable(items, source=None)
         result = MappingProxyVariable(dict_vt, source=self.source)
         return self.tx.output.side_effects.track_mutable(value, result)
@@ -1066,7 +1069,8 @@ class VariableBuilder:
             )
             return GetAttrVariable(
                 AutogradFunctionVariable(
-                    value.__self__, source=AttrSource(self.source, member="__self__")
+                    value.__self__,
+                    source=AttrSource(self.source, member="__self__"),
                 ),
                 "apply",
             )
@@ -1604,7 +1608,9 @@ class VariableBuilder:
 
             # We need all the keys to be hashable. We do this within the
             # _HashableTracker class in dicts.py
-            def build_key_value(i, k, v):
+            def build_key_value(
+                i: Any, k: Any, v: Any
+            ) -> tuple[LazyVariableTracker, LazyVariableTracker]:
                 base = self.get_source()
                 source_key = ConstDictKeySource(base, i)
                 key = LazyVariableTracker.create(k, source_key)
@@ -1624,6 +1630,7 @@ class VariableBuilder:
             )
 
             dict_vt = ConstDictVariable(
+                # pyrefly: ignore[bad-argument-type]
                 result,
                 user_cls=(
                     collections.OrderedDict
@@ -1774,7 +1781,7 @@ class VariableBuilder:
         return self.tx.output.side_effects.track_object_existing(value, result)
 
     def wrap_listlike(
-        self, value: Union[tuple, list, odict_values, NamedTuple]
+        self, value: Union[tuple[Any, ...], list[Any], odict_values, NamedTuple]
     ) -> VariableTracker:
         for item in value:
             if item is value:
@@ -3177,6 +3184,8 @@ def handle_traced_output(
         and isinstance(proxy.node.target.__self__, torch._C.Generator)
         or proxy.node.target is torch.random.set_rng_state
     ):
+        assert type(proxy.node.target) is not str
+        # pyrefly: ignore[bad-argument-type]
         return TorchInGraphFunctionVariable(proxy.node.target)
     elif (
         proxy.node.target is torch._C._DisableFuncTorch
@@ -3212,7 +3221,9 @@ def handle_traced_output(
                     source = options["source"]
                     options_i = options.copy()
                     options_i["source"] = GetItemSource(
-                        base=source, index=i, index_is_slice=False
+                        base=source,
+                        index=i,
+                        index_is_slice=False,
                     )
                 else:
                     # use the same options object as parent
@@ -3662,7 +3673,9 @@ def _automatic_dynamic(
     t_id = id(e)
     dim2constraint = {}
 
-    def update_dim2constraint(dim, constraint_range, name):
+    def update_dim2constraint(
+        dim: int, constraint_range: "StrictMinMaxConstraint", name: str
+    ) -> None:
         if dim in dim2constraint:
             from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 
@@ -4063,7 +4076,7 @@ class SourcelessBuilder:
         )
 
     @staticmethod
-    def wrap_constant_literal(value) -> VariableTracker:
+    def wrap_constant_literal(value: object) -> VariableTracker:
         assert ConstantVariable.is_literal(value)
         return ConstantVariable.create(value=value)
 
