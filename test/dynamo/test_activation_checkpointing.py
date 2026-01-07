@@ -2124,7 +2124,7 @@ class GraphModule(torch.nn.Module):
         backend = aot_autograd(
             fw_compiler=fw_compiler,
             bw_compiler=nop,
-            partition_fn=min_cut_rematerialization_partition,
+            partition_fn=default_partition,
         )
         # Enable capture_profiler_record_function to trace record_function ops
         with torch._dynamo.config.patch(capture_profiler_record_function=True):
