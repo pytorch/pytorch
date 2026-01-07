@@ -290,12 +290,12 @@ if not IS_WINDOWS:
             [
                 f
                 for f in _csrc_dir.rglob("*.cpp")
-                if f.name not in ("mv_tensor_accessor_cpu.cpp",)
+                if f.name != "mv_tensor_accessor_cpu.cpp"
             ]
             + [
                 f
                 for f in _csrc_dir.rglob("*.cu")
-                if f.name not in ("mv_tensor_accessor_cuda.cu",)
+                if f.name != "mv_tensor_accessor_cuda.cu"
             ]
         )
 

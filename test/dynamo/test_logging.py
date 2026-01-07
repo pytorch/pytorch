@@ -197,13 +197,46 @@ class LoggingTests(LoggingTestCase):
 
     @make_logging_test(recompiles=True)
     def test_recompiles(self, records):
-        def fn(x, y):
-            return torch.add(x, y)
+        def outmost_fn(x, ys, zs):
+            return outer_fn(x, ys, zs)
 
-        fn_opt = torch.compile(fn, backend="inductor")
-        fn_opt(torch.ones(1000, 1000), torch.ones(1000, 1000))
-        fn_opt(torch.ones(1000, 1000), 1)
-        self.assertGreater(len(records), 0)
+        def outer_fn(x, ys, zs):
+            return fn(x, ys, zs)
+
+        def fn(x, ys, zs):
+            return inner(x, ys, zs)
+
+        def inner(x, ys, zs):
+            for y, z in zip(ys, zs):
+                x += y * z
+            return x
+
+        ys = [1.0, 2.0, 3.0]
+        zs = [3.0]
+        x = torch.tensor([1.0])
+
+        fn_opt = torch.compile(outmost_fn, backend="eager")
+        fn_opt(x, ys, zs)
+        fn_opt(x, ys[:1], zs)
+
+        record_str = re.sub(
+            r'"[^"]*"',
+            "[file_path]",
+            "\n".join(r.getMessage() for r in records),
+        )
+        self.assertIn(
+            """\
+    - User stack trace:
+    -   File [file_path], line 201, in outmost_fn
+    -     return outer_fn(x, ys, zs)
+    -   File [file_path], line 204, in outer_fn
+    -     return fn(x, ys, zs)
+    -   File [file_path], line 207, in fn
+    -     return inner(x, ys, zs)
+    -   File [file_path], line 210, in inner
+    -     for y, z in zip(ys, zs):""",
+            record_str,
+        )
 
     test_dynamo_debug = within_range_record_test(30, 90, dynamo=logging.DEBUG)
     test_dynamo_info = within_range_record_test(2, 10, dynamo=logging.INFO)
@@ -348,6 +381,23 @@ torch._inductor.exc.InductorError: LoweringException: AssertionError:
         logger = logging.getLogger("torch.utils")
         logger.info("hi")
         self.assertEqual(len(records), 1)
+
+    @make_settings_test("torch._logging")
+    def test_directory_based_logging(self, records):
+        # Test that the package itself can log
+        logger = logging.getLogger("torch._logging")
+        logger.info("package log")
+
+        # Test that submodules can also log
+        sublogger = logging.getLogger("torch._logging._internal")
+        sublogger.info("submodule log")
+
+        # We should have at least 2 records (one from package, one from submodule)
+        self.assertGreaterEqual(len(records), 2)
+
+        # Verify both loggers are registered and have handlers
+        self.assertTrue(len(logger.handlers) > 0 or logger.propagate)
+        self.assertTrue(len(sublogger.handlers) > 0 or sublogger.propagate)
 
     @make_logging_test(all=logging.DEBUG, dynamo=logging.INFO)
     def test_all(self, _):
@@ -1059,6 +1109,7 @@ exclusions = {
     "benchmarking",
     "loop_ordering",
     "loop_tiling",
+    "auto_chunker",
     "autotuning",
     "graph_region_expansion",
     "hierarchical_compile",

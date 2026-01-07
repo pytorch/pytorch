@@ -28,7 +28,7 @@ from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.utils import get_layout_constraint_tag
-from torch._prims_common import (  # pyrefly: ignore  # deprecated; pyrefly: ignore [deprecated]
+from torch._prims_common import (
     canonicalize_dim,
     canonicalize_dims,
     check,
@@ -162,7 +162,6 @@ def group_foreach_args(
                 break
         assert device is not None, "foreach op should have at least one tensor arg"
         if unpack_args:
-            # pyrefly: ignore [bad-unpacking]
             (args,) = args
         out[(device, use_foreach)].append((i, args))
     return out
@@ -279,7 +278,7 @@ def decode_dtype(dtype: Union[int, torch.dtype]) -> torch.dtype:
     if not isinstance(dtype, int):
         return dtype
     assert dtype in DTYPE_ID_LOOKUP, f"id {dtype} missing from DTYPE_ID_LOOKUP"
-    # pyrefly: ignore [bad-assignment]
+
     dtype = DTYPE_ID_LOOKUP[dtype]
     return dtype
 
@@ -695,7 +694,6 @@ def make_pointwise(
         if not override_device:
             device = None
             for i in inputs:
-                # pyrefly: ignore [missing-attribute]
                 if is_gpu(i.get_device().type):
                     device = i.get_device()
                     break
@@ -3140,10 +3138,8 @@ def copy(self, src, non_blocking=False):
         src = tensor(src, dtype=self.get_dtype(), device=self.get_device())
     x = src
     if self.get_device() != src.get_device():
-        # pyrefly: ignore [bad-argument-type]
         x = to_device(x, self.get_device())
     if self.get_dtype() != src.get_dtype():
-        # pyrefly: ignore [bad-argument-type]
         x = to_dtype(x, self.get_dtype())
 
     if self.get_size() != src.get_size():
@@ -3211,7 +3207,7 @@ def iota(
 
 @register_lowering(aten.select_scatter, type_promotion_kind=None)
 def select_scatter(x, src, dim: int, index: int):
-    assert x.get_dtype() == src.get_dtype()
+    src = to_dtype(src, x.get_dtype())
     x_loader = x.make_loader()
     dim = _validate_dim(x, dim, 0)
     if V.graph.sizevars.guard_or_false(sympy.Lt(index, 0)):
@@ -6444,7 +6440,7 @@ def pow(a, b):
     if isinstance(a, Number):
         if a == 1:
             return full_like(b, 1)
-        # pyrefly: ignore [missing-attribute]
+
         if a == 2 and is_float_dtype(b.get_dtype()):
             return exp2(b)
 
@@ -7571,15 +7567,34 @@ def with_effects(token, op, *args, **kwargs):
                 op_name = new_op.get_name()  # pyrefly: ignore[missing-attribute]
                 V.graph.additional_star_deps[op_name].add(prev_effect_buffer.get_name())
         # Update the effectful ops chain to point to the latest operation
-        V.graph.effectful_ops[effect_type] = (  # pyrefly: ignore[missing-attribute]
+        V.graph.effectful_ops[effect_type] = (
             new_op  # pyrefly: ignore[unsupported-operation]
         )
 
     try:
-        args, kwargs = pytree.tree_map_only(
-            ir.TorchBindObject, lambda a: a.get_value(), (args, kwargs)
+
+        def convert_ir_to_value(a):
+            if isinstance(a, ir.TorchBindObject):
+                return a.get_value()
+            elif isinstance(a, TensorBox):
+                # TensorBox wraps StorageBox, which wraps the actual buffer
+                # We need to get the example tensor from the inner buffer
+                try:
+                    storage = a.data
+                    if hasattr(storage, "data") and hasattr(
+                        storage.data, "get_example"
+                    ):
+                        return storage.data.get_example()
+                except (AttributeError, NotImplementedError):
+                    pass
+                # Fall back to returning the TensorBox itself if get_example fails
+                return a
+            return a
+
+        schema_args, schema_kwargs = pytree.tree_map(
+            convert_ir_to_value, (args, kwargs)
         )
-        schema = _get_schema(op, args, kwargs)
+        schema = _get_schema(op, schema_args, schema_kwargs)
     except RuntimeError as e:
         error_msg = str(e)
         log.warning(
