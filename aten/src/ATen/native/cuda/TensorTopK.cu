@@ -135,9 +135,9 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
     uint64_t ballot = WARP_BALLOT(hasTopK); // a bitmask of threads that have hasTopK == true within the warp.
     int warp_count = __popcll(ballot); // count the number of threads that have hasTopK == true within the warp.
 
-    // if > 0 threads have hasTopK == true within the warp, 
+    // if > 0 threads have hasTopK == true within the warp,
     // reserve space for them by incrementing writeIndexStart atomically + saving the old value in warp_bases.
-    if (lane_id == 0 && warp_count > 0) { 
+    if (lane_id == 0 && warp_count > 0) {
       warp_bases[warp_id] = atomicAdd(&writeIndexStart, warp_count);
     }
     __syncwarp();
@@ -206,7 +206,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
       }
       __syncwarp();
       // now warp has reserved space for itself.
-    
+
       // if warp_bases[warp_id] overshoots outputSliceSize, there is no space to add topk values. Break out of the loop.
       if (outputSliceSize <= warp_bases[warp_id]){
         break;
