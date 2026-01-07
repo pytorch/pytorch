@@ -251,7 +251,7 @@ _f4_f4_bf16_grouped_mm_fbgemm(
           "scale_b must be Float8_e8m0fnu, got: ", scale_b.scalar_type());
   }
 
-  auto o = fbgemm_gpu::f4f4bf16_grouped_mm(
+  auto o = mslk::gemm::f4f4bf16_grouped_mm(
       mat_a,
       mat_b,
       scale_a,
