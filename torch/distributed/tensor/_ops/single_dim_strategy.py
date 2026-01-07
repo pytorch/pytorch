@@ -64,7 +64,7 @@ def _insert_single_dim_replication_strategy(
     """
     Inserts the [Replicate(), Replicate(), ...] strategy after asserting that such strategy does not yet exist.
     """
-    for i, strategy in enumerate(single_dim_strategies_with_placeholders):
+    for strategy in single_dim_strategies_with_placeholders:
         assert not all(isinstance(p, Replicate) for p in strategy)
     single_dim_strategies_with_placeholders.append(
         [Replicate()] * (1 + num_input_tensors)

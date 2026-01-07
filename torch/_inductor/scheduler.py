@@ -4215,7 +4215,7 @@ class Scheduler:
             ):
                 pending_fusion = pending_fusions.get(
                     self.get_fused_node(node1),
-                    pending_fusions.get(self.get_fused_node(node2), None),
+                    pending_fusions.get(self.get_fused_node(node2)),
                 )
                 assert pending_fusion is not None
 
