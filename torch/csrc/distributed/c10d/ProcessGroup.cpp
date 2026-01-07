@@ -128,14 +128,6 @@ void ProcessGroup::setGroupName(const std::string& name) {
   }
 }
 
-const std::optional<std::string>& ProcessGroup::getGroupNameAlias() const {
-  return groupNameAlias_;
-}
-
-void ProcessGroup::setGroupNameAlias(const std::string& name) {
-  groupNameAlias_ = name;
-}
-
 const std::string& ProcessGroup::getGroupDesc() const {
   return pg_desc_;
 }
@@ -198,6 +190,7 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
     backendOpts->group_name = groupName;
     backendOpts->timeout =
         timeout.has_value() ? timeout.value() : backendOpts->timeout;
+    backendOpts->group_desc = groupDesc;
     auto splitBackend = parentBackend->split(store, sorted_ranks, backendOpts);
     if (splitBackend == nullptr) {
       continue;

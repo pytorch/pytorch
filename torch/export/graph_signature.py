@@ -5,6 +5,7 @@ from enum import auto, Enum
 from typing import TYPE_CHECKING, Union
 
 from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import get_opaque_type_name, is_opaque_type
 from torch._subclasses.fake_tensor import is_fake
 
 
@@ -323,8 +324,8 @@ class ExportGraphSignature:
 
     # Graph node names of pytree-flattened inputs of original program
     @property
-    def user_inputs(self) -> Collection[int | float | bool | None | str]:
-        user_inputs: list[int | float | bool | None | str] = []
+    def user_inputs(self) -> Collection[int | float | bool | str | None]:
+        user_inputs: list[int | float | bool | str | None] = []
         for s in self.input_specs:
             if s.kind != InputKind.USER_INPUT:
                 continue
@@ -349,8 +350,8 @@ class ExportGraphSignature:
     # Graph node names of pytree-flattened outputs of original program
     # For joint-graph purposes, will include the loss output.
     @property
-    def user_outputs(self) -> Collection[int | float | bool | None | str]:
-        user_outputs: list[int | float | bool | None | str] = []
+    def user_outputs(self) -> Collection[int | float | bool | str | None]:
+        user_outputs: list[int | float | bool | str | None] = []
         for s in self.output_specs:
             if s.kind not in [
                 OutputKind.USER_OUTPUT,
@@ -587,6 +588,10 @@ def _make_argument_spec(node, token_names) -> ArgumentSpec:
     elif isinstance(val, FakeScriptObject):
         return CustomObjArgument(
             name=node.name, class_fqn=val.script_class_name, fake_val=val
+        )
+    elif is_opaque_type(type(val)):
+        return CustomObjArgument(
+            name=node.name, class_fqn=get_opaque_type_name(type(val)), fake_val=val
         )
     elif isinstance(val, (int, bool, str, float, type(None))):
         return ConstantArgument(name=node.name, value=val)

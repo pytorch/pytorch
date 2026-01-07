@@ -16,7 +16,6 @@ import time
 import warnings
 from collections import namedtuple
 from collections.abc import Callable
-from dataclasses import dataclass
 from datetime import timedelta
 from typing import Any, NewType, TYPE_CHECKING
 from typing_extensions import deprecated
@@ -752,11 +751,6 @@ class GroupMember(metaclass=_WorldMeta):
     NON_GROUP_MEMBER = -100
 
 
-@dataclass
-class _NonGroupMember:
-    group_name: GroupName
-
-
 def _get_default_timeout(backend: Backend) -> timedelta:
     # see note on nccl vs other backend timeout (constants.py)
     if backend == Backend.NCCL:
@@ -1203,7 +1197,7 @@ def _as_iterable(obj) -> collections.abc.Iterable:
 
 def _ensure_all_tensors_same_dtype(*tensors) -> None:
     last_dtype = None
-    # pyrefly: ignore [bad-assignment]
+
     for tensor in itertools.chain.from_iterable(map(_as_iterable, tensors)):
         tensor_dtype = tensor.dtype
         # Mixing complex and its element type is allowed
@@ -1885,7 +1879,6 @@ def _get_split_source(pg: ProcessGroup):
         split_from = pg._get_backend(pg.bound_device_id)
     elif pg is _world.default_pg:
         try:
-            # pyrefly: ignore [missing-attribute]
             split_from = pg._get_backend(torch.device("cuda"))
         except RuntimeError:
             # no cuda device associated with this backend
@@ -3398,7 +3391,7 @@ def gather_object(
 
     if object_gather_list is None:
         raise AssertionError("Must provide object_gather_list on dst rank")
-    # pyrefly: ignore  # unbound-name
+    # pyrefly: ignore [unbound-name]
     for i, tensor in enumerate(output_tensors):
         tensor = tensor.type(torch.uint8)
         tensor_size = object_size_list[i]
@@ -5308,7 +5301,6 @@ def new_group(
     use_local_synchronization: bool = False,
     group_desc=None,
     device_id: torch.device | None = None,
-    always_return_group_name: bool = False,
 ):
     """
     Create a new distributed group.
@@ -5387,7 +5379,6 @@ def new_group(
         use_local_synchronization=use_local_synchronization,
         group_desc=group_desc,
         device_id=device_id,
-        always_return_group_name=always_return_group_name,
     )
 
 
@@ -5400,7 +5391,6 @@ def _new_group_with_tag(
     use_local_synchronization=False,
     group_desc=None,
     device_id: torch.device | None = None,
-    always_return_group_name: bool = False,
 ):
     """
     Variant of ``new_group`` that exposes tag creation.
@@ -5514,9 +5504,6 @@ def _new_group_with_tag(
             _store_based_barrier(
                 global_rank, barrier_store, group_name, world_size, timeout
             )
-
-    if always_return_group_name and pg == GroupMember.NON_GROUP_MEMBER:
-        return _NonGroupMember(group_name)
 
     return pg
 

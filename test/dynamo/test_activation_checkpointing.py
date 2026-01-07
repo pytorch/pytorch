@@ -5,6 +5,7 @@ import contextlib
 import copy
 import functools
 import math
+import re
 import unittest  # noqa: F811
 from importlib import import_module
 
@@ -396,7 +397,11 @@ class ActivationCheckpointingViaTagsTests(
 
         def partition_fn(joint_gm, *args, **kwargs):
             gm_str = joint_gm.print_readable(print_output=False)
-            self.assertTrue("# ac_graph_id: 2 - PREFER_RECOMPUTE" in gm_str)
+            # Check for the pattern with any graph ID (the ID depends on test order)
+            self.assertTrue(
+                re.search(r"# ac_graph_id: \d+ - PREFER_RECOMPUTE", gm_str),
+                f"Expected ac_graph_id pattern not found in:\n{gm_str}",
+            )
             return min_cut_rematerialization_partition(joint_gm, *args, **kwargs)
 
         backend = aot_autograd(
@@ -2028,7 +2033,7 @@ class GraphModule(torch.nn.Module):
     def test_frozen_dataclass_pytree_output(self):
         import dataclasses
 
-        from torch.utils._pytree import register_dataclass
+        from torch.utils import _pytree as pytree
 
         @dataclasses.dataclass(frozen=True)
         class InputNode:
@@ -2038,46 +2043,59 @@ class GraphModule(torch.nn.Module):
         class OutputNode:
             y: torch.Tensor
 
-        register_dataclass(InputNode)
-        register_dataclass(OutputNode)
+        pytree.register_dataclass(InputNode)
+        pytree.register_dataclass(OutputNode)
 
-        class TinyMLP(nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.fc1 = nn.Linear(4, 8)
-                self.fc2 = nn.Linear(8, 4)
+        def cleanup():
+            # Clean up pytree registrations to avoid leaking state to other tests.
+            # We manually remove from the registries since _deregister_pytree_node
+            # has issues with classes registered without serialized_type_name.
+            for cls in [InputNode, OutputNode]:
+                pytree.SUPPORTED_NODES.pop(cls, None)
+                pytree.SUPPORTED_SERIALIZED_TYPES.pop(cls, None)
+                pytree.CONSTANT_NODES.discard(cls)
 
-            def forward(self, inp: InputNode) -> OutputNode:
-                h = self.fc1(inp.x)
-                h = torch.nn.functional.silu(h)
-                y = self.fc2(h)
-                return OutputNode(y=y)
+        try:
 
-        mlp = TinyMLP()
+            class TinyMLP(nn.Module):
+                def __init__(self):
+                    super().__init__()
+                    self.fc1 = nn.Linear(4, 8)
+                    self.fc2 = nn.Linear(8, 4)
 
-        def checkpointed_forward(inp):
-            return torch.utils.checkpoint.checkpoint(
-                mlp.forward,
-                inp,
-                use_reentrant=False,
-                preserve_rng_state=True,
+                def forward(self, inp: InputNode) -> OutputNode:
+                    h = self.fc1(inp.x)
+                    h = torch.nn.functional.silu(h)
+                    y = self.fc2(h)
+                    return OutputNode(y=y)
+
+            mlp = TinyMLP()
+
+            def checkpointed_forward(inp):
+                return torch.utils.checkpoint.checkpoint(
+                    mlp.forward,
+                    inp,
+                    use_reentrant=False,
+                    preserve_rng_state=True,
+                )
+
+            input_eager = InputNode(x=torch.randn(2, 4, requires_grad=True))
+            torch.manual_seed(0)
+            output_eager = checkpointed_forward(input_eager)
+            output_eager.y.sum().backward()
+
+            input_compiled = InputNode(
+                x=input_eager.x.detach().clone().requires_grad_(True)
             )
+            torch.manual_seed(0)
+            compiled_fn = torch.compile(checkpointed_forward, fullgraph=True)
+            output_compiled = compiled_fn(input_compiled)
+            output_compiled.y.sum().backward()
 
-        input_eager = InputNode(x=torch.randn(2, 4, requires_grad=True))
-        torch.manual_seed(0)
-        output_eager = checkpointed_forward(input_eager)
-        output_eager.y.sum().backward()
-
-        input_compiled = InputNode(
-            x=input_eager.x.detach().clone().requires_grad_(True)
-        )
-        torch.manual_seed(0)
-        compiled_fn = torch.compile(checkpointed_forward, fullgraph=True)
-        output_compiled = compiled_fn(input_compiled)
-        output_compiled.y.sum().backward()
-
-        self.assertEqual(output_eager.y, output_compiled.y)
-        self.assertEqual(input_eager.x.grad, input_compiled.x.grad)
+            self.assertEqual(output_eager.y, output_compiled.y)
+            self.assertEqual(input_eager.x.grad, input_compiled.x.grad)
+        finally:
+            cleanup()
 
 
 class RematerializeACNodesPassTests(torch._dynamo.test_case.TestCase):

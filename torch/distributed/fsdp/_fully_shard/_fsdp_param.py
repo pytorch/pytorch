@@ -4,7 +4,7 @@ import itertools
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import auto, Enum
-from typing import Any, cast, Optional
+from typing import Any, cast
 
 import torch
 import torch.nn as nn
@@ -181,7 +181,7 @@ class ParamModuleInfo:
 @dataclass
 class ExtensionsData:
     # User-defined metadata passed from pre to post-all-gather
-    all_gather_metadata: Optional[Any] = None
+    all_gather_metadata: Any | None = None
     # Save the all-gather input sizes to unflatten the all-gather outputs to ND
     all_gather_input_sizes: Sequence[torch.Size] = ()  # ND
 
@@ -197,8 +197,8 @@ class FSDPParam:
     """
 
     orig_dtype: torch.dtype
-    param_dtype: Optional[torch.dtype]
-    reduce_dtype: Optional[torch.dtype]
+    param_dtype: torch.dtype | None
+    reduce_dtype: torch.dtype | None
     _orig_size: torch.Size  # ND
     sharded_size: torch.Size  # ND
     contiguous_sharded_stride: tuple[int, ...]
@@ -207,10 +207,10 @@ class FSDPParam:
     contiguous_sharded_post_forward_stride: tuple[int, ...]
     _sharded_param_data: torch.Tensor  # 1D
     sharded_param: nn.Parameter  # ND
-    _sharded_post_forward_param_data: Optional[torch.Tensor]  # 1D
-    _sharded_post_forward_param: Optional[nn.Parameter]  # ND
+    _sharded_post_forward_param_data: torch.Tensor | None  # 1D
+    _sharded_post_forward_param: nn.Parameter | None  # ND
     _unsharded_param: nn.Parameter  # ND
-    unsharded_accumulated_grad: Optional[torch.Tensor]  # ND
+    unsharded_accumulated_grad: torch.Tensor | None  # ND
     _sharding_spec: DTensorSpec
     # DTensor attributes (only defined for DTensor `param`):
     _tp_spec: DTensorSpec
@@ -224,9 +224,9 @@ class FSDPParam:
         param: nn.Parameter,
         module_info: ParamModuleInfo,
         mesh_info: FSDPMeshInfo,
-        post_forward_mesh_info: Optional[FSDPMeshInfo],
+        post_forward_mesh_info: FSDPMeshInfo | None,
         device: torch.device,
-        shard_placement_fn: Optional[Callable[[nn.Parameter], Optional[Shard]]],
+        shard_placement_fn: Callable[[nn.Parameter], Shard | None] | None,
         mp_policy: MixedPrecisionPolicy,
         offload_policy: OffloadPolicy,
     ):
@@ -240,14 +240,14 @@ class FSDPParam:
         self.pin_memory = (
             self.offload_to_cpu and cast(CPUOffloadPolicy, offload_policy).pin_memory
         )
-        self.grad_offload_event: Optional[torch.Event] = None
+        self.grad_offload_event: torch.Event | None = None
         self._init_sharded_param(param, device, shard_placement_fn)
         if self.post_forward_mesh_info:
             self._init_sharded_post_forward_param_metadata(param)
         self._init_extensions()
         self.all_gather_outputs: list[torch.Tensor] = []
         self.unsharded_accumulated_grad = None
-        self._param_fqn: Optional[str] = None  # prefixed from root module
+        self._param_fqn: str | None = None  # prefixed from root module
         # TODO: Remove this padding logic once DTensor pads the local tensor:
         # https://github.com/pytorch/pytorch/issues/113045
         self._post_load_hook_handle = (
@@ -261,7 +261,7 @@ class FSDPParam:
         self,
         param: nn.Parameter,
         device: torch.device,
-        shard_placement_fn: Optional[Callable],
+        shard_placement_fn: Callable | None,
     ):
         if param.device != device and param.device.type != "meta":
             raise AssertionError(
@@ -876,7 +876,7 @@ class FSDPParam:
                     f"instead of {self.sharded_param}"
                 )
             self.sharded_param = new_param
-        # pyrefly: ignore [missing-attribute]
+
         local_tensor = new_param._local_tensor
         if local_tensor.is_meta:
             return
