@@ -712,12 +712,7 @@ def _clone_meta(
     else:
         # Match eager behavior by preserving strides for non_overlapping_and_dense tensors
         # If not, eager clone creates contiguous strides
-        computed_stride = None
-        if utils.is_non_overlapping_and_dense(input):
-            computed_stride = input.stride()
-        else:
-            computed_stride = utils.compute_elementwise_output_strides(input)
-
+        computed_stride = utils.compute_elementwise_output_strides(input)
         return torch.empty_strided(
             input.shape,
             computed_stride,
@@ -2007,7 +2002,7 @@ def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorL
         raise AssertionError(f"dtype must be torch.dtype, got {type(dtype)}")
 
     # dtype conversion preserves dense strides
-    if torch._prims_common.is_non_overlapping_and_dense(a):
+    if torch._prims_common.is_non_overlapping_and_dense_or_false(a):
         strides = a.stride()
     else:
         strides = utils.compute_elementwise_output_strides(a)
