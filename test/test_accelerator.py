@@ -9,6 +9,8 @@ from torch.testing._internal.common_utils import (
     NoTest,
     run_tests,
     TEST_ACCELERATOR,
+    TEST_CUDA_GRAPH,
+    TEST_CUDAMALLOCASYNC,
     TEST_MPS,
     TEST_MULTIACCELERATOR,
     TestCase,
@@ -252,6 +254,53 @@ class TestAccelerator(TestCase):
         pool2 = torch.accelerator.generate_graph_pool_handle()
         self.assertGreater(pool2[1], pool1[1])
         self.assertEqual(pool2[0], 0)
+
+    @unittest.skipIf(not TEST_CUDA_GRAPH or TEST_CUDAMALLOCASYNC)
+    def test_graph_three_successive(self):
+        size = 1000
+        acc = torch.accelerator.current_accelerator()
+        a = torch.ones((size,), device=acc)
+
+        s = torch.Stream()
+        for pool in [None, torch.accelerator.generate_graph_pool_handle()]:
+            g0 = torch.accelerator.Graph(pool=pool)
+            g1 = torch.accelerator.Graph(pool=pool)
+            g2 = torch.accelerator.Graph(pool=pool)
+            with s, g0:
+                b = a.clone()
+                c = b + 1
+                d = b + 2
+
+            with s, g1:
+                e = c + 3
+                del c
+
+            with s, g2:
+                f = d + 4
+
+            g0.replay()
+            g1.replay()
+            g2.replay()
+
+            self.assertEqual(e.sum().item(), size * 5)
+            self.assertEqual(f.sum().item(), size * 7)
+
+            # Tests that replaying as g0, g2, g1 is only valid if they don't share a pool
+            g0.replay()
+            g2.replay()
+            g1.replay()
+
+            expect_corruption = pool is not None
+            # If we used the native allocator and shared mempools, g2's capture should have reused c's memory for f.
+            # We replayed g2 then g1, so we expect g1's captured "e = c + 3" mistakenly filled e with "f's vals + 3".
+            self.assertEqual(
+                e.sum().item(), size * (7 + 3) if expect_corruption else size * 5
+            )
+            self.assertEqual(f.sum().item(), size * 7)
+
+            del a, b, d, e, f, g0, g1, g2
+            torch.accelerator.synchronize()
+            torch.accelerator.empty_cache()
 
 
 if __name__ == "__main__":

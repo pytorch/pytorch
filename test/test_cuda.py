@@ -86,6 +86,7 @@ from torch.testing._internal.common_utils import (
     TEST_CUDA,
     TEST_CUDA_GRAPH,
     TEST_CUDA_PYTHON_BINDINGS,
+    TEST_CUDAMALLOCASYNC,
     TEST_NUMPY,
     TEST_WITH_ROCM,
     TestCase,
@@ -112,9 +113,6 @@ except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
-TEST_CUDAMALLOCASYNC = TEST_CUDA and (
-    torch.cuda.get_allocator_backend() == "cudaMallocAsync"
-)
 TEST_LARGE_TENSOR = TEST_CUDA
 TEST_MEDIUM_TENSOR = TEST_CUDA
 TEST_BF16 = False
