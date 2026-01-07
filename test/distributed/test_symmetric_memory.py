@@ -3,6 +3,7 @@
 import itertools
 import os
 import random
+import re
 from contextlib import nullcontext
 from unittest import skip, skipIf, skipUnless
 
@@ -11,7 +12,11 @@ import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
 from torch._C._autograd import DeviceType
 from torch._C._distributed_c10d import _SymmetricMemory
-from torch._inductor.utils import fresh_cache, run_and_get_triton_code
+from torch._inductor.utils import (
+    fresh_cache,
+    fresh_inductor_cache,
+    run_and_get_triton_code,
+)
 from torch.distributed._functional_collectives import all_gather_tensor
 from torch.distributed._symmetric_memory import (
     _fused_all_gather_matmul_fallback,
@@ -1276,6 +1281,71 @@ class LoweringTest(MultiProcContinuousTest):
 
         self.assertIn("one_shot_all_reduce", code_3)
         self.assertNotIn("return (buf0", code_3)
+
+    @skip_if_rocm_multiprocess  # requires registered-buffer support
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_comm_buffer_reuse(self):
+        self._init_process()
+
+        N = 8
+        x = torch.rand(N, N, device=self.device)
+        w1 = torch.rand(N, N, device=self.device)
+        w2 = torch.rand(N, N, device=self.device)
+        w3 = torch.rand(N, N, device=self.device)
+
+        def func_no_reuse(x, w1, w2):
+            a = torch.mm(x, w1)
+            b = torch.mm(a, w2)
+
+            # Both a and b need comm buffers that are live simultaneously
+            a = torch.ops.symm_mem.one_shot_all_reduce(a, "sum", "0")
+            a = torch.ops._c10d_functional.wait_tensor(a)
+
+            b = torch.ops._c10d_functional.all_reduce(b, "sum", "0")
+            b = torch.ops._c10d_functional.wait_tensor(b)
+
+            return a + b
+
+        compiled_no_reuse = torch.compile(func_no_reuse, fullgraph=True)
+        code_no_reuse = run_and_get_triton_code(compiled_no_reuse, x, w1, w2)
+
+        p2p_matches = re.findall(r"buf\d+ = empty_strided_p2p", code_no_reuse)
+        self.assertEqual(
+            len(p2p_matches), 2, f"Expected 2 p2p allocations, got {len(p2p_matches)}"
+        )
+
+        def func_reuse(x, w1, w2, w3):
+            a = torch.mm(x, w1)
+
+            # First all_reduce uses a comm buffer
+            a = torch.ops._c10d_functional.all_reduce(a, "sum", "0")
+            a = torch.ops._c10d_functional.wait_tensor(a)
+
+            # After wait_tensor, the comm buffer for 'a' can be freed
+            b = torch.mm(a, w2)  # b is a regular cuda allocation
+            c = torch.mm(b, w3)
+
+            # Second all_reduce can reuse the freed comm buffer
+            c = torch.ops.symm_mem.one_shot_all_reduce(c, "sum", "0")
+            c = torch.ops._c10d_functional.wait_tensor(c)
+
+            return c
+
+        compiled_reuse = torch.compile(func_reuse, fullgraph=True)
+        code_reuse = run_and_get_triton_code(compiled_reuse, x, w1, w2, w3)
+
+        p2p_matches_reuse = re.findall(r"buf\d+ = empty_strided_p2p", code_reuse)
+        self.assertEqual(
+            len(p2p_matches_reuse),
+            1,
+            f"Expected 1 p2p allocation (reuse), got {len(p2p_matches_reuse)}",
+        )
+
+        cuda_matches = re.findall(r"buf\d+ = empty_strided_cuda", code_reuse)
+        self.assertGreaterEqual(
+            len(cuda_matches), 1, "Expected at least 1 regular cuda allocation"
+        )
 
 
 class SymmMemSingleProcTest(TestCase):

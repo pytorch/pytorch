@@ -4239,12 +4239,6 @@ class CommBufferLayout(FixedLayout):
         comm_buffer_type: CommBufferType,
         group_name: str,
     ):
-        if not isinstance(layout, FlexibleLayout):
-            raise AssertionError(
-                "A `CommBufferLayout` can only be initialized with "
-                f"a `FlexibleLayout` (got {layout})."
-            )
-
         fixed = layout.as_fixed()
         super().__init__(
             device=fixed.device,
