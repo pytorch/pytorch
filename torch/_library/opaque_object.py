@@ -134,8 +134,7 @@ def register_opaque_type(
             object and returns a list of values to guard on. These values will be compared
             for equality on each function call, triggering recompilation if they change.
             Only applicable for reference types.
-            Example: lambda obj: [obj.seed]
-            Example: lambda obj: [obj.x, obj.y]  # Multiple values
+            Example: lambda obj: [obj.x, obj.y]
         members (dict[str, MemberType] | None): Dictionary mapping member names
             (attributes, properties, or methods) to their MemberType, which controls
             how they are handled during torch.compile tracing:
@@ -149,7 +148,8 @@ def register_opaque_type(
         >>>     typ="reference",
         >>>     guard_fn=lambda obj: [obj.x, obj.y],  # Guard on x and y values
         >>>     members={
-        >>>         "ndim": MemberType.USE_REAL,     # Bake ndim as constant
+        >>>         "x": MemberType.USE_REAL,     # Bake x as constant
+        >>>         "y": MemberType.USE_REAL,     # Bake y as constant
         >>>         "compute": MemberType.INLINED,   # Inline compute method
         >>>     },
         >>> )
@@ -204,8 +204,8 @@ def register_opaque_type(
         if members is not None:
             raise TypeError(
                 "No need to specify `members` for "
-                f"value-type opaque class {cls} as it will be guarded based "
-                "on `__eq__`, and all methods will be inlined by default."
+                f"value-type opaque class {cls} as it will inline all methods "
+                "by default and be guarded based on `__eq__`."
             )
 
         if guard_fn is not None:
