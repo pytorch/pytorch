@@ -21,8 +21,10 @@ if [[ ! -d "$FLASH_ATTENTION_HOPPER_DIR" ]]; then
     fatal "flash attn directory not found $FLASH_ATTENTION_HOPPER_DIR"
 fi
 
+PYTHON="${PYTHON_EXECUTABLE:-python}"
+
 echo "installing dependencies"
-pip_install einops packaging ninja numpy
+"$PYTHON" -m pip install einops packaging ninja numpy
 
 export FLASH_ATTENTION_FORCE_BUILD="${FLASH_ATTENTION_FORCE_BUILD:-TRUE}"
 
@@ -60,7 +62,7 @@ git submodule update --init ../csrc/cutlass
 sed -i 's/bare_metal_version != Version("12.8")/bare_metal_version < Version("12.8")/' \
     "$FLASH_ATTENTION_HOPPER_DIR/setup.py"
 
-python setup.py bdist_wheel \
+"$PYTHON" setup.py bdist_wheel \
     -d "$FA_FINAL_PACKAGE_DIR" \
     -k \
     --plat-name "manylinux_2_28_${WHEEL_PLAT}"

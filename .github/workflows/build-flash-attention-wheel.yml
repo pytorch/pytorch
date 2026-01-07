@@ -90,14 +90,16 @@ jobs:
             "${DOCKER_IMAGE}"
           )
 
-          docker exec -t "${container_name}" bash -c \
-            "pip install torch --index-url https://download.pytorch.org/whl/cu${CUDA_SHORT}"
+          PYTHON_EXECUTABLE=/opt/python/cp312-cp312/bin/python
+          docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" -m pip install \
+            torch --index-url "https://download.pytorch.org/whl/cu${CUDA_SHORT}"
 
           docker exec -t \
             -e TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" \
             -e FA_FINAL_PACKAGE_DIR="/artifacts" \
             -e WHEEL_PLAT="${{ matrix.arch }}" \
             -e PYTORCH_ROOT="/pytorch" \
+            -e PYTHON_EXECUTABLE="${PYTHON_EXECUTABLE}" \
             "${container_name}" bash -c \
             "bash /pytorch/.ci/flash-attention/build.sh"
 
