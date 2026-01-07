@@ -178,9 +178,7 @@ def load(
             if key not in state_dict:
                 continue
             elem = state_dict[key]
-            stateful_sd[key] = (
-                elem.state_dict() if isinstance(elem, Stateful) else elem
-            )
+            stateful_sd[key] = elem.state_dict() if isinstance(elem, Stateful) else elem
 
         _load_state_dict(
             state_dict=stateful_sd,
