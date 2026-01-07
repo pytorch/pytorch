@@ -43,7 +43,7 @@ from torch.utils._triton import has_triton_tma_device
 torch.set_float32_matmul_precision("high")
 
 
-f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ and XPU devices"
+f8_msg = "FP8 is supported on H100+, SM 8.9 and MI300+ and CPU/XPU devices"
 
 
 def _is_cuda_device(device) -> bool:
