@@ -29,6 +29,12 @@ def start_debug_server(port: int = 25999, worker_port: int = 0) -> None:
     deadlocked distributed jobs across all ranks simultaneously. This collects
     data such as stack traces, FlightRecorder events, and performance profiles.
 
+    This depends on dependencies which are not installed by default.
+
+    Dependencies:
+    - Jinja2
+    - aiohttp
+
     WARNING: This is intended to only be used in trusted network environments.
     The debug server is not designed to be secure and should not be exposed to
     the public internet. See SECURITY.md for more details.

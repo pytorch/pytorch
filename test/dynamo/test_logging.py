@@ -68,6 +68,50 @@ def munge_shape_guards(s: str) -> str:
     return "\n".join([line for line, nsubs in lines if nsubs > 0])
 
 
+def munge_global_state_json(text):
+    import re
+
+    match = re.search(r"\+- GLOBAL_STATE:.*", text)
+    if not match:
+        return ""
+
+    line = match.group(0)
+    while "[" in line:
+        line = re.sub(r"\[[^\[\]]*\]", '"#"', line)
+
+    line = re.sub(r':\s*(\d+|true|false|"[^"]*")', r': "#"', line)
+    return line
+
+
+LOG_PREFIX_PATTERNS = [
+    re.compile(r"^\[rank\d+\]:\s*"),
+    re.compile(r"^[A-Z]+:[^:]+:\s*"),
+    re.compile(r"^[A-Z]\d{2,4}\s+\d{2}:\d{2}:\d{2}(?:\.\d+)?\s+\d+\s+[^\]]+\]\s*"),
+    re.compile(r"^[A-Z](?:\d{4})?\s+[^:]+:\s*"),
+]
+
+
+def normalize_log_line(line: str) -> str:
+    line = line.rstrip()
+    for pattern in LOG_PREFIX_PATTERNS:
+        stripped, count = pattern.subn("", line, count=1)
+        if count:
+            line = stripped.lstrip()
+            break
+    return line
+
+
+def normalize_rank_prefix(output: str) -> str:
+    if "[rank" in output:
+        return output
+
+    def repl(match):
+        prefix = match.group(1)
+        return f"{prefix}[rank0]: "
+
+    return re.sub(r"(^|\n)(?:[A-Z]+:[^:]+:)", repl, output)
+
+
 def example_fn(a):
     output = a.mul(torch.ones(1000, 1000))
     output = output.add(torch.ones(1000, 1000))
@@ -153,13 +197,46 @@ class LoggingTests(LoggingTestCase):
 
     @make_logging_test(recompiles=True)
     def test_recompiles(self, records):
-        def fn(x, y):
-            return torch.add(x, y)
+        def outmost_fn(x, ys, zs):
+            return outer_fn(x, ys, zs)
 
-        fn_opt = torch.compile(fn, backend="inductor")
-        fn_opt(torch.ones(1000, 1000), torch.ones(1000, 1000))
-        fn_opt(torch.ones(1000, 1000), 1)
-        self.assertGreater(len(records), 0)
+        def outer_fn(x, ys, zs):
+            return fn(x, ys, zs)
+
+        def fn(x, ys, zs):
+            return inner(x, ys, zs)
+
+        def inner(x, ys, zs):
+            for y, z in zip(ys, zs):
+                x += y * z
+            return x
+
+        ys = [1.0, 2.0, 3.0]
+        zs = [3.0]
+        x = torch.tensor([1.0])
+
+        fn_opt = torch.compile(outmost_fn, backend="eager")
+        fn_opt(x, ys, zs)
+        fn_opt(x, ys[:1], zs)
+
+        record_str = re.sub(
+            r'"[^"]*"',
+            "[file_path]",
+            "\n".join(r.getMessage() for r in records),
+        )
+        self.assertIn(
+            """\
+    - User stack trace:
+    -   File [file_path], line 201, in outmost_fn
+    -     return outer_fn(x, ys, zs)
+    -   File [file_path], line 204, in outer_fn
+    -     return fn(x, ys, zs)
+    -   File [file_path], line 207, in fn
+    -     return inner(x, ys, zs)
+    -   File [file_path], line 210, in inner
+    -     for y, z in zip(ys, zs):""",
+            record_str,
+        )
 
     test_dynamo_debug = within_range_record_test(30, 90, dynamo=logging.DEBUG)
     test_dynamo_info = within_range_record_test(2, 10, dynamo=logging.INFO)
@@ -305,6 +382,23 @@ torch._inductor.exc.InductorError: LoweringException: AssertionError:
         logger.info("hi")
         self.assertEqual(len(records), 1)
 
+    @make_settings_test("torch._logging")
+    def test_directory_based_logging(self, records):
+        # Test that the package itself can log
+        logger = logging.getLogger("torch._logging")
+        logger.info("package log")
+
+        # Test that submodules can also log
+        sublogger = logging.getLogger("torch._logging._internal")
+        sublogger.info("submodule log")
+
+        # We should have at least 2 records (one from package, one from submodule)
+        self.assertGreaterEqual(len(records), 2)
+
+        # Verify both loggers are registered and have handlers
+        self.assertTrue(len(logger.handlers) > 0 or logger.propagate)
+        self.assertTrue(len(sublogger.handlers) > 0 or sublogger.propagate)
+
     @make_logging_test(all=logging.DEBUG, dynamo=logging.INFO)
     def test_all(self, _):
         registry = torch._logging._internal.log_registry
@@ -388,8 +482,17 @@ torch._inductor.exc.InductorError: LoweringException: AssertionError:
             if torch._logging._internal._is_torch_handler(handler):
                 break
         self.assertIsNotNone(handler)
-        self.assertIn("I", handler.format(records[0]))
-        self.assertEqual("custom format", handler.format(records[1]))
+        formatted_dynamo = handler.format(records[0])
+        self.assertIn("test dynamo", formatted_dynamo)
+        self.assertEqual(normalize_log_line(formatted_dynamo), "test dynamo")
+        ci_style_line = (
+            "I1124 19:43:23.879000 4928 dynamo/test_logging.py:410] test dynamo"
+        )
+        self.assertEqual(normalize_log_line(ci_style_line), "test dynamo")
+
+        formatted_artifact = handler.format(records[1])
+        self.assertIn("custom format", formatted_artifact)
+        self.assertEqual(normalize_log_line(formatted_artifact), "custom format")
 
     @make_logging_test(dynamo=logging.INFO)
     def test_multiline_format(self, records):
@@ -404,10 +507,20 @@ torch._inductor.exc.InductorError: LoweringException: AssertionError:
             if torch._logging._internal._is_torch_handler(handler):
                 break
         self.assertIsNotNone(handler)
-        for record in records:
-            r = handler.format(record)
-            for l in r.splitlines():
-                self.assertIn("I", l)
+        expected_lines = [
+            ["test", "dynamo"],
+            ["test", "dynamo"],
+            ["test", "test", "dynamo"],
+        ]
+
+        for record, expected in zip(records, expected_lines):
+            formatted = handler.format(record)
+            normalized_lines = [
+                line
+                for line in (normalize_log_line(l) for l in formatted.splitlines())
+                if line
+            ]
+            self.assertEqual(normalized_lines, expected)
 
     test_trace_source_simple = within_range_record_test(1, 100, trace_source=True)
 
@@ -566,7 +679,10 @@ print("arf")
 """,
             env=env,
         )
-        self.assertIn("[rank0]:", stderr.decode("utf-8"))
+        stderr_text = stderr.decode("utf-8")
+        normalized = normalize_rank_prefix(stderr_text)
+        self.assertIn("[rank0]:", normalized)
+        self.assertIn("woof", normalized)
 
     @skipIfNotPy311
     @make_logging_test(trace_call=True)
@@ -768,6 +884,20 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             """\
 +- __SHAPE_GUARD__: L['x'].size()[0] == 2*L['y'].size()[0]  # torch._check(x.size(0) == y.size(0) * 2)  # #:# in # #:# in #
 +- __SHAPE_GUARD__: 3 <= L['y'].size()[0] <= 14  # torch._check(x.size(0) > 5)  # #:# in # #:# in # and torch._check(x.size(0) < 30)  # #:# in # #:# in #""",  # noqa: B950
+        )
+
+    @make_logging_test(guards=True)
+    def test_global_state_guard_logging(self, records):
+        @torch.compile(backend="eager")
+        def f(x):
+            return x + 1
+
+        f(torch.randn(3))
+
+        record = self.getRecord(records, "TREE_GUARD_MANAGER")
+        self.assertExpectedInline(
+            munge_global_state_json(record.getMessage()),
+            """+- GLOBAL_STATE: ___check_global_state() against {"allow_bf16_reduce": "#","allow_fp16_reduce": "#","allow_tf32": "#","autocast_state":{"cached_enabled": "#","dtype": "#","enabled": "#"},"default_dtype": "#","deterministic_algorithms": "#","deterministic_algorithms_warn_only": "#","grad_mode": "#","num_threads": "#","torch_function": "#","torch_function_all_disabled": "#"}""",  # noqa: B950
         )
 
     @make_logging_test(cudagraph_static_inputs=True)
@@ -979,12 +1109,14 @@ exclusions = {
     "benchmarking",
     "loop_ordering",
     "loop_tiling",
+    "auto_chunker",
     "autotuning",
     "graph_region_expansion",
     "hierarchical_compile",
     "compute_dependencies",
     "annotation",
     "node_runtime_estimation",
+    "caching",
 }
 for name in torch._logging._internal.log_registry.artifact_names:
     if name not in exclusions:

@@ -29,7 +29,7 @@ from torch.distributed.tensor._collective_utils import (
 )
 from torch.distributed.tensor.placement_types import _Partial, Shard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, TEST_XPU, TestCase
+from torch.testing._internal.common_utils import run_tests, TEST_HPU, TEST_XPU, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
@@ -38,7 +38,11 @@ from torch.testing._internal.distributed.fake_pg import FakeProcessGroup, FakeSt
 from torch.utils._typing_utils import not_none
 
 
-device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+device_type = (
+    acc.type
+    if (acc := torch.accelerator.current_accelerator(check_available=True))
+    else "cpu"
+)
 device_count = torch.accelerator.device_count()
 
 try:
@@ -58,7 +62,7 @@ def _set_env_var(addr="localhost", port="25364", world_size=1, rank=0, local_ran
         os.environ["LOCAL_RANK"] = f"{local_rank}"
 
 
-@unittest.skipIf(TEST_XPU, "XPU does not support gloo backend.")
+@unittest.skipIf(TEST_XPU or TEST_HPU, "XPU/HPU does not support gloo backend.")
 class DeviceMeshTestGlooBackend(DTensorTestBase):
     @property
     def backend(self):
@@ -971,6 +975,18 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(dp_cp_mesh.mesh_dim_names, ("dp_cp",))
         # check flattened mesh dependency
         self.assertEqual(dp_cp_mesh._get_root_mesh(), mesh_4d)
+        mesh_4d[mesh_dim_names[1:3]]._flatten("dp_shard_cp")
+        mesh_4d["dp_replicate", "dp_shard_cp"]._flatten("dp")
+        self.assertEqual(mesh_4d["dp", "tp"].mesh.shape, (8, 1))
+
+        # Corner cases when slicing and flattening a mesh which is smaller than the world size.
+        mesh_4d = init_device_mesh(
+            self.device_type,
+            mesh_shape=(1, 1, 1, 1),
+            mesh_dim_names=("dp_replicate", "dp_shard", "cp", "tp"),
+        )
+        mesh_4d["dp_shard", "cp"]._flatten("dp_cp")
+        self.assertEqual(mesh_4d["dp_replicate", "dp_cp", "tp"].mesh.shape, (1, 1, 1))
 
     @with_comms
     def test_unflatten_mesh_2d(self):

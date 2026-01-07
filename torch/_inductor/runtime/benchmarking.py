@@ -9,15 +9,15 @@ from typing import Any, Concatenate, Optional, Union
 from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
+import torch._inductor.config as inductor_config
 import torch.utils._pytree as pytree
 from torch._dynamo.utils import counters, dynamo_timed
-from torch._inductor.config import use_experimental_benchmarker
 from torch.utils._debug_mode import DebugMode
 
 
 logger = torch._logging.getArtifactLogger(__name__, "benchmarking")
 use_experimental_benchmarker = (
-    use_experimental_benchmarker and torch.cuda.is_available()
+    inductor_config.use_experimental_benchmarker and torch.cuda.is_available()
 )
 
 
@@ -34,8 +34,8 @@ def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any
         return fn
 
     def distort(
-        ms: list[float] | tuple[float] | float,
-    ) -> list[float] | tuple[float] | float:
+        ms: list[float] | tuple[float, ...] | float,
+    ) -> list[float] | tuple[float, ...] | float:
         if isinstance(ms, (list, tuple)):
             return type(ms)(distort(val) for val in ms)  # type: ignore[misc]
 
@@ -53,7 +53,7 @@ def may_distort_benchmarking_result(fn: Callable[..., Any]) -> Callable[..., Any
     @functools.wraps(fn)
     def wrapper(
         *args: list[Any], **kwargs: dict[str, Any]
-    ) -> list[float] | tuple[float] | float:
+    ) -> list[float] | tuple[float, ...] | float:
         ms = fn(*args, **kwargs)
 
         return distort(ms)
@@ -190,14 +190,17 @@ class Benchmarker:
         else:
             _callable = lambda: fn(*fn_args, **fn_kwargs)  # noqa: E731
 
+        warmup = kwargs.pop("warmup", inductor_config.inductor_default_autotune_warmup)
+        rep = kwargs.pop("rep", inductor_config.inductor_default_autotune_rep)
+
         # Surfacing all kernels during autotuning is super noisy; filtering these out.
         with DebugMode._benchmarking_inductor():
             if inferred_device == torch.device("cpu"):
-                return self.benchmark_cpu(_callable, **kwargs)
+                return self.benchmark_cpu(_callable, warmup=warmup, rep=rep, **kwargs)
             # TODO(nmacchioni): For non-CPU functions we default to using the GPU-specific benchmarking
             # implementation which was written specifically with CUDA devices in mind, we may want to
             # explore alternate implementations for other device types.
-            return self.benchmark_gpu(_callable, **kwargs)
+            return self.benchmark_gpu(_callable, warmup=warmup, rep=rep, **kwargs)
 
     @time_and_count
     def benchmark_cpu(

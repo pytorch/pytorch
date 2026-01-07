@@ -1,5 +1,4 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/Dispatch.h>
 #include <ATen/Dispatch_v2.h>
 #include <ATen/EmptyTensor.h>
 #include <ATen/ScalarOps.h>

@@ -1,7 +1,6 @@
 import logging
 import math
 from enum import IntEnum
-from typing import Optional
 
 from torch.distributed._tools.ilp_utils import Graph, is_submodule
 from torch.distributed._tools.sac_estimator import SACStats
@@ -36,8 +35,8 @@ def sac_milp(
     graph: Graph,
     memory_budget: float,
     world_size: int = 1,
-    ac_units: Optional[list[str]] = None,
-    fsdp_units: Optional[list[str]] = None,
+    ac_units: list[str] | None = None,
+    fsdp_units: list[str] | None = None,
 ) -> tuple[dict[str, float], float, int]:
     """
     MILP to decide which modules to AC and how much memory to discard.

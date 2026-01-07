@@ -87,8 +87,9 @@ def parse_args() -> Any:
 def fetch_jobs(url: str, headers: dict[str, str]) -> list[dict[str, str]]:
     response, links = fetch_url(url, headers=headers, reader=parse_json_and_links)
     jobs = response["jobs"]
-    assert type(jobs) is list
-    while "next" in links.keys():
+    if type(jobs) is not list:
+        raise AssertionError(f"Expected jobs to be a list, got {type(jobs).__name__}")
+    while "next" in links:
         response, links = fetch_url(
             links["next"]["url"], headers=headers, reader=parse_json_and_links
         )

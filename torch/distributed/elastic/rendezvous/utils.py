@@ -14,7 +14,7 @@ import weakref
 from collections.abc import Callable
 from datetime import timedelta
 from threading import Event, Thread
-from typing import Any, Optional, Union
+from typing import Any
 
 
 __all__ = ["parse_rendezvous_endpoint"]
@@ -44,7 +44,7 @@ def _parse_rendezvous_config(config_str: str) -> dict[str, str]:
                 "<key1>=<value1>,...,<keyN>=<valueN>."
             )
 
-        value: Optional[str]
+        value: str | None
         if values:
             value = values[0].strip()
         else:
@@ -58,7 +58,7 @@ def _parse_rendezvous_config(config_str: str) -> dict[str, str]:
     return config
 
 
-def _try_parse_port(port_str: str) -> Optional[int]:
+def _try_parse_port(port_str: str) -> int | None:
     """Try to extract the port number from ``port_str``."""
     if port_str and re.match(r"^[0-9]{1,5}$", port_str):
         return int(port_str)
@@ -66,7 +66,7 @@ def _try_parse_port(port_str: str) -> Optional[int]:
 
 
 def parse_rendezvous_endpoint(
-    endpoint: Optional[str], default_port: int
+    endpoint: str | None, default_port: int
 ) -> tuple[str, int]:
     """Extract the hostname and the port number from a rendezvous endpoint.
 
@@ -166,7 +166,7 @@ def _matches_machine_hostname(host: str) -> bool:
     return False
 
 
-def _delay(seconds: Union[float, tuple[float, float]]) -> None:
+def _delay(seconds: float | tuple[float, float]) -> None:
     """Suspend the current thread for ``seconds``.
 
     Args:
@@ -200,9 +200,9 @@ class _PeriodicTimer:
         kwargs: dict[str, Any]
         stop_event: Event
 
-    _name: Optional[str]
-    _thread: Optional[Thread]
-    _finalizer: Optional[weakref.finalize]
+    _name: str | None
+    _thread: Thread | None
+    _finalizer: weakref.finalize | None
 
     # The context that is shared between the timer and the background thread.
     _ctx: _Context
@@ -227,7 +227,7 @@ class _PeriodicTimer:
         self._finalizer = None
 
     @property
-    def name(self) -> Optional[str]:
+    def name(self) -> str | None:
         """Get the name of the timer."""
         return self._name
 

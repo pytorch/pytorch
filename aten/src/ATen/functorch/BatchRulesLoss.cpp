@@ -6,8 +6,6 @@
 
 #include <ATen/functorch/BatchRulesHelper.h>
 #include <ATen/functorch/PlumbingHelper.h>
-#include <ATen/functorch/BatchedFallback.h>
-#include <ATen/core/dispatch/Dispatcher.h>
 
 namespace at::functorch {
 // Flattens out all dims except the batch dim, and also moves batch dim

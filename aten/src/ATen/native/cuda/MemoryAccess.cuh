@@ -370,7 +370,7 @@ struct vectorized {
 
 #ifdef USE_ROCM
 // This is similar to vectorized policy above, but this one supports
-// heterogenous input tensor types as templated parameters.
+// heterogeneous input tensor types as templated parameters.
 // Its use should be limited to frequently used heterogeneous data types
 // as each instantiation will generate a separate kernel, leading to code
 // bloating if applied to all combinations supported in PyTorch. Assumption: all

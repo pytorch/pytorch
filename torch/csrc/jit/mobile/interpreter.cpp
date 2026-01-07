@@ -4,7 +4,6 @@
 #include <ATen/core/dynamic_type.h>
 #include <ATen/core/function.h>
 #include <ATen/core/jit_type.h>
-#include <ATen/core/operator_name.h>
 #include <ATen/record_function.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
@@ -13,7 +12,6 @@
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/mobile/promoted_prim_ops.h>
 #include <torch/csrc/jit/runtime/instruction.h>
-#include <torch/csrc/jit/runtime/jit_exception.h>
 #include <torch/csrc/jit/runtime/vararg_functions.h>
 
 namespace torch::jit {

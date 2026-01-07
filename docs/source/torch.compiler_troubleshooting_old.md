@@ -211,7 +211,7 @@ debugging. There are two tools available to enable this:
 If the error does not occur with the `"eager"` backend, then the
 backend compiler is the source of the error ([example
 error](https://gist.github.com/mlazos/2f13681e3cc6c43b3911f336327032de)).
-There are [different choices](./torch.compiler.md)
+There are [different choices](./user_guide/torch_compiler/torch.compiler.md)
 for backend compilers for TorchDynamo, with TorchInductor
 fitting the needs of most users. This section focuses on TorchInductor
 as the motivating example, but some tools can also be used with other

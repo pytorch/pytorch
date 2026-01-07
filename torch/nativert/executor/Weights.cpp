@@ -3,7 +3,6 @@
 #include <utility>
 
 #include <torch/csrc/export/pt2_archive_constants.h>
-#include <torch/csrc/jit/serialization/import.h>
 #include <torch/csrc/jit/serialization/import_read.h>
 #include <torch/csrc/jit/serialization/pickle.h>
 #include <torch/nativert/executor/Weights.h>

@@ -1,10 +1,9 @@
 # mypy: allow-untyped-defs
-import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator
 from enum import auto, Enum
 from functools import partial
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.nn as nn
@@ -227,15 +226,6 @@ def checkpoint_wrapper(
         (nn.Module):
             Wrapped module
     """
-
-    if checkpoint_impl == CheckpointImpl.REENTRANT:
-        warnings.warn(
-            f"Please specify {CheckpointImpl.NO_REENTRANT} as "
-            f"{CheckpointImpl.REENTRANT} will soon be removed as "
-            "the default and eventually deprecated.",
-            FutureWarning,
-            stacklevel=2,
-        )
     return CheckpointWrapper(
         module,
         checkpoint_impl,
@@ -248,7 +238,7 @@ def apply_activation_checkpointing(
     model,
     checkpoint_wrapper_fn=checkpoint_wrapper,
     check_fn=lambda _: True,
-    auto_wrap_policy: Optional[Callable[[nn.Module, bool, int], bool]] = None,
+    auto_wrap_policy: Callable[[nn.Module, bool, int], bool] | None = None,
 ):
     """
     Apply :func:`checkpoint_wrapper` to modules within `model` based on a user-defined configuration.

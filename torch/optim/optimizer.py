@@ -7,7 +7,7 @@ from collections import defaultdict, OrderedDict
 from collections.abc import Callable, Hashable, Iterable, Sequence
 from copy import deepcopy
 from itertools import chain
-from typing import Any, cast, Optional, overload, TypeAlias, TypeVar, Union
+from typing import Any, cast, overload, TypeAlias, TypeVar
 from typing_extensions import ParamSpec, Self
 
 import torch
@@ -28,13 +28,11 @@ _P = ParamSpec("_P")
 Args: TypeAlias = tuple[Any, ...]
 Kwargs: TypeAlias = dict[str, Any]
 StateDict: TypeAlias = dict[str, Any]
-DeviceDict: TypeAlias = dict[Optional[torch.device], torch.Tensor]
-DeviceDtypeDict: TypeAlias = dict[
-    Optional[tuple[torch.device, torch.dtype]], torch.Tensor
-]
+DeviceDict: TypeAlias = dict[torch.device | None, torch.Tensor]
+DeviceDtypeDict: TypeAlias = dict[tuple[torch.device, torch.dtype] | None, torch.Tensor]
 
 GlobalOptimizerPreHook: TypeAlias = Callable[
-    ["Optimizer", Args, Kwargs], Optional[tuple[Args, Kwargs]]
+    ["Optimizer", Args, Kwargs], tuple[Args, Kwargs] | None
 ]
 GlobalOptimizerPostHook: TypeAlias = Callable[["Optimizer", Args, Kwargs], None]
 
@@ -106,7 +104,7 @@ def _stack_if_compiling(x):
 
 
 def _disable_dynamo_if_unsupported(
-    single_tensor_fn: Optional[Callable[..., object]] = None,
+    single_tensor_fn: Callable[..., object] | None = None,
 ) -> Callable[[Callable[_P, _T]], Callable[_P, _T]]:
     # workaround for torchscript BC
     # it requires all called functions to be in the
@@ -230,7 +228,7 @@ def _get_capturable_supported_devices(supports_xla: bool = True) -> list[str]:
     return capturable_supported_devices
 
 
-def _to_scalar(x: Union[float, torch.Tensor]):
+def _to_scalar(x: float | torch.Tensor):
     r"""This function converts a hyperparameter to a 0-dimension (scalar) tensor
     if it is a nonzero-dimensions 1-element tensor. If it is not a tensor, it is
     kept as is.
@@ -331,9 +329,11 @@ def register_optimizer_step_post_hook(hook: GlobalOptimizerPostHook) -> Removabl
     return handle
 
 
-ParamsT: TypeAlias = Union[
-    Iterable[torch.Tensor], Iterable[dict[str, Any]], Iterable[tuple[str, torch.Tensor]]
-]
+ParamsT: TypeAlias = (
+    Iterable[torch.Tensor]
+    | Iterable[dict[str, Any]]
+    | Iterable[tuple[str, torch.Tensor]]
+)
 
 R = TypeVar("R")
 T = TypeVar("T")
@@ -356,7 +356,7 @@ class Optimizer:
 
     OptimizerPreHook: TypeAlias = Callable[
         [Self, Args, Kwargs],  # type: ignore[misc]
-        Optional[tuple[Args, Kwargs]],
+        tuple[Args, Kwargs] | None,
     ]
     OptimizerPostHook: TypeAlias = Callable[[Self, Args, Kwargs], None]  # type: ignore[misc]
 
@@ -366,11 +366,11 @@ class Optimizer:
     _optimizer_state_dict_pre_hooks: 'OrderedDict[int, Callable[["Optimizer"], None]]'
     _optimizer_state_dict_post_hooks: (
         # pyrefly: ignore [not-a-type]
-        'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
+        'OrderedDict[int, Callable[["Optimizer", StateDict], StateDict | None]]'
     )
     _optimizer_load_state_dict_pre_hooks: (
         # pyrefly: ignore [not-a-type]
-        'OrderedDict[int, Callable[["Optimizer", StateDict], Optional[StateDict]]]'
+        'OrderedDict[int, Callable[["Optimizer", StateDict], StateDict | None]]'
     )
     _optimizer_load_state_dict_post_hooks: (
         # pyrefly: ignore [not-a-type]
@@ -541,10 +541,10 @@ class Optimizer:
     def _group_tensors_by_device_and_dtype(
         tensorlistlist: TensorListList,
         with_indices: bool = False,
-    ) -> Union[
-        dict[tuple[None, None], tuple[TensorListList, Indices]],
-        dict[tuple[torch.device, torch.dtype], tuple[TensorListList, Indices]],
-    ]:
+    ) -> (
+        dict[tuple[None, None], tuple[TensorListList, Indices]]
+        | dict[tuple[torch.device, torch.dtype], tuple[TensorListList, Indices]]
+    ):
         """Group a list of lists of tensors by device and dtype.
 
         Skips this step if we are compiling since this will occur during inductor lowering.
@@ -641,7 +641,7 @@ class Optimizer:
 
     def register_state_dict_post_hook(
         self,
-        hook: Callable[["Optimizer", StateDict], Optional[StateDict]],
+        hook: Callable[["Optimizer", StateDict], StateDict | None],
         prepend: bool = False,
     ) -> RemovableHandle:
         r"""Register a state dict post-hook which will be called after :meth:`~torch.optim.Optimizer.state_dict` is called.
@@ -800,7 +800,7 @@ class Optimizer:
 
     def register_load_state_dict_pre_hook(
         self,
-        hook: Callable[["Optimizer", StateDict], Optional[StateDict]],
+        hook: Callable[["Optimizer", StateDict], StateDict | None],
         prepend: bool = False,
     ) -> RemovableHandle:  # noqa: D205 D400
         r"""Register a load_state_dict pre-hook which will be called before
@@ -978,6 +978,7 @@ class Optimizer:
                     for k, v in value.items()
                 }
             elif isinstance(value, Iterable):
+                # pyrefly: ignore [bad-instantiation]
                 return type(value)(
                     # pyrefly: ignore [bad-argument-count]
                     _cast(param, v, param_id=param_id, param_groups=param_groups)
@@ -1041,9 +1042,10 @@ class Optimizer:
         if not hasattr(self, "_zero_grad_profile_name"):
             self._patch_step_function()
 
-        per_device_and_dtype_grads: Optional[
+        per_device_and_dtype_grads: (
             defaultdict[torch.device, defaultdict[torch.dtype, list[torch.Tensor]]]
-        ]
+            | None
+        )
         if foreach:
             per_device_and_dtype_grads = defaultdict(lambda: defaultdict(list))
         else:
@@ -1085,7 +1087,7 @@ class Optimizer:
     @overload
     def step(self, closure: Callable[[], float]) -> float: ...
 
-    def step(self, closure: Optional[Callable[[], float]] = None) -> Optional[float]:
+    def step(self, closure: Callable[[], float] | None = None) -> float | None:
         r"""Perform a single optimization step to update parameter.
 
         Args:

@@ -44,7 +44,7 @@ struct TORCH_API XLAHooksInterface : AcceleratorHooksInterface {
     TORCH_CHECK(false, "Cannot get XLA generator without torch_xla library. ", XLA_HELP);
   }
 
-  virtual DeviceIndex getCurrentDevice() const override {
+  DeviceIndex getCurrentDevice() const override {
     TORCH_CHECK(false, "Cannot get current XLA device without torch_xla library. ", XLA_HELP);
   }
 

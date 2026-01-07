@@ -33,6 +33,25 @@ void initModule(PyObject* module) {
     return at::accelerator::getDeviceIndex();
   });
 
+  m.def("_accelerator_getDeviceCapability", [](c10::DeviceIndex device_index) {
+    const auto device_type = at::accelerator::getAccelerator(true).value();
+    torch::utils::maybe_initialize_device(device_type);
+    auto caps = at::accelerator::getDeviceCapability(device_index);
+
+    py::dict dict;
+
+    py::set dtype_set;
+    caps.forEachSupportedScalarType([&](c10::ScalarType dtype) {
+      THPDtype* thp_dtype = torch::getTHPDtype(dtype);
+      py::object dtype_obj =
+          py::reinterpret_borrow<py::object>((PyObject*)thp_dtype);
+      dtype_set.add(dtype_obj);
+    });
+
+    dict["supported_dtypes"] = dtype_set;
+    return dict;
+  });
+
   m.def("_accelerator_setStream", [](c10::Stream stream) {
     const auto device_type = at::accelerator::getAccelerator(true).value();
     torch::utils::maybe_initialize_device(device_type);

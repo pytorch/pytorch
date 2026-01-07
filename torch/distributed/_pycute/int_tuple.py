@@ -36,14 +36,14 @@ Functions for manipulating IntTuples
 
 from functools import reduce
 from itertools import chain
-from typing import Optional, TypeAlias, Union
+from typing import TypeAlias
 from typing_extensions import TypeIs
 
 from .typing import Integer
 
 
 # Type aliases for better readability
-IntTuple: TypeAlias = Union[int, tuple["IntTuple", ...]]
+IntTuple: TypeAlias = int | tuple["IntTuple", ...]
 
 
 def is_int(x: object) -> TypeIs[int]:
@@ -168,9 +168,7 @@ def suffix_product(a: IntTuple, init: IntTuple = 1) -> IntTuple:
             return init
 
 
-def idx2crd(
-    idx: IntTuple, shape: IntTuple, stride: Optional[IntTuple] = None
-) -> IntTuple:
+def idx2crd(idx: IntTuple, shape: IntTuple, stride: IntTuple | None = None) -> IntTuple:
     if stride is None:
         stride = suffix_product(shape)
 
@@ -190,7 +188,7 @@ def idx2crd(
 
 
 def crd2idx(
-    crd: Optional[IntTuple], shape: IntTuple, stride: Optional[IntTuple] = None
+    crd: IntTuple | None, shape: IntTuple, stride: IntTuple | None = None
 ) -> int:
     if stride is None:
         stride = suffix_product(shape)
@@ -222,7 +220,7 @@ def crd2idx(
 
 # Transform crd into the dst_shape's iteration space
 def crd2crd(
-    crd: IntTuple, dst_shape: IntTuple, src_shape: Optional[IntTuple] = None
+    crd: IntTuple, dst_shape: IntTuple, src_shape: IntTuple | None = None
 ) -> IntTuple:
     if is_tuple(crd):
         if is_tuple(dst_shape):  # tuple tuple
@@ -241,7 +239,7 @@ def crd2crd(
 
 
 # Filter trg according to crd: keep only elements of trg that are paired with None
-def slice_(crd: Union[None, tuple, int], trg: Union[tuple, int]) -> Union[tuple, int]:
+def slice_(crd: tuple | int | None, trg: tuple | int) -> tuple | int:
     if is_tuple(crd):
         if is_tuple(trg):  # tuple tuple
             assert len(crd) == len(trg)
@@ -264,7 +262,7 @@ def slice_(crd: Union[None, tuple, int], trg: Union[tuple, int]) -> Union[tuple,
 
 
 # Determine if None appears at any of an int_tuples' terminals
-def has_none(a: Union[None, tuple, int]) -> bool:
+def has_none(a: tuple | int | None) -> bool:
     if is_tuple(a):
         return any(has_none(v) for v in a)
     else:
