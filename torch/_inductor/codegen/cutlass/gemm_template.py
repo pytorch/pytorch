@@ -1028,7 +1028,7 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             filter_res = self.filter_op(op)
             if (
                 filter_res is not None
-                and res.get(filter_res.configuration_name(), None) is None
+                and res.get(filter_res.configuration_name()) is None
             ):
                 res[filter_res.configuration_name()] = filter_res
         log.info(
@@ -1701,7 +1701,7 @@ class CUTLASS3xGemmTemplate(CUTLASSGemmTemplate):
 
 
 class CUTLASS2xGemmTemplate(CUTLASSGemmTemplate):
-    """CUTLASS 2x GEMM Template, which is used to generate CUTLASS GEMM kernels"""
+    """CUTLASS 2x GEMM Template, which is used to generate CUTLASS 2x GEMM kernels"""
 
     def __init__(
         self,
