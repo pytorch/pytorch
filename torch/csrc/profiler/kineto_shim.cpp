@@ -393,7 +393,7 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
   // If PrivateUse1 backend is enabled, this should return
   // c10::DeviceType::PrivateUse1.
   auto device_type_privateuse1_or = [](c10::DeviceType device_type) {
-    return (c10::get_privateuse1_backend() != "privateuseone")
+    return c10::is_privateuse1_backend_registered()
         ? c10::DeviceType::PrivateUse1
         : device_type;
   };
@@ -402,7 +402,7 @@ c10::DeviceType deviceTypeFromActivity(libkineto::ActivityType activity_type) {
     case libkineto::ActivityType::GPU_MEMCPY:
     case libkineto::ActivityType::GPU_MEMSET:
     case libkineto::ActivityType::CONCURRENT_KERNEL:
-#if not defined(USE_CUDA) and defined(USE_XPU)
+#if defined(USE_XPU)
       return device_type_privateuse1_or(c10::DeviceType::XPU);
 #endif
       [[fallthrough]];
