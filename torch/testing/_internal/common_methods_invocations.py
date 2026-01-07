@@ -14294,7 +14294,6 @@ op_db: list[OpInfo] = [
                         # automatic differentiation, but one of the arguments requires grad
                         # https://github.com/pytorch/pytorch/issues/68966
                         # Eager tests pass but there is an error in the inductor tests.
-                        DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_variant_consistency_eager'),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_conj_view'),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_view'),
                         DecorateInfo(unittest.skip("Skipped!"), 'TestMathBits', 'test_neg_conj_view'),
