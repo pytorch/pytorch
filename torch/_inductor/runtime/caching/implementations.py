@@ -1,4 +1,4 @@
-"""Cache implementation classes for PyTorch Inductor runtime caching.
+"""Cache implementation classes
 
 This module provides concrete implementations of caching backends including
 in-memory, on-disk, and remote caching strategies. Each implementation follows
@@ -18,7 +18,7 @@ from threading import Lock
 from typing import Generic, TypeVar
 from typing_extensions import override
 
-from filelock import FileLock
+from filelock import BaseFileLock, FileLock
 
 from . import locks
 
@@ -119,23 +119,24 @@ class _CacheImpl(ABC, Generic[_V]):
         """
 
 
-class _InMemoryCacheImpl(_CacheImpl[object]):
+class _InMemoryCacheImpl(_CacheImpl[_V], Generic[_V]):
     """In-memory cache implementation using a dictionary.
 
     This implementation stores key-value pairs in a Python dictionary,
     with keys being pickled for consistent hashing. It provides fast
     access but is limited by available memory and process lifetime.
 
-    The value type is 'object' since any Python object can be stored in memory.
+    Type Parameters:
+        _V: The type of values stored in the cache.
     """
 
     def __init__(self) -> None:
         """Initialize the in-memory cache with an empty dictionary."""
         super().__init__()
-        self._memory: dict[str, object] = {}
+        self._memory: dict[str, _V] = {}
 
     @override
-    def get(self, key: str) -> Hit[object] | None:
+    def get(self, key: str) -> Hit[_V] | None:
         """Retrieve a value from the in-memory cache.
 
         Args:
@@ -145,17 +146,17 @@ class _InMemoryCacheImpl(_CacheImpl[object]):
             A Hit object on cache hit where Hit.value is the cached value,
             or None on cache miss.
         """
-        if (value := self._memory.get(key, miss)) is not miss:
-            return Hit(value=value)
+        if key in self._memory:
+            return Hit(value=self._memory[key])
         return None
 
     @override
-    def insert(self, key: str, value: object) -> bool:
+    def insert(self, key: str, value: _V) -> bool:
         """Insert a key-value pair into the in-memory cache.
 
         Args:
             key: The key to insert (must be str).
-            value: The value to associate with the key (can be any object).
+            value: The value to associate with the key.
 
         Returns:
             True if the insertion was successful (key was new),
@@ -193,8 +194,7 @@ class _OnDiskCacheImpl(_CacheImpl[bytes]):
                     Defaults to empty string if not specified.
         """
         self._cache_dir: Path = self._base_dir / (sub_dir or "")
-        # pyrefly: ignore [bad-assignment]
-        self._flock: FileLock = FileLock(str(self._cache_dir / "dir.lock"))
+        self._flock: BaseFileLock = FileLock(str(self._cache_dir / "dir.lock"))
 
     @property
     def _base_dir(self) -> Path:
@@ -347,7 +347,7 @@ try:
     from .fb.implementations import _RemoteCacheImpl
 except ModuleNotFoundError:
 
-    class _RemoteCacheImpl(_CacheImpl[bytes]):  # type: ignore[no-redef]
+    class _RemoteCacheImpl(_CacheImpl[bytes]):
         """Fallback remote cache implementation for non-Facebook environments.
 
         This is a no-op implementation that always raises NotImplementedError.

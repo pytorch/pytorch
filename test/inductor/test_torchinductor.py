@@ -1880,6 +1880,8 @@ class CommonTemplate:
             # is fixed.
             elif is_mps_backend(self.device):
                 pass  # no device asserts in MPS
+            elif is_pallas_backend(self.device):
+                pass  # Pallas generates Python/JAX code, not C++/Triton
             elif self.device == "cpu" and not is_triton_cpu_backend(self.device):
                 _, code = run_and_get_cpp_code(fn_opt, *inps)
                 self.assertTrue(("TORCH_CHECK" in code) is has_assert)
@@ -3308,6 +3310,28 @@ class CommonTemplate:
             return (torch.nn.functional.silu(a),)
 
         self.common(fn, (torch.randn(8, 8),))
+
+    @skip_if_halide  # halide has different precision characteristics
+    def test_silu_exact_eager(self):
+        """Test that compiled SiLU matches eager exactly."""
+
+        def fn(a):
+            return torch.nn.functional.silu(a)
+
+        # Test with normal random values
+        self.common(fn, (torch.randn(1024, device=self.device),))
+
+        # Test with bfloat16 edge cases (all possible bf16 values)
+        x_bf16 = (
+            torch.arange(0, 2**16, dtype=torch.int32, device=self.device)
+            .to(torch.int16)
+            .view(torch.bfloat16)
+        )
+        eager_result_bf16 = fn(x_bf16)
+        torch._dynamo.reset()
+        compiled_fn = torch.compile(fn)
+        compiled_result_bf16 = compiled_fn(x_bf16)
+        self.assertEqual(eager_result_bf16, compiled_result_bf16, equal_nan=True)
 
     @skip_if_halide  # halide has buggy nan handling
     def test_nan_to_num(self):
@@ -8793,6 +8817,23 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 torch.randn(197, 38),
             ],
         )
+
+    @skipIfMPS  # MPS does not support float64
+    def test_select_scatter_dtype_consistency(self):
+        def fn(x, a):
+            return (torch.select_scatter(x, a, 1, 0),)
+
+        for dtype in [
+            torch.int64,
+            torch.float64,
+        ]:
+            self.common(
+                fn,
+                [
+                    torch.randn((8, 197, 38)).to(dtype),
+                    torch.randn((8, 38), dtype=torch.float32),
+                ],
+            )
 
     @skip_if_gpu_halide  # accuracy issue
     def test_slice_scatter(self):
@@ -14785,8 +14826,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue(torch.all(result < 2560).item())
 
         code_str = "\n".join(code)
+        if torch.version.hip:
+            triton_str = "tl.minimum"
+        else:
+            triton_str = "triton_helpers.minimum"
         self.assertIn(
-            "triton_helpers.minimum",
+            triton_str,
             code_str,
             "Generated Triton code should use triton_helpers.minimum for clamping",
         )
@@ -14978,6 +15023,79 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(result, expected)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
         FileCheck().check_regex(r"tl\.store\(.*xmask\)").run(code)
+
+    @requires_cuda_and_triton
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @config.patch({"triton.enable_pdl": True})
+    def test_pdl_mutation(self):
+        def fn(a, b, c):
+            b.copy_(c)  # second kernel
+            return a**2 + b  # first kernel
+
+        a, b, c = [
+            torch.randn(s, device=GPU_TYPE) for s in [(1024, 1024), (1024,), (1024,)]
+        ]
+        self.common(fn, (a, b, c))
+
+        code = run_and_get_triton_code(torch.compile(fn), a, b, c)
+        (
+            FileCheck()
+            # first kernel
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("load")
+            .check("load")
+            .check("gdc_launch")
+            .check("store")
+            # second kernel, no need to wait before load
+            .check("'launch_pdl': True")
+            .check("load")
+            .check("gdc_wait")
+            .check("gdc_launch")
+            .check("store")
+        ).run(code)
+
+    @requires_cuda_and_triton
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @config.patch(
+        {
+            "triton.enable_pdl": True,
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "coordinate_descent_tuning": True,
+        }
+    )
+    def test_pdl_template_and_delay(self):
+        def fn(a, b):
+            a = (a / (a**2).sum(-1, keepdim=True)) ** 2  # first kernel
+            b = (b / (b**2).sum(-1, keepdim=True)) ** 2  # second kernel
+            c = a @ b  # fused-epilogue template
+            c = c**2
+            return c
+
+        a, b = [torch.randn(s, device=GPU_TYPE) for s in [(1024, 512), (512, 1024)]]
+        self.common(fn, (a, b))
+        code = run_and_get_triton_code(torch.compile(fn, mode="max-autotune"), a, b)
+        (
+            FileCheck()
+            # first kernel
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("load")
+            .check("gdc_launch")
+            .check("store")
+            # second kernel, no need to wait before load
+            .check("'launch_pdl': True")
+            .check("load")
+            .check("gdc_wait")
+            .check("gdc_launch")
+            .check("store")
+            # matmul template
+            .check_not("'launch_pdl': True")
+            .check_not("gdc_wait")
+            .check_not("gdc_launch")
+            .check("store")
+        ).run(code)
 
     # end of class CommonTemplate - add new tests here
 
@@ -15493,6 +15611,18 @@ if RUN_GPU:
             self.assertTrue("out_ptr1" in code)
             self.assertFalse("out_ptr0" in code)
             self.assertEqual(fn_opt(*inps), fn(*inps))
+
+        def test_reduction_hint_inner_with_high_tiling_ratio(self):
+            """Test inner reduction hint with high tiling score ratio."""
+
+            def f(x, y):
+                return x.sum(dim=-1, keepdim=True) + (x + y[..., None])
+
+            x = torch.randn(2048, 128, 1024, device=GPU_TYPE)
+            y = torch.randn(128, 2048, device=GPU_TYPE).t()
+
+            code = run_and_get_triton_code(torch.compile(f), x, y)
+            self.assertIn("ReductionHint.INNER", code)
 
         def test_numpy_on_gpu(self):
             x = np.arange(10, dtype=np.float32)
@@ -16479,10 +16609,17 @@ if RUN_GPU:
             output = torch.zeros(512, 768, dtype=torch.bfloat16, device=GPU_TYPE)
 
             result, code = run_and_get_code(torch.compile(fn), output, indices, values)
-            self.assertTrue(
-                "tl.atomic_add" in code[0],
-                "bf16 should generate tl.atomic_add",
-            )
+            if output.device.type == "xpu":
+                # xpu fallback bf16 atomic add for better performance
+                self.assertFalse(
+                    "tl.atomic_add" in code[0],
+                    "bf16 should not generate tl.atomic_add on xpu",
+                )
+            else:
+                self.assertTrue(
+                    "tl.atomic_add" in code[0],
+                    "bf16 should generate tl.atomic_add",
+                )
             expected = torch.zeros(512, 768, dtype=torch.bfloat16, device=GPU_TYPE)
             torch.testing.assert_close(result, fn(expected, indices, values))
 
