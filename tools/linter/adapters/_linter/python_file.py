@@ -7,7 +7,7 @@ from tokenize import generate_tokens, TokenInfo
 from typing import TYPE_CHECKING
 from typing_extensions import Self
 
-from . import is_empty, NO_TOKEN, ParseError, ROOT
+from . import is_empty, NO_TOKEN, ParseError
 from .sets import LineWithSets
 
 
@@ -30,13 +30,16 @@ class PythonFile:
     ) -> None:
         self.linter_name = linter_name
         self._contents = contents
-        self.path = path.relative_to(ROOT) if path and path.is_absolute() else path
+        self._path = path
+
+    def __repr__(self) -> str:
+        return f"PythonFile({self._path})"
 
     @cached_property
     def contents(self) -> str:
         if self._contents is not None:
             return self._contents
-        return self.path.read_text() if self.path else ""
+        return self.path.read_text() if self._path else ""
 
     @cached_property
     def lines(self) -> list[str]:
@@ -49,8 +52,13 @@ class PythonFile:
         else:
             return cls(linter_name, contents=pc)
 
+    @cached_property
+    def path(self) -> Path:
+        assert self._path is not None
+        return self._path
+
     def with_contents(self, contents: str) -> Self:
-        return self.__class__(self.linter_name, contents=contents, path=self.path)
+        return self.__class__(self.linter_name, contents=contents, path=self._path)
 
     @cached_property
     def omitted(self) -> OmittedLines:
@@ -157,6 +165,35 @@ class PythonFile:
         from .blocks import blocks
 
         return blocks(self)
+
+    @cached_property
+    def blocks_by_line_number(self) -> dict[int, Block]:
+        # Lines that don't appear are in the top-level scope
+        # Later blocks correctly overwrite earlier, parent blocks.
+        return {i: b for b in self.blocks for i in b.line_range}
+
+    def block_name(self, line: int) -> str:
+        block = self.blocks_by_line_number.get(line)
+        return block.full_name if block else ""
+
+    @cached_property
+    def is_public(self) -> bool:
+        return is_public(*self.python_parts)
+
+    @cached_property
+    def python_parts(self) -> tuple[str, ...]:
+        parts = self.path.with_suffix("").parts
+        return parts[:-1] if parts[-1] == "__init__" else parts
+
+
+def is_public(*parts: str) -> bool:
+    # TODO: this rule is easy to understand but incomplete.
+    #
+    # What is missing is checking `__all__`: see
+    # https://github.com/pytorch/pytorch/wiki/Public-API-definition-and-documentation
+
+    it = (s for p in parts for s in p.split("."))
+    return not any(i.startswith("_") and not i.startswith("__") for i in it)
 
 
 class OmittedLines:
