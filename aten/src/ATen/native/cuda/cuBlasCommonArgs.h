@@ -158,9 +158,18 @@ struct cublasCommonArgs {
     m = sizes_a[transpose_result ? 1 : 0];
     k = sizes_a[transpose_result ? 0 : 1];
     n = sizes_b[transpose_result ? 0 : 1];
-    lda = mata->stride((transpose_a == transpose_result) ? 1 : 0);
-    ldb = matb->stride((transpose_b == transpose_result) ? 1 : 0);
+
+    const auto get_ld = [](c10::MaybeOwned<Tensor>& t, bool trans_t, bool trans_res) -> int64_t {
+      // NOTE: a tensor of shape (1, 2) with strides (1, 1) is contiguous in PyTorch.
+      // However, cuBLAS expects inputs with sorted strides being strictly increasing/decreasing.
+      const auto strides = t->is_contiguous() ? c10::contiguous_strides(t->sizes()) : t->strides();
+      return strides[(trans_t == trans_res) ? 1 : 0];
+    };
+
+    lda = get_ld(mata, transpose_a, transpose_result);
+    ldb = get_ld(matb, transpose_b, transpose_result);
     result_ld = result->stride(transpose_result ? 0 : 1);
+
     transa = transpose_a ? mata->is_conj() ? 'c' : 't' : 'n';
     transb = transpose_b ? matb->is_conj() ? 'c' : 't' : 'n';
 
