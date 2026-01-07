@@ -23,6 +23,7 @@ from typing import Any, Generic, Literal, TYPE_CHECKING, TypeVar, Union
 import torch
 from torch._dynamo.utils import counters, set_feature_use
 from torch._inductor import metrics
+from torch._inductor.config import triton as inductor_triton_config
 from torch._prims_common import compute_required_storage_length
 from torch.utils._debug_mode import get_active_debug_mode
 from torch.utils._ordered_set import OrderedSet
@@ -49,6 +50,7 @@ from .hints import (
     TRITON_MAX_RSPLIT,
 )
 from .runtime_utils import (
+    cache_dir,
     ceildiv,
     conditional_product,
     create_bandwidth_info_str,
@@ -214,6 +216,44 @@ def _dump_launch_params(args, kwargs, launcher, kernel_name, grid):
         f.write(f"{kernel_name} | {args_str} | {grid!r}\n")
 
 
+def _dump_launch_tensors(args, kernel_path, kernel_hash, kernel_name):
+    tensor_list = [arg for arg in args if isinstance(arg, torch.Tensor)]
+
+    run_index = 0
+
+    # Some kernels don't have path and hash stored
+    # Using only the name to differentiate between those
+    if not kernel_path:
+        kernel_hash = kernel_name
+
+    # Saving only the last N runs of the kernels to avoid bloating the folder
+    if kernel_hash in inductor_triton_config.debug_dump_kernel_inputs:
+        run_index = inductor_triton_config.debug_dump_kernel_inputs[kernel_hash] + 1
+
+        if run_index >= inductor_triton_config.max_kernel_dump_occurrences:
+            run_index = 0
+
+    inductor_triton_config.debug_dump_kernel_inputs[kernel_hash] = run_index
+
+    # Default path for kernels with no hash
+    if not kernel_path:
+        directory_path = os.path.join(cache_dir(), "unhashed_kernel_inputs")
+    else:
+        directory_path = os.path.dirname(kernel_path)
+    directory_path = f"{directory_path}/{kernel_name}_run_{run_index}"
+    os.makedirs(directory_path, exist_ok=True)
+
+    log.info(
+        "Dumping %d tensor(s) for kernel %s to %s",
+        len(tensor_list),
+        kernel_name,
+        directory_path,
+    )
+
+    for index, tensor in enumerate(tensor_list):
+        torch.save(tensor, f"{directory_path}/tensor_{index}.pt")
+
+
 def check_autotune_cache(
     configs: list[Config], filename: str | None, inductor_meta: dict[str, Any]
 ) -> tuple[list[Config], AutotuneCache | None, dict[str, Any]]:
@@ -368,6 +408,12 @@ class CachingAutotuner(KernelInterface):
         self.dump_launch_params = (
             os.environ.get("TORCHINDUCTOR_DUMP_LAUNCH_PARAMS", "0") == "1"
         )
+        self.dump_launch_tensors = (
+            os.environ.get("TORCHINDUCTOR_DUMP_LAUNCH_TENSORS", "0") == "1"
+        )
+        self.kernels_to_dump = os.environ.get(
+            "TORCHINDUCTOR_KERNELS_TO_DUMP", ""
+        ).split(",")
 
         self.triton_interpret = os.environ.get("TRITON_INTERPRET", "0") == "1"
 
@@ -1420,6 +1466,15 @@ class CachingAutotuner(KernelInterface):
         if self.dump_launch_params:
             new_args, grid = self._interpret_args_grid(args, launcher.config)
             _dump_launch_params(new_args, kwargs, launcher, self.fn.__name__, grid)
+
+        if self.dump_launch_tensors:
+            # Check the kernel name if the list was provided
+            if not self.kernels_to_dump or any(
+                kernel_name in self.fn.__name__ for kernel_name in self.kernels_to_dump
+            ):
+                _dump_launch_tensors(
+                    args, self.filename, self.kernel_hash, self.fn.__name__
+                )
 
         # it is faster than entering and exiting a context manager, even if the context
         # manager is a nullcontext.
