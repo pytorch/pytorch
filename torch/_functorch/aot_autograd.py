@@ -707,6 +707,7 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
         # Packaging this just for later use
         aot_config=aot_config,
         stack=stack,
+        fake_mode=fake_mode,
     )
 
 

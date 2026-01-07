@@ -16,7 +16,7 @@ from typing import Any, NewType, Optional, Protocol, TYPE_CHECKING, TypeVar, Uni
 import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
-from torch._subclasses import FakeTensor
+from torch._subclasses import FakeTensor, FakeTensorMode
 from torch._subclasses.fake_tensor import is_fake
 from torch.fx.experimental._backward_state import BackwardState
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -1050,6 +1050,11 @@ class AOTState:
     # can cancel it and reenable it later when you need it.
     stack: contextlib.ExitStack
 
+    # The fake tensor mode used during tracing.  This is useful for later
+    # operations that need to create new fake tensors consistent with the
+    # original trace.
+    fake_mode: FakeTensorMode
+
 
 FxValue = Union[Tensor, int, SymInt, BackwardState]
 
@@ -1295,3 +1300,7 @@ class JointWithDescriptors:
     @graph_module.setter
     def graph_module(self, value):
         self._aot_graph_capture.graph_module = value
+
+    @property
+    def fake_mode(self):
+        return self._aot_state.fake_mode
