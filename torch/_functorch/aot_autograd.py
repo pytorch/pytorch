@@ -30,6 +30,7 @@ from torch._subclasses import FakeTensor, FakeTensorMode
 from torch.export._tree_utils import reorder_kwargs
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.symbolic_shapes import ShapeEnv
+from torch.utils._python_dispatch import _disable_current_modes
 
 
 static_inputs_log = torch._logging.getArtifactLogger(
@@ -1327,13 +1328,17 @@ def aot_compile_joint_with_descriptors(
 
     TODO: Consider if we should allow_in_graph the result by default.
     """
-    compiled_fn, _ = aot_stage2_compile(
-        jd._aot_state,
-        jd._aot_graph_capture,
-        partition_fn,
-        fw_compiler,
-        bw_compiler,
-    )
+    # Any user-defined modes that are enabled over a compiled region
+    # need to be disabled at compile time. Ordinarily dynamo does this,
+    # but we need to disable them here in case dynamo is not active
+    with _disable_current_modes():
+        compiled_fn, _ = aot_stage2_compile(
+            jd._aot_state,
+            jd._aot_graph_capture,
+            partition_fn,
+            fw_compiler,
+            bw_compiler,
+        )
 
     # Cribbed from torch/export/pt2_archive/_package.py
     @simple_wraps(compiled_fn)

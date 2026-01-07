@@ -3,11 +3,18 @@
 import contextlib
 import os
 import unittest
+from contextlib import ExitStack
 
 import torch
 import torch.distributed as dist
 import torch.distributed._functional_collectives as _functional_collectives
+import torch.fx.traceback as fx_traceback
 from torch._dynamo.testing import CompileCounterWithBackend
+from torch._functorch.aot_autograd import (
+    aot_compile_joint_with_descriptors,
+    aot_export_joint_with_descriptors,
+)
+from torch._guards import tracing as torch_tracing, TracingContext
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed.tensor import (
     DeviceMesh,
@@ -19,6 +26,7 @@ from torch.distributed.tensor import (
 )
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
 from torch.fx.experimental.proxy_tensor import make_fx
+from torch.fx.passes.regional_inductor import regional_inductor
 from torch.testing._internal.common_distributed import (
     MultiProcessTestCase,
     requires_nccl,
@@ -159,6 +167,50 @@ class TestDTensorDebugMode(TestCase):
             s0 = debug_mode.debug_string()
         s1 = debug_mode.debug_string()
         self.assertEqual(s0, s1)
+
+    def test_export_and_compile_with_debug_mode(self):
+        class SimpleModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 2)
+
+            def forward(self, x):
+                with fx_traceback.annotate({"compile_with_inductor": 0}):
+                    return self.linear(x)
+
+        model = SimpleModule()
+        inpt = torch.randn(4, 3)
+        mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
+        inpt_dt = DTensor.from_local(inpt, mesh, [Replicate()], run_check=False)
+        model.linear.weight = torch.nn.Parameter(
+            DTensor.from_local(
+                model.linear.weight, mesh, [Replicate()], run_check=False
+            ),
+            requires_grad=True,
+        )
+        model.linear.bias = torch.nn.Parameter(
+            DTensor.from_local(model.linear.bias, mesh, [Replicate()], run_check=False),
+            requires_grad=True,
+        )
+        inputs = (inpt_dt,)
+
+        with DebugMode(), DebugMode.log_tensor_hashes(hash_fn="hash_tensor"):
+            with ExitStack() as stack:
+                joint_with_descriptors = aot_export_joint_with_descriptors(
+                    stack, model, inputs
+                )
+                # hacky way to grab the existing fake mode so we can re-enter the TracingContext
+                fake_mode = (
+                    next(iter(joint_with_descriptors.graph_module.graph.nodes))
+                    .meta["val"]
+                    .fake_mode
+                )
+                stack.enter_context(torch_tracing(TracingContext(fake_mode)))
+                model_fn = aot_compile_joint_with_descriptors(
+                    joint_with_descriptors, fw_compiler=regional_inductor
+                )
+
+            _ = model_fn(*dict(model.named_parameters()).values(), *inputs)
 
     def test_debug_mode_backward(self):
         mesh = DeviceMesh(self.device_type, list(range(self.world_size)))
