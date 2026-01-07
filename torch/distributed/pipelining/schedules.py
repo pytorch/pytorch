@@ -9,6 +9,7 @@ import re
 from abc import ABC, abstractmethod
 from collections import Counter, defaultdict
 from collections.abc import Callable
+from dataclasses import dataclass
 from enum import Enum
 from functools import lru_cache
 from typing import Any, cast, NamedTuple, Protocol
@@ -41,66 +42,27 @@ __all__ = [
 logger = logging.getLogger(__name__)
 
 
-class _ComputationType(Enum):
+class _ComputationType(str, Enum):
     # TODO(whc) rename to _ActType?
-    FORWARD = 1
-    BACKWARD_INPUT = 2
-    BACKWARD_WEIGHT = 3
-    UNSHARD = 4
-    RESHARD = 5
-    SEND_F = 6
-    RECV_F = 7
-    SEND_B = 8
-    RECV_B = 9
-    FULL_BACKWARD = 10
-    OVERLAP_F_B = 11
-    REDUCE_GRAD = 12
-
-    def __str__(self):
-        str_map = {
-            _ComputationType.FORWARD: "F",
-            _ComputationType.BACKWARD_INPUT: "I",
-            _ComputationType.BACKWARD_WEIGHT: "W",
-            _ComputationType.UNSHARD: "UNSHARD",
-            _ComputationType.RESHARD: "RESHARD",
-            _ComputationType.SEND_F: "SEND_F",
-            _ComputationType.RECV_F: "RECV_F",
-            _ComputationType.SEND_B: "SEND_B",
-            _ComputationType.RECV_B: "RECV_B",
-            _ComputationType.FULL_BACKWARD: "B",
-            _ComputationType.OVERLAP_F_B: "OVERLAP_F_B",
-            _ComputationType.REDUCE_GRAD: "REDUCE_GRAD",
-        }
-        return str_map[self]
+    FORWARD = "F"
+    BACKWARD_INPUT = "I"
+    BACKWARD_WEIGHT = "W"
+    UNSHARD = "UNSHARD"
+    RESHARD = "RESHARD"
+    SEND_F = "SEND_F"
+    RECV_F = "RECV_F"
+    SEND_B = "SEND_B"
+    RECV_B = "RECV_B"
+    FULL_BACKWARD = "B"
+    OVERLAP_F_B = "OVERLAP_F_B"
+    REDUCE_GRAD = "REDUCE_GRAD"
 
     @staticmethod
-    def from_str(action):
-        if action == "F":
-            return _ComputationType.FORWARD
-        elif action == "I":
-            return _ComputationType.BACKWARD_INPUT
-        elif action == "W":
-            return _ComputationType.BACKWARD_WEIGHT
-        elif action == "UNSHARD":
-            return _ComputationType.UNSHARD
-        elif action == "RESHARD":
-            return _ComputationType.RESHARD
-        elif action == "SEND_F":
-            return _ComputationType.SEND_F
-        elif action == "RECV_F":
-            return _ComputationType.RECV_F
-        elif action == "SEND_B":
-            return _ComputationType.SEND_B
-        elif action == "RECV_B":
-            return _ComputationType.RECV_B
-        elif action == "B":
-            return _ComputationType.FULL_BACKWARD
-        elif action == "OVERLAP_F_B":
-            return _ComputationType.OVERLAP_F_B
-        elif action == "REDUCE_GRAD":
-            return _ComputationType.REDUCE_GRAD
-        else:
-            raise RuntimeError(f"Invalid computation type {action}")
+    def from_str(action: str) -> "_ComputationType":
+        try:
+            return _ComputationType(action)
+        except ValueError as exc:
+            raise RuntimeError(f"Invalid computation type {action}") from exc
 
 
 FORWARD = _ComputationType.FORWARD
@@ -141,10 +103,11 @@ class _Action(NamedTuple):
         if self.sub_actions is not None:
             # Use recursive repr for sub_actions
             sub_action_reprs = [repr(sub_action) for sub_action in self.sub_actions]
-            return f"({';'.join(sub_action_reprs)}){self.computation_type}"
+            return f"({';'.join(sub_action_reprs)}){self.computation_type.value}"
         else:
             repr_str = str(self.stage_index)
-            repr_str += str(self.computation_type)
+            # Use .value to get the short string (e.g., "F", "B") instead of the full enum name
+            repr_str += self.computation_type.value
             if self.microbatch_index is not None:
                 repr_str += str(self.microbatch_index)
             return repr_str
@@ -1703,7 +1666,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
                     computation_type = action.computation_type
                     mb_index = action.microbatch_index
                     stage_index = action.stage_index
-                    if not (mb_index is not None):
+                    if mb_index is None:
                         raise AssertionError(
                             "All currently supported action types require valid microbatch_index"
                         )
@@ -1780,7 +1743,7 @@ class PipelineScheduleMulti(_PipelineSchedule):
                         computation_type = prev_rank_action.computation_type
                         mb_index = prev_rank_action.microbatch_index
                         stage_index = prev_rank_action.stage_index
-                        if not (mb_index is not None):
+                        if mb_index is None:
                             raise AssertionError(
                                 "All currently supported action types require valid microbatch_index"
                             )
@@ -1855,20 +1818,15 @@ at time_step %s when running action %s",
         self._update_losses(self._stages, losses)
 
 
+@dataclass
 class _PipelineContext:
-    def __init__(
-        self,
-        schedule_ref: _PipelineSchedule,
-        arg_mbs: list[tuple] | None = None,
-        kwarg_mbs: list[dict] | None = None,
-        target_mbs: list | None = None,
-        losses: list | None = None,
-    ):
-        self.schedule_ref = schedule_ref
-        self.arg_mbs = arg_mbs
-        self.kwarg_mbs = kwarg_mbs
-        self.target_mbs = target_mbs
-        self.losses = losses
+    """Context passed to custom functions during pipeline execution."""
+
+    schedule_ref: _PipelineSchedule
+    arg_mbs: list[tuple] | None = None
+    kwarg_mbs: list[dict] | None = None
+    target_mbs: list | None = None
+    losses: list | None = None
 
 
 class _CustomFunctionProtocol(Protocol):
@@ -1954,7 +1912,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             for rank in actions:
                 self.pipeline_order_with_comms[rank] = []
                 for action in actions[rank]:
-                    if not (action is not None):
+                    if action is None:
                         raise AssertionError(
                             f"Expected action to be not None, got {type(action)}"
                         )
@@ -2015,14 +1973,14 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
     def _dump_csv(self, filename: str, format: str = "compute_comms"):
         """Dump a CSV representation of the schedule into a file with the provided filename."""
         if format == "compute_only":
-            if not (self.pipeline_order is not None):
+            if self.pipeline_order is None:
                 raise AssertionError("Compute only schedule must be available")
             with open(filename, "w", newline="") as csvfile:
                 writer = csv.writer(csvfile)
                 for rank in self.pipeline_order:
                     writer.writerow(self.pipeline_order[rank])
         elif format == "compute_comms":
-            if not (self.pipeline_order_with_comms is not None):
+            if self.pipeline_order_with_comms is None:
                 raise AssertionError(
                     "Must initialize compute_comms schedule before dump_csv"
                 )
@@ -2074,7 +2032,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
             stage.stage_index: stage for stage in self._stages
         }
 
-        if not (self.pipeline_order_with_comms is not None):
+        if self.pipeline_order_with_comms is None:
             raise AssertionError(
                 "Must call _prepare_schedule_with_comms() before calling _step_microbatches()"
             )
@@ -2147,7 +2105,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                         raise AssertionError(
                             f"Resharding {stage_idx=} without unsharding"
                         )
-                    if not (stage_idx not in self.unshard_ops):
+                    if stage_idx in self.unshard_ops:
                         raise AssertionError(
                             f"Resharding {stage_idx=} before finishing unshard"
                         )
@@ -2271,7 +2229,7 @@ class _PipelineScheduleRuntime(PipelineScheduleMulti):
                             action, ctx
                         )
                     elif action.computation_type == OVERLAP_F_B:
-                        if not (action.sub_actions is not None):
+                        if action.sub_actions is None:
                             raise AssertionError("sub_actions must be set")
                         for sub_a in action.sub_actions:
                             _perform_action(sub_a)
@@ -2508,6 +2466,25 @@ def _get_1f1b_rank_ops(
     return rank_ops
 
 
+def _get_warmup_ops(
+    rank: int,
+    n_local_stages: int,
+    microbatches_per_round: int,
+    pp_group_size: int,
+    n_microbatches: int,
+    multiply_factor: int = 2,
+) -> int:
+    """
+    Calculate the number of warmup operations for interleaved schedules.
+    """
+    # Warmup operations for last stage
+    warmups_ops_last_stage = (n_local_stages - 1) * microbatches_per_round
+    # Increment warmup operations by multiply_factor for each hop away from the last stage
+    warmup_ops = warmups_ops_last_stage + multiply_factor * ((pp_group_size - 1) - rank)
+    # We cannot have more warmup operations than there are number of microbatches, so cap it there
+    return min(warmup_ops, n_microbatches * n_local_stages)
+
+
 class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
     """
     The Interleaved 1F1B schedule.
@@ -2570,21 +2547,14 @@ class ScheduleInterleaved1F1B(_PipelineScheduleRuntime):
         self._prepare_schedule_with_comms(self.pipeline_order)
 
     def _calculate_single_rank_operations(self, rank) -> list[_Action | None]:
-        def get_rank_warmup_ops(rank):
-            # Warms up operations for last stage
-            warmups_ops_last_stage = (
-                self.n_local_stages - 1
-            ) * self.microbatches_per_round
-            # Increment warmup operations by 2 for each hop away from the last stage
-            multiply_factor = 2
-            warmup_ops = warmups_ops_last_stage + multiply_factor * (
-                (self.pp_group_size - 1) - rank
-            )
-
-            # We cannot have more warmup operations than there are number of microbatches, so cap it there
-            return min(warmup_ops, self._n_microbatches * self.n_local_stages)
-
-        warmup_ops = get_rank_warmup_ops(rank)
+        warmup_ops = _get_warmup_ops(
+            rank,
+            self.n_local_stages,
+            self.microbatches_per_round,
+            self.pp_group_size,
+            self._n_microbatches,
+            multiply_factor=2,
+        )
         microbatch_ops = self.n_local_stages * self._n_microbatches
         # fwd_bwd_ops should encompass the remaining forwards
         fwd_bwd_ops = microbatch_ops - warmup_ops
@@ -2693,21 +2663,14 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
         self._prepare_schedule_with_comms(self.pipeline_order)
 
     def _calculate_single_rank_operations(self, rank) -> list[_Action | None]:
-        def get_rank_warmup_ops(rank):
-            # Warms up operations for last stage
-            warmups_ops_last_stage = (
-                self.n_local_stages - 1
-            ) * self.microbatches_per_round
-            # Increment warmup operations by 2 for each hop away from the last stage
-            multiply_factor = 1
-            warmup_ops = warmups_ops_last_stage + multiply_factor * (
-                (self.pp_group_size - 1) - rank
-            )
-
-            # We cannot have more warmup operations than there are number of microbatches, so cap it there
-            return min(warmup_ops, self._n_microbatches * self.n_local_stages)
-
-        warmup_ops = get_rank_warmup_ops(rank)
+        warmup_ops = _get_warmup_ops(
+            rank,
+            self.n_local_stages,
+            self.microbatches_per_round,
+            self.pp_group_size,
+            self._n_microbatches,
+            multiply_factor=1,
+        )
         microbatch_ops = self.n_local_stages * self._n_microbatches
         # fwd_bwd_ops should encompass the remaining forwards
         fwd_bwd_ops = microbatch_ops - warmup_ops
@@ -2794,7 +2757,7 @@ class ScheduleInterleavedZeroBubble(_PipelineScheduleRuntime):
 
                 if actions[rank][timestamp] is not None:
                     temp_action = actions[rank][timestamp]
-                    if not (temp_action is not None):
+                    if temp_action is None:
                         raise AssertionError(
                             f"Expected temp_action to be not None, got {type(temp_action)}"
                         )
