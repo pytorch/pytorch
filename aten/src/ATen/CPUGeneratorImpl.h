@@ -28,7 +28,7 @@ struct TORCH_API CPUGeneratorImpl : public c10::GeneratorImpl {
   std::optional<double> next_double_normal_sample();
   void set_next_float_normal_sample(std::optional<float> randn);
   void set_next_double_normal_sample(std::optional<double> randn);
-  at::mt19937 engine();
+  at::mt19937& engine();
   void set_engine(at::mt19937 engine);
 
  private:

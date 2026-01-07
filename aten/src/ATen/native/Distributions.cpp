@@ -361,10 +361,9 @@ Tensor _s_binomial_cpu(const Tensor& count, const Tensor& prob, std::optional<Ge
     CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    std::mt19937 stdgenerator(generator->random());
-    cpu_serial_kernel(iter, [&stdgenerator](scalar_t count_val, scalar_t prob_val) -> scalar_t{
+    cpu_serial_kernel(iter, [generator](scalar_t count_val, scalar_t prob_val) -> scalar_t{
       std::binomial_distribution<int64_t> dist(count_val, static_cast<double>(prob_val));
-      return dist(stdgenerator);
+      return dist(generator->engine());
     });
   });
   return ret;
@@ -380,10 +379,9 @@ Tensor _s_poisson_cpu(const Tensor& lambda, std::optional<Generator> gen) {
     CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    std::mt19937 stdgenerator(generator->random());
-    cpu_serial_kernel(iter, [&stdgenerator](scalar_t lambda_val) -> scalar_t{
+    cpu_serial_kernel(iter, [generator](scalar_t lambda_val) -> scalar_t{
       std::poisson_distribution<int64_t> dist(static_cast<double>(lambda_val));
-      return dist(stdgenerator);
+      return dist(generator->engine());
     });
   });
   return ret;
@@ -399,10 +397,9 @@ Tensor _s_gamma_cpu(const Tensor& alpha, std::optional<Generator> gen) {
     CPUGeneratorImpl* generator = get_generator_or_default<CPUGeneratorImpl>(gen, detail::getDefaultCPUGenerator());
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(generator->mutex_);
-    std::mt19937 stdgenerator(generator->random());
-    cpu_serial_kernel(iter, [&stdgenerator](scalar_t alpha_val) -> scalar_t{
+    cpu_serial_kernel(iter, [generator](scalar_t alpha_val) -> scalar_t{
       std::gamma_distribution<double> dist(alpha_val);
-      return std::max<scalar_t>(std::numeric_limits<scalar_t>::min(), dist(stdgenerator));
+      return std::max<scalar_t>(std::numeric_limits<scalar_t>::min(), dist(generator->engine()));
     });
   });
 

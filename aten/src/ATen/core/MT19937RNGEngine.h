@@ -110,6 +110,16 @@ struct mt19937_data_pod {
 class mt19937_engine {
 public:
 
+  using result_type = uint32_t;
+
+  static constexpr result_type min() {
+    return 0;
+  }
+
+  static constexpr result_type max() {
+    return 0xffffffff;
+  }
+
   // NOLINTNEXTLINE(cppcoreguidelines-pro-type-member-init)
   inline explicit mt19937_engine(uint64_t seed = 5489) {
     init_with_uint32(seed);
@@ -127,7 +137,7 @@ public:
     return data_.seed_;
   }
 
-  inline bool is_valid() {
+  inline bool is_valid() const {
     if ((data_.seeded_ == true)
       && (data_.left_ > 0 && data_.left_ <= MERSENNE_STATE_N)
       && (data_.next_ <= MERSENNE_STATE_N)) {
@@ -136,7 +146,7 @@ public:
     return false;
   }
 
-  inline uint32_t operator()() {
+  inline result_type operator()() {
     if (--(data_.left_) == 0) {
         next_state();
     }
@@ -163,11 +173,11 @@ private:
     data_.next_ = 0;
   }
 
-  inline uint32_t mix_bits(uint32_t u, uint32_t v) {
+  inline uint32_t mix_bits(uint32_t u, uint32_t v) const {
     return (u & UMASK) | (v & LMASK);
   }
 
-  inline uint32_t twist(uint32_t u, uint32_t v) {
+  inline uint32_t twist(uint32_t u, uint32_t v) const {
     return (mix_bits(u,v) >> 1) ^ (v & 1 ? MATRIX_A : 0);
   }
 
