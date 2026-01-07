@@ -300,10 +300,12 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCase):
             return x + 1
 
         def f2(x):
-            return f1(x + 2) + 4
+            # order matters! should cancel out the enable_grad
+            with torch.no_grad():
+                return f1(x + 2) + 4
 
         def f3(x):
-            with torch.no_grad():
+            with torch.enable_grad():
                 return f2(x + 8) + 16
 
         cnts = torch._dynamo.testing.CompileCounter()
