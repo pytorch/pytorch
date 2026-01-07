@@ -4280,10 +4280,8 @@ class Scheduler:
                 node1, node2 = pending_fusion.get_fusion_nodes()
 
                 if node2 == candidate:
-                    assert (
-                        is_epilogue_fusion(node1, node2)
-                        and self.get_fused_node(node2) is node2
-                    )
+                    assert is_epilogue_fusion(node1, node2)
+                    assert self.get_fused_node(node2) is node2
 
                     # Template fused with previous epilogue, no longer fusible
                     # TODO (PaulZhang12): Does not support fusions of templates with
@@ -4291,10 +4289,8 @@ class Scheduler:
                     if self.get_fused_node(node1) is not node1:
                         continue
                 else:
-                    assert (
-                        is_prologue_fusion(node1, node2)
-                        and self.get_fused_node(node1) is node1
-                    )
+                    assert is_prologue_fusion(node1, node2)
+                    assert self.get_fused_node(node1) is node1
 
                     # In prologue case, either template could have been previously fused with epilogue
                     # or could have been fused with prologue
@@ -4364,12 +4360,6 @@ class Scheduler:
         def resolve_pending_fusions(
             node1: BaseSchedulerNode, node2: BaseSchedulerNode
         ) -> None:
-            if is_template_fusion(
-                self.get_fused_node(node1), self.get_fused_node(node2)
-            ):
-                # Defer template fusions by default, will be handled later
-                return
-
             while (
                 self.get_fused_node(node1) in pending_fusions
                 or self.get_fused_node(node2) in pending_fusions
@@ -4382,10 +4372,6 @@ class Scheduler:
 
                 node_key1, node_key2 = pending_fusion.get_fusion_nodes()
                 is_speedup = pending_fusion.callable_fn
-
-                fusion_log.error(
-                    f"Removing node {node_key1} {node_key2} from pending_fusions"
-                )
 
                 pending_fusions.pop(node_key1, None)
                 pending_fusions.pop(node_key2, None)
