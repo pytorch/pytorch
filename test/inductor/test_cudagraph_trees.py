@@ -2261,14 +2261,17 @@ if HAS_CUDA_AND_TRITON:
             # is currently broken.  But testing the float case here is also
             # awkward, because we plan to Tensor-ify the float compute, and as
             # a result we'd actually expect this to work with cuda graphs!
-            with capture_stderr() as captured_output:
+            log_stream, ctx = logs_to_string("torch._inductor.scheduler", "cudagraphs")
+            with ctx(), capture_stderr() as captured_output:
                 self.assertEqual(foo(torch.tensor(3, device="cuda")), 3)
                 self.assertEqual(foo(torch.tensor(6, device="cuda")), 6)
 
             if config.graph_partition:
-                FileCheck().check("cudagraph partition due to non gpu ops").run(
-                    captured_output[0]
-                )
+                FileCheck().check_count(
+                    "op0: reason=cpu ops, ir=DynamicScalar",
+                    1,
+                    exactly=True,
+                ).run(log_stream.getvalue())
             else:
                 FileCheck().check(
                     "skipping cudagraphs due to disabling cudagraphs due to incompatible op"
