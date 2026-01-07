@@ -151,8 +151,7 @@ def varlen_attn(
     is_causal: bool = False,
     return_aux: AuxRequest | None = None,
     scale: float | None = None,
-    window_size: tuple[int, int] = (-1, -1),
-    kwargs: Any = {},
+    **kwargs,
 ) -> torch.Tensor | tuple[torch.Tensor, torch.Tensor]:
     """
     Compute variable-length attention using Flash Attention.
@@ -170,8 +169,8 @@ def varlen_attn(
         is_causal (bool, optional): If set to True, applies causal masking (default: False).
         return_aux (Optional[AuxRequest]): If not None and ``return_aux.lse`` is True, also returns the logsumexp tensor.
         scale (float, optional): Scaling factor for attention scores
-        window_size (tuple[int, int], optional): Left and right window sizes for windowed attention.
         kwargs: Additional keyword arguments for future extensions.
+            - window_size (tuple[int, int], optional): Left and right window sizes for windowed attention.
 
     Returns:
         output (Tensor): Output tensor from attention computation; shape :math:`(T_q, H, D)`.
@@ -219,6 +218,7 @@ def varlen_attn(
         ...     query, key, value, cu_seq, cu_seq, max_len, max_len, is_causal=False
         ... )
     """
+    window_size = kwargs.pop("window_size", (-1, -1))
     out, lse, _ = torch.ops.torch_attn._varlen_attn(
         query, key, value, cu_seq_q, cu_seq_k, max_q, max_k, is_causal, scale, window_size[0], window_size[1], **kwargs
     )
