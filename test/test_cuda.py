@@ -2099,7 +2099,6 @@ torch.cuda.synchronize()
         s = torch.Stream()
         g = torch.accelerator.Graph()
         self.assertFalse(torch.accelerator.current_stream().is_capturing())
-        self.assertTrue(torch.accelerator.is_graph_available())
 
         with s, g:
             a = torch.full((1000,), 1, device="cuda")

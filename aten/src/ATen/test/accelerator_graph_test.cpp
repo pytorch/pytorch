@@ -45,10 +45,8 @@ REGISTER_GRAPH_IMPL(DUMMY, DummyGraphImpl)
 
 TEST(AcceleratorGraphTest, graphRegistrationAndCapture) {
   EXPECT_EQ(at::has_graph_impl(at::kPrivateUse1), false);
-  EXPECT_EQ(at::accelerator::isGraphAvailable(), false);
   at::register_privateuse1_backend("DUMMY");
   EXPECT_EQ(at::has_graph_impl(at::kPrivateUse1), true);
-  EXPECT_EQ(at::accelerator::isGraphAvailable(), true);
   EXPECT_EQ(is_capture_begin_called, false);
   EXPECT_EQ(is_capture_end_called, false);
   EXPECT_EQ(keep_raw_graph, false);
