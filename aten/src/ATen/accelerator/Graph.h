@@ -35,6 +35,14 @@ struct TORCH_API Graph {
     return impl_->pool();
   }
 
+  void enable_debug_mode() {
+    impl_->enable_debug_mode();
+  }
+
+  void debug_dump(const std::string& path) const {
+    impl_->debug_dump(path);
+  }
+
  private:
   std::unique_ptr<at::GraphImplInterface> impl_;
 };
