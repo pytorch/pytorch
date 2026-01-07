@@ -906,7 +906,7 @@ test_dynamo_benchmark() {
     install_torchrec_and_fbgemm
   fi
   # Same pinned commit as used in TorchBench
-  pip_install git+https://github.com/facebookresearch/detectron2.git@0df2d73d0013db7de629602c23cc120219b4f2b8
+  pip_install git+https://github.com/facebookresearch/detectron2.git@0df2d73d0013db7de629602c23cc120219b4f2b8 --no-build-isolation
   pip freeze
 
   # Exclude torchrec_dlrm for CUDA 13 as FBGEMM is not compatible
