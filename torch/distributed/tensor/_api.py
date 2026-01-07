@@ -1407,4 +1407,10 @@ def zeros(  # type: ignore[no-untyped-def]
     )
 
 
+# Module-level alias for DTensor.from_local to support FX code generation.
+# FX uses __name__ instead of __qualname__ when generating code, which loses
+# the class context for static methods. This alias allows generated code like
+# `torch.distributed.tensor._api.from_local(...)` to work correctly.
+from_local = DTensor.from_local
+
 _register_device_mesh_as_opaque_type()
