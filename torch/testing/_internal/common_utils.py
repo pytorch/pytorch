@@ -103,7 +103,7 @@ except ImportError:
 SEED = 1234
 MI350_ARCH = ("gfx950",)
 MI300_ARCH = ("gfx942",)
-MI200_ARCH = ("gfx90a")
+MI200_ARCH = ("gfx90a",)
 NAVI_ARCH = ("gfx1030", "gfx1100", "gfx1101", "gfx1200", "gfx1201")
 NAVI3_ARCH = ("gfx1100", "gfx1101")
 NAVI4_ARCH = ("gfx1200", "gfx1201")
@@ -2016,6 +2016,8 @@ def getRocmArchName(device_index: int = 0):
     return torch.cuda.get_device_properties(device_index).gcnArchName
 
 def isRocmArchAnyOf(arch: tuple[str, ...]):
+    if not torch.version.hip:
+        return False
     rocmArch = getRocmArchName()
     return any(x in rocmArch for x in arch)
 
@@ -5702,6 +5704,13 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
     s = re.sub(r'https:/([a-zA-Z0-9_.-]+)', r'https://\1', s)
     s = re.sub(file, _as_posix_path(os.path.basename(file)), s)
     s = re.sub(_as_posix_path(os.path.join(os.path.dirname(torch.__file__), "")), "", s)
+    # 3.10 CALL_FUNCTION bytecode compatibility for dynamo graph break messages
+    s = re.sub(
+        r"attempting to trace CALL_FUNCTION:.*$",
+        "attempting to trace CALL: a function call, e.g. f(x, y):",
+        s,
+        flags=re.MULTILINE,
+    )
     if suppress_suffix:
         s = re.sub(r"\n*Set TORCH_LOGS.+", "", s, flags=re.DOTALL)
         s = re.sub(r"\n*You can suppress this exception.+", "", s, flags=re.DOTALL)

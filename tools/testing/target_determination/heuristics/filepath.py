@@ -111,6 +111,7 @@ class Filepath(HeuristicInterface):
     # Heuristic based on folders in the file path.  Takes each folder of each
     # changed file and attempts to find matches based on those folders
     def __init__(self, **kwargs: dict[str, Any]) -> None:
+        # pyrefly: ignore [missing-attribute]
         super().__init__(**kwargs)
 
     def get_prediction_confidence(self, tests: list[str]) -> TestPrioritizations:

@@ -4,9 +4,9 @@ description: Cleans up diskspace if the root directory has used more than sevent
 
 inputs:
     diskspace-cutoff:
-        description: The percent amount after which docker prune is run.
+        description: The absolute amount of docker diskspace required on the runner.
         required: true
-        default: 70
+        default: 200
 
 runs:
   using: composite
@@ -21,19 +21,14 @@ runs:
             echo "Docker root directory ($docker_root_dir) does not exist. Skipping disk space check."
             exit 0
         fi
-        diskspace=$(df -H --output=pcent ${docker_root_dir} | sed -n 2p | sed 's/%//' | sed 's/ //')
+        avail_gib=$(df -BG --output=avail "$docker_root_dir" | sed -n 2p | tr -d ' ' | sed 's/G$//')
         msg="Please file an issue on pytorch/pytorch reporting the faulty runner. Include a link to the runner logs so the runner can be identified"
-        if [[ "$diskspace" -ge "$diskspace_cutoff" ]] ; then
+        if [[ "$avail_gib" -le "$diskspace_cutoff" ]] ; then
             docker system prune -af
-            diskspace_new=$(df -H --output=pcent ${docker_root_dir} | sed -n 2p | sed 's/%//' | sed 's/ //')
-            if [[ "$diskspace_new" -gt "$diskspace_cutoff" ]] ; then
-                diskspace_cutoff_int=$((diskspace_cutoff + 0))
-                difference=$((100 - diskspace_cutoff_int))
-                echo "Error: Available diskspace is less than $difference percent. Not enough diskspace."
+            avail_gib=$(df -BG --output=avail "$docker_root_dir" | sed -n 2p | tr -d ' ' | sed 's/G$//')
+            if [[ "$avail_gib" -lt "$diskspace_cutoff" ]] ; then
+                echo "Error: Available diskspace is less than $diskspace-cutoff GiB. Not enough diskspace."
                 echo "$msg"
                 exit 1
-            else
-                difference=$((diskspace - diskspace_new))
-                echo "Diskspace saved: $difference percent"
             fi
         fi
