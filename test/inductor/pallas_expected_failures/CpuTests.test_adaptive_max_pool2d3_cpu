@@ -1,5 +1,2 @@
 ERROR
-  File "/home/oulgen/py312/lib/python3.12/site-packages/jax/_src/numpy/lax_numpy.py", line 8253, in argmax
-    return _argmax(arr, None if axis is None else operator.index(axis),
-                                                  ^^^^^^^^^^^^^^^^^^^^
-TypeError: 'tuple' object cannot be interpreted as an integer
+TypeError: add got incompatible shapes for broadcasting

@@ -2216,6 +2216,7 @@ class BenchmarkRunner:
                 log.warning(
                     "fp64 golden ref were not generated for %s. Setting accuracy check to cosine",
                     name,
+                    exc_info=True,
                 )
                 self.args.cosine = True
                 fp64_outputs = None
@@ -4169,14 +4170,19 @@ def run(runner, args, original_dir=None):
             write_outputs(output_filename, [], [args.only, batch_size])
         return
 
+    should_profile_details = args.profile_details
     args.profile_details = {}
     if args.export_profiler_trace:
-        if args.profile_details:
+        if should_profile_details:
             args.profile_details = {
                 "record_shapes": True,
                 "profile_memory": True,
                 "with_stack": True,
                 "with_modules": True,
+                "activities": [
+                    torch.profiler.ProfilerActivity.CPU,
+                    torch.profiler.ProfilerActivity.CUDA,
+                ],
             }
 
         if args.profiler_trace_name is None:

@@ -144,7 +144,7 @@ struct CacheKey {
         std::memcmp(key, other.key, key_size) == 0;
   }
 
-  size_t hash() const {
+  size_t hash() const noexcept {
     // don't bother hashing the key data, common case 1 cache entry per node
     return std::hash<std::type_index>()(node_type) ^ key_size;
   }
@@ -1555,7 +1555,7 @@ struct PackedArgs {
 
 template <>
 struct std::hash<torch::dynamo::autograd::CacheKey> {
-  size_t operator()(const torch::dynamo::autograd::CacheKey& k) const {
+  size_t operator()(const torch::dynamo::autograd::CacheKey& k) const noexcept {
     return k.hash();
   }
 };

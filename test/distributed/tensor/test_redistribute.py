@@ -26,7 +26,7 @@ from torch.distributed.tensor._redistribute import (
     use_min_cost_redistribution_plan,
 )
 from torch.distributed.tensor.debug import CommDebugMode
-from torch.distributed.tensor.placement_types import _StridedShard, MaskPartial
+from torch.distributed.tensor.placement_types import _MaskPartial, _StridedShard
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -1246,7 +1246,7 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
         input_data = torch.randn((8, 8), device=self.device_type)
         src_placement = [Shard(1)]
         tgt_placement = [
-            (MaskPartial(offset_shape=torch.Size([10, 20]), offset_dim=0),)
+            (_MaskPartial(offset_shape=torch.Size([10, 20]), offset_dim=0),)
         ]
         sharded_dt = _distribute_tensor(
             input_data.clone(),

@@ -421,6 +421,8 @@ class TunableOp {
 };
 
 struct OpParams {
+  OpParams() = default;
+  OpParams(const OpParams&) = default;
   virtual ~OpParams() = default;
   virtual std::string Signature() const = 0;
   virtual std::string BLASSignature() const = 0;
