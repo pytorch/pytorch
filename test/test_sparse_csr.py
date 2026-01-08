@@ -19,7 +19,7 @@ from torch.testing._internal.common_device_type import \
      precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse, largeTensorTest)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, sparse_csr_unary_ufuncs, ReductionOpInfo)
-from torch.testing._internal.common_cuda import TEST_CUDA
+from torch.testing._internal.common_cuda import with_tf32_off, TEST_CUDA
 from torch.testing._internal.common_dtype import (
     floating_types, all_types_and_complex_and, floating_and_complex_types, floating_types_and,
     all_types_and_complex, floating_and_complex_types_and)
@@ -3985,6 +3985,7 @@ class TestSparseCompressedTritonKernels(TestCase):
     @dtypesIfCUDA(torch.half, *[torch.bfloat16] if SM80OrLater else [], torch.float, torch.int8)
     @precisionOverride({torch.float16: 6e-1})
     @unittest.skipIf(IS_FBCODE and IS_REMOTE_GPU, "Test requires Triton")
+    @with_tf32_off
     def test_triton_kernel(self, op, device, dtype, blocksize, out_dtype):
         from torch.sparse._triton_ops import bsr_dense_addmm, bsr_dense_mm, _int_bsr_dense_addmm
         from torch.sparse._triton_ops_meta import (create_blocked_tensor, get_meta,
