@@ -255,7 +255,10 @@ class TestAccelerator(TestCase):
         self.assertGreater(pool2[1], pool1[1])
         self.assertEqual(pool2[0], 0)
 
-    @unittest.skipIf(not TEST_CUDA_GRAPH or TEST_CUDAMALLOCASYNC, "Requires Graph with native allocator.")
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH or TEST_CUDAMALLOCASYNC,
+        "Requires Graph support with native allocator."
+    )
     def test_graph_three_successive(self):
         gc.collect()
         torch.accelerator.empty_cache()
