@@ -2090,7 +2090,7 @@
     "SimpleQueue",
     "Tuple",
     "compatibility",
-    "stable_topological_sort",
+    "legalize_graph",
     "lift_subgraph_as_module"
   ],
   "torch.fx.tensor_type": [

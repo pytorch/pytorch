@@ -38,7 +38,7 @@ from torch.distributed.elastic.multiprocessing.subprocess_handler import (
     SubprocessHandler,
 )
 from torch.distributed.elastic.multiprocessing.tail_log import TailLog
-from torch.numa.binding import maybe_wrap_with_numa_binding, NumaOptions
+from torch.numa.binding import _maybe_wrap_with_numa_binding, NumaOptions
 
 
 IS_WINDOWS = sys.platform == "win32"
@@ -698,7 +698,7 @@ def _wrap(
         os.environ[k] = v
 
     with stdout_cm, stderr_cm:
-        fn = maybe_wrap_with_numa_binding(
+        fn = _maybe_wrap_with_numa_binding(
             fn, gpu_index=local_rank, numa_options=numa_options
         )
         ret = record(fn)(*args_)
@@ -836,7 +836,7 @@ class MultiprocessContext(PContext):
                 " of fn: %s (start_method: %s)",
                 failed_proc.exitcode,
                 failed_local_rank,
-                e.pid,
+                e.error_pid,
                 fn_name,
                 self.start_method,
             )
@@ -846,7 +846,7 @@ class MultiprocessContext(PContext):
                 failures={
                     failed_local_rank: ProcessFailure(
                         local_rank=failed_local_rank,
-                        pid=e.pid,
+                        pid=e.error_pid,
                         exitcode=failed_proc.exitcode,
                         error_file=error_filepath,
                     )

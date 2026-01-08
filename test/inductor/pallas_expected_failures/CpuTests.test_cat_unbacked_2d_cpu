@@ -1,0 +1,5 @@
+ERROR
+  File "/tmp/tmp1dzn2qvd/o2/co2o56k2yvm6po5mwz3gfv6o2cefusoc3ubuhgvtvnh6thorgd3i.py", line 11, in pallas_fused_new_ones_4d751881_kernel
+    out_ptr0[...] = tmp0.reshape(u0, 3)
+                                 ^^
+NameError: name 'u0' is not defined

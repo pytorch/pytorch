@@ -423,7 +423,9 @@ class CppWrapperCpu(PythonWrapperCodegen):
                     from torch.utils._sympy.value_ranges import bound_sympy
 
                     sym_range = bound_sympy(d, V.graph.sizevars.shape_env.var_to_range)
-                    if not math.isinf(sym_range.lower):
+                    if config.aot_inductor.check_lowerbound and not math.isinf(
+                        sym_range.lower
+                    ):
                         self.prefix.splice(
                             f"""
                                 if ({name}_size[{dim_idx}] < {sym_range.lower}) {{
@@ -824,7 +826,19 @@ class CppWrapperCpu(PythonWrapperCodegen):
                 assert isinstance(tensor, torch.Tensor)
                 self.prefix.writeline(f"""constants_info_[{idx}].name = "{name}";""")
                 self.prefix.writeline(
-                    f"constants_info_[{idx}].dtype = static_cast<int32_t>({self.codegen_dtype(tensor.dtype)});"
+                    f"constants_info_[{idx}].dtype = {self.codegen_dtype(tensor.dtype)};"
+                )
+                # Mixed-device constants are only supported when the secondary device is CPU
+                if tensor.device.type != self.device and tensor.device.type != "cpu":
+                    raise AssertionError(
+                        f"Mixed-device constants are only supported when the secondary "
+                        f"device is CPU. Model device is '{self.device}', but constant "
+                        f"'{name}' is on device '{tensor.device}'."
+                    )
+                # device_index is not needed because it can be set at runtime
+                device_type, _ = self.codegen_device(tensor.device).split(", ")
+                self.prefix.writeline(
+                    f"constants_info_[{idx}].device_type = {device_type};"
                 )
                 self.prefix.writeline(
                     f"constants_info_[{idx}].offset = {tensor.storage_offset()};"
@@ -2640,19 +2654,13 @@ if (!custom_op_wrapper) {
                 )
             dispatch_lines.writeline(");")
 
-            if len(output_args) == 1 and (output := output_args[0]) is not None:
-                # result is a single tensor
+            # assign result(s), ignoring None
+            for idx, output_arg in enumerate(output_args):
+                if output_arg is None:
+                    continue
                 dispatch_lines.writeline(
-                    f"{output} = torch::stable::detail::to<AtenTensorHandle>(dispatch_vars[0]);"
+                    f"{output_arg} = torch::stable::detail::to<AtenTensorHandle>(dispatch_vars[{idx}]);"
                 )
-            else:
-                # result is a tuple of tensors
-                for idx, output_arg in enumerate(output_args):
-                    if output_arg is None:
-                        continue
-                    dispatch_lines.writeline(
-                        f"{output_arg} = torch::stable::detail::to<AtenTensorHandle>(dispatch_vars[{idx}]);"
-                    )
 
         dispatch_lines.writeline("}")
         self.writelines(dispatch_lines.getvalue().splitlines())

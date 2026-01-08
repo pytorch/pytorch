@@ -19,6 +19,7 @@ import atexit
 import collections
 import dis
 import functools
+import glob
 import hashlib
 import inspect
 import itertools
@@ -312,6 +313,7 @@ def lru_cache(
 def uninteresting_files() -> set[str]:
     import torch._compile
     import torch._dynamo.eval_frame
+    import torch._higher_order_ops
     import torch._inductor.sizevars
     import torch._library.custom_ops
     import torch._library.fake_impl
@@ -340,8 +342,15 @@ def uninteresting_files() -> set[str]:
     ]
     import torch._dynamo.guards
 
+    files = {inspect.getfile(m) for m in mods}
+
+    # Add all Python files in torch._higher_order_ops directory
+    higher_order_ops_dir = os.path.dirname(torch._higher_order_ops.__file__)
+    hop_files = glob.glob(os.path.join(higher_order_ops_dir, "*.py"))
+
     return (
-        {inspect.getfile(m) for m in mods}
+        files
+        | set(hop_files)
         | torch._dynamo.guards.uninteresting_files()
         | {"<string>"}
     )
@@ -369,7 +378,8 @@ def hint_int(a: Union[torch.SymInt, int], fallback: Optional[int] = None) -> int
     """
     Retrieve the hint for an int (based on the underlying real values as observed
     at runtime).  If no hint is available (e.g., because data dependent shapes),
-    if fallback is not None, use that instead (otherwise raise an error).
+    if fallback is not None, use that instead to hint each unbacked symbol individually
+    (otherwise raise an error).
     """
     if isinstance(a, torch.SymInt):
         return a.node.require_hint(fallback)
@@ -1192,6 +1202,38 @@ def _free_unbacked_symbols_with_path(
     if pending is None:
         pending = set()
     r = {}
+
+    def match_tensor(a: torch.Tensor, real_tensor: Optional[torch.Tensor] = None):
+        r.update(
+            go(
+                a.size(),
+                path + (CallMethodKey("size"),),
+                real=real_tensor.size() if real_tensor is not None else None,
+            )
+        )
+        if a.layout not in [
+            torch.sparse_csr,
+            torch.sparse_csc,
+            torch.sparse_bsr,
+            torch.sparse_bsc,
+        ]:
+            r.update(
+                go(
+                    a.stride(),
+                    path + (CallMethodKey("stride"),),
+                    real=real_tensor.stride() if real_tensor is not None else None,
+                )
+            )
+        r.update(
+            go(
+                a.storage_offset(),
+                path + (CallMethodKey("storage_offset"),),
+                real=(
+                    real_tensor.storage_offset() if real_tensor is not None else None
+                ),
+            )
+        )
+
     if isinstance(a, (tuple, list)):
         # NB: real is apparently not always a tuple/list here
         # python test/inductor/test_torchinductor.py CpuTests.test_index_propagation_nested_indirect_indexing_cpu
@@ -1209,6 +1251,12 @@ def _free_unbacked_symbols_with_path(
         for attr in attrs:
             sub = getattr(a, attr)
             r.update(go(sub, path + (InnerTensorKey(attr),)))
+
+        # match DTensor outer shapes
+        if torch.distributed.is_available() and isinstance(
+            a, torch.distributed.tensor.DTensor
+        ):
+            match_tensor(a)
     elif isinstance(a, torch.Tensor) and is_batchedtensor(a):
         unwrapped_tensor = get_unwrapped(a)
         r.update(go(unwrapped_tensor, path))
@@ -1216,38 +1264,7 @@ def _free_unbacked_symbols_with_path(
         from torch._subclasses.fake_tensor import FakeTensor
 
         assert isinstance(a, FakeTensor)
-        r.update(
-            go(
-                a.size(),
-                path + (CallMethodKey("size"),),
-                real=a.real_tensor.size() if a.real_tensor is not None else None,
-            )
-        )
-        if a.layout not in [
-            torch.sparse_csr,
-            torch.sparse_csc,
-            torch.sparse_bsr,
-            torch.sparse_bsc,
-        ]:
-            r.update(
-                go(
-                    a.stride(),
-                    path + (CallMethodKey("stride"),),
-                    real=a.real_tensor.stride() if a.real_tensor is not None else None,
-                )
-            )
-        r.update(
-            go(
-                a.storage_offset(),
-                path + (CallMethodKey("storage_offset"),),
-                real=(
-                    a.real_tensor.storage_offset()
-                    if a.real_tensor is not None
-                    else None
-                ),
-            )
-        )
-
+        match_tensor(a, a.real_tensor)
     elif (
         isinstance(a, (torch.SymInt, torch.SymFloat))
         and isinstance(s := expr(a), sympy.Symbol)
@@ -1351,19 +1368,24 @@ def compute_unbacked_bindings(
     if shape_env is None:
         return None
 
-    fs = shape_env.pending_fresh_unbacked_symbols
+    fresh_sym = shape_env.pending_fresh_unbacked_symbols
+    ign_sym = shape_env.ignorable_fresh_unbacked_symbols
 
-    pending = set(fs)
+    pending = set(fresh_sym)
+    ignorable = set(ign_sym)
+    if not peek:
+        if pending:
+            log.info("compute_unbacked_bindings %s", fresh_sym)
+        fresh_sym.clear()
+        ign_sym.clear()
+
     if not pending:
         return None
-
-    if not peek:
-        log.info("compute_unbacked_bindings %s", fs)
-        fs.clear()
 
     symbol_to_path = _free_unbacked_symbols_with_path(
         example_value, (), shape_env=shape_env, pending=pending, simplify=False
     )
+    pending -= ignorable
     if not peek and pending:
         extra = (
             repr((example_value.stride(), example_value.storage_offset()))
@@ -1862,12 +1884,10 @@ class DimDynamic(Enum):
     DUCK = 1
     # Treat the dimension statically based on its hint
     STATIC = 2
-    # Treat the dimension as a size-like unbacked
-    SIZE_LIKE_UNBACKED = 3
+    # Treat the dimension as unbacked
+    UNBACKED = 3
     # Infer the strides from stride. If size is static, strides will be static as well.
     INFER_STRIDE = 4
-    # Like SIZE_LIKE_UNBACKED, but there's a hint
-    OBLIVIOUS_SIZE = 5
 
 
 # NB: These constraints affect both clients and backends: given some
@@ -2247,9 +2267,9 @@ class TrackedFake:
     Used by shape guard computation.
     """
 
-    fake: Union[FakeTensor, SymInt]
+    fake: FakeTensor | SymInt | SymFloat
     source: Source
-    symbolic_context: Optional[SymbolicContext]
+    symbolic_context: SymbolicContext | None
 
     def __hash__(self) -> int:
         return hash((self.fake, self.source.name))
@@ -3796,10 +3816,6 @@ class ShapeEnv:
         # Like var_to_val, but only set when propagate_real_tensors is on.
         # Used as last resort to avoid GuardOnDataDependent error
         self.unbacked_var_to_val: dict[sympy.Symbol, sympy.Integer] = {}
-        # Like above, but used exclusively for OBLIVIOUS_SIZE.  These
-        # potentially could be put together but I am not sure, writing out
-        # the logic individually before abstracting.
-        self.oblivious_var_to_val: dict[sympy.Symbol, sympy.Integer] = {}
         # Maps symbolic ints to their min/max range.  These ranges
         # are conservative: the int MUST fall in the range, but the
         # range may contain ints which may not actually appear in
@@ -3897,6 +3913,9 @@ class ShapeEnv:
         # NB: fresh unbacked symbols NEVER get substitutions applied to them,
         # they are binding sites!
         self.pending_fresh_unbacked_symbols: list[sympy.Symbol] = []
+        # These are symbols which we'd like to process as pending, but if
+        # they're missing then it's okay too.
+        self.ignorable_fresh_unbacked_symbols: list[sympy.Symbol] = []
 
         # Version counter used to invalidate cached values
         self._prev_cache_key = self._get_key()
@@ -5060,7 +5079,7 @@ class ShapeEnv:
                 source_name
             ]
 
-        if dynamic_dim in (DimDynamic.SIZE_LIKE_UNBACKED, DimDynamic.OBLIVIOUS_SIZE):
+        if dynamic_dim is DimDynamic.UNBACKED:
             out = self.create_unbacked_symint(source).node.expr
             self._constrain_range_for_size(out)
 
@@ -5070,8 +5089,6 @@ class ShapeEnv:
                 symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][
                     source_name
                 ] = out
-            if dynamic_dim is DimDynamic.OBLIVIOUS_SIZE:
-                self.oblivious_var_to_val[out] = val
             return out
 
         if do_not_specialize_zero_one:
@@ -5143,7 +5160,7 @@ class ShapeEnv:
 
             if duck:
                 # Make sure to reuse this symbol for subsequent duck shaping
-                # pyrefly: ignore [unsupported-operation]
+
                 self.val_to_var[val] = sympy_expr
 
             if isinstance(val, int):
@@ -5387,7 +5404,6 @@ class ShapeEnv:
             for i, (t, context) in enumerate(zip(placeholders, input_contexts)):
                 if isinstance(t, Tensorlike):
                     if context is None:
-                        # pyrefly: ignore [bad-argument-type]
                         input_contexts[i] = _create_no_constraints_context(t)
                 else:
                     assert isinstance(t, (SymInt, int, SymFloat, float))
@@ -6565,34 +6581,6 @@ class ShapeEnv:
             if allow_none:
                 return None
 
-            if self.oblivious_var_to_val:
-                # See https://github.com/pytorch/pytorch/issues/137100#issuecomment-2495778113
-                correct_hint = result_expr.xreplace(self.oblivious_var_to_val)
-                counterfactual_hint = result_expr.xreplace(
-                    {k: max(v, 2) for k, v in self.oblivious_var_to_val.items()}
-                )
-                if (
-                    not correct_hint.free_symbols
-                    and not counterfactual_hint.free_symbols
-                ):
-                    if correct_hint == counterfactual_hint:
-                        log.info("oblivious_size hit %s -> %s", expr, correct_hint)
-                        return correct_hint
-                    else:
-                        log.info(
-                            "oblivious_size counterfactual failed %s -> %s != %s",
-                            expr,
-                            correct_hint,
-                            counterfactual_hint,
-                        )
-                else:
-                    log.info(
-                        "oblivious_size miss %s -> %s (counterfactual: %s)",
-                        expr,
-                        correct_hint,
-                        counterfactual_hint,
-                    )
-
             if self.unbacked_var_to_val:
                 unsound_expr = result_expr.xreplace(self.unbacked_var_to_val)
                 if not unsound_expr.free_symbols:
@@ -7588,36 +7576,6 @@ class ShapeEnv:
                     if not ok and fallback_value is not None:
                         self._log_suppressed_dde(orig_expr, fallback_value)
                         return fallback_value
-
-                    # oblivious_var_to_val will be defined iff we have sizes with DimDynamic.OBLIVIOUS_SIZE type.
-                    # See https://github.com/pytorch/pytorch/issues/137100#issuecomment-2495778113
-                    if (
-                        self.oblivious_var_to_val
-                        and not (
-                            correct_hint := orig_expr.xreplace(
-                                self.oblivious_var_to_val
-                            )
-                        ).free_symbols
-                        and not (
-                            counterfactual_hint := orig_expr.xreplace(
-                                {
-                                    k: max(2, v)
-                                    for k, v in self.oblivious_var_to_val.items()
-                                }
-                            )
-                        ).free_symbols
-                        and correct_hint == counterfactual_hint
-                    ):
-                        # TODO: better logging
-                        log.info(
-                            "oblivious_size %s -> %s (passed counterfactual)",
-                            orig_expr,
-                            correct_hint,
-                        )
-
-                        concrete_val = correct_hint
-                        # NB: do NOT transmute into runtime assert
-                        ok = True
 
                     # unbacked_var_to_val is not None iff propagate_real_tensors is on.
                     # if propagate_real_tensors is on, we check the example values to generate (unsound_result)

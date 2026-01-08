@@ -1,5 +1,4 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch_v2.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
