@@ -378,6 +378,12 @@ class DeviceOpOverrides:
         # optionally return (scratch definition, arg name)
         raise NotImplementedError
 
+    def get_device_arch(self) -> str:
+        raise NotImplementedError
+
+    def get_toolkit_version(self) -> str:
+        raise NotImplementedError
+
 
 device_op_overrides_dict: dict[str, DeviceOpOverrides] = {}
 custom_backend_passes: dict[str, Optional[CustomGraphModulePass]] = {}
