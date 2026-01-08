@@ -4,12 +4,24 @@ set -ex
 
 if [ -n "$CLANG_VERSION" ]; then
 
-  if [[ $UBUNTU_VERSION == 22.04 ]]; then
+  ubuntu_codename=""
+
+  case "$UBUNTU_VERSION" in
+    22.04)
+      ubuntu_codename="jammy"
+      ;;
+    24.04)
+      ubuntu_codename="noble"
+      ;;
+  esac
+
+  if [[ -n "$ubuntu_codename" ]]; then
     # work around ubuntu apt-get conflicts
     sudo apt-get -y -f install
     wget --no-check-certificate -O - https://apt.llvm.org/llvm-snapshot.gpg.key | sudo apt-key add -
-    if [[ $CLANG_VERSION -ge 18 ]]; then
-      apt-add-repository "deb http://apt.llvm.org/jammy/ llvm-toolchain-jammy-${CLANG_VERSION} main"
+
+    if [[ "$CLANG_VERSION" -ge 18 ]]; then
+      apt-add-repository "deb http://apt.llvm.org/${ubuntu_codename}/ llvm-toolchain-${ubuntu_codename}-${CLANG_VERSION} main"
     fi
   fi
 
