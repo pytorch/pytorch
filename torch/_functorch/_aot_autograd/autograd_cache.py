@@ -150,6 +150,7 @@ def check_node_safe(node: Node):
         "torch.sym_float",
         "torch.sym_sum",
         "torch.autograd.grad",
+        "torch.distributed.tensor._api.from_local",
     )
     SAFE_NON_TORCH_FUNCTIONS = (
         "einops.einops.rearrange",

@@ -1208,7 +1208,9 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> c10d.GroupName:
             dim = group[1]
             return dmesh._dim_group_names[dim]
         else:
-            raise ValueError("Invalid tuple for group must be (DeviceMesh, int)")
+            raise ValueError(
+                f"Invalid tuple for group must be (DeviceMesh, int). Instead got {(type(group[0]), type(group[1]))}"
+            )
     elif isinstance(group, list):
         if not is_torchdynamo_compiling():
             warnings.warn(
