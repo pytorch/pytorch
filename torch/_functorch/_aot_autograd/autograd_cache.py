@@ -149,6 +149,7 @@ def check_node_safe(node: Node):
         "torch._sym_sqrt",
         "torch.sym_float",
         "torch.sym_sum",
+        "torch.distributed.tensor._api.from_local",
     )
     SAFE_NON_TORCH_FUNCTIONS = (
         "einops.einops.rearrange",
@@ -165,7 +166,7 @@ def check_node_safe(node: Node):
 
     def is_safe_torch_function(target):
         """Allowlisted torch functions"""
-        function_name = f"{target.__module__}.{target.__name__}"
+        function_name = f"{target.__module__}.{target.__qualname__}"
         # Allow torch.autograd.function.FunctionCtx if custom autograd functions are allowed
         if function_name == "torch.autograd.function.FunctionCtx":
             return (
