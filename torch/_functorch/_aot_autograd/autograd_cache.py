@@ -839,6 +839,39 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
         """
         return os.path.join(cls._get_tmp_dir(), key)
 
+    @classmethod
+    def _record_result(
+        cls: type[AOTAutogradCache],
+        _key: str,
+        local_hit: bool,
+        local_miss: bool,
+        remote_hit: bool,
+        remote_miss: bool,
+    ) -> None:
+        """
+        Called by GuardedCache to record hit/miss statistics.
+        """
+        if local_hit:
+            CompileEventLogger.try_(
+                CompileEventLogger.increment_toplevel,
+                "aotautograd_local_cache_hit_count",
+            )
+        if remote_hit:
+            CompileEventLogger.try_(
+                CompileEventLogger.increment_toplevel,
+                "aotautograd_remote_cache_hit_count",
+            )
+        if local_miss:
+            CompileEventLogger.try_(
+                CompileEventLogger.increment_toplevel,
+                "aotautograd_local_cache_miss_count",
+            )
+        if remote_miss:
+            CompileEventLogger.try_(
+                CompileEventLogger.increment_toplevel,
+                "aotautograd_remote_cache_miss_count",
+            )
+
     @staticmethod
     def evaluate_guards(guard_expr: str, hints: Union[list[int], list[torch.SymInt]]):
         if torch._inductor.config.unsafe_skip_cache_dynamic_shape_guards:

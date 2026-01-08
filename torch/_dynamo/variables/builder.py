@@ -246,6 +246,7 @@ from .misc import (
     MethodWrapperVariable,
     NumpyDTypeVariable,
     NumpyVariable,
+    ObjectVariable,
     PythonModuleVariable,
     RandomClassVariable,
     RandomVariable,
@@ -581,12 +582,12 @@ class VariableBuilder:
 
         return result
 
-    def wrap_regex_pattern(self, value: re.Pattern) -> ConstantLikeVariable:
+    def wrap_regex_pattern(self, value: re.Pattern[Any]) -> ConstantLikeVariable:
         # TODO(jansel): something like a REPR_MATCH might be more robust here
         self.install_guards(GuardBuilder.ID_MATCH)
         return ConstantLikeVariable(value)
 
-    def wrap_weakref(self, value: weakref.ReferenceType) -> WeakRefVariable:
+    def wrap_weakref(self, value: weakref.ReferenceType[Any]) -> WeakRefVariable:
         self.install_guards(GuardBuilder.TYPE_MATCH)
         return WeakRefVariable.build(self.tx, value, source=self.source)
 
@@ -628,7 +629,9 @@ class VariableBuilder:
                 ],
             )
 
-        def build_key_value(k, v):
+        def build_key_value(
+            k: Any, v: Any
+        ) -> tuple[VariableTracker, LazyVariableTracker]:
             key = ConstantVariable.create(k)
             source_key = k
 
@@ -640,6 +643,7 @@ class VariableBuilder:
         items = dict(build_key_value(k, v) for k, v in value.items())
 
         # Create a dict_vt to be used in the mapping proxy variable
+        # pyrefly: ignore[bad-argument-type]
         dict_vt = ConstDictVariable(items, source=None)
         result = MappingProxyVariable(dict_vt, source=self.source)
         return self.tx.output.side_effects.track_mutable(value, result)
@@ -1065,7 +1069,8 @@ class VariableBuilder:
             )
             return GetAttrVariable(
                 AutogradFunctionVariable(
-                    value.__self__, source=AttrSource(self.source, member="__self__")
+                    value.__self__,
+                    source=AttrSource(self.source, member="__self__"),
                 ),
                 "apply",
             )
@@ -1595,7 +1600,9 @@ class VariableBuilder:
 
             # We need all the keys to be hashable. We do this within the
             # _HashableTracker class in dicts.py
-            def build_key_value(i, k, v):
+            def build_key_value(
+                i: Any, k: Any, v: Any
+            ) -> tuple[LazyVariableTracker, LazyVariableTracker]:
                 base = self.get_source()
                 source_key = ConstDictKeySource(base, i)
                 key = LazyVariableTracker.create(k, source_key)
@@ -1615,6 +1622,7 @@ class VariableBuilder:
             )
 
             dict_vt = ConstDictVariable(
+                # pyrefly: ignore[bad-argument-type]
                 result,
                 user_cls=(
                     collections.OrderedDict
@@ -1753,6 +1761,9 @@ class VariableBuilder:
                 return self.wrap_symint(value.val, dynamism=DimDynamic.DYNAMIC)
             else:
                 raise RuntimeError(f"Undefined dynamism {value.dynamism}")
+        elif istype(value, object):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return ObjectVariable(value, source=self.source)
         else:
             return self.wrap_user_defined(value)
 
@@ -1765,7 +1776,7 @@ class VariableBuilder:
         return self.tx.output.side_effects.track_object_existing(value, result)
 
     def wrap_listlike(
-        self, value: Union[tuple, list, odict_values, NamedTuple]
+        self, value: Union[tuple[Any, ...], list[Any], odict_values, NamedTuple]
     ) -> VariableTracker:
         for item in value:
             if item is value:
@@ -1931,9 +1942,9 @@ class VariableBuilder:
         # As long as this runs before AOT this is sound
         if value in self.tx.output.side_effects:
             var = self.tx.output.side_effects[value]
-            # type: ignore[attr-defiend]
+            # type: ignore[attr-defined]
             var.proxy.node.meta["tensor_dict"]["_dynamo_static_input_type"] = (
-                # type: ignore[attr-defiend]
+                # type: ignore[attr-defined]
                 value._dynamo_static_input_type
             )
 
@@ -2111,7 +2122,7 @@ class VariableBuilder:
 
             if is_unbacked_source(self.source.name):
                 log.debug("%s marked unbacked via source whitelist", self.source.name)
-                return self.wrap_symint(value, dynamism=DimDynamic.SIZE_LIKE_UNBACKED)
+                return self.wrap_symint(value, dynamism=DimDynamic.UNBACKED)
 
             if not config.specialize_int:
                 # unspecializing int by default, but still
@@ -3168,6 +3179,8 @@ def handle_traced_output(
         and isinstance(proxy.node.target.__self__, torch._C.Generator)
         or proxy.node.target is torch.random.set_rng_state
     ):
+        assert type(proxy.node.target) is not str
+        # pyrefly: ignore[bad-argument-type]
         return TorchInGraphFunctionVariable(proxy.node.target)
     elif (
         proxy.node.target is torch._C._DisableFuncTorch
@@ -3203,7 +3216,9 @@ def handle_traced_output(
                     source = options["source"]
                     options_i = options.copy()
                     options_i["source"] = GetItemSource(
-                        base=source, index=i, index_is_slice=False
+                        base=source,
+                        index=i,
+                        index_is_slice=False,
                     )
                 else:
                     # use the same options object as parent
@@ -3442,9 +3457,7 @@ def get_automatic_dynamic_shapes_mark_as() -> DimDynamic:
     if config.automatic_dynamic_shapes_mark_as == "dynamic":
         return DimDynamic.DYNAMIC
     elif config.automatic_dynamic_shapes_mark_as == "unbacked":
-        return DimDynamic.SIZE_LIKE_UNBACKED
-    elif config.automatic_dynamic_shapes_mark_as == "oblivious":
-        return DimDynamic.OBLIVIOUS_SIZE
+        return DimDynamic.UNBACKED
     else:
         raise ValueError(
             f"invalid automatic_dynamic_shapes_mark_as = {config.automatic_dynamic_shapes_mark_as}"
@@ -3653,7 +3666,9 @@ def _automatic_dynamic(
     t_id = id(e)
     dim2constraint = {}
 
-    def update_dim2constraint(dim, constraint_range, name):
+    def update_dim2constraint(
+        dim: int, constraint_range: "StrictMinMaxConstraint", name: str
+    ) -> None:
         if dim in dim2constraint:
             from torch.fx.experimental.symbolic_shapes import StrictMinMaxConstraint
 
@@ -3791,7 +3806,7 @@ def _automatic_dynamic(
         constraint_strides.append(constraint_stride)
 
         if marked_unbacked or is_unbacked_source(name):
-            dynamic_size = DimDynamic.SIZE_LIKE_UNBACKED
+            dynamic_size = DimDynamic.UNBACKED
         elif (
             constraint_size is not None
             or marked_dynamic
@@ -4044,11 +4059,8 @@ class SourcelessBuilder:
         ):
             proxy = tx.output.bound_symbols[value.node.expr]
             return SymNodeVariable.create(tx, proxy)
-        elif is_opaque_value_type(type(value)):
-            return TorchScriptObjectVariable.create(
-                value,
-                value,
-            )
+        elif istype(value, object):
+            return ObjectVariable(value)
         unimplemented(
             gb_type="Unexpected type in sourceless builder",
             context=f"{value_type.__module__}.{value_type.__qualname__}",
@@ -4057,7 +4069,7 @@ class SourcelessBuilder:
         )
 
     @staticmethod
-    def wrap_constant_literal(value) -> VariableTracker:
+    def wrap_constant_literal(value: object) -> VariableTracker:
         assert ConstantVariable.is_literal(value)
         return ConstantVariable.create(value=value)
 
