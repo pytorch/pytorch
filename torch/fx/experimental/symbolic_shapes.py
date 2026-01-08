@@ -3806,8 +3806,8 @@ class ShapeEnv:
         self.unique_ids: set[int] = set()
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
-        # when hint is overriden in mark_dynamic, the value stored in
-        # self.var_to_val is the overriden hint.
+        # when hint is overridden in mark_dynamic, the value stored in
+        # self.var_to_val is the overridden hint.
         # only used for backed dynamic shapes symbols.
         self.var_to_val: dict[sympy.Symbol, sympy.Integer] = {}
         # Like var_to_val, but only set when propagate_real_tensors is on.
@@ -4685,11 +4685,6 @@ class ShapeEnv:
             )
             for i, (sym, hint) in enumerate(zip(size, ex_size))
         ]
-        symbol_to_override_hint = {}
-
-        for i, s in enumerate(size):
-            if i in hint_overrides:
-                symbol_to_override_hint[s] = hint_overrides[i]
 
         for i, sym in enumerate(sym_sizes):
             if isinstance(sym, torch.SymInt) and i in hint_overrides:
@@ -4700,7 +4695,7 @@ class ShapeEnv:
             # NB: Don't duck size the stride; instead use the expression
             # we computed
             assert stride_expr is not None
-            hint_stride = stride_expr.xreplace(self.var_to_hint_override)
+            hint_stride = stride_expr.xreplace(self.var_to_val)
             if isinstance(hint_stride, (int, sympy.core.numbers.Integer)):
                 hint_stride = int(hint_stride)
             else:
@@ -6967,9 +6962,6 @@ class ShapeEnv:
             if hint_size is None:
                 size = sys.maxsize
             elif symbol_is_type(x, SymT.SIZE):
-                import fbvscode
-
-                fbvscode.set_trace()
                 assert isinstance(hint_size, sympy.Expr)
                 size = int(hint_size)
             else:

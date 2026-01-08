@@ -601,7 +601,7 @@ class SizeVarAllocator:
     ) -> int:
         if isinstance(expr, SymInt):
             raise TypeError(
-                "wrong API usage!, did you mean to use size_hint from torch.fx.experimental.symbolic_shapes"
+                "wrong API usage!, use size_hint from torch.fx.experimental.symbolic_shapes or pass sympy expressions instead"
             )
 
         out = self.symbolic_hint(
