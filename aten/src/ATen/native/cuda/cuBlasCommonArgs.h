@@ -190,7 +190,8 @@ struct cublasCommonArgs {
       // NOTE: self and result are different tensors here
       // NOTE: possible Lt dispatch with self.dtype == result.dtype == Float and
       // mat1.dtype/mat2.dtype if of reduced float type -- we do not have
-      // such a kernel specialization yet.
+      // such a kernel specialization yet, so need to copy bias.
+      must_copy_bias = true;
       return;
     }
     const bool can_use_1D_bias_no_copy = (

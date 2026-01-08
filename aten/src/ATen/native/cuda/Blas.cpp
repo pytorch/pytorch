@@ -336,13 +336,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   cublasCommonArgs args(mat1, mat2, result, self, beta);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!args.result->is_conj());
 
-  // Copy bias into result and set args' bias vars to default
-  const auto copy_bias_into_result = [](cublasCommonArgs& args, const Tensor& bias) -> void {
-    // NOTE: self should broadcast over result
-    (*args.result).copy_(*expand_size(bias, args.result->sizes(), "addmm"));
-    args.set_default_bias_vars();
-  };
-
+  // Handle copying bias (self) into result {
   const bool can_avoid_bias_copy = (
     // BLAS path without out-of-place/epilogue bias
     (disable_addmm_cuda_lt && !args.bias.has_value())
@@ -350,20 +344,30 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     || (!disable_addmm_cuda_lt && !args.must_copy_bias_into_result())
   );
 
-  // Handle copying bias (self) into result
-  // result.is_complex implies BLAS path, so we need to copy bias (self) into result
-  if (result.is_complex() && args.bias.has_value()) {
-    copy_bias_into_result(args, **args.bias);
-  } else if (!can_avoid_bias_copy) {
-    copy_bias_into_result(args, args.bias.has_value() ? **args.bias : self);
+  // Copy bias into result and set args' bias vars to default
+  const auto copy_bias_into_result = [](cublasCommonArgs& args, const Tensor& bias) -> void {
+    if (args.result->is_same(bias)) {
+      return;
+    }
+    // NOTE: self should broadcast over result
+    (*args.result).copy_(*expand_size(bias, args.result->sizes(), "addmm"));
+    args.set_default_bias_vars();
+  };
+
+  if (can_avoid_bias_copy) { // Unfortunately, there are exceptions when bias is copied anyway.
+    // result.is_complex implies BLAS path, so we need to copy bias (self) into result
+    if (result.is_complex() && args.bias.has_value()) {
+      copy_bias_into_result(args, **args.bias);
+    }
+    // FIXME: Float output with reduced self/mat1/mat2 dtype produces incorrect results,
+    // unless bias (self) is copied into result
+    if (!disable_addmm_cuda_lt && is_float_output_with_half_input && args.bias.has_value()) {
+      copy_bias_into_result(args, **args.bias);
+    }
   } else {
-    copy_bias_into_result(args, self);
+    copy_bias_into_result(args, args.bias.has_value() ? **args.bias : self);
   }
-  // FIXME: Float output with reduced self/mat1/mat2 dtype produces incorrect results,
-  // unless bias (self) is copied into result
-  if (!disable_addmm_cuda_lt && is_float_output_with_half_input && args.bias.has_value()) {
-    copy_bias_into_result(args, **args.bias);
-  }
+  // }
 
   // The Lt path
   if (!disable_addmm_cuda_lt) {

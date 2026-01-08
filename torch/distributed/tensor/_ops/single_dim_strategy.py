@@ -1,7 +1,7 @@
 #  Copyright (c) Meta Platforms, Inc. and affiliates
+import functools
 import logging
 from collections.abc import Callable, Sequence
-from functools import lru_cache
 from typing import Any, cast, Optional, TypeAlias, TypeVar, Union
 
 import torch
@@ -98,9 +98,8 @@ def _fill_single_dim_strategy_placeholders(
         if isinstance(placement, _StridedShard):
             key = f"StridedShard(sf={placement.split_factor})"
             if key not in shard_builders:
-                sf = placement.split_factor
-                shard_builders[key] = lambda tensor_dim: _StridedShard(
-                    tensor_dim, split_factor=sf
+                shard_builders[key] = functools.partial(
+                    _StridedShard, split_factor=placement.split_factor
                 )
         elif isinstance(placement, Shard):
             key = "Shard()"
@@ -181,7 +180,7 @@ def _expand_single_dim_strategy_to_mesh(
     # Note: circular import, failed to untangle with #168221, reverted
     from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 
-    @lru_cache
+    @functools.lru_cache
     def _create_expanded_strategy(
         op_schema: OpSchema,
         output_tensor_meta: TensorMeta | Sequence[TensorMeta | None],
