@@ -8,7 +8,6 @@ import torch
 from .. import config as inductor_config
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import lowerings
-from ..runtime.caching import decoders, encoders, memoizers
 from ..select_algorithm import (
     autotune_select_algorithm,
     ExternKernelChoice,
@@ -126,11 +125,6 @@ mm_plus_mm_template = TritonTemplate(
 )
 
 
-@memoizers.tuned_mm_plus_mm_memoizer.memoize(
-    custom_params_encoder=encoders.tuned_mm_plus_mm_params_encoder,
-    custom_result_encoder=encoders.tuned_kernel_result_encoder,
-    custom_result_decoder=decoders.tuned_mm_plus_mm_result_decoder,
-)
 def tuned_mm_plus_mm(mat1, mat2, mat3, mat4, *, layout=None):
     """
     Computes mm(mat1, mat2) + mm(mat3, mat4)
