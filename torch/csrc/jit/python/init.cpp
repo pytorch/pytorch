@@ -1617,7 +1617,18 @@ void initJITBindings(PyObject* module) {
             auto scalar_type =
                 reinterpret_cast<THPDtype*>(data_type_obj.ptr())->scalar_type;
 
-            TORCH_INTERNAL_ASSERT(size == numel * elementSize(scalar_type));
+            TORCH_CHECK(
+                size == numel * elementSize(scalar_type),
+                "record size (",
+                size,
+                " bytes) does not match expected size (",
+                numel * elementSize(scalar_type),
+                " bytes = ",
+                numel,
+                " elements * ",
+                elementSize(scalar_type),
+                " bytes/element) for dtype ",
+                scalar_type);
 
             c10::Storage storage(
                 c10::Storage::use_byte_size_t(),

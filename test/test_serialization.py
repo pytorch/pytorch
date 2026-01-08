@@ -5188,8 +5188,8 @@ class TestSubclassSerialization(TestCase):
             torch.load(modified_buffer, weights_only=True)
 
     def test_weights_only_arbitrary_numel_in_persistent_id_rejected(self):
-        # Test that a mismatched numel in persistent_id causes an assertion failure
-        # The C++ fix adds TORCH_INTERNAL_ASSERT that record size == numel * element_size
+        # Test that a mismatched numel in persistent_id causes an error
+        # The C++ code checks that record size == numel * element_size
         t = torch.randn(10)  # 10 float32 elements = 40 bytes
 
         with BytesIOContext() as f:
@@ -5220,8 +5220,7 @@ class TestSubclassSerialization(TestCase):
 
         modified_archive.seek(0)
 
-        # Loading should fail because numel * element_size != actual record size
-        with self.assertRaises(RuntimeError):
+        with self.assertRaisesRegex(RuntimeError, r"record size \(20 bytes\) does not match expected size \(40 bytes"):
             torch.load(modified_archive, weights_only=True)
 
     def test_weights_only_invalid_persistent_id_type_in_error_message(self):
