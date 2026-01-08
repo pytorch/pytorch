@@ -315,6 +315,12 @@ class AsyncCompile:
         if get_compile_threads() <= 1:
             return False
 
+        # Proton instrumentation backend requires compilation to happen in the main
+        # process so it can instrument the Triton IR during JIT compilation.
+        # Force synchronous compilation when proton profiling is enabled.
+        if config.triton.proton_profiling:
+            return False
+
         # Create a dummy job to check if the pool is ready. Submit it here instead of at
         # pool creation so we don't launch the full pool of worker subprocesses until
         # we're sure they're needed.

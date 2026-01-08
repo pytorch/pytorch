@@ -5689,16 +5689,20 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
 
     # Remove everything that looks like stack frames in NOT this file
     def repl_frame(m):
-        if m.group(1) != file:
+        if m.group(2) != file:
             return ""
         # Don't accept top-level, even for this script, these will wobble
         # depending on how the testing script was invoked
-        if m.group(2) == "<module>":
+        if m.group(3) == "<module>":
             return ""
 
         return m.group(0)
 
-    s = re.sub(r'  File "([^"]+)", line \d+, in (.+)\n(    .+\n( +[~^]+ *\n)?)+', repl_frame, s)
+    s = re.sub(
+        r'( *)File "([^"]+)", line \d+, in (.+)\n(\1  .+\n( +[~^]+ *\n)?)+',
+        repl_frame,
+        s,
+    )
     s = re.sub(r"line \d+", "line N", s)
     s = re.sub(r".py:\d+", ".py:N", s)
     s = re.sub(r'https:/([a-zA-Z0-9_.-]+)', r'https://\1', s)

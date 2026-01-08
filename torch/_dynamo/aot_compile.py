@@ -150,11 +150,11 @@ class AOTCompilePickler(pickle.Pickler):
 
 
 class AOTCompileUnpickler(pickle.Unpickler):
-    def __init__(self, external_data: dict[str, Any], file: io.BytesIO):
+    def __init__(self, external_data: dict[str, object], file: io.BytesIO) -> object:
         super().__init__(file)
         self.external_data = external_data
 
-    def persistent_load(self, key: str):
+    def persistent_load(self, key: str) -> object:
         if key not in self.external_data:
             raise RuntimeError(
                 f"Missing required external reference to data: {key}. "
@@ -174,10 +174,10 @@ class AOTCompileSaveResult:
 class AOTCompiledFunction:
     _artifacts: CompileArtifacts
     _guard_check_enabled: bool = True
-    _extra_globals: Optional[dict[str, object]] = None
+    _extra_globals: dict[str, object] | None = None
 
-    def prepare_f_locals(self, *args, **kwargs):
-        f_locals: dict[str, Any] = {}
+    def prepare_f_locals(self, *args: object, **kwargs: object) -> dict[str, object]:
+        f_locals: dict[str, object] = {}
         env = self._artifacts.runtime_env
         if env.closure:
             assert env.bytecode.co_freevars and len(env.closure) == len(
