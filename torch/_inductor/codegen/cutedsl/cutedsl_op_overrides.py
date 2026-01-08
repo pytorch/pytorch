@@ -53,6 +53,15 @@ class CuteDSLOpOverrides(OpOverrides):
     LOG2_E = 1.4426950408889634  # 1/ln(2) for converting natural exp to base-2 exp
 
     @staticmethod
+    def _get_cse_var(arg: CuteDSLArg) -> Optional[CSEVariable]:
+        """Extract CSEVariable from arg if it's a tensor (either direct or wrapped in OpsValue)."""
+        if isinstance(arg, CSEVariable):
+            return arg
+        if isinstance(arg, OpsValue) and isinstance(arg.value, CSEVariable):
+            return arg.value
+        return None
+
+    @staticmethod
     def _ensure_tensor_ssa(arg: CuteDSLArg, template_tensor: CuteDSLArg) -> str:
         """
         Convert scalar arguments to TensorSSA using cute.full_like if needed.
@@ -79,10 +88,11 @@ class CuteDSLOpOverrides(OpOverrides):
     def _extract_dtype_and_bounds(
         *args: CuteDSLArg,
     ) -> tuple[Optional[torch.dtype], ValueRanges[sympy.Expr]]:
-        """Extract dtype and bounds from CSEVariable arguments."""
+        """Extract dtype and bounds from CSEVariable arguments (including OpsValue wrappers)."""
         for arg in args:
-            if isinstance(arg, CSEVariable):
-                return arg.dtype, arg.bounds
+            cse_var = CuteDSLOpOverrides._get_cse_var(arg)
+            if cse_var is not None:
+                return cse_var.dtype, cse_var.bounds
         return None, ValueRanges.unknown()
 
     @staticmethod
@@ -92,23 +102,20 @@ class CuteDSLOpOverrides(OpOverrides):
 
         CuteDSL requires both operands to be TensorSSA objects for tensor operations.
         This helper automatically converts scalar arguments to TensorSSA using
-        cute.full_like when at least one argument is a tensor (CSEVariable).
+        cute.full_like when at least one argument is a tensor (CSEVariable or OpsValue).
 
         Args:
-            a: First operand (CSEVariable for tensors, str for scalars)
-            b: Second operand (CSEVariable for tensors, str for scalars)
+            a: First operand (CSEVariable for tensors, str for scalars, or OpsValue wrapper)
+            b: Second operand (CSEVariable for tensors, str for scalars, or OpsValue wrapper)
             op_format: Format string with {a} and {b} placeholders for the operation
 
         Returns:
-            CSEVariable if at least one operand is a CSEVariable, otherwise string
+            CSEVariable if at least one operand is a tensor, otherwise string
         """
-        tensor_arg = (
+        # Check for CSEVariable directly or wrapped in OpsValue
+        tensor_arg = CuteDSLOpOverrides._get_cse_var(
             a
-            if isinstance(a, CSEVariable)
-            else b
-            if isinstance(b, CSEVariable)
-            else None
-        )
+        ) or CuteDSLOpOverrides._get_cse_var(b)
         if tensor_arg is not None:
             a_ssa = CuteDSLOpOverrides._ensure_tensor_ssa(a, tensor_arg)
             b_ssa = CuteDSLOpOverrides._ensure_tensor_ssa(b, tensor_arg)
@@ -126,19 +133,20 @@ class CuteDSLOpOverrides(OpOverrides):
     @staticmethod
     def _apply_unary_op(x: CuteDSLArg, op_format: str) -> CuteDSLArg:
         """
-        Apply a unary operation, returning CSEVariable if input is CSEVariable.
+        Apply a unary operation, returning CSEVariable if input is a tensor.
 
         Args:
-            x: Input operand (CSEVariable for tensors, str for scalars)
+            x: Input operand (CSEVariable for tensors, str for scalars, or OpsValue wrapper)
             op_format: Format string with {x} placeholder for the operation
 
         Returns:
-            CSEVariable if input is a CSEVariable, otherwise string
+            CSEVariable if input is a tensor, otherwise string
         """
-        if isinstance(x, CSEVariable):
-            result_expr = op_format.format(x=str(x))
+        cse_var = CuteDSLOpOverrides._get_cse_var(x)
+        if cse_var is not None:
+            result_expr = op_format.format(x=str(cse_var))
             return V.kernel.cse.generate(
-                V.kernel.body, result_expr, bounds=x.bounds, dtype=x.dtype
+                V.kernel.body, result_expr, bounds=cse_var.bounds, dtype=cse_var.dtype
             )
 
         return op_format.format(x=x)
@@ -169,6 +177,10 @@ class CuteDSLOpOverrides(OpOverrides):
     @staticmethod
     def truediv(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
         return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} / {b})")
+
+    @staticmethod
+    def floordiv(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
+        return CuteDSLOpOverrides._apply_binary_op(a, b, "({a} // {b})")
 
     @staticmethod
     def mod(a: CuteDSLArg, b: CuteDSLArg) -> CuteDSLArg:
@@ -224,25 +236,20 @@ class CuteDSLOpOverrides(OpOverrides):
         a: CuteDSLArg,
         b: CuteDSLArg,
     ) -> CuteDSLArg:
-        """Conditional selection - handles both CSEVariable and string inputs."""
+        """Conditional selection - handles CSEVariable, OpsValue, and string inputs."""
         # Find a tensor argument to use as template for full_like
         # Priority: use 'a' if it's a tensor, else use 'b', else condition
         tensor_arg = (
-            a
-            if isinstance(a, CSEVariable)
-            else (
-                b
-                if isinstance(b, CSEVariable)
-                else condition
-                if isinstance(condition, CSEVariable)
-                else None
-            )
+            CuteDSLOpOverrides._get_cse_var(a)
+            or CuteDSLOpOverrides._get_cse_var(b)
+            or CuteDSLOpOverrides._get_cse_var(condition)
         )
 
         if tensor_arg is not None:
             a_ssa = CuteDSLOpOverrides._ensure_tensor_ssa(a, tensor_arg)
             b_ssa = CuteDSLOpOverrides._ensure_tensor_ssa(b, tensor_arg)
-            result_expr = f"cute.where({condition}, {a_ssa}, {b_ssa})"
+            cond_ssa = CuteDSLOpOverrides._ensure_tensor_ssa(condition, tensor_arg)
+            result_expr = f"cute.where({cond_ssa}, {a_ssa}, {b_ssa})"
 
             dtype, bounds = CuteDSLOpOverrides._extract_dtype_and_bounds(
                 a, b, condition
@@ -274,7 +281,6 @@ class CuteDSLOpOverrides(OpOverrides):
             else "mlir_math.absi"
         )
         return CuteDSLOpOverrides._apply_unary_op(
-            # pyrefly: ignore [bad-argument-type]
             x,
             f"cute.TensorSSA({abs_op}({{x}}), {{x}}.shape, {{x}}.dtype)",
         )
@@ -323,11 +329,42 @@ class CuteDSLOpOverrides(OpOverrides):
     # Logical operations
     @staticmethod
     def logical_and(x0: CuteDSLArg, x1: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(x0, x1, "({a} and {b})")
+        return CuteDSLOpOverrides._apply_binary_op(x0, x1, "({a} & {b})")
 
     @staticmethod
     def logical_or(x0: CuteDSLArg, x1: CuteDSLArg) -> CuteDSLArg:
-        return CuteDSLOpOverrides._apply_binary_op(x0, x1, "({a} or {b})")
+        return CuteDSLOpOverrides._apply_binary_op(x0, x1, "({a} | {b})")
+
+    # Bitwise operations (override parent class to properly CSE)
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def bitwise_and(x: CuteDSLArg, y: CuteDSLArg) -> CuteDSLArg:
+        return CuteDSLOpOverrides._apply_binary_op(x, y, "({a} & {b})")
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def bitwise_or(x: CuteDSLArg, y: CuteDSLArg) -> CuteDSLArg:
+        return CuteDSLOpOverrides._apply_binary_op(x, y, "({a} | {b})")
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def bitwise_xor(x: CuteDSLArg, y: CuteDSLArg) -> CuteDSLArg:
+        return CuteDSLOpOverrides._apply_binary_op(x, y, "({a} ^ {b})")
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def bitwise_not(x: CuteDSLArg) -> CuteDSLArg:
+        return CuteDSLOpOverrides._apply_unary_op(x, "(~{x})")
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def bitwise_left_shift(x: CuteDSLArg, y: CuteDSLArg) -> CuteDSLArg:
+        return CuteDSLOpOverrides._apply_binary_op(x, y, "({a} << {b})")
+
+    @staticmethod
+    # pyrefly: ignore [bad-override]
+    def bitwise_right_shift(x: CuteDSLArg, y: CuteDSLArg) -> CuteDSLArg:
+        return CuteDSLOpOverrides._apply_binary_op(x, y, "({a} >> {b})")
 
     @staticmethod
     def logical_not(a):

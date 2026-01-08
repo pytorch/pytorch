@@ -220,3 +220,11 @@ torch/backends/cudnn/ @eqy @syed-ahmed @Aidyn-A
 /aten/src/ATen/cuda/CUDAScaledBlas.cpp @drisspg @slayton58
 /aten/src/ATen/cuda/CUDAScaledBlas.h @drisspg @slayton58
 /test/test_scaled_matmul_cuda.py @drisspg @slayton58
+
+# Sparse Tensors
+/aten/src/ATen/native/sparse/ @amjames @pearu @nikitaved
+/aten/src/ATen/SparseTensorImpl.cpp @amjames @pearu @nikitaved
+/aten/src/ATen/SparseCsrTensorImpl.cpp @amjames @pearu @nikitaved
+/torch/sparse/ @amjames @pearu @nikitaved
+/test/test_sparse.py @amjames @pearu @nikitaved
+/test/test_sparse_csr.py @amjames @pearu @nikitaved

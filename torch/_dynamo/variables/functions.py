@@ -26,13 +26,14 @@ import functools
 import inspect
 import itertools
 import logging
+import os
 import sys
 import traceback
 import types
 from collections import namedtuple
 from collections.abc import Callable, Sequence
 from types import CellType, FunctionType
-from typing import Any, cast, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, cast, Literal, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import Never
 from weakref import WeakKeyDictionary
 
@@ -44,7 +45,7 @@ from torch.utils._pytree import is_namedtuple_class
 from .. import config, graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_rot_n, is_generator
 from ..exc import (
-    format_skip_frame_message,
+    format_frame_info,
     get_dynamo_observed_exception,
     handle_observed_exception,
     InfiniteGeneratorError,
@@ -52,7 +53,6 @@ from ..exc import (
     ObservedGeneratorExit,
     ObservedUserStopIteration,
     raise_observed_exception,
-    SkipFrame,
     StepUnsupported,
     unimplemented,
     Unsupported,
@@ -119,20 +119,26 @@ CO_VARKEYWORDS = 0x08
 _SUPPORTED_TREE_MAP_KWARGS = frozenset({"namespace", "none_is_leaf", "is_leaf"})
 _TREE_MAP_ONLY_SUPPORTED_KWARGS = frozenset({"is_leaf"})
 
+PT2_ISSUE_TRACKER_URL = "https://github.com/pytorch/pytorch/issues/new?&labels=oncall%3A+pt2&projects=&template=pt2-bug-report.yml"
 
 # Module-level cache keyed by the function object
 _spec_cache: WeakKeyDictionary[Any, Any] = WeakKeyDictionary()
 
 
+# Raised when get_function() cannot convert a nested function to a Python function.
+class ClosureConversionError(NotImplementedError):
+    pass
+
+
 @functools.lru_cache
-def get_pytree_SUPPORTED_NODES_source():
+def get_pytree_SUPPORTED_NODES_source() -> AttrSource:
     return AttrSource(
         AttrSource(AttrSource(TorchSource(), "utils"), "_pytree"), "SUPPORTED_NODES"
     )
 
 
 class FunctionSpec:
-    def __init__(self, func: FunctionType):
+    def __init__(self, func: FunctionType) -> None:
         code = func.__code__
         vn = code.co_varnames
 
@@ -382,7 +388,7 @@ class BaseUserFunctionVariable(VariableTracker):
     def get_name(self) -> str:
         return self.get_code().co_name  # type: ignore[attr-defined]
 
-    def get_globals(self):
+    def get_globals(self) -> dict[str, Any]:
         raise NotImplementedError
 
     def call_function(
@@ -418,7 +424,7 @@ class BaseUserFunctionVariable(VariableTracker):
     # Override to set whether or not nested graph breaks should be allowed
     # if we create an inlining tx for this BaseUserFunctionVariable.
     # See symbolic_convert.py for where this function is called.
-    def should_allow_nested_graph_breaks(self):
+    def should_allow_nested_graph_breaks(self) -> bool:
         return True
 
 
@@ -643,7 +649,7 @@ class UserFunctionVariable(BaseUserFunctionVariable):
                         "`torch.compile` region",
                     ],
                 )
-            # pyrefly: ignore[missing-attribute]
+
             fn = fn_var.fn
             return variables.TorchInGraphFunctionVariable(fn, nonstrict_traceable=True)
 
@@ -818,13 +824,13 @@ class UserFunctionVariable(BaseUserFunctionVariable):
             return collected
         return None
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> Literal[True]:
         return True
 
-    def get_python_hash(self):
+    def get_python_hash(self) -> int:
         return hash(self.fn)
 
-    def is_python_equal(self, other):
+    def is_python_equal(self, other: object) -> bool:
         return isinstance(other, variables.UserFunctionVariable) and self.fn is other.fn
 
 
@@ -943,12 +949,11 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def reconstruct(self, codegen: "PyCodegen") -> None:
         from torch._dynamo.side_effects import disallow_side_effects_in_generator
         from torch._dynamo.symbolic_convert import (
-            InstructionTranslator,
             save_and_restart_speculation_log,
             temporarely_allow_writes_to_output_graph,
         )
 
-        tx = InstructionTranslator.current_tx()
+        tx = codegen.tx
         save = save_and_restart_speculation_log(tx)
         disallow = disallow_side_effects_in_generator(tx)
         temp = temporarely_allow_writes_to_output_graph(tx)
@@ -973,7 +978,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
     def python_type(self) -> type:
         return types.GeneratorType
 
-    def next_variable(self, tx: "InstructionTranslator") -> VariableTracker:
+    def next_variable(self, tx: "InstructionTranslatorBase") -> VariableTracker:
         tracer = self.inline_tracer
 
         if self._is_generator_exhausted():
@@ -989,10 +994,22 @@ class LocalGeneratorObjectVariable(VariableTracker):
             raise e
         except InfiniteGeneratorError:
             # test/dynamo/test_misc.py::test_iterator_limit
-            raise
+            unimplemented(
+                gb_type="infinite generator detected",
+                context="",
+                explanation="Dynamo traced the YIELD_VALUE bytecode too many times. This could mean "
+                "that we have attempted to trace an infinite generator.",
+                hints=[
+                    f"If you are sure that your generator is not infinite, please report a bug at {PT2_ISSUE_TRACKER_URL}.",
+                    *graph_break_hints.USER_ERROR,
+                ],
+            )
         except Unsupported as e:
             torch._dynamo.eval_frame.skip_code(self.get_code())
-            raise SkipFrame from e
+            e.skip_frame = True
+            if not tx.one_graph and not tx.error_on_graph_break:
+                e.msg += "\n\nSkipping frame due to graph break in a generator's next() call."
+            raise
 
     def call_obj_hasattr(
         self, tx: "InstructionTranslator", name: str
@@ -1008,14 +1025,14 @@ class LocalGeneratorObjectVariable(VariableTracker):
         return True
 
     def force_unpack_var_sequence(
-        self, tx: "InstructionTranslator"
+        self, tx: "InstructionTranslatorBase"
     ) -> list[VariableTracker]:
         result: list[VariableTracker] = []
         self.force_apply_to_var_sequence(tx, result.append)
         return result
 
     def force_apply_to_var_sequence(
-        self, tx: "InstructionTranslator", fn: Callable[[VariableTracker], Any]
+        self, tx: "InstructionTranslatorBase", fn: Callable[[VariableTracker], Any]
     ) -> None:
         while True:
             try:
@@ -1025,7 +1042,7 @@ class LocalGeneratorObjectVariable(VariableTracker):
                 break
 
     # no nested graph breaks in generators
-    def should_allow_nested_graph_breaks(self):
+    def should_allow_nested_graph_breaks(self) -> Literal[False]:
         return False
 
     def _setup_exception(
@@ -1263,7 +1280,7 @@ class LocalGeneratorFunctionVariable(BaseUserFunctionVariable):
         self.vt = vt
         self.generator_cls = generator_cls
 
-    def __getattr__(self, name):
+    def __getattr__(self, name: str) -> Any:
         if name in self.__class__.__dict__:
             return getattr(self, name)
         return getattr(self.vt, name)
@@ -1326,7 +1343,7 @@ class FunctionDecoratedByContextlibContextManagerVariable(
         This is only used when the function is annotated with @contextlib.contextmanager
     """
 
-    def __init__(self, vt: VariableTracker, **kwargs: Any):
+    def __init__(self, vt: VariableTracker, **kwargs: Any) -> None:
         super().__init__(
             vt,
             generator_cls=ContextlibContextManagerLocalGeneratorObjectVariable,
@@ -1359,7 +1376,7 @@ class UserMethodVariable(UserFunctionVariable):
         self,
         fn: Callable[..., Any],
         obj: VariableTracker,
-        source_fn: Callable[..., Any] | None = None,
+        source_fn: Source | None = None,
         **kwargs: Any,
     ) -> None:
         super().__init__(fn=fn, **kwargs)  # type: ignore[arg-type]
@@ -1580,22 +1597,76 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
     def self_args(self) -> list[VariableTracker]:
         return []
 
-    def as_python_constant(self):
+    def as_python_constant(self) -> types.FunctionType:
         return self.get_function()
 
     def get_code(self) -> types.CodeType:
         return self.code.as_python_constant()
 
-    def python_type(self) -> type:
+    def python_type(self) -> type[types.FunctionType]:
         return types.FunctionType
 
-    def get_function(self) -> types.FunctionType:
+    def get_function(self, _converting: set[int] | None = None) -> types.FunctionType:
+        # _converting is used a way to break cycles when
+        # two nested_functions refer to each other.
+        from .base import AsPythonConstantNotImplementedError
+
+        self_id = id(self)
+        if _converting is None:
+            _converting = set()
+        if self_id in _converting:
+            raise ClosureConversionError(
+                "cycle detected in mutually recursive closures"
+            )
+        _converting.add(self_id)
+        try:
+            return self._get_function_impl(_converting)
+        except AsPythonConstantNotImplementedError as e:
+            raise ClosureConversionError(
+                "failed to convert closure cell to Python constant"
+            ) from e
+        finally:
+            _converting.discard(self_id)
+
+    def _get_function_impl(self, _converting: set[int]) -> types.FunctionType:
+        closure_cells = None
         if self.closure:
-            raise NotImplementedError("get_function")
+            from torch._dynamo.symbolic_convert import InstructionTranslator
+
+            tx = InstructionTranslator.current_tx()
+            cells = []
+
+            for cell_var in self.closure.items:  # type: ignore[attr-defined]
+                # Get the cell contents from side_effects or pre_existing_contents
+                # load_cell will replay the side-effects
+                cell_contents = tx.output.side_effects.load_cell(cell_var)
+
+                # Check for self-referential closure (function capturing itself for recursion)
+                # For example:
+                # def outer():
+                #     def helper(n):
+                #         if n <= 0:
+                #             return 0
+                #         return n + helper(n - 1)  # helper calls itself
+                #     return helper
+                if cell_contents is self:
+                    raise ClosureConversionError("self-referential nested function")
+
+                # If the cell contents is a NestedUserFunctionVariable, call get_function
+                # directly to properly propagate the _converting set for cycle detection
+                if isinstance(cell_contents, NestedUserFunctionVariable):
+                    value = cell_contents.get_function(_converting)
+                else:
+                    value = cell_contents.as_python_constant()
+                cells.append(make_cell(value))
+            closure_cells = tuple(cells)
+
         func = types.FunctionType(
             self.code.as_python_constant(),
             self.f_globals,
             self.fn_name.as_python_constant(),
+            argdefs=None,
+            closure=closure_cells,
         )
         if self.defaults:
             func.__defaults__ = self.defaults.as_python_constant()
@@ -1736,9 +1807,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             codegen.extend_output(create_call_function(1, True))
 
         # codegen attributes
-        from torch._dynamo.symbolic_convert import InstructionTranslator
-
-        tx = InstructionTranslator.current_tx()
+        tx = codegen.tx
         if tx.output.side_effects.has_pending_mutation(self):
             for name, value in tx.output.side_effects.store_attr_mutations[
                 self
@@ -1871,14 +1940,28 @@ class SkipFunctionVariable(VariableTracker):
                 skip_frame_msg = skip_frame_msg.as_python_constant()
             else:
                 skip_frame_msg = ""
-            raise SkipFrame(
-                format_skip_frame_message(
-                    tx.f_code,
-                    f"Skip frame due to `torch._dynamo.skip_frame()`. Message: {skip_frame_msg}",
-                )
+            unimplemented(
+                gb_type="Call to `torch._dynamo.skip_frame()`",
+                context=f"Called `torch._dynamo.skip_frame()` with args `{args}`, kwargs `{kwargs}`. "
+                f"Skipping frame {format_frame_info(tx.f_code)}.",
+                explanation=f"User-inserted skip frame. Message: {skip_frame_msg}",
+                hints=[
+                    "Remove the `torch._dynamo.skip_frame()` call.",
+                ],
+                skip_frame=True,
             )
         elif self.value is torch._dynamo.step_unsupported:
-            raise StepUnsupported
+            try:
+                unimplemented(
+                    gb_type="Call to `torch._dynamo.step_unsupported()`",
+                    context="",
+                    explanation="User-inserted step_unsupported.",
+                    hints=[
+                        "Remove the `torch._dynamo.step_unsupported()` call.",
+                    ],
+                )
+            except Unsupported as e:
+                raise StepUnsupported(e.msg) from None
         else:
             if config.dont_skip_tracing:
                 from .builder import SourcelessBuilder
@@ -1974,14 +2057,17 @@ class SkipFunctionVariable(VariableTracker):
 
         return fn_var_getattr(tx, self.value, self.source, name)
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> bool:
         return True
 
-    def get_python_hash(self):
+    def get_python_hash(self) -> int:
         return hash(self.value)
 
-    def is_python_equal(self, other):
-        return self.as_python_constant() == other.as_python_constant()
+    def is_python_equal(self, other: object) -> bool:
+        return (
+            isinstance(other, VariableTracker)
+            and self.as_python_constant() == other.as_python_constant()
+        )
 
 
 class WrappedSkipFunctionVariable(SkipFunctionVariable):
@@ -2049,12 +2135,18 @@ class WrapperUserFunctionVariable(VariableTracker):
             module_name = getattr(target_fn, "__module__", "") or ""
 
             if module_name.split(".", maxsplit=1)[0] != "torch":
+                frame_summary = tx.frame_summary()
+                filename = os.path.basename(frame_summary.filename)
+                lineno = frame_summary.lineno
                 msg = (
                     "Dynamo detected a call to a `functools.lru_cache`-wrapped "
-                    "function. Dynamo ignores the cache wrapper and directly "
-                    "traces the wrapped function. Silent incorrectness is only "
-                    "a *potential* risk, not something we have observed. "
-                    'Enable TORCH_LOGS="+dynamo" for a DEBUG stack trace.'
+                    f"function at '{filename}:{lineno}'. Dynamo ignores the "
+                    "cache wrapper and directly traces the wrapped function. "
+                    "Silent incorrectness is only a *potential* risk, not "
+                    "something we have observed. "
+                    "Enable TORCH_LOGS=+dynamo for a DEBUG stack trace.\n\n"
+                    "This call originates from:\n"
+                    f"{''.join(traceback.format_list([frame_summary]))}"
                 )
 
                 torch._dynamo.utils.warn_once(msg)
@@ -2203,6 +2295,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         if self.fn in (
             dist.all_reduce,
             dist.reduce_scatter_tensor,
+            # pyrefly: ignore [deprecated]
             dist._reduce_scatter_base,
         ):
             reduce_op_var = kwargs.get("op")
@@ -2388,15 +2481,16 @@ class FunctoolsPartialVariable(VariableTracker):
             and all(value.is_python_hashable() for value in self.keywords.values())
         )
 
-    def get_python_hash(self):
+    def get_python_hash(self) -> int:
         func_hash = self.func.get_python_hash()
         args_hash = (arg.get_python_hash() for arg in self.args)
         values_hash = (value.get_python_hash() for value in self.keywords.values())
         return hash((func_hash, *args_hash, *values_hash))
 
-    def is_python_equal(self, other):
+    def is_python_equal(self, other: object) -> bool:
         return (
-            self.func.is_python_equal(other.func)
+            isinstance(other, FunctoolsPartialVariable)
+            and self.func.is_python_equal(other.func)
             and all(
                 arg_a.is_python_equal(arg_b)
                 for (arg_a, arg_b) in zip(self.args, other.args)
@@ -2452,7 +2546,7 @@ class PolyfilledFunctionVariable(VariableTracker):
             raise RuntimeError(
                 f"Polyfill handler {handler} does not have a traceable function"
             )
-        # pyrefly: ignore[invalid-type-var]
+
         self.wrapped_fn = handler
         # pyrefly: ignore[invalid-type-var]
         self.traceable_fn: _F = traceable_fn
@@ -2545,16 +2639,6 @@ class PolyfilledFunctionVariable(VariableTracker):
         return self.fn
 
 
-class TracebackVariable(VariableTracker):
-    # We don't track traceback. A call to any function in this module is a no-op
-    def call_function(  # type: ignore[empty-body]
-        self,
-        tx: "InstructionTranslator",
-        args: Sequence[VariableTracker],
-        kwargs: dict[str, VariableTracker],
-    ) -> VariableTracker: ...
-
-
 class SysFunctionVariable(VariableTracker):
     def __init__(self, value: Any, **kwargs: Any) -> None:
         super().__init__(**kwargs)
@@ -2564,12 +2648,8 @@ class SysFunctionVariable(VariableTracker):
         if len(tx.exn_vt_stack):
             exn = tx.exn_vt_stack[-1]
             typ = exn.exc_type  # type: ignore[union-attr]
-            tb = None
-            items = [
-                VariableTracker.build(tx, typ),
-                exn,
-                VariableTracker.build(tx, tb),
-            ]
+            tb = exn.var_getattr(tx, "__traceback__")
+            items = [VariableTracker.build(tx, typ), exn, tb]
         else:
             items = [
                 variables.ConstantVariable(None),
@@ -2589,6 +2669,7 @@ class SysFunctionVariable(VariableTracker):
     ) -> VariableTracker:
         if self.value is sys.exc_info:
             return self.exc_info(tx)
+
         assert self.value is sys.exception
         return self.exception(tx)
 
@@ -2664,6 +2745,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
     ) -> VariableTracker:
         from .builder import VariableBuilder
 
+        assert tx is not None
         wrapped_user_obj = VariableBuilder(
             tx, AttrSource(variable.kernel_source, f"{name}")
         )._wrap(user_obj)
@@ -2712,7 +2794,7 @@ class DynamoTritonHOPifier(TritonHOPifier):
         self,
         variable: "TritonKernelVariable",
         grids: Any,
-        combined_args_raw: dict[str, Any],
+        combined_args: dict[str, Any],
         tx: "InstructionTranslator",
     ) -> "variables.ConstantVariable":
         from .dicts import ConstDictVariable
@@ -2724,17 +2806,16 @@ class DynamoTritonHOPifier(TritonHOPifier):
         # TMA descriptor-related metadata to a separate argument,
         # so that we can reconstruct the TMA descriptors downstream
         tma_descriptor_metadata: TMADescriptorMetadata = {}
-        for k in list(combined_args_raw.keys()):
-            v = combined_args_raw[k]
+        for k in list(combined_args.keys()):
+            v = combined_args[k]
             if isinstance(
                 v, (TMADescriptorExperimentalVariable, TMADescriptorStableVariable)
             ):
                 tma_descriptor_metadata[k] = v.to_metadata()
-                combined_args_raw[k] = v.get_tensor()
+                combined_args[k] = v.get_tensor()
 
-        combined_args = {
-            variables.ConstantVariable.create(k): v
-            for k, v in combined_args_raw.items()
+        combined_args_vt = {
+            variables.ConstantVariable.create(k): v for k, v in combined_args.items()
         }
 
         from torch._higher_order_ops.triton_kernel_wrap import (
@@ -2747,12 +2828,12 @@ class DynamoTritonHOPifier(TritonHOPifier):
         # parameters of the wrapper function
         constant_args = {
             k: v.as_python_constant()
-            for k, v in combined_args_raw.items()
+            for k, v in combined_args.items()
             if isinstance(v, VariableTracker) and v.is_python_constant()
         }
         non_constant_args = {
             k: v
-            for k, v in combined_args.items()
+            for k, v in combined_args_vt.items()
             if not (isinstance(v, VariableTracker) and v.is_python_constant())
         }
 
@@ -2925,10 +3006,17 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
         ptr = kwargs["ptr"] if "ptr" in kwargs else args[0]
 
         if not isinstance(ptr, variables.DataPtrVariable):
-            raise Unsupported(
-                "Please ensure there were no graph breaks between "
-                f"create_{self.rank}d_tma_descriptor and the upstream "
-                ".data_ptr() call."
+            unimplemented(
+                gb_type="invalid ptr argument for create_tma_descriptor",
+                context=f"args = {args}, kwargs = {kwargs}",
+                explanation=f"Expected `ptr` argument of `create_{self.rank}d_tma_descriptor`"
+                "to be from a `.data_ptr()` call, represented internally by `DataPtrVariable`",
+                hints=[
+                    "`torch.compile` may fail to internally represent result of `.data_ptr()` "
+                    "with `DataPtrVariable` due to a graph break between the `.data_ptr()` call and "
+                    f"`create_{self.rank}d_tma_descriptor`. Please ensure there were no graph breaks "
+                    "between these two calls.",
+                ],
             )
 
         if self.rank == 1:
@@ -2958,6 +3046,9 @@ class CreateTMADescriptorExperimentalVariable(VariableTracker):
                 kwargs["block_dim0"] if "block_dim0" in kwargs else args[4],
             ]
         element_size = kwargs["element_size"] if "element_size" in kwargs else args[-1]
+
+        # to make pyrefy happy
+        assert isinstance(ptr, variables.DataPtrVariable)
 
         return TMADescriptorExperimentalVariable(
             data_ptr=ptr,
