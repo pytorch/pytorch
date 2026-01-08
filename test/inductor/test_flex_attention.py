@@ -2244,6 +2244,22 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             _WARNINGS_SHOWN.update(original_shown)
 
     @supported_platform
+    @dtypes(*device_configs["cpu"].dtypes)
+    @dtypesIfCUDA(*device_configs["cuda"].dtypes)
+    @dtypesIfXPU(*device_configs["xpu"].dtypes)
+    def test_autocast(self, device, dtype):
+        """Test torch autocast functionality"""
+        q = torch.randn(1, 1, 1024, 64, device=device, dtype=dtype).to(torch.float16)
+        k = torch.randn(1, 1, 1024, 64, device=device, dtype=dtype)
+        v = torch.randn(1, 1, 1024, 64, device=device, dtype=dtype)
+
+        with torch.autocast(dtype=torch.float16, enabled=True, device_type=device):
+            sdpa_output = torch.nn.functional.scaled_dot_product_attention(q, k, v)
+            flex_output = flex_attention(q, k, v)
+            torch.testing.assert_close(sdpa_output, flex_output, atol=1e-3, rtol=1e-3)
+            self.assertEqual(flex_output.dtype, torch.float16)
+
+    @supported_platform
     @dtypes(*device_configs["cpu"].dtypes_fast)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes_fast)
     @dtypesIfXPU(*device_configs["xpu"].dtypes_fast)
