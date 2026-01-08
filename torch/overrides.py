@@ -2062,6 +2062,15 @@ class TorchFunctionMode:
         _pop_mode()
 
     @classmethod
+    def is_infra_mode(cls) -> bool:
+        """
+        Returns True if this mode is an infrastructure mode that should not
+        be tracked by Dynamo. Infrastructure modes are internal implementation
+        details (e.g., for tracing) that shouldn't have guards created on them.
+        """
+        return False
+
+    @classmethod
     def push(cls, *args, **kwargs):
         warnings.warn(
             "`Mode.push()` is no longer necessary and can be replaced with just `with Mode()`",
