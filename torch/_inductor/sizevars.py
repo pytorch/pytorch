@@ -595,8 +595,8 @@ class SizeVarAllocator:
     def size_hint(
         self,
         expr: Union[Expr, int],
+        fallback: int,
         *,
-        fallback: Optional[int] = None,
         hint_override: Optional[int] = None,
     ) -> int:
         if isinstance(expr, SymInt):

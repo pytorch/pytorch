@@ -368,7 +368,14 @@ def hint_int(a: Union[torch.SymInt, int], fallback: Optional[int] = None) -> int
     return size_hint(a, fallback)
 
 
-def size_hint(a: Union[torch.SymInt, int], fallback: Optional[int] = None) -> int:
+def size_hint_or_throw(a: Union[torch.SymInt, int]) -> int:
+    if isinstance(a, torch.SymInt):
+        return a.node.require_hint()
+    assert type(a) is int, a
+    return a
+
+
+def size_hint(a: Union[torch.SymInt, int], fallback: int) -> int:
     """
     Retrieve the hint for an int (based on the underlying real values as observed
     at runtime).  If no hint is available (e.g., because data dependent shapes),
