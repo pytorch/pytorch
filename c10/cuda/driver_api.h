@@ -66,6 +66,7 @@
   _(cuGetErrorString, 12000)
 
 #if defined(CUDA_VERSION) && (CUDA_VERSION >= 12080)
+#define C10_LIBCUDA_DRIVER_API_OPTIONAL(_) \
   _(cuCtxFromGreenCtx, 12080)              \
   _(cuCtxGetCurrent, 12080)                \
   _(cuCtxPopCurrent, 12080)                \
@@ -83,7 +84,6 @@
   _(cuMulticastCreate, 12030)              \
   _(cuMulticastUnbind, 12030)
 #elif defined(CUDA_VERSION) && (CUDA_VERSION >= 12030)
-#define C10_LIBCUDA_DRIVER_API_OPTIONAL(_) \
 #define C10_LIBCUDA_DRIVER_API_OPTIONAL(_) \
   _(cuMulticastAddDevice, 12030)           \
   _(cuMulticastBindMem, 12030)             \
