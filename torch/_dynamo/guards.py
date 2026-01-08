@@ -121,6 +121,7 @@ from .source import (
     AttrSource,
     CallFunctionNoArgsSource,
     CallMethodItemSource,
+    CallMethodSource,
     ChainedSource,
     ClosureSource,
     CodeSource,
@@ -1661,6 +1662,17 @@ class GuardBuilder(GuardBuilderBase):
             assert base_guard_manager  # to make mypy happy
             out = base_guard_manager.lambda_manager(
                 python_lambda=lambda x: x.item(),
+                source=source_name,
+                example_value=example_value,
+                guard_manager_enum=guard_manager_enum,
+            )
+        elif istype(source, CallMethodSource):
+            assert base_guard_manager  # to make mypy happy
+            method_name = source.method_name
+            args = source.args
+            kwargs = dict(source.kwargs)
+            out = base_guard_manager.lambda_manager(
+                python_lambda=lambda x: getattr(x, method_name)(*args, **kwargs),
                 source=source_name,
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
