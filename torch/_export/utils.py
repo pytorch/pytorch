@@ -1311,6 +1311,19 @@ def _check_valid_to_preserve(op_overload: "OperatorBase"):
     if not torch._C._dispatch_has_kernel(op_overload.name()):
         return False
 
+    # We also cannot return NotImplemented for ops that return None
+    # pushPyOutToStack in python_variable.cpp would fail because the return is expected
+    # to be None.
+    if len(op_overload._schema.returns) == 0:
+        return False
+    if hasattr(op_overload, "_schema"):
+        # We cannot return NotImplemented for ops that return ClassType,
+        # because ConcretePyInterpreterVTable::python_dispatcher cannot handle the conversion
+        # from NotImplemented to ClassType (e.g., torch.classes.profiler._RecordFunction).
+        for ret in op_overload._schema.returns:
+            if isinstance(ret.real_type, torch._C.ClassType):
+                return False
+
     return True
 
 
