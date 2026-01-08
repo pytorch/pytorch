@@ -2,12 +2,14 @@
 #include <c10/util/Exception.h>
 #include <torch/csrc/autograd/anomaly_mode.h>
 #include <torch/csrc/autograd/function.h>
+#include <torch/csrc/profiler/combined_traceback.h>
 #include <mutex>
 
 namespace torch::autograd {
 
 bool AnomalyMode::_enabled = false;
 bool AnomalyMode::_check_nan = true;
+bool AnomalyMode::_mixed_stack = false;
 
 namespace {
 std::mutex& get_anomaly_guard_lock() {
@@ -21,21 +23,23 @@ uint32_t& get_anomaly_counter() {
 }
 } // namespace
 
-DetectAnomalyGuard::DetectAnomalyGuard(bool check_nan) {
+DetectAnomalyGuard::DetectAnomalyGuard(bool check_nan, bool mixed_stack) {
   TORCH_WARN_ONCE(
       "This mode should be enabled only for debugging as the different tests will slow down your program execution.");
   std::lock_guard<std::mutex> lock(get_anomaly_guard_lock());
   uint32_t& counter = get_anomaly_counter();
   counter++;
   this->prev_check_nan_ = AnomalyMode::should_check_nan();
-  AnomalyMode::set_enabled(true, check_nan);
+  this->prev_mixed_stack_ = AnomalyMode::should_use_mixed_stack();
+  AnomalyMode::set_enabled(true, check_nan, mixed_stack);
 }
 
 DetectAnomalyGuard::~DetectAnomalyGuard() {
   std::lock_guard<std::mutex> lock(get_anomaly_guard_lock());
   uint32_t& counter = get_anomaly_counter();
   counter--;
-  AnomalyMode::set_enabled(counter > 0, this->prev_check_nan_);
+  AnomalyMode::set_enabled(
+      counter > 0, this->prev_check_nan_, this->prev_mixed_stack_);
 }
 
 AnomalyMetadata::~AnomalyMetadata() = default;
@@ -72,6 +76,13 @@ void AnomalyMetadata::print_stack(const std::string& current_node_name) {
 
 void AnomalyMetadata::assign_parent(const std::shared_ptr<Node>& parent_node) {
   parent_ = parent_node;
+}
+
+std::shared_ptr<torch::CapturedTraceback> AnomalyMetadata::captured_traceback()
+    const {
+  // Base implementation returns nullptr.
+  // PyAnomalyMetadata overrides this when mixed_stack is enabled.
+  return nullptr;
 }
 
 } // namespace torch::autograd

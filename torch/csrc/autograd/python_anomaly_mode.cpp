@@ -3,14 +3,70 @@
 #include <torch/csrc/Exceptions.h>
 #include <torch/csrc/autograd/python_anomaly_mode.h>
 #include <torch/csrc/autograd/python_cpp_function.h>
+#include <torch/csrc/profiler/combined_traceback.h>
 #include <torch/csrc/python_headers.h>
 #include <torch/csrc/utils/object_ptr.h>
 #include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_strings.h>
 
+#include <sstream>
+
 namespace torch::autograd {
 
+namespace {
+// Filter function matching the logic used by MemoryViz.js frameFilter
+bool shouldOmitFrame(const std::string& funcname, const std::string& filename) {
+  // Functions to omit - matches MemoryViz.js omitFunctions
+  static const std::vector<std::string> omitFunctions = {
+      "unwind::unwind",
+      "CapturedTraceback::gather",
+      "gather_with_cpp",
+      "_start",
+      "__libc_start_main",
+      "PyEval_",
+      "PyObject_",
+      "PyFunction_",
+  };
+
+  // Filenames to omit - matches MemoryViz.js omitFilenames
+  static const std::vector<std::string> omitFilenames = {
+      "core/boxing",
+      "/Register",
+      "/Redispatch",
+      "pythonrun.c",
+      "Modules/main.c",
+      "Objects/call.c",
+      "Objects/methodobject.c",
+      "pycore_ceval.h",
+      "ceval.c",
+      "cpython/abstract.h",
+  };
+
+  for (const auto& of : omitFunctions) {
+    if (funcname.find(of) != std::string::npos) {
+      return true;
+    }
+  }
+
+  for (const auto& of : omitFilenames) {
+    if (filename.find(of) != std::string::npos) {
+      return true;
+    }
+  }
+
+  return false;
+}
+} // namespace
+
 void PyAnomalyMetadata::store_stack() {
+  if (AnomalyMode::should_use_mixed_stack()) {
+    // Use CapturedTraceback for mixed Python/C++/TorchScript traces
+    captured_traceback_ = torch::CapturedTraceback::gather(
+        /*python=*/true, /*script=*/true, /*cpp=*/true);
+    return;
+  }
+
+  // Existing behavior: use torch.fx.traceback.format_stack()
   pybind11::gil_scoped_acquire gil;
   THPObjectPtr mod(PyImport_ImportModule("torch.fx.traceback"));
   if (!mod) {
@@ -28,6 +84,45 @@ void PyAnomalyMetadata::store_stack() {
 }
 
 void PyAnomalyMetadata::print_stack(const std::string& current_node_name) {
+  // If we have a CapturedTraceback (mixed_stack mode), symbolize and print it
+  if (captured_traceback_) {
+    std::vector<torch::CapturedTraceback*> to_symbolize = {
+        captured_traceback_.get()};
+    torch::SymbolizedTracebacks symbolized = torch::symbolize(to_symbolize);
+
+    std::vector<std::string> filtered_frames;
+    for (uint64_t frame_idx : symbolized.tracebacks.at(0)) {
+      const auto& frame = symbolized.all_frames.at(frame_idx);
+      // Use the same filtering logic as MemoryViz.js frameFilter
+      if (shouldOmitFrame(frame.funcname, frame.filename)) {
+        continue;
+      }
+      std::ostringstream frame_oss;
+      frame_oss << "  File \"" << frame.filename << "\", line " << frame.lineno
+                << ", in " << frame.funcname;
+      filtered_frames.push_back(frame_oss.str());
+    }
+
+    // Skip the first 3 frames as they are internal to anomaly mode
+    // (store_stack, Node constructor, etc.)
+    size_t start_idx = std::min(static_cast<size_t>(3), filtered_frames.size());
+
+    std::ostringstream oss;
+    for (size_t i = start_idx; i < filtered_frames.size(); ++i) {
+      oss << filtered_frames[i] << "\n";
+    }
+
+    TORCH_WARN(
+        "Error detected in ",
+        current_node_name,
+        ". ",
+        "Traceback of forward call that caused the error:\n",
+        oss.str());
+    // TODO: Add parent traceback tracking for mixed mode. As it is rarely used
+    // (due to lack of popularity of higher order derivative)
+    return;
+  }
+
   pybind11::gil_scoped_acquire gil;
   if (!PyDict_Check(dict())) {
     TORCH_CHECK(false, "Anomaly metadata is not a python dictionary.");
@@ -90,6 +185,11 @@ void PyAnomalyMetadata::assign_parent(
   if (PyDict_SetItemString(dict(), ANOMALY_PARENT_KEY, parent_node_.get())) {
     throw python_error();
   }
+}
+
+std::shared_ptr<torch::CapturedTraceback> PyAnomalyMetadata::
+    captured_traceback() const {
+  return captured_traceback_;
 }
 
 void _print_stack(
