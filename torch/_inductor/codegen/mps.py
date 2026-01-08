@@ -808,7 +808,8 @@ class MetalKernel(SIMDKernel):
             with self.body.indent():
                 if isinstance(acc_size, sympy.Symbol):
                     self.body.writeline(
-                        f"{self.index_dtype} {linear_idx_name} = {self.max_threadgroup_size} * {entry.root.prefix}_cnt + {root_name};"
+                        f"{self.index_dtype} {linear_idx_name} = "
+                        f"{self.max_threadgroup_size} * {entry.root.prefix}_cnt + {root_name};"
                     )
                 else:
                     self.body.writeline(
