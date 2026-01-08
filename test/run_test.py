@@ -1391,7 +1391,9 @@ def parse_args():
         "--mps",
         "--mps",
         action="store_true",
-        help=("If this flag is present, we will only run test_mps and test_metal"),
+        help=(
+            "If this flag is present, we will only run test_mps, test_metal, and test_ops"
+        ),
     )
     parser.add_argument(
         "--xpu",
@@ -1680,6 +1682,7 @@ def get_selected_tests(options) -> list[str]:
 
     if options.mps:
         selected_tests = [
+            "test_ops",
             "test_mps",
             "test_metal",
             "test_modules",
