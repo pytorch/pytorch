@@ -1029,35 +1029,102 @@ def _record_memory_history_impl(
 _record_memory_history.__signature__ = signature(_record_memory_history_impl)  # type: ignore[attr-defined]
 
 
-def _augment_frames(frames: list[_Frame]) -> int:
+# Pattern to match legacy FX generated files (eval_with_key style)
+_LEGACY_FX_PATTERN = re.compile(r"<eval_with_key>.*")
+# Path suffix for GraphModule file
+_GRAPH_MODULE_PATH_SUFFIX = "torch/fx/graph_module.py"
+
+
+def _is_legacy_fx_filename(filename: str) -> bool:
+    """Check if a filename looks like a legacy FX generated file (eval_with_key style)."""
+    return bool(_LEGACY_FX_PATTERN.search(filename))
+
+
+def _has_legacy_fx_frame(frames: list[_Frame]) -> bool:
+    """
+    Check if a frames stack contains a legacy FX frame pattern.
+
+    A legacy FX frame is identified by:
+    1. A frame with '<eval_with_key>' in the filename
+    2. A later frame (higher index) with name='__call__' and filename ending with
+       'torch/fx/graph_module.py'
+
+    This pattern indicates the allocation came from FX-generated code that was
+    executed via GraphModule.__call__, but without the modern keyed file naming.
+
+    Args:
+        frames: List of frame dictionaries representing a call stack
+
+    Returns:
+        True if the frames stack contains a legacy FX frame pattern
+    """
+    if not frames:
+        return False
+
+    # Find the index of the first eval_with_key frame
+    eval_with_key_idx = None
+    for i, frame in enumerate(frames):
+        if "filename" in frame and _is_legacy_fx_filename(frame["filename"]):
+            eval_with_key_idx = i
+            break
+
+    if eval_with_key_idx is None:
+        return False
+
+    # Check if there's a GraphModule.__call__ frame after the eval_with_key frame
+    for i in range(eval_with_key_idx + 1, len(frames)):
+        frame = frames[i]
+        if (
+            frame.get("name") == "__call__"
+            and "filename" in frame
+            and frame["filename"].endswith(_GRAPH_MODULE_PATH_SUFFIX)
+        ):
+            return True
+
+    return False
+
+
+class _AugmentationResult:
+    """Result of frame augmentation including statistics."""
+
+    def __init__(self) -> None:
+        self.augmented_count: int = 0
+        self.legacy_fx_frames_found: int = 0
+        self.keyed_fx_frames_found: int = 0
+
+
+def _augment_frames(frames: list[_Frame], result: _AugmentationResult) -> None:
     """
     Augment a list of frames with FX debug information.
 
     Args:
         frames: List of frame dictionaries to augment
-
-    Returns:
-        The count of frames that were augmented.
+        result: _AugmentationResult object to update with statistics
     """
     from torch.fx.graph_module import FX_GRAPH_MODULE_FILE_PREFIX
 
-    # Regex pattern to match FX generated files
+    # Regex pattern to match modern FX generated files
     _FX_GENERATED_PATTERN = re.compile(
         rf"{re.escape(FX_GRAPH_MODULE_FILE_PREFIX)}.*\.py$"
     )
 
-    count = 0
     if not frames:
-        return count
+        return
+
+    # Check if this frames stack contains a legacy FX frame pattern
+    if _has_legacy_fx_frame(frames):
+        result.legacy_fx_frames_found += 1
 
     for frame in frames:
         if "filename" in frame and "line" in frame:
             filename = frame["filename"]
             lineno = frame["line"]
 
-            # Check if this looks like an FX generated file
+            # Check if this looks like a keyed FX generated file
             if not _FX_GENERATED_PATTERN.search(os.path.basename(filename)):
                 continue
+
+            result.keyed_fx_frames_found += 1
 
             # Look up metadata from the global registry
             from torch.fx.traceback import _FX_METADATA_REGISTRY
@@ -1089,14 +1156,45 @@ def _augment_frames(frames: list[_Frame]) -> int:
                 if original_trace:
                     frame["fx_original_trace"] = original_trace
 
-                count += 1
+                result.augmented_count += 1
 
-    return count
+
+def _detect_legacy_fx_frames(snapshot_dict: _Snapshot) -> bool:
+    """
+    Detect if any legacy FX frames (eval_with_key style) exist in a snapshot.
+
+    A legacy FX frame stack is identified by:
+    1. A frame with '<eval_with_key>' in the filename
+    2. A later frame with name='__call__' and filename ending with 'torch/fx/graph_module.py'
+
+    Args:
+        snapshot_dict: The snapshot dictionary to scan
+
+    Returns:
+        True if at least one frame stack contains legacy FX frames, False otherwise
+    """
+    # Process blocks in segments
+    if "segments" in snapshot_dict:
+        for segment in snapshot_dict["segments"]:
+            if "blocks" in segment:
+                for block in segment["blocks"]:
+                    if "frames" in block and _has_legacy_fx_frame(block["frames"]):
+                        return True
+
+    # Process device traces
+    if "device_traces" in snapshot_dict:
+        for trace_list in snapshot_dict["device_traces"]:
+            for trace_entry in trace_list:
+                if isinstance(trace_entry, dict) and "frames" in trace_entry:
+                    if _has_legacy_fx_frame(trace_entry["frames"]):
+                        return True
+
+    return False
 
 
 def _augment_memory_snapshot_stack_traces(
     snapshot: str | _Snapshot,
-) -> _Snapshot:
+) -> tuple[_Snapshot, _AugmentationResult]:
     """
     Augment a memory snapshot with original source stack traces from FX metadata.
 
@@ -1109,8 +1207,10 @@ def _augment_memory_snapshot_stack_traces(
         snapshot: Either a memory snapshot dict or path to a snapshot pickle file
 
     Returns:
-        The augmented snapshot dictionary with fx_node_op, fx_node_name,
-        fx_original_trace, and fx_node_info fields added to frames
+        A tuple of:
+        - The augmented snapshot dictionary with fx_node_op, fx_node_name,
+          fx_original_trace, and fx_node_info fields added to frames
+        - An _AugmentationResult with statistics about the augmentation
     """
 
     snapshot_dict: _Snapshot
@@ -1121,8 +1221,8 @@ def _augment_memory_snapshot_stack_traces(
     else:
         snapshot_dict = snapshot
 
-    # Process stack traces in the snapshot
-    augmented_count = 0
+    # Track augmentation statistics
+    result = _AugmentationResult()
 
     # Process blocks in segments (for regular allocations)
     if "segments" in snapshot_dict:
@@ -1130,19 +1230,19 @@ def _augment_memory_snapshot_stack_traces(
             if "blocks" in segment:
                 for block in segment["blocks"]:
                     if "frames" in block:
-                        augmented_count += _augment_frames(block["frames"])
+                        _augment_frames(block["frames"], result)
 
     # Process device traces (for memory history)
     if "device_traces" in snapshot_dict:
         for trace_list in snapshot_dict["device_traces"]:
             for trace_entry in trace_list:
                 if isinstance(trace_entry, dict) and "frames" in trace_entry:
-                    augmented_count += _augment_frames(trace_entry["frames"])
+                    _augment_frames(trace_entry["frames"], result)
 
-    return snapshot_dict
+    return snapshot_dict, result
 
 
-def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
+def _snapshot(device: "Device" = None, augment_with_fx_traces=True):
     """Save a snapshot of CUDA memory state at the time it was called.
 
     The state is represented as a dictionary with the following structure.
@@ -1234,9 +1334,57 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
     Returns:
         The Snapshot dictionary object
     """
+    from torch.fx.traceback import _FX_METADATA_REGISTRY
+
     s = _C._cuda_memorySnapshot(None)
+
+    # Add metadata about FX augmentation settings
+    # This helps the memory viz tool provide helpful guidance
+    fx_trace_info: dict[str, Any] = {
+        "augment_with_fx_traces": augment_with_fx_traces,
+        "has_legacy_fx_frames": False,
+        "has_fx_metadata_registry_empty_warning": False,
+    }
+
     if augment_with_fx_traces:
-        s = _augment_memory_snapshot_stack_traces(s)  # type: ignore[assignment, arg-type]
+        s, result = _augment_memory_snapshot_stack_traces(s)  # type: ignore[arg-type]
+
+        # Check if we found legacy FX frames and the registry is empty
+        if result.legacy_fx_frames_found > 0:
+            fx_trace_info["has_legacy_fx_frames"] = True
+            if not _FX_METADATA_REGISTRY:
+                fx_trace_info["has_fx_metadata_registry_empty_warning"] = True
+                warnings.warn(
+                    "Memory snapshot contains legacy FX frames (eval_with_key style) but "
+                    "torch.fx.experimental._config.enrich_profiler_metadata was not enabled "
+                    "before compilation. To get augmented stack traces mapping FX code to "
+                    "original model source, set "
+                    "torch.fx.experimental._config.enrich_profiler_metadata = True "
+                    "BEFORE compiling your model. Note: torch._dynamo.config.enrich_profiler_metadata "
+                    "is deprecated and has no effect.",
+                    stacklevel=2,
+                )
+    else:
+        # Even if not augmenting, scan for legacy frames to include in metadata
+        # so the visualization can show appropriate help text
+        has_legacy = _detect_legacy_fx_frames(s)  # type: ignore[arg-type]
+        if has_legacy:
+            fx_trace_info["has_legacy_fx_frames"] = True
+            if not _FX_METADATA_REGISTRY:
+                fx_trace_info["has_fx_metadata_registry_empty_warning"] = True
+                warnings.warn(
+                    "Memory snapshot contains legacy FX frames (eval_with_key style) but "
+                    "torch.fx.experimental._config.enrich_profiler_metadata was not enabled "
+                    "before compilation. To get augmented stack traces mapping FX code to "
+                    "original model source:\n"
+                    "1. Set torch.fx.experimental._config.enrich_profiler_metadata = True "
+                    "BEFORE compiling your model.\n"
+                    "2. Pass augment_with_fx_traces=True to _snapshot().\n"
+                    "Note: torch._dynamo.config.enrich_profiler_metadata is deprecated and has no effect.",
+                    stacklevel=2,
+                )
+
+    s["fx_trace_info"] = fx_trace_info  # type: ignore[typeddict-unknown-key]
     return s
 
 

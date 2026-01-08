@@ -605,6 +605,27 @@ function create_segment_view(dst, snapshot, device) {
       'display: grid; grid-template-columns: 1fr 2fr; grid-template-rows: 2fr 1fr; height: 100%; gap: 10px',
     );
 
+  // Check for and display FX trace help text if needed
+  const fx_help_text = get_fx_trace_help_text(snapshot);
+  if (fx_help_text) {
+    outer
+      .append('div')
+      .attr(
+        'style',
+        'grid-column: 1 / 3; grid-row: 1; background-color: #fff3cd; ' +
+          'border: 1px solid #ffc107; border-radius: 4px; padding: 10px; ' +
+          'font-family: monospace; white-space: pre-wrap; margin-bottom: 10px; ' +
+          'max-height: 150px; overflow-y: auto;',
+      )
+      .text(fx_help_text);
+    // Adjust grid layout if help text is shown
+    outer.attr(
+      'style',
+      'display: grid; grid-template-columns: 1fr 2fr; ' +
+        'grid-template-rows: auto 2fr 1fr; height: 100%; gap: 10px',
+    );
+  }
+
   const events = snapshot.device_traces[device];
   const stack_info = StackInfo(outer);
   const memory_view = MemoryView(outer, stack_info, snapshot, device);
@@ -830,6 +851,37 @@ function format_frames(frames) {
       return frame_str;
     });
   return elideRepeats(frame_strings).join('\n');
+}
+
+function get_fx_trace_help_text(snapshot) {
+  // Check for fx_trace_info metadata in the snapshot
+  // This field may not exist in older snapshots, so we need to handle that gracefully
+  if (!snapshot || !snapshot.fx_trace_info) {
+    return null;
+  }
+
+  const fx_trace_info = snapshot.fx_trace_info;
+
+  // Extract fields with defaults for backward compatibility
+  const has_legacy_fx_frames = fx_trace_info.has_legacy_fx_frames || false;
+  const has_fx_metadata_registry_empty_warning = fx_trace_info.has_fx_metadata_registry_empty_warning || false;
+
+  // Only show warning if we have legacy FX frames and the registry was empty
+  if (has_legacy_fx_frames && has_fx_metadata_registry_empty_warning) {
+    return (
+      `⚠️ FX Trace Augmentation Issue:\n` +
+      `Found legacy FX frames (eval_with_key style) but torch.fx.experimental._config.enrich_profiler_metadata ` +
+      `was not enabled before compilation.\n\n` +
+      `To get augmented stack traces mapping FX code to original model source:\n\n` +
+      `1. Enable FX profiler metadata BEFORE compilation:\n` +
+      `   torch.fx.experimental._config.enrich_profiler_metadata = True\n\n` +
+      `2. Then compile and run your model.\n\n` +
+      `Note: torch._dynamo.config.enrich_profiler_metadata is deprecated and has no effect.\n` +
+      `The torch.fx.experimental._config version must be used.`
+    );
+  }
+
+  return null;
 }
 
 function process_alloc_data(snapshot, device, plot_segments, max_entries) {
@@ -1302,6 +1354,21 @@ function create_trace_view(
   d.append('label').text(
     `Detail: ${max_entries} of ${data.elements_length} entries`,
   );
+
+  // Check for and display FX trace help text if needed
+  const fx_help_text = get_fx_trace_help_text(snapshot);
+  if (fx_help_text) {
+    dst
+      .append('div')
+      .attr(
+        'style',
+        'background-color: #fff3cd; ' +
+          'border: 1px solid #ffc107; border-radius: 4px; padding: 10px; ' +
+          'font-family: monospace; white-space: pre-wrap; margin: 10px 0; ' +
+          'max-height: 150px; overflow-y: auto;',
+      )
+      .text(fx_help_text);
+  }
 
   const grid_container = dst
     .append('div')

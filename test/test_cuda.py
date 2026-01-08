@@ -7882,7 +7882,7 @@ class TestFXMemoryProfiler(TestCase):
         return fx_frames
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
+    # @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     def test_fx_memory_profiler_augmentation(self):
         """Test that memory snapshots are augmented with FX debug information."""
 
@@ -7944,6 +7944,182 @@ class TestFXMemoryProfiler(TestCase):
                 self.assertIn("f = self.net2(e)", frame["fx_original_trace"])
             elif fx_node_name == "relu":
                 self.assertIn("e = self.relu(d)", frame["fx_original_trace"])
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_fx_trace_info_metadata_with_augmentation(self):
+        """Test that fx_trace_info metadata is included in snapshots when augment_with_fx_traces=True."""
+        device = "cuda"
+        mod = self.MLPModule(device)
+        torch.cuda.memory.empty_cache()
+        torch.cuda.memory._record_memory_history()
+        compiled = torch.compile(mod, backend="aot_eager", fullgraph=True)
+        result = compiled(torch.randn(10, 10, device=device))
+        snapshot = torch.cuda.memory._snapshot(augment_with_fx_traces=True)
+        torch.cuda.memory._record_memory_history(enabled=None, clear_history=True)
+        torch.cuda.empty_cache()
+
+        # Check that fx_trace_info metadata is present
+        self.assertIn("fx_trace_info", snapshot)
+        fx_trace_info = snapshot["fx_trace_info"]
+
+        # Check required fields
+        self.assertIn("augment_with_fx_traces", fx_trace_info)
+        self.assertIn("has_legacy_fx_frames", fx_trace_info)
+        self.assertIn("has_fx_metadata_registry_empty_warning", fx_trace_info)
+
+        # augment_with_fx_traces should be True
+        self.assertTrue(fx_trace_info["augment_with_fx_traces"])
+
+        # With enrich_profiler_metadata enabled (via decorator on compile),
+        # we should not have legacy FX frames
+        self.assertFalse(fx_trace_info["has_legacy_fx_frames"])
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_fx_trace_info_metadata_without_augmentation(self):
+        """Test that fx_trace_info metadata is included in snapshots when augment_with_fx_traces=False."""
+        device = "cuda"
+        mod = self.MLPModule(device)
+        torch.cuda.memory.empty_cache()
+        torch.cuda.memory._record_memory_history()
+        compiled = torch.compile(mod, backend="aot_eager", fullgraph=True)
+        result = compiled(torch.randn(10, 10, device=device))
+        snapshot = torch.cuda.memory._snapshot(augment_with_fx_traces=False)
+        torch.cuda.memory._record_memory_history(enabled=None, clear_history=True)
+        torch.cuda.empty_cache()
+
+        # Check that fx_trace_info metadata is present even without augmentation
+        self.assertIn("fx_trace_info", snapshot)
+        fx_trace_info = snapshot["fx_trace_info"]
+
+        # Check required fields
+        self.assertIn("augment_with_fx_traces", fx_trace_info)
+        self.assertIn("has_legacy_fx_frames", fx_trace_info)
+        self.assertIn("has_fx_metadata_registry_empty_warning", fx_trace_info)
+
+        # augment_with_fx_traces should be False
+        self.assertFalse(fx_trace_info["augment_with_fx_traces"])
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_legacy_fx_frame_detection(self):
+        """Test detection of legacy FX frames (eval_with_key style)."""
+        from torch.cuda.memory import _is_legacy_fx_filename, _has_legacy_fx_frame
+
+        # Test legacy FX filename patterns
+        self.assertTrue(_is_legacy_fx_filename("<eval_with_key>.0"))
+        self.assertTrue(_is_legacy_fx_filename("<eval_with_key>.123"))
+        self.assertTrue(_is_legacy_fx_filename("<eval_with_key>"))
+
+        # Test non-legacy patterns
+        self.assertFalse(_is_legacy_fx_filename("fx_generated_abc123.py"))
+        self.assertFalse(_is_legacy_fx_filename("/path/to/regular_file.py"))
+        self.assertFalse(_is_legacy_fx_filename("model.py"))
+
+        # Test _has_legacy_fx_frame with a valid legacy pattern
+        # (eval_with_key frame followed by GraphModule.__call__ frame)
+        legacy_frames = [
+            {"filename": "<eval_with_key>.0", "line": 10, "name": "forward"},
+            {"filename": "/path/to/torch/fx/graph_module.py", "line": 100, "name": "__call__"},
+            {"filename": "/path/to/model.py", "line": 20, "name": "run"},
+        ]
+        self.assertTrue(_has_legacy_fx_frame(legacy_frames))
+
+        # Test _has_legacy_fx_frame without GraphModule.__call__ frame
+        no_call_frames = [
+            {"filename": "<eval_with_key>.0", "line": 10, "name": "forward"},
+            {"filename": "/path/to/model.py", "line": 20, "name": "run"},
+        ]
+        self.assertFalse(_has_legacy_fx_frame(no_call_frames))
+
+        # Test _has_legacy_fx_frame with GraphModule.__call__ before eval_with_key (wrong order)
+        wrong_order_frames = [
+            {"filename": "/path/to/torch/fx/graph_module.py", "line": 100, "name": "__call__"},
+            {"filename": "<eval_with_key>.0", "line": 10, "name": "forward"},
+        ]
+        self.assertFalse(_has_legacy_fx_frame(wrong_order_frames))
+
+        # Test _has_legacy_fx_frame with no eval_with_key frame
+        no_legacy_frames = [
+            {"filename": "fx_generated_abc.py", "line": 10, "name": "forward"},
+            {"filename": "/path/to/torch/fx/graph_module.py", "line": 100, "name": "__call__"},
+        ]
+        self.assertFalse(_has_legacy_fx_frame(no_legacy_frames))
+
+        # Test empty frames list
+        self.assertFalse(_has_legacy_fx_frame([]))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_detect_legacy_fx_frames_in_snapshot(self):
+        """Test _detect_legacy_fx_frames function with mock snapshot data."""
+        from torch.cuda.memory import _detect_legacy_fx_frames
+
+        # Create a mock snapshot with legacy FX frames (eval_with_key followed by GraphModule.__call__)
+        mock_snapshot = {
+            "segments": [
+                {
+                    "blocks": [
+                        {
+                            "frames": [
+                                {"filename": "<eval_with_key>.0", "line": 10, "name": "forward"},
+                                {"filename": "/path/to/torch/fx/graph_module.py", "line": 100, "name": "__call__"},
+                                {"filename": "/path/to/model.py", "line": 20, "name": "call"},
+                            ]
+                        },
+                    ]
+                }
+            ],
+            "device_traces": [],
+        }
+
+        # Should return True since we have legacy frames
+        self.assertTrue(_detect_legacy_fx_frames(mock_snapshot))
+
+        # Test with eval_with_key but no GraphModule.__call__ (should not be detected as legacy)
+        mock_snapshot_no_call = {
+            "segments": [
+                {
+                    "blocks": [
+                        {
+                            "frames": [
+                                {"filename": "<eval_with_key>.0", "line": 10, "name": "forward"},
+                                {"filename": "/path/to/model.py", "line": 20, "name": "call"},
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "device_traces": [],
+        }
+
+        self.assertFalse(_detect_legacy_fx_frames(mock_snapshot_no_call))
+
+        # Test with no legacy frames at all
+        mock_snapshot_no_legacy = {
+            "segments": [
+                {
+                    "blocks": [
+                        {
+                            "frames": [
+                                {"filename": "fx_generated_abc.py", "line": 10, "name": "forward"},
+                                {"filename": "/path/to/model.py", "line": 20, "name": "call"},
+                            ]
+                        }
+                    ]
+                }
+            ],
+            "device_traces": [],
+        }
+
+        self.assertFalse(_detect_legacy_fx_frames(mock_snapshot_no_legacy))
+
+    @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
+    def test_augmentation_result_class(self):
+        """Test the _AugmentationResult class initialization."""
+        from torch.cuda.memory import _AugmentationResult
+
+        result = _AugmentationResult()
+        self.assertEqual(result.augmented_count, 0)
+        self.assertEqual(result.legacy_fx_frames_found, 0)
+        self.assertEqual(result.keyed_fx_frames_found, 0)
 
 
 instantiate_parametrized_tests(TestCuda)
