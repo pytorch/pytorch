@@ -2671,10 +2671,10 @@ class BuiltinVariable(VariableTracker):
                     and (not tx.export or not config.capture_sparse_compute)
                 ):
                     unimplemented(
-                        gb_type="Attempted to wrap sparse Tensor",
+                        gb_type="Attempted getattr on sparse Tensor",
                         context="",
                         explanation="torch.compile does not support sparse Tensors",
-                        hints=[*graph_break_hints.SUPPORTABLE],
+                        hints=[*graph_break_hints.SPARSE_TENSOR],
                     )
 
             try:
