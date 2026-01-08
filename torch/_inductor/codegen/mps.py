@@ -829,7 +829,7 @@ class MetalKernel(SIMDKernel):
                     f"{self.index_dtype} {entry.name} = {sub_index_str};"
                 )
         else:
-            # root is already processed so need to just compute this entry's value inside the existing loop
+            # root is already processed so just need to compute this entry's value inside the existing loop
             with self.body.indent():
                 sub_index_str = index_str.replace(entry.root.name, linear_idx_name)
                 self.body.writeline(
