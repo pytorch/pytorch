@@ -265,6 +265,15 @@ case "$tag" in
     DOCS=yes
     UNINSTALL_DILL=yes
     ;;
+  pytorch-linux-noble-py3.10-gcc11)
+    ANACONDA_PYTHON_VERSION=3.10
+    GCC_VERSION=11
+    VISION=yes
+    KATEX=yes
+    TRITON=yes
+    DOCS=yes
+    UNINSTALL_DILL=yes
+    ;;
   pytorch-linux-jammy-py3-clang12-executorch)
     ANACONDA_PYTHON_VERSION=3.10
     CLANG_VERSION=12
