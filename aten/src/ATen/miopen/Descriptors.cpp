@@ -50,11 +50,12 @@ void TensorDescriptor::set(miopenDataType_t datatype, IntArrayRef t_sizes, IntAr
   size_t dim = t_sizes.size();
   if (dim > MIOPEN_DIM_MAX || pad > MIOPEN_DIM_MAX)
     TORCH_CHECK(false, "MIOpen supports only up to ", MIOPEN_DIM_MAX, " dimensions");
-  int size[MIOPEN_DIM_MAX];
-  int stride[MIOPEN_DIM_MAX];
+  // Use size_t (64-bit) to support large tensors with numel > int32_max
+  size_t size[MIOPEN_DIM_MAX];
+  size_t stride[MIOPEN_DIM_MAX];
   for (const auto i : c10::irange(dim)) {
-    size[i] = static_cast<int>(t_sizes[i]);
-    stride[i] = static_cast<int>(t_strides[i]);
+    size[i] = static_cast<size_t>(t_sizes[i]);
+    stride[i] = static_cast<size_t>(t_strides[i]);
   }
   for (const auto i : c10::irange(dim, pad)) {
     size[i] = 1;
@@ -118,13 +119,14 @@ void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_fo
     "Weight strides: ", t.strides(), '\n',
     "cuDNN suggested memory_format: ", memory_format);
 
-  int size[MIOPEN_DIM_MAX];
-  int stride[MIOPEN_DIM_MAX];
+  // Use size_t (64-bit) to support large tensors
+  size_t size[MIOPEN_DIM_MAX];
+  size_t stride[MIOPEN_DIM_MAX];
   for (const auto i : c10::irange(dim)) {
-    size[i] = (int) t.size(i);
+    size[i] = static_cast<size_t>(t.size(i));
   }
   for (const auto i : c10::irange(dim, pad)) {
-    size[i] = (int) 1;
+    size[i] = 1;
   }
 
   for (int i = pad; i >= dim; --i ) {
@@ -132,7 +134,7 @@ void FilterDescriptor::set(const at::Tensor &t, const at::MemoryFormat memory_fo
   }
   for (int i = dim-1 ; i >=0; --i ) {
       // Pass-through
-      stride[i] = t.stride(i);
+      stride[i] = static_cast<size_t>(t.stride(i));
   }
 
   dim = std::max<int64_t>(dim, pad);

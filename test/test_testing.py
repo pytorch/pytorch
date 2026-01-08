@@ -22,7 +22,7 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_utils import (
     IS_FBCODE, IS_JETSON, IS_MACOS, IS_SANDCASTLE, IS_WINDOWS, TestCase, run_tests, slowTest,
     parametrize, reparametrize, subtest, instantiate_parametrized_tests, dtype_name,
-    TEST_WITH_ROCM, decorateIf, skipIfRocm
+    TEST_WITH_ROCM, decorateIf
 )
 from torch.testing._internal.common_device_type import \
     (PYTORCH_TESTING_DEVICE_EXCEPT_FOR_KEY, PYTORCH_TESTING_DEVICE_ONLY_FOR_KEY, dtypes,
@@ -286,7 +286,6 @@ class TestTesting(TestCase):
     # when CUDA assert was thrown. Because all subsequent test will fail if that happens.
     # These tests are slow because it spawn another process to run test suite.
     # See: https://github.com/pytorch/pytorch/issues/49019
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @onlyCUDA
     @slowTest
     def test_cuda_assert_should_stop_common_utils_test_suite(self, device):
@@ -314,13 +313,17 @@ class TestThatContainsCUDAAssertFailure(TestCase):
 if __name__ == '__main__':
     run_tests()
 """)
-        # should capture CUDA error
-        self.assertIn('CUDA error: device-side assert triggered', stderr)
+        # CUDA says "device-side assert triggered", ROCm says "unspecified launch failure"
+        has_cuda_assert = 'CUDA error: device-side assert triggered' in stderr
+        has_hip_assert = 'HIP error' in stderr and 'launch failure' in stderr
+        self.assertTrue(
+            has_cuda_assert or has_hip_assert,
+            f"Expected device assert error in stderr, got: {stderr}",
+        )
         # should run only 1 test because it throws unrecoverable error.
         self.assertIn('errors=1', stderr)
 
 
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     @onlyCUDA
     @slowTest
     def test_cuda_assert_should_stop_common_device_type_test_suite(self, device):
@@ -355,8 +358,13 @@ instantiate_device_type_tests(
 if __name__ == '__main__':
     run_tests()
 """)
-        # should capture CUDA error
-        self.assertIn('CUDA error: device-side assert triggered', stderr)
+        # CUDA says "device-side assert triggered", ROCm says "unspecified launch failure"
+        has_cuda_assert = 'CUDA error: device-side assert triggered' in stderr
+        has_hip_assert = 'HIP error' in stderr and 'launch failure' in stderr
+        self.assertTrue(
+            has_cuda_assert or has_hip_assert,
+            f"Expected device assert error in stderr, got: {stderr}",
+        )
         # should run only 1 test because it throws unrecoverable error.
         self.assertIn('errors=1', stderr)
 
@@ -2354,7 +2362,6 @@ class TestImports(TestCase):
 
     # The test is flaky on ROCm/XPU and has been open and close multiple times
     # https://github.com/pytorch/pytorch/issues/110040
-    @skipIfRocm
     def test_circular_dependencies(self) -> None:
         """ Checks that all modules inside torch can be imported
         Prevents regression reported in https://github.com/pytorch/pytorch/issues/77441 """
@@ -2369,11 +2376,13 @@ class TestImports(TestCase):
                            "torch._inductor.codegen.cuda",  # depends on cutlass
                            "torch._inductor.codegen.cutedsl",  # depends on cutlass
                            "torch.distributed.benchmarks",  # depends on RPC and DDP Optim
+                           "torch.distributed.debug._frontend",  # depends on tabulate
                            "torch.distributed.examples",  # requires CUDA and torchvision
                            "torch.distributed.tensor.examples",  # example scripts
                            "torch.distributed._tools.sac_ilp",  # depends on pulp
                            "torch.csrc",  # files here are devtools, not part of torch
                            "torch.include",  # torch include files after install
+                           "torch._inductor.kernel.vendored_templates.cutedsl_grouped_gemm",  # depends on cutlass
                            ]
         if IS_WINDOWS or IS_MACOS or IS_JETSON:
             # Distributed should be importable on Windows(except nn.api.), but not on Mac

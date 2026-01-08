@@ -292,6 +292,8 @@ class BenchmarkRunner:
             "latency unit": "us",
             "peak memory": results["peak_memory"],
             "memory unit": "KB",
+            "memory bandwidth": results.get("memory_bandwidth_gb_s"),
+            "memory bandwidth unit": "GB/s",
         }
 
         # parsing test_case.test_config.input_config, adding it as entries to the 'out' dictionary
@@ -559,6 +561,7 @@ class BenchmarkRunner:
             run_type = perf_item.get("run")
             latency = perf_item.get("latency", 0)
             peak_memory = perf_item.get("peak memory", 0)
+            memory_bandwidth = perf_item.get("memory bandwidth", 0)
             device = perf_item.get("device", "unknown")
             dtype = perf_item.get("dtype", "torch.float").split(".")[1]
             runtime = perf_item.get("runtime", None)
@@ -656,6 +659,16 @@ class BenchmarkRunner:
             )
             records.append(asdict(record_memory))
 
+            # Add record for memory bandwidth
+            record_memory_bandwidth = copy.deepcopy(record_latency)
+            record_memory_bandwidth.metric = MetricInfo(
+                name="memory bandwidth",
+                unit="GB/s",
+                benchmark_values=[memory_bandwidth],
+                target_value=None,
+            )
+            records.append(asdict(record_memory_bandwidth))
+
         # Write all records to the output file
         with open(output_file, "w", encoding="utf-8") as f:
             json.dump(records, f, indent=2)
@@ -671,6 +684,7 @@ class BenchmarkRunner:
             "run_backward",
             "Execution Time",
             "Peak Memory (KB)",
+            "Memory Bandwidth (GB/s)",
         ]
 
         if self.args.output_json or self.args.output_json_for_dashboard:
@@ -746,6 +760,7 @@ class BenchmarkRunner:
                         test_case.test_config.run_backward,
                         result_dict["reported_run_time_us"][0],
                         result_dict["peak_memory"],
+                        result_dict["memory_bandwidth_gb_s"],
                     ],
                 )
                 if self.args.output_json or self.args.output_json_for_dashboard:
