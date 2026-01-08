@@ -682,6 +682,13 @@ def flex_attention_backward(*args, **kwargs):
     )
 
     kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
+    # Add check for mixed dtypes
+    if query.dtype != key.dtype or query.dtype != value.dtype:
+        raise ValueError(
+            f"Backward pass with mixed query, key, and value dtype is not supported, "
+            f"got query.dtype={query.dtype}, key.dtype={key.dtype}, "
+            f"and value.dtype={value.dtype}"
+        )
     # Mark symbols in custom kernel options as static shapes and add guards.
     kernel_options = {
         k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
@@ -923,7 +930,6 @@ def flex_attention_backward(*args, **kwargs):
             **cur_kernel_options,
         )
     inputs_for_autotuning = (
-        # pyrefly: ignore [unsupported-operation]
         [
             query,
             key,
@@ -994,11 +1000,9 @@ def get_bwd_subgraph_outputs(
     joint_outputs: JointOutputResult,
 ) -> list[Optional[Union[ComputedBuffer, TensorBox]]]:
     subgraph_buffer = (
-        # pyrefly: ignore [bad-assignment]
         subgraph_buffer if isinstance(subgraph_buffer, Sequence) else [subgraph_buffer]
     )
     mask_graph_buffer = (
-        # pyrefly: ignore [bad-assignment]
         mask_graph_buffer
         if isinstance(mask_graph_buffer, Sequence)
         else [mask_graph_buffer]
@@ -1010,5 +1014,4 @@ def get_bwd_subgraph_outputs(
         *joint_outputs.mutated_grads,
     ]
 
-    # pyrefly: ignore [not-iterable]
     return [*subgraph_buffer, *mask_graph_buffer, *joint_output_buffers]
