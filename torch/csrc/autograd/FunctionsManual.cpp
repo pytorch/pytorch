@@ -5344,6 +5344,15 @@ Tensor _cudnn_ctc_loss_backward(
   }
 }
 
+Tensor _miopen_ctc_loss_backward(
+    const Tensor& grad_out,
+    const Tensor& loss,
+    const Tensor& raw_grad,
+    bool zero_infinity) {
+  // MIOpen CTC Loss backward is identical to cuDNN
+  return _cudnn_ctc_loss_backward(grad_out, loss, raw_grad, zero_infinity);
+}
+
 bool any_variable_defined(const variable_list& variables) {
   for (const auto& variable : variables) {
     if (variable.defined()) {
