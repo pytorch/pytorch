@@ -3497,9 +3497,9 @@ class SubgraphTracer(fx.Tracer):
             self.parent.lift_tracked_freevar_to_input(proxy)
 
         example_value = proxy.node.meta["example_value"]
-        new_proxy = self.create_graph_input(
-            proxy.node.name, type(example_value), example_value
-        )
+        # Put None for type_expr argument or else it will use the fake class
+        # as the type
+        new_proxy = self.create_graph_input(proxy.node.name, None, example_value)
         self.lifted_freevars[proxy] = new_proxy
         return new_proxy
 

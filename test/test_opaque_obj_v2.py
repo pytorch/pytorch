@@ -175,6 +175,13 @@ class NestedValueSize:
         return repr_str, all_globals
 
 
+class OpaqueMultiplier:
+    """Opaque object that holds a multiplier value for backward tests."""
+
+    def __init__(self, multiplier: float):
+        self.multiplier = multiplier
+
+
 register_opaque_type(OpaqueQueue, typ="reference")
 register_opaque_type(
     RNGState,
@@ -211,6 +218,12 @@ register_opaque_type(
     },
 )
 register_opaque_type(AddModule, typ="reference")
+register_opaque_type(
+    OpaqueMultiplier,
+    typ="reference",
+    guard_fn=lambda obj: [obj.multiplier],
+    members={"multiplier": MemberType.USE_REAL},
+)
 register_opaque_type(ValueConfig, typ="value")
 register_opaque_type(SizeStore, typ="value")
 register_opaque_type(NestedValueSize, typ="value")
@@ -409,6 +422,36 @@ class TestOpaqueObject(TestCase):
             x: torch.Tensor, config: Optional[list[SizeStore]]
         ) -> torch.Tensor:
             return torch.empty_like(x)
+
+        torch.library.define(
+            "_TestOpaqueObject::mul_with_scale",
+            f"({get_opaque_type_name(OpaqueMultiplier)} scale_obj, Tensor x) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::mul_with_scale",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def mul_with_scale_impl(
+            scale_obj: OpaqueMultiplier, x: torch.Tensor
+        ) -> torch.Tensor:
+            return x * scale_obj.multiplier
+
+        def mul_setup_context(ctx, inputs, output):
+            ctx.scale_obj = inputs[0]
+
+        def mul_backward(ctx, grad):
+            return None, torch.ops._TestOpaqueObject.mul_with_scale(ctx.scale_obj, grad)
+
+        torch.library.register_autograd(
+            "_TestOpaqueObject::mul_with_scale",
+            mul_backward,
+            setup_context=mul_setup_context,
+            lib=self.lib,
+        )
 
         super().setUp()
 
@@ -1283,6 +1326,32 @@ def forward(self, arg0_1):
         opt_f = torch.compile(foo, fullgraph=True, backend="inductor")
         x = torch.randn(3, 3)
         self.assertEqual(opt_f(x), foo(x))
+
+    def test_invoke_subgraph(self):
+        @torch.compiler.nested_compile_region
+        def fn(scale_obj, x):
+            result = torch.ops._TestOpaqueObject.mul_with_scale(scale_obj, x)
+            result = result * 2
+            return result
+
+        def gn(scale_obj, x):
+            z = fn(scale_obj, x)
+            return z + z
+
+        scale_obj = OpaqueMultiplier(3.0)
+        x = torch.randn(2, 2, requires_grad=True)
+        x_clone = x.detach().clone().requires_grad_(True)
+
+        ref = gn(scale_obj, x_clone)
+        ref.sum().backward()
+
+        backend = AotEagerAndRecordGraphs()
+        opt_outer = torch.compile(gn, fullgraph=True, backend=backend)
+        res = opt_outer(scale_obj, x)
+        res.sum().backward()
+
+        self.assertEqual(ref, res)
+        self.assertEqual(ref.grad, res.grad)
 
 
 instantiate_parametrized_tests(TestOpaqueObject)
