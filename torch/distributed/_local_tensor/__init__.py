@@ -1176,8 +1176,8 @@ _PATCHED_DEVICE_MESH_METHODS: Sequence[str] = (
     "get_coordinate",
     "get_local_rank",
     "get_rank",
-    "is_current_rank_part_of_mesh",
-    "sym_get_coordinate",
+    "_is_current_rank_part_of_mesh",
+    "_sym_get_coordinate",
 )
 
 # These random functions are also patched.
@@ -1565,12 +1565,12 @@ class _LocalDeviceMesh:
         return out  # type: ignore[return-value]
 
     @staticmethod
-    def is_current_rank_part_of_mesh(self: DeviceMesh) -> bool:
+    def _is_current_rank_part_of_mesh(self: DeviceMesh) -> bool:
         my_coordinate = self.get_coordinate()
         return my_coordinate is not None
 
     @staticmethod
-    def sym_get_coordinate(self: DeviceMesh, index: int) -> int:
+    def _sym_get_coordinate(self: DeviceMesh, index: int) -> int:
         my_coordinate = self.get_coordinate()
         assert my_coordinate is not None
         return my_coordinate[index]
@@ -1782,6 +1782,27 @@ from queue import Queue
 _LOCAL_RUNNER_MODE: "LocalRunnerMode | None" = None
 
 
+class _ExceptionRaisingThread(threading.Thread):
+    def __init__(
+        self, group=None, target=None, name=None, args=(), kwargs=None, *, daemon=None
+    ):
+        super().__init__(
+            target=target, name=name, args=args, kwargs=kwargs, daemon=daemon
+        )
+        self.exception: BaseException | None = None
+
+    def run(self):
+        try:
+            super().run()
+        except BaseException as e:  # noqa: B036
+            self.exception = e
+
+    def join(self, timeout=None):
+        super().join(timeout=timeout)
+        if self.exception:
+            raise self.exception
+
+
 class LocalRunnerMode:
     """
     A class for running multiple SPMD functions concurrently, however at any point
@@ -1807,7 +1828,7 @@ class LocalRunnerMode:
             dst: {src: Queue() for src in ranks} for dst in ranks
         }
         self._runners = [
-            threading.Thread(target=self._run, args=(i,), name="LocalRunnerMode")
+            _ExceptionRaisingThread(target=self._run, args=(i,), name="LocalRunnerMode")
             for i in range(concurrency)
         ]
         self._process_mode = True

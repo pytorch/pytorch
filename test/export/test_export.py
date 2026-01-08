@@ -3185,15 +3185,12 @@ def forward(self, x, y):
     foo = torch.ops.export.foo.default(x, y);  x = None
     sym_size_int = torch.ops.aten.sym_size.int(foo, 0)
     sym_size_int_1 = torch.ops.aten.sym_size.int(foo, 1)
-    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int);  sym_constrain_range_for_size_default = None
     ge = sym_size_int >= 0;  sym_size_int = None
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
-    sym_constrain_range_for_size_default_1 = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_1);  sym_constrain_range_for_size_default_1 = None
     ge_1 = sym_size_int_1 >= 0;  sym_size_int_1 = None
     _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_default_1 = None
     bar = torch.ops.export.bar.default(y);  y = None
     sym_size_int_2 = torch.ops.aten.sym_size.int(bar, 0)
-    sym_constrain_range_for_size_default_2 = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_2);  sym_constrain_range_for_size_default_2 = None
     ge_2 = sym_size_int_2 >= 0;  sym_size_int_2 = None
     _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u2 >= 0 on node 'ge_2'");  ge_2 = _assert_scalar_default_2 = None
     return (foo, bar)""",
@@ -18013,7 +18010,6 @@ class TestExportCustomClass(TorchTestCase):
 def forward(self, x, mask):
     masked_select = torch.ops.aten.masked_select.default(x, mask);  x = mask = None
     sym_size_int_1 = torch.ops.aten.sym_size.int(masked_select, 0)
-    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_1);  sym_constrain_range_for_size_default = None
     ge = sym_size_int_1 >= 0
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
     le = sym_size_int_1 <= 1188864

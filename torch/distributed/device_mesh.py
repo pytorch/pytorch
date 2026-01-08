@@ -1060,7 +1060,7 @@ else:
                 )
             return not_none(get_rank(mesh_dim_group))
 
-        def is_current_rank_part_of_mesh(self) -> bool:
+        def _is_current_rank_part_of_mesh(self) -> bool:
             """
             Return True if the current rank is part of this mesh.
             """
@@ -1073,7 +1073,7 @@ else:
             """
             return self._coordinate_on_dim if self._coordinate_on_dim else None
 
-        def sym_get_coordinate(self, index: int) -> int:
+        def _sym_get_coordinate(self, index: int) -> int:
             # This is only valid when the current rank is part of the mesh.
             assert self._coordinate_on_dim
             return self._coordinate_on_dim[index]

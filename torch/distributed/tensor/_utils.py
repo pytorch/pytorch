@@ -136,7 +136,7 @@ def compute_local_shape_and_global_offset(
 
     """
     empty_offset = ()
-    if not mesh.is_current_rank_part_of_mesh():
+    if not mesh._is_current_rank_part_of_mesh():
         # if rank not in the mesh, return empty offset
         return ((0,), empty_offset)
 
