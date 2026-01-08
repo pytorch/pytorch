@@ -211,15 +211,22 @@ struct cublasCommonArgs {
         // Bias expanded to a matrix with the leading dimension 0
         bias = c10::MaybeOwned<Tensor>::borrowed(*self);
         bias_ld = static_cast<int64_t>(0);
-      }
-      if (self->dim() == 2) { // 2D bias
+      } else if (self->dim() == 2) { // 2D bias
         // Bias should match the result's layout
         bias = maybe_prepare_matrix_with_layout(*self, /*make_row_major_like=*/transpose_result, result->sizes());
         if (bias.has_value()) {
           bias_ld = (*bias)->stride(transpose_result ? 0 : 1);
         }
+      } else { // Fallback - copy bias into result
+        must_copy_bias = true;
       }
     }
+  }
+
+  void set_default_bias_vars() {
+    bias = std::nullopt;
+    bias_ld = std::nullopt;
+    must_copy_bias = false;
   }
 
   bool is_beta_zero() const {
@@ -235,7 +242,7 @@ struct cublasCommonArgs {
   }
 
   bool must_copy_bias_into_result() const {
-    return !bias.has_value() && beta.has_value() && !is_beta_zero();
+    return must_copy_bias;
   }
 
   // Matrix members
@@ -248,6 +255,7 @@ struct cublasCommonArgs {
   std::optional<int64_t> bias_ld = std::nullopt;
   std::optional<c10::MaybeOwned<Tensor>> bias = std::nullopt;
   std::optional<Scalar> beta = std::nullopt;
+  bool must_copy_bias = false;
 
   // Scale members
   void* scale_mata_ptr = nullptr;

@@ -336,19 +336,27 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   cublasCommonArgs args(mat1, mat2, result, self, beta);
   TORCH_INTERNAL_ASSERT_DEBUG_ONLY(!args.result->is_conj());
 
-  // Copy bias into result and set args.bias args.bias_ld to nullopt
+  // Copy bias into result and set args' bias vars to default
   const auto copy_bias_into_result = [](cublasCommonArgs& args, const Tensor& bias) -> void {
     // NOTE: self should broadcast over result
     (*args.result).copy_(*expand_size(bias, args.result->sizes(), "addmm"));
-    args.bias = std::nullopt;
-    args.bias_ld = std::nullopt;
+    args.set_default_bias_vars();
   };
 
+  const bool can_avoid_bias_copy = (
+    // BLAS path without out-of-place/epilogue bias
+    (disable_addmm_cuda_lt && !args.bias.has_value())
+    // Lt path with a no-copy out-of-place/epilogue bias
+    || (!disable_addmm_cuda_lt && !args.must_copy_bias_into_result())
+  );
+
+  // Handle copying bias (self) into result
   // result.is_complex implies BLAS path, so we need to copy bias (self) into result
   if (result.is_complex() && args.bias.has_value()) {
     copy_bias_into_result(args, **args.bias);
-  }
-  if (args.must_copy_bias_into_result()) {
+  } else if (!can_avoid_bias_copy) {
+    copy_bias_into_result(args, args.bias.has_value() ? **args.bias : self);
+  } else {
     copy_bias_into_result(args, self);
   }
   // FIXME: Float output with reduced self/mat1/mat2 dtype produces incorrect results,

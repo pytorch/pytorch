@@ -1761,6 +1761,27 @@ class triton:
     # This ensures the last N runs are saved, where N is this value
     max_kernel_dump_occurrences = 3
 
+    proton_profiling: bool = (
+        os.environ.get("TORCHINDUCTOR_TRITON_PROTON_PROFILING", "0") == "1"
+    )
+    # If not specified, proton traces will be saved to the debug directory
+    proton_output_dir: Optional[str] = os.environ.get(
+        "TORCHINDUCTOR_TRITON_PROTON_OUTPUT_DIR"
+    )
+    # Group CTAs by SM in proton trace files.
+    proton_group_by_sm: bool = (
+        os.environ.get("TORCHINDUCTOR_TRITON_PROTON_GROUP_BY_SM", "1") == "1"
+    )
+    # Split proton trace files by kernel invocation.
+    proton_split_invocations: bool = (
+        os.environ.get("TORCHINDUCTOR_TRITON_PROTON_SPLIT_INVOCATIONS", "1") == "1"
+    )
+    # Process warp tracks into CTA tracks (min warp start, max warp end) and
+    # assign CTAs to slots per SM such that CTAs do not overlap.
+    proton_per_cta_occupancy: bool = (
+        os.environ.get("TORCHINDUCTOR_TRITON_PROTON_PER_CTA_OCCUPANCY", "1") == "1"
+    )
+
 
 class aot_inductor:
     """
