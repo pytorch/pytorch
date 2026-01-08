@@ -67,6 +67,7 @@ class ContextProp:
     def __set__(self, obj, val):
         self.setter(val)
 
+
 def init_dropout_state(dropout, train, dropout_seed, dropout_state):
     dropout_desc_name = "desc_" + str(torch.cuda.current_device())
     dropout_p = dropout if train else 0
@@ -96,7 +97,6 @@ class CudnnRNNModule(PropModule):
         self.m.Unserializable = Unserializable
         self.m.get_cudnn_mode = get_cudnn_mode
         self.m.init_dropout_state = init_dropout_state
-
 
     @staticmethod
     def init_dropout_state(dropout, train, dropout_seed, dropout_state):
