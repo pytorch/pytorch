@@ -1433,3 +1433,5 @@ def _register_device_mesh_as_opaque_type():
             "__getitem__": MemberType.USE_REAL,
         },
     )
+
+    register_opaque_type(ProcessGroup, typ="reference")

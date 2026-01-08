@@ -355,6 +355,44 @@ def forward(self, arg0_1, arg1_1):
         res3 = opt_fn3(x)
         self.assertEqual(res3, ref3)
 
+    def test_dtensor_mesh_slicing_and_process_group(self):
+        # Create a 2D mesh with named dimensions
+        mesh_2d = init_device_mesh(
+            self.device_type,
+            (1, self.world_size),
+            mesh_dim_names=("dp", "tp"),
+        )
+
+        def fn(x):
+            # Do some computation on the DTensor
+            y = x * 2 + 1
+
+            # Get the device mesh from the resulting DTensor
+            mesh = y.device_mesh
+
+            # Do some computation with the mesh
+            local_rank = mesh.get_local_rank("tp")
+
+            # Get a submesh via __getitem__
+            tp_mesh = mesh["tp"]
+
+            # Access the process group from the submesh
+            pg = tp_mesh.get_group()
+
+            # Do some simple computation using process group info
+            pg_size = pg.size()
+
+            return y * local_rank + pg_size
+
+        x = DTensor.from_local(
+            torch.rand(4, 4), mesh_2d, [Replicate(), Shard(0)], run_check=False
+        )
+        ref = fn(x)
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        res = opt_fn(x)
+        self.assertEqual(res, ref)
+
     def test_fakify_dtensor(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
