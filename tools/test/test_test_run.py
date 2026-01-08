@@ -163,6 +163,13 @@ class TestShardedTest(unittest.TestCase):
 
         self.assertListEqual(sharded_test.get_pytest_args(), expected_args)
 
+    def test_lt_with_none_time_is_unordered(self) -> None:
+        left = ShardedTest("foo", 1, 1)
+        right = ShardedTest("foo", 1, 1)
+
+        self.assertFalse(left < right)
+        self.assertFalse(right < left)
+
 
 if __name__ == "__main__":
     unittest.main()
