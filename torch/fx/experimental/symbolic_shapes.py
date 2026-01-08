@@ -6953,9 +6953,6 @@ class ShapeEnv:
             if hint_size is None:
                 size = sys.maxsize
             elif symbol_is_type(x, SymT.SIZE):
-                import fbvscode
-
-                fbvscode.set_trace()
                 assert isinstance(hint_size, sympy.Expr)
                 size = int(hint_size)
             else:
