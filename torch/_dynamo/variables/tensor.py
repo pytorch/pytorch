@@ -1585,7 +1585,9 @@ class TensorVariable(VariableTracker):
     def get_python_hash(self) -> int:
         return hash(self.as_proxy().node.meta["example_value"])
 
-    def is_python_equal(self, other: "VariableTracker") -> bool:
+    def is_python_equal(self, other: object) -> bool:
+        if not isinstance(other, VariableTracker):
+            return False
         a = self.as_proxy().node.meta["example_value"]
         b = other.as_proxy().node.meta["example_value"]
         return a is b
@@ -1697,11 +1699,14 @@ class SymNodeVariable(VariableTracker):
         # searched for a dict key.
         return hash(self.evaluate_expr())
 
-    def is_python_equal(self, other: "VariableTracker") -> bool:
+    def is_python_equal(self, other: object) -> bool:
         if isinstance(other, SymNodeVariable):
             return self.evaluate_expr() == other.evaluate_expr()
         # could be constant variable as well
-        return self.evaluate_expr() == other.as_python_constant()
+        return (
+            isinstance(other, VariableTracker)
+            and self.evaluate_expr() == other.as_python_constant()
+        )
 
 
 class NumpyNdarrayVariable(TensorVariable):
