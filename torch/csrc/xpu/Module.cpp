@@ -333,6 +333,8 @@ static void registerXpuDeviceProperties(PyObject* module) {
       ._(gpu_eu_count)                                           \
       ._(max_work_group_size)                                    \
       ._(max_num_sub_groups)                                     \
+      ._(memory_clock_rate)                                      \
+      ._(memory_bus_width)                                       \
       ._(sub_group_sizes)                                        \
       ._(has_fp16)                                               \
       ._(has_fp64)                                               \

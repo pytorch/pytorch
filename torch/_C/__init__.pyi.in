@@ -2436,6 +2436,8 @@ class _XpuDeviceProperties:
     gpu_eu_count: _int
     max_work_group_size: _int
     max_num_sub_groups: _int
+    memory_clock_rate: _int
+    memory_bus_width: _int
     sub_group_sizes: list[_int]
     has_fp16: _bool
     has_fp64: _bool
