@@ -2,7 +2,7 @@ import itertools
 import unittest.mock
 from collections.abc import Callable, Generator, Iterator
 from contextlib import contextmanager
-from typing import Any, TypeVar, Union
+from typing import TypeVar, Union
 from typing_extensions import ParamSpec
 
 import torch
@@ -23,7 +23,7 @@ CROSSREF_FUNCTIONALIZE = False
 
 _P = ParamSpec("_P")
 _T = TypeVar("_T")
-T = TypeVar("T")
+_R = TypeVar("_R")
 
 
 def all_py_loaded_overloads() -> Iterator[torch._ops.OpOverload]:
@@ -85,7 +85,7 @@ def check_tensor_metadata_matches(
         )
 
 
-def check_metadata_matches(n: Any, r: Any, desc: Callable[[], str]) -> None:
+def check_metadata_matches(n: object, r: object, desc: Callable[[], str]) -> None:
     if not callable(desc):
         raise AssertionError(f"desc must be callable, got {type(desc)}")
     n_vals, _n_spec = pytree.tree_flatten(n)
@@ -129,7 +129,7 @@ def make_crossref_functionalize(
     def handler(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         fake_mode = FakeTensorMode()
 
-        def fakeify_defun(t: T) -> T | torch._subclasses.fake_tensor.FakeTensor:
+        def fakeify_defun(t: _R) -> _R | torch._subclasses.fake_tensor.FakeTensor:
             if isinstance(t, torch.Tensor):
                 if torch._is_functional_tensor(t):
                     r = torch._from_functional_tensor(t)
@@ -149,7 +149,7 @@ def make_crossref_functionalize(
                 return fake_mode.from_tensor(r)
             return t
 
-        def maybe_detach(t: T) -> T | torch.Tensor:
+        def maybe_detach(t: _R) -> _R | torch.Tensor:
             if isinstance(t, torch.Tensor):
                 return t.detach()
             else:

@@ -7,6 +7,7 @@ import operator
 import sys
 from functools import reduce
 from typing import Any, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import ParamSpec
 
 import torch
 import torch._custom_op
@@ -35,7 +36,7 @@ from torch._subclasses.fake_tensor import (
     run_fallback_kernel,
     UnsupportedOperatorException,
 )
-from torch.fx.operator_schemas import normalize_function
+from torch.fx.operator_schemas import _normalize_function_or_error
 from torch.utils._stats import count_label
 
 
@@ -47,7 +48,9 @@ if TYPE_CHECKING:
 
 
 FakeTensorLike = Union[FakeTensor, torch.Tensor]
-T = TypeVar("T")
+_P = ParamSpec("_P")
+_R = TypeVar("_R")
+_T = TypeVar("_T")
 
 pytree = torch.utils._pytree
 
@@ -65,7 +68,7 @@ op_implementations_checks = []
 aten = torch._ops.ops.aten
 
 
-def ordered_set(*items: T) -> dict[T, bool]:
+def ordered_set(*items: _T) -> dict[_T, bool]:
     return dict.fromkeys(items, True)
 
 
@@ -159,8 +162,8 @@ def register_op_impl(
     | OpOverload
     | list[OpOverload]
     | tuple[OpOverload, ...],
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    def impl_decorator(op_impl: Callable[..., Any]) -> Callable[..., Any]:
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+    def impl_decorator(op_impl: Callable[_P, _R]) -> Callable[_P, _R]:
         if isinstance(run_impl_check, OpOverload):
             assert run_impl_check not in op_implementations_dict, (
                 f"duplicate registration: {run_impl_check}"
@@ -203,11 +206,9 @@ def constructors(
     fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
 ) -> FakeTensor:
     assert func not in _non_kwarg_device_constructors
-    res = normalize_function(
+    _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-    assert res is not None
-    _, new_kwargs = res
     if "names" in kwargs:
         # REASON: "torch.compile doesn't support named tensors"
         raise UnsupportedOperatorException(func)
@@ -234,9 +235,9 @@ def constructors(
 def non_kwarg_is_pinned(
     fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
 ) -> bool:
-    res = normalize_function(func, args, kwargs, normalize_to_only_use_kwargs=True)
-    assert res is not None
-    _, new_kwargs = res
+    _, new_kwargs = _normalize_function_or_error(
+        func, args, kwargs, normalize_to_only_use_kwargs=True
+    )
     inp = new_kwargs.pop("input")
     # we'll ignore device argument because it is deprecated and not
     # actually used by is_pinned.
@@ -249,7 +250,7 @@ def non_kwarg_is_pinned(
 # They take string arguments and should not have device/dtype parameters added
 @register_op_impl(torch.ops.profiler._record_function_enter.default)
 def _record_function_enter(
-    fake_mode: FakeTensorMode, func: OpOverload, name: str, args: Any | None = None
+    fake_mode: FakeTensorMode, func: OpOverload, name: str, args: object | None = None
 ) -> FakeTensor:
     # Call the real implementation to get a real handle tensor
     with in_kernel_invocation_manager(fake_mode):
@@ -271,7 +272,7 @@ def _record_function_exit(
 
 @register_op_impl(torch.ops.profiler._record_function_enter_new.default)
 def _record_function_enter_new(
-    fake_mode: FakeTensorMode, func: OpOverload, name: str, args: Any | None = None
+    fake_mode: FakeTensorMode, func: OpOverload, name: str, args: object | None = None
 ) -> Any:
     # Call the real implementation - returns a custom class, not a tensor
     # Just pass through without wrapping
@@ -284,9 +285,9 @@ def _record_function_enter_new(
 def non_kwarg_to(
     fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
 ) -> FakeTensor:
-    res = normalize_function(func, args, kwargs, normalize_to_only_use_kwargs=True)
-    assert res is not None
-    _, new_kwargs = res
+    _, new_kwargs = _normalize_function_or_error(
+        func, args, kwargs, normalize_to_only_use_kwargs=True
+    )
     input_device = new_kwargs["device"]
     out_device = input_device if input_device else new_kwargs["input"].device
     new_kwargs["device"] = torch.device("meta")
@@ -329,6 +330,8 @@ def workaround_stride_incorrect_op(
                 func,
                 flat_args,
                 args_spec,
+                # TODO: refactor to lambda so we don't instantiate extra errors before
+                # calling
                 RuntimeError("Cannot run fallback kernel for stride_incorrect_op"),
             )
 
@@ -724,10 +727,16 @@ def _reshape_copy(
     shape = utils.infer_size(*shape, a.numel())
     if is_contiguous_or_false(a):
         view = _view_meta(fake_mode, func, a, *shape)
-        return view.clone(memory_format=torch.contiguous_format)
+        return view.clone(  # pyrefly: ignore[bad-return]
+            memory_format=torch.contiguous_format
+        )
     else:
         return _view_meta(
-            fake_mode, func, a.clone(memory_format=torch.contiguous_format), *shape
+            fake_mode,
+            func,
+            # pyrefly: ignore[bad-argument-type]
+            a.clone(memory_format=torch.contiguous_format),
+            *shape,
         )
 
 
@@ -1093,11 +1102,10 @@ def run_and_return_new_tensor_of_input_device(
     args: tuple[Any, ...],
     kwargs: dict[str, Any],
 ) -> FakeTensor:
-    res = normalize_function(
+    # TODO: ref
+    _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-    assert res is not None
-    _, new_kwargs = res
     out_device = new_kwargs["input"].device
     with in_kernel_invocation_manager(fake_mode):
         out = func(*args, **kwargs)
@@ -1169,11 +1177,9 @@ def index_tensor(
 ) -> FakeTensor:
     from torch._meta_registrations import meta_index_Tensor
 
-    res = normalize_function(
+    _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-    assert res is not None
-    _, new_kwargs = res
 
     out_device = new_kwargs["input"].device
     # ensure nonzero call goes to fake tensor
@@ -1215,11 +1221,9 @@ def multi_device_op_out(
     with in_kernel_invocation_manager(fake_mode):
         func(*args, **kwargs)
 
-    res = normalize_function(
+    _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-    assert res is not None
-    _, new_kwargs = res
 
     return new_kwargs["input"]
 
@@ -1229,11 +1233,9 @@ def multi_device_op_out(
 def index_put_impl(
     fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
 ) -> FakeTensor:
-    res = normalize_function(
+    _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-    assert res is not None
-    _, new_kwargs = res
     values = new_kwargs["values"]
     self_device = new_kwargs["input"].fake_device
     torch._check(
@@ -1281,11 +1283,9 @@ def nyi(fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any) 
 def conv(
     fake_mode: FakeTensorMode, func: OpOverload, *args: Any, **kwargs: Any
 ) -> FakeTensor | tuple[FakeTensor | None, FakeTensor | None, FakeTensor | None]:
-    res = normalize_function(
+    _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
     )
-    assert res is not None
-    _, new_kwargs = res
     device = new_kwargs["input"].fake_device
     # need to re-enable mode so the tensors report fake device
     with fake_mode:
@@ -1437,8 +1437,8 @@ FAST_OP_IMPLEMENTATIONS = {}
 # run_impl_check, and these run BEFORE decompositions
 def register_fast_op_impl(
     func: OpOverload,
-) -> Callable[[Callable[..., Any]], Callable[..., Any]]:
-    def impl_decorator(op_impl: Callable[..., Any]) -> Callable[..., Any]:
+) -> Callable[[Callable[_P, _R]], Callable[_P, _R]]:
+    def impl_decorator(op_impl: Callable[_P, _R]) -> Callable[_P, _R]:
         FAST_OP_IMPLEMENTATIONS[func] = op_impl
         return op_impl
 

@@ -134,7 +134,7 @@ class ComplexTensor(Tensor):
     def __tensor_flatten__(self) -> tuple[list[str], Any]:
         return ["re", "im"], None
 
-    def __repr__(self, *, tensor_contents: Any | None = None) -> str:
+    def __repr__(self, *, tensor_contents: object | None = None) -> str:
         return f"ComplexTensor(real={self.re!r}, imag={self.im!r})"
 
     def is_pinned(self, device: DeviceLikeType | None = None) -> bool:
