@@ -7484,4 +7484,29 @@ Tensor values_backward(const Tensor& grad, const Tensor& self) {
   return grad_self;
 }
 
+std::tuple<Tensor, Tensor, Tensor> attn_backward(const Tensor& grad_o, const Tensor& grad_a, const Tensor& q, const Tensor& k, const Tensor& v, const Tensor& a) {
+  Tensor grad_q;
+  Tensor grad_k;
+  Tensor grad_v;
+  if (!grad_o.defined() && !grad_a.defined()) {
+    return std::make_tuple(grad_q, grad_k, grad_v);
+  }
+
+  Tensor grad_a_total;
+  if (grad_o.defined()) {
+    grad_v = at::matmul(a.t(), grad_o);
+    grad_a_total = at::matmul(grad_o, v.t());
+  }
+
+  if (grad_a.defined()) {
+    grad_a_total = grad_a_total.defined() ? grad_a_total + grad_a : grad_a;
+  }
+
+  Tensor grad_x = grad_a_total * (1 - a * a);
+  grad_q = at::matmul(grad_x, k);
+  grad_k = at::matmul(grad_x.t(), q);
+
+  return std::make_tuple(grad_q, grad_k, grad_v);
+}
+
 } // namespace torch::autograd::generated::details

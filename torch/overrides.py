@@ -485,6 +485,7 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.atan2: lambda input, other, out=None: -1,
         torch.arctan2: lambda input, other, out=None: -1,
         torch.atanh: lambda input, out=None: -1,
+        torch.attn: lambda q, k, v: -1,
         torch.arctanh: lambda input, out=None: -1,
         torch.atleast_1d: lambda *tensors: -1,
         torch.atleast_2d: lambda *tensors: -1,

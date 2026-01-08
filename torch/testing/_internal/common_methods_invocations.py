@@ -2370,6 +2370,13 @@ def sample_inputs_chunk_cat(op_info, device, dtype, requires_grad, **kwargs):
             tensors.append(t)
         yield SampleInput(tensors, args=(dim, num_chunks))
 
+def sample_inputs_attn(op_info, device, dtype, requires_grad, **kwargs):
+    q = torch.randn(2, 3, requires_grad=True, dtype=torch.double)
+    k = torch.randn(2, 3, requires_grad=True, dtype=torch.double)
+    v = torch.randn(2, 5, requires_grad=True, dtype=torch.double)
+
+    yield SampleInput((q, k, v))
+
 def error_inputs_chunk_cat(op_info, device, **kwargs):
     make_arg = partial(make_tensor, device=device, dtype=torch.float32)
 
@@ -22072,6 +22079,13 @@ op_db: list[OpInfo] = [
                 device_type="cuda",
             ),
         ),
+    ),
+    OpInfo(
+        'attn',
+        dtypes=floating_types(),
+        supports_autograd=True,
+        supports_out=False,
+        sample_inputs_func=sample_inputs_attn,
     ),
 ]
 op_db += opinfo.definitions.op_db
