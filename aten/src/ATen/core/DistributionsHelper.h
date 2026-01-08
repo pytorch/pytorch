@@ -120,7 +120,7 @@ struct uniform_real_distribution {
 template <typename RNG,
           typename = decltype(&RNG::next_double_normal_sample),
           typename = decltype(&RNG::set_next_double_normal_sample)>
-C10_HOST_DEVICE inline bool maybe_get_next_normal_sample(RNG* generator, double* ret) {
+C10_HOST_DEVICE bool maybe_get_next_normal_sample(RNG* generator, double* ret) {
   std::optional<double> sample = generator->next_double_normal_sample();
   if (!sample.has_value())
     return false;
@@ -132,7 +132,7 @@ C10_HOST_DEVICE inline bool maybe_get_next_normal_sample(RNG* generator, double*
 template <typename RNG,
           typename = decltype(&RNG::next_float_normal_sample),
           typename = decltype(&RNG::set_next_float_normal_sample)>
-C10_HOST_DEVICE inline bool maybe_get_next_normal_sample(RNG* generator, float* ret) {
+C10_HOST_DEVICE bool maybe_get_next_normal_sample(RNG* generator, float* ret) {
   std::optional<float> sample = generator->next_float_normal_sample();
   if (!sample.has_value())
     return false;
@@ -142,22 +142,24 @@ C10_HOST_DEVICE inline bool maybe_get_next_normal_sample(RNG* generator, float* 
 }
 
 template <typename RNG>
-C10_HOST_DEVICE inline bool maybe_get_next_normal_sample(RNG* /* generator */, void* /* ret */) {
+C10_HOST_DEVICE bool maybe_get_next_normal_sample(RNG* /* generator */, void* /* ret */) {
   return false;
 }
 
-template <typename RNG, typename T = decltype(&RNG::set_next_double_normal_sample)>
-C10_HOST_DEVICE inline void maybe_set_next_normal_sample(RNG* generator, const double* cache) {
+template <typename RNG,
+          typename = decltype(&RNG::set_next_double_normal_sample)>
+C10_HOST_DEVICE void maybe_set_next_normal_sample(RNG* generator, const double* cache) {
   generator->set_next_double_normal_sample(*cache);
 }
 
-template <typename RNG, typename T = decltype(&RNG::set_next_float_normal_sample)>
-C10_HOST_DEVICE inline void maybe_set_next_normal_sample(RNG* generator, const float* cache) {
+template <typename RNG,
+          typename = decltype(&RNG::set_next_float_normal_sample)>
+C10_HOST_DEVICE void maybe_set_next_normal_sample(RNG* generator, const float* cache) {
   generator->set_next_float_normal_sample(*cache);
 }
 
 template <typename RNG>
-C10_HOST_DEVICE inline void maybe_set_next_normal_sample(RNG* /* generator */, const void* /* cache */) {
+C10_HOST_DEVICE void maybe_set_next_normal_sample(RNG* /* generator */, const void* /* cache */) {
 }
 
 /**
@@ -178,7 +180,7 @@ struct normal_distribution {
     dist_acctype<T> ret;
     // return cached values if available
     if (maybe_get_next_normal_sample(generator, &ret)) {
-      return ret;
+      return transformation::normal(ret, mean, stdv);
     }
 
     // otherwise generate new normal values
