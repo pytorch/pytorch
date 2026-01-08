@@ -403,7 +403,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
     // TODO: change the `ptr` below to `tensor.data_ptr()` when adding support
     // for user slice/view operations. For MemPool support,
-    // `tensor.storate().data_ptr()` is fine (today's `ptr`).
+    // `tensor.storage().data_ptr()` is fine (today's `ptr`).
 
     // If the tensor's ptr happen to be the same as allocation ptr
     if (ptr == allocation->ptr) {
