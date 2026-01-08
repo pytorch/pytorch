@@ -10,6 +10,7 @@ import sys
 import unittest
 
 import torch.distributed.elastic.rendezvous as rdvz
+from torch.testing._internal.common_utils import run_tests
 
 
 BACKEND_NAME = "testbackend"
@@ -36,3 +37,7 @@ class OutOfTreeRendezvousTest(unittest.TestCase):
 
         # Removing testbackend from python path
         sys.path.remove(current_path + TEST_PACKAGE_PATH)
+
+
+if __name__ == "__main__":
+    run_tests()

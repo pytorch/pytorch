@@ -51,6 +51,7 @@ from torch.distributed.elastic.rendezvous.dynamic_rendezvous import (
     RendezvousTimeout,
     Token,
 )
+from torch.testing._internal.common_utils import run_tests
 
 
 TEST_PORT = 54321
@@ -1926,3 +1927,7 @@ class _InMemoryRendezvousBackend(RendezvousBackend):
 
             self._state = state
             self._token = self._token + 1 if self._token is not None else 0
+
+
+if __name__ == "__main__":
+    run_tests()
