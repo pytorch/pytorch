@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 from collections.abc import Mapping
-from typing import Any, Union
+from typing import Any
 
 import torch.optim as optim
 from torch import Tensor
@@ -10,7 +10,7 @@ from torch.distributed._shard.sharded_tensor import ShardedTensor
 class ShardedOptimizer(optim.Optimizer):
     def __init__(
         self,
-        named_params: Mapping[str, Union[Tensor, ShardedTensor]],
+        named_params: Mapping[str, Tensor | ShardedTensor],
         optimizer_class,
         *optimizer_args,
         **optimizer_kwargs,

@@ -210,12 +210,12 @@ class DeferredTritonCallWrapper:
             self.arg_types,
             params["def_args"],
         )
-        arg_type_loookup = dict(zip(params["def_args"], self.arg_types))
+        arg_type_lookup = dict(zip(params["def_args"], self.arg_types))
         # difference between Python and C++ wrapper: C++ wrapper strips out equal_to_1 constants
         call_args = [
             name for name in params["call_args"] if name not in triton_meta["constants"]
         ]
-        arg_types = [arg_type_loookup[name] for name in call_args]
+        arg_types = [arg_type_lookup[name] for name in call_args]
         arg_signatures = [triton_meta["signature"][name] for name in call_args]
         scratch_spaces = {
             name: params[name]
@@ -707,12 +707,6 @@ class CppWrapperGpu(CppWrapperCpu):
                     )
                 )
                 new_args.append(f"&{var_name}")
-            elif arg_type in (sympy.Integer, int):
-                code.writeline(f"int {var_name} = {cexpr(arg)};")
-                new_args.append(f"&{var_name}")
-            elif arg_type in (sympy.Float, float):
-                code.writeline(f"float {var_name} = {cexpr(arg)};")
-                new_args.append(f"&{var_name}")
             # For symbolic call arguments, examine the arg signatures from triton meta
             # to explicitly cast to the right type
             # Reason: `auto` can infer unexpected type against kernel input signature.
@@ -724,6 +718,12 @@ class CppWrapperGpu(CppWrapperCpu):
                 code.writeline(
                     f"{signature2dtype[arg_signature]} {var_name} = {cexpr(arg)};"
                 )
+                new_args.append(f"&{var_name}")
+            elif arg_type in (sympy.Integer, int):
+                code.writeline(f"int {var_name} = {cexpr(arg)};")
+                new_args.append(f"&{var_name}")
+            elif arg_type in (sympy.Float, float):
+                code.writeline(f"float {var_name} = {cexpr(arg)};")
                 new_args.append(f"&{var_name}")
             elif arg_signature and arg_signature.startswith("tensordesc<"):
                 new_args.extend(

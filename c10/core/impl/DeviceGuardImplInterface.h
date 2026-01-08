@@ -304,15 +304,16 @@ struct NoOpDeviceGuardImpl : public DeviceGuardImplInterface {
   DeviceCapability getDeviceCapability(Device /*unused*/) const override {
     DeviceCapability cap;
     if constexpr (D == DeviceType::Meta) {
-      cap.capability_bits = 0;
+      cap.capability_data.capability_bits = 0;
       // Meta only supports basic types for shape inference
       // Byte, Char, Short, Int, Long, Float, Double,
       // Bool, ComplexFloat, ComplexDouble
-      cap.capability_bits = (1ULL << kIndex_Byte) | (1ULL << kIndex_Char) |
-          (1ULL << kIndex_Short) | (1ULL << kIndex_Int) |
-          (1ULL << kIndex_Long) | (1ULL << kIndex_Float) |
-          (1ULL << kIndex_Double) | (1ULL << kIndex_ComplexFloat) |
-          (1ULL << kIndex_ComplexDouble) | (1ULL << kIndex_Bool);
+      cap.capability_data.capability_bits = (1ULL << kIndex_Byte) |
+          (1ULL << kIndex_Char) | (1ULL << kIndex_Short) |
+          (1ULL << kIndex_Int) | (1ULL << kIndex_Long) |
+          (1ULL << kIndex_Float) | (1ULL << kIndex_Double) |
+          (1ULL << kIndex_ComplexFloat) | (1ULL << kIndex_ComplexDouble) |
+          (1ULL << kIndex_Bool);
     }
     return cap;
   }

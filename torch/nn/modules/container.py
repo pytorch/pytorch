@@ -4,7 +4,7 @@ from __future__ import annotations
 import operator
 from collections import abc as container_abcs, OrderedDict
 from itertools import chain, islice
-from typing import Any, Optional, overload, TYPE_CHECKING, TypeVar
+from typing import Any, overload, TYPE_CHECKING, TypeVar
 from typing_extensions import deprecated, Self
 
 import torch
@@ -358,7 +358,7 @@ class ModuleList(Module):
 
     _modules: dict[str, Module]  # type: ignore[assignment]
 
-    def __init__(self, modules: Optional[Iterable[Module]] = None) -> None:
+    def __init__(self, modules: Iterable[Module] | None = None) -> None:
         super().__init__()
         if modules is not None:
             self += modules
@@ -514,7 +514,7 @@ class ModuleDict(Module):
     * the order of insertion, and
 
     * in :meth:`~torch.nn.ModuleDict.update`, the order of the merged
-      ``OrderedDict``, ``dict`` (started from Python 3.6) or another
+      ``OrderedDict``, ``dict`` or another
       :class:`~torch.nn.ModuleDict` (the argument to
       :meth:`~torch.nn.ModuleDict.update`).
 
@@ -545,7 +545,7 @@ class ModuleDict(Module):
 
     _modules: dict[str, Module]  # type: ignore[assignment]
 
-    def __init__(self, modules: Optional[Mapping[str, Module]] = None) -> None:
+    def __init__(self, modules: Mapping[str, Module] | None = None) -> None:
         super().__init__()
         if modules is not None:
             self.update(modules)
@@ -673,7 +673,7 @@ class ParameterList(Module):
                 return x
     """
 
-    def __init__(self, values: Optional[Iterable[Any]] = None) -> None:
+    def __init__(self, values: Iterable[Any] | None = None) -> None:
         super().__init__()
         self._size = 0
         if values is not None:
@@ -888,7 +888,7 @@ class ParameterDict(Module):
     def __contains__(self, key: str) -> bool:
         return key in self._keys
 
-    def setdefault(self, key: str, default: Optional[Any] = None) -> Any:
+    def setdefault(self, key: str, default: Any | None = None) -> Any:
         """Set the default for a key in the Parameterdict.
 
         If key is in the ParameterDict, return its value.
@@ -927,7 +927,7 @@ class ParameterDict(Module):
         del self[k]
         return k, val
 
-    def get(self, key: str, default: Optional[Any] = None) -> Any:
+    def get(self, key: str, default: Any | None = None) -> Any:
         r"""Return the parameter associated with key if present. Otherwise return default if provided, None if not.
 
         Args:
@@ -937,7 +937,7 @@ class ParameterDict(Module):
         return self[key] if key in self else default  # noqa: SIM401
 
     def fromkeys(
-        self, keys: Iterable[str], default: Optional[Any] = None
+        self, keys: Iterable[str], default: Any | None = None
     ) -> ParameterDict:
         r"""Return a new ParameterDict with the keys provided.
 

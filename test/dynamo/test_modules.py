@@ -3117,6 +3117,24 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         self.assertFalse(hasattr(compiled_model, "foo"))
 
     def test_globals_change_in_other_file(self):
+        global _variable, _variable1
+
+        prev_variable = _variable
+        prev_variable1 = _variable1
+        prev_test_functions_variable = test_functions._variable
+
+        def restore_globals():
+            global _variable, _variable1
+            _variable = prev_variable
+            _variable1 = prev_variable1
+            test_functions._variable = prev_test_functions_variable
+
+        self.addCleanup(restore_globals)
+
+        _variable = 0
+        _variable1 = 0
+        test_functions._variable = 0
+
         @torch.compile(backend="eager", fullgraph=True)
         def fn(x):
             # Let `update_global` get invoked in a nested frame, to make sure
@@ -3365,7 +3383,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
             def __bool__(self):
                 self.bool_invoked += 1
-                return len(self.key_cache)
+                # __bool__ must return a real bool; use truthiness of cache size
+                return len(self.key_cache) > 0
 
         @torch.compile(fullgraph=True, backend="eager")
         def f(x):
@@ -3489,6 +3508,36 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         assert hasattr(model.linear, "weight")
         assert not hasattr(compiled_model.linear, "_tmp_weight")
         torch.testing.assert_close(eager_output, compiled_output)
+
+    @patch.object(torch._dynamo.config, "guard_nn_modules", True)
+    def test_dict_insertion_guard_method_func(self):
+        class SimpleModel(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        def hook_function(module, args):
+            return (args[0] + 1.0,)
+
+        class HookHelper:
+            def hook_method(self, module, args):
+                return (args[0] + 2.0,)
+
+        model = SimpleModel()
+        helper = HookHelper()
+
+        model.register_forward_pre_hook(hook_function)
+        model.register_forward_pre_hook(helper.hook_method, prepend=True)
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def runner_func(mod, x):
+            return mod(x)
+
+        input_tensor = torch.randn(1, 10)
+        output = runner_func(model, input_tensor)
 
 
 devices = ["cuda", "hpu", "xpu"]

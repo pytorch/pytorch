@@ -168,11 +168,13 @@ def get_device_capability(device: _device_t = None, /) -> dict[str, Any]:
             - ``supported_dtypes`` (set(torch.dtype)): Set of PyTorch data types supported by the device
 
     Examples:
+        >>> # xdoctest: +SKIP("requires cuda")
         >>> # Query capabilities for current device
         >>> capabilities = torch.accelerator.get_device_capability("cuda:0")
         >>> print("Supported dtypes:", capabilities["supported_dtypes"])
     """
     device_index = _get_device_index(device, optional=True)
+    # pyrefly: ignore [missing-attribute]
     return torch._C._accelerator_getDeviceCapability(device_index)
 
 

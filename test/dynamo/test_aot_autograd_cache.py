@@ -1,6 +1,7 @@
 # Owner(s): ["module: dynamo"]
 
 import copy
+import functools
 import os
 import shutil
 import unittest
@@ -39,6 +40,11 @@ from torch.testing._internal.common_utils import (
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU, requires_triton
 from torch.testing._internal.triton_utils import requires_cuda_and_triton
 from torch.testing._internal.two_tensor import TwoTensor
+from torch.utils.checkpoint import (
+    checkpoint,
+    CheckpointPolicy,
+    create_selective_checkpoint_contexts,
+)
 
 
 def aot_eager_regional_inductor():
@@ -587,37 +593,17 @@ class AOTAutogradCacheTests(InductorTestCase):
     @functorch_config.patch(
         {"enable_autograd_cache": True, "strict_autograd_cache": True}
     )
-    @parametrize("fn_select", ("tag_activation_checkpoint", "allow_in_graph"))
-    def test_unsafe_mark_cacheable(self, fn_select):
-        if fn_select == "tag_activation_checkpoint":
-            from torch.utils.checkpoint import checkpoint
+    def test_unsafe_mark_cacheable(self):
+        @torch._dynamo.allow_in_graph
+        class AllowInGraphFunc(torch.autograd.Function):
+            @staticmethod
+            def forward(_, x):
+                torch._dynamo.graph_break()
+                return x.sin()
 
-            def gn(x, y, z=None):
-                a = torch.matmul(x, y)
-                if z is not None:
-                    return torch.matmul(a, z)
-                return a
-
-            @torch.compile
-            def fn(x, y, z):
-                return torch.cos(checkpoint(gn, x, y, use_reentrant=False, z=z))
-
-            fn_name = "torch.ops.higher_order.tag_activation_checkpoint"
-        else:
-            assert fn_select == "allow_in_graph"
-
-            @torch._dynamo.allow_in_graph
-            class AllowInGraphFunc(torch.autograd.Function):
-                @staticmethod
-                def forward(_, x):
-                    torch._dynamo.graph_break()
-                    return x.sin()
-
-            @torch.compile
-            def fn(x, y, z):
-                return AllowInGraphFunc.apply(x)
-
-            fn_name = "torch._dynamo.variables.misc.trampoline_autograd_apply"
+        @torch.compile
+        def fn(x, y, z):
+            return AllowInGraphFunc.apply(x)
 
         x = torch.randn(4, 4)
         y = torch.randn(4, 4)
@@ -636,58 +622,10 @@ class AOTAutogradCacheTests(InductorTestCase):
 
         self._clear_dynamo_and_codecache()
 
-        if fn_select == "allow_in_graph":
-            # TODO: Fix allow in graph
-            raise unittest.SkipTest(
-                "Allow in graph produces an unserializable cache artifact"
-            )
-
-        with inductor_config.patch(
-            "unsafe_marked_cacheable_functions", {fn_name: "key1"}
-        ):
-            fn(*args)
-
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
-
-            self._clear_dynamo_and_codecache()
-
-            fn(*args)
-
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
-
-        self._clear_dynamo_and_codecache()
-        with inductor_config.patch(
-            "unsafe_marked_cacheable_functions", {fn_name: "key2"}
-        ):
-            fn(*args)
-
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
-
-            self._clear_dynamo_and_codecache()
-
-            fn(*args)
-
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 2)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
-
-        # On second try with same key, it should hit once more
-        with inductor_config.patch(
-            "unsafe_marked_cacheable_functions", {fn_name: "key1"}
-        ):
-            self._clear_dynamo_and_codecache()
-
-            fn(*args)
-
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 3)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
+        # TODO: Fix allow in graph
+        raise unittest.SkipTest(
+            "Allow in graph produces an unserializable cache artifact"
+        )
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", False)
@@ -1054,7 +992,193 @@ class AOTAutogradCacheTests(InductorTestCase):
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
     @functorch_config.patch({"enable_autograd_cache": True})
-    @unittest.expectedFailure  # Currently ops that call other ops does not properly invalidate cache
+    def test_triton_op_local_variable_kernel_detection(self):
+        """
+        Test that triton kernels passed via local variables are properly detected.
+
+        This tests the pattern:
+            kernel_fn = _my_kernel  # global
+            wrapped = wrapper(kernel_fn)
+            capture_triton(wrapped)[grid](...)
+
+        The local variable tracing in get_inner_triton_kernels should trace
+        through the assignments to find the original JITFunction.
+        """
+        from torch._library import capture_triton
+        from torch._library.triton import triton_ops_to_kernels
+
+        @triton.jit
+        def inner_kernel(x_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            tl.store(x_ptr + offsets, x + 42, mask=mask)
+
+        def identity_wrapper(kernel):
+            # simulate a wrapper function (like unroll_varargs in GDPA)
+            # that takes a kernel as argument and returns it
+            return kernel
+
+        @torch._library.triton_op("test::local_var_triton_op", mutates_args=())
+        def local_var_triton_op(x: torch.Tensor) -> torch.Tensor:
+            y = x.clone()
+            n_elements = y.numel()
+            # this is the GDPA pattern:
+            # 1. Assign global kernel to local variable
+            # 2. Pass it through wrapper functions
+            # 3. Use the wrapped result with capture_triton
+            kernel_fn = inner_kernel  # Direct assignment from global
+            wrapped_kernel = identity_wrapper(kernel_fn)  # Wrapper call
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)  # noqa: E731
+            capture_triton(wrapped_kernel)[grid](y, n_elements, BLOCK_SIZE=256)
+            return y
+
+        kernels = triton_ops_to_kernels.get("test::local_var_triton_op", [])
+        self.assertGreater(
+            len(kernels),
+            0,
+            "Local variable tracing should detect the kernel",
+        )
+
+        kernel_names = [getattr(k, "__name__", str(k)) for k in kernels]
+        self.assertIn(
+            "inner_kernel",
+            kernel_names,
+            f"inner_kernel should be detected, got: {kernel_names}",
+        )
+
+        a = torch.randn(5, device=GPU_TYPE)
+        expected = a.clone() + 42
+        result = torch.ops.test.local_var_triton_op(a)
+        self.assertEqual(result, expected)
+
+    @requires_cuda_and_triton
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_triton_op_local_variable_cache_invalidation(self):
+        """
+        Test that cache properly invalidates when a kernel passed via local
+        variable changes.
+        """
+        from torch._library import capture_triton
+
+        @triton.jit
+        def versioned_kernel(x):
+            arg_0 = tl.load(x)
+            tl.store(x, arg_0 + 1)
+
+        @torch._library.triton_op("test::local_var_cache_test", mutates_args=())
+        def local_var_cache_op(x: torch.Tensor) -> torch.Tensor:
+            y = x.clone().detach_().requires_grad_(True)
+            kernel = versioned_kernel  # local assignment
+            capture_triton(kernel)[1,](y)
+            return y
+
+        def fn(a):
+            return torch.ops.test.local_var_cache_test(a)
+
+        a = torch.randn(5, device=GPU_TYPE)
+        a2 = a.clone().detach_()
+        compiled_fn = torch.compile(fn, backend="inductor")
+        result = compiled_fn(a)
+        self.assertEqual(fn(a), result)
+
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+
+        self._clear_dynamo_and_codecache()
+
+        # redef the kernel with different behavior
+        @triton.jit
+        def versioned_kernel(x):  # noqa: F811
+            arg_0 = tl.load(x)
+            tl.store(x, arg_0 + 2)
+
+        @torch._library.triton_op("test::local_var_cache_test", mutates_args=())
+        def local_var_cache_op(x: torch.Tensor) -> torch.Tensor:  # noqa: F811
+            y = x.clone().detach_().requires_grad_(True)
+            kernel = versioned_kernel  # local assignment
+            capture_triton(kernel)[1,](y)
+            return y
+
+        compiled_fn = torch.compile(fn, backend="inductor")
+        result = compiled_fn(a2)
+
+        # Should be a cache miss due to kernel source change
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
+
+        self.assertEqual(fn(a2), result)
+
+    @requires_cuda_and_triton
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
+    def test_triton_op_recursive_function_kernel_detection(self):
+        """
+        Test that triton kernels hidden behind helper function calls are detected.
+
+        This tests the recursive function analysis capability where:
+            def helper():
+                capture_triton(my_kernel)[grid](...)
+
+            @triton_op(...)
+            def my_op(x):
+                helper()  # kernel is inside helper, not directly in my_op
+
+        The recursive analysis in get_inner_triton_kernels should trace
+        into helper functions to find the triton kernels.
+        """
+        from torch._library import capture_triton
+        from torch._library.triton import triton_ops_to_kernels
+
+        @triton.jit
+        def nested_kernel(x_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
+            pid = tl.program_id(0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            tl.store(x_ptr + offsets, x + 100, mask=mask)
+
+        def helper_that_calls_kernel(y, n_elements):
+            """Helper function that contains the triton kernel call."""
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)  # noqa: E731
+            capture_triton(nested_kernel)[grid](y, n_elements, BLOCK_SIZE=256)
+
+        @torch._library.triton_op("test::recursive_func_triton_op", mutates_args=())
+        def recursive_func_triton_op(x: torch.Tensor) -> torch.Tensor:
+            y = x.clone()
+            n_elements = y.numel()
+            # The kernel is hidden inside helper_that_calls_kernel
+            helper_that_calls_kernel(y, n_elements)
+            return y
+
+        kernels = triton_ops_to_kernels.get("test::recursive_func_triton_op", [])
+        self.assertGreater(
+            len(kernels),
+            0,
+            "Recursive function analysis should detect the kernel in helper function",
+        )
+
+        kernel_names = [getattr(k, "__name__", str(k)) for k in kernels]
+        self.assertIn(
+            "nested_kernel",
+            kernel_names,
+            f"nested_kernel should be detected, got: {kernel_names}",
+        )
+
+        a = torch.randn(5, device=GPU_TYPE)
+        expected = a.clone() + 100
+        result = torch.ops.test.recursive_func_triton_op(a)
+        self.assertEqual(result, expected)
+
+    @requires_cuda_and_triton
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch({"enable_autograd_cache": True})
     def test_triton_op_cache_multiple_ops_invalidation(self):
         @triton.jit
         def my_jit(x):
@@ -2354,6 +2478,214 @@ class AOTAutogradCachePicklerTests(torch._dynamo.test_case.TestCase):
 
             self.assertEqual(c1, c2)
             self.assertNotEqual(c3, c4)
+
+
+def _policy_save_mm(ctx, op, *args, **kwargs):
+    if op == torch.ops.aten.mm.default:
+        return CheckpointPolicy.MUST_SAVE
+    return CheckpointPolicy.MUST_RECOMPUTE
+
+
+def _policy_save_add(ctx, op, *args, **kwargs):
+    if op == torch.ops.aten.add.Tensor:
+        return CheckpointPolicy.MUST_SAVE
+    return CheckpointPolicy.MUST_RECOMPUTE
+
+
+def _policy_no_hash(ctx, op, *args, **kwargs):
+    if op == torch.ops.aten.mm.default:
+        return CheckpointPolicy.MUST_SAVE
+    return CheckpointPolicy.MUST_RECOMPUTE
+
+
+def _create_sac_ctx_fn(policy, cache_hash=None):
+    """
+    Helper to create a SAC context_fn with cache_hash set on the partial.
+    """
+    ctx_fn = functools.partial(create_selective_checkpoint_contexts, policy)
+    if cache_hash is not None:
+        ctx_fn.cache_hash = cache_hash
+    return ctx_fn
+
+
+class HOPCacheTests(torch._dynamo.test_case.TestCase):
+    def setUp(self):
+        super().setUp()
+        counters.clear()
+        torch._dynamo.reset()
+
+    def tearDown(self):
+        super().tearDown()
+        counters.clear()
+        torch._dynamo.reset()
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
+    def test_different_sac_policies_cause_cache_miss(self):
+        def gn(x, y):
+            a = torch.mm(x, y)
+            b = torch.add(a, x)
+            return b
+
+        ctx_fn_save_mm = _create_sac_ctx_fn(_policy_save_mm, "policy_save_mm_v1")
+
+        ctx_fn_save_add = _create_sac_ctx_fn(_policy_save_add, "policy_save_add_v1")
+
+        @torch.compile(backend="inductor")
+        def fn_with_checkpoint(x, y, ctx_fn):
+            return checkpoint(gn, x, y, use_reentrant=False, context_fn=ctx_fn)
+
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+
+        with fresh_cache():
+            fn_with_checkpoint(x, y, ctx_fn_save_mm)
+
+            # First run: miss=1, hit=0
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            torch._dynamo.reset()
+
+            fn_with_checkpoint(x, y, ctx_fn_save_add)
+
+            # Different policy: miss=2, hit=0 (policy is part of cache key)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
+    def test_same_sac_policy_causes_cache_hit(self):
+        def gn(x, y):
+            a = torch.mm(x, y)
+            b = torch.add(a, x)
+            return b
+
+        ctx_fn = _create_sac_ctx_fn(_policy_save_mm, "policy_save_mm_v1")
+
+        @torch.compile(backend="inductor")
+        def fn_with_checkpoint(x, y):
+            return checkpoint(gn, x, y, use_reentrant=False, context_fn=ctx_fn)
+
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+
+        with fresh_cache():
+            fn_with_checkpoint(x, y)
+
+            # First run: miss=1, hit=0
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            torch._dynamo.reset()
+
+            fn_with_checkpoint(x, y)
+
+            # Same policy: miss stays at 1, hit increments to 1
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
+    def test_checkpoint_with_dropout_caches_correctly(self):
+        def gn(x):
+            return torch.dropout(x, p=0.5, train=True)
+
+        @torch.compile(backend="inductor")
+        def fn(x):
+            return checkpoint(gn, x, use_reentrant=False)
+
+        x = torch.randn(4, 4, requires_grad=True)
+
+        with fresh_cache():
+            out1 = fn(x.clone().requires_grad_(True))
+            out1.sum().backward()
+
+            # First run: miss=1, hit=0
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            torch._dynamo.reset()
+
+            out2 = fn(x.clone().requires_grad_(True))
+            out2.sum().backward()
+
+            # Same function with RNG HOPs: miss stays at 1, hit increments to 1
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch("enable_autograd_cache", True)
+    def test_sac_without_cache_hash_bypasses_cache(self):
+        def gn(x, y):
+            a = torch.mm(x, y)
+            b = torch.add(a, x)
+            return b
+
+        ctx_fn = _create_sac_ctx_fn(_policy_no_hash)  # No cache_hash
+
+        @torch.compile(backend="inductor")
+        def fn_with_checkpoint(x, y):
+            return checkpoint(gn, x, y, use_reentrant=False, context_fn=ctx_fn)
+
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+
+        with fresh_cache():
+            fn_with_checkpoint(x, y)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+            self.assertGreater(counters["aot_autograd"]["autograd_cache_bypass"], 0)
+
+    @inductor_config.patch("fx_graph_remote_cache", False)
+    @inductor_config.patch("fx_graph_cache", True)
+    @functorch_config.patch(
+        {"enable_autograd_cache": True, "strict_autograd_cache": True}
+    )
+    def test_changing_cache_hash_invalidates_cache(self):
+        def gn(x, y):
+            a = torch.mm(x, y)
+            b = torch.add(a, x)
+            return b
+
+        ctx_fn_mm = _create_sac_ctx_fn(_policy_save_mm, "policy_save_mm_v1")
+
+        ctx_fn_add = _create_sac_ctx_fn(_policy_save_add, "policy_save_add_v1")
+
+        @torch.compile(backend="inductor")
+        def fn_mm(x, y):
+            return checkpoint(gn, x, y, use_reentrant=False, context_fn=ctx_fn_mm)
+
+        @torch.compile(backend="inductor")
+        def fn_add(x, y):
+            return checkpoint(gn, x, y, use_reentrant=False, context_fn=ctx_fn_add)
+
+        x = torch.randn(4, 4)
+        y = torch.randn(4, 4)
+
+        with fresh_cache():
+            fn_mm(x, y)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
+
+            torch._dynamo.reset()
+
+            fn_add(x, y)
+
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 2)
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
 
 
 if __name__ == "__main__":

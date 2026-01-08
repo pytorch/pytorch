@@ -5,7 +5,7 @@ import inspect
 import warnings
 from collections.abc import Callable
 from functools import partial
-from typing import Any, Union
+from typing import Any
 
 import torch.nn as nn
 from torch.distributed.fsdp._common_utils import (
@@ -25,7 +25,7 @@ from torch.distributed.fsdp.wrap import (
 
 def _auto_wrap(
     root_module: nn.Module,
-    policy: Union[Callable, _Policy],
+    policy: Callable | _Policy,
     ignored_modules: set[nn.Module],
     ignored_params: set[nn.Parameter],
     root_kwargs: dict[str, Any],
