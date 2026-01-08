@@ -25,6 +25,7 @@ from torch.testing._internal.common_device_type import instantiate_device_type_t
 from torch.testing._internal.common_utils import (
     IS_CI,
     IS_JETSON,
+    IS_LINUX,
     IS_MACOS,
     IS_S390X,
     IS_SANDCASTLE,
@@ -40,7 +41,6 @@ from torch.testing._internal.common_utils import (
     TEST_WITH_ASAN,
     TEST_WITH_TSAN,
     TestCase,
-    xfailIfLinux,
 )
 from torch.utils.data import (
     _utils,
@@ -1398,14 +1398,14 @@ except RuntimeError as e:
             del loader1_it
             del loader2_it
 
-    # This case pass on Intel GPU, but currently expected failure on other device,
-    # please don't forget to remove this skip when remove the xfailIfLinux.
-    @skipIfXpu
-    # This case passes on s390x too.
-    # please don't forget to remove this skip when remove the xfailIfLinux.
-    @unittest.skipIf(IS_S390X, "Unexpectedly succeeds on s390x")
-    # https://github.com/pytorch/pytorch/issues/128551
-    @xfailIfLinux
+    # Test that DataLoader properly handles worker segfaults
+    # Note: This test has inconsistent behavior across Linux distributions:
+    # - Passes on RHEL 9.6 (segfault triggers correctly)
+    # - Fails on Ubuntu (process may not terminate as expected)
+    # Skipping on Linux due to kernel/distribution-dependent segfault behavior.
+    # See: https://github.com/pytorch/pytorch/issues/128551
+    # See: https://github.com/pytorch/pytorch/issues/169054
+    @unittest.skipIf(IS_LINUX, "Segfault behavior is inconsistent across Linux distributions")
     def test_segfault(self):
         p = ErrorTrackingProcess(target=_test_segfault)
         p.start()
