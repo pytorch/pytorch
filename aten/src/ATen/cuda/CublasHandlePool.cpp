@@ -218,7 +218,7 @@ size_t getCUDABlasLtWorkspaceSize() {
 #ifndef USE_ROCM
   static auto unified_env_var = c10::utils::check_env(TORCH_CUBLASLT_UNIFIED_WORKSPACE);
 #if !defined(FBCODE)
-  static bool unified = unified_env_var == std::nullopt || unified_env_var == true;
+  static bool unified = (unified_env_var == std::nullopt) || (unified_env_var == true);
 #else
   static bool unified = unified_env_var == true;
 #endif
