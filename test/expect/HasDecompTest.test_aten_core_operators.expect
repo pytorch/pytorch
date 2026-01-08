@@ -298,6 +298,9 @@ aten::isnan.out
 aten::lcm
 aten::lcm.out
 aten::lcm_
+aten::ldexp.Tensor
+aten::ldexp.out
+aten::ldexp_
 aten::le.Scalar
 aten::le.Scalar_out
 aten::le.Tensor
@@ -348,6 +351,8 @@ aten::lt.Tensor
 aten::lt.Tensor_out
 aten::lt_.Scalar
 aten::lt_.Tensor
+aten::max_pool2d_with_indices_backward
+aten::max_pool2d_with_indices_backward.grad_input
 aten::maximum
 aten::maximum.out
 aten::mean

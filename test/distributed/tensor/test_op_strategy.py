@@ -25,18 +25,17 @@ from torch.distributed.tensor._op_schema import (
     OpSpec,
     OpStrategy,
     RuntimeSchemaInfo,
+    TupleStrategy,
 )
 from torch.distributed.tensor._ops._einsum_strategy import (
     EinsumDims,
     gen_einsum_strategies,
 )
-from torch.distributed.tensor._ops.registration import register_op_strategy
-from torch.distributed.tensor._ops.utils import replicate_op_strategy
-from torch.distributed.tensor.debug import (
-    _clear_fast_path_sharding_prop_cache,
-    _clear_python_sharding_prop_cache,
-    CommDebugMode,
+from torch.distributed.tensor._ops.utils import (
+    register_op_strategy,
+    replicate_op_strategy,
 )
+from torch.distributed.tensor.debug import _clear_sharding_prop_cache, CommDebugMode
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -44,6 +43,7 @@ from torch.testing._internal.distributed._tensor.common_dtensor import (
     DTensorTestBase,
     with_comms,
 )
+from torch.testing._internal.distributed.fake_pg import FakeStore
 
 
 try:
@@ -512,8 +512,7 @@ def op_strategy_context(op_overload, strategy_func, schema_info=None):
                 del propagator.op_to_schema_info[op_overload]
         else:
             propagator.op_to_schema_info[op_overload] = _origin_op_strategy_schema
-        _clear_fast_path_sharding_prop_cache()
-        _clear_python_sharding_prop_cache()
+        _clear_sharding_prop_cache()
 
 
 def detect_exists_identical_opspec(*args, op, mesh, strategy_function) -> bool:
@@ -708,6 +707,146 @@ DistTensorReplicateStrategyRegistrationTestWithLocalTensor = (
 TestStrategyHashingWithLocalTensor = create_local_tensor_test_class(
     TestStrategyHashing,
 )
+
+
+class TestOpSchemaMetaProperties(TestCase):
+    def setUp(self):
+        super().setUp()
+        self.world_size = 8
+        store = FakeStore()
+        torch.distributed.init_process_group(
+            backend="fake", rank=0, world_size=self.world_size, store=store
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        torch.distributed.destroy_process_group()
+
+    def test_args_meta_mixed_opstrategy_and_tuplestrategy(self):
+        """Test args_meta with both OpStrategy and TupleStrategy"""
+        # Create a simple mesh
+        mesh = DeviceMesh("cpu", torch.arange(4))
+
+        # Create tensor metadata
+        tensor_meta1 = TensorMeta(
+            shape=torch.Size([10, 20]),
+            stride=(20, 1),
+            dtype=torch.float32,
+        )
+        tensor_meta2 = TensorMeta(
+            shape=torch.Size([5, 10]),
+            stride=(10, 1),
+            dtype=torch.float32,
+        )
+        tensor_meta3 = TensorMeta(
+            shape=torch.Size([5, 10]),
+            stride=(10, 1),
+            dtype=torch.float32,
+        )
+        tensor_meta4 = TensorMeta(
+            shape=torch.Size([20, 30]),
+            stride=(30, 1),
+            dtype=torch.float32,
+        )
+
+        # Create OpStrategies
+        op_strategy1 = OpStrategy(
+            [OpSpec(DTensorSpec(mesh, (Shard(0),), tensor_meta1))]
+        )
+        op_strategy2 = OpStrategy(
+            [OpSpec(DTensorSpec(mesh, (Shard(1),), tensor_meta2))]
+        )
+        op_strategy3 = OpStrategy(
+            [OpSpec(DTensorSpec(mesh, (Replicate(),), tensor_meta3))]
+        )
+        op_strategy4 = OpStrategy(
+            [OpSpec(DTensorSpec(mesh, (Shard(1),), tensor_meta4))]
+        )
+
+        # Create TupleStrategy
+        tuple_strategy = TupleStrategy([op_strategy2, op_strategy3])
+
+        # Create OpSchema: (OpStrategy, TupleStrategy, OpStrategy)
+        op_schema = OpSchema(
+            torch.ops.aten.add.Tensor,
+            args_schema=(op_strategy1, tuple_strategy, op_strategy4),
+            kwargs_schema={},
+        )
+
+        # Test args_meta
+        args_meta = op_schema.args_meta
+        self.assertEqual(len(args_meta), 3)
+        # First arg should be TensorMeta
+        self.assertIsInstance(args_meta[0], TensorMeta)
+        self.assertEqual(args_meta[0].shape, torch.Size([10, 20]))
+        # Second arg should be tuple of TensorMeta
+        self.assertIsInstance(args_meta[1], tuple)
+        self.assertEqual(len(args_meta[1]), 2)
+        self.assertIsInstance(args_meta[1][0], TensorMeta)
+        self.assertIsInstance(args_meta[1][1], TensorMeta)
+        self.assertEqual(args_meta[1][0].shape, torch.Size([5, 10]))
+        self.assertEqual(args_meta[1][1].shape, torch.Size([5, 10]))
+        # Third arg should be TensorMeta
+        self.assertIsInstance(args_meta[2], TensorMeta)
+        self.assertEqual(args_meta[2].shape, torch.Size([20, 30]))
+
+    def test_kwargs_meta_mixed(self):
+        """Test kwargs_meta with mixed types"""
+        # Create a simple mesh
+        mesh = DeviceMesh("cpu", torch.arange(4))
+
+        # Create tensor metadata
+        tensor_meta1 = TensorMeta(
+            shape=torch.Size([10, 20]),
+            stride=(20, 1),
+            dtype=torch.float32,
+        )
+        tensor_meta2 = TensorMeta(
+            shape=torch.Size([5, 10]),
+            stride=(10, 1),
+            dtype=torch.float32,
+        )
+        tensor_meta3 = TensorMeta(
+            shape=torch.Size([5, 10]),
+            stride=(10, 1),
+            dtype=torch.float32,
+        )
+
+        # Create OpStrategies
+        op_strategy1 = OpStrategy(
+            [OpSpec(DTensorSpec(mesh, (Shard(0),), tensor_meta1))]
+        )
+        op_strategy2 = OpStrategy(
+            [OpSpec(DTensorSpec(mesh, (Shard(1),), tensor_meta2))]
+        )
+        op_strategy3 = OpStrategy(
+            [OpSpec(DTensorSpec(mesh, (Replicate(),), tensor_meta3))]
+        )
+
+        # Create TupleStrategy
+        tuple_strategy = TupleStrategy([op_strategy2, op_strategy3])
+
+        # Create OpSchema with mixed kwargs
+        op_schema = OpSchema(
+            torch.ops.aten.add.Tensor,
+            args_schema=(),
+            kwargs_schema={
+                "input": op_strategy1,
+                "tensors": tuple_strategy,
+                "dim": 0,
+                "alpha": 1.0,
+            },
+        )
+
+        # Test kwargs_meta
+        kwargs_meta = op_schema.kwargs_meta
+        self.assertEqual(len(kwargs_meta), 4)
+        self.assertIsInstance(kwargs_meta["input"], TensorMeta)
+        self.assertIsInstance(kwargs_meta["tensors"], tuple)
+        self.assertEqual(len(kwargs_meta["tensors"]), 2)
+        self.assertEqual(kwargs_meta["dim"], 0)
+        self.assertEqual(kwargs_meta["alpha"], 1.0)
+
 
 if __name__ == "__main__":
     run_tests()

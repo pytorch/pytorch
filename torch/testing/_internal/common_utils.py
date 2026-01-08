@@ -103,7 +103,7 @@ except ImportError:
 SEED = 1234
 MI350_ARCH = ("gfx950",)
 MI300_ARCH = ("gfx942",)
-MI200_ARCH = ("gfx90a")
+MI200_ARCH = ("gfx90a",)
 NAVI_ARCH = ("gfx1030", "gfx1100", "gfx1101", "gfx1200", "gfx1201")
 NAVI3_ARCH = ("gfx1100", "gfx1101")
 NAVI4_ARCH = ("gfx1200", "gfx1201")
@@ -2016,6 +2016,8 @@ def getRocmArchName(device_index: int = 0):
     return torch.cuda.get_device_properties(device_index).gcnArchName
 
 def isRocmArchAnyOf(arch: tuple[str, ...]):
+    if not torch.version.hip:
+        return False
     rocmArch = getRocmArchName()
     return any(x in rocmArch for x in arch)
 
@@ -5687,16 +5689,20 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
 
     # Remove everything that looks like stack frames in NOT this file
     def repl_frame(m):
-        if m.group(1) != file:
+        if m.group(2) != file:
             return ""
         # Don't accept top-level, even for this script, these will wobble
         # depending on how the testing script was invoked
-        if m.group(2) == "<module>":
+        if m.group(3) == "<module>":
             return ""
 
         return m.group(0)
 
-    s = re.sub(r'  File "([^"]+)", line \d+, in (.+)\n(    .+\n( +[~^]+ *\n)?)+', repl_frame, s)
+    s = re.sub(
+        r'( *)File "([^"]+)", line \d+, in (.+)\n(\1  .+\n( +[~^]+ *\n)?)+',
+        repl_frame,
+        s,
+    )
     s = re.sub(r"line \d+", "line N", s)
     s = re.sub(r".py:\d+", ".py:N", s)
     s = re.sub(r'https:/([a-zA-Z0-9_.-]+)', r'https://\1', s)
