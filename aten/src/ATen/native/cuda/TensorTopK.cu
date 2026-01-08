@@ -359,9 +359,9 @@ void launch(
     dim3 grid;
     TORCH_INTERNAL_ASSERT(getGridFromTiles(numInputSlices, grid), "Too many slices for topk");
     int warp_size = at::cuda::warp_size();
-    dim3 block(::min(at::ceil_div((int64_t)inputSliceSize, (int64_t)warp_size) * (int64_t)warp_size, (int64_t)1024));
+    dim3 block(std::min(at::ceil_div((int64_t)inputSliceSize, (int64_t)warp_size) * (int64_t)warp_size, (int64_t)1024));
 #ifndef USE_ROCM
-    gatherTopK<T, IndexType, Dim, /* WithKthValues= */false><<<grid, block, 0, c10::hip::getCurrentHIPStreamMasqueradingAsCUDA()>>>(
+    gatherTopK<T, IndexType, Dim, /* WithKthValues= */false><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
         input,
         inputSliceSize,
         outputSliceSize,
@@ -375,7 +375,7 @@ void launch(
         nullptr);
 #else
     if (warp_size == 64) {
-      gatherTopK<T, IndexType, Dim, /* WithKthValues= */false, 64><<<grid, block, 0, c10::hip::getCurrentHIPStreamMasqueradingAsCUDA()>>>(
+      gatherTopK<T, IndexType, Dim, /* WithKthValues= */false, 64><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
         input,
         inputSliceSize,
         outputSliceSize,
@@ -388,7 +388,7 @@ void launch(
         indicesWithinSliceStride,
         nullptr);
     } else if (warp_size == 32) {
-      gatherTopK<T, IndexType, Dim, /* WithKthValues= */false, 32><<<grid, block, 0, c10::hip::getCurrentHIPStreamMasqueradingAsCUDA()>>>(
+      gatherTopK<T, IndexType, Dim, /* WithKthValues= */false, 32><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
         input,
         inputSliceSize,
         outputSliceSize,
@@ -405,7 +405,7 @@ void launch(
       TORCH_INTERNAL_ASSERT(false, "Unsupported warp size: ", warp_size);
     }
 #endif
-    C10_HIP_KERNEL_LAUNCH_CHECK();
+C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 } // namespace sbtopk
 
