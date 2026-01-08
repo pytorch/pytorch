@@ -511,7 +511,7 @@ class TestTransformers(NNTestCase):
             ) for pair in input_mask_pairs
         ]
 
-        maybe_autocast = torch.autocast(device, dtype=torch.float16) if use_autocast else contextlib.nullcontext()
+        maybe_autocast = torch.autocast("cuda", dtype=torch.float16) if use_autocast else contextlib.nullcontext()
         with maybe_autocast:
             for input, src_key_padding_mask in input_mask_pairs:
                 with torch.no_grad():
