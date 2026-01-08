@@ -4,7 +4,6 @@ import hashlib
 import itertools
 from dataclasses import dataclass
 from typing import Any, Optional, TYPE_CHECKING, Union
-from typing_extensions import override
 from unittest.mock import patch
 
 import sympy
@@ -40,7 +39,12 @@ class ArgInfo:
 
 
 @clear_on_fresh_cache
-class CUDATemplate(KernelTemplate):
+class CUTLASSTemplate(KernelTemplate):
+    """
+    CUTLASSTemplate is a class that provides a template for generating CUTLASS Templates. Used as a baseclass for the
+    CUTLASSGemmTemplate, providing functionality that might also be relevant for non-GEMM CUTLASS Kernels.
+    """
+
     index_counter = itertools.count()
     # dict of cache key to (code, size_args)
     code_cache: dict[str, tuple[str, tuple[int, ...], tuple[int, ...]]] = {}
@@ -52,13 +56,14 @@ class CUDATemplate(KernelTemplate):
         input_nodes: list[Buffer],
         layout: Layout,
         input_reorder: Optional[list[int]] = None,
+        device_type: str = "cuda",
     ) -> None:
         """
-        Baseclass for CUDA C++ Templates, derived from KernelTemplate.
+        Baseclass for CUTLASS C++ Templates, derived from KernelTemplate.
         Not to be instantiated directly.
 
         Args:
-            name (str): The name of the CUDATemplate object.
+            name (str): The name of the CUTLASSTemplate object.
             input_nodes (List[IRNode]): A list of input IRNodes.
             layout (Layout): The layout of the output buffer / tensor.
             input_reorder (Optional[List[int]]): An optional list that specifies
@@ -69,6 +74,7 @@ class CUDATemplate(KernelTemplate):
         self.output_node: Buffer = Buffer(name="buf_out", layout=layout)
         self.input_reorder = input_reorder
         self.layout = layout
+        self.device_type = device_type
 
     @classmethod
     @functools.lru_cache(None)
@@ -261,6 +267,18 @@ class CUDATemplate(KernelTemplate):
                 #include <vector>
             """
         )
+        res.splice(
+            """
+                #include "cute/tensor.hpp"
+                #include "cutlass/cutlass.h"
+                #include "cutlass/numeric_types.h"
+                #include "cutlass/tensor_ref.h"
+                #include "cutlass/util/host_tensor.h"
+                #include "cutlass/util/reference/host/tensor_fill.h"
+                #include "cutlass/util/reference/device/tensor_fill.h"
+                #include "cutlass/util/device_memory.h"
+            """
+        )
         return res
 
     def globals(self) -> IndentedBuffer:
@@ -281,42 +299,6 @@ class CUDATemplate(KernelTemplate):
                 #endif
             """
         )
-        return res
-
-    def render(self, **kwargs) -> str:
-        raise NotImplementedError
-
-    def get_runtime_arg_info(self) -> list[ArgInfo]:
-        return []
-
-    def get_runtime_arg_values(self, **kwargs) -> list[Any]:
-        return []
-
-
-class CUTLASSTemplate(CUDATemplate):
-    """
-    CUTLASSTemplate is a class that provides a template for generating CUTLASS Templates. Used as a baseclass for the
-    CUTLASSGemmTemplate, providing functionality that might also be relevant for non-GEMM CUTLASS Kernels.
-    """
-
-    def header(self) -> IndentedBuffer:
-        res = super().header()
-        res.splice(
-            """
-                #include "cute/tensor.hpp"
-                #include "cutlass/cutlass.h"
-                #include "cutlass/numeric_types.h"
-                #include "cutlass/tensor_ref.h"
-                #include "cutlass/util/host_tensor.h"
-                #include "cutlass/util/reference/host/tensor_fill.h"
-                #include "cutlass/util/reference/device/tensor_fill.h"
-                #include "cutlass/util/device_memory.h"
-            """
-        )
-        return res
-
-    def globals(self) -> IndentedBuffer:
-        res = super().globals()
         res.splice(
             """
                 using namespace cute;
@@ -382,11 +364,12 @@ class CUTLASSTemplate(CUDATemplate):
                 f"({self._DTYPE_TO_CUTLASS_SPARSE_META.get(node.get_dtype())}*)({ptr})"
             )
 
-    @override
+    def render(self, **kwargs) -> str:
+        raise NotImplementedError
+
     def get_runtime_arg_info(self) -> list[ArgInfo]:
         return [ArgInfo("swizzle", "const uint8_t")]
 
-    @override
     def get_runtime_arg_values(self, **kwargs) -> list[Any]:
         """
         Helper method to retrieve runtime args from generate kwargs
