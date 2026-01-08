@@ -19,9 +19,11 @@ class ExportableModule(torch.nn.Module, abc.ABC):
     to create a module that can be exported to ONNX format.
 
     Example::
+
         class Model(torch.nn.Module):
             def forward(self, x):
                 return x * 2
+
 
         class MyExportableModule(torch.onnx.ExportableModule):
             def __init__(self):
@@ -43,6 +45,7 @@ class ExportableModule(torch.nn.Module, abc.ABC):
             def dynamic_shapes(self):
                 return ({0: "batch_size"},)
 
+
         exportable_module = MyExportableModule()
         onnx_program = exportable_module.to_onnx()
         # The model can also be supplied directly to torch.onnx.export
@@ -58,11 +61,6 @@ class ExportableModule(torch.nn.Module, abc.ABC):
         arguments should be representative of the expected input shapes and types
         during inference.
 
-        Returns:
-            A tuple containing:
-                - A tuple of positional arguments to pass to the forward method
-                - A dictionary of keyword arguments (or None if no kwargs are needed)
-
         Example::
 
             def example_arguments(self):
@@ -75,6 +73,12 @@ class ExportableModule(torch.nn.Module, abc.ABC):
                 return (torch.randn(1, 3, 224, 224), torch.randn(1, 512)), {
                     "temperature": 1.0
                 }
+
+        Returns:
+            A tuple containing:
+
+            - A tuple of positional arguments to pass to the forward method
+            - A dictionary of keyword arguments (or None if no kwargs are needed)
         """
         raise NotImplementedError
 
@@ -84,13 +88,6 @@ class ExportableModule(torch.nn.Module, abc.ABC):
         Override this method to specify which dimensions of the input tensors
         should be treated as dynamic during ONNX export. This allows the exported
         model to accept inputs with varying sizes along the specified dimensions.
-
-        Returns:
-            Dynamic shape specification compatible with ``torch.export.export``.
-            Return None if all input dimensions should be static. The format can be:
-                - A dictionary mapping input names to dimension specifications
-                - A tuple/list of dimension specifications corresponding to inputs
-                - Any format accepted by the ``dynamic_shapes`` parameter of ``torch.export.export``
 
         Example::
 
@@ -108,6 +105,14 @@ class ExportableModule(torch.nn.Module, abc.ABC):
 
         Note:
             The default implementation returns None, indicating all dimensions are static.
+
+        Returns:
+            Dynamic shape specification compatible with ``torch.export.export``.
+            Return None if all input dimensions should be static. The format can be:
+
+            - A dictionary mapping input names to dimension specifications
+            - A tuple/list of dimension specifications corresponding to inputs
+            - Any format accepted by the ``dynamic_shapes`` parameter of ``torch.export.export``
         """
         return None
 
@@ -117,11 +122,6 @@ class ExportableModule(torch.nn.Module, abc.ABC):
         Override this method to provide custom names for the input tensors in the
         exported ONNX model. These names will be used as identifiers in the ONNX
         graph and can be useful for debugging and model inspection.
-
-        Returns:
-            A sequence of strings representing input names, or None to use default names.
-            The number of names should match the number of positional arguments in the
-            forward method.
 
         Example::
 
@@ -135,6 +135,11 @@ class ExportableModule(torch.nn.Module, abc.ABC):
 
         Note:
             The default implementation returns None, which results in auto-generated names.
+
+        Returns:
+            A sequence of strings representing input names, or None to use default names.
+            The number of names should match the number of positional arguments in the
+            forward method.
         """
         return None
 
@@ -144,11 +149,6 @@ class ExportableModule(torch.nn.Module, abc.ABC):
         Override this method to provide custom names for the output tensors in the
         exported ONNX model. These names will be used as identifiers in the ONNX
         graph and can be useful for debugging and model inspection.
-
-        Returns:
-            A sequence of strings representing output names, or None to use default names.
-            The number of names should match the number of outputs from the forward method.
-            For models returning multiple outputs, provide a name for each output.
 
         Example::
 
@@ -162,6 +162,11 @@ class ExportableModule(torch.nn.Module, abc.ABC):
 
         Note:
             The default implementation returns None, which results in auto-generated names.
+
+        Returns:
+            A sequence of strings representing output names, or None to use default names.
+            The number of names should match the number of outputs from the forward method.
+            For models returning multiple outputs, provide a name for each output.
         """
         return None
 
@@ -173,6 +178,8 @@ class ExportableModule(torch.nn.Module, abc.ABC):
         names defined by the module. Additional export options can be specified via
         keyword arguments.
 
+        See Also: ``torch.onnx.export`` for complete documentation of export options.
+
         Args:
             **kwargs: Additional keyword arguments to pass to ``torch.onnx.export``.
                 Common options include:
@@ -182,9 +189,6 @@ class ExportableModule(torch.nn.Module, abc.ABC):
 
         Returns:
             An ONNXProgram object containing the exported model and metadata.
-
-        See Also:
-            ``torch.onnx.export`` for complete documentation of export options.
         """
         result = torch.onnx.export(self, **kwargs)
         assert result is not None
