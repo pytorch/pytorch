@@ -1824,7 +1824,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 non_leaf_consumed = {
                     gf
                     for gf in consumed_grad_fns
-                    if gf.name() != "torch::autograd::AccumulateGrad"
+                    if type(gf).__name__ != "AccumulateGrad"
                 }
 
                 # Check for double-consumption: if any grad_fn was already consumed
