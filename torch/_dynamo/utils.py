@@ -4782,9 +4782,26 @@ def get_torch_function_mode_stack_at(ind: int) -> Any:
 
 
 def set_torch_function_mode_stack(stack: list[Any]) -> None:
+    # First, collect any infra modes currently on the stack - these should be preserved
+    # because they are internal infrastructure (like make_fx's TorchFunctionMetadataMode)
+    # that shouldn't be affected by Dynamo's generated code.
+    current_infra_modes = []
+    current_stack = [
+        torch._C._get_function_stack_at(i) for i in range(_len_torch_function_stack())
+    ]
+    for mode in current_stack:
+        if type(mode).is_infra_mode():
+            current_infra_modes.append(mode)
+
+    # Clear the stack
     for _ in range(_len_torch_function_stack()):
         _pop_torch_function_stack()
 
+    # Push infra modes first (they should be at the bottom of the stack)
+    for mode in current_infra_modes:
+        _push_on_torch_function_stack(mode)
+
+    # Then push the requested stack (which should only contain non-infra modes)
     for mode in stack:
         _push_on_torch_function_stack(mode)
 
