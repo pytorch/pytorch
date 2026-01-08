@@ -345,6 +345,7 @@ class TestCase(InductorTestCase):
 
     @requires_gpu()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._inductor.config.patch("_use_fp64_for_unbacked_floats", True)
     def test_unbacked_float_uses_fp64_signature(self):
         """
         Test that unbacked float scalars from .item() use fp64 in kernel signature
