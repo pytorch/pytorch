@@ -41,9 +41,9 @@ class FakeScriptObject:
                 f"Tried to call __getattr__ with attr '{name}' on a FakeScriptObject, "
                 "implying that you are calling this inside of a fake kernel. "
                 "The fake kernel should not depend on the contents of the "
-                "OpaqueObject at all, so we're erroring out. If you need this"
-                "functionality, consider creating a custom TorchBind Object instead"
-                "(but note that this is more difficult)."
+                "OpaqueObject at all, so we're erroring out. If this attr is "
+                "a method or constant attribute, you can allow this member access by "
+                "registering it via `register_opaque_type(members=...)`."
             ) from e
 
     def __setattr__(self, name, value):
@@ -163,16 +163,31 @@ def maybe_to_fake_obj(
 
     from torch._library.opaque_object import (
         FakeOpaqueObject,
+        get_opaque_obj_info,
         get_opaque_type_name,
+        is_opaque_reference_type,
         is_opaque_type,
         OpaqueTypeStr,
     )
 
-    if x is None or is_opaque_type(type(x)):
-        # In order to make OpaqueObjects truly opaque, the fake kernel should
-        # not depend on the contents of the OpaqueObject at all.
-        type_name = OpaqueTypeStr if x is None else get_opaque_type_name(type(x))
-        fake_x_wrapped = FakeScriptObject(FakeOpaqueObject(), type_name, None)
+    x_type = type(x)
+    if is_opaque_type(x_type):
+        type_name = OpaqueTypeStr if x is None else get_opaque_type_name(x_type)
+        fake_x_wrapped = FakeScriptObject(FakeOpaqueObject(), type_name, x)
+
+        # Reference types with pure methods should also keep the real object
+        # so that those methods can be called during tracing
+        if is_opaque_reference_type(x_type):
+            opaque_info = get_opaque_obj_info(x_type)
+            assert opaque_info is not None
+            for attr_name in opaque_info.members:
+                if not hasattr(x, attr_name):
+                    raise TypeError(
+                        f"Opaque object of type '{type_name}' was specified to have member "
+                        f"'{attr_name}', but this doesn't actually exist in the object."
+                    )
+                object.__setattr__(fake_x_wrapped, attr_name, getattr(x, attr_name))
+
         return fake_x_wrapped
     else:
         # x.__obj_flatten__() could be calling some tensor operations inside but we don't
