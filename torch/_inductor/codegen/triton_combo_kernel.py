@@ -435,7 +435,6 @@ class ComboKernel(Kernel):
                 assert f"{tree.prefix}numel_{num}" in self.dynamic_shape_args
                 uniquify_block_sizes.append(f"{tree.prefix}numel")
 
-            # pyrefly: ignore [missing-argument]
             if not tree.is_reduction:
                 if isinstance(simplified_tree_numel, (Integer, int)):
                     grid.append(int(simplified_tree_numel))
@@ -705,7 +704,6 @@ class ComboKernel(Kernel):
         for sub_kernel in self.sub_kernels:
             # TODO: we assume all sub_kernels have the same block size
             for tree in sub_kernel.range_trees:
-                # pyrefly: ignore [missing-argument]
                 if tree.is_reduction and (
                     not sub_kernel.inside_reduction or sub_kernel.persistent_reduction
                 ):
@@ -744,7 +742,7 @@ class ComboKernel(Kernel):
                     expr = V.graph.wrapper_code.generate_numel_expr(
                         name, tree, suffix=str(num)
                     )
-                # pyrefly: ignore [missing-argument]
+
                 if not tree.is_reduction or sub_kernel.inside_reduction:
                     call_args.append(expr)
                     arg_types.append(type(expr))
@@ -756,7 +754,7 @@ class ComboKernel(Kernel):
                 numel_name = f"{tree.prefix}numel_{num}"
                 if numel_name not in self.dynamic_shape_args:
                     continue
-                # pyrefly: ignore [missing-argument]
+
                 if not tree.is_reduction or sub_kernel.inside_reduction:
                     extra_args.append(
                         str(
@@ -768,6 +766,7 @@ class ComboKernel(Kernel):
         return extra_args
 
     def codegen_kernel(self, name: Optional[str] = None) -> str:
+        """Generate the triton code for a combo kernel that fuses multiple sub-kernels."""
         # TODO: is it correct to use the first sub kernel's heuristics?
         heuristics_list, size_hints_list = [], []
         for subkernel in self.sub_kernels:
@@ -814,11 +813,14 @@ class ComboKernel(Kernel):
                 argdefs=argdefs,
             )
         )
+        kernel_name = name or str(Placeholder.KERNEL_NAME)
         code.writeline(
-            f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join(x.full_name() for x in argdefs)}):"
+            f"def {kernel_name}({', '.join(x.full_name() for x in argdefs)}):"
         )
 
         with code.indent():
+            if config.triton.proton_profiling:
+                code.writeline(f'pl.enter_scope("{kernel_name}")')
             code.splice("pid = tl.program_id(0)")
             if not self.enable_autotune:
                 self.codegen_blocks(code)
@@ -839,6 +841,8 @@ class ComboKernel(Kernel):
             code.splice("else:")
             with code.indent():
                 code.splice("pass")
+            if config.triton.proton_profiling:
+                code.writeline(f'pl.exit_scope("{kernel_name}")')
 
         if config.benchmark_combo_kernel:
             code.splice(self.codegen_kernel_benchmark(num_gb=0))
@@ -1037,7 +1041,6 @@ class ComboKernel(Kernel):
         for num, sub_kernel in enumerate(self.sub_kernels):
             meta[f"no_x_dim_{num}"] = sub_kernel.no_x_dim
             for tree in sub_kernel.range_trees:
-                # pyrefly: ignore [missing-argument]
                 if not tree.is_reduction:
                     numel_name = f"{tree.prefix}numel_{num}"
                     if numel_name in self.dynamic_shape_args:
