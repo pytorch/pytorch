@@ -24,7 +24,7 @@ fi
 PYTHON="${PYTHON_EXECUTABLE:-python}"
 
 echo "installing dependencies"
-"$PYTHON" -m pip install einops packaging ninja numpy
+"$PYTHON" -m pip install einops packaging ninja numpy wheel setuptools
 
 export FLASH_ATTENTION_FORCE_BUILD="${FLASH_ATTENTION_FORCE_BUILD:-TRUE}"
 
@@ -55,10 +55,6 @@ pushd "$FLASH_ATTENTION_HOPPER_DIR"
 
 git submodule update --init ../csrc/cutlass
 
-# Patch setup.py to use system CUDA for 12.8+ (including 13.0)
-# The original condition only skips nvcc download for exactly 12.8, but CUDA 13.0
-# also needs the system toolchain because the downloaded nvcc 12.6 lacks libcudacxx
-# headers required by CUTLASS 4.0
 sed -i 's/bare_metal_version != Version("12.8")/bare_metal_version < Version("12.8")/' \
     "$FLASH_ATTENTION_HOPPER_DIR/setup.py"
 
