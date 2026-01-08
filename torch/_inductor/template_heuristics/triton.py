@@ -1874,13 +1874,13 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
             yield origami_config_kwargs
         else:
             for c in configs(
-            m,
-            n,
-            k,
-            dtype_size=dtype.itemsize,
-            op_name=op_name,
-            **kwargs,
-        ):
+                m,
+                n,
+                k,
+                dtype_size=dtype.itemsize,
+                op_name=op_name,
+                **kwargs,
+            ):
                 template_kwargs = self._convert_config_to_template_kwargs(
                     c,
                     m,
