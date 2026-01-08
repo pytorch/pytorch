@@ -4939,7 +4939,8 @@ def max_pool2d_checks_and_compute_shape(
     return nInputPlane, outputHeight, outputWidth
 
 
-@register_meta(aten.max_pool2d_with_indices_backward.default)
+@register_meta(aten.max_pool2d_with_indices_backward)
+@out_wrapper("grad_input")
 def meta_max_pool2d_with_indices_backward(
     grad_output,
     self,
