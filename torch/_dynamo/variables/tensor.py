@@ -1474,7 +1474,9 @@ class TensorVariable(VariableTracker):
                     gb_type="Compilation of intermediate hooks requires compiled autograd",
                     context=f"var_getattr {self} {name}",
                     explanation="Dynamo must be in compiled_autograd to register hooks.",
-                    hints=[],
+                    hints=[
+                        "Consider using torch.autograd.Function with a custom backward() method instead of register_hook()."
+                    ],
                 )
 
             hook_name, bw_state_proxy = tx.output.add_backward_state_hook(hook)
