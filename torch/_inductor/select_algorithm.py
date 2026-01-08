@@ -630,8 +630,10 @@ class TritonTemplateKernel(TritonKernel):
         for node in self.input_nodes:
             for fx_node in node._current_origins:
                 f = count_flops_fx(fx_node)
-                if f is not None:
-                    return V.graph.sizevars.size_hint(f, fallback=0)
+                if isinstance(f, torch.SymInt):
+                    f = f.node.expr
+
+                return V.graph.sizevars.size_hint(f, fallback=0)
         return 0
 
     def jit_lines(self):
