@@ -93,7 +93,7 @@ def _skip_rocm_blas_accuracy_regression(
     if not TEST_WITH_ROCM:
         return False
     rocm_version = getRocmVersion()
-    if rocm_version != (7, 0):
+    if rocm_version < (7, 0):
         return False
     if input_dtype == torch.bfloat16 and N == 1 and K in (32, 64) and batch_size:
         return True
