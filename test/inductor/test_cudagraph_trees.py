@@ -3132,6 +3132,20 @@ if HAS_CUDA_AND_TRITON:
                 exactly=True,
             ).check_count("reason=cpu ops", 1, exactly=True).run(log_stream.getvalue())
 
+            log_stream, ctx = logs_to_string(
+                "torch._inductor.cudagraph_trees", "cudagraphs"
+            )
+            with ctx():
+                # trigger recording
+                foo(torch.ones([10], device="cuda"), torch.ones([20]))
+                foo(torch.ones([10], device="cuda"), torch.ones([20]))
+
+            FileCheck().check_count(
+                "Recording function 0 (partition_0) of graph recording id 0",
+                1,
+                exactly=True,
+            ).run(log_stream.getvalue())
+
         @torch._inductor.config.patch("graph_partition", True)
         def test_graph_partition_cpu_scalar1(self):
             def f(x, y):
