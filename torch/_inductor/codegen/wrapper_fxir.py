@@ -950,10 +950,8 @@ class FxConverter:
 
             log.info("Autotuning Triton kernel %s at compile time.", kernel_name)
 
-            # pyrefly: ignore [missing-attribute]
             device = driver.active.get_current_device()
 
-            # pyrefly: ignore [missing-attribute]
             stream = driver.active.get_current_stream(device)
 
             def node_to_tuning_arg(arg: Any) -> Any:

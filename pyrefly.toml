@@ -86,6 +86,7 @@ ignore-missing-imports = [
     "future.utils.*",
     "past.builtins.*",
     "numba.*",
+    "nvMatmulHeuristics",
     "PIL.*",
     "moviepy.*",
     "cv2.*",
@@ -136,7 +137,8 @@ errors.implicit-import = false
 errors.deprecated = false # re-enable after we've fix import formatting
 
 permissive-ignores = true
-replace-imports-with-any = ["!sympy.printing.*", "sympy.*", "onnxscript.onnx_opset.*"]
+# TODO: explain how this next line gets maintained.
+replace-imports-with-any = ["!sympy.printing.*", "sympy.*", "onnxscript.onnx_opset.*", "triton.*"]
 search-path = ["tools/experimental"]
 
 # Dynamo sub-config - note, we experiment with stricter typing here
