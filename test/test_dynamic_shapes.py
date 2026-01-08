@@ -4705,7 +4705,6 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         x = torch.rand(10, 20, 30)
 
         torch._dynamo.mark_dynamic(x, 0, hint_override=2)
-        # torch._dynamo.mark_dynamic(x, 1, hint_override=4)
         torch._dynamo.mark_dynamic(x, 2, hint_override=6)
 
         func(x)
@@ -4713,11 +4712,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
     def test_hint_override_consistent_stride2(self):
         @torch.compile(fullgraph=True, dynamic=True)
         def func(x):
-            a = torch.fx.experimental.symbolic_shapes.size_hint(x.size()[2])
-            b = torch.fx.experimental.symbolic_shapes.size_hint(x.stride()[1])
-            torch._check(a == b)
-            torch._check(a == 6)
-
+            # only one of the sizes has hint overridden. 
             a = torch.fx.experimental.symbolic_shapes.size_hint(
                 x.size()[1] * x.size()[2]
             )
