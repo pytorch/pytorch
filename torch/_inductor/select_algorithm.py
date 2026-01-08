@@ -19,7 +19,7 @@ from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import StringIO
 from pathlib import Path
 from types import ModuleType
-from typing import Any, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, NamedTuple, Optional, TYPE_CHECKING, Union
 from typing_extensions import Self
 from unittest.mock import patch
 
@@ -89,6 +89,7 @@ from .utils import (
     sympy_dot,
     sympy_index_symbol,
     sympy_product,
+    tlx_only_cuda_options,
     triton_type,
     triton_type_to_torch,
     unique,
@@ -436,7 +437,7 @@ class TritonTemplateKernel(TritonKernel):
             reduction_idx = None
             for i, prefix in enumerate(tiling):
                 rt = prefix_to_range_tree[prefix]
-                # pyrefly: ignore  # missing-argument
+
                 if rt.is_reduction:
                     reduction_idx = i
                     break
@@ -661,6 +662,10 @@ class TritonTemplateKernel(TritonKernel):
         if kpack:
             triton_meta["kpack"] = kpack
 
+        for k in tlx_only_cuda_options():
+            if v := self.meta.get(k, None):
+                triton_meta[k] = v
+
         self.triton_meta = triton_meta
 
         inductor_meta = {
@@ -689,6 +694,13 @@ class TritonTemplateKernel(TritonKernel):
             num_consumer_groups={self.num_consumer_groups},
             num_buffers_warp_spec={self.num_buffers_warp_spec},
         """
+
+        for k in tlx_only_cuda_options():
+            if v := self.meta.get(k, None):
+                template_args += f"""
+                    {k}={v},
+                """
+                self.triton_meta[k] = v
 
         return f"""
             @triton_heuristics.template(
@@ -1221,7 +1233,6 @@ class TritonTemplateKernel(TritonKernel):
                                 val_shape[i],
                                 i,
                                 len(val_shape),
-                                # pyrefly: ignore [missing-argument]
                                 block_name=range_tree.symt.name,
                             )
                         )
@@ -1235,7 +1246,7 @@ class TritonTemplateKernel(TritonKernel):
                         )
                         # Update the val_shape information to use consistent naming
                         # after the remapping.
-                        # pyrefly: ignore [missing-argument]
+
                         val_shape_copy[i] = range_tree.symt.name
                     # pyrefly: ignore [bad-assignment]
                     val_shape = tuple(val_shape_copy)
@@ -1310,7 +1321,6 @@ class TritonTemplateKernel(TritonKernel):
                 if output_index == contiguous_index:
                     output_index = sympy.Symbol("xindex", integer=True)
 
-            # pyrefly: ignore [bad-assignment]
             self.template_out_shape = val_shape if val_shape else val
             acc_dtype = (
                 triton_type_to_torch(self.meta["ACC_TYPE"])
@@ -2305,15 +2315,17 @@ class TritonTemplateCaller(ir.TritonTemplateCallerBase):
         )
 
     def output_node(self):
-        return ir.TensorBox.create(
-            ir.TritonTemplateBuffer(
-                layout=self.layout,
-                inputs=self.input_nodes,
-                make_kernel_render=self.make_kernel_render,
-                mutated_inputs=self.mutated_inputs,
-                allowed_prologue_inps=self.allowed_prologue_inps,
-            )
+        buffer = ir.TritonTemplateBuffer(
+            layout=self.layout,
+            inputs=self.input_nodes,
+            make_kernel_render=self.make_kernel_render,
+            mutated_inputs=self.mutated_inputs,
+            allowed_prologue_inps=self.allowed_prologue_inps,
         )
+        # Pass KTC annotation to the buffer for encoding
+        if "ktc" in self.annotations:
+            buffer.annotations["ktc"] = self.annotations["ktc"]
+        return ir.TensorBox.create(buffer)
 
     def info_dict(self) -> dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]:
         """Information returned here is logged to the autotune log file when that is enabled."""
@@ -2461,6 +2473,9 @@ class ExternKernelCaller(ChoiceCaller):
                 kwargs=self.kwargs,
             )
 
+        # Pass KTC annotation to the buffer for encoding
+        if "ktc" in self.annotations:
+            inner.annotations["ktc"] = self.annotations["ktc"]
         return ir.TensorBox.create(inner)
 
     def info_dict(self) -> dict[str, Union[PrimitiveInfoType, list[PrimitiveInfoType]]]:
@@ -2572,7 +2587,7 @@ class DataProcessorTemplateWrapper:
             self._postprocessor = lambda x: x
         assert "input_nodes" in kwargs
         assert "layout" in kwargs
-        # pyrefly: ignore [not-callable]
+
         kwargs["input_nodes"], kwargs["layout"] = preprocessor(
             kwargs["input_nodes"], kwargs["layout"]
         )
@@ -2763,7 +2778,6 @@ class AlgorithmSelectorCache(PersistentCache):
             choice for choice in choices if isinstance(choice, ExternKernelChoice)
         ]
         if len(externs) > 0:
-            # pyrefly: ignore [bad-return]
             return externs[0]
         else:
             return choices[0]
@@ -3495,7 +3509,8 @@ class AlgorithmSelectorCache(PersistentCache):
         }
         example_inputs = list(unique_example_inputs.values())
         example_inputs_extern = []
-        for input_node in input_nodes:
+
+        for i, input_node in enumerate(input_nodes):
             if unique_example_inputs[input_node.get_name()].is_mkldnn:
                 example_inputs_extern.append(
                     unique_example_inputs[input_node.get_name()]
@@ -3503,34 +3518,43 @@ class AlgorithmSelectorCache(PersistentCache):
             else:
                 base = unique_example_inputs[input_node.get_name()]
                 base = base if base._base is None else base._base
-                sizes = tuple(
-                    V.graph.sizevars.atomically_apply_size_hint(
-                        size,
+
+                if i in input_gen_fns:
+                    # Use tensor's actual shape from input_gen_fn
+                    generated_tensor = unique_example_inputs[input_node.get_name()]
+                    sizes = tuple(generated_tensor.size())
+                    strides = tuple(generated_tensor.stride())
+                    storage_offset = generated_tensor.storage_offset()
+                else:
+                    # Use IR node's shape resolved via size hints
+                    sizes = tuple(
+                        V.graph.sizevars.atomically_apply_size_hint(
+                            size,
+                            fallback=config.unbacked_symint_fallback,
+                            hint_override=hint_override,
+                        )
+                        for size in input_node.get_size()
+                    )
+                    strides = tuple(
+                        V.graph.sizevars.atomically_apply_size_hint(
+                            stride,
+                            fallback=config.unbacked_symint_fallback,
+                            hint_override=hint_override,
+                        )
+                        for stride in input_node.get_stride()
+                    )
+                    storage_offset = V.graph.sizevars.atomically_apply_size_hint(
+                        input_node.get_layout().offset,
                         fallback=config.unbacked_symint_fallback,
                         hint_override=hint_override,
                     )
-                    for size in input_node.get_size()
-                )
-                strides = tuple(
-                    V.graph.sizevars.atomically_apply_size_hint(
-                        stride,
-                        fallback=config.unbacked_symint_fallback,
-                        hint_override=hint_override,
-                    )
-                    for stride in input_node.get_stride()
-                )
-                storage_offset = V.graph.sizevars.atomically_apply_size_hint(
-                    input_node.get_layout().offset,
-                    fallback=config.unbacked_symint_fallback,
-                    hint_override=hint_override,
-                )
 
                 # Check if the required storage size exceeds the current storage
                 # to avoid illegal memory access
                 needed_size = torch._prims_common.compute_required_storage_length(
-                    sizes, strides, storage_offset
+                    sizes, strides, cast(int, storage_offset)
                 )
-                current_size = base.storage().size()
+                current_size = base.untyped_storage().size()
 
                 if needed_size > current_size:
                     # Create a new base tensor with sufficient storage
@@ -4285,7 +4309,6 @@ class AlgorithmSelectorCache(PersistentCache):
             node.get_device(),
             node.get_dtype(),
             V.graph.sizevars.atomically_apply_size_hint(
-                # pyrefly: ignore [missing-attribute]
                 node.layout.offset,
                 fallback=config.unbacked_symint_fallback,
                 hint_override=hint_override,
@@ -4296,7 +4319,6 @@ class AlgorithmSelectorCache(PersistentCache):
                     fallback=config.unbacked_symint_fallback,
                     hint_override=hint_override,
                 )
-                # pyrefly: ignore [bad-argument-type]
                 for size in V.graph.get_allocation_size(node)
             ),
         )

@@ -2608,7 +2608,7 @@ def compile(
         - Experimental or debug in-tree backends can be seen with `torch._dynamo.list_backends(None)`
 
         - To register an out-of-tree custom backend:
-          https://pytorch.org/docs/main/torch.compiler_custom_backends.html#registering-custom-backends
+          https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_custom_backends.html#registering-custom-backends
        mode (str): Can be either "default", "reduce-overhead", "max-autotune" or "max-autotune-no-cudagraphs"
 
         - "default" is the default mode, which is a good balance between performance and overhead
@@ -2782,6 +2782,12 @@ from torch.func import vmap as vmap
 
 
 if not TYPE_CHECKING:
+    # register python metas for distributed ops
+    # Only import if distributed is available (USE_DISTRIBUTED=1)
+    if hasattr(torch._C, "_c10d_init"):
+        import torch.distributed._meta_registrations as coll_meta_registrations
+
+        del coll_meta_registrations
     from torch import _meta_registrations
 
 # Enable CUDA Sanitizer
