@@ -7,7 +7,6 @@ import shutil
 import sys
 import time
 from dataclasses import dataclass
-from pathlib import Path
 from typing import Any, Optional
 from typing_extensions import TypeIs
 
@@ -22,7 +21,6 @@ from ... import config
 from ...ir import Layout
 from ...runtime.runtime_utils import cache_dir
 from ...virtualized import V
-from ..cpp_utils import DTYPE_TO_CPP
 from ..cuda.cuda_env import get_cuda_arch, get_cuda_version
 
 
@@ -293,6 +291,9 @@ def gen_ops() -> dict[Any, Any]:
         return _gen_ops_cached(arch, version)
 
 
+from ..cpp_utils import DTYPE_TO_CPP
+
+
 DTYPE_TO_CUTLASS_TYPE = {
     **DTYPE_TO_CPP,
     torch.float16: "__half",
@@ -447,47 +448,3 @@ def get_max_alignment(inductor_layout: Layout) -> int:
         ):
             return alignment
     return 1
-
-
-class CUDACompileSourceCapturingContext:
-    # Helper class for Benchmarking and Testing CUTLASS Kernels in isolation.
-    # Can be used to capture the sourcecode passed to CUDACodeCache.compile
-
-    def __init__(self):
-        self.sources = []
-        self._compile_patch = None
-
-    def __enter__(self, *args, **kwargs):
-        import unittest.mock as mock
-
-        import torch._inductor.codecache
-
-        _compile_method_orig = torch._inductor.codecache.CUDACodeCache.compile
-
-        def my_compile(
-            source_code, dst_file_ext, extra_args: Optional[list[str]] = None
-        ):
-            self.sources.append(source_code)
-            return _compile_method_orig(source_code, dst_file_ext)
-
-        # pyrefly: ignore [bad-assignment]
-        self._compile_patch = mock.patch(
-            "torch._inductor.codecache.CUDACodeCache.compile", my_compile
-        )
-        self._compile_patch.__enter__(*args, **kwargs)  # type: ignore[union-attr]
-        return self
-
-    def __exit__(self, *args, **kwargs):
-        self._compile_patch.__exit__(*args, **kwargs)  # type: ignore[union-attr]
-
-
-def cuda_standalone_runner_compile_command(srcpath: Path, exepath: Path):
-    # returns command string to compile a (captured) CUDA GEMM Kernel source to a standalone executable that's ready to run
-    # Passes the correct preprocessor define to nvcc to ensure the standalone runner is enabled.
-    from torch._inductor.codecache import cuda_compile_command
-
-    extra_args = ["-DGENERATE_STANDALONE_RUNNER=1", "-DCUTLASS_DEBUG_TRACE_LEVEL=1"]
-    compile_command = cuda_compile_command(
-        [str(srcpath)], str(exepath), "exe", extra_args=extra_args
-    )
-    return compile_command

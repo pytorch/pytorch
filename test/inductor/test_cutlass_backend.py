@@ -1468,7 +1468,7 @@ class TestCutlassBackend(TestCase):
         ):
             from tempfile import NamedTemporaryFile
 
-            from torch._inductor.codegen.cutlass.utils import (
+            from torch._inductor.codegen.cuda.compile_utils import (
                 cuda_standalone_runner_compile_command,
                 CUDACompileSourceCapturingContext,
             )
