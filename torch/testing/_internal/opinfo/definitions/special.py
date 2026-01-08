@@ -285,6 +285,10 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
+        skips=(
+            # The operator 'aten::special_ndtri.out' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+        ),
     ),
     UnaryUfuncInfo(
         "special.log_ndtr",
@@ -293,6 +297,10 @@ op_db: list[OpInfo] = [
         dtypes=all_types_and(torch.bool),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
+        skips=(
+            # The operator 'aten::special_log_ndtr.out' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+        ),
     ),
     UnaryUfuncInfo(
         "special.erfcx",
@@ -309,6 +317,10 @@ op_db: list[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_erfcx,
+        skips=(
+            # The operator 'aten::special_erfcx.out' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+        ),
     ),
     UnaryUfuncInfo(
         "special.airy_ai",
@@ -716,6 +728,10 @@ python_ref_db: list[OpInfo] = [
                 }
             ),
         ),
+        skips=(
+            # The operator 'aten::special_erfcx.out' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.i0e",
@@ -755,6 +771,10 @@ python_ref_db: list[OpInfo] = [
         "_refs.special.log_ndtr",
         torch_opinfo_name="special.log_ndtr",
         op_db=op_db,
+        skips=(
+            # The operator 'aten::special_log_ndtr.out' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.ndtr",
@@ -765,6 +785,10 @@ python_ref_db: list[OpInfo] = [
         "_refs.special.ndtri",
         torch_opinfo_name="special.ndtri",
         op_db=op_db,
+        skips=(
+            # The operator 'aten::special_ndtri.out' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.spherical_bessel_j0",

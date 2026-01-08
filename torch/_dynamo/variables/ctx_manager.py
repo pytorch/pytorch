@@ -535,11 +535,13 @@ class CatchWarningsCtxManagerVariable(ContextWrappingVariable):
         self.set_cleanup_hook(tx, lambda: ctx_val.__exit__(None, None, None))
         return variables.ConstantVariable.create(ctx_val.__enter__())
 
-    def reconstruct(self, cg: "PyCodegen") -> None:
-        cg.add_push_null(lambda: cg.load_import_from("warnings", "catch_warnings"))
-        cg.foreach(self.catch_warnings_args.values())
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("warnings", "catch_warnings")
+        )
+        codegen.foreach(self.catch_warnings_args.values())
         keys = tuple(self.catch_warnings_args.keys())
-        cg.extend_output(cg.create_call_function_kw(len(keys), keys, False))
+        codegen.extend_output(codegen.create_call_function_kw(len(keys), keys, False))
 
 
 class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
@@ -836,11 +838,11 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
     def set_cleanup_hook(
         self,
         tx: "InstructionTranslator",
-        cleanup_fn: Optional[Callable[..., Any]] = None,
+        fn: Callable[..., Any] | None = None,
     ) -> None:
-        if cleanup_fn is None:
+        if fn is None:
 
-            def cleanup_fn() -> None:
+            def fn() -> None:
                 tx.symbolic_torch_function_state.torch_function_subclass_enabled = (
                     self.initial_torch_function_subclass_enabled
                 )
@@ -849,7 +851,7 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
                         self.initial_torch_function_subclass_enabled
                     )
 
-        self.cleanup_fn = cleanup_fn
+        self.cleanup_fn = fn
         tx.output.add_cleanup_hook(self.cleanup)
 
     def _call_func(self, tx: "InstructionTranslator", values: Sized) -> None:
@@ -1099,7 +1101,7 @@ class ProfilerContextVariable(ContextWrappingVariable):
     def fn_name(self) -> str:
         return "nullcontext"
 
-    def reconstruct(self, cg: "PyCodegen") -> None:
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         unimplemented(
             gb_type="torch.profiler object escaped from compiled region",
             context=str(self),
