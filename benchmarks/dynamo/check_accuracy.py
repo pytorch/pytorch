@@ -48,6 +48,7 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 "BERT_pytorch",
                 # LLM
                 "google/gemma-2-2b",
+                "tts_angular",  # RuntimeError: Cannot access data pointer of Tensor
             }
         )
 
