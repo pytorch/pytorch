@@ -1750,6 +1750,15 @@ class triton:
         os.environ.get("TORCHINDUCTOR_ENABLE_TLX_TEMPLATES", "0") == "1"
     )
 
+    # Map for storing the amount of kernel runs with dumped input tensors
+    # Based on hash of Triton source code to avoid bloating the folder
+    debug_dump_kernel_inputs: dict[str, int] = {}
+
+    # Value for the maximum amount of runs with dumped kernel input tensors
+    # When the maximum is reached the first values get overwritten
+    # This ensures the last N runs are saved, where N is this value
+    max_kernel_dump_occurrences = 3
+
 
 class aot_inductor:
     """

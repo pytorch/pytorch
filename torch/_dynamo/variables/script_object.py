@@ -19,7 +19,7 @@ by limiting operations to known-safe patterns and failing fast for unsafe usage.
 """
 
 import functools
-from collections.abc import Callable, Iterable
+from collections.abc import Callable, Iterable, Sequence
 from typing import Any, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
@@ -73,28 +73,28 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
     __init__ is called.
     """
 
-    def __init__(self, value, **kwargs) -> None:
+    def __init__(self, value: Any, **kwargs: Any) -> None:
         super().__init__(**kwargs)
         self.value = value
 
-    def as_python_constant(self):
+    def as_python_constant(self) -> Any:
         return self.value
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> bool:
         return is_opaque_value_type(type(self.value))
 
-    def as_proxy(self):
+    def as_proxy(self) -> Any:
         return self.value
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value})"
 
-    def call_function(  # pyrefly: ignore[bad-override]
+    def call_function(
         self,
         tx: "InstructionTranslator",
-        args: "list[VariableTracker]",
-        kwargs: "dict[str, VariableTracker]",
-    ) -> "VariableTracker":
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         # disallow creating reference-type opaque objects in the middle of the
         # program
         if is_opaque_reference_type(self.value):
@@ -230,7 +230,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
             ],
         )
 
-    def as_python_constant(self):
+    def as_python_constant(self) -> Any:
         if is_opaque_value_type(type(self.value)):
             return self.value
         return super().as_python_constant()
