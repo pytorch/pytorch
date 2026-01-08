@@ -30,7 +30,7 @@ struct NCCLAllocation {
   size_t buffer_size;
   int device_idx;
   // Map of group name to peer alloc info
-  std::map<std::string, c10::intrusive_ptr<NCCLPeerAllocInfo>> peer_alloc_infos_;
+  std::unordered_map<std::string, c10::intrusive_ptr<NCCLPeerAllocInfo>> peer_alloc_infos_;
 
   NCCLAllocation(void* ptr, size_t buffer_size, int device_idx)
       : ptr(ptr), buffer_size(buffer_size), device_idx(device_idx) {}
@@ -68,28 +68,27 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
  public:
   NCCLPeerAllocInfo(
       NCCLAllocation* allocation,
-      const std::string group_name)
-      : base_ptr_(allocation->ptr),
-        buffer_size_(allocation->buffer_size),
+      std::string group_name)
+      : buffer_size_(allocation->buffer_size),
         device_idx_(allocation->device_idx),
         group_name_(std::move(group_name))
   {
     c10::cuda::CUDAGuard guard(device_idx_);
-    GroupInfo& group_info = get_group_info(group_name);
+    GroupInfo& group_info = get_group_info(group_name_);
     rank_ = group_info.rank;
     world_size_ = group_info.world_size;  // size of current group
 
-    auto group = resolve_process_group(group_name);
+    auto group = resolve_process_group(group_name_);
     auto* ncclPg = dynamic_cast<c10d::ProcessGroupNCCL*>(
         group->getBackend(c10::DeviceType::CUDA).get());
     TORCH_CHECK(ncclPg != nullptr, "backend must be a NCCL process group");
     ncclComm_t comm = reinterpret_cast<ncclComm_t>(ncclPg->getCommPtr());
 
     C10D_NCCL_CHECK(
-      ncclCommWindowRegister(comm, base_ptr_, buffer_size_, &buffer_win_, NCCL_WIN_COLL_SYMMETRIC),
+      ncclCommWindowRegister(comm, allocation->ptr, buffer_size_, &buffer_win_, NCCL_WIN_COLL_SYMMETRIC),
       c10::str(
           "Failed to window register segment with ptr ",
-          base_ptr_,
+          allocation->ptr,
           ", size ",
           buffer_size_,
           " on rank ",
@@ -122,7 +121,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
       if (rank_ == 0) {
         LOG(INFO) << "[rank " << rank_ << ']'
                   << " rank_to_global_rank: " << group_info.rank_to_global_rank
-                  << ", group_name: " << group_name
+                  << ", group_name: " << group_name_
                   << ", exchanged_n_times: " << exchanged_n_times;
       }
     }
@@ -134,7 +133,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
     // Create NCCL device communicator if it doesn't exist. Skip if it already exists.
     auto& mr = NCCLDevCommManager::get(c10::Device(c10::DeviceType::CUDA, device_idx_));
-    mr.try_emplace_devcomm(group_name, comm);
+    mr.try_emplace_devcomm(group_name_, comm);
 
     const size_t arr_size = sizeof(void*) * world_size_;
     buffers_dev_ = reinterpret_cast<void**>(
@@ -166,9 +165,12 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
 
   // Exact copy is not needed / supported
   NCCLPeerAllocInfo(const NCCLPeerAllocInfo& other) = delete;
+  NCCLPeerAllocInfo& operator=(const NCCLPeerAllocInfo& other) = delete;
+  NCCLPeerAllocInfo(NCCLPeerAllocInfo&& other) = default;
+  NCCLPeerAllocInfo& operator=(NCCLPeerAllocInfo&& other) = default;
+  ~NCCLPeerAllocInfo() = default;
 
  private:
-  void* base_ptr_;
   size_t buffer_size_;
   int device_idx_;
   int rank_;
@@ -177,7 +179,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   std::vector<void*> signal_pads_;
   void** buffers_dev_;
   void** signal_pads_dev_;
-  const std::string group_name_;
+  std::string group_name_;
   ncclWindow_t buffer_win_;
   ncclWindow_t signal_handle_;
   std::vector<int> rank_to_global_rank_;
@@ -328,8 +330,10 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     auto pai_it = peer_alloc_infos.find(*group_name);
     if (pai_it == peer_alloc_infos.end()) {
       // Never rendezvoused with this group before, create a new peer alloc info
-      auto pai = c10::make_intrusive<NCCLPeerAllocInfo>(allocation.get(), *group_name);
-      pai_it = peer_alloc_infos.emplace_hint(pai_it, *group_name, std::move(pai));
+      pai_it = peer_alloc_infos.emplace_hint(
+          pai_it,
+          *group_name,
+          c10::make_intrusive<NCCLPeerAllocInfo>(allocation.get(), *group_name));
     }
 
     auto& pai = pai_it->second;
