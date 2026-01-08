@@ -25,10 +25,15 @@ namespace symmetric_memory {
 
 static StoreExchange storeExchange = StoreExchange("NCCLAllocation");
 
+// Forward declaration
+class NCCLPeerAllocInfo;
+
 struct NCCLAllocation {
   void* ptr;
   size_t buffer_size;
   int device_idx;
+  // Map of group name to peer alloc info
+  std::map<std::string, c10::intrusive_ptr<NCCLPeerAllocInfo>> peer_alloc_infos_;
 
   NCCLAllocation(void* ptr, size_t buffer_size, int device_idx)
       : ptr(ptr), buffer_size(buffer_size), device_idx(device_idx) {}
@@ -351,12 +356,13 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
     auto& allocation = alloc_it->second;
 
-    // TODO: left here -- find peer alloc info based on base_ptr
-    auto key = std::make_tuple(allocation->ptr, *group_name);
-    auto pai_it = symm_mems_.find(key);
-    if (pai_it == symm_mems_.end()) {
+    // Get or create peer alloc info for the group
+    auto& peer_alloc_infos = allocation->peer_alloc_infos_;
+    auto pai_it = peer_alloc_infos.find(*group_name);
+    if (pai_it == peer_alloc_infos.end()) {
+      // Never rendezvoused with this group before, create a new peer alloc info
       auto pai = make_peer_alloc_info(allocation.get(), *group_name);
-      pai_it = symm_mems_.emplace(key, std::move(pai)).first;
+      pai_it = peer_alloc_infos.emplace_hint(pai_it, *group_name, std::move(pai));
     }
 
     auto& pai = pai_it->second;
@@ -379,8 +385,6 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
  private:
   std::unordered_map<void*, std::unique_ptr<NCCLAllocation>> allocations_;
-  std::map<std::tuple<void*, std::string>, c10::intrusive_ptr<NCCLPeerAllocInfo>>
-      symm_mems_;
 };
 
 struct RegisterNCCLSymmetricMemoryAllocator {
