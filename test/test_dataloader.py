@@ -436,6 +436,73 @@ class TestTensorDataset(TestCase):
         with self.assertRaisesRegex(AssertionError, "Size mismatch between tensors"):
             TensorDataset(tensor1, tensor2, tensor3)
 
+    def test_getitems(self):
+        """Test batch fetching with __getitems__ for improved DataLoader performance."""
+        t = torch.randn(15, 10, 2, 3)
+        l = torch.randn(15, 5)
+        source = TensorDataset(t, l)
+
+        # Test that __getitems__ exists
+        self.assertTrue(hasattr(source, "__getitems__"))
+
+        # Test fetching multiple indices at once
+        indices = [0, 5, 10, 14]
+        batch = source.__getitems__(indices)
+
+        # Should return a list of samples
+        self.assertIsInstance(batch, list)
+        self.assertEqual(len(batch), len(indices))
+
+        # Each sample should be a tuple matching __getitem__ output
+        for i, idx in enumerate(indices):
+            self.assertIsInstance(batch[i], tuple)
+            self.assertEqual(len(batch[i]), 2)
+            # Verify data matches what __getitem__ would return
+            expected = source[idx]
+            self.assertEqual(batch[i][0], expected[0])
+            self.assertEqual(batch[i][1], expected[1])
+
+    def test_getitems_single_tensor(self):
+        """Test __getitems__ with a single tensor dataset."""
+        t = torch.randn(10, 5)
+        source = TensorDataset(t)
+
+        indices = [1, 3, 7]
+        batch = source.__getitems__(indices)
+
+        self.assertEqual(len(batch), 3)
+        for i, idx in enumerate(indices):
+            self.assertEqual(batch[i][0], t[idx])
+
+    def test_getitems_empty_indices(self):
+        """Test __getitems__ with empty indices list."""
+        t = torch.randn(10, 5)
+        source = TensorDataset(t)
+
+        batch = source.__getitems__([])
+        self.assertEqual(len(batch), 0)
+
+    def test_getitems_with_dataloader(self):
+        """Test that __getitems__ integrates correctly with DataLoader."""
+        t = torch.randn(100, 10)
+        l = torch.randint(0, 10, (100,))
+        source = TensorDataset(t, l)
+
+        loader = DataLoader(source, batch_size=16, shuffle=False)
+
+        # Verify DataLoader produces correct batches
+        batch_count = 0
+        for batch_t, batch_l in loader:
+            start_idx = batch_count * 16
+            end_idx = min(start_idx + 16, 100)
+            expected_t = t[start_idx:end_idx]
+            expected_l = l[start_idx:end_idx]
+            self.assertEqual(batch_t, expected_t)
+            self.assertEqual(batch_l, expected_l)
+            batch_count += 1
+
+        self.assertEqual(batch_count, 7)  # ceil(100/16) = 7 batches
+
 
 @unittest.skipIf(
     TEST_WITH_TSAN,
