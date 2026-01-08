@@ -222,8 +222,10 @@ struct VecRoundConvert<
     2,
     typename std::enable_if_t<is_8bit_integer_v<dst_t>, void>> {
   static inline VectorizedN<dst_t, 1> apply(const VectorizedN<float, 2>& src) {
-    at::vec::Vectorized<dst_t> vec1 = round_convert_float_to_int8<dst_t>(src[0]);
-    at::vec::Vectorized<dst_t> vec2 = round_convert_float_to_int8<dst_t>(src[1]);
+    at::vec::Vectorized<dst_t> vec1 =
+        round_convert_float_to_int8<dst_t>(src[0]);
+    at::vec::Vectorized<dst_t> vec2 =
+        round_convert_float_to_int8<dst_t>(src[1]);
     __m128 lane2 = _mm512_castps512_ps128(_mm512_castsi512_ps(vec2));
     __m512 result = _mm512_insertf32x4(
         _mm512_castsi512_ps(vec1),

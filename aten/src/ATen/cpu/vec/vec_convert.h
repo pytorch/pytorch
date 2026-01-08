@@ -76,7 +76,8 @@ template <
     typename src_t,
     int src_n,
     std::enable_if_t<dst_n != 1, int> = 0>
-inline VectorizedN<dst_t, dst_n> round_convert(const VectorizedN<src_t, src_n>& src) {
+inline VectorizedN<dst_t, dst_n> round_convert(
+    const VectorizedN<src_t, src_n>& src) {
   return VecRoundConvert<dst_t, dst_n, src_t, src_n>::apply(src);
 }
 

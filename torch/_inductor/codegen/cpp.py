@@ -1672,7 +1672,7 @@ class CppVecOverrides(CppOverrides):
         return csevar
     
     @staticmethod
-    def round_to_int(x, dtype):
+    def round_to_int(x, dtype, src_dtype=None, use_compute_types=True):
         assert dtype in [
             torch.uint8,
             torch.int8,
