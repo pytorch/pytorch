@@ -5391,7 +5391,7 @@ class CppTemplateBuffer(TemplateBuffer):
     def get_layout(self) -> Layout:
         if isinstance(self.layout, MultiOutputLayout):
             assert isinstance(self.outputs, Iterable), type(self.outputs)
-            # pyrefly: ignore [index-error]
+
             first_output = self.outputs[0]
             assert isinstance(first_output, Buffer), type(first_output)
             layout = first_output.layout
@@ -7052,7 +7052,7 @@ class UserDefinedTritonKernel(ExternKernel):
 
             configs = kernel.configs
             kernel = kernel.fn
-        # pyrefly: ignore [bad-return]
+
         return kernel, configs, restore_value_args, reset_to_zero_args
 
     @override
@@ -7208,7 +7208,6 @@ class UserDefinedTritonKernel(ExternKernel):
         self.mutable_args = [
             kernel_args[key]
             for key in identify_mutated_tensors(
-                # pyrefly: ignore [bad-argument-type]
                 kernel,
                 {**kernel_args, **autotuned_kwargs},
                 tma_descriptor_metadata,
@@ -7860,7 +7859,7 @@ class FallbackKernel(ExternKernelAlloc):
                         add_alias(optional_tensor_arg)
             else:
                 assert library_utils.is_tensor_like_type(info.type)
-                # pyrefly: ignore [bad-argument-type]
+
                 add_alias(arg)
 
         for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
@@ -8299,7 +8298,7 @@ class FallbackKernel(ExternKernelAlloc):
             packed.outputs = tuple(outputs)
         else:
             packed.outputs = [outputs]
-        # pyrefly: ignore [bad-return]
+
         return outputs
 
 
@@ -9729,7 +9728,7 @@ class _WaitKernel(_CollectiveKernel):
             # Case 1
             if isinstance(coll, _CollectiveKernel):
                 _, idx = inp.indices[0]
-                # pyrefly: ignore [bad-return]
+
                 return [coll.inputs[idx]]
             # Case 2
             return []
