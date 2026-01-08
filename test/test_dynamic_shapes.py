@@ -917,9 +917,9 @@ def forward(self, x_1):
             )
         )
 
-    def test_prims_non_overlapping_and_dense(self):
+    def test_prims_is_non_overlapping_and_dense_or_false(self):
         shape_env = ShapeEnv()
-        cf = torch._prims_common.is_non_overlapping_and_dense
+        cf = torch._prims_common.is_non_overlapping_and_dense_or_false
 
         # backed case
         a0 = create_symint(shape_env, 5)
