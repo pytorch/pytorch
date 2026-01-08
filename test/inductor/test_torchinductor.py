@@ -9967,11 +9967,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 indices,
             ],
         )
-        # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion.
+        # Note: Kernel count varies by backend (CUDA/XPU ~3, ROCm ~2) due to fusion.
         # Correctness is validated by self.common() above.
         self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
 
-    @expectedFailureXPU
     def test_max_pool2d_with_indices_backward5(self):
         # Large window size - decomposition handles via scatter_add
         def fn(a, b, c):
@@ -9997,7 +9996,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 indices,
             ],
         )
-        # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion.
+        # Note: Kernel count varies by backend (CUDA/XPU ~3, ROCm ~2) due to fusion.
         # Correctness is validated by self.common() above.
         # MPS: decomposition falls back to native kernel, so no inductor kernels generated
         if self.device != "mps":
@@ -10029,7 +10028,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 indices,
             ],
         )
-        # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion.
+        # Note: Kernel count varies by backend (CUDA/XPU ~3, ROCm ~2) due to fusion.
         # Correctness is validated by self.common() above.
         # MPS: decomposition falls back to native kernel, so no inductor kernels generated
         if self.device != "mps":
