@@ -613,7 +613,6 @@ def copy_strategy(op_schema: OpSchema) -> StrategyType:
     return pointwise_strategy(op_schema, preserve_partial="all")
 
 
-
 def common_pointwise_strategy(
     op,
     args_schema: Sequence[object],
