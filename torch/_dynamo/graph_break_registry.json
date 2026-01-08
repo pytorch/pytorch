@@ -290,7 +290,9 @@
       "Gb_type": "Compilation of intermediate hooks requires compiled autograd",
       "Context": "var_getattr {self} {name}",
       "Explanation": "Dynamo must be in compiled_autograd to register hooks.",
-      "Hints": []
+      "Hints": [
+        "Consider using torch.autograd.Function with a custom backward() method instead of register_hook()."
+      ]
     }
   ],
   "GB0030": [
