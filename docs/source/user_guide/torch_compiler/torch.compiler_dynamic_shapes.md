@@ -172,21 +172,23 @@ dynamic shapes.
 
 > ⚠️ **Warning**
 >
-> `torch._dynamo.mark_dynamic()` must not be called inside a model’s
-> `forward()` method when using `torch.compile()`.
+> `torch._dynamo.mark_dynamic()` must not be called inside any function
+> that is being compiled by `torch.compile()` (for example, a model’s
+> `forward()` method or any function it calls).
 >
-> This function is a *tracing-time API*. Calling it inside compiled
-> function will raise an error such as:
+> This function is a *tracing-time API*. If it is invoked from within
+> compiled code, Dynamo will raise an error such as:
 >
 > ```
 > AssertionError: Attempt to trace forbidden callable
 > ```
 >
-> **Correct usage** is to call `mark_dynamic` on input tensors
-> **outside** the compiled model, or to use:
+> **Correct usage** is to call `mark_dynamic` on input tensors *before*
+> invoking `torch.compile`, for example:
 >
 > ```python
-> torch.compile(model, dynamic=True)
+> torch._dynamo.mark_dynamic(x, 0)
+> compiled_model = torch.compile(model)
 > ```
 
 
