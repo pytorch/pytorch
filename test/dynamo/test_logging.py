@@ -972,6 +972,8 @@ TRACE FX call mul from test_logging.py:N in fn (LoggingTests.test_trace_call_pre
             env["TORCH_LOGS_OUT"] = file_path
             _, stderr = self.run_process_no_exception(
                 """\
+import warnings
+warnings.filterwarnings("ignore", category=FutureWarning, module="torch.utils._config_module")
 import torch
 @torch.compile(backend="eager")
 def fn(a):
