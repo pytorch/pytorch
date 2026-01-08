@@ -46,7 +46,7 @@ extern "C" {{export_declaration}}
         num_threads, N, K, micro_gemm, is_dynamic_M, kernel, GemmOuts[0], config, L1_cache_size, L2_cache_size, X_list[0], W_list[0]
     ) }}
 {%- if num_threads > 1 %}
-    #pragma omp parallel num_threads({{num_threads}})
+    #pragma omp parallel
     {
         {{ template.codegen_multi_threads_params()|indent(8, false) }}
 {%- else %}

@@ -49,7 +49,7 @@ extern "C"
     constexpr int64_t num_threads = {{num_threads}};
     int64_t B_single_thread_block = (B / num_threads) * num_threads;
 
-    #pragma omp parallel for num_threads({{num_threads}})
+    #pragma omp parallel
     {%- else %}
     int64_t B_single_thread_block = B;
     {%- endif %}
