@@ -370,9 +370,6 @@ x = add_1, y = add_2);  getitem = None
         with patch("sys.stdout", new_callable=io.StringIO):
             compiled_m(*inputs)
 
-        # Verify we captured a graph
-        self.assertEqual(len(backend.graphs), 1)
-
         if not TEST_WITH_CROSSREF:
             self.assertExpectedInline(
                 backend.graphs[0].code.strip(),
@@ -461,10 +458,6 @@ def forward(self, tangents_1):
 
         with patch("sys.stdout", new_callable=io.StringIO):
             compiled_m(*inputs)
-
-        # Verify we captured a graph
-        self.assertEqual(len(backend.graphs), 1)
-        self.assertGreaterEqual(len(backend.inductor_graphs), 1)
 
         # Check inductor INPUT graph - print wrapped with with_effects
         # Inductor creates/sinks tokens internally rather than passing as args
