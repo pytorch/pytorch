@@ -1284,6 +1284,53 @@ def forward(self, primals_1):
     def test_tp_compile_comm_reordering_graph_partition(self):
         self._test_tp_compile_comm_reordering()
 
+    def test_make_fx_with_invoke_subgraph_dtensor(self):
+        """Test that make_fx can trace over torch.compile with invoke_subgraph backend and DTensor.
+
+        This tests the scenario where:
+        1. An outer make_fx traces a function
+        2. Inside that function, a torch.compile'd function with invoke_subgraph backend is called
+        3. The compiled function operates on DTensor inputs
+        4. The invoke_subgraph HOP should appear in the traced graph
+        """
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        orig_force_compile = torch._dynamo.config.force_compile_during_fx_trace
+
+        try:
+            # force_compile_during_fx_trace implicitly overrides error_on_nested_fx_trace
+            torch._dynamo.config.force_compile_during_fx_trace = True
+            torch._dynamo.reset()
+
+            def inner_fn(dt):
+                # Redistribute DTensor
+                return dt.redistribute(mesh, [Replicate()])
+
+            compiled_fn = torch.compile(
+                inner_fn, backend="invoke_subgraph", fullgraph=True
+            )
+
+            def outer_fn(x):
+                # Convert plain tensor to DTensor
+                dt = DTensor.from_local(x + 1, mesh, [Shard(0)], run_check=False)
+                # Call compiled function with DTensor
+                dt_out = compiled_fn(dt)
+                # Convert back to plain tensor
+                return dt_out.to_local()
+
+            x = torch.randn(4, 4)
+
+            # Trace with make_fx
+            traced = make_fx(outer_fn, tracing_mode="fake")(x)
+
+            # Verify invoke_subgraph appears in the graph
+            graph_code = traced.print_readable(print_output=False)
+            self.assertIn("invoke_subgraph", graph_code)
+        finally:
+            torch._dynamo.config.force_compile_during_fx_trace = orig_force_compile
+
 
 @instantiate_parametrized_tests
 class TestDTensorCompileE2E(DTensorTestBase):

@@ -847,12 +847,11 @@ class InvokeSubgraphBackendTests(torch._dynamo.test_case.TestCase):
         import torch._dynamo.backends.debugging as dbg
         from torch.fx.experimental.proxy_tensor import make_fx
 
-        # Save original config values
-        orig_error_on_nested = torch._dynamo.config.error_on_nested_fx_trace
+        # Save original config value
         orig_force_compile = torch._dynamo.config.force_compile_during_fx_trace
 
         try:
-            torch._dynamo.config.error_on_nested_fx_trace = False
+            # force_compile_during_fx_trace implicitly overrides error_on_nested_fx_trace
             torch._dynamo.config.force_compile_during_fx_trace = True
             torch._dynamo.reset()  # Clear any cached graphs
             dbg._invoke_subgraph_counter = 0  # Reset for test stability
@@ -882,8 +881,7 @@ class outer_fn(torch.nn.Module):
         repeated_subgraph0 = self.repeated_subgraph0
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_1', add, y_1);  repeated_subgraph0 = add = y_1 = None
         getitem: "f32[3, 3]" = invoke_subgraph[0];  invoke_subgraph = None
-        select: "f32[3]" = torch.ops.aten.select.int(getitem, 0, 0);  getitem = None
-        mul: "f32[3]" = torch.ops.aten.mul.Tensor(select, 2);  select = None
+        mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(getitem, 2);  getitem = None
         return mul
 
     class repeated_subgraph0(torch.nn.Module):
@@ -894,8 +892,7 @@ class outer_fn(torch.nn.Module):
 """,  # noqa: B950
             )
         finally:
-            # Restore original config values
-            torch._dynamo.config.error_on_nested_fx_trace = orig_error_on_nested
+            # Restore original config value
             torch._dynamo.config.force_compile_during_fx_trace = orig_force_compile
 
     def test_same_compiled_fn_called_twice_shares_subgraph(self):
@@ -908,11 +905,10 @@ class outer_fn(torch.nn.Module):
         from torch._guards import tracing, TracingContext
         from torch.fx.experimental.proxy_tensor import make_fx
 
-        orig_error_on_nested = torch._dynamo.config.error_on_nested_fx_trace
         orig_force_compile = torch._dynamo.config.force_compile_during_fx_trace
 
         try:
-            torch._dynamo.config.error_on_nested_fx_trace = False
+            # force_compile_during_fx_trace implicitly overrides error_on_nested_fx_trace
             torch._dynamo.config.force_compile_during_fx_trace = True
             torch._dynamo.reset()
             dbg._invoke_subgraph_counter = 0  # Reset for test stability
@@ -944,12 +940,10 @@ class outer_fn(torch.nn.Module):
         repeated_subgraph0 = self.repeated_subgraph0
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_1', x_1);  repeated_subgraph0 = x_1 = None
         getitem: "f32[3, 3]" = invoke_subgraph[0];  invoke_subgraph = None
-        select: "f32[3]" = torch.ops.aten.select.int(getitem, 0, 0);  getitem = None
         repeated_subgraph0_1 = self.repeated_subgraph0
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, 'invoke_subgraph_1', y_1);  repeated_subgraph0_1 = y_1 = None
         getitem_1: "f32[3, 3]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-        select_1: "f32[3]" = torch.ops.aten.select.int(getitem_1, 0, 0);  getitem_1 = None
-        add: "f32[3]" = torch.ops.aten.add.Tensor(select, select_1);  select = select_1 = None
+        add: "f32[3, 3]" = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
         return add
 
     class repeated_subgraph0(torch.nn.Module):
@@ -959,7 +953,6 @@ class outer_fn(torch.nn.Module):
 """,  # noqa: B950
             )
         finally:
-            torch._dynamo.config.error_on_nested_fx_trace = orig_error_on_nested
             torch._dynamo.config.force_compile_during_fx_trace = orig_force_compile
 
     def test_guard_failure_creates_separate_subgraphs(self):
@@ -972,11 +965,10 @@ class outer_fn(torch.nn.Module):
         import torch._dynamo.backends.debugging as dbg
         from torch.fx.experimental.proxy_tensor import make_fx
 
-        orig_error_on_nested = torch._dynamo.config.error_on_nested_fx_trace
         orig_force_compile = torch._dynamo.config.force_compile_during_fx_trace
 
         try:
-            torch._dynamo.config.error_on_nested_fx_trace = False
+            # force_compile_during_fx_trace implicitly overrides error_on_nested_fx_trace
             torch._dynamo.config.force_compile_during_fx_trace = True
             torch._dynamo.reset()
             dbg._invoke_subgraph_counter = 0  # Reset for test stability
@@ -1007,12 +999,10 @@ class outer_fn(torch.nn.Module):
         repeated_subgraph0 = self.repeated_subgraph0
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_1', x_1);  repeated_subgraph0 = None
         getitem: "f32[3, 3]" = invoke_subgraph[0];  invoke_subgraph = None
-        select: "f32[3]" = torch.ops.aten.select.int(getitem, 0, 0);  getitem = None
         repeated_subgraph1 = self.repeated_subgraph1
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph1, 'invoke_subgraph_2', x_1);  repeated_subgraph1 = x_1 = None
         getitem_1: "f32[3, 3]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-        select_1: "f32[3]" = torch.ops.aten.select.int(getitem_1, 0, 0);  getitem_1 = None
-        add: "f32[3]" = torch.ops.aten.add.Tensor(select, select_1);  select = select_1 = None
+        add: "f32[3, 3]" = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
         return add
 
     class repeated_subgraph0(torch.nn.Module):
@@ -1027,7 +1017,6 @@ class outer_fn(torch.nn.Module):
 """,  # noqa: B950
             )
         finally:
-            torch._dynamo.config.error_on_nested_fx_trace = orig_error_on_nested
             torch._dynamo.config.force_compile_during_fx_trace = orig_force_compile
 
 
