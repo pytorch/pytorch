@@ -256,6 +256,8 @@ def aot_stage1_graph_capture(
             trace_joint_graph=aot_state.needs_autograd and not aot_config.pre_dispatch,
         )
 
+    graph.meta["fake_mode"] = aot_state.fake_mode
+
     return AOTGraphCapture(
         wrappers=wrappers,
         graph_module=graph,
