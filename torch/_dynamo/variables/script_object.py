@@ -19,6 +19,7 @@ by limiting operations to known-safe patterns and failing fast for unsafe usage.
 """
 
 import functools
+import inspect
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
@@ -218,6 +219,28 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         args: Iterable[Any],
         kwargs: dict[str, Any],
     ) -> VariableTracker:
+        value_type = type(self.value)
+        if is_opaque_value_type(value_type):
+            if inspect.getattr_static(value_type, "__getattr__", None) is not None:
+                unimplemented(
+                    gb_type="Opaque object with custom __getattr__ not supported",
+                    context=f"{value_type.__name__} with custom __getattr__",
+                    explanation="Dynamo does not support opaque objects types with custom __getattr__ methods",
+                    hints=[],
+                )
+
+            args = [x.as_python_constant() for x in args]
+            kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+
+            method = getattr(self.value, name)
+
+            if name == "__setattr__":
+                method(*args, **kwargs)
+                return self.value  # pyrefly: ignore[bad-return]
+
+            constant_val = method(*args, **kwargs)
+            return ConstantVariable(constant_val)
+
         unimplemented(
             gb_type="Weird method call on TorchScript object",
             context=f"value={self.value}, method={name}",
