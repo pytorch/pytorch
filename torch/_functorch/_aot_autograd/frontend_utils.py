@@ -69,7 +69,6 @@ def process_inputs(
                     # FakeTensor subclass from a different mode.
                     # Fall through to refakify.
 
-
             # see note [Tensor Fakification and Symbol Caching]
             symbolic_context = None
             source = None
