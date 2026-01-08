@@ -237,10 +237,18 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
 # Used to clear/restore the python torch function mode stack and temporarily restore it as needed
 class TorchFunctionModeStackStateManager:
     def __init__(self) -> None:
-        self.stack: list[Any] = []
+        # Use a stack of stacks to handle nested entry correctly
+        self._saved_stacks: list[list[Any]] = []
+
+    @property
+    def stack(self) -> list[Any]:
+        """Get the current saved stack (for temp_restore_stack compatibility)."""
+        return self._saved_stacks[-1] if self._saved_stacks else []
 
     def __enter__(self) -> None:
-        self.stack = torch.overrides._get_current_function_mode_stack()
+        # Save the current stack and clear it
+        current_stack = torch.overrides._get_current_function_mode_stack()
+        self._saved_stacks.append(current_stack)
         clear_torch_function_mode_stack()
 
     def __exit__(
@@ -249,8 +257,10 @@ class TorchFunctionModeStackStateManager:
         exc_val: Optional[BaseException],
         exc_tb: Optional[TracebackType],
     ) -> None:
-        set_torch_function_mode_stack(self.stack)
-        self.stack = []
+        # Restore the most recently saved stack
+        if self._saved_stacks:
+            saved_stack = self._saved_stacks.pop()
+            set_torch_function_mode_stack(saved_stack)
 
     @contextlib.contextmanager
     def temp_restore_stack(self) -> Generator[None, None, None]:
