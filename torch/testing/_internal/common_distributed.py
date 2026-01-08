@@ -1908,8 +1908,19 @@ class MultiProcContinuousTest(TestCase):
             if self.rank == self.MAIN_PROCESS_RANK:
                 logger.debug(f"Waiting for workers to finish {self.id()}")  # noqa: G004
                 # Wait for the workers to finish the test
-                for i, completion_queue in enumerate(self.completion_queues):
-                    rv = completion_queue.get()
+                for i, (p, completion_queue) in enumerate(
+                    zip(self.processes, self.completion_queues)
+                ):
+                    # When the process died before filling the completion queue `get` will never return.
+                    # Hence periodically check the process for liveness
+                    while True:
+                        try:
+                            rv = completion_queue.get(timeout=120)
+                        except queue.Empty:
+                            # If not alive do a last check because the timeout might have happened just before completion
+                            if not p.is_alive() and completion_queue.empty():
+                                rv = RuntimeError(f"Exited with {p.exitcode}")
+                                break
                     if isinstance(rv, unittest.SkipTest):
                         raise rv
                     if isinstance(rv, BaseException):
