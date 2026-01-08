@@ -81,6 +81,7 @@ def init_dropout_state(dropout, train, dropout_seed, dropout_state):
                     dropout_p,
                     train,
                     dropout_seed,
+                    # pyrefly: ignore [unexpected-keyword]
                     self_ty=torch.uint8,
                     device=torch.device("cuda"),
                 )
