@@ -154,7 +154,9 @@ def has_triton() -> bool:
     if triton_disable_device_detection:
         return False
 
+    from torch._C import _get_privateuse1_backend_name
     from torch._dynamo.device_interface import get_interface_for_device
+    from torch.accelerator import current_accelerator
 
     def cuda_extra_check(device_interface: Any) -> bool:
         return device_interface.Worker.get_device_properties().major >= 7
@@ -163,6 +165,10 @@ def has_triton() -> bool:
         import triton.backends
 
         return "cpu" in triton.backends.backends
+
+    def pu1_extra_check(device_interface: Any) -> bool:
+        device = current_accelerator()
+        return device_interface.is_triton_capable(device)
 
     def _return_true(device_interface: Any) -> bool:
         return True
@@ -173,6 +179,10 @@ def has_triton() -> bool:
         "cpu": cpu_extra_check,
         "mtia": _return_true,
     }
+
+    privateuse1_backend = _get_privateuse1_backend_name()
+    if current_accelerator() and current_accelerator().type == privateuse1_backend:
+        triton_supported_devices[privateuse1_backend] = pu1_extra_check
 
     def is_device_compatible_with_triton() -> bool:
         for device, extra_check in triton_supported_devices.items():
