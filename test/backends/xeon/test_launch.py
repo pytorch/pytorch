@@ -74,32 +74,17 @@ class TestTorchrun(TestCase):
     def test_multi_threads(self):
         num = 0
         with subprocess.Popen(
-            f'python -m torch.backends.xeon.run_cpu --ninstances 4 --use-default-allocator \
-            --disable-iomp --disable-numactl --disable-taskset --log-path {self._test_dir} --no-python echo "test"',
+            f"python -m torch.backends.xeon.run_cpu --ninstances 4 --use-default-allocator \
+            --disable-iomp --disable-numactl --disable-taskset --log-path {self._test_dir} --no-python pwd",
             shell=True,
             stdout=subprocess.PIPE,
             stderr=subprocess.STDOUT,
         ) as p:
             for line in p.stdout.readlines():
-                segs = str(line, "utf-8").strip().split(":")
-                if segs[-1].strip() == "test":
+                segs = str(line, "utf-8").strip().split("-")
+                if segs[-1].strip() == "pwd":
                     num += 1
         assert num == 4, "Failed to launch multiple instances for inference"
-
-    def test_multi_instance_uneven_core_distribute(self):
-        num = 0
-        with subprocess.Popen(
-            f'python -m torch.backends.xeon.run_cpu --ninstances 3 --ncores-per-instance 5 5 6 --use-default-allocator \
-            --disable-iomp --disable-numactl --disable-taskset --log-path {self._test_dir} --no-python echo "test"',
-            shell=True,
-            stdout=subprocess.PIPE,
-            stderr=subprocess.STDOUT,
-        ) as p:
-            for line in p.stdout.readlines():
-                segs = str(line, "utf-8").strip().split(":")
-                if segs[-1].strip() == "test":
-                    num += 1
-        assert num == 3, "Failed to launch multiple instances for inference"
 
 
 if __name__ == "__main__":

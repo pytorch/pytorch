@@ -1,6 +1,6 @@
 # mypy: allow-untyped-defs
 """
-This is a script for launching PyTorch inference on Intel® Xeon® Scalable Processors with optimal configurations.
+This is a script for launching PyTorch inference on Intel(R) Xeon(R) Scalable Processors with optimal configurations.
 
 Single instance inference, multi-instance inference are enabled.
 
@@ -27,7 +27,7 @@ Illustrated as below:
     |                             |             thread 1 |  M+1  |
     +-----------------------------+----------------------+-------+
 
-To get the peak performance on Intel® Xeon® Scalable Processors, the script optimizes the configuration of thread and memory
+To get the peak performance on Intel(R) Xeon(R) Scalable Processors, the script optimizes the configuration of thread and memory
 management. For thread management, the script configures thread affinity and the preload of Intel OMP library.
 For memory management, it configures NUMA binding and preload optimized memory allocation library (e.g. tcmalloc, jemalloc).
 
@@ -62,7 +62,7 @@ Single instance inference
 
 ::
 
-   python -m torch.backends.xeon.run_cpu --ninstances 1 script.py args
+   python -m torch.backends.xeon.run_cpu --throughput-mode script.py args
 
 2. Run single-instance inference on a single CPU node.
 
@@ -81,36 +81,28 @@ Multi-instance inference
 
    python -m torch.backends.xeon.run_cpu -- python_script args
 
-   eg: on an Intel® Xeon® Scalable Processor with 14 instances, 4 cores per instance
+   eg: on an Intel(R) Xeon(R) Scalable Processor with 14 instance, 4 cores per instance
 
 ::
 
    python -m torch.backends.xeon.run_cpu --ninstances 14 --ncores-per-instance 4 python_script args
 
-   Setting different cores for each instance is supported.
-
-::
-
-   python -m torch.backends.xeon.run_cpu --ncores-per-instance 43 43 42 43 43 42 --ninstances 6 python_script args
-
-   eg: on an Intel® Xeon® Scalable Processor with 6 instances, each instance has 43 or 42 cores, as specified.
-
 2. Run single-instance inference among multiple instances.
    By default, runs all ninstances. If you want to independently run a single instance among ninstances, specify rank.
 
-   eg: run 0th instance on an Intel® Xeon® Scalable Processor with 2 instance (i.e., numactl -C 0-27)
+   eg: run 0th instance on an Intel(R) Xeon(R) Scalable Processor with 2 instance (i.e., numactl -C 0-27)
 
 ::
 
    python -m torch.backends.xeon.run_cpu --ninstances 2 --rank 0 python_script args
 
-   eg: run 1st instance on an Intel® Xeon® Scalable Processor with 2 instance (i.e., numactl -C 28-55)
+   eg: run 1st instance on an Intel(R) Xeon(R) Scalable Processor with 2 instance (i.e., numactl -C 28-55)
 
 ::
 
    python -m torch.backends.xeon.run_cpu --ninstances 2 --rank 1 python_script args
 
-   eg: run 0th instance on an Intel® Xeon® Scalable Processor with 2 instance, 2 cores per instance,
+   eg: run 0th instance on an Intel(R) Xeon(R) Scalable Processor with 2 instance, 2 cores per instance,
    first four cores (i.e., numactl -C 0-1)
 
 ::
@@ -186,7 +178,7 @@ class _CPUinfo:
                     self.cpuinfo.append(regex_out.group(1).strip().split(","))
 
             # physical cores := core column in lscpu output
-            #  logical cores :=  CPU column in lscpu output
+            #  logical cores :=  cPU column in lscpu output
             self.node_nums = int(max(line[3] for line in self.cpuinfo)) + 1
             self.node_physical_cores: list[list[int]] = []  # node_id is index
             self.node_logical_cores: list[list[int]] = []  # node_id is index
@@ -299,7 +291,6 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
             "/usr/local/lib64",
             "/usr/lib",
             "/usr/lib64",
-            "/usr/lib/x86_64-linux-gnu/",
         ]
 
         lib_find = False
@@ -387,7 +378,7 @@ or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib6
             logger.warning(
                 """Neither TCMalloc nor JeMalloc is found in $CONDA_PREFIX/lib or $VIRTUAL_ENV/lib
                             or /.local/lib/ or /usr/local/lib/ or /usr/local/lib64/ or /usr/lib or /usr/lib64 or
-                           %s/.local/lib/ or /usr/lib/x86_64-linux-gnu/ so the LD_PRELOAD environment variable will not be set.
+                           %s/.local/lib/ so the LD_PRELOAD environment variable will not be set.
                            This may drop the performance""",
                 expanduser("~"),
             )
@@ -474,12 +465,11 @@ Value applied: %s. Value ignored: %s",
                     )
             elif len(args.ncores_per_instance) > 1:
                 args.ninstances = len(args.ncores_per_instance)
-
         if args.core_list:  # user specify what cores will be used by params
             cores = [int(x) for x in args.core_list.split(",")]
             if args.ncores_per_instance == [-1]:
                 raise AssertionError(
-                    'please specify "--ncores-per-instance" if you have pass the --core-list params'
+                    'please specify the "--ncores-per-instance" if you have pass the --core-list params'
                 )
             if args.ninstances > 0 and sum(args.ncores_per_instance) < len(cores):
                 logger.warning(
@@ -518,7 +508,7 @@ but you specify %s cores in core_list",
             elif args.ncores_per_instance == [-1] and args.ninstances != -1:
                 if args.ninstances > len(cores):
                     raise AssertionError(
-                        f"there are only {len(cores)} total cores but you specify {args.ninstances} ninstances; \
+                        f"there are {len(cores)} total cores but you specify {args.ninstances} ninstances; \
 please make sure ninstances <= total_cores)"
                     )
                 if args.bind_numa_node:
@@ -1022,10 +1012,10 @@ def main(args):
 
 if __name__ == "__main__":
     parser = ArgumentParser(
-        description="This is a script for launching PyTorch inference on Intel® Xeon® Scalable "
+        description="This is a script for launching PyTorch inference on Intel(R) Xeon(R) Scalable "
         "Processors with optimal configurations. Single instance inference, "
-        "multi-instance inference are enable. To get the peak performance on Intel® "
-        "Xeon® Scalable Processors, the script optimizes the configuration "
+        "multi-instance inference are enable. To get the peak performance on Intel(R) "
+        "Xeon(R) Scalable Processors, the script optimizes the configuration "
         "of thread and memory management. For thread management, the script configures thread "
         "affinity and the preload of Intel OMP library. For memory management, it configures "
         "NUMA binding and preload optimized memory allocation library (e.g. tcmalloc, jemalloc) "
