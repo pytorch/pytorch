@@ -19,6 +19,7 @@ import atexit
 import collections
 import dis
 import functools
+import glob
 import hashlib
 import inspect
 import itertools
@@ -312,6 +313,7 @@ def lru_cache(
 def uninteresting_files() -> set[str]:
     import torch._compile
     import torch._dynamo.eval_frame
+    import torch._higher_order_ops
     import torch._inductor.sizevars
     import torch._library.custom_ops
     import torch._library.fake_impl
@@ -340,8 +342,15 @@ def uninteresting_files() -> set[str]:
     ]
     import torch._dynamo.guards
 
+    files = {inspect.getfile(m) for m in mods}
+
+    # Add all Python files in torch._higher_order_ops directory
+    higher_order_ops_dir = os.path.dirname(torch._higher_order_ops.__file__)
+    hop_files = glob.glob(os.path.join(higher_order_ops_dir, "*.py"))
+
     return (
-        {inspect.getfile(m) for m in mods}
+        files
+        | set(hop_files)
         | torch._dynamo.guards.uninteresting_files()
         | {"<string>"}
     )
@@ -471,6 +480,11 @@ def has_static_value(a: Union[SymBool, SymFloat, SymInt, bool, float, int]) -> b
     return a.node.shape_env.bound_sympy(a.node.expr).is_singleton()  # type: ignore[union-attr]
 
 
+@deprecated(
+    "guard_size_oblivious will be removed. Consider using explicit unbacked handling \
+    potentially utilizing guard_or_false, guard_or_true, or statically_known_true",
+    category=FutureWarning,
+)
 def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
     """
     Perform a guard on a symbolic boolean expression in a size oblivious way.
@@ -526,7 +540,7 @@ def resolve_unbacked_bindings(
     with these new symints. To ensure consistency we use PropagateUnbackedSymInts
     to rename unbacked bindings to their old ones. But all of the node metas are
     still using the old bindings from before the renaming. This function helps to
-    post facto apply any renamings discovered in the PropogateUnbackedSymInts pass.
+    post facto apply any renamings discovered in the PropagateUnbackedSymInts pass.
     """
     if bindings is None:
         return None
@@ -1875,12 +1889,10 @@ class DimDynamic(Enum):
     DUCK = 1
     # Treat the dimension statically based on its hint
     STATIC = 2
-    # Treat the dimension as a size-like unbacked
-    SIZE_LIKE_UNBACKED = 3
+    # Treat the dimension as unbacked
+    UNBACKED = 3
     # Infer the strides from stride. If size is static, strides will be static as well.
     INFER_STRIDE = 4
-    # Like SIZE_LIKE_UNBACKED, but there's a hint
-    OBLIVIOUS_SIZE = 5
 
 
 # NB: These constraints affect both clients and backends: given some
@@ -2486,7 +2498,7 @@ def _maybe_evaluate_static_worker(
         return None
 
     # We need to canonicalize, as after expand we may have something like `a + b = a` and
-    # sympy will not simplify the a. The two appeareances of the a will then make value ranges
+    # sympy will not simplify the a. The two appearances of the a will then make value ranges
     # analysis give lose bounds
     new_expr = canonicalize_bool_expr(safe_expand(new_expr))
     if new_expr.is_number:
@@ -3809,10 +3821,6 @@ class ShapeEnv:
         # Like var_to_val, but only set when propagate_real_tensors is on.
         # Used as last resort to avoid GuardOnDataDependent error
         self.unbacked_var_to_val: dict[sympy.Symbol, sympy.Integer] = {}
-        # Like above, but used exclusively for OBLIVIOUS_SIZE.  These
-        # potentially could be put together but I am not sure, writing out
-        # the logic individually before abstracting.
-        self.oblivious_var_to_val: dict[sympy.Symbol, sympy.Integer] = {}
         # Maps symbolic ints to their min/max range.  These ranges
         # are conservative: the int MUST fall in the range, but the
         # range may contain ints which may not actually appear in
@@ -5076,7 +5084,7 @@ class ShapeEnv:
                 source_name
             ]
 
-        if dynamic_dim in (DimDynamic.SIZE_LIKE_UNBACKED, DimDynamic.OBLIVIOUS_SIZE):
+        if dynamic_dim is DimDynamic.UNBACKED:
             out = self.create_unbacked_symint(source).node.expr
             self._constrain_range_for_size(out)
 
@@ -5086,8 +5094,6 @@ class ShapeEnv:
                 symbolic_context.shape_env_to_source_to_symbol_cache[id(self)][
                     source_name
                 ] = out
-            if dynamic_dim is DimDynamic.OBLIVIOUS_SIZE:
-                self.oblivious_var_to_val[out] = val
             return out
 
         if do_not_specialize_zero_one:
@@ -6580,34 +6586,6 @@ class ShapeEnv:
             if allow_none:
                 return None
 
-            if self.oblivious_var_to_val:
-                # See https://github.com/pytorch/pytorch/issues/137100#issuecomment-2495778113
-                correct_hint = result_expr.xreplace(self.oblivious_var_to_val)
-                counterfactual_hint = result_expr.xreplace(
-                    {k: max(v, 2) for k, v in self.oblivious_var_to_val.items()}
-                )
-                if (
-                    not correct_hint.free_symbols
-                    and not counterfactual_hint.free_symbols
-                ):
-                    if correct_hint == counterfactual_hint:
-                        log.info("oblivious_size hit %s -> %s", expr, correct_hint)
-                        return correct_hint
-                    else:
-                        log.info(
-                            "oblivious_size counterfactual failed %s -> %s != %s",
-                            expr,
-                            correct_hint,
-                            counterfactual_hint,
-                        )
-                else:
-                    log.info(
-                        "oblivious_size miss %s -> %s (counterfactual: %s)",
-                        expr,
-                        correct_hint,
-                        counterfactual_hint,
-                    )
-
             if self.unbacked_var_to_val:
                 unsound_expr = result_expr.xreplace(self.unbacked_var_to_val)
                 if not unsound_expr.free_symbols:
@@ -7603,36 +7581,6 @@ class ShapeEnv:
                     if not ok and fallback_value is not None:
                         self._log_suppressed_dde(orig_expr, fallback_value)
                         return fallback_value
-
-                    # oblivious_var_to_val will be defined iff we have sizes with DimDynamic.OBLIVIOUS_SIZE type.
-                    # See https://github.com/pytorch/pytorch/issues/137100#issuecomment-2495778113
-                    if (
-                        self.oblivious_var_to_val
-                        and not (
-                            correct_hint := orig_expr.xreplace(
-                                self.oblivious_var_to_val
-                            )
-                        ).free_symbols
-                        and not (
-                            counterfactual_hint := orig_expr.xreplace(
-                                {
-                                    k: max(2, v)
-                                    for k, v in self.oblivious_var_to_val.items()
-                                }
-                            )
-                        ).free_symbols
-                        and correct_hint == counterfactual_hint
-                    ):
-                        # TODO: better logging
-                        log.info(
-                            "oblivious_size %s -> %s (passed counterfactual)",
-                            orig_expr,
-                            correct_hint,
-                        )
-
-                        concrete_val = correct_hint
-                        # NB: do NOT transmute into runtime assert
-                        ok = True
 
                     # unbacked_var_to_val is not None iff propagate_real_tensors is on.
                     # if propagate_real_tensors is on, we check the example values to generate (unsound_result)
