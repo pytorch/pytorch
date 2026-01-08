@@ -26,6 +26,7 @@ from torch.fx.experimental.proxy_tensor import (
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.multiprocessing.reductions import StorageWeakRef
+from torch._library.opaque_object import is_opaque_type
 
 
 @dataclass
@@ -739,7 +740,7 @@ def _stack_pytree(pytrees):
 # We use t_idx and s_idx to keep track of the next index of the item we are going to pop for the two lists.
 def save_tensors_and_symints_for_backward(ctx, args):
     assert all(
-        isinstance(arg, (torch.Tensor, torch.SymInt, int, type(None))) for arg in args
+        isinstance(arg, (torch.Tensor, torch.SymInt, int, type(None))) or is_opaque_type(type(arg)) for arg in args
     ), args
     partitioned_args: list[Any] = [[], []]
     pos = []

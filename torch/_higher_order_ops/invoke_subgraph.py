@@ -11,6 +11,7 @@ from typing import Any, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
+from torch._library.opaque_object import is_opaque_type
 from torch._C import DispatchKey
 from torch._dispatch.python import suspend_functionalization
 from torch._higher_order_ops.utils import (
@@ -121,7 +122,7 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         )
 
         assert all(
-            isinstance(o, (torch.Tensor, int, torch.SymInt, torch.Generator))
+            isinstance(o, (torch.Tensor, int, torch.SymInt, torch.Generator)) or is_opaque_type(type(o))
             for o in operands
             if o is not None
         ), (
