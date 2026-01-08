@@ -1,4 +1,4 @@
-"""Utility functions for caching operations in PyTorch Inductor runtime.
+"""Utility functions
 
 This module provides helper functions for LRU caching decorators used
 throughout the caching system.
@@ -6,9 +6,7 @@ throughout the caching system.
 
 from collections.abc import Callable
 from functools import lru_cache, wraps
-from typing_extensions import ParamSpec, TypedDict, TypeVar
-
-from torch import Tensor
+from typing_extensions import ParamSpec, TypeVar
 
 
 # Type specification for function parameters
@@ -33,34 +31,10 @@ def _lru_cache(fn: Callable[P, R]) -> Callable[P, R]:
     cached_fn = lru_cache(maxsize=64, typed=True)(fn)
 
     @wraps(fn)
-    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:  # type: ignore[type-var]
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         try:
-            return cached_fn(*args, **kwargs)  # type: ignore[arg-type]
+            return cached_fn(*args, **kwargs)
         except TypeError:
             return fn(*args, **kwargs)
 
     return wrapper
-
-
-class EncodedTensor(TypedDict):
-    """TypedDict for encoded tensor metadata."""
-
-    shape: tuple[int, ...]
-    stride: tuple[int, ...]
-    dtype: str
-
-
-def _encode_tensor(t: Tensor) -> EncodedTensor:
-    """Encode a tensor's metadata into a JSON-serializable dict.
-
-    Args:
-        t: PyTorch tensor to encode
-
-    Returns:
-        Dict containing shape, stride, and dtype information
-    """
-    return EncodedTensor(
-        shape=tuple(t.shape),
-        stride=tuple(t.stride()),
-        dtype=str(t.dtype),
-    )
