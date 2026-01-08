@@ -119,16 +119,22 @@ def _has_same_id_matched_objs(frame: DynamoFrameType, cache_entry: Any) -> bool:
     if not cache_entry:
         return False
 
-    for (
-        local_name,
-        weakref_from_cache_entry,
-    ) in cache_entry.guard_manager.id_matched_objs.items():
-        if weakref_from_cache_entry() is not None:
-            weakref_from_frame = _get_weakref_from_f_locals(frame, local_name)
-            if weakref_from_frame is not weakref_from_cache_entry:
-                return False
+    id_matched_objs = getattr(cache_entry.guard_manager, "id_matched_objs", None)
+    if not id_matched_objs:
+        # Also covers the case where no ID_MATCH objects are saved in frame.f_locals.
+        return True
 
-    # Also covers the case where no ID_MATCH objects are saved in frame.f_locals
+    for local_name, weakref_from_cache_entry in id_matched_objs.items():
+        # If the object referenced by a cache entry is already deallocated,
+        # it cannot match the current frame's local. Treat as a mismatch.
+        cached_obj = weakref_from_cache_entry()
+        if cached_obj is None:
+            return False
+
+        frame_obj = frame.f_locals.get(local_name, None)
+        if frame_obj is not cached_obj:
+            return False
+
     return True
 
 
