@@ -2041,11 +2041,13 @@ def split(x, sizes, dim=0):
     # by computing what the actual size of each chunk should be.
     if not isinstance(sizes, (list, tuple)):
         x_size = x.get_size()[dim]
-        if sizes == 0:
+        if sizes == 0 and x_size == 0:
             chunks = 1
             sizes_ = [x_size]
         else:
-            chunks = V.graph.sizevars.guard_int(FloorDiv(x_size + sizes - 1, sizes))
+            chunks = V.graph.sizevars.guard_int(
+                sympy.Max(FloorDiv(x_size + sizes - 1, sizes), 1)
+            )
             sizes_ = [sizes] * chunks
             # The last chunk might have a smaller size than the rest.
             sizes_[-1] = x_size - (chunks - 1) * sizes
