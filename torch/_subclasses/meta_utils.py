@@ -968,11 +968,9 @@ class MetaConverter(Generic[_TensorT]):
                     if not has_symbolic and symbolic_context is None:
                         return (t.size, t.stride, t.storage_offset)
 
-                    # NB: Currently we only allocate new symbols at the same places
-                    # as the old shape environment, but we do not preserve all the
-                    # axioms/replacements/etc in the old shape environment. This is fine
-                    # in the cross compilation use case since we use the fake mode to
-                    # construct native tensors (eg. cuda) on a box without devices.
+                    # There are some export use cases where we do have a symbolic_context
+                    # and an outer fake mode. In these cases we want to respect the
+                    # symbolic_context and properly allocate dynamism properly.
                     t_size = tuple(
                         shape_env._maybe_specialize_sym_int_with_hint(sz)
                         for sz in t.size
