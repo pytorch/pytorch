@@ -49,8 +49,8 @@ inline bool THPVariable_CheckTypeExact(PyTypeObject* tp) {
   // Parameter, which is used for Python bookkeeping but is equivalent to
   // Tensor as far as C++ is concerned.
   return (
-      tp == (PyTypeObject*)THPVariableClass ||
-      tp == (PyTypeObject*)ParameterClass);
+      tp == reinterpret_cast<PyTypeObject*>(THPVariableClass) ||
+      tp == reinterpret_cast<PyTypeObject*>(ParameterClass));
 }
 
 inline bool THPVariable_CheckExact(PyObject* obj) {

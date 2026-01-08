@@ -68,7 +68,7 @@ static PyObject* Tensor_new(
     PyObject* args,
     PyObject* kwargs) {
   HANDLE_TH_ERRORS
-  auto& tensor_type = *((PyTensorType*)type);
+  auto& tensor_type = *(reinterpret_cast<PyTensorType*>(type));
   TORCH_CHECK_TYPE(
       !tensor_type.is_cuda || torch::utils::cuda_enabled(),
       "type ",
@@ -93,7 +93,7 @@ static PyObject* Tensor_new(
 // we add...
 static PyObject* Tensor_instancecheck(PyObject* _self, PyObject* arg) {
   HANDLE_TH_ERRORS
-  auto self = (PyTensorType*)_self;
+  auto self = reinterpret_cast<PyTensorType*>(_self);
   if (THPVariable_Check(arg)) {
     const auto& var = THPVariable_Unpack(arg);
     // NB: This is a little unfortunate, in that if I do an isinstance check
@@ -163,12 +163,36 @@ typedef PyObject* (*getter)(PyObject*, void*);
 
 // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables,modernize-avoid-c-arrays)
 static struct PyGetSetDef metaclass_properties[] = {
-    {"dtype", (getter)Tensor_dtype, nullptr, nullptr, nullptr},
-    {"layout", (getter)Tensor_layout, nullptr, nullptr, nullptr},
-    {"is_cuda", (getter)Tensor_is_cuda, nullptr, nullptr, nullptr},
-    {"is_xpu", (getter)Tensor_is_xpu, nullptr, nullptr, nullptr},
-    {"is_sparse", (getter)Tensor_is_sparse, nullptr, nullptr, nullptr},
-    {"is_sparse_csr", (getter)Tensor_is_sparse_csr, nullptr, nullptr, nullptr},
+    {"dtype",
+     reinterpret_cast<getter>(Tensor_dtype),
+     nullptr,
+     nullptr,
+     nullptr},
+    {"layout",
+     reinterpret_cast<getter>(Tensor_layout),
+     nullptr,
+     nullptr,
+     nullptr},
+    {"is_cuda",
+     reinterpret_cast<getter>(Tensor_is_cuda),
+     nullptr,
+     nullptr,
+     nullptr},
+    {"is_xpu",
+     reinterpret_cast<getter>(Tensor_is_xpu),
+     nullptr,
+     nullptr,
+     nullptr},
+    {"is_sparse",
+     reinterpret_cast<getter>(Tensor_is_sparse),
+     nullptr,
+     nullptr,
+     nullptr},
+    {"is_sparse_csr",
+     reinterpret_cast<getter>(Tensor_is_sparse_csr),
+     nullptr,
+     nullptr,
+     nullptr},
     {nullptr}};
 
 static PyTypeObject metaclass = {
@@ -244,9 +268,10 @@ static void set_type(
   // This field is lazily initialized from backend and scalar_type
   type_obj.backend = static_cast<int>(backend);
   type_obj.scalar_type = static_cast<int>(scalarType);
-  type_obj.layout =
-      (THPLayout*)Py_NewRef(torch::getTHPLayout(layout_from_backend(backend)));
-  type_obj.dtype = (THPDtype*)Py_NewRef(torch::getTHPDtype(scalarType));
+  type_obj.layout = reinterpret_cast<THPLayout*>(
+      Py_NewRef(torch::getTHPLayout(layout_from_backend(backend))));
+  type_obj.dtype =
+      reinterpret_cast<THPDtype*>(Py_NewRef(torch::getTHPDtype(scalarType)));
   type_obj.is_cuda =
       (backend == at::Backend::CUDA || backend == at::Backend::SparseCUDA);
   type_obj.is_xpu =
@@ -268,7 +293,7 @@ static THPObjectPtr get_tensor_dict() {
   if (!tensor_class)
     throw python_error();
 
-  auto tensor_type = (PyTypeObject*)tensor_class.get();
+  auto tensor_type = reinterpret_cast<PyTypeObject*>(tensor_class.get());
   TORCH_CHECK(tensor_type->tp_base, "missing base type for Tensor");
 
   auto res = THPObjectPtr(PyDict_New());
@@ -411,7 +436,7 @@ static void py_bind_tensor_types(
     if (!module_obj)
       throw python_error();
 
-    PyObject* type_obj = (PyObject*)tensor_type;
+    PyObject* type_obj = reinterpret_cast<PyObject*>(tensor_type);
     Py_INCREF(type_obj);
     if (PyModule_AddObject(module_obj.get(), type_name.c_str(), type_obj) < 0) {
       throw python_error();
@@ -425,7 +450,7 @@ static void py_bind_tensor_types(
 static bool PyTensorType_Check(PyObject* obj) {
   auto it = std::find_if(
       tensor_types.begin(), tensor_types.end(), [obj](PyTensorType* x) {
-        return (PyObject*)x == obj;
+        return reinterpret_cast<PyObject*>(x) == obj;
       });
   return it != tensor_types.end();
 }
@@ -437,7 +462,7 @@ void py_set_default_tensor_type(PyObject* obj) {
   TORCH_CHECK_TYPE(
       PyTensorType_Check(obj),
       "invalid type object: only floating-point types are supported as the default type");
-  PyTensorType* type = (PyTensorType*)obj;
+  PyTensorType* type = reinterpret_cast<PyTensorType*>(obj);
   TORCH_CHECK_TYPE(
       !type->is_cuda || torch::utils::cuda_enabled(),
       "type ",
@@ -450,7 +475,7 @@ void py_set_default_dtype(PyObject* obj) {
   TORCH_CHECK_TYPE(
       THPDtype_Check(obj),
       "invalid dtype object: only floating-point types are supported as the default type");
-  auto scalar_type = ((THPDtype*)obj)->scalar_type;
+  auto scalar_type = (reinterpret_cast<THPDtype*>(obj))->scalar_type;
   set_default_tensor_type(/*backend=*/std::nullopt, scalar_type);
 }
 

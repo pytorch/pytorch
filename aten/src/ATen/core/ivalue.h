@@ -305,7 +305,7 @@ struct TORCH_API IValue final {
    *   dict), following Python. Calling `hash()` on these types will throw.
    */
   IValue hash() const {
-    return (int64_t)IValue::hash(*this);
+    return static_cast<int64_t>(IValue::hash(*this));
   }
   // This is defined because `c10::hash` dispatches to a function of this
   // signature. See the member function `hash()`.
@@ -1362,7 +1362,7 @@ struct TORCH_API IValue final {
         static_cast<uint32_t>(tag) < kNumTags,
         "unexpected tag ",
         static_cast<int>(tag));
-    return kTruthTableBitVector & (1 << (uint32_t(tag) % 32));
+    return kTruthTableBitVector & (1 << (static_cast<uint32_t>(tag) % 32));
   }
 
   // Storage and Generator were treated specially when

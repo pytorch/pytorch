@@ -41,7 +41,7 @@ class basic_string_view final {
   using size_type = std::size_t;
   using difference_type = std::ptrdiff_t;
 
-  static constexpr size_type npos = size_type(-1);
+  static constexpr size_type npos = static_cast<size_type>(-1);
 
   constexpr basic_string_view() noexcept : begin_(nullptr) {}
 

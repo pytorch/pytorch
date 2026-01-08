@@ -21,16 +21,17 @@ static int THPCapturedTraceback_traverse(
     PyObject* self,
     visitproc visit,
     void* arg) {
-  return ((THPCapturedTraceback*)self)
-      ->data->traversePython((int (*)(void*, void*))visit, arg);
+  return (reinterpret_cast<THPCapturedTraceback*>(self))
+      ->data->traversePython(
+          reinterpret_cast<int (*)(void*, void*)>(visit), arg);
 }
 
 static int THPCapturedTraceback_clear(PyObject* self) {
-  return ((THPCapturedTraceback*)self)->data->clearPython();
+  return (reinterpret_cast<THPCapturedTraceback*>(self))->data->clearPython();
 }
 
 static void THPCapturedTraceback_dealloc(PyObject* self_) {
-  auto* self = (THPCapturedTraceback*)self_;
+  auto* self = reinterpret_cast<THPCapturedTraceback*>(self_);
   PyObject_GC_UnTrack(self);
   self->data.~shared_ptr<torch::CapturedTraceback>();
   // promptly trigger delayed frees since we have GIL
@@ -61,8 +62,8 @@ static PyTypeObject THPCapturedTracebackType = {
     // NOLINTNEXTLINE(misc-redundant-expression)
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_HAVE_GC, /* tp_flags */
     nullptr, /* tp_doc */
-    (traverseproc)THPCapturedTraceback_traverse, /* tp_traverse */
-    (inquiry)THPCapturedTraceback_clear, /* tp_clear */
+    static_cast<traverseproc>(THPCapturedTraceback_traverse), /* tp_traverse */
+    static_cast<inquiry>(THPCapturedTraceback_clear), /* tp_clear */
     nullptr, /* tp_richcompare */
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
@@ -103,7 +104,7 @@ struct type_caster<std::shared_ptr<torch::CapturedTraceback>> {
       handle /* parent */) {
     auto* r = PyObject_GC_New(THPCapturedTraceback, &THPCapturedTracebackType);
     new (&r->data) std::shared_ptr<torch::CapturedTraceback>(std::move(src));
-    return py::handle((PyObject*)r);
+    return py::handle(reinterpret_cast<PyObject*>(r));
   }
 };
 
@@ -148,21 +149,22 @@ PyObject* RecordFunctionFast_new(
     PyTypeObject* subtype,
     PyObject* args,
     PyObject* kwargs) {
-  RecordFunctionFast* self = (RecordFunctionFast*)subtype->tp_alloc(subtype, 0);
+  RecordFunctionFast* self =
+      reinterpret_cast<RecordFunctionFast*>(subtype->tp_alloc(subtype, 0));
   if (self != nullptr) {
     self->name = nullptr;
     self->input_values = nullptr;
     self->keyword_values = nullptr;
     self->guard.reset();
   }
-  return (PyObject*)self;
+  return reinterpret_cast<PyObject*>(self);
 }
 
 int RecordFunctionFast_init(
     PyObject* selfGeneric,
     PyObject* args,
     PyObject* kwargs) {
-  auto self = (RecordFunctionFast*)selfGeneric;
+  auto self = reinterpret_cast<RecordFunctionFast*>(selfGeneric);
   // NOLINTNEXTLINE(*-c-arrays*)
   constexpr const char* kwlist[] = {
       "name", "input_values", "keyword_values", nullptr};
@@ -204,7 +206,7 @@ int RecordFunctionFast_init(
 }
 
 void RecordFunctionFast_dealloc(PyObject* selfGeneric) {
-  auto self = (RecordFunctionFast*)selfGeneric;
+  auto self = reinterpret_cast<RecordFunctionFast*>(selfGeneric);
   Py_CLEAR(self->name);
   Py_CLEAR(self->input_values);
   Py_CLEAR(self->keyword_values);
@@ -217,7 +219,7 @@ void RecordFunctionFast_dealloc(PyObject* selfGeneric) {
 PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
   HANDLE_TH_ERRORS
   if (torch::profiler::impl::ProfilerStateBase::get() != nullptr) {
-    auto self = (RecordFunctionFast*)selfGeneric;
+    auto self = reinterpret_cast<RecordFunctionFast*>(selfGeneric);
     TORCH_INTERNAL_ASSERT(
         !self->guard,
         "Trying to enter a new record_function_fast context but the guard is unexpectedly already set");
@@ -307,7 +309,7 @@ PyObject* RecordFunctionFast_enter(PyObject* selfGeneric, PyObject* unused) {
 PyObject* RecordFunctionFast_exit(PyObject* selfGeneric, PyObject* unused) {
   HANDLE_TH_ERRORS
   if (torch::profiler::impl::ProfilerStateBase::get() != nullptr) {
-    auto self = (RecordFunctionFast*)selfGeneric;
+    auto self = reinterpret_cast<RecordFunctionFast*>(selfGeneric);
     TORCH_INTERNAL_ASSERT(
         self->guard,
         "Trying to exit an active record_function_fast context but no guard is set");
@@ -668,7 +670,9 @@ void initPythonBindings(PyObject* module) {
 
   TORCH_CHECK(PyType_Ready(&THPCapturedTracebackType) >= 0);
   PyModule_AddObject(
-      m.ptr(), "CapturedTraceback", (PyObject*)&THPCapturedTracebackType);
+      m.ptr(),
+      "CapturedTraceback",
+      reinterpret_cast<PyObject*>(&THPCapturedTracebackType));
   m.def(
       "gather_traceback",
       CapturedTraceback::gather,
@@ -679,7 +683,8 @@ void initPythonBindings(PyObject* module) {
     std::vector<CapturedTraceback*> tb_ptrs;
     tb_ptrs.reserve(tbs.size());
     for (py::handle tb : tbs) {
-      tb_ptrs.emplace_back(((THPCapturedTraceback*)tb.ptr())->data.get());
+      tb_ptrs.emplace_back(
+          (reinterpret_cast<THPCapturedTraceback*>(tb.ptr()))->data.get());
     }
     return py_symbolize(tb_ptrs);
   });
@@ -725,7 +730,8 @@ void initPythonBindings(PyObject* module) {
 
   RecordFunctionFast_Type.tp_name = "torch._C._profiler.RecordFunctionFast",
   RecordFunctionFast_Type.tp_basicsize = sizeof(RecordFunctionFast);
-  RecordFunctionFast_Type.tp_dealloc = (destructor)RecordFunctionFast_dealloc;
+  RecordFunctionFast_Type.tp_dealloc =
+      static_cast<destructor>(RecordFunctionFast_dealloc);
   RecordFunctionFast_Type.tp_flags = Py_TPFLAGS_DEFAULT;
   RecordFunctionFast_Type.tp_methods = RecordFunctionFast_methods;
   RecordFunctionFast_Type.tp_init = RecordFunctionFast_init;
@@ -739,7 +745,7 @@ void initPythonBindings(PyObject* module) {
   if (PyModule_AddObject(
           m.ptr(),
           "_RecordFunctionFast",
-          (PyObject*)&RecordFunctionFast_Type) != 0) {
+          reinterpret_cast<PyObject*>(&RecordFunctionFast_Type)) != 0) {
     Py_DECREF(&RecordFunctionFast_Type);
     throw python_error();
   }

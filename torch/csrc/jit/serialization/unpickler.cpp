@@ -320,21 +320,21 @@ PickleOpCode Unpickler::readInstruction() {
     } break;
     case PickleOpCode::BININT1: {
       uint8_t value = read<uint8_t>();
-      stack_.emplace_back(int64_t(value));
+      stack_.emplace_back(static_cast<int64_t>(value));
     } break;
     case PickleOpCode::BININT2: {
       uint16_t value = from_le16(read<uint16_t>());
-      stack_.emplace_back(int64_t(value));
+      stack_.emplace_back(static_cast<int64_t>(value));
     } break;
     case PickleOpCode::BININT: {
       int32_t value = from_le32(read<int32_t>());
-      stack_.emplace_back(int64_t(value));
+      stack_.emplace_back(static_cast<int64_t>(value));
     } break;
     case PickleOpCode::LONG1: {
       // Only read LONG1s with 8 as the length
       uint8_t length = read<uint8_t>();
       TORCH_CHECK(length == 8, "Expected length to be 8, got ", int(length));
-      stack_.emplace_back(int64_t(from_le64(read<int64_t>())));
+      stack_.emplace_back(static_cast<int64_t>(from_le64(read<int64_t>())));
     } break;
     case PickleOpCode::BINUNICODE: {
       uint32_t length = from_le32(read<uint32_t>());
@@ -670,7 +670,7 @@ void Unpickler::readGlobal(
         // torch.nn.Buffer is introduced later in PyTorch 2 and this type IValue
         // will not be used in C++.
         rebuildTensor(false);
-        stack_.emplace_back(int64_t(globals_.size() - 1));
+        stack_.emplace_back(static_cast<int64_t>(globals_.size() - 1));
         this->skip_next_read_global = 0;
         return;
       }
@@ -681,7 +681,7 @@ void Unpickler::readGlobal(
         TORCH_WARN(
             "Trying to load a Subclassed Tensor, it will be converted to at::Tensor in C++");
       }
-      stack_.emplace_back(int64_t(globals_.size() - 1));
+      stack_.emplace_back(static_cast<int64_t>(globals_.size() - 1));
       return;
     } else {
       TORCH_CHECK(false, "INVALID VALUES")
@@ -810,7 +810,7 @@ void Unpickler::readGlobal(
       stack_.pop_back();
       stack_.emplace_back(c10::Device(device_string.toStringRef()));
     });
-    stack_.emplace_back(int64_t(globals_.size() - 1));
+    stack_.emplace_back(static_cast<int64_t>(globals_.size() - 1));
     return;
   } else if (module_name == "torch.distributed.rpc" && class_name == "rref") {
 #ifdef USE_RPC
@@ -834,7 +834,7 @@ void Unpickler::readGlobal(
     AT_FORALL_SCALAR_TYPES_WITH_COMPLEX_AND_QINTS(CHECK_SCALAR)
 #undef CHECK_SCALAR
     if (scalar_type.has_value()) {
-      stack_.emplace_back(int64_t(*scalar_type));
+      stack_.emplace_back(static_cast<int64_t>(*scalar_type));
       return;
     }
 
@@ -845,7 +845,7 @@ void Unpickler::readGlobal(
       }
     }
     if (qscheme.has_value()) {
-      stack_.emplace_back(int64_t(*qscheme));
+      stack_.emplace_back(static_cast<int64_t>(*qscheme));
       return;
     }
     TORCH_CHECK(
@@ -885,7 +885,7 @@ void Unpickler::readGlobal(
       });
     }
   }
-  stack_.emplace_back(int64_t(globals_.size() - 1));
+  stack_.emplace_back(static_cast<int64_t>(globals_.size() - 1));
 }
 
 void Unpickler::rebuildSparseTensor() {
@@ -1082,7 +1082,7 @@ void Unpickler::rebuildRRef() {
     stack_.emplace_back(
         c10::static_intrusive_pointer_cast<c10::RRefInterface>(rref));
   });
-  stack_.emplace_back(int64_t(globals_.size() - 1));
+  stack_.emplace_back(static_cast<int64_t>(globals_.size() - 1));
   return;
 }
 #endif

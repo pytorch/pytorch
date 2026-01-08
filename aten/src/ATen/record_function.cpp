@@ -17,12 +17,12 @@ namespace {
 // Used to generate unique callback handles
 CallbackHandle next_unique_callback_handle() {
   static std::atomic<uint64_t> unique_cb_id{1};
-  return CallbackHandle(unique_cb_id++);
+  return static_cast<CallbackHandle>(unique_cb_id++);
 }
 
 RecordFunctionHandle next_unique_record_function_handle() {
   static std::atomic<uint64_t> unique_rf_id{1};
-  return RecordFunctionHandle(unique_rf_id++);
+  return static_cast<RecordFunctionHandle>(unique_rf_id++);
 }
 
 std::atomic<int64_t> defaultNodeId(-1);

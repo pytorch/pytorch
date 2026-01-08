@@ -452,7 +452,7 @@ inline float calc_digamma(float x) {
     // the computation of pi * x is a source of error (when |x| > 1).
     double q, r;
     r = std::modf(x, &q);
-    float pi_over_tan_pi_x = (float)(c10::pi<double> / tan(c10::pi<double> * r));
+    float pi_over_tan_pi_x = static_cast<float>(c10::pi<double> / tan(c10::pi<double> * r));
     return calc_digamma(1 - x) - pi_over_tan_pi_x;
   }
 

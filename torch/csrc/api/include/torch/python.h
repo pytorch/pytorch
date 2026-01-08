@@ -56,8 +56,8 @@ void bind_cpp_module_wrapper(
 
   // Grab the `type` class which we'll use as a metaclass to create a new class
   // dynamically.
-  py::object type_metaclass =
-      py::reinterpret_borrow<py::object>((PyObject*)&PyType_Type);
+  py::object type_metaclass = py::reinterpret_borrow<py::object>(
+      reinterpret_cast<PyObject*>(&PyType_Type));
 
   // The `ModuleWrapper` constructor copies all functions to its own `__dict__`
   // in its constructor, but we do need to give our dynamic class a constructor.

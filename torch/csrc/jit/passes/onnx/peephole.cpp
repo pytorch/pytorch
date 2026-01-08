@@ -715,7 +715,9 @@ static void eraseListUnpack(Node* n, int opset_version) {
     auto g = n->owningGraph();
     for (size_t i = 0; i < n->outputs().size(); ++i) {
       auto seq_idx_n = g->create(onnx::Constant, 1);
-      seq_idx_n->t_(attr::value, at::scalar_to_tensor(at::Scalar(int64_t(i))));
+      seq_idx_n->t_(
+          attr::value,
+          at::scalar_to_tensor(at::Scalar(static_cast<int64_t>(i))));
       seq_idx_n->insertBefore(n);
 
       auto seq_at_n = g->create(onnx::SequenceAt, 1);

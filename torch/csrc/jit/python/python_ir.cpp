@@ -933,8 +933,8 @@ void initPythonIRBindings(PyObject* module_) {
               return py::none();
             }
             THPDtype* thp_dtype = torch::getTHPDtype(*scalar_type);
-            py::object dtype =
-                py::reinterpret_borrow<py::object>((PyObject*)thp_dtype);
+            py::object dtype = py::reinterpret_borrow<py::object>(
+                reinterpret_cast<PyObject*>(thp_dtype));
             return dtype;
           })
       .def(

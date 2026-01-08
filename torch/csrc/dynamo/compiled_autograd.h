@@ -732,7 +732,7 @@ class CompiledNodeArgs {
         _node_call(node_call),
         _specialization_key(
             // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
-            (uint8_t*)std::malloc(_specialization_key_storage)) {}
+            static_cast<uint8_t*>(std::malloc(_specialization_key_storage))) {}
   CompiledNodeArgs(const CompiledNodeArgs&) = delete;
   CompiledNodeArgs(CompiledNodeArgs&&) = delete;
   CompiledNodeArgs& operator=(const CompiledNodeArgs&) = delete;
@@ -749,8 +749,8 @@ class CompiledNodeArgs {
         _specialization_key_size + sizeof(T) > _specialization_key_storage)) {
       _specialization_key_storage *= 2;
       // NOLINTNEXTLINE(cppcoreguidelines-no-malloc)
-      _specialization_key = (uint8_t*)std::realloc(
-          _specialization_key, _specialization_key_storage);
+      _specialization_key = static_cast<uint8_t*>(
+          std::realloc(_specialization_key, _specialization_key_storage));
     }
     std::memcpy(_specialization_key + _specialization_key_size, &t, sizeof(T));
     _specialization_key_size += sizeof(T);

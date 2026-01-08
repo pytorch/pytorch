@@ -287,7 +287,9 @@ at::Tensor all_to_all_single(
   TORCH_CHECK(input.is_contiguous());
   std::vector<int64_t> output_sizes = input.sizes().vec();
   output_sizes[0] = std::accumulate(
-      output_split_sizes.begin(), output_split_sizes.end(), int64_t(0));
+      output_split_sizes.begin(),
+      output_split_sizes.end(),
+      static_cast<int64_t>(0));
   auto output = input.new_empty(output_sizes);
 
   auto group = c10d::resolve_process_group(std::move(group_name));

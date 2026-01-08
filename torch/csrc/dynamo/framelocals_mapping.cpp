@@ -23,7 +23,8 @@
 // NOTE: hidden variables are not included.
 // Returns a new reference.
 FrameLocalsMapping::FrameLocalsMapping(FrameLocalsFrameType* frame)
-    : _code_obj(py::cast<py::object>((PyObject*)F_CODE(frame))) {
+    : _code_obj(
+          py::cast<py::object>(reinterpret_cast<PyObject*> F_CODE(frame))) {
   PyCodeObject* co = F_CODE(frame);
   _framelocals.resize(co->co_nlocalsplus, nullptr);
 
@@ -95,7 +96,8 @@ void FrameLocalsMapping::_realize_dict() {
   _dict = py::dict();
   py::tuple framelocals_names = code_framelocals_names(_code_obj);
 
-  auto nlocalsplus = ((PyCodeObject*)_code_obj.ptr())->co_nlocalsplus;
+  auto nlocalsplus =
+      (reinterpret_cast<PyCodeObject*>(_code_obj.ptr()))->co_nlocalsplus;
   DEBUG_CHECK(nlocalsplus == _framelocals.size());
   for (int i = 0; i < nlocalsplus; i++) {
     if (_framelocals[i]) {
@@ -106,7 +108,8 @@ void FrameLocalsMapping::_realize_dict() {
 
 py::tuple code_framelocals_names(py::handle code) {
   CHECK(PyCode_Check(code.ptr()));
-  return py::cast<py::tuple>(((PyCodeObject*)code.ptr())->co_localsplusnames);
+  return py::cast<py::tuple>(
+      (reinterpret_cast<PyCodeObject*>(code.ptr()))->co_localsplusnames);
 }
 
 #else

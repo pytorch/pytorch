@@ -156,7 +156,7 @@ namespace torch::autograd {
 auto PyNode::apply(variable_list&& inputs) -> variable_list {
   pybind11::gil_scoped_acquire gil;
   at::OptionalDeviceGuard _device_guard;
-  THPFunction* py_fn = (THPFunction*)obj;
+  THPFunction* py_fn = reinterpret_cast<THPFunction*>(obj);
 
   // Massage a C++ variable_list into a Python arguments tuple
   THPObjectPtr pyInputs(to_py_args(inputs, &_device_guard));
@@ -207,7 +207,7 @@ auto PyNode::apply_with_saved_impl(
     const SwapSavedVariables& saved) -> variable_list {
   pybind11::gil_scoped_acquire gil;
   at::OptionalDeviceGuard _device_guard;
-  THPFunction* py_fn = (THPFunction*)obj;
+  THPFunction* py_fn = reinterpret_cast<THPFunction*>(obj);
 
   // Massage a C++ variable_list into a Python arguments tuple
   THPObjectPtr pyInputs(to_py_args(inputs, &_device_guard));
@@ -299,7 +299,7 @@ auto PyNode::release_variables() -> void {
   // we just leak the saved objects.
   if (Py_IsInitialized()) {
     pybind11::gil_scoped_acquire gil;
-    auto f = (THPFunction*)obj;
+    auto f = reinterpret_cast<THPFunction*>(obj);
     f->saved_variables.clear();
     f->has_freed_buffers = 1;
   }
@@ -307,7 +307,7 @@ auto PyNode::release_variables() -> void {
 
 auto PyNode::name() const -> std::string {
   pybind11::gil_scoped_acquire gil;
-  auto f = (THPFunction*)obj;
+  auto f = reinterpret_cast<THPFunction*>(obj);
   auto name = std::string(Py_TYPE(f)->tp_name);
   return name;
 }
@@ -337,7 +337,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) const {
   args.collect_size(static_cast<size_t>(key));
   args.collect_size(static_cast<size_t>(size));
 
-  auto f = (THPFunction*)obj;
+  auto f = reinterpret_cast<THPFunction*>(obj);
   f->compiled_autograd_symints.clear();
   f->compiled_autograd_symints.reserve(size - 1);
   for (const auto i : c10::irange(1, size)) {
@@ -376,7 +376,7 @@ void PyNode::compiled_args(CompiledNodeArgs& args) const {
 variable_list PyNode::apply_with_saved(
     const variable_list& inputs,
     SwapSavedVariables& saved) {
-  auto f = (THPFunction*)obj;
+  auto f = reinterpret_cast<THPFunction*>(obj);
   saved.before(f->compiled_autograd_symints);
   saved.before(f->saved_variables);
   saved.before(f->needs_input_grad);
@@ -396,7 +396,7 @@ variable_list PyNode::apply_with_saved(
 PyObject* PyNode::to_py_args(
     const variable_list& inputs,
     at::OptionalDeviceGuard* device_guard) {
-  THPFunction* py_fn = (THPFunction*)obj;
+  THPFunction* py_fn = reinterpret_cast<THPFunction*>(obj);
 
   auto zeros_without_gil = [](const VariableInfo& variable,
                               at::OptionalDeviceGuard& dg) {
@@ -519,7 +519,7 @@ static void THPFunction_dealloc(THPFunction* self) {
   self->input_info.~vector();
   self->saved_variables.~vector();
   self->is_variable_input.~vector();
-  Py_TYPE(self)->tp_free((PyObject*)self);
+  Py_TYPE(self)->tp_free(reinterpret_cast<PyObject*>(self));
 }
 
 static PyObject* THPFunction_new(
@@ -531,7 +531,7 @@ static PyObject* THPFunction_new(
     return nullptr;
   // Python zero-initializes the object memory, so there's no need to initialize
   // most fields
-  THPFunction* self = (THPFunction*)obj;
+  THPFunction* self = reinterpret_cast<THPFunction*>(obj);
   // Setup the PyNode later; we can't keep it live here
   new (&self->cdata) std::weak_ptr<PyNode>();
   new (&self->output_info) std::vector<VariableInfo>();
@@ -660,7 +660,7 @@ static void _wrap_outputs(
     }
 
     THPObjectPtr apply_jvp_fn(
-        PyObject_GetAttrString((PyObject*)self, "apply_jvp"));
+        PyObject_GetAttrString(reinterpret_cast<PyObject*>(self), "apply_jvp"));
     if (!apply_jvp_fn)
       throw_python_error();
     THPObjectPtr r(PyObject_CallObject(apply_jvp_fn, pyInputs.get()));
@@ -1037,7 +1037,7 @@ void _trace_post_record(
 
   node->i_(jit::attr::inplace, is_inplace);
   if (PyObject* module_name = PyDict_GetItemString(
-          ((PyTypeObject*)op_obj)->tp_dict, "__module__")) {
+          (reinterpret_cast<PyTypeObject*>(op_obj))->tp_dict, "__module__")) {
     if (auto ptr = PyUnicode_AsUTF8(module_name)) {
       node->s_(jit::attr::module, std::string(ptr));
     }
@@ -1175,7 +1175,7 @@ PyObject* process_outputs(
 
 PyObject* THPFunction_name(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS
-  auto cdata = ((THPFunction*)self)->cdata.lock();
+  auto cdata = (reinterpret_cast<THPFunction*>(self))->cdata.lock();
   check_legacy_fn_attr_access(cdata, "name");
   return THPUtils_packString(cdata->name());
   END_HANDLE_TH_ERRORS
@@ -1183,7 +1183,7 @@ PyObject* THPFunction_name(PyObject* self, PyObject* noargs) {
 
 PyObject* THPFunction_sequence_nr(PyObject* self, PyObject* noargs) {
   HANDLE_TH_ERRORS;
-  auto cdata = ((THPFunction*)self)->cdata.lock();
+  auto cdata = (reinterpret_cast<THPFunction*>(self))->cdata.lock();
   check_legacy_fn_attr_access(cdata, "_sequence_nr");
   return THPUtils_packUInt64(cdata->sequence_nr());
   END_HANDLE_TH_ERRORS
@@ -1191,7 +1191,7 @@ PyObject* THPFunction_sequence_nr(PyObject* self, PyObject* noargs) {
 
 PyObject* THPFunction_set_sequence_nr(PyObject* self, PyObject* sequence_nr) {
   HANDLE_TH_ERRORS;
-  auto cdata = ((THPFunction*)self)->cdata.lock();
+  auto cdata = (reinterpret_cast<THPFunction*>(self))->cdata.lock();
   check_legacy_fn_attr_access(cdata, "_set_sequence_nr");
   cdata->set_sequence_nr(THPUtils_unpackUInt64(sequence_nr));
   Py_RETURN_NONE;
@@ -1200,7 +1200,7 @@ PyObject* THPFunction_set_sequence_nr(PyObject* self, PyObject* sequence_nr) {
 
 PyObject* THPFunction_input_metadata(PyObject* self, void* unused) {
   HANDLE_TH_ERRORS;
-  auto cdata = ((THPFunction*)self)->cdata.lock();
+  auto cdata = (reinterpret_cast<THPFunction*>(self))->cdata.lock();
   check_legacy_fn_attr_access(cdata, "_input_metadata");
   const auto num_inputs = cdata->num_inputs();
   THPObjectPtr list(PyTuple_New(num_inputs));
@@ -1223,7 +1223,7 @@ PyObject* THPFunction_maybe_clear_saved_tensors(
     PyObject* self,
     PyObject* noargs) {
   HANDLE_TH_ERRORS;
-  auto cdata = ((THPFunction*)self)->cdata.lock();
+  auto cdata = (reinterpret_cast<THPFunction*>(self))->cdata.lock();
   if (!get_current_graph_task_keep_graph()) {
     cdata->release_variables();
   }
@@ -1322,7 +1322,7 @@ PyObject* THPFunction_apply(PyObject* cls, PyObject* inputs) {
   THPObjectPtr ctx_obj(PyObject_CallFunctionObjArgs(backward_cls, nullptr));
   if (!ctx_obj)
     return nullptr;
-  THPFunction* ctx = (THPFunction*)ctx_obj.get();
+  THPFunction* ctx = reinterpret_cast<THPFunction*>(ctx_obj.get());
 
   auto cdata =
       std::shared_ptr<PyNode>(new PyNode(std::move(ctx_obj)), deleteNode);
@@ -1417,7 +1417,7 @@ PyObject* THPFunction__register_hook_dict(PyObject* _self, PyObject* _var) {
   const auto& tensor = THPVariable_Unpack(var);
   std::unique_ptr<FunctionPreHook> hook(
       new PyFunctionTensorPreHook(var->backward_hooks, tensor.output_nr()));
-  auto self = (THPFunction*)_self;
+  auto self = reinterpret_cast<THPFunction*>(_self);
   auto cdata = self->cdata.lock();
   check_legacy_fn_attr_access(cdata, "_register_hook_dict");
   cdata->add_tensor_pre_hook(std::move(hook));
@@ -1427,7 +1427,7 @@ PyObject* THPFunction__register_hook_dict(PyObject* _self, PyObject* _var) {
 
 PyObject* THPFunction_register_hook(PyObject* _self, PyObject* hook) {
   HANDLE_TH_ERRORS
-  auto self = (THPFunction*)_self;
+  auto self = reinterpret_cast<THPFunction*>(_self);
   auto cdata = self->cdata.lock();
   check_legacy_fn_attr_access(cdata, "register_hook");
   return torch::autograd::registerFunctionHook(*cdata, hook);
@@ -1436,7 +1436,7 @@ PyObject* THPFunction_register_hook(PyObject* _self, PyObject* hook) {
 
 PyObject* THPFunction_register_prehook(PyObject* _self, PyObject* hook) {
   HANDLE_TH_ERRORS
-  auto self = (THPFunction*)_self;
+  auto self = reinterpret_cast<THPFunction*>(_self);
   auto cdata = self->cdata.lock();
   check_legacy_fn_attr_access(cdata, "register_prehook");
   return torch::autograd::registerFunctionPreHook(*cdata, hook);
@@ -1528,7 +1528,7 @@ PyObject* THPFunction_get_compiled_autograd_symints(
     PyObject* _self,
     PyObject* _unused) {
   HANDLE_TH_ERRORS
-  auto self = (THPFunction*)_self;
+  auto self = reinterpret_cast<THPFunction*>(_self);
   auto size = self->compiled_autograd_symints.size();
   PyObject* result = PyTuple_New(static_cast<Py_ssize_t>(size));
   if (!result) {
@@ -1548,7 +1548,7 @@ PyObject* THPFunction_get_compiled_autograd_backward_state(
     PyObject* _self,
     void* _unused) {
   HANDLE_TH_ERRORS
-  auto self = (THPFunction*)_self;
+  auto self = reinterpret_cast<THPFunction*>(_self);
   PyObject* bw_state = self->compiled_autograd_backward_state;
   if (bw_state == nullptr) {
     bw_state = Py_None;
@@ -1563,7 +1563,7 @@ int THPFunction_set_compiled_autograd_backward_state(
     PyObject* bw_state,
     void* _unused) {
   HANDLE_TH_ERRORS
-  auto self = (THPFunction*)_self;
+  auto self = reinterpret_cast<THPFunction*>(_self);
   TORCH_INTERNAL_ASSERT(self->compiled_autograd_backward_state == nullptr);
   Py_INCREF(bw_state);
   self->compiled_autograd_backward_state = bw_state;
@@ -1648,7 +1648,7 @@ namespace {
 
 template <PyObject* THPFunction::* ptr>
 PyObject* getObject(PyObject* obj, void* _unused) {
-  auto self = (THPFunction*)obj;
+  auto self = reinterpret_cast<THPFunction*>(obj);
   PyObject* value = self->*ptr;
   if (!value) {
     Py_RETURN_NONE;
@@ -1659,7 +1659,7 @@ PyObject* getObject(PyObject* obj, void* _unused) {
 
 template <PyObject* THPFunction::* ptr>
 int setObject(PyObject* obj, PyObject* value, void* _unused) {
-  auto self = (THPFunction*)obj;
+  auto self = reinterpret_cast<THPFunction*>(obj);
   if (value == Py_None) {
     value = nullptr;
   }
@@ -1671,13 +1671,13 @@ int setObject(PyObject* obj, PyObject* value, void* _unused) {
 
 template <typename M, M THPFunction::* ptr, PyObject* (*Convert)(long)>
 PyObject* getMember(PyObject* obj, void* _unused) {
-  auto self = (THPFunction*)obj;
+  auto self = reinterpret_cast<THPFunction*>(obj);
   return Convert(self->*ptr);
 }
 
 template <typename M, M autograd::Node::* ptr, PyObject* (*Convert)(long)>
 PyObject* getImplMember(PyObject* obj, void* _unused) {
-  auto self = (THPFunction*)obj;
+  auto self = reinterpret_cast<THPFunction*>(obj);
   return Convert(self->cdata.*ptr);
 }
 
@@ -1690,22 +1690,22 @@ PyObject* getRequiresGrad(PyObject* obj, void* _unused) {
 // NOLINTNEXTLINE(modernize-avoid-c-arrays,cppcoreguidelines-avoid-c-arrays,cppcoreguidelines-avoid-non-const-global-variables)
 static struct PyGetSetDef THPFunction_properties[] = {
     {"saved_tensors",
-     (getter)THPFunction_saved_tensors,
+     reinterpret_cast<getter>(THPFunction_saved_tensors),
      nullptr,
      nullptr,
      nullptr},
     {"saved_variables",
-     (getter)THPFunction_saved_variables,
+     reinterpret_cast<getter>(THPFunction_saved_variables),
      nullptr,
      nullptr,
      nullptr},
     {"_raw_saved_tensors",
-     (getter)THPFunction_raw_saved_tensors,
+     reinterpret_cast<getter>(THPFunction_raw_saved_tensors),
      nullptr,
      nullptr,
      nullptr},
     {"next_functions",
-     (getter)THPFunction_next_functions,
+     reinterpret_cast<getter>(THPFunction_next_functions),
      nullptr,
      nullptr,
      nullptr},
@@ -1735,30 +1735,34 @@ static struct PyGetSetDef THPFunction_properties[] = {
      nullptr,
      nullptr},
     {"requires_grad", getRequiresGrad, nullptr, nullptr, nullptr},
-    {"metadata", (getter)THPFunction_metadata, nullptr, nullptr, nullptr},
+    {"metadata",
+     reinterpret_cast<getter>(THPFunction_metadata),
+     nullptr,
+     nullptr,
+     nullptr},
     {"_input_metadata",
-     (getter)THPFunction_input_metadata,
+     static_cast<getter>(THPFunction_input_metadata),
      nullptr,
      nullptr,
      nullptr},
     {"materialize_grads",
      nullptr,
-     (setter)THPFunction_set_materialize_grads,
+     reinterpret_cast<setter>(THPFunction_set_materialize_grads),
      nullptr,
      nullptr},
     {"_is_pure_view",
      nullptr,
-     (setter)THPFunction_set_pure_view,
+     reinterpret_cast<setter>(THPFunction_set_pure_view),
      nullptr,
      nullptr},
     {"_materialize_non_diff_grads",
-     (getter)THPFunction_get_materialize_non_diff_grads,
-     (setter)THPFunction_set_materialize_non_diff_grads,
+     reinterpret_cast<getter>(THPFunction_get_materialize_non_diff_grads),
+     reinterpret_cast<setter>(THPFunction_set_materialize_non_diff_grads),
      nullptr,
      nullptr},
     {"_compiled_autograd_backward_state",
-     (getter)THPFunction_get_compiled_autograd_backward_state,
-     (setter)THPFunction_set_compiled_autograd_backward_state,
+     static_cast<getter>(THPFunction_get_compiled_autograd_backward_state),
+     static_cast<setter>(THPFunction_set_compiled_autograd_backward_state),
      nullptr,
      nullptr},
     {nullptr}};
@@ -1790,7 +1794,7 @@ PyTypeObject THPFunctionType = {
     "torch._C._FunctionBase", /* tp_name */
     sizeof(THPFunction), /* tp_basicsize */
     0, /* tp_itemsize */
-    (destructor)THPFunction_dealloc, /* tp_dealloc */
+    reinterpret_cast<destructor>(THPFunction_dealloc), /* tp_dealloc */
     0, /* tp_vectorcall_offset */
     nullptr, /* tp_getattr */
     nullptr, /* tp_setattr */
@@ -1809,8 +1813,8 @@ PyTypeObject THPFunctionType = {
     Py_TPFLAGS_DEFAULT | Py_TPFLAGS_BASETYPE |
         Py_TPFLAGS_HAVE_GC, /* tp_flags */
     nullptr, /* tp_doc */
-    (traverseproc)THPFunction_traverse, /* tp_traverse */
-    (inquiry)THPFunction_clear, /* tp_clear */
+    reinterpret_cast<traverseproc>(THPFunction_traverse), /* tp_traverse */
+    reinterpret_cast<inquiry>(THPFunction_clear), /* tp_clear */
     nullptr, /* tp_richcompare */
     0, /* tp_weaklistoffset */
     nullptr, /* tp_iter */
@@ -1832,6 +1836,7 @@ bool THPFunction_initModule(PyObject* module) {
   if (PyType_Ready(&THPFunctionType) < 0)
     return false;
   Py_INCREF(&THPFunctionType);
-  PyModule_AddObject(module, "_FunctionBase", (PyObject*)&THPFunctionType);
+  PyModule_AddObject(
+      module, "_FunctionBase", reinterpret_cast<PyObject*>(&THPFunctionType));
   return true;
 }

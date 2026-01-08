@@ -222,7 +222,7 @@ void Function::init_execution_state() const {
   // The underlying storage of the parameters should be owned by `parameters_`,
   // which should be alive when `execution_state_` is being used.
   for (const auto& param : parameters_) {
-    const c10::IValue& ivalue = (c10::IValue)param;
+    const c10::IValue& ivalue = c10::IValue(param);
     if (ivalue.isTensor()) {
       arguments.emplace_back(ivalue.toTensor().data_ptr());
     } else if (torch::isCustomClass(ivalue)) {
