@@ -161,6 +161,14 @@
       "Context": "",
       "Explanation": "torch.compile does not support sparse Tensors",
       "Hints": [
+        "Sparse tensor operations are not yet fully supported in torch.compile with fullgraph=True. Consider using fullgraph=False to allow graph breaks, or move sparse tensor creation outside the compiled region."
+      ]
+    },
+    {
+      "Gb_type": "Attempted to wrap sparse Tensor",
+      "Context": "",
+      "Explanation": "torch.compile does not support sparse Tensors",
+      "Hints": [
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
     }
@@ -692,6 +700,26 @@
       "Explanation": "{seq} cannot be unpacked into a list for the BUILD_LIST_UNPACK bytecode (`[*x, *y, ...]`).",
       "Hints": [
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB2023": [
+    {
+      "Gb_type": "Sparse tensor creation not supported",
+      "Context": "function: {fn_name}",
+      "Explanation": "torch.compile does not support sparse tensor creation functions like {fn_name}. Sparse tensors require specialized handling that is not yet implemented in the compiler.",
+      "Hints": [
+        "Sparse tensor operations are not yet fully supported in torch.compile with fullgraph=True. Consider using fullgraph=False to allow graph breaks, or move sparse tensor creation outside the compiled region."
+      ]
+    }
+  ],
+  "GB4790": [
+    {
+      "Gb_type": "Attempted getattr on sparse Tensor",
+      "Context": "",
+      "Explanation": "torch.compile does not support sparse Tensors",
+      "Hints": [
+        "Sparse tensor operations are not yet fully supported in torch.compile with fullgraph=True. Consider using fullgraph=False to allow graph breaks, or move sparse tensor creation outside the compiled region."
       ]
     }
   ],
@@ -3093,6 +3121,14 @@
     }
   ],
   "GB0277": [
+    {
+      "Gb_type": "Attempted to wrap sparse Tensor with VariableTracker",
+      "Context": "str(example_value)",
+      "Explanation": "torch.compile does not support sparse Tensors with VariableTracker",
+      "Hints": [
+        "Sparse tensor operations are not yet fully supported in torch.compile with fullgraph=True. Consider using fullgraph=False to allow graph breaks, or move sparse tensor creation outside the compiled region."
+      ]
+    },
     {
       "Gb_type": "Attempted to wrap sparse Tensor with VariableTracker",
       "Context": "str(example_value)",
