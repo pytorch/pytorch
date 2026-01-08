@@ -4685,6 +4685,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         res2 = fn(torch.ones((12,)))
         self.assertEqual(res1, res2)
 
+    @skipIfTorchDynamo("mark_dynamic not supported")
     def test_hint_override_consistent_stride1(self):
         @torch.compile(fullgraph=True, dynamic=True)
         def func(x):
@@ -4709,6 +4710,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
 
         func(x)
 
+    @skipIfTorchDynamo("mark_dynamic not supported")
     def test_hint_override_consistent_stride2(self):
         @torch.compile(fullgraph=True, dynamic=True)
         def func(x):
