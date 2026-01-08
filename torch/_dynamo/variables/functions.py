@@ -2065,7 +2065,7 @@ class SkipFunctionVariable(VariableTracker):
 
     def is_python_equal(self, other: object) -> bool:
         return (
-            isinstance(other, SkipFunctionVariable)
+            isinstance(other, VariableTracker)
             and self.as_python_constant() == other.as_python_constant()
         )
 

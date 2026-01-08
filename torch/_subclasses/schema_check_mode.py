@@ -5,7 +5,7 @@ from itertools import combinations
 from typing import Any, NamedTuple, TYPE_CHECKING
 
 import torch
-from torch.fx.operator_schemas import normalize_function
+from torch.fx.operator_schemas import _normalize_function_or_error
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
@@ -163,11 +163,9 @@ class SchemaCheckMode(TorchDispatchMode):
         self.ops.append(func._schema.name)
 
         # Clone and process arguments and outputs
-        normalized = normalize_function(
+        pre_arguments = _normalize_function_or_error(
             func, args, kwargs, normalize_to_only_use_kwargs=True
-        )
-        assert normalized is not None
-        pre_arguments = normalized.kwargs
+        ).kwargs
 
         c_p_args = dict(zip(pre_arguments.keys(), clone_inputs(pre_arguments.values())))
         cloned_arguments = {

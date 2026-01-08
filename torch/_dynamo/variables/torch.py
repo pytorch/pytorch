@@ -2510,7 +2510,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         return hash(self.value)
 
     def is_python_equal(self, other: object) -> bool:
-        if not isinstance(other, TorchInGraphFunctionVariable):
+        if not isinstance(other, VariableTracker):
             return False
         return self.as_python_constant() == other.as_python_constant()
 

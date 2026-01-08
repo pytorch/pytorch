@@ -1,19 +1,21 @@
 from __future__ import annotations
 
-import builtins
 import contextlib
 import warnings
 import weakref
 from abc import ABC, abstractmethod
-from collections.abc import Callable, Generator, Mapping, Sequence
 from contextlib import AbstractContextManager
 from typing import Any, Optional, TYPE_CHECKING, Union
+from typing_extensions import Self
 
 
 if TYPE_CHECKING:
+    import builtins
+    from collections.abc import Callable, Generator, Sequence
+    from types import TracebackType
+
     from torch._functorch.pyfunctorch import FunctionalizeInterpreter
     from torch._ops import OpOverload
-    from types import TracebackType
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -104,9 +106,9 @@ class FunctionalTensor(torch.Tensor):
     ]
 
     # Used by auto_functionalize to determine base of tensors during inference mode.
-    _inference_mode_base: Optional["FunctionalTensor"] = None
+    _inference_mode_base: Optional[FunctionalTensor] = None
 
-    def __new__(cls, elem: torch.Tensor, mode: FunctionalTensorMode) -> FunctionalTensor:
+    def __new__(cls, elem: torch.Tensor, mode: FunctionalTensorMode) -> Self:
         assert torch._is_functional_tensor(elem)
 
         # In general, we'd like our functional tensor subclass to only be in charge of functionalization,
@@ -286,7 +288,9 @@ class FunctionalTensor(torch.Tensor):
         return super().to(*args, **kwargs)
 
     # pyrefly: ignore[bad-override]
-    def cuda(self, device: torch.device | int | str | None = None, *args: Any, **kwargs: Any) -> torch.Tensor:
+    def cuda(
+        self, device: torch.device | int | str | None = None, *args: Any, **kwargs: Any
+    ) -> torch.Tensor:
         device = device or torch.cuda.current_device()
         if len(args) > 0:
             return self.to(device, *args, **kwargs)
@@ -305,7 +309,12 @@ class FunctionalTensor(torch.Tensor):
     long = _conversion_method_template(dtype=torch.int64)
 
     # TODO(sparse-team): fixes #133174 but can we do without the relay?
-    def to_dense(self, dtype: torch.dtype | None = None, *, masked_grad: builtins.bool | None = None) -> torch.Tensor: 
+    def to_dense(
+        self,
+        dtype: torch.dtype | None = None,
+        *,
+        masked_grad: builtins.bool | None = None,
+    ) -> torch.Tensor:
         return self.elem.to_dense()
 
     @property
@@ -355,7 +364,7 @@ class FunctionalTensorMode(TorchDispatchMode):
         ] = weakref.WeakKeyDictionary()
 
     # No-op if FunctionalTensorMode is already in use
-    def __enter__(self) -> FunctionalTensorMode:
+    def __enter__(self) -> Self:
         def _get_prev_mode() -> Optional[FunctionalTensorMode]:
             if self._dispatch_key == torch._C.DispatchKey.PreDispatch:
                 return _get_dispatch_mode_pre_dispatch(
@@ -703,9 +712,7 @@ class BaseFunctionalizeAPI(ABC):
         pass
 
     @abstractmethod
-    def unwrap_tensors(
-        self, args: torch.Tensor | tuple[torch.Tensor, ...]
-    ) -> Any:
+    def unwrap_tensors(self, args: torch.Tensor | tuple[torch.Tensor, ...]) -> Any:
         pass
 
     @abstractmethod
