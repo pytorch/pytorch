@@ -34,6 +34,7 @@ import warnings
 
 from .cuda_to_hip_mappings import CUDA_TO_HIP_MAPPINGS
 from .cuda_to_hip_mappings import MATH_TRANSPILATIONS
+from .cuda_to_hip_mappings import CAFFE2_PATH_MAPPINGS
 
 from collections.abc import Iterator
 from collections.abc import Mapping, Iterable
@@ -853,6 +854,23 @@ def preprocessor(
 
     output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_repl, output_source)
 
+    # Apply CAFFE2 path mappings (simple string replacement for paths containing slashes)
+    # Need to be careful to avoid double-transformations when source file has #ifdef blocks
+    # with HIP-specific paths already in them (e.g., caffe2/core/hip/context_gpu.h)
+    for cuda_path, hip_path in CAFFE2_PATH_MAPPINGS.items():
+        # Use regex to ensure we don't match paths that already have been hipified
+        # We need to avoid transforming "caffe2/core/hip/context_gpu.h" when looking for "caffe2/core/context_gpu.h"
+        # The key insight: if hip_path contains /hip/ and cuda_path doesn't, we need to be careful
+        if "/hip/" in hip_path and "/hip/" not in cuda_path:
+            # Only replace cuda_path if it's not preceded by "/hip/"
+            # Use negative lookbehind to prevent matching already-hipified paths
+            # The pattern checks that the cuda_path is not immediately preceded by "/hip/"
+            pattern = r'(?<!/hip/)' + re.escape(cuda_path)
+            output_source = re.sub(pattern, hip_path, output_source)
+        else:
+            # Simple replacement when no /hip/ involved or both have it
+            output_source = output_source.replace(cuda_path, hip_path)
+            
     # Header rewrites
     def mk_repl(templ, include_current_dir=True):
         def repl(m):
