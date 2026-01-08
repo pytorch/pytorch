@@ -8,7 +8,6 @@ MemPool::MemPool(
     bool use_on_oom,
     bool no_split)
     : allocator_(allocator),
-      is_user_created_(is_user_created),
       id_(c10::generate_mempool_id(is_user_created)) {
   device_ = c10::cuda::current_device();
   CUDACachingAllocator::createOrIncrefPool(device_, id_, allocator);
