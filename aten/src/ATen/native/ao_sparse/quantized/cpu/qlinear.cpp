@@ -1,7 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/Parallel.h>
-#include <torch/custom_class.h>
 #include <torch/library.h>
 
 #include <ATen/native/ao_sparse/quantized/cpu/fbgemm_utils.h>

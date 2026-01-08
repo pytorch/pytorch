@@ -1,6 +1,4 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
-#include <c10/util/SmallBuffer.h>
 #include <c10/core/impl/COW.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS

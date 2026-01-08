@@ -1,7 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/FunctionOfAMatrixUtils.h>
 
-#include <ATen/core/Tensor.h>
 #include <ATen/TensorIterator.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS

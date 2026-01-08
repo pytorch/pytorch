@@ -1,7 +1,4 @@
 #include <ATen/native/sparse/cuda/cuSPARSELtOps.h>
-#include <unordered_map>
-#include <mutex>
-#include <string_view>
 #if AT_CUSPARSELT_ENABLED()
 
 namespace at::native {

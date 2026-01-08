@@ -3,7 +3,6 @@
 
 #ifndef _WIN32
 #include <dlfcn.h>
-#include <libgen.h>
 #else
 #include <c10/util/win32-headers.h>
 #include <c10/util/Unicode.h>

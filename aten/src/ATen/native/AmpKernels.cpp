@@ -1,15 +1,11 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/AmpKernels.h>
-#include <ATen/Dispatch.h>
-#include <ATen/core/Tensor.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/_amp_foreach_non_finite_check_and_unscale.h>
 #include <ATen/ops/_amp_foreach_non_finite_check_and_unscale_native.h>
-#include <ATen/ops/_amp_update_scale.h>
 #include <ATen/ops/_amp_update_scale_native.h>
 #endif
 

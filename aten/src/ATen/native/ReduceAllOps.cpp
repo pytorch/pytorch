@@ -2,7 +2,6 @@
 #include <ATen/native/ReduceAllOps.h>
 #include <ATen/native/Resize.h>
 
-#include <ATen/core/Tensor.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -11,9 +10,7 @@
 #include <ATen/ops/_aminmax_native.h>
 #include <ATen/ops/aminmax.h>
 #include <ATen/ops/empty.h>
-#include <ATen/ops/max.h>
 #include <ATen/ops/max_native.h>
-#include <ATen/ops/min.h>
 #include <ATen/ops/min_native.h>
 #endif
 

@@ -1,5 +1,4 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/native/Resize.h>
 #include <ATen/native/ResizeCommon.h>
 #include <ATen/NamedTensorUtils.h>
@@ -12,7 +11,6 @@
 #include <ATen/ops/resize_as_sparse_native.h>
 #include <ATen/ops/resize_native.h>
 #include <ATen/ops/resize.h>
-#include <ATen/ops/_resize_output.h>
 #include <ATen/ops/_resize_output_native.h>
 #endif
 

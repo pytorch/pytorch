@@ -1,8 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <torch/library.h>
 
-#include <torch/custom_class.h>
-#include <ATen/native/ao_sparse/quantized/cpu/packed_params.h>
 #include <ATen/native/ao_sparse/quantized/cpu/fbgemm_utils.h>
 
 // Register operators

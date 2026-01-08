@@ -5,7 +5,6 @@
 #include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
-#include <ATen/ops/empty.h>
 #include <ATen/ops/unfold_backward_native.h>
 #include <ATen/ops/zeros.h>
 #endif

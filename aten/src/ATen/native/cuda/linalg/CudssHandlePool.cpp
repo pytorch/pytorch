@@ -1,7 +1,6 @@
+#if defined(USE_CUDSS)
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/detail/DeviceThreadHandles.h>
-
-#if defined(USE_CUDSS)
 
 namespace at::cuda {
 namespace {

@@ -1,11 +1,8 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 #include <ATen/native/Resize.h>
-#include <ATen/native/xnnpack/Engine.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/TensorOperators.h>
 #include <c10/util/irange.h>
-#include <c10/core/Contiguity.h>
 #include <c10/core/GradMode.h>
 #include <c10/core/SymInt.h>
 #include <c10/util/MaybeOwned.h>

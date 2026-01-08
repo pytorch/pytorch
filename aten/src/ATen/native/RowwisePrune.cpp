@@ -1,7 +1,6 @@
 // Copyright 2004-present Facebook. All Rights Reserved.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <c10/util/irange.h>
 

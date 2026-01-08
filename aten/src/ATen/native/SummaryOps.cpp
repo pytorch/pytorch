@@ -1,7 +1,6 @@
 // Returns the frequency of elements of input non-negative integer tensor.
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <c10/util/irange.h>
 

@@ -1,6 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/native/Lerp.h>
-#include <ATen/core/Tensor.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/TensorMeta.h>
 

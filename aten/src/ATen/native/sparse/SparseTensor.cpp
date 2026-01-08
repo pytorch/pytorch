@@ -1,16 +1,11 @@
 // Basic functions on sparse tensors
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
-#include <ATen/InitialTensorOptions.h>
-#include <ATen/Layout.h>
-#include <ATen/Parallel.h>
 #include <ATen/SparseCsrTensorUtils.h>
 #include <ATen/SparseTensorImpl.h>
 #include <ATen/native/SparseTensorUtils.h>
 #include <ATen/native/sparse/SparseStubs.h>
-#include <ATen/native/IndexingUtils.h>
 #include <ATen/native/NonSymbolicBC.h>
 #include <ATen/NamedTensorUtils.h>
 
@@ -25,7 +20,6 @@
 #include <ATen/ops/_coalesce.h>
 #include <ATen/ops/_coalesce_native.h>
 #include <ATen/ops/_coalesced_native.h>
-#include <ATen/ops/_convert_indices_from_csr_to_coo.h>
 #include <ATen/ops/_dimI_native.h>
 #include <ATen/ops/_dimV_native.h>
 #include <ATen/ops/_indices_native.h>
@@ -48,12 +42,9 @@
 #include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like_native.h>
 #include <ATen/ops/empty_native.h>
-#include <ATen/ops/zeros_like.h>
-#include <ATen/ops/index_select.h>
 #include <ATen/ops/indices_native.h>
 #include <ATen/ops/is_coalesced_native.h>
 #include <ATen/ops/is_pinned_native.h>
-#include <ATen/ops/resize_as_sparse.h>
 #include <ATen/ops/resize_as_sparse_native.h>
 #include <ATen/ops/sparse_coo_tensor_native.h>
 #include <ATen/ops/sparse_dim_native.h>
@@ -61,9 +52,6 @@
 #include <ATen/ops/_sparse_mask_projection_native.h>
 #include <ATen/ops/sparse_resize_and_clear_native.h>
 #include <ATen/ops/sparse_resize_native.h>
-#include <ATen/ops/to_dense_native.h>
-#include <ATen/ops/to_sparse_native.h>
-#include <ATen/ops/unique_dim.h>
 #include <ATen/ops/values_native.h>
 #include <ATen/ops/view_as_real.h>
 #include <ATen/ops/view_as_real_native.h>

@@ -1,5 +1,4 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/core/Tensor.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -16,7 +15,6 @@
 #include <ATen/ops/retain_grad_native.h>
 #include <ATen/ops/retains_grad_native.h>
 #include <ATen/ops/set_data_native.h>
-#include <ATen/ops/zeros_like_ops.h>
 #endif
 
 // The stubs in here are used by dynamic dispatch. It just redirects everything

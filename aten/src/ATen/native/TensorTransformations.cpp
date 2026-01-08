@@ -2,7 +2,6 @@
 #include <ATen/native/IndexKernel.h> // for flip_stub
 #include <ATen/native/TensorTransformations.h>
 
-#include <ATen/Parallel.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/core/DimVector.h>
@@ -24,7 +23,6 @@
 #include <ATen/ops/flipud_native.h>
 #include <ATen/ops/roll_native.h>
 #include <ATen/ops/rot90_native.h>
-#include <ATen/ops/zeros_like_ops.h>
 #endif
 
 #include <algorithm>

@@ -7,7 +7,6 @@
 // Graves et al. call the probabilities y, we use log_probs (also calling them inputs)
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 
-#include <ATen/core/Tensor.h>
 #include <ATen/Dispatch.h>
 #include <ATen/Parallel.h>
 #include <ATen/TensorIterator.h>
