@@ -206,11 +206,7 @@ class TensorDataset(Dataset[tuple[Tensor, ...]]):
         return tuple(tensor[index] for tensor in self.tensors)
 
     def __getitems__(self, indices: list) -> list[tuple[Tensor, ...]]:
-        # Use advanced indexing to fetch all items in a single operation.
-        # This is significantly faster than fetching items one by one.
-        batch_tensors = tuple(tensor[indices] for tensor in self.tensors)
-        # Return as list of tuples to match expected __getitems__ return type
-        return list(zip(*batch_tensors))
+        return list(zip(*(tensor[indices] for tensor in self.tensors)))
 
     def __len__(self) -> int:
         return self.tensors[0].size(0)
