@@ -4685,6 +4685,25 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         res2 = fn(torch.ones((12,)))
         self.assertEqual(res1, res2)
 
+    def test_hint_override_consistent_stride(self):
+        @torch.compile(fullgraph=True)
+        def func(x):
+            # a = torch.fx.experimental.symbolic_shapes.size_hint(x.size()[0])
+            # b =  torch.fx.experimental.symbolic_shapes.size_hint(x.stride()[1])
+
+            # torch._check(a==b, lambda:f"{a}, {b} are not the same")
+            # a = torch.fx.experimental.symbolic_shapes.size_hint(x.size()[0]*x.size()[1])
+            # b =  torch.fx.experimental.symbolic_shapes.size_hint(x.stride()[2])
+            # torch._check(a==b, lambda:f"{a}, {b} are not the same")
+
+            return x*a
+
+        x = torch.rand(10, 20, 30)
+        # torch._dynamo.mark_dynamic(x, 0, hint_override=2)
+        # torch._dynamo.mark_dynamic(x, 1, hint_override=2)
+        # torch._dynamo.mark_dynamic(x, 2, hint_override=2)
+        func(x)
+
     def test_size_hint(self):
         @torch.compile(fullgraph=True)
         def func(x):
