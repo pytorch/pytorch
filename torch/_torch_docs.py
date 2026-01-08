@@ -217,6 +217,66 @@ sparse_support_notes = {
 }
 
 add_docstr(
+    torch.pi,
+    r"""
+pi -> float
+
+Returns pi(:math:`\pi`).
+
+Example::
+
+    >>> torch.pi
+    3.141592653589793
+
+""",
+)
+
+add_docstr(
+    torch.e,
+    r"""
+e -> float
+
+Returns e(Euler's number).
+
+Example::
+
+    >>> torch.e
+    2.718281828459045
+
+""",
+)
+
+add_docstr(
+    torch.nan,
+    r"""
+nan -> float
+
+Returns NaN(Not a Number).
+
+Example::
+
+    >>> torch.nan
+    nan
+
+""",
+)
+
+add_docstr(
+    torch.inf,
+    r"""
+inf -> float
+
+Returns (positive) infinity.
+
+Example::
+
+    >>> torch.inf
+    inf
+
+""",
+)
+
+add_docstr(
     torch.abs,
     r"""
 abs(input: Tensor, *, out: Optional[Tensor]) -> Tensor
