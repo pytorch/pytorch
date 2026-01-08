@@ -10,9 +10,11 @@ from typing import Any, Optional
 
 import torch._inductor.config as config
 from torch._inductor.codecache import cutlass_key
-from torch._inductor.codegen.cuda import cutlass_utils, serialization
 from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch, get_cuda_version
-from torch._inductor.codegen.cuda.serialization import get_cutlass_operation_serializer
+from torch._inductor.codegen.cutlass import serialization, utils
+from torch._inductor.codegen.cutlass.serialization import (
+    get_cutlass_operation_serializer,
+)
 from torch._inductor.runtime.cache_dir_utils import cache_dir
 from torch._inductor.utils import clear_on_fresh_cache
 
@@ -39,7 +41,7 @@ def get_config_request_key(
             return hashlib.sha256(f.read()).hexdigest()
 
     serialization_hash = get_file_hash(serialization)
-    cutlass_utils_hash = get_file_hash(cutlass_utils)
+    cutlass_utils_hash = get_file_hash(utils)
 
     hash_target = "-".join(
         [
