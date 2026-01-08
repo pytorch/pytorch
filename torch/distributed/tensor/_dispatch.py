@@ -250,7 +250,7 @@ class OpDispatcher:
         assert op_info is not None, "op_info should never be None"
 
         mesh = op_info.compute_mesh
-        participating = mesh.is_current_rank_part_of_mesh()
+        participating = mesh._is_current_rank_part_of_mesh()
         local_results = None
         if participating:
             # computation that happens in the current rank of the mesh, normal case

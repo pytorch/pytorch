@@ -233,7 +233,7 @@ class Shard(torch._C._distributed.Shard):
         """
         reduce and scatter a tensor on a mesh dimension
         """
-        if not mesh.is_current_rank_part_of_mesh():
+        if not mesh._is_current_rank_part_of_mesh():
             # if rank is not part of mesh, we simply return local_tensor,
             # which should be an empty tensor
             return tensor
@@ -256,7 +256,7 @@ class Shard(torch._C._distributed.Shard):
         if is_padded:
             assert pad_sizes is not None
             output = Shard._maybe_unpad_tensor_with_sizes(
-                self.dim, output, pad_sizes, mesh.sym_get_coordinate(mesh_dim), False
+                self.dim, output, pad_sizes, mesh._sym_get_coordinate(mesh_dim), False
             )
         return output
 
@@ -1066,7 +1066,7 @@ class _MaskPartial(Partial):
     def _partition_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
-        assert mesh.is_current_rank_part_of_mesh(), "rank is not part of mesh"
+        assert mesh._is_current_rank_part_of_mesh(), "rank is not part of mesh"
         # override parent logic to perform partial mask for embedding
         num_chunks = mesh.size(mesh_dim)
         # get local shard size and offset on the embedding_dim
@@ -1076,7 +1076,7 @@ class _MaskPartial(Partial):
         local_shard_size, local_offset_on_dim = Shard.local_shard_size_and_offset(
             self.offset_shape[self.offset_dim],
             num_chunks,
-            mesh.sym_get_coordinate(mesh_dim),
+            mesh._sym_get_coordinate(mesh_dim),
         )
         mask, masked_tensor = _MaskPartial._mask_tensor(
             tensor, local_offset_on_dim, local_shard_size

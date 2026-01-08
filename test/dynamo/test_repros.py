@@ -7752,6 +7752,99 @@ def forward(self, s77 : torch.SymInt, s27 : torch.SymInt, L_x_ : torch.Tensor):
 
         self.assertEqual(model(*inputs), compiled_model(*inputs))
 
+    def test_autograd_function_ctx_stash_no_vc_check(self):
+        # Test that tensors stashed directly on ctx (e.g., ctx.x = x) in an
+        # autograd.Function don't trigger version counter checks, while tensors
+        # saved via save_for_backward do.
+        class MutatingFunction(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, a, b, c, x, y, z):
+                # Stash b and y directly on ctx (no VC check)
+                ctx.b = b
+                ctx.y = y
+                # Save a, c, x via save_for_backward (with VC check)
+                ctx.save_for_backward(a, c, x)
+                return z + 1
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                a, c, x = ctx.saved_tensors
+                b = ctx.b
+                y = ctx.y
+                # Mutate the stashed tensors in backward
+                # This would fail with VC check if they went through save_for_backward
+                b.mul_(2)
+                y.mul_(3)
+                return None, None, None, None, None, grad_output + 2 + a + c + x
+
+        def my_func(*args):
+            return MutatingFunction.apply(*args)
+
+        compiled_func = torch.compile(my_func, backend=aot_graph_capture_backend)
+
+        # Create tensors - only z requires grad
+        a = torch.zeros(4, requires_grad=False)
+        b = torch.zeros(4, requires_grad=False)
+        c = torch.zeros(4, requires_grad=False)
+        x = torch.zeros(4, requires_grad=False)
+        y = torch.zeros(4, requires_grad=False)
+        z1 = torch.randn(4, requires_grad=True)
+        z2 = torch.randn(4, requires_grad=True)
+
+        # Two forward calls that save b and y
+        out1 = compiled_func(a, b, c, x, y, z1)
+        out2 = compiled_func(a, b, c, x, y, z2)
+
+        # First backward mutates b and y
+        out1.sum().backward()
+
+        # Second backward should NOT error even though b and y were mutated
+        # because they were stashed on ctx, not saved via save_for_backward
+        out2.sum().backward()
+        # If we got here without error, the test passed
+        # Also, assert that the AOTAutograd output descriptors on the fw graph show up
+        # Of 5 total activations, 2 of them are smuggled through ctx without VC checks
+        # (b and y via ctx.b = b, ctx.y = y) while 3 are saved via save_for_backward
+        # (a, c, x via ctx.save_for_backward(a, c, x))
+        # In dynamic shapes mode, there's also a symint saved for backward.
+        if torch._dynamo.config.assume_static_by_default:
+            self.assertExpectedInline(
+                "\n".join(
+                    [
+                        str(x)
+                        for x in fw_graph[0]
+                        .graph.find_nodes(op="output")[0]
+                        .meta["desc"]
+                    ]
+                ),
+                """\
+PlainAOTOutput(idx=0)
+SavedForBackwardsAOTOutput(idx=0)
+SavedForBackwardsAOTOutput(idx=1)
+SavedForBackwardsAOTOutput(idx=2)
+SavedForBackwardsNoVcCheckAOTOutput(idx=3)
+SavedForBackwardsNoVcCheckAOTOutput(idx=4)""",
+            )
+        else:
+            self.assertExpectedInline(
+                "\n".join(
+                    [
+                        str(x)
+                        for x in fw_graph[0]
+                        .graph.find_nodes(op="output")[0]
+                        .meta["desc"]
+                    ]
+                ),
+                """\
+PlainAOTOutput(idx=0)
+SavedForBackwardsAOTOutput(idx=0)
+SavedForBackwardsAOTOutput(idx=1)
+SavedForBackwardsAOTOutput(idx=2)
+SavedForBackwardsNoVcCheckAOTOutput(idx=3)
+SavedForBackwardsNoVcCheckAOTOutput(idx=4)
+SavedForBackwardsAOTOutput(idx=5)""",
+            )
+
 
 class ReproTestsDevice(torch._dynamo.test_case.TestCase):
     def test_sub_alpha_scalar_repro(self, device):

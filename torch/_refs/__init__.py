@@ -905,14 +905,13 @@ def logsumexp(
     if not isinstance(dim, Iterable):
         dim = (dim,)
     if self.numel() == 0:
-        # pyrefly: ignore [no-matching-overload]
         return torch.sum(torch.exp(self), dim, keepdim).log()
-    # pyrefly: ignore [bad-argument-type]
+
     maxes = torch.amax(torch.real(self), dim, keepdim=True)
     maxes = torch.masked_fill(maxes, maxes.abs() == float("inf"), 0)
-    # pyrefly: ignore [no-matching-overload]
+
     maxes_squeezed = maxes if keepdim else torch.squeeze(maxes, dim)
-    # pyrefly: ignore [no-matching-overload]
+
     result = torch.sum(torch.exp(self - maxes), dim, keepdim)
     return result.log().add(maxes_squeezed)
 
@@ -1372,7 +1371,7 @@ def float_power(
     b = _maybe_convert_to_dtype(b, dtype)
 
     a, b = _maybe_broadcast(a, b)
-    # pyrefly: ignore [bad-return]
+
     return pow(a, b)
 
 
@@ -3445,7 +3444,6 @@ def native_layer_norm(
         input.ndim >= normalized_ndim
         and sym_eq(
             input.shape[(input.ndim - normalized_ndim) :],
-            # pyrefly: ignore [bad-argument-type]
             tuple(normalized_shape),
         ),
         lambda: "Given normalized_shape="
@@ -4089,7 +4087,6 @@ def roll(a: TensorLikeType, shifts: DimsType, dims: DimsType = ()) -> TensorLike
         # Takes care of the case when dims is not specified (default)
         # By default, the tensor is flattened before shifting, after which the original shape is restored
         if len_dims == 0 and len_shifts == 1:
-            # pyrefly: ignore [bad-argument-type]
             return torch.roll(torch.flatten(a), shifts, 0).view(a.shape)
         if len_shifts != len_dims:
             raise RuntimeError(
@@ -4529,7 +4526,7 @@ def hsplit(
                 + "!"
             ),
         )
-        # pyrefly: ignore [bad-argument-type]
+
         return tensor_split(a, split_size, dim)
 
     torch._check_type(
@@ -4571,7 +4568,7 @@ def vsplit(
                 f"!"
             ),
         )
-        # pyrefly: ignore [bad-argument-type]
+
         return tensor_split(a, split_size, 0)
 
     torch._check_type(
@@ -5997,7 +5994,7 @@ def masked_fill(a: TensorLikeType, mask: TensorLikeType, value: TensorOrNumberLi
 
     # Since `where` allows type-promotion,
     # cast value to correct type before passing to `where`
-    # pyrefly: ignore [no-matching-overload]
+
     value = _maybe_convert_to_dtype(value, a.dtype)
     r = torch.where(mask, value, a)  # type: ignore[arg-type]
 
