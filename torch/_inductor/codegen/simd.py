@@ -2286,6 +2286,15 @@ class SIMDScheduling(BaseScheduling):
         mixed_sizes: bool,
         only_gen_src_code: bool = False,
     ) -> list[tuple[str, Any, Any]]:
+        """
+        Generate kernel code for combo kernel partitions.
+
+        Partitions subkernel_nodes using horizontal_partition(), then generates
+        kernel code for each partition. Single-node partitions are generated as
+        regular kernels, while multi-node partitions use ComboKernel.
+
+        Returns a list of (src_code, kernel, node_group) tuples.
+        """
         from .triton_combo_kernel import ComboKernel
 
         fused_node_lists = [node.get_nodes() for node in subkernel_nodes]
@@ -2317,30 +2326,56 @@ class SIMDScheduling(BaseScheduling):
         for node_group in partitions:
             if len(node_group) == 0:
                 continue
-            kernel = ComboKernel(
-                enable_autotune=enable_autotune,
-                mixed_sizes=mixed_sizes,
-            )
 
-            for pn in node_group:
-                self.codegen_node_schedule_with_kernel(
-                    node_schedule_map[pn][0],
-                    kernel.create_sub_kernel(subkernel_map[pn]),
+            if len(node_group) == 1:
+                # Single-node partition: generate as a regular kernel, not a combo kernel
+                pn = node_group[0]
+                node_schedule, tiling, numel, rnumel = node_schedule_map[pn]
+                # Decrement kernel count to compensate for kernel already created in subkernel_map
+                # pyrefly: ignore [bad-assignment]
+                metrics.generated_kernel_count -= 1
+                kernel = self.kernel_type(
+                    tiling,
+                    features=SIMDKernelFeatures(node_schedule, numel, rnumel),
                 )
-                subkernel = subkernel_map[pn]
-                node_schedule = node_schedule_map[pn][0]
+                self.codegen_node_schedule_with_kernel(node_schedule, kernel)
                 if not only_gen_src_code:
-                    with V.set_kernel_handler(subkernel):  # type: ignore[call-arg]
+                    with V.set_kernel_handler(kernel):  # type: ignore[call-arg]
                         for node in NodeScheduleMarker.only_nodes(node_schedule):
                             node.mark_run()
-                V.graph.removed_buffers |= subkernel.removed_buffers
-                V.graph.inplaced_to_remove |= subkernel.inplaced_to_remove
+                V.graph.removed_buffers |= kernel.removed_buffers
+                V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
+                with V.set_kernel_handler(kernel):
+                    src_code = kernel.codegen_kernel()
+                kernel_code_list.append((src_code, kernel, node_group))
+            else:
+                # Multi-node partition: use combo kernel
+                kernel = ComboKernel(
+                    enable_autotune=enable_autotune,
+                    mixed_sizes=mixed_sizes,
+                )
 
-            src_code = kernel.codegen_kernel()
-            kernel_code_list.append((src_code, kernel, node_group))
+                for pn in node_group:
+                    self.codegen_node_schedule_with_kernel(
+                        node_schedule_map[pn][0],
+                        kernel.create_sub_kernel(subkernel_map[pn]),
+                    )
+                    subkernel = subkernel_map[pn]
+                    node_schedule = node_schedule_map[pn][0]
+                    if not only_gen_src_code:
+                        with V.set_kernel_handler(subkernel):  # type: ignore[call-arg]
+                            for node in NodeScheduleMarker.only_nodes(node_schedule):
+                                node.mark_run()
+                    V.graph.removed_buffers |= subkernel.removed_buffers
+                    V.graph.inplaced_to_remove |= subkernel.inplaced_to_remove
+
+                src_code = kernel.codegen_kernel()
+                kernel_code_list.append((src_code, kernel, node_group))
         return kernel_code_list
 
     def codegen_combo_kernel(self, combo_kernel_node):
+        from .triton_combo_kernel import ComboKernel
+
         subkernel_nodes = combo_kernel_node.get_subkernel_nodes()
         custom_part_algorithm = combo_kernel_node.use_custom_partition_algo
         enable_autotune = combo_kernel_node.enable_autotune
@@ -2356,7 +2391,12 @@ class SIMDScheduling(BaseScheduling):
             kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
             self.codegen_comment(combo_kernel_node.snodes, kernel_name)
             log.debug("ComboKernels: generated kernel %s.", kernel_name)
-            kernel.call_kernel(V.graph.wrapper_code, kernel_name)
+            if isinstance(kernel, ComboKernel):
+                # pyrefly: ignore [bad-argument-type]
+                kernel.call_kernel(V.graph.wrapper_code, kernel_name)
+            else:
+                # Regular kernel (for single-node partitions)
+                kernel.call_kernel(kernel_name)
 
         self.free_buffers_in_scheduler()
 
