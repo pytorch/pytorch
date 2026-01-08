@@ -44,6 +44,8 @@ import pytorch_sphinx_theme2
 html_theme = "pytorch_sphinx_theme2"
 html_theme_path = [pytorch_sphinx_theme2.get_html_theme_path()]
 
+from redirects import redirects
+
 
 # -- General configuration ------------------------------------------------
 
@@ -66,6 +68,7 @@ extensions = [
     "sphinx.ext.linkcode",
     "sphinxcontrib.mermaid",
     "sphinx_sitemap",
+    "sphinx_reredirects",
 ]
 
 myst_enable_extensions = [

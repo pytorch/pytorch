@@ -22,6 +22,10 @@ sphinx_sitemap==2.6.0
 #Description: This is used to generate sitemap for PyTorch docs
 #Pinned versions: 2.6.0
 
+sphinx-reredirects==0.1.4
+#Description: This is used to generate redirects for PyTorch docs
+#Pinned versions: 0.1.4
+
 matplotlib==3.5.3 ; python_version < "3.13"
 matplotlib==3.6.3 ; python_version >= "3.13"
 #Description: This is used to generate PyTorch docs
