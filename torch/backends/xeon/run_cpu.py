@@ -460,7 +460,7 @@ Value applied: %s. Value ignored: %s",
                         args.ncores_per_instance * args.ninstances
                     )
                 if len(args.ncores_per_instance) != args.ninstances:
-                    raise AssertionError(
+                    raise ValueError(
                         'Mismatch for "--ninstances" and "--ncores-per-instance" settings.'
                     )
             elif len(args.ncores_per_instance) > 1:
@@ -468,7 +468,7 @@ Value applied: %s. Value ignored: %s",
         if args.core_list:  # user specify what cores will be used by params
             cores = [int(x) for x in args.core_list.split(",")]
             if args.ncores_per_instance == [-1]:
-                raise AssertionError(
+                raise RuntimeError(
                     'please specify the "--ncores-per-instance" if you have pass the --core-list params'
                 )
             if args.ninstances > 0 and sum(args.ncores_per_instance) < len(cores):
@@ -507,7 +507,7 @@ but you specify %s cores in core_list",
                 args.throughput_mode = True
             elif args.ncores_per_instance == [-1] and args.ninstances != -1:
                 if args.ninstances > len(cores):
-                    raise AssertionError(
+                    raise RuntimeError(
                         f"there are {len(cores)} total cores but you specify {args.ninstances} ninstances; \
 please make sure ninstances <= total_cores)"
                     )
@@ -518,7 +518,7 @@ to launch the instance(s), each node for 1 instance.",
                         args.ninstances,
                     )
                     if args.ninstances > self.cpuinfo.node_nums:
-                        raise AssertionError(
+                        raise ValueError(
                             "--ninstances should not be larger than numa node number \
 when --bind-numa-node or --skip-cross-node-cores is set"
                         )
@@ -546,7 +546,7 @@ as evenly as possible to each instance. It is possible that some cores in an ins
                     ncore_per_node = [len(c) for c in utilized_node_cores]
                     if len(args.ncores_per_instance) > len(ncore_per_node):
                         # too many ncores_per_instance to skip cross-node cores
-                        raise AssertionError(
+                        raise ValueError(
                             "there are %s nodes, but %s ncores-per-instance elements and \
 --bind-numa-node is specified.",
                             len(ncore_per_node),
@@ -557,7 +557,7 @@ as evenly as possible to each instance. It is possible that some cores in an ins
                         leftover_num = core_num - ncore_per_node[i]
                         if leftover_num > 0:
                             # too many ncores_per_instance for a node
-                            raise AssertionError(
+                            raise RuntimeError(
                                 "there are %s core(s) in node %s, but specified %s cores for \
 this node and --bind-numa-node is specified.",
                                 ncore_per_node[i],
@@ -576,7 +576,7 @@ this node and --bind-numa-node is specified.",
                 args.ninstances = len(args.ncores_per_instance)
             else:
                 if sum(args.ncores_per_instance) > len(cores):
-                    raise AssertionError(
+                    raise ValueError(
                         "Please make sure the sum up of ncores_per_instance <= total_cores"
                     )
             if args.latency_mode:
