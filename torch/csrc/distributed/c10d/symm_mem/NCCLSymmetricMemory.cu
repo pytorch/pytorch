@@ -82,7 +82,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     c10::cuda::CUDAGuard guard(allocation->device_idx);
 
     auto global_rank = get_group_info("0").rank;
-    GroupInfo& group_info = get_group_info(group_name);
+    GroupInfo& group_info = get_group_info(group_name_);
     auto store = group_info.store;
     rank_ = group_info.rank;
     world_size_ = group_info.world_size;  // size of current group
@@ -95,7 +95,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
       if (rank_ == 0) {
         LOG(INFO) << "[rank " << rank_ << ']'
                   << " rank_to_global_rank: " << group_info.rank_to_global_rank
-                  << ", group_name: " << group_name
+                  << ", group_name: " << group_name_
                   << ", exchanged_n_times: " << exchanged_n_times;
       }
     }
