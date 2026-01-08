@@ -1411,10 +1411,10 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
                 BLOCK_K,
                 num_stages,
                 num_warps,
-                group_m,
-                matrix_instr_nonkdim,
-                waves_per_eu,
-                kpack,
+                group_m=group_m,
+                matrix_instr_nonkdim=matrix_instr_nonkdim,
+                waves_per_eu=waves_per_eu,
+                kpack=kpack,
             )
             for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
                 [16, 32, 64, 128, 256], repeat=3
