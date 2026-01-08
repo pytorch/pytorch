@@ -111,6 +111,11 @@ SKIP_FUNCTION_MACROS   = NO
 # Extra defs for to help with building the _right_ version of the docs
 PREDEFINED             = DOXYGEN_DOCUMENTATION_BUILD
 PREDEFINED            += DOXYGEN_SHOULD_SKIP_THIS
+# Use FILTER_PATTERNS to preprocess HIDDEN_NAMESPACE macros in torch/csrc/stable files.
+# The actual macros use variadic args and helper macros which Doxygen's PREDEFINED
+# doesn't handle well. Using sed as a filter properly expands these macros.
+# Only apply to stable/*.h files to avoid unnecessary processing of other files.
+FILTER_PATTERNS        = */torch/csrc/stable/*.h="sed -e 's/HIDDEN_NAMESPACE_BEGIN(\\([^,]*\\), *\\([^,)]*\\))/namespace \\1 { namespace \\2 {/g' -e 's/HIDDEN_NAMESPACE_END(\\([^,]*\\), *\\([^,)]*\\))/} }/g' -e 's/HIDDEN_NAMESPACE_BEGIN(\\([^,]*\\), *\\([^,]*\\), *\\([^)]*\\))/namespace \\1 { namespace \\2 { namespace \\3 {/g' -e 's/HIDDEN_NAMESPACE_END(\\([^,]*\\), *\\([^,]*\\), *\\([^)]*\\))/} } }/g'"
 # Symbol expansion to follow for #include statements (not input)
 SEARCH_INCLUDES        = YES
 INCLUDE_PATH           = ../../.. \

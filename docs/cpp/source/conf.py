@@ -119,7 +119,8 @@ exhale_args = {
     "contentsTitle": "Page Contents",
     "kindsWithContentsDirectives": ["class", "file", "namespace", "struct"],
     # Exclude PIMPL files from class hierarchy tree and namespace pages.
-    "listingExclude": [r".*Impl$"],
+    # Also exclude torch::stable namespace which is documented manually in stable.rst
+    "listingExclude": [r".*Impl$", r"torch::stable::.*", r"torch::headeronly::.*"],
     ############################################################################
     # Main library page layout example configuration.                          #
     ############################################################################
