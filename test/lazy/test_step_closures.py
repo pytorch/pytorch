@@ -61,7 +61,7 @@ class ClosuresTest(TestCase):
         except RuntimeError:
             assert flag.is_set(), "Should have caught exception from closure"
 
-    @unittest.skipif(
+    @unittest.skipIf(
         sysconfig.get_config_var("Py_GIL_DISABLED") == 1,
         "Non-deterministic, fails more consistently in free threaded python",
     )
