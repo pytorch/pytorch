@@ -1770,18 +1770,22 @@ _LOCAL_RUNNER_MODE: "LocalRunnerMode | None" = None
 
 
 class _ExceptionRaisingThread(threading.Thread):
-    def __init__(self, target, *args, **kwargs):
-        super().__init__(target=target, *args, **kwargs)
-        self.exception = None
+    def __init__(
+        self, group=None, target=None, name=None, args=(), kwargs=None, *, daemon=None
+    ):
+        super().__init__(
+            target=target, name=name, args=args, kwargs=kwargs, daemon=daemon
+        )
+        self.exception: BaseException | None = None
 
     def run(self):
         try:
             super().run()
-        except BaseException as e:
+        except BaseException as e:  # noqa: B036
             self.exception = e
 
-    def join(self, *args, **kwargs):
-        super().join(*args, **kwargs)
+    def join(self, timeout=None):
+        super().join(timeout=timeout)
         if self.exception:
             raise self.exception
 
