@@ -14,7 +14,6 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
 )
 from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
 from torch._inductor.remote_gemm_autotune_cache import gen_best_config
-from torch._inductor.runtime.caching import decoders, encoders, memoizers
 from torch._inductor.virtualized import ops, V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
@@ -303,11 +302,6 @@ addmm_contiguous_subgraph_template = ContiguousTemplate(
 
 
 @register_lowering(aten.mm, type_promotion_kind=None)
-@memoizers.tuned_mm_memoizer.memoize(
-    custom_params_encoder=encoders.tuned_mm_params_encoder,
-    custom_result_encoder=encoders.tuned_kernel_result_encoder,
-    custom_result_decoder=decoders.tuned_mm_result_decoder,
-)
 def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     """
     Lowering for autotuning aten.mm with different backends (Aten, Triton, CUTLASS, etc.)
@@ -557,11 +551,6 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
 
 
 @register_lowering(aten._int_mm, type_promotion_kind=None)
-@memoizers.tuned_int_mm_memoizer.memoize(
-    custom_params_encoder=encoders.tuned_int_mm_params_encoder,
-    custom_result_encoder=encoders.tuned_kernel_result_encoder,
-    custom_result_decoder=decoders.tuned_int_mm_result_decoder,
-)
 def tuned_int_mm(mat1, mat2, *, layout=None):
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat1, mat2 = mm_args(
@@ -611,11 +600,6 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 
 
 @register_lowering(aten.addmm, type_promotion_kind=None)
-@memoizers.tuned_addmm_memoizer.memoize(
-    custom_params_encoder=encoders.tuned_addmm_params_encoder,
-    custom_result_encoder=encoders.tuned_kernel_result_encoder,
-    custom_result_decoder=decoders.tuned_addmm_result_decoder,
-)
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     """
     Lowering for autotuning aten.addmm with different backends (Aten, Triton, CUTLASS, etc.)
@@ -876,11 +860,6 @@ def get_scaling_options(
 
 
 @register_lowering(aten._scaled_mm.default, type_promotion_kind=None)  # type: ignore[misc]
-@memoizers.tuned_scaled_mm_memoizer.memoize(
-    custom_params_encoder=encoders.tuned_scaled_mm_params_encoder,
-    custom_result_encoder=encoders.tuned_kernel_result_encoder,
-    custom_result_decoder=decoders.tuned_scaled_mm_result_decoder,
-)
 def tuned_scaled_mm(
     mat_a,
     mat_b,
