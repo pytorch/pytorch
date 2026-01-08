@@ -207,7 +207,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         x = torch.randn(3)
         with self.assertRaisesRegex(
             torch._dynamo.exc.Unsupported,
-            r"HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)",
+            "HOP: Unsafe side effect",
         ):
             f(x)
 
@@ -343,9 +343,7 @@ class HigherOrderOpTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
             return dynamo_bypassing_wrapper(wrapper, outer_wrapped, x)
 
         x = torch.tensor(1.0)
-        with self.assertRaisesRegex(
-            RuntimeError, "Mutating a variable not in the current scope"
-        ):
+        with self.assertRaisesRegex(RuntimeError, "HOP: Unsafe side effect"):
             fn_nested(x)
 
     def test_symint_input(self):
@@ -730,7 +728,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         arg_count = ifdynstaticdefault(4, 5)
         # when compiled with dynamic, we don't have upper bound runtime assertions for u0
-        expected_op_count = ifdynstaticdefault(10, 8)
+        expected_op_count = ifdynstaticdefault(9, 7)
         out_graph = self._test_wrap_simple(
             f,
             default_args_generator((x,)),
@@ -750,7 +748,6 @@ class GraphModule(torch.nn.Module):
         c: "i64[u0, 1]" = l_x_.nonzero()
 
         sym_size_int_1: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
-        _check_is_size = torch._check_is_size(sym_size_int_1);  _check_is_size = None
 
         ge: "Sym(u0 >= 0)" = sym_size_int_1 >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
@@ -787,7 +784,6 @@ class GraphModule(torch.nn.Module):
         c: "i64[u0, 1]" = l_x_.nonzero()
 
         sym_size_int_1: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
-        _check_is_size = torch._check_is_size(sym_size_int_1);  _check_is_size = None
 
         ge: "Sym(u0 >= 0)" = sym_size_int_1 >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
@@ -886,7 +882,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3)
         arg_count = ifdynstaticdefault(4, 5)
         # when compiled with dynamic, we don't have upper bound runtime assertions for u0
-        expected_op_count = ifdynstaticdefault(10, 8)
+        expected_op_count = ifdynstaticdefault(9, 7)
         out_graph = self._test_wrap_simple(
             f,
             default_args_generator((x,)),
@@ -908,7 +904,6 @@ class GraphModule(torch.nn.Module):
         c: "i64[u0, 1]" = l_x_.nonzero()
 
         sym_size_int: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
-        _check_is_size = torch._check_is_size(sym_size_int);  _check_is_size = None
 
         ge: "Sym(u0 >= 0)" = sym_size_int >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
@@ -959,7 +954,7 @@ class GraphModule(torch.nn.Module):
         y = torch.randn(3)
         arg_count = ifdynstaticdefault(5, 6)
         # when compiled with dynamic, we don't have upper bound runtime assertions for u0 and u1
-        expected_op_count = ifdynstaticdefault(17, 13)
+        expected_op_count = ifdynstaticdefault(15, 11)
         out_graph = self._test_wrap_simple(
             f,
             default_args_generator((x, y)),
@@ -980,7 +975,6 @@ class GraphModule(torch.nn.Module):
         c: "i64[u0, 1]" = l_x_.nonzero()
 
         sym_size_int_2: "Sym(u0)" = torch.ops.aten.sym_size.int(c, 0)
-        _check_is_size = torch._check_is_size(sym_size_int_2);  _check_is_size = None
 
         ge: "Sym(u0 >= 0)" = sym_size_int_2 >= 0
         _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
@@ -990,7 +984,6 @@ class GraphModule(torch.nn.Module):
         d: "i64[u1, 1]" = l_y_.nonzero();  l_y_ = None
 
         sym_size_int_3: "Sym(u1)" = torch.ops.aten.sym_size.int(d, 0)
-        _check_is_size_1 = torch._check_is_size(sym_size_int_3);  _check_is_size_1 = None
 
         ge_1: "Sym(u1 >= 0)" = sym_size_int_3 >= 0
         _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_default_2 = None
@@ -1149,6 +1142,18 @@ class GraphModule(torch.nn.Module):
         a = torch.tensor([1.0, 0.0, 1.0])
         b = torch.randn(3)
         t = TwoTensor(a, b)
+
+        prev_impl = cond_op.python_key_table.pop(TwoTensor, None)
+        cond_op._dispatch_cache.clear()
+
+        def restore_twotensor_impl():
+            cond_op.python_key_table.pop(TwoTensor, None)
+            if prev_impl is not None:
+                cond_op.python_key_table[TwoTensor] = prev_impl
+            cond_op._dispatch_cache.clear()
+
+        self.addCleanup(restore_twotensor_impl)
+
         with self.assertRaisesRegex(
             NotImplementedError,
             "no rule registered for HOP cond and subclass .*TwoTensor'>",
@@ -2088,13 +2093,13 @@ def forward(self, child : torch.Tensor, const_unused : int):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
+            r"Higher Order Operator: torch\.cond",
         ):
             mod_for_eager(torch.ones(6, 4))
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
+            r"Higher Order Operator: torch\.cond",
         ):
             mod_for_compile(torch.ones(3, 4))
 
@@ -2182,7 +2187,7 @@ def forward(self, child : torch.Tensor, const_unused : int):
         gm = backend.graphs[0]
         graph = gm.code.strip()
         subgraphs = []
-        for module_name in gm._modules.keys():
+        for module_name in gm._modules:
             subgraphs.append(getattr(gm, module_name).code.strip())
         return (graph, *subgraphs)
 
@@ -2300,13 +2305,13 @@ def forward(self):
         )
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
+            r"Higher Order Operator: torch\.cond",
         ):
             mod_for_eager(torch.tensor(True), torch.tensor(5))
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            r"Cond doesn't work unless it is captured completely with torch.compile",
+            r"Higher Order Operator: torch\.cond",
         ):
             mod_for_compile(torch.tensor(True), torch.tensor(5))
 
@@ -2347,7 +2352,7 @@ def forward(self):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "map doesn't work unless it is captured completely with torch.compile",
+            r"Higher Order Operator: torch\.ops\.higher_order\.map_impl",
         ):
             mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
 
@@ -2377,7 +2382,7 @@ def forward(self):
 
         with self.assertRaisesRegex(
             torch._dynamo.exc.UncapturedHigherOrderOpError,
-            "map doesn't work unless it is captured completely with torch.compile",
+            r"Higher Order Operator: torch\.ops\.higher_order\.map_impl",
         ):
             mod_for_compile(torch.Tensor([[6, 4, 5], [3, 4, 5], [6, 6, 6]]))
 
@@ -2520,9 +2525,7 @@ class GraphModule(torch.nn.Module):
         assert_dict_matches_regex(
             self,
             dict(counters["graph_break"]),
-            {
-                r".*HigherOrderOperator: Mutating a variable not in the current scope \(SideEffects\)": 1
-            },
+            {"HOP: Unsafe side effect": 1},
         )
 
     def test_fallback_on_graph_break_simple(self):
@@ -3189,7 +3192,7 @@ def forward(self, L_pred_ : torch.Tensor, L_pytree_in_0_ : torch.Tensor, L_pytre
         for pytree_in in [("string",), (1.0,)]:
             with self.assertRaisesRegex(
                 torch._dynamo.exc.UncapturedHigherOrderOpError,
-                r"Cond doesn't work unless it is captured completely with torch.compile",
+                r"Higher Order Operator: torch\.cond",
             ):
                 torch.compile(fn, backend="eager")(pred, pytree_in)
 
@@ -3763,23 +3766,38 @@ class FuncTorchHigherOrderOpTests(
         # because of a previous call to _vmap_increment_nesting that wasn't undone
         # i.e. test_vmap_free_tensor fails when PYTORCH_TEST_WITH_DYNAMO=1
         # and the call to increment nesting is not undone
-        if not TEST_WITH_TORCHDYNAMO:
-            return
+        try:
+            if TEST_WITH_TORCHDYNAMO:
+                warn = False
+                while ci := torch._C._functorch.peek_interpreter_stack():
+                    if ci.key() == torch._C._functorch.TransformType.Vmap:
+                        warn = True
+                        torch._C._functorch._vmap_decrement_nesting()
+                    else:
+                        break
 
-        warn = False
-        while ci := torch._C._functorch.peek_interpreter_stack():
-            if ci.key() == torch._C._functorch.TransformType.Vmap:
-                warn = True
-                torch._C._functorch._vmap_decrement_nesting()
-            else:
-                break
+                if warn:
+                    msg = (
+                        "Interpreter stack is not empty. Test should have called "
+                        "'torch._C._functorch._vmap_decrement_nesting()'"
+                    )
+                    warnings.warn(msg)
+        finally:
+            super().tearDown()
 
-        if warn:
-            msg = (
-                "Interpreter stack is not empty. Test should have called "
-                "'torch._C._functorch._vmap_decrement_nesting()'"
+    def test_teardown_resets_nested_graph_breaks(self):
+        expected_nested_state = getattr(
+            self, "prev_nested_graph_breaks", torch._dynamo.config.nested_graph_breaks
+        )
+
+        def _check_flag():
+            self.assertEqual(
+                torch._dynamo.config.nested_graph_breaks, expected_nested_state
             )
-            warnings.warn(msg)
+
+        self.addCleanup(_check_flag)
+        # Sanity check: these tests always run with nested graph breaks enabled.
+        self.assertTrue(torch._dynamo.config.nested_graph_breaks)
 
     def _compile_check(self, fn, inputs, fullgraph=True, graph_idx=0):
         backend = EagerAndRecordGraphs()
@@ -4304,15 +4322,15 @@ class GraphModule(torch.nn.Module):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func.{grad, vjp, jacrev, hessian} don't yet support saved tensor hooks. Please open an issue with your use case.");  _saved_tensors_hooks_disable = None
         _grad_increment_nesting = torch._C._functorch._grad_increment_nesting();  _grad_increment_nesting = None
 
-        child: "f32[5]" = torch._C._functorch._wrap_for_grad(l_x_, 1);  l_x_ = None
+        _wrap_for_grad: "f32[5]" = torch._C._functorch._wrap_for_grad(l_x_, 1);  l_x_ = None
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True);  set_inplace_requires_grad_allowed = None
 
-        child_1: "f32[5]" = torch._functorch.eager_transforms._set_tensor_requires_grad(child);  child_1 = None
+        child: "f32[5]" = torch._functorch.eager_transforms._set_tensor_requires_grad(_wrap_for_grad);  child = None
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False);  set_inplace_requires_grad_allowed_1 = None
 
-        sin: "f32[5]" = child.sin();  child = None
+        sin: "f32[5]" = _wrap_for_grad.sin();  _wrap_for_grad = None
         primals_out: "f32[]" = sin.sum();  sin = None
 
         results: "f32[]" = torch._C._functorch._unwrap_for_grad(primals_out, 1);  primals_out = None
@@ -4352,24 +4370,24 @@ class GraphModule(torch.nn.Module):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func.{grad, vjp, jacrev, hessian} don't yet support saved tensor hooks. Please open an issue with your use case.");  _saved_tensors_hooks_disable = None
         _grad_increment_nesting = torch._C._functorch._grad_increment_nesting();  _grad_increment_nesting = None
 
-        child: "f32[5]" = torch._C._functorch._wrap_for_grad(l_x_, 1);  l_x_ = None
+        _wrap_for_grad: "f32[5]" = torch._C._functorch._wrap_for_grad(l_x_, 1);  l_x_ = None
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True);  set_inplace_requires_grad_allowed = None
 
-        child_3: "f32[5]" = torch._functorch.eager_transforms._set_tensor_requires_grad(child)
+        child_2: "f32[5]" = torch._functorch.eager_transforms._set_tensor_requires_grad(_wrap_for_grad)
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False);  set_inplace_requires_grad_allowed_1 = None
 
-        child_1: "f32[5]" = child.sin()
-        child_2: "f32[5]" = child.cos();  child = None
+        child: "f32[5]" = _wrap_for_grad.sin()
+        child_1: "f32[5]" = _wrap_for_grad.cos();  _wrap_for_grad = None
 
-        _unwrap_for_grad: "f32[5]" = torch._C._functorch._unwrap_for_grad(child_1, 1)
-        _unwrap_for_grad_1: "f32[5]" = torch._C._functorch._unwrap_for_grad(child_2, 1)
+        _unwrap_for_grad: "f32[5]" = torch._C._functorch._unwrap_for_grad(child, 1)
+        _unwrap_for_grad_1: "f32[5]" = torch._C._functorch._unwrap_for_grad(child_1, 1)
 
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
 
-        _autograd_grad = torch._functorch.eager_transforms._autograd_grad([child_1, child_2], [child_3], [l_v_, l_v_], retain_graph = True, create_graph = True);  child_1 = child_2 = child_3 = l_v_ = None
+        _autograd_grad = torch._functorch.eager_transforms._autograd_grad([child, child_1], [child_2], [l_v_, l_v_], retain_graph = True, create_graph = True);  child = child_1 = child_2 = l_v_ = None
         getitem: "f32[5]" = _autograd_grad[0];  _autograd_grad = None
         return (_unwrap_for_grad, _unwrap_for_grad_1, getitem)
 """,
@@ -4404,28 +4422,28 @@ class GraphModule(torch.nn.Module):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func.{grad, vjp, jacrev, hessian} don't yet support saved tensor hooks. Please open an issue with your use case.");  _saved_tensors_hooks_disable = None
         _grad_increment_nesting = torch._C._functorch._grad_increment_nesting();  _grad_increment_nesting = None
 
-        child: "f32[5]" = torch._C._functorch._wrap_for_grad(l_x_, 1);  l_x_ = None
+        _wrap_for_grad: "f32[5]" = torch._C._functorch._wrap_for_grad(l_x_, 1);  l_x_ = None
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True);  set_inplace_requires_grad_allowed = None
 
-        child_3: "f32[5]" = torch._functorch.eager_transforms._set_tensor_requires_grad(child)
+        child_2: "f32[5]" = torch._functorch.eager_transforms._set_tensor_requires_grad(_wrap_for_grad)
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False);  set_inplace_requires_grad_allowed_1 = None
 
-        child_1: "f32[5]" = child.sin()
-        child_2: "f32[5]" = child.cos();  child = None
+        child: "f32[5]" = _wrap_for_grad.sin()
+        child_1: "f32[5]" = _wrap_for_grad.cos();  _wrap_for_grad = None
 
-        value: "f32[5]" = torch._C._functorch._unwrap_for_grad(child_1, 1)
-        value_1: "f32[5]" = torch._C._functorch._unwrap_for_grad(child_2, 1)
+        _unwrap_for_grad: "f32[5]" = torch._C._functorch._unwrap_for_grad(child, 1)
+        _unwrap_for_grad_1: "f32[5]" = torch._C._functorch._unwrap_for_grad(child_1, 1)
 
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
         _saved_tensors_hooks_enable = torch._C._autograd._saved_tensors_hooks_enable();  _saved_tensors_hooks_enable = None
 
-        child_4: "f32[5]" = l_v_.sin()
+        child_3: "f32[5]" = l_v_.sin()
 
-        _autograd_grad = torch._functorch.eager_transforms._autograd_grad([child_1, child_2], [child_3], [l_v_, child_4], retain_graph = True, create_graph = True);  child_1 = child_2 = child_3 = l_v_ = child_4 = None
+        _autograd_grad = torch._functorch.eager_transforms._autograd_grad([child, child_1], [child_2], [l_v_, child_3], retain_graph = True, create_graph = True);  child = child_1 = child_2 = l_v_ = child_3 = None
         getitem: "f32[5]" = _autograd_grad[0];  _autograd_grad = None
-        return (value, value_1, getitem)
+        return (_unwrap_for_grad, _unwrap_for_grad_1, getitem)
 """,
         )
 
@@ -4458,18 +4476,18 @@ class GraphModule(torch.nn.Module):
         _saved_tensors_hooks_disable = torch._C._autograd._saved_tensors_hooks_disable("torch.func.{grad, vjp, jacrev, hessian} don't yet support saved tensor hooks. Please open an issue with your use case.");  _saved_tensors_hooks_disable = None
         _grad_increment_nesting = torch._C._functorch._grad_increment_nesting();  _grad_increment_nesting = None
 
-        child: "f32[5]" = torch._C._functorch._wrap_for_grad(l_x_, 1);  l_x_ = None
+        aux: "f32[5]" = torch._C._functorch._wrap_for_grad(l_x_, 1);  l_x_ = None
 
         set_inplace_requires_grad_allowed = torch._C._functorch.set_inplace_requires_grad_allowed(True);  set_inplace_requires_grad_allowed = None
 
-        child_1: "f32[5]" = torch._functorch.eager_transforms._set_tensor_requires_grad(child);  child_1 = None
+        child: "f32[5]" = torch._functorch.eager_transforms._set_tensor_requires_grad(aux);  child = None
 
         set_inplace_requires_grad_allowed_1 = torch._C._functorch.set_inplace_requires_grad_allowed(False);  set_inplace_requires_grad_allowed_1 = None
 
-        sin: "f32[5]" = child.sin()
+        sin: "f32[5]" = aux.sin()
         primals_out: "f32[]" = sin.sum();  sin = None
 
-        aux: "f32[5]" = torch._C._functorch._unwrap_for_grad(child, 1);  child = aux = None
+        aux_1: "f32[5]" = torch._C._functorch._unwrap_for_grad(aux, 1);  aux = aux_1 = None
         results: "f32[]" = torch._C._functorch._unwrap_for_grad(primals_out, 1);  primals_out = None
 
         _grad_decrement_nesting = torch._C._functorch._grad_decrement_nesting();  _grad_decrement_nesting = None
@@ -5014,11 +5032,11 @@ class GraphModule(torch.nn.Module):
         aux: "f32[3, 3, 3]" = child.cos()
 
         _autograd_grad = torch._functorch.eager_transforms._autograd_grad((output,), [child, child_1], create_graph = True);  child = child_1 = None
-        child_2: "f32[3, 3, 3]" = _autograd_grad[0]
-        child_3: "f32[3, 3, 3]" = _autograd_grad[1];  _autograd_grad = None
+        getitem: "f32[3, 3, 3]" = _autograd_grad[0]
+        getitem_1: "f32[3, 3, 3]" = _autograd_grad[1];  _autograd_grad = None
 
-        _unwrap_for_grad: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(child_2, 1);  child_2 = None
-        _unwrap_for_grad_1: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(child_3, 1);  child_3 = None
+        _unwrap_for_grad: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(getitem, 1);  getitem = None
+        _unwrap_for_grad_1: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(getitem_1, 1);  getitem_1 = None
         output_1: "f32[]" = torch._C._functorch._unwrap_for_grad(output, 1);  output = output_1 = None
         aux_1: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(aux, 1);  aux = None
 
@@ -5058,11 +5076,11 @@ class GraphModule(torch.nn.Module):
         aux: "f32[3, 3, 3]" = child.cos()
 
         _autograd_grad = torch._functorch.eager_transforms._autograd_grad((output,), [child, child_1], create_graph = True);  child = child_1 = None
-        child_2: "f32[3, 3, 3]" = _autograd_grad[0]
-        child_3: "f32[3, 3, 3]" = _autograd_grad[1];  _autograd_grad = None
+        getitem: "f32[3, 3, 3]" = _autograd_grad[0]
+        getitem_1: "f32[3, 3, 3]" = _autograd_grad[1];  _autograd_grad = None
 
-        _unwrap_for_grad: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(child_2, 1);  child_2 = None
-        _unwrap_for_grad_1: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(child_3, 1);  child_3 = None
+        _unwrap_for_grad: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(getitem, 1);  getitem = None
+        _unwrap_for_grad_1: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(getitem_1, 1);  getitem_1 = None
         output_1: "f32[]" = torch._C._functorch._unwrap_for_grad(output, 1);  output = output_1 = None
         aux_1: "f32[3, 3, 3]" = torch._C._functorch._unwrap_for_grad(aux, 1);  aux = None
 
@@ -6386,9 +6404,9 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_x_: "f32[3, 3, 3]", L_y_: "f32[3, 3]"):
-        l_x_ = L_x_
+    def forward(self, L_y_: "f32[3, 3]", L_x_: "f32[3, 3, 3]"):
         l_y_ = L_y_
+        l_x_ = L_x_
 
         lazy_load_decompositions = torch._functorch.predispatch.lazy_load_decompositions();  lazy_load_decompositions = None
 
@@ -6560,9 +6578,9 @@ class GraphModule(torch.nn.Module):
             actual,
             """\
 class GraphModule(torch.nn.Module):
-    def forward(self, L_y_: "f32[5, 3]", L_x_: "f32[2, 3]"):
-        l_y_ = L_y_
+    def forward(self, L_x_: "f32[2, 3]", L_y_: "f32[5, 3]"):
         l_x_ = L_x_
+        l_y_ = L_y_
 
         lazy_load_decompositions = torch._functorch.predispatch.lazy_load_decompositions();  lazy_load_decompositions = None
 

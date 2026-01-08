@@ -277,6 +277,19 @@ Membership Changes
    a new ``WorkerGroup`` is formed, and all workers are started with a new ``RANK`` and
    ``WORLD_SIZE``.
 
+NUMA Binding
+------------
+
+On multi-GPU systems with NUMA (Non-Uniform Memory Access) architecture, you can improve
+performance by binding worker processes to CPUs near their assigned GPUs. Use the
+``--numa-binding`` flag:
+
+::
+
+    torchrun --numa-binding=node --nproc-per-node=8 train.py
+
+See :ref:`numa-api` for more details.
+
 Important Notices
 -----------------
 
@@ -375,7 +388,6 @@ import uuid
 from argparse import ArgumentParser, REMAINDER
 from collections.abc import Callable
 from importlib import metadata
-from typing import Optional, Union
 
 import torch
 from torch.distributed.argparse_util import check_env, env
@@ -658,23 +670,8 @@ def get_args_parser() -> ArgumentParser:
         type=str,
         choices=[mode.value for mode in _AffinityMode],
         default=None,
-        help="""
-        If provided, we will affinitize the worker processes based on NUMA nodes
-        for better performance. (E.g., preferring to allocate memory locally and run on CPUs on the
-        same NUMA node.)
-
-        NOTE: This is currently only supported for GPUs, and we assume
-        that the LOCAL_RANK process corresponds to the GPU with index LOCAL_RANK. If this is not
-        accurate for your workload, this feature may be a pessimization.
-
-        Available options are:
-          - node: Processes are bound to cpu cores within a NUMA node. This is a good starting point,
-          but other options may perform even slightly better in some cases.
-          - socket: Processes are bound to cpu cores within a socket.
-          - exclusive: Processes are bound to exclusive sets of cpu cores within a NUMA node.
-          - core-complex: Processes are bound to cpu cores in a core-complex.
-          NOTE: The core-complex option might not achieve optimal performance on architectures
-          featuring a single L3 cache per socket.""",
+        help="Bind worker processes to CPUs near their assigned GPUs for better performance. "
+        "See torch/numa/binding.py for available modes and details.",
     )
 
     parser.add_argument(
@@ -798,7 +795,7 @@ def get_use_env(args) -> bool:
     return args.use_env
 
 
-def _get_logs_specs_class(logs_specs_name: Optional[str]) -> type[LogsSpecs]:
+def _get_logs_specs_class(logs_specs_name: str | None) -> type[LogsSpecs]:
     """
     Attempts to load `torchrun.logs_spec` entrypoint with key of `logs_specs_name` param.
     Provides plugin mechanism to provide custom implementation of LogsSpecs.
@@ -811,6 +808,7 @@ def _get_logs_specs_class(logs_specs_name: Optional[str]) -> type[LogsSpecs]:
         eps = metadata.entry_points()
         group = eps.select(group="torchrun.logs_specs")
         if group.select(name=logs_specs_name):
+            # pyrefly: ignore [bad-index]
             logs_specs_cls = group[logs_specs_name].load()
 
         if logs_specs_cls is None:
@@ -827,7 +825,7 @@ def _get_logs_specs_class(logs_specs_name: Optional[str]) -> type[LogsSpecs]:
     return logs_specs_cls
 
 
-def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str]]:
+def config_from_args(args) -> tuple[LaunchConfig, Callable | str, list[str]]:
     # If ``args`` not passed, defaults to ``sys.argv[:1]``
     min_nodes, max_nodes = parse_min_max_nnodes(args.nnodes)
     if not (0 < min_nodes <= max_nodes):
@@ -871,7 +869,7 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
 
     rdzv_endpoint = get_rdzv_endpoint(args)
 
-    ranks: Optional[set[int]] = None
+    ranks: set[int] | None = None
     if args.local_ranks_filter:
         try:
             ranks = set(map(int, args.local_ranks_filter.split(",")))
@@ -883,7 +881,7 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
             ) from e
 
     logs_specs_cls: type[LogsSpecs] = _get_logs_specs_class(args.logs_specs)
-    # pyrefly: ignore [bad-instantiation]
+
     logs_specs = logs_specs_cls(
         log_dir=args.log_dir,
         redirects=Std.from_str(args.redirects),
@@ -920,7 +918,7 @@ def config_from_args(args) -> tuple[LaunchConfig, Union[Callable, str], list[str
     )
 
     with_python = not args.no_python
-    cmd: Union[Callable, str]
+    cmd: Callable | str
     cmd_args = []
     use_env = get_use_env(args)
     if args.run_path:

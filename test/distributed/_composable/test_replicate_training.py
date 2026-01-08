@@ -678,7 +678,9 @@ class TestReplicateTrainingCompose(FSDPTest):
         test_device_type: str,
     ):
         assert checkpoint_impl in ("composable", "utils", "wrapper")
-        testing_compile = replicate != torch.distributed._composable.replicate_with_fsdp
+        testing_compile = (
+            replicate is not torch.distributed._composable.replicate_with_fsdp
+        )
         if testing_compile and checkpoint_impl == "composable":
             return
         torch.manual_seed(42)

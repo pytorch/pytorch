@@ -4,6 +4,7 @@ cuda = '{{CUDA_VERSION}}'
 # TODO: use workspace status to stamp the correct version
 git_version = ""
 hip = None
+rocm = None
 
 # This is a gross monkey-patch hack that depends on the order of imports
 # in torch/__init__.py

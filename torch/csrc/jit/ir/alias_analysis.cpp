@@ -6,7 +6,6 @@
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/inliner.h>
-#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <fstream>
 #include <iostream>
@@ -617,7 +616,7 @@ void AliasDb::analyzeImpl(Node* node) {
         oss << input->type()->str() << ", ";
       }
       oss << "\n\nCandidates:";
-      auto candidates = getAllOperatorsFor(node->kind());
+      const auto& candidates = getAllOperatorsFor(node->kind());
       for (const auto& candidate : candidates) {
         oss << "\n\t" << candidate->schema();
       }

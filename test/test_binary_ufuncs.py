@@ -1149,6 +1149,16 @@ class TestBinaryUfuncs(TestCase):
         res = nom / denom
         self.assertEqual(res, expected)
 
+    @onlyCUDA
+    @dtypes(torch.float, torch.bfloat16)
+    def test_division_by_scalar(self, device, dtype):
+        num = torch.rand(1024, device=device, dtype=dtype)
+        denom = torch.logspace(-4, 4, steps=20)
+        denom = [d.item() for d in denom]
+        res = [num / d for d in denom]
+        ref = [num * (1 / d) for d in denom]
+        self.assertEqual(res, ref, atol=0, rtol=0)
+
     # Tests that trying to add, inplace, a CUDA tensor to a CPU tensor
     #   throws the correct error message
     @onlyCUDA
@@ -2756,6 +2766,25 @@ class TestBinaryUfuncs(TestCase):
                     value = 255 if dtype == torch.uint8 else -1
                     self.assertTrue(torch.all(fn(x, zero) == value))
 
+    @onlyNativeDeviceTypes
+    @dtypes(*integral_types())
+    def test_fmod_remainder_overflow(self, device, dtype):
+        fn_list = (torch.fmod, torch.remainder)
+        for fn in fn_list:
+            if dtype in [torch.uint8, torch.uint16, torch.uint32, torch.uint64]:
+                continue
+
+            min_val = torch.iinfo(dtype).min
+            dividend = torch.full((2, 3), min_val, dtype=dtype, device=device)
+            divisor = torch.full((3,), -1, dtype=dtype, device=device)
+
+            result = fn(dividend, divisor)
+            expected = torch.zeros_like(dividend)
+            self.assertEqual(result, expected)
+
+            result_scalar = fn(dividend, -1)
+            self.assertEqual(result_scalar, expected)
+
     @dtypes(*all_types_and(torch.half))
     def test_fmod_remainder(self, device, dtype):
         # Use numpy as reference
@@ -2879,6 +2908,18 @@ class TestBinaryUfuncs(TestCase):
             else:
                 expected = np.hypot(input[0].cpu().numpy(), input[1].cpu().numpy())
             self.assertEqual(actual, expected, exact_dtype=False)
+
+        if torch.device(device).type == "cuda":
+            # test using cpu scalar with cuda.
+            x = torch.randn(10, device=device).to(dtype)
+            y = torch.tensor(2.0).to(dtype)
+            actual1 = torch.hypot(x, y)
+            actual2 = torch.hypot(y, x)
+            expected = np.hypot(x.cpu().numpy(), 2.0)
+            self.assertTrue(actual1.is_cuda)
+            self.assertTrue(actual2.is_cuda)
+            self.assertEqual(actual1, expected, exact_dtype=False)
+            self.assertEqual(actual2, expected, exact_dtype=False)
 
     @onlyNativeDeviceTypes
     @dtypes(torch.uint8, torch.int8, torch.int16, torch.int32, torch.int64)
@@ -3057,6 +3098,18 @@ class TestBinaryUfuncs(TestCase):
         with self.assertRaisesRegex(RuntimeError, "ZeroDivisionError"):
             with self.assertWarnsOnceRegex(UserWarning, "floor_divide"):
                 a // b
+
+    @dtypes(torch.int8, torch.int16, torch.int32, torch.int64)
+    def test_floor_divide_int_min(self, device, dtype):
+        int_min = torch.iinfo(dtype).min
+        a = torch.tensor([int_min], dtype=dtype, device=device)
+        b = torch.tensor([-1], dtype=dtype, device=device)
+
+        result = torch.floor_divide(a, b)
+        result_ = a // b
+
+        self.assertEqual(result, a)
+        self.assertEqual(result_, a)
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
     def test_muldiv_scalar(self, device, dtype):
@@ -3447,6 +3500,14 @@ class TestBinaryUfuncs(TestCase):
         mantissas = torch.randn(64, device=device, dtype=torch.half)
         exponents = torch.randint(-5, 5, (64,), device=device)
         self.assertEqual(torch.ldexp(mantissas, exponents).dtype, torch.half)
+
+        # test half dtype bound ends (very small and very large exponents)
+        mantissas = torch.tensor([-2, 2**-10], device=device, dtype=torch.half)
+        exponents = torch.tensor([-25, 20], device=device)
+        self.assertEqual(
+            torch.ldexp(mantissas, exponents),
+            torch.tensor([-(2**-24), 2**10], dtype=torch.half),
+        )
 
         # test float64 computation
         mantissas = torch.tensor([1], dtype=torch.float64, device=device)
@@ -3974,14 +4035,20 @@ class TestBinaryUfuncs(TestCase):
         def test_dx(sizes, dim, dx, device):
             t = torch.randn(sizes, device=device)
             actual = torch.trapezoid(t, dx=dx, dim=dim)
-            expected = np.trapz(t.cpu().numpy(), dx=dx, axis=dim)  # noqa: NPY201
+            if int(np.__version__.split(".")[0]) >= 2:
+                expected = np.trapezoid(t.cpu().numpy(), dx=dx, axis=dim)  # noqa: NPY201
+            else:
+                expected = np.trapz(t.cpu().numpy(), dx=dx, axis=dim)  # noqa: NPY201
             self.assertEqual(expected.shape, actual.shape)
             self.assertEqual(expected, actual, exact_dtype=False)
 
         def test_x(sizes, dim, x, device):
             t = torch.randn(sizes, device=device)
             actual = torch.trapezoid(t, x=torch.tensor(x, device=device), dim=dim)
-            expected = np.trapz(t.cpu().numpy(), x=x, axis=dim)  # noqa: NPY201
+            if int(np.__version__.split(".")[0]) >= 2:
+                expected = np.trapezoid(t.cpu().numpy(), x=x, axis=dim)  # noqa: NPY201
+            else:
+                expected = np.trapz(t.cpu().numpy(), x=x, axis=dim)  # noqa: NPY201
             self.assertEqual(expected.shape, actual.shape)
             self.assertEqual(expected, actual.cpu(), exact_dtype=False)
 

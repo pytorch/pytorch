@@ -1,8 +1,10 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Dispatch.h>
 #include <ATen/TensorIterator.h>
 #include <ATen/mps/MPSProfiler.h>
 #include <ATen/native/Activation.h>
 #include <ATen/native/mps/OperationUtils.h>
+#include <ATen/native/mps/kernels/Activation.h>
 #include <fmt/format.h>
 
 namespace at::native {
@@ -41,6 +43,30 @@ static void hardswish_backward_kernel(at::TensorIterator& iter) {
   lib.exec_binary_kernel(iter, "hardswish_backward");
 }
 
+static void elu_kernel(TensorIteratorBase& iter, const Scalar& alpha, const Scalar& scale, const Scalar& input_scale) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(c10::kHalf, c10::kBFloat16, iter.common_dtype(), "elu_mps", [&]() {
+    ELUParams<scalar_t> params{alpha.to<scalar_t>(), scale.to<scalar_t>(), input_scale.to<scalar_t>()};
+    lib.exec_unary_kernel_with_params(
+        iter, "elu", params, fmt::format("ELUParams_{}", mps::scalarToMetalTypeString(iter.common_dtype())));
+  });
+}
+
+static void elu_backward_kernel(TensorIteratorBase& iter,
+                                const Scalar& alpha,
+                                const Scalar& scale,
+                                const Scalar& input_scale,
+                                bool is_result) {
+  AT_DISPATCH_FLOATING_TYPES_AND2(c10::kHalf, c10::kBFloat16, iter.common_dtype(), "elu_backward_mps", [&]() {
+    ELUBackwardParams<scalar_t> params{
+        alpha.to<scalar_t>(), scale.to<scalar_t>(), input_scale.to<scalar_t>(), is_result};
+    lib.exec_binary_kernel_with_params(
+        iter,
+        "elu_backward",
+        params,
+        fmt::format("ELUBackwardParams_{}", mps::scalarToMetalTypeString(iter.common_dtype())));
+  });
+}
+
 static void leaky_relu_kernel(TensorIteratorBase& iter, const Scalar& negative_slope) {
   lib.exec_unary_kernel(iter, "leaky_relu", negative_slope);
 }
@@ -56,6 +82,8 @@ REGISTER_DISPATCH(hardsigmoid_stub, hardsigmoid_kernel);
 REGISTER_DISPATCH(hardsigmoid_backward_stub, hardsigmoid_backward_kernel);
 REGISTER_DISPATCH(hardswish_stub, hardswish_kernel);
 REGISTER_DISPATCH(hardswish_backward_stub, hardswish_backward_kernel);
+REGISTER_DISPATCH(elu_stub, elu_kernel);
+REGISTER_DISPATCH(elu_backward_stub, elu_backward_kernel);
 REGISTER_DISPATCH(leaky_relu_stub, leaky_relu_kernel);
 REGISTER_DISPATCH(leaky_relu_backward_stub, leaky_relu_backward_kernel);
 

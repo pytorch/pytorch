@@ -1,12 +1,9 @@
 #include <torch/csrc/jit/mobile/module.h>
 
 #include <torch/csrc/jit/backends/backend_exception.h>
-#include <torch/csrc/jit/mobile/interpreter.h>
 #include <torch/csrc/jit/mobile/observer.h>
 #include <torch/csrc/jit/mobile/type_parser.h>
-#include <torch/csrc/jit/runtime/jit_exception.h>
 
-#include <ATen/record_function.h>
 #include <c10/util/ScopeExit.h>
 #include <c10/util/irange.h>
 

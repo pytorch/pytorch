@@ -55,7 +55,6 @@ MUTABLE_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
 
 # All of these operators don't have any tensor like returns
 FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
-    "_async_error",
     "_assert_async",  # no return
     "_assert_async.msg",  # no return
     "_assert_tensor_metadata",  # no return
@@ -70,6 +69,8 @@ FUNCTIONAL_OPS_THAT_CANNOT_GET_AN_OUT_VARIANT = [
     "_nnz",  # returns an int
     "_use_cudnn_ctc_loss",  # returns a boolean
     "_use_cudnn_ctc_loss.Tensor",  # returns a boolean
+    "_use_miopen_ctc_loss",  # returns a boolean
+    "_use_miopen_ctc_loss.Tensor",  # returns a boolean
     "_validate_compressed_sparse_indices",  # no return
     "allclose",  # returns a boolean
     "dense_dim",  # returns an int

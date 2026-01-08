@@ -475,6 +475,7 @@ class MetaTensorDescriber:
             ),
             fake_mode=torch._subclasses.fake_tensor.maybe_get_fake_mode(t),
             view_func=view_func,
+            # pyrefly: ignore [bad-argument-type]
             attrs=attrs,
             ctx=ctx,
             type=type_v,
@@ -870,7 +871,7 @@ class MetaConverter(Generic[_TensorT]):
 
     # This function assumes that it's possible to do the conversion
     # NB: name here is used in a conventional way by Dynamo; it corresponds
-    # precisely to the Source.name() of the tensor we're fakeifying and
+    # precisely to the Source.name of the tensor we're fakeifying and
     # corresponds to a valid Python expression.  When we construct sub-names
     # as part of this process, we will maintain this invariant!  (Even though
     # other users of this may not need it this property to be upheld.)
@@ -1407,7 +1408,6 @@ class MetaConverter(Generic[_TensorT]):
                     if t.requires_grad:
                         r.requires_grad = True
                     if t.requires_grad and not is_leaf:
-                        # pyrefly: ignore [bad-argument-type]
                         r = self._backward_error(r)
                 elif t.is_nested and not t.is_traceable_wrapper_subclass:
                     # TODO: Handle this better in Dynamo?
@@ -1450,7 +1450,6 @@ class MetaConverter(Generic[_TensorT]):
                     if t.requires_grad:
                         r.requires_grad = True
                     if t.requires_grad and not is_leaf:
-                        # pyrefly: ignore [bad-argument-type]
                         r = self._backward_error(r)
                 elif t.is_functorch_wrapped:
                     if t.is_view:
@@ -1937,7 +1936,7 @@ class MetaConverter(Generic[_TensorT]):
                 metadata_fn=lambda: {
                     "describer_id": self.describer.id,
                     "id": t_desc.id,
-                    "source": source.name(),
+                    "source": source.name,
                 },
             )
 

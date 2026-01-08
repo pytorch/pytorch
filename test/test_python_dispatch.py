@@ -5,6 +5,7 @@ import pickle
 import sys
 import tempfile
 import unittest
+import weakref
 from copy import deepcopy
 
 import torch
@@ -69,6 +70,22 @@ class TestPythonRegistration(TestCase):
     def tearDown(self):
         if hasattr(torch.ops, self.test_ns):
             del torch.ops._test_python_registration
+
+    def test_global_enter(self):
+        try:
+            v = LoggingTensorMode()
+            v_ref = weakref.ref(v)
+
+            v.__enter__()
+            # The bug trigger when the C++ stack is the only
+            # owner of the mode object.
+            del v
+
+            # Does not segfault
+            str(torch.rand(2))
+
+        finally:
+            v_ref().__exit__(None, None, None)
 
     def test_fallback(self) -> None:
         test_key = "TESTING_ONLY_GenericMode"
@@ -299,8 +316,12 @@ class TestPythonRegistration(TestCase):
         lib = Library(self.test_ns, "FRAGMENT")  # noqa: TOR901
         lib.define("foo123(Tensor x) -> Tensor")
 
-        # 1 for `lib`, 1 for sys.getrefcount
-        self.assertEqual(sys.getrefcount(lib), 2)
+        # 1 for `lib`, 1 for sys.getrefcount' for previous python version (<=3.12)
+        # In Python 3.13+, sys.getrefcount() was optimized to not create
+        # a temporary reference, so expected counts are 1 less than before
+        expected_refcount = 1 if sys.version_info >= (3, 14) else 2
+        self.assertEqual(sys.getrefcount(lib), expected_refcount)
+
         # We gained an additional reference that gets cleared when the finalizer runs
         self.assertEqual(sys.getrefcount(torch.library._impls), impls_refcnt + 1)
         # 1 for `lib`
@@ -318,7 +339,7 @@ class TestPythonRegistration(TestCase):
         saved_op_impls = lib._op_impls
 
         # del will definitely work if the following passes
-        self.assertEqual(sys.getrefcount(lib), 2)
+        self.assertEqual(sys.getrefcount(lib), expected_refcount)
         del lib
 
         # 1 for saved_op_impls
@@ -326,7 +347,7 @@ class TestPythonRegistration(TestCase):
         # This function should be the last user of lib._op_impls:
         # - lib should not have a reference anymore (it was del'ed)
         # - lib's finalizer should not have a reference anymore
-        self.assertEqual(sys.getrefcount(saved_op_impls), 2)
+        self.assertEqual(sys.getrefcount(saved_op_impls), expected_refcount)
 
         self.assertTrue(key not in torch.library._impls)
 

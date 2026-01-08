@@ -777,7 +777,7 @@ void LLVMCodeGenImpl::emitKernel(
   PM.run(*module_);
   asmCode_ = asmStream.str().str();
 
-  GRAPH_DEBUG("\nLLVM generated assembly code\n\n", asmCode_, "\n");
+  GRAPH_DEBUG("\nLLVM generated assembly code\n\n", asmCode_, '\n');
 }
 
 // TODO: The binary ops are copypaste.
@@ -1535,10 +1535,10 @@ std::vector<llvm::Value*> LLVMCodeGenImpl::unpackFuncArgs(
   std::vector<llvm::Value*> func_args(arg_count);
   llvm::Value* zero = llvm::ConstantInt::get(IntTy_, 0);
   for (const auto i : c10::irange(arg_count)) {
-    llvm::Type* feild_type = packed.type->getStructElementType(i);
-    llvm::Value* feild_addr = irb_.CreateInBoundsGEP(
+    llvm::Type* field_type = packed.type->getStructElementType(i);
+    llvm::Value* field_addr = irb_.CreateInBoundsGEP(
         packed.type, packed.addr, {zero, llvm::ConstantInt::get(IntTy_, i)});
-    func_args[i] = irb_.CreateLoad(feild_type, feild_addr);
+    func_args[i] = irb_.CreateLoad(field_type, field_addr);
   }
   return func_args;
 }

@@ -903,9 +903,26 @@ DEFINE_CACHING_PYTHON_IMPORT_GETTER(
         .attr("_op_schema")
         .attr("OutputSharding"))
 
+DEFINE_CACHING_PYTHON_IMPORT_GETTER(
+    get_op_strategy_class,
+    py::module::import("torch.distributed.tensor")
+        .attr("_op_schema")
+        .attr("OpStrategy"))
+
+DEFINE_CACHING_PYTHON_IMPORT_GETTER(
+    get_tuple_strategy_class,
+    py::module::import("torch.distributed.tensor")
+        .attr("_op_schema")
+        .attr("TupleStrategy"))
+
 static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
   const auto dtensor_spec_class = get_dtensor_spec_class();
-  if (py::isinstance(arg, dtensor_spec_class)) {
+  const auto op_strategy_class = get_op_strategy_class();
+  const auto tuple_strategy_class = get_tuple_strategy_class();
+
+  if (py::isinstance(arg, dtensor_spec_class) ||
+      py::isinstance(arg, op_strategy_class) ||
+      py::isinstance(arg, tuple_strategy_class)) {
     return true;
   }
   if (!PyList_Check(arg.ptr())) {
@@ -913,7 +930,9 @@ static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
   }
   py::list arg_list = py::reinterpret_borrow<py::list>(arg);
   for (const auto e : arg_list) {
-    if (!e.is_none() && !py::isinstance(e, dtensor_spec_class)) {
+    if (!e.is_none() && !py::isinstance(e, dtensor_spec_class) &&
+        !py::isinstance(e, op_strategy_class) &&
+        !py::isinstance(e, tuple_strategy_class)) {
       return false;
     }
   }
@@ -1101,7 +1120,7 @@ class NativeOpSchema {
         comparison_key_ == rhs.comparison_key_;
   }
 
-  std::size_t hash() const {
+  std::size_t hash() const noexcept {
     return hash_;
   }
 
@@ -1131,7 +1150,7 @@ class NativeOpSchema {
 namespace std {
 template <>
 struct hash<NativeOpSchema> {
-  std::size_t operator()(const NativeOpSchema& schema) const {
+  std::size_t operator()(const NativeOpSchema& schema) const noexcept {
     return schema.hash();
   }
 };
@@ -1200,25 +1219,27 @@ get_thread_local_native_sharding_propagator_cache() {
         py::reinterpret_borrow<py::dict>(PyThreadState_GetDict());
     // We need to clean up before Python detaches from the thread if
     // the thread is being destroyed.
-    thread_dict["__DTensor_fastpath_thread_cache_cleanup"] =
-        py::capsule(new std::thread::id(this_thread_id), [](void* p) {
-          auto* ptid = reinterpret_cast<std::thread::id*>(p);
-          {
-            std::lock_guard<std::mutex> inner_lock(
-                native_sharding_propagator_cache_cleanup_mutex);
-            auto it = all_thread_caches.find(*ptid);
-            if (it != all_thread_caches.end()) {
-              // We need to both:
-              // 1) free python objects, and
-              it->second->reset();
-              // 2) make sure we don't try to come back and mess with
-              // a destroyed thread-local at module unload (e.g.,
-              // process exit) time.
-              all_thread_caches.erase(it);
+    if (!thread_dict.contains("__DTensor_fastpath_thread_cache_cleanup")) {
+      thread_dict["__DTensor_fastpath_thread_cache_cleanup"] =
+          py::capsule(new std::thread::id(this_thread_id), [](void* p) {
+            auto* ptid = reinterpret_cast<std::thread::id*>(p);
+            {
+              std::lock_guard<std::mutex> inner_lock(
+                  native_sharding_propagator_cache_cleanup_mutex);
+              auto it = all_thread_caches.find(*ptid);
+              if (it != all_thread_caches.end()) {
+                // We need to both:
+                // 1) free python objects, and
+                it->second->reset();
+                // 2) make sure we don't try to come back and mess with
+                // a destroyed thread-local at module unload (e.g.,
+                // process exit) time.
+                all_thread_caches.erase(it);
+              }
             }
-          }
-          delete ptid;
-        });
+            delete ptid;
+          });
+    }
   }
   return native_sharding_propagator_cache_DO_NOT_USE.value();
 }
@@ -1353,11 +1374,11 @@ static bool get_local_results(
             " in DTensor op is not supported");
         result.push_back(default_tensor(item));
       }
-      stack->push_back(std::move(result));
+      stack->emplace_back(std::move(result));
     };
 
     if (py::isinstance(spec, get_dtensor_spec_class())) {
-      stack->push_back(default_tensor(spec));
+      stack->emplace_back(default_tensor(spec));
     } else if (PyList_Check(spec.ptr())) {
       handle_sequence(py::reinterpret_borrow<py::list>(spec));
     } else if (PyTuple_Check(spec.ptr())) {
@@ -1424,6 +1445,17 @@ py::object dispatchDTensorOp(
 
   torch::jit::Stack saved_args = *stack;
   NativeShardingPropagatorCache* native_sharding_propagator_cache = nullptr;
+  // In the original Python implementation of DTensor dispatch, the creation
+  // of OpInfo (which includes the OpSchema computed here) never fails. However,
+  // C++ support for all the features of OpSchema are not supported; in this
+  // case opt_native_op_schema is nullopt.  In this case, we need to fallback
+  // to the Python logic for doing so.  If you are comparing against the old
+  // Python code, this is a bit tricky, since the Python 'dispatch' function
+  // has been completely deleted.
+
+  // First, we will try to short-circuit Python entirely using the fast path.
+  // Here, we never materialize OpInfo, we generate a gimped NativeOpSchema
+  // object which has exactly the information you need to do a hash lookup.
   auto opt_native_op_schema = create_native_op_schema(op, py_op, stack);
   if (opt_native_op_schema.has_value()) {
     native_sharding_propagator_cache =
@@ -1431,21 +1463,30 @@ py::object dispatchDTensorOp(
     cached_sharding =
         native_sharding_propagator_cache->find(opt_native_op_schema->first);
   }
+
   py::object py_op_info;
   if (!cached_sharding) {
+    // OK, the C++ fastpath failed.  Let's use the Python path to generate the
+    // OpInfo (which is guaranteed to work), which we will need to either
+    // redo the cache lookup or compute the value for real.
     py_op_info = checked_vectorcall(
         op_dispatcher.attr("unwrap_to_op_info").ptr(),
         py_op.ptr(),
         args.ptr(),
         kwargs.ptr());
+
     py::object sharding = checked_vectorcall(
-        op_dispatcher
-            .attr("_propagate_op_sharding_non_cached_dispatch_slow_path")
-            .ptr(),
+        op_dispatcher.attr("_propagate_op_sharding_dispatch_slow_path").ptr(),
         py_op.ptr(),
         args.ptr(),
         kwargs.ptr(),
-        py_op_info.ptr());
+        py_op_info.ptr(),
+        /*try_cache*/ !opt_native_op_schema.has_value() ? Py_True : Py_False);
+    // This is a hack, because the dispatch slow path sometimes returns
+    // a sharding result (in which case we need to keep going) but it
+    // will sometimes just decompose and directly return a Tensor result,
+    // in which case we should return immediately.  In this case, sharding
+    // is not a sharding at all; it's the real result!
     if (!py::isinstance(sharding, get_output_sharding_class())) {
       stack->clear();
       return sharding;
@@ -1841,9 +1882,9 @@ static PyObject* DTensor_compute_global_tensor_info_impl(
     // to say that nearly all our remaining time spent is spent
     // calling back into Python.
     const auto& cpp_placement = placement.cast<const distributed::Placement&>();
-    if (const auto* cpp_shard =
-            dynamic_cast<const distributed::Shard*>(&cpp_placement)) {
-      const auto shard_dim = cpp_shard->dim;
+    if (typeid(cpp_placement) == typeid(distributed::Shard) ||
+        typeid(cpp_placement) == typeid(distributed::StridedShard)) {
+      const auto shard_dim = py::cast<int64_t>(placement.attr("dim"));
       TORCH_CHECK(
           shard_dim >= 0,
           "Shard placements should have negative dims normalized in the user-facing APIs: ",

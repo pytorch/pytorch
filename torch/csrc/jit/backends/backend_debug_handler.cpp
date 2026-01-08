@@ -1,7 +1,5 @@
 #include <torch/csrc/jit/backends/backend_debug_handler.h>
 
-#include <stack>
-
 namespace torch::jit {
 
 std::atomic<DebugHandleType> BackendDebugInfoRecorder::unique_debug_handle_{0};

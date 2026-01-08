@@ -23,6 +23,7 @@ __all__: list[str] = [
     "activate_flash_attention_impl",
     "list_flash_attention_impls",
     "current_flash_attention_impl",
+    "restore_flash_attention_impl",
 ]
 
 
@@ -138,9 +139,10 @@ def sdpa_kernel(backends: list[SDPBackend] | SDPBackend, set_priority: bool = Fa
     This context manager can be used to select which backend to use for scaled dot product attention.
     Upon exiting the context manager, the previous state of the flags will be restored, enabling all backends.
     """
-    assert isinstance(backends, (list, SDPBackend)), (
-        "Backend must be an instance of SDPBackend or a list of SDPBackend instances"
-    )
+    if not isinstance(backends, (list, SDPBackend)):
+        raise AssertionError(
+            f"Backend must be an instance of SDPBackend or a list of SDPBackend instances, got {type(backends).__name__}"
+        )
 
     if isinstance(backends, SDPBackend):
         backends = [backends]
@@ -177,11 +179,13 @@ register_flash_attention_impl = _registry.register_flash_attention_impl
 activate_flash_attention_impl = _registry.activate_flash_attention_impl
 list_flash_attention_impls = _registry.list_flash_attention_impls
 current_flash_attention_impl = _registry.current_flash_attention_impl
+restore_flash_attention_impl = _registry.restore_flash_attention_impl
 
 register_flash_attention_impl.__module__ = __name__
 activate_flash_attention_impl.__module__ = __name__
 list_flash_attention_impls.__module__ = __name__
 current_flash_attention_impl.__module__ = __name__
+restore_flash_attention_impl.__module__ = __name__
 
 # Import built-in implementations to trigger self-registration
 from . import _fa4  # noqa: F401

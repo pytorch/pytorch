@@ -8,7 +8,6 @@
 #include <utility>
 #include <vector>
 
-#include <c10/util/Logging.h>
 #include <c10/util/irange.h>
 
 #include <ATen/core/functional.h>
