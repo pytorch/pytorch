@@ -141,7 +141,7 @@ void distribution_nullary_kernel(at::TensorIteratorBase& iter,
   }
 
   auto [counter_offset, grid, block] = calc_execution_policy(numel, unroll_factor);
-  uint64_t num_dims = 0;
+  uint64_t tensor_ndim = 0;
   std::array<uint64_t, MAX_DIMS> local_shape{};
   std::array<uint64_t, MAX_DIMS> global_offset{};
   std::array<uint64_t, MAX_DIMS> global_shape{};
@@ -151,7 +151,7 @@ void distribution_nullary_kernel(at::TensorIteratorBase& iter,
     // See Note [Acquire lock when using random generators]
     std::lock_guard<std::mutex> lock(gen->mutex_);
     rng_engine_inputs = gen->philox_cuda_state(counter_offset);
-    num_dims = gen->get_sharding_spec(local_shape, global_offset, global_shape, global_strides);
+    tensor_ndim = gen->get_sharding_spec(local_shape, global_offset, global_shape, global_strides);
   }
 
   if (!iter.can_use_32bit_indexing()) {
@@ -167,10 +167,10 @@ void distribution_nullary_kernel(at::TensorIteratorBase& iter,
   uint64_t global_numel = numel;
   uint64_t single_thread_n = grid.x * block.x;
   bool is_sharded = false;
-  if (num_dims > 0) {
+  if (tensor_ndim > 0) {
     global_numel = 1;
     is_sharded = true;
-    for (int i = 0; i < (int)num_dims; ++i) {
+    for (int i = 0; i < (int)tensor_ndim; ++i) {
       global_numel *= global_shape[i];
       if (local_shape[i] == 0)
         is_sharded = false;
@@ -181,13 +181,13 @@ void distribution_nullary_kernel(at::TensorIteratorBase& iter,
   TORCH_CHECK(single_thread_n > 0, "single_thread_n is 0!!!");
 
   auto virtual_idx_func = [=] __device__(uint64_t local_entry_linear_idx) {
-    if (num_dims == 0) { // not a dtensor
+    if (tensor_ndim == 0) { // not a dtensor
       return std::make_tuple(
           local_entry_linear_idx % single_thread_n, local_entry_linear_idx / single_thread_n, single_thread_n);
     }
     uint64_t tmp_idx = local_entry_linear_idx;
     uint64_t global_entry_linear_idx = 0;
-    for (int i = num_dims - 1; i >= 0; --i) {
+    for (int i = tensor_ndim - 1; i >= 0; --i) {
       uint64_t global_idx_at_i = global_offset[i] + tmp_idx % local_shape[i];
       tmp_idx /= local_shape[i];
       global_entry_linear_idx += global_idx_at_i * global_strides[i];
