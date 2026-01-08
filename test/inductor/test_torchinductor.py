@@ -3156,6 +3156,13 @@ class CommonTemplate:
             ),
         )
 
+    def test_view_copy_dtype_change(self):
+        def fn(x, dtype):
+            return torch.ops.aten.view_copy(x, dtype=dtype)
+
+        x = torch.randint(2, 32, (8, 16), dtype=torch.int32, device=self.device)
+        self.common(fn, (x, torch.int64))
+
     def test_torch_device_split(self):
         def fn(x):
             return x.split(2)
@@ -3310,6 +3317,28 @@ class CommonTemplate:
             return (torch.nn.functional.silu(a),)
 
         self.common(fn, (torch.randn(8, 8),))
+
+    @skip_if_halide  # halide has different precision characteristics
+    def test_silu_exact_eager(self):
+        """Test that compiled SiLU matches eager exactly."""
+
+        def fn(a):
+            return torch.nn.functional.silu(a)
+
+        # Test with normal random values
+        self.common(fn, (torch.randn(1024, device=self.device),))
+
+        # Test with bfloat16 edge cases (all possible bf16 values)
+        x_bf16 = (
+            torch.arange(0, 2**16, dtype=torch.int32, device=self.device)
+            .to(torch.int16)
+            .view(torch.bfloat16)
+        )
+        eager_result_bf16 = fn(x_bf16)
+        torch._dynamo.reset()
+        compiled_fn = torch.compile(fn)
+        compiled_result_bf16 = compiled_fn(x_bf16)
+        self.assertEqual(eager_result_bf16, compiled_result_bf16, equal_nan=True)
 
     @skip_if_halide  # halide has buggy nan handling
     def test_nan_to_num(self):
@@ -9938,11 +9967,13 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 indices,
             ],
         )
-        assertGeneratedKernelCountEqual(self, 1)
+        # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion.
+        # Correctness is validated by self.common() above.
+        self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
 
     @expectedFailureXPU
     def test_max_pool2d_with_indices_backward5(self):
-        # Window size is too big. Should fallback
+        # Large window size - decomposition handles via scatter_add
         def fn(a, b, c):
             return aten.max_pool2d_with_indices_backward(
                 a, b, [13, 13], [1, 1], [2, 2], [1, 1], False, c
@@ -9966,11 +9997,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 indices,
             ],
         )
-        assertGeneratedKernelCountEqual(self, 0)
+        # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion.
+        # Correctness is validated by self.common() above.
+        # MPS: decomposition falls back to native kernel, so no inductor kernels generated
+        if self.device != "mps":
+            self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
 
     # From https://github.com/pytorch/pytorch/issues/93384
     def test_max_pool2d_with_indices_backward6(self):
-        # dilation is not 1. Should fallback
+        # dilation != 1 - decomposition handles all dilation cases
         def fn(a, b, c):
             return aten.max_pool2d_with_indices_backward(
                 a, b, [3, 2], [2, 1], [1, 1], [1, 2], False, c
@@ -9994,7 +10029,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 indices,
             ],
         )
-        assertGeneratedKernelCountEqual(self, 0)
+        # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion.
+        # Correctness is validated by self.common() above.
+        # MPS: decomposition falls back to native kernel, so no inductor kernels generated
+        if self.device != "mps":
+            self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
 
     def test_issue102546(self):
         def fn(x):
@@ -13544,6 +13583,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             elements = torch.tensor([1, 2, 3, 4])
             test_elements = 1
             self.common(torch.isin, (elements, test_elements), {"invert": invert})
+
+        elements = torch.tensor(3.0)
+        test_elements = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0])
+        self.common(torch.isin, (elements, test_elements), {"assume_unique": True})
 
     def test_mul_index_expr(self):
         # Minified repro from https://github.com/pytorch/pytorch/issues/111884
