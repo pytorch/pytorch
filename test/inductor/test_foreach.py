@@ -1083,6 +1083,7 @@ class ForeachTests(TestCase):
 
     @requires_gpu
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._inductor.config.patch("_use_fp64_for_unbacked_floats", True)
     @parametrize(
         "value",
         [
