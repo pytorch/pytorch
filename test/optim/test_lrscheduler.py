@@ -2678,6 +2678,54 @@ class TestLRScheduler(TestCase):
             optim.param_groups[0]["lr"],
         )
 
+    def test_steplr_negative_epoch_zero_division(self):
+        # StepLR with gamma=0 is the most fragile configuration because
+        # closed form computation uses: gamma ** (epoch // step_size)
+        #
+        # If epoch is negative, this becomes:
+        #     0.0 ** negative_number
+        # which raises a ZeroDivisionError at runtime.
+        #
+        # This test documents the current (buggy) behavior: calling
+        # scheduler.step(epoch=<negative>) should not crash the scheduler
+        # later during normal stepping.
+
+        model = torch.nn.Linear(1, 1)
+        optimizer = torch.optim.SGD(model.parameters(), lr=0.2)
+
+        # gamma=0 forces the exponentiation path that is vulnerable to negative epochs
+        sched = torch.optim.lr_scheduler.StepLR(
+            optimizer,
+            step_size=3,
+            gamma=0.0,
+        )
+
+        # This call currently causes future LR steps to eventually hit:
+        #     ZeroDivisionError: 0.0 cannot be raised to a negative power
+        # because StepLR does not validate negative 'epoch' inputs.
+        sched.step(epoch=-5)
+
+        # Perform a few normal optimizer/scheduler steps.
+        # The ZeroDivisionError triggers around here.
+        for _ in range(3):
+            optimizer.step()
+            sched.step()
+
+        optimizer.step()  # final optimizer step before the failing scheduler call
+
+        # The final StepLR update used to crash with ZeroDivisionError.
+        try:
+            sched.step()  # should NOT raise ZeroDivisionError
+        except ZeroDivisionError as e:
+            raise AssertionError(
+                "StepLR raised ZeroDivisionError after receiving a negative epoch. "
+                "Schedulers should validate epoch inputs instead of crashing."
+            ) from e
+
+        # Scheduler should always leave LR in a valid numeric state.
+        lr = optimizer.param_groups[0]["lr"]
+        assert lr >= 0.0
+
 
 instantiate_parametrized_tests(TestLRScheduler)
 
