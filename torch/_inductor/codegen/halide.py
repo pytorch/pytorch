@@ -452,6 +452,10 @@ class HalideOverrides(OpOverrides):
         return f"hl.pow({a}, {b})"  # hl.fast_pow fails accuracy
 
     @staticmethod
+    def ldexp(x, n):
+        raise Unsupported("ldexp")
+
+    @staticmethod
     def log(x):
         return f"hl.log({x})"  # hl.fast_log fails accuracy
 

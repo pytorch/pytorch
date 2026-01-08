@@ -296,27 +296,27 @@ class ShardingPropagator:
             return None
 
     @lru_cache  # noqa: B019
-    def _propagate_tensor_meta(
+    def _propagate_tensor_meta_cached(
         self, op_schema: OpSchema
     ) -> TensorMeta | Sequence[TensorMeta | None] | None:
         """
         Cached version of _propagate_tensor_meta_non_cached
-        This is a private API. Use propagate_tensor_meta instead.
+        Use _propagate_tensor_meta instead to handle dynamic shapes.
         """
         return self._propagate_tensor_meta_non_cached(op_schema)
 
-    def propagate_tensor_meta(
+    def _propagate_tensor_meta(
         self, op_schema: OpSchema
     ) -> TensorMeta | Sequence[TensorMeta | None] | None:
         """
         Propagate the tensor metadata, it could either return a TensorMeta
-        or a list/tuple of TensorMetas. This is a public API that should be
-        used if cache should be used.
+        or a list/tuple of TensorMetas. Uses the cached version if not
+        actively tracing. Use this method instead of _propagate_tensor_meta_non_cached
         """
         if _are_we_tracing():
             return self._propagate_tensor_meta_non_cached(op_schema)
         else:
-            return self._propagate_tensor_meta(op_schema)
+            return self._propagate_tensor_meta_cached(op_schema)
 
     def _create_output_spec_with_new_tensor_meta(
         self,
@@ -486,10 +486,17 @@ class ShardingPropagator:
             if single_dim_strategy is not None:
                 mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
                 assert isinstance(mesh, DeviceMesh), "Expected to find a valid mesh"
+                # if we run into a case where we register a single-dim rule for an op that can't propagate tensor meta,
+                # we could loosen this assert, but it's better to fix gaps in tensor meta prop. We want to end up
+                # with the invariant that all DTensorSpec have a valid tensormeta, but many existing sharding rules
+                # skip this.  We try to enforce it for all newly added single-dim rules.
+                assert out_tensor_meta is not None, (
+                    f"_propagate_tensor_meta_non_cached returned None for {op_schema}, but tensor_meta is required"
+                )
                 # expand to generate the full set of strategy combinations, each one
                 # with a redistribute cost, and then find the min strategy over those costs.
                 _expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
-                    mesh, strategy_schema, single_dim_strategy
+                    mesh, strategy_schema, single_dim_strategy, out_tensor_meta
                 )
                 op_strategy = _expanded_strategy_fn(
                     op_schema.op, strategy_schema.args_meta, strategy_schema.kwargs_meta

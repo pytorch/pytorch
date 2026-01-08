@@ -1413,7 +1413,6 @@ if HAS_CUDA_AND_TRITON:
             self.assertEqual(samples, samples_compiled)
             self.assertEqual(num_skipped, counters["inductor"]["cudagraph_skips"])
 
-        @skipIfRocm
         def test_checkpointing_resets_persistent_refs(self):
             @torch.compile(mode="reduce-overhead")
             def foo(x):
@@ -1715,7 +1714,6 @@ if HAS_CUDA_AND_TRITON:
             del x
             self.assertEqual(all_live_block_count(), 0)
 
-        @skipIfRocm
         @unittest.skipUnless(IS_X86 and IS_LINUX, "cpp contexts are linux only")
         @torch._inductor.config.patch("triton.cudagraph_trees_history_recording", True)
         def test_workspace_allocation_error(self):
@@ -1740,14 +1738,20 @@ if HAS_CUDA_AND_TRITON:
                 except Exception as e:
                     thrown = True
                     if not IS_ARM64:
+                        # CUDA uses gemm/gemm_internal_cublas, ROCm uses bgemm_internal_cublaslt
                         self.assertTrue(
                             "at::cuda::blas::gemm<float, float>" in str(e)
                             or "at::cuda::blas::gemm_internal_cublas<float, float>"
                             in str(e)
+                            or "at::cuda::blas::bgemm_internal_cublaslt<float, float>"
+                            in str(e)
                         )
+                        # CUDA uses getCurrentCUDABlasHandle/getNewWorkspace,
+                        # ROCm uses getNewCUDABlasLtWorkspace/getCUDABlasLtWorkspace
                         self.assertTrue(
                             "getCurrentCUDABlasHandle" in str(e)
                             or "getNewWorkspace" in str(e)
+                            or "CUDABlasLtWorkspace" in str(e)
                         )
 
                 self.assertTrue(thrown)
