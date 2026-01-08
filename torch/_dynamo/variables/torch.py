@@ -43,7 +43,7 @@ from torch._C import DispatchKeySet
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.streams import StreamVariable
 from torch._dynamo.variables.torch_function import TorchFunctionModeVariable
-from torch._guards import Source, TracingContext
+from torch._guards import Guard, Source, TracingContext
 from torch._logging import warning_once
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
 
@@ -60,6 +60,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
+    GlobalStateSource,
     SyntheticLocalSource,
     TorchSource,
 )
@@ -547,7 +548,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         from . import (
             ConstantVariable,
-            DeterministicAlgorithmsVariable,
             GradModeVariable,
             StreamContextVariable,
             SymNodeVariable,
@@ -810,13 +810,23 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )
-            return DeterministicAlgorithmsVariable.create(tx, mode.as_python_constant())
+
+            value = mode.as_python_constant()
+            tx.output.create_node(
+                "call_function", torch._C._set_deterministic_algorithms, (value,), {}
+            )
+            torch._C._set_deterministic_algorithms(value)
+            return ConstantVariable.create(None)
 
         @register(torch.are_deterministic_algorithms_enabled)
         def handle_are_deterministic_algorithms_enabled(
             self, tx: "InstructionTranslator"
         ) -> ConstantVariable:
-            install_guard(DeterministicAlgorithmsVariable._guards_singleton)
+            guard = Guard(
+                GlobalStateSource(),
+                GuardBuilder.DETERMINISTIC_ALGORITHMS,  # type: ignore[arg-type]
+            )
+            install_guard(guard)
             return ConstantVariable.create(torch.are_deterministic_algorithms_enabled())
 
         @register(torch._C._is_torch_function_enabled)
@@ -1695,8 +1705,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         gb_type="Can't extract message from torch._check()",
                         context=str(message_vt),
                         explanation=(
-                            "The second argument of torch._check() must be a function"
-                            "defined within the torch.compile region"
+                            "The second argument of torch._check() must be a function "
+                            "defined within the torch.compile region "
                             "that does not reference a non-local variable."
                         ),
                         hints=[
