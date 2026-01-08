@@ -66,6 +66,7 @@ extensions = [
     "sphinx.ext.linkcode",
     "sphinxcontrib.mermaid",
     "sphinx_sitemap",
+    "sphinx_tippy",
 ]
 
 myst_enable_extensions = [
@@ -73,6 +74,17 @@ myst_enable_extensions = [
     "deflist",
     "html_image",
 ]
+
+# sphinx-tippy configuration
+tippy_props = {
+    "placement": "auto-start",
+    "maxWidth": 500,
+    "interactive": True,  # Allow clicking links inside tooltips
+    "theme": "material",
+}
+
+# Skip all URLs except glossary term links (glossary.html#term-*)
+tippy_skip_urls = (r"^(?!.*glossary\.html#term-).*$",)
 
 html_baseurl = "https://docs.pytorch.org/docs/stable/"  # needed for sphinx-sitemap
 sitemap_locales = [None]

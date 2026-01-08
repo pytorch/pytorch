@@ -1,5 +1,5 @@
 TorchScript
-===========
+===================
 
 .. toctree::
     :maxdepth: 1
@@ -18,7 +18,7 @@ TorchScript
 .. automodule:: torch.jit
 
 Creating TorchScript Code
---------------------------
+----------------------------------
 
 .. autosummary::
     :toctree: generated

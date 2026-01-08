@@ -2,7 +2,7 @@ sphinx==7.2.6
 #Description: This is used to generate PyTorch docs
 #Pinned versions: 7.2.6
 
-pytorch_sphinx_theme2==0.2.0
+pytorch_sphinx_theme2==0.3.0
 #Description: This is needed to generate PyTorch docs
 #Pinned versions: 0.2.0
 
@@ -62,3 +62,6 @@ sphinx-copybutton==0.5.0
 sphinx-design==0.6.1
 sphinxcontrib-mermaid==1.0.0
 myst-parser==4.0.1
+sphinx_tippy==0.4.3
+#Description: This is used to provide hover tooltips in PyTorch docs
+#Pinned versions: 0.4.3

@@ -56,7 +56,7 @@ Under the hood, `torch.export` leverages the following latest technologies:
   called the Frame Evaluation API to safely trace PyTorch graphs. This
   provides a massively improved graph capturing experience, with much fewer
   rewrites needed in order to fully trace the PyTorch code.
-- **AOT Autograd** ensures the graph is decomposed/lowered to the ATen operator
+- **AOT Autograd** ensures the graph is decomposed or lowered to the {term}`ATen` operator
   set. When using `run_decompositions()`, it can also provide functionalization.
 - **Torch FX (torch.fx)** is the underlying representation of the graph,
   allowing flexible Python-based transformations.
@@ -66,7 +66,7 @@ Under the hood, `torch.export` leverages the following latest technologies:
 {func}`torch.compile` also utilizes the same PT2 stack as `torch.export`, but
 is slightly different:
 
-- **JIT vs. AOT**: {func}`torch.compile` is a JIT compiler whereas
+- **{term}`JIT` vs. AOT**: {func}`torch.compile` is a {term}`JIT` compiler whereas
   which is not intended to be used to produce compiled artifacts outside of
   deployment.
 - **Partial vs. Full Graph Capture**: When {func}`torch.compile` runs into an
@@ -98,7 +98,7 @@ over Python bytecodes. The resulting graphs are simpler and only have straight
 line control flow, except for explicit control flow operators.
 
 Compared to {func}`torch.jit.trace`, `torch.export` is sound:
-it can trace code that performs integer computation on sizes and records
+it can {term}`trace<Tracing>` code that performs integer computation on sizes and records
 all of the side-conditions necessary to ensure that a particular
 trace is valid for other inputs.
 
@@ -145,7 +145,7 @@ Inspecting the `ExportedProgram`, we can note the following:
 - The {class}`torch.fx.Graph` contains the computation graph of the original
   program, along with records of the original code for easy debugging.
 - The graph contains only `torch.ops.aten` operators found [here](https://github.com/pytorch/pytorch/blob/main/aten/src/ATen/native/native_functions.yaml)
-  and custom operators.
+  and {term}`custom operators<Custom Operation>`.
 - The parameters (weight and bias to conv) are lifted as inputs to the graph,
   resulting in no `get_attr` nodes in the graph, which previously existed in
   the result of {func}`torch.fx.symbolic_trace`.
@@ -447,7 +447,7 @@ saved_exported_program = torch.export.load('exported_program.pt2')
 ## Export IR: Training vs Inference
 
 The graph produced by `torch.export` returns a graph containing only
-[ATen operators](https://pytorch.org/cppdocs/#aten), which are the basic unit of
+[{term}`ATen` operators](https://pytorch.org/cppdocs/#aten), which are the basic unit of
 computation in PyTorch. Export provides different IR levels based on your use case:
 
 | IR Type | How to Obtain | Properties | Operator Count | Use Case |
