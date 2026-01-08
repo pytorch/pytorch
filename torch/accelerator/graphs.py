@@ -156,6 +156,7 @@ class Graph(_acceleratorGraph):
             # very expensive, especially when performing multiple graph captures in sequence.
             gc.collect()
         torch.accelerator.empty_cache()
+        torch.accelerator.empty_host_cache()
         self.capture_begin()
 
     def __exit__(self, *exc_info: object) -> None:
