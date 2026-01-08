@@ -4263,7 +4263,7 @@ class Scheduler:
         """
 
         template_futures: list[Future] = []
-        future_to_pending_fusion: dict[Future, PendingFusion] = {}
+        future_to_pending_fusion: dict[Future, tuple[PendingFusion, BaseSchedulerNode]] = {}
 
         while template_fusion_candidates:
             fusions_to_remove: OrderedSet[BaseSchedulerNode] = OrderedSet()
@@ -4281,7 +4281,6 @@ class Scheduler:
 
                 if node2 == candidate:
                     assert is_epilogue_fusion(node1, node2)
-                    assert self.get_fused_node(node2) is node2
 
                     # Template fused with previous epilogue, no longer fusible
                     # TODO (PaulZhang12): Does not support fusions of templates with
@@ -4305,7 +4304,7 @@ class Scheduler:
                     f = pending_fusion.future.future
                     assert f is not None
                     template_futures.append(f)
-                    future_to_pending_fusion[f] = pending_fusion
+                    future_to_pending_fusion[f] = (pending_fusion, candidate)
                 else:
                     # Non AsyncCompile path, perform fusion
                     if self.fuse_if_speedup(
@@ -4315,14 +4314,14 @@ class Scheduler:
 
             # Evaluate fusion candidates as async_compile completes
             for f in as_completed(template_futures):
-                pending_fusion = future_to_pending_fusion[f]
+                pending_fusion, cand = future_to_pending_fusion[f]
                 if self.fuse_if_speedup(
                     self.get_fused_node(pending_fusion.node1),
                     self.get_fused_node(pending_fusion.node2),
                     pending_fusion.callable_fn,
                     fused_nodes,
                 ):
-                    fusions_to_remove.add(candidate)
+                    fusions_to_remove.add(cand)
 
             for f in fusions_to_remove:
                 template_fusion_candidates.pop(f)
