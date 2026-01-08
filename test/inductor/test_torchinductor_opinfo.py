@@ -297,10 +297,6 @@ inductor_expected_failures_single_sample["xpu"] = {
     ("linalg.pinv", "singular"): {f64},
     # could not create a primitive
     "addmv": {f64},
-    # could not create a primitive descriptor for
-    # a deconvolution forward propagation primitive
-    "nn.functional.conv_transpose2d": {f32, f64},
-    "nn.functional.conv_transpose3d": {f32, f64},
     # [Begin] Incorrect XPU reference due to new driver.
     "masked.prod": {b8, i32, i64},
     "masked.amin": {i64},
@@ -828,9 +824,6 @@ inductor_one_sample["cuda"] = {
     "nn.functional.fractional_max_pool3d": {f16, f32, f64},
     "nn.functional.group_norm": {f16},
     "nn.functional.hinge_embedding_loss": {f16},
-    # Enabling all tests for this test fails randomly
-    # See https://github.com/pytorch/pytorch/issues/129238
-    "nn.functional.huber_loss": {f16},
     "nn.functional.interpolate.bicubic": {f16},
     "nn.functional.interpolate.bilinear": {f16},
     "nn.functional.interpolate.trilinear": {f16},
@@ -948,9 +941,6 @@ inductor_one_sample["xpu"] = {
     "nn.functional.fractional_max_pool3d": {f16, f32, f64},
     "nn.functional.group_norm": {f16},
     "nn.functional.hinge_embedding_loss": {f16},
-    # Enabling all tests for this test fails randomly
-    # See https://github.com/pytorch/pytorch/issues/129238
-    "nn.functional.huber_loss": {f16},
     "nn.functional.interpolate.bicubic": {f16},
     "nn.functional.interpolate.bilinear": {f16},
     "nn.functional.interpolate.trilinear": {f16},
@@ -1338,8 +1328,10 @@ class TestInductorOpInfo(TestCase):
                         # Triton
                         if has_triton():
                             adjusted_kwargs.update(
-                                copy_to_gpu=False, reference_in_float=False
+                                copy_to_gpu=False,
                             )
+                            if device_type == GPU_TYPE:
+                                adjusted_kwargs["reference_in_float"] = False
 
                         # skip checking gradient on CPU for now
                         if device_type == GPU_TYPE:

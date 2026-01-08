@@ -1,6 +1,5 @@
 #include <torch/csrc/jit/runtime/operator.h>
 
-#include <ATen/ATen.h>
 #include <ATen/core/interned_strings.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/frontend/edit_distance.h>
@@ -51,16 +50,6 @@ struct OperatorRegistry {
       operators_by_sig[canonicalSchemaString(op->schema())] = op;
     }
     to_register.clear();
-  }
-
-  const std::vector<std::shared_ptr<Operator>>& getOperatorsWithLockHeld(
-      Symbol name) {
-    registerPendingOperators();
-    static std::vector<std::shared_ptr<Operator>> empty;
-    auto it = operators.find(name);
-    if (it != operators.end())
-      return it->second;
-    return empty;
   }
 
  public:
@@ -153,35 +142,14 @@ struct OperatorRegistry {
     return it->second;
   }
 
-  // This function returns internal lock-protected state. We need to
-  // copy it to avoid race conditions.
-  std::vector<std::shared_ptr<Operator>> getOperators(Symbol name) {
+  const std::vector<std::shared_ptr<Operator>>& getOperators(Symbol name) {
     std::lock_guard<std::mutex> guard(lock);
-    return getOperatorsWithLockHeld(name);
-  }
-
-  std::vector<std::shared_ptr<Operator>> getSortedOperators(Symbol name) {
-    std::lock_guard<std::mutex> guard(lock);
-    const auto& unsortedOps = getOperatorsWithLockHeld(name);
-    // Depending on the order of registration, aten or jit ops may be
-    // registered first. This sorting is helpful in cases where
-    // deterministic (i.e. not dependent on build config) behavior is
-    // desired; e.g. torch.ops.aten.* uses this function, and tries to
-    // find the "first" op that matches input args. Without the sorting,
-    // the "first" op may change depending on registration order.
-    std::vector<std::shared_ptr<Operator>> sortedOps;
-    sortedOps.reserve(unsortedOps.size());
-    std::copy_if(
-        unsortedOps.begin(),
-        unsortedOps.end(),
-        std::back_inserter(sortedOps),
-        [](const std::shared_ptr<Operator>& op) { return op->isC10Op(); });
-    std::copy_if(
-        unsortedOps.begin(),
-        unsortedOps.end(),
-        std::back_inserter(sortedOps),
-        [](const std::shared_ptr<Operator>& op) { return !op->isC10Op(); });
-    return sortedOps;
+    registerPendingOperators();
+    static std::vector<std::shared_ptr<Operator>> empty;
+    auto it = operators.find(name);
+    if (it != operators.end())
+      return it->second;
+    return empty;
   }
 
   std::vector<Symbol> findSimilarOperators(Symbol input_op) {
@@ -418,16 +386,35 @@ void deregisterOperator(const FunctionSchema& schema) {
   getRegistry().deregisterOperator(schema);
 }
 
-std::vector<std::shared_ptr<Operator>> getAllOperators() {
+const std::vector<std::shared_ptr<Operator>> getAllOperators() {
   return getRegistry().getAllOperators();
 }
 
-std::vector<std::shared_ptr<Operator>> getAllOperatorsFor(Symbol name) {
+const std::vector<std::shared_ptr<Operator>>& getAllOperatorsFor(Symbol name) {
   return getRegistry().getOperators(name);
 }
 
 std::vector<std::shared_ptr<Operator>> getAllSortedOperatorsFor(Symbol name) {
-  return getRegistry().getSortedOperators(name);
+  const auto& unsortedOps = getAllOperatorsFor(name);
+  // Depending on the order of registration, aten or jit ops may be
+  // registered first. This sorting is helpful in cases where
+  // deterministic (i.e. not dependent on build config) behavior is
+  // desired; e.g. torch.ops.aten.* uses this function, and tries to
+  // find the "first" op that matches input args. Without the sorting,
+  // the "first" op may change depending on registration order.
+  std::vector<std::shared_ptr<Operator>> sortedOps;
+  sortedOps.reserve(unsortedOps.size());
+  std::copy_if(
+      unsortedOps.begin(),
+      unsortedOps.end(),
+      std::back_inserter(sortedOps),
+      [](const std::shared_ptr<Operator>& op) { return op->isC10Op(); });
+  std::copy_if(
+      unsortedOps.begin(),
+      unsortedOps.end(),
+      std::back_inserter(sortedOps),
+      [](const std::shared_ptr<Operator>& op) { return !op->isC10Op(); });
+  return sortedOps;
 }
 
 std::shared_ptr<Operator> findOperatorFor(const c10::OperatorName& full_name) {

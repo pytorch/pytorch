@@ -49,12 +49,15 @@ from ..utils import (
     use_cpp_gemm_template,
     use_cutlass_template,
     use_decompose_k_choice,
+    use_nv_universal_gemm_template,
     use_triton_blackwell_tma_template,
+    use_triton_scaling_template,
     use_triton_template,
     use_triton_tma_template,
 )
 from .mm_common import (
     _is_static_problem,
+    load_kernel_template,
     mm_args,
     mm_grid,
     persistent_mm_grid,
@@ -75,162 +78,18 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 prims = torch.ops.prims
 
+# We define each template kernel in a separate file which is the name of the input to load_kernel_template
+# (e.g. triton_mm for templates/triton_mm.py.jinja).
+# If you are adding a new template, please follow that pattern and add a new file with your implementation in the templates folder.
 mm_template = TritonTemplate(
     name="mm",
     grid=mm_grid,
-    source=(
-        r"""
-{{def_kernel("A", "B")}}
-    M = {{size("A", 0)}}
-    N = {{size("B", 1)}}
-    K = {{size("A", 1)}}
-    if M * N == 0:
-        # early exit due to zero-size input(s)
-        return
-    stride_am = {{stride("A", 0)}}
-    stride_ak = {{stride("A", 1)}}
-    stride_bk = {{stride("B", 0)}}
-    stride_bn = {{stride("B", 1)}}
-
-    # based on triton.ops.matmul
-    pid = tl.program_id(0).to(INDEX_DTYPE)
-    grid_m = (M + BLOCK_M - 1) // BLOCK_M
-    grid_n = (N + BLOCK_N - 1) // BLOCK_N
-
-    # re-order program ID for better L2 performance
-    width = GROUP_M * grid_n
-    group_id = pid // width
-    group_size = min(grid_m - group_id * GROUP_M, GROUP_M)
-    pid_m = group_id * GROUP_M + (pid % group_size)
-    pid_n = (pid % width) // (group_size)
-    tl.assume(pid_m >= 0)
-    tl.assume(pid_n >= 0)
-
-    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
-    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    if ((stride_am == 1 and stride_ak == M) or (stride_am == K and stride_ak == 1)) and (M >= BLOCK_M and K > 1):
-        offs_a_m = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
-    else:
-        offs_a_m = rm % M
-    if ((stride_bk == 1 and stride_bn == K) or (stride_bk == N and stride_bn == 1)) and (N >= BLOCK_N and K > 1):
-        offs_b_n = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
-    else:
-        offs_b_n = rn % N
-    offs_k = tl.arange(0, BLOCK_K)
-    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-
-    for k_idx in range(0, tl.cdiv(K, BLOCK_K)):
-        {% if not EVEN_K %}
-        a_mask = offs_k[None, :] < (K - k_idx * BLOCK_K)
-        b_mask = offs_k[:, None] < (K - k_idx * BLOCK_K)
-        {% endif %}
-        a_k_idx_vals = offs_k[None, :] + (k_idx * BLOCK_K)
-        b_k_idx_vals = offs_k[:, None] + (k_idx * BLOCK_K)
-
-        idx_m = offs_a_m[:, None]
-        idx_n = a_k_idx_vals
-        {{load_input("A", "a", ("idx_m", "idx_n"), mask=None if EVEN_K else "a_mask",
-                     indent_width=8, index_shape=("BLOCK_M", "BLOCK_K"))}}
-
-        idx_m = b_k_idx_vals
-        idx_n = offs_b_n[None, :]
-        {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask",
-                     indent_width=8, index_shape=("BLOCK_K", "BLOCK_N"))}}
-
-        {% if USE_FAST_ACCUM %}
-        acc = tl.dot(a, b, acc, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
-        {% else %}
-        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
-        {% endif %}
-
-    # rematerialize rm and rn to save registers
-    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
-    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    idx_m = rm[:, None]
-    idx_n = rn[None, :]
-    mask = (idx_m < M) & (idx_n < N)
-
-    # inductor generates a suffix
-    {{store_output(("idx_m", "idx_n"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
-"""
-        if (torch.version.hip is None) or triton_version >= "3.3.0"
-        # FIXME: To get around rocm failures like https://github.com/pytorch/pytorch/actions/runs/13123783322/job/36617154943
-        # The only difference between the two templates is M >= BLOCK_M and N >= BLOCK_N checking.
-        # See more details in https://github.com/pytorch/pytorch/pull/146293
-        else r"""
-{{def_kernel("A", "B")}}
-    M = {{size("A", 0)}}
-    N = {{size("B", 1)}}
-    K = {{size("A", 1)}}
-    if M * N == 0:
-        # early exit due to zero-size input(s)
-        return
-    stride_am = {{stride("A", 0)}}
-    stride_ak = {{stride("A", 1)}}
-    stride_bk = {{stride("B", 0)}}
-    stride_bn = {{stride("B", 1)}}
-
-    # based on triton.ops.matmul
-    pid = tl.program_id(0).to(INDEX_DTYPE)
-    grid_m = (M + BLOCK_M - 1) // BLOCK_M
-    grid_n = (N + BLOCK_N - 1) // BLOCK_N
-
-    # re-order program ID for better L2 performance
-    width = GROUP_M * grid_n
-    group_id = pid // width
-    group_size = min(grid_m - group_id * GROUP_M, GROUP_M)
-    pid_m = group_id * GROUP_M + (pid % group_size)
-    pid_n = (pid % width) // (group_size)
-    tl.assume(pid_m >= 0)
-    tl.assume(pid_n >= 0)
-
-    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
-    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    if (stride_am == 1 and stride_ak == M) or (stride_am == K and stride_ak == 1):
-        offs_a_m = tl.max_contiguous(tl.multiple_of(rm % M, BLOCK_M), BLOCK_M)
-    else:
-        offs_a_m = rm % M
-    if (stride_bk == 1 and stride_bn == K) or (stride_bk == N and stride_bn == 1):
-        offs_b_n = tl.max_contiguous(tl.multiple_of(rn % N, BLOCK_N), BLOCK_N)
-    else:
-        offs_b_n = rn % N
-    offs_k = tl.arange(0, BLOCK_K)
-    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-
-    for k_idx in range(0, tl.cdiv(K, BLOCK_K)):
-        {% if not EVEN_K %}
-        a_mask = offs_k[None, :] < (K - k_idx * BLOCK_K)
-        b_mask = offs_k[:, None] < (K - k_idx * BLOCK_K)
-        {% endif %}
-        a_k_idx_vals = offs_k[None, :] + (k_idx * BLOCK_K)
-        b_k_idx_vals = offs_k[:, None] + (k_idx * BLOCK_K)
-
-        idx_m = offs_a_m[:, None]
-        idx_n = a_k_idx_vals
-        {{load_input("A", "a", ("idx_m", "idx_n"), mask=None if EVEN_K else "a_mask",
-                     indent_width=8, index_shape=("BLOCK_M", "BLOCK_K"))}}
-
-        idx_m = b_k_idx_vals
-        idx_n = offs_b_n[None, :]
-        {{load_input("B", "b", ("idx_m", "idx_n"), mask=None if EVEN_K else "b_mask",
-                     indent_width=8, index_shape=("BLOCK_K", "BLOCK_N"))}}
-        {% if USE_FAST_ACCUM %}
-        acc = tl.dot(a, b, acc, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
-        {% else %}
-        acc += tl.dot(a, b, allow_tf32=ALLOW_TF32, out_dtype=ACC_TYPE)
-        {% endif %}
-
-    # rematerialize rm and rn to save registers
-    rm = pid_m * BLOCK_M + tl.arange(0, BLOCK_M)
-    rn = pid_n * BLOCK_N + tl.arange(0, BLOCK_N)
-    idx_m = rm[:, None]
-    idx_n = rn[None, :]
-    mask = (idx_m < M) & (idx_n < N)
-
-    # inductor generates a suffix
-    {{store_output(("idx_m", "idx_n"), "acc", "mask", val_shape=("BLOCK_M", "BLOCK_N"))}}
-"""
-    ),
+    source=load_kernel_template("triton_mm")
+    if (torch.version.hip is None) or triton_version >= "3.3.0"
+    # FIXME: To get around rocm failures like https://github.com/pytorch/pytorch/actions/runs/13123783322/job/36617154943
+    # The only difference between the two templates is M >= BLOCK_M and N >= BLOCK_N checking.
+    # See more details in https://github.com/pytorch/pytorch/pull/146293
+    else load_kernel_template("triton_mm_rocm"),
     cache_codegen_enabled_for_template=True,
     prologue_loads_all_inputs=True,
 )
@@ -238,682 +97,27 @@ mm_template = TritonTemplate(
 persistent_tma_mm_template = TritonTemplate(
     name="mm_persistent_tma",
     grid=persistent_mm_grid,
-    source=r"""
-{{def_kernel("A", "B")}}
-    M = {{size("A", 0)}}
-    N = {{size("B", 1)}}
-    K = {{size("A", 1)}}
-    if M * N == 0:
-        # early exit due to zero-size input(s)
-        return
-
-    start_pid = tl.program_id(0).to(INDEX_DTYPE)
-    grid_m = tl.cdiv(M, BLOCK_M)
-    grid_n = tl.cdiv(N, BLOCK_N)
-    k_tiles = tl.cdiv(K, BLOCK_K)
-    num_tiles = grid_m * grid_n
-    tiles_per_SM = num_tiles // NUM_SMS
-    if start_pid < num_tiles % NUM_SMS:
-        tiles_per_SM += 1
-
-    tile_id = start_pid - NUM_SMS
-    ki = -1
-
-    width = GROUP_M * grid_n
-    rk_for_mask = tl.arange(0, BLOCK_K)
-    acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-
-    {%- if TMA_EXPERIMENTAL_API %}
-    workspace_base = ws_ptr + start_pid * 2 * TMA_SIZE
-    a_desc_ptr = workspace_base
-    b_desc_ptr = workspace_base + TMA_SIZE
-
-    triton.language.extra.cuda.experimental_device_tensormap_create2d(
-        desc_ptr=a_desc_ptr,
-        global_address=A,
-        load_size=[BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
-        global_size=[M, K] if A_ROW_MAJOR else [K, M],
-        element_ty=A.dtype.element_ty,
-    )
-    triton.language.extra.cuda.experimental_device_tensormap_create2d(
-        desc_ptr=b_desc_ptr,
-        global_address=B,
-        load_size=[BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
-        global_size=[K, N] if B_ROW_MAJOR else [N, K],
-        element_ty=B.dtype.element_ty,
-    )
-
-    tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(a_desc_ptr)
-    tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(b_desc_ptr)
-
-    {%- else %}
-    stride_am = {{stride("A", 0)}}
-    stride_ak = {{stride("A", 1)}}
-    stride_bk = {{stride("B", 0)}}
-    stride_bn = {{stride("B", 1)}}
-    a_desc = triton.language.make_tensor_descriptor(
-        base=A,
-        shape=[M, K] if A_ROW_MAJOR else [K, M],
-        strides=[stride_am, 1] if A_ROW_MAJOR else [stride_ak, 1],
-        block_shape=[BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
-    )
-    b_desc = triton.language.make_tensor_descriptor(
-        base=B,
-        shape=[K, N] if B_ROW_MAJOR else [N, K],
-        strides=[stride_bk, 1] if B_ROW_MAJOR else [stride_bn, 1],
-        block_shape=[BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
-    )
-    {%- endif %}
-
-    pid_m = 0
-    pid_n = 0
-    rm = 0
-    rn = 0
-
-    for _ in range(0, k_tiles * tiles_per_SM):
-        ki = tl.where(ki == k_tiles - 1, 0, ki + 1)
-        if ki == 0:
-            tile_id += NUM_SMS
-            # re-order program ID for better L2 performance
-            group_id = tile_id // width
-            group_size = min(grid_m - group_id * GROUP_M, GROUP_M)
-            pid_m = group_id * GROUP_M + (tile_id % group_size)
-            pid_n = (tile_id % width) // (group_size)
-
-            rm = pid_m * BLOCK_M
-            rn = pid_n * BLOCK_N
-
-        rk = ki * BLOCK_K
-
-        {%- if TMA_EXPERIMENTAL_API %}
-        a = tl._experimental_descriptor_load(
-            a_desc_ptr,
-            [rm, rk] if A_ROW_MAJOR else [rk, rm],
-            [BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
-            A.dtype.element_ty,
-        )
-        b = tl._experimental_descriptor_load(
-            b_desc_ptr,
-            [rk, rn] if B_ROW_MAJOR else [rn, rk],
-            [BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
-            B.dtype.element_ty,
-        )
-        {%- else %}
-        a = tl.load_tensor_descriptor(
-            a_desc,
-            [rm, rk] if A_ROW_MAJOR else [rk, rm],
-        )
-        b = tl.load_tensor_descriptor(
-            b_desc,
-            [rk, rn] if B_ROW_MAJOR else [rn, rk],
-        )
-        {%- endif %}
-        acc += tl.dot(
-            a if A_ROW_MAJOR else a.T,
-            b if B_ROW_MAJOR else b.T,
-            allow_tf32=ALLOW_TF32,
-        )
-
-        if ki == k_tiles - 1:
-            # inductor generates a suffix
-            {%- if TMA_EXPERIMENTAL_API %}
-            # rematerialize rm and rn to save registers
-            rcm = rm + tl.arange(0, BLOCK_M)
-            rcn = rn + tl.arange(0, BLOCK_N)
-            idx_m = rcm[:, None]
-            idx_n = rcn[None, :]
-            mask = (idx_m < M) & (idx_n < N)
-            {{store_output(("idx_m", "idx_n"), "acc", "mask", indent_width=12, val_shape=("BLOCK_M", "BLOCK_N"))}}
-            {%- else %}
-            {{store_output(("rm", "rn"), "acc", indent_width=12, val_shape=("BLOCK_M", "BLOCK_N"), block_indexing=True)}}
-            {%- endif %}
-            acc = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-
-""",
+    source=load_kernel_template("triton_persistent_tma_mm"),
 )
-
-load_scales = r"""
-@triton.jit
-def load_scales(scale_ptr, SCALE_RECIPE: tl.constexpr):
-    if SCALE_RECIPE == 0:
-        return tl.load(scale_ptr)  # For tensor-wise scaling, we'll load the scalar values
-    else:
-        return scale_ptr  # For all other scaling recipes, we'll return the pointers
-"""
-
-
-apply_scaling = r"""
-@triton.jit
-def apply_scaling(
-    accumulator,
-    a_scale,
-    b_scale,
-    SCALE_RECIPE_A: tl.constexpr,
-    SCALE_RECIPE_B: tl.constexpr,
-    offs_cm,
-    offs_cn,
-    M,
-    N,
-    stride_a_scale_m,
-    stride_b_scale_n,
-):
-    if SCALE_RECIPE_A == 1 and SCALE_RECIPE_B == 1:  # (ScalingType.RowWise, ScalingType.RowWise)
-        # For row-wise scaling, we need to load the scales for each row/column
-        a_scales = tl.load(
-            a_scale + (offs_cm * stride_a_scale_m),
-            mask=offs_cm < M,
-            other=0.0,
-        )
-        b_scales = tl.load(
-            b_scale + (offs_cn * stride_b_scale_n),
-            mask=offs_cn < N,
-            other=0.0,
-        )
-        acc_scale = a_scales[:, None] * b_scales[None, :]
-    else:  # (ScalingType.TensorWise, ScalingType.TensorWise)
-        # For per-tensor scaling, we can directly use the loaded scalar values
-        acc_scale = a_scale * b_scale
-
-    return accumulator * acc_scale
-"""
-
-
-scaled_mm_device_tma_epilogue_scaling = r"""
-{{def_kernel("A", "B", "A_inverse_scale", "B_inverse_scale")}}
-    M = {{size("A", 0)}}
-    N = {{size("B", 1)}}
-    K = {{size("A", 1)}}
-    if M * N == 0:
-        # early exit due to zero-size input(s)
-        return
-
-    stride_am = {{stride("A", 0)}}
-    stride_ak = {{stride("A", 1)}}
-    stride_bk = {{stride("B", 0)}}
-    stride_bn = {{stride("B", 1)}}
-
-    if SCALE_RECIPE_A == 1:  # ScalingType.RowWise
-        stride_a_scale_m = 1
-    else:
-        stride_a_scale_m = 0
-
-    if SCALE_RECIPE_B == 1:  # ScalingType.RowWise
-        stride_b_scale_n = 1
-    else:
-        stride_b_scale_n = 0
-
-    start_pid = tl.program_id(axis=0).to(INDEX_DTYPE)
-    num_pid_m = tl.cdiv(M, BLOCK_M)
-    num_pid_n = tl.cdiv(N, BLOCK_N)
-    k_tiles = tl.cdiv(K, BLOCK_K)
-    num_tiles = num_pid_m * num_pid_n
-
-    {%- if TMA_EXPERIMENTAL_API %}
-    workspace_base = ws_ptr + start_pid * 2 * TMA_SIZE
-    a_desc_ptr = workspace_base
-    b_desc_ptr = workspace_base + TMA_SIZE
-
-    triton.language.extra.cuda.experimental_device_tensormap_create2d(
-        desc_ptr=a_desc_ptr,
-        global_address=A,
-        load_size=[BLOCK_M, BLOCK_K],
-        global_size=[M, K],
-        element_ty=A.dtype.element_ty,
-    )
-    triton.language.extra.cuda.experimental_device_tensormap_create2d(
-        desc_ptr=b_desc_ptr,
-        global_address=B,
-        load_size=[BLOCK_N, BLOCK_K],
-        global_size=[N, K],
-        element_ty=B.dtype.element_ty,
-    )
-
-    tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(a_desc_ptr)
-    tl.extra.cuda.experimental_tensormap_fenceproxy_acquire(b_desc_ptr)
-
-    {%- else %}
-    stride_am = {{stride("A", 0)}}
-    stride_bn = {{stride("B", 1)}}
-    a_desc = triton.language.make_tensor_descriptor(
-        base=A,
-        shape=[M, K],
-        strides=[stride_am, 1],
-        block_shape=[BLOCK_M, BLOCK_K],
-    )
-    b_desc = triton.language.make_tensor_descriptor(
-        base=B,
-        shape=[N, K],
-        strides=[stride_bn, 1],
-        block_shape=[BLOCK_N, BLOCK_K],
-    )
-    {%- endif %}
-
-    tiles_per_SM = num_tiles // NUM_SMS
-    if start_pid < num_tiles % NUM_SMS:
-        tiles_per_SM += 1
-
-    tile_id = start_pid - NUM_SMS
-    ki = -1
-
-    pid_m = 0
-    pid_n = 0
-    offs_am = 0
-    offs_bn = 0
-
-    num_pid_in_group = GROUP_M * num_pid_n
-    accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-    a_scale = load_scales(A_inverse_scale, SCALE_RECIPE_A)
-    b_scale = load_scales(B_inverse_scale, SCALE_RECIPE_B)
-
-    for _ in range(0, k_tiles * tiles_per_SM):
-        ki = tl.where(ki == k_tiles - 1, 0, ki + 1)
-        if ki == 0:
-            tile_id += NUM_SMS
-            group_id = tile_id // num_pid_in_group
-            first_pid_m = group_id * GROUP_M
-            group_size_m = min(num_pid_m - first_pid_m, GROUP_M)
-            pid_m = first_pid_m + (tile_id % group_size_m)
-            pid_n = (tile_id % num_pid_in_group) // group_size_m
-
-            offs_am = pid_m * BLOCK_M
-            offs_bn = pid_n * BLOCK_N
-
-        offs_k = ki * BLOCK_K
-
-        {%- if TMA_EXPERIMENTAL_API %}
-        a = tl._experimental_descriptor_load(
-            a_desc_ptr, [offs_am, offs_k], [BLOCK_M, BLOCK_K],  A.dtype.element_ty
-        )
-        b = tl._experimental_descriptor_load(
-            b_desc_ptr, [offs_bn, offs_k], [BLOCK_N, BLOCK_K],  B.dtype.element_ty
-        )
-        {%- else %}
-        a = tl.load_tensor_descriptor(a_desc, [offs_am, offs_k])
-        b = tl.load_tensor_descriptor(b_desc, [offs_bn, offs_k])
-        {%- endif %}
-        if USE_FAST_ACCUM:
-            accumulator = tl.dot(a, b.T, accumulator)
-        else:
-            accumulator += tl.dot(a, b.T)
-
-        if ki == k_tiles - 1:
-            # Apply inverse scaling
-            offs_cm = offs_am + tl.arange(0, BLOCK_M)
-            offs_cn = offs_bn + tl.arange(0, BLOCK_N)
-            # Apply scaling
-            accumulator = apply_scaling(
-                accumulator,
-                a_scale,
-                b_scale,
-                SCALE_RECIPE_A,
-                SCALE_RECIPE_B,
-                offs_cm,
-                offs_cn,
-                M,
-                N,
-                stride_a_scale_m,
-                stride_b_scale_n,
-            )
-
-            # inductor generates a suffix
-            {%- if TMA_EXPERIMENTAL_API %}
-            idx_m = offs_cm[:, None]
-            idx_n = offs_cn[None, :]
-            mask = (idx_m < M) & (idx_n < N)
-            {{store_output(("idx_m", "idx_n"), "accumulator", "mask", indent_width=12, val_shape=("BLOCK_M", "BLOCK_N"))}}
-            {%- else %}
-            {{store_output(
-                ("offs_am", "offs_bn"),
-                "accumulator",
-                indent_width=12,
-                val_shape=("BLOCK_M", "BLOCK_N"),
-                block_indexing=True,
-            )}}
-            {%- endif %}
-            accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
-"""
 
 
 scaled_mm_device_tma_epilogue_scaling_template = TritonTemplate(
     name="scaled_mm_device_tma_epilogue_scaling",
     grid=persistent_mm_grid,
-    source=scaled_mm_device_tma_epilogue_scaling + load_scales + apply_scaling,
+    source=load_kernel_template("triton_epilogue_scaled_mm"),
 )
 
-blockwise1xTILESIZE_scaling = r"""
-@triton.jit
-def blockwise1xTILESIZE_scaling(
-    pid,
-    scale,
-    ki,
-    lhs_size,
-    lhs_blocks,
-    k_blocks,
-    BLOCK_lhs: tl.constexpr,
-    BLOCK_K: tl.constexpr,
-    MIN_BLOCK_TILE_K: tl.constexpr,
-    TILE_SIZE: tl.constexpr,
-):
-    row_offs_scale = pid * BLOCK_lhs + tl.arange(0, BLOCK_lhs)
-    col_offs_scale = ki * tl.cdiv(BLOCK_K, TILE_SIZE) + tl.arange(0, (BLOCK_K + TILE_SIZE - 1) // TILE_SIZE)
-    ptrs = scale + row_offs_scale[:, None] * k_blocks + col_offs_scale[None, :]
-    mask = (row_offs_scale[:, None] < lhs_size) & (col_offs_scale[None, :] < k_blocks)
-    scale_block = tl.load(ptrs, mask=mask, other=1.0)
-
-    scale_expanded = scale_block[:, :, None]
-    scale_expanded = tl.broadcast_to(
-        scale_expanded,
-        (BLOCK_lhs, (BLOCK_K + TILE_SIZE - 1) // TILE_SIZE, MIN_BLOCK_TILE_K)
-    )
-    scale_expanded = scale_expanded.reshape(
-        BLOCK_lhs,
-        ((BLOCK_K + TILE_SIZE - 1) // TILE_SIZE) * MIN_BLOCK_TILE_K
-    )
-
-    return scale_expanded
-"""
-
-blockwise128x128_scaling = r"""
-@triton.jit
-def blockwise128x128_scaling(
-    pid,
-    scale,
-    ki,
-    lhs_blocks,
-    k_blocks,
-    BLOCK_lhs: tl.constexpr,
-    BLOCK_K: tl.constexpr,
-    MIN_BLOCK_TILE_lhs: tl.constexpr,
-    MIN_BLOCK_TILE_K: tl.constexpr,
-):
-    row_offs_scale = pid * tl.cdiv(BLOCK_lhs, 128) + tl.arange(0, (BLOCK_lhs + 128 - 1) // 128)
-    col_offs_scale = ki * tl.cdiv(BLOCK_K, 128) + tl.arange(0, (BLOCK_K + 128 - 1) // 128)
-    ptrs = scale + row_offs_scale[:, None] * k_blocks + col_offs_scale[None, :]
-    mask = (row_offs_scale[:, None] < lhs_blocks) & (col_offs_scale[None, :] < k_blocks)
-    scale_block = tl.load(ptrs, mask=mask, other=1.0)
-
-    scale_expanded = scale_block[:, :, None, None]
-    scale_expanded = tl.broadcast_to(
-        scale_expanded,
-        ((BLOCK_lhs + 128 - 1) // 128, (BLOCK_K + 128 - 1) // 128, MIN_BLOCK_TILE_lhs, MIN_BLOCK_TILE_K)
-    )
-    scale_expanded = scale_expanded.reshape(
-        ((BLOCK_lhs + 128 - 1) // 128) * MIN_BLOCK_TILE_lhs,
-        ((BLOCK_K + 128 - 1) // 128) * MIN_BLOCK_TILE_K
-    )
-
-    return scale_expanded
-"""
-
-scaled_mm_device_tma_main_loop_scaling = r"""
-{{def_kernel("A", "B", "A_inverse_scale", "B_inverse_scale")}}
-    M = {{size("A", 0)}}
-    N = {{size("B", 1)}}
-    K = {{size("A", 1)}}
-    if M * N == 0:
-        # early exit due to zero-size input(s)
-        return
-
-    stride_am = {{stride("A", 0)}}
-    stride_bn = {{stride("B", 1)}}
-
-    start_pid = tl.program_id(axis=0).to(INDEX_DTYPE)
-    num_pid_m = tl.cdiv(M, BLOCK_M)
-    num_pid_n = tl.cdiv(N, BLOCK_N)
-    k_tiles = tl.cdiv(K, BLOCK_K)
-    num_tiles = num_pid_m * num_pid_n
-
-    a_desc = triton.language.make_tensor_descriptor(
-        base=A,
-        shape=[M, K],
-        strides=[stride_am, 1],
-        block_shape=[BLOCK_M, BLOCK_K],
-    )
-    b_desc = triton.language.make_tensor_descriptor(
-        base=B,
-        shape=[N, K],
-        strides=[stride_bn, 1],
-        block_shape=[BLOCK_N, BLOCK_K],
-    )
-
-    tiles_per_SM = num_tiles // NUM_SMS
-    if start_pid < num_tiles % NUM_SMS:
-        tiles_per_SM += 1
-
-    tile_id = start_pid - NUM_SMS
-    ki = -1
-
-    pid_m = 0
-    pid_n = 0
-    offs_am = 0
-    offs_bn = 0
-
-    num_pid_in_group = GROUP_M * num_pid_n
-    accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=ACC_TYPE)
-    a_scale = load_scales(A_inverse_scale, SCALE_RECIPE_A)
-    b_scale = load_scales(B_inverse_scale, SCALE_RECIPE_B)
-
-    for _ in range(0, k_tiles * tiles_per_SM):
-        ki = tl.where(ki == k_tiles - 1, 0, ki + 1)
-        if ki == 0:
-            tile_id += NUM_SMS
-            group_id = tile_id // num_pid_in_group
-            first_pid_m = group_id * GROUP_M
-            group_size_m = min(num_pid_m - first_pid_m, GROUP_M)
-            pid_m = first_pid_m + (tile_id % group_size_m)
-            pid_n = (tile_id % num_pid_in_group) // group_size_m
-
-            offs_am = pid_m * BLOCK_M
-            offs_bn = pid_n * BLOCK_N
-
-        offs_k = ki * BLOCK_K
-
-        a = tl.load_tensor_descriptor(a_desc, [offs_am, offs_k])
-        b = tl.load_tensor_descriptor(b_desc, [offs_bn, offs_k])
-
-        am_blocks = tl.cdiv(M, TILE_SIZE_A)
-        ak_blocks = tl.cdiv(K, TILE_SIZE_A)
-        bn_blocks = tl.cdiv(N, TILE_SIZE_B)
-        bk_blocks = tl.cdiv(K, TILE_SIZE_B)
-
-        {%- if SCALE_RECIPE_A == 5 %}  # ScalingType.Blockwise128x128
-        scale_a_block = blockwise128x128_scaling(
-            pid_m,
-            a_scale,
-            ki,
-            am_blocks,
-            ak_blocks,
-            BLOCK_M,
-            BLOCK_K,
-            MIN_BLOCK_TILE_AM,
-            MIN_BLOCK_TILE_AK,
-        )
-        {%- else %}  # ScalingType.Blockwise1xTILESIZE
-        scale_a_block = blockwise1xTILESIZE_scaling(
-            pid_m,
-            a_scale,
-            ki,
-            M,
-            am_blocks,
-            ak_blocks,
-            BLOCK_M,
-            BLOCK_K,
-            MIN_BLOCK_TILE_AK,
-            TILE_SIZE_A,
-        )
-        {%- endif %}
-
-        {%- if SCALE_RECIPE_A == 5 %}  # ScalingType.Blockwise128x128
-        scale_b_block = blockwise128x128_scaling(
-            pid_n,
-            b_scale,
-            ki,
-            bn_blocks,
-            bk_blocks,
-            BLOCK_N,
-            BLOCK_K,
-            MIN_BLOCK_TILE_BN,
-            MIN_BLOCK_TILE_BK,
-        )
-        {%- else %}  # ScalingType.Blockwise1xTILESIZE
-        scale_b_block = blockwise1xTILESIZE_scaling(
-            pid_n,
-            b_scale,
-            ki,
-            N,
-            bn_blocks,
-            bk_blocks,
-            BLOCK_N,
-            BLOCK_K,
-            MIN_BLOCK_TILE_BK,
-            TILE_SIZE_B,
-        )
-        {%- endif %}
-
-        a_scaled = a * scale_a_block
-        b_scaled = b * scale_b_block
-        accumulator = tl.dot(a_scaled, b_scaled.T, accumulator)
-
-        if ki == k_tiles - 1:
-            offs_cm = offs_am + tl.arange(0, BLOCK_M)
-            offs_cn = offs_bn + tl.arange(0, BLOCK_N)
-
-            # inductor generates a suffix
-            {{store_output(
-                ("offs_am", "offs_bn"),
-                "accumulator",
-                indent_width=12,
-                val_shape=("BLOCK_M", "BLOCK_N"),
-                block_indexing=True,
-            )}}
-            accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
-"""
 
 scaled_mm_device_tma_main_loop_scaling_template = TritonTemplate(
     name="scaled_mm_device_tma_main_loop_scaling",
     grid=persistent_mm_grid,
-    source=scaled_mm_device_tma_main_loop_scaling
-    + load_scales
-    + blockwise1xTILESIZE_scaling
-    + blockwise128x128_scaling,
+    source=load_kernel_template("triton_main_loop_scaled_mm"),
 )
-
-_compute_blackwell_pid = r"""
-@triton.jit
-def _compute_pid(tile_id, num_pid_in_group, grid_m, GROUP_M: tl.constexpr, NUM_SMS: tl.constexpr):
-    group_id = tile_id // num_pid_in_group
-    first_pid_m = group_id * GROUP_M
-    GROUP_M = min(grid_m - first_pid_m, GROUP_M)
-    pid_m = first_pid_m + (tile_id % GROUP_M)
-    pid_n = (tile_id % num_pid_in_group) // GROUP_M
-    return pid_m, pid_n
-"""
-
-_blackwell_ws_persistent_device_tma = r"""
-{{def_kernel("A", "B")}}
-    M = {{size("A", 0)}}
-    N = {{size("B", 1)}}
-    K = {{size("A", 1)}}
-    if M * N == 0:
-        # early exit due to zero-size input(s)
-        return
-    start_pid = tl.program_id(0)
-    grid_m = tl.cdiv(M, BLOCK_M)
-    grid_n = tl.cdiv(N, BLOCK_N)
-    k_tiles = tl.cdiv(K, BLOCK_K)
-    num_tiles = grid_m * grid_n
-
-    # Note: We require TMA_EXPERIMENTAL_API == False, which
-    # we will check before invoking this template.
-    stride_am = {{stride("A", 0)}}
-    stride_ak = {{stride("A", 1)}}
-    stride_bk = {{stride("B", 0)}}
-    stride_bn = {{stride("B", 1)}}
-    a_desc = triton.language.make_tensor_descriptor(
-        base=A,
-        shape=[M, K] if A_ROW_MAJOR else [K, M],
-        strides=[stride_am, 1] if A_ROW_MAJOR else [stride_ak, 1],
-        block_shape=[BLOCK_M, BLOCK_K] if A_ROW_MAJOR else [BLOCK_K, BLOCK_M],
-    )
-    b_desc = triton.language.make_tensor_descriptor(
-        base=B,
-        shape=[K, N] if B_ROW_MAJOR else [N, K],
-        strides=[stride_bk, 1] if B_ROW_MAJOR else [stride_bn, 1],
-        block_shape=[BLOCK_K, BLOCK_N] if B_ROW_MAJOR else [BLOCK_N, BLOCK_K],
-    )
-
-    # tile_id_c is used in the epilogue to break the dependency between
-    # the prologue and the epilogue
-    tile_id_c = start_pid - NUM_SMS
-    num_pid_in_group = GROUP_M * grid_n
-
-    for tile_id in tl.range(
-        start_pid, num_tiles, NUM_SMS, flatten=FLATTEN, warp_specialize=WARP_SPECIALIZE
-    ):
-        pid_m, pid_n = _compute_pid(
-            tile_id, num_pid_in_group, grid_m, GROUP_M, NUM_SMS
-        )
-        offs_am = pid_m * BLOCK_M
-        offs_bn = pid_n * BLOCK_N
-
-        accumulator = tl.zeros((BLOCK_M, BLOCK_N), dtype=tl.float32)
-        for ki in range(k_tiles):
-            offs_k = ki * BLOCK_K
-            a = tl.load_tensor_descriptor(
-                a_desc,
-                [offs_am, offs_k] if A_ROW_MAJOR else [offs_k, offs_am],
-            )
-            b = tl.load_tensor_descriptor(
-                b_desc,
-                [offs_k, offs_bn] if B_ROW_MAJOR else [offs_bn, offs_k],
-            )
-            accumulator += tl.dot(
-                a if A_ROW_MAJOR else a.T,
-                b if B_ROW_MAJOR else b.T,
-                allow_tf32=ALLOW_TF32,
-            )
-
-        tile_id_c += NUM_SMS
-        pid_m, pid_n = _compute_pid(
-            tile_id_c, num_pid_in_group, grid_m, GROUP_M, NUM_SMS
-        )
-        offs_cm = pid_m * BLOCK_M
-        offs_cn = pid_n * BLOCK_N
-        {%- if EPILOGUE_SUBTILE %}
-        tl.static_assert(BLOCK_N % 2 == 0)
-        acc = tl.reshape(accumulator, (BLOCK_M, 2, BLOCK_N // 2))
-        acc = tl.permute(acc, (0, 2, 1))
-        acc0, acc1 = tl.split(acc)
-        {{store_output(
-            ("offs_cm", "offs_cn"),
-            "acc0",
-            indent_width=8,
-            val_shape=("BLOCK_M", "BLOCK_N // 2"),
-            block_indexing=True
-        )}}
-        offs_cn2 = offs_cn + BLOCK_N // 2
-        {{store_output(
-            ("offs_cm", "offs_cn2"),
-            "acc1",
-            indent_width=8,
-            val_shape=("BLOCK_M", "BLOCK_N // 2"),
-            block_indexing=True
-        )}}
-        {%- else %}
-        {{store_output(
-            ("offs_cm", "offs_cn"),
-            "accumulator",
-            indent_width=8,
-            val_shape=("BLOCK_M", "BLOCK_N"),
-            block_indexing=True
-        )}}
-        {%- endif %}
-"""
 
 blackwell_ws_persistent_device_tma_mm_template = TritonTemplate(
     name="blackwell_ws_persistent_device_tma",
     grid=persistent_mm_grid,
-    source=_blackwell_ws_persistent_device_tma + _compute_blackwell_pid,
+    source=load_kernel_template("triton_blackwell_ws_persistent_device_tma_mm"),
 )
 
 
@@ -926,7 +130,7 @@ def lazy_register_extern_choice(fn):
 aten_mm = ExternKernelChoice(torch.mm, "at::mm_out", op_overload=aten.mm.out)
 aten_mm_dtype = ExternKernelChoice(
     torch.mm,
-    "at::_mm_dtype_out_cuda",
+    "at::_mm_dtype_out_xpu" if torch.xpu.is_available() else "at::_mm_dtype_out_cuda",
     name="mm_dtype",
     op_overload=aten.mm.dtype_out,
 )
@@ -1109,8 +313,8 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
             lambda: "input dtypes must be the same",
         )
         torch._check(
-            mat1.get_device().type == "cuda",
-            lambda: "out_dtype is only supported for CUDA",
+            mat1.get_device().type in ("cuda", "xpu"),
+            lambda: "out_dtype is only supported for CUDA or XPU",
         )
         torch._check(
             out_dtype == input_dtype
@@ -1221,6 +425,14 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
             if use_triton_blackwell_tma_template(mat1, mat2, output_layout=layout):
                 templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
 
+            if (
+                inductor_config.is_fbcode()
+                and inductor_config.triton.enable_tlx_templates
+            ):
+                from torch._inductor.fb.tlx_templates.mm_templates import append_tlx
+
+                templates_to_use = append_tlx(templates_to_use)
+
         templates_to_use.append(mm_contiguous_subgraph_template)
 
     choices.extend(
@@ -1246,6 +458,15 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
     if out_dtype is None and is_nonzero and use_ck_tile_gemm_template(layout, m, n, k):
         CKTileGemmTemplate.add_choices(choices, layout, kernel_inputs.nodes())
+
+    if (
+        out_dtype is None
+        and is_nonzero
+        and use_nv_universal_gemm_template(layout, m, n, k, mat1, mat2)
+    ):
+        from ..codegen.nv_universal_gemm import add_nv_universal_gemm_choices
+
+        add_nv_universal_gemm_choices(choices, layout, kernel_inputs)
 
     if out_dtype is None and use_cpp_gemm_template(layout, mat1, mat2):
         CppGemmTemplate.add_choices(
@@ -1551,6 +772,7 @@ scaling_pairs = [
     (ScalingType.RowWise, ScalingType.RowWise),
     (ScalingType.BlockWise1x128, ScalingType.BlockWise128x128),
     (ScalingType.BlockWise1x128, ScalingType.BlockWise1x128),
+    (ScalingType.BlockWise128x128, ScalingType.BlockWise1x128),
 ]
 
 
@@ -1719,28 +941,27 @@ def tuned_scaled_mm(
     ):
         overriders = dict(USE_FAST_ACCUM=use_fast_accum)
 
+        scale_a_size, scale_b_size = scale_a_real.shape, scale_b_real.shape
+
+        scale_option_a, scale_option_b = get_scaling_options(
+            mat_a, mat_b, scale_a_size, scale_b_size
+        )
+
         # TODO (paulzhan): There is no template that exists for bias and TMA
         # Don't run tma template currently if bias exist
         if use_triton_tma_template(mat_a, mat_b, output_layout=layout) and not bias:
-            scale_a_size, scale_b_size = scale_a_real.shape, scale_b_real.shape
-
-            scale_option_a, scale_option_b = get_scaling_options(
-                mat_a, mat_b, scale_a_size, scale_b_size
-            )
             overriders["SCALE_RECIPE_A"] = scale_option_a.value
             overriders["SCALE_RECIPE_B"] = scale_option_b.value
 
-            if (
-                scale_option_a in epilogue_scaling_types
-                and scale_option_b in epilogue_scaling_types
+            if use_triton_scaling_template(
+                scale_option_a, scale_option_b, epilogue_scaling_types
             ):
                 templates_to_use.append(scaled_mm_device_tma_epilogue_scaling_template)
                 kwarg_overrides[scaled_mm_device_tma_epilogue_scaling_template.uid] = (
                     overriders
                 )
-            elif (
-                scale_option_a in main_loop_scaling_types
-                and scale_option_b in main_loop_scaling_types
+            elif use_triton_scaling_template(
+                scale_option_a, scale_option_b, main_loop_scaling_types
             ):
                 overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
                 overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
@@ -1764,8 +985,11 @@ def tuned_scaled_mm(
                 overriders
             )
 
-        templates_to_use.append(mm_template)
-        kwarg_overrides[mm_template.uid] = overriders
+        if use_triton_scaling_template(
+            scale_option_a, scale_option_b, epilogue_scaling_types
+        ):
+            templates_to_use.append(mm_template)
+            kwarg_overrides[mm_template.uid] = overriders
 
     # Single unified call for all templates
     choices.extend(

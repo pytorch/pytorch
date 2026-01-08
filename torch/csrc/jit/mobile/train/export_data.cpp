@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/mobile/import_export_common.h>
 #include <torch/csrc/jit/mobile/module.h>
-#include <torch/csrc/jit/runtime/instruction.h>
 #include <torch/csrc/jit/serialization/flatbuffer_serializer.h>
 #include <torch/csrc/jit/serialization/pickler.h>
 #include <torch/csrc/jit/serialization/type_name_uniquer.h>

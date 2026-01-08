@@ -246,7 +246,7 @@ class UvTcpServer : public UvTcpSocket {
               uv_err_name(uv_res),
               uv_strerror(uv_res)));
       res->cacheSocketPort();
-    } catch (std::exception& ex) {
+    } catch (std::exception&) {
       res->close();
       throw;
     }
@@ -322,7 +322,7 @@ class UvTcpServer : public UvTcpSocket {
               uv_err_name(uv_res),
               uv_strerror(uv_res)));
       res->cacheSocketPort();
-    } catch (std::exception& ex) {
+    } catch (std::exception&) {
       res->close();
       throw;
     }

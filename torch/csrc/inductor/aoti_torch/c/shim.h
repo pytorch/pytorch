@@ -38,9 +38,9 @@
 
 // The following files are implemented in a header-only way and are guarded by
 // test/cpp/aoti_abi_check
-#include <c10/util/BFloat16.h>
-#include <c10/util/Half.h>
-#include <c10/util/complex.h>
+#include <torch/headeronly/util/BFloat16.h>
+#include <torch/headeronly/util/Half.h>
+#include <torch/headeronly/util/complex.h>
 
 #ifdef __cplusplus
 extern "C" {

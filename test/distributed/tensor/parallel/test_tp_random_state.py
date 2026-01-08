@@ -2,6 +2,7 @@
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._random as random
+from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import Replicate
 from torch.distributed.tensor.parallel.api import parallelize_module
@@ -9,6 +10,7 @@ from torch.distributed.tensor.parallel.style import ColwiseParallel
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
+    create_local_tensor_test_class,
     DTensorTestBase,
     MLPModule,
     with_comms,
@@ -20,13 +22,13 @@ class TensorParallelRandomStateTests(DTensorTestBase):
         shape = large_tensor.shape
         assert shape[0] % n == 0
         local_shape = [shape[0] // n, shape[1]]
-
         slice_idx = (
             slice(idx * local_shape[0], (idx + 1) * local_shape[0]),
             slice(local_shape[1]),
         )
         return large_tensor[slice_idx]
 
+    @maybe_run_for_local_tensor
     def check_gathered_tensors(self, self_rank, size, gathered_tensors, assertFunc):
         for other_rank in range(size):
             if self_rank != other_rank:
@@ -127,6 +129,10 @@ class TensorParallelRandomStateTests(DTensorTestBase):
                     dp_rank, dp_size, tensor_gather, dp_weights_assert
                 )
 
+
+TensorParallelRandomStateTestsWithLocalTensor = create_local_tensor_test_class(
+    TensorParallelRandomStateTests
+)
 
 if __name__ == "__main__":
     run_tests()

@@ -246,7 +246,6 @@ CREATE_MPS_STRUCTURED_BOOLEAN_OP_FUNC(gt_tensor_out_mps, greaterThan, Tensor);
 // Arithmetic Binary Ops
 CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(minimum_out_mps, minimumWithNaNPropagationAndIntFallback, Tensor);
 CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(maximum_out_mps, maximumWithNaNPropagationAndIntFallback, Tensor);
-CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(pow_tensor_scalar_out_mps, power, Scalar);
 CREATE_MPS_STRUCTURED_BINARY_OP_FUNC(pow_tensor_tensor_out_mps, power, Tensor);
 CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_and_out_mps, logicalAND, Tensor);
 CREATE_MPS_BINARY_COMPARISON_OP_FUNC(logical_or_out_mps, logicalOR, Tensor);

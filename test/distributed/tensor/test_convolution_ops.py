@@ -14,6 +14,7 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.nn import functional as F
+from torch.testing._internal.common_cuda import with_tf32_off
 from torch.testing._internal.common_utils import run_tests
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -230,6 +231,7 @@ class DistConvolutionOpsTest(DTensorTestBase):
         out_dt, out = self._run_single_arg_fwd(model, x, [Shard(0)])
         self.assertEqual(out_dt, out)
 
+    @with_tf32_off
     @with_comms
     def test_conv2d_no_bias_compile(self):
         """Test Conv2d with bias=False in compile mode (Issue #167091)
@@ -262,7 +264,7 @@ class DistConvolutionOpsTest(DTensorTestBase):
         self.assertEqual(result_compiled.shape, torch.Size([1, 8, 5, 5]))
 
         # Verify numerical correctness
-        torch.testing.assert_close(result_compiled.to_local(), result_eager.to_local())
+        self.assertEqual(result_compiled.to_local(), result_eager.to_local())
 
     @with_comms
     def test_conv2d_no_bias_backward(self):

@@ -2,7 +2,6 @@
 
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/jit_log.h>
-#include <torch/csrc/jit/passes/quantization/helper.h>
 #include <torch/csrc/jit/runtime/graph_iterator.h>
 
 namespace torch::jit {

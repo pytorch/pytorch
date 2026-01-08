@@ -1,6 +1,7 @@
 #include <ATen/core/TensorBase.h>
 #include <ATen/core/TensorBody.h>
 #include <c10/util/OptionalArrayRef.h>
+#include <c10/util/Exception.h>
 
 #ifdef AT_PER_OPERATOR_HEADERS
 #include <ATen/ops/_assert_tensor_metadata_native.h>
@@ -14,14 +15,12 @@ namespace native {
 
 template<typename O, typename C>
 static void _assert_match(const O& original, const C& compared, const std::string& name) {
-  if (compared) {
-    bool equal = (original == compared.value());
-    if (!equal) {
-      std::stringstream msg;
-      msg << "Tensor " << name << " mismatch! Expected: " << compared.value() << ", Got: " << original;
-      throw std::runtime_error(msg.str());
-    }
-  }
+  TORCH_CHECK(!compared || original == compared.value(), "Tensor ",
+  name,
+  " mismatch! Expected: ",
+  compared.value(),
+  ", Got: ",
+  original);
 }
 
 template<>
@@ -31,19 +30,21 @@ void _assert_match<c10::Device, std::optional<c10::Device>>(
     const std::string& name) {
   if (compared) {
     const c10::Device& expected = compared.value();
-    if (original.type() != expected.type()) {
-      std::stringstream msg;
-      msg << "Tensor " << name << " mismatch! Expected: " << expected << ", Got: " << original;
-      throw std::runtime_error(msg.str());
-    }
+    TORCH_CHECK(original.type() == expected.type(), "Tensor ",
+    name,
+    " mismatch! Expected: ",
+    expected,
+    ", Got: ",
+    original);
 
     // If the expected device doesn't have an index (e.g., just "cuda"),
     // or if both devices have the same index, consider them equal
-    if (expected.has_index() && original.has_index() && expected.index() != original.index()) {
-      std::stringstream msg;
-      msg << "Tensor " << name << " mismatch! Expected: " << expected << ", Got: " << original;
-      throw std::runtime_error(msg.str());
-    }
+    TORCH_CHECK(!expected.has_index() || !original.has_index() || expected.index() == original.index(), "Tensor ",
+    name,
+    " mismatch! Expected: ",
+    expected,
+    ", Got: ",
+    original);
   }
 }
 

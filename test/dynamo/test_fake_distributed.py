@@ -90,12 +90,12 @@ class GraphModule(torch.nn.Module):
             """\
 class GraphModule(torch.nn.Module):
     def forward(self, primals_1: "Sym(u0)", primals_2: "Sym(u1)", primals_3: "Sym(u2)", primals_4: "f32[u0, u1, u2]"):
-        ge_1: "Sym(u0 >= 0)" = primals_1 >= 0
-        _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
-        ge_3: "Sym(u1 >= 0)" = primals_2 >= 0
-        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_3 = _assert_scalar_1 = None
-        ge_5: "Sym(u2 >= 0)" = primals_3 >= 0
-        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(ge_5, "Runtime assertion failed for expression u2 >= 0 on node 'ge_2'");  ge_5 = _assert_scalar_2 = None
+        ge: "Sym(u0 >= 0)" = primals_1 >= 0
+        _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar = None
+        ge_1: "Sym(u1 >= 0)" = primals_2 >= 0
+        _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
+        ge_2: "Sym(u2 >= 0)" = primals_3 >= 0
+        _assert_scalar_2 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u2 >= 0 on node 'ge_2'");  ge_2 = _assert_scalar_2 = None
 
         floordiv: "Sym((u0//2))" = primals_1 // 2
 
@@ -134,6 +134,26 @@ class GraphModule(torch.nn.Module):
         x = torch.ones(10)
         res = fn(x)
         self.assertEqual(res, x)
+
+    def test_device_mesh_flatten(self):
+        device_mesh = init_device_mesh(
+            device_type="cpu",
+            mesh_shape=(
+                1,
+                self.world_size,
+            ),
+            mesh_dim_names=("dp", "tp"),
+        )
+        self.assertEqual(device_mesh.get_coordinate(), [0, 0])
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def fn(x):
+            dm = device_mesh._flatten()
+            return x + 1, dm.get_coordinate()
+
+        x = torch.ones(10)
+        res = fn(x)
+        self.assertEqual(res, (x + 1, [0]))
 
 
 instantiate_parametrized_tests(TestFakeDistributed)

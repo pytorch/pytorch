@@ -9,7 +9,7 @@ __all__ = ["move_to_device_pass"]
 
 
 def move_to_device_pass(
-    ep: ExportedProgram, location: Union[torch.device, str, dict[str, str]]
+    ep: ExportedProgram, location: torch.device | str | dict[str, str]
 ) -> ExportedProgram:
     """
     Move the exported program to the given device.
@@ -27,7 +27,7 @@ def move_to_device_pass(
 
     def _get_new_device(
         curr_device: torch.device,
-        location: Union[torch.device, str, dict[str, str]],
+        location: torch.device | str | dict[str, str],
     ) -> str:
         if isinstance(location, dict):
             if str(curr_device) in location:

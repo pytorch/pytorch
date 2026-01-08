@@ -147,7 +147,7 @@ def benchmark_torch_function_in_microseconds(func: Callable, *args, **kwargs) ->
 
 @dataclass(frozen=True)
 class ExperimentConfig:
-    shape: tuple[int]  # [B, Hq, M, Hkv, N, D]
+    shape: tuple[int, ...]  # [B, Hq, M, Hkv, N, D]
     attn_type: str
     dtype: torch.dtype
     calculate_bwd_time: bool
@@ -257,7 +257,7 @@ def generate_inputs(
 
 
 def generate_jagged_inputs(
-    shape: tuple[int],
+    shape: tuple[int, ...],
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
@@ -720,7 +720,7 @@ softcap_value = 50
 dropout_p = 0.0
 
 
-def generate_score_mod(attn_type: str, shape: tuple[int]) -> Callable | None:
+def generate_score_mod(attn_type: str, shape: tuple[int, ...]) -> Callable | None:
     B, Hq, M, Hkv, N, D = shape
     is_decoding = M == 1
     from attn_gym.mods import generate_alibi_bias, generate_tanh_softcap
@@ -762,7 +762,7 @@ sliding_window_size = 512
 prefix_length = 512
 
 
-def generate_block_mask(attn_type: str, shape: tuple[int]):
+def generate_block_mask(attn_type: str, shape: tuple[int, ...]):
     B, Hq, M, Hkv, N, D = shape
     is_decoding = M == 1
 
@@ -837,7 +837,7 @@ def generate_block_mask(attn_type: str, shape: tuple[int]):
     return block_mask, mask_mod_kwargs
 
 
-def get_kernel_options(attn_type: str, shape: tuple[int]):
+def get_kernel_options(attn_type: str, shape: tuple[int, ...]):
     B, Hq, M, Hkv, N, D = shape
     is_decoding = M == 1
     kernel_opt_training_dict = {
@@ -924,7 +924,7 @@ def get_backend_context(backend: str):
 
 
 def generate_FA_callable(
-    attn_type: str, shape: tuple[int], dtype: torch.dtype, backend: str, **kwargs
+    attn_type: str, shape: tuple[int, ...], dtype: torch.dtype, backend: str, **kwargs
 ) -> Callable | None:
     if dtype not in [torch.float16, torch.bfloat16]:
         return None
@@ -983,7 +983,7 @@ def generate_FA_callable(
 
 
 def generate_FD_callable(
-    attn_type: str, shape: tuple[int], dtype: torch.dtype
+    attn_type: str, shape: tuple[int, ...], dtype: torch.dtype
 ) -> Callable | None:
     if dtype not in [torch.float16, torch.bfloat16]:
         return None
@@ -1030,7 +1030,10 @@ def generate_FD_callable(
 
 
 def generate_attn_mask_linear_score_mod(
-    shape: tuple[int], block_mask: BlockMask, score_mod: Callable, dtype: torch.dtype
+    shape: tuple[int, ...],
+    block_mask: BlockMask,
+    score_mod: Callable,
+    dtype: torch.dtype,
 ):
     B, Hq, M, N = shape
     if block_mask is None and score_mod is None:
@@ -1055,7 +1058,7 @@ def generate_attn_mask_linear_score_mod(
 
 def generate_eager_sdpa(
     attn_type: str,
-    shape: tuple[int],
+    shape: tuple[int, ...],
     dtype: torch.dtype,
     block_mask: BlockMask,
     score_mod: Callable | None = None,

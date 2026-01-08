@@ -39,13 +39,12 @@ C10_DIAGNOSTIC_POP()
 #include <dlfcn.h>
 #endif
 
-namespace at {
-namespace native {
+namespace at::native {
 
 namespace {
 
 // TODO: remove duplicate code in Conv_v7.cpp
-constexpr int64_t operator"" _TiB(unsigned long long n) {
+constexpr int64_t operator""_TiB(unsigned long long n) {
   return static_cast<size_t>(n) << 40;
 }
 
@@ -350,11 +349,26 @@ struct BenchmarkCache {
 // @eqy: use thread local caches as cuDNN Execution Plans are not guaranteed to
 // be thread safe across all engines see Limitations in
 // https://docs.nvidia.com/deeplearning/cudnn/backend/latest/release-notes.html
-thread_local BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyWrapper>
-    benchmark_cache;
-thread_local BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFusedWrapper>
-    benchmark_cache_fused;
+//
+// We also leak them due to apparent teardown segfaults observed since cuDNN
+// version 9.10+
+BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyWrapper>*
+_get_benchmark_cache() {
+  static thread_local BenchmarkCache<
+      cudnn_frontend::ExecutionPlan,
+      CacheKeyWrapper>* benchmark_cache =
+      new BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyWrapper>();
+  return benchmark_cache;
+}
 
+BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFusedWrapper>*
+_get_benchmark_cache_fused() {
+  static thread_local BenchmarkCache<
+      cudnn_frontend::ExecutionPlan,
+      CacheKeyFusedWrapper>* benchmark_cache_fused =
+      new BenchmarkCache<cudnn_frontend::ExecutionPlan, CacheKeyFusedWrapper>();
+  return benchmark_cache_fused;
+}
 } // namespace
 
 void run_conv_plan(
@@ -632,14 +646,40 @@ static nlohmann::json errata_json_handle;
 
 bool plan_errata_exception(
     const cudnnHandle_t handle,
-    const std::string& executionPlanTag) {
+    const std::string& executionPlanTag,
+    const Tensor& x) {
   static bool has_json =
       cudnn_frontend::load_from_config(errata_json_handle, "");
-  if (!has_json) {
-    return false;
-  } else {
+  // rule_id is an arbitrary string, here we use the issue number if there is
+  // one
+  static auto hardcoded_errata_json_handle_3d = nlohmann::json::parse(R"(
+            { "version" : 1,
+              "rules"   :
+                [
+                    { "rule_id"             : "163539",
+                      "operation"           : "ConvFwd",
+                      "engine"              : 23,
+                      "cudnn_version_start" : 90800,
+                      "cudnn_version_end"   : 91500
+                    },
+                    { "rule_id"             : "ConvBwdData",
+                      "operation"           : "ConvBwdData",
+                      "engine"              : 23,
+                      "cudnn_version_start" : 8000,
+                      "cudnn_version_end"   : -1
+                    }
+                ]
+            })");
+  if (!has_json && x.dim() > 4) {
+    return cudnn_frontend::check_errata(
+        hardcoded_errata_json_handle_3d, executionPlanTag, handle, []() {
+          return true;
+        });
+  } else if (has_json) {
     return cudnn_frontend::check_errata(
         errata_json_handle, executionPlanTag, handle, []() { return true; });
+  } else {
+    return false;
   }
 }
 
@@ -652,7 +692,7 @@ void generate_and_filter_plans(
     at::DataPtr& workspace_ptr) {
   auto initial_predicate_function =
       [&](cudnn_frontend::ExecutionPlan const& plan) -> bool {
-    return plan_errata_exception(handle, plan.getTag());
+    return plan_errata_exception(handle, plan.getTag(), x);
   };
   auto plans =
       generator.cudnnGetPlan(handle, opGraph, initial_predicate_function);
@@ -876,7 +916,7 @@ void try_plans(
   for (auto& plan : plans) {
     try {
       run_conv_plan(handle, x, y, w, plan, operation);
-      benchmark_cache.update(key, plan);
+      _get_benchmark_cache()->update(key, plan);
       return;
     } catch (cudnn_frontend::cudnnException&) {
     } catch (CuDNNError&) {
@@ -900,7 +940,7 @@ void try_plans_fused(
   for (auto& plan : plans) {
     try {
       run_conv_plan_fused(handle, x, y, w, z, b, plan);
-      benchmark_cache_fused.update(key, plan);
+      _get_benchmark_cache_fused()->update(key, plan);
       return;
     } catch (cudnn_frontend::cudnnException&) {
     } catch (CuDNNError&) {
@@ -927,11 +967,11 @@ bool try_configs(
                       .setHandle(handle)
                       .setEngineConfig(config, opgraph_tag)
                       .build();
-      if (plan_errata_exception(handle, plan.getTag())) {
+      if (plan_errata_exception(handle, plan.getTag(), x)) {
         continue;
       }
       run_conv_plan(handle, x, y, w, plan, operation);
-      benchmark_cache.update(key, plan);
+      _get_benchmark_cache()->update(key, plan);
       return true;
     } catch (cudnn_frontend::cudnnException&) {
     } catch (CuDNNError&) {
@@ -958,11 +998,11 @@ bool try_configs_fused(
                       .setHandle(handle)
                       .setEngineConfig(config, opgraph_tag)
                       .build();
-      if (plan_errata_exception(handle, plan.getTag())) {
+      if (plan_errata_exception(handle, plan.getTag(), x)) {
         continue;
       }
       run_conv_plan_fused(handle, x, y, w, z, b, plan);
-      benchmark_cache_fused.update(key, plan);
+      _get_benchmark_cache_fused()->update(key, plan);
       return true;
     } catch (cudnn_frontend::cudnnException&) {
     } catch (CuDNNError&) {
@@ -998,7 +1038,7 @@ void run_single_conv(
       deterministic,
       allow_tf32);
   // TODO: is this thread safe if cache is updated? is pointer stale?
-  auto search = benchmark_cache.find(key);
+  auto search = _get_benchmark_cache()->find(key);
   if (search) {
     try {
       run_conv_plan(handle, x, y, w, *search, operation);
@@ -1098,7 +1138,7 @@ void run_fused_conv(
       groups,
       deterministic,
       allow_tf32);
-  auto search = benchmark_cache_fused.find(key);
+  auto search = _get_benchmark_cache_fused()->find(key);
   if (search) {
     try {
       run_conv_plan_fused(handle, x, y, w, z, b, *search);
@@ -1185,8 +1225,8 @@ void raw_cudnn_convolution_forward_out(
   if (output.numel() == 0) {
     return;
   }
-  for (auto it = dilation.begin(); it != dilation.end(); it++) {
-    TORCH_CHECK_VALUE(*it > 0, "Expected positive dilation in convolution.");
+  for (long it : dilation) {
+    TORCH_CHECK_VALUE(it > 0, "Expected positive dilation in convolution.");
   }
   if (at::native::cudnnv8_enabled_check_debug()) {
     run_single_conv(
@@ -1353,7 +1393,6 @@ void raw_cudnn_convolution_add_relu_out(
   }
 }
 
-} // namespace native
-} // namespace at
+} // namespace at::native
 
 #endif // AT_CUDNN_ENABLED

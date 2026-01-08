@@ -1,6 +1,7 @@
 #pragma once
 
 #include <c10/core/CachingDeviceAllocator.h>
+#include <c10/core/DeviceCapability.h>
 #include <c10/core/DeviceType.h>
 #include <c10/macros/Macros.h>
 
@@ -72,6 +73,10 @@ TORCH_API c10::DeviceIndex exchangeDevice(c10::DeviceIndex device_index);
 // context if the context for device_index is not initialized. Return the
 // original device index that was active before the change.
 TORCH_API c10::DeviceIndex maybeExchangeDevice(c10::DeviceIndex device_index);
+
+// Get the device capability of the given device index.
+TORCH_API c10::DeviceCapability getDeviceCapability(
+    c10::DeviceIndex device_index);
 
 TORCH_API inline void emptyCache() {
   const auto device_type = getAccelerator(true).value();

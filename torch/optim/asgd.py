@@ -1,5 +1,5 @@
 # mypy: allow-untyped-defs
-from typing import cast, Optional, Union
+from typing import cast
 
 import torch
 from torch import Tensor
@@ -30,12 +30,12 @@ class ASGD(Optimizer):
     def __init__(
         self,
         params: ParamsT,
-        lr: Union[float, Tensor] = 1e-2,
+        lr: float | Tensor = 1e-2,
         lambd: float = 1e-4,
         alpha: float = 0.75,
         t0: float = 1e6,
         weight_decay: float = 0,
-        foreach: Optional[bool] = None,
+        foreach: bool | None = None,
         maximize: bool = False,
         differentiable: bool = False,
         capturable: bool = False,
@@ -355,7 +355,7 @@ def _multi_tensor_asgd(
             torch._foreach_add_(grouped_state_steps, 1)
 
         # intermediate = grad + param * lambd
-        intermediate: Union[tuple[Tensor, ...], list[Tensor]]
+        intermediate: tuple[Tensor, ...] | list[Tensor]
         if weight_decay != 0:
             if maximize:
                 torch._foreach_add_(grouped_grads, grouped_params, alpha=weight_decay)
@@ -390,8 +390,8 @@ def _multi_tensor_asgd(
         torch._foreach_addcmul_(grouped_axs, intermediate, grouped_mus)
         del intermediate
 
-        new_etas: Union[tuple[Tensor, ...], list[Tensor]]
-        new_mus: Union[tuple[Tensor, ...], list[Tensor]]
+        new_etas: tuple[Tensor, ...] | list[Tensor]
+        new_mus: tuple[Tensor, ...] | list[Tensor]
         if capturable:
             # update grouped_mus
             new_mus = torch._foreach_sub(grouped_state_steps, t0)
@@ -431,7 +431,7 @@ def asgd(
     state_steps: list[Tensor],
     # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
-    foreach: Optional[bool] = None,
+    foreach: bool | None = None,
     maximize: bool = False,
     differentiable: bool = False,
     capturable: bool = False,

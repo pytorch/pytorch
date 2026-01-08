@@ -2178,11 +2178,11 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
     return &pyobj_slot_;
   }
 
-  void incref_pyobject() const override final;
+  void incref_pyobject() const noexcept final;
 
-  void decref_pyobject() const override final;
+  void decref_pyobject() const noexcept final;
 
-  bool try_incref_pyobject() const override final;
+  bool try_incref_pyobject() const noexcept final;
 
  private:
   // See NOTE [std::optional operator usage in CUDA]

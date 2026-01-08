@@ -5,26 +5,27 @@
 
 #if AT_MKLDNN_ENABLED()
 #include <ideep.hpp>
+#include <dnnl.hpp>
 
-#ifndef IDEEP_PREREQ
-// Please find definitions of version numbers in ideep.hpp
-#if defined(IDEEP_VERSION_MAJOR) && defined(IDEEP_VERSION_MINOR) && \
-  defined(IDEEP_VERSION_PATCH) && defined(IDEEP_VERSION_REVISION)
-#define IDEEP_PREREQ(major, minor, patch, revision) \
-  (((IDEEP_VERSION_MAJOR << 16) + (IDEEP_VERSION_MINOR << 8) + \
-   (IDEEP_VERSION_PATCH << 0)) >= \
-   ((major << 16) + (minor << 8) + (patch << 0)) && \
-   (IDEEP_VERSION_REVISION >= revision))
+#ifndef DNNL_PREREQ
+// oneDNN version check macro
+// Checks if the current oneDNN version is >= the specified version
+#if defined(DNNL_VERSION_MAJOR) && defined(DNNL_VERSION_MINOR) && \
+  defined(DNNL_VERSION_PATCH)
+#define DNNL_PREREQ(major, minor, patch) \
+  (((DNNL_VERSION_MAJOR << 16) + (DNNL_VERSION_MINOR << 8) + \
+   (DNNL_VERSION_PATCH << 0)) >= \
+   ((major << 16) + (minor << 8) + (patch << 0)))
 #else
-#define IDEEP_PREREQ(major, minor, patch, revision) 0
+#define DNNL_PREREQ(major, minor, patch) 0
 #endif
 #endif
 
 namespace at::native {
 
-// Mapping ScalarType to ideep tensor data_type
-TORCH_API ideep::tensor::data_type get_mkldnn_dtype(ScalarType type);
-static inline ideep::tensor::data_type get_mkldnn_dtype(const Tensor& t) {
+// Mapping ScalarType to oneDNN memory data_type
+TORCH_API dnnl::memory::data_type get_mkldnn_dtype(ScalarType type);
+static inline dnnl::memory::data_type get_mkldnn_dtype(const Tensor& t) {
   return get_mkldnn_dtype(t.scalar_type());
 }
 
