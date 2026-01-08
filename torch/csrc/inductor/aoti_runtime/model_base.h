@@ -637,10 +637,15 @@ class AOTInductorModelBase {
       int32_t const_device_type = this->constant_device_type(i);
       bool device_type_matches = const_device_type == device_type_;
       uint8_t* internal_ptr = nullptr;
+      // Track the blob offset for this constant before incrementing the index.
+      // This is needed for MPS where we pass the base pointer and compute
+      // the storage_offset to include the blob internal offset.
+      size_t current_blob_offset = 0;
       if (data_size != 0) {
         if (device_type_matches) {
+          current_blob_offset = constants_internal_offset[main_blob_idx];
           internal_ptr = constant_ptr(
-              constants_internal_offset[main_blob_idx],
+              current_blob_offset,
               bytes_read,
               data_size,
               /* skip_copy = */ false);
@@ -663,8 +668,11 @@ class AOTInductorModelBase {
       auto size = this->constant_shape(i);
       auto stride = this->constant_stride(i);
 #ifdef USE_MPS
+      // For MPS, internal_ptr is the base of the entire MTL buffer, so we need
+      // to include the blob internal offset in the storage_offset. We use
+      // current_blob_offset which was saved before main_blob_idx was incremented.
       auto offset = this->constant_offset(i) +
-          (constants_internal_offset[i] / aoti_torch_dtype_element_size(dtype));
+          (current_blob_offset / aoti_torch_dtype_element_size(dtype));
 #else
       auto offset = this->constant_offset(i);
 #endif
