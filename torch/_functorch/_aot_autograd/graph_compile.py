@@ -616,7 +616,6 @@ def collect_bw_donated_buffer_idxs(
         fw_ins,
         user_fw_outs,
         bw_outs,
-        # pyrefly: ignore [bad-argument-type]
         saved_tensors,
     )
 
@@ -1929,7 +1928,7 @@ def _aot_stage2b_bw_compile(
                 with suppress_ctx:
                     for k in range(len(ph_arg.stride())):
                         # real_stride can't be symbolic.
-                        # pyrefly: ignore [index-error]
+
                         if guard_or_true(ph_arg.stride()[k] != int(real_stride[k])):
                             stride_different = True
                             break
@@ -1953,7 +1952,6 @@ def _aot_stage2b_bw_compile(
 
                     ph_size = ph_arg.size()
 
-                    # pyrefly: ignore [bad-argument-type]
                     placeholder_list[i] = ph_arg.as_strided(ph_size, real_stride)
             compiled_bw_func = None
             if (
