@@ -216,6 +216,15 @@ def gen_common_triton_imports() -> str:
         from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, DeviceProperties
         """
     )
+    if config.triton.proton_profiling:
+        imports.splice(
+            """
+            import triton.profiler as proton
+            import triton.profiler.language as pl
+            pl.enable_semantic('triton')
+            """
+        )
+
     return imports.getvalue()
 
 
@@ -1607,6 +1616,10 @@ class TritonOverrides(OpOverrides):
     @maybe_upcast_float32()
     def log2(x):
         return f"libdevice.log2({x})"
+
+    @staticmethod
+    def ldexp(x, n):
+        return f"libdevice.ldexp({x}, {n}.to(tl.int32))"
 
     @staticmethod
     @maybe_upcast_float32()
@@ -5537,14 +5550,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 @triton.jit
             """
         code.splice(heuristics_line)
+        kernel_name = name or str(Placeholder.KERNEL_NAME)
         code.writeline(
-            f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join(x.full_name() for x in argdefs)}):"
+            f"def {kernel_name}({', '.join(x.full_name() for x in argdefs)}):"
         )
         with code.indent():
+            if config.triton.proton_profiling:
+                code.writeline(f'pl.enter_scope("{kernel_name}")')
             self.codegen_static_numels(code)
             for old, new in self.args.aliases():
                 code.writeline(f"{old} = {new}")
             code.splice(self.body)
+            if config.triton.proton_profiling:
+                code.writeline(f'pl.exit_scope("{kernel_name}")')
 
         if config.benchmark_kernel:
             code.splice(self.codegen_kernel_benchmark(num_gb))
