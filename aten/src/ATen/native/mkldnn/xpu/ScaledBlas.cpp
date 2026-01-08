@@ -3,9 +3,9 @@
 #include <ATen/WrapDimUtilsMulti.h>
 #include <ATen/ceil_div.h>
 #include <ATen/native/Resize.h>
+#include <ATen/native/ScaledBlasUtils.h>
 #include <ATen/native/mkldnn/xpu/detail/oneDNN.h>
 #include <ATen/native/xpu/Blas.h>
-#include <ATen/native/ScaledBlasUtils.h>
 #include <torch/library.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
