@@ -6,9 +6,7 @@ throughout the caching system.
 
 from collections.abc import Callable
 from functools import lru_cache, wraps
-from typing_extensions import ParamSpec, TypedDict, TypeVar
-
-from torch import Tensor
+from typing_extensions import ParamSpec, TypeVar
 
 
 # Type specification for function parameters
@@ -40,27 +38,3 @@ def _lru_cache(fn: Callable[P, R]) -> Callable[P, R]:
             return fn(*args, **kwargs)
 
     return wrapper
-
-
-class EncodedTensor(TypedDict):
-    """TypedDict for encoded tensor metadata."""
-
-    shape: tuple[int, ...]
-    stride: tuple[int, ...]
-    dtype: str
-
-
-def _encode_tensor(t: Tensor) -> EncodedTensor:
-    """Encode a tensor's metadata into a JSON-serializable dict.
-
-    Args:
-        t: PyTorch tensor to encode
-
-    Returns:
-        Dict containing shape, stride, and dtype information
-    """
-    return EncodedTensor(
-        shape=tuple(t.shape),
-        stride=tuple(t.stride()),
-        dtype=str(t.dtype),
-    )
