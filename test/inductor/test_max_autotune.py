@@ -61,6 +61,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     NAVI_ARCH,
     parametrize,
+    random_matrix_with_scaled_reduction_dim,
     skipIfRocmArch,
     TEST_WITH_ROCM,
 )
@@ -134,6 +135,17 @@ class FailChoiceCaller(ChoiceCaller):
 @config.patch(enable_caching_generated_triton_templates=True)
 @instantiate_parametrized_tests
 class TestMaxAutotune(TestCase):
+    def _make_matrices(self, M, K, N, *batch_dims, dtype, device, requires_grad):
+        make_matrix = functools.partial(
+            random_matrix_with_scaled_reduction_dim,
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
+        a = make_matrix(M, K, *batch_dims, reduction_dim=-1)
+        b = make_matrix(K, N, *batch_dims, reduction_dim=-2)
+        return a, b
+
     @parametrize("dynamic", (False, True))
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     def test_max_autotune_mm_plus_mm_zero_size_input(self, dynamic, search_space):
@@ -1333,11 +1345,13 @@ class TestMaxAutotune(TestCase):
             a_in = torch.stack((a, a), dim=0)
             return (a_in @ b).relu()
 
-        a = torch.randn(
-            32, 32768, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
-        )
-        b = torch.randn(
-            32768, 64, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+        a, b = self._make_matrices(
+            M=32,
+            K=32768,
+            N=64,
+            dtype=torch.bfloat16,
+            device=GPU_TYPE,
+            requires_grad=True,
         )
 
         torch._dynamo.reset()
@@ -1360,8 +1374,8 @@ class TestMaxAutotune(TestCase):
             torch.testing.assert_close(
                 out,
                 f(a, b),
-                atol=1e-2,
-                rtol=1e-2,
+                atol=1e-4,
+                rtol=1e-4,
             )
 
     @unittest.skipIf(
@@ -1383,11 +1397,13 @@ class TestMaxAutotune(TestCase):
                 a_in = torch.cat([a for _ in range(256)], dim=0)
                 return (a_in @ b).relu().sum()
 
-            a = torch.randn(
-                8, 64, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
-            )
-            b = torch.randn(
-                64, 32768, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+            a, b = self._make_matrices(
+                M=8,
+                K=64,
+                N=32768,
+                dtype=torch.bfloat16,
+                device=GPU_TYPE,
+                requires_grad=True,
             )
 
             torch._dynamo.reset()
