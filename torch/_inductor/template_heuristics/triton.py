@@ -45,6 +45,9 @@ if TYPE_CHECKING:
 
     from triton import Config as TritonConfig
 
+else:
+    from torch._inductor.runtime.triton_compat import Config as TritonConfig
+
 
 # Gemm Configs
 @dataclasses.dataclass
@@ -71,6 +74,18 @@ class GemmConfig(BaseConfig):
 
 
 ConvConfig = BaseConfig
+
+
+@dataclasses.dataclass
+class BlackwellGPUGemmConfig(GemmConfig):
+    """
+    Gemm configuration used for templates with features explicitly
+    targeting Nvidia Blackwell GPUs
+    """
+
+    epilogue_subtile: bool = dataclasses.field(kw_only=True, default=False)
+    warp_specialize: bool = dataclasses.field(kw_only=True, default=True)
+    flatten: bool = dataclasses.field(kw_only=True, default=True)
 
 
 # FlexAttention Configs
@@ -311,17 +326,121 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         ]
 
         self.blackwell_persistent_mm_configs: list[BaseConfig] = [
-            GemmConfig(128, 256, 64, 4, 8),
-            GemmConfig(256, 128, 64, 3, 8),
-            GemmConfig(128, 256, 128, 2, 8),
-            GemmConfig(128, 256, 64, 3, 8),
-            GemmConfig(128, 128, 128, 3, 4),
-            GemmConfig(256, 128, 64, 3, 8),
-            GemmConfig(128, 128, 128, 3, 8),
+            BlackwellGPUGemmConfig(
+                128,
+                256,
+                64,
+                4,
+                8,
+                epilogue_subtile=True,
+                warp_specialize=True,
+                flatten=True,
+            ),
+            BlackwellGPUGemmConfig(
+                256,
+                128,
+                64,
+                3,
+                8,
+                epilogue_subtile=True,
+                warp_specialize=True,
+                flatten=True,
+            ),
+            BlackwellGPUGemmConfig(
+                128,
+                256,
+                128,
+                2,
+                8,
+                epilogue_subtile=True,
+                warp_specialize=True,
+                flatten=True,
+            ),
+            BlackwellGPUGemmConfig(
+                128,
+                256,
+                64,
+                3,
+                8,
+                epilogue_subtile=True,
+                warp_specialize=True,
+                flatten=True,
+            ),
+            BlackwellGPUGemmConfig(
+                128,
+                128,
+                128,
+                3,
+                4,
+                epilogue_subtile=True,
+                warp_specialize=True,
+                flatten=True,
+            ),
+            BlackwellGPUGemmConfig(
+                256,
+                128,
+                64,
+                3,
+                8,
+                epilogue_subtile=True,
+                warp_specialize=True,
+                flatten=True,
+            ),
+            BlackwellGPUGemmConfig(
+                128,
+                128,
+                128,
+                3,
+                8,
+                epilogue_subtile=True,
+                warp_specialize=True,
+                flatten=True,
+            ),
+            # Include no-subtiling. Always required for testing.
+            BlackwellGPUGemmConfig(
+                256,
+                128,
+                64,
+                3,
+                8,
+                epilogue_subtile=False,
+                warp_specialize=True,
+                flatten=True,
+            ),
+            BlackwellGPUGemmConfig(
+                128,
+                128,
+                128,
+                3,
+                8,
+                epilogue_subtile=False,
+                warp_specialize=True,
+                flatten=True,
+            ),
         ]
 
         self.blackwell_persistent_addmm_configs: list[BaseConfig] = [
-            GemmConfig(256, 128, 64, 2, 4),
+            BlackwellGPUGemmConfig(
+                256,
+                128,
+                64,
+                2,
+                4,
+                epilogue_subtile=True,
+                warp_specialize=True,
+                flatten=True,
+            ),
+            # Ensure we can test at least 1 non-subtiled version.
+            BlackwellGPUGemmConfig(
+                256,
+                128,
+                64,
+                2,
+                4,
+                epilogue_subtile=False,
+                warp_specialize=True,
+                flatten=True,
+            ),
         ]
 
         self.scaled_mm_configs: list[BaseConfig] = [
@@ -448,6 +567,22 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(64, 256, 128, 4, 4),
         ]
 
+        self.blackwell_scaled_persistent_mm_configs = [
+            BlackwellGPUGemmConfig(
+                block_m=c.block_m,
+                block_n=c.block_n,
+                block_k=c.block_k,
+                num_stages=c.num_stages,
+                num_warps=c.num_warps,
+                hint_override=c.hint_override,
+                group_m=8,
+                epilogue_subtile=True,
+                warp_specialize=True,
+                flatten=True,
+            )
+            for c in self.scaled_persistent_mm_configs
+        ]
+
         # TODO: Unify with other gemm patterns, mm_plus_mm currently follows
         # slightly different pattern than rest
         self.mm_plus_mm_configs: list[BaseConfig] = [
@@ -560,7 +695,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 max_mm_configs is None or len(used) < max_mm_configs
             ):
                 used.add(key)
-                kwargs = {
+                kwargs: dict[str, Any] = {
                     "BLOCK_M": conf.block_m,
                     "BLOCK_N": conf.block_n,
                     "BLOCK_K": conf.block_k,
@@ -568,6 +703,13 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
                 }
                 if group_m is not None:
                     kwargs["GROUP_M"] = group_m
+
+                # Add BlackwellGPUGemmConfig specific fields if present
+                if isinstance(conf, BlackwellGPUGemmConfig):
+                    kwargs["EPILOGUE_SUBTILE"] = conf.epilogue_subtile
+                    kwargs["WARP_SPECIALIZE"] = conf.warp_specialize
+                    kwargs["FLATTEN"] = conf.flatten
+
                 yield self.triton_config(conf.num_stages, num_warps, **kwargs)
 
     def _scale_mm_configs(
@@ -625,26 +767,74 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             )
 
             for c in configs:
-                scaled_config = dataclasses.replace(
-                    c,
-                    block_m=max(min(int(c.block_m * scale), m_hint), min_block_size),
-                    block_n=max(min(int(c.block_n * scale), n_hint), min_block_size),
-                    block_k=max(min(int(c.block_k * scale), k_hint), min_block_size_k),
-                    hint_override=hint_override,
-                )
+                block_m = max(min(int(c.block_m * scale), m_hint), min_block_size)
+                block_n = max(min(int(c.block_n * scale), n_hint), min_block_size)
+                block_k = max(min(int(c.block_k * scale), k_hint), min_block_size_k)
+                if not exclude(block_m, block_n, block_k):
+                    # This copy is expensive, so avoid it if we can.
+                    if (block_m, block_n, block_k, hint_override) != (
+                        c.block_m,
+                        c.block_n,
+                        c.block_k,
+                        c.hint_override,
+                    ):
+                        c = dataclasses.replace(
+                            c,
+                            block_m=block_m,
+                            block_n=block_n,
+                            block_k=block_k,
+                            hint_override=hint_override,
+                        )
 
-                if not exclude(
-                    scaled_config.block_m, scaled_config.block_n, scaled_config.block_k
-                ):
-                    scaled_configs.append(scaled_config)
+                    scaled_configs.append(c)
 
         return scaled_configs
 
+    # Estimate theoretical maximum shared memory
+    def get_shared_memory_estimation(
+        self,
+        gemm_config: BaseConfig,
+        dtype_size: int,
+        has_sm_layout_conversion: bool,
+        layout_conversion_byte_size: int,
+    ):
+        shared_mem_loads = dtype_size * (
+            gemm_config.block_m * gemm_config.block_k
+            + gemm_config.block_n * gemm_config.block_k
+        )
+
+        # Extra bytes to account for barriers in boundary conditions
+        extra_bytes = 128
+
+        # In persistent tma case, the layout conversion from mma -> blocked layout
+        # is not free and takes additional shared memory, while next loads are prefetched
+        # For addmm, the conversion is in the acc dtype, as it is needed before the bias addition
+        # For mm, the conversion is in the output dtype, as it happens before the store
+        if has_sm_layout_conversion:
+            element_bits = layout_conversion_byte_size * 8
+            # 8 bytes of padding for fp16/bf16
+            max_padding = 128 // element_bits
+            block_n = max_padding + gemm_config.block_n
+            shared_mem_epilogue = (
+                layout_conversion_byte_size * gemm_config.block_m * block_n
+            )
+        else:
+            shared_mem_epilogue = 0
+
+        return (
+            shared_mem_loads * gemm_config.num_stages
+            + shared_mem_epilogue
+            + extra_bytes
+        )
+
     def _get_exceeding_shared_memory_checker(
         self,
+        has_sm_layout_conversion: bool,
+        layout_conversion_byte_size: int,
     ) -> Optional[Callable[[BaseConfig, int], bool]]:
         """
         Returns a function that checks whether a given configuration exceeds the available shared memory for the device.
+        based on the config's theoretical maximum shared memory used.
         If the device does not report available shared memory, returns None.
         """
 
@@ -664,11 +854,13 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
         # TODO make a BaseDeviceConfigHeuristics to handle different device configuration in its own implementation.
         def exceeds(gemm_config: BaseConfig, dtype_size: int) -> bool:
-            shared_mem_accum = dtype_size * (
-                gemm_config.block_m * gemm_config.block_k
-                + gemm_config.block_n * gemm_config.block_k
+            estimation = self.get_shared_memory_estimation(
+                gemm_config,
+                dtype_size,
+                has_sm_layout_conversion,
+                layout_conversion_byte_size,
             )
-            return shared_mem_accum * gemm_config.num_stages > sm_available
+            return estimation > sm_available
 
         return exceeds
 
@@ -676,31 +868,26 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         self,
         configs: list[BaseConfig],
         dtype_size: int,
+        has_sm_layout_conversion: bool = False,
+        layout_conversion_byte_size: int = 0,
     ) -> list[BaseConfig]:
         if dtype_size <= 0:
             return configs
 
-        is_exceeding_shared_memory = self._get_exceeding_shared_memory_checker()
+        is_exceeding_shared_memory = self._get_exceeding_shared_memory_checker(
+            has_sm_layout_conversion, layout_conversion_byte_size
+        )
         if is_exceeding_shared_memory is None:
             return configs
 
         return [c for c in configs if not is_exceeding_shared_memory(c, dtype_size)]
 
-    def _prune_exhaustive_configs(
+    def _prune_reg_spill_configs(
         self,
         configs: list[BaseConfig],
-        dtype_size: int,
     ) -> list[BaseConfig]:
-        is_exceeding_shared_memory = self._get_exceeding_shared_memory_checker()
-
         pruned_configs = []
         for gemm_config in configs:
-            # Will use more shared memory than available
-            if is_exceeding_shared_memory and is_exceeding_shared_memory(
-                gemm_config, dtype_size
-            ):
-                continue
-
             NUM_REG = 255
             acc_regs = math.ceil(
                 gemm_config.block_m * gemm_config.block_n / (gemm_config.num_warps * 32)
@@ -733,6 +920,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         ] = lambda m, n, k: False,
         dtype_size: int = 0,
         op_name: str = "mm",  # For preprocessing overrides e.g. on CPU
+        **kwargs,
     ) -> Generator[TritonConfig, None, None]:
         configs = self._filter_configs(configs)
         scaled_configs = self._scale_mm_configs(
@@ -740,21 +928,23 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         )
 
         # Filter out configs that require more shared memory than is available.
+        # Theoretical upper bound, will over-prune configs. Off by default for maximum
+        # performance
         if config.max_autotune_prune_choices_based_on_shared_mem:
             scaled_configs = self._prune_exceeding_max_shared_mem_configs(
-                scaled_configs, dtype_size
+                scaled_configs,
+                dtype_size,
+                kwargs.get("has_sm_layout_conversion", False),
+                kwargs.get("layout_conversion_byte_size", 0),
             )
 
         if config.max_autotune_gemm_search_space == "EXHAUSTIVE":
-            assert dtype_size > 0, "dtype_size must be provided for exhaustive search"
-            scaled_configs = self._prune_exhaustive_configs(scaled_configs, dtype_size)
+            scaled_configs = self._prune_reg_spill_configs(scaled_configs)
         return self._finalize_mm_configs(scaled_configs)
 
     def triton_config(
         self, num_stages: int, num_warps: int, **kwargs: Any
     ) -> TritonConfig:
-        from triton import Config as TritonConfig  # type: ignore[attr-defined]
-
         return TritonConfig(kwargs, num_stages=num_stages, num_warps=num_warps)
 
     def get_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
@@ -884,6 +1074,7 @@ class CPUConfigHeuristic(BaseConfigHeuristic):
         ] = lambda m, n, k: False,
         dtype_size: int = 0,
         op_name: str = "mm",  # For preprocessing overrides e.g. on CPU
+        **kwargs,
     ) -> Generator[TritonConfig, None, None]:
         """
         CPU-specific preprocessing that applies CPU-specific scaling (0.5) and exclusion logic.
@@ -902,6 +1093,7 @@ class CPUConfigHeuristic(BaseConfigHeuristic):
             exclude=cpu_exclude_fn,
             dtype_size=dtype_size,
             op_name=op_name,
+            **kwargs,
         )
 
 
@@ -1630,6 +1822,7 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         self,
         kernel_inputs: KernelInputs,
         op_name: str,
+        **kwargs,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Convert config lists to template kwargs.
@@ -1654,7 +1847,14 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
         configs = self._get_config_generator()
 
         # Generate and process configs
-        for c in configs(m, n, k, dtype_size=dtype.itemsize, op_name=op_name):
+        for c in configs(
+            m,
+            n,
+            k,
+            dtype_size=dtype.itemsize,
+            op_name=op_name,
+            **kwargs,
+        ):
             template_kwargs = self._convert_config_to_template_kwargs(
                 c,
                 m,
@@ -1667,21 +1867,18 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
     def _convert_config_to_template_kwargs(
         self,
         triton_config: TritonConfig,
-        m: sympy.Integer,
-        n: sympy.Integer,
-        k: sympy.Integer,
+        m: sympy.Integer | sympy.Symbol,
+        n: sympy.Integer | sympy.Symbol,
+        k: sympy.Integer | sympy.Symbol,
         out_dtype: torch.dtype,
     ) -> dict[str, Any]:
         """
         Convert triton config to template kwargs.
         Moved from mm_common.mm_options.
         """
-        # Calculate EVEN_K symbolic
-        even_k_symbolic = (
-            # it isn't worth guarding on this
-            sympy.gcd(k, triton_config.kwargs["BLOCK_K"])
-            == triton_config.kwargs["BLOCK_K"]
-        )
+        # Calculate EVEN_K symbolic. (It isn't worth guarding on this)
+        even_k_symbolic = (k % triton_config.kwargs["BLOCK_K"]) == 0
+        even_k_symbolic = V.graph.sizevars.statically_known_true(even_k_symbolic)
 
         # Build options dict
 
@@ -1738,15 +1935,20 @@ class MMPlusMMTemplateConfigMixin(MMTemplateConfigMixin):
         self,
         kernel_inputs: KernelInputs,
         op_name: str,
+        **kwargs,
     ) -> Generator[dict[str, Any], None, None]:
         assert isinstance(kernel_inputs, MMKernelInputs), "Expect MMKernelInputs"
         m, n, k = kernel_inputs.mnk_symbolic()
-        for kwargs in super()._get_template_configs_impl(kernel_inputs, op_name):
+        for template_kwargs in super()._get_template_configs_impl(
+            kernel_inputs, op_name, **kwargs
+        ):
             # Apply BLOCK_K constraint specific to mm_plus_mm
             # see https://github.com/triton-lang/triton/issues/1298
             # BLOCK_K = K causes llvm error
-            if V.graph.sizevars.statically_known_lt(kwargs.get("BLOCK_K", k), k):
-                yield kwargs
+            if V.graph.sizevars.statically_known_lt(
+                template_kwargs.get("BLOCK_K", k), k
+            ):
+                yield template_kwargs
 
 
 class TMAWorkspaceMixin(MMTemplateConfigMixin):
@@ -1776,6 +1978,15 @@ class TMAWorkspaceMixin(MMTemplateConfigMixin):
         return super()._filter_configs(configs)
 
 
+def get_shared_memory_checker_opts(op_name: str, dtype_size: int):
+    return {
+        "has_sm_layout_conversion": True,
+        # addmm requires the acc dtype for layout conversion due to adding bias
+        # mm just input dtype
+        "layout_conversion_byte_size": 4 if op_name == "addmm" else dtype_size,
+    }
+
+
 # TMA-specific mixin for TMA templates
 class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
     """
@@ -1787,6 +1998,7 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
         self,
         kernel_inputs: KernelInputs,
         op_name: str,
+        **kwargs,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Generate TMA template configs by calling super and adding TMA-specific options.
@@ -1804,10 +2016,14 @@ class TMATemplateConfigMixin(TMAWorkspaceMixin, MMTemplateConfigMixin):
             "tma_store": config.triton.enable_template_tma_store,
             "transpose_discontiguous_tensor_descriptors_override": True,
         }
+
         # Get base template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs,
             op_name,
+            **get_shared_memory_checker_opts(
+                op_name, dtype_size=kernel_inputs.dtype().itemsize
+            ),
         ):
             yield {**template_kwargs, **tma_opts}
 
@@ -1818,31 +2034,33 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
         self,
         kernel_inputs: KernelInputs,
         op_name: str,
+        **kwargs,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Generate TMA template configs by calling super and adding TMA-specific options.
         """
-        base_ops = {
-            "NUM_SMS": get_num_sms(),
-            # TODO: Consider making this tunable.
-            "FLATTEN": True,
-        }
         # Get base template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs,
             op_name,
+            **kwargs,
         ):
             # Some Triton versions requires num_warps >= 4 for WS
             # to avoid compilation issues. Triton disables WS if num_warps < 4
             # or num_stages < 2. Similar issues have been seen with num_stages=1
-            ws = (
-                template_kwargs["num_warps"] >= 4 and template_kwargs["num_stages"] >= 2
+            constraints_violated = (
+                template_kwargs["num_warps"] < 4 or template_kwargs["num_stages"] < 2
             )
+            ws = (
+                template_kwargs.get("WARP_SPECIALIZE", True)
+                and not constraints_violated
+            )
+            flatten = template_kwargs.get("FLATTEN", True) and not constraints_violated
             yield {
                 **template_kwargs,
-                **base_ops,
+                "NUM_SMS": get_num_sms(),
                 "WARP_SPECIALIZE": ws,
-                "EPILOGUE_SUBTILE": config.triton.enable_epilogue_subtiling,
+                "FLATTEN": flatten,
             }
 
 
@@ -1891,6 +2109,7 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
         self,
         kernel_inputs: KernelInputs,
         op_name: str,
+        **kwargs,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Generate scaled MM template configs with scaled MM-specific options.
@@ -1934,7 +2153,7 @@ class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
 
         # Get base template configs from superclass
         for template_kwargs in super()._get_template_configs_impl(
-            kernel_inputs, op_name
+            kernel_inputs, op_name, **kwargs
         ):
             # Add scaled MM-specific options (moved from mm_common.scaled_mm_options)
             # Override accumulator type for scaled MM
@@ -2022,6 +2241,7 @@ class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
         self,
         kernel_inputs: KernelInputs,
         op_name: str,
+        **kwargs,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Generate scaled TMA template configs with both scaled MM and TMA-specific options.
@@ -2030,6 +2250,7 @@ class ScaledTMAConfigMixin(TMAWorkspaceMixin, BaseScaledMMConfigMixin):
         for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs,
             op_name,
+            **kwargs,
         ):
             # Add TMA-specific options for device TMA scaled MM
             template_kwargs["TMA_SIZE"] = TMA_DESCRIPTOR_SIZE
@@ -2049,7 +2270,6 @@ class ScaledBlackwellTMAConfigMixin(
     This inherits from ScaledMMConfigMixin, which inherits the scale_mm_epilogue, and adds TMA-specific options.
     """
 
-    # pyrefly: ignore [bad-override]
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         """
         Warp specialization-specific filtering (BlackwellTMATemplateConfigMixin)
@@ -2182,7 +2402,6 @@ class CUDAScaledMMTemplateConfigHeuristic(ScaledMMConfigMixin, CUDAConfigHeurist
         # Override mm_configs to use scaled_mm_configs
         self.mm_configs = self.scaled_mm_configs
 
-    # pyrefly: ignore [bad-override]
     def _filter_configs(self, configs: list[BaseConfig]) -> list[BaseConfig]:
         configs = [c for c in configs if c.block_k >= 32]
         return super()._filter_configs(configs)
@@ -2228,6 +2447,7 @@ class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
         self,
         kernel_inputs: KernelInputs,
         op_name: str,
+        **kwargs,
     ) -> Generator[dict[str, Any], None, None]:
         """
         Generate main loop scaling kernel inputs.
@@ -2245,6 +2465,7 @@ class CUDAScaledTMAMainLoopScalingTemplateConfigHeuristic(
         for template_kwargs in super()._get_template_configs_impl(
             kernel_inputs,
             op_name,
+            **kwargs,
         ):
             # Add scaling-specific options for main loop scaling variants
 
@@ -2284,9 +2505,8 @@ class CUDAScaledBlackwellTMATemplateConfigHeuristic(
 
     def __init__(self) -> None:
         super().__init__()
-        # Override mm_configs to use scaled_persistent_mm_configs for TMA
         # TODO: Tune scaled_persistent_mm_configs for Blackwell
-        self.mm_configs = self.scaled_persistent_mm_configs
+        self.mm_configs = self.blackwell_persistent_addmm_configs
 
 
 @register_template_heuristic(
