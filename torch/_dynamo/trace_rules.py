@@ -70,6 +70,7 @@ from .variables import (
     TorchInGraphFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
+    SparseTensorCreationSkipVariable
 )
 from .variables.base import VariableTracker
 
@@ -367,11 +368,11 @@ manual_torch_name_rule_map: dict[
     "torch.cuda._get_device_properties": TorchInGraphFunctionVariable,
     "torch.utils.hooks.BackwardHook": TorchInGraphFunctionVariable,
     "torch.set_default_device": UserFunctionVariable,
-    "torch.sparse_bsc_tensor": SkipFunctionVariable,
-    "torch.sparse_bsr_tensor": SkipFunctionVariable,
-    "torch.sparse_csc_tensor": SkipFunctionVariable,
-    "torch.sparse_csr_tensor": SkipFunctionVariable,
-    "torch.sparse_compressed_tensor": SkipFunctionVariable,
+    "torch.sparse_bsc_tensor": SparseTensorCreationSkipVariable,
+    "torch.sparse_bsr_tensor": SparseTensorCreationSkipVariable,
+    "torch.sparse_csc_tensor": SparseTensorCreationSkipVariable,
+    "torch.sparse_csr_tensor": SparseTensorCreationSkipVariable,
+    "torch.sparse_compressed_tensor": SparseTensorCreationSkipVariable,
     "torch._C._autograd._unsafe_set_version_counter": TorchInGraphFunctionVariable,
     "torch.xpu.get_rng_state": SkipFunctionVariable,
     "torch.xpu.set_rng_state": SkipFunctionVariable,

@@ -75,6 +75,7 @@ from .functions import (
     UserMethodVariable,
     WrapperUserFunctionVariable,
     WrapperUserMethodVariable,
+    SparseTensorCreationSkipVariable
 )
 from .higher_order_ops import (
     FunctionalCallVariable,

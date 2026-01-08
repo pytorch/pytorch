@@ -24,3 +24,8 @@ INFERENCE_MODE = [
     "This is primarily used in conjunction with `torch.inference_mode`. Consider using `torch.no_grad` instead "
     "because `torch.no_grad` leads to same improvements as `inference_mode` when `torch.compile` is used.",
 ]
+SPARSE_TENSOR = [
+    "Sparse tensor operations are not yet fully supported in torch.compile with fullgraph=True. "
+    "Consider using fullgraph=False to allow graph breaks, or move sparse tensor creation "
+    "outside the compiled region.",
+]
