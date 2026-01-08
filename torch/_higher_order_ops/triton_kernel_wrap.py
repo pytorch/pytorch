@@ -441,11 +441,11 @@ def generate_ttir(
 
     # Triton explicitly interprets ASTSource.constants entries as constexpr
     # (triton-lang/triton#8248). Thus, only arguments marked `is_constexpr`
-    # should be treated as such, not just non-tensor-like arguments.
+    # or None values should be treated as such, not just non-tensor-like arguments.
     constants = {
-        (i,): arg
-        for i, ((_, arg), param) in enumerate(zip(ordered_args.items(), kernel.params))
-        if param.is_constexpr
+        name: arg
+        for ((name, arg), param) in zip(ordered_args.items(), kernel.params)
+        if param.is_constexpr or arg is None
     }
 
     if (mangle_type := getattr(triton.runtime.jit, "mangle_type", None)) is not None:
