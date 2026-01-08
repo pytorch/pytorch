@@ -7,7 +7,11 @@ from typing import Any, Optional
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._higher_order_ops.utils import redirect_to_mode, reenter_make_fx
+from torch._higher_order_ops.utils import (
+    redirect_to_mode,
+    reenter_make_fx,
+    register_fake,
+)
 from torch._logging import warning_once
 from torch._ops import HigherOrderOperator
 from torch.fx import GraphModule
@@ -71,10 +75,6 @@ def inductor_compiled_code_impl(func, inputs):
 redirect_to_mode(inductor_compiled_code, DebugMode)
 redirect_to_mode(inductor_compiled_code, _CachingTorchDispatchMode)
 redirect_to_mode(inductor_compiled_code, _CachedTorchDispatchMode)
-
-
-# Register with FakeTensorMode to raise a clear error
-from torch._higher_order_ops.utils import register_fake
 
 
 @register_fake(inductor_compiled_code)
