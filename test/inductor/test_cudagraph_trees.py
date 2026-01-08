@@ -2267,10 +2267,8 @@ if HAS_CUDA_AND_TRITON:
                 self.assertEqual(foo(torch.tensor(6, device="cuda")), 6)
 
             if config.graph_partition:
-                FileCheck().check_count(
+                FileCheck().check(
                     "op0: reason=cpu ops, ir=DynamicScalar",
-                    1,
-                    exactly=True,
                 ).run(log_stream.getvalue())
             else:
                 FileCheck().check(
@@ -2303,7 +2301,8 @@ if HAS_CUDA_AND_TRITON:
             def foo(x):
                 return x.nonzero()
 
-            with capture_stderr() as captured_output:
+            log_stream, ctx = logs_to_string("torch._inductor.scheduler", "cudagraphs")
+            with ctx(), capture_stderr() as captured_output:
                 self.assertEqual(
                     foo(torch.tensor([1, 0, 2], device="cuda")),
                     torch.tensor([[0], [2]]),
@@ -2313,9 +2312,9 @@ if HAS_CUDA_AND_TRITON:
                 )
 
             if config.graph_partition:
-                FileCheck().check(
-                    "cudagraph partition due to unbacked binding ops"
-                ).check("foo").run(captured_output[0])
+                FileCheck().check("op0: reason=unbacked binding ops").check("foo").run(
+                    log_stream.getvalue()
+                )
             else:
                 FileCheck().check(
                     "skipping cudagraphs due to disabling cudagraphs due to incompatible op"
