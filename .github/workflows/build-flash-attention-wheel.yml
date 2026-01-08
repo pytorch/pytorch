@@ -52,7 +52,6 @@ jobs:
             torch_cuda_arch_list: "8.0;8.6;9.0;10.0"
             docker_image: "pytorch/manylinuxaarch64-builder:cuda13.0"
             runner: "linux.arm64.2xlarge"
-    timeout-minutes: 180
     env:
       DOCKER_IMAGE: ${{ matrix.docker_image }}
       CUDA_VERSION: ${{ matrix.cuda_version }}
