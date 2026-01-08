@@ -3199,17 +3199,6 @@
         "remove references to closure variable `x` in `lambda: f'{x} failed check'`",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
       ]
-    },
-    {
-      "Gb_type": "Can't extract message from torch._check()",
-      "Context": "str(message_vt)",
-      "Explanation": "The second argument of torch._check() must be a function defined within the torch.compile region that does not reference a non-local variable.",
-      "Hints": [
-        "Make sure the message function is defined in the torch.compile region.",
-        "Remove any closure variables, e.g. ",
-        "remove references to closure variable `x` in `lambda: f'{x} failed check'`",
-        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
-      ]
     }
   ],
   "GB0289": [
