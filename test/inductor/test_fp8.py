@@ -17,6 +17,7 @@ from torch.testing._internal.common_cuda import (
     IS_SM90,
     PLATFORM_SUPPORTS_FP8,
     PLATFORM_SUPPORTS_MX_GEMM,
+    SM90OrLater,
 )
 from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
@@ -393,6 +394,40 @@ class TestFP8Types(TestCase):
             f"Benchmark results: Inductor: {compiled_latency}ms, Eager: {eager_latency}ms, "
             f"LN only Inductor: {ln_latency}ms."
         )
+
+    @unittest.skipIf(
+        not SM90OrLater or torch.version.hip, "PDL requires NVIDIA SM 9.0+"
+    )
+    @onlyOn(["cuda", "xpu"])
+    def test_scaled_mm_pdl_handles_none_bias(self, device):
+        dtype_float8 = _fix_fp8_dtype_for_rocm(torch.float8_e4m3fn, device)
+        M, K, N = 32, 64, 32
+
+        # A row-major, B column-major view (transpose of contiguous)
+        a = torch.randn(M, K, device=device, dtype=torch.float16).to(dtype_float8)
+        b = torch.randn(N, K, device=device, dtype=torch.float16).to(dtype_float8).t()
+        scale_a = torch.tensor(1.0, device=device)
+        scale_b = torch.tensor(1.0, device=device)
+        scale_r = torch.tensor(1.0, device=device)
+
+        def linear(a, b, sa, sb, sr):
+            return torch._scaled_mm(a, b, sa, sb, None, sr, out_dtype=torch.bfloat16)
+
+        expected = linear(a, b, scale_a, scale_b, scale_r)
+
+        patch_cfg = {
+            "triton.enable_pdl": True,
+            "triton.use_tensor_descriptor": False,
+            "max_autotune_gemm": True,
+            "max_autotune_gemm_backends": "ATEN,TRITON",
+            "max_autotune_gemm_search_space": "EXHAUSTIVE",
+        }
+
+        with config.patch(patch_cfg):
+            compiled = torch.compile(linear, mode="max-autotune")
+            actual = compiled(a, b, scale_a, scale_b, scale_r)
+
+        self.assertEqual(expected, actual, rtol=5e-2, atol=0.07)
 
 
 class TestFP8Lowering(TestCase):

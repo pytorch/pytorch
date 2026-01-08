@@ -195,7 +195,7 @@ def forward(self, L_self_buffers_buffer_ : torch.distributed.tensor.DTensor, L_x
     l_self_buffers_buffer_ = L_self_buffers_buffer_
     l_x_ = L_x_
     l_mesh_ = L_mesh_
-    from_local = torch.distributed.tensor._api.DTensor.from_local(l_x_, l_mesh_, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = l_mesh_ = None
+    from_local = torch.distributed.tensor._api.from_local(l_x_, l_mesh_, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = l_mesh_ = None
     inter = l_self_buffers_buffer_ + from_local;  l_self_buffers_buffer_ = from_local = None
     to_local = inter.to_local();  inter = None
     return (to_local,)""",  # noqa: B950
@@ -244,7 +244,7 @@ def forward(self, args_0):
     l_self_buffers_buffer_ = L_self_buffers_buffer_
     l_x_ = L_x_
     l_mesh_ = L_mesh_
-    from_local = torch.distributed.tensor._api.DTensor.from_local(l_x_, l_mesh_, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = l_mesh_ = None
+    from_local = torch.distributed.tensor._api.from_local(l_x_, l_mesh_, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = l_mesh_ = None
     inter = l_self_buffers_buffer_ + from_local;  l_self_buffers_buffer_ = from_local = None
     to_local = inter.to_local();  inter = None
     return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, _tree_leaf_1, to_local), self._out_spec)""",  # noqa: B950
@@ -1029,6 +1029,7 @@ def forward(self, arg0_1, arg1_1):
 
         def fn(x, y, z):
             permute = x.permute(0, 2, 1)
+            x.device_mesh
             permute2 = permute.contiguous()
             layer_norm = torch.nn.functional.layer_norm(permute2, (4,), y, z, 1e-05)
             out = layer_norm.permute(0, 2, 1)
@@ -1069,7 +1070,7 @@ def forward(self, arg0_1, arg1_1):
 def forward(self, L_x_ : torch.Tensor, L_mesh_ : torch.distributed.device_mesh.DeviceMesh):
     l_x_ = L_x_
     l_mesh_ = L_mesh_
-    dt = torch.distributed.tensor._api.DTensor.from_local(l_x_, l_mesh_, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = None
+    dt = torch.distributed.tensor._api.from_local(l_x_, l_mesh_, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = None
     redistribute = dt.redistribute(l_mesh_, [torch.distributed.tensor.placement_types.Replicate()]);  dt = l_mesh_ = None
     to_local = redistribute.to_local();  redistribute = None
     add = to_local + 2;  to_local = None
@@ -1112,7 +1113,7 @@ def forward(self, arg0_1, arg1_1):
 def forward(self, L_x_ : torch.Tensor, L_mesh_ : torch.distributed.device_mesh.DeviceMesh):
     l_x_ = L_x_
     l_mesh_ = L_mesh_
-    dt = torch.distributed.tensor._api.DTensor.from_local(l_x_, l_mesh_, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = None
+    dt = torch.distributed.tensor._api.from_local(l_x_, l_mesh_, [torch.distributed.tensor.placement_types.Shard(dim=0)], run_check = False);  l_x_ = None
     redistribute = dt.redistribute(device_mesh = l_mesh_, placements = [torch.distributed.tensor.placement_types.Replicate()]);  dt = l_mesh_ = None
     to_local = redistribute.to_local();  redistribute = None
     add = to_local + 2;  to_local = None

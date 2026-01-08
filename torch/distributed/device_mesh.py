@@ -1430,5 +1430,6 @@ def _register_device_mesh_as_opaque_type():
             "_unflatten": MemberType.USE_REAL,
             "_get_mesh_dim_by_name": MemberType.USE_REAL,
             "_get_root_mesh": MemberType.USE_REAL,
+            "__getitem__": MemberType.USE_REAL,
         },
     )
