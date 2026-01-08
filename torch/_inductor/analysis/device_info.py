@@ -245,23 +245,3 @@ def datasheet_tops(dtype: torch.dtype, is_tf32: bool = False) -> Optional[float]
     return device_info.tops[
         "torch.tf32" if dtype == torch.float32 and is_tf32 else dtype
     ]
-
-
-def datasheet_dram_bw_gbs() -> Optional[float]:
-    """
-    Get the theoretical DRAM bandwidth of the device in GB/s. This can throw an exception if the device
-    is not in the datasheet list above.
-    """
-    gpu_type = torch._inductor.utils.get_gpu_type()
-    device_interface = get_interface_for_device(gpu_type)
-    name: Optional[str] = device_interface.get_device_name()
-    if name is None:
-        log.info("No device found, returning None")
-        return None
-    device_info = lookup_device_info(name)
-    if device_info is None:
-        log_str = f"Device {name} not in datasheet, returning None"
-        log.info(log_str)
-        return None
-
-    return device_info.dram_bw_gbs
