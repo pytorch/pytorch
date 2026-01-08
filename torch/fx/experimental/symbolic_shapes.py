@@ -4695,12 +4695,13 @@ class ShapeEnv:
             # NB: Don't duck size the stride; instead use the expression
             # we computed
             assert stride_expr is not None
+            # self.var_to_val will have the up to date hint value for each symbols
+            # including overridden hints.
             hint_stride = stride_expr.xreplace(self.var_to_val)
             if isinstance(hint_stride, (int, sympy.core.numbers.Integer)):
                 hint_stride = int(hint_stride)
             else:
                 hint_stride = ex_stride[i]
-            # The remaining
             sym_stride.append(
                 self.create_symintnode(
                     stride_expr,

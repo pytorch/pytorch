@@ -4712,7 +4712,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
     def test_hint_override_consistent_stride2(self):
         @torch.compile(fullgraph=True, dynamic=True)
         def func(x):
-            # only one of the sizes has hint overridden. 
+            # only one of the sizes has hint overridden.
             a = torch.fx.experimental.symbolic_shapes.size_hint(
                 x.size()[1] * x.size()[2]
             )
