@@ -2019,8 +2019,19 @@ class MultiProcContinuousTest(TestCase):
                 # Drain all completion queues before raising any exception,
                 # so stale results don't desync subsequent tests.
                 deferred_exception = None
-                for i, completion_queue in enumerate(self.completion_queues):
-                    rv = completion_queue.get()
+                for i, (p, completion_queue) in enumerate(
+                    zip(self.processes, self.completion_queues)
+                ):
+                    # When the process died before filling the completion queue `get` will never return.
+                    # Hence periodically check the process for liveness
+                    while True:
+                        try:
+                            rv = completion_queue.get(timeout=120)
+                        except queue.Empty:
+                            # If not alive do a last check because the timeout might have happened just before completion
+                            if not p.is_alive() and completion_queue.empty():
+                                rv = RuntimeError(f"Exited with {p.exitcode}")
+                                break
                     if deferred_exception is not None:
                         # Already captured an exception; just drain
                         continue
