@@ -471,10 +471,6 @@ x = add_1, y = add_2);  getitem = None
         fusion_ops_no_print = extract_fusion_ops(merged_no_print)
         fusion_ops_with_print = extract_fusion_ops(merged_with_print)
 
-        # Log for debugging
-        print(f"Fusion ops without print: {fusion_ops_no_print}")
-        print(f"Fusion ops with print: {fusion_ops_with_print}")
-
         # Verify that the fusion patterns are the same
         # The print version should have the same fused ops as the no-print version
         self.assertEqual(
