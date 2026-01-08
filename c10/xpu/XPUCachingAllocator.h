@@ -194,6 +194,7 @@ namespace c10::xpu {
 
 using c10::CaptureId_t;
 using c10::MempoolId_t;
+
 struct C10_XPU_API MemPool {
   MemPool(
       XPUCachingAllocator::XPUAllocator* allocator = nullptr,
