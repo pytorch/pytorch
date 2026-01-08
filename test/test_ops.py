@@ -739,8 +739,6 @@ class TestCommon(TestCase):
         # In this test, refs call into the torch namespace (after the initial invocation)
         # For example, a ref with torch.foo in it will call torch.foo instead of refs.foo
         # Direct calls to refs and prims are not translated
-        if TEST_WITH_ROCM and op.name == "_refs.fft.ihfftn" and dtype == torch.float16:
-            self.skipTest("Skipped on ROCm")
         if op.full_name == "_refs.div.floor_rounding" and dtype == torch.bfloat16:
             self.skipTest(
                 "Skipped _refs.div.floor_rounding with bfloat16"
