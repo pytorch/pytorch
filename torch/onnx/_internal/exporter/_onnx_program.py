@@ -458,6 +458,7 @@ ONNXProgram(
         """Rename axes in a model according to the specified rename mapping.
 
         Example::
+
             batch = onnx_program.model.graph.inputs[0].shape[0]
             seq_len = onnx_program.model.graph.inputs[0].shape[2]
             rename_mapping = {
