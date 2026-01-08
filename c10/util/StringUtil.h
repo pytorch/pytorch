@@ -160,6 +160,13 @@ struct C10_API SourceLocation {
   const char* function;
   const char* file;
   uint32_t line;
+
+  static constexpr SourceLocation current(
+      const char* file = __builtin_FILE(),
+      const char* function = __builtin_FUNCTION(),
+      const std::uint_least32_t line = __builtin_LINE()) noexcept {
+    return {function, file, line};
+  }
 };
 
 std::ostream& operator<<(std::ostream& out, const SourceLocation& loc);
