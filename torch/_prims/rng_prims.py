@@ -29,7 +29,7 @@ def register_rng_prim(name, schema, impl_aten, impl_meta, doc, tags=None):
     rngprim_def = torch.library.custom_op(
         "rngprims::" + name, impl_aten, mutates_args=(), schema=schema
     )
-    # pyrefly: ignore [missing-attribute]
+
     rngprim_def.register_fake(impl_meta)
 
     prim_packet = getattr(torch._ops.ops.rngprims, name)
@@ -153,9 +153,10 @@ def get_device(args, kwargs):
 def register_run_and_save_rng_state_op():
     class RunAndSaveRngState(HigherOrderOperator):
         def __init__(self):
-            super().__init__("run_and_save_rng_state")
+            super().__init__("run_and_save_rng_state", cacheable=True)
 
         def __call__(self, op, *args, **kwargs):
+            # pyrefly: ignore [missing-attribute]
             return super().__call__(op, *args, **kwargs)
 
     run_and_save_rng_state = RunAndSaveRngState()
@@ -217,9 +218,10 @@ def register_run_and_save_rng_state_op():
 def register_run_with_rng_state_op():
     class RunWithRngState(HigherOrderOperator):
         def __init__(self):
-            super().__init__("run_with_rng_state")
+            super().__init__("run_with_rng_state", cacheable=True)
 
         def __call__(self, rng_state, op, *args, **kwargs):
+            # pyrefly: ignore [missing-attribute]
             return super().__call__(rng_state, op, *args, **kwargs)
 
     run_with_rng_state = RunWithRngState()
@@ -320,6 +322,7 @@ def register_graphsafe_run_with_rng_state_op():
             super().__init__("graphsafe_run_with_rng_state")
 
         def __call__(self, op, *args, rng_state=None, **kwargs):
+            # pyrefly: ignore [missing-attribute]
             return super().__call__(op, *args, rng_state=rng_state, **kwargs)
 
     graphsafe_run_with_rng_state = GraphSafeRunWithRngState()
@@ -334,7 +337,7 @@ def register_graphsafe_run_with_rng_state_op():
         device_idx = rng_state.device.index
         generator = torch.cuda.default_generators[device_idx]
         current_state = generator.graphsafe_get_state()
-        # pyrefly: ignore [bad-argument-type]
+
         generator.graphsafe_set_state(rng_state)
         out = op(*args, **kwargs)
         generator.graphsafe_set_state(current_state)

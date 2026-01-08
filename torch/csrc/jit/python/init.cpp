@@ -159,7 +159,7 @@ std::optional<IValue> toTypeInferredIValueOptional(py::handle input) {
   // on various object types, but we want it to work with all types.
   try {
     return toTypeInferredIValue(input);
-  } catch (const c10::Error& e) {
+  } catch (const c10::Error&) {
     return std::nullopt;
   }
 }
@@ -878,9 +878,8 @@ void initJITBindings(PyObject* module) {
               } else if (pair.first == "DYNAMIC") {
                 vec_conv.emplace_back(FusionBehavior::DYNAMIC, pair.second);
               } else {
-                TORCH_INTERNAL_ASSERT(
-                    false,
-                    "FusionBehavior only supported 'STATIC' or 'DYNAMIC', got: ",
+                throw py::value_error(
+                    "FusionBehavior only supported 'STATIC' or 'DYNAMIC', got: " +
                     pair.first);
               }
             }

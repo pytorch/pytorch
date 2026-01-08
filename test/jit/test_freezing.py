@@ -33,8 +33,6 @@ except ImportError:
     HAS_TORCHVISION = False
 skipIfNoTorchVision = unittest.skipIf(not HAS_TORCHVISION, "no torchvision")
 
-TEST_ROCM = torch.cuda.is_available() and torch.version.hip is not None
-
 
 def removeExceptions(graph):
     for n in graph.findAllNodes("prim::RaiseException"):

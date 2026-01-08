@@ -277,7 +277,8 @@ def get_globals_in_pkl(file) -> set[str]:
         key = read(1)
         if not key:
             raise EOFError
-        assert isinstance(key, bytes_types)
+        if not isinstance(key, bytes_types):
+            raise AssertionError(f"Expected bytes, got {type(key).__name__}")
         if key[0] == GLOBAL[0]:
             module, name = _read_global_instruction(readline)
             globals_in_checkpoint.add(f"{module}.{name}")
@@ -324,7 +325,8 @@ class Unpickler:
             key = read(1)
             if not key:
                 raise EOFError
-            assert isinstance(key, bytes_types)
+            if not isinstance(key, bytes_types):
+                raise AssertionError(f"Expected bytes, got {type(key).__name__}")
             # Risky operators
             if key[0] == GLOBAL[0]:
                 module, name = _read_global_instruction(self.readline)
@@ -419,7 +421,7 @@ class Unpickler:
                 inst = self.stack[-1]
                 if type(inst) is torch.Tensor:
                     # Legacy unpickling
-                    # pyrefly: ignore [not-iterable]
+
                     inst.set_(*state)
                 elif type(inst) is torch.nn.Parameter:
                     inst.__setstate__(state)
@@ -466,19 +468,11 @@ class Unpickler:
                 list_obj.extend(items)
             elif key[0] == SETITEM[0]:
                 (v, k) = (self.stack.pop(), self.stack.pop())
-                if type(self.stack[-1]) not in [dict, OrderedDict, Counter]:
-                    raise UnpicklingError(
-                        "Can only SETITEM for dict, collections.OrderedDict, "
-                        f"collections.Counter, but got {type(object)}"
-                    )
+                self._check_set_item_target("SETITEM")
                 self.stack[-1][k] = v
             elif key[0] == SETITEMS[0]:
                 items = self.pop_mark()
-                if type(self.stack[-1]) not in [dict, OrderedDict, Counter]:
-                    raise UnpicklingError(
-                        "Can only SETITEMS for dict, collections.OrderedDict, "
-                        f"collections.Counter, but got {type(object)}"
-                    )
+                self._check_set_item_target("SETITEMS")
                 for i in range(0, len(items), 2):
                     self.stack[-1][items[i]] = items[i + 1]
             elif key[0] == MARK[0]:
@@ -580,6 +574,13 @@ class Unpickler:
         self.stack = self.metastack.pop()
         self.append = self.stack.append
         return items
+
+    def _check_set_item_target(self, opcode: str):
+        if type(self.stack[-1]) not in [dict, OrderedDict, Counter]:
+            raise UnpicklingError(
+                f"Can only {opcode} for dict, collections.OrderedDict, "
+                f"collections.Counter, but got {type(self.stack[-1])}"
+            )
 
     def persistent_load(self, pid):
         raise UnpicklingError("unsupported persistent id encountered")

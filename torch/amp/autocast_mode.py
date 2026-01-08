@@ -236,7 +236,8 @@ class autocast:
         if torch._jit_internal.is_scripting():
             self._enabled = enabled
             self.device = device_type
-            assert self.fast_dtype is not None
+            if self.fast_dtype is None:
+                raise AssertionError("fast_dtype must not be None in scripting mode")
             return
         self.device = device_type
         if not is_autocast_available(self.device):
@@ -256,12 +257,14 @@ class autocast:
             message += "a module by `torch._register_device_module`, and the module must have these funcs: \n"
             message += "`get_amp_supported_dtype() -> List[torch.dtype]`. \n"
 
-            assert hasattr(torch, self.custom_backend_name), message
+            if not hasattr(torch, self.custom_backend_name):
+                raise AssertionError(message)
             self.custom_device_mod = getattr(torch, self.custom_backend_name)
             for func in necessary_funcs:
-                assert hasattr(self.custom_device_mod, func), (
-                    message + f"But the func `{func}` is missing. \n"
-                )
+                if not hasattr(self.custom_device_mod, func):
+                    raise AssertionError(
+                        message + f"But the func `{func}` is missing. \n"
+                    )
             device_supported_dtypes = self.custom_device_mod.get_amp_supported_dtype()
 
         self._cache_enabled = (
@@ -316,7 +319,8 @@ class autocast:
 
     def __enter__(self):
         if torch._jit_internal.is_scripting():
-            assert self.fast_dtype is not None
+            if self.fast_dtype is None:
+                raise AssertionError("fast_dtype must not be None in scripting mode")
             return self
 
         self.prev_cache_enabled = torch.is_autocast_cache_enabled()

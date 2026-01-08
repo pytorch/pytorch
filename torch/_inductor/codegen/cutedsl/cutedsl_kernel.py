@@ -489,6 +489,8 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
 
     def load(self, name: str, index: sympy.Expr):
         """Handle loading from tensor or fixed(template args) input for CuteDSL."""
+        from torch._inductor.kernel.flex.flex_flash_attention import HierarchicalIndex
+
         if name not in self.fixed_inputs:
             var = self._add_kernel_input(name)
             buffer = V.graph.get_buffer(name)
@@ -497,18 +499,24 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             cute_dtype = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(
                 var_dtype, "cutlass.Float32"
             )
-            renamed_index = self.kernel.rename_indexing(index)
-
-            idx_var = self._emit_scalar_fragment(
-                self.kernel.kexpr(renamed_index), "cutlass.Int32", torch.int32
-            )
+            idx_vars = [
+                self._emit_scalar_fragment(
+                    self.kernel.kexpr(self.kernel.rename_indexing(dim_index)),
+                    "cutlass.Int32",
+                    torch.int32,
+                )
+                for dim_index in (
+                    index.args if isinstance(index, HierarchicalIndex) else (index,)
+                )
+            ]
 
             val_frag = self.kernel.cse.newvar(dtype=var_dtype)
             self.kernel.body.writeline(
                 f"{val_frag} = cute.make_rmem_tensor(1, {cute_dtype})"
             )
-
-            self.kernel.body.writeline(f"{val_frag}[0] = ({var}[{idx_var}])")
+            self.kernel.body.writeline(
+                f"{val_frag}[0] = ({var}[{', '.join(idx_vars)}])"
+            )
 
             final_expr = f"{val_frag}.load()"
 
