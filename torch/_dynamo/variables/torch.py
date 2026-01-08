@@ -1691,8 +1691,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         gb_type="Can't extract message from torch._check()",
                         context=str(message_vt),
                         explanation=(
-                            "The second argument of torch._check() must be a function"
-                            "defined within the torch.compile region"
+                            "The second argument of torch._check() must be a function "
+                            "defined within the torch.compile region "
                             "that does not reference a non-local variable."
                         ),
                         hints=[
