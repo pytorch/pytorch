@@ -1769,6 +1769,23 @@ from queue import Queue
 _LOCAL_RUNNER_MODE: "LocalRunnerMode | None" = None
 
 
+class _ExceptionRaisingThread(threading.Thread):
+    def __init__(self, target, *args, **kwargs):
+        super().__init__(target=target, *args, **kwargs)
+        self.exception = None
+
+    def run(self):
+        try:
+            super().run()
+        except BaseException as e:
+            self.exception = e
+
+    def join(self, *args, **kwargs):
+        super().join(*args, **kwargs)
+        if self.exception:
+            raise self.exception
+
+
 class LocalRunnerMode:
     """
     A class for running multiple SPMD functions concurrently, however at any point
@@ -1794,7 +1811,7 @@ class LocalRunnerMode:
             dst: {src: Queue() for src in ranks} for dst in ranks
         }
         self._runners = [
-            threading.Thread(target=self._run, args=(i,), name="LocalRunnerMode")
+            _ExceptionRaisingThread(target=self._run, args=(i,), name="LocalRunnerMode")
             for i in range(concurrency)
         ]
         self._process_mode = True
