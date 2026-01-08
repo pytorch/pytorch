@@ -3164,14 +3164,15 @@ class PyTreeTreeIsLeafFunctionVariable(UserFunctionVariable):
         out = supported_nodes_var.call_method(tx, "__contains__", [node_type_var], {})
         return ConstantVariable.create(not out.value)
 
+
 class SparseTensorCreationSkipVariable(SkipFunctionVariable):
     """
     Skip variable for sparse tensor factory functions with clear messaging regarding lack of support.
     """
 
     def __init__(self, value: Any, **kwargs: Any) -> None:
-          reason = "sparse tensor creation is not supported in torch.compile"
-          super().__init__(value, reason=reason, **kwargs)
+        reason = "sparse tensor creation is not supported in torch.compile"
+        super().__init__(value, reason=reason, **kwargs)
 
     def call_function(
         self,
@@ -3191,4 +3192,3 @@ class SparseTensorCreationSkipVariable(SkipFunctionVariable):
             ),
             hints=[*graph_break_hints.SPARSE_TENSOR],
         )
-
