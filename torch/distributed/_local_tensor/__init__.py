@@ -1057,14 +1057,7 @@ class LocalTensor(torch.Tensor):
         self,
         memory_format: torch.memory_format = torch.contiguous_format,
     ) -> torch.Tensor:
-        # pyrefly: ignore [bad-argument-type]
-        return LocalTensor(
-            # pyrefly: ignore [bad-argument-count]
-            {
-                r: t.contiguous(memory_format=memory_format)
-                for r, t in self._local_tensors.items()
-            }
-        )
+        return _LocalContiguous.apply(self, memory_format)
 
     def is_contiguous(
         self,
@@ -1131,6 +1124,33 @@ class LocalTensor(torch.Tensor):
                 _compute_local_tensor_meta(self._local_tensors)
             )
             self._size = shape
+
+
+class _LocalContiguous(torch.autograd.Function):
+    """Autograd function for LocalTensor.contiguous() that preserves gradient flow."""
+
+    @staticmethod
+    def forward(  # type: ignore[override]
+        ctx: torch.autograd.function.FunctionCtx,
+        input: LocalTensor,
+        memory_format: torch.memory_format,
+    ) -> LocalTensor:
+        # pyrefly: ignore [bad-argument-type]
+        return LocalTensor(
+            # pyrefly: ignore [bad-argument-count]
+            {
+                r: t.contiguous(memory_format=memory_format)
+                for r, t in input._local_tensors.items()
+            },
+            input.requires_grad,
+        )
+
+    @staticmethod
+    def backward(  # type: ignore[override]
+        ctx: torch.autograd.function.FunctionCtx,
+        grad_output: torch.Tensor,
+    ) -> tuple[torch.Tensor, None]:
+        return grad_output, None
 
 
 # If set to `True` the LocalTensorMode stack will be created for the whole process,
@@ -1526,8 +1546,11 @@ class _LocalDeviceMesh:
         assert lm is not None, "Unexpectedly not in LocalTensorMode"
 
         coords: list[dict[int, int]] = [{} for _ in range(self.ndim)]
+        # Clone rank_map to avoid "Cannot set version_counter for inference tensor"
+        # error when running under torch.inference_mode()
+        rank_map = self._rank_map.clone()
         for r in lm.ranks:
-            rank_tensor = self._layout.remap_to_tensor(self._rank_map)
+            rank_tensor = self._layout.remap_to_tensor(rank_map)
             rank_coords = (rank_tensor == r).nonzero().tolist()
             assert len(rank_coords) == 1
             for d, c in enumerate(rank_coords[0][1:]):
@@ -1746,6 +1769,27 @@ from queue import Queue
 _LOCAL_RUNNER_MODE: "LocalRunnerMode | None" = None
 
 
+class _ExceptionRaisingThread(threading.Thread):
+    def __init__(
+        self, group=None, target=None, name=None, args=(), kwargs=None, *, daemon=None
+    ):
+        super().__init__(
+            target=target, name=name, args=args, kwargs=kwargs, daemon=daemon
+        )
+        self.exception: BaseException | None = None
+
+    def run(self):
+        try:
+            super().run()
+        except BaseException as e:  # noqa: B036
+            self.exception = e
+
+    def join(self, timeout=None):
+        super().join(timeout=timeout)
+        if self.exception:
+            raise self.exception
+
+
 class LocalRunnerMode:
     """
     A class for running multiple SPMD functions concurrently, however at any point
@@ -1771,7 +1815,7 @@ class LocalRunnerMode:
             dst: {src: Queue() for src in ranks} for dst in ranks
         }
         self._runners = [
-            threading.Thread(target=self._run, args=(i,), name="LocalRunnerMode")
+            _ExceptionRaisingThread(target=self._run, args=(i,), name="LocalRunnerMode")
             for i in range(concurrency)
         ]
         self._process_mode = True
@@ -1896,7 +1940,7 @@ class _LocalPhiloxState:
 
         if len(set(offsets.values())) == 1:
             return next(iter(offsets.values()))
-        # pyrefly: ignore [bad-argument-type, bad-argument-count]
+
         return SymInt(LocalIntNode(offsets))
 
     @offset.setter

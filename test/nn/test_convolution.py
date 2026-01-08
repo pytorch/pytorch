@@ -4202,23 +4202,54 @@ class TestConvolutionNNDeviceType(NNTestCase):
     @onlyCUDA
     @largeTensorTest("48GB", "cuda")
     @serialTest()
-    def test_conv3d_cudnn_broken(self, device):
-        for dtype in (torch.half, torch.bfloat16):
-            x = torch.rand(1, 16, 124, 1282, 722, dtype=dtype, device=device)
-            m = torch.nn.Conv3d(
-                16,
-                16,
-                kernel_size=(1, 3, 3),
-                padding=0,
-                stride=1,
-                bias=False,
-                dtype=dtype,
-                device=device,
-            )
-            with torch.backends.cudnn.flags(enabled=False):
-                yref = m(x)
-            y = m(x)
-            self.assertEqual(yref, y)
+    @dtypes(*(torch.half, torch.bfloat16))
+    def test_conv3d_cudnn_broken(self, device, dtype):
+        x = torch.rand(1, 16, 124, 1282, 722, dtype=dtype, device=device)
+        m = torch.nn.Conv3d(
+            16,
+            16,
+            kernel_size=(1, 3, 3),
+            padding=0,
+            stride=1,
+            bias=False,
+            dtype=dtype,
+            device=device,
+        )
+        with torch.backends.cudnn.flags(enabled=False):
+            yref = m(x)
+        y = m(x)
+        self.assertEqual(yref, y)
+
+    @skipCUDAIfRocm
+    @onlyCUDA
+    @largeTensorTest("96GB", "cuda")
+    @serialTest()
+    @dtypes(*(torch.half, torch.bfloat16))
+    def test_conv3d_cudnn_backward_broken(self, device, dtype):
+        x = torch.rand(
+            1, 16, 124, 1282, 722, dtype=dtype, device=device, requires_grad=True
+        )
+        m = torch.nn.Conv3d(
+            16,
+            16,
+            kernel_size=(1, 3, 3),
+            padding=0,
+            stride=1,
+            bias=False,
+            dtype=dtype,
+            device=device,
+        )
+        with torch.backends.cudnn.flags(enabled=False):
+            yref = m(x)
+            grad = torch.randn_like(yref)
+            yref.backward(grad)
+        gradref = x.grad
+        x.grad = None
+        y = m(x)
+        y.backward(grad)
+        self.assertEqual(yref, y)
+        atol = 5e-3 if dtype == torch.half else 5e-2
+        self.assertEqual(gradref, x.grad, atol=atol, rtol=1e-3)
 
     @onlyCUDA
     @largeTensorTest("20GB")

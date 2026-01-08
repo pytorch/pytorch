@@ -376,7 +376,7 @@ def _set_stream_by_id(stream_id, device_index, device_type) -> None:
 
 
 def set_stream(stream: Stream) -> None:
-    r"""Set the current stream.This is a wrapper API to set the stream.
+    r"""Set the current stream. This is a wrapper API to set the stream.
         Usage of this function is discouraged in favor of the ``stream``
         context manager.
 
