@@ -434,18 +434,18 @@ class TestTensorDataset(TestCase):
         t = torch.randn(15, 10, 2, 3)
         l = torch.randn(15, 5)
         source = TensorDataset(t, l)
-        
+
         # Test that __getitems__ exists
         self.assertTrue(hasattr(source, "__getitems__"))
-        
+
         # Test fetching multiple indices at once
         indices = [0, 5, 10, 14]
         batch = source.__getitems__(indices)
-        
+
         # Should return a list of samples
         self.assertIsInstance(batch, list)
         self.assertEqual(len(batch), len(indices))
-        
+
         # Each sample should be a tuple matching __getitem__ output
         for i, idx in enumerate(indices):
             self.assertIsInstance(batch[i], tuple)
@@ -459,10 +459,10 @@ class TestTensorDataset(TestCase):
         """Test __getitems__ with a single tensor dataset."""
         t = torch.randn(10, 5)
         source = TensorDataset(t)
-        
+
         indices = [1, 3, 7]
         batch = source.__getitems__(indices)
-        
+
         self.assertEqual(len(batch), 3)
         for i, idx in enumerate(indices):
             self.assertEqual(batch[i][0], t[idx])
@@ -471,7 +471,7 @@ class TestTensorDataset(TestCase):
         """Test __getitems__ with empty indices list."""
         t = torch.randn(10, 5)
         source = TensorDataset(t)
-        
+
         batch = source.__getitems__([])
         self.assertEqual(len(batch), 0)
 
@@ -480,9 +480,9 @@ class TestTensorDataset(TestCase):
         t = torch.randn(100, 10)
         l = torch.randint(0, 10, (100,))
         source = TensorDataset(t, l)
-        
+
         loader = DataLoader(source, batch_size=16, shuffle=False)
-        
+
         # Verify DataLoader produces correct batches
         batch_count = 0
         for batch_t, batch_l in loader:
@@ -493,7 +493,7 @@ class TestTensorDataset(TestCase):
             self.assertEqual(batch_t, expected_t)
             self.assertEqual(batch_l, expected_l)
             batch_count += 1
-        
+
         self.assertEqual(batch_count, 7)  # ceil(100/16) = 7 batches
 
 
