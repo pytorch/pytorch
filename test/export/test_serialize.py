@@ -59,6 +59,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     TemporaryFileName,
     TestCase,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.torchbind_impls import init_torchbind_implementations
 
@@ -721,7 +722,7 @@ def forward(self, x):
                 )
 
     @unittest.skipIf(
-        not torch.cuda.is_available() or not has_triton(), "requires cuda and triton"
+        not torch.cuda.is_available() or not has_triton() or TEST_WITH_ROCM, "requires cuda and triton, ROCm doesn't support bool tl.cosntexpr."
     )
     def test_triton_constexpr_matching(self) -> None:
         """Test that constexpr values are properly matched during serialization.

@@ -556,7 +556,7 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
 
     if hasattr(actual_kernel, "device_caches"):
         caches = actual_kernel.device_caches
-        assert len(caches.keys()) >= 1
+        assert len(caches.keys()) == 1
         cache = next(iter(caches.values()))[0]
     elif hasattr(actual_kernel, "cache"):
         # old path, still used for cpu triton builds
