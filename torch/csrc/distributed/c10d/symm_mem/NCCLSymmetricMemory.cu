@@ -30,7 +30,7 @@ struct NCCLAllocation {
   size_t buffer_size;
   int device_idx;
   // Map of group name to peer alloc info
-  std::map<std::string, c10::intrusive_ptr<NCCLPeerAllocInfo>> peer_alloc_infos_;
+  std::unordered_map<std::string, c10::intrusive_ptr<NCCLPeerAllocInfo>> peer_alloc_infos_;
 
   NCCLAllocation(void* ptr, size_t buffer_size, int device_idx)
       : ptr(ptr), buffer_size(buffer_size), device_idx(device_idx) {}
@@ -68,7 +68,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
  public:
   NCCLPeerAllocInfo(
       NCCLAllocation* allocation,
-      const std::string group_name,
+      std::string group_name,
       ncclWindow_t buffer_handle,
       ncclWindow_t signal_handle)
       : buffer_size_(allocation->buffer_size),
@@ -144,7 +144,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   std::vector<void*> signal_pads_;
   void** buffers_dev_;
   void** signal_pads_dev_;
-  const std::string group_name_;
+  std::string group_name_;
   ncclWindow_t buffer_win_;
   ncclWindow_t signal_handle_;
   std::vector<int> rank_to_global_rank_;
