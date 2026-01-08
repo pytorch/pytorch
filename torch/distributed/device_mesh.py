@@ -677,23 +677,30 @@ else:
         ) -> "DeviceMesh":
             root_mesh = self._get_root_mesh()
             slice_dim_group_name = []
-            for name in submesh_dim_names:
-                if name in not_none(self._mesh_dim_names):
-                    slice_dim_group_name.append(
-                        self._dim_group_names[  # type: ignore[has-type]
-                            not_none(self._mesh_dim_names).index(name)
-                        ]
-                    )
-                else:
-                    # If device_mesh is not root_mesh, we already throw error in _get_slice_mesh_layout
-                    # Since we will deprecate the slicing of flattened dim_name from root mesh soon,
-                    # we don't want to optimize the code furthermore.
-                    flatten_mesh = self._flatten_mapping[name]
-                    slice_dim_group_name.append(
-                        flatten_mesh._dim_group_names[  # type: ignore[has-type]
-                            not_none(flatten_mesh._mesh_dim_names).index(name)
-                        ]
-                    )
+            if len(self._dim_group_names) > 0:
+                assert len(self._dim_group_names) == len(
+                    not_none(self._mesh_dim_names)
+                ), (
+                    "The number of dim_group_names and mesh_dim_names "
+                    "should have the same length if the rank is in the mesh."
+                )
+                for name in submesh_dim_names:
+                    if name in not_none(self._mesh_dim_names):
+                        slice_dim_group_name.append(
+                            self._dim_group_names[
+                                not_none(self._mesh_dim_names).index(name)
+                            ]
+                        )
+                    else:
+                        # If device_mesh is not root_mesh, we already throw error in _get_slice_mesh_layout
+                        # Since we will deprecate the slicing of flattened dim_name from root mesh soon,
+                        # we don't want to optimize the code furthermore.
+                        flatten_mesh = self._flatten_mapping[name]
+                        slice_dim_group_name.append(
+                            flatten_mesh._dim_group_names[
+                                not_none(flatten_mesh._mesh_dim_names).index(name)
+                            ]
+                        )
             res_submesh = DeviceMesh(
                 self._device_type,
                 _layout=layout,
@@ -843,11 +850,13 @@ else:
             pre_stride = -1
             for stride in reversed(sliced_strides):
                 # Note that with CuTe layout, we can support slicing flattened non-contiguous mesh dims with no problem.
-                # But this will make this behavior complicated so we decided to not support it for now.
+                # But we don't see a use case for now so we don't want to support it.
                 if not is_int(stride):
                     raise NotImplementedError(
                         "Currently, this only allows slicing out a contiguous flattened dim."
                     )
+                # Note that with CuTe layout, we can support slicing non-ascending order dims with no problem.
+                # But we don't see a use case for now so we don't want to support it.
                 if stride < pre_stride:
                     raise KeyError(
                         f"Invalid mesh_dim_names {mesh_dim_names} specified. "
@@ -1061,10 +1070,10 @@ else:
         def _flatten(
             self,
             mesh_dim_name: str | None = None,
-            backend_override: None
-            | str
+            backend_override: str
             | C10dBackend.Options
-            | tuple[str, C10dBackend.Options] = None,
+            | tuple[str, C10dBackend.Options]
+            | None = None,
         ) -> "DeviceMesh":
             """
             Returns a 1D DeviceMesh by flattening the current DeviceMesh.
