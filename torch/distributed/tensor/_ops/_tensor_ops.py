@@ -197,9 +197,16 @@ def create_like_strategy(op_schema: OpSchema) -> StrategyType:
                 Replicate() if isinstance(p, Partial) else p
                 for p in arg_spec.placements
             ),
+            tensor_meta=arg_spec.tensor_meta,
         )
         create_like_strategy.strategies.append(
-            OpSpec(output_specs=output_spec, input_specs=(arg_spec,))
+            OpSpec(
+                output_specs=output_spec,
+                input_specs=(arg_spec,),
+                redistribute_cost=[
+                    generate_redistribute_costs(select_strategy, arg_spec),
+                ],
+            )
         )
 
     return create_like_strategy
