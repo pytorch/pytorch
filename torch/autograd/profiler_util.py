@@ -246,6 +246,7 @@ class EventList(list):
         header=None,
         top_level_events_only=False,
         time_unit=None,
+        add_full_name_column=False,
     ):
         """Print an EventList as a nicely formatted table.
 
@@ -264,7 +265,9 @@ class EventList(list):
                 cpu/cuda/xpu ops events are omitted for profiler result readability.
             time_unit(str, optional): A time unit to be used for all values in the
                 table. Valid options are: ``s``, ``ms`` and ``us``.
-
+            add_full_name_column(bool, optional): Boolean flag to insert a column right
+                to show the full name of a function whose displayed name is truncated.
+                It won't show anything if the function's displayed name is not truncated.
         Returns:
             A string containing the table.
         """
@@ -280,6 +283,7 @@ class EventList(list):
             with_flops=self._with_flops,
             top_level_events_only=top_level_events_only,
             time_unit=time_unit,
+            add_full_name_column=add_full_name_column,
         )
 
     def export_chrome_trace(self, path):
@@ -1041,6 +1045,14 @@ def _rewrite_name(name, with_wildcard=False):
             name = "ProfilerStep*"
     return name
 
+def truncate_name(name, max_name_column_width):
+    if (
+        max_name_column_width is not None
+        and len(name) >= max_name_column_width - 3
+    ):
+        return name[: (max_name_column_width - 3)] + "..."
+    else:
+        return name
 
 def _build_table(
     events,
@@ -1054,6 +1066,7 @@ def _build_table(
     profile_memory=False,
     top_level_events_only=False,
     time_unit=None,
+    add_full_name_column=False,
 ):
     """Print a summary of events (which can be a list of FunctionEvent or FunctionEventAvg)."""
     if len(events) == 0:
@@ -1215,6 +1228,17 @@ def _build_table(
         else:
             with_flops = False  # can't find any valid flops
 
+    if add_full_name_column:
+        if has_overload_names:
+            func_full_overload_name = "Full Overload Name"
+            headers.append(func_full_overload_name)
+            add_column(len(func_full_overload_name))
+
+        # "Full Name" must be last column in the table, since it will be long.
+        func_full_name = "Full Name"
+        headers.append(func_full_name)
+        add_column(len(func_full_name))
+
     row_format = row_format_lst[0]
     header_sep = header_sep_lst[0]
     line_length = line_length_lst[0]
@@ -1286,9 +1310,8 @@ def _build_table(
             continue
         else:
             event_limit += 1
-        name = evt.key
-        if max_name_column_width is not None and len(name) >= max_name_column_width - 3:
-            name = name[: (max_name_column_width - 3)] + "..."
+        original_name = evt.key
+        name = truncate_name(original_name, max_name_column_width)
 
         evt.self_cpu_percent = _format_time_share(
             evt.self_cpu_time_total, sum_self_cpu_time_total
@@ -1301,12 +1324,9 @@ def _build_table(
 
         row_values = [name]
         if has_overload_names:
-            overload_name = evt.overload_name
-            if (
-                max_name_column_width is not None
-                and len(overload_name) >= max_name_column_width - 3
-            ):
-                overload_name = overload_name[: (max_name_column_width - 3)] + "..."
+            original_overload_name = evt.overload_name
+            overload_name = truncate_name(original_overload_name, max_name_column_width)
+
             row_values += [overload_name]
         row_values += [
             # Self CPU total %, 0 for async events.
@@ -1380,6 +1400,20 @@ def _build_table(
             if len(evt.stack) > 0:
                 src_field = trim_path(evt.stack[0], src_column_width)
             row_values.append(src_field)
+
+        if add_full_name_column:
+            # only show the full name of the function with truncated name in 'Name' column
+            if has_overload_names:
+                if original_overload_name != overload_name:
+                    row_values.append(original_overload_name)
+                else:
+                    row_values.append("")
+
+            if original_name != name:
+                row_values.append(original_name)
+            else:
+                row_values.append("")
+
         append(row_format.format(*row_values))
 
         if has_stack:
@@ -1402,6 +1436,7 @@ def _build_table(
             f"Self {use_device.upper() if use_device is not None else 'None'} "
             f"time total: {override_time_unit(sum_self_device_time_total, _format_time(sum_self_device_time_total), time_unit)}"
         )
+
     return "".join(result)
 
 
