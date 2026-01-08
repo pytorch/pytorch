@@ -2777,6 +2777,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # has_grad_fn field to False to workaround the issue.
         result.has_grad_fn = False  # type: ignore[union-attr]
 
+        # Register this parameter as a leaf tensor for backward() auto-detection.
+        # When backward() is called without inputs, we need to find all leaf tensors,
+        # including those created in-graph like nn.Parameter.
+        tx.output.leaf_var_creation_order.append(result)
+
         # TODO(jansel): if the new param falls out of scope, currently it won't get freed until
         # the end of the graph.  We should fix this.
         return result
