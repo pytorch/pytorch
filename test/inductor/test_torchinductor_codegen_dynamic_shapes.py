@@ -95,6 +95,11 @@ def check_codegen(
 # xfail by default, set is_skip=True to skip
 test_failures = {
     #
+    # PDL tests are CUDA SM90+ only, skip on CPU (generates Triton, not C++ code)
+    #
+    "test_pdl_mutation_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    "test_pdl_template_and_delay_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    #
     # Failed to find dynamic for loop variable (no kernels generated)
     #
     "test_fft_real_input_dynamic_shapes": TestFailure(
@@ -206,12 +211,6 @@ test_failures = {
     "test_linspace4_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_logcumsumexp_dynamic_shapes": TestFailure(("cpu",)),
     "test_logcumsumexp_zero_dim_dynamic_shapes": TestFailure(("cpu",)),
-    "test_max_pool2d_with_indices_backward5_dynamic_shapes": TestFailure(
-        ("cpu", "cuda")
-    ),
-    "test_max_pool2d_with_indices_backward6_dynamic_shapes": TestFailure(
-        ("cpu", "cuda", "xpu")
-    ),
     "test_misaligned_address_issue1_dynamic_shapes": TestFailure(("cpu",)),
     "test_mm_views_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
     "test_new_empty_dynamic_shapes": TestFailure(("cpu", "cuda", "xpu")),
