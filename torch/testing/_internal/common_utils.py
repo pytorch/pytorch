@@ -5814,7 +5814,7 @@ def win_safe_rmtree(path):
     try:
         shutil.rmtree(path, onerror=handle_error)
     except Exception:
-        log.exception("Fatal exception during directory traversal for %s", path)
+        log.exception("Fatal exception during directory removal for %s", path)
 
 def remove_cpp_extensions_build_root():
     """
