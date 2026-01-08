@@ -872,6 +872,12 @@ def _load_state_dict(
             else:
                 tensor_meta = payload_meta.tensor_meta
                 assert tensor_meta is not None
+                print(
+                    state_dict_file_map[payload_meta.path_name],
+                    deserialize_size(tensor_meta.sizes),
+                    deserialize_stride(tensor_meta.strides),
+                    deserialize_storage_offset(tensor_meta.storage_offset)
+                )
                 weight_tensor = torch.as_strided(
                     input=state_dict_file_map[payload_meta.path_name],
                     size=deserialize_size(tensor_meta.sizes),
