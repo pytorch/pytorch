@@ -800,14 +800,15 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
         from torch._guards import detect_fake_mode
 
         fake_mode = detect_fake_mode(operands)
-        assert fake_mode is not None and fake_mode.shape_env is not None
-        insert_deferred_runtime_asserts(
-            graph,
-            fake_mode.shape_env,
-            "invoke_subgraph_proxy_torch_dispatch_mode",
-            export=True,
-        )
-        graph.recompile()
+        assert fake_mode is not None
+        if fake_mode.shape_env is not None:
+            insert_deferred_runtime_asserts(
+                graph,
+                fake_mode.shape_env,
+                "invoke_subgraph_proxy_torch_dispatch_mode",
+                export=True,
+            )
+            graph.recompile()
 
         assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
         if invoke_subgraph_cache:
