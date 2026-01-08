@@ -931,7 +931,7 @@ def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
 
         inp = inp * sign
         max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
-        # pyrefly: ignore [unsupported-operation]
+
         return (inp - max_) * (sign * other)
 
     # pyrefly: ignore [bad-argument-type]
@@ -961,7 +961,7 @@ def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
 
         inp = inp * sign
         max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
-        # pyrefly: ignore [unsupported-operation]
+
         return (inp - max_) / (sign * other)
 
     # pyrefly: ignore [bad-argument-type]
