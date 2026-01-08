@@ -149,6 +149,75 @@ def tracing_with_real(x: torch.ScriptObject) -> bool:
     return x.tracing_mode() == "real"
 
 
+def _construct_fake_opaque_object(real_obj: Any) -> FakeScriptObject:
+    from torch._library.opaque_object import (
+        FakeOpaqueObject,
+        get_opaque_obj_info,
+        get_opaque_type_name,
+    )
+
+    real_type = type(real_obj)
+    opaque_info = get_opaque_obj_info(real_type)
+    allowed_members = set(opaque_info.members.keys()) if opaque_info else set()
+
+    script_class_name = get_opaque_type_name(real_type)
+
+    FakeClass = _create_fake_opaque_class(real_type, allowed_members)
+    fake_obj = FakeClass(FakeOpaqueObject(), script_class_name, real_obj)
+
+    # Set the allowed members onto the fake object
+    for attr_name in allowed_members:
+        attr_on_class = getattr(real_type, attr_name, None)
+        # Skip properties - they'll be called dynamically
+        if isinstance(attr_on_class, property):
+            continue
+
+        if not hasattr(real_obj, attr_name):
+            type_name = f"{real_type.__module__}.{real_type.__qualname__}"
+            raise TypeError(
+                f"Opaque object of type '{type_name}' was specified to have member "
+                f"'{attr_name}', but this doesn't actually exist in the object."
+            )
+
+        object.__setattr__(fake_obj, attr_name, getattr(real_obj, attr_name))
+
+    return fake_obj
+
+
+def _create_fake_opaque_class(real_type: type, allowed_members: set[str]) -> type:
+    """
+    Create a dynamic class that inherits from both the real class and
+    FakeScriptObject. This allows isinstance checks to work correctly while
+    maintaining FakeScriptObject behavior.
+    """
+
+    def fake_init(self, wrapped_obj, script_class_name, real_obj):
+        FakeScriptObject.__init__(self, wrapped_obj, script_class_name, real_obj)
+
+    def fake_setattr(self, name, value):
+        if name in allowed_members:
+            object.__setattr__(self, name, value)
+        else:
+            FakeScriptObject.__setattr__(self, name, value)
+
+    def fake_reduce(self):
+        return (_construct_fake_opaque_object, (self.real_obj,))
+
+    def fake_hash(self):
+        return id(self)
+
+    return type(
+        f"Fake{real_type.__name__}",
+        (real_type, FakeScriptObject),
+        {
+            "__init__": fake_init,
+            "__setattr__": fake_setattr,
+            "__reduce__": fake_reduce,
+            "__hash__": fake_hash,
+        },
+    )
+
+
 def maybe_to_fake_obj(
     fake_mode,
     x: Any,
@@ -161,34 +230,11 @@ def maybe_to_fake_obj(
     if tracing_with_real(x):
         return x
 
-    from torch._library.opaque_object import (
-        FakeOpaqueObject,
-        get_opaque_obj_info,
-        get_opaque_type_name,
-        is_opaque_reference_type,
-        is_opaque_type,
-        OpaqueTypeStr,
-    )
+    from torch._library.opaque_object import is_opaque_type
 
     x_type = type(x)
     if is_opaque_type(x_type):
-        type_name = OpaqueTypeStr if x is None else get_opaque_type_name(x_type)
-        fake_x_wrapped = FakeScriptObject(FakeOpaqueObject(), type_name, x)
-
-        # Reference types with pure methods should also keep the real object
-        # so that those methods can be called during tracing
-        if is_opaque_reference_type(x_type):
-            opaque_info = get_opaque_obj_info(x_type)
-            assert opaque_info is not None
-            for attr_name in opaque_info.members:
-                if not hasattr(x, attr_name):
-                    raise TypeError(
-                        f"Opaque object of type '{type_name}' was specified to have member "
-                        f"'{attr_name}', but this doesn't actually exist in the object."
-                    )
-                object.__setattr__(fake_x_wrapped, attr_name, getattr(x, attr_name))
-
-        return fake_x_wrapped
+        return _construct_fake_opaque_object(x)
     else:
         # x.__obj_flatten__() could be calling some tensor operations inside but we don't
         # want to call these ops in surrounding dispatch modes when executing it.
