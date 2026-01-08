@@ -166,7 +166,7 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
       std::array<uint64_t, MAX_DIMS>& global_shape,
       std::array<uint64_t, MAX_DIMS>& global_strides) const;
   void set_sharding_spec(
-      uint64_t num_dims,
+      uint64_t tensor_ndim,
       const std::array<uint64_t, MAX_DIMS>& local_shape,
       const std::array<uint64_t, MAX_DIMS>& global_offset,
       const std::array<uint64_t, MAX_DIMS>& global_shape,
@@ -186,7 +186,7 @@ struct TORCH_CUDA_CPP_API CUDAGeneratorImpl : public c10::GeneratorImpl {
   CUDAGeneratorImpl* clone_impl() const override;
 
   c10::intrusive_ptr<CUDAGeneratorState> state_;
-  uint64_t num_dims_ = 0;
+  uint64_t tensor_ndim_ = 0;
   std::array<uint64_t, MAX_DIMS> local_shape_{};
   std::array<uint64_t, MAX_DIMS> global_offset_{};
   std::array<uint64_t, MAX_DIMS> global_shape_{};

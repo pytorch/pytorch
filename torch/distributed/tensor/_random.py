@@ -636,7 +636,7 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
 
                 local_shape, global_offset = tuple(local_shape), tuple(global_offset)
 
-            if spec.tensor_meta is not None and spec.tensor_meta != (0,):
+            if spec.tensor_meta is not None and spec.tensor_meta.stride != (0,):
                 global_strides = spec.tensor_meta.stride
             else:
                 global_strides = (1,)
