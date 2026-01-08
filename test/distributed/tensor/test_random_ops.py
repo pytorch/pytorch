@@ -857,13 +857,6 @@ class DistTensorRandomOpsTest3D(DTensorTestBase):
         compute_rankwise_if_local_tensor(weight_local, self.rank)
 
 
-class DTensorRandomOpsSeedConsistencyTest(DTensorTestBase):
-    @property
-    def world_size(self):
-        return 8
-
-
-
 DistTensorRandomInitTestWithLocalTensor = create_local_tensor_test_class(
     DistTensorRandomInitTest,
 )
