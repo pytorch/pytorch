@@ -4013,6 +4013,8 @@ class SourcelessBuilder:
             return UserDefinedClassVariable(value)
         elif isinstance(value, types.MethodWrapperType):
             return MethodWrapperVariable(value)
+        elif ProcessGroupVariable.is_process_group(value):
+            return ProcessGroupVariable(value)
         elif (
             isinstance(value, types.MethodType)
             # We only want to support sourceless class objects here
@@ -4054,11 +4056,6 @@ class SourcelessBuilder:
         ):
             proxy = tx.output.bound_symbols[value.node.expr]
             return SymNodeVariable.create(tx, proxy)
-        elif is_opaque_value_type(type(value)):
-            return TorchScriptObjectVariable.create(
-                value,
-                value,
-            )
         unimplemented(
             gb_type="Unexpected type in sourceless builder",
             context=f"{value_type.__module__}.{value_type.__qualname__}",

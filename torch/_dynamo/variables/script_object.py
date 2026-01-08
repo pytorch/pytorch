@@ -39,6 +39,7 @@ from .. import graph_break_hints
 from ..eval_frame import skip_code
 from ..exc import unimplemented, UnsafeScriptObjectError, Unsupported
 from ..source import AttrSource, CallMethodSource
+from ..utils import istype, common_constant_types
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
@@ -273,17 +274,16 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
             # lifted as an input. It should have a CallMethodSource so that we
             # can properly reconstruct this.
             # However, we can only create CallMethodSource if all arguments are
-            # reconstructable (i.e., not opaque objects themselves).
-            from torch._library.opaque_object import is_opaque_type
+            def is_safe_for_source(v):
+                if istype(v, (tuple, frozenset)):
+                    return all(map(is_safe_for_source, v))
+                return istype(v, common_constant_types)
 
-            has_opaque_args = any(
-                is_opaque_type(type(arg)) for arg in args_const
-            ) or any(is_opaque_type(type(v)) for v in kwargs_const.values())
+            args_are_safe = all(is_safe_for_source(arg) for arg in args_const) and all(
+                is_safe_for_source(v) for v in kwargs_const.values()
+            )
 
-            if (
-                self.source
-                and not has_opaque_args
-            ):
+            if self.source and args_are_safe:
                 # convert to tuple to make it hashable
                 kwargs_tuple = tuple(sorted(kwargs_const.items()))
                 call_source = CallMethodSource(
