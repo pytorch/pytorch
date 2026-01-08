@@ -13,7 +13,11 @@ import torch.distributed.tensor._dispatch as op_dispatch
 import torch.distributed.tensor._random as random
 import torch.nn as nn
 from torch._export.wrappers import mark_subclass_constructor_exportable_experimental
-from torch.distributed.device_mesh import _mesh_resources, DeviceMesh
+from torch.distributed.device_mesh import (
+    _mesh_resources,
+    _register_device_mesh_as_opaque_type,
+    DeviceMesh,
+)
 from torch.distributed.tensor._collective_utils import check_tensor_meta, mesh_broadcast
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._redistribute import (
@@ -1401,3 +1405,12 @@ def zeros(  # type: ignore[no-untyped-def]
         device_mesh=device_mesh,
         placements=placements,
     )
+
+
+# Module-level alias for DTensor.from_local to support FX code generation.
+# FX uses __name__ instead of __qualname__ when generating code, which loses
+# the class context for static methods. This alias allows generated code like
+# `torch.distributed.tensor._api.from_local(...)` to work correctly.
+from_local = DTensor.from_local
+
+_register_device_mesh_as_opaque_type()

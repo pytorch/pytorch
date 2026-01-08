@@ -185,6 +185,7 @@ def _get_qualified_name(func: Callable[..., Any]) -> str:
     ):
         return f"torch.Tensor.{func.__name__}"
     name = func.__name__
+
     if name == "<lambda>":
         # For lambdas, try to get their defining name in the module
         try:
