@@ -2596,16 +2596,12 @@
   device_check: NoCheck   # TensorIterator
   structured_delegate: exp.out
   variants: function, method
-  dispatch:
-    SparseCPU, SparseCUDA, SparseMPS: exp_sparse
   tags: [core, pointwise]
 
 - func: exp_(Tensor(a!) self) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   structured_delegate: exp.out
   variants: function, method
-  dispatch:
-    SparseCPU, SparseCUDA, SparseMPS: exp_sparse_
   tags: pointwise
 
 - func: exp.out(Tensor self, *, Tensor(a!) out) -> Tensor(a!)
@@ -2614,7 +2610,6 @@
   structured_inherits: TensorIteratorBase
   dispatch:
     CPU, CUDA, MPS, MTIA: exp_out
-    SparseCPU, SparseCUDA, SparseMPS: exp_sparse_out
   tags: pointwise
 
 - func: exp2(Tensor self) -> Tensor
