@@ -1145,6 +1145,8 @@ from user code:
         """
         Test cross-compilation with transformer model with DTensors,
         FlexAttention, and checkpointing using the compiler toolkit.
+        Compares compiled execution against eager execution for bitwise
+        equivalence of logits and gradients.
         """
 
         def dtensorify_module(
@@ -1180,6 +1182,23 @@ from user code:
                     buffer_placements=buffer_placements,
                 )
 
+        def init_weights_deterministic(module: nn.Module, seed: int = 42) -> None:
+            """
+            Initialize module weights deterministically using a fixed seed.
+            This ensures reproducible results across eager and compiled runs.
+            """
+            torch.manual_seed(seed)
+            torch.cuda.manual_seed(seed)
+            for name, param in module.named_parameters():
+                if param.requires_grad:
+                    local_param = (
+                        param.to_local() if isinstance(param, DTensor) else param
+                    )
+                    local_param.data.normal_(mean=0.0, std=0.02)
+            for name, buf in module.named_buffers():
+                local_buf = buf.to_local() if isinstance(buf, DTensor) else buf
+                local_buf.data.normal_(mean=0.0, std=0.02)
+
         fake_store = FakeStore()
         c10d.init_process_group(backend="fake", store=fake_store, rank=0, world_size=1)
 
@@ -1196,7 +1215,6 @@ from user code:
             max_seq_len = 32
             batch_size = 2
             seq_len = 16
-            torch.manual_seed(0)
             torch.set_default_device(device)
 
             device_mesh = init_device_mesh(
@@ -1205,15 +1223,16 @@ from user code:
                 mesh_dim_names=("dp",),
             )
 
-            model = Transformer(
-                vocab_size,
-                embed_dim,
-                num_heads,
-                num_layers,
-                max_seq_len,
-                num_kv_heads=num_kv_heads,
-                device_mesh=device_mesh,
-            ).to(device)
+            with torch.device("meta"):
+                model = Transformer(
+                    vocab_size,
+                    embed_dim,
+                    num_heads,
+                    num_layers,
+                    max_seq_len,
+                    num_kv_heads=num_kv_heads,
+                    device_mesh=device_mesh,
+                )
 
             dtensorify_module(
                 model,
@@ -1224,6 +1243,9 @@ from user code:
 
             outer_fake_mode = FakeTensorMode(allow_non_fake_inputs=True)
             with outer_fake_mode:
+                # Convert meta tensors -> fake tensors on target device
+                model.to_empty(device=device)
+
                 local_input_ids = torch.randint(
                     0, vocab_size, (batch_size, seq_len), device=device
                 )
@@ -1282,21 +1304,112 @@ from user code:
                     f.read()
                 )
 
+            # Create compiled model with deterministic initialization
+            torch.manual_seed(123)
+            torch.cuda.manual_seed(123)
             local_input_ids = torch.randint(
                 0, vocab_size, (batch_size, seq_len), device=device
             )
             input_ids_dt = DTensor.from_local(local_input_ids, device_mesh, [Shard(0)])
+            torch.manual_seed(456)
+            torch.cuda.manual_seed(456)
             targets = torch.randint(0, vocab_size, (batch_size, seq_len), device=device)
 
-            (logits_dt,) = loaded_fn(
-                *model.parameters(), *model.buffers(), input_ids_dt
+            compiled_model = Transformer(
+                vocab_size,
+                embed_dim,
+                num_heads,
+                num_layers,
+                max_seq_len,
+                num_kv_heads=num_kv_heads,
+                device_mesh=device_mesh,
+            )
+            dtensorify_module(
+                compiled_model,
+                device_mesh,
+                param_placements=[Replicate()],
+                buffer_placements=[Replicate()],
+            )
+            compiled_model.to_empty(device=device)
+            init_weights_deterministic(compiled_model, seed=789)
+
+            eager_model = Transformer(
+                vocab_size,
+                embed_dim,
+                num_heads,
+                num_layers,
+                max_seq_len,
+                num_kv_heads=num_kv_heads,
+                device_mesh=device_mesh,
+            )
+            dtensorify_module(
+                eager_model,
+                device_mesh,
+                param_placements=[Replicate()],
+                buffer_placements=[Replicate()],
+            )
+            eager_model.to_empty(device=device)
+            init_weights_deterministic(eager_model, seed=789)
+
+            # Run compiled forward pass
+            (compiled_logits_dt,) = loaded_fn(
+                *compiled_model.parameters(), *compiled_model.buffers(), input_ids_dt
+            )
+            compiled_logits = (
+                compiled_logits_dt.to_local()
+                if isinstance(compiled_logits_dt, DTensor)
+                else compiled_logits_dt
             )
 
-            logits = (
-                logits_dt.to_local() if isinstance(logits_dt, DTensor) else logits_dt
+            # Run eager forward pass with same input
+            eager_logits_dt = eager_model(input_ids_dt)
+            eager_logits = (
+                eager_logits_dt.to_local()
+                if isinstance(eager_logits_dt, DTensor)
+                else eager_logits_dt
             )
-            loss = F.cross_entropy(logits.view(-1, vocab_size), targets.view(-1))
-            loss.backward()
+
+            # Compare logits for bitwise equivalence
+            self.assertEqual(
+                compiled_logits,
+                eager_logits,
+                msg="Compiled and eager logits should be bitwise equivalent",
+            )
+
+            # Run backward pass on compiled model
+            compiled_loss = F.cross_entropy(
+                compiled_logits.view(-1, vocab_size), targets.view(-1)
+            )
+            compiled_loss.backward()
+            compiled_grads = {
+                name: p.grad.clone() if p.grad is not None else None
+                for name, p in compiled_model.named_parameters()
+            }
+
+            # Run backward pass on eager model
+            eager_loss = F.cross_entropy(
+                eager_logits.view(-1, vocab_size), targets.view(-1)
+            )
+            eager_loss.backward()
+            eager_grads = {
+                name: p.grad.clone() if p.grad is not None else None
+                for name, p in eager_model.named_parameters()
+            }
+
+            # Compare losses for bitwise equivalence
+            self.assertEqual(
+                compiled_loss,
+                eager_loss,
+                msg="Compiled and eager losses should be bitwise equivalent",
+            )
+
+            # Compare gradients for bitwise equivalence
+            for name in compiled_grads:
+                self.assertEqual(
+                    compiled_grads[name],
+                    eager_grads[name],
+                    msg=f"Gradients for {name} should be bitwise equivalent",
+                )
 
             os.unlink(serialization_path)
 
