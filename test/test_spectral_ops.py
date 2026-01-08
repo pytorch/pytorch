@@ -916,8 +916,6 @@ class TestFFT(TestCase):
         self.assertTrue((x.grad - dx).abs().max() == 0)
         self.assertFalse((x.grad - x).abs().max() == 0)
 
-    # passes on ROCm w/ python 2.7, fails w/ python 3.6
-    @skipIfTorchDynamo("cannot set WRITEABLE flag to True of this array")
     @skipCPUIfNoFFT
     @onlyNativeDeviceTypes
     @dtypes(torch.double)
