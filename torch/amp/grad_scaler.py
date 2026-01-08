@@ -38,12 +38,13 @@ class _MultiDeviceReplicator:
 # Defines default_factory for GradScaler's _per_optimizer_states defaultdict,
 # as well as associated "enum" values.  Prefers defining these at top level because
 # - Lambdas can't be pickled, so we don't want to supply a lambda as the factory.
-# - Defining READY, UNSCALED, STEPPED and _refresh_per_optimizer_state within GradScaler
-#   causes a circular reference, which we'd rather avoid.
+# - Defining READY, UNSCALED, STEPPED, UPDATED and _refresh_per_optimizer_state within
+# GradScaler causes a circular reference, which we'd rather avoid.
 class OptState(Enum):
     READY = 0
     UNSCALED = 1
     STEPPED = 2
+    UPDATED = 3
 
 
 def _refresh_per_optimizer_state() -> dict[str, Any]:
@@ -342,7 +343,7 @@ class GradScaler:
             raise RuntimeError(
                 "unscale_() has already been called on this optimizer since the last update()."
             )
-        elif optimizer_state["stage"] is OptState.STEPPED:
+        elif optimizer_state["stage"] in (OptState.STEPPED, OptState.UPDATED):
             raise RuntimeError("unscale_() is being called after step().")
 
         # FP32 division can be imprecise for certain compile options, so we carry out the reciprocal in FP64.
@@ -370,6 +371,7 @@ class GradScaler:
         retval: Optional[float] = None
         if not sum(v.item() for v in optimizer_state["found_inf_per_device"].values()):
             retval = optimizer.step(*args, **kwargs)
+            optimizer_state["stage"] = OptState.STEPPED
         return retval
 
     def step(
@@ -408,7 +410,7 @@ class GradScaler:
 
         optimizer_state = self._per_optimizer_states[id(optimizer)]
 
-        if optimizer_state["stage"] is OptState.STEPPED:
+        if optimizer_state["stage"] in (OptState.STEPPED, OptState.UPDATED):
             raise RuntimeError(
                 "step() has already been called since the last update()."
             )
@@ -475,9 +477,8 @@ class GradScaler:
         if len(optimizer_state["found_inf_per_device"]) == 0:
             raise AssertionError("No inf checks were recorded for this optimizer.")
 
+        optimizer_state["stage"] = OptState.UPDATED
         retval = self._maybe_opt_step(optimizer, optimizer_state, *args, **kwargs)
-
-        optimizer_state["stage"] = OptState.STEPPED
 
         return retval
 
@@ -623,6 +624,10 @@ class GradScaler:
     def is_enabled(self) -> bool:
         r"""Return a bool indicating whether this instance is enabled."""
         return self._enabled
+
+    def stage(self, optimizer: torch.optim.Optimizer) -> OptState:
+        r"""Return the current stage for the given optimizer. If the optimizer is not found, returns OptState.READY."""
+        return self._per_optimizer_states.get(id(optimizer), _refresh_per_optimizer_state()).get("stage")
 
     def state_dict(self) -> dict[str, Any]:
         r"""Return the state of the scaler as a :class:`dict`.
