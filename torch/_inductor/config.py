@@ -2316,6 +2316,8 @@ _cache_config_ignore_prefix: list[str] = [
     "trace",
     # uses absolute path
     "cuda.cutlass_dir",
+    "cutlas.cutlass_dir",
+    "xpu.cutlass_dir",
     # not relevant
     "worker_start_method",
     "compile_threads",
