@@ -1,0 +1,9 @@
+"""
+"""
+
+
+module(
+    name = "pytorch"
+)
+
+bazel_dep(name = "eigen", version = "5.0.0")
