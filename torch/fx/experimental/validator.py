@@ -181,8 +181,7 @@ try:
             return x if x.is_int() else z3.ToInt(x)
 
         def sym_sum(self, args: z3.ArithRef) -> z3.ArithRef:
-            # pyrefly: ignore
-            return sum(args)
+            return sum(args)  # pyrefly: ignore [no-matching-overload]
 
         # Implements Python division semantics.
         def div(self, numerator: z3.ArithRef, denominator: z3.ArithRef) -> z3.ArithRef:
@@ -430,6 +429,9 @@ try:
             return self._ops.pow(base, exp)
 
         def mod(self, p: z3.ArithRef, q: z3.ArithRef) -> z3.ArithRef:
+            return self._ops.mod(p, q)
+
+        def python_mod(self, p: z3.ArithRef, q: z3.ArithRef) -> z3.ArithRef:
             return self._ops.mod(p, q)
 
         def ceil_to_int(self, x: z3.ArithRef, dtype: torch.dtype) -> z3.ArithRef:

@@ -2,8 +2,6 @@
 // external_functions_codegen_template.cpp
 #include <torch/csrc/jit/tensorexpr/external_functions.h>
 
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
 #include <torch/csrc/jit/tensorexpr/external_functions_registry.h>
 
 namespace torch::jit::tensorexpr {

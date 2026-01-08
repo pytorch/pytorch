@@ -328,6 +328,10 @@ class ContinueExecutionCache:
         # mainly used to ensure distinct code objects per stack trace,
         # which prevents excessive recompilation of inner frames
         nested_code_objs: tuple[types.CodeType],
+        # Are we currently graph breaking on an instruction that doesn't push
+        # its result to the stack? If so, and we are not the leaf resume, then we need to pop
+        # the result of calling the next resume function.
+        pop_nested_resume_result: bool,
     ) -> types.CodeType:
         assert resume_offset is not None
         assert not (
@@ -351,6 +355,7 @@ class ContinueExecutionCache:
                 argnames_ctx_vars,
                 null_idxes,
                 nested_code_objs,
+                pop_nested_resume_result,
             )
 
         is_py311_plus = sys.version_info >= (3, 11)
@@ -534,6 +539,9 @@ class ContinueExecutionCache:
                         *create_call_function_ex(False, False),
                     ]
                 )
+                if pop_nested_resume_result:
+                    # pop the result of calling the nested resume function
+                    prefix.append(create_instruction("POP_TOP"))
             else:
                 # Set is_tracing_resume_prologue back to allow graph breaks after the jump
                 prefix.extend(

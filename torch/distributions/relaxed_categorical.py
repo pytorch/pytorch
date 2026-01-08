@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 from torch import Tensor
@@ -48,14 +47,15 @@ class ExpRelaxedCategorical(Distribution):
     def __init__(
         self,
         temperature: Tensor,
-        probs: Optional[Tensor] = None,
-        logits: Optional[Tensor] = None,
-        validate_args: Optional[bool] = None,
+        probs: Tensor | None = None,
+        logits: Tensor | None = None,
+        validate_args: bool | None = None,
     ) -> None:
         self._categorical = Categorical(probs, logits)
         self.temperature = temperature
         batch_shape = self._categorical.batch_shape
         event_shape = self._categorical.param_shape[-1:]
+        # pyrefly: ignore [bad-argument-type]
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):
@@ -137,9 +137,9 @@ class RelaxedOneHotCategorical(TransformedDistribution):
     def __init__(
         self,
         temperature: Tensor,
-        probs: Optional[Tensor] = None,
-        logits: Optional[Tensor] = None,
-        validate_args: Optional[bool] = None,
+        probs: Tensor | None = None,
+        logits: Tensor | None = None,
+        validate_args: bool | None = None,
     ) -> None:
         base_dist = ExpRelaxedCategorical(
             temperature, probs, logits, validate_args=validate_args
