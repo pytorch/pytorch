@@ -32,7 +32,7 @@ import typing
 import unittest
 from collections import defaultdict, OrderedDict
 from collections.abc import Callable, Iterable, KeysView, Sequence
-from typing import Any, cast, TYPE_CHECKING, Union
+from typing import Any, cast, Literal, TYPE_CHECKING, Union
 
 import torch
 from torch import sym_float, sym_int
@@ -42,7 +42,6 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
 from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
-    AttributeMutationError,
     ObservedAttributeError,
     ObservedUserStopIteration,
     raise_observed_exception,
@@ -886,7 +885,6 @@ class BuiltinVariable(VariableTracker):
                         and left.exc_type is not right.exc_type
                     ):
                         return ConstantVariable.create(op(left, right))
-                    return None
 
                 result.append(((VariableTracker, VariableTracker), handle_is))  # type: ignore[arg-type]
 
@@ -1002,7 +1000,7 @@ class BuiltinVariable(VariableTracker):
     ) -> Callable[
         [
             "InstructionTranslator",
-            Sequence[VariableTracker],
+            tuple[VariableTracker, ...],
             dict[str, VariableTracker],
         ],
         VariableTracker | None,
@@ -1018,7 +1016,7 @@ class BuiltinVariable(VariableTracker):
             )
 
         if inspect.isclass(fn) and (
-            issubclass(fn, Exception)
+            issubclass(fn, BaseException)
             # GeneratorExit doesn't inherit from Exception
             # >>> issubclass(GeneratorExit, Exception)
             # False
@@ -1027,7 +1025,7 @@ class BuiltinVariable(VariableTracker):
 
             def create_exception_class_object(
                 tx: "InstructionTranslator",
-                args: Sequence[VariableTracker],
+                args: tuple[VariableTracker, ...],
                 kwargs: dict[str, VariableTracker],
             ) -> VariableTracker:
                 if fn is AssertionError and not all(
@@ -1531,7 +1529,6 @@ class BuiltinVariable(VariableTracker):
             resolved_fn = getattr(self.fn, name)
             if resolved_fn in dict_methods:
                 if isinstance(args[0], variables.UserDefinedDictVariable):
-                    # pyrefly: ignore [missing-attribute]
                     return args[0]._dict_vt.call_method(tx, name, args[1:], kwargs)
                 elif isinstance(args[0], variables.ConstDictVariable):
                     return args[0].call_method(tx, name, args[1:], kwargs)
@@ -1540,7 +1537,6 @@ class BuiltinVariable(VariableTracker):
             resolved_fn = getattr(self.fn, name)
             if resolved_fn in set_methods:
                 if isinstance(args[0], variables.UserDefinedSetVariable):
-                    # pyrefly: ignore [missing-attribute]
                     return args[0]._set_vt.call_method(tx, name, args[1:], kwargs)
                 elif isinstance(args[0], variables.SetVariable):
                     return args[0].call_method(tx, name, args[1:], kwargs)
@@ -1597,6 +1593,15 @@ class BuiltinVariable(VariableTracker):
     def call_bool(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker | None:
+        if arg.is_tensor():
+            item = arg.call_method(tx, "item", [], {})
+            if isinstance(item, SymNodeVariable) and isinstance(
+                item.sym_num, torch.SymBool
+            ):
+                return item
+            if isinstance(item, variables.ConstantVariable):
+                return variables.ConstantVariable.create(bool(item.value))
+            return SymNodeVariable.create(tx, item.as_proxy() != 0)
         # Emulate `PyBool_Type.tp_vectorcall` which boils down to `PyObject_IsTrue`.
         # https://github.com/python/cpython/blob/3.12/Objects/object.c#L1674-L1697
         if isinstance(arg, SymNodeVariable):
@@ -1615,7 +1620,9 @@ class BuiltinVariable(VariableTracker):
         # TODO handle more cases and merge this with this with `generic_jump`.
         return None
 
-    def call_repr(self, tx: "InstructionTranslator", arg):
+    def call_repr(
+        self, tx: "InstructionTranslator", arg: VariableTracker
+    ) -> VariableTracker | None:
         """Handle repr() on user defined objects."""
         if isinstance(arg, variables.UserDefinedObjectVariable):
             repr_method = arg.value.__repr__
@@ -1629,6 +1636,7 @@ class BuiltinVariable(VariableTracker):
                 bound_method = repr_method.__func__
                 fn_vt = VariableTracker.build(tx, bound_method)
                 return fn_vt.call_function(tx, [arg], {})
+        return None
 
     def call_str(
         self, tx: "InstructionTranslator", arg: VariableTracker
@@ -2168,7 +2176,7 @@ class BuiltinVariable(VariableTracker):
                 "2 args",
                 f"{len(args)} args",
             )
-        # pyrefly: ignore [bad-unpacking]
+
         arg, value = args
         DictVariableType = (
             ConstDictVariable if user_cls is not defaultdict else DefaultDictVariable
@@ -2177,7 +2185,6 @@ class BuiltinVariable(VariableTracker):
         if isinstance(arg, dict):
             arg_list = [ConstantVariable.create(k) for k in arg]
             return DictVariableType(
-                # pyrefly: ignore [bad-argument-type]
                 dict.fromkeys(arg_list, value),
                 user_cls,
                 mutation_type=ValueMutationNew(),
@@ -2186,7 +2193,6 @@ class BuiltinVariable(VariableTracker):
             keys = arg.force_unpack_var_sequence(tx)
             if all(is_hashable(v) for v in keys):
                 return DictVariableType(
-                    # pyrefly: ignore [bad-argument-type]
                     dict.fromkeys(keys, value),
                     user_cls,
                     mutation_type=ValueMutationNew(),
@@ -2727,6 +2733,7 @@ class BuiltinVariable(VariableTracker):
                 variables.UserDefinedObjectVariable,
                 variables.NestedUserFunctionVariable,
                 variables.ExceptionVariable,
+                variables.TracebackVariable,
             ),
         ):
             return obj.call_method(tx, "__setattr__", [name_var, val], {})
@@ -2844,8 +2851,14 @@ class BuiltinVariable(VariableTracker):
             return val
         elif isinstance(obj, variables.NNModuleVariable):
             if not tx.output.is_root_tracer():
-                raise AttributeMutationError(
-                    "Can't inplace modify module params/buffers inside HigherOrderOp"
+                unimplemented(
+                    gb_type="nn.Module mutation in HigherOrderOp",
+                    context=f"nn.Module: {obj}",
+                    explanation="Inplace modifying nn.Module params/buffers inside HigherOrderOps is not allowed.",
+                    hints=[
+                        "Remove the mutation or move it outside of the HigherOrderOp.",
+                        *graph_break_hints.FUNDAMENTAL,
+                    ],
                 )
             if name_var.is_python_constant() and isinstance(
                 val, variables.TensorVariable
@@ -3268,13 +3281,13 @@ class BuiltinVariable(VariableTracker):
     ) -> VariableTracker:
         return a.call_method(tx, "__contains__", [b], {})
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> Literal[True]:
         return True
 
-    def get_python_hash(self):
+    def get_python_hash(self) -> int:
         return hash(self.fn)
 
-    def is_python_equal(self, other):
+    def is_python_equal(self, other: object) -> bool:
         return isinstance(other, variables.BuiltinVariable) and self.fn is other.fn
 
 

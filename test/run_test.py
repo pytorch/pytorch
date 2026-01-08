@@ -880,8 +880,8 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
         if TEST_CUDA or TEST_XPU:
             exts_to_build.append((wheel_cmd, "python_agnostic_extension"))
         if TEST_CUDA:
-            exts_to_build.append((install_cmd, "libtorch_agnostic_2_9_extension"))
-            exts_to_build.append((install_cmd, "libtorch_agnostic_2_10_extension"))
+            exts_to_build.append((install_cmd, "libtorch_agn_2_9_extension"))
+            exts_to_build.append((install_cmd, "libtorch_agn_2_10_extension"))
         for cmd, extension_dir in exts_to_build:
             return_code = shell(
                 cmd,
@@ -910,8 +910,8 @@ def _test_cpp_extensions_aot(test_directory, options, use_ninja):
                     install_directories.append(os.path.join(root, directory))
 
         for extension_name in [
-            "libtorch_agnostic_2_9_extension",
-            "libtorch_agnostic_2_10_extension",
+            "libtorch_agn_2_9_extension",
+            "libtorch_agn_2_10_extension",
         ]:
             for root, directories, _ in os.walk(
                 os.path.join(cpp_extensions, extension_name, "install")
