@@ -557,7 +557,7 @@ as evenly as possible to each instance. It is possible that some cores in an ins
                         leftover_num = core_num - ncore_per_node[i]
                         if leftover_num > 0:
                             # too many ncores_per_instance for a node
-                            raise RuntimeError(
+                            raise ValueError(
                                 "there are %s core(s) in node %s, but specified %s cores for \
 this node and --bind-numa-node is specified.",
                                 ncore_per_node[i],
@@ -576,7 +576,7 @@ this node and --bind-numa-node is specified.",
                 args.ninstances = len(args.ncores_per_instance)
             else:
                 if sum(args.ncores_per_instance) > len(cores):
-                    raise ValueError(
+                    raise RuntimeError(
                         "Please make sure the sum up of ncores_per_instance <= total_cores"
                     )
             if args.latency_mode:
