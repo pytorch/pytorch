@@ -117,7 +117,6 @@ from torch.fx.experimental.symbolic_shapes import (
     SYMPY_INTERP,
 )
 from torch.utils import _pytree as pytree
-from torch.utils._mode_utils import no_dispatch
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._traceback import format_frame, report_compile_source_on_error
 from torch.utils.weak import TensorWeakRef
@@ -2218,16 +2217,7 @@ class GuardBuilder(GuardBuilderBase):
     def DTENSOR_SPEC_MATCH(self, guard: Guard) -> None:
         # Copied from DTensor __metadata_guard__
         # TODO - Consider moving this to C++ if stable
-        # We need to disable dispatch because otherwise we end
-        # up doing a clone on storage, which under the hood calls
-        # _copy but when we call _copy, the fake mode turns self,
-        # which is on "cpu", into a meta device resulting in an
-        # assertion failure:
-        #   Attempted to set the storage of a tensor on device
-        #   "meta" to a storage on different device "cpu"...
-
-        with no_dispatch():
-            value = deepcopy(self.get(guard))
+        value = deepcopy(self.get(guard))
 
         def guard_fn(x: Any) -> bool:
             return x._check_equals(value, skip_shapes=True)

@@ -54,23 +54,21 @@ def process_inputs(
             if not isinstance(x, torch.Tensor):
                 return x
             if isinstance(x, FakeTensor):
-                # In the case of cross compilation we will have an outer
-                # fake mode to construct tensors on a device without the
-                # actual physical hardware (eg. cuda tensors without a GPU).
-                # In these cases we want to clone the fake tensor from the
-                # outer fake mode to the inner fake mode.
+                # In the case of cross compilation we will have example inputs
+                # with a different fake mode than our tracing fake mode.
+                # In these cases we want to clone the fake tensor into our
+                # inner fake mode.
                 if x.fake_mode is not fake_mode:
                     return fake_mode.from_tensor(x)
                 return x
             if is_traceable_wrapper_subclass(x):
                 attrs, _ = x.__tensor_flatten__()
-                if any(isinstance(getattr(x, attr), FakeTensor) for attr in attrs):
-                    for attr in attrs:
-                        attr_val = getattr(x, attr)
-                        if attr_val.fake_mode is not fake_mode:
-                            setattr(x, attr, fake_mode.from_tensor(attr_val))
+                if all(isinstance(getattr(x, attr), FakeTensor) for attr in attrs):
+                    if all(getattr(x, attr).fake_mode is fake_mode for attr in attrs):
+                        return x
+                    # FakeTensor subclass from a different mode.
+                    # Fall through to refakify.
 
-                    return x
 
             # see note [Tensor Fakification and Symbol Caching]
             symbolic_context = None
