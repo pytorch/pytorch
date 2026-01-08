@@ -30,6 +30,7 @@ from torch._export.verifier import load_verifier
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.fx.experimental import symbolic_shapes
+from torch.fx.traceback import NodeSource
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import treespec_dumps, treespec_loads
 from torch.utils._sympy.numbers import int_oo
@@ -969,7 +970,27 @@ class GraphModuleSerializer(metaclass=Final):
                     f"Failed to serialize custom metadata for node {node.name} with error {e}"
                 ) from e
 
+        if "from_node" in node.meta:
+            from_node = node.meta["from_node"]
+            # Serialize from_node as JSON since it's a complex nested structure
+            ret["from_node"] = json.dumps(self._serialize_from_node(from_node))
+
         return ret
+
+    def _serialize_from_node(
+        self, from_node: Optional[list[NodeSource]]
+    ) -> Optional[list[dict[str, Any]]]:
+        """
+        Serialize from_node metadata from a list of NodeSource objects to a list of dictionaries.
+        """
+        if from_node is None:
+            return None
+
+        return [
+            node_source.to_dict()
+            for node_source in from_node
+            if isinstance(node_source, NodeSource)
+        ]
 
     def serialize_script_obj_meta(
         self, script_obj_meta: ep.CustomObjArgument
@@ -3063,7 +3084,27 @@ class GraphModuleDeserializer(metaclass=Final):
         if custom_str := metadata.get("custom"):
             ret["custom"] = json.loads(custom_str)
 
+        if from_node_str := metadata.get("from_node"):
+            ret["from_node"] = self._deserialize_from_node(json.loads(from_node_str))
+
         return ret
+
+    def _deserialize_from_node(
+        self, from_node_data: Optional[list[dict[str, Any]]]
+    ) -> Optional[list[NodeSource]]:
+        """
+        Deserialize from_node metadata from JSON data.
+        """
+        if from_node_data is None:
+            return None
+
+        assert isinstance(from_node_data, list)
+
+        return [
+            node_source
+            for fn_dict in from_node_data
+            if (node_source := NodeSource._from_dict(fn_dict)) is not None
+        ]
 
     def deserialize_argument_spec(self, x: Argument) -> ep.ArgumentSpec:
         log.debug("[deserialize_argument_spec] %s", x)

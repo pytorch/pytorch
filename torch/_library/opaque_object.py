@@ -35,6 +35,7 @@ You can register a custom class as being a reference-based opaque object class
 through `register_opaque_type(MyClass, typ="value")`.
 """
 
+from collections.abc import Callable
 from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Literal, NewType, Optional
@@ -79,9 +80,9 @@ OpaqueType = NewType("OpaqueType", torch._C.ScriptObject)
 class _OpaqueTypeInfo:
     class_name: str
     opaque_typ: Literal["reference", "value"]
-    guard_fn: (
-        Any  # Callable that takes the object and returns list of values to guard on
-    )
+    guard_fn: Callable[
+        Any, list[Any]
+    ]  # Callable that takes the object and returns list of values to guard on
     members: dict[str, MemberType]  # Maps member name to how it should be handled
 
 
