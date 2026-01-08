@@ -278,9 +278,13 @@ class OpDispatcher:
             local_tensor_args = cast(tuple[object, ...], local_tensor_args)
             if op_call in self._random_ops:
                 if not random._rng_tracker and is_rng_supported_mesh(mesh):
-                    # Default to `OffsetBasedRNGTracker` if the parallelism API
-                    # did not already construct one
-                    random._rng_tracker = random.OffsetBasedRNGTracker(mesh)
+                    # Default to `OffsetBasedRNGTracker` if the parallelism API did not already construct one
+                    if random._USE_THREAD_RNG_TRACKER:
+                        random._rng_tracker = random.ThreadBasedRNGTracker(mesh)
+                    else:
+                        random._rng_tracker = random.OffsetBasedRNGTracker(
+                            mesh, run_state_sync=False
+                        )
 
                 first_arg, first_local_arg = (
                     cast(dtensor.DTensor, args[0]),
