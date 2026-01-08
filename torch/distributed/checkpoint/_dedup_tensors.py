@@ -30,8 +30,26 @@ def init_logger() -> logging.Logger:
 logger = init_logger()
 
 
-# TODO add docstring for dedup_tensors
 def dedup_tensors(all_plans: list[SavePlan]) -> list[SavePlan]:
+    """
+    Remove duplicate tensor entries across multiple SavePlan objects.
+
+    When multiple ranks attempt to save the same tensor (identified by MetadataIndex),
+    this function deduplicates by keeping only the first occurrence and removing
+    subsequent duplicates from their respective SavePlans.
+
+    Args:
+        all_plans (list[SavePlan]): List of SavePlan objects, one per rank, that may
+            contain duplicate tensor entries.
+
+    Returns:
+        list[SavePlan]: List of SavePlan objects with duplicates removed. For each
+            duplicated tensor, only the first occurrence (by plan order) is retained.
+
+    Note:
+        The deduplication strategy always keeps the tensor from the first plan that
+        contains it, removing it from all subsequent plans.
+    """
     all_plans = list(all_plans)
     key_to_plan: dict[MetadataIndex, list[int]] = {}
     for plan_idx, plan in enumerate(all_plans):
