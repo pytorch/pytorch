@@ -28,7 +28,7 @@ from torch._higher_order_ops.associative_scan import associative_scan_op
 from torch._higher_order_ops.triton_kernel_wrap import triton_kernel_wrapper_mutation
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.utils import get_layout_constraint_tag
-from torch._prims_common import (  # pyrefly: ignore  # deprecated; pyrefly: ignore [deprecated]
+from torch._prims_common import (
     canonicalize_dim,
     canonicalize_dims,
     check,
@@ -162,7 +162,6 @@ def group_foreach_args(
                 break
         assert device is not None, "foreach op should have at least one tensor arg"
         if unpack_args:
-            # pyrefly: ignore [bad-unpacking]
             (args,) = args
         out[(device, use_foreach)].append((i, args))
     return out
@@ -279,7 +278,7 @@ def decode_dtype(dtype: Union[int, torch.dtype]) -> torch.dtype:
     if not isinstance(dtype, int):
         return dtype
     assert dtype in DTYPE_ID_LOOKUP, f"id {dtype} missing from DTYPE_ID_LOOKUP"
-    # pyrefly: ignore [bad-assignment]
+
     dtype = DTYPE_ID_LOOKUP[dtype]
     return dtype
 
@@ -695,7 +694,6 @@ def make_pointwise(
         if not override_device:
             device = None
             for i in inputs:
-                # pyrefly: ignore [missing-attribute]
                 if is_gpu(i.get_device().type):
                     device = i.get_device()
                     break
@@ -931,6 +929,45 @@ def register_pointwise(
             convert_input_to_bool=convert_input_to_bool,
         )(fn)
     return fn
+
+
+register_op_dtype_propagation_rules(
+    "ldexp",
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    override_return_dtype=None,
+)
+
+
+@register_lowering(aten.ldexp, broadcast=True, type_promotion_kind=None)
+def ldexp_lowering(x: TensorBox, n: TensorBox):
+    ldexp_fn = ops_wrapper("ldexp")
+
+    x_dtype = x.get_dtype()
+    n_dtype = n.get_dtype()
+
+    x_is_float = x_dtype.is_floating_point
+    n_is_int = not n_dtype.is_floating_point and n_dtype != torch.bool
+
+    if x_is_float and n_is_int:
+        # Use native ldexp
+        def compute_ldexp(x, n):
+            return ldexp_fn(x, n)
+
+        return make_pointwise(compute_ldexp)(x, n)
+    else:
+        # Fall back to decomposition: x * pow(2, n)
+        out_dtype = torch.float32 if is_integer_type(x) else x_dtype
+
+        def compute_fallback(x, n):
+            n_out_type = ops.to_dtype(n, out_dtype)
+            two = ops.constant(2.0, out_dtype)
+            pow_result = ops.pow(two, n_out_type)
+            return ops.mul(x, pow_result)
+
+        return make_pointwise(
+            compute_fallback,
+            override_return_dtype=out_dtype,
+        )(x, n)
 
 
 def register_frexp():
@@ -2922,7 +2959,7 @@ make_fallback(aten._scaled_dot_product_attention_math_for_mps)  # @malfet
 # 1) Easy
 make_fallback(aten.uniform, warn=False)
 make_fallback(aten.exponential.default, warn=False)  # (fails accuracy on test_torch.py)
-make_fallback(aten._pdist_forward)  # Has decomp. Needs benchmarks
+make_fallback(aten._pdist_forward, require_contiguous)  # Has decomp. Needs benchmarks
 make_fallback(aten.soft_margin_loss_backward, warn=False)  # py_impl?
 make_fallback(aten._fused_rms_norm, warn=False)  # (MPS-only and faster than decomp)
 if torch.xpu.is_available():
@@ -2993,7 +3030,7 @@ make_fallback(aten.upsample_linear1d_backward)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
 make_fallback(aten.upsample_trilinear3d_backward)
 make_fallback(aten.grid_sampler_2d_backward)
-make_fallback(aten._pdist_backward)
+make_fallback(aten._pdist_backward, require_contiguous)
 
 
 # 5) Impossible (missing triton/CPU features)
@@ -3140,10 +3177,8 @@ def copy(self, src, non_blocking=False):
         src = tensor(src, dtype=self.get_dtype(), device=self.get_device())
     x = src
     if self.get_device() != src.get_device():
-        # pyrefly: ignore [bad-argument-type]
         x = to_device(x, self.get_device())
     if self.get_dtype() != src.get_dtype():
-        # pyrefly: ignore [bad-argument-type]
         x = to_dtype(x, self.get_dtype())
 
     if self.get_size() != src.get_size():
@@ -6413,7 +6448,7 @@ fallback_pow_tensor_scalar = fallback_handler(
 
 @register_lowering(aten.pow, broadcast=True)
 def pow(a, b):
-    if isinstance(b, float) and b == int(b):
+    if isinstance(b, float) and b.is_integer():
         return pow(a, int(b))
     elif isinstance(b, float) and b == 0.5:
         return sqrt(a)
@@ -6444,7 +6479,7 @@ def pow(a, b):
     if isinstance(a, Number):
         if a == 1:
             return full_like(b, 1)
-        # pyrefly: ignore [missing-attribute]
+
         if a == 2 and is_float_dtype(b.get_dtype()):
             return exp2(b)
 
@@ -6975,6 +7010,7 @@ register_pointwise_numeric(aten.erfc)
 register_pointwise_numeric(aten.erfinv)
 register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
+# register_pointwise_numeric(aten.ldexp)
 register_pointwise_numeric(aten.log2)
 register_pointwise_numeric(aten.nextafter)
 
@@ -7571,7 +7607,7 @@ def with_effects(token, op, *args, **kwargs):
                 op_name = new_op.get_name()  # pyrefly: ignore[missing-attribute]
                 V.graph.additional_star_deps[op_name].add(prev_effect_buffer.get_name())
         # Update the effectful ops chain to point to the latest operation
-        V.graph.effectful_ops[effect_type] = (  # pyrefly: ignore[missing-attribute]
+        V.graph.effectful_ops[effect_type] = (
             new_op  # pyrefly: ignore[unsupported-operation]
         )
 
@@ -7588,9 +7624,7 @@ def with_effects(token, op, *args, **kwargs):
                     if hasattr(storage, "data") and hasattr(
                         storage.data, "get_example"
                     ):
-                        return (
-                            storage.data.get_example()
-                        )  # pyrefly: ignore[missing-attribute]
+                        return storage.data.get_example()
                 except (AttributeError, NotImplementedError):
                     pass
                 # Fall back to returning the TensorBox itself if get_example fails
