@@ -81,7 +81,7 @@ class _OpaqueTypeInfo:
     class_name: str
     opaque_typ: Literal["reference", "value"]
     guard_fn: Callable[
-        Any, list[Any]
+        [Any], list[Any]
     ]  # Callable that takes the object and returns list of values to guard on
     members: dict[str, MemberType]  # Maps member name to how it should be handled
 
