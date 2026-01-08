@@ -2324,6 +2324,7 @@ def get_default_op_list() -> OpTypes:
 
     default_recomputable_ops += [
         aten.zeros_like,
+        aten.ones_like,
     ]
 
     default_recomputable_ops += [method_to_operator(m) for m in magic_methods]

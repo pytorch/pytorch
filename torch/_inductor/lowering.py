@@ -3564,8 +3564,8 @@ def constant_like(fill_value):
 
 
 empty_like = register_lowering(aten.empty_like)(create_tensor_like(empty))
-ones_like = create_tensor_like(tensor_constructor(1))
-zeros_like = create_tensor_like(tensor_constructor(0))
+ones_like = register_lowering(aten.ones_like)(create_tensor_like(tensor_constructor(1)))
+zeros_like = register_lowering(aten.zeros_like)(create_tensor_like(tensor_constructor(0)))
 
 
 def new_constant(fill_value):

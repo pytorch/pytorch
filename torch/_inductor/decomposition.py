@@ -130,6 +130,8 @@ decomps_to_exclude: list[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacke
     aten.sum,  # inductor lowers this directly
     aten.unbind,  # inductor lowers this directly
     aten.baddbmm,  # upcasts to fp32, perf issue
+    aten.ones_like,  # need to be in the ATen graph for partitioner to recognize as recomputable factory op
+    aten.zeros_like,  # need to be in the ATen graph for partitioner to recognize as recomputable factory op
 ]
 
 remove_decompositions(decompositions, decomps_to_exclude)

@@ -443,8 +443,8 @@ class TestReinplacingPassCorrectness(InductorTestCase):
     @parametrize(
         "factory_op",
         [
-            # Skipping because of https://github.com/pytorch/pytorch/issues/170160
-            # subtest(torch.ones_like, name="ones_like"),
+            subtest(torch.ones_like, name="ones_like"),
+            subtest(torch.zeros_like, name="zeros_like"),
             subtest(torch.empty_like, name="empty_like"),
         ],
     )
