@@ -261,7 +261,7 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
     if (is_causal) { window_size_right = 0; }
 
     bool is_dropout = p_dropout > 0.0;
-    auto stream = at::cuda::getCurrentHIPStream().stream();
+    auto stream = at::cuda::getCurrentCUDAStream().stream();
 
     auto q_dtype = q.dtype();
     TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
@@ -365,7 +365,7 @@ mha_bwd_ck(const at::Tensor &dout,                   // batch_size x seqlen_q x 
     }
 
     // Cast to char to avoid compiler warning about narrowing
-    at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
+    at::cuda::CUDAGuard device_guard{(char)q.get_device()};
 
     auto opts = q.options();
     auto softmax_d = at::empty({batch_size, num_heads, seqlen_q}, opts.dtype(at::kFloat));

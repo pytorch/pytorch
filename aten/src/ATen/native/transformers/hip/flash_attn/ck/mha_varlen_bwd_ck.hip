@@ -255,7 +255,7 @@ mha_varlen_bwd_ck(const at::Tensor &dout,                   // total_q x num_hea
     if (is_causal) { window_size_right = 0; }
 
     bool is_dropout = p_dropout > 0.0;
-    auto stream = at::hip::getCurrentHIPStreamMasqueradingAsCUDA().stream();
+    auto stream = at::cuda::getCurrentCUDAStream().stream();
 
     auto q_dtype = q.dtype();
     TORCH_CHECK(q_dtype == at::kHalf || q_dtype == at::kBFloat16,
@@ -366,7 +366,7 @@ mha_varlen_bwd_ck(const at::Tensor &dout,                   // total_q x num_hea
     }
 
     // Cast to char to avoid compiler warning about narrowing
-    at::hip::HIPGuardMasqueradingAsCUDA device_guard{(char)q.get_device()};
+    at::cuda::CUDAGuard device_guard{(char)q.get_device()};
 
     auto opts = q.options();
     auto softmax_d = at::empty({batch_size, num_heads, max_seqlen_q}, opts.dtype(at::kFloat));
