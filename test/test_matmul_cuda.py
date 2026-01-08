@@ -82,7 +82,7 @@ def blas_library_context(backend):
         torch.backends.cuda.preferred_blas_library(prev_backend)
 
 
-_ROCM_BLA_REGRESSION_MSG = (
+_ROCM_BLAS_REGRESSION_MSG = (
     "accuracy regression in hipblas and hipblaslt in ROCm 7.0 for certain shapes"
 )
 
