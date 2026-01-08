@@ -56,7 +56,6 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   // Indices are limited to integer fp precision, so counts can fit in
   // int32, regardless of IndexType
   __shared__ int smem[32]; // one per each warp, up to warp limit
-
   IndexType slice = getLinearBlockId<IndexType>();
   if (slice >= numInputSlices) {
     return;
@@ -178,11 +177,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
 
 #else
 
-constexpr int log2_constexpr(int n) {
-  return (n <= 1) ? 0 : 1 + log2_constexpr(n / 2);
-}
-
-template <typename T, typename IndexType, int Dim, bool WithKthValues, int WARP_SIZE>
+template <typename T, typename IndexType, int Dim, bool WithKthValues>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> input,
                             IndexType inputSliceSize,
@@ -198,13 +193,12 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
                             at::cuda::detail::TensorInfo<int64_t, IndexType> indices,
                             IndexType indicesWithinSliceStride,
                             T* kthValues) {
-  static_assert(WARP_SIZE == 64 || WARP_SIZE == 32);
 
   // Indices are limited to integer fp precision, so counts can fit in
   // int32, regardless of IndexType
   __shared__ int smem[64];
-  constexpr int WARP_BITS = log2_constexpr(WARP_SIZE);
-  __shared__ int warp_bases[1024 >> WARP_BITS]; // 1024 >> WARP_BITS = 1024/WARP_SIZE = max warps per block. Variable warp_bases is used for intra-warp communication of write indices.
+  constexpr int MAX_WARPS = 1024 / 32;  // warpSize >= 32 so MAX_WARPS = 1024 / warpSize <= 1024 / 32 = 32
+  __shared__ int warp_bases[MAX_WARPS]; // variable warp_bases is used for intra-warp communication of write indices.
   __shared__ int writeIndexStart; // index to track where to write results. This is shared by all threads in the block. Increases atomically.
 
   IndexType slice = getLinearBlockId<IndexType>();
@@ -248,15 +242,16 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   // each warp counts its own number of hasTopk threads and
   // reserves space for them by incrementing writeIndexStart atomically + saving the old value in warp_bases.
 
-  // All threads within the warp need to participate in the loop, so rounding up to a multiple of the warp size.
-  IndexType numIterations = round_up(inputSliceSize, (IndexType) WARP_SIZE);
-  int warp_id = threadIdx.x >> WARP_BITS; // = threadIdx.x / WARP_SIZE
-  int lane_id = threadIdx.x & (WARP_SIZE - 1); // = threadIdx.x % WARP_SIZE
+  CountType WARP_BITS = __builtin_ctz(warpSize);
+  int warp_id = threadIdx.x >> WARP_BITS; // = threadIdx.x / warpSize
+  int lane_id = threadIdx.x & (warpSize - 1); // = threadIdx.x % warpSize
   // Initialize writeIndexStart to 0 by the first thread in the block.
   if (threadIdx.x == 0) {
     writeIndexStart = 0;
   }
   __syncthreads();
+  // All threads within the warp need to participate in the loop, so rounding up to a multiple of the warp size.
+  IndexType numIterations = round_up(inputSliceSize, (IndexType) warpSize);
 
   for (IndexType i = threadIdx.x; i < numIterations; i += blockDim.x) {
     bool inRange = (i < inputSliceSize);
@@ -360,7 +355,6 @@ void launch(
     TORCH_INTERNAL_ASSERT(getGridFromTiles(numInputSlices, grid), "Too many slices for topk");
     int warp_size = at::cuda::warp_size();
     dim3 block(std::min(at::ceil_div((int64_t)inputSliceSize, (int64_t)warp_size) * (int64_t)warp_size, (int64_t)1024));
-#ifndef USE_ROCM
     gatherTopK<T, IndexType, Dim, /* WithKthValues= */false><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
         input,
         inputSliceSize,
@@ -373,38 +367,6 @@ void launch(
         indices,
         indicesWithinSliceStride,
         nullptr);
-#else
-    if (warp_size == 64) {
-      gatherTopK<T, IndexType, Dim, /* WithKthValues= */false, 64><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
-        input,
-        inputSliceSize,
-        outputSliceSize,
-        largest,
-        numInputSlices,
-        inputWithinSliceStride,
-        topK,
-        topKWithinSliceStride,
-        indices,
-        indicesWithinSliceStride,
-        nullptr);
-    } else if (warp_size == 32) {
-      gatherTopK<T, IndexType, Dim, /* WithKthValues= */false, 32><<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(
-        input,
-        inputSliceSize,
-        outputSliceSize,
-        largest,
-        numInputSlices,
-        inputWithinSliceStride,
-        topK,
-        topKWithinSliceStride,
-        indices,
-        indicesWithinSliceStride,
-        nullptr);
-    }
-    else {
-      TORCH_INTERNAL_ASSERT(false, "Unsupported warp size: ", warp_size);
-    }
-#endif
     C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 } // namespace sbtopk
