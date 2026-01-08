@@ -405,7 +405,7 @@ void launch(
       TORCH_INTERNAL_ASSERT(false, "Unsupported warp size: ", warp_size);
     }
 #endif
-C10_CUDA_KERNEL_LAUNCH_CHECK();
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
 }
 } // namespace sbtopk
 
