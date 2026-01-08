@@ -243,7 +243,7 @@ struct TORCH_API Engine {
 
   // How many nested reentrant calls are allowed until a new thread is used
   // NOLINTNEXTLINE(cppcoreguidelines-non-private-member-variables-in-classes)
-  int max_recursion_depth_;
+  int max_recursion_depth_{MAX_DEPTH};
 
   struct ThreadPoolShared {
     // Data structures used by the threads for executing reentrant backwards

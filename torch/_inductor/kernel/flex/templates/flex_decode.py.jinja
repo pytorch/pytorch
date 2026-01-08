@@ -49,15 +49,14 @@
 
     MATMUL_PRECISION = Q.dtype.element_ty
 
-    # Make sure each split is a multiple of BLOCK_N
-    TILE_KV_OG = tl.cdiv(KV_LEN, SPLIT_KV)
-    TILE_KV = tl.cdiv(TILE_KV_OG, BLOCK_N) * BLOCK_N
-    TILE_KV_MULTIPLE: tl.constexpr = (TILE_KV // BLOCK_N)
+    NUM_BLOCK_M = tl.cdiv(Q_LEN * G, BLOCK_M)
 
-    off_z = tl.program_id(0).to(INDEX_DTYPE) // HKV
+    off_block_m = tl.program_id(0).to(INDEX_DTYPE)
+
+    off_z = tl.program_id(1).to(INDEX_DTYPE) // HKV
     off_zkv = off_z % ZKV
-    off_hkv = tl.program_id(0).to(INDEX_DTYPE) % HKV
-    off_t = tl.program_id(1).to(INDEX_DTYPE)
+    off_hkv = tl.program_id(1).to(INDEX_DTYPE) % HKV
+    off_t = tl.program_id(2).to(INDEX_DTYPE)
 
     q_offset = off_z * stride_qz + off_hkv * stride_qh
     k_offset = off_zkv * stride_kz + off_hkv * stride_kh
@@ -86,20 +85,17 @@
     off_g = tl.arange(0, G)                                                 # [G]
     offs_g = tl.ravel(tl.broadcast_to(off_g[:, None], [G, BLOCK_M_PER_HQ])) # [BLOCK_M]
     offs_hq = offs_g + off_hkv * G
-    off_m = tl.arange(0, BLOCK_M_PER_HQ)                                    # [BLOCK_M_PER_HQ]
+    off_m = tl.arange(0, BLOCK_M_PER_HQ) + off_block_m * BLOCK_M_PER_HQ
     offs_m = tl.ravel(tl.broadcast_to(off_m[None, :], [G, BLOCK_M_PER_HQ])) # [BLOCK_M]
     offs_d = tl.arange(0, QK_HEAD_DIM_ROUNDED)
     offs_vd = tl.arange(0, V_HEAD_DIM_ROUNDED)
 
     # Get HZ offsets for KV_NUM_BLKS and KV_IDX
+    sparse_idx_m = off_block_m * BLOCK_M_PER_HQ // SPARSE_Q_BLOCK_SIZE
     stride_block_z, stride_block_h, stride_block_row = {{stride("KV_NUM_BLKS")}}
-    sparse_block_hz_offset = sparse_idx_z * stride_block_z + sparse_idx_h * stride_block_h
+    sparse_block_zhm_offset = sparse_idx_z * stride_block_z + sparse_idx_h * stride_block_h + sparse_idx_m * stride_block_row
     stride_kv_z, stride_kv_h, stride_kv_row, stride_kv_col = {{stride("KV_IDX")}}
-    sparse_idx_hz_offset = sparse_idx_z * stride_kv_z + sparse_idx_h * stride_kv_h
-
-    # Calculate KV blocks that belong this CTA.
-    block_n_start = off_t * TILE_KV_MULTIPLE                        # n_offset inside sparse block
-    block_n_end = block_n_start + TILE_KV_MULTIPLE                  # end BLOCK_N
+    sparse_idx_zhm_offset = sparse_idx_z * stride_kv_z + sparse_idx_h * stride_kv_h + sparse_idx_m * stride_kv_row
 
     q_range = stride_qg * off_g[:, None, None] + stride_qm * off_m[None, :, None] + stride_qk * offs_d[None, None, :]
 
@@ -118,8 +114,24 @@
     # ~~~~~~~~~~~~~~ normal blocks ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
     # find first kv block we are loading and the number of blocks we are loading
     # Offset the kv_indices tensor by the correct batch and head
-    kv_indices = KV_IDX + sparse_idx_hz_offset
-    kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_block_hz_offset)
+    kv_indices = KV_IDX + sparse_idx_zhm_offset
+    kv_num_blocks = tl.load(KV_NUM_BLKS + sparse_block_zhm_offset)
+
+    # Make sure each split is a multiple of BLOCK_N
+    if HAS_FULL_BLOCKS:
+        # TODO do the a optimization as partial blocks once vllm is
+        # able to pass in full blocks:
+        # https://github.com/vllm-project/vllm/blob/61249b177de1566027fc74e9b51b45a4c973eb47/vllm/v1/attention/backends/flex_attention.py#L615-L616
+        TILE_KV_OG = tl.cdiv(KV_LEN, SPLIT_KV)
+    else:
+        TILE_KV_OG = tl.cdiv(kv_num_blocks * SPARSE_KV_BLOCK_SIZE, SPLIT_KV)
+    TILE_KV = tl.cdiv(TILE_KV_OG, BLOCK_N) * BLOCK_N
+    TILE_KV_MULTIPLE: tl.constexpr = (TILE_KV // BLOCK_N)
+
+    # Calculate KV blocks that belong this CTA.
+    block_n_start = off_t * TILE_KV_MULTIPLE                        # n_offset inside sparse block
+    block_n_end = block_n_start + TILE_KV_MULTIPLE                  # end BLOCK_N
+
     MAX_KV_IDX = {{size("KV_IDX", -1)}}
     indices_idx = (block_n_start // SPARSE_KV_MULTIPLE) % (MAX_KV_IDX)
     off_n_block_in_sparse = block_n_start % SPARSE_KV_MULTIPLE
@@ -170,8 +182,8 @@
     # We know these blocks are guaranteed to be "full", so we don't need to
     # apply mask_mod to them - only score_mod
     if HAS_FULL_BLOCKS:
-        kv_indices = FULL_KV_IDX + sparse_idx_hz_offset
-        kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_block_hz_offset)
+        kv_indices = FULL_KV_IDX + sparse_idx_zhm_offset
+        kv_num_blocks = tl.load(FULL_KV_NUM_BLKS + sparse_block_zhm_offset)
         # Assign full block in a reverse order for off_t. Prioritize the last CTA.
         block_n_start = (SPLIT_KV - off_t - 1) * TILE_KV_MULTIPLE
         block_n_end = block_n_start + TILE_KV_MULTIPLE
@@ -207,7 +219,7 @@
         base=M + m_offset,
         shape=(G, Q_LEN),                   # (G, M)
         strides=(stride_mh, stride_mm),
-        offsets=(off_hkv*G, 0),
+        offsets=(off_hkv*G, off_block_m * BLOCK_M_PER_HQ),
         block_shape=(G, BLOCK_M_PER_HQ),
         order=(1, 0)
     )
@@ -215,7 +227,7 @@
         base=L + l_offset,
         shape=(G, Q_LEN),                   # (G, M)
         strides=(stride_lh, stride_lm),
-        offsets=(off_hkv*G, 0),
+        offsets=(off_hkv*G, off_block_m * BLOCK_M_PER_HQ),
         block_shape=(G, BLOCK_M_PER_HQ),
         order=(1, 0)
     )

@@ -17,6 +17,10 @@ from torch.distributed._local_tensor import (
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor._ops.utils import (
+    is_tensor_evenly_shardable,
+    is_tensor_shardable,
+)
 from torch.distributed.tensor._utils import (
     _compute_local_shape_and_global_offset,
     compute_global_tensor_info,
@@ -1029,12 +1033,12 @@ class Test_StridedShard_Propagation(LocalDTensorTestBase):
 
             with CommDebugMode() as comm_mode:
                 # `A @ B2` will trigger redistribution on both inputs as below:
-                # A: S(1)[0]S(1)[1]->S(1)R->RR->RS(1)
-                # B2: _S(0, 4)S(0)[0] -> RS(0)
-                # The final output res2's placements will be RP.
+                # A: S(1)[0]S(1)[1]
+                # B2: _S(0, 4)S(0)[0]->RS(0)->RR->S(0)R->S(0)[0]S(0)[1]
+                # The final output res2's placements will be PP.
                 res2 = A @ B2
             self.assertEqual(
-                comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 3
+                comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 2
             )
             assert isinstance(res1, DTensor)
             assert isinstance(res2, DTensor)
@@ -1497,6 +1501,30 @@ class TestExplicitRedistribute(LocalTensorTestBase):
     def world_size(self):
         return 4
 
+    def test_message_fn_not_called_in_fastpath(self):
+        """Test that message_fn is not called when no ExplicitRedistributionContext is active.
+
+        This ensures that string formatting overhead is avoided in the common case.
+        """
+        from unittest.mock import patch
+
+        from torch.distributed.tensor._op_schema import OpSchema
+
+        with LocalTensorMode(self.world_size):
+            device_mesh = self.build_device_mesh()
+            dim = 128
+            x = torch.randn(8, dim, requires_grad=True)
+            A = torch.randn(dim, dim, requires_grad=True)
+
+            # Prepare DTensors that will trigger redistribution
+            dx = distribute_tensor(x, device_mesh, [Shard(0)])
+            dA = distribute_tensor(A, device_mesh, [Shard(0)])
+
+            # Without ExplicitRedistributionContext, OpSchema.__str__ should NOT be called
+            with patch.object(OpSchema, "__str__", autospec=True) as mock_str:
+                torch.matmul(dx, dA)
+                mock_str.assert_not_called()
+
     def test_explicit_matmul(self):
         with LocalTensorMode(self.world_size):
             device_mesh = self.build_device_mesh()
@@ -1529,10 +1557,10 @@ class TestExplicitRedistribute(LocalTensorTestBase):
                     )
                     # TODO enable this once fixing the issue that op_info.schema is None in some calls to
                     # redistribute_local_tensor
-                    # self.assertRegex(
-                    #     captured.output[0],
-                    #     r".*aten\.mm\.default.*",
-                    # )
+                    self.assertRegex(
+                        captured.output[0],
+                        r".*aten\.mm\.default.*",
+                    )
 
             # explicit redistribute allows manual redistribute
             with ExplicitRedistributionContext():
@@ -1560,6 +1588,43 @@ class TestExplicitRedistribute(LocalTensorTestBase):
                 # and re-enable
                 with self.assertRaisesRegex(RuntimeError, "Implicit redistribution"):
                     loss.backward(retain_graph=True)
+
+
+class TestIsTensorShardable(LocalTensorTestBase):
+    @property
+    def world_size(self):
+        return 8
+
+    def _create_spec(
+        self, mesh_shape: tuple[int, ...], placements: list[Placement]
+    ) -> DTensorSpec:
+        mesh = init_device_mesh("cpu", mesh_shape)
+        return DTensorSpec(mesh=mesh, placements=tuple(placements))
+
+    def test_is_tensor_shardable(self):
+        spec = self._create_spec((4,), [Shard(0)])
+        self.assertTrue(is_tensor_shardable([8], spec))
+        self.assertTrue(is_tensor_shardable([10], spec))
+        self.assertFalse(is_tensor_shardable([2], spec))
+
+        spec = self._create_spec((4, 2), [Shard(0), Shard(0)])
+        self.assertTrue(is_tensor_shardable([8, 8], spec))
+
+        spec = self._create_spec((4, 2), [Shard(0), _StridedShard(0, split_factor=2)])
+        # not shardable now because of the split_factor
+        self.assertFalse(is_tensor_shardable([8, 8], spec))
+
+    def test_is_tensor_evenly_shardable(self):
+        spec = self._create_spec((4,), [Shard(0)])
+        self.assertTrue(is_tensor_evenly_shardable([8], spec))
+        self.assertFalse(is_tensor_evenly_shardable([10], spec))
+
+        spec = self._create_spec((4, 2), [Shard(0), Shard(0)])
+        self.assertTrue(is_tensor_evenly_shardable([16, 8], spec))
+
+        spec = self._create_spec((4, 2), [_StridedShard(0, split_factor=3), Shard(0)])
+        # not evenly shardable now because of the split_factor
+        self.assertFalse(is_tensor_evenly_shardable([16, 8], spec))
 
 
 UtilTestWithLocalTensor = create_local_tensor_test_class(UtilTest)

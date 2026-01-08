@@ -21,9 +21,7 @@
 namespace at::native {
 
 template <typename scalar_t, typename IndexType>
-#if __CUDA_ARCH__ >= 350 || defined(USE_ROCM)
 C10_LAUNCH_BOUNDS_2(cuda::getApplyBlockSize(), cuda::getApplyBlocksPerSM())
-#endif
 __global__ void kernel_pointwise_flip_apply2(
     const cuda::detail::TensorInfo<scalar_t, IndexType> in_tensor_info,
     cuda::detail::TensorInfo<scalar_t, IndexType> out_tensor_info,

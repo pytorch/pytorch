@@ -4,6 +4,7 @@ import gc
 import random
 from contextlib import ExitStack
 from dataclasses import dataclass
+from typing import Optional
 
 import torch
 import torch.utils._pytree as pytree
@@ -89,12 +90,12 @@ class ValueConfig:
     def __hash__(self):
         return hash(self.mode)
 
-    def __repr__(self):
-        return f"ValueConfig(mode={self.mode!r})"
+    def __fx_repr__(self):
+        return f"ValueConfig(mode={self.mode!r})", {"ValueConfig": ValueConfig}
 
 
 class SizeStore:
-    def __init__(self, size: str):
+    def __init__(self, size: int):
         self.size = size
 
     def __eq__(self, other):
@@ -103,11 +104,37 @@ class SizeStore:
     def __hash__(self):
         return hash(self.size)
 
-    def __repr__(self):
-        return f"SizeStore(size={self.size!r})"
+    def __fx_repr__(self):
+        # Return (repr_string, dict_mapping_name_to_type)
+        return f"SizeStore(size={self.size!r})", {"SizeStore": SizeStore}
 
     def increment_size(self):
         return self.size + 1
+
+
+class NestedValueSize:
+    def __init__(self, size: SizeStore, config: ValueConfig):
+        self.size = size
+        self.config = config
+
+    def __eq__(self, other):
+        return self.size == other.size and self.config == other.config
+
+    def __hash__(self):
+        return hash(self.size) ^ hash(self.config)
+
+    def __fx_repr__(self):
+        # Recursively call __fx_repr__ on nested opaque objects
+        size_eval, size_globals = self.size.__fx_repr__()
+        config_eval, config_globals = self.config.__fx_repr__()
+
+        # Combine repr and globals
+        repr_str = f"NestedValueSize(size={size_eval}, config={config_eval})"
+        all_globals = (
+            {"NestedValueSize": NestedValueSize} | size_globals | config_globals
+        )
+
+        return repr_str, all_globals
 
 
 register_opaque_type(OpaqueQueue, typ="reference")
@@ -116,6 +143,7 @@ register_opaque_type(Counter, typ="reference")
 register_opaque_type(AddModule, typ="reference")
 register_opaque_type(ValueConfig, typ="value")
 register_opaque_type(SizeStore, typ="value")
+register_opaque_type(NestedValueSize, typ="value")
 
 
 class TestOpaqueObject(TestCase):
@@ -171,7 +199,7 @@ class TestOpaqueObject(TestCase):
         def size_impl_fake(q: OpaqueQueue) -> int:
             ctx = torch._custom_op.impl.get_ctx()
             u0 = ctx.new_dynamic_size()
-            torch._check_is_size(u0)
+            torch._check(u0 >= 0)
             return u0
 
         torch.library.define(
@@ -230,13 +258,75 @@ class TestOpaqueObject(TestCase):
             elif config.mode == "double":
                 return x + x
             else:
-                return x
+                return x.clone()
 
         @torch.library.register_fake(
             "_TestOpaqueObject::process_with_config", lib=self.lib
         )
         def process_with_config_fake(
             x: torch.Tensor, config: ValueConfig
+        ) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        torch.library.define(
+            "_TestOpaqueObject::process_nested_config",
+            f"(Tensor x, {get_opaque_type_name(NestedValueSize)} config) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::process_nested_config",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def process_nested_config_impl(
+            x: torch.Tensor, config: NestedValueSize
+        ) -> torch.Tensor:
+            assert isinstance(config, NestedValueSize)
+            if config.config.mode == "square":
+                return x * x
+            elif config.config.mode == "double":
+                return x + x
+            else:
+                return x.clone()
+
+        @torch.library.register_fake(
+            "_TestOpaqueObject::process_nested_config", lib=self.lib
+        )
+        def process_nested_config_fake(
+            x: torch.Tensor, config: ValueConfig
+        ) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        torch.library.define(
+            "_TestOpaqueObject::process_multiple_sizes",
+            f"(Tensor x, {get_opaque_type_name(SizeStore)}[]? sizes) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::process_multiple_sizes",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def process_multiple_sizes_impl(
+            x: torch.Tensor, config: Optional[list[SizeStore]]
+        ) -> torch.Tensor:
+            if config is None:
+                return x.clone()
+            else:
+                x_res = x.clone()
+                for size in config:
+                    x_res += size.size
+                return x_res
+
+        @torch.library.register_fake(
+            "_TestOpaqueObject::process_multiple_sizes", lib=self.lib
+        )
+        def process_multiple_sizes_fake(
+            x: torch.Tensor, config: Optional[list[SizeStore]]
         ) -> torch.Tensor:
             return torch.empty_like(x)
 
@@ -624,9 +714,7 @@ def forward(self, primals, tangents):
             def __hash__(self):
                 return hash(self.x)
 
-        with self.assertRaisesRegex(
-            TypeError, "expected to have a non-default `__repr__`"
-        ):
+        with self.assertRaisesRegex(TypeError, "expected to have a `__fx_repr__`"):
             register_opaque_type(NoRepr, typ="value")
 
     def test_invalid_schema(self):
@@ -673,11 +761,17 @@ def forward(self, primals, tangents):
             x: int
 
         pytree.register_dataclass(Bad1)
-        with self.assertRaisesRegex(
-            ValueError,
-            "cannot be registered as an opaque object as it has been registered as a pytree.",
-        ):
-            register_opaque_type(Bad1, typ="reference")
+        try:
+            with self.assertRaisesRegex(
+                ValueError,
+                "cannot be registered as an opaque object as it has been registered as a pytree.",
+            ):
+                register_opaque_type(Bad1, typ="reference")
+        finally:
+            # Clean up pytree registration to avoid leaking state to other tests
+            pytree.SUPPORTED_NODES.pop(Bad1, None)
+            pytree.SUPPORTED_SERIALIZED_TYPES.pop(Bad1, None)
+            pytree.CONSTANT_NODES.discard(Bad1)
 
         @dataclass
         class Bad2:
@@ -827,8 +921,8 @@ def forward(self, arg0_1):
                 def __hash__(self):
                     return hash(self.value)
 
-                def __repr__(self):
-                    return f"TmpClass(value={self.value!r})"
+                def __fx_repr__(self):
+                    return f"TmpClass(value={self.value!r})", {"TmpClass": TmpClass}
 
             register_opaque_type(TmpClass, typ="value")
 
@@ -847,6 +941,54 @@ def forward(self, arg0_1):
         # Verify that the class is no longer registered
         for opaque_info in _OPAQUE_TYPES.values():
             self.assertFalse(tmp_class_name in opaque_info.class_name)
+
+    def test_value_type_nested(self):
+        def foo(x, config):
+            size = SizeStore(x.shape[0])
+            cfg = NestedValueSize(size, ValueConfig(config))
+            return torch.ops._TestOpaqueObject.process_nested_config(x, cfg)
+
+        x = torch.randn(3, 3)
+        backend = AotEagerAndRecordGraphs()
+        opt_f = torch.compile(foo, fullgraph=True, backend=backend)
+        opt_f(x, "square")
+
+        self.assertExpectedInline(
+            backend.fw_graphs[0].code.strip(),
+            """\
+def forward(self, arg0_1):
+    process_nested_config = torch.ops._TestOpaqueObject.process_nested_config.default(arg0_1, NestedValueSize(size=SizeStore(size=3), config=ValueConfig(mode='square')));  arg0_1 = None
+    return (process_nested_config,)""",  # noqa: B950
+        )
+
+        opt_f = torch.compile(foo, fullgraph=True, backend="inductor")
+        x = torch.randn(3, 3)
+        self.assertEqual(opt_f(x, "square"), foo(x, "square"))
+        self.assertEqual(opt_f(x, "double"), foo(x, "double"))
+
+    def test_value_type_list(self):
+        def foo(x):
+            sizes = []
+            for size in x.size():
+                sizes.append(SizeStore(size))
+            return torch.ops._TestOpaqueObject.process_multiple_sizes(x, sizes)
+
+        x = torch.randn(3, 3)
+        backend = AotEagerAndRecordGraphs()
+        opt_f = torch.compile(foo, fullgraph=True, backend=backend)
+        opt_f(x)
+
+        self.assertExpectedInline(
+            backend.fw_graphs[0].code.strip(),
+            """\
+def forward(self, arg0_1):
+    process_multiple_sizes = torch.ops._TestOpaqueObject.process_multiple_sizes.default(arg0_1, [SizeStore(size=3), SizeStore(size=3)]);  arg0_1 = None
+    return (process_multiple_sizes,)""",  # noqa: B950
+        )
+
+        opt_f = torch.compile(foo, fullgraph=True, backend="inductor")
+        x = torch.randn(3, 3)
+        self.assertEqual(opt_f(x), foo(x))
 
 
 instantiate_parametrized_tests(TestOpaqueObject)

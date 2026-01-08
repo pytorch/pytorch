@@ -31,7 +31,6 @@ from ...ir import (
     IRNode,
     MutationLayoutSHOULDREMOVE,
     Scatter,
-    ShapeAsConstantBuffer,
     StorageBox,
     Subgraph,
     TensorBox,
@@ -99,21 +98,19 @@ def get_fwd_subgraph_outputs(
     subgraph_buffer: SubgraphResults, mask_graph_buffer: SubgraphResults
 ) -> list[Optional[ComputedBuffer]]:
     subgraph_buffer = (
-        # pyrefly: ignore [bad-assignment]
         subgraph_buffer if isinstance(subgraph_buffer, Sequence) else [subgraph_buffer]
     )
     mask_graph_buffer = (
-        # pyrefly: ignore [bad-assignment]
         mask_graph_buffer
         if isinstance(mask_graph_buffer, Sequence)
         else [mask_graph_buffer]
     )
-    # pyrefly: ignore [not-iterable]
+
     return [*subgraph_buffer, *mask_graph_buffer]
 
 
 def build_subgraph_module_buffer(
-    args: list[Union[TensorBox, ShapeAsConstantBuffer]],
+    args: list[TensorBox],
     graph_module: torch.fx.GraphModule,
 ) -> SubgraphResults:
     """This function's goal is to take in the required args and produce the subgraph buffer
@@ -167,9 +164,7 @@ def build_subgraph_module_buffer(
     return tree_map(convert_output_node_to_buffer, pw_subgraph.graph_outputs)
 
 
-def build_subgraph_buffer(
-    args: list[Union[TensorBox, ShapeAsConstantBuffer]], subgraph: Subgraph
-) -> SubgraphResults:
+def build_subgraph_buffer(args: list[TensorBox], subgraph: Subgraph) -> SubgraphResults:
     return build_subgraph_module_buffer(args, subgraph.graph_module)
 
 
@@ -206,7 +201,7 @@ def create_placeholder(
     dtype: torch.dtype,
     device: torch.device,
     size: Optional[list[int]] = None,
-) -> Union[TensorBox, ShapeAsConstantBuffer]:
+) -> TensorBox:
     """Creates a placeholder input buffers for producing subgraph_output."""
     input_buffer = InputBuffer(
         name=name,
