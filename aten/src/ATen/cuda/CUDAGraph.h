@@ -33,8 +33,8 @@ struct TORCH_CUDA_CPP_API CUDAGraphImpl : public at::GraphImplInterface {
   void replay() override;
   void reset() override;
   MempoolId_t pool() const override;
-  void enable_debug_mode();
-  void debug_dump(const std::string& debug_path);
+  void enable_debug_mode() override;
+  void debug_dump(const std::string& debug_path) override;
   cudaGraph_t raw_cuda_graph();
   cudaGraphExec_t raw_cuda_graph_exec();
 
