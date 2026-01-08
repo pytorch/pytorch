@@ -79,8 +79,8 @@ namespace {
             data = c10::hip::HIPCachingAllocator::raw_alloc(size);
         }
         DropoutState(const DropoutState&) = delete;
-        DropoutState(DropoutState&&) = default;
-        DropoutState& operator=(DropoutState&&) = default;
+        DropoutState(DropoutState&&) = delete;
+        DropoutState& operator=(DropoutState&&) = delete;
         ~DropoutState() {
             if (data) {
                 c10::hip::HIPCachingAllocator::raw_delete(data);

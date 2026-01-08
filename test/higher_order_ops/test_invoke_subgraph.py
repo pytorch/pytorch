@@ -180,6 +180,37 @@ class TestInvokeSubgraphCompile(TestCase):
         self.assertEqual(x.grad, x_clone.grad)
         self.assertEqual(y.grad, y_clone.grad)
 
+    def test_stack_trace(self):
+        # Last frame in the stack trace on invoke_subgraph should point to
+        # model code, not files in torch._higher_order_ops directory.
+        class Mod(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.c = 5
+
+            @nested_compile_region
+            def forward(self, x, y):
+                return torch.mul(x, y).sin() + self.c
+
+        mod = Mod()
+
+        def fn(x, y):
+            return mod(x, y) + mod(x, y)
+
+        x = torch.randn(8)
+        y = torch.randn(8)
+        backend = AotEagerAndRecordGraphs()
+        torch.compile(fn, backend=backend, fullgraph=True)(x, y)
+
+        graph = backend.graphs[0]
+        invoke_subgraph_nodes = graph.graph.find_nodes(
+            op="call_function", target=torch._higher_order_ops.invoke_subgraph
+        )
+        for node in invoke_subgraph_nodes:
+            stack_trace = node.meta["stack_trace"]
+            if not TEST_WITH_CROSSREF:
+                self.assertTrue(stack_trace.endswith("return mod(x, y) + mod(x, y)\n"))
+
     def test_gen_schema(self):
         class Mod(torch.nn.Module):
             def __init__(self):
@@ -281,7 +312,6 @@ class GraphModule(torch.nn.Module):
         subgraph_1 = self.subgraph_0
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', l_mod_buffers_buf_, l_x_, l_y_);  subgraph_1 = l_mod_buffers_buf_ = l_x_ = l_y_ = None
         getitem_9: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-
         add: "f32[8]" = getitem_8 + getitem_9;  getitem_8 = getitem_9 = None
         return (add,)
 
@@ -774,6 +804,7 @@ class GraphModule(torch.nn.Module):
         subgraph_0 = self.subgraph_0
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_);  subgraph_0 = l_x_ = None
         a: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
+
         subgraph_1 = self.subgraph_0
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', a, l_y_);  subgraph_1 = a = l_y_ = None
         getitem_1: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
@@ -858,7 +889,6 @@ class GraphModule(torch.nn.Module):
         subgraph_1 = self.subgraph_0
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', l_x_, l_gn_closure_0_cell_contents_closure_0_cell_contents_parameters_weight_, l_gn_closure_0_cell_contents_closure_0_cell_contents_parameters_bias_);  subgraph_1 = l_x_ = l_gn_closure_0_cell_contents_closure_0_cell_contents_parameters_weight_ = l_gn_closure_0_cell_contents_closure_0_cell_contents_parameters_bias_ = None
         getitem_1: "f32[10, 10]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-
         add: "f32[10, 10]" = getitem + getitem_1;  getitem = getitem_1 = None
         return (add,)
 
@@ -1004,7 +1034,6 @@ class GraphModule(torch.nn.Module):
         subgraph_0 = self.subgraph_0
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_);  subgraph_0 = l_x_ = None
         getitem_2: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
-
         detach: "f32[8]" = getitem_2.detach();  getitem_2 = None
         return (detach,)
 
@@ -1071,6 +1100,7 @@ class GraphModule(torch.nn.Module):
         subgraph_0 = self.subgraph_0
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_);  subgraph_0 = l_x_ = None
         getitem_4: "f32[8]" = invoke_subgraph[0];  invoke_subgraph = None
+
         subgraph_1 = self.subgraph_1
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_1', getitem_4, l_y_);  subgraph_1 = getitem_4 = l_y_ = None
         getitem_5: "f32[8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
@@ -1522,7 +1552,6 @@ class GraphModule(torch.nn.Module):
         subgraph_1 = self.subgraph_0
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', l_x_);  subgraph_1 = l_x_ = None
         getitem_1: "f32[8, 8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-
         add: "f32[8, 8]" = getitem + getitem_1;  getitem = getitem_1 = None
         return (add,)
 
@@ -1588,7 +1617,6 @@ class GraphModule(torch.nn.Module):
         subgraph_1 = self.subgraph_0
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', l_x_, l_self_modules_linear_parameters_weight_, l_self_modules_linear_parameters_bias_);  subgraph_1 = l_self_modules_linear_parameters_weight_ = l_self_modules_linear_parameters_bias_ = None
         getitem_1: "f32[8, 8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-
         mul: "f32[8, 8]" = getitem * getitem_1;  getitem = getitem_1 = None
         add: "f32[8, 8]" = l_x_ + mul;  mul = None
         add_1: "f32[8, 8]" = add + l_x_;  add = l_x_ = None
@@ -1641,7 +1669,6 @@ class GraphModule(torch.nn.Module):
         subgraph_1 = self.subgraph_0
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', l_x_);  subgraph_1 = None
         getitem_1: "f32[8, 8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-
         mul: "f32[8, 8]" = getitem * getitem_1;  getitem = getitem_1 = None
         add: "f32[8, 8]" = l_x_ + mul;  mul = None
         add_1: "f32[8, 8]" = add + l_x_;  add = l_x_ = None
@@ -1938,7 +1965,6 @@ class GraphModule(torch.nn.Module):
         getitem_5: "f32[8, 8]" = invoke_subgraph_2[2]
         getitem_4: "f32[8, 8]" = invoke_subgraph_2[1]
         getitem: "f32[8, 8]" = invoke_subgraph_2[0];  invoke_subgraph_2 = None
-
         sin: "f32[8, 8]" = torch.ops.aten.sin.default(getitem)
         cos: "f32[8, 8]" = torch.ops.aten.cos.default(getitem);  getitem = None
         return (sin, getitem_6, getitem_5, getitem_4, cos)
@@ -1961,7 +1987,6 @@ class GraphModule(torch.nn.Module):
 class GraphModule(torch.nn.Module):
     def forward(self, getitem_6: "f32[8, 8]", getitem_5: "f32[8, 8]", getitem_4: "f32[8, 8]", cos: "f32[8, 8]", tangents_1: "f32[8, 8]"):
         mul: "f32[8, 8]" = torch.ops.aten.mul.Tensor(tangents_1, cos);  tangents_1 = cos = None
-
         partitioned_bw_subgraph_0_0 = self.partitioned_bw_subgraph_0_0
         invoke_subgraph_3 = torch.ops.higher_order.invoke_subgraph(partitioned_bw_subgraph_0_0, 'partitioned_bw_subgraph_0_0', getitem_4, getitem_5, getitem_6, mul);  partitioned_bw_subgraph_0_0 = getitem_4 = getitem_5 = getitem_6 = mul = None
         getitem_1: "f32[8, 8]" = invoke_subgraph_3[0]
@@ -2308,7 +2333,6 @@ class GraphModule(torch.nn.Module):
         subgraph_1 = self.subgraph_0
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', l_x_);  subgraph_1 = l_x_ = None
         getitem_1: "f32[8, 8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
-
         add: "f32[8, 8]" = getitem + getitem_1;  getitem = getitem_1 = None
         return (add,)
 
@@ -2414,6 +2438,7 @@ class GraphModule(torch.nn.Module):
         subgraph_0 = self.subgraph_0
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', x, y);  subgraph_0 = x = None
         getitem_4: "f32[5]" = invoke_subgraph[0];  invoke_subgraph = None
+
         subgraph_1 = self.subgraph_1
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_1', getitem_4, y);  subgraph_1 = getitem_4 = y = None
         getitem_5: "f32[5]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
@@ -2821,6 +2846,7 @@ class GraphModule(torch.nn.Module):
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_x_, l_y_);  subgraph_0 = l_x_ = None
         getitem: "f32[8, 8]" = invoke_subgraph[0]
         getitem_1: "f32[8, 8]" = invoke_subgraph[1];  invoke_subgraph = None
+
         subgraph_1 = self.subgraph_0
         invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(subgraph_1, 'subgraph_0', getitem, l_y_);  subgraph_1 = getitem = l_y_ = None
         getitem_2: "f32[8, 8]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None

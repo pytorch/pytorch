@@ -1,4 +1,5 @@
 #include <ATen/xpu/CachingHostAllocator.h>
+#include <c10/xpu/XPUGraphsC10Utils.h>
 
 namespace at::xpu {
 namespace {
@@ -35,6 +36,15 @@ struct XPUCachingHostAllocatorImpl
     // Using background threads for XPU causes a hang on Windows during program
     // exit. Will be enabled once the issue is resolved.
     return false;
+  }
+
+  XPUStream get_current_stream() const override {
+    return c10::xpu::getCurrentXPUStream();
+  }
+
+  bool stream_is_capturing(XPUStream s) const override {
+    return c10::xpu::CaptureStatus(s.queue().ext_oneapi_get_state()) ==
+        c10::xpu::CaptureStatus::Recording;
   }
 };
 
