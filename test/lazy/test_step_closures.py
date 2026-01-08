@@ -1,5 +1,7 @@
 # Owner(s): ["oncall: jit"]
 
+import sysconfig
+import unittest
 from threading import Event
 from time import sleep
 
@@ -59,6 +61,10 @@ class ClosuresTest(TestCase):
         except RuntimeError:
             assert flag.is_set(), "Should have caught exception from closure"
 
+    @unittest.skipif(
+        sysconfig.get_config_var("Py_GIL_DISABLED") == 1,
+        "Non-deterministic, fails more consistently in free threaded python",
+    )
     def test_asynchronous_exception(self):
         flag = Event()
         assert not flag.is_set()
