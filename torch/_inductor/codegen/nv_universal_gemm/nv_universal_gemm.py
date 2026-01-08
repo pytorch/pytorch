@@ -85,7 +85,8 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         kernel = self.kernel
 
         def run_kernel():
-            kernel.run(args, artifact, assume_supported_args=True)
+            stream = torch.cuda.current_stream()
+            kernel.run(args, artifact, stream=stream, assume_supported_args=True)
 
         return run_kernel
 
@@ -138,14 +139,16 @@ class NVUniversalGemmCaller(ChoiceCaller):
     def output_node(self) -> TensorBox:
         from torch._inductor.ir import NVUniversalGemmBuffer
 
-        return TensorBox.create(
-            NVUniversalGemmBuffer(
-                layout=self.layout,
-                inputs=self.input_nodes,
-                kernel=self.kernel,
-                accumulator_type=self.accumulator_type,
-            )
+        buffer = NVUniversalGemmBuffer(
+            layout=self.layout,
+            inputs=self.input_nodes,
+            kernel=self.kernel,
+            accumulator_type=self.accumulator_type,
         )
+        # Pass KTC annotation to the buffer for encoding
+        if "ktc" in self.annotations:
+            buffer.annotations["ktc"] = self.annotations["ktc"]
+        return TensorBox.create(buffer)
 
     def call_name(self) -> str:
         return self.name

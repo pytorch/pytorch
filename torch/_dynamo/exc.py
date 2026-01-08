@@ -51,7 +51,7 @@ if TYPE_CHECKING:
 
     from .output_graph import DynamoTracerOutput
     from .symbolic_convert import InstructionTranslatorBase
-    from .types import DynamoFrameType
+    from .types import DynamoFrameType, FrameExecStrategy
 
 
 def exportdb_error_message(case_name: str) -> str:
@@ -67,9 +67,21 @@ graph_breaks_log = torch._logging.getArtifactLogger(__name__, "graph_breaks")
 
 
 class TorchDynamoException(RuntimeError):
+    """Base exception class for all TorchDynamo-specific exceptions.
+
+    Attributes:
+        _torch_dynamo_tracer_output: Optional tracer output attached to the exception
+        frame_exec_strategy: Optional frame execution strategy to control how convert_frame
+            should handle this exception. When set, convert_frame will use this strategy
+            instead of the default behavior. This allows exceptions to signal specific
+            execution strategies (e.g., SKIP, RUN_ONLY) without requiring separate
+            exception types for control flow.
+    """
+
     def __init__(self, *args: Any, **kwargs: Any) -> None:
         super().__init__(*args, **kwargs)
         self._torch_dynamo_tracer_output: Optional[DynamoTracerOutput] = None
+        self.frame_exec_strategy: FrameExecStrategy | None = None
 
 
 class InternalTorchDynamoError(TorchDynamoException):
@@ -203,7 +215,7 @@ class Unsupported(TorchDynamoException):
         counters[category][self.msg] += 1
 
 
-class UnknownPropertiesDuringBackwardTrace(Unsupported):
+class UnknownPropertiesDuringBackwardTrace(TorchDynamoException):
     pass
 
 
@@ -211,24 +223,12 @@ class RecompileError(TorchDynamoException):
     pass
 
 
-class ArgsMismatchError(Unsupported):
-    pass
-
-
-class AttributeMutationError(Unsupported):
-    pass
-
-
-class InfiniteGeneratorError(Unsupported):
+class InfiniteGeneratorError(TorchDynamoException):
     # Raised when the number of yielded values is greater than MAX_ITERATOR_LIMIT
     pass
 
 
-class SideEffectsError(Unsupported):
-    pass
-
-
-class CondOpArgsMismatchError(ArgsMismatchError):
+class CondOpArgsMismatchError(TorchDynamoException):
     """
     Internal error from cond() due to arguments mismatch.
     """
@@ -267,14 +267,6 @@ class UserError(Unsupported):
         super().__init__(msg, case_name if case_name else "UserError")
         self.error_type = error_type
         self.message = msg
-
-
-class SkipCodeRecursiveException(TorchDynamoException):
-    pass
-
-
-class RecompileLimitExceeded(Unsupported):
-    pass
 
 
 # debug exception thrown when tracing torch._dynamo.step_unsupported()
@@ -594,7 +586,7 @@ def unimplemented(
     hints: list[str],
     from_exc: Any = _NOTHING,
     log_warning: bool = False,
-    skip_frame=False,
+    skip_frame: bool = False,
 ) -> NoReturn:
     """
     Called within dynamo to cause a graph break.

@@ -366,7 +366,7 @@ class MtiaInterface(DeviceInterface):
         return True
 
     @staticmethod
-    def raise_if_triton_unavailable(evice: torch.types.Device = None) -> None:
+    def raise_if_triton_unavailable(device: torch.types.Device = None) -> None:
         import triton.backends
 
         if "mtia" not in triton.backends.backends:
@@ -469,8 +469,8 @@ class CpuInterface(DeviceInterface):
         def __init__(self, enable_timing: bool = True) -> None:
             self.time = 0.0
 
-        def elapsed_time(self, end_event: Any) -> float:
-            return (end_event.time - self.time) * 1000
+        def elapsed_time(self, other: Any) -> float:
+            return (other.time - self.time) * 1000
 
         def record(self, stream: Any = None) -> None:
             self.time = time.perf_counter()
