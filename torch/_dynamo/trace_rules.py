@@ -67,10 +67,10 @@ from .variables import (
     PyTreeTreeIsLeafFunctionVariable,
     ReparametrizeModuleCallVariable,
     SkipFunctionVariable,
+    SparseTensorCreationSkipVariable,
     TorchInGraphFunctionVariable,
     UserFunctionVariable,
     UserMethodVariable,
-    SparseTensorCreationSkipVariable
 )
 from .variables.base import VariableTracker
 
