@@ -8,7 +8,7 @@ typedef struct CUgreenCtx_st* CUgreenCtx;
 namespace at::cuda {
 
 namespace {
-  constexpr int kStreamPerGreenContextPool = 16;
+  constexpr int kStreamPerGreenContextPool = 32;
 }
 
 class TORCH_CUDA_CPP_API GreenContext {
