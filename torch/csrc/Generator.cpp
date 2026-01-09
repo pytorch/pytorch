@@ -65,7 +65,7 @@ static PyObject* THPGenerator_pynew(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPGenerator_getState(PyObject* _self, PyObject* noargs) {
+static PyObject* THPGenerator_getState(PyObject* _self, PyObject* /*noargs*/) {
   using namespace torch::autograd;
   HANDLE_TH_ERRORS
   auto& gen = (reinterpret_cast<THPGenerator*>(_self))->cdata;
@@ -124,7 +124,7 @@ static uint64_t unpack_uint64(PyObject* pyobj) {
 
 static PyObject* THPGenerator_graphSafeGetState(
     PyObject* _self,
-    PyObject* noargs) {
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto& gen = (reinterpret_cast<THPGenerator*>(_self))->cdata;
 
@@ -151,7 +151,9 @@ static PyObject* THPGenerator_graphSafeSetState(
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPGenerator_cloneState(PyObject* _self, PyObject* noargs) {
+static PyObject* THPGenerator_cloneState(
+    PyObject* _self,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto& gen = (reinterpret_cast<THPGenerator*>(_self))->cdata;
 
@@ -198,7 +200,7 @@ static PyObject* THPGenerator_setOffset(PyObject* _self, PyObject* offset) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPGenerator_seed(PyObject* _self, PyObject* noargs) {
+static PyObject* THPGenerator_seed(PyObject* _self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   // See Note [Acquire lock when using random generators]
   auto self = reinterpret_cast<THPGenerator*>(_self);
@@ -208,27 +210,29 @@ static PyObject* THPGenerator_seed(PyObject* _self, PyObject* noargs) {
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPGenerator_initialSeed(PyObject* _self, PyObject* noargs) {
+static PyObject* THPGenerator_initialSeed(
+    PyObject* _self,
+    PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPGenerator*>(_self);
   return THPUtils_packUInt64(self->cdata.current_seed());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPGenerator_getOffset(PyObject* _self, PyObject* noargs) {
+static PyObject* THPGenerator_getOffset(PyObject* _self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPGenerator*>(_self);
   return THPUtils_packUInt64(self->cdata.get_offset());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPGenerator_get_device(THPGenerator* self, void* unused) {
+static PyObject* THPGenerator_get_device(THPGenerator* self, void* /*unused*/) {
   HANDLE_TH_ERRORS
   return THPDevice_New(self->cdata.device());
   END_HANDLE_TH_ERRORS
 }
 
-static PyObject* THPGenerator_reduce(PyObject* _self, PyObject* noargs) {
+static PyObject* THPGenerator_reduce(PyObject* _self, PyObject* /*noargs*/) {
   HANDLE_TH_ERRORS
   auto self = reinterpret_cast<THPGenerator*>(_self);
   auto& gen = self->cdata;

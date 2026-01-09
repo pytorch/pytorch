@@ -27,7 +27,7 @@ static PyObject* THPMemoryFormat_repr(THPMemoryFormat* self) {
   return THPUtils_packString(self->name);
 }
 
-static PyObject* THPMemoryFormat_reduce(PyObject* _self, PyObject* noargs) {
+static PyObject* THPMemoryFormat_reduce(PyObject* _self, PyObject* /*noargs*/) {
   auto* self = reinterpret_cast<THPMemoryFormat*>(_self);
   return THPUtils_packString(self->name);
 }

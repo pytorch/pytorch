@@ -73,14 +73,14 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
   }
 
   std::vector<std::string> GetCompilationDevices(
-      const std::string& device,
+      const std::string& /*device*/,
       c10::ArrayRef<std::string> devices) const override {
     return std::vector<std::string>(devices.begin(), devices.end());
   }
 
   at::Tensor MakeTensorFromComputationData(
       const torch::lazy::BackendDataPtr data,
-      std::optional<at::ScalarType> logical_scalar_type) const override {
+      std::optional<at::ScalarType> /*logical_scalar_type*/) const override {
     const auto ts_data = std::static_pointer_cast<TSData>(data);
     return ts_data->data();
   }
@@ -168,7 +168,7 @@ class TSBackendImpl : public torch::lazy::BackendImplInterface {
   torch::lazy::BackendDevice GetBackendDevice(
       c10::Device device) const override;
 
-  void SetRngSeed(size_t seed) const override {
+  void SetRngSeed(size_t /*seed*/) const override {
     LOG(FATAL) << "Not implemented yet.";
   }
 

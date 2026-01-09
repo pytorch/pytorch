@@ -759,8 +759,8 @@ std::shared_ptr<LazyGraphExecutor::Async> LazyGraphExecutor::TryRunCachedSync(
 }
 
 LazyGraphExecutor::CompilationResult LazyGraphExecutor::Compile(
-    const std::vector<LazyTensorPtr>& tensors,
-    c10::ArrayRef<std::string> devices,
+    const std::vector<LazyTensorPtr>& /*tensors*/,
+    c10::ArrayRef<std::string> /*devices*/,
     const SyncTensorCollection& coll,
     PostOrderData* po_data,
     const std::vector<Value>& ir_values) {

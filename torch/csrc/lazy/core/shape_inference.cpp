@@ -160,21 +160,21 @@ std::vector<Shape> compute_shape_abs(const at::Tensor& self) {
 std::vector<Shape> compute_shape_bernoulli(
     const at::Tensor& self,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    ::std::optional<at::Generator> generator) {
+    ::std::optional<at::Generator> /*generator*/) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
 std::vector<Shape> compute_shape_bernoulli(
     const at::Tensor& self,
-    double p,
+    double /*p*/,
     ::std::optional<at::Generator> generator) {
   return compute_shape_bernoulli(self, std::move(generator));
 }
 
 std::vector<Shape> compute_shape_binary_cross_entropy(
     const at::Tensor& self,
-    const at::Tensor& target,
-    const ::std::optional<at::Tensor>& weight,
+    const at::Tensor& /*target*/,
+    const ::std::optional<at::Tensor>& /*weight*/,
     int64_t reduction) {
   if (reduction == at::Reduction::None) {
     return {Shape(self.scalar_type(), self.sizes().vec())};
@@ -183,18 +183,18 @@ std::vector<Shape> compute_shape_binary_cross_entropy(
 }
 
 std::vector<Shape> compute_shape_binary_cross_entropy_backward(
-    const at::Tensor& grad_output,
+    const at::Tensor& /*grad_output*/,
     const at::Tensor& self,
-    const at::Tensor& target,
-    const ::std::optional<at::Tensor>& weight,
-    int64_t reduction) {
+    const at::Tensor& /*target*/,
+    const ::std::optional<at::Tensor>& /*weight*/,
+    int64_t /*reduction*/) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
 std::vector<Shape> compute_shape_constant_pad_nd(
     const at::Tensor& self,
     at::IntArrayRef pad,
-    const at::Scalar& value) {
+    const at::Scalar& /*value*/) {
   // Based on aten/src/ATen/native/ConstantPadNd.cpp::constant_pad_nd
   TORCH_CHECK(
       pad.size() % 2 == 0,
@@ -246,13 +246,13 @@ std::vector<Shape> compute_shape_convolution_backward(
     const at::Tensor& input,
     const at::Tensor& weight,
     at::OptionalIntArrayRef bias_sizes,
-    at::IntArrayRef stride,
-    at::IntArrayRef padding,
-    at::IntArrayRef dilation,
-    bool transposed,
-    at::IntArrayRef output_padding,
-    int64_t groups,
-    ::std::array<bool, 3> output_mask) {
+    at::IntArrayRef /*stride*/,
+    at::IntArrayRef /*padding*/,
+    at::IntArrayRef /*dilation*/,
+    bool /*transposed*/,
+    at::IntArrayRef /*output_padding*/,
+    int64_t /*groups*/,
+    ::std::array<bool, 3> /*output_mask*/) {
   if (bias_sizes.has_value()) {
     return {
         Shape(input.scalar_type(), input.sizes().vec()),
@@ -270,7 +270,7 @@ std::vector<Shape> compute_shape_convolution_backward(
 std::vector<Shape> compute_shape_convolution(
     const at::Tensor& input,
     const at::Tensor& weight,
-    const ::std::optional<at::Tensor>& bias,
+    const ::std::optional<at::Tensor>& /*bias*/,
     at::IntArrayRef stride,
     at::IntArrayRef padding,
     at::IntArrayRef dilation,
@@ -314,15 +314,15 @@ std::vector<Shape> compute_shape_convolution(
 
 std::vector<Shape> compute_shape_masked_fill(
     const at::Tensor& self,
-    const at::Tensor& mask,
-    const at::Scalar& value) {
+    const at::Tensor& /*mask*/,
+    const at::Scalar& /*value*/) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
 std::vector<Shape> compute_shape_masked_fill(
     const at::Tensor& self,
-    const at::Tensor& mask,
-    const at::Tensor& value) {
+    const at::Tensor& /*mask*/,
+    const at::Tensor& /*value*/) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
@@ -364,29 +364,31 @@ std::vector<Shape> compute_shape_nonzero(const at::Tensor& self) {
 std::vector<Shape> compute_shape_embedding(
     const at::Tensor& weight,
     const at::Tensor& indices,
-    int64_t padding_idx,
-    bool scale_grad_by_freq,
-    bool sparse) {
+    int64_t /*padding_idx*/,
+    bool /*scale_grad_by_freq*/,
+    bool /*sparse*/) {
   // Based on aten/src/ATen/native/Embedding.cpp::embedding.
   std::vector<int64_t> out_sizes = indices.sizes().vec();
   out_sizes.emplace_back(weight.size(1));
   return {Shape(weight.scalar_type(), out_sizes)};
 }
 
-std::vector<Shape> compute_shape_std(const at::Tensor& self, bool unbiased) {
+std::vector<Shape> compute_shape_std(
+    const at::Tensor& self,
+    bool /*unbiased*/) {
   return compute_shape_std(self, ::std::nullopt, ::std::nullopt, false);
 }
 std::vector<Shape> compute_shape_std(
     const at::Tensor& self,
     at::OptionalIntArrayRef dim,
-    bool unbiased,
+    bool /*unbiased*/,
     bool keepdim) {
   return compute_shape_std(self, dim, ::std::nullopt, keepdim);
 }
 std::vector<Shape> compute_shape_std(
     const at::Tensor& self,
     at::OptionalIntArrayRef dim,
-    const ::std::optional<at::Scalar>& correction,
+    const ::std::optional<at::Scalar>& /*correction*/,
     bool keepdim) {
   if (dim.has_value()) {
     auto shape = at::native::shape_from_dim_mask(
@@ -399,10 +401,10 @@ std::vector<Shape> compute_shape_std(
 
 std::vector<Shape> compute_shape_embedding_dense_backward(
     const at::Tensor& grad_output,
-    const at::Tensor& indices,
+    const at::Tensor& /*indices*/,
     int64_t num_weights,
-    int64_t padding_idx,
-    bool scale_grad_by_freq) {
+    int64_t /*padding_idx*/,
+    bool /*scale_grad_by_freq*/) {
   // Based on aten/src/ATen/native/Embedding.cpp::embedding_dense_backward_cpu.
   return {
       Shape(grad_output.scalar_type(), {num_weights, grad_output.size(-1)})};
@@ -411,7 +413,7 @@ std::vector<Shape> compute_shape_embedding_dense_backward(
 std::vector<Shape> compute_shape_expand(
     const at::Tensor& self,
     at::IntArrayRef size,
-    bool implicit) {
+    bool /*implicit*/) {
   TORCH_CHECK_GE(static_cast<int64_t>(size.size()), self.dim());
   size_t num_new_dimensions = size.size() - self.dim();
   std::vector<int64_t> padded_self(num_new_dimensions, 0);
@@ -427,7 +429,7 @@ std::vector<Shape> compute_shape_expand(
 std::vector<Shape> compute_shape_expand(
     const at::Tensor& self,
     c10::SymIntArrayRef size,
-    bool implicit) {
+    bool /*implicit*/) {
   TORCH_CHECK_GE(static_cast<int64_t>(size.size()), self.dim());
   std::vector<c10::SymInt> _sizes = ToVector<c10::SymInt>(size);
   size_t num_new_dimensions = _sizes.size() - self.dim();
@@ -508,19 +510,19 @@ std::vector<Shape> compute_shape_cat(at::TensorList tensors, int64_t dim) {
 
 TORCH_API std::vector<torch::lazy::Shape> compute_shape_cholesky(
     const at::Tensor& self,
-    bool upper) {
+    bool /*upper*/) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
 std::vector<torch::lazy::Shape> compute_shape_native_batch_norm(
     const at::Tensor& input,
-    const ::std::optional<at::Tensor>& weight,
-    const ::std::optional<at::Tensor>& bias,
+    const ::std::optional<at::Tensor>& /*weight*/,
+    const ::std::optional<at::Tensor>& /*bias*/,
     const ::std::optional<at::Tensor>& running_mean,
     const ::std::optional<at::Tensor>& running_var,
-    bool training,
-    double momentum,
-    double eps) {
+    bool /*training*/,
+    double /*momentum*/,
+    double /*eps*/) {
   std::vector<torch::lazy::Shape> shapes;
   shapes.reserve(3);
   shapes.emplace_back(input.scalar_type(), input.sizes().vec());
@@ -552,16 +554,16 @@ std::vector<torch::lazy::Shape> compute_shape_native_batch_norm(
 }
 
 std::vector<torch::lazy::Shape> compute_shape_native_batch_norm_backward(
-    const at::Tensor& grad_out,
+    const at::Tensor& /*grad_out*/,
     const at::Tensor& input,
-    const ::std::optional<at::Tensor>& weight,
-    const ::std::optional<at::Tensor>& running_mean,
-    const ::std::optional<at::Tensor>& running_var,
-    const ::std::optional<at::Tensor>& save_mean,
-    const ::std::optional<at::Tensor>& save_invstd,
-    bool train,
-    double eps,
-    ::std::array<bool, 3> output_mask) {
+    const ::std::optional<at::Tensor>& /*weight*/,
+    const ::std::optional<at::Tensor>& /*running_mean*/,
+    const ::std::optional<at::Tensor>& /*running_var*/,
+    const ::std::optional<at::Tensor>& /*save_mean*/,
+    const ::std::optional<at::Tensor>& /*save_invstd*/,
+    bool /*train*/,
+    double /*eps*/,
+    ::std::array<bool, 3> /*output_mask*/) {
   std::vector<torch::lazy::Shape> shapes;
   shapes.reserve(3);
   shapes.emplace_back(input.scalar_type(), input.sizes().vec());
@@ -586,9 +588,9 @@ std::vector<torch::lazy::Shape> compute_shape_native_batch_norm_backward(
 std::vector<Shape> compute_shape_native_layer_norm(
     const at::Tensor& input,
     at::IntArrayRef normalized_shape,
-    const ::std::optional<at::Tensor>& weight,
-    const ::std::optional<at::Tensor>& bias,
-    double eps) {
+    const ::std::optional<at::Tensor>& /*weight*/,
+    const ::std::optional<at::Tensor>& /*bias*/,
+    double /*eps*/) {
   // Copied from aten/src/ATen/native/layer_norm.cpp::layer_norm_cpu_out.
   auto input_shape = input.sizes().vec();
   const size_t axis = input.dim() - normalized_shape.size();
@@ -610,11 +612,11 @@ std::vector<Shape> compute_shape_native_layer_norm(
 }
 
 std::vector<Shape> compute_shape_native_layer_norm_backward(
-    const at::Tensor& grad_out,
+    const at::Tensor& /*grad_out*/,
     const at::Tensor& input,
-    at::IntArrayRef normalized_shape,
-    const at::Tensor& mean,
-    const at::Tensor& rstd,
+    at::IntArrayRef /*normalized_shape*/,
+    const at::Tensor& /*mean*/,
+    const at::Tensor& /*rstd*/,
     const ::std::optional<at::Tensor>& weight,
     const ::std::optional<at::Tensor>& bias,
     ::std::array<bool, 3> output_mask) {
@@ -644,24 +646,24 @@ std::vector<Shape> compute_shape_mean(
 std::vector<Shape> compute_shape_new_empty_strided(
     const at::Tensor& self,
     at::IntArrayRef size,
-    at::IntArrayRef stride,
+    at::IntArrayRef /*stride*/,
     ::std::optional<at::ScalarType> dtype,
-    ::std::optional<at::Layout> layout,
-    ::std::optional<at::Device> device,
-    ::std::optional<bool> pin_memory) {
+    ::std::optional<at::Layout> /*layout*/,
+    ::std::optional<at::Device> /*device*/,
+    ::std::optional<bool> /*pin_memory*/) {
   return {Shape(dtype.has_value() ? *dtype : self.scalar_type(), size.vec())};
 }
 
 std::vector<Shape> compute_shape_mv(
     const at::Tensor& self,
-    const at::Tensor& vec) {
+    const at::Tensor& /*vec*/) {
   return {Shape(self.scalar_type(), {self.size(0)})};
 }
 
 std::vector<Shape> compute_shape_native_dropout(
     const at::Tensor& input,
-    double p,
-    ::std::optional<bool> train) {
+    double /*p*/,
+    ::std::optional<bool> /*train*/) {
   return {
       Shape(input.scalar_type(), input.sizes().vec()),
       Shape(c10::ScalarType::Bool, input.sizes().vec())};
@@ -669,29 +671,29 @@ std::vector<Shape> compute_shape_native_dropout(
 
 std::vector<Shape> compute_shape_native_dropout_backward(
     const at::Tensor& grad_output,
-    const at::Tensor& mask,
-    double scale) {
+    const at::Tensor& /*mask*/,
+    double /*scale*/) {
   return {Shape(grad_output.scalar_type(), grad_output.sizes().vec())};
 }
 
 std::vector<Shape> compute_shape_random(
     const at::Tensor& self,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    ::std::optional<at::Generator> generator) {
+    ::std::optional<at::Generator> /*generator*/) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
 std::vector<Shape> compute_shape_random(
     const at::Tensor& self,
-    int64_t to,
+    int64_t /*to*/,
     ::std::optional<at::Generator> generator) {
   return compute_shape_random(self, std::move(generator));
 }
 
 std::vector<Shape> compute_shape_random(
     const at::Tensor& self,
-    int64_t from,
-    ::std::optional<int64_t> to,
+    int64_t /*from*/,
+    ::std::optional<int64_t> /*to*/,
     ::std::optional<at::Generator> generator) {
   return compute_shape_random(self, std::move(generator));
 }
@@ -731,8 +733,8 @@ std::vector<Shape> compute_shape_trace(const at::Tensor& self) {
 
 std::vector<Shape> compute_shape_sort(
     const at::Tensor& self,
-    int64_t dim,
-    bool descending) {
+    int64_t /*dim*/,
+    bool /*descending*/) {
   return {
       Shape(self.scalar_type(), self.sizes().vec()),
       Shape(c10::ScalarType::Long, self.sizes().vec())};
@@ -780,11 +782,11 @@ std::vector<torch::lazy::Shape> compute_shape_logical_xor(
 }
 
 std::vector<Shape> compute_shape_smooth_l1_loss_backward(
-    const at::Tensor& grad_output,
+    const at::Tensor& /*grad_output*/,
     const at::Tensor& self,
-    const at::Tensor& target,
-    int64_t reduction,
-    double beta) {
+    const at::Tensor& /*target*/,
+    int64_t /*reduction*/,
+    double /*beta*/) {
   // The `grad_output` tensor is really the input to this kernel, and while its
   // shape may vary following the logic of the forward output, the output of
   // this kernel should have fixed shapes matching the inputs to the forward
@@ -811,8 +813,8 @@ std::vector<Shape> compute_shape_log_sigmoid_forward(const at::Tensor& self) {
 
 std::vector<Shape> compute_shape_log_sigmoid_backward(
     const at::Tensor& grad_output,
-    const at::Tensor& self,
-    const at::Tensor& buffer) {
+    const at::Tensor& /*self*/,
+    const at::Tensor& /*buffer*/) {
   // Based on definition of
   // aten/src/ATen/native/Activation.cpp::log_sigmoid_backward_cpu*.
   return {Shape(grad_output.scalar_type(), grad_output.sizes().vec())};
@@ -821,9 +823,9 @@ std::vector<Shape> compute_shape_log_sigmoid_backward(
 std::vector<Shape> compute_shape_nll_loss2d_forward(
     const at::Tensor& self,
     const at::Tensor& target,
-    const ::std::optional<at::Tensor>& weight,
+    const ::std::optional<at::Tensor>& /*weight*/,
     int64_t reduction,
-    int64_t ignore_index) {
+    int64_t /*ignore_index*/) {
   // Based on definition of
   // aten/src/ATen/native/LossNLL2d.cpp:nll_loss2d_forward_cpu
   auto sizes =
@@ -833,22 +835,22 @@ std::vector<Shape> compute_shape_nll_loss2d_forward(
 }
 
 std::vector<Shape> compute_shape_nll_loss2d_backward(
-    const at::Tensor& grad_output,
+    const at::Tensor& /*grad_output*/,
     const at::Tensor& self,
-    const at::Tensor& target,
-    const ::std::optional<at::Tensor>& weight,
-    int64_t reduction,
-    int64_t ignore_index,
-    const at::Tensor& total_weight) {
+    const at::Tensor& /*target*/,
+    const ::std::optional<at::Tensor>& /*weight*/,
+    int64_t /*reduction*/,
+    int64_t /*ignore_index*/,
+    const at::Tensor& /*total_weight*/) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
 std::vector<Shape> compute_shape_grid_sampler_2d(
     const at::Tensor& input,
     const at::Tensor& grid,
-    int64_t interpolation_mode,
-    int64_t padding_mode,
-    bool align_corners) {
+    int64_t /*interpolation_mode*/,
+    int64_t /*padding_mode*/,
+    bool /*align_corners*/) {
   // from `aten/src/ATen/native/cpu/GridSamplerKernel.cpp
   int64_t N = input.size(0);
   int64_t C = input.size(1);
@@ -858,13 +860,13 @@ std::vector<Shape> compute_shape_grid_sampler_2d(
 }
 
 std::vector<Shape> compute_shape_grid_sampler_2d_backward(
-    const at::Tensor& grad_output,
+    const at::Tensor& /*grad_output*/,
     const at::Tensor& input,
     const at::Tensor& grid,
-    int64_t interpolation_mode,
-    int64_t padding_mode,
-    bool align_corners,
-    ::std::array<bool, 2> output_mask) {
+    int64_t /*interpolation_mode*/,
+    int64_t /*padding_mode*/,
+    bool /*align_corners*/,
+    ::std::array<bool, 2> /*output_mask*/) {
   // from `aten/src/ATen/native/cpu/GridSamplerKernel.cpp
   auto grad_input_shape = Shape(input.scalar_type(), input.sizes().vec());
   auto grad_grid_shape = Shape(grid.scalar_type(), grid.sizes().vec());
@@ -873,7 +875,7 @@ std::vector<Shape> compute_shape_grid_sampler_2d_backward(
 
 std::vector<Shape> compute_shape_flip(
     const at::Tensor& self,
-    at::IntArrayRef dims) {
+    at::IntArrayRef /*dims*/) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
@@ -1038,34 +1040,34 @@ std::vector<Shape> compute_shape__adaptive_avg_pool3d_backward(
 }
 
 std::vector<Shape> compute_shape_glu_backward(
-    const at::Tensor& grad_output,
+    const at::Tensor& /*grad_output*/,
     const at::Tensor& self,
-    int64_t dim) {
+    int64_t /*dim*/) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
 std::vector<Shape> compute_shape_glu_jvp(
     const at::Tensor& glu,
-    const at::Tensor& x,
-    const at::Tensor& dx,
-    int64_t dim) {
+    const at::Tensor& /*x*/,
+    const at::Tensor& /*dx*/,
+    int64_t /*dim*/) {
   return {Shape(glu.scalar_type(), glu.sizes().vec())};
 }
 
 std::vector<Shape> compute_shape_clamp_min(
     const at::Tensor& self,
-    const at::Scalar& min) {
+    const at::Scalar& /*min*/) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
 std::vector<Shape> compute_shape__to_copy(
     const at::Tensor& self,
     ::std::optional<at::ScalarType> dtype,
-    ::std::optional<at::Layout> layout,
-    ::std::optional<at::Device> device,
-    ::std::optional<bool> pin_memory,
-    bool non_blocking,
-    ::std::optional<at::MemoryFormat> memory_format) {
+    ::std::optional<at::Layout> /*layout*/,
+    ::std::optional<at::Device> /*device*/,
+    ::std::optional<bool> /*pin_memory*/,
+    bool /*non_blocking*/,
+    ::std::optional<at::MemoryFormat> /*memory_format*/) {
   if (dtype) {
     return {Shape(*dtype, self.sizes().vec())};
   }
@@ -1074,7 +1076,7 @@ std::vector<Shape> compute_shape__to_copy(
 
 TORCH_API std::vector<Shape> compute_shape_clone(
     const at::Tensor& self,
-    ::std::optional<at::MemoryFormat> memory_format) {
+    ::std::optional<at::MemoryFormat> /*memory_format*/) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
@@ -1118,10 +1120,10 @@ std::vector<Shape> compute_shape_repeat(
 
 std::vector<Shape> compute_shape_narrow_copy_symint(
     const at::Tensor& self,
-    int64_t dim,
-    int64_t start,
+    int64_t /*dim*/,
+    int64_t /*start*/,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    c10::SymInt length) {
+    c10::SymInt /*length*/) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
@@ -1130,7 +1132,7 @@ std::vector<Shape> compute_shape_hardswish(const at::Tensor& self) {
 }
 
 std::vector<Shape> compute_shape_hardswish_backward(
-    const at::Tensor& grad_output,
+    const at::Tensor& /*grad_output*/,
     const at::Tensor& self) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
@@ -1141,14 +1143,14 @@ std::vector<Shape> compute_shape_selu(const at::Tensor& self) {
 
 // Non-Native Ops
 std::vector<Shape> compute_shape_scalar(
-    const at::Scalar& value,
+    const at::Scalar& /*value*/,
     const at::ScalarType& type) {
   return {Shape(type, {})};
 }
 std::vector<Shape> compute_shape_expand(
     const Output& input,
     const std::vector<int64_t>& size,
-    const bool& is_scalar_expand) {
+    const bool& /*is_scalar_expand*/) {
   return {Shape(input.shape().scalar_type(), size)};
 }
 std::vector<Shape> compute_shape_view(
@@ -1162,7 +1164,7 @@ std::vector<Shape> compute_shape_view(
 std::vector<Shape> compute_shape_cast(
     const Output& input,
     const at::ScalarType& dtype,
-    const ::std::optional<at::ScalarType>& stype) {
+    const ::std::optional<at::ScalarType>& /*stype*/) {
   Shape shape = input.shape();
   shape.set_scalar_type(dtype);
   return {shape};
@@ -1171,25 +1173,25 @@ std::vector<Shape> compute_shape_cast(
 // View Ops
 std::vector<Shape> compute_shape_as_strided_view_update(
     const Output& target,
-    const Output& input,
+    const Output& /*input*/,
     const std::vector<int64_t>& size,
-    const std::vector<int64_t>& stride,
-    const int64_t& storage_offset) {
+    const std::vector<int64_t>& /*stride*/,
+    const int64_t& /*storage_offset*/) {
   return {Shape(target.shape().scalar_type(), size)};
 }
 std::vector<Shape> compute_shape_as_strided(
     const Output& input,
     const std::vector<int64_t>& size,
-    const std::vector<int64_t>& stride,
-    const int64_t& storage_offset) {
+    const std::vector<int64_t>& /*stride*/,
+    const int64_t& /*storage_offset*/) {
   return {Shape(input.shape().scalar_type(), size)};
 }
 std::vector<Shape> compute_shape_diagonal_view_update(
     const Output& target,
-    const Output& input,
-    const int64_t& offset,
-    const int64_t& dim1,
-    const int64_t& dim2) {
+    const Output& /*input*/,
+    const int64_t& /*offset*/,
+    const int64_t& /*dim1*/,
+    const int64_t& /*dim2*/) {
   return {target.shape()};
 }
 std::vector<Shape> compute_shape_diagonal(
@@ -1201,13 +1203,13 @@ std::vector<Shape> compute_shape_diagonal(
 }
 std::vector<Shape> compute_shape_narrow_view_update(
     const Output& input,
-    const Output& source,
-    const std::vector<int64_t>& base_indices) {
+    const Output& /*source*/,
+    const std::vector<int64_t>& /*base_indices*/) {
   return {input.shape()};
 }
 std::vector<Shape> compute_shape_narrow(
     const Output& input,
-    const std::vector<int64_t>& base_indices,
+    const std::vector<int64_t>& /*base_indices*/,
     const std::vector<int64_t>& sizes) {
   return {Shape(input.shape().scalar_type(), sizes)};
 }
@@ -1223,11 +1225,11 @@ std::vector<Shape> compute_shape_resize(
 }
 std::vector<Shape> compute_shape_select_view_update(
     const Output& target,
-    const Output& source,
-    const int64_t& dim,
-    const int64_t& start,
-    const int64_t& end,
-    const int64_t& stride) {
+    const Output& /*source*/,
+    const int64_t& /*dim*/,
+    const int64_t& /*start*/,
+    const int64_t& /*end*/,
+    const int64_t& /*stride*/) {
   return {target.shape()};
 }
 std::vector<Shape> compute_shape_select(
@@ -1362,19 +1364,19 @@ std::vector<Shape> compute_shape_as_strided_scatter_symint(
 
 std::vector<Shape> compute_shape_normal_functional(
     const at::Tensor& self,
-    double mean,
-    double std,
+    double /*mean*/,
+    double /*std*/,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    ::std::optional<at::Generator> generator) {
+    ::std::optional<at::Generator> /*generator*/) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 
 std::vector<Shape> compute_shape_uniform(
     const at::Tensor& self,
-    double from,
-    double to,
+    double /*from*/,
+    double /*to*/,
     // NOLINTNEXTLINE(performance-unnecessary-value-param)
-    ::std::optional<at::Generator> generator) {
+    ::std::optional<at::Generator> /*generator*/) {
   return {Shape(self.scalar_type(), self.sizes().vec())};
 }
 

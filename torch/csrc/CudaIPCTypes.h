@@ -109,7 +109,7 @@ struct CudaIPCRefCountersFile final {
     used_slots_++;
   }
 
-  void return_offset(uint64_t offset /* unused */) {
+  void return_offset(uint64_t /*offset*/ /* unused */) {
     used_slots_--;
   }
 

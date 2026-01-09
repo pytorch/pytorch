@@ -13,8 +13,8 @@ struct ITTMethods : public ProfilerStubs {
       int64_t* cpu_ns) const override {}
 
   float elapsed(
-      const ProfilerVoidEventStub* event,
-      const ProfilerVoidEventStub* event2) const override {
+      const ProfilerVoidEventStub* /*event*/,
+      const ProfilerVoidEventStub* /*event2*/) const override {
     return 0;
   }
 

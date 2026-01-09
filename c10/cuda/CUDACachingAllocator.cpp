@@ -1455,7 +1455,7 @@ class DeviceCachingAllocator {
         // Search pool
         get_free_block(params)
         // Trigger callbacks and retry search
-        || (trigger_free_memory_callbacks(params) && get_free_block(params));
+        || (trigger_free_memory_callbacks() && get_free_block(params));
 
     // Can't reuse an existing block; try to get a new one.
     if (!block_found) {
@@ -1475,8 +1475,7 @@ class DeviceCachingAllocator {
       block_found = alloc_block(params, false, context, lock)
           // Try to use memory pools that have opted in as overflow before
           // expensive memory freeing operations.
-          || try_mempool_fallback(
-                        params, size, stream, device_id, alloc_size, stats)
+          || try_mempool_fallback(params, size, stream, device_id, alloc_size)
           // Free enough available cached blocks to satisfy alloc and retry
           // alloc.
           || (release_available_cached_blocks(params, context) &&
@@ -1621,8 +1620,7 @@ class DeviceCachingAllocator {
       size_t size,
       cudaStream_t stream,
       c10::DeviceIndex device_idx,
-      size_t alloc_size,
-      DeviceStats& device_stats) {
+      size_t alloc_size) {
     bool block_found = false;
     // if already trying to use a mempool, then just oom
     bool active_pool = params.pool->owner_PrivatePool;
@@ -3175,7 +3173,7 @@ class DeviceCachingAllocator {
     return true;
   }
 
-  bool trigger_free_memory_callbacks(AllocParams& p) {
+  bool trigger_free_memory_callbacks() {
     bool freed_memory = false;
     for (const auto& name : FreeCudaMemoryCallbacksRegistry()->Keys()) {
       freed_memory |=
@@ -4521,7 +4519,7 @@ class NativeCachingAllocator : public CUDAAllocator {
          MemHandleCacheEntry(
              curr_device, handle, *device_allocator[curr_device])});
     auto sp = std::shared_ptr<void>(
-        inserted->second.ptr(), [handle, this](void* ptr) {
+        inserted->second.ptr(), [handle, this](void* /*ptr*/) {
           std::unique_lock<std::mutex> deleter_lock(IpcMutex);
 
           auto it = ipcMemHandle_to_devptr.find(handle);

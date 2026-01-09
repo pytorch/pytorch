@@ -43,17 +43,17 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual bool is_nested_int() const {
     return false;
   }
-  virtual SymNode add(const SymNode& other) {
+  virtual SymNode add(const SymNode& /*other*/) {
     TORCH_CHECK(false, "NYI");
   }
-  virtual SymNode sub(const SymNode& other) {
+  virtual SymNode sub(const SymNode& /*other*/) {
     TORCH_CHECK(false, "NYI");
   }
-  virtual SymNode mul(const SymNode& other) {
+  virtual SymNode mul(const SymNode& /*other*/) {
     TORCH_CHECK(false, "NYI");
   }
   // NB: legacy, prefer float_truediv or int_truediv
-  virtual SymNode truediv(const SymNode& other) {
+  virtual SymNode truediv(const SymNode& /*other*/) {
     TORCH_CHECK(false, "NYI");
   }
   virtual SymNode float_truediv(const SymNode& other) {
@@ -63,7 +63,7 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
     return truediv(other);
   }
   // NB: legacy, prefer float_pow or pow_by_natural
-  virtual SymNode pow(const SymNode& other) {
+  virtual SymNode pow(const SymNode& /*other*/) {
     TORCH_CHECK(false, "NYI");
   }
   virtual SymNode float_pow(const SymNode& other) {
@@ -73,31 +73,31 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
     return pow(other);
   }
   // NB: legacy, prefer int_floordiv
-  virtual SymNode floordiv(const SymNode& other) {
+  virtual SymNode floordiv(const SymNode& /*other*/) {
     TORCH_CHECK(false, "NYI");
   }
   virtual SymNode int_floordiv(const SymNode& other) {
     return floordiv(other);
   }
-  virtual SymNode mod(const SymNode& other) {
+  virtual SymNode mod(const SymNode& /*other*/) {
     TORCH_CHECK(false, "NYI");
   }
-  virtual SymNode eq(const SymNode& other) {
+  virtual SymNode eq(const SymNode& /*other*/) {
     TORCH_CHECK(false, "NYI");
   }
-  virtual SymNode ne(const SymNode& other) {
+  virtual SymNode ne(const SymNode& /*other*/) {
     TORCH_CHECK(false, "NYI");
   }
-  virtual SymNode gt(const SymNode& other) {
+  virtual SymNode gt(const SymNode& /*other*/) {
     TORCH_CHECK(false, "NYI");
   }
-  virtual SymNode lt(const SymNode& other) {
+  virtual SymNode lt(const SymNode& /*other*/) {
     TORCH_CHECK(false, "NYI");
   }
-  virtual SymNode le(const SymNode& other) {
+  virtual SymNode le(const SymNode& /*other*/) {
     TORCH_CHECK(false, "NYI");
   }
-  virtual SymNode ge(const SymNode& other) {
+  virtual SymNode ge(const SymNode& /*other*/) {
     TORCH_CHECK(false, "NYI");
   }
   virtual SymNode ceil() {
@@ -109,53 +109,55 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual SymNode neg() {
     TORCH_CHECK(false, "NYI");
   }
-  virtual SymNode sym_min(const SymNode& other) {
+  virtual SymNode sym_min(const SymNode& /*other*/) {
     TORCH_CHECK(false, "NYI");
   }
-  virtual SymNode sym_max(const SymNode& other) {
+  virtual SymNode sym_max(const SymNode& /*other*/) {
     TORCH_CHECK(false, "NYI");
   }
-  virtual SymNode sym_or(const SymNode& other) {
+  virtual SymNode sym_or(const SymNode& /*other*/) {
     TORCH_CHECK(false, "NYI");
   }
-  virtual SymNode sym_and(const SymNode& other) {
+  virtual SymNode sym_and(const SymNode& /*other*/) {
     TORCH_CHECK(false, "NYI");
   }
   virtual SymNode sym_not() {
     TORCH_CHECK(false, "NYI");
   }
-  virtual SymNode sym_ite(const SymNode& then_val, const SymNode& else_val) {
+  virtual SymNode sym_ite(
+      const SymNode& /*then_val*/,
+      const SymNode& /*else_val*/) {
     TORCH_CHECK(false, "NYI");
   }
   // NB: self is ignored here, only the arguments are used
   virtual SymNode is_contiguous(
-      ArrayRef<SymNode> sizes,
-      ArrayRef<SymNode> strides) {
+      ArrayRef<SymNode> /*sizes*/,
+      ArrayRef<SymNode> /*strides*/) {
     TORCH_CHECK(false, "NYI");
   }
   virtual SymNode is_channels_last_contiguous_2d(
-      ArrayRef<SymNode> sizes,
-      ArrayRef<SymNode> strides) {
+      ArrayRef<SymNode> /*sizes*/,
+      ArrayRef<SymNode> /*strides*/) {
     TORCH_CHECK(false, "NYI");
   }
   virtual SymNode is_channels_last_contiguous_3d(
-      ArrayRef<SymNode> sizes,
-      ArrayRef<SymNode> strides) {
+      ArrayRef<SymNode> /*sizes*/,
+      ArrayRef<SymNode> /*strides*/) {
     TORCH_CHECK(false, "NYI");
   }
   virtual SymNode is_channels_last_strides_2d(
-      ArrayRef<SymNode> sizes,
-      ArrayRef<SymNode> strides) {
+      ArrayRef<SymNode> /*sizes*/,
+      ArrayRef<SymNode> /*strides*/) {
     TORCH_CHECK(false, "NYI");
   }
   virtual SymNode is_channels_last_strides_3d(
-      ArrayRef<SymNode> sizes,
-      ArrayRef<SymNode> strides) {
+      ArrayRef<SymNode> /*sizes*/,
+      ArrayRef<SymNode> /*strides*/) {
     TORCH_CHECK(false, "NYI");
   }
   virtual SymNode is_non_overlapping_and_dense(
-      ArrayRef<SymNode> sizes,
-      ArrayRef<SymNode> strides) {
+      ArrayRef<SymNode> /*sizes*/,
+      ArrayRef<SymNode> /*strides*/) {
     TORCH_CHECK(false, "NYI");
   }
   virtual SymNode clone() {
@@ -164,22 +166,22 @@ class C10_API SymNodeImpl : public c10::intrusive_ptr_target {
   virtual SymNode sym_float() {
     TORCH_CHECK(false, "NYI");
   }
-  virtual SymNode wrap_int(int64_t num) {
+  virtual SymNode wrap_int(int64_t /*num*/) {
     TORCH_CHECK(false, "NYI");
   }
-  virtual SymNode wrap_float(double num) {
+  virtual SymNode wrap_float(double /*num*/) {
     TORCH_CHECK(false, "NYI");
   }
-  virtual SymNode wrap_bool(bool num) {
+  virtual SymNode wrap_bool(bool /*num*/) {
     TORCH_CHECK(false, "NYI");
   }
-  virtual int64_t guard_int(const char* file, int64_t line) {
+  virtual int64_t guard_int(const char* /*file*/, int64_t /*line*/) {
     TORCH_CHECK(false, "NYI");
   }
-  virtual bool guard_bool(const char* file, int64_t line) {
+  virtual bool guard_bool(const char* /*file*/, int64_t /*line*/) {
     TORCH_CHECK(false, "NYI");
   }
-  virtual double guard_float(const char* file, int64_t line) {
+  virtual double guard_float(const char* /*file*/, int64_t /*line*/) {
     TORCH_CHECK(false, "NYI");
   }
   virtual bool guard_size_oblivious(const char* file, int64_t line) {

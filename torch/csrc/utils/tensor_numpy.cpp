@@ -273,7 +273,7 @@ at::Tensor tensor_from_numpy(
       data_ptr,
       sizes,
       strides,
-      [obj](void* data) {
+      [obj](void* /*data*/) {
         pybind11::gil_scoped_acquire gil;
         Py_DECREF(obj);
       },
@@ -516,7 +516,7 @@ at::Tensor tensor_from_cuda_array_interface(
       data_ptr,
       sizes,
       strides,
-      [obj](void* data) {
+      [obj](void* /*data*/) {
         pybind11::gil_scoped_acquire gil;
         Py_DECREF(obj);
       },

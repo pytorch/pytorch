@@ -14,7 +14,7 @@ namespace torch::nativert {
 
 c10::OperatorHandle getOperatorForTarget(
     std::string_view target,
-    const Node* node) {
+    const Node* /*node*/) {
   // target could come as either "torch.ops.aten.add.default" or
   // "aten.add.default"
   std::vector<std::string_view> atoms = c10::split(target, '.');
