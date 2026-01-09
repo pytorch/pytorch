@@ -9,15 +9,15 @@ For fp8: only supports forward pass right now.
 from __future__ import annotations
 
 import importlib
+from collections.abc import Callable
 from dataclasses import dataclass
 from functools import cache
-from typing import Callable
 from typing_extensions import TypeVarTuple, Unpack
-
-from . import _registry
 
 import torch
 from torch.library import Library
+
+from . import _registry
 
 
 __all__ = [
