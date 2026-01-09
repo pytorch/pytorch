@@ -829,7 +829,7 @@ class InvokeSubgraphBackendTests(torch._dynamo.test_case.TestCase):
             y = torch.randn(3, 3)
 
             # Trace with make_fx - the compiled_fn should appear as invoke_subgraph HOP
-            traced = make_fx(outer_fn, tracing_mode="fake")(x, y)
+            traced = make_fx(outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True)(x, y)
 
             self.assertExpectedInline(
                 normalize_gm(traced.print_readable(print_output=False)),
@@ -883,7 +883,7 @@ class outer_fn(torch.nn.Module):
             # Set up TracingContext so invoke_subgraph cache works
             tracing_ctx = TracingContext(fake_mode=None)
             with tracing(tracing_ctx):
-                traced = make_fx(outer_fn, tracing_mode="fake")(x, y)
+                traced = make_fx(outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True)(x, y)
 
             self.assertExpectedInline(
                 normalize_gm(traced.print_readable(print_output=False)),
@@ -937,7 +937,7 @@ class outer_fn(torch.nn.Module):
 
             x = torch.randn(3, 3)
 
-            traced = make_fx(outer_fn, tracing_mode="fake")(x)
+            traced = make_fx(outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True)(x)
 
             self.assertExpectedInline(
                 normalize_gm(traced.print_readable(print_output=False)),
@@ -962,6 +962,154 @@ class outer_fn(torch.nn.Module):
         def forward(self, arg0_1: "f32[3, 3]"):
             mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, 3);  arg0_1 = None
             return (mul,)
+""",  # noqa: B950
+            )
+
+    def test_multiple_inputs(self):
+        """Test invoke_subgraph with multiple tensor inputs.
+
+        Verifies that the invoke_subgraph HOP correctly handles functions
+        that take more than 2 tensor inputs.
+        """
+        import torch._dynamo.backends.debugging as dbg
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        with torch._dynamo.config.patch(force_compile_during_fx_trace=True):
+            torch._dynamo.reset()
+            dbg._invoke_subgraph_counter = 0
+
+            def multi_input_fn(a, b, c, d):
+                return a * b + c * d
+
+            compiled_fn = torch.compile(multi_input_fn, backend="invoke_subgraph")
+
+            def outer_fn(w, x, y, z):
+                return compiled_fn(w, x, y, z)
+
+            w = torch.randn(3, 3)
+            x = torch.randn(3, 3)
+            y = torch.randn(3, 3)
+            z = torch.randn(3, 3)
+
+            traced = make_fx(outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True)(w, x, y, z)
+
+            self.assertExpectedInline(
+                normalize_gm(traced.print_readable(print_output=False)),
+                """\
+class outer_fn(torch.nn.Module):
+    def forward(self, w_1: "f32[3, 3]", x_1: "f32[3, 3]", y_1: "f32[3, 3]", z_1: "f32[3, 3]"):
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_1', w_1, x_1, y_1, z_1);  repeated_subgraph0 = w_1 = x_1 = y_1 = z_1 = None
+        getitem: "f32[3, 3]" = invoke_subgraph[0];  invoke_subgraph = None
+        return getitem
+
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3, 3]", arg2_1: "f32[3, 3]", arg3_1: "f32[3, 3]"):
+            mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+            mul_1: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg2_1, arg3_1);  arg2_1 = arg3_1 = None
+            add: "f32[3, 3]" = torch.ops.aten.add.Tensor(mul, mul_1);  mul = mul_1 = None
+            return (add,)
+""",  # noqa: B950
+            )
+
+    def test_multiple_outputs(self):
+        """Test invoke_subgraph with multiple tensor outputs.
+
+        Verifies that the invoke_subgraph HOP correctly handles functions
+        that return multiple tensors.
+        """
+        import torch._dynamo.backends.debugging as dbg
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        with torch._dynamo.config.patch(force_compile_during_fx_trace=True):
+            torch._dynamo.reset()
+            dbg._invoke_subgraph_counter = 0
+
+            def multi_output_fn(x, y):
+                return x + y, x - y, x * y
+
+            compiled_fn = torch.compile(multi_output_fn, backend="invoke_subgraph")
+
+            def outer_fn(a, b):
+                sum_out, diff_out, prod_out = compiled_fn(a, b)
+                return sum_out * diff_out + prod_out
+
+            a = torch.randn(3, 3)
+            b = torch.randn(3, 3)
+
+            traced = make_fx(outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True)(a, b)
+
+            self.assertExpectedInline(
+                normalize_gm(traced.print_readable(print_output=False)),
+                """\
+class outer_fn(torch.nn.Module):
+    def forward(self, a_1: "f32[3, 3]", b_1: "f32[3, 3]"):
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_1', a_1, b_1);  repeated_subgraph0 = a_1 = b_1 = None
+        getitem: "f32[3, 3]" = invoke_subgraph[0]
+        getitem_1: "f32[3, 3]" = invoke_subgraph[1]
+        getitem_2: "f32[3, 3]" = invoke_subgraph[2];  invoke_subgraph = None
+        mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
+        add: "f32[3, 3]" = torch.ops.aten.add.Tensor(mul, getitem_2);  mul = getitem_2 = None
+        return add
+
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3, 3]"):
+            add: "f32[3, 3]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1)
+            sub: "f32[3, 3]" = torch.ops.aten.sub.Tensor(arg0_1, arg1_1)
+            mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+            return (add, sub, mul)
+""",  # noqa: B950
+            )
+
+    def test_multiple_inputs_and_outputs(self):
+        """Test invoke_subgraph with both multiple inputs and outputs.
+
+        Verifies that the invoke_subgraph HOP correctly handles functions
+        that have both multiple tensor inputs and multiple tensor outputs.
+        """
+        import torch._dynamo.backends.debugging as dbg
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        with torch._dynamo.config.patch(force_compile_during_fx_trace=True):
+            torch._dynamo.reset()
+            dbg._invoke_subgraph_counter = 0
+
+            def multi_io_fn(a, b, c):
+                # Multiple inputs, multiple outputs
+                return a + b + c, a * b * c
+
+            compiled_fn = torch.compile(multi_io_fn, backend="invoke_subgraph")
+
+            def outer_fn(x, y, z):
+                sum_out, prod_out = compiled_fn(x, y, z)
+                return sum_out - prod_out
+
+            x = torch.randn(3, 3)
+            y = torch.randn(3, 3)
+            z = torch.randn(3, 3)
+
+            traced = make_fx(outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True)(x, y, z)
+
+            self.assertExpectedInline(
+                normalize_gm(traced.print_readable(print_output=False)),
+                """\
+class outer_fn(torch.nn.Module):
+    def forward(self, x_1: "f32[3, 3]", y_1: "f32[3, 3]", z_1: "f32[3, 3]"):
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_1', x_1, y_1, z_1);  repeated_subgraph0 = x_1 = y_1 = z_1 = None
+        getitem: "f32[3, 3]" = invoke_subgraph[0]
+        getitem_1: "f32[3, 3]" = invoke_subgraph[1];  invoke_subgraph = None
+        sub: "f32[3, 3]" = torch.ops.aten.sub.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
+        return sub
+
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[3, 3]", arg1_1: "f32[3, 3]", arg2_1: "f32[3, 3]"):
+            add: "f32[3, 3]" = torch.ops.aten.add.Tensor(arg0_1, arg1_1)
+            add_1: "f32[3, 3]" = torch.ops.aten.add.Tensor(add, arg2_1);  add = None
+            mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(arg0_1, arg1_1);  arg0_1 = arg1_1 = None
+            mul_1: "f32[3, 3]" = torch.ops.aten.mul.Tensor(mul, arg2_1);  mul = arg2_1 = None
+            return (add_1, mul_1)
 """,  # noqa: B950
             )
 
