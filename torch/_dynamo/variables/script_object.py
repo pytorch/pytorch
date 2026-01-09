@@ -173,7 +173,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
             real_obj = (
                 self.value
                 if is_opaque_value_type(type(self.value))
-                else self.value.real_obj
+                else self.value.real_obj  # pyrefly: ignore[missing-attribute]
             )
 
             member_type = get_member_type(
@@ -250,7 +250,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
             real_obj = (
                 self.value
                 if is_opaque_value_type(type(self.value))
-                else self.value.real_obj
+                else self.value.real_obj  # pyrefly: ignore[missing-attribute]
             )
             value_type = type(real_obj)
 
