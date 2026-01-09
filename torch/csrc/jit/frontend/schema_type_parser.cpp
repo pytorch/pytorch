@@ -50,11 +50,9 @@ static std::unordered_set<std::string>& getOpaqueTypes() {
 
 void registerOpaqueType(const std::string& type_name) {
   auto& global_opaque_types = getOpaqueTypes();
-  auto [_, inserted] = global_opaque_types.insert(type_name);
-  if (!inserted) {
-    throw std::runtime_error(
-        "Type '" + type_name + "' is already registered as an opaque type");
-  }
+  // Allow opaque types to be registered multiple times. Why not? It's just a
+  // string name.
+  global_opaque_types.insert(type_name);
 }
 
 bool isRegisteredOpaqueType(const std::string& type_name) {
