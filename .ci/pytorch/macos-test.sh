@@ -40,7 +40,7 @@ test_python_all() {
 test_python_mps() {
   setup_test_python
 
-  time python test/run_test.py --verbose --mps
+  time PYTORCH_TEST_WITH_SLOW=1 python test/run_test.py --verbose --mps
   MTL_CAPTURE_ENABLED=1 python3 test/test_mps.py --verbose -k test_metal_capture
 
   assert_git_not_dirty
@@ -106,7 +106,7 @@ test_custom_backend() {
   rm -rf build && mkdir build
   pushd build
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" "${CMAKE_EXEC}" ..
+  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
   make VERBOSE=1
   popd
 
@@ -127,7 +127,7 @@ test_custom_script_ops() {
   rm -rf build && mkdir build
   pushd build
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" "${CMAKE_EXEC}" ..
+  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
   make VERBOSE=1
   popd
 
@@ -147,7 +147,7 @@ test_jit_hooks() {
   rm -rf build && mkdir build
   pushd build
   SITE_PACKAGES="$(python -c 'from distutils.sysconfig import get_python_lib; print(get_python_lib())')"
-  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" "${CMAKE_EXEC}" ..
+  CMAKE_PREFIX_PATH="$SITE_PACKAGES/torch" cmake ..
   make VERBOSE=1
   popd
 

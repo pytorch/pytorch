@@ -592,19 +592,6 @@ static void max_unpool_out_mps_template(const Tensor& input,
   output.resize_(output_size, memory_format);
   output.fill_(0);
 
-  if (indices.defined() && indices.numel() > 0) {
-    auto output_image_size = c10::multiply_integers(output_size_);
-
-    auto [min_idx_tensor, max_idx_tensor] = indices.aminmax();
-    int64_t min_idx = min_idx_tensor.item<int64_t>();
-    int64_t max_idx = max_idx_tensor.item<int64_t>();
-
-    if (min_idx < 0 || max_idx >= output_image_size) {
-      int64_t error_idx = (min_idx < 0) ? min_idx : max_idx;
-      TORCH_CHECK(false, "Found an invalid max index: ", error_idx, " for output tensor of shape ", output_size_);
-    }
-  }
-
   id<MTLDevice> device = MPSDevice::getInstance()->device();
   MPSStream* mpsStream = getCurrentMPSStream();
   const auto numThreads = input.numel();
@@ -628,7 +615,7 @@ static void max_unpool_out_mps_template(const Tensor& input,
 
       getMPSProfiler().beginProfileKernel(PSO, op_name, {input});
       [computeEncoder setComputePipelineState:PSO];
-      mtl_setArgs(computeEncoder, output, input, indices, params);
+      mtl_setArgs(computeEncoder, output, input, indices, params, mpsStream->getErrorBuffer());
 
       mtl_dispatch1DJob(computeEncoder, PSO, numThreads);
       getMPSProfiler().endProfileKernel(PSO);
