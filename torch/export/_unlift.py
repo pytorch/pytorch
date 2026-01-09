@@ -260,7 +260,11 @@ def _unlift_inputs_as_getattr(
     input_name_to_node = {}
 
     placeholder_nodes = [node for node in gm.graph.nodes if node.op == "placeholder"]
-    assert len(lifted_inputs) == len(placeholder_nodes)
+    if len(lifted_inputs) != len(placeholder_nodes):
+        raise AssertionError(
+            f"Number of lifted inputs ({len(lifted_inputs)}) does not match "
+            f"placeholder nodes ({len(placeholder_nodes)})"
+        )
     for input_node, lifted_node in zip(placeholder_nodes, lifted_inputs):
         if lifted_node is None:
             input_name_to_node[input_node.name] = input_node
@@ -301,7 +305,11 @@ def _insert_copy_for_mutations(
     """
     output_node = gm.graph.output_node()
     outputs = pytree.tree_flatten(output_node.args)[0]
-    assert len(outputs) == len(mutated_outputs)
+    if len(outputs) != len(mutated_outputs):
+        raise AssertionError(
+            f"Number of outputs ({len(outputs)}) does not match "
+            f"mutated outputs ({len(mutated_outputs)})"
+        )
 
     user_output_nodes = []
     return_nodes_to_copy = {}
@@ -816,7 +824,8 @@ def _unlift_exported_program_lifted_states(
             )
         ]
 
-    assert ep.call_spec.in_spec is not None
+    if ep.call_spec.in_spec is None:
+        raise AssertionError("ep.call_spec.in_spec cannot be None")
     new_gm = _unlift(
         new_gm,
         lifted_inputs,

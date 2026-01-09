@@ -353,7 +353,6 @@ keep-runtime-typing = true
 "torch/_higher_order_ops/**" = ["S101"]
 "torch/_inductor/**" = ["S101"]
 "torch/distributed/**" = ["S101"]
-"torch/export/**" = ["S101"]
 "torch/fx/**" = ["S101"]
 "torch/jit/**" = ["S101"]
 "torch/onnx/_internal/**" = ["S101"]
