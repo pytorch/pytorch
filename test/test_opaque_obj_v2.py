@@ -194,6 +194,13 @@ class NestedValueSize:
         return repr_str, all_globals
 
 
+class OpaqueMultiplier:
+    """Opaque object that holds a multiplier value for backward tests."""
+
+    def __init__(self, multiplier: float):
+        self.multiplier = multiplier
+
+
 register_opaque_type(OpaqueQueue, typ="reference")
 register_opaque_type(
     RNGState,
@@ -230,6 +237,12 @@ register_opaque_type(
     },
 )
 register_opaque_type(AddModule, typ="reference")
+register_opaque_type(
+    OpaqueMultiplier,
+    typ="reference",
+    guard_fn=lambda obj: [obj.multiplier],
+    members={"multiplier": MemberType.USE_REAL},
+)
 register_opaque_type(ValueConfig, typ="value")
 register_opaque_type(
     SizeStore,
@@ -498,6 +511,36 @@ class TestOpaqueObject(TestCase):
             x: torch.Tensor, config: Optional[list[SizeStore]]
         ) -> torch.Tensor:
             return torch.empty_like(x)
+
+        torch.library.define(
+            "_TestOpaqueObject::mul_with_scale",
+            f"({get_opaque_type_name(OpaqueMultiplier)} scale_obj, Tensor x) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::mul_with_scale",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def mul_with_scale_impl(
+            scale_obj: OpaqueMultiplier, x: torch.Tensor
+        ) -> torch.Tensor:
+            return x * scale_obj.multiplier
+
+        def mul_setup_context(ctx, inputs, output):
+            ctx.scale_obj = inputs[0]
+
+        def mul_backward(ctx, grad):
+            return None, torch.ops._TestOpaqueObject.mul_with_scale(ctx.scale_obj, grad)
+
+        torch.library.register_autograd(
+            "_TestOpaqueObject::mul_with_scale",
+            mul_backward,
+            setup_context=mul_setup_context,
+            lib=self.lib,
+        )
 
         super().setUp()
 
@@ -1437,6 +1480,58 @@ class GraphModule(torch.nn.Module):
 
         # Recompile since Counter has changed
         self.assertEqual(cnt.frame_count, 2)
+
+    def test_invoke_subgraph(self):
+        @torch.compiler.nested_compile_region
+        def fn(scale_obj, x):
+            result = torch.ops._TestOpaqueObject.mul_with_scale(scale_obj, x)
+            result = result * 2
+            return result
+
+        def gn(scale_obj, x):
+            z = fn(scale_obj, x)
+            return z + z
+
+        scale_obj = OpaqueMultiplier(3.0)
+        x = torch.randn(2, 2)
+        x_clone = x.detach().clone()
+
+        ref = gn(scale_obj, x_clone)
+
+        backend = AotEagerAndRecordGraphs()
+        opt_outer = torch.compile(gn, fullgraph=True, backend=backend)
+        res = opt_outer(scale_obj, x)
+
+        actual = normalize_gm(backend.graphs[0].print_readable(print_output=False))
+        fx_class = _illegal_char_regex.sub("_", get_opaque_type_name(OpaqueMultiplier))
+        self.assertExpectedInline(
+            actual,
+            f"""\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_scale_obj_ : {fx_class}, L_x_: "f32[2, 2]"):
+        l_scale_obj_ = L_scale_obj_
+        l_x_ = L_x_
+
+        subgraph_0 = self.subgraph_0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_scale_obj_, l_x_);  subgraph_0 = l_scale_obj_ = l_x_ = None
+        getitem_2: "f32[2, 2]" = invoke_subgraph[0];  invoke_subgraph = None
+
+        add: "f32[2, 2]" = getitem_2 + getitem_2;  getitem_2 = None
+        return (add,)
+
+    class subgraph_0(torch.nn.Module):
+        def forward(self, l_scale_obj_ : {fx_class}, l_x_: "f32[2, 2]"):
+            result: "f32[2, 2]" = torch.ops._TestOpaqueObject.mul_with_scale(l_scale_obj_, l_x_);  l_scale_obj_ = l_x_ = None
+
+            result_1: "f32[2, 2]" = result * 2;  result = None
+            return (result_1,)
+""",  # noqa: B950
+        )
+
+        self.assertEqual(ref, res)
+
+        # TODO enable backwards testing when
+        # https://github.com/pytorch/pytorch/pull/171633 lands
 
 
 instantiate_parametrized_tests(TestOpaqueObject)
