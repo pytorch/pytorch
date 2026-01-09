@@ -2075,14 +2075,6 @@
   "GB3840": [
     {
       "Gb_type": "leaf_function without fake_fn",
-      "Context": "fn={decorated_fn}",
-      "Explanation": "The leaf_function decorator requires a fake_fn to be provided, but none was found on the decorated function.",
-      "Hints": [
-        "Ensure the function is decorated with @leaf_function(fake_fn)"
-      ]
-    },
-    {
-      "Gb_type": "leaf_function without fake_fn",
       "Context": "fn={fn}",
       "Explanation": "The leaf_function decorator requires a fake_fn to be provided, but none was found on the decorated function.",
       "Hints": [

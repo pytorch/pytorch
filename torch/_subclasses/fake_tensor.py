@@ -2515,7 +2515,6 @@ class FakeTensorMode(TorchDispatchMode):
                 else self.shape_env.ignore_fresh_unbacked_symbols
             )
 
-            # TODO: test unbacked symint outputs
             with self, maybe_ignore_fresh_unbacked_symbols():
                 # pyrefly: ignore [index-error]
                 return registered_hop_fake_fns[func](*args, **kwargs)

@@ -1429,7 +1429,6 @@ class UserMethodVariable(UserFunctionVariable):
             )
             return var.call_function(tx, call_args, kwargs)
 
-        # TODO: remove the depulication with nonstrict trace path
         if is_leaf_function(self.fn):
             call_args = [*self.self_args(), *args]
             var = variables.TorchInGraphFunctionVariable(self.fn, leaf_function=True)
