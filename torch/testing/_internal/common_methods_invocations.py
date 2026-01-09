@@ -19250,7 +19250,7 @@ op_db: list[OpInfo] = [
                        # AssertionError: Tensor-likes are not close!
                        # Greatest absolute difference: nan at index (700,) (up to 0.01 allowed)
                        # Greatest relative difference: nan at index (700,) (up to 0.001 allowed)
-                       DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
+                       DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     dtypes=(torch.chalf,)),
                    )),
     UnaryUfuncInfo('sqrt',
@@ -24707,7 +24707,7 @@ python_ref_db = [
             # AssertionError: Tensor-likes are not close!
             # Greatest absolute difference: nan at index (700,) (up to 0.01 allowed)
             # Greatest relative difference: nan at index (700,) (up to 0.001 allowed)
-            DecorateInfo(unittest.skip("skipped!"), 'TestUnaryUfuncs',
+            DecorateInfo(unittest.expectedFailure, 'TestUnaryUfuncs',
                          'test_reference_numerics_large',
                          dtypes=(torch.chalf,)),
         ),
