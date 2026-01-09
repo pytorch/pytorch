@@ -202,10 +202,28 @@ class TensorDataset(Dataset[tuple[Tensor, ...]]):
             raise AssertionError("Size mismatch between tensors")
         self.tensors = tensors
 
-    def __getitem__(self, index):
+    def __getitem__(self, index) -> tuple[Tensor, ...]:
         return tuple(tensor[index] for tensor in self.tensors)
 
     def __getitems__(self, indices: list) -> list[tuple[Tensor, ...]]:
+        r"""Fetch multiple samples by indices in a single operation.
+
+        This method enables efficient batch fetching for DataLoader by using
+        advanced tensor indexing instead of individual __getitem__ calls.
+
+        Args:
+            indices: List of indices to fetch.
+
+        Returns:
+            List of tuples, where each tuple contains the tensors for one sample.
+
+        Example:
+            >>> t1 = torch.tensor([[1, 2], [3, 4], [5, 6]])
+            >>> t2 = torch.tensor([7, 8, 9])
+            >>> ds = TensorDataset(t1, t2)
+            >>> ds.__getitems__([0, 2])
+            [(tensor([1, 2]), tensor(7)), (tensor([5, 6]), tensor(9))]
+        """
         return list(zip(*(tensor[indices] for tensor in self.tensors)))
 
     def __len__(self) -> int:
