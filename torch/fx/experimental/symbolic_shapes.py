@@ -2207,7 +2207,7 @@ class StatelessSymbolicContext(SymbolicContext, Generic[_P1, _T1]):
 # created with new fake modes should produce the same exact symbols as the original, providing the same shape_env
 # is used.
 # TODO(voz): Shape env validation
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class StatefulSymbolicContext(StatelessSymbolicContext):
     """
     Create symbols in ``create_symbolic_sizes_strides_storage_offset`` via
@@ -2222,7 +2222,7 @@ class StatefulSymbolicContext(StatelessSymbolicContext):
     with respect to different shape_envs, clearing, etc.
     """
 
-    tensor_source: Source = None  # type: ignore[assignment]
+    tensor_source: Source
     # Why is this keyed on int first?
     # That integer is actually the id of the shape_env. This cache short-circuits symbol
     # creation, and we must store it per shape env. Now, while tracing invariants are a single
@@ -2232,14 +2232,9 @@ class StatefulSymbolicContext(StatelessSymbolicContext):
     # cause it to fail with unknown symbols, as the symbols cached here will skip creation, and never
     # get recorded in var_to_val, etc.
     # TODO(voz): consider a weakref to the shape_env here
-    shape_env_to_source_to_symbol_cache: dict[int, dict[str, sympy.Expr]] = None  # type: ignore[assignment]
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        # The None default is annoying, but required because of dataclass limitations
-        assert self.tensor_source is not None
-        if not self.shape_env_to_source_to_symbol_cache:
-            object.__setattr__(self, "shape_env_to_source_to_symbol_cache", {})
+    shape_env_to_source_to_symbol_cache: dict[int, dict[str, sympy.Expr]] = field(
+        default_factory=dict
+    )
 
 
 @dataclass(frozen=True, slots=True)
