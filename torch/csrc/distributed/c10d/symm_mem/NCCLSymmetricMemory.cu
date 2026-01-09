@@ -268,6 +268,10 @@ ncclWindow_t NCCLSymmetricMemory::get_signal_pad_handle() {
   return pai_->signal_handle_;
 }
 
+size_t NCCLSymmetricMemory::get_offset() {
+  return offset_;
+}
+
 class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
  public:
   void* alloc(
