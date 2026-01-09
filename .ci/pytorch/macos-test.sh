@@ -41,7 +41,7 @@ test_python_mps() {
   setup_test_python
 
   time python test/run_test.py --verbose --mps
-  MTL_CAPTURE_ENABLED=1 python3 test/test_mps.py --verbose -k test_metal_capture
+  MTL_CAPTURE_ENABLED=1 ${CONDA_RUN} python3 test/test_mps.py --verbose -k test_metal_capture
 
   assert_git_not_dirty
 }
@@ -101,6 +101,8 @@ test_libtorch() {
 }
 
 test_custom_backend() {
+  print_cmake_info
+
   echo "Testing custom backends"
   pushd test/custom_backend
   rm -rf build && mkdir build
@@ -121,6 +123,8 @@ test_custom_backend() {
 }
 
 test_custom_script_ops() {
+  print_cmake_info
+
   echo "Testing custom script operators"
   pushd test/custom_operator
   # Build the custom operator library.
@@ -141,6 +145,8 @@ test_custom_script_ops() {
 }
 
 test_jit_hooks() {
+  print_cmake_info
+
   echo "Testing jit hooks in cpp"
   pushd test/jit_hooks
   # Build the custom operator library.
@@ -218,6 +224,8 @@ pip_benchmark_deps() {
 
 
 test_torchbench_perf() {
+  print_cmake_info
+
   echo "Launching torchbench setup"
   pip_benchmark_deps
   torchbench_setup_macos
@@ -243,6 +251,8 @@ test_torchbench_perf() {
 }
 
 test_torchbench_smoketest() {
+  print_cmake_info
+
   echo "Launching torchbench setup"
   pip_benchmark_deps
   # shellcheck disable=SC2119,SC2120
@@ -304,6 +314,8 @@ test_torchbench_smoketest() {
 }
 
 test_aoti_torchbench_smoketest() {
+  print_cmake_info
+
   echo "Launching AOTInductor torchbench setup"
   pip_benchmark_deps
   # shellcheck disable=SC2119,SC2120
@@ -344,6 +356,7 @@ test_aoti_torchbench_smoketest() {
 }
 
 test_hf_perf() {
+  print_cmake_info
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   pip_benchmark_deps
@@ -359,6 +372,7 @@ test_hf_perf() {
 }
 
 test_timm_perf() {
+  print_cmake_info
   TEST_REPORTS_DIR=$(pwd)/test/test-reports
   mkdir -p "$TEST_REPORTS_DIR"
   pip_benchmark_deps
