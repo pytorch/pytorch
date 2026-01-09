@@ -217,6 +217,9 @@ struct cublasCommonArgs {
         bias = maybe_prepare_matrix_with_layout(*self, /*make_row_major_like=*/transpose_result, result->sizes());
         if (bias.has_value()) {
           bias_ld = (*bias)->stride(transpose_result ? 0 : 1);
+        } else {
+          // Cannot use bias descriptor, so a copy is needed
+          must_copy_bias = true;
         }
       } else { // Fallback - copy bias into result
         must_copy_bias = true;
