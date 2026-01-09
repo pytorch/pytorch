@@ -10,9 +10,8 @@ if(NOT TARGET caffe2::mkldnn)
   add_library(caffe2::mkldnn INTERFACE IMPORTED)
 endif()
 
-set_property(
-  TARGET caffe2::mkldnn PROPERTY INTERFACE_INCLUDE_DIRECTORIES
-  ${MKLDNN_INCLUDE_DIR})
+# Don't set INTERFACE_INCLUDE_DIRECTORIES here because they are already
+# inherited from the MKLDNN_LIBRARIES targets (e.g., cpu_mkldnn)
 set_property(
   TARGET caffe2::mkldnn PROPERTY INTERFACE_LINK_LIBRARIES
   ${MKLDNN_LIBRARIES})
