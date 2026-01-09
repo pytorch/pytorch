@@ -854,7 +854,7 @@ torch.cuda.synchronize()
                     RuntimeError, r"Found an invalid max index:"
                 ):
                     unpool(output, indices)
-                    if torch.device(device).type == 'mps':
+                    if torch.device(device).type == "mps":
                         torch.mps.synchronize()
             else:
                 unpool(output, indices)

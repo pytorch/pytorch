@@ -29,14 +29,14 @@ OutputType = list[Optional[Union[int, torch.Tensor]]]
 ModelType = Callable[[list[InputType]], OutputType]
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class FunctionID:
     "Unique counter of a function wrapped in cudagraphify_impl"
 
     id: int
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class PlaceholderInfo:
     """
     A serializable version of torch.fx.Node that contains information
@@ -51,7 +51,7 @@ class PlaceholderInfo:
     mutating_use_stack_trace: Optional[str]
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class WrappedFunction:
     """
     Represents a function that you want to record for CUDA graph replay,
