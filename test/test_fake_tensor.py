@@ -1695,6 +1695,54 @@ class FakeTensorOperatorInvariants(TestCase):
         with torch._subclasses.CrossRefFakeMode():
             Repro()(*args)
 
+    def test_convolution_backward_channels_last_memory_format(self):
+        """Regression test: meta convolution_backward must predict channels_last
+        output strides when inputs are channels_last, matching CUDA/MPS backends.
+        See https://github.com/pytorch/pytorch/issues/171622
+        """
+        with FakeTensorMode():
+            # channels_last inputs: outputs should be channels_last
+            grad_out = torch.randn(2, 3, 4, 4).to(memory_format=torch.channels_last)
+            inp = torch.randn(2, 3, 4, 4).to(memory_format=torch.channels_last)
+            weight = torch.randn(3, 3, 3, 3).to(memory_format=torch.channels_last)
+            grad_input, grad_weight, _ = torch.ops.aten.convolution_backward(
+                grad_out,
+                inp,
+                weight,
+                [3],
+                [1, 1],
+                [1, 1],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+                [True, True, True],
+            )
+            self.assertTrue(grad_input.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(
+                grad_weight.is_contiguous(memory_format=torch.channels_last)
+            )
+
+            # contiguous inputs: outputs should be contiguous
+            grad_out_c = torch.randn(2, 3, 4, 4)
+            inp_c = torch.randn(2, 3, 4, 4)
+            weight_c = torch.randn(3, 3, 3, 3)
+            grad_input_c, grad_weight_c, _ = torch.ops.aten.convolution_backward(
+                grad_out_c,
+                inp_c,
+                weight_c,
+                [3],
+                [1, 1],
+                [1, 1],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+                [True, True, True],
+            )
+            self.assertTrue(grad_input_c.is_contiguous())
+            self.assertTrue(grad_weight_c.is_contiguous())
+
     def test_no_dispatch_with_like_function(self):
         class CountingMode(TorchDispatchMode):
             def __init__(self) -> None:
