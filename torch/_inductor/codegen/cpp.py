@@ -743,7 +743,7 @@ class CppOverrides(OpOverrides):
             """
             V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
         return csevar
-    
+
     @staticmethod
     def round_to_int(x, dtype, src_dtype=None, use_compute_types=True):
         assert isinstance(x, CppCSEVariable)
@@ -1670,7 +1670,7 @@ class CppVecOverrides(CppOverrides):
         if dtype in DTYPE_LOWP_FP and src_dtype == torch.float:
             V.kernel.cache_dtype_convert(x, src_dtype, csevar, dtype)
         return csevar
-    
+
     @staticmethod
     def round_to_int(x, dtype, src_dtype=None, use_compute_types=True):
         assert dtype in [
