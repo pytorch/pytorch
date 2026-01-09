@@ -149,6 +149,7 @@ def check_node_safe(node: Node):
         "torch._sym_sqrt",
         "torch.sym_float",
         "torch.sym_sum",
+        "torch.autograd.grad",
     )
     SAFE_NON_TORCH_FUNCTIONS = (
         "einops.einops.rearrange",
