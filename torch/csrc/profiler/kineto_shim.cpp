@@ -1,5 +1,6 @@
 #include <torch/csrc/profiler/collection.h>
 #include <torch/csrc/profiler/kineto_shim.h>
+#include <torch/csrc/profiler/standalone/privateuse1_profiler.h>
 #include <type_traits>
 
 #ifdef USE_KINETO
@@ -75,9 +76,8 @@ static_assert(
 
 const DeviceAndResource kineto_ids() {
 #ifdef USE_KINETO
-  return {
-      /*device=*/libkineto::processId(),
-      /*resource=*/libkineto::systemThreadId()};
+  return {/*device=*/libkineto::processId(),
+          /*resource=*/libkineto::systemThreadId()};
 #else
   return {};
 #endif // USE_KINETO
@@ -270,6 +270,14 @@ void prepareTrace(
 
   if (!libkineto::api().isProfilerInitialized()) {
     libkineto::api().initProfilerIfRegistered();
+  }
+
+  // Forward any registered PrivateUse1 profiler factory to Kineto.
+  // This must happen after Kineto is initialized but before trace starts.
+  // TODO: gate this behind a ProfilerState::KINETO_PRIVATEUSE1 check (new
+  // state)
+  if (libkineto::api().isProfilerInitialized()) {
+    PrivateUse1ProfilerRegistry::instance().onKinetoInit();
   }
 
   std::set<libkineto::ActivityType> k_activities;
