@@ -3621,10 +3621,36 @@ def meta_convolution_backward(
     backend_grad_weight = None
     backend_grad_bias = None
 
+    # Backend layout expectation: GPU backends (CUDA via cudnn_conv_suggest_memory_format,
+    # MPS via mps_conv_use_channels_last) return channels_last outputs when either input
+    # tensor is channels_last. This must be matched here to avoid stride assertion failures
+    # in inductor when the predicted strides don't match actual backend output strides.
+    # See: https://github.com/pytorch/pytorch/issues/171622
+    #
+    # Memory format inference rules (matching backend behavior):
+    #   - grad_input format: derived from grad_output and weight
+    #   - grad_weight format: derived from input and grad_output
+    def _conv_memory_format(t1, t2):
+        # Match the logic in cudnn_conv_suggest_memory_format and mps_conv_use_channels_last:
+        # Use channels_last if either tensor suggests it
+        fmt1 = suggest_memory_format(t1)
+        fmt2 = suggest_memory_format(t2)
+        if fmt1 == torch.channels_last or fmt2 == torch.channels_last:
+            return torch.channels_last
+        if fmt1 == torch.channels_last_3d or fmt2 == torch.channels_last_3d:
+            return torch.channels_last_3d
+        return torch.contiguous_format
+
     if output_mask[0]:
-        backend_grad_input = grad_output_.new_empty(input_.size())
+        memory_format = _conv_memory_format(grad_output_, weight_)
+        backend_grad_input = grad_output_.new_empty(input_.size()).to(
+            memory_format=memory_format
+        )
     if output_mask[1]:
-        backend_grad_weight = grad_output_.new_empty(weight_.size())
+        memory_format = _conv_memory_format(input_, grad_output_)
+        backend_grad_weight = grad_output_.new_empty(weight_.size()).to(
+            memory_format=memory_format
+        )
     if output_mask[2]:
         backend_grad_bias = grad_output_.new_empty(bias_sizes_opt)
 
