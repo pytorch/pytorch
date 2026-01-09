@@ -30,16 +30,20 @@ import re
 import shutil
 import sys
 import os
+import warnings
 
-from . import constants
 from .cuda_to_hip_mappings import CUDA_TO_HIP_MAPPINGS
 from .cuda_to_hip_mappings import MATH_TRANSPILATIONS
+from .cuda_to_hip_mappings import CAFFE2_PATH_MAPPINGS
 
 from collections.abc import Iterator
 from collections.abc import Mapping, Iterable
 from enum import Enum
 import functools
 import hashlib
+
+def _deprecated(name):
+    warnings.warn(f"hipify version 2.0.0 no longer uses function {name}", FutureWarning, stacklevel=2)
 
 class CurrentState(Enum):
     INITIALIZED = 1
@@ -67,7 +71,7 @@ __all__ = ['InputError', 'openf', 'bcolors', 'GeneratedFileCleaner', 'match_exte
            'preprocess_file_and_save_result', 'compute_stats', 'add_dim3', 'processKernelLaunches', 'find_closure_group',
            'find_bracket_group', 'find_parentheses_group', 'replace_math_functions', 'hip_header_magic', 'replace_extern_shared',
            'get_hip_file_path', 'is_out_of_place', 'is_pytorch_file', 'is_cusparse_file', 'is_special_file', 'is_caffe2_gpu_file',
-           'is_caffe2_gpu_file', 'Trie', 'preprocessor', 'file_specific_replacement', 'file_add_header',
+           'Trie', 'preprocessor', 'file_specific_replacement', 'file_add_header',
            'fix_static_global_kernels', 'extract_arguments', 'str2bool', 'CurrentState', 'HipifyResult', 'hipify']
 
 
@@ -180,7 +184,6 @@ def matched_files_iter(
                 dirs.append("third_party/nvfuser")
         for filename in filenames:
             filepath = _to_unix_path(os.path.join(abs_dirpath, filename))
-            rel_filepath = _to_unix_path(os.path.join(rel_dirpath, filename))
             # We respect extensions, UNLESS you wrote the entire
             # filename verbatim, in which case we always accept it
             if (
@@ -188,11 +191,6 @@ def matched_files_iter(
                 and (not _fnmatch(filepath, ignores))
                 and (match_extensions(filepath, extensions) or filepath in exact_matches)
             ):
-                if not is_pytorch_extension:  # for pytorch extensions, consider all files
-                    if not is_pytorch_file(rel_filepath) and not is_caffe2_gpu_file(rel_filepath):
-                        continue
-                    if out_of_place_only and not is_out_of_place(rel_filepath):
-                        continue
                 yield filepath
 
 
@@ -565,8 +563,8 @@ def get_hip_file_path(rel_filepath, is_pytorch_extension=False):
     # it gets a different name from the original filename, so
     # that we don't overwrite the original file
     #
-    # There's a lot of different naming conventions across PyTorch
-    # and Caffe2, but the general recipe is to convert occurrences
+    # There's a lot of different naming conventions across PyTorch,
+    # but the general recipe is to convert occurrences
     # of cuda/gpu to hip, and add hip if there are no occurrences
     # of cuda/gpu anywhere.
     #
@@ -632,6 +630,7 @@ def is_out_of_place(rel_filepath) -> bool:
 
 # Keep this synchronized with includes/ignores in build_amd.py
 def is_pytorch_file(rel_filepath) -> bool:
+    _deprecated("is_pytorch_file")
     if os.path.isabs(rel_filepath):
         raise AssertionError("rel_filepath must be a relative path")
     if rel_filepath.startswith("aten/"):
@@ -650,12 +649,14 @@ def is_pytorch_file(rel_filepath) -> bool:
 
 
 def is_cusparse_file(rel_filepath):
+    _deprecated("is_cusparse_file")
     if is_pytorch_file(rel_filepath):
         return "sparse" in rel_filepath.lower()
     return False
 
 
 def is_special_file(rel_filepath) -> bool:
+    _deprecated("is_special_file")
     if is_pytorch_file(rel_filepath):
         if "sparse" in rel_filepath.lower():
             return True
@@ -665,7 +666,9 @@ def is_special_file(rel_filepath) -> bool:
             return True
     return False
 
+
 def is_caffe2_gpu_file(rel_filepath):
+    _deprecated("is_caffe2_gpu_file")
     if os.path.isabs(rel_filepath):
         raise AssertionError("rel_filepath must be a relative path")
     if rel_filepath.startswith("c10/cuda"):
@@ -675,6 +678,7 @@ def is_caffe2_gpu_file(rel_filepath):
 
     return ('gpu' in filename or ext in ['.cu', '.cuh']) and ('cudnn' not in filename)
 
+
 class TrieNode:
     """A Trie node whose children are represented as a directory of char: TrieNode.
        A special char '' represents end of word
@@ -682,6 +686,7 @@ class TrieNode:
 
     def __init__(self) -> None:
         self.children = {}
+
 
 class Trie:
     """Creates a Trie out of a list of words. The trie can be exported to a Regex pattern.
@@ -777,39 +782,16 @@ class Trie:
         """Export the Trie to a regex pattern."""
         return self._pattern(self.root, self._digest)
 
-CAFFE2_TRIE = Trie()
-CAFFE2_MAP = {}
 PYTORCH_TRIE = Trie()
 PYTORCH_MAP: dict[str, object] = {}
-
-# In PyTorch, we map cuBLAS->rocBLAS and cuSPARSE->hipSPARSE. Note the prefix, roc versus hip.
-# The 'hip' APIs offer a more direct CUDA-friendly mapping, but calling rocBLAS directly has better performance.
-# Unfortunately, the roc* types and hip* types differ, i.e., rocblas_float_complex versus hipComplex.
-# In the case of SPARSE, we must use the hip types for complex instead of the roc types,
-# but the pytorch mappings assume roc. Therefore, we create a new SPARSE mapping that has a higher priority.
-# Its mappings will trigger first, and only when a miss occurs will the lower-priority pytorch mapping take place.
-# When a file contains "sparse" in the filename, a mapping marked with API_SPARSE is preferred over other choices.
-# Similarly, "linalg" files require rocBLAS -> hipSOLVER so they also need special handling.
-PYTORCH_SPECIAL_MAP = {}
 
 for mapping in CUDA_TO_HIP_MAPPINGS:
     if not isinstance(mapping, Mapping):
         raise TypeError("Expected each mapping in CUDA_TO_HIP_MAPPINGS to be a Mapping")
-    for src, value in mapping.items():
-        dst = value[0]
-        meta_data = value[1:]
-        if constants.API_CAFFE2 not in meta_data:
-            PYTORCH_TRIE.add(src)
-            # if src is already in PYTORCH_MAP and dst belongs to API_SPECIAL
-            # do not overwrite PYTORCH_MAP, store dst separately
-            if constants.API_SPECIAL in meta_data and PYTORCH_MAP.get(src, ""):
-                PYTORCH_SPECIAL_MAP[src] = dst
-            else:
-                PYTORCH_MAP[src] = dst
-        if constants.API_PYTORCH not in meta_data and constants.API_SPECIAL not in meta_data:
-            CAFFE2_TRIE.add(src)
-            CAFFE2_MAP[src] = dst
-RE_CAFFE2_PREPROCESSOR = re.compile(CAFFE2_TRIE.export_to_regex())
+    for src, dst in mapping.items():
+        PYTORCH_TRIE.add(src)
+        PYTORCH_MAP[src] = dst
+
 RE_PYTORCH_PREPROCESSOR = re.compile(fr'(?<=\W)({PYTORCH_TRIE.export_to_regex()})(?=\W)')
 
 RE_QUOTE_HEADER = re.compile(r'#include "([^"]+)"')
@@ -870,23 +852,25 @@ def preprocessor(
     def pt_repl(m):
         return PYTORCH_MAP[m.group(0)]
 
-    def pt_special_repl(m):
-        # checks SPECIAL map first, and if a miss occurs, falls back to pytorch mappings
-        return PYTORCH_SPECIAL_MAP.get(m.group(0), pt_repl(m))
+    output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_repl, output_source)
 
-
-    if is_pytorch_extension:
-        output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_repl, output_source)
-    else:
-        if is_special_file(rel_filepath):
-            output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_special_repl, output_source)
-        elif is_pytorch_file(rel_filepath):
-            output_source = RE_PYTORCH_PREPROCESSOR.sub(pt_repl, output_source)
+    # Apply CAFFE2 path mappings (simple string replacement for paths containing slashes)
+    # Need to be careful to avoid double-transformations when source file has #ifdef blocks
+    # with HIP-specific paths already in them (e.g., caffe2/core/hip/context_gpu.h)
+    for cuda_path, hip_path in CAFFE2_PATH_MAPPINGS.items():
+        # Use regex to ensure we don't match paths that already have been hipified
+        # We need to avoid transforming "caffe2/core/hip/context_gpu.h" when looking for "caffe2/core/context_gpu.h"
+        # The key insight: if hip_path contains /hip/ and cuda_path doesn't, we need to be careful
+        if "/hip/" in hip_path and "/hip/" not in cuda_path:
+            # Only replace cuda_path if it's not preceded by "/hip/"
+            # Use negative lookbehind to prevent matching already-hipified paths
+            # The pattern checks that the cuda_path is not immediately preceded by "/hip/"
+            pattern = r'(?<!/hip/)' + re.escape(cuda_path)
+            output_source = re.sub(pattern, hip_path, output_source)
         else:
-            def c2_repl(m):
-                return CAFFE2_MAP[m.group(0)]
-            output_source = RE_CAFFE2_PREPROCESSOR.sub(c2_repl, output_source)
-
+            # Simple replacement when no /hip/ involved or both have it
+            output_source = output_source.replace(cuda_path, hip_path)
+            
     # Header rewrites
     def mk_repl(templ, include_current_dir=True):
         def repl(m):
