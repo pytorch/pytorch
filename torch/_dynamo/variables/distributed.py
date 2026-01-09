@@ -328,6 +328,8 @@ class DeviceMeshVariable(DistributedVariable):
             return ProcessGroupVariable(
                 self.value.get_group(*const_args, **const_kwargs)
             )
+        if name == "_is_current_rank_part_of_mesh":
+            return ConstantVariable.create(self.value._is_current_rank_part_of_mesh())
         if name == "_get_or_create_default_group":
             return ProcessGroupVariable(self.value._get_or_create_default_group())
         if name == "_flatten":
@@ -337,6 +339,12 @@ class DeviceMeshVariable(DistributedVariable):
             const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
             return SourcelessBuilder.create(
                 tx, self.value._flatten(*const_args, **const_kwargs)
+            )
+        if name == "_sym_get_coordinate":
+            const_args = [x.as_python_constant() for x in args]
+            const_kwargs = {k: v.as_python_constant() for k, v in kwargs.items()}
+            return ConstantVariable.create(
+                self.value._sym_get_coordinate(*const_args, **const_kwargs)
             )
         return super().call_method(tx, name, args, kwargs)
 
