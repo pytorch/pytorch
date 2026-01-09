@@ -68,24 +68,50 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
  public:
   NCCLPeerAllocInfo(
       NCCLAllocation* allocation,
-      std::string group_name,
-      ncclWindow_t buffer_handle,
-      ncclWindow_t signal_handle)
+      std::string group_name)
       : buffer_size_(allocation->buffer_size),
         device_idx_(allocation->device_idx),
-        group_name_(std::move(group_name)),
-        buffer_win_(buffer_handle),
-        signal_handle_(signal_handle)
+        group_name_(std::move(group_name))
   {
-    // For logging only
-    static int exchanged_n_times = 0;
-    c10::cuda::CUDAGuard guard(allocation->device_idx);
-
-    auto global_rank = get_group_info("0").rank;
+    c10::cuda::CUDAGuard guard(device_idx_);
     GroupInfo& group_info = get_group_info(group_name_);
-    auto store = group_info.store;
     rank_ = group_info.rank;
     world_size_ = group_info.world_size;  // size of current group
+
+    auto group = resolve_process_group(group_name_);
+    auto* ncclPg = dynamic_cast<c10d::ProcessGroupNCCL*>(
+        group->getBackend(c10::DeviceType::CUDA).get());
+    TORCH_CHECK(ncclPg != nullptr, "backend must be a NCCL process group");
+    ncclComm_t comm = reinterpret_cast<ncclComm_t>(ncclPg->getCommPtr());
+
+    C10D_NCCL_CHECK(
+      ncclCommWindowRegister(comm, allocation->ptr, buffer_size_, &buffer_win_, NCCL_WIN_COLL_SYMMETRIC),
+      c10::str(
+          "Failed to window register segment with ptr ",
+          allocation->ptr,
+          ", size ",
+          buffer_size_,
+          " on rank ",
+          rank_));
+
+    void* signal_pad_ptr;
+    const size_t signal_pad_size = get_signal_pad_size();
+    C10D_NCCL_CHECK(
+        ncclMemAlloc(&signal_pad_ptr, signal_pad_size), "ncclMemAlloc failed");
+    C10D_NCCL_CHECK(
+    ncclCommWindowRegister(comm, signal_pad_ptr, signal_pad_size, &signal_handle_, NCCL_WIN_COLL_SYMMETRIC),
+    c10::str(
+        "Failed to window register segment with ptr ",
+        signal_pad_ptr,
+        ", size ",
+        signal_pad_size,
+        " on rank ",
+        rank_));
+
+    // For logging only
+    static int exchanged_n_times = 0;
+    auto global_rank = get_group_info("0").rank;
+    auto store = group_info.store;
     // Exchange rank to global rank mapping for this group.
     // If it is already available, skip the exchange.
     if (group_info.rank_to_global_rank.empty()) {
@@ -103,7 +129,12 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
     TORCH_INTERNAL_ASSERT(!group_info.rank_to_global_rank.empty());
     rank_to_global_rank_ = group_info.rank_to_global_rank;
 
+    // Starting from NCCL 2.28, we can use device communicators and get peer pointers
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+    // Create NCCL device communicator if it doesn't exist. Skip if it already exists.
+    auto& mr = NCCLDevCommManager::get(c10::Device(c10::DeviceType::CUDA, device_idx_));
+    mr.try_emplace_devcomm(group_name_, comm);
+
     const size_t arr_size = sizeof(void*) * world_size_;
     buffers_dev_ = reinterpret_cast<void**>(
         c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
@@ -114,9 +145,9 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
 
     int threads = std::min(128, world_size_);
     auto stream = at::cuda::getCurrentCUDAStream();
-    build_ptr_dev<<<1, threads, 0, stream>>>(buffer_handle, 0, buffers_dev_, world_size_);
+    build_ptr_dev<<<1, threads, 0, stream>>>(buffer_win_, 0, buffers_dev_, world_size_);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
-    build_ptr_dev<<<1, threads, 0, stream>>>(signal_handle, 0, signal_pads_dev_, world_size_);
+    build_ptr_dev<<<1, threads, 0, stream>>>(signal_handle_, 0, signal_pads_dev_, world_size_);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
     C10_CUDA_CHECK(cudaStreamSynchronize(stream));
     C10_CUDA_CHECK(cudaMemcpy(
@@ -134,6 +165,10 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
 
   // Exact copy is not needed / supported
   NCCLPeerAllocInfo(const NCCLPeerAllocInfo& other) = delete;
+  NCCLPeerAllocInfo& operator=(const NCCLPeerAllocInfo& other) = delete;
+  NCCLPeerAllocInfo(NCCLPeerAllocInfo&& other) = default;
+  NCCLPeerAllocInfo& operator=(NCCLPeerAllocInfo&& other) = default;
+  ~NCCLPeerAllocInfo() = default;
 
  private:
   size_t buffer_size_;
@@ -233,6 +268,10 @@ ncclWindow_t NCCLSymmetricMemory::get_signal_pad_handle() {
   return pai_->signal_handle_;
 }
 
+size_t NCCLSymmetricMemory::get_offset() {
+  return offset_;
+}
+
 class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
  public:
   void* alloc(
@@ -270,60 +309,6 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     return it->second->buffer_size;
   };
 
-  c10::intrusive_ptr<NCCLPeerAllocInfo> make_peer_alloc_info(NCCLAllocation* alloc, const std::string& group_name) {
-    auto group = resolve_process_group(group_name);
-    c10::cuda::CUDAGuard guard(alloc->device_idx);
-    ncclWindow_t handle;
-    ncclWindow_t signal_handle;
-
-    auto group_info = get_group_info(group_name);
-    auto buffer_size_map =
-        storeExchange.all_gather(group_info.store, group_info.rank, group_info.world_size, alloc->buffer_size);
-
-    LOG(INFO) << "[rank " << group_info.rank << ']'
-              << "buffer_size_map: " << buffer_size_map;
-    // NCCL window registration api requires all ranks to have the same buffer size
-    // we have this check to make sure all ranks have the same buffer size.
-    for (auto r = 0; r < group_info.world_size; ++r) {
-      TORCH_CHECK(alloc->buffer_size == buffer_size_map[r], "buffer size mismatch");
-    }
-    auto* ncclPg = dynamic_cast<c10d::ProcessGroupNCCL*>(
-        group->getBackend(c10::DeviceType::CUDA).get());
-    TORCH_CHECK(ncclPg != nullptr, "backend must be a NCCL process group");
-    ncclComm_t comm = reinterpret_cast<ncclComm_t>(ncclPg->getCommPtr());
-    C10D_NCCL_CHECK(
-      ncclCommWindowRegister(comm, alloc->ptr, alloc->buffer_size, (ncclWindow_t*)&handle, NCCL_WIN_COLL_SYMMETRIC),
-      c10::str(
-          "Failed to window register segment with ptr ",
-          alloc->ptr,
-          ", size ",
-          alloc->buffer_size,
-          " on ncclComm_ ",
-          comm));
-
-    void* signal_pad_ptr;
-    const size_t signal_pad_size = get_signal_pad_size();
-    C10D_NCCL_CHECK(
-        ncclMemAlloc(&signal_pad_ptr, signal_pad_size), "ncclMemAlloc failed");
-    C10D_NCCL_CHECK(
-    ncclCommWindowRegister(comm, signal_pad_ptr, signal_pad_size, (ncclWindow_t*)&signal_handle, NCCL_WIN_COLL_SYMMETRIC),
-    c10::str(
-        "Failed to window register segment with ptr ",
-        signal_pad_ptr,
-        ", size ",
-        signal_pad_size,
-        " on ncclComm_ ",
-        comm));
-
-    // Create NCCL device communicator if it doesn't exist. Skip if it already exists.
-#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
-    auto& mr = NCCLDevCommManager::get(c10::Device(c10::DeviceType::CUDA, alloc->device_idx));
-    mr.try_emplace_devcomm(group_name, comm);
-#endif
-
-    return c10::make_intrusive<NCCLPeerAllocInfo>(alloc, group_name, std::move(handle), std::move(signal_handle));
-  }
-
   c10::intrusive_ptr<SymmetricMemory> rendezvous(
       void* ptr,
       const std::optional<std::string>& group_name) override {
@@ -349,8 +334,10 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
     auto pai_it = peer_alloc_infos.find(*group_name);
     if (pai_it == peer_alloc_infos.end()) {
       // Never rendezvoused with this group before, create a new peer alloc info
-      auto pai = make_peer_alloc_info(allocation.get(), *group_name);
-      pai_it = peer_alloc_infos.emplace_hint(pai_it, *group_name, std::move(pai));
+      pai_it = peer_alloc_infos.emplace_hint(
+          pai_it,
+          *group_name,
+          c10::make_intrusive<NCCLPeerAllocInfo>(allocation.get(), *group_name));
     }
 
     auto& pai = pai_it->second;
