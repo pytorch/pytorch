@@ -9,7 +9,13 @@ from typing import Optional
 import torch
 import torch.utils._pytree as pytree
 from torch._dynamo.test_case import run_tests, TestCase
-from torch._dynamo.testing import AotEagerAndRecordGraphs, CompileCounter
+from torch._dynamo.testing import (
+    AotEagerAndRecordGraphs,
+    CompileCounter,
+    CompileCounterWithBackend,
+    EagerAndRecordGraphs,
+    normalize_gm,
+)
 from torch._dynamo.utils import counters as dynamo_counters
 from torch._functorch.aot_autograd import (
     aot_compile_joint_with_descriptors,
@@ -944,7 +950,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         with self.assertRaisesRegex(
             RuntimeError, "Attempted to access unregistered member on an OpaqueObject"
         ):
-            torch.compile(foo)(counter, torch.ones(2, 3))
+            torch.compile(foo, backend="eager")(counter, torch.ones(2, 3))
 
         def bar(counter, x):
             x = x * x
@@ -954,16 +960,18 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         with self.assertRaisesRegex(
             RuntimeError, "Attempted to access unregistered member on an OpaqueObject"
         ):
-            torch.compile(bar)(counter, torch.ones(2, 3))
+            torch.compile(bar, backend="eager")(counter, torch.ones(2, 3))
 
         def foo(counter, x):
             return counter.get_c()
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "Opaque object member with method-type USE_REAL returned a reference-type opaque objects.",
+            "Opaque object member with method-type USE_REAL returned a reference-type opaque object.",
         ):
-            torch.compile(foo)(NestedCounters(Counter(1, 5)), torch.ones(2, 3))
+            torch.compile(foo, backend="eager")(
+                NestedCounters(Counter(1, 5)), torch.ones(2, 3)
+            )
 
         config = ValueConfig("double")
 
@@ -973,7 +981,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         with self.assertRaisesRegex(
             RuntimeError, "Attempted to access unregistered member on an OpaqueObject"
         ):
-            torch.compile(foo)(config, torch.ones(2, 3))
+            torch.compile(foo, backend="eager")(config, torch.ones(2, 3))
 
         def bar(mode, x):
             config.print_mode()
@@ -981,7 +989,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         with self.assertRaisesRegex(
             RuntimeError, "Attempted to access unregistered member on an OpaqueObject"
         ):
-            torch.compile(bar)(config, torch.ones(2, 3))
+            torch.compile(bar, backend="eager")(config, torch.ones(2, 3))
 
     def test_export_joint(self):
         torch.library.define(
@@ -1386,34 +1394,49 @@ def forward(self, arg0_1):
         self.assertEqual(opt_f(x), foo(x))
 
     def test_tensor_subclass_with_opaque_attr(self):
-        """Test accessing an opaque object attribute from a tensor subclass."""
-
         def fn(x):
             y = x * 2 + 1
             counter = y._counter
-            return torch.ops._TestOpaqueObject.increment_counter(counter, y)
+            return y * counter.start
 
         a = torch.rand(4, 4)
         b = torch.rand(4, 4)
         counter = Counter(start=3, end=10)
         x = TensorWithCounter(a, b, counter)
 
-        backend = AotEagerAndRecordGraphs()
-        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        backend = EagerAndRecordGraphs()
+        cnt = CompileCounterWithBackend(backend)
+
+        opt_fn = torch.compile(fn, backend=cnt, fullgraph=True)
         opt_fn(x)
 
-        fx_class = _illegal_char_regex.sub("_", get_opaque_type_name(Counter))
+        actual = normalize_gm(backend.graphs[0].print_readable(print_output=False))
         self.assertExpectedInline(
-            str(backend.graphs[0].code).strip(),
-            f"""\
-def forward(self, L_x_ : {fx_class}):
-    l_x_ = L_x_
-    mul = l_x_ * 2;  l_x_ = None
-    y = mul + 1;  mul = None
-    getattr_1 = y._counter
-    increment_counter = torch.ops._TestOpaqueObject.increment_counter(getattr_1, y);  getattr_1 = y = None
-    return (increment_counter,)""",
+            actual,
+            """\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_x_: "TensorWithCounter(f32[4, 4])"):
+        l_x_ = L_x_
+
+        mul: "TensorWithCounter(f32[4, 4])" = l_x_ * 2;  l_x_ = None
+        y: "TensorWithCounter(f32[4, 4])" = mul + 1;  mul = None
+
+        getattr_1 = y._counter;  getattr_1 = None
+
+        mul_1: "TensorWithCounter(f32[4, 4])" = y * 3;  y = None
+        return (mul_1,)
+""",
         )
+        self.assertEqual(cnt.frame_count, 1)
+
+        a = torch.rand(4, 4)
+        b = torch.rand(4, 4)
+        counter = Counter(start=1, end=10)
+        x = TensorWithCounter(a, b, counter)
+        opt_fn(x)
+
+        # Recompile since Counter has changed
+        self.assertEqual(cnt.frame_count, 2)
 
 
 instantiate_parametrized_tests(TestOpaqueObject)
