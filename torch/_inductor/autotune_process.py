@@ -150,6 +150,9 @@ class TuningProcess:
             "TORCHINDUCTOR_PROFILE_WITH_DO_BENCH_USING_PROFILING": "1"
             if config.profile_bandwidth_with_do_bench_using_profiling
             else "0",
+            # Disable aten conv in subprocesses when config.disable_aten_conv is True.
+            # This ensures benchmarking doesn't use aten conv when it's disabled.
+            "TORCHINDUCTOR_DISABLE_ATEN_CONV": "1" if config.disable_aten_conv else "0",
         }
         if self.device is not None:
             env[CUDA_VISIBLE_DEVICES] = str(self.device)
