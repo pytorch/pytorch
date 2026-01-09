@@ -77,6 +77,7 @@ __all__ = [
 
 # matches bfd8deac from resnet18-bfd8deac.pth
 HASH_REGEX = re.compile(r"-([a-f0-9]*)\.")
+_PATH_SEP_PATTERN = re.compile(r"[/\\]")
 
 _TRUSTED_REPO_OWNERS = (
     "facebookresearch",
@@ -145,13 +146,13 @@ def _safe_extract_zip(zip_file, extract_to):
         filename = os.path.normpath(member.filename)
 
         # Check for directory traversal attempts
-        if filename.startswith(("/","\\")):
+        if filename.startswith(("/", "\\")):
             raise ValueError(f"Archive entry has absolute path: {member.filename}")
 
         if len(filename) >= 2 and filename[1] == ":" and filename[0].isalpha():
             raise ValueError(f"Archive entry has absolute path: {member.filename}")
 
-        if ".." in re.split("[/\\\\]", filename):
+        if ".." in re.split(_PATH_SEP_PATTERN, filename):
             raise ValueError(
                 f"Archive entry contains directory traversal: {member.filename}"
             )
@@ -160,7 +161,9 @@ def _safe_extract_zip(zip_file, extract_to):
         out = (extract_to / filename).resolve(strict=False)
 
         if not out.is_relative_to(extract_to):
-            raise ValueError(f"Archive entry escapes target directory: {member.filename!r}")
+            raise ValueError(
+                f"Archive entry escapes target directory: {member.filename}"
+            )
 
         # Extract the member safely
         zip_file.extract(member, extract_to)
