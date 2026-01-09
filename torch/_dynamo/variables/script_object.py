@@ -25,6 +25,7 @@ from typing import Any, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
+import torch.utils._pytree as pytree
 from torch._guards import Source
 from torch._library.opaque_object import (
     get_member_type,
@@ -38,7 +39,7 @@ from torch.fx.proxy import Proxy
 from .. import graph_break_hints
 from ..eval_frame import skip_code
 from ..exc import unimplemented, UnsafeScriptObjectError, Unsupported
-from ..source import AttrSource, CallMethodSource
+from ..source import AttrSource
 from .base import VariableTracker
 from .constant import ConstantVariable
 from .dicts import ConstDictVariable
@@ -154,10 +155,11 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
     def as_proxy(self) -> Proxy:
         return self.proxy
 
-    def _is_opaque_reference_type(self) -> bool:
-        return hasattr(self.value, "script_class_name") and is_opaque_reference_type(
-            self.value.script_class_name
-        )
+    def _is_opaque_type(self) -> bool:
+        return (
+            hasattr(self.value, "script_class_name")
+            and is_opaque_reference_type(self.value.script_class_name)
+        ) or is_opaque_value_type(type(self.value))
 
     @_raise_hard_error_if_graph_break(
         "Dynamo cannot safely trace script object due to graph break."
@@ -167,19 +169,21 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
         from .higher_order_ops import TorchHigherOrderOperatorVariable
 
-        if is_opaque_value_type(type(self.value)):
-            res = super().var_getattr(tx, name)
-            return res
+        if self._is_opaque_type():
+            real_obj = (
+                self.value
+                if is_opaque_value_type(type(self.value))
+                else self.value.real_obj
+            )
 
-        if self._is_opaque_reference_type():
             member_type = get_member_type(
-                self.value.script_class_name,  # pyrefly: ignore[missing-attribute]
+                type(real_obj),
                 name,
             )
             if member_type is None:
                 unimplemented(
                     gb_type="Attempted to access unregistered member on an OpaqueObject",
-                    context=f"value={self.value}, attr={name}",
+                    context=f"value={real_obj}, attr={name}",
                     explanation=f"Member '{name}' is not registered for this opaque object type.",
                     hints=[
                         f"Register '{name}' with a MemberType in register_opaque_type(members=...).",
@@ -187,16 +191,14 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 )
 
             if member_type == MemberType.USE_REAL:
-                value = getattr(
-                    self.value.real_obj,  # pyrefly: ignore[missing-attribute]
-                    name,
-                )
+                value = getattr(real_obj, name)
                 if inspect.ismethod(value):
                     return LambdaVariable(
                         lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)
                     )
                 else:
                     return super().var_getattr(tx, name)
+
             elif member_type == MemberType.INLINED:
                 return super().var_getattr(tx, name)
 
@@ -221,6 +223,7 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                     "Use method calls instead of attribute access.",
                 ],
             )
+
         assert self.source is not None
         return TorchHigherOrderOperatorVariable.make(
             call_torchbind,
@@ -243,12 +246,31 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         args: Iterable[Any],
         kwargs: dict[str, Any],
     ) -> VariableTracker:
-        from .builder import SourcelessBuilder, VariableBuilder
+        if self._is_opaque_type():
+            real_obj = (
+                self.value
+                if is_opaque_value_type(type(self.value))
+                else self.value.real_obj
+            )
+            value_type = type(real_obj)
 
-        value_type = type(self.value)
+            member_type = get_member_type(
+                value_type,
+                name,
+            )
+            if member_type is None:
+                unimplemented(
+                    gb_type="Attempted to access unregistered member on an OpaqueObject",
+                    context=f"value={real_obj}, attr={name}",
+                    explanation=f"Member '{name}' is not registered for this opaque object type.",
+                    hints=[
+                        f"Register '{name}' with a MemberType in register_opaque_type(members=...).",
+                    ],
+                )
 
-        def call_method_and_return_constant(real_obj):
-            # Call the method and return result as constant
+            assert member_type == MemberType.USE_REAL, (
+                f"Member `{name}` of opaque object `{real_obj}` was specified to be member type `{member_type}`"
+            )
 
             if inspect.getattr_static(value_type, "__getattr__", None) is not None:
                 unimplemented(
@@ -269,41 +291,26 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
             constant_val = method(*args_const, **kwargs_const)
 
-            # If the result is a reference-type opaque obj then it will be
-            # lifted as an input. It should have a CallMethodSource so that we
-            # can properly reconstruct this.
-            # However, we can only create CallMethodSource if all arguments are
-            # reconstructable (i.e., not opaque objects themselves).
-            from torch._library.opaque_object import is_opaque_type
-
-            has_opaque_args = any(
-                is_opaque_type(type(arg)) for arg in args_const
-            ) or any(is_opaque_type(type(v)) for v in kwargs_const.values())
-
-            if self.source and not has_opaque_args:
-                # convert to tuple to make it hashable
-                kwargs_tuple = tuple(sorted(kwargs_const.items()))
-                call_source = CallMethodSource(
-                    self.source,
-                    name,
-                    tuple(args_const),
-                    kwargs_tuple,  # pyrefly: ignore[bad-argument-type]
+            if any(
+                is_opaque_reference_type(type(r))
+                for r in pytree.tree_flatten(constant_val)[0]
+            ):
+                unimplemented(
+                    gb_type="Opaque object member with method-type USE_REAL returned a reference-type opaque objects.",
+                    context=f"Opaque object type: {value_type}. Method name: '{name}'",
+                    explanation=(
+                        "To properly guard reference-type opaque objects, "
+                        "we must lift them as inputs to the graph. In order "
+                        "to do this, they must all have a source, meaning they "
+                        "come from a global value or are an attribute of an input."
+                    ),
+                    hints=[
+                        f"Register member '{name}' with MemberType.INLINED in "
+                        "register_opaque_type({value_type}, members=...).",
+                    ],
                 )
-                return VariableBuilder(tx, call_source)(constant_val)
-            else:
-                return SourcelessBuilder.create(tx, constant_val)
 
-        if is_opaque_value_type(value_type):
-            return call_method_and_return_constant(self.value)
-
-        if self._is_opaque_reference_type():
-            member_type = get_member_type(
-                self.value.script_class_name,  # pyrefly: ignore[missing-attribute]
-                name,
-            )
-
-            if member_type == MemberType.USE_REAL:
-                return call_method_and_return_constant(self.value)
+            return VariableTracker.build(tx, constant_val)
 
         unimplemented(
             gb_type="Weird method call on TorchScript object",

@@ -165,22 +165,21 @@ def maybe_to_fake_obj(
         FakeOpaqueObject,
         get_opaque_obj_info,
         get_opaque_type_name,
-        is_opaque_reference_type,
         is_opaque_type,
         OpaqueTypeStr,
     )
+    from torch._subclasses.fake_tensor import unset_fake_temporarily
 
     x_type = type(x)
     if is_opaque_type(x_type):
         type_name = OpaqueTypeStr if x is None else get_opaque_type_name(x_type)
         fake_x_wrapped = FakeScriptObject(FakeOpaqueObject(), type_name, x)
 
-        # Reference types with pure methods should also keep the real object
-        # so that those methods can be called during tracing
-        if is_opaque_reference_type(x_type):
-            opaque_info = get_opaque_obj_info(x_type)
-            assert opaque_info is not None
-            for attr_name in opaque_info.members:
+        # Set specified members onto the fake object
+        opaque_info = get_opaque_obj_info(x_type)
+        assert opaque_info is not None
+        for attr_name in opaque_info.members:
+            with unset_fake_temporarily():
                 if not hasattr(x, attr_name):
                     raise TypeError(
                         f"Opaque object of type '{type_name}' was specified to have member "

@@ -77,7 +77,7 @@ class RNGState:
     def __init__(self, seed):
         self.seed = seed
         self.rng = random.Random(self.seed)
-        self.dummy = lambda x: x
+        self.dummy = lambda x: x  # test something not pickleable
 
     def get_seed(self):
         return self.seed
@@ -198,7 +198,7 @@ register_opaque_type(
     members={
         "c": MemberType.USE_REAL,
         "get_c": MemberType.USE_REAL,
-        "get_starts": MemberType.USE_REAL,
+        "get_starts": MemberType.INLINED,
     },
 )
 register_opaque_type(
@@ -206,13 +206,17 @@ register_opaque_type(
     typ="reference",
     members={
         "q": MemberType.USE_REAL,
-        "get_q": MemberType.USE_REAL,
+        "get_q": MemberType.INLINED,
         "pop_q": MemberType.INLINED,
     },
 )
 register_opaque_type(AddModule, typ="reference")
 register_opaque_type(ValueConfig, typ="value")
-register_opaque_type(SizeStore, typ="value")
+register_opaque_type(
+    SizeStore,
+    typ="value",
+    members={"size": MemberType.USE_REAL, "increment_size": MemberType.USE_REAL},
+)
 register_opaque_type(NestedValueSize, typ="value")
 
 
@@ -672,8 +676,7 @@ def forward(self, arg0_1, arg1_1):
     def test_nested_reference_recompile(self):
         def foo(nested_counter, x):
             c1 = nested_counter.c
-            c2 = nested_counter.get_c()
-            return c1.start + c2.start + x
+            return c1.start + x
 
         cnt = CompileCounter()
         x = torch.ones(2, 3)
@@ -722,9 +725,9 @@ def forward(self, L_x_ : torch.Tensor, object_getattribute_L_nested_counter_c_0_
 
     def test_nested_reference_trace(self):
         def foo(nested_queue, x):
-            q1 = nested_queue.get_q()
+            q1 = nested_queue.q
             torch.ops._TestOpaqueObject.queue_push(q1, x.tan())
-            q2 = nested_queue.q
+            q2 = nested_queue.get_q()
             torch.ops._TestOpaqueObject.queue_push(q2, x.cos())
             pop1 = nested_queue.pop_q()
             pop2 = nested_queue.pop_q()
@@ -742,21 +745,19 @@ def forward(self, L_x_ : torch.Tensor, object_getattribute_L_nested_counter_c_0_
         self.assertExpectedInline(
             backend.graphs[0].code.strip(),
             f"""\
-def forward(self, L_nested_queue_get_q_ : {fx_class}, L_x_ : torch.Tensor):
-    l_nested_queue_get_q_ = L_nested_queue_get_q_
+def forward(self, L_x_ : torch.Tensor, object_getattribute_L_nested_queue_q_ : {fx_class}):
     l_x_ = L_x_
+    object_getattribute_l_nested_queue_q_ = object_getattribute_L_nested_queue_q_
     tan = l_x_.tan()
-    queue_push = torch.ops._TestOpaqueObject.queue_push(l_nested_queue_get_q_, tan);  tan = queue_push = None
+    queue_push = torch.ops._TestOpaqueObject.queue_push(object_getattribute_l_nested_queue_q_, tan);  tan = queue_push = None
     cos = l_x_.cos();  l_x_ = None
-    queue_push_1 = torch.ops._TestOpaqueObject.queue_push(l_nested_queue_get_q_, cos);  cos = queue_push_1 = None
-    pop1 = torch.ops._TestOpaqueObject.queue_pop(l_nested_queue_get_q_)
+    queue_push_1 = torch.ops._TestOpaqueObject.queue_push(object_getattribute_l_nested_queue_q_, cos);  cos = queue_push_1 = None
+    pop1 = torch.ops._TestOpaqueObject.queue_pop(object_getattribute_l_nested_queue_q_)
     sym_size_int = torch.ops.aten.sym_size.int(pop1, 0)
-    _check_is_size = torch._check_is_size(sym_size_int);  _check_is_size = None
     ge = sym_size_int >= 0
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
-    pop2 = torch.ops._TestOpaqueObject.queue_pop(l_nested_queue_get_q_);  l_nested_queue_get_q_ = None
+    pop2 = torch.ops._TestOpaqueObject.queue_pop(object_getattribute_l_nested_queue_q_);  object_getattribute_l_nested_queue_q_ = None
     sym_size_int_1 = torch.ops.aten.sym_size.int(pop2, 0)
-    _check_is_size_1 = torch._check_is_size(sym_size_int_1);  _check_is_size_1 = None
     ge_1 = sym_size_int_1 >= 0
     _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_default_1 = None
     eq = sym_size_int == sym_size_int_1;  sym_size_int = sym_size_int_1 = None
@@ -770,24 +771,24 @@ def forward(self, L_nested_queue_get_q_ : {fx_class}, L_x_ : torch.Tensor):
             backend.fw_graphs[0].code.strip(),
             """\
 def forward(self, arg0_1, arg1_1, arg2_1):
-    tan = torch.ops.aten.tan.default(arg2_1)
-    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops._TestOpaqueObject.queue_push.default, arg1_1, tan);  arg0_1 = tan = None
+    tan = torch.ops.aten.tan.default(arg1_1)
+    with_effects = torch.ops.higher_order.with_effects(arg0_1, torch.ops._TestOpaqueObject.queue_push.default, arg2_1, tan);  arg0_1 = tan = None
     getitem = with_effects[0];  with_effects = None
-    cos = torch.ops.aten.cos.default(arg2_1);  arg2_1 = None
-    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._TestOpaqueObject.queue_push.default, arg1_1, cos);  getitem = cos = None
+    cos = torch.ops.aten.cos.default(arg1_1);  arg1_1 = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops._TestOpaqueObject.queue_push.default, arg2_1, cos);  getitem = cos = None
     getitem_2 = with_effects_1[0];  with_effects_1 = None
-    with_effects_2 = torch.ops.higher_order.with_effects(getitem_2, torch.ops._TestOpaqueObject.queue_pop.default, arg1_1);  getitem_2 = None
+    with_effects_2 = torch.ops.higher_order.with_effects(getitem_2, torch.ops._TestOpaqueObject.queue_pop.default, arg2_1);  getitem_2 = None
     getitem_4 = with_effects_2[0]
     getitem_5 = with_effects_2[1];  with_effects_2 = None
     sym_size_int = torch.ops.aten.sym_size.int(getitem_5, 0)
-    ge_1 = sym_size_int >= 0
-    _assert_scalar = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge_1 = _assert_scalar = None
-    with_effects_3 = torch.ops.higher_order.with_effects(getitem_4, torch.ops._TestOpaqueObject.queue_pop.default, arg1_1);  getitem_4 = arg1_1 = None
+    ge = sym_size_int >= 0
+    _assert_scalar = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar = None
+    with_effects_3 = torch.ops.higher_order.with_effects(getitem_4, torch.ops._TestOpaqueObject.queue_pop.default, arg2_1);  getitem_4 = arg2_1 = None
     getitem_6 = with_effects_3[0]
     getitem_7 = with_effects_3[1];  with_effects_3 = None
     sym_size_int_1 = torch.ops.aten.sym_size.int(getitem_7, 0)
-    ge_3 = sym_size_int_1 >= 0
-    _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_3, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_3 = _assert_scalar_1 = None
+    ge_1 = sym_size_int_1 >= 0
+    _assert_scalar_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_1 = None
     eq_2 = sym_size_int == sym_size_int_1;  sym_size_int = sym_size_int_1 = None
     _assert_scalar_2 = torch.ops.aten._assert_scalar.default(eq_2, "Runtime assertion failed for expression Eq(u0, u1) on node 'eq'");  eq_2 = _assert_scalar_2 = None
     add_4 = torch.ops.aten.add.Tensor(getitem_5, getitem_7);  getitem_5 = getitem_7 = None
@@ -874,6 +875,15 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             RuntimeError, "Attempted to access unregistered member on an OpaqueObject"
         ):
             torch.compile(bar)(counter, torch.ones(2, 3))
+
+        def foo(counter, x):
+            return counter.get_c()
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Opaque object member with method-type USE_REAL returned a reference-type opaque objects.",
+        ):
+            torch.compile(foo)(NestedCounters(Counter(1, 5)), torch.ones(2, 3))
 
     def test_export_joint(self):
         torch.library.define(
@@ -1000,11 +1010,6 @@ def forward(self, primals, tangents):
 
             def __fx_repr__(self):
                 return f"SpecifyMember({self.x})"
-
-        with self.assertRaisesRegex(TypeError, "No need to specify `members`"):
-            register_opaque_type(
-                SpecifyMember, typ="value", members={"x": MemberType.USE_REAL}
-            )
 
         with self.assertRaisesRegex(TypeError, "No need to specify `guard_fn`"):
             register_opaque_type(SpecifyMember, typ="value", guard_fn=lambda obj: [])
