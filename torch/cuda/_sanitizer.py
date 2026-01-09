@@ -26,9 +26,9 @@ from typing import Any, TypeVar
 
 import torch
 import torch.cuda._gpu_trace as gpu_trace
+from torch.ops import aten
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
-from torch.ops import aten
 
 
 DEFAULT_STREAM_ID = 0
