@@ -245,6 +245,25 @@ def set_per_process_memory_fraction(fraction: float, device: Device = None) -> N
     torch._C._xpu_setMemoryFraction(fraction, device)
 
 
+def memory_snapshot(
+    mempool_id: tuple[int, int] | None = None,
+) -> list[dict[str, Any]]:
+    r"""
+    Return a snapshot of the XPU memory allocator state across all devices.
+    Provides detailed information for each memory segment managed by the allocator
+    including its size, owning pool, associated stream, call stack traces, and other relevant attributes.
+
+    Arguments:
+        mempool_id (tuple[int, int] or None, optional): The memory pool id. If None, the default memory pool is used.
+
+    Returns:
+        list[dict[str, Any]]: List of memory segments and their attributes.
+    """
+    if not is_initialized():
+        return []
+    return torch._C._xpu_memorySnapshot(mempool_id)["segments"]
+
+
 class _XPUAllocator:
     r"""Wrapper over internal XPU memory allocators."""
 
@@ -333,6 +352,7 @@ __all__ = [
     "mem_get_info",
     "memory_allocated",
     "memory_reserved",
+    "memory_snapshot",
     "memory_stats",
     "memory_stats_as_nested_dict",
     "reset_accumulated_memory_stats",

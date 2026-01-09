@@ -713,16 +713,6 @@ PyObject* THCPModule_resetPeakHostMemoryStats(
   Py_RETURN_NONE;
 }
 
-CapturedTraceback* getFromContext(
-    const std::shared_ptr<c10::GatheredContext>& x) {
-  if (CapturedTraceback* sc = dynamic_cast<CapturedTraceback*>(x.get())) {
-    return sc;
-  }
-  TORCH_CHECK(
-      false,
-      "attempting to gather stack context from the wrong StackContext type.");
-}
-
 PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   c10::cuda::MempoolId_t mempool_id = {0, 0};
@@ -761,7 +751,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   py::str active_pending_free_s = "active_pending_free";
   py::str inactive_s = "inactive";
   py::str addr_s = "addr";
-  py::str cpp_frames_s = "cpp_frames";
   py::str blocks_s = "blocks";
   py::str is_expandable_s = "is_expandable";
   py::str frames_s = "frames";
@@ -776,7 +765,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   auto add_frame_key = [&](const py::dict& d,
                            const std::shared_ptr<c10::GatheredContext>& ctx) {
     if (ctx) {
-      auto sc = getFromContext(ctx);
+      auto sc = getCapturedTracebackFromContext(ctx);
       to_gather_frames.emplace_back(sc);
       to_gather_dest.emplace_back(d);
     } else {
@@ -874,7 +863,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
       py::dict trace_entry;
       if (te.context_) {
         // without further compression frames can get really large on dump
-        auto sc = getFromContext(te.context_);
+        auto sc = getCapturedTracebackFromContext(te.context_);
         to_gather_frames.emplace_back(sc);
         to_gather_dest.emplace_back(trace_entry);
       }

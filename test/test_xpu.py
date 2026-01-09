@@ -1,5 +1,6 @@
 # Owner(s): ["module: intel"]
 
+import collections
 import ctypes
 import gc
 import re
@@ -616,6 +617,126 @@ if __name__ == "__main__":
                     torch.xpu.can_device_access_peer(device, peer),
                     torch.xpu.can_device_access_peer(peer, device),
                 )
+
+    @serialTest()
+    def test_memory_snapshot(self):
+        def _test_memory_stats_generator(N=35):
+            m0 = torch.xpu.memory_allocated()
+
+            def alloc(*size):
+                return torch.empty(*size, device="xpu")
+
+            yield
+
+            tensors1 = [alloc(1), alloc(10, 20), alloc(200, 300, 2000)]
+            m1 = torch.xpu.memory_allocated()
+            yield
+
+            tensors2 = []
+
+            for i in range(1, int(N / 2) + 1):
+                # small ones
+                tensors2.append(alloc(i, i * 4))
+                yield
+
+            for i in range(5, int(N / 2) + 5):
+                # large ones
+                tensors2.append(alloc(i, i * 7, i * 9, i * 11))
+                yield
+
+            tensors2.append(alloc(0, 0, 0))
+            yield
+
+            permute = []
+            for i in torch.randperm(len(tensors2)):
+                permute.append(tensors2[i])
+                yield
+
+            del tensors2
+            yield
+            tensors2 = permute
+            yield
+            del permute
+            yield
+
+            for i in range(int(N / 2)):
+                del tensors2[i]
+                yield
+
+            for i in range(2, int(2 * N / 3) + 2):
+                tensors2.append(alloc(i, i * 3, i * 8))
+                yield
+
+            del tensors2
+            self.assertEqual(torch.xpu.memory_allocated(), m1)
+            yield True
+
+            del tensors1
+            self.assertEqual(torch.xpu.memory_allocated(), m0)
+
+        def _check_memory_stat_consistency():
+            snapshot = torch.xpu.memory_snapshot()
+
+            expected_each_device = collections.defaultdict(
+                lambda: collections.defaultdict(int)
+            )
+
+            for segment in snapshot:
+                expandable = segment["is_expandable"]
+                expected = expected_each_device[segment["device"]]
+                pool_str = segment["segment_type"] + "_pool"
+
+                if not expandable:
+                    expected["segment.all.current"] += 1
+                    expected[f"segment.{pool_str}.current"] += 1
+
+                expected["allocated_bytes.all.current"] += segment["allocated_size"]
+                expected[f"allocated_bytes.{pool_str}.current"] += segment[
+                    "allocated_size"
+                ]
+
+                expected["reserved_bytes.all.current"] += segment["total_size"]
+                expected[f"reserved_bytes.{pool_str}.current"] += segment["total_size"]
+
+                expected["active_bytes.all.current"] += segment["active_size"]
+                expected[f"active_bytes.{pool_str}.current"] += segment["active_size"]
+
+                expected["requested_bytes.all.current"] += segment["requested_size"]
+                expected[f"requested_bytes.{pool_str}.current"] += segment[
+                    "requested_size"
+                ]
+
+                sum_requested = 0
+                is_split = len(segment["blocks"]) > 1
+                for block in segment["blocks"]:
+                    if block["state"] == "active_allocated":
+                        expected["allocation.all.current"] += 1
+                        expected[f"allocation.{pool_str}.current"] += 1
+
+                    if block["state"].startswith("active_"):
+                        sum_requested += block["requested_size"]
+                        expected["active.all.current"] += 1
+                        expected[f"active.{pool_str}.current"] += 1
+
+                    if block["state"] == "inactive" and is_split and not expandable:
+                        expected["inactive_split.all.current"] += 1
+                        expected[f"inactive_split.{pool_str}.current"] += 1
+                        expected["inactive_split_bytes.all.current"] += block["size"]
+                        expected[f"inactive_split_bytes.{pool_str}.current"] += block[
+                            "size"
+                        ]
+
+                self.assertEqual(sum_requested, segment["requested_size"])
+
+            for device, expected in expected_each_device.items():
+                stats = torch.xpu.memory_stats(device)
+                for k, v in expected.items():
+                    self.assertEqual(v, stats[k])
+
+        gc.collect()
+        torch.xpu.empty_cache()
+        for _ in _test_memory_stats_generator():
+            _check_memory_stat_consistency()
 
     def get_dummy_allocator(self, check_vars):
         dummy_allocator_source_vars = """
