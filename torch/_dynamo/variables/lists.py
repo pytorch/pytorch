@@ -19,7 +19,7 @@ import inspect
 import operator
 import sys
 from collections.abc import Sequence
-from typing import Any, Optional, TYPE_CHECKING
+from typing import Any, Literal, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
@@ -619,16 +619,16 @@ class RangeVariable(BaseListVariable):
             return self.items[fields.index(name)]
         return super().var_getattr(tx, name)
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> Literal[True]:
         return True
 
-    def get_python_hash(self):
+    def get_python_hash(self) -> int:
         l = self.range_length()
         start = self.start()
         step = self.step()
         return hash((l, start, step))
 
-    def is_python_equal(self, other):
+    def is_python_equal(self, other: object) -> bool:
         if not isinstance(other, variables.RangeVariable):
             return False
 
@@ -1003,7 +1003,7 @@ class ListVariable(CommonListMethodsVariable):
             return super().call_obj_hasattr(tx, name)
         return variables.ConstantVariable.create(hasattr([], name))
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> bool:
         return False
 
 
@@ -1195,14 +1195,14 @@ class TupleVariable(BaseListVariable):
             return super().call_obj_hasattr(tx, name)
         return variables.ConstantVariable.create(hasattr((), name))
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> bool:
         return all(item.is_python_hashable() for item in self.items)
 
-    def get_python_hash(self):
+    def get_python_hash(self) -> int:
         items = tuple(x.get_python_hash() for x in self.items)
         return hash(items)
 
-    def is_python_equal(self, other):
+    def is_python_equal(self, other: object) -> bool:
         return isinstance(other, variables.TupleVariable) and all(
             a.is_python_equal(b) for (a, b) in zip(self.items, other.items)
         )
