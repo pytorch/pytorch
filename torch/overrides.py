@@ -193,6 +193,7 @@ def get_ignored_functions() -> set[Callable]:
         torch.cudnn_convolution_add_relu,
         torch.cudnn_grid_sampler,
         torch.cudnn_is_acceptable,
+        torch.miopen_ctc_loss,
         torch.empty,
         torch.empty_permuted,
         torch.empty_strided,
@@ -1881,9 +1882,8 @@ def _get_overridable_functions() -> tuple[
                         "{}.{} is in the tuple returned by torch._overrides.get_ignored_functions "
                         "but still has an explicit override"
                     )
-                    assert func.__get__ not in get_testing_overrides(), msg.format(
-                        namespace, func.__name__
-                    )
+                    if func.__get__ in get_testing_overrides():
+                        raise AssertionError(msg.format(namespace, func.__name__))
                     continue
                 else:
                     overridable_funcs[func].append(func.__get__)
@@ -1903,9 +1903,8 @@ def _get_overridable_functions() -> tuple[
                     "{}.{} is in the tuple returned by torch._overrides.get_ignored_functions "
                     "but still has an explicit override"
                 )
-                assert func not in get_testing_overrides(), msg.format(
-                    namespace, func.__name__
-                )
+                if func in get_testing_overrides():
+                    raise AssertionError(msg.format(namespace, func.__name__))
                 continue
             overridable_funcs[namespace].append(func)
     return overridable_funcs, index
@@ -2062,15 +2061,6 @@ class TorchFunctionMode:
 
     def __exit__(self, exc_type, exc_val, exc_tb):
         _pop_mode()
-
-    @classmethod
-    def is_infra_mode(cls) -> bool:
-        """
-        Returns True if this mode is an infrastructure mode that should not
-        be tracked by Dynamo. Infrastructure modes are internal implementation
-        details (e.g., for tracing) that shouldn't have guards created on them.
-        """
-        return False
 
     @classmethod
     def push(cls, *args, **kwargs):

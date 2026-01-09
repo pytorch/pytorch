@@ -160,7 +160,7 @@ class TorchFunctionModeVariable(GenericContextWrappingVariable):
         value: Optional[TorchFunctionMode],
         source: Optional[Source] = None,
         **kwargs: Any,
-    ):
+    ) -> None:
         if value is not None:
             super().__init__(value, **kwargs)
         self.value = value
@@ -255,9 +255,7 @@ class TorchFunctionModeStackStateManager:
     @contextlib.contextmanager
     def temp_restore_stack(self) -> Generator[None, None, None]:
         prev = torch.overrides._get_current_function_mode_stack()
-        # Filter out infra modes when restoring - they shouldn't be active during Dynamo tracing
-        non_infra_stack = [m for m in self.stack if not type(m).is_infra_mode()]
-        set_torch_function_mode_stack(non_infra_stack)
+        set_torch_function_mode_stack(self.stack)
         try:
             yield
         finally:
@@ -301,14 +299,9 @@ class SymbolicTorchFunctionState:
         )
 
         for i, val in enumerate(py_stack):
-            # Skip infra modes (like TorchFunctionMetadataMode) to avoid
-            # creating guards on their internal state during FX tracing
-            if not type(val).is_infra_mode():
-                self.mode_stack.append(
-                    LazyVariableTracker.create(  # type: ignore[arg-type]
-                        val, source=TorchFunctionModeStackSource(i)
-                    )
-                )
+            self.mode_stack.append(
+                LazyVariableTracker.create(val, source=TorchFunctionModeStackSource(i))  # type: ignore[arg-type]
+            )
 
     def in_torch_function_mode(self) -> bool:
         return len(self.mode_stack) > 0
@@ -586,7 +579,7 @@ class TensorWithTFOverrideVariable(TensorVariable):
         tx: "InstructionTranslator",
         tensor_var: VariableTracker,
         class_type: type,
-        cls_source: Source,
+        cls_source: Source | None,
     ) -> "TensorWithTFOverrideVariable":
         # [Note: __torch_function__] coerce `tensor_var` into a
         # TensorWithTFOverrideVariable. In eager, this is just a type change.
@@ -595,7 +588,9 @@ class TensorWithTFOverrideVariable(TensorVariable):
         # This simulates shallow-copying the tensor object.
         kwargs = dict(tensor_var.__dict__)
         input_tensor_type = kwargs.pop("class_type")
-        assert input_tensor_type in (torch.Tensor, torch.nn.Parameter), (
+        assert input_tensor_type in (torch.Tensor, torch.nn.Parameter) or issubclass(
+            input_tensor_type, torch.Tensor
+        ), (
             f"invalid class type {input_tensor_type} in TensorWithTFOverrideVariable.from_tensor_var"
         )
         var = cls(class_type=class_type, **kwargs)

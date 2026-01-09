@@ -170,7 +170,8 @@ class MultivariateNormal(Distribution):
             # pyrefly: ignore [read-only]
             self.covariance_matrix = covariance_matrix.expand(batch_shape + (-1, -1))
         else:
-            assert precision_matrix is not None  # helps mypy
+            if precision_matrix is None:
+                raise AssertionError("precision_matrix is unexpectedly None")
             if precision_matrix.dim() < 2:
                 raise ValueError(
                     "precision_matrix must be at least two-dimensional, "

@@ -20,6 +20,7 @@
 #include <torch/csrc/StorageSharing.h>
 
 #ifdef USE_CUDA
+#include <ATen/cuda/CUDAEvent.h>
 #include <c10/cuda/CUDAGuard.h>
 #include <cuda.h>
 #include <cuda_runtime.h>
@@ -463,10 +464,8 @@ static PyObject* THPStorage_newSharedCuda(PyObject* _unused, PyObject* args) {
     }
     auto ipc_event_handle = reinterpret_cast<const cudaIpcEventHandle_t*>(
         s_ipc_event_handle.c_str());
-    cudaEvent_t event = nullptr;
-    C10_CUDA_CHECK(cudaIpcOpenEventHandle(&event, *ipc_event_handle));
-    C10_CUDA_CHECK(
-        cudaStreamWaitEvent(c10::cuda::getCurrentCUDAStream(device), event, 0));
+    at::cuda::CUDAEvent event(device, ipc_event_handle);
+    event.block(c10::cuda::getCurrentCUDAStream(device));
   }
 
   std::string s_handle = THPStorage_bytesAsHandleString(_handle);

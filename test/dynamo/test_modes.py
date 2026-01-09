@@ -800,43 +800,6 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
                     )
 
 
-class InfraModeCompileTests(torch._dynamo.test_case.TestCase):
-    def test_infra_mode_not_traced_by_dynamo(self):
-        """Test that infra modes are not traced into by Dynamo.
-
-        A mode marked as is_infra_mode=True should be completely invisible to
-        Dynamo tracing. We verify this by putting a graph_break() in the mode's
-        __torch_function__ and compiling with fullgraph=True. If Dynamo traced
-        into the mode, it would hit the graph break and fail. If the test passes,
-        it proves Dynamo skipped the infra mode entirely.
-        """
-        torch._dynamo.reset()
-
-        class InfraModeWithGraphBreak(TorchFunctionMode):
-            @classmethod
-            def is_infra_mode(cls) -> bool:
-                return True
-
-            def __torch_function__(self, func, types, args=(), kwargs=None):
-                # This would cause compilation to fail if Dynamo traced into it
-                torch._dynamo.graph_break()
-                return func(*args, **(kwargs or {}))
-
-        def fn(x):
-            return x * 2.0
-
-        # fullgraph=True means any graph break would raise an error
-        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
-
-        x = torch.randn(3, 3)
-
-        with InfraModeWithGraphBreak():
-            # This should succeed because Dynamo doesn't trace the infra mode
-            result = compiled_fn(x)
-
-        self.assertEqual(result, x * 2.0)
-
-
 class InvokeSubgraphBackendTests(torch._dynamo.test_case.TestCase):
     def test_make_fx_over_compiled_function(self):
         """Test that make_fx can trace over torch.compile'd functions using invoke_subgraph backend.
@@ -847,12 +810,8 @@ class InvokeSubgraphBackendTests(torch._dynamo.test_case.TestCase):
         import torch._dynamo.backends.debugging as dbg
         from torch.fx.experimental.proxy_tensor import make_fx
 
-        # Save original config value
-        orig_force_compile = torch._dynamo.config.force_compile_during_fx_trace
-
-        try:
-            # force_compile_during_fx_trace implicitly overrides error_on_nested_fx_trace
-            torch._dynamo.config.force_compile_during_fx_trace = True
+        # force_compile_during_fx_trace implicitly overrides error_on_nested_fx_trace
+        with torch._dynamo.config.patch(force_compile_during_fx_trace=True):
             torch._dynamo.reset()  # Clear any cached graphs
             dbg._invoke_subgraph_counter = 0  # Reset for test stability
 
@@ -891,9 +850,6 @@ class outer_fn(torch.nn.Module):
             return (add,)
 """,  # noqa: B950
             )
-        finally:
-            # Restore original config value
-            torch._dynamo.config.force_compile_during_fx_trace = orig_force_compile
 
     def test_same_compiled_fn_called_twice_shares_subgraph(self):
         """Test that calling the same compiled function twice uses the same subgraph.
@@ -905,11 +861,8 @@ class outer_fn(torch.nn.Module):
         from torch._guards import tracing, TracingContext
         from torch.fx.experimental.proxy_tensor import make_fx
 
-        orig_force_compile = torch._dynamo.config.force_compile_during_fx_trace
-
-        try:
-            # force_compile_during_fx_trace implicitly overrides error_on_nested_fx_trace
-            torch._dynamo.config.force_compile_during_fx_trace = True
+        # force_compile_during_fx_trace implicitly overrides error_on_nested_fx_trace
+        with torch._dynamo.config.patch(force_compile_during_fx_trace=True):
             torch._dynamo.reset()
             dbg._invoke_subgraph_counter = 0  # Reset for test stability
 
@@ -952,8 +905,6 @@ class outer_fn(torch.nn.Module):
             return (mul,)
 """,  # noqa: B950
             )
-        finally:
-            torch._dynamo.config.force_compile_during_fx_trace = orig_force_compile
 
     def test_guard_failure_creates_separate_subgraphs(self):
         """Test that guard failures create separate subgraphs.
@@ -965,11 +916,8 @@ class outer_fn(torch.nn.Module):
         import torch._dynamo.backends.debugging as dbg
         from torch.fx.experimental.proxy_tensor import make_fx
 
-        orig_force_compile = torch._dynamo.config.force_compile_during_fx_trace
-
-        try:
-            # force_compile_during_fx_trace implicitly overrides error_on_nested_fx_trace
-            torch._dynamo.config.force_compile_during_fx_trace = True
+        # force_compile_during_fx_trace implicitly overrides error_on_nested_fx_trace
+        with torch._dynamo.config.patch(force_compile_during_fx_trace=True):
             torch._dynamo.reset()
             dbg._invoke_subgraph_counter = 0  # Reset for test stability
 
@@ -1016,8 +964,6 @@ class outer_fn(torch.nn.Module):
             return (mul,)
 """,  # noqa: B950
             )
-        finally:
-            torch._dynamo.config.force_compile_during_fx_trace = orig_force_compile
 
 
 class TorchFunctionModeLifecycleTests(torch._dynamo.test_case.TestCase):
