@@ -28,6 +28,7 @@ from torch._library.effects import EffectType
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
     _OPAQUE_TYPES,
+    _OPAQUE_TYPES_BY_NAME,
     get_opaque_type_name,
     is_opaque_type,
     is_opaque_value_type,
@@ -319,6 +320,7 @@ class TensorWithCounter(torch.Tensor):
 class TestOpaqueObject(TestCase):
     def setUp(self):
         self.lib = torch.library.Library("_TestOpaqueObject", "FRAGMENT")  # noqa: TOR901
+        self._opaque_types_before_test = set(_OPAQUE_TYPES_BY_NAME.keys())
 
         torch.library.define(
             "_TestOpaqueObject::queue_push",
@@ -579,6 +581,14 @@ class TestOpaqueObject(TestCase):
 
     def tearDown(self):
         self.lib._destroy()
+
+        # Clean up any opaque types registered during the test
+        types_to_remove = (
+            set(_OPAQUE_TYPES_BY_NAME.keys()) - self._opaque_types_before_test
+        )
+        for name in types_to_remove:
+            torch._C._unregister_opaque_type(name)
+            _OPAQUE_TYPES_BY_NAME.pop(name, None)
 
         super().tearDown()
 
