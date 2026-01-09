@@ -315,13 +315,11 @@ inductor_expected_failures_single_sample["xpu"] = {
     "fft.irfft2": {f16},
     "fft.irfftn": {f16},
     # [Begin] Incorrect XPU reference due to new driver.
-    "masked.prod": {b8, i64},
+    "masked.prod": {b8},
     "masked.amin": {i64},
     "masked.amax": {i64},
     "amax": {i64},
     "amin": {i64},
-    "std": {f64},
-    "var": {f64},
     "std_mean": {f64},
     "var_mean": {f64},
     # [End]

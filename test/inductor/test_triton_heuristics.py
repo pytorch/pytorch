@@ -129,11 +129,9 @@ class TestTritonHeuristics(TestCase):
         ]
         self.assertEqual(forward(*args), foo_c(*args))
 
-    # @skipIfXpu
     def test_artificial_zgrid(self):
         self._test_artificial_zgrid()
 
-    # @skipIfXpu
     @config.patch("cpp_wrapper", True)
     def test_artificial_grid_cpp_wrapper(self):
         self._test_artificial_zgrid()
@@ -179,7 +177,6 @@ class TestTritonHeuristics(TestCase):
             "inductor_meta": inductor_meta,
         }
 
-    # @skipIfXpu
     def test_pre_hook_assert(self):
         # assert if any of the configs passed to the CachingAutotuner have pre-hooks
         args = self._get_cos_kernel_caching_autotuner_args()
@@ -336,7 +333,7 @@ class TestArgumentCloneAndRestore(TestCase):
         old_storage_offset = gpu_tensor.storage_offset()
         gpu_tensor_clone = clone_preserve_strides(gpu_tensor)
 
-        peak_mem_before = torch.cuda.max_memory_allocated()
+        peak_mem_before = torch.get_device_module(GPU_TYPE).max_memory_allocated()
         cpu_copies = autotuner.copy_args_to_cpu_if_needed(gpu_tensor)
         self.assertTrue(len(cpu_copies) == 1)
 

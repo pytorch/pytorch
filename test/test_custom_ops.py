@@ -53,6 +53,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     scoped_load_inline,
     skipIfTorchDynamo,
+    skipIfXpu,
     subtest,
     TemporaryFileName,
     TEST_XPU,
@@ -1587,6 +1588,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         with self.assertRaisesRegex(RuntimeError, "is not a Tensor"):
             op(x)
 
+    @skipIfXpu(msg="Deprecated torch.custom_ops API")
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
     def test_impl_separate(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
@@ -1611,6 +1613,7 @@ class TestCustomOp(CustomOpTestCaseBase):
         result = op(x_cuda)
         self.assertEqual(result, foo_cuda(x_cuda))
 
+    @skipIfXpu(msg="Deprecated torch.custom_ops API")
     @unittest.skipIf(not TEST_CUDA and not TEST_XPU, "requires CUDA or XPU")
     def test_impl_multiple(self):
         @custom_ops.custom_op(f"{TestCustomOp.test_ns}::foo")
