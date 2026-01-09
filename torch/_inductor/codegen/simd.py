@@ -11,7 +11,7 @@ import math
 import operator
 import textwrap
 from collections import Counter
-from typing import Any, Generic, Optional, TYPE_CHECKING, Union
+from typing import Any, Generic, NamedTuple, Optional, TYPE_CHECKING, Union
 from typing_extensions import TypeVar
 
 import sympy
@@ -377,6 +377,19 @@ class PartialAccumulate:
     buffer_name: str
     reduction_type: str
     value: Any
+
+
+class NodeInfo(NamedTuple):
+    """
+    Pre-computed node information for combo kernel partitioning.
+    """
+
+    node_schedule: list
+    tiling: dict
+    numel: Any
+    rnumel: Any
+    features: SIMDKernelFeatures
+    is_persistent_reduction: bool
 
 
 class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
@@ -1859,6 +1872,23 @@ class SIMDScheduling(BaseScheduling):
             V.graph.sizevars.check_leq(size, int_max)  # type: ignore[arg-type]
         return True
 
+    def process_kernel(
+        self,
+        kernel: Any,
+        node_schedule: list[NodeScheduleEntry],
+        only_gen_src_code: bool = False,
+    ) -> None:
+        """
+        Process a kernel by generating code for its node schedule and updating graph state.
+        """
+        self.codegen_node_schedule_with_kernel(node_schedule, kernel)
+        if not only_gen_src_code:
+            with V.set_kernel_handler(kernel):
+                for node in NodeScheduleMarker.only_nodes(node_schedule):
+                    node.mark_run()
+        V.graph.removed_buffers |= kernel.removed_buffers
+        V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
+
     def codegen_node_schedule(self, kernel_features: SIMDKernelFeatures):
         """
         Generate code for nodes in kernel_features
@@ -2298,23 +2328,31 @@ class SIMDScheduling(BaseScheduling):
         from .triton_combo_kernel import ComboKernel
 
         fused_node_lists = [node.get_nodes() for node in subkernel_nodes]
-        subkernel_map, node_schedule_map = {}, {}
+        node_schedule_map: dict[Any, NodeInfo] = {}
         for pn, nodes in zip(subkernel_nodes, fused_node_lists):
             _, (numel, rnumel) = max(nodes, key=lambda x: int(x.is_reduction())).group
             node_schedule = self.generate_node_schedule(nodes, numel, rnumel)
             tiling = self.select_tiling(node_schedule, numel, rnumel)
-            node_schedule_map[pn] = node_schedule, tiling, numel, rnumel
-            subkernel_map[pn] = ComboKernel.create_triton_kernel(
-                tiling,
-                features=SIMDKernelFeatures(node_schedule, numel, rnumel),
-                optimize_mask=not mixed_sizes,
+            features = SIMDKernelFeatures(node_schedule, numel, rnumel)
+            is_persistent_reduction = (
+                features.is_reduction()
+                and V.choices.should_use_persistent_reduction(
+                    features, cooperative_reduction=False
+                )
+            )
+            node_schedule_map[pn] = NodeInfo(
+                node_schedule=node_schedule,
+                tiling=tiling,
+                numel=numel,
+                rnumel=rnumel,
+                features=features,
+                is_persistent_reduction=is_persistent_reduction,
             )
 
         partitions = ComboKernel.horizontal_partition(
             nodes=subkernel_nodes,
             triton_scheduling=self,
             custom_algorithm=custom_part_algorithm,
-            kernel_map=subkernel_map,
             node_info_map=node_schedule_map,
         )
         log.debug(
@@ -2328,54 +2366,40 @@ class SIMDScheduling(BaseScheduling):
                 continue
 
             if len(node_group) == 1:
-                # Single-node partition: generate as a regular kernel, not a combo kernel
-                pn = node_group[0]
-                node_schedule, tiling, numel, rnumel = node_schedule_map[pn]
-                # Decrement kernel count to compensate for kernel already created in subkernel_map
-                # pyrefly: ignore [bad-assignment]
-                metrics.generated_kernel_count -= 1
+                # Single-node: create regular kernel
+                node_info = node_schedule_map[node_group[0]]
                 kernel = self.kernel_type(
-                    tiling,
-                    features=SIMDKernelFeatures(node_schedule, numel, rnumel),
+                    node_info.tiling,
+                    features=node_info.features,
                 )
-                self.codegen_node_schedule_with_kernel(node_schedule, kernel)
-                if not only_gen_src_code:
-                    with V.set_kernel_handler(kernel):  # type: ignore[call-arg]
-                        for node in NodeScheduleMarker.only_nodes(node_schedule):
-                            node.mark_run()
-                V.graph.removed_buffers |= kernel.removed_buffers
-                V.graph.inplaced_to_remove |= kernel.inplaced_to_remove
+                self.process_kernel(kernel, node_info.node_schedule, only_gen_src_code)
                 with V.set_kernel_handler(kernel):
                     src_code = kernel.codegen_kernel()
                 kernel_code_list.append((src_code, kernel, node_group))
             else:
-                # Multi-node partition: use combo kernel
+                # Multi-node: create ComboKernel with combo subkernels
                 kernel = ComboKernel(
                     enable_autotune=enable_autotune,
                     mixed_sizes=mixed_sizes,
                 )
-
                 for pn in node_group:
-                    self.codegen_node_schedule_with_kernel(
-                        node_schedule_map[pn][0],
-                        kernel.create_sub_kernel(subkernel_map[pn]),
+                    node_info = node_schedule_map[pn]
+                    subkernel = ComboKernel.create_triton_kernel(
+                        node_info.tiling,
+                        features=node_info.features,
+                        optimize_mask=not mixed_sizes,
                     )
-                    subkernel = subkernel_map[pn]
-                    node_schedule = node_schedule_map[pn][0]
-                    if not only_gen_src_code:
-                        with V.set_kernel_handler(subkernel):  # type: ignore[call-arg]
-                            for node in NodeScheduleMarker.only_nodes(node_schedule):
-                                node.mark_run()
-                    V.graph.removed_buffers |= subkernel.removed_buffers
-                    V.graph.inplaced_to_remove |= subkernel.inplaced_to_remove
+                    self.process_kernel(
+                        kernel.create_sub_kernel(subkernel),
+                        node_info.node_schedule,
+                        only_gen_src_code,
+                    )
 
                 src_code = kernel.codegen_kernel()
                 kernel_code_list.append((src_code, kernel, node_group))
         return kernel_code_list
 
     def codegen_combo_kernel(self, combo_kernel_node):
-        from .triton_combo_kernel import ComboKernel
-
         subkernel_nodes = combo_kernel_node.get_subkernel_nodes()
         custom_part_algorithm = combo_kernel_node.use_custom_partition_algo
         enable_autotune = combo_kernel_node.enable_autotune
@@ -2391,12 +2415,7 @@ class SIMDScheduling(BaseScheduling):
             kernel_name = self.define_kernel(src_code, [combo_kernel_node], kernel)
             self.codegen_comment(combo_kernel_node.snodes, kernel_name)
             log.debug("ComboKernels: generated kernel %s.", kernel_name)
-            if isinstance(kernel, ComboKernel):
-                # pyrefly: ignore [bad-argument-type]
-                kernel.call_kernel(V.graph.wrapper_code, kernel_name)
-            else:
-                # Regular kernel (for single-node partitions)
-                kernel.call_kernel(kernel_name)
+            kernel.call_kernel(kernel_name)
 
         self.free_buffers_in_scheduler()
 
