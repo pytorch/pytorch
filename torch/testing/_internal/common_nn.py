@@ -36,7 +36,8 @@ def get_reduction(m):
     result = getattr(m, 'reduction', None)
     if result is None:
         result = _Reduction.legacy_get_string(getattr(m, 'sizeAverage', None), True, emit_warning=False)
-    assert result is not None
+    if result is None:
+        raise AssertionError(f"Failed to determine reduction mode for module {type(m).__name__}")
     return result
 
 
@@ -2737,7 +2738,8 @@ def kldivloss_reference(input, target, reduction='mean', log_target=False):
 
 def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
                         reduction='mean'):
-    assert input.dim() >= 3
+    if input.dim() < 3:
+        raise AssertionError(f"input must be at least 3D, got {input.dim()}D")
     N = input.size(0)
     C = input.size(1)
     out_size = (N,) + input.size()[2:]
@@ -2763,7 +2765,8 @@ def nlllossNd_reference(input, target, weight=None, ignore_index=-100,
 
 def cross_entropy_loss_prob_target_reference(input, target, weight=None, reduction='mean',
                                              label_smoothing=0.0):
-    assert input.dim() >= 2
+    if input.dim() < 2:
+        raise ValueError(f"input must be at least 2D, got {input.dim()}D")
 
     input = torch.log_softmax(input, 1)
     C = input.size(1)
@@ -2772,7 +2775,8 @@ def cross_entropy_loss_prob_target_reference(input, target, weight=None, reducti
     weight = weight.view(1, C, *(1 for _ in input.shape[2:]))
 
     if label_smoothing > 0.0:
-        assert label_smoothing <= 1.0
+        if label_smoothing > 1.0:
+            raise ValueError(f"label_smoothing must be <= 1.0, got {label_smoothing}")
         target = (target * (1 - label_smoothing) + label_smoothing / C)
 
     output = -(input * target * weight).sum(dim=1)
@@ -2796,7 +2800,8 @@ def cross_entropy_loss_indices_target_reference(input, target, weight=None, igno
     if label_smoothing == 0.0:
         return nllloss
 
-    assert 0.0 < label_smoothing <= 1.0
+    if not (0.0 < label_smoothing <= 1.0):
+        raise ValueError(f"label_smoothing must be in range (0.0, 1.0], got {label_smoothing}")
 
     input = torch.log_softmax(input, 1)
     C = input.size(1)
@@ -2909,7 +2914,11 @@ def multilabelmarginloss_reference(input, target, reduction='mean'):
     # make everything 2-dimensional
     input_dim = input.dim()
     if input.dim() < 2:
-        assert target.dim() < 2
+        if target.dim() >= 2:
+            raise ValueError(
+                f"target.dim() must be < 2 when input.dim() < 2, "
+                f"got input.dim()={input.dim()}, target.dim()={target.dim()}"
+            )
         input = input.unsqueeze(0) if input.dim() == 1 else input.unsqueeze(0).unsqueeze(0)
         target = target.unsqueeze(0) if target.dim() == 1 else target.unsqueeze(0).unsqueeze(0)
 
@@ -3374,7 +3383,8 @@ class TestBase:
         return self._get_arg('extra_args', True)
 
     def _get_arg(self, name, unpack):
-        assert name in self._required_arg_names
+        if name not in self._required_arg_names:
+            raise AssertionError(f"{name} is not in required_arg_names {self._required_arg_names}")
 
         if name not in self._arg_cache:
             fn_name = name + '_fn'
@@ -3385,8 +3395,9 @@ class TestBase:
             elif fn_name in self._extra_kwargs:
                 self._arg_cache[name] = self._extra_kwargs[fn_name]()
             else:
-                assert size_name in self._extra_kwargs, \
-                    f"Missing `{name}`, `{size_name}` or `{fn_name}` for {self.get_name()}"
+                if size_name not in self._extra_kwargs:
+                    raise AssertionError(
+                        f"Missing `{name}`, `{size_name}` or `{fn_name}` for {self.get_name()}")
 
                 def map_tensor_sizes(sizes):
                     if isinstance(sizes, list):
@@ -3471,7 +3482,8 @@ class ModuleTest(TestBase):
                 dim = d + 1
                 break
         noncontig = torch.stack([torch.empty_like(tensor), tensor], dim).select(dim, 1).detach()
-        assert noncontig.numel() == 1 or noncontig.numel() == 0 or not noncontig.is_contiguous()
+        if noncontig.numel() not in (0, 1) and noncontig.is_contiguous():
+            raise AssertionError(f"Expected non-contiguous tensor, got contiguous tensor with numel={noncontig.numel()}")
         noncontig.requires_grad = tensor.requires_grad
         return noncontig
 
@@ -3643,7 +3655,8 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
         num_inputs = len(input_tuple)
 
         def fn_to_gradcheck(*inputs_and_params, **kwargs):
-            assert not kwargs
+            if kwargs:
+                raise AssertionError(f"kwargs should be empty, got {kwargs}")
             return test_case._forward(module, inputs_and_params[:num_inputs])
 
         # gradcheck doesn't support operators that take in dense inputs but
@@ -3651,7 +3664,8 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
         # and nn.EmbeddingBag. Instead, we call `self.check_jacobian`, which
         # is a slightly different version of gradcheck that can handle this.
         if self.has_sparse_gradients:
-            assert num_inputs == 1
+            if num_inputs != 1:
+                raise AssertionError(f"sparse gradients only supported with exactly 1 input, got {num_inputs}")
             test_input_jacobian = torch.is_floating_point(input_tuple[0])
             test_case.check_jacobian(module, input_tuple[0], test_input_jacobian)
         else:
@@ -3682,7 +3696,8 @@ class NewModuleTest(InputVariableMixin, ModuleTest):  # type: ignore[misc]
 
             # check_inplace doesn't support multiple input tensors, since we don't have any modules
             # that modify the inputs in-place and that accept more than one input
-            assert len(input_tuple) == 1
+            if len(input_tuple) != 1:
+                raise AssertionError(f"inplace test only supports exactly 1 input, got {len(input_tuple)}")
             input = input_tuple[0]
 
             module_ip = self.constructor(*self.constructor_args, inplace=True)
