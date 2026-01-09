@@ -501,9 +501,8 @@ def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, TorchVer
             compiler_info = subprocess.check_output(compiler, stderr=subprocess.STDOUT)
         match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info.decode(*SUBPROCESS_DECODE_ARGS).strip())
         version = ['0', '0', '0'] if match is None else list(match.groups())
-    except Exception:
-        _, error, _ = sys.exc_info()
-        logger.warning('Error checking compiler version for %s: %s', compiler, error)
+    except (subprocess.CalledProcessError, OSError):
+        logger.warning('Error checking compiler version for %s', compiler, exc_info=True)
         return (False, TorchVersion('0.0.0'))
 
     # convert alphanumeric string to numeric string
@@ -1830,10 +1829,10 @@ def check_compiler_is_gcc(compiler) -> bool:
     env['LC_ALL'] = 'C'  # Don't localize output
     try:
         version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
-    except Exception:
+    except (subprocess.CalledProcessError, OSError):
         try:
             version_string = subprocess.check_output([compiler, '--version'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
-        except Exception:
+        except (subprocess.CalledProcessError, OSError):
             return False
     # Check for GCC by verifying both COLLECT_GCC and gcc version string are present
     # This works for c++, g++, gcc, and versioned variants like g++-13
@@ -2635,6 +2634,12 @@ def _get_rocm_arch_flags(cflags: list[str] | None = None) -> list[str]:
             archs = archFlags.split()
         else:
             archs = []
+            logger.warning(
+                "Failed to auto-detect ROCm architecture. Extensions will be compiled "
+                "without architecture-specific optimizations. Set PYTORCH_ROCM_ARCH "
+                "environment variable to specify target architectures "
+                "(e.g., export PYTORCH_ROCM_ARCH='gfx90a;gfx942')."
+            )
     else:
         archs = _archs.replace(' ', ';').split(';')
     flags = [f'--offload-arch={arch}' for arch in archs]

@@ -574,8 +574,8 @@ class ConvertFrameAssert:
         compiler_fn: CompilerFn,
         one_graph: bool = True,
         export: bool = False,
-        export_constraints: Optional[typing.Never] = None,
-        package: Optional[CompilePackage] = None,
+        export_constraints: Any | None = None,
+        package: CompilePackage | None = None,
     ) -> None:
         # assert export_constraints is None
         reset_graph_break_dup_checker()
@@ -740,7 +740,7 @@ def convert_frame_assert(
     compiler_fn: CompilerFn,
     one_graph: bool = True,
     export: bool = False,
-    export_constraints: Optional[typing.Never] = None,
+    export_constraints: Any | None = None,
     package: Optional[CompilePackage] = None,
 ) -> ConvertFrameAssert:
     """Fully convert a frame into an FX graph, raising an exception if we fail."""
@@ -786,7 +786,7 @@ def trace_frame(
     code_options: dict[str, object],
     *,
     export: bool = False,
-    export_constraints: Optional[typing.Never] = None,
+    export_constraints: Any | None = None,
     frame_state: Optional[dict[str, Union[int, FrameStateSizeEntry]]] = None,
     distributed_state: Optional[DistributedState] = None,
     package: Optional[CompilePackage] = None,
@@ -1103,6 +1103,11 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
             # pyrefly: ignore [missing-attribute]
             resolved_forward = resolved_forward.__func__
 
+        resolved_call = mod.__call__
+        if hasattr(resolved_call, "__self__"):
+            # pyrefly: ignore [missing-attribute]
+            resolved_call = resolved_call.__func__
+
         # Mirrored from NNModuleVariable.call_function:
         # https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/variables/nn_module.py#L1035
         if (
@@ -1114,7 +1119,8 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
             and len(mod._backward_hooks) == 0
             and len(torch.nn.modules.module._global_backward_pre_hooks) == 0
             and len(torch.nn.modules.module._global_backward_hooks) == 0
-            and resolved_forward != torch.nn.Module.forward
+            and resolved_forward != torch.nn.Module.forward  # has forward impl
+            and resolved_call == torch.nn.Module.__call__  # no custom __call__ impl
         ):
             # We cannot trace __call__ by default because it will break
             # the legacy dynamo export. If we want to revisit this,
@@ -1294,7 +1300,7 @@ def compile_frame(  # type: ignore[return]
     restart_reasons: set[str],
     *,
     export: bool = False,
-    export_constraints: Optional[typing.Never] = None,
+    export_constraints: Any | None = None,
     frame_state: Optional[dict[str, Union[int, FrameStateSizeEntry]]] = None,
     distributed_state: Optional[DistributedState] = None,
     package: Optional[CompilePackage] = None,
@@ -1400,7 +1406,7 @@ def _compile(
     compiler_fn: CompilerFn,
     one_graph: bool,
     export: bool,
-    export_constraints: Optional[typing.Never],
+    export_constraints: Any | None,
     hooks: Hooks,
     cache_entry: Optional[CacheEntry],
     cache_size: CacheSizeRelevantForFrame,

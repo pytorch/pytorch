@@ -782,21 +782,15 @@ def forward(self, x):
             gm = dynamo_graph_capture_for_export(foo)(*trace_inputs)
             test_inputs = make_inputs()
             self.assertExpectedInline(
-                gm._in_shuffle_graph.code.strip("\r\n "),
-                """\
-def forward(self, arg0_1, arg1_1, arg2_1):
-    return (arg1_1, arg2_1)""",
-            )
-            self.assertExpectedInline(
                 gm.code.strip("\r\n "),
                 """\
 def forward(self, args_0):
-    _tree_leaf_0, _tree_leaf_1, _tree_leaf_2, = pytree.tree_leaves((self, args_0,))
-    L_bar_x , L_bar_y , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1, _tree_leaf_2)
+    _fn_args = (args_0, )
+    L_bar_x , L_bar_y , = self._dynamo_bytecode_flatten(*_fn_args)
     l_bar_x = L_bar_x
     l_bar_y = L_bar_y
     add = l_bar_x + l_bar_y;  l_bar_x = l_bar_y = None
-    return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, _tree_leaf_1, _tree_leaf_2, add), self._out_spec)""",
+    return self._dynamo_bytecode_unflatten((add,), _fn_args)""",
             )
             self.assertEqual(gm(*test_inputs), foo(*test_inputs))
         finally:
@@ -819,25 +813,18 @@ def forward(self, args_0):
         inps = (torch.randn(10, 32),)
         ep = dynamo_graph_capture_for_export(MyModel())(*inps)
         self.assertExpectedInline(
-            ep._in_shuffle_graph.code.strip("\r\n "),
-            """\
-def forward(self, arg0_1, arg1_1):
-    _tensor_constant0 = self._tensor_constant0
-    return (arg1_1, _tensor_constant0)""",
-        )
-        self.assertExpectedInline(
             ep.code.strip("\r\n "),
             """\
 def forward(self, args_0):
-    _tree_leaf_0, _tree_leaf_1, = pytree.tree_leaves((self, args_0,))
-    L_x_ , L_outer_ , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1)
+    _fn_args = (args_0, )
+    L_x_ , L_outer_ , = self._dynamo_bytecode_flatten(*_fn_args)
     l_x_ = L_x_
     l_outer_ = L_outer_
     z = l_x_ + l_outer_;  l_x_ = l_outer_ = None
     y = z[(slice(None, -1, None), slice(None, None, None))];  z = None
     stacked = torch.stack([y, y, y], dim = 0);  y = None
     reshaped = stacked.reshape(-1, 3, 32);  stacked = None
-    return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, _tree_leaf_1, reshaped), self._out_spec)""",
+    return self._dynamo_bytecode_unflatten((reshaped,), _fn_args)""",
         )
         self.assertEqual(ep(*inps), MyModel()(*inps))
 
@@ -916,12 +903,12 @@ def forward(self, args_0):
             gm.code.strip("\r\n "),
             """\
 def forward(self, args_0):
-    _tree_leaf_0, _tree_leaf_1, = pytree.tree_leaves((self, args_0,))
-    L_args_0_ , = self._in_shuffle_graph(_tree_leaf_0, _tree_leaf_1)
+    _fn_args = (args_0, )
+    L_args_0_ , = self._dynamo_bytecode_flatten(*_fn_args)
     l_args_0_ = L_args_0_
     add = l_args_0_ + 1
     mul = l_args_0_ * 2;  l_args_0_ = None
-    return pytree.tree_unflatten(self._out_shuffle_graph(_tree_leaf_0, _tree_leaf_1, mul, add), self._out_spec)""",
+    return self._dynamo_bytecode_unflatten((mul, add,), _fn_args)""",
         )
         self.assertEqual(gm(*test_inputs), foo(*test_inputs))
 
@@ -1048,6 +1035,124 @@ def forward(self, args_0):
         ep = dynamo_graph_capture_for_export(m)(torch.randn(2, 3))
         test_inputs = (torch.randn(2, 3),)
         self.assertEqual(ep(*test_inputs), m(*test_inputs))
+
+    def test_restore_state_dict_basic(self):
+        """Test basic state dict restoration with a simple model."""
+        from torch.export import _restore_state_dict
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+                self.register_buffer("buf", torch.randn(4))
+
+            def forward(self, x):
+                return self.linear(x) + self.buf
+
+        model = Model()
+        gm = dynamo_graph_capture_for_export(model)(torch.randn(2, 4))
+
+        # Before restoration, FQNs may be flattened
+        state_dict_before = dict(gm.named_parameters())
+        buffer_dict_before = dict(gm.named_buffers())
+
+        _restore_state_dict(model, gm)
+
+        # After restoration, FQNs should match original module
+        state_dict_after = dict(gm.named_parameters())
+        buffer_dict_after = dict(gm.named_buffers())
+
+        # Check that the parameter names match the original
+        original_param_names = set(dict(model.named_parameters()).keys())
+        restored_param_names = set(state_dict_after.keys())
+        self.assertEqual(original_param_names, restored_param_names)
+
+        # Check that the buffer names match the original
+        original_buffer_names = set(dict(model.named_buffers()).keys())
+        restored_buffer_names = set(buffer_dict_after.keys())
+        self.assertEqual(original_buffer_names, restored_buffer_names)
+
+        # Verify the model still works correctly
+        test_input = torch.randn(2, 4)
+        expected = model(test_input)
+        actual = gm(test_input)
+        self.assertEqual(expected, actual)
+
+    def test_restore_state_dict_nested_modules(self):
+        """Test state dict restoration with nested modules."""
+        from torch.export import _restore_state_dict
+
+        class SubModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc = torch.nn.Linear(8, 8)
+                self.register_buffer("scale", torch.tensor(2.0))
+
+            def forward(self, x):
+                return self.fc(x) * self.scale
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.sub1 = SubModule()
+                self.sub2 = SubModule()
+
+            def forward(self, x):
+                return self.sub1(x) + self.sub2(x)
+
+        model = Model()
+        gm = dynamo_graph_capture_for_export(model)(torch.randn(2, 8))
+
+        _restore_state_dict(model, gm)
+
+        # Check that nested FQNs are properly restored
+        original_param_names = set(dict(model.named_parameters()).keys())
+        restored_param_names = set(dict(gm.named_parameters()).keys())
+        self.assertEqual(original_param_names, restored_param_names)
+
+        # Check buffers too
+        original_buffer_names = set(dict(model.named_buffers()).keys())
+        restored_buffer_names = set(dict(gm.named_buffers()).keys())
+        self.assertEqual(original_buffer_names, restored_buffer_names)
+
+        # Verify functionality
+        test_input = torch.randn(2, 8)
+        expected = model(test_input)
+        actual = gm(test_input)
+        self.assertEqual(expected, actual)
+
+    def test_restore_state_dict_with_bound_method(self):
+        """Test state dict restoration when passing a bound method."""
+        from torch.export import _restore_state_dict
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(4, 4)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        model = Model()
+        gm = dynamo_graph_capture_for_export(model.forward)(torch.randn(2, 4))
+
+        # Pass bound method instead of module
+        _restore_state_dict(model.forward, gm)
+
+        # Verify FQNs match
+        original_param_names = set(dict(model.named_parameters()).keys())
+        restored_param_names = set(dict(gm.named_parameters()).keys())
+        self.assertEqual(original_param_names, restored_param_names)
+
+    def test_restore_state_dict_type_error(self):
+        """Test that _restore_state_dict raises TypeError for invalid input."""
+        from torch.export import _restore_state_dict
+
+        gm = torch.fx.GraphModule({}, torch.fx.Graph())
+
+        # Should raise TypeError when given a non-module, non-bound-method
+        with self.assertRaises(TypeError):
+            _restore_state_dict(lambda x: x, gm)
 
 
 if __name__ == "__main__":
