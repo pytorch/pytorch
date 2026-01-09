@@ -12,6 +12,7 @@
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/xpu/Module.h>
 #include <torch/csrc/xpu/XPUPluggableAllocator.h>
+#include <torch/csrc/xpu/memory_snapshot.h>
 
 using namespace torch;
 
@@ -608,6 +609,7 @@ static void initXpuMethodBindings(PyObject* module) {
 
     return result;
   });
+  m.def("_xpu_recordMemoryHistory", &torch::xpu::_record_memory_history);
 }
 
 // Callback for python part. Used for additional initialization of python

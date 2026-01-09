@@ -3,6 +3,8 @@
 import collections
 import ctypes
 import gc
+import json
+import random
 import re
 import subprocess
 import sys
@@ -24,6 +26,7 @@ from torch.testing._internal.common_utils import (
     find_library_location,
     IS_LINUX,
     IS_WINDOWS,
+    IS_X86,
     run_tests,
     serialTest,
     suppress_warnings,
@@ -737,6 +740,127 @@ if __name__ == "__main__":
         torch.xpu.empty_cache()
         for _ in _test_memory_stats_generator():
             _check_memory_stat_consistency()
+
+    @unittest.skipUnless(IS_X86 and IS_LINUX, "x86 linux only cpp unwinding")
+    def test_direct_traceback(self):
+        from torch._C._profiler import gather_traceback, symbolize_tracebacks
+
+        c = gather_traceback(True, True, True)
+        (r,) = symbolize_tracebacks([c])
+        r = str(r)
+        self.assertTrue("test_xpu.py" in r)
+        self.assertTrue("unwind" in r)
+
+    def test_memory_snapshot_with_python(self):
+        try:
+            gc.collect()
+            torch.xpu.memory.empty_cache()
+            torch.xpu.memory._record_memory_history("state", stacks="python")
+            # Make x the second block in a segment
+            torch.rand(2 * 311, 411, device="xpu")
+            unused = torch.rand(310, 410, device="xpu")
+            x = torch.rand(311, 411, device="xpu")
+
+            # Allocate many 512B tensors to fill a segment and test history merging.
+            tensors = [torch.rand(128, device="xpu") for _ in range(1000)]
+            while tensors:
+                del tensors[random.randint(0, len(tensors) - 1)]
+
+            torch.rand(128 * 5, device="xpu")
+
+            ss = torch._C._xpu_memorySnapshot(None)
+            found_it = False
+            for seg in ss["segments"]:
+                self.assertTrue("frames" in seg)
+                for b in seg["blocks"]:
+                    # Look for x by size
+                    if b["requested_size"] == 311 * 411 * 4:
+                        self.assertTrue("test_xpu" in b["frames"][0]["filename"])
+                        found_it = True
+                        self.assertEqual(x.untyped_storage().data_ptr(), b["address"])
+            self.assertTrue(found_it)
+
+            del unused
+            del x
+            gc.collect()
+            torch.xpu.empty_cache()
+            ss = torch._C._xpu_memorySnapshot(None)
+            self.assertTrue(
+                ss["device_traces"][0][-1]["action"]
+                in ("segment_free", "segment_unmap")
+            )
+
+        finally:
+            torch.xpu.memory._record_memory_history(None)
+
+    @unittest.skipUnless(IS_X86 and IS_LINUX, "x86 linux only cpp unwinding")
+    def test_memory_snapshot_with_cpp(self):
+        try:
+            gc.collect()
+            torch.xpu.memory.empty_cache()
+            torch.xpu.memory._record_memory_history("state", stacks="all")
+            _ = torch.rand(311, 411, device="xpu")
+
+            ss = torch.xpu.memory.memory_snapshot()
+            found_it = False
+            for seg in ss:
+                for b in seg["blocks"]:
+                    if b["requested_size"] == 311 * 411 * 4:
+                        self.assertTrue("::rand" in str(b["frames"]))
+                        found_it = True
+            self.assertTrue(found_it)
+
+        finally:
+            torch.xpu.memory._record_memory_history(None)
+
+    @unittest.skipUnless(IS_X86 and IS_LINUX, "x86 linux only cpp unwinding")
+    def test_memory_plots_free_stack(self):
+        for context in ["alloc", "all", "state"]:
+            try:
+                gc.collect()
+                torch.xpu.memory.empty_cache()
+                torch.xpu.memory._record_memory_history(context=context)
+                x = None
+
+                def thealloc():
+                    nonlocal x
+                    x = torch.rand(3, 4, device="xpu")
+
+                def thefree():
+                    nonlocal x
+                    del x
+
+                thealloc()
+                thefree()
+                ss = json.dumps(torch._C._xpu_memorySnapshot(None))
+                self.assertEqual(("thefree" in ss), (context == "all"))
+                self.assertEqual(("thealloc" in ss), (context != "state"))
+            finally:
+                torch.xpu.memory._record_memory_history(None)
+
+    def test_memory_snapshot_script(self):
+        try:
+            gc.collect()
+            torch.xpu.memory.empty_cache()
+            torch.xpu.memory._record_memory_history("state", stacks="python")
+
+            @torch.jit.script
+            def foo():
+                return torch.rand(311, 411, device="xpu")
+
+            _ = foo()
+
+            ss = torch.xpu.memory.memory_snapshot()
+            found_it = False
+            for seg in ss:
+                for b in seg["blocks"]:
+                    if b["requested_size"] == 311 * 411 * 4:
+                        self.assertEqual(b["frames"][0]["name"], "foo")
+                        found_it = True
+            self.assertTrue(found_it)
+
+        finally:
+            torch.xpu.memory._record_memory_history(None)
 
     def get_dummy_allocator(self, check_vars):
         dummy_allocator_source_vars = """
