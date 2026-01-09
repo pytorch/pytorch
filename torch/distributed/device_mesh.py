@@ -1060,12 +1060,23 @@ else:
                 )
             return not_none(get_rank(mesh_dim_group))
 
+        def _is_current_rank_part_of_mesh(self) -> bool:
+            """
+            Return True if the current rank is part of this mesh.
+            """
+            return self._coordinate_on_dim is not None
+
         def get_coordinate(self) -> list[int] | None:
             """
             Return the relative indices of this rank relative to all
             dimensions of the mesh. If this rank is not part of the mesh, return None.
             """
             return self._coordinate_on_dim if self._coordinate_on_dim else None
+
+        def _sym_get_coordinate(self, index: int) -> int:
+            # This is only valid when the current rank is part of the mesh.
+            assert self._coordinate_on_dim
+            return self._coordinate_on_dim[index]
 
         def _flatten(
             self,
