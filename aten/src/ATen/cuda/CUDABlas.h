@@ -105,24 +105,47 @@ enum GEMMAndBiasActivationEpilogue {
   GELU,
 };
 
+
+#define CUBLASLT_GEMM_AND_EPILOGUE(Dtype, C_Dtype, ...) \
+    bool transpose_mat1, \
+    bool transpose_mat2, \
+    int64_t m, \
+    int64_t n, \
+    int64_t k, \
+    at::opmath_type<Dtype> alpha_val, \
+    const Dtype* mat1_ptr, \
+    int64_t mat1_ld, \
+    const Dtype* mat2_ptr, \
+    int64_t mat2_ld, \
+    at::opmath_type<Dtype> beta_val, \
+    C_Dtype* result_ptr, \
+    int64_t result_ld, \
+    __VA_ARGS__
+
+// Includes values by default
+#define CUBLASLT_GEMM_ARGS_DECL(Dtype, C_Dtype) \
+  CUBLASLT_GEMM_AND_EPILOGUE( \
+      Dtype, \
+      C_Dtype, \
+      const Dtype* bias_ptr = nullptr, \
+      std::optional<int64_t> bias_ld = std::nullopt, \
+      GEMMAndBiasActivationEpilogue activation = GEMMAndBiasActivationEpilogue::None \
+  )
+
+// Useful for template specializations
+#define CUBLASLT_GEMM_ARGS(Dtype, C_Dtype) \
+  CUBLASLT_GEMM_AND_EPILOGUE( \
+      Dtype, \
+      C_Dtype, \
+      const Dtype* bias_ptr, \
+      std::optional<int64_t> bias_ld, \
+      GEMMAndBiasActivationEpilogue activation \
+  )
+
 // NOTE: GELU activation is not supported prior to CUDA 11.4 and will
 // do nothing if passed in that case.
 template <typename Dtype, typename C_Dtype = Dtype>
-bool gemm_and_bias(
-    bool transpose_mat1,
-    bool transpose_mat2,
-    int64_t m,
-    int64_t n,
-    int64_t k,
-    at::opmath_type<Dtype> alpha_val,
-    const Dtype* mat1_ptr,
-    int64_t mat1_ld,
-    const Dtype* mat2_ptr,
-    int64_t mat2_ld,
-    const Dtype* bias,
-    C_Dtype* result_ptr,
-    int64_t result_ld,
-    GEMMAndBiasActivationEpilogue activation = GEMMAndBiasActivationEpilogue::None);
+bool gemm_and_bias(CUBLASLT_GEMM_ARGS_DECL(Dtype, C_Dtype));
 
 void int8_gemm(
     bool transpose_mat1,
