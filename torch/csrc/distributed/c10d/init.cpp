@@ -949,6 +949,20 @@ This class does not support ``__members__`` property.)");
           &::c10d::makeNCCLPreMulSum<at::Tensor>,
           py::arg("factor").noconvert(),
           py::return_value_policy::copy, // seems safest
+          py::call_guard<py::gil_scoped_release>())
+      // Alias for XCCL backend - uses same underlying implementation as NCCL
+      // since both PreMulSumSupplement structures are identical
+      .def(
+          "_make_xccl_premul_sum",
+          &::c10d::makeNCCLPreMulSum<double>,
+          py::arg("factor").noconvert(),
+          py::return_value_policy::copy, // seems safest
+          py::call_guard<py::gil_scoped_release>())
+      .def(
+          "_make_xccl_premul_sum",
+          &::c10d::makeNCCLPreMulSum<at::Tensor>,
+          py::arg("factor").noconvert(),
+          py::return_value_policy::copy, // seems safest
           py::call_guard<py::gil_scoped_release>());
 
   module.def(
