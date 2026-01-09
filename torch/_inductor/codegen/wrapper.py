@@ -3125,13 +3125,37 @@ class PythonWrapperCodegen(CodeGen):
             return repr(s)
 
     # The following methods are for memory management
+    def get_custom_annotation(self, buffer: BufferLike) -> dict:
+        """
+        Extract custom annotation (e.g., {'mempool': 0}) from the buffer's
+        originating FX node metadata.
+        """
+        custom_annotation = {}
+        # buffer.origins contains the FX nodes this buffer originates from
+        if hasattr(buffer, "origins"):
+            for origin in buffer.origins:
+                # origin is an FX node; check its meta for custom annotation
+                if hasattr(origin, "meta") and "custom" in origin.meta:
+                    custom_annotation.update(origin.meta["custom"])
+                    break  # Use the first one found
+        return custom_annotation
+
     def make_buffer_allocation(self, buffer: BufferLike):
+        # Get the custom annotation from the originating FX node
+        custom_annotation = self.get_custom_annotation(buffer)
+
         device = buffer.get_device()
         dtype = buffer.get_dtype()
         shape = tuple(buffer.get_size())
         allocation_shape = tuple(V.graph.get_allocation_size(buffer))
         stride = tuple(buffer.get_stride())
         is_pinned = buffer.get_is_pinned()
+
+        # Example: Use the mempool annotation
+        mempool = custom_annotation.get("mempool", None)
+        if mempool is not None:
+            self.writeline(f"{self.comment} allocating on mempool: {mempool}")
+
         return self.make_allocation(
             buffer.get_name(), device, dtype, shape, stride, allocation_shape, is_pinned
         )
