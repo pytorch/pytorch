@@ -688,6 +688,9 @@ class BaseSchedulerNode:
         def should_prune(dep: Dep) -> bool:
             if not isinstance(dep, WeakDep):
                 return False
+            if dep.name not in self.scheduler.name_to_buf:
+                return False
+
             op_name = self.scheduler.name_to_buf[dep.name].defining_op_name()
             return op_name in V.graph.removed_operations
 
