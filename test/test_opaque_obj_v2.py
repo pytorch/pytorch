@@ -881,7 +881,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
 
         with self.assertRaisesRegex(
             RuntimeError,
-            "Opaque object member with method-type USE_REAL returned a reference-type opaque objects.",
+            "Opaque object member with method-type USE_REAL returned a reference-type opaque object.",
         ):
             torch.compile(foo)(NestedCounters(Counter(1, 5)), torch.ones(2, 3))
 
