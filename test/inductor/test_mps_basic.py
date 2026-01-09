@@ -155,6 +155,20 @@ class MPSBasicTests(TestCase):
         A = torch.diag(torch.tensor([20.0, 0.5, 5.0], dtype=torch.float32) ** 2)
         self.common(fn, (A,), check_lowp=False)
 
+    def test_large_reduction(self):
+        def fn(a, b):
+            return (a[:, None] - b[None, :]).sum()
+
+        a = torch.randn(32, device="mps")
+        b = torch.randn(64, device="mps")
+        self.common(
+            fn,
+            (
+                a,
+                b,
+            ),
+        )
+
 
 class MPSBasicTestsAOTI(TestCase):
     def check_model(self, m, inp, dynamic_shapes=None):
