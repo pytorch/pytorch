@@ -521,7 +521,7 @@ def _is_non_overlapping_and_dense_or_false(sizes, strides) -> bool:
     return check_contiguous_sizes_strides(sizes, strides, false_if_dde=True)
 
 
-def is_non_overlapping_and_dense(a: Tensor) -> bool:
+def is_non_overlapping_and_dense_or_false(a: Tensor) -> bool:
     """
     True when a tensor is non-overlapping and dense.
 
@@ -688,6 +688,13 @@ def compute_elementwise_output_strides(*tensors) -> tuple[int, ...]:
         return ()
     if ndim == 1:
         return (1,)
+
+    if len(tensors) == 1:
+        if torch._prims_common.is_non_overlapping_and_dense_or_false(tensors[0]):
+            return tensors[0].stride()
+        else:
+            empty_like_tensor = torch.empty_like(tensors[0])
+            return empty_like_tensor.stride()
 
     logical_to_physical_perm, _ = compute_elementwise_output_logical_to_physical_perm(
         *tensors, _skip_checks=True
@@ -1334,7 +1341,6 @@ def get_higher_dtype(
 
         raise RuntimeError("Unexpected type given to _extract_dtype!")
 
-    # pyrefly: ignore [bad-argument-type]
     a, b = _extract_dtype(a), _extract_dtype(b)
 
     if a is b:
@@ -1701,10 +1707,8 @@ def elementwise_dtypes(
 
         # Prefers dtype of tensors with one or more dimensions
         if one_plus_dim_tensor_dtype is not None:
-            # pyrefly: ignore [bad-return]
             return one_plus_dim_tensor_dtype
 
-        # pyrefly: ignore [bad-return]
         return zero_dim_tensor_dtype
 
     if highest_type is float:
