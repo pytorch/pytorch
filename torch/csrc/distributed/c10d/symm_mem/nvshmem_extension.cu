@@ -378,7 +378,7 @@ void all_to_all_vdev(
 // offsets between peers.
 
 /* Arguments:
- * `in_splits_offsets`: input splits and offsets (optinoal), of size (2, nsplits), or (1, nsplits) if no offsets are provided.
+ * `in_splits_offsets`: input splits and offsets (optional), of size (2, nsplits), or (1, nsplits) if no offsets are provided.
  * `out_splits_offsets`: output splits and offsets, of size (2, nsplits).
  * `mype`: the rank of the current PE.
  * `npes`: the number of PEs.
