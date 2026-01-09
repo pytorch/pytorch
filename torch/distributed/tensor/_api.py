@@ -137,9 +137,11 @@ class _FromTorchTensor(torch.autograd.Function):
         run_check: bool,
         shape: torch.Size | None = None,
         stride: tuple[int, ...] | None = None,
+        grad_placements: tuple[Placement, ...] | None = None,
     ) -> "DTensor":
         ctx.forward_input_placements = placements
         ctx.forward_input_device_mesh = device_mesh
+        ctx.grad_placements = grad_placements
 
         if shape and stride:
             tensor_shape, tensor_stride = shape, stride
@@ -202,24 +204,25 @@ class _FromTorchTensor(torch.autograd.Function):
     def backward(ctx, grad_output: "DTensor"):  # type: ignore[override]
         forward_input_placements = ctx.forward_input_placements
         forward_input_device_mesh = ctx.forward_input_device_mesh
+        grad_placements = ctx.grad_placements
 
-        # reshard to the placement when creating DistributedTensor
-        # so that the gradient layout matches, and we could return
-        # local gradients directly
-        if grad_output.placements != forward_input_placements:
-            current_spec = grad_output._spec
+        # When user provided grad_placements, we use it as the desired layout without any optimizations
+        if grad_placements is not None:
+            target_spec = DTensorSpec(
+                forward_input_device_mesh,
+                grad_placements,
+                tensor_meta=grad_output._spec.tensor_meta,
+            )
+        else:
+            grad_placements = forward_input_placements
 
+            # We optimize gradients placement by replacing partial with replicate
             # for backward shard -> partial, we do shard -> replicate
             # for backward replicate -> partial, we do replicate -> replicate / skip transformation
-            # TODO: for backward partial -> partial, right now we keep it unchanged,
-            # but this might need revisit
+            # for backward partial -> partial, we do partial -> replicate
             normalized_placements: list[Placement] = []
-            for current, target in zip(
-                current_spec.placements, forward_input_placements
-            ):
-                if (
-                    current.is_shard() or current.is_replicate()
-                ) and target.is_partial():
+            for current, target in zip(grad_output._spec.placements, grad_placements):
+                if target.is_partial():
                     normalized_placements.append(Replicate())
                 else:
                     normalized_placements.append(target)
@@ -229,6 +232,9 @@ class _FromTorchTensor(torch.autograd.Function):
                 tuple(normalized_placements),
                 tensor_meta=grad_output._spec.tensor_meta,
             )
+
+        if grad_output.placements != grad_placements:
+            current_spec = grad_output._spec
             local_tensor = grad_output._local_tensor
             output = redistribute_local_tensor(
                 local_tensor,
