@@ -48,7 +48,7 @@ from torch.compiler._cache import (
     CacheArtifactFactory,
     CacheArtifactManager,
 )
-from torch.fx.experimental.symbolic_shapes import hint_int
+from torch.fx.experimental.symbolic_shapes import size_hint
 from torch.utils._triton import has_triton_package
 
 from .aot_autograd_result import (
@@ -149,7 +149,6 @@ def check_node_safe(node: Node):
         "torch._sym_sqrt",
         "torch.sym_float",
         "torch.sym_sum",
-        "torch.autograd.grad",
     )
     SAFE_NON_TORCH_FUNCTIONS = (
         "einops.einops.rearrange",
@@ -897,7 +896,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
             remote_cache = AOTAutogradCache.get_remote_cache()
 
         symints = AOTAutogradCache._filter_backed_symints(args)
-        hints = [hint_int(s) for s in symints]
+        hints = [size_hint(s) for s in symints]
         entry = None
         pickled_content = None
         try:
