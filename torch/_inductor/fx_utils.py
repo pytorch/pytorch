@@ -126,12 +126,15 @@ class FakeTensorUpdater:
             new,
             old,
             *,
+            check_strides: bool = True,
             check_storage: bool = True,
             node: torch.fx.Node | None = None,
         ) -> bool:
             """Validate that two FakeTensors (or iterables thereof) are the same,
             including storage locations if enabled.
 
+            check_strides: disabling this flag will remove checks for exact tensor
+            striding.
             check_storage: disabling this flag will remove checks for storage offset and
             location.  This is useful for subgraph argument and output updating, where
             storage location can change without invalidating the subgraph."""
@@ -144,6 +147,7 @@ class FakeTensorUpdater:
                     is_fake_tensor_same(
                         new_i,
                         old_i,
+                        check_strides=check_strides,
                         check_storage=check_storage,
                         node=node,
                     )
@@ -170,8 +174,10 @@ class FakeTensorUpdater:
             if new.device != old.device:
                 return False
 
-            if new.layout == torch.strided and not is_intlist_same(
-                new.stride(), old.stride()
+            if (
+                check_strides
+                and new.layout == torch.strided
+                and not is_intlist_same(new.stride(), old.stride())
             ):
                 return False
 
@@ -378,21 +384,28 @@ class FakeTensorUpdater:
                     # existing args the first time we see the subgraph, update the
                     # placeholder nodes in the subgraph.  Any updates past that point
                     # would make the graph internally inconsistent.
-                    #
-                    # NOTE: we deliberately don't check storages, since every invocation
-                    # of the subgraph will use different storages.  This means that we
-                    # may incorrectly add or remove arg aliasing relationships, but
-                    # there's no clear way around this if subgraphs can be multiply
-                    # invoked.
                     if subgraph_args is not None:
                         for p, a in zip(
                             subgraph.graph.find_nodes(op="placeholder"), subgraph_args
                         ):
+                            # Do an update iff anything except the storage has changed,
+                            # since every invocation of the subgraph will use different
+                            # storages.  This implies potentially incorrect arg
+                            # aliasing relationships.
                             if not is_fake_tensor_same(
-                                a, get_fake(p, subgraph), check_storage=False
+                                a, p_fake := get_fake(p, subgraph), check_storage=False
                             ):
                                 assert update_subgraph, (
                                     "subgraph args must have consistent values!"
+                                )
+                                # Check that only the stride has changed.  Other changes
+                                # cannot be handled without manual intervention.
+                                assert is_fake_tensor_same(
+                                    a, p_fake, check_strides=False, check_storage=False
+                                ), (
+                                    "A subgraph argument other than striding has been "
+                                    "modified; FakeTensorUpdater cannot update this "
+                                    "argument!"
                                 )
 
                                 subgraph_updatings[subgraph].args_updated = True
