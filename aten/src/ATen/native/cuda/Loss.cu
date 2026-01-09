@@ -286,6 +286,10 @@ void nll_loss_forward_out_cuda_template(
   int64_t batch_size = n_dims == 1 ? 1 : input.size(0);
 
   auto weight_ = weight.defined() ? weight.contiguous() : weight;
+  // Convert weight to input dtype if needed for FP16/BF16 computations
+  if (weight_.defined() && weight_.scalar_type() != input.scalar_type()) {
+    weight_ = weight_.to(input.scalar_type());
+  }
 
   if (reduction == Reduction::None && n_dims == 2) {
     at::native::resize_output(output, {batch_size});
@@ -495,6 +499,10 @@ void nll_loss_backward_out_cuda_template(
   int64_t batch_size = n_dims == 1 ? 1 : input.size(0);
 
   auto weight_ = weight.defined() ? weight.contiguous() : weight;
+  // Convert weight to input dtype if needed for FP16/BF16 computations
+  if (weight_.defined() && weight_.scalar_type() != input.scalar_type()) {
+    weight_ = weight_.to(input.scalar_type());
+  }
 
   if (reduction == at::Reduction::None && n_dims == 2) {
     if (batch_size == 0) {
