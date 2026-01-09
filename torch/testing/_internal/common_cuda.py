@@ -180,7 +180,8 @@ __cuda_ctx_rng_initialized = False
 # after this call, CUDA context and RNG must have been initialized on each GPU
 def initialize_cuda_context_rng():
     global __cuda_ctx_rng_initialized
-    assert TEST_CUDA, 'CUDA must be available when calling initialize_cuda_context_rng'
+    if not TEST_CUDA:
+        raise RuntimeError('CUDA must be available when calling initialize_cuda_context_rng')
     if not __cuda_ctx_rng_initialized:
         # initialize cuda context and rng for memory tests
         for i in range(torch.cuda.device_count()):
@@ -417,4 +418,5 @@ requires_triton_ptxas_compat = unittest.skipIf(torch.version.hip is None and _ge
 
 # Importing this module should NOT eagerly initialize CUDA
 if not CUDA_ALREADY_INITIALIZED_ON_IMPORT:
-    assert not torch.cuda.is_initialized()
+    if torch.cuda.is_initialized():
+        raise RuntimeError("CUDA was initialized during import of common_cuda.py")

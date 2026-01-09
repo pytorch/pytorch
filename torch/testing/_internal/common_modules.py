@@ -567,7 +567,8 @@ def no_batch_dim_reference_fn(m, p, *args, **kwargs):
     is_criterion = get_and_pop('is_criterion', False)
 
     if kwargs_to_batchify is not None:
-        assert isinstance(kwargs_to_batchify, dict)
+        if not isinstance(kwargs_to_batchify, dict):
+            raise TypeError(f"kwargs_to_batchify must be a dict, got {type(kwargs_to_batchify).__name__}")
         for k, v in kwargs.items():
             if k in kwargs_to_batchify and v is not None:
                 bdim = kwargs_to_batchify[k]
@@ -2536,7 +2537,8 @@ def module_inputs_torch_nn_TransformerEncoderLayer(module_info, device, dtype, r
     # since the fast path requires no_grad mode, we run the fast path in .eval()
     # and no_grad() in the reference_fn and verify that against the results in train mode.
     def fast_path_reference_fn(module, parameters, *args, **kwargs):
-        assert module.training
+        if not module.training:
+            raise AssertionError("module must be in training mode")
         module.train(False)
         with torch.no_grad():
             output = module(*args, **kwargs)

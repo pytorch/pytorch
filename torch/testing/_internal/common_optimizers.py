@@ -1333,7 +1333,8 @@ def _get_device_type(device: Union[str, torch.device]) -> str:
     # Returns the device type as a string, e.g., "cpu" or "cuda"
     if isinstance(device, torch.device):
         device = str(device.type)
-    assert isinstance(device, str)
+    if not isinstance(device, str):
+        raise TypeError(f"device must be a string or torch.device, got {type(device)}")
     return device.split(":")[0]
 
 
@@ -1351,9 +1352,10 @@ def _get_optim_inputs_including_global_cliquey_kwargs(
     trivial. That said, we sometimes want to test for all possible configs on an
     optimizer including all supported flags, so this helper returns all optim inputs.
     """
-    assert all(x in ["foreach", "fused", "differentiable"] for x in skip), (
-        "skip must be a subset of ['foreach', 'fused', 'differentiable']"
-    )
+    if any(x not in ["foreach", "fused", "differentiable"] for x in skip):
+        raise AssertionError(
+            "skip must be a subset of ['foreach', 'fused', 'differentiable']"
+        )
 
     optim_inputs = optim_info.optim_inputs_func(device)
 

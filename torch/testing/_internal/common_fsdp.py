@@ -154,9 +154,11 @@ def _assert_module_states(
     olist = [None for _ in range(world_size)]
     dist.all_gather_object(olist, named_module_states, group=process_group)
     rank0_states = olist[0]
-    assert rank0_states is not None  # mypy
+    if rank0_states is None:
+        raise AssertionError("rank0_states (olist[0]) must not be None")
     for state in olist[1:]:
-        assert state is not None  # mypy
+        if state is None:
+            raise AssertionError("state in olist must not be None")
         for (_, p1), (_, p2) in zip(rank0_states, state, strict=True):
             assert_fn(p1, p2)
 
@@ -1144,7 +1146,8 @@ def check_sharded_parity(
             clean_sharded_name = clean_sharded_name.replace(prefix, "")
         cls.assertEqual(replicated_name, clean_sharded_name)
         cls.assertIsInstance(sharded_param, DTensor)
-        assert isinstance(sharded_param, DTensor)  # mypy
+        if not isinstance(sharded_param, DTensor):
+            raise TypeError("sharded_param should be DTensor")
         mesh, placements = sharded_param.device_mesh, sharded_param.placements
         if tuple(placements) == (Shard(0), Shard(0)):
             raise AssertionError(
@@ -1159,7 +1162,8 @@ def check_sharded_parity(
         cls.assertIsNotNone(sharded_param.grad)
         sharded_ref_grad = distribute_tensor(replicated_param.grad, mesh, placements)
         cls.assertIsInstance(sharded_param.grad, DTensor)
-        assert isinstance(sharded_param.grad, DTensor)  # mypy
+        if not isinstance(sharded_param.grad, DTensor):
+            raise TypeError("sharded_param.grad should be DTensor")
         cls.assertEqual(sharded_param.grad.to_local(), sharded_ref_grad.to_local())
 
 
@@ -1328,16 +1332,20 @@ class FSDPTest(MultiProcessTestCase):
             loss = sharded_grad_scaler.scale(loss)
 
             if not mixed_precision and not use_pure_fp16:
-                assert loss.dtype == torch.float32, (
-                    "loss data type should be float32, as the original \
+                if loss.dtype != torch.float32:
+                    raise AssertionError(
+                        "loss data type should be float32, as the original \
                     parameter data type is float32."
-                )
+                    )
             else:
                 if use_pure_fp16:
                     self.assertEqual(loss.dtype, torch.float16)
                 # FSDP loss is fp16, DDP AMP loss is fp32
                 elif isinstance(model, FSDP):
-                    assert mixed_precision is not None  # mypy
+                    if mixed_precision is None:
+                        raise AssertionError(
+                            "mixed_precision is expected to be not None"
+                        )
                     self.assertEqual(loss.dtype, mixed_precision.param_dtype)
                 else:
                     self.assertEqual(loss.dtype, torch.float32)
@@ -1397,9 +1405,8 @@ class FSDPTest(MultiProcessTestCase):
                 wrapper should provide data parallel semantics. If ``None``,
                 then the callable defaults to the DDP constructor.
         """
-        assert fsdp_init_mode != FSDPInitMode.NO_FSDP, (
-            "Expects an FSDP init mode that wraps with FSDP"
-        )
+        if fsdp_init_mode == FSDPInitMode.NO_FSDP:
+            raise AssertionError("Expects an FSDP init mode that wraps with FSDP")
         if init_kwargs is None:
             init_kwargs = {}
         lr = 1e-2
