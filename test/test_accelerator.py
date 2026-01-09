@@ -257,7 +257,7 @@ class TestAccelerator(TestCase):
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH or TEST_CUDAMALLOCASYNC,
-        "Requires Graph support with native allocator."
+        "Requires Graph support with native allocator.",
     )
     def test_graph_three_successive(self):
         gc.collect()
