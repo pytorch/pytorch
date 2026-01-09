@@ -691,6 +691,10 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             if group_m is not None:
                 key += (group_m,)
 
+            # Add BlackwellGPUGemmConfig specific fields to key if present
+            if isinstance(conf, BlackwellGPUGemmConfig):
+                key += (conf.epilogue_subtile, conf.warp_specialize, conf.flatten)
+
             if key not in used and (
                 max_mm_configs is None or len(used) < max_mm_configs
             ):
