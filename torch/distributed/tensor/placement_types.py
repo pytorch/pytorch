@@ -119,9 +119,11 @@ class Shard(torch._C._distributed.Shard):
         Like _split_tensor() but only returns a single Tensor
         """
         shards, _ = self._split_tensor(
-            tensor, num_chunks, with_padding=with_padding, contiguous=contiguous
+            tensor, num_chunks, with_padding=with_padding, contiguous=False
         )
         result = shards[index]
+        if contiguous:
+            result = result.contiguous()
         return result
 
     @staticmethod
@@ -744,9 +746,11 @@ class _StridedShard(torch._C._distributed.StridedShard):
         Like _split_tensor() but only returns a single Tensor
         """
         shards, _ = self._split_tensor(
-            tensor, num_chunks, with_padding=with_padding, contiguous=contiguous
+            tensor, num_chunks, with_padding=with_padding, contiguous=False
         )
         result = shards[index]
+        if contiguous:
+            result = result.contiguous()
         return result
 
     def _to_replicate_tensor(
