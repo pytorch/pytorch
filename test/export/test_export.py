@@ -78,6 +78,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     run_tests,
     skipIfCrossRef,
+    skipIfRocm,
     skipIfXpu,
     TEST_TRANSFORMERS,
     TEST_WITH_CROSSREF,
@@ -3184,15 +3185,12 @@ def forward(self, x, y):
     foo = torch.ops.export.foo.default(x, y);  x = None
     sym_size_int = torch.ops.aten.sym_size.int(foo, 0)
     sym_size_int_1 = torch.ops.aten.sym_size.int(foo, 1)
-    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int);  sym_constrain_range_for_size_default = None
     ge = sym_size_int >= 0;  sym_size_int = None
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
-    sym_constrain_range_for_size_default_1 = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_1);  sym_constrain_range_for_size_default_1 = None
     ge_1 = sym_size_int_1 >= 0;  sym_size_int_1 = None
     _assert_scalar_default_1 = torch.ops.aten._assert_scalar.default(ge_1, "Runtime assertion failed for expression u1 >= 0 on node 'ge_1'");  ge_1 = _assert_scalar_default_1 = None
     bar = torch.ops.export.bar.default(y);  y = None
     sym_size_int_2 = torch.ops.aten.sym_size.int(bar, 0)
-    sym_constrain_range_for_size_default_2 = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_2);  sym_constrain_range_for_size_default_2 = None
     ge_2 = sym_size_int_2 >= 0;  sym_size_int_2 = None
     _assert_scalar_default_2 = torch.ops.aten._assert_scalar.default(ge_2, "Runtime assertion failed for expression u2 >= 0 on node 'ge_2'");  ge_2 = _assert_scalar_default_2 = None
     return (foo, bar)""",
@@ -8124,6 +8122,87 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
             ):
                 _ = export(mod, inp, strict=True)
 
+    @requires_gpu
+    @skipIfRocm
+    @skipIfXpu
+    @testing.expectedFailureSerDer
+    @testing.expectedFailureSerDerNonStrict
+    def test_export_lstm_gpu(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rnn = torch.nn.LSTM(
+                    input_size=4, hidden_size=5, num_layers=1, batch_first=True
+                )
+
+            def forward(self, x):
+                out, _ = self.rnn(x)
+                return out
+
+        m = M().to(GPU_TYPE)
+        x = torch.randn(2, 3, 4, device=GPU_TYPE)
+
+        ep = export(m, (x,))
+        self.assertTrue(callable(ep.module()))
+
+        eager_out = m(x)
+        export_out = ep.module()(x)
+        self.assertEqual(eager_out, export_out)
+
+    @requires_gpu
+    @skipIfRocm
+    @skipIfXpu
+    @testing.expectedFailureSerDer
+    @testing.expectedFailureSerDerNonStrict
+    def test_export_gru_gpu(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.rnn = torch.nn.GRU(
+                    input_size=4, hidden_size=5, num_layers=1, batch_first=True
+                )
+
+            def forward(self, x):
+                out, _ = self.rnn(x)
+                return out
+
+        m = M().to(GPU_TYPE)
+        x = torch.randn(2, 3, 4, device=GPU_TYPE)
+
+        ep = export(m, (x,))
+        self.assertTrue(callable(ep.module()))
+
+        eager_out = m(x)
+        export_out = ep.module()(x)
+        self.assertEqual(eager_out, export_out)
+
+    @requires_gpu
+    @skipIfRocm
+    @skipIfXpu
+    @testing.expectedFailureSerDer
+    @testing.expectedFailureSerDerNonStrict
+    def test_export_rnn_flatten_parameters_gpu(self):
+        class M(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.lstm = torch.nn.LSTM(
+                    input_size=3, hidden_size=4, num_layers=2, batch_first=True
+                )
+
+            def forward(self, x):
+                self.lstm.flatten_parameters()
+                out, (h, c) = self.lstm(x)
+                return out
+
+        m = M().to(GPU_TYPE)
+        x = torch.randn(1, 5, 3, device=GPU_TYPE)
+
+        ep = export(m, (x,), strict=False)
+
+        eager_out = m(x)
+        export_out = ep.module()(x)
+        self.assertEqual(eager_out, export_out)
+
     def test_device_to_static(self):
         class Module(torch.nn.Module):
             def forward(self, x):
@@ -8749,7 +8828,7 @@ def forward(self, x):
     bn_num_batches_tracked = self.bn.num_batches_tracked;  bn_num_batches_tracked = None
     _guards_fn = self._guards_fn(x);  _guards_fn = None
     conv2d = torch.ops.aten.conv2d.default(x, conv_weight, conv_bias);  x = conv_weight = conv_bias = None
-    batch_norm = torch.ops.aten.batch_norm.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, False, 0.1, 1e-05, True);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
+    batch_norm = torch.ops.aten.batch_norm.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, False, 0.1, 1e-05, False);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
     return pytree.tree_unflatten((batch_norm,), self._out_spec)""",
         )
 
@@ -8770,7 +8849,7 @@ def forward(self, x):
     _guards_fn = self._guards_fn(x);  _guards_fn = None
     conv2d = torch.ops.aten.conv2d.default(x, conv_weight, conv_bias);  x = conv_weight = conv_bias = None
     add_ = torch.ops.aten.add_.Tensor(bn_num_batches_tracked, 1);  bn_num_batches_tracked = add_ = None
-    batch_norm = torch.ops.aten.batch_norm.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, True, 0.1, 1e-05, True);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
+    batch_norm = torch.ops.aten.batch_norm.default(conv2d, bn_weight, bn_bias, bn_running_mean, bn_running_var, True, 0.1, 1e-05, False);  conv2d = bn_weight = bn_bias = bn_running_mean = bn_running_var = None
     return pytree.tree_unflatten((batch_norm,), self._out_spec)""",
         )
 
@@ -9699,7 +9778,6 @@ def forward(self, b_a_buffer, x):
         self.assertTrue(torch.allclose(ep.module()(xs), module_out))
 
     @requires_cuda_and_triton
-    @testing.expectedFailureStrictV2
     def test_export_associative_scan_lifted_buffers(self):
         if "cpp_runtime_nonstrict" in self.id():
             self.skipTest("TODO Unexpected success in OSS but not in fbcode.")
@@ -9944,7 +10022,6 @@ def forward(self, b_a_buffer, x):
         self.assertEqual(len(ep.graph_signature.input_specs), 4)
         self.assertTrue(torch.allclose(ep.module()(*inp), transform.module()(*inp)))
 
-    @testing.expectedFailureStrictV2
     def test_tensor_attribute_zero_args(self):
         class Foo(torch.nn.Module):
             def __init__(self, value):
@@ -10264,7 +10341,6 @@ def forward(self, p_conv_weight, p_conv_bias, p_conv1d_weight, p_conv1d_bias, c_
             # expected 4, but got 7
             ep_v2.module()(*test_inp)
 
-    @testing.expectedFailureStrictV2
     def test_constant_output(self):
         class ModuleConstant(torch.nn.Module):
             def __init__(self) -> None:
@@ -16408,13 +16484,10 @@ def forward(self, x):
     submod_6 = self.submod_1
     to = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_6, mod_embedding_weight);  submod_6 = mod_embedding_weight = None
     getitem = to[0];  to = None
-    submod_7 = self.submod_3
-    wrap_with_set_grad_enabled = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_7);  submod_7 = wrap_with_set_grad_enabled = None
-    submod_8 = self.submod_4
-    view_as = torch.ops.higher_order.wrap_with_set_grad_enabled(False, submod_8, detach, getitem);  submod_8 = detach = getitem = None
-    getitem_1 = view_as[0];  view_as = None
+    set_ = torch.ops.aten.set_.source_Tensor(detach, getitem);  detach = getitem = None
+    view_as = torch.ops.aten.view_as.default(set_, set_);  set_ = None
     ones = torch.ops.aten.ones.default([4], dtype = torch.int64, device = device(type='cuda', index=0), pin_memory = False)
-    embedding = torch.ops.aten.embedding.default(getitem_1, ones);  getitem_1 = ones = None
+    embedding = torch.ops.aten.embedding.default(view_as, ones);  view_as = ones = None
     sum_1 = torch.ops.aten.sum.default(embedding);  embedding = None
     sum_2 = torch.ops.aten.sum.default(args_0);  args_0 = None
     sum_3 = torch.ops.aten.sum.default(sum_1);  sum_1 = None
@@ -17934,7 +18007,6 @@ class TestExportCustomClass(TorchTestCase):
 def forward(self, x, mask):
     masked_select = torch.ops.aten.masked_select.default(x, mask);  x = mask = None
     sym_size_int_1 = torch.ops.aten.sym_size.int(masked_select, 0)
-    sym_constrain_range_for_size_default = torch.ops.aten.sym_constrain_range_for_size.default(sym_size_int_1);  sym_constrain_range_for_size_default = None
     ge = sym_size_int_1 >= 0
     _assert_scalar_default = torch.ops.aten._assert_scalar.default(ge, "Runtime assertion failed for expression u0 >= 0 on node 'ge'");  ge = _assert_scalar_default = None
     le = sym_size_int_1 <= 1188864

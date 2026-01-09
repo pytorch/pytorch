@@ -11346,6 +11346,18 @@ class TestConvolutionMPS(TestCaseMPS):
                                      msg=f"groundtruth comparison failed for mode={mode}, "
                                      f"padding_mode={padding_mode}")
 
+    def test_grid_sample_non_contig(self):
+        inp = torch.randn((1, 4, 4, 8, 8), device="mps")
+        grid_noncontig = torch.randn((1, 3, 4, 8, 8), device="mps").permute(0, 2, 3, 4, 1)
+        mps_res = F.grid_sample(
+            inp, grid_noncontig, align_corners=False, padding_mode='zeros'
+        )
+        cpu_res = F.grid_sample(
+            inp, grid_noncontig, align_corners=False, padding_mode='zeros'
+        )
+        self.assertEqual(mps_res.cpu(), cpu_res)
+
+
 class TestAdvancedIndexing(TestCaseMPS):
     supported_dtypes = [torch.float32, torch.float16, torch.int64, torch.int32, torch.int16, torch.uint8]
     supported_np_dtypes = [np.float32, np.float16, np.int64, np.int32, np.int16, np.uint8]
