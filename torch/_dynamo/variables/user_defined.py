@@ -1248,6 +1248,22 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             "an AttributeMutation mutation_type"
         )
 
+        # __weakref_ and __dict__ can't be reassigned on instances
+        if name in ("__weakref__", "__dict__"):
+            raise_observed_exception(AttributeError, tx)
+
+        # Properties without setters are read-only
+        try:
+            desc = inspect.getattr_static(type(self.value), name)
+        except AttributeError:
+            desc = None
+
+        if isinstance(desc, property) and desc.fset is None:
+            raise_observed_exception(AttributeError, tx)
+
+        # Objects using __slots__ can only set attributes that are in the slots
+        if not hasattr(self.value, "__dict__") and desc is None:
+            raise_observed_exception(AttributeError, tx)
         if directly_update_dict:
             self.attrs_directly_modifed_on_dict.add(name_str)
         else:
