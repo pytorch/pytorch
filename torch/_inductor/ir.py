@@ -79,6 +79,7 @@ from .dependencies import (
     extract_free_symbols,
     extract_input_node_reduction_ranges,
     extract_read_writes,
+    MemoryDep,
     var_builder,
 )
 from .loop_body import LoopBody
@@ -5110,6 +5111,24 @@ class TemplateBuffer(OperationBuffer):
             None,
         )
 
+    def can_fuse_multi_output(self, node2) -> bool:
+        return False
+
+    def supports_multi_outputs(self) -> bool:
+        return False
+
+    def get_multi_output_write_dep(
+        self, output_name: str, template_writes: OrderedSet[Dep]
+    ) -> MemoryDep:
+        """Get the write dependency for fusing an epilogue with this output.
+
+        Multi-output templates can override this to return per-output dependencies.
+        """
+        assert len(template_writes) == 1
+        write = next(iter(template_writes))
+        assert isinstance(write, MemoryDep)
+        return write
+
 
 class TritonTemplateBuffer(TemplateBuffer):
     def __init__(
@@ -5399,6 +5418,9 @@ class CppTemplateBuffer(TemplateBuffer):
             return layout
         else:
             return super().get_layout()
+
+    def supports_multi_outputs(self) -> bool:
+        return isinstance(self.layout, MultiOutputLayout)
 
 
 class CuteDSLTemplateBuffer(TemplateBuffer):
