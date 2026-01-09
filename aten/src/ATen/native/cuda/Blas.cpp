@@ -355,6 +355,12 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   };
 
   if (can_avoid_bias_copy) { // Unfortunately, there are exceptions when bias is copied anyway.
+    #ifdef USE_ROCM
+    // Disabling 2D bias for ROCM
+    if (!disable_addmm_cuda_lt && args.bias.has_value() && (*args.bias)->dim() >= 2) {
+      copy_bias_into_result(args, **args.bias);
+    }
+    #endif
     // result.is_complex implies BLAS path, so we need to copy bias (self) into result
     if (result.is_complex() && args.bias.has_value()) {
       copy_bias_into_result(args, **args.bias);
