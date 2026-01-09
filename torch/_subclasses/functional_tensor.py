@@ -193,7 +193,6 @@ class FunctionalTensor(torch.Tensor):
 
         if kwargs is None:
             kwargs = {}
-        assert kwargs is not None
         # FunctionalTensor needs to plumb all metadata requests to the inner tensor.
         # In theory we don't have to do this - but if we want to service metadata requests here,
         # we need to carefully make sure all metadata is accurate (including metadata mutations)
@@ -222,7 +221,7 @@ class FunctionalTensor(torch.Tensor):
             "Attempting to use FunctionalTensor on its own. Instead, please use it with a corresponding FunctionalTensorMode()"
         )
 
-    def __repr__(self, *, tensor_contents: Any | None = None) -> str:
+    def __repr__(self, *, tensor_contents: object | None = None) -> str:
         return f"FunctionalTensor({repr(self.elem)})"
 
     @staticmethod
@@ -400,7 +399,6 @@ class FunctionalTensorMode(TorchDispatchMode):
     ) -> Any:
         if kwargs is None:
             kwargs = {}
-        assert kwargs is not None
 
         unrecognized_types = [
             t

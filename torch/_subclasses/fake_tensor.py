@@ -1431,9 +1431,9 @@ class FakeTensorMode(TorchDispatchMode):
 
     def __exit__(
         self,
-        exc_type: Optional[type[BaseException]],
-        exc_val: Optional[BaseException],
-        exc_tb: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
         (live, maybe_prev_fake_mode, maybe_prev_only_lift_cpu_tensors) = (
             self.enter_stack.pop()
