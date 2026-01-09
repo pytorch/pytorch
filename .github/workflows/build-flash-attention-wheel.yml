@@ -112,7 +112,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           ref: ${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}
-          submodules: recursive
+          # submodules: recursive
           path: pytorch
           show-progress: false
       - name: Checkout Flash-Attention
@@ -134,11 +134,11 @@ jobs:
       #     "${PYTORCH_ROOT}/.circleci/scripts/binary_populate_env.sh"
 
       - name: volume info
-        shell: pwsh
+        shell: powershell
         run: Get-Volume
 
       - name: Print pagefile size
-        shell: pwsh
+        shell: powershell
         run: |
           systeminfo | find "Virtual Memory"
 
