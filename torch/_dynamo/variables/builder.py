@@ -1579,7 +1579,7 @@ class VariableBuilder:
                 )
 
             return TorchScriptObjectVariable.create(
-                proxy,
+                proxy,  # pyrefly: ignore[bad-argument-type]
                 fake_script_obj,
                 source=self.source,
             )

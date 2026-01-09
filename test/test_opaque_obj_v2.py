@@ -91,6 +91,16 @@ class Counter:
         self.start = start
         self.end = end
 
+    def __eq__(self, other):
+        return (
+            isinstance(other, Counter)
+            and self.start == other.start
+            and self.end == other.end
+        )
+
+    def __hash__(self):
+        return hash((self.start, self.end))
+
     @property
     def counter(self):
         return torch.scalar_tensor(self.start, dtype=torch.int64)
@@ -221,6 +231,73 @@ register_opaque_type(
     members={"size": MemberType.USE_REAL, "increment_size": MemberType.USE_REAL},
 )
 register_opaque_type(NestedValueSize, typ="value")
+
+
+# A tensor subclass (similar to TwoTensor) that also holds an opaque Counter
+# object
+class TensorWithCounter(torch.Tensor):
+    @staticmethod
+    def __new__(cls, a, b, counter, outer_size=None, outer_stride=None):
+        if outer_size is None:
+            outer_size = a.size()
+        if outer_stride is None:
+            outer_stride = a.stride()
+
+        assert a.device == b.device and a.dtype == b.dtype
+        kwargs = {}
+        kwargs["strides"] = outer_stride
+        kwargs["storage_offset"] = a.storage_offset()
+        kwargs["device"] = a.device
+        kwargs["layout"] = a.layout
+        kwargs["requires_grad"] = a.requires_grad
+        kwargs["dtype"] = a.dtype
+        out = torch.Tensor._make_wrapper_subclass(cls, outer_size, **kwargs)
+        return out
+
+    def __init__(self, a, b, counter, outer_size=None, outer_stride=None):
+        self.a = a
+        self.b = b
+        self._counter = counter
+
+    def __repr__(self):
+        return f"TensorWithCounter({self.a}, {self.b}, {self._counter})"
+
+    def __tensor_flatten__(self):
+        return ["a", "b"], self._counter
+
+    @staticmethod
+    def __tensor_unflatten__(inner_tensors, ctx, outer_size, outer_stride):
+        a, b = inner_tensors["a"], inner_tensors["b"]
+        counter = ctx
+        return TensorWithCounter(a, b, counter, outer_size, outer_stride)
+
+    @classmethod
+    def __torch_dispatch__(cls, func, types, args, kwargs):
+        if kwargs is None:
+            kwargs = {}
+
+        def unwrap(x):
+            return x.a if isinstance(x, TensorWithCounter) else x
+
+        def wrap(x, counter):
+            return (
+                TensorWithCounter(x, x.clone(), counter)
+                if isinstance(x, torch.Tensor)
+                else x
+            )
+
+        # Get counter from first TensorWithCounter arg
+        counter = None
+        for arg in torch.utils._pytree.tree_leaves(args):
+            if isinstance(arg, TensorWithCounter):
+                counter = arg._counter
+                break
+
+        unwrapped_args = torch.utils._pytree.tree_map(unwrap, args)
+        unwrapped_kwargs = torch.utils._pytree.tree_map(unwrap, kwargs)
+
+        out = func(*unwrapped_args, **unwrapped_kwargs)
+        return torch.utils._pytree.tree_map(lambda x: wrap(x, counter), out)
 
 
 class TestOpaqueObject(TestCase):
@@ -1307,6 +1384,36 @@ def forward(self, arg0_1):
         opt_f = torch.compile(foo, fullgraph=True, backend="inductor")
         x = torch.randn(3, 3)
         self.assertEqual(opt_f(x), foo(x))
+
+    def test_tensor_subclass_with_opaque_attr(self):
+        """Test accessing an opaque object attribute from a tensor subclass."""
+
+        def fn(x):
+            y = x * 2 + 1
+            counter = y._counter
+            return torch.ops._TestOpaqueObject.increment_counter(counter, y)
+
+        a = torch.rand(4, 4)
+        b = torch.rand(4, 4)
+        counter = Counter(start=3, end=10)
+        x = TensorWithCounter(a, b, counter)
+
+        backend = AotEagerAndRecordGraphs()
+        opt_fn = torch.compile(fn, backend=backend, fullgraph=True)
+        opt_fn(x)
+
+        fx_class = _illegal_char_regex.sub("_", get_opaque_type_name(Counter))
+        self.assertExpectedInline(
+            str(backend.graphs[0].code).strip(),
+            f"""\
+def forward(self, L_x_ : {fx_class}):
+    l_x_ = L_x_
+    mul = l_x_ * 2;  l_x_ = None
+    y = mul + 1;  mul = None
+    getattr_1 = y._counter
+    increment_counter = torch.ops._TestOpaqueObject.increment_counter(getattr_1, y);  getattr_1 = y = None
+    return (increment_counter,)""",
+        )
 
 
 instantiate_parametrized_tests(TestOpaqueObject)
