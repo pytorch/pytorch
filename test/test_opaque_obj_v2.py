@@ -990,6 +990,28 @@ def forward(self, arg0_1):
         x = torch.randn(3, 3)
         self.assertEqual(opt_f(x), foo(x))
 
+    def test_register_opaque_type_multiple_times(self):
+        # Test that registering the same opaque type multiple times works.
+        # This is useful when multiple libraries or modules independently
+        # try to register the same type.
+        class MultiRegisterClass:
+            def __init__(self, value):
+                self.value = value
+
+        # First registration should succeed
+        register_opaque_type(MultiRegisterClass, typ="reference")
+        self.assertTrue(is_opaque_type(MultiRegisterClass))
+
+        # Second registration with the same type should also succeed
+        register_opaque_type(MultiRegisterClass, typ="reference")
+        self.assertTrue(is_opaque_type(MultiRegisterClass))
+
+        # Verify the type name is still correct
+        expected_name = (
+            f"{MultiRegisterClass.__module__}.{MultiRegisterClass.__qualname__}"
+        )
+        self.assertEqual(get_opaque_type_name(MultiRegisterClass), expected_name)
+
 
 instantiate_parametrized_tests(TestOpaqueObject)
 
