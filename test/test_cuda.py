@@ -259,8 +259,31 @@ class TestCuda(TestCase):
 
         check_stats(expected)
 
-        # Empty cache and check stats
+        # Free tensors (no recorded streams) and check active counters drop
+        del t1
+        del t2
+        gc.collect()
+        for prefix in ["active_requests"]:
+            expected[prefix + ".current"] -= 2
+            expected[prefix + ".freed"] += 2
+        for prefix, size in [("active_bytes", allocation_size1 + allocation_size2)]:
+            expected[prefix + ".current"] -= size
+            expected[prefix + ".freed"] += size
+
+        check_stats(expected)
+
+        # Empty cache and check pool counters drop
         torch._C._host_emptyCache()
+
+        for prefix in ["allocations"]:
+            expected[prefix + ".current"] -= 2
+            expected[prefix + ".freed"] += 2
+        total_allocated = allocation_size1 + allocation_size2
+        for prefix in ["allocated_bytes"]:
+            expected[prefix + ".current"] -= total_allocated
+            expected[prefix + ".freed"] += total_allocated
+        expected["num_host_free"] = expected["allocations.freed"]
+        expected["host_free_time.count"] += 2
 
         check_stats(expected)
 
