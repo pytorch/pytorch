@@ -41,11 +41,11 @@ if(env_cxx_standard GREATER -1)
   message(
     WARNING
       "C++ standard version definition detected in environment variable."
-      "PyTorch requires -std=c++17. Please remove -std=c++ settings in your environment."
+      "PyTorch requires -std=c++20. Please remove -std=c++ settings in your environment."
   )
 endif()
 set(CMAKE_CXX_STANDARD
-    17
+    20
     CACHE STRING
           "The C++ standard whose features are requested to build this target.")
 set(CMAKE_C_STANDARD
@@ -56,11 +56,11 @@ set(CMAKE_C_STANDARD
 # ---[ Utils
 include(cmake/public/utils.cmake)
 
-# --- [ Check that minimal gcc version is 9.3+
-if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 9.3)
+# --- [ Check that minimal gcc version is 11.3+
+if(CMAKE_COMPILER_IS_GNUCXX AND CMAKE_CXX_COMPILER_VERSION VERSION_LESS 11.3)
   message(
     FATAL_ERROR
-      "GCC-9.3 or newer is required to compile PyTorch, but found ${CMAKE_CXX_COMPILER_VERSION}"
+      "GCC-11.3 or newer is required to compile PyTorch, but found ${CMAKE_CXX_COMPILER_VERSION}"
   )
 endif()
 
