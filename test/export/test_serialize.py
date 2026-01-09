@@ -771,8 +771,12 @@ def forward(self, x):
         m = Model().to(device)
         args = (torch.randn(1024, device=device),)
 
+        # Run the model in eager mode first to warm up the Triton cache
+        eager_result = m(*args)
+
         ep = torch.export.export(m, args=args)
         ep = ep.run_decompositions(decompose_custom_triton_ops=False)
+        assert torch.allclose(eager_result, ep.module()(*args))
 
         # This should not raise - constexpr matching should work for bool values
         serialized = ExportedProgramSerializer().serialize(ep)
