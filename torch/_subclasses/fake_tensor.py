@@ -670,10 +670,12 @@ class FakeTensor(Tensor):
     # TODO: Generalize this as needed, e.g., into a trie of memos, if
     # you do something like x[0].item()  (x[0] is fresh each time, so
     # memo mechanism here won't work)
-    nonzero_memo = SymNumberMemoDescriptor()
+    nonzero_memo: SymNumberMemoDescriptor | int | None = SymNumberMemoDescriptor()
     item_memo = SymNumberMemoDescriptor()
-    unique_memo = SymNumberMemoDescriptor()
-    unique_consecutive_memo = SymNumberMemoDescriptor()
+    unique_memo: SymNumberMemoDescriptor | int | None = SymNumberMemoDescriptor()
+    unique_consecutive_memo: SymNumberMemoDescriptor | int | None = (
+        SymNumberMemoDescriptor()
+    )
 
     # We expect nested_int_memo to be None when an offsets is a graph
     # intermediate, or an input that has never been associated with a
