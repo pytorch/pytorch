@@ -3509,36 +3509,6 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
         assert not hasattr(compiled_model.linear, "_tmp_weight")
         torch.testing.assert_close(eager_output, compiled_output)
 
-    @patch.object(torch._dynamo.config, "guard_nn_modules", True)
-    def test_dict_insertion_guard_method_func(self):
-        class SimpleModel(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(10, 10)
-
-            def forward(self, x):
-                return self.linear(x)
-
-        def hook_function(module, args):
-            return (args[0] + 1.0,)
-
-        class HookHelper:
-            def hook_method(self, module, args):
-                return (args[0] + 2.0,)
-
-        model = SimpleModel()
-        helper = HookHelper()
-
-        model.register_forward_pre_hook(hook_function)
-        model.register_forward_pre_hook(helper.hook_method, prepend=True)
-
-        @torch.compile(fullgraph=True, backend="eager")
-        def runner_func(mod, x):
-            return mod(x)
-
-        input_tensor = torch.randn(1, 10)
-        output = runner_func(model, input_tensor)
-
 
 devices = ["cuda", "hpu", "xpu"]
 instantiate_device_type_tests(

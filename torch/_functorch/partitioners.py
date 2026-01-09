@@ -2502,6 +2502,10 @@ def estimate_runtime(node):
             node.target(*args, **kwargs)
         counted_flops = mode.get_total_flops()
         return max(counted_flops, 1)
+
+    elif callable(RUNTIME_MODE):
+        return RUNTIME_MODE(node)
+
     else:
         raise RuntimeError(f"Not aware of runtime estimator: {RUNTIME_MODE}")
 

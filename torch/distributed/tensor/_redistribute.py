@@ -175,17 +175,16 @@ def _optimize_transform_infos_for_flattened_reductions(
     device_mesh: DeviceMesh,
 ) -> list[_TransformInfo | _FlattenedTransformInfo]:
     """
-    Optimize a list of transform infos by grouping same-type reduction operations
-    and replacing them with flattened transforms when a matching flattened DeviceMesh exists.
+    Optimize a list of transform infos by grouping consecutive same-type reduction
+    operations and replacing them with flattened transforms when a matching
+    flattened DeviceMesh exists.
 
-    This function finds all transforms that perform the same type of reduction
-    (e.g., Partial("sum") -> Replicate), groups them by reduce_op, and checks if there
-    exists a flattened DeviceMesh that covers exactly those mesh dimensions. If such
-    a mesh exists, the group is replaced with a single _FlattenedTransformInfo.
-    Otherwise, the original _TransformInfo entries are preserved.
-
-    Reductions on different mesh dimensions are independent operations, so they can
-    be grouped even if they are not consecutive in the original transform list.
+    IMPORTANT: Only consecutive reductions can be flattened. Non-consecutive
+    reductions (with different operations in between) cannot be grouped because
+    the order of operations matters. For example:
+        sum_A, max_B, sum_C -> sum_C(max_B(sum_A(x)))
+    is NOT the same as:
+        sum_{A,C}, max_B -> max_B(sum_{A,C}(x))
 
     Args:
         transform_infos: List of transform infos to optimize
@@ -193,84 +192,67 @@ def _optimize_transform_infos_for_flattened_reductions(
 
     Returns:
         List of transform infos (mix of _TransformInfo and _FlattenedTransformInfo)
-        with eligible reductions replaced by flattened versions where possible.
+        with eligible consecutive reductions replaced by flattened versions.
     """
     if not transform_infos:
         return []
 
-    # Separate reductions by reduce_op, and track non-reductions
-    # Key: reduce_op string, Value: list of (original_index, transform_info)
-    reductions_by_op: dict[str, list[tuple[int, _TransformInfo]]] = defaultdict(list)
-    non_reductions: list[tuple[int, _TransformInfo]] = []
+    result: list[_TransformInfo | _FlattenedTransformInfo] = []
+    i = 0
 
-    for idx, info in enumerate(transform_infos):
+    while i < len(transform_infos):
+        info = transform_infos[i]
         src, dst = info.src_dst_placements
+
+        # Check if this is a Partial -> Replicate reduction
         if src.is_partial() and dst.is_replicate():
-            reduce_op = cast(Partial, src).reduce_op
-            reductions_by_op[reduce_op].append((idx, info))
+            # Find consecutive reductions of the same type
+            # Note: We compare the full Partial placement (not just reduce_op) because
+            # subclasses like _NormPartial have the same reduce_op but different semantics
+            consecutive_reductions = [(i, info)]
+            j = i + 1
+            while j < len(transform_infos):
+                next_info = transform_infos[j]
+                next_src, next_dst = next_info.src_dst_placements
+                if (
+                    next_src.is_partial()
+                    and next_dst.is_replicate()
+                    and next_src == src
+                ):
+                    consecutive_reductions.append((j, next_info))
+                    j += 1
+                else:
+                    break
+
+            if len(consecutive_reductions) >= 2:
+                # Try to flatten consecutive reductions
+                mesh_dims = tuple(info.mesh_dim for _, info in consecutive_reductions)
+                flattened_mesh = _get_flattened_mesh_by_layout(device_mesh, mesh_dims)
+
+                if flattened_mesh is not None:
+                    # Create a flattened transform
+                    first_idx, first_info = consecutive_reductions[0]
+                    flattened_transform = _FlattenedTransformInfo(
+                        mesh_dim=0,
+                        src_dst_placements=(src, dst),
+                        logical_shape=first_info.logical_shape,
+                        mesh=flattened_mesh,
+                        original_mesh_dims=mesh_dims,
+                    )
+                    result.append(flattened_transform)
+                    i = j  # Skip all consecutive reductions
+                    continue
+
+            # No flattening possible, add reductions individually
+            for _, reduction_info in consecutive_reductions:
+                result.append(reduction_info)
+            i = j
         else:
-            non_reductions.append((idx, info))
+            # Non-reduction transform, add as-is
+            result.append(info)
+            i += 1
 
-    # Try to flatten each group of same-type reductions
-    # Track which indices have been consumed by flattening
-    consumed_indices: set[int] = set()
-    flattened_transforms: list[tuple[int, _FlattenedTransformInfo]] = []
-
-    for reduce_op, reductions in reductions_by_op.items():
-        if len(reductions) < 2:
-            # Single reduction, nothing to flatten
-            continue
-
-        # Extract mesh dims for this group
-        mesh_dims = tuple(info.mesh_dim for _, info in reductions)
-
-        # Check if a flattened mesh exists for these dims
-        flattened_mesh = _get_flattened_mesh_by_layout(device_mesh, mesh_dims)
-
-        if flattened_mesh is not None:
-            # Create a flattened transform to replace the group
-            # Use the first transform's info as representative
-            first_idx, first_info = reductions[0]
-            src, dst = first_info.src_dst_placements
-
-            flattened_transform = _FlattenedTransformInfo(
-                mesh_dim=0,  # Always 0 for flattened 1D mesh
-                src_dst_placements=(src, dst),
-                logical_shape=first_info.logical_shape,
-                mesh=flattened_mesh,
-                original_mesh_dims=mesh_dims,
-            )
-
-            # Mark all indices in this group as consumed
-            for idx, _ in reductions:
-                consumed_indices.add(idx)
-
-            # Insert the flattened transform at the position of the first reduction
-            flattened_transforms.append((first_idx, flattened_transform))
-
-    # Build result list preserving relative order
-    # - Non-consumed transforms keep their original order
-    # - Flattened transforms are inserted at the position of their first reduction
-    result_items: list[tuple[int, _TransformInfo | _FlattenedTransformInfo]] = []
-
-    # Add non-reductions that weren't consumed
-    for idx, info in non_reductions:
-        result_items.append((idx, info))
-
-    # Add reductions that weren't consumed (single reductions or no flattened mesh)
-    for reduce_op, reductions in reductions_by_op.items():
-        for idx, info in reductions:
-            if idx not in consumed_indices:
-                result_items.append((idx, info))
-
-    # Add flattened transforms
-    for idx, flattened in flattened_transforms:
-        result_items.append((idx, flattened))
-
-    # Sort by original index to preserve order
-    result_items.sort(key=lambda x: x[0])
-
-    return [item for _, item in result_items]
+    return result
 
 
 # Global cache for DTensorRedistributePlanner instances
@@ -463,8 +445,7 @@ class DTensorRedistributePlanner:
             dtensor_meta: TensorMeta of the DTensor to redistribute
         """
         self.device_mesh = device_mesh
-        self.coordinate = device_mesh.get_coordinate()
-        assert self.coordinate is not None
+        assert device_mesh._is_current_rank_part_of_mesh()
         assert dtensor_meta is not None
         self.dtensor_meta = dtensor_meta
         self.tensor_dimension = len(dtensor_meta.shape)
@@ -738,7 +719,6 @@ class DTensorRedistributePlanner:
         full_tensor_shape: tuple[int, ...],
     ) -> list[int]:
         new_logical_shape = list(full_tensor_shape)
-        assert self.coordinate is not None
         for entry in src_state.tensor_dim_to_mesh_dim:
             tensor_dim = entry.tensor_dim
             mesh_dims = entry.mesh_dims
@@ -749,7 +729,7 @@ class DTensorRedistributePlanner:
                 new_size = Shard.local_shard_size_and_offset(
                     new_logical_shape[tensor_dim],
                     self.device_mesh.size(mesh_dim=mdim),
-                    self.coordinate[mdim],
+                    self.device_mesh._sym_get_coordinate(mdim),
                 )[0]
                 new_logical_shape[tensor_dim] = new_size
         return new_logical_shape
@@ -838,7 +818,6 @@ class DTensorRedistributePlanner:
         """
         # logical shape records the logic tensor shape on the mesh dimension
         # this is useful to ensure uneven sharding gets correct output shape
-        assert self.coordinate is not None
         initial_logical_shape = list(src_spec.shape)
         mesh_dims_to_logical_shape = [initial_logical_shape]
         transform_infos: list[_TransformInfo] = []
@@ -866,7 +845,7 @@ class DTensorRedistributePlanner:
                     local_shard_size, _ = src._local_shard_size_and_offset(
                         current_logical_shape[src.dim],
                         mesh_dim_size,
-                        self.coordinate[i],
+                        self.device_mesh._sym_get_coordinate(i),
                     )
                     new_logical_shape = list(current_logical_shape)
                     new_logical_shape[src.dim] = local_shard_size
@@ -1013,9 +992,7 @@ def redistribute_local_tensor(
     new_local_tensor = local_tensor
     device_mesh = current_spec.mesh
 
-    my_coordinate = device_mesh.get_coordinate()
-
-    if my_coordinate is None:
+    if not device_mesh._is_current_rank_part_of_mesh():
         # if rank is not part of mesh, we skip redistribute and simply return local_tensor,
         # which should be an empty tensor
         return local_tensor
@@ -1098,7 +1075,7 @@ def redistribute_local_tensor(
                 elif current.is_replicate():
                     # split the tensor and return the corresponding cloned local shard
                     new_local_tensor = target_placement._replicate_to_shard(
-                        local_tensor, mesh_to_use, i, my_coordinate[i]
+                        local_tensor, mesh_to_use, i, device_mesh._sym_get_coordinate(i)
                     )
                 else:
                     assert current.is_shard(), (
