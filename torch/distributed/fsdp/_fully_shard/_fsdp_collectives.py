@@ -630,6 +630,12 @@ def foreach_reduce(
                     # Record an event on which to block the CPU thread to
                     # ensure that the D2H copy finishes before the optimizer
                     fsdp_param.grad_offload_event = post_reduce_stream.record_event()
+            param_grad_dtype = fsdp_param.sharded_param.grad_dtype
+            if (
+                param_grad_dtype is not None
+                and new_sharded_grad.dtype != param_grad_dtype
+            ):
+                new_sharded_grad = new_sharded_grad.to(param_grad_dtype)
             if to_accumulate_grad:
                 if not isinstance(fsdp_param.sharded_param.grad, DTensor):
                     raise AssertionError(

@@ -388,6 +388,35 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             ):
                 ref_param_compute.detach().copy_(ref_param)
 
+    @skip_if_lt_x_gpu(2)
+    def test_grad_dtype_preserved(self):
+        # test that grad_dtype is preserved when applying fully_shard
+        torch.manual_seed(42)
+        model = nn.Sequential(*[MLP(16, torch.device("cpu")) for _ in range(3)])
+        model.to(device_type)
+
+        desired_grad_dtype = torch.bfloat16
+        for param in model.parameters():
+            param.grad_dtype = desired_grad_dtype
+
+        mp_policy = MixedPrecisionPolicy(
+            param_dtype=torch.bfloat16, reduce_dtype=torch.float32
+        )
+        for mlp in model:
+            fully_shard(mlp, mp_policy=mp_policy)
+        fully_shard(model, mp_policy=mp_policy)
+
+        for param in model.parameters():
+            self.assertEqual(param.grad_dtype, desired_grad_dtype)
+
+        torch.manual_seed(42 + self.rank + 1)
+        inp = torch.randn(2, 16, device=device_type, dtype=torch.bfloat16)
+        model(inp).sum().backward()
+
+        for param in model.parameters():
+            self.assertIsNotNone(param.grad)
+            self.assertEqual(param.grad.dtype, desired_grad_dtype)
+
 
 class TestFullyShardMixedPrecisionCasts(FSDPTestMultiThread):
     @property
