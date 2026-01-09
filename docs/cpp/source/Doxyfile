@@ -111,10 +111,10 @@ SKIP_FUNCTION_MACROS   = NO
 # Extra defs for to help with building the _right_ version of the docs
 PREDEFINED             = DOXYGEN_DOCUMENTATION_BUILD
 PREDEFINED            += DOXYGEN_SHOULD_SKIP_THIS
-# Use INPUT_FILTER to preprocess HIDDEN_NAMESPACE macros before Doxygen parses them.
+# Use FILTER_PATTERNS to preprocess HIDDEN_NAMESPACE macros only for torch/csrc/stable files.
 # Doxygen's PREDEFINED doesn't work reliably because it finds the actual macro definitions
 # in the included headers. Using sed with explicit literal replacements works correctly.
-INPUT_FILTER           = "sed -e 's/HIDDEN_NAMESPACE_BEGIN(torch, stable, accelerator)/namespace torch { namespace stable { namespace accelerator {/g' -e 's/HIDDEN_NAMESPACE_END(torch, stable, accelerator)/} } }/g' -e 's/HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)/namespace torch { namespace stable { namespace detail {/g' -e 's/HIDDEN_NAMESPACE_END(torch, stable, detail)/} } }/g' -e 's/HIDDEN_NAMESPACE_BEGIN(torch, stable)/namespace torch { namespace stable {/g' -e 's/HIDDEN_NAMESPACE_END(torch, stable)/} }/g'"
+FILTER_PATTERNS        = */torch/csrc/stable/*.h="sed -e 's/HIDDEN_NAMESPACE_BEGIN(torch, stable, accelerator)/namespace torch { namespace stable { namespace accelerator {/g' -e 's/HIDDEN_NAMESPACE_END(torch, stable, accelerator)/} } }/g' -e 's/HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)/namespace torch { namespace stable { namespace detail {/g' -e 's/HIDDEN_NAMESPACE_END(torch, stable, detail)/} } }/g' -e 's/HIDDEN_NAMESPACE_BEGIN(torch, stable)/namespace torch { namespace stable {/g' -e 's/HIDDEN_NAMESPACE_END(torch, stable)/} }/g'"
 # Symbol expansion to follow for #include statements (not input)
 SEARCH_INCLUDES        = YES
 INCLUDE_PATH           = ../../.. \
