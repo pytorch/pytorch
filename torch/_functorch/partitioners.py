@@ -1835,6 +1835,25 @@ def solve_min_cut(
             "Need networkx installed to perform smart recomputation heuristics"
         ) from e
 
+    def _is_regeneratable_from_seed(node):
+        # Check if a node is derived from inductor_random with a seed,
+        # making it deterministically computable.
+        if node.target == torch.ops.prims.inductor_random.default:
+            # Check if it has a seed argument
+            for arg in node.args:
+                if isinstance(arg, torch.fx.Node):
+                    if arg.target == torch.ops.prims.inductor_lookup_seed.default:
+                        return True
+            return False
+
+        # Check if this node is derived from inductor_random
+        for arg in node.args:
+            if isinstance(arg, torch.fx.Node):
+                if _is_regeneratable_from_seed(arg):
+                    return True
+
+        return False
+
     def is_materialized_backwards(node):
         if op_types.is_view(node):
             return False
@@ -1859,6 +1878,8 @@ def solve_min_cut(
         if config.recompute_views and op_types.is_view(node):
             return False
         if node.target in [aten.lift_fresh_copy.default, aten.lift_fresh.default]:
+            return False
+        if inductor_config.lowmem_dropout and _is_regeneratable_from_seed(node):
             return False
 
         if min_cut_options.ban_if_not_in_allowlist:
@@ -2330,8 +2351,19 @@ def get_default_op_list() -> OpTypes:
     recomputable_ops = OrderedSet(default_recomputable_ops)
 
     random_ops = OrderedSet[Callable[..., Any]](
-        [aten.native_dropout, aten.rand_like, aten.randn_like]
+        [
+            aten.native_dropout,
+            aten.rand_like,
+            aten.randn_like,
+            aten.bernoulli,
+            aten.bernoulli_,
+        ]
     )
+    # this takes in a seed, so it's deterministic, and we can recompute it
+    if hasattr(prims, "inductor_random"):
+        default_recomputable_ops += [prims.inductor_random]
+        random_ops.update([prims.inductor_seeds, prims.inductor_seed])
+
     compute_intensive_ops = [
         aten.mm,
         aten.convolution,
