@@ -296,125 +296,42 @@ class DistTensorRandomInitTest(DTensorTestBase):
     @with_comms
     @skip_if_lt_x_gpu(2)
     def test_dtensor_init_helper_tensor_meta_strides(self):
-        """
-        Test that DTensorSpec.tensor_meta has correct strides in _dtensor_init_helper.
+        """Test that DTensorSpec.tensor_meta has correct strides in _distribute_region."""
+        import torch.distributed.tensor._random as random_module
 
-        Background:
-        ===========
-        In _dtensor_init_helper (torch/distributed/tensor/_api.py), when creating
-        DTensor via random factory functions (randn, rand), a DTensorSpec is created
-        with tensor_meta that includes shape, strides, and dtype.
-
-        The strides in tensor_meta should match the expected contiguous strides for
-        the tensor shape. For example, a tensor of shape (8, 8) should have strides
-        (8, 1) for row-major contiguous layout.
-
-        What This Test Verifies:
-        ========================
-        1. Creates a SpecCapturingTracker wrapper that intercepts calls to
-           _distribute_region and captures the DTensorSpec passed to it.
-
-        2. Calls torch.distributed.tensor.randn() to trigger _dtensor_init_helper.
-
-        3. Inspects the captured spec to verify:
-           - Shape is correct: torch.Size([8, 8])
-           - Strides are correct: (8, 1) for contiguous 8x8 tensor
-
-        Test Strategy:
-        ==============
-        - Use a wrapper class (SpecCapturingTracker) to intercept _distribute_region
-        - Capture the spec argument for inspection
-        - Assert that tensor_meta.stride matches expected contiguous strides
-        """
-        mesh = torch.arange(self.world_size)
-        device_mesh = DeviceMesh(self.device_type, mesh)
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
         captured_specs = []
 
         class SpecCapturingTracker:
-            """
-            Wrapper class to intercept and capture DTensorSpec passed to _distribute_region.
-
-            This wrapper delegates all attribute access to the underlying tracker,
-            except for _distribute_region which it intercepts to capture the spec.
-            """
+            """Wrapper to intercept _distribute_region and capture DTensorSpec."""
 
             def __init__(self, tracker):
                 self._tracker = tracker
 
             def __getattr__(self, name):
-                # Delegate all attribute access to the wrapped tracker
                 return getattr(self._tracker, name)
 
             def _distribute_region(self, spec):
-                """
-                Intercept _distribute_region to capture the spec for inspection.
-
-                Args:
-                    spec: DTensorSpec containing tensor_meta with shape, strides, dtype
-                """
-                captured_specs.append(
-                    {
-                        "shape": spec.tensor_meta.shape,
-                        "strides": spec.tensor_meta.stride,
-                        "dtype": spec.tensor_meta.dtype,
-                    }
-                )
+                captured_specs.append(spec.tensor_meta)
                 return self._tracker._distribute_region(spec)
 
-        import torch.distributed.tensor._random as random_module
+        # Initialize the RNG tracker
+        torch.manual_seed(42)
+        torch.distributed.tensor.randn(
+            (8, 8), device_mesh=device_mesh, placements=[Shard(0)]
+        )
 
-        original_tracker = random_module._rng_tracker
+        # Wrap tracker to capture specs
+        random_module._rng_tracker = SpecCapturingTracker(random_module._rng_tracker)
 
         torch.manual_seed(42)
         torch.distributed.tensor.randn(
-            (8, 8),
-            device_mesh=device_mesh,
-            placements=[Shard(0)],
+            (8, 8), device_mesh=device_mesh, placements=[Shard(0)]
         )
 
-        random_module._rng_tracker = SpecCapturingTracker(random_module._rng_tracker)
-
-        try:
-            # Call randn again - this time we capture the spec
-            torch.manual_seed(42)
-            torch.distributed.tensor.randn(
-                (8, 8),
-                device_mesh=device_mesh,
-                placements=[Shard(0)],
-            )
-
-            # Verify we captured exactly one spec
-            self.assertEqual(
-                len(captured_specs),
-                1,
-                f"Expected to capture 1 spec, but captured {len(captured_specs)}",
-            )
-            captured_spec = captured_specs[0]
-
-            expected_shape = torch.Size([8, 8])
-            self.assertEqual(
-                captured_spec["shape"],
-                expected_shape,
-                f"Shape mismatch: expected {expected_shape}, got {captured_spec['shape']}",
-            )
-
-            # Verify the strides are correct for contiguous layout
-            # For a (8, 8) tensor with row-major contiguous layout:
-            # - stride[0] = 8 (stepping one row = 2 elements)
-            # - stride[1] = 1 (stepping one column = 1 element)
-            expected_strides = (8, 1)
-            actual_strides = captured_spec["strides"]
-
-            self.assertEqual(
-                actual_strides,
-                expected_strides,
-                f"Strides mismatch in tensor_meta passed to _distribute_region: "
-                f"expected {expected_strides} for contiguous (8, 8) tensor, "
-                f"got {actual_strides}",
-            )
-
-        finally:
-            random_module._rng_tracker = original_tracker
+        self.assertEqual(len(captured_specs), 1)
+        self.assertEqual(captured_specs[0].shape, torch.Size([8, 8]))
+        self.assertEqual(captured_specs[0].stride, (8, 1))
 
 
 class DistTensorRandomOpTest(DTensorTestBase):
