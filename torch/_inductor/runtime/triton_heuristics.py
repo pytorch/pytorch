@@ -1730,7 +1730,6 @@ class StaticTritonCompileResult(CompileResult[_T]):
                 triton_cache_dir(triton_meta.get("device", 0)),
                 triton_hash_to_path_key(kernel.hash),
                 f"{kernel.src.fn.__name__}{binary_ext}",
-            
             )
 
             if not os.path.exists(cubin_location):

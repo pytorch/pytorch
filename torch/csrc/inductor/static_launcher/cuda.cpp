@@ -353,11 +353,20 @@ PyObject* load_kernel(PyObject* self, PyObject* args) {
 
   // Ensure CUDA context is initialized before loading kernel
   CUcontext pctx = nullptr;
+
+#if defined(USE_ROCM)
+  AT_CUDA_DRIVER_CHECK(hipCtxGetCurrent(&pctx));
+  if (!pctx) {
+    AT_CUDA_DRIVER_CHECK(hipDevicePrimaryCtxRetain(&pctx, device));
+    AT_CUDA_DRIVER_CHECK(hipCtxSetCurrent(pctx));
+  }
+#else
   AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxGetCurrent(&pctx));
   if (!pctx) {
     AT_CUDA_DRIVER_CHECK(nvrtc().cuDevicePrimaryCtxRetain(&pctx, device));
     AT_CUDA_DRIVER_CHECK(nvrtc().cuCtxSetCurrent(pctx));
   }
+#endif
 
   CUfunction func = nullptr;
   func = loadKernel(filePath, funcName, sharedMemBytes, device);
