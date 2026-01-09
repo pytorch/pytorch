@@ -38,7 +38,8 @@ class LinearPackedParams(torch.nn.Module):
     ) -> None:
         if row_block_size is None or col_block_size is None:
             raise AssertionError(
-                f"row_block_size and col_block_size must not be None, got {row_block_size=}, {col_block_size=}"
+                "row_block_size and col_block_size must not be None, got "
+                f"row_block_size={row_block_size}, col_block_size={col_block_size}"
             )
         self._packed_params = torch.ops.sparse.qlinear_prepack(
             weight, bias, row_block_size, col_block_size
@@ -219,7 +220,8 @@ class Linear(torch.nn.Module):
     ) -> None:
         if row_block_size is None or col_block_size is None:
             raise AssertionError(
-                f"row_block_size and col_block_size must not be None, got {row_block_size=}, {col_block_size=}"
+                "row_block_size and col_block_size must not be None, "
+                f"got row_block_size={row_block_size}, col_block_size={col_block_size}"
             )
         self._packed_params.set_weight_bias(w, b, row_block_size, col_block_size)
 
