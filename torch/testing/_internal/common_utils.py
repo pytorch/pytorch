@@ -4944,6 +4944,31 @@ def random_matrix(rows, columns, *batch_dims, **kwargs):
     return (u * s.unsqueeze(-2)) @ vh
 
 
+def random_matrix_with_scaled_reduction_dim(rows, columns, *batch_dims, **kwargs):
+    """Return rectangular matrix or batches of rectangular matrices
+    with entries being iid and sampled from N(0, sigma^2) such that
+    the variance of (A @ A.T)[..., i, j] is 1 if reduction_dim=-1, or
+    the variance of (A.T @ A)[..., i, j] is 1 if reduction_dim=-2.
+
+    Parameters:
+      dtype - the data type
+      device - the device kind
+      requires_grad - whether output requires grad
+      reduction_dim - the row/column dimension to re-scale.
+                    Expected to be either -1 (columns) or -2 (rows).
+    """
+    dtype = kwargs.get('dtype', torch.double)
+    device = kwargs.get('device', 'cpu')
+    requires_grad = kwargs.get('requires_grad', False)
+    reduction_dim = kwargs.get('reduction_dim', -1)
+
+    shape = (*batch_dims, rows, columns)
+    red_scale = math.sqrt(shape[reduction_dim])
+    res = torch.randn(*shape, dtype=dtype, device=device) / red_scale
+    res.requires_grad_(requires_grad)
+    return res
+
+
 def random_lowrank_matrix(rank, rows, columns, *batch_dims, **kwargs):
     """Return rectangular matrix or batches of rectangular matrices with
     given rank.
@@ -5689,16 +5714,20 @@ def munge_exc(e, *, suppress_suffix=True, suppress_prefix=True, file=None, skip=
 
     # Remove everything that looks like stack frames in NOT this file
     def repl_frame(m):
-        if m.group(1) != file:
+        if m.group(2) != file:
             return ""
         # Don't accept top-level, even for this script, these will wobble
         # depending on how the testing script was invoked
-        if m.group(2) == "<module>":
+        if m.group(3) == "<module>":
             return ""
 
         return m.group(0)
 
-    s = re.sub(r'  File "([^"]+)", line \d+, in (.+)\n(    .+\n( +[~^]+ *\n)?)+', repl_frame, s)
+    s = re.sub(
+        r'( *)File "([^"]+)", line \d+, in (.+)\n(\1  .+\n( +[~^]+ *\n)?)+',
+        repl_frame,
+        s,
+    )
     s = re.sub(r"line \d+", "line N", s)
     s = re.sub(r".py:\d+", ".py:N", s)
     s = re.sub(r'https:/([a-zA-Z0-9_.-]+)', r'https://\1', s)
