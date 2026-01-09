@@ -227,7 +227,7 @@ dispatch_key_set_functions = {
 }
 
 
-def _check_for_gradient_edge(var, arg_name="argument"):
+def _check_for_gradient_edge(var: VariableTracker, arg_name: str) -> None:
     """Check if var contains a GradientEdge from outside the compiled region.
 
     Used by handle_autograd_grad to reject external GradientEdge objects that
@@ -268,12 +268,12 @@ def _collect_all_grad_fns(tensor: torch.Tensor) -> set[torch.autograd.graph.Node
 
     grad_fns: set[torch.autograd.graph.Node] = set()
 
+    plain_tensors: list[torch.SymInt | torch.Tensor | int] = []
     # Get all plain tensors (handles nested subclasses)
     if is_traceable_wrapper_subclass(tensor):
-        plain_tensors: list = []
         get_plain_tensors(tensor, out=plain_tensors)
     else:
-        plain_tensors = [tensor]
+        plain_tensors.append(tensor)
 
     for t in plain_tensors:
         if not isinstance(t, torch.Tensor):
@@ -289,7 +289,9 @@ def _collect_all_grad_fns(tensor: torch.Tensor) -> set[torch.autograd.graph.Node
     return grad_fns
 
 
-def _collect_tensors_with_sources(var):
+def _collect_tensors_with_sources(
+    var: VariableTracker,
+) -> list[tuple[torch.Tensor, Optional[str]]]:
     """Extract (fake_tensor, source_name) pairs from a VariableTracker.
 
     Used by handle_autograd_grad to collect tensors from the outputs and inputs
@@ -299,7 +301,7 @@ def _collect_tensors_with_sources(var):
     from .lists import BaseListVariable
     from .tensor import TensorVariable
 
-    results = []
+    results: list[tuple[torch.Tensor, Optional[str]]] = []
     if isinstance(var, TensorVariable):
         fake_tensor = var.as_proxy().node.meta.get("example_value")
         assert isinstance(fake_tensor, torch._subclasses.fake_tensor.FakeTensor)
