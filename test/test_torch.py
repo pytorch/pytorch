@@ -442,7 +442,7 @@ class TestTorchDeviceType(TestCase):
     @onlyCUDA
     def test_module_share_memory(self):
         # Test fix for issue #80733
-        # See https://github.com/pytorch/pytorch/issues/80733(regression test for issue
+        # See https://github.com/pytorch/pytorch/issues/80733
         model = torch.nn.Linear(3, 1)
         _model_cuda = model.to('cuda')
         model.share_memory()
