@@ -13,6 +13,7 @@ behavior, including:
 import getpass
 import os
 import sys
+import sysconfig
 import tempfile
 from collections.abc import Callable
 from os.path import abspath, dirname
@@ -52,10 +53,12 @@ dead_code_elimination = True
 replay_side_effects = True
 
 # Configure side effect warning level
-# If `silent`, we silently allow side effects
-# If `warn`, we warn side effects
+# If `info` (default): allow side effects and log to TORCH_LOGS="side_effects" and tlparse
+# If `silent`, we allow side effects, no logs are made.
+# If `warn`, we allow side effects but issue warnings
 # If `error`, we error on side effects
-side_effect_replay_policy = "silent"
+# NOTE: it is NOT safe to change this config during compilation!
+side_effect_replay_policy = "info"
 
 # disable (for a function) when cache reaches this size
 
@@ -763,7 +766,8 @@ pt2_compile_id_prefix: Optional[str] = os.environ.get("PT2_COMPILE_ID_PREFIX", N
 
 # Run GC at the end of compilation
 run_gc_after_compile = Config(  # type: ignore[var-annotated]
-    default=True,
+    # Disable by default on free-threaded builds since they always do a full collection, which can be slow
+    default=sysconfig.get_config_var("Py_GIL_DISABLED") != 1,
     justknob="pytorch/compiler:enable_run_gc_after_compile",
     env_name_default="TORCH_DYNAMO_RUN_GC_AFTER_COMPILE",
 )
