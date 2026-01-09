@@ -135,6 +135,11 @@ def compute_local_shape_and_global_offset(
         skip_offset is True, this will be an empty tuple.
 
     """
+    empty_offset = ()
+    if not mesh._is_current_rank_part_of_mesh():
+        # if rank not in the mesh, return empty offset
+        return ((0,), empty_offset)
+
     return _compute_local_shape_and_global_offset(
         global_shape, mesh.shape, mesh.get_coordinate(), placements, skip_offset
     )
@@ -219,11 +224,6 @@ def _compute_local_shape_and_global_offset(
               empty tuple.
     """
 
-    empty_offset = ()
-    if my_coordinate is None:
-        # if rank not in the mesh, return empty offset
-        return ((0,), empty_offset)
-
     local_shape = list(global_shape)
     # Perform shard from left to right. For example,
     #   global tensor: [0, 1, 2, 3, 4, 5, 6, 7]
@@ -247,6 +247,7 @@ def _compute_local_shape_and_global_offset(
             f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
         )
         previous_offsets = shard_dim_to_global_offsets.get(shard_dim)
+        assert my_coordinate is not None
         shard_size, shard_offsets = _get_shard_size_and_offsets(
             local_shape[shard_dim],
             mesh_shape[mesh_dim],
@@ -259,7 +260,7 @@ def _compute_local_shape_and_global_offset(
         local_shape[shard_dim] = shard_size
         shard_dim_to_global_offsets[shard_dim] = shard_offsets
     if skip_offset:
-        return tuple(local_shape), empty_offset
+        return tuple(local_shape), ()
     global_offset = [0] * len(global_shape)
     for shard_dim, global_offsets in shard_dim_to_global_offsets.items():
         global_offset[shard_dim] = _get_first_offset(global_offsets)

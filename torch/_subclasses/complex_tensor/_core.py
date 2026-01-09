@@ -94,13 +94,13 @@ class ComplexTensor(Tensor):
         return self._im
 
     @classmethod
-    def __torch_dispatch__(
+    def __torch_dispatch__(  # type: ignore[bad-override]
         cls,
         func: OpOverload,
         types: tuple[type, ...],
         args: tuple = (),
-        kwargs: dict | None = None,
-    ):
+        kwargs: dict[str, Any] | None = None,
+    ) -> Any:
         from ._ops.common import lookup_complex
 
         kwargs = {} if kwargs is None else kwargs
@@ -135,7 +135,7 @@ class ComplexTensor(Tensor):
     def __tensor_flatten__(self) -> tuple[list[str], Any]:
         return ["re", "im"], None
 
-    def __repr__(self, *, tensor_contents=None) -> str:
+    def __repr__(self, *, tensor_contents: object | None = None) -> str:
         return f"ComplexTensor(real={self.re!r}, imag={self.im!r})"
 
     def is_pinned(self, device: DeviceLikeType | None = None) -> bool:
