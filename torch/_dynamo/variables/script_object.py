@@ -25,6 +25,7 @@ from typing import Any, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
+import torch.utils._pytree as pytree
 from torch._guards import Source
 from torch._library.opaque_object import (
     get_member_type,
@@ -289,6 +290,26 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
                 return real_obj  # pyrefly: ignore[bad-return]
 
             constant_val = method(*args_const, **kwargs_const)
+
+            if any(
+                is_opaque_reference_type(type(r))
+                for r in pytree.tree_leaves(constant_val)
+            ):
+                unimplemented(
+                    gb_type="Opaque object member with method-type USE_REAL returned a reference-type opaque object.",
+                    context=f"Opaque object type: {value_type}. Method name: '{name}'",
+                    explanation=(
+                        "To properly guard reference-type opaque objects, "
+                        "we must lift them as inputs to the graph. In order "
+                        "to do this, they must all have a source, meaning they "
+                        "come from a global value or are an attribute of an input."
+                    ),
+                    hints=[
+                        f"Register member '{name}' with MemberType.INLINED in "
+                        "register_opaque_type({value_type}, members=...).",
+                    ],
+                )
+
             return VariableTracker.build(tx, constant_val)
 
         unimplemented(
