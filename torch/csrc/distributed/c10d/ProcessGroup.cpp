@@ -128,6 +128,14 @@ void ProcessGroup::setGroupName(const std::string& name) {
   }
 }
 
+const std::optional<std::string>& ProcessGroup::getGroupNameAlias() const {
+  return groupNameAlias_;
+}
+
+void ProcessGroup::setGroupNameAlias(const std::string& name) {
+  groupNameAlias_ = name;
+}
+
 const std::string& ProcessGroup::getGroupDesc() const {
   return pg_desc_;
 }
