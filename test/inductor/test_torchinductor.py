@@ -3656,6 +3656,8 @@ class CommonTemplate:
         cf(x, 1e-5)
         cf(x, 1e-6)
 
+    # I think Triton CPU doesn't preserve -0.0 sign in tl.full
+    @xfail_if_triton_cpu
     def test_div_by_zero(self):
         def fn(x, runtime_zero, runtime_neg_zero):
             zero = torch.zeros_like(x)
@@ -9967,13 +9969,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 indices,
             ],
         )
-        # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion.
-        # Correctness is validated by self.common() above.
-        self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
+        assertGeneratedKernelCountEqual(self, 1)
 
     @expectedFailureXPU
     def test_max_pool2d_with_indices_backward5(self):
-        # Large window size - decomposition handles via scatter_add
+        # Window size is too big. Should fallback
         def fn(a, b, c):
             return aten.max_pool2d_with_indices_backward(
                 a, b, [13, 13], [1, 1], [2, 2], [1, 1], False, c
@@ -9997,15 +9997,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 indices,
             ],
         )
-        # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion.
-        # Correctness is validated by self.common() above.
-        # MPS: decomposition falls back to native kernel, so no inductor kernels generated
-        if self.device != "mps":
-            self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
+        assertGeneratedKernelCountEqual(self, 0)
 
     # From https://github.com/pytorch/pytorch/issues/93384
     def test_max_pool2d_with_indices_backward6(self):
-        # dilation != 1 - decomposition handles all dilation cases
+        # dilation is not 1. Should fallback
         def fn(a, b, c):
             return aten.max_pool2d_with_indices_backward(
                 a, b, [3, 2], [2, 1], [1, 1], [1, 2], False, c
@@ -10029,11 +10025,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 indices,
             ],
         )
-        # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion.
-        # Correctness is validated by self.common() above.
-        # MPS: decomposition falls back to native kernel, so no inductor kernels generated
-        if self.device != "mps":
-            self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
+        assertGeneratedKernelCountEqual(self, 0)
 
     def test_issue102546(self):
         def fn(x):
@@ -15117,6 +15109,21 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             .check_not("gdc_launch")
             .check("store")
         ).run(code)
+
+    def test_use_deterministic_algorithms(self):
+        @torch.compile(backend="inductor", fullgraph=True)
+        def fn(src, index, base_tensor):
+            src = src + 10
+            torch.use_deterministic_algorithms(True)
+            base_tensor.scatter_(0, index, src)
+            return base_tensor.clone() + 1
+
+        src = torch.tensor([[100.0], [200.0], [300.0]])
+        index = torch.tensor([[0], [0], [0]])
+        base_tensor = torch.zeros(2, 1)
+        out = fn(src, index, base_tensor)
+        expected = torch.tensor([[311.0], [1.0]])
+        self.assertEqual(out, expected)
 
     # end of class CommonTemplate - add new tests here
 
