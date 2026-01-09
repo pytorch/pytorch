@@ -122,9 +122,12 @@ class Shard(torch._C._distributed.Shard):
         # work based on the shard)
         if isinstance(index, int) or with_padding:
             shards, _ = self._split_tensor(
-                tensor, num_chunks, with_padding=with_padding, contiguous=contiguous
+                tensor, num_chunks, with_padding=with_padding, contiguous=False
             )
-            return shards[index]
+            result = shards[index]
+            if contiguous:
+                result = result.contiguous()
+            return result
 
         # For the SymInt implementation just compute the value for the tensor we
         # want rather than computing all of them.
@@ -768,9 +771,11 @@ class _StridedShard(torch._C._distributed.StridedShard):
         Like _split_tensor() but only returns a single Tensor
         """
         shards, _ = self._split_tensor(
-            tensor, num_chunks, with_padding=with_padding, contiguous=contiguous
+            tensor, num_chunks, with_padding=with_padding, contiguous=False
         )
         result = shards[index]
+        if contiguous:
+            result = result.contiguous()
         return result
 
     def _to_replicate_tensor(
