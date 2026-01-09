@@ -333,13 +333,18 @@ else:
             """Returns the device type of the mesh."""
             return self._device_type
 
-        @property
-        def mesh(self) -> torch.Tensor:
-            """Returns the tensor representing the layout of devices."""
-            full_mesh = self._layout.remap_to_tensor(self._rank_map)
+        @staticmethod
+        def _get_mesh_tensor_from_full_mesh(
+            full_mesh: torch.Tensor,
+            current_rank: int | None = None,
+        ) -> torch.Tensor:
             if full_mesh.size(0) == 1:
                 return full_mesh[0]
-            my_coords = (full_mesh == get_rank()).nonzero()
+
+            if current_rank is None:
+                current_rank = get_rank()
+
+            my_coords = (full_mesh == current_rank).nonzero()
             if my_coords.size(0) > 0:
                 return full_mesh[my_coords[0, 0]]
             raise RuntimeError(
@@ -347,6 +352,12 @@ else:
                 "either have all its original dimensions (e.g., no slicing) "
                 "or it needs to contain the local rank"
             )
+
+        @property
+        def mesh(self) -> torch.Tensor:
+            """Returns the tensor representing the layout of devices."""
+            full_mesh = self._layout.remap_to_tensor(self._rank_map)
+            return self._get_mesh_tensor_from_full_mesh(full_mesh)
 
         @property
         def mesh_dim_names(self) -> tuple[str, ...] | None:
