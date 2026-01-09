@@ -39,6 +39,11 @@ verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
 # [@compile_ignored: runtime_behaviour] verify the correctness of optimized backend
 verify_correctness = False
 
+# Validate that fake_fn and real_fn in @leaf_function decorators produce outputs
+# with matching shapes and dtypes in eager mode. Helps catch mismatches early.
+# [@compile_ignored: debug]
+validate_leaf_function_outputs = False
+
 # need this many ops to create an FX graph (deprecated: not used)
 minimum_call_count = 1
 

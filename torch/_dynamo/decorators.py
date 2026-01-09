@@ -239,15 +239,95 @@ def nonstrict_trace(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
     return wrapped
 
 
-def leaf_function(fake_fn):
-    def wrapped(real_fn):
-        @functools.wraps(real_fn)
-        def inner(*args, **kwargs):
-            return real_fn(*args, **kwargs)
+def leaf_function(
+    fn: Optional[Callable[..., Any]] = None,
+    /,
+    *,
+    fake_impl: Optional[Callable[..., Any]] = None,
+) -> Any:
+    """
+    Decorator to mark a function as a leaf function for dynamo.
 
-        # Store the fake_fn and real_fn on the wrapped function for later retrieval
-        inner._torchdynamo_leaf_fake_fn = fake_fn  # type: ignore[attr-defined]
-        inner._torchdynamo_leaf_real_fn = real_fn  # type: ignore[attr-defined]
+    A leaf function is treated as an atomic operation during tracing - dynamo
+    will not trace into it, but will capture it in the FX graph.
+
+    Can be used in two ways:
+    1. @leaf_function - use the decorated function as fake_impl (works for most cases)
+    2. @leaf_function(fake_impl=...) - provide explicit fake implementation for tracing
+
+    Restrictions:
+        - Data-dependent control flow requires explicit fake_impl: If the function has
+          branches like ``if x.sum() > 0:``, tracing will fail because fake tensors
+          don't have real values. Provide an explicit fake_impl in this case.
+        - fake_impl must match real_impl output structure: The fake_impl must return
+          the same pytree structure, tensor shapes, and dtypes as real_impl. Enable
+          ``torch._dynamo.config.validate_leaf_function_outputs = True`` to validate.
+        - (Temporary) Only nn.Module methods supported: Currently designed for methods
+          on ``torch.nn.Module`` subclasses, not standalone functions.
+        - (Temporary) Return value should be a tuple of tensors.
+
+    Dangerous patterns (may cause silent incorrectness):
+        - Side effects: fake_impl runs multiple times during compilation; real_impl
+          runs exactly once at runtime. Don't rely on side effects for correctness.
+          For example, the leaf function should not depend on variables mutated by
+          upstream code, and downstream code should not depend on mutations made by
+          the leaf function. Logging/printing in real_impl is fine.
+
+          Bad::
+
+              self.counter += 1  # Upstream mutation
+              y = self.leaf_fn(x)  # Don't depend on self.counter inside leaf_fn
+
+              y = self.leaf_fn(x)
+              result = self.state  # Don't depend on state mutated by leaf_fn
+
+        - Aliasing and in-place mutations: These are not tracked across the leaf
+          function boundary and may produce incorrect results.
+
+          Bad::
+
+              @leaf_function
+              def forward(self, x):
+                  x.add_(1)  # In-place mutation are dangerous
+                  return (x,)
+
+    Example:
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            @leaf_function
+            def forward(self, x):
+                return (self.linear(x),)
+
+        # With explicit fake_impl for data-dependent control flow:
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            @leaf_function(fake_impl=lambda self, x: (self.linear(x),))
+            def forward(self, x):
+                if x.sum() > 0:  # data-dependent branch
+                    return (self.linear(x),)
+                return (self.linear(x) + 1,)
+
+    Args:
+        fn: The function being decorated (positional-only, used when called as @leaf_function).
+        fake_impl: Optional fake implementation for tracing. Must be passed as keyword argument.
+    """
+
+    def decorator(real_impl: Callable[..., Any]) -> Callable[..., Any]:
+        # Determine the actual fake_impl to use
+        actual_fake_impl = fake_impl if fake_impl is not None else real_impl
+
+        @functools.wraps(real_impl)
+        def inner(*args: Any, **kwargs: Any) -> Any:
+            return real_impl(*args, **kwargs)
+
+        inner._torchdynamo_leaf_real_fn = real_impl  # type: ignore[attr-defined]
+        inner._torchdynamo_leaf_fake_fn = actual_fake_impl  # type: ignore[attr-defined]
 
         wrapped_id = id(inner)
         # This line allows us to reuse much of the `allow_in_graph` impl.
@@ -265,16 +345,18 @@ def leaf_function(fake_fn):
 
         return inner
 
-    return wrapped
+    if fn is None:
+        return decorator
+    return decorator(fn)
 
 
-def get_leaf_function_fake_fn(fn: Any) -> Any:
-    """Get the fake_fn associated with a leaf_function decorated callable."""
+def get_leaf_function_fake_impl(fn: Any) -> Any:
+    """Get the fake_impl associated with a leaf_function decorated callable."""
     return getattr(fn, "_torchdynamo_leaf_fake_fn", None)
 
 
-def get_leaf_function_real_fn(fn: Any) -> Any:
-    """Get the real_fn associated with a leaf_function decorated callable."""
+def get_leaf_function_real_impl(fn: Any) -> Any:
+    """Get the real_impl associated with a leaf_function decorated callable."""
     return getattr(fn, "_torchdynamo_leaf_real_fn", None)
 
 
