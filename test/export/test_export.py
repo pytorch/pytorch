@@ -8171,6 +8171,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
         ep = export(m, (x,))
         print(f"ep.state_dict(): {ep.state_dict}")
+        tensor = ep.state_dict["rnn.weight_hh_l0"].data
+        print("tensor's info: ", tensor.size(), tensor.storage_offset())
         self.assertTrue(callable(ep.module()))
 
         eager_out = m(x)
