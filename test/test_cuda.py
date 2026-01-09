@@ -859,6 +859,7 @@ print(t.is_pinned())
             self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "none")
 
     @recover_orig_fp32_precision
+    @serialTest()
     def test_fp32_precision_with_float32_matmul_precision(self):
         torch.set_float32_matmul_precision("highest")
         self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "ieee")
@@ -868,6 +869,7 @@ print(t.is_pinned())
         self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "tf32")
 
     @recover_orig_fp32_precision
+    @serialTest()
     def test_invalid_status_for_legacy_api(self):
         torch.backends.cudnn.conv.fp32_precision = "none"
         torch.backends.cudnn.rnn.fp32_precision = "tf32"
@@ -5800,6 +5802,37 @@ class TestMemPool(TestCase):
 
         # called_dummy_free should be 321 if dummy_free was used to deallocate
         # out tensor
+        self.assertEqual(called_dummy_free.value, 321)
+
+    def test_tensor_delete_after_allocator_delete(self):
+        allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
+        pool = torch.cuda.MemPool(allocator.allocator())
+
+        with torch.cuda.use_mem_pool(pool):
+            data = torch.empty(4, device="cuda")
+
+        alloc_lib = ctypes.CDLL(dummy_allocator)
+        called_dummy_alloc = ctypes.c_int.in_dll(alloc_lib, "called_dummy_alloc")
+        called_dummy_free = ctypes.c_int.in_dll(alloc_lib, "called_dummy_free")
+
+        self.assertEqual(called_dummy_alloc.value, 123)
+        self.assertEqual(called_dummy_free.value, 0)
+
+        # Explicitly drop the allocator before releasing the
+        # tensor. CUDACachingAllocator's PrivatePool instance should
+        # keep the allocator live until all tensors die.
+
+        # N.B.: Deleting the pool doesn't actually do anything, since
+        # it doesn't own the allocator object. But we do it anyway
+        # because it is the situation that users are likely to face.
+        del pool
+        del allocator
+
+        self.assertEqual(called_dummy_free.value, 0)
+
+        del data
+        torch.cuda.empty_cache()
+
         self.assertEqual(called_dummy_free.value, 321)
 
     @serialTest()
