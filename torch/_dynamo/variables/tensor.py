@@ -1648,92 +1648,92 @@ class TensorVariable(VariableTracker):
                         {},
                     ),
                 )
-            else:
-                # Rewrite intermediate tensor hook as custom autograd function
-                # Given:
-                # glb_list = []
-                # glb_dict = {}
-                #
-                # def fn(x):
-                #     y = x * 2
-                #     glb_list.append(y)
-                #     glb_dict['tensor'] = y
-                #     a = glb_list[0] * 3      # Should use output of register_hook
-                #     b = glb_dict['tensor'] + 1  # Should use hooked_y
-                #     y.register_hook(lambda grad: grad + 1)
-                #     return (a + b).sum()
-                # We basically want to replace y.register_hook(lambda grad: grad + 1) with
-                # custom autograd function where the forward is just identity while backward
-                # calls custom hook.
-                # The algo works by:
-                #    1. When we see a hook, create a node with custom autograd function apply (y')
-                #    2. Move the custom autograd node just after definition of the intermediate tensor (y in above),
-                #       this ensures that all the other nodes that reference y refers to y' instead.
-                # As a result of this algo, above example turns into:
-                # def fn(x):
-                #     y = x * 2
-                #     y_prime = custom_autograd_function.apply()
-                #     glb_list.append(y_prime)
-                #     glb_dict['tensor'] = y_prime
-                #     a = glb_list[0] * 3
-                #     b = glb_dict['tensor'] + 1
-                #     return (a + b).sum()
-                # Get the original tensor's node and save its current users
-                tensor_node = self.as_proxy().node
+            # ----------Handling intermediate tensor custom hooks------
+            # Rewrite intermediate tensor hook as custom autograd function
+            # Given:
+            # glb_list = []
+            # glb_dict = {}
+            #
+            # def fn(x):
+            #     y = x * 2
+            #     glb_list.append(y)
+            #     glb_dict['tensor'] = y
+            #     a = glb_list[0] * 3      # Should use output of register_hook
+            #     b = glb_dict['tensor'] + 1  # Should use hooked_y
+            #     y.register_hook(lambda grad: grad + 1)
+            #     return (a + b).sum()
+            # We basically want to replace y.register_hook(lambda grad: grad + 1) with
+            # custom autograd function where the forward is just identity while backward
+            # calls custom hook.
+            # The algo works by:
+            #    1. When we see a hook, create a node with custom autograd function apply (y')
+            #    2. Move the custom autograd node just after definition of the intermediate tensor (y in above),
+            #       this ensures that all the other nodes that reference y refers to y' instead.
+            # As a result of this algo, above example turns into:
+            # def fn(x):
+            #     y = x * 2
+            #     y_prime = custom_autograd_function.apply()
+            #     glb_list.append(y_prime)
+            #     glb_dict['tensor'] = y_prime
+            #     a = glb_list[0] * 3
+            #     b = glb_dict['tensor'] + 1
+            #     return (a + b).sum()
+            # Get the original tensor's node and save its current users
+            tensor_node = self.as_proxy().node
 
-                users_to_replace = list(tensor_node.users.keys())
+            users_to_replace = list(tensor_node.users.keys())
 
-                # Create the ApplyBackwardHook call
-                apply_hook_var = variables.AutogradFunctionVariable(ApplyBackwardHook)
-                result = apply_hook_var.call_apply(tx, [self, hook], {})
+            # Create the ApplyBackwardHook call
+            apply_hook_var = variables.AutogradFunctionVariable(ApplyBackwardHook)
+            result = apply_hook_var.call_apply(tx, [self, hook], {})
 
-                # Get the hooked tensor's node (this is the getitem node)
-                tensor_prime_node = result.as_proxy().node
+            # Get the hooked tensor's node (this is the getitem node)
+            tensor_prime_node = result.as_proxy().node
 
-                # DFS to collect all nodes that tensor_prime_node depends on,
-                # stopping at tensor_node. These are the nodes we need to move right
-                # after tensor_node.
-                nodes_to_move: list[torch.fx.Node] = []
-                visited: set[torch.fx.Node] = set()
+            # DFS to collect all nodes that tensor_prime_node depends on,
+            # stopping at tensor_node. These are the nodes we need to move right
+            # after tensor_node.
+            nodes_to_move: list[torch.fx.Node] = []
+            visited: set[torch.fx.Node] = set()
 
-                def collect_deps(node: torch.fx.Node, stop_at: torch.fx.Node) -> None:
-                    if node in visited or node is stop_at:
-                        return
-                    for arg in node.args:
-                        if isinstance(arg, torch.fx.Node):
-                            collect_deps(arg, stop_at)
-                    for kwarg in node.kwargs.values():
-                        if isinstance(kwarg, torch.fx.Node):
-                            collect_deps(kwarg, stop_at)
-                    visited.add(node)
-                    nodes_to_move.append(node)
+            def collect_deps(node: torch.fx.Node, stop_at: torch.fx.Node) -> None:
+                if node in visited or node is stop_at:
+                    return
+                for arg in node.args:
+                    if isinstance(arg, torch.fx.Node):
+                        collect_deps(arg, stop_at)
+                for kwarg in node.kwargs.values():
+                    if isinstance(kwarg, torch.fx.Node):
+                        collect_deps(kwarg, stop_at)
+                visited.add(node)
+                nodes_to_move.append(node)
 
-                collect_deps(tensor_prime_node, tensor_node)
+            collect_deps(tensor_prime_node, tensor_node)
 
-                # Move each node to right after tensor_node using node.append()
-                insert_point = tensor_node
-                for node in nodes_to_move:
-                    insert_point.append(node)
-                    insert_point = node
+            # Move each node to right after tensor_node using node.append()
+            insert_point = tensor_node
+            for node in nodes_to_move:
+                insert_point.append(node)
+                insert_point = node
 
-                # Replace uses of tensor with hooked version, but only for the users
-                # that existed before we created the hook node
-                for user in users_to_replace:
-                    user.replace_input_with(tensor_node, tensor_prime_node)
+            # Replace uses of tensor with hooked version, but only for the users
+            # that existed before we created the hook node
+            for user in users_to_replace:
+                user.replace_input_with(tensor_node, tensor_prime_node)
 
-                # Update self to point to the tensor_prime
-                assert isinstance(result, TensorVariable)
-                self.proxy = result.as_proxy()
-                # TensorVariable doesn't actually store the grad_fn
-                # so this is fine.
-                self.synchronize_attributes(tx)
+            # Update self to point to the tensor_prime
+            assert isinstance(result, TensorVariable)
+            self.proxy = result.as_proxy()
+            # TensorVariable doesn't actually store the grad_fn
+            # so this is fine.
+            self.synchronize_attributes(tx)
 
-                # Return a RemovableHandleVariable for API compatibility
-                # can't fall through because side_effects.register_hook
-                # require source.
-                return variables.RemovableHandleVariable(
-                    mutation_type=variables.base.ValueMutationNew(),
-                )
+            # Return a RemovableHandleVariable for API compatibility
+            # can't fall through because side_effects.register_hook
+            # require source.
+            return variables.RemovableHandleVariable(
+                mutation_type=variables.base.ValueMutationNew(),
+            )
 
         handle_variable = variables.RemovableHandleVariable(
             mutation_type=variables.base.ValueMutationNew(),
