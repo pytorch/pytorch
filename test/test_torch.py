@@ -2266,6 +2266,11 @@ class TestTorchDeviceType(TestCase):
             fweights = fweights.cpu().numpy() if fweights is not None else None
             aweights = aweights.cpu().numpy() if aweights is not None else None
             ref = np.cov(t, ddof=correction, fweights=fweights, aweights=aweights)
+            # only makes sense to compare real portion of complex here, since cov should
+            # return real numbers only. this avoids rounding errors in the imag portion
+            if res.is_complex():
+                res = res.real
+                ref = ref.real
             self.assertEqual(res, ref, atol=1e-05, rtol=1e-05, exact_dtype=False)
 
         for x in self._generate_correlation_tensors(device, dtype):

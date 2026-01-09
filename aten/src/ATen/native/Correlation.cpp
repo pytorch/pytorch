@@ -17,7 +17,7 @@
 #include <ATen/ops/scalar_tensor.h>
 #include <ATen/ops/sqrt.h>
 #include <ATen/ops/true_divide.h>
-#include <ATen/ops/zeros.h>
+#include <ATen/ops/zeros_like.h>
 #endif
 
 namespace at::native {
@@ -27,7 +27,6 @@ Tensor cov(
     int64_t correction,
     const std::optional<Tensor>& fweights,
     const std::optional<Tensor>& aweights) {
-  constexpr int64_t VARIABLES_DIM = 0;
   constexpr int64_t OBSERVATIONS_DIM = 1;
 
   TORCH_CHECK(
@@ -42,31 +41,7 @@ Tensor cov(
 
   // View input tensor as 2D (variables, observations)
   auto in = self.ndimension() < 2 ? self.view({1, -1}) : self;
-  const auto num_variables = in.size(VARIABLES_DIM);
   const auto num_observations = in.size(OBSERVATIONS_DIM);
-
-  // mimic numpy's behavior when (N − ddof) == 0 and fweights are None
-  if (num_observations == correction && !fweights.has_value()) {
-    if (self.ndimension() == 2) {
-      // 2D input with single observation returns nans
-      if (num_observations == 1) {
-        auto zeros = at::zeros({num_variables, num_variables}, in.options());
-        return zeros / 0;
-      }
-      // 2D input with multiple observations returns inf on diagonal, -inf off-diagonal
-      else {
-        auto diag = at::zeros({num_variables, num_variables}, in.options());
-        diag -= 1;
-        diag.diagonal().fill_(1);
-        return diag / 0;
-      }
-    }
-    else {
-      // 1D input returns inf
-      auto one = at::scalar_tensor(1, in.options());
-      return one / 0;
-    }
-  }
 
   // The product of frequencies (fweights) and weights (aweights).
   Tensor w;
@@ -132,10 +107,22 @@ Tensor cov(
   // Compute the normalization factor
   Tensor norm_factor;
 
-  if (w.defined() && aweights.has_value() && correction != 0) {
-    norm_factor = w_sum - correction * (w * aweights.value()).sum() / w_sum;
-  } else {
+  if (!w.defined()) {
+    norm_factor = at::scalar_tensor(num_observations - correction, in.options().dtype(kLong));
+  }
+  else if (correction == 0) {
+    norm_factor = w_sum;
+  }
+  else if (!aweights.has_value()) {
     norm_factor = w_sum - correction;
+  }
+  else {
+    if (!fweights.has_value() && num_observations == 1 && correction == 1) {
+      // corner case that was causing rounding error and deviating from numpy result
+      norm_factor = at::scalar_tensor(0, in.options().dtype(kLong));
+    } else {
+      norm_factor = w_sum - correction * (w * aweights.value()).sum() / w_sum;
+    }
   }
 
   if (at::is_scalar_tensor_true(norm_factor.le(0))) {
@@ -144,8 +131,31 @@ Tensor cov(
   }
 
   // Compute covariance matrix
-  in = in - avg.unsqueeze(1);
-  const auto c = at::mm(in, (w.defined() ? in * w : in).t().conj());
+
+  // corner case that was causing rounding error and deviating from numpy result
+  // algebraically, if we only have one observation and only one set of weights, the weighted avg == the input
+  // so we get zero as a result of input - avg.  Using != here as logical XOR.
+  if (num_observations == 1 && fweights.has_value() != aweights.has_value()) {
+    in.zero_();
+    // the in - avg we're replacing below has the side effect of promoting int tensors to float
+    if (at::isIntegralType(in.scalar_type())) {
+      in = in.to(kFloat);
+    }
+  }
+  else {
+    in = in - avg.unsqueeze(1);
+  }
+  auto c = at::mm(in, (w.defined() ? in * w : in).t().conj());
+  // corner case that was causing rounding error and deviating from numpy result
+  // at::mm is doing a dot product, and if inputs were complex, algebraically the imag part becomes 0
+  // but in some cases the imag part was non-zero but very small 1e-7, and dividing this by 0
+  // caused imag to be inf instead of nan (0/0). I know. All for the sake of a few unit tests.
+  // Zero out the imag part.
+  if (c.is_complex()) {
+    auto re = at::real(c);
+    auto im0 = at::zeros_like(re);
+    c = at::complex(re, im0);
+  }
   return at::true_divide(c, norm_factor).squeeze();
 }
 
