@@ -92,10 +92,10 @@ def _prepare_collective_groups(
     ranks = [r - offset for r in ranks]
 
     shape, strides = _indices_to_layout(ranks)
-    layout = _MeshLayout(shape, strides)
+    layout = _FlatLayout(shape, strides)
 
     global_pg = _get_default_group()
-    group_offsets = layout.complement(global_pg.size()).all_ranks_from_zero()
+    group_offsets = layout.complement(global_pg.size()).codomain()
 
     return ranks, group_offsets, offset
 

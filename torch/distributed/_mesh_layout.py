@@ -3,176 +3,103 @@ Definition of CuTe inspired Layouts for DeviceMesh internal bookkeeping and func
 """
 
 import math
-from collections.abc import Iterator
 from dataclasses import dataclass
 from itertools import product
+from typing import Iterator, NoReturn, Sequence
 
 import torch
 from torch.distributed._pycute import (
     as_tuple,
-    coalesce,
-    complement,
-    composition,
+    coalesce as pycute_coalesce,
+    complement as pycute_complement,
+    composition as pycute_composition,
+    make_layout,
     flatten,
     IntTuple,
-    is_int,
-    is_tuple,
     Layout,
+    suffix_product,
+    is_tuple,
+    is_int,
     match_structure,
 )
 
 
-@dataclass(frozen=True, init=True)
-class _MeshLayout(Layout):
+@dataclass(frozen=True)
+class _FlatLayout:
     """
-    Utility class for representing an integer layout by borrowing ideas from CuTe Layout Algebra.
-    See https://docs.nvidia.com/cutlass/media/docs/cpp/cute/02_layout_algebra.html for more details.
+    A canonical CuTe layout for a single dimension of a DeviceMesh
 
-    Each layout is represented as a list of sizes and strides. We use it as a way for mechanical bookkeeping
-    of the integers such as ranks in a SPMD mesh, and the transformation on top of it.
+    This layout is _not_ itself subdivided into multiple dimensions. It might
+    internally sometimes use multidimensional tuple to represent "irregular"
+    layout (e.g., flattening non-adjacent dims), but this should be considered
+    an opaque implementation detail.
 
-    Lots of methods of layout like coalesce, composition, complement, etc. are borrowed from pycute.
-    https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/pycute/layout.py#L137,L257
+    This class guarantees that all equivalent layouts are encoded as the same
+    normalized representation, and thus compare equal. This is achieved by
+    flattening and coalescing compatible adjacent dimensions (which includes
+    removing all dimensions of size 1).
 
-    Note this is a CuTe-inspired layout, because CuTe uses co-lexicographic way in linearization while PyTorch
-    is using lexicographic. So even though the CuTe documentation can still be referenced, the implementation will be
-    different from that of PyCute's.
     """
 
-    # pyrefly: ignore [bad-override]
-    shape: IntTuple
-    # pyrefly: ignore [bad-override]
-    stride: IntTuple
+    shape: tuple[int, ...]
+    stride: tuple[int, ...]
 
-    def __post_init__(self) -> None:
-        if not is_tuple(self.shape) and not is_int(self.shape):
-            raise TypeError(f"shape must be a tuple or int, got {type(self.shape)}")
-        if not is_tuple(self.stride) and not is_int(self.stride):
-            raise TypeError(f"stride must be a tuple or int, got {type(self.stride)}")
-        if not match_structure(self.shape, self.stride):
+    def __init__(self, shape: IntTuple, stride: IntTuple | None = None) -> None:
+        """
+        Create a _FlatLayout from shape and optional stride.
+
+        Args:
+            shape: Shape as an IntTuple (can be nested, will be normalized)
+            stride: Stride as an IntTuple (can be nested, will be normalized).
+                    If None, computes contiguous strides using suffix_product.
+        """
+        if not is_tuple(shape) and not is_int(shape):
+            raise TypeError(f"shape must be a tuple or int, got {type(shape)}")
+        stride = stride if stride is not None else suffix_product(shape)
+        if not is_tuple(stride) and not is_int(stride):
+            raise TypeError(f"stride must be a tuple or int, got {type(stride)}")
+        if not match_structure(shape, stride):
             raise ValueError(
-                f"sizes {self.shape} and strides {self.stride} don't match"
+                f"sizes {shape} and strides {stride} don't match"
             )
 
-    @property
-    def sizes(self) -> IntTuple:
-        return self.shape
+        coalesced_layout = pycute_coalesce(Layout(sorted_shape, sorted_stride))
+        flat_shape = flatten(coalesced_layout.shape)
+        flat_stride = flatten(coalesced_layout.stride)
 
-    @property
-    def strides(self) -> IntTuple:
-        return self.stride
+        assert sorted(strides, reverse=True) == strides, (
+            "For the time being we don't support transposing mesh dimensions "
+            "hence layouts should always remain sorted. If we choose to allow this, "
+            "we first need to decide whether we consider [0, 1, 2, 3] and "
+            "[0, 2, 1, 3] to be the same layout (and thus the same ProcessGroup)."
+        )
 
-    @property
-    def sizes_and_strides(self) -> Iterator[tuple[int, int]]:
-        return zip(flatten(self.shape), flatten(self.stride))
+        # TODO could we also assert that it's non-overlapping?
 
-    @property
-    def top_level_sizes(self) -> tuple[int, ...]:
-        return tuple(self[i].numel() for i in range(len(self)))
+        # pycute will preserve a size=1 dim if it's the only remaining dim, but
+        # we prefer to stick to the Tensor convention and make it 0-dimensional
+        if flat_shape == (1,) and flat_stride == (0,):
+            flat_shape = ()
+            flat_stride = ()
+
+        # Set attributes using object.__setattr__ since frozen=True
+        object.__setattr__(self, "shape", flat_shape)
+        object.__setattr__(self, "stride", flat_stride)
+
+    def __len__(self) -> NoReturn:
+        raise RuntimeError(
+            "You should never need to know the length of the internal representation of a FlatLayout"
+        )
+
+    def __getitem__(self, i: int) -> NoReturn:
+        raise RuntimeError(
+            "You should never need to index into the internal representation of a FlatLayout"
+        )
 
     def numel(self) -> int:
-        return math.prod(flatten(self.shape))
+        return math.prod(self.shape)
 
-    # # operator []    (get-i like tuples)
-    def __getitem__(self, i: int) -> "_MeshLayout":
-        if i < -len(self) or i >= len(self):
-            raise IndexError(
-                f"Dim {i} is out of range for layout with {len(self)} dimensions. "
-                f"Expected dim to be in range [{-len(self)}, {len(self) - 1}]."
-            )
-        layout = super().__getitem__(i)
-        return _MeshLayout(layout.shape, layout.stride)
-
-    def nest(self) -> "_MeshLayout":
-        return _MeshLayout((self.shape,), (self.stride,))
-
-    def coalesce(self) -> "_MeshLayout":
-        """
-        A layout is represented by (sizes):(strides), e.g. (3,2):(4,2).
-        Two consecutive dimensions can be "merged" into one if their
-        strides are contiguous/multiplicative (i.e., the inner stride * inner size
-        equals the next stride), we perform this kind of merge inside coalesce.
-
-        Example 1 (simple): (3,2):(2,1)
-        - inner dimension: has stride=1, size=2
-        - outer dimension: stride = inner_stride * inner_size = 2
-        → coalesced = (6:1)    # acts like a flat 1D array of length 6
-
-        Example 2 (non-coalescible): (3,2):(4,1)
-        - inner dimension: stride=1, size=2 → 2*1 = 2
-        - outer dimension: stride=4, mismatch (≠ 2)
-        → cannot merge; result stays (3,2):(4,1)
-        """
-        layout = coalesce(self)
-        # The original PuCute coalesce() will use stride=0 for size=1 for all dimension.
-        # We don't want to do that in device mesh, we will reset them to be 1 to be same as PyTorch.
-        if is_int(layout.stride) and layout.stride == 0:
-            return _MeshLayout(layout.shape, 1)
-        elif is_tuple(layout.stride) and any(s == 0 for s in layout.stride):
-            non_zero_strides = tuple(s if s != 0 else 1 for s in layout.stride)
-            return _MeshLayout(layout.shape, non_zero_strides)
-        else:
-            return _MeshLayout(layout.shape, layout.stride)
-
-    def composition(self, layout: "_MeshLayout") -> "_MeshLayout":
-        """
-        By-dimension composition allows one layout to "select from" or "filter through" another layout.
-        Think of it as function composition: (self ∘ layout)(input) = self(layout(input))
-        between two layouts. This function is a wrapper of pycute's composition.
-
-        Mental model about how to understand the composition logic:
-        - The LEFT layout (self) defines the "output space" - what indices are possible
-        - The RIGHT layout (layout parameter) acts as a "selector" - which specific indices to pick
-        - The composition only generates indices that the left layout could originally produce,
-          but the right layout determines which indices to be picked.
-        - The stride of the composition layout will not be smaller than the stride of the right layout,
-          because when picking the indices the composition will at least follow the the right layout's stride
-          to move forward.
-
-        Example:
-          self = (6,2):(2,1)      # sizes=(6,2), strides=(2,1)
-          layout = (3:2)          # sizes=(3,), stride=(2,)
-          self o layout = (3:2)
-
-        Returns:
-          Layout being composed.
-        """
-        result = composition(self, layout)
-        return _MeshLayout(result.shape, result.stride)
-
-    def complement(self, world_size: int) -> "_MeshLayout":
-        """
-        Compute the "complement layout" relative to a given world_size.
-        A complement layout fills in the "missing" factor so that: self repeat a layout of complement(self, world_size)
-        will get a complete world_size. We use ⊗ to denote the repeat operation.
-
-        Example:
-          self = (4:1)   # size=4, stride=1
-          world_size = 8
-          Then:
-            complete needed factor = 8 / 4 = 2
-            complement(self, 8) = (2:1)
-
-          Together they form:
-            (4:1) ⊗ (2:1) = (4,2):(2,1)
-          which has world_size = 4 * 2 = 8, as required.
-
-        In distributed terms, complement() is often used to derive the "other"
-        rank grouping when splitting processes into 2D meshes.
-
-        For a visualized explanation, see https://x.com/ezyang/status/1962364978393981433/
-        """
-        layout = complement(self, world_size)
-        return _MeshLayout(layout.shape, layout.stride)
-
-    def splice(self, start: int, end: int, layout: "_MeshLayout") -> "_MeshLayout":
-        sizes = list(as_tuple(self.sizes))
-        strides = list(as_tuple(self.strides))
-        sizes[start:end] = list(as_tuple(layout.sizes))
-        strides[start:end] = list(as_tuple(layout.strides))
-        return _MeshLayout(tuple(sizes), tuple(strides))
-
-    def all_ranks_from_zero(self) -> list[int]:
+    def codomain(self) -> list[int]:
         """
         This function computes the all ranks specified by the layout staring from zero.
 
@@ -182,7 +109,7 @@ class _MeshLayout(Layout):
             (0,0), (0,1), (0,2), (1,0), (1,1), (1,2)
 
         2. For each coordinate, we compute a linear rank index as:
-            all_ranks_from_zero = sum(coord[i] * strides[i] for i in range(ndim))
+            codomain = sum(coord[i] * strides[i] for i in range(ndim))
 
         Example A:
         sizes = (2, 3)        # 2 rows, 3 cols
@@ -207,37 +134,182 @@ class _MeshLayout(Layout):
         result = [0, 2, 4, 1, 3, 5]
         """
         return [
-            sum(c * s for c, s in zip(coord, flatten(self.strides)))
-            for coord in product(*(range(s) for s in flatten(self.sizes)))
+            sum(c * s for c, s in zip(coord, self.stride))
+            for coord in product(*(range(s) for s in self.shape))
         ]
 
-    def global_ranks(self, world_size: int) -> list[list[int]]:
+    def complement(self, world_size: int) -> "_FlatLayout":
         """
-        Build global ranks specified by the layout via two-level ranks composition.
-
-        The nested list forms the Cartesian product of all ranks for one layout and offset
-        regarding filling up the world_size with the layout.
-        The final global ranks are the addition of these two. The result is a
-        list of lists: one sublist per layout. This rank list will be used to build
-        the communicator underlying the layout and the given `world_size`.
+        Compute the "complement layout" relative to a given world_size.
+        A complement layout fills in the "missing" factor so that: self repeat a layout of complement(self, world_size)
+        will get a complete world_size. We use ⊗ to denote the repeat operation.
 
         Example:
-        world_size = 16
-        self.size = 4
-        self.stride = 1
-        ranks = [0, 1, 2, 3]
-        offsets = [0, 4, 8, 12]
-        result = [
-            [0+0, 0+1, 0+2, 0+3],  # → [0, 1, 2, 3]
-            [4+0, 4+1, 4+2, 4+3],  # → [4, 5, 6, 7]
-            [8+0, 8+1, 8+2, 8+3],  # → [8, 9, 10,11]
-            [12+0, 12+1, 12+2, 12+3],  # → [12,13,14,15]
-        ]
+          self = (4:1)   # size=4, stride=1
+          world_size = 8
+          Then:
+            complete needed factor = 8 / 4 = 2
+            complement(self, 8) = (2:1)
+
+          Together they form:
+            (4:1) ⊗ (2:1) = (4,2):(2,1)
+          which has world_size = 4 * 2 = 8, as required.
+
+        In distributed terms, complement() is often used to derive the "other"
+        rank grouping when splitting processes into 2D meshes.
+
+        For a visualized explanation, see https://x.com/ezyang/status/1962364978393981433/
         """
-        return [
-            [offset + rank for rank in self.all_ranks_from_zero()]
-            for offset in self.complement(world_size).all_ranks_from_zero()
+        result = pycute_complement(self.to_pycute(), world_size)
+        return _FlatLayout(result.shape, result.stride)
+
+    def composition(self, other: "_ListOfFlatLayouts") -> "_ListOfFlatLayouts":
+        """
+        By-dimension composition allows one layout to "select from" or "filter through" another layout.
+        Think of it as function composition: (self ∘ layout)(input) = self(layout(input))
+        between two layouts. This function is a wrapper of pycute's composition.
+
+        The composition preserves the structure of the right operand (other), returning a
+        _ListOfFlatLayouts with the same number of axes.
+
+        Mental model about how to understand the composition logic:
+        - The LEFT layout (self) defines the "output space" - what indices are possible
+        - The RIGHT layout (other parameter) acts as a "selector" - which specific indices to pick
+        - The composition only generates indices that the left layout could originally produce,
+          but the right layout determines which indices to be picked.
+        - The stride of the composition layout will not be smaller than the stride of the right layout,
+          because when picking the indices the composition will at least follow the the right layout's stride
+          to move forward.
+
+        Example:
+          self = (6,2):(2,1)      # sizes=(6,2), strides=(2,1)
+          other = _ListOfFlatLayouts with 2 axes: [(3,):(2,), (2,):(1,)]
+          self o other = _ListOfFlatLayouts with 2 axes preserving structure
+
+        Args:
+            other: A _ListOfFlatLayouts whose structure will be preserved in the result
+
+        Returns:
+            A _ListOfFlatLayouts with the same number of axes as other
+        """
+        result = pycute_composition(self.to_pycute(), other.to_pycute())
+        result_axes = [
+            _FlatLayout(shape, stride)
+            for shape, stride in zip(as_tuple(result.shape), as_tuple(result.stride))
         ]
+        return _ListOfFlatLayouts(result_axes)
+
+    def to_pycute(self) -> Layout:
+        """Convert to a pycute Layout for compatibility with pycute operations."""
+        if not self.shape:
+            return Layout(1, 0)
+        return Layout(self.shape, self.stride)
+
+    @property
+    def sizes_and_strides(self) -> Iterator[tuple[int, int]]:
+        """Iterate over (size, stride) pairs for each dimension."""
+        return zip(self.shape, self.stride)
+
+    def __str__(self) -> str:
+        return f"{self.shape}:{self.stride}"
+
+
+@dataclass(frozen=True)
+class _ListOfFlatLayouts:
+    """
+    A list of normalized layouts, one per mesh dimension.
+
+    This class represents the layout of a DeviceMesh, containing one _FlatLayout
+    per mesh dimension. It provides operations for manipulating mesh layouts
+    while maintaining the invariant that each axis is always normalized.
+
+    The structure is always a flat tuple of _FlatLayout objects (one per mesh dimension).
+    """
+
+    axes: tuple[_FlatLayout, ...]
+
+    def __init__(self, axes: Sequence[_FlatLayout]) -> None:
+        """
+        Create a _ListOfFlatLayouts from a sequence of _FlatLayout objects.
+
+        Args:
+            axes: Sequence of _FlatLayout, one per mesh dimension
+        """
+        object.__setattr__(self, "axes", tuple(axes))
+
+    @classmethod
+    def from_sizes_strides(
+        cls, sizes: tuple[int, ...], strides: tuple[int, ...] | None = None
+    ) -> "_ListOfFlatLayouts":
+        """
+        Create a _ListOfFlatLayouts from top-level sizes and optional strides.
+
+        Each size/stride pair becomes a single-element _FlatLayout.
+
+        Args:
+            sizes: Tuple of sizes, one per mesh dimension
+            strides: Tuple of strides, one per mesh dimension.
+                     If None, computes contiguous strides using suffix_product.
+
+        Returns:
+            A new _ListOfFlatLayouts with one axis per dimension
+        """
+        if strides is None:
+            strides = suffix_product(sizes)
+        assert len(sizes) == len(strides)
+        axes = tuple(_FlatLayout((s,), (d,)) for s, d in zip(sizes, strides))
+        return cls(axes)
+
+    def __len__(self) -> int:
+        return len(self.axes)
+
+    def __getitem__(self, i: int) -> _FlatLayout:
+        return self.axes[i]
+
+    def __iter__(self) -> Iterator[_FlatLayout]:
+        return iter(self.axes)
+
+    def to_pycute(self) -> Layout:
+        if len(self.axes) == 0:
+            return Layout(1, 0)
+        return make_layout(*(axis.to_pycute() for axis in self.axes))
+
+    @property
+    def top_level_sizes(self) -> tuple[int, ...]:
+        return tuple(axis.numel() for axis in self.axes)
+
+    def numel(self) -> int:
+        return math.prod(axis.numel() for axis in self.axes)
+
+    def cosize(self) -> int:
+        return self.to_pycute().cosize()
+
+    def merge_axes_into_one(self) -> _FlatLayout:
+        """
+        Merge all axes into a single _FlatLayout.
+
+        Combines all dimensions across all axes into one axis,
+        with flattening and coalescing handled by the _FlatLayout constructor.
+        """
+        shapes = tuple(axis.shape for axis in self.axes)
+        strides = tuple(axis.stride for axis in self.axes)
+        return _FlatLayout(shapes, strides)
+
+    def splice(self, start: int, end: int, layout: "_ListOfFlatLayouts") -> "_ListOfFlatLayouts":
+        """
+        Replace axes[start:end] with the axes from another layout.
+
+        Args:
+            start: Start index (inclusive)
+            end: End index (exclusive)
+            layout: The _ListOfFlatLayouts whose axes will be inserted
+
+        Returns:
+            A new _ListOfFlatLayouts with the specified axes replaced
+        """
+        new_axes = list(self.axes)
+        new_axes[start:end] = list(layout.axes)
+        return _ListOfFlatLayouts(new_axes)
 
     def check_non_overlap(self) -> bool:
         """
@@ -309,9 +381,22 @@ class _MeshLayout(Layout):
         assert rank_map.is_contiguous()
         assert rank_map.numel() >= self.cosize()
 
-        complement_layout = self.complement(rank_map.numel())
+        complement_layout = self.merge_axes_into_one().complement(rank_map.numel())
+
+        shapes: list[int] = [*complement_layout.shape]
+        strides: list[int] = [*complement_layout.stride]
+        for axis in self.axes:
+            shapes.extend(axis.shape)
+            strides.extend(axis.stride)
 
         return rank_map.as_strided(
-            flatten(complement_layout.sizes) + flatten(self.sizes),
-            flatten(complement_layout.strides) + flatten(self.strides),
+            tuple(shapes), tuple(strides)
         ).reshape(-1, *self.top_level_sizes)
+
+    def __str__(self) -> str:
+        axes_str = ", ".join(str(axis) for axis in self.axes)
+        return f"[{axes_str}]"
+
+
+# Alias for backwards compatibility
+_MeshLayout = _ListOfFlatLayouts
