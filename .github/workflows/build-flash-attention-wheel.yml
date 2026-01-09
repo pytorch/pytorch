@@ -23,7 +23,7 @@ jobs:
   build-wheel:
     name: "Build FA3 ${{ matrix.cuda_version }} ${{ matrix.arch }}"
     needs: get-label-type
-    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ matrix.runner }}"
+    runs-on: "${{ matrix.runner }}"
     strategy:
       fail-fast: false
       matrix:
