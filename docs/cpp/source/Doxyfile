@@ -111,6 +111,11 @@ SKIP_FUNCTION_MACROS   = NO
 # Extra defs for to help with building the _right_ version of the docs
 PREDEFINED             = DOXYGEN_DOCUMENTATION_BUILD
 PREDEFINED            += DOXYGEN_SHOULD_SKIP_THIS
+# Define HIDDEN_NAMESPACE macros for proper namespace parsing
+PREDEFINED            += "HIDDEN_NAMESPACE_BEGIN(ns1, ns2)=namespace ns1 { namespace ns2 {"
+PREDEFINED            += "HIDDEN_NAMESPACE_END(ns1, ns2)=} }"
+PREDEFINED            += "HIDDEN_NAMESPACE_BEGIN(ns1, ns2, ns3)=namespace ns1 { namespace ns2 { namespace ns3 {"
+PREDEFINED            += "HIDDEN_NAMESPACE_END(ns1, ns2, ns3)=} } }"
 # Symbol expansion to follow for #include statements (not input)
 SEARCH_INCLUDES        = YES
 INCLUDE_PATH           = ../../.. \
