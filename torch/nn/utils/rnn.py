@@ -124,7 +124,7 @@ class PackedSequence(PackedSequence_):
             )
 
             # Does not forward device or dtype arg/kwargs, device is set from data.device
-            def call_to(t: _T) -> _T:
+            def call_to(t: torch.Tensor) -> torch.Tensor:
                 return t.to(
                     data.device,
                     non_blocking=non_blocking,
