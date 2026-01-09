@@ -775,7 +775,7 @@ void gemm_internal_ck<at::BFloat16>(CUDABLAS_GEMM_ARGTYPES(at::BFloat16)) {
   static const std::vector<std::string> wmma_archs = {
     "gfx1100", "gfx1101", "gfx1102", "gfx1200", "gfx1201",
 #if ROCM_VERSION >= 70000
-    "gfx1150", "gfx1151"
+    "gfx1150", "gfx1151", "gfx1152","gfx1153"
 #endif
   };
   if (at::detail::getCUDAHooks().isGPUArch(wmma_archs)) {

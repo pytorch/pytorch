@@ -126,7 +126,7 @@ static bool isGloballyDisabledAddmmCudaLt(const at::Device& device) {
         "gfx1100", "gfx1101", "gfx1200", "gfx1201", "gfx908",
     #endif
     #if ROCM_VERSION >= 70000
-        "gfx950", "gfx1150", "gfx1151"
+        "gfx950", "gfx1150", "gfx1151", "gfx1152", "gfx1153"
     #endif
   };
   const auto is_hipblas_lt_arch_supported = at::detail::getCUDAHooks().isGPUArch(archs, device.index());

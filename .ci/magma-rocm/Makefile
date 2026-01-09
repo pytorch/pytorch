@@ -5,7 +5,7 @@ DESIRED_ROCM ?= 7.1
 DESIRED_ROCM_SHORT = $(subst .,,$(DESIRED_ROCM))
 PACKAGE_NAME = magma-rocm
 # inherit this from underlying docker image, do not pass this env var to docker
-#PYTORCH_ROCM_ARCH ?= gfx900;gfx906;gfx908;gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1200;gfx1201
+#PYTORCH_ROCM_ARCH ?= gfx900;gfx906;gfx908;gfx90a;gfx942;gfx950;gfx1030;gfx1100;gfx1101;gfx1102;gfx1150;gfx1151;gfx1152;gfx1153;gfx1200;gfx1201
 
 DOCKER_RUN = set -eou pipefail; ${DOCKER_CMD} run --rm -i \
 	-v $(shell git rev-parse --show-toplevel)/.ci:/builder \
