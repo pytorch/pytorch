@@ -10,7 +10,7 @@
 namespace torch::inductor {
 
 // Regarding a aten operation implemented by AOTI, the metadata of the input
-// tensors will be cached on the disk to accelerate next run. TensorMetada
+// tensors will be cached on the disk to accelerate next run. TensorMetadata
 // structure is to represent the metadata of each input tensor. It includes
 // whether the tensor is symbolic, the dtype, the device, the sizes and the
 // strides of the tensor. When the metadata of the input tensors is the same as
@@ -19,7 +19,7 @@ namespace torch::inductor {
 // library.
 // Beyond the TensorMetadata, we build guard/TensorCheck for each input tensor
 // as well to support symbolic shape. We intend to utilize TensorCheck to find
-// out the proper kernel rather than TensorMetada comparison. Suppose an
+// out the proper kernel rather than TensorMetadata comparison. Suppose an
 // operation with a single input tensor and two kernels:
 //   kernel1: TensorMetadata(is_symbolic=false, dtype=Float, device=CPU,
 //   sizes=[s0, s1, s2], strides=[s1 * s2, s2, 1]) kernel2:
@@ -27,7 +27,7 @@ namespace torch::inductor {
 //   s2], strides=[s1 * s2, s2, 1])
 // If a tensor with sizes=[3, 4, 5] is passed to the operation, both kernel1 and
 // kernel2 support the tensor shape. In this case, we need to use TensorCheck
-// plus some heruistic rules to find out the proper kernel.
+// plus some heuristic rules to find out the proper kernel.
 struct TensorMetadata {
   // Indicate whether the tensor is symbolic and it may be concluded by sizes_
   // and strides_ in the future.

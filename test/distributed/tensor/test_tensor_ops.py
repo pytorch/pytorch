@@ -111,6 +111,22 @@ class DistTensorOpsTest(DTensorTestBase):
             self.assertEqual(dst_dtensor.placements, (Partial(),))
             self.assertEqual(dst_dtensor._local_tensor, dst_tensor)
 
+        # test that copy_ preserves any Partial type, not just sum/avg
+        for reduce_op in ["max", "min"]:
+            src_tensor = torch.randn((64, 1))
+            dst_tensor = torch.zeros(16, 32, 64, 128)
+            partial_placement = Partial(reduce_op)
+            src_dtensor = DTensor.from_local(
+                src_tensor, device_mesh, [partial_placement]
+            )
+            dst_dtensor = DTensor.from_local(
+                dst_tensor, device_mesh, [partial_placement]
+            )
+            dst_dtensor.copy_(src_dtensor)
+            dst_tensor.copy_(src_tensor)
+            self.assertEqual(dst_dtensor.placements, (partial_placement,))
+            self.assertEqual(dst_dtensor._local_tensor, dst_tensor)
+
     @with_comms
     def test_contiguous(self):
         device_mesh = self.build_device_mesh()
@@ -565,7 +581,7 @@ class DistTensorOpsTest(DTensorTestBase):
         # case 2 input sharding: input sharded, index replicated, output mask partial
         # only works when index has size 1 on the gather dimension and
         # input is sharded on the gather dimension
-        from torch.distributed.tensor.placement_types import MaskPartial
+        from torch.distributed.tensor.placement_types import _MaskPartial
 
         gather_dim = 1
         global_input = torch.randn(12, 8, 16)
@@ -576,7 +592,7 @@ class DistTensorOpsTest(DTensorTestBase):
         with comm_mode:
             output_dt = torch.gather(input_dt, gather_dim, index_dt)
             self.assertEqual(comm_mode.get_total_counts(), 0)
-        self.assertIsInstance(output_dt.placements[0], MaskPartial)
+        self.assertIsInstance(output_dt.placements[0], _MaskPartial)
         self.assertEqual(output_dt.full_tensor(), global_output)
 
         # case 3 index sharding: input replicated, index sharded, output sharded
@@ -760,11 +776,11 @@ class DistTensorOpsTest(DTensorTestBase):
     @with_comms
     def test_dtensor_dtype_conversion(self):
         from torch.distributed.tensor.debug import (
-            _clear_fast_path_sharding_prop_cache,
+            _clear_sharding_prop_cache,
             _get_fast_path_sharding_prop_cache_stats,
         )
 
-        _clear_fast_path_sharding_prop_cache()
+        _clear_sharding_prop_cache()
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
         # by default we start from bf16 dtype

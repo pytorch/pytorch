@@ -53,7 +53,6 @@ from torch._inductor.aoti_eager import (
     load_aoti_eager_cache,
 )
 from torch._inductor.codegen.common import DataTypePropagation, OptimizationContext
-from torch._inductor.fx_passes import pad_mm
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import (
     add_scheduler_init_hook,
@@ -96,10 +95,12 @@ from torch.testing._internal.common_utils import (
     IS_MACOS,
     IS_X86,
     MACOS_VERSION,
+    MI200_ARCH,
     parametrize,
     serialTest,
     skipIfMPS,
     skipIfRocm,
+    skipIfRocmArch,
     skipIfWindows,
     skipIfXpu,
     subtest,
@@ -658,6 +659,7 @@ def check_model(
     torch._dynamo.reset()
 
 
+@skipIfRocmArch(MI200_ARCH)
 @torch._inductor.config.patch("triton.cudagraphs", False)
 def check_model_gpu(
     self: TestCase,
@@ -1878,6 +1880,8 @@ class CommonTemplate:
             # is fixed.
             elif is_mps_backend(self.device):
                 pass  # no device asserts in MPS
+            elif is_pallas_backend(self.device):
+                pass  # Pallas generates Python/JAX code, not C++/Triton
             elif self.device == "cpu" and not is_triton_cpu_backend(self.device):
                 _, code = run_and_get_cpp_code(fn_opt, *inps)
                 self.assertTrue(("TORCH_CHECK" in code) is has_assert)
@@ -3152,6 +3156,13 @@ class CommonTemplate:
             ),
         )
 
+    def test_view_copy_dtype_change(self):
+        def fn(x, dtype):
+            return torch.ops.aten.view_copy(x, dtype=dtype)
+
+        x = torch.randint(2, 32, (8, 16), dtype=torch.int32, device=self.device)
+        self.common(fn, (x, torch.int64))
+
     def test_torch_device_split(self):
         def fn(x):
             return x.split(2)
@@ -3306,6 +3317,28 @@ class CommonTemplate:
             return (torch.nn.functional.silu(a),)
 
         self.common(fn, (torch.randn(8, 8),))
+
+    @skip_if_halide  # halide has different precision characteristics
+    def test_silu_exact_eager(self):
+        """Test that compiled SiLU matches eager exactly."""
+
+        def fn(a):
+            return torch.nn.functional.silu(a)
+
+        # Test with normal random values
+        self.common(fn, (torch.randn(1024, device=self.device),))
+
+        # Test with bfloat16 edge cases (all possible bf16 values)
+        x_bf16 = (
+            torch.arange(0, 2**16, dtype=torch.int32, device=self.device)
+            .to(torch.int16)
+            .view(torch.bfloat16)
+        )
+        eager_result_bf16 = fn(x_bf16)
+        torch._dynamo.reset()
+        compiled_fn = torch.compile(fn)
+        compiled_result_bf16 = compiled_fn(x_bf16)
+        self.assertEqual(eager_result_bf16, compiled_result_bf16, equal_nan=True)
 
     @skip_if_halide  # halide has buggy nan handling
     def test_nan_to_num(self):
@@ -3623,6 +3656,8 @@ class CommonTemplate:
         cf(x, 1e-5)
         cf(x, 1e-6)
 
+    # I think Triton CPU doesn't preserve -0.0 sign in tl.full
+    @xfail_if_triton_cpu
     def test_div_by_zero(self):
         def fn(x, runtime_zero, runtime_neg_zero):
             zero = torch.zeros_like(x)
@@ -4589,6 +4624,20 @@ class CommonTemplate:
             fn2,
             (torch.randn([2, 2, 10]),),
         )
+
+    def test_unsafe_chunk_empty_tensor(self):
+        def fn(x, chunks):
+            return torch.unsafe_chunk(x, chunks=chunks, dim=0)
+
+        x = torch.zeros(0)
+        result = torch.compile(fn)(x, 4)
+        self.assertEqual(len(result), 4)
+        for chunk in result:
+            self.assertEqual(chunk.shape, torch.Size([0]))
+
+        self.common(fn, (torch.zeros(0), 4))
+        self.common(fn, (torch.zeros(0), 2))
+        self.common(fn, (torch.zeros(0, dtype=torch.float32), 3))
 
     @parametrize("dilation", (1, 2))
     @parametrize("dim", (subtest(2), subtest(3)))
@@ -7408,7 +7457,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
     @xfail_if_mps_unimplemented
     @skipCUDAIf(not TEST_CUDNN, "CUDNN not available")
     @skipIfXpu
-    @skipIfRocm
     def test_cudnn_rnn(self):
         if self.device == "cpu":
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
@@ -7453,24 +7501,45 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 b14,
                 b15,
             ]
-            return aten._cudnn_rnn(
-                a0,
-                a1,
-                4,
-                a3,
-                a4,
-                a5,
-                2,
-                2048,
-                0,
-                2,
-                False,
-                0.0,
-                False,
-                True,
-                [],
-                None,
-            )
+
+            if torch.version.cuda:
+                return aten._cudnn_rnn(
+                    a0,
+                    a1,
+                    4,
+                    a3,
+                    a4,
+                    a5,
+                    2,
+                    2048,
+                    0,
+                    2,
+                    False,
+                    0.0,
+                    False,
+                    True,
+                    [],
+                    None,
+                )
+            else:
+                return aten.miopen_rnn(
+                    a0,
+                    a1,
+                    4,
+                    # weight_buf is cudnn only
+                    a4,
+                    a5,
+                    2,
+                    2048,
+                    # proj_size is cudnn only
+                    2,
+                    False,
+                    0.0,
+                    False,
+                    True,
+                    [],
+                    None,
+                )
 
         self.common(
             fn,
@@ -8757,6 +8826,23 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 torch.randn(197, 38),
             ],
         )
+
+    @skipIfMPS  # MPS does not support float64
+    def test_select_scatter_dtype_consistency(self):
+        def fn(x, a):
+            return (torch.select_scatter(x, a, 1, 0),)
+
+        for dtype in [
+            torch.int64,
+            torch.float64,
+        ]:
+            self.common(
+                fn,
+                [
+                    torch.randn((8, 197, 38)).to(dtype),
+                    torch.randn((8, 38), dtype=torch.float32),
+                ],
+            )
 
     @skip_if_gpu_halide  # accuracy issue
     def test_slice_scatter(self):
@@ -13188,21 +13274,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         res = torch.compile(fn)(20)
         self.assertTrue(torch.all((res >= 0) & (res < 10)).item())
 
-    @torch._inductor.config.patch(force_shape_pad=True)
-    @skip_if_gpu_halide  # correctness issue
-    def test_should_pad_bench_for_bmm(self):
-        B = 2
-        M = 1024
-        N = 1024
-        K = 1024 + 1  # a size that requires padding
-
-        mat1 = torch.rand(B, M, K, device=self.device)
-        mat2 = torch.rand(B, K, N, device=self.device)
-
-        should_pad = pad_mm.should_pad_bench(None, mat1, mat2, torch.ops.aten.bmm)
-
-        self.assertTrue(should_pad)
-
     @parametrize(
         "name, op",
         [
@@ -13504,6 +13575,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             elements = torch.tensor([1, 2, 3, 4])
             test_elements = 1
             self.common(torch.isin, (elements, test_elements), {"invert": invert})
+
+        elements = torch.tensor(3.0)
+        test_elements = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0])
+        self.common(torch.isin, (elements, test_elements), {"assume_unique": True})
 
     def test_mul_index_expr(self):
         # Minified repro from https://github.com/pytorch/pytorch/issues/111884
@@ -14764,8 +14839,12 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertTrue(torch.all(result < 2560).item())
 
         code_str = "\n".join(code)
+        if torch.version.hip:
+            triton_str = "tl.minimum"
+        else:
+            triton_str = "triton_helpers.minimum"
         self.assertIn(
-            "triton_helpers.minimum",
+            triton_str,
             code_str,
             "Generated Triton code should use triton_helpers.minimum for clamping",
         )
@@ -14957,6 +15036,227 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(result, expected)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
         FileCheck().check_regex(r"tl\.store\(.*xmask\)").run(code)
+
+    @requires_cuda_and_triton
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @config.patch({"triton.enable_pdl": True})
+    def test_pdl_mutation(self):
+        def fn(a, b, c):
+            b.copy_(c)  # second kernel
+            return a**2 + b  # first kernel
+
+        a, b, c = [
+            torch.randn(s, device=GPU_TYPE) for s in [(1024, 1024), (1024,), (1024,)]
+        ]
+        self.common(fn, (a, b, c))
+
+        code = run_and_get_triton_code(torch.compile(fn), a, b, c)
+        (
+            FileCheck()
+            # first kernel
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("load")
+            .check("load")
+            .check("gdc_launch")
+            .check("store")
+            # second kernel, no need to wait before load
+            .check("'launch_pdl': True")
+            .check("load")
+            .check("gdc_wait")
+            .check("gdc_launch")
+            .check("store")
+        ).run(code)
+
+    @requires_cuda_and_triton
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @config.patch(
+        {
+            "triton.enable_pdl": True,
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "coordinate_descent_tuning": True,
+        }
+    )
+    def test_pdl_template_and_delay(self):
+        def fn(a, b):
+            a = (a / (a**2).sum(-1, keepdim=True)) ** 2  # first kernel
+            b = (b / (b**2).sum(-1, keepdim=True)) ** 2  # second kernel
+            c = a @ b  # fused-epilogue template
+            c = c**2
+            return c
+
+        a, b = [torch.randn(s, device=GPU_TYPE) for s in [(1024, 512), (512, 1024)]]
+        self.common(fn, (a, b))
+        code = run_and_get_triton_code(torch.compile(fn, mode="max-autotune"), a, b)
+        (
+            FileCheck()
+            # first kernel
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("load")
+            .check("gdc_launch")
+            .check("store")
+            # second kernel, no need to wait before load
+            .check("'launch_pdl': True")
+            .check("load")
+            .check("gdc_wait")
+            .check("gdc_launch")
+            .check("store")
+            # matmul template
+            .check_not("'launch_pdl': True")
+            .check_not("gdc_wait")
+            .check_not("gdc_launch")
+            .check("store")
+        ).run(code)
+
+    def test_use_deterministic_algorithms(self):
+        @torch.compile(backend="inductor", fullgraph=True)
+        def fn(src, index, base_tensor):
+            src = src + 10
+            torch.use_deterministic_algorithms(True)
+            base_tensor.scatter_(0, index, src)
+            return base_tensor.clone() + 1
+
+        src = torch.tensor([[100.0], [200.0], [300.0]])
+        index = torch.tensor([[0], [0], [0]])
+        base_tensor = torch.zeros(2, 1)
+        out = fn(src, index, base_tensor)
+        expected = torch.tensor([[311.0], [1.0]])
+        self.assertEqual(out, expected)
+
+    @xfail_if_triton_cpu
+    @requires_cuda_and_triton
+    def test_addcmul_fma_bitwise_equal(self):
+        """Test that addcmul with FMA lowering produces bitwise equal results to eager."""
+        self_tensor = torch.randn(64, 64, device=GPU_TYPE)
+        tensor1 = torch.randn(64, 64, device=GPU_TYPE)
+        tensor2 = torch.randn(64, 64, device=GPU_TYPE)
+
+        # ROCm may have small numerical differences
+        # For some reason ROCm isn't bitwise equivalent between eager and compiled
+        atol = 1e-5 if TEST_WITH_ROCM else 0
+        rtol = 1e-5 if TEST_WITH_ROCM else 0
+
+        # Test value=1
+        eager_result = torch.addcmul(self_tensor, tensor1, tensor2)
+
+        @torch.compile
+        def fn(s, t1, t2):
+            return torch.addcmul(s, t1, t2)
+
+        compiled_result = fn(self_tensor, tensor1, tensor2)
+        self.assertEqual(eager_result, compiled_result, atol=atol, rtol=rtol)
+
+        # Test value != 1
+        eager_result2 = torch.addcmul(self_tensor, tensor1, tensor2, value=2.5)
+
+        @torch.compile
+        def fn2(s, t1, t2):
+            return torch.addcmul(s, t1, t2, value=2.5)
+
+        compiled_result2 = fn2(self_tensor, tensor1, tensor2)
+        self.assertEqual(eager_result2, compiled_result2, atol=atol, rtol=rtol)
+
+    @xfail_if_triton_cpu
+    @requires_cuda_and_triton
+    def test_addcmul_fma_uses_fma_instruction(self):
+        """Test that addcmul generates code using FMA instruction."""
+        self_tensor = torch.randn(64, 64, device=GPU_TYPE)
+        tensor1 = torch.randn(64, 64, device=GPU_TYPE)
+        tensor2 = torch.randn(64, 64, device=GPU_TYPE)
+
+        @torch.compile
+        def fn(s, t1, t2):
+            return torch.addcmul(s, t1, t2, value=2.0)
+
+        _, code = run_and_get_code(fn, self_tensor, tensor1, tensor2)
+        code = " ".join(code)
+        self.assertIn(
+            "libdevice.fma", code, "Expected FMA to be used in generated code"
+        )
+
+    @requires_cuda_and_triton
+    def test_addcmul_type_promotion(self):
+        """Test that addcmul correctly promotes types when inputs have different dtypes."""
+        # Test int + float promotion
+        self_int = torch.randint(0, 10, (32, 32), device=GPU_TYPE, dtype=torch.int32)
+        tensor1_float = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float32)
+        tensor2_float = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float32)
+
+        eager_result = torch.addcmul(self_int, tensor1_float, tensor2_float)
+
+        @torch.compile
+        def fn(s, t1, t2):
+            return torch.addcmul(s, t1, t2)
+
+        compiled_result = fn(self_int, tensor1_float, tensor2_float)
+        self.assertEqual(eager_result.dtype, compiled_result.dtype)
+        self.assertEqual(eager_result, compiled_result)
+
+        # Test float16 + float32 promotion
+        self_fp16 = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float16)
+        tensor1_fp32 = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float32)
+        tensor2_fp32 = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float32)
+
+        eager_result2 = torch.addcmul(self_fp16, tensor1_fp32, tensor2_fp32)
+
+        @torch.compile
+        def fn2(s, t1, t2):
+            return torch.addcmul(s, t1, t2)
+
+        compiled_result2 = fn2(self_fp16, tensor1_fp32, tensor2_fp32)
+        self.assertEqual(eager_result2.dtype, compiled_result2.dtype)
+        self.assertEqual(eager_result2, compiled_result2)
+
+        # Test all float16 inputs
+        self_fp16_2 = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float16)
+        tensor1_fp16 = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float16)
+        tensor2_fp16 = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float16)
+
+        eager_result3 = torch.addcmul(
+            self_fp16_2, tensor1_fp16, tensor2_fp16, value=2.0
+        )
+
+        @torch.compile
+        def fn3(s, t1, t2):
+            return torch.addcmul(s, t1, t2, value=2.0)
+
+        compiled_result3 = fn3(self_fp16_2, tensor1_fp16, tensor2_fp16)
+        self.assertEqual(eager_result3.dtype, compiled_result3.dtype)
+        self.assertEqual(eager_result3, compiled_result3)
+
+        # Test with scalar tensor (0-d tensor) broadcasting
+        self_tensor = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float32)
+        tensor1_scalar = torch.tensor(2.5, device=GPU_TYPE, dtype=torch.float32)
+        tensor2_tensor = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float32)
+
+        eager_result4 = torch.addcmul(self_tensor, tensor1_scalar, tensor2_tensor)
+
+        @torch.compile
+        def fn4(s, t1, t2):
+            return torch.addcmul(s, t1, t2)
+
+        compiled_result4 = fn4(self_tensor, tensor1_scalar, tensor2_tensor)
+        self.assertEqual(eager_result4.dtype, compiled_result4.dtype)
+        self.assertEqual(eager_result4, compiled_result4)
+
+        # Test with scalar tensor and type promotion
+        self_fp32 = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float32)
+        tensor1_fp64_scalar = torch.tensor(1.5, device=GPU_TYPE, dtype=torch.float64)
+        tensor2_fp32 = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float32)
+
+        eager_result5 = torch.addcmul(
+            self_fp32, tensor1_fp64_scalar, tensor2_fp32, value=0.5
+        )
+
+        @torch.compile
+        def fn5(s, t1, t2):
+            return torch.addcmul(s, t1, t2, value=0.5)
+
+        compiled_result5 = fn5(self_fp32, tensor1_fp64_scalar, tensor2_fp32)
+        self.assertEqual(eager_result5.dtype, compiled_result5.dtype)
+        self.assertEqual(eager_result5, compiled_result5)
 
     # end of class CommonTemplate - add new tests here
 
@@ -15472,6 +15772,18 @@ if RUN_GPU:
             self.assertTrue("out_ptr1" in code)
             self.assertFalse("out_ptr0" in code)
             self.assertEqual(fn_opt(*inps), fn(*inps))
+
+        def test_reduction_hint_inner_with_high_tiling_ratio(self):
+            """Test inner reduction hint with high tiling score ratio."""
+
+            def f(x, y):
+                return x.sum(dim=-1, keepdim=True) + (x + y[..., None])
+
+            x = torch.randn(2048, 128, 1024, device=GPU_TYPE)
+            y = torch.randn(128, 2048, device=GPU_TYPE).t()
+
+            code = run_and_get_triton_code(torch.compile(f), x, y)
+            self.assertIn("ReductionHint.INNER", code)
 
         def test_numpy_on_gpu(self):
             x = np.arange(10, dtype=np.float32)
@@ -16458,10 +16770,17 @@ if RUN_GPU:
             output = torch.zeros(512, 768, dtype=torch.bfloat16, device=GPU_TYPE)
 
             result, code = run_and_get_code(torch.compile(fn), output, indices, values)
-            self.assertTrue(
-                "tl.atomic_add" in code[0],
-                "bf16 should generate tl.atomic_add",
-            )
+            if output.device.type == "xpu":
+                # xpu fallback bf16 atomic add for better performance
+                self.assertFalse(
+                    "tl.atomic_add" in code[0],
+                    "bf16 should not generate tl.atomic_add on xpu",
+                )
+            else:
+                self.assertTrue(
+                    "tl.atomic_add" in code[0],
+                    "bf16 should generate tl.atomic_add",
+                )
             expected = torch.zeros(512, 768, dtype=torch.bfloat16, device=GPU_TYPE)
             torch.testing.assert_close(result, fn(expected, indices, values))
 

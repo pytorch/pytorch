@@ -110,6 +110,7 @@ if typing.TYPE_CHECKING:
         ValuesView,
     )
 
+    from torch._dynamo.bytecode_transformation import Instruction
     from torch._dynamo.replay_record import ExecutionRecord
     from torch._dynamo.symbolic_convert import (
         InstructionTranslator,
@@ -169,10 +170,8 @@ counters: collections.defaultdict[str, Counter[str]] = collections.defaultdict(
     collections.Counter
 )
 optimus_scuba_log: dict[str, Any] = {}
-troubleshooting_url = (
-    "https://pytorch.org/docs/main/compile/programming_model.recompilation.html"
-)
-nnmodule_doc_url = "https://pytorch.org/docs/main/torch.compiler_nn_module.html"
+troubleshooting_url = "https://docs.pytorch.org/docs/main/user_guide/torch_compiler/compile/programming_model.recompilation.html"
+nnmodule_doc_url = "https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_nn_module.html"
 nnmodule_doc_url_msg = f"See {nnmodule_doc_url} for more information and limitations."
 log = logging.getLogger(__name__)
 
@@ -351,16 +350,23 @@ def print_time_report() -> None:
 #        with dynamo_timed("metric", dynamo_compile_column_us="metric_us")
 #            ...
 #
-_METRICS_CONTEXT: MetricsContext
-_RUNTIME_METRICS_CONTEXT: RuntimeMetricsContext
+_metrics_context_tls = threading.local()
 
 
 def get_metrics_context() -> MetricsContext:
-    return _METRICS_CONTEXT
+    if not hasattr(_metrics_context_tls, "metrics_context"):
+        _metrics_context_tls.metrics_context = MetricsContext(
+            on_exit=record_compilation_metrics
+        )
+    return _metrics_context_tls.metrics_context
 
 
 def get_runtime_metrics_context() -> RuntimeMetricsContext:
-    return _RUNTIME_METRICS_CONTEXT
+    if not hasattr(_metrics_context_tls, "runtime_metrics_context"):
+        _metrics_context_tls.runtime_metrics_context = RuntimeMetricsContext(
+            on_exit=record_compilation_metrics
+        )
+    return _metrics_context_tls.runtime_metrics_context
 
 
 class CompileEventLogLevel(enum.Enum):
@@ -948,7 +954,7 @@ ANSI_ESCAPE_PATTERN = re.compile(
 class StripAnsiFormatter(logging.Formatter):
     """Logging formatter that strips ANSI escape codes."""
 
-    def format(self, record):
+    def format(self, record: logging.LogRecord) -> str:
         msg = super().format(record)
         return ANSI_ESCAPE_PATTERN.sub("", msg)
 
@@ -1079,6 +1085,7 @@ def istype(obj: object, allowed_types: Any) -> bool:
     return type(obj) is allowed_types
 
 
+_builtin_final_typing_classes: tuple[Any, ...] = tuple()
 if sys.version_info >= (3, 12):
     # Some typing classes moved to C in 3.12,
     # which no longer have the _Final mixin.
@@ -1400,11 +1407,17 @@ class CompilationMetrics:
     log_format_version: int = LOG_FORMAT_VERSION
     inductor_config: Optional[str] = None
     remote_cache_version: Optional[int] = None
-    inductor_fx_remote_cache_hit_count: Optional[int] = None
-    inductor_fx_remote_cache_miss_count: Optional[int] = None
+    inductor_fx_remote_cache_hit_count: Optional[int] = 0
+    inductor_fx_remote_cache_miss_count: Optional[int] = 0
     inductor_fx_remote_cache_backend_type: Optional[str] = None
     inductor_fx_remote_cache_hit_keys: Optional[str] = None
     inductor_fx_remote_cache_miss_keys: Optional[str] = None
+    inductor_fx_local_cache_hit_count: Optional[int] = 0
+    inductor_fx_local_cache_miss_count: Optional[int] = 0
+    aotautograd_remote_cache_hit_count: Optional[int] = 0
+    aotautograd_remote_cache_miss_count: Optional[int] = 0
+    aotautograd_local_cache_hit_count: Optional[int] = 0
+    aotautograd_local_cache_miss_count: Optional[int] = 0
     cuda_version: Optional[str] = None
     triton_version: Optional[str] = None
     feature_usage: Optional[dict[str, bool]] = None
@@ -1766,11 +1779,6 @@ def record_compilation_metrics(
     # Finally log the compilation metrics.
     if config.log_compilation_metrics:
         log_compilation_event(compilation_metrics)
-
-
-# record_compilation_metrics is called by the singleton MetricsContext exit handler.
-_METRICS_CONTEXT = MetricsContext(on_exit=record_compilation_metrics)
-_RUNTIME_METRICS_CONTEXT = RuntimeMetricsContext(on_exit=record_compilation_metrics)
 
 
 def set_compilation_metrics_limit(new_size: int) -> None:
@@ -2303,16 +2311,19 @@ def skip_frame_if_in_functorch_mode(val: torch.Tensor) -> None:
     try:
         val.data_ptr()  # will throw for functorch tensors
     except RuntimeError as e:
-        from .exc import format_skip_frame_message, SkipFrame
+        from .exc import unimplemented
 
         # This will be GradTrackingTensor/BatchedTensor/etc
         functorch_subclass_name = re.sub(r"\(.*", "", repr(val))
-        raise SkipFrame(
-            format_skip_frame_message(
-                None,
-                f"torch.compile cannot be run in context: {functorch_subclass_name}",
-            )
-        ) from e
+
+        unimplemented(
+            gb_type="skip frame due to being in functorh mode",
+            context="",
+            explanation=f"torch.compile cannot be run in context: {functorch_subclass_name}. Skipping frame.",
+            hints=[],
+            from_exc=e,
+            skip_frame=True,
+        )
 
 
 @contextmanager
@@ -3038,6 +3049,7 @@ def same(
     log_error: Callable[..., None] = log.error,
     use_larger_multiplier_for_smaller_tensor: bool = False,
     force_max_multiplier: bool = False,
+    use_iou_for_bool: bool = False,
 ) -> bool:
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
@@ -3065,6 +3077,7 @@ def same(
                 log_error=log_error,
                 use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
                 force_max_multiplier=force_max_multiplier,
+                use_iou_for_bool=use_iou_for_bool,
             )
             for ai, bi, fp64_refi in zip(ref, res, fp64_ref)
         )
@@ -3085,6 +3098,7 @@ def same(
             log_error=log_error,
             use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
             force_max_multiplier=force_max_multiplier,
+            use_iou_for_bool=use_iou_for_bool,
         )
     elif isinstance(ref, dict):
         assert isinstance(res, dict)
@@ -3106,6 +3120,7 @@ def same(
                     log_error=log_error,
                     use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
                     force_max_multiplier=force_max_multiplier,
+                    use_iou_for_bool=use_iou_for_bool,
                 )
             ):
                 log_error("Accuracy failed for key name %s", k)
@@ -3135,6 +3150,25 @@ def same(
                 return False
             if ref.dtype == torch.bool:
                 if ignore_non_fp:
+                    return True
+                if use_iou_for_bool:
+                    # Use IoU (Intersection over Union) metric for boolean mask comparison.
+                    # This is useful for segmentation models where small floating-point
+                    # differences get thresholded into boolean masks.
+                    intersection = (ref & res).sum().float()
+                    union = (ref | res).sum().float()
+                    if union == 0:
+                        # Both masks are empty
+                        return bool(intersection == 0)
+                    iou = (intersection / union).item()
+                    iou_threshold = 0.99
+                    if iou < iou_threshold:
+                        log_error(
+                            "IoU accuracy failed: %.4f < %.2f",
+                            iou,
+                            iou_threshold,
+                        )
+                        return False
                     return True
                 # triton stores bool as int8, so add this for more accurate checking
                 r = torch.allclose(
@@ -3449,7 +3483,7 @@ def get_concrete_sizes_from_symints(
     shape_env = fake_mode.shape_env
     var_to_val = shape_env.var_to_val
 
-    def replace_sym(match):
+    def replace_sym(match: Any) -> str:
         sym_name = f"s{match.group(1)}"
         val = next(
             (v for k, v in var_to_val.items() if k.name == sym_name),
@@ -4249,6 +4283,7 @@ def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
 
     import ast
 
+    tree: Any | None = None
     try:
         # Without brackets, `segment` is parsed as a statement.
         # We expect an expression, so wrap `segment` in
@@ -4256,6 +4291,7 @@ def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
         tree = ast.parse("(\n" + segment + "\n)")
     except SyntaxError:
         return None
+    assert tree is not None
 
     if len(tree.body) != 1:
         return None
@@ -4363,7 +4399,7 @@ def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
     return None
 
 
-def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> str:
+def get_instruction_source_311(code: types.CodeType, inst: Instruction) -> str:
     """
     Python 3.11+ only. Returns lines of source code (from code object `code`)
     corresponding to `inst`'s location data, and underlines relevant code to `inst`.
@@ -4402,7 +4438,7 @@ def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> s
         result = textwrap.indent(textwrap.dedent(result), indent)
         return result
 
-    assert inst.positions is not None
+    assert hasattr(inst, "positions") and inst.positions is not None
     if inst.positions.lineno is None:
         return ""
     # The rstrip + "\n" pattern is used throughout this function to handle
