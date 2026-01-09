@@ -187,6 +187,7 @@ class ApplyBackwardHook(torch.autograd.Function):
     """
 
     @staticmethod
+    # pyre-ignore[14]: Inconsistent override is expected for autograd.Function
     def forward(
         ctx: Any, tensor: torch.Tensor, hook_fn: Callable[..., Any]
     ) -> torch.Tensor:  # type: ignore[override]

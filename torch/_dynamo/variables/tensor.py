@@ -1721,8 +1721,9 @@ class TensorVariable(VariableTracker):
                 for user in users_to_replace:
                     user.replace_input_with(tensor_node, tensor_prime_node)
 
-                # Update self to point to the hooked tensor
-                self.proxy = result.proxy
+                # Update self to point to the tensor_prime
+                assert isinstance(result, TensorVariable)
+                self.proxy = result.as_proxy()
                 # TensorVariable doesn't actually store the grad_fn
                 # so this is fine.
                 self.synchronize_attributes(tx)
