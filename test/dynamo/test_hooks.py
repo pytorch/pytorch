@@ -303,7 +303,6 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(cnts.frame_count, 0)
 
     def test_intermediary_hooks(self):
-        # Graph breaks because compiled_autograd is not set
         def simple_hook(g):
             return g * 2
 
@@ -319,7 +318,7 @@ class HooksTests(torch._dynamo.test_case.TestCase):
         res = fn(out)
         res.backward()
         self.assertEqual(res, f(out))
-        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.frame_count, 1)
         self.assertEqual(out.grad, torch.Tensor([2.0]))
 
     def test_intermediary_hooks_same_on_aot_eager(self):
