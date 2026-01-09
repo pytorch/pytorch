@@ -2248,6 +2248,17 @@
       "Hints": []
     }
   ],
+  "GB8843": [
+    {
+      "Gb_type": "Opaque object member with method-type USE_REAL returned a reference-type opaque objects.",
+      "Context": "Opaque object type: {value_type}. Method name: '{name}'",
+      "Explanation": "To properly guard reference-type opaque objects, we must lift them as inputs to the graph. In order to do this, they must all have a source, meaning they come from a global value or are an attribute of an input.",
+      "Hints": [
+        "Register member '{name}' with MemberType.INLINED in ",
+        "register_opaque_type({value_type}, members=...)."
+      ]
+    }
+  ],
   "GB0201": [
     {
       "Gb_type": "namedtuple construction",
@@ -3423,6 +3434,24 @@
       "Explanation": "torch.cond expects 4 positional arguments (got {len(args)}) and no keyword arguments (got {len(kwargs)}) Usage: cond(pred, cond_fn, body_fn, operands)",
       "Hints": [
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB2078": [
+    {
+      "Gb_type": "Attempted to access unregistered member on an OpaqueObject",
+      "Context": "value={real_obj}, attr={name}",
+      "Explanation": "Member '{name}' is not registered for this opaque object type.",
+      "Hints": [
+        "Register '{name}' with a MemberType in register_opaque_type(members=...)."
+      ]
+    },
+    {
+      "Gb_type": "Attempted to access unregistered member on an OpaqueObject",
+      "Context": "value={self.value}, attr={name}",
+      "Explanation": "Member '{name}' is not registered for this opaque object type.",
+      "Hints": [
+        "Register '{name}' with a MemberType in register_opaque_type(members=...)."
       ]
     }
   ],
