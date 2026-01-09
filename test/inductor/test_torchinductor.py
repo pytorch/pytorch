@@ -9969,13 +9969,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 indices,
             ],
         )
-        # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion.
-        # Correctness is validated by self.common() above.
-        self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
+        assertGeneratedKernelCountEqual(self, 1)
 
     @expectedFailureXPU
     def test_max_pool2d_with_indices_backward5(self):
-        # Large window size - decomposition handles via scatter_add
+        # Window size is too big. Should fallback
         def fn(a, b, c):
             return aten.max_pool2d_with_indices_backward(
                 a, b, [13, 13], [1, 1], [2, 2], [1, 1], False, c
@@ -9999,15 +9997,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 indices,
             ],
         )
-        # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion.
-        # Correctness is validated by self.common() above.
-        # MPS: decomposition falls back to native kernel, so no inductor kernels generated
-        if self.device != "mps":
-            self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
+        assertGeneratedKernelCountEqual(self, 0)
 
     # From https://github.com/pytorch/pytorch/issues/93384
     def test_max_pool2d_with_indices_backward6(self):
-        # dilation != 1 - decomposition handles all dilation cases
+        # dilation is not 1. Should fallback
         def fn(a, b, c):
             return aten.max_pool2d_with_indices_backward(
                 a, b, [3, 2], [2, 1], [1, 1], [1, 2], False, c
@@ -10031,11 +10025,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
                 indices,
             ],
         )
-        # Note: Kernel count varies by backend (CUDA ~3, ROCm ~2) due to fusion.
-        # Correctness is validated by self.common() above.
-        # MPS: decomposition falls back to native kernel, so no inductor kernels generated
-        if self.device != "mps":
-            self.assertGreater(torch._inductor.metrics.generated_kernel_count, 0)
+        assertGeneratedKernelCountEqual(self, 0)
 
     def test_issue102546(self):
         def fn(x):
@@ -15143,6 +15133,11 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         tensor1 = torch.randn(64, 64, device=GPU_TYPE)
         tensor2 = torch.randn(64, 64, device=GPU_TYPE)
 
+        # ROCm may have small numerical differences
+        # For some reason ROCm isn't bitwise equivalent between eager and compiled
+        atol = 1e-5 if TEST_WITH_ROCM else 0
+        rtol = 1e-5 if TEST_WITH_ROCM else 0
+
         # Test value=1
         eager_result = torch.addcmul(self_tensor, tensor1, tensor2)
 
@@ -15151,7 +15146,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return torch.addcmul(s, t1, t2)
 
         compiled_result = fn(self_tensor, tensor1, tensor2)
-        self.assertEqual(eager_result, compiled_result, atol=0, rtol=0)
+        self.assertEqual(eager_result, compiled_result, atol=atol, rtol=rtol)
 
         # Test value != 1
         eager_result2 = torch.addcmul(self_tensor, tensor1, tensor2, value=2.5)
@@ -15161,7 +15156,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             return torch.addcmul(s, t1, t2, value=2.5)
 
         compiled_result2 = fn2(self_tensor, tensor1, tensor2)
-        self.assertEqual(eager_result2, compiled_result2, atol=0, rtol=0)
+        self.assertEqual(eager_result2, compiled_result2, atol=atol, rtol=rtol)
 
     @xfail_if_triton_cpu
     @requires_cuda_and_triton

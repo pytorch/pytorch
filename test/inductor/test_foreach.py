@@ -13,6 +13,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
 from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu
@@ -1354,6 +1355,11 @@ class ForeachTests(TestCase):
             torch.randn(32, 32, device=GPU_TYPE),
         ]
 
+        # ROCm may have small numerical differences
+        # For some reason ROCm isn't bitwise equivalent between eager and compiled
+        atol = 1e-5 if TEST_WITH_ROCM else 0
+        rtol = 1e-5 if TEST_WITH_ROCM else 0
+
         # Test with default value=1
         eager_result = torch._foreach_addcmul(self_tensors, tensor1_list, tensor2_list)
 
@@ -1363,7 +1369,7 @@ class ForeachTests(TestCase):
 
         compiled_result = fn(self_tensors, tensor1_list, tensor2_list)
         for eager, compiled in zip(eager_result, compiled_result):
-            self.assertEqual(eager, compiled, atol=0, rtol=0)
+            self.assertEqual(eager, compiled, atol=atol, rtol=rtol)
 
         # Test with value != 1
         eager_result2 = torch._foreach_addcmul(
@@ -1376,7 +1382,7 @@ class ForeachTests(TestCase):
 
         compiled_result2 = fn2(self_tensors, tensor1_list, tensor2_list)
         for eager, compiled in zip(eager_result2, compiled_result2):
-            self.assertEqual(eager, compiled, atol=0, rtol=0)
+            self.assertEqual(eager, compiled, atol=atol, rtol=rtol)
 
     @requires_cuda_and_triton
     def test_foreach_addcmul_uses_fma_instruction(self):
