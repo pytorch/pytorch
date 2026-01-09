@@ -1,7 +1,7 @@
 /******************************************************************************
  * Copyright (c) 2023, Advanced Micro Devices, Inc.
  * Copyright (c) 2022, Tri Dao.
- * Copyright (c) 2011-2021, NVIDIA CORPORATION.  All rights reserved.
+ * Copyright (c) 2011, NVIDIA CORPORATION.  All rights reserved.
  *
  * Redistribution and use in source and binary forms, with or without
  * modification, are permitted provided that the following conditions are met:
