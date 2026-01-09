@@ -2469,9 +2469,11 @@ def calc_conv_nd_return_shape(
                 # pyrefly: ignore [bad-index, index-error]
                 _formula(dims[i], padding[i], dilation[i], kernel_size[i], stride[i])
             )
-    # CPU kernels don't support zero-sized spatial dimensions, but CUDA does
-    # During compilation, input_tensor is a FakeTensor with device='meta',
-    # so we need to check fake_device to get the actual target device
+    # NOTE: Backend behavior for zero-sized spatial dimensions is inconsistent.
+    # CUDA (cuDNN) handles zero-sized outputs gracefully by short-circuiting,
+    # but other backends fail: CPU rejects it, ROCm/miopen returns
+    # miopenStatusBadParm, and MPS asserts "Placeholder tensor is empty".
+    # We only allow zero-sized outputs on CUDA where it's known to work.
     from torch._subclasses.fake_tensor import FakeTensor
     from torch.fx.experimental.symbolic_shapes import sym_or
 
@@ -2481,7 +2483,7 @@ def calc_conv_nd_return_shape(
         else input_tensor.device
     )
 
-    if device.type == "cpu":
+    if device.type != "cuda":
         torch._check(
             sym_or(*[x > 0 for x in ret_shape[2:]]),
             lambda: f"Given input size per channel: {list(dims)}. "
@@ -4950,8 +4952,7 @@ def max_pool2d_checks_and_compute_shape(
     return nInputPlane, outputHeight, outputWidth
 
 
-@register_meta(aten.max_pool2d_with_indices_backward)
-@out_wrapper("grad_input")
+@register_meta(aten.max_pool2d_with_indices_backward.default)
 def meta_max_pool2d_with_indices_backward(
     grad_output,
     self,
