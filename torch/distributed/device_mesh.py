@@ -175,6 +175,7 @@ else:
             >>> mesh = DeviceMesh(device_type="cuda", mesh=[[0, 1, 2, 3],[4, 5, 6, 7]])
         """
 
+        _rank: int
         _device_type: str
         _rank_map: torch.Tensor
         _mesh_dim_names: tuple[str, ...] | None
@@ -230,7 +231,6 @@ else:
                 f"which isn't large enough for layout {_layout}"
             )
 
-            self._rank = _rank
             self._device_type = device_type
             self._layout = _layout
             self._rank_map = _rank_map
@@ -287,8 +287,10 @@ else:
                     self._thread_id = threading.get_ident()
 
                 # Now that the process group is initialized, we can get the rank
-                if self._rank is None:
+                if _rank is None:
                     self._rank = get_rank()
+                else:
+                    self._rank = _rank
 
                 self._coordinate_on_dim = self._compute_coordinate_on_dim()
 

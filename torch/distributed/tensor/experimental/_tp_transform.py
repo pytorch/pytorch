@@ -432,6 +432,7 @@ def _partition_val(val: Any, spec: DTensorSpec) -> Any:
                     my_coord_on_mesh_dim,
                     with_padding=False,
                     contiguous=True,
+                    clone=False,
                 )
         return local_shard
     elif isinstance(val, (list, tuple)):

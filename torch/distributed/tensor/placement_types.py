@@ -114,6 +114,7 @@ class Shard(torch._C._distributed.Shard):
         *,
         with_padding: bool = True,
         contiguous: bool = True,
+        clone: bool = True,
     ) -> torch.Tensor:
         """
         Like _split_tensor() but only returns a single Tensor
@@ -145,7 +146,9 @@ class Shard(torch._C._distributed.Shard):
         start = split_size * index
         length = torch.sym_ite(index == num_chunks - 1, last_split, split_size)
         result = torch.narrow(tensor, self.dim, start, length)
-        if contiguous:
+        if clone:
+            result = result.clone()
+        elif contiguous:
             result = result.contiguous()
         return result
 
@@ -400,7 +403,7 @@ class Shard(torch._C._distributed.Shard):
             num_chunks,
             shard_index,
             with_padding=False,
-            contiguous=True,
+            clone=True,
         )
 
     @staticmethod
@@ -766,6 +769,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
         *,
         with_padding: bool = True,
         contiguous: bool = True,
+        clone: bool = True,
     ) -> torch.Tensor:
         """
         Like _split_tensor() but only returns a single Tensor
@@ -774,7 +778,9 @@ class _StridedShard(torch._C._distributed.StridedShard):
             tensor, num_chunks, with_padding=with_padding, contiguous=False
         )
         result = shards[index]
-        if contiguous:
+        if clone:
+            result = result.clone()
+        elif contiguous:
             result = result.contiguous()
         return result
 
