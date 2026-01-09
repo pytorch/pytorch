@@ -1769,6 +1769,27 @@ from queue import Queue
 _LOCAL_RUNNER_MODE: "LocalRunnerMode | None" = None
 
 
+class _ExceptionRaisingThread(threading.Thread):
+    def __init__(
+        self, group=None, target=None, name=None, args=(), kwargs=None, *, daemon=None
+    ):
+        super().__init__(
+            target=target, name=name, args=args, kwargs=kwargs, daemon=daemon
+        )
+        self.exception: BaseException | None = None
+
+    def run(self):
+        try:
+            super().run()
+        except BaseException as e:  # noqa: B036
+            self.exception = e
+
+    def join(self, timeout=None):
+        super().join(timeout=timeout)
+        if self.exception:
+            raise self.exception
+
+
 class LocalRunnerMode:
     """
     A class for running multiple SPMD functions concurrently, however at any point
@@ -1794,7 +1815,7 @@ class LocalRunnerMode:
             dst: {src: Queue() for src in ranks} for dst in ranks
         }
         self._runners = [
-            threading.Thread(target=self._run, args=(i,), name="LocalRunnerMode")
+            _ExceptionRaisingThread(target=self._run, args=(i,), name="LocalRunnerMode")
             for i in range(concurrency)
         ]
         self._process_mode = True
@@ -1919,7 +1940,7 @@ class _LocalPhiloxState:
 
         if len(set(offsets.values())) == 1:
             return next(iter(offsets.values()))
-        # pyrefly: ignore [bad-argument-type, bad-argument-count]
+
         return SymInt(LocalIntNode(offsets))
 
     @offset.setter
