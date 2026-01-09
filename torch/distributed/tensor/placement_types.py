@@ -110,7 +110,7 @@ class Shard(torch._C._distributed.Shard):
         self,
         tensor: torch.Tensor,
         num_chunks: int,
-        index: int,
+        index: RankType,
         *,
         with_padding: bool = True,
         contiguous: bool = True,
@@ -119,10 +119,33 @@ class Shard(torch._C._distributed.Shard):
         """
         Like _split_tensor() but only returns a single Tensor
         """
-        shards, _ = self._split_tensor(
-            tensor, num_chunks, with_padding=with_padding, contiguous=False
+        # We don't handle SymInt with_padding yet (because that requires extra
+        # work based on the shard)
+        if isinstance(index, int) or with_padding:
+            shards, _ = self._split_tensor(
+                tensor, num_chunks, with_padding=with_padding, contiguous=False
+            )
+            result = shards[index]
+            if contiguous:
+                result = result.contiguous()
+            return result
+
+        # For the SymInt implementation just compute the value for the tensor we
+        # want rather than computing all of them.
+
+        assert self.dim <= tensor.ndim, (
+            f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
         )
-        result = shards[index]
+
+        # chunk tensor over dimension `dim` into n slices
+        dim_size = tensor.size(self.dim)
+        split_size = (dim_size + num_chunks - 1) // num_chunks
+        # each split is split_size except (maybe) the last one...
+        last_split = dim_size - split_size * (num_chunks - 1)
+
+        start = split_size * index
+        length = torch.sym_ite(index == num_chunks - 1, last_split, split_size)
+        result = torch.narrow(tensor, self.dim, start, length)
         if clone:
             result = result.clone()
         elif contiguous:
@@ -135,7 +158,7 @@ class Shard(torch._C._distributed.Shard):
         curr_local_size: int,
         num_chunks: int,
         rank: _RankTypeT,
-    ) -> tuple[int, _RankTypeT]:
+    ) -> tuple[_RankTypeT, _RankTypeT]:
         """
         Given the size of the current local tensor (which may already be sharded on some dimensions),
         computes the new local shard size and offset given the desired number of chunks
@@ -152,7 +175,7 @@ class Shard(torch._C._distributed.Shard):
             full_chunk_size = curr_local_size // num_chunks
             # pyrefly: ignore[bad-assignment] # pyrefly bug?
             shard_starting_idx: _RankTypeT = full_chunk_size * rank
-            return full_chunk_size, shard_starting_idx
+            return full_chunk_size, shard_starting_idx  # pyrefly: ignore[bad-return]
 
         # uneven sharding case
         full_chunk_size = (curr_local_size + num_chunks - 1) // num_chunks
@@ -160,6 +183,7 @@ class Shard(torch._C._distributed.Shard):
         shard_starting_idx: _RankTypeT = full_chunk_size * rank
 
         if curr_local_size < shard_starting_idx:
+            # pyrefly: ignore[bad-return]
             return 0, typing.cast(_RankTypeT, curr_local_size)
         else:
             local_shard_size = (
@@ -174,6 +198,7 @@ class Shard(torch._C._distributed.Shard):
         num_chunks: int,
         rank: RankType,
     ) -> tuple[int, RankType]:
+        # pyrefly: ignore[bad-argument-type]  # pyrefly bug
         return Shard.local_shard_size_and_offset(curr_local_size, num_chunks, rank)
 
     @staticmethod
