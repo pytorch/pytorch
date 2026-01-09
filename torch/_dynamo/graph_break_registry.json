@@ -2250,7 +2250,7 @@
   ],
   "GB8843": [
     {
-      "Gb_type": "Opaque object member with method-type USE_REAL returned a reference-type opaque objects.",
+      "Gb_type": "Opaque object member with method-type USE_REAL returned a reference-type opaque object.",
       "Context": "Opaque object type: {value_type}. Method name: '{name}'",
       "Explanation": "To properly guard reference-type opaque objects, we must lift them as inputs to the graph. In order to do this, they must all have a source, meaning they come from a global value or are an attribute of an input.",
       "Hints": [

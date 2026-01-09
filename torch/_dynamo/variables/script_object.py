@@ -293,10 +293,10 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
             if any(
                 is_opaque_reference_type(type(r))
-                for r in pytree.tree_flatten(constant_val)[0]
+                for r in pytree.tree_leaves(constant_val)
             ):
                 unimplemented(
-                    gb_type="Opaque object member with method-type USE_REAL returned a reference-type opaque objects.",
+                    gb_type="Opaque object member with method-type USE_REAL returned a reference-type opaque object.",
                     context=f"Opaque object type: {value_type}. Method name: '{name}'",
                     explanation=(
                         "To properly guard reference-type opaque objects, "
