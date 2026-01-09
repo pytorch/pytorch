@@ -2580,7 +2580,10 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(actual, expected)
 
     @requires_gpu
-    @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
+    @skipIfXpu(
+        msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs, "
+        "https://github.com/pytorch/pytorch/pull/167786"
+    )
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])
     def test_kernel_inline_asm(self, quotes):

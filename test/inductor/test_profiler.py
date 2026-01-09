@@ -12,7 +12,7 @@ import torch._inductor.utils
 from torch import _dynamo as torchdynamo
 from torch._inductor import config
 from torch.profiler import ProfilerActivity, record_function
-from torch.testing._internal.common_utils import skipIfXpu, TemporaryFileName
+from torch.testing._internal.common_utils import TemporaryFileName
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_GPU_AND_TRITON,
@@ -27,10 +27,6 @@ HAS_TRITON = has_triton()
 
 
 class DynamoProfilerTests(torch._inductor.test_case.TestCase):
-    @skipIfXpu(
-        msg="AssertionError: False is not true, "
-        "https://github.com/intel/torch-xpu-ops/issues/2335"
-    )
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
     def test_inductor_profiling_triton_launch(self):
         # Verify that we get some sort of CPU-side indication of triton kernel launches
@@ -225,9 +221,6 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         self.assertTrue(hooks_called["enter"])
         self.assertTrue(hooks_called["exit"])
 
-    @skipIfXpu(
-        msg="TypeError: list indices must be integers or slices, not str, https://github.com/intel/torch-xpu-ops/issues/2335"
-    )
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
     def test_pt2_triton_attributes(self):
         from torch._inductor.codecache import code_hash

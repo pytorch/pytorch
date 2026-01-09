@@ -336,7 +336,7 @@ class TestArgumentCloneAndRestore(TestCase):
         old_storage_offset = gpu_tensor.storage_offset()
         gpu_tensor_clone = clone_preserve_strides(gpu_tensor)
 
-        peak_mem_before = torch.cuda.max_memory_allocated()
+        peak_mem_before = torch.get_device_module(GPU_TYPE).max_memory_allocated()
         cpu_copies = autotuner.copy_args_to_cpu_if_needed(gpu_tensor)
         self.assertTrue(len(cpu_copies) == 1)
 

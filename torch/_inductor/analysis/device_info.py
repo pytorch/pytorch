@@ -194,7 +194,11 @@ def datasheet_tops(dtype: torch.dtype, is_tf32: bool = False) -> Optional[float]
     Get the theoretical TFLOPS of the device for a given dtype. This can throw an exception if the device
     is not in the datasheet list above.
     """
-    name: Optional[str] = torch.cuda.get_device_name()
+    name: Optional[str] = (
+        torch.xpu.get_device_name()
+        if torch.xpu.is_available()
+        else torch.cuda.get_device_name()
+    )
     if name is None:
         log.info("No device found, returning None")
         return None

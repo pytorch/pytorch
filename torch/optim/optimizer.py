@@ -137,7 +137,7 @@ def _disable_dynamo_if_unsupported(
                 # pyrefly: ignore [unsupported-operation]
                 and (arg := args[state_steps_ind])
                 and isinstance(arg, Sequence)
-                and arg[0].is_cuda
+                and (arg[0].is_cuda or arg[0].is_xpu)
                 or (
                     "state_steps" in kwargs
                     # pyrefly: ignore [unsupported-operation]
