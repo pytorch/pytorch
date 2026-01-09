@@ -233,7 +233,7 @@ manual_torch_name_rule_map: dict[
     "torch.cuda.current_device": TorchInGraphFunctionVariable,
     "torch._C.autocast_decrement_nesting": SkipFunctionVariable,
     "torch._C.autocast_increment_nesting": SkipFunctionVariable,
-    "torch.autograd.grad": TorchInGraphFunctionVariable,
+    "torch.autograd.grad": SkipFunctionVariable,
     "torch.autograd.backward": SkipFunctionVariable,
     "torch._C.clear_autocast_cache": SkipFunctionVariable,
     "torch.distributions.constraints.is_dependent": SkipFunctionVariable,
