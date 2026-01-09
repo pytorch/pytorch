@@ -21,4 +21,5 @@ def pin_memory(data_ptr: int, size: int) -> None:
 
 def unpin_memory(data_ptr: int) -> None:
     succ = int(torch.cuda.cudart().cudaHostUnregister(data_ptr))
-    assert succ == 0, f"Unpinning shared memory failed with error-code: {succ}"
+    if succ != 0:
+        raise AssertionError(f"Unpinning shared memory failed with error-code: {succ}")

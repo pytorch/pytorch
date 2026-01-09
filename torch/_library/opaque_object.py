@@ -123,9 +123,10 @@ def register_opaque_type(cls: Any, *, typ: str) -> None:
             "registered as a pytree. Opaque objects must be pytree leaves."
         )
 
-    assert typ in ["reference", "value"], (
-        "Opaque type must be either 'reference' or 'value'"
-    )
+    if typ not in ["reference", "value"]:
+        raise AssertionError(
+            f"Opaque type must be either 'reference' or 'value', got {typ!r}"
+        )
 
     if typ == "value":
         if cls.__eq__ is object.__eq__:  # type: ignore[comparison-overlap]
