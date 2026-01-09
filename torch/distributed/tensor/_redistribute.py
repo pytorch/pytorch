@@ -173,30 +173,30 @@ def _get_flattened_mesh_by_layout(
 def _optimize_transform_infos_for_flattened_reductions(
     transform_infos: list[_TransformInfo],
     device_mesh: DeviceMesh,
+    src_placements: tuple[Placement, ...],
 ) -> list[_TransformInfo | _FlattenedTransformInfo]:
     """
-    Optimize a list of transform infos by grouping consecutive same-type reduction
+    Optimize a list of transform infos by grouping same-type reduction
     operations and replacing them with flattened transforms when a matching
     flattened DeviceMesh exists.
 
-    IMPORTANT: Only consecutive reductions can be flattened. Non-consecutive
-    reductions (with different operations in between) cannot be grouped because
-    the order of operations matters. For example:
-        sum_A, max_B, sum_C -> sum_C(max_B(sum_A(x)))
-    is NOT the same as:
-        sum_{A,C}, max_B -> max_B(sum_{A,C}(x))
+    IMPORTANT: Reductions can only be merged if there are no Partial placements
+    on the mesh dimensions between them. A Partial placement (even if unchanged)
+    implies a semantic ordering that must be preserved. For example:
+        (Psum, Pmax, Psum) -> the correct order is sum_A, then max_B, then sum_C
+    If we merge the sums: sum_{A,C}(x) then max_B gives a different result.
+
+    However, non-Partial placements (Replicate, Shard) in between are safe to
+    skip because they don't impose ordering constraints.
 
     Args:
         transform_infos: List of transform infos to optimize
         device_mesh: The device mesh being used for redistribution
+        src_placements: The source placements (needed to check skipped dims)
 
     Returns:
         List of transform infos (mix of _TransformInfo and _FlattenedTransformInfo)
         with eligible reductions replaced by flattened versions.
-
-        Non-partial transforms (like allgather) between same-type reductions are
-        independent and can be reordered, so we can still merge the reductions.
-        Only different-type partial reductions break the chain (order matters).
     """
     if not transform_infos:
         return []
@@ -210,32 +210,49 @@ def _optimize_transform_infos_for_flattened_reductions(
 
         # Check if this is a Partial -> Replicate reduction
         if src.is_partial() and dst.is_replicate():
-            # Find same-type reductions, skipping over non-partial transforms
+            # Find same-type reductions, potentially skipping non-Partial dims
             # Note: We compare the full Partial placement (not just reduce_op) because
             # subclasses like _NormPartial have the same reduce_op but different semantics
             same_type_reductions = [(i, info)]
             skipped_transforms: list[tuple[int, _TransformInfo]] = []
             j = i + 1
+            last_mesh_dim = info.mesh_dim
+
             while j < len(transform_infos):
                 next_info = transform_infos[j]
                 next_src, next_dst = next_info.src_dst_placements
+
                 if next_src.is_partial() and next_dst.is_replicate():
                     if next_src == src:
-                        # Same type partial reduction, add to group
-                        same_type_reductions.append((j, next_info))
-                        j += 1
+                        # Same type partial reduction - check if we can merge
+                        # We need to verify no Partial placements on skipped dims
+                        can_merge = True
+                        for dim in range(last_mesh_dim + 1, next_info.mesh_dim):
+                            if src_placements[dim].is_partial():
+                                # There's a Partial on a skipped dim - can't merge
+                                can_merge = False
+                                break
+
+                        if can_merge:
+                            same_type_reductions.append((j, next_info))
+                            last_mesh_dim = next_info.mesh_dim
+                            j += 1
+                        else:
+                            # Can't merge due to Partial on skipped dim
+                            break
                     else:
                         # Different type partial - must stop (order matters)
                         break
                 else:
-                    # Non-partial transform (e.g., allgather) - skip for now
+                    # Non-partial transform (e.g., allgather) - can skip
                     skipped_transforms.append((j, next_info))
                     j += 1
 
             if len(same_type_reductions) >= 2:
                 # Try to flatten the reductions
-                # Sort mesh dims to match the order expected by device mesh lookup
-                mesh_dims = tuple(sorted(info.mesh_dim for _, info in same_type_reductions))
+                mesh_dims = tuple(
+                    sorted(info.mesh_dim for _, info in same_type_reductions)
+                )
                 flattened_mesh = _get_flattened_mesh_by_layout(device_mesh, mesh_dims)
 
                 if flattened_mesh is not None:
@@ -1022,7 +1039,7 @@ def redistribute_local_tensor(
 
     # Optimize by flattening multiple same-type reductions into single operations
     optimized_transform_infos = _optimize_transform_infos_for_flattened_reductions(
-        transform_infos, device_mesh
+        transform_infos, device_mesh, current_spec.placements
     )
 
     debug_mode = get_active_debug_mode()
