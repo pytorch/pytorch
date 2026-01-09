@@ -12,7 +12,7 @@
 #include <ATen/ops/_new_zeros_with_same_feature_meta_native.h>
 #include <ATen/ops/_unpack_dual_native.h>
 #include <ATen/ops/_lazy_clone_native.h>
-#include <ATen/ops/alias.h>
+#include <ATen/ops/alias_native.h>
 #include <ATen/ops/zeros.h>
 #endif
 
@@ -26,7 +26,7 @@ Tensor _make_dual(const Tensor& primal, const Tensor& tangent, int64_t level) {
       "inputs are inference tensors. You should NOT call this function directly as "
       "native::_make_dual. Please use the dispatcher, i.e., at::_make_dual. Please "
       "file an issue if you come across this error otherwise.");
-  return at::alias(primal);
+  return at::native::alias(primal);
 }
 
 /// This function can be used to unpack a given dual Tensor to get its primal and tangent. The returned primal

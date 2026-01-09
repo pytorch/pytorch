@@ -60,7 +60,7 @@
 #include <ATen/ops/neg_native.h>
 #include <ATen/ops/pow.h>
 #include <ATen/ops/pow_native.h>
-#include <ATen/ops/result_type.h>
+#include <ATen/ops/result_type_native.h>
 #include <ATen/ops/scalar_tensor.h>
 #include <ATen/ops/smm_native.h>
 #include <ATen/ops/sspaddmm.h>
@@ -258,7 +258,7 @@ SparseTensor& div_out_sparse_zerodim(const SparseTensor& t, const Tensor& value,
 }
 
 Tensor div_sparse(const Tensor& self, const Tensor& value) {
-  auto commonDtype = at::result_type(self, value);
+  auto commonDtype = at::native::result_type(self, value);
   if (c10::isIntegralType(commonDtype, /*includeBool=*/true)) {
     commonDtype = typeMetaToScalarType(at::get_default_dtype());
   }
@@ -271,7 +271,7 @@ Tensor& div_sparse_(Tensor& self, const Tensor& value) {
 }
 
 Tensor div_sparse(const Tensor& self, const Tensor& value, std::optional<std::string_view> rounding_mode) {
-  auto commonDtype = at::result_type(self, value);
+  auto commonDtype = at::native::result_type(self, value);
   if (c10::isIntegralType(commonDtype, /*includeBool=*/true) && !rounding_mode.has_value()) {
     commonDtype = typeMetaToScalarType(at::get_default_dtype());
   }
@@ -333,7 +333,7 @@ SparseTensor& floor_divide_out_sparse_zerodim(const SparseTensor& dividend,
 }
 
 Tensor floor_divide_sparse(const Tensor& self, const Tensor& value) {
-  auto commonDtype = at::result_type(self, value);
+  auto commonDtype = at::native::result_type(self, value);
   Tensor result = at::empty({0}, self.options().dtype(commonDtype));
   return floor_divide_out_sparse_zerodim(self, value, result);
 }
@@ -408,7 +408,7 @@ Tensor add_sparse(const Tensor& self, const Tensor& other, const Scalar& alpha) 
   // TODO: Why?! Can't we just flip the order here...
   TORCH_CHECK(!(self.is_sparse() && !other.is_sparse()),
               "add(sparse, dense) is not supported. Use add(dense, sparse) instead.");
-  auto commonDtype = at::result_type(self, other);
+  auto commonDtype = at::native::result_type(self, other);
   alpha_check(commonDtype, alpha);
   Tensor result = at::empty({0}, self.options().dtype(commonDtype));
   return at::add_out(result, self, other, alpha);  // redispatch!
@@ -801,7 +801,7 @@ Tensor& add_out_dense_sparse_cpu(Tensor& r, const Tensor& dense, const SparseTen
 // --------------------------------------------------------------------
 
 Tensor mul_sparse(const Tensor& self, const Tensor& other) {
-  auto commonDtype = at::result_type(self, other);
+  auto commonDtype = at::native::result_type(self, other);
   // Arbitrary (dense, sparse) and (sparse, dense) multiplication is not
   // currently supported, but (0dim-dense, sparse) and (sparse, 0dim-dense) is.
   // Make sure we use the sparse exemplar for result.

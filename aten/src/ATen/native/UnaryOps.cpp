@@ -48,7 +48,6 @@
 #include <ATen/ops/atanh.h>
 #include <ATen/ops/atanh_native.h>
 #include <ATen/ops/bitwise_not_native.h>
-#include <ATen/ops/can_cast.h>
 #include <ATen/ops/ceil_native.h>
 #include <ATen/ops/conj_native.h>
 #include <ATen/ops/conj_physical.h>
@@ -731,7 +730,7 @@ Tensor& special_ndtr_out(const Tensor& self, Tensor& result) {
 
   auto ndtr = calc_ndtr(self);
   TORCH_CHECK(
-      at::can_cast(ndtr.scalar_type(), result.scalar_type()),
+      canCast(ndtr.scalar_type(), result.scalar_type()),
       "result type ",
       ndtr.scalar_type(),
       " can't be cast to the desired output type ",
@@ -914,7 +913,7 @@ Tensor& mvlgamma_(Tensor& self, int64_t p) {
 Tensor& mvlgamma_out(const Tensor& self, int64_t p, Tensor& result) {
   auto out = self.mvlgamma(p);
   TORCH_CHECK(
-      at::can_cast(out.scalar_type(), result.scalar_type()),
+      canCast(out.scalar_type(), result.scalar_type()),
       "mvlgamma: result type ",
       self.scalar_type(),
       " can't be cast to the desired output type ",

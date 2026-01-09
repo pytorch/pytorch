@@ -34,7 +34,7 @@
 #include <ATen/ops/argsort.h>
 #include <ATen/ops/searchsorted_native.h>
 #include <ATen/ops/_sparse_sum_backward_native.h>
-#include <ATen/ops/result_type.h>
+#include <ATen/ops/result_type_native.h>
 #include <ATen/ops/bmm_native.h>
 #include <ATen/ops/addmm_native.h>
 #include <ATen/ops/copy_sparse_to_sparse.h>
@@ -367,7 +367,7 @@ static SparseTensor& mul_out_dense_sparse_mps(
   const int64_t nnz = sparse._nnz();
   out.resize_as_(sparse);
 
-  auto commonDtype = at::result_type(dense, sparse);
+  auto commonDtype = at::native::result_type(dense, sparse);
   TORCH_CHECK(canCast(commonDtype, out.scalar_type()),
               "Can't convert result type ", commonDtype, " to output ", out.scalar_type());
 
@@ -509,7 +509,7 @@ SparseTensor& mul_out_sparse_mps(const Tensor& t_, const Tensor& src_, SparseTen
   const int64_t sd = lhs.sparse_dim();
 
   // dtype checks and promotion
-  auto commonDtype = at::result_type(lhs, rhs);
+  auto commonDtype = at::native::result_type(lhs, rhs);
   TORCH_CHECK(canCast(commonDtype, r_.scalar_type()),
               "Can't convert result type ", commonDtype, " to output ", r_.scalar_type());
 
@@ -697,7 +697,7 @@ static Tensor& add_out_dense_sparse_mps(
     return out;
   }
 
-  auto commonDtype = at::result_type(dense, sparse);
+  auto commonDtype = at::native::result_type(dense, sparse);
   TORCH_CHECK(canCast(commonDtype, out.scalar_type()),
               "Can't convert result type ", commonDtype, " to output ", out.scalar_type());
 
@@ -770,7 +770,7 @@ SparseTensor& add_out_sparse_mps(const SparseTensor& self,
   if (!self.is_sparse()) {
     return add_out_dense_sparse_mps(out, self, other, alpha);
   }
-  auto commonDtype = at::result_type(self, other);
+  auto commonDtype = at::native::result_type(self, other);
   TORCH_CHECK(canCast(commonDtype, out.scalar_type()),
               "Can't convert result type ", commonDtype, " to output ", out.scalar_type());
 
@@ -870,7 +870,7 @@ static void sparse_mask_apply_out_mps_kernel(
   const auto sd = src.sparse_dim();
   result.sparse_resize_(mask.sizes(), mask.sparse_dim(), mask.dense_dim());
 
-  auto commonDtype = at::result_type(src, mask);
+  auto commonDtype = at::native::result_type(src, mask);
   TORCH_CHECK(canCast(commonDtype, result.scalar_type()),
               "Can't convert result type ", commonDtype, " to output ", result.scalar_type());
 
@@ -952,7 +952,7 @@ static void sparse_mask_projection_out_mps_kernel(
   const auto lhs_nnz = lhs_c._nnz();
   const auto rhs_nnz = rhs_c._nnz();
 
-  auto commonDtype = at::result_type(lhs_c, rhs_c);
+  auto commonDtype = at::native::result_type(lhs_c, rhs_c);
   TORCH_CHECK(canCast(commonDtype, result.scalar_type()),
               "Can't convert ", commonDtype, " to output ", result.scalar_type());
 
@@ -1048,7 +1048,7 @@ Tensor sparse_sparse_matmul_mps(const Tensor& mat1_, const Tensor& mat2_) {
     return out;
   }
 
-  const auto computeDtype = at::result_type(mat1_, mat2_);
+  const auto computeDtype = at::native::result_type(mat1_, mat2_);
 
   auto A_idx = A._indices().contiguous();
   auto A_val = A._values().to(computeDtype).contiguous();

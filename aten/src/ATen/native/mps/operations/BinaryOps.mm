@@ -26,7 +26,7 @@
 #include <ATen/ops/ne_native.h>
 #include <ATen/ops/pow.h>
 #include <ATen/ops/pow_native.h>
-#include <ATen/ops/result_type.h>
+#include <ATen/ops/result_type_native.h>
 #include <ATen/ops/sub_native.h>
 #include <ATen/ops/view_as_real.h>
 #include <ATen/ops/xlogy_native.h>
@@ -183,7 +183,7 @@ static void add_sub_lerp_template(const Tensor& self,
   }
 
   if (alpha_has_value) {
-    auto commonDtype = at::result_type(self, other);
+    auto commonDtype = at::native::result_type(self, other);
     at::native::alpha_check(commonDtype, alpha);
     mps::binary_op_kernel(op_name + "_alpha", self, other, output, alpha);
   } else {

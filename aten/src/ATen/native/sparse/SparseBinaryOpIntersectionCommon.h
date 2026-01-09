@@ -14,7 +14,7 @@
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
-#include <ATen/ops/result_type.h>
+#include <ATen/ops/result_type_native.h>
 #endif
 
 #ifdef GPUCC
@@ -142,7 +142,7 @@ void _sparse_binary_op_intersection_kernel_impl(
   // This is because binary_of_t produces new values and it could be that
   // new_values.dtype != res.dtype. In such a case we should error out
   // as soon as possible to avoid redundant kernel runs.
-  const auto common_dtype = at::result_type(x_, y_);
+  const auto common_dtype = at::native::result_type(x_, y_);
   TORCH_CHECK(canCast(common_dtype, res.scalar_type()),
       "Can't convert result type ", common_dtype,
       " to output ", res.scalar_type());
@@ -395,7 +395,7 @@ void _sparse_binary_op_intersection_kernel_impl(
   }();
 
   const auto res_indices = source._indices().clone();
-  const auto binary_op_res_dtype = at::result_type(source._values(), probably_coalesced._values());
+  const auto binary_op_res_dtype = at::native::result_type(source._values(), probably_coalesced._values());
   const auto res_values = value_selection_intersection_kernel_t::apply(
       source._values().to(binary_op_res_dtype),
       nnz_arange.narrow(-1, 0, source._nnz()),

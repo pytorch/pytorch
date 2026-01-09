@@ -95,7 +95,7 @@
 #include <ATen/ops/relu.h>
 #include <ATen/ops/relu_native.h>
 #include <ATen/ops/resize_as_sparse_native.h>
-#include <ATen/ops/result_type.h>
+#include <ATen/ops/result_type_native.h>
 #include <ATen/ops/round.h>
 #include <ATen/ops/round_native.h>
 #include <ATen/ops/round_ops.h>
@@ -225,7 +225,7 @@ Tensor& mul_out_sparse_csr(const Tensor& t_, const Tensor& src_, Tensor& r) {
 template <typename op_t>
 static Tensor intersection_binary_op_with_wrapped_scalar(const Tensor& sparse, const Tensor& scalar, const op_t& op) {
   // NOTE: intersection_binary_op_with_wrapped_scalar assumes scalar.numel() == 1.
-  const auto result_values = op(sparse.values(), scalar.squeeze()).to(at::result_type(sparse, scalar));
+  const auto result_values = op(sparse.values(), scalar.squeeze()).to(at::native::result_type(sparse, scalar));
   const auto result_sizes = infer_size(sparse.sizes(), scalar.sizes());
   auto [compressed_indices, plain_indices] = getCompressedPlainIndices(sparse);
   return at::_sparse_compressed_tensor_unsafe(
@@ -270,7 +270,7 @@ Tensor mul_sparse_csr(const Tensor& self, const Tensor& other) {
     return mul_sparse_csr(self.sparse_mask(other), other);
   }
 
-  auto commonDtype = at::result_type(self, other);
+  auto commonDtype = at::native::result_type(self, other);
   auto result_options = self.options().dtype(commonDtype);
   // CSR is 2d!
   Tensor result = at::empty({0, 0}, result_options);
@@ -797,7 +797,7 @@ Tensor add_sparse_csr(
     const Tensor& self,
     const Tensor& other,
     const Scalar& alpha) {
-  auto commonDtype = at::result_type(self, other);
+  auto commonDtype = at::native::result_type(self, other);
   alpha_check(commonDtype, alpha);
   Tensor result;
   if (self.layout() != kStrided && other.layout() == kStrided) {
