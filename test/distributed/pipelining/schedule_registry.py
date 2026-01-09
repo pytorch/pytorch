@@ -5,11 +5,13 @@
 from collections.abc import Callable
 from typing import Optional
 
+from torch.distributed.pipelining.runtime import (
+    _PipelineScheduleRuntime,
+    PipelineScheduleMulti,
+)
 from torch.distributed.pipelining.schedules import (
     _Action,
     _ComputationType,
-    _PipelineScheduleRuntime,
-    PipelineScheduleMulti,
     RECV_B,
     RECV_F,
     SEND_B,
