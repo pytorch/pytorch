@@ -1412,14 +1412,17 @@ class OptimizeFlattenedReductionsTest(TestCase):
         self.assertIsInstance(result[0], _FlattenedTransformInfo)
         self.assertEqual(result[0].original_mesh_dims, (0, 2))
 
-    def test_non_consecutive_reductions_not_flattened(self):
-        """Non-consecutive same-type reductions are NOT flattened because order matters."""
+    def test_non_consecutive_reductions_with_gather_flattened(self):
+        """Non-consecutive same-type reductions with gather in between CAN be flattened.
+
+        Allgather and allreduce on different mesh dimensions are independent operations,
+        so we can reorder them and merge the reductions.
+        """
         mesh = init_device_mesh("cpu", (2, 2, 2), mesh_dim_names=("A", "B", "C"))
         mesh["A", "C"]._flatten("A_C")
 
-        # Reductions on dims 0 and 2 with a different operation on dim 1 in between
-        # These should NOT be flattened because:
-        # sum_C(shard_B(sum_A(x))) != shard_B(sum_{A,C}(x))
+        # Reductions on dims 0 and 2 with an allgather on dim 1 in between
+        # These CAN be flattened because allgather is independent of allreduce
         transform_infos = [
             _TransformInfo(
                 mesh_dim=0,
@@ -1442,16 +1445,16 @@ class OptimizeFlattenedReductionsTest(TestCase):
             transform_infos, mesh
         )
 
-        # Should have all 3 transforms - no flattening due to non-consecutive
-        self.assertEqual(len(result), 3)
+        # Should have 2 transforms: flattened reduction on A_C and gather on B
+        self.assertEqual(len(result), 2)
 
-        # All should be regular TransformInfo, in order
-        self.assertIsInstance(result[0], _TransformInfo)
-        self.assertEqual(result[0].mesh_dim, 0)
+        # First should be the flattened reduction
+        self.assertIsInstance(result[0], _FlattenedTransformInfo)
+        self.assertEqual(result[0].original_mesh_dims, (0, 2))
+
+        # Second should be the gather (unchanged)
         self.assertIsInstance(result[1], _TransformInfo)
         self.assertEqual(result[1].mesh_dim, 1)
-        self.assertIsInstance(result[2], _TransformInfo)
-        self.assertEqual(result[2].mesh_dim, 2)
 
     def test_different_reduce_ops_not_grouped(self):
         """Reductions with different reduce_ops are not grouped together."""
@@ -1688,6 +1691,29 @@ class FlattenedReductionIntegrationTest(DTensorTestBase):
         # No flattening because sums are not consecutive (max is in between)
         # Should have 3 comm ops: sum on A, max on B, sum on C
         self.assertEqual(comm_mode.get_total_counts(), 3)
+
+        # Test: non-consecutive same-type partials with gather in between CAN be merged
+        # [Partial("sum"), Shard(0), Partial("sum")] → [Replicate, Replicate, Replicate]
+        # Allgather is independent of allreduce, so the two sums can be merged
+        local_tensor = torch.ones(8, 8, device=self.device_type)
+        dt = DTensor.from_local(
+            local_tensor,
+            mesh,
+            (Partial("sum"), Shard(0), Partial("sum")),
+            run_check=False,
+        )
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            result = dt.redistribute(mesh, (Replicate(), Replicate(), Replicate()))
+
+        # With optimization: should have 2 ops (1 merged allreduce on A_C, 1 allgather on B)
+        # Without optimization: would have 3 ops (allreduce A, allgather B, allreduce C)
+        self.assertEqual(comm_mode.get_total_counts(), 2)
+
+        # Verify correctness: each rank contributes 1, sum across 4 ranks (A=2, C=2)
+        expected = torch.ones(8 * 2, 8, device=self.device_type) * 4
+        self.assertEqual(result.to_local(), expected)
 
     @with_comms
     def test_non_consecutive_reductions_not_flattened(self):

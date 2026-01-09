@@ -192,7 +192,11 @@ def _optimize_transform_infos_for_flattened_reductions(
 
     Returns:
         List of transform infos (mix of _TransformInfo and _FlattenedTransformInfo)
-        with eligible consecutive reductions replaced by flattened versions.
+        with eligible reductions replaced by flattened versions.
+
+        Non-partial transforms (like allgather) between same-type reductions are
+        independent and can be reordered, so we can still merge the reductions.
+        Only different-type partial reductions break the chain (order matters).
     """
     if not transform_infos:
         return []
@@ -206,32 +210,37 @@ def _optimize_transform_infos_for_flattened_reductions(
 
         # Check if this is a Partial -> Replicate reduction
         if src.is_partial() and dst.is_replicate():
-            # Find consecutive reductions of the same type
+            # Find same-type reductions, skipping over non-partial transforms
             # Note: We compare the full Partial placement (not just reduce_op) because
             # subclasses like _NormPartial have the same reduce_op but different semantics
-            consecutive_reductions = [(i, info)]
+            same_type_reductions = [(i, info)]
+            skipped_transforms: list[tuple[int, _TransformInfo]] = []
             j = i + 1
             while j < len(transform_infos):
                 next_info = transform_infos[j]
                 next_src, next_dst = next_info.src_dst_placements
-                if (
-                    next_src.is_partial()
-                    and next_dst.is_replicate()
-                    and next_src == src
-                ):
-                    consecutive_reductions.append((j, next_info))
-                    j += 1
+                if next_src.is_partial() and next_dst.is_replicate():
+                    if next_src == src:
+                        # Same type partial reduction, add to group
+                        same_type_reductions.append((j, next_info))
+                        j += 1
+                    else:
+                        # Different type partial - must stop (order matters)
+                        break
                 else:
-                    break
+                    # Non-partial transform (e.g., allgather) - skip for now
+                    skipped_transforms.append((j, next_info))
+                    j += 1
 
-            if len(consecutive_reductions) >= 2:
-                # Try to flatten consecutive reductions
-                mesh_dims = tuple(info.mesh_dim for _, info in consecutive_reductions)
+            if len(same_type_reductions) >= 2:
+                # Try to flatten the reductions
+                # Sort mesh dims to match the order expected by device mesh lookup
+                mesh_dims = tuple(sorted(info.mesh_dim for _, info in same_type_reductions))
                 flattened_mesh = _get_flattened_mesh_by_layout(device_mesh, mesh_dims)
 
                 if flattened_mesh is not None:
                     # Create a flattened transform
-                    first_idx, first_info = consecutive_reductions[0]
+                    first_idx, first_info = same_type_reductions[0]
                     flattened_transform = _FlattenedTransformInfo(
                         mesh_dim=0,
                         src_dst_placements=(src, dst),
@@ -240,12 +249,17 @@ def _optimize_transform_infos_for_flattened_reductions(
                         original_mesh_dims=mesh_dims,
                     )
                     result.append(flattened_transform)
-                    i = j  # Skip all consecutive reductions
+                    # Add the skipped non-partial transforms after
+                    for _, skipped_info in skipped_transforms:
+                        result.append(skipped_info)
+                    i = j
                     continue
 
-            # No flattening possible, add reductions individually
-            for _, reduction_info in consecutive_reductions:
-                result.append(reduction_info)
+            # No flattening possible, add all in original order
+            all_indices = same_type_reductions + skipped_transforms
+            all_indices.sort(key=lambda x: x[0])
+            for _, transform in all_indices:
+                result.append(transform)
             i = j
         else:
             # Non-reduction transform, add as-is
