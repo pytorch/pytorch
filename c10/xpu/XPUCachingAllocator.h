@@ -6,11 +6,10 @@
 #include <c10/xpu/XPUStream.h>
 
 namespace c10::xpu::XPUCachingAllocator {
-
 class XPUAllocator : public DeviceAllocator {
  public:
   virtual void init(c10::DeviceIndex device_count) = 0;
-  virtual void* raw_alloc(size_t nbytes) = 0;
+  virtual void* raw_alloc(size_t size) = 0;
   virtual void raw_delete(void* ptr) = 0;
 };
 

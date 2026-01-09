@@ -446,6 +446,27 @@ static void initXpuMethodBindings(PyObject* module) {
   m.def("_xpu_setMemoryFraction", [](double fraction, c10::DeviceIndex device) {
     c10::xpu::XPUCachingAllocator::setMemoryFraction(fraction, device);
   });
+  m.def(
+      "_xpu_beginAllocateCurrentThreadToPool",
+      [](c10::DeviceIndex device, at::xpu::MempoolId_t mempool_id) {
+        auto tid = std::this_thread::get_id();
+
+        c10::xpu::XPUCachingAllocator::beginAllocateToPool(
+            device, mempool_id, [=](sycl::queue*) {
+              auto current_tid = std::this_thread::get_id();
+              return current_tid == tid;
+            });
+      });
+  m.def(
+      "_xpu_endAllocateToPool",
+      [](c10::DeviceIndex device, at::xpu::MempoolId_t mempool_id) {
+        c10::xpu::XPUCachingAllocator::endAllocateToPool(device, mempool_id);
+      });
+  m.def(
+      "_xpu_releasePool",
+      [](c10::DeviceIndex device, at::xpu::MempoolId_t mempool_id) {
+        c10::xpu::XPUCachingAllocator::releasePool(device, mempool_id);
+      });
 }
 
 // Callback for python part. Used for additional initialization of python
