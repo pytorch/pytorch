@@ -248,11 +248,11 @@ def leaf_function(
     """
     Decorator to mark a function as a leaf function for dynamo.
 
-    A leaf function is treated as an atomic operation during tracing - dynamo
-    will not trace into it, but will capture it in the FX graph.
+    A leaf function is treated as an opaque operation during compilation- dynamo
+    and aot dispatcher will not trace into it, but will capture it in the FX graph.
 
     Can be used in two ways:
-    1. @leaf_function - use the decorated function as fake_impl (works for most cases)
+    1. @leaf_function - use the decorated function as fake_impl (works for simple cases)
     2. @leaf_function(fake_impl=...) - provide explicit fake implementation for tracing
 
     Restrictions:
@@ -263,7 +263,7 @@ def leaf_function(
           the same pytree structure, tensor shapes, and dtypes as real_impl. Enable
           ``torch._dynamo.config.validate_leaf_function_outputs = True`` to validate.
         - (Temporary) Only nn.Module methods supported: Currently designed for methods
-          on ``torch.nn.Module`` subclasses, not standalone functions.
+          on ``torch.nn.Module``, not standalone functions.
         - (Temporary) Return value should be a tuple of tensors.
 
     Dangerous patterns (may cause silent incorrectness):
