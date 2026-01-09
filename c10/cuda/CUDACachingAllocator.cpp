@@ -2824,7 +2824,9 @@ class DeviceCachingAllocator {
         return c;
       }
     }
-    auto segment_size = pool->is_small ? kSmallBuffer : kLargeBuffer;
+    auto segment_size = pool->is_small
+        ? kSmallBuffer
+        : AcceleratorAllocatorConfig::large_segment_size();
     expandable_segments_.emplace_back(new ExpandableSegment(
         device, stream, segment_size, devices_with_peer_access_));
 
@@ -3109,7 +3111,7 @@ class DeviceCachingAllocator {
     if (size <= kSmallSize) {
       return kSmallBuffer;
     } else if (size < kMinLargeAlloc) {
-      return kLargeBuffer;
+      return AcceleratorAllocatorConfig::large_segment_size();
     } else {
       return kRoundLarge * ((size + kRoundLarge - 1) / kRoundLarge);
     }
