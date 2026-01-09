@@ -159,25 +159,24 @@ def has_triton() -> bool:
     from torch.accelerator import current_accelerator
 
     triton_supported_devices = ["cuda", "xpu", "cpu", "mtia"]
+    triton_supported_devices.append(_get_privateuse1_backend_name())
 
-    privateuse1_backend = _get_privateuse1_backend_name()
-    if current_accelerator() and current_accelerator().type == privateuse1_backend:
-        triton_supported_devices.append(privateuse1_backend)
+    device = current_accelerator()
+    device_type = "cpu"
 
-    def is_device_compatible_with_triton() -> bool:
-        for device in triton_supported_devices:
-            try:
-                device_interface = get_interface_for_device(device)
-                if (
-                    device_interface.is_available()
-                    and device_interface.is_triton_capable(current_accelerator())
-                ):
-                    return True
-            except NotImplementedError:
-                continue
-        return False
+    if device and device.type in triton_supported_devices:
+        device_type = device.type
 
-    return is_device_compatible_with_triton()
+    if device_type in triton_supported_devices:
+        try:
+            device_interface = get_interface_for_device(device_type)
+            if device_interface.is_available():
+                device_interface.raise_if_triton_unavailable(device)
+                return True
+        except Exception:
+            pass
+
+    return False
 
 
 @functools.cache
