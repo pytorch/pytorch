@@ -1017,6 +1017,61 @@ class PallasTestsMixin:
         expected = fn(a, b)
         self.assertEqual(result, expected)
 
+    def test_torch_nn_LayerNorm(self):
+        """Test nn.LayerNorm with Pallas backend.
+
+        This test verifies that nn.LayerNorm works correctly with the Pallas backend,
+        including proper handling of partial reductions with symbolic dimensions.
+        """
+        if self.DEVICE == "cuda":
+            self.skipTest("LayerNorm not supported in Pallas GPU (Mosaic) backend")
+
+        # Warm up dynamo cache with other operations to reproduce the issue
+        def add_fn(a, b):
+            return a + b
+
+        compiled_add = self._compile(add_fn)
+        a = torch.randn(4, 4, device=self.DEVICE)
+        b = torch.randn(4, 4, device=self.DEVICE)
+        _ = compiled_add(a, b)
+
+        def mul_fn(a, b):
+            return a * b
+
+        compiled_mul = self._compile(mul_fn)
+        _ = compiled_mul(a, b)
+
+        def relu_fn(x):
+            return torch.relu(x)
+
+        compiled_relu = self._compile(relu_fn)
+        _ = compiled_relu(a)
+
+        def sum_fn(x):
+            return x.sum()
+
+        compiled_sum = self._compile(sum_fn)
+        _ = compiled_sum(a)
+
+        linear = torch.nn.Linear(8, 4)
+        linear.eval()
+        if self.DEVICE != "cpu":
+            linear = linear.to(self.DEVICE)
+        compiled_linear = self._compile(linear)
+        _ = compiled_linear(torch.randn(2, 8, device=self.DEVICE))
+
+        # Now test nn.LayerNorm module
+        ln = torch.nn.LayerNorm(8)
+        ln.eval()
+        if self.DEVICE != "cpu":
+            ln = ln.to(self.DEVICE)
+
+        x = torch.randn(2, 4, 8, device=self.DEVICE)
+        expected = ln(x)
+        compiled_ln = self._compile(ln)
+        result = compiled_ln(x)
+        self.assertEqual(result, expected)
+
     def test_sum_reduction(self):
         """Test sum reduction."""
 
