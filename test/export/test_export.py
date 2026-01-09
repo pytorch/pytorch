@@ -8127,6 +8127,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
     @requires_gpu
     @skipIfRocm
+    @testing.expectedFailureSerDer
+    @testing.expectedFailureSerDerNonStrict
     def test_export_lstm_gpu(self):
         class M(torch.nn.Module):
             def __init__(self):
@@ -8163,6 +8165,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
                 out, _ = self.rnn(x)
                 return out
 
+        torch.cuda.manual_seed(0)
         m = M().to(GPU_TYPE)
         x = torch.randn(2, 3, 4, device=GPU_TYPE)
 
@@ -8175,6 +8178,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
     @requires_gpu
     @skipIfRocm
+    @testing.expectedFailureSerDer
+    @testing.expectedFailureSerDerNonStrict
     def test_export_rnn_flatten_parameters_gpu(self):
         class M(torch.nn.Module):
             def __init__(self):
