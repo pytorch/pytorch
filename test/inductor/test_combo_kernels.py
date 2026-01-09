@@ -209,6 +209,27 @@ class ComboKernelTests(TestCase):
         # [y_sum, z_sum] will become a combo kernel
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 3)
 
+    @requires_gpu_and_triton
+    def test_single_combo_kernels(self):
+        def fn(a, b):
+            c = torch.add(a, 1)
+            d = torch.add(b, 1)
+            return c, d
+
+        inps = [
+            torch.rand(8192, 8192, device=GPU_TYPE),
+            torch.rand(100, 100, device=GPU_TYPE),
+        ]
+        out_eager = fn(*inps)
+        fn_c = torch.compile(fn)
+        out_compiled, code = run_and_get_code(fn_c, *inps)
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 2)
+        # Verify kernels are regular pointwise, not combo kernels
+        FileCheck().check("triton_heuristics.pointwise").check(
+            "'grid_type': 'Grid1D'"
+        ).check_not("combo_grid_meta").run(code[0])
+
 
 @instantiate_parametrized_tests
 class ComboKernelBenchmarkTests(TestCase):
