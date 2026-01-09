@@ -321,7 +321,6 @@ class DistTensorRandomInitTest(DTensorTestBase):
         # Wrap tracker to capture specs
         random_module._rng_tracker = SpecCapturingTracker(random_module._rng_tracker)
 
-        torch.manual_seed(42)
         torch.distributed.tensor.randn(
             (8, 8), device_mesh=device_mesh, placements=[Shard(0)]
         )
