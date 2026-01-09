@@ -2,6 +2,7 @@
 import copy
 import logging
 import traceback
+import warnings
 from contextlib import contextmanager
 from enum import Enum
 from typing import Any, Optional, Union
@@ -19,6 +20,8 @@ log = logging.getLogger(__name__)
 __all__ = [
     "annotate",
     "annotate_fn",
+    "annotate_fqn",
+    "annotate_fqn_fn",
     "preserve_node_meta",
     "has_preserved_node_meta",
     "set_stack_trace",
@@ -37,6 +40,16 @@ __all__ = [
 current_meta: dict[str, Any] = {}
 current_replay_node: Optional[Node] = None
 should_preserve_node_meta = False
+
+
+# If you change the key here, you should also change
+# _COPY_META_FIELDS in torch/fx/proxy.py
+FQN_ANNOTATION_KEY = "annotated_fqn"
+FQN_DELIMINATER = "."
+
+# List of metadata keys used for annotations
+# These keys are propagated through various compilation passes
+ANNOTATION_META_KEYS = ["custom", FQN_ANNOTATION_KEY]
 
 GRADIENT_ACC_SPECIAL_STACK = (
     "Gradient addition node due to multiple use of tensor around:"
@@ -285,6 +298,10 @@ def annotate(annotation_dict: dict):
     This is intended for advanced users who need to attach additional metadata to the fx nodes
     (e.g., for debugging, analysis, or external tooling) during export tracing.
 
+    When nested, annotations with the same keys are overridden by the innermost context,
+    while annotations with different keys are merged. Upon exiting each nested context,
+    the annotations are restored to their previous state.
+
     Note:
         This API is **not backward compatible** and may evolve in future releases.
 
@@ -324,6 +341,56 @@ def annotate(annotation_dict: dict):
 
 
 @compatibility(is_backward_compatible=False)
+@contextmanager
+def annotate_fqn(fqn: str):
+    """
+    Temporarily adds a fully qualified name (FQN) annotation to the current tracing context.
+    FX nodes will have the annotation in node.metadata["annotated_fqn"].
+
+    When nested, FQN annotations are automatically concatenated with dots ('.') to create
+    a hierarchical path (e.g., "model.encoder.layer1").
+
+    Note:
+        This API is **not backward compatible** and may evolve in future releases.
+
+    Note:
+        This API is not compatible with fx.symbolic_trace or jit.trace. It's intended
+        to be used with PT2 family of tracers, e.g. torch.export and dynamo.
+
+    Args:
+        fqn (str): Name to inject into FX trace metadata. Avoid using dots ('.').
+
+    Example:
+        >>> with annotate_fqn("model"):
+        ...     with annotate_fqn("encoder"):
+        ...         x = y + z  # annotated_fqn="model.encoder"
+    """
+    if FQN_DELIMINATER in fqn:
+        warnings.warn(
+            f"annotate_fqn {fqn} contains '{FQN_DELIMINATER}'. "
+            f"'{FQN_DELIMINATER}' is used as the deliminater. "
+            f"Consider using a different fqn annotation."
+        )
+    global current_meta
+
+    has_fqn_annotation = FQN_ANNOTATION_KEY in current_meta
+    old_fqn = current_meta.get(FQN_ANNOTATION_KEY, "")
+
+    try:
+        if not has_fqn_annotation:
+            current_meta[FQN_ANNOTATION_KEY] = fqn
+        else:
+            current_meta[FQN_ANNOTATION_KEY] = old_fqn + FQN_DELIMINATER + fqn
+        yield
+    finally:
+        if has_fqn_annotation:
+            # Restore the original custom dict
+            current_meta[FQN_ANNOTATION_KEY] = old_fqn
+        else:
+            del current_meta[FQN_ANNOTATION_KEY]
+
+
+@compatibility(is_backward_compatible=False)
 def annotate_fn(annotation_dict: dict):
     """
     A decorator that wraps a function with the annotate context manager.
@@ -353,6 +420,44 @@ def annotate_fn(annotation_dict: dict):
         @wraps(func)
         def wrapper(*args, **kwargs):
             with annotate(annotation_dict):
+                return func(*args, **kwargs)
+
+        return wrapper
+
+    return decorator
+
+
+@compatibility(is_backward_compatible=False)
+def annotate_fqn_fn(fqn: str):
+    """
+    A decorator that wraps a function with the annotate_fqn context manager.
+    Use this when you want to annotate an entire function with a fully qualified name
+    instead of a specific code block.
+
+    Note:
+        This API is **not backward compatible** and may evolve in future releases.
+
+    Note:
+        This API is not compatible with fx.symbolic_trace or jit.trace. It's intended
+        to be used with PT2 family of tracers, e.g. torch.export and dynamo.
+
+    Args:
+        fqn (str): A fully qualified name string to inject into the FX trace metadata
+            for all operations in the function.
+
+    Example:
+        All operations in my_function will have annotated_fqn metadata.
+
+        >>> @annotate_fqn_fn("my_module.my_function")
+        ... def my_function(x):
+        ...     return x + 1
+    """
+    from functools import wraps
+
+    def decorator(func):
+        @wraps(func)
+        def wrapper(*args, **kwargs):
+            with annotate_fqn(fqn):
                 return func(*args, **kwargs)
 
         return wrapper
@@ -485,18 +590,55 @@ def get_graph_provenance_json(graph: Graph) -> dict[str, Any]:
         return {}
 
 
-def _get_custom_metadata(gm: GraphModule) -> str:
+def _get_annotation_metadata(gm: GraphModule, key: str) -> str:
+    """
+    Generic helper to extract annotation metadata for a given key from a GraphModule.
+
+    Args:
+        gm: The GraphModule to extract metadata from
+        key: The metadata key to extract (e.g., "custom", "annotated_fqn")
+
+    Returns:
+        A string representation of all nodes with the specified metadata key
+    """
     assert isinstance(gm, GraphModule)
 
     def helper(gm: GraphModule):
-        custom_metadata = []
+        metadata = []
         for node in gm.graph.nodes:
-            if hasattr(node, "meta") and node.meta.get("custom", None):
-                custom_metadata.append((node.op, node.name, node.meta["custom"]))
+            if hasattr(node, "meta") and node.meta.get(key, None):
+                metadata.append((node.op, node.name, node.meta[key]))
             if node.op == "get_attr" and isinstance(
                 getattr(gm, node.target), GraphModule
             ):
-                custom_metadata.append(helper(getattr(gm, node.target)))
-        return custom_metadata
+                metadata.append(helper(getattr(gm, node.target)))
+        return metadata
 
     return "\n".join(str(x) for x in helper(gm))
+
+
+def _get_custom_metadata(gm: GraphModule) -> str:
+    """
+    Extract custom annotation metadata from a GraphModule.
+    This function maintains backward compatibility.
+
+    Args:
+        gm: The GraphModule to extract metadata from
+
+    Returns:
+        A string representation of all nodes with custom metadata
+    """
+    return _get_annotation_metadata(gm, "custom")
+
+
+def _get_annotated_fqn_metadata(gm: GraphModule) -> str:
+    """
+    Extract annotated_fqn metadata from a GraphModule.
+
+    Args:
+        gm: The GraphModule to extract metadata from
+
+    Returns:
+        A string representation of all nodes with annotated_fqn metadata
+    """
+    return _get_annotation_metadata(gm, "annotated_fqn")

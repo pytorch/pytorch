@@ -29,6 +29,8 @@ from .ctx_manager import (
     DynamoConfigPatchVariable,
     ErrorOnGraphBreakVariable,
     FSDPParamGroupUseTrainingStateVariable,
+    FxTracebackAnnotateBaseVariable,
+    FxTracebackAnnotateFqnVariable,
     FxTracebackAnnotateVariable,
     GenericContextWrappingVariable,
     GradIncrementNestingCtxManagerVariable,

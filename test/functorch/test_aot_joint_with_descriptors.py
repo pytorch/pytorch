@@ -1143,6 +1143,63 @@ class inner_f(torch.nn.Module):
 ('call_function', 't_9', {'test': 1})""",
         )
 
+    def test_annotate_fqn(self):
+        class Bar(nn.Module):
+            def forward(self, x):
+                with fx_traceback.annotate_fqn("bar"):
+                    return x * 1
+
+        class Foo(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.bar = Bar()
+
+            def forward(self, x):
+                with fx_traceback.annotate_fqn("foo"):
+                    y = self.bar(x)
+                    return y * 2
+
+        class MyMod(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.foo = Foo()
+
+            def forward(self, x):
+                with fx_traceback.annotate_fqn("my_mod"):
+                    x = x / 2
+                    y = self.foo(x)
+                return y - 1
+
+        inputs = (torch.randn(4, 3),)
+        model = MyMod()
+
+        for with_export in [False, True]:
+            graph_module = graph_capture(model, inputs, with_export)
+            custom_metadata = fx_traceback._get_annotated_fqn_metadata(graph_module)
+            self.assertExpectedInline(
+                str(custom_metadata),
+                """\
+('call_function', 'div', 'my_mod')
+('call_function', 'mul', 'my_mod.foo.bar')
+('call_function', 'mul_1', 'my_mod.foo')""",
+            )
+
+        # Now test with require gradients
+        inputs = (torch.randn(4, 3, requires_grad=True),)
+        for with_export in [False, True]:
+            graph_module = graph_capture(model, inputs, with_export)
+            custom_metadata = fx_traceback._get_annotated_fqn_metadata(graph_module)
+            self.assertExpectedInline(
+                str(custom_metadata),
+                """\
+('call_function', 'div', 'my_mod')
+('call_function', 'mul', 'my_mod.foo.bar')
+('call_function', 'mul_1', 'my_mod.foo')
+('call_function', 'mul_2', 'my_mod.foo')
+('call_function', 'mul_3', 'my_mod.foo.bar')
+('call_function', 'div_1', 'my_mod')""",
+            )
+
 
 if __name__ == "__main__":
     run_tests()
