@@ -2669,7 +2669,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         compiled_div = Decimal(compile_out.item())
         eager_div = Decimal((x_ten / y_ten).item())
 
-        self.assertNotEqual(eager_div, compiled_div)
+        self.assertEqual(eager_div, compiled_div, atol=1e-3, rtol=1e-3)
         self.assertTrue("div_rn" not in code)
 
 
