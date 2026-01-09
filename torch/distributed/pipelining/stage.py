@@ -25,7 +25,483 @@ from ._utils import flatten_args, PipeInfo, validate_tensors_metadata
 __all__ = [
     "PipelineStage",
     "build_stage",
+    "StageExecutor",
+    "EagerExecutor",
+    "GraphExecutor",
 ]
+
+
+class StageExecutor(ABC):
+    """
+    Abstract base class for pipeline stage executors.
+
+    Executors are responsible for the actual computation (forward/backward passes)
+    while PipelineStage handles input retrieval/validation and output handling/caching.
+    """
+
+    @abstractmethod
+    def forward(
+        self,
+        stage: "_PipelineStageBase",
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+    ) -> tuple[Any, Any]:
+        """
+        Execute forward computation.
+
+        Args:
+            stage: The pipeline stage (for accessing submodule, device, etc.)
+            args: Forward input arguments
+            kwargs: Forward input keyword arguments
+
+        Returns:
+            (output, saved_for_backward): Model output and data to cache for backward
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def backward(
+        self,
+        stage: "_PipelineStageBase",
+        saved_for_backward: Any,
+        output_grads: tuple[torch.Tensor, ...] | None,
+        last_backward: bool = False,
+    ) -> tuple[torch.Tensor | None, ...]:
+        """
+        Execute full backward computation.
+
+        Args:
+            stage: The pipeline stage
+            saved_for_backward: Data cached from forward pass
+            output_grads: Gradients from next stage (None for last stage with loss)
+            last_backward: Whether this is the last backward pass (for gradient sync)
+
+        Returns:
+            input_grads: Gradients to send to previous stage
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def backward_input(
+        self,
+        stage: "_PipelineStageBase",
+        saved_for_backward: Any,
+        output_grads: tuple[torch.Tensor, ...] | None,
+        last_backward: bool = False,
+    ) -> tuple[tuple[torch.Tensor | None, ...], Any]:
+        """
+        Execute input-only backward computation (dI for F,I,W schedules).
+
+        Args:
+            stage: The pipeline stage
+            saved_for_backward: Data cached from forward pass
+            output_grads: Gradients from next stage (None for last stage with loss)
+            last_backward: Whether this is the last backward pass
+
+        Returns:
+            (input_grads, saved_for_backward_weight): Gradients for previous stage and
+                intermediate values needed for backward_weight computation
+        """
+        raise NotImplementedError
+
+    @abstractmethod
+    def backward_weight(
+        self,
+        stage: "_PipelineStageBase",
+        saved_for_backward_weight: Any,
+        last_backward: bool = False,
+    ) -> None:
+        """
+        Execute weight-only backward computation (dW for F,I,W schedules).
+
+        Args:
+            stage: The pipeline stage
+            saved_for_backward_weight: Intermediate values from backward_input() needed
+                for weight gradient computation (e.g., input_values, param_groups)
+            last_backward: Whether this is the last backward pass
+        """
+        raise NotImplementedError
+
+
+class EagerExecutor(StageExecutor):
+    """
+    Eager-mode executor for pipeline stages.
+
+    Uses PyTorch autograd for backward pass computation.
+    """
+
+    def forward(
+        self,
+        stage: "_PipelineStageBase",
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+    ) -> tuple[Any, Any]:
+        """
+        Execute forward computation using the submodule directly.
+
+        Returns:
+            (output, saved_for_backward): The model output and flattened input tensors
+            saved for backward pass.
+        """
+        # Compute forward
+        try:
+            output = stage.forward_maybe_with_nosync(*args, **kwargs)
+        except Exception as e:
+            exc_msg = f"""
+            {stage.log_prefix} failed to run forward:
+            args: {map_debug_info(args)}
+            kwargs: {map_debug_info(kwargs)}
+            """
+            raise RuntimeError(exc_msg) from e
+
+        # Save inputs for backward
+        flat_args = flatten_args(args)
+        flat_kwargs = flatten_args(kwargs)
+        flatten_input_tensors = flat_args + flat_kwargs
+        saved_for_backward = flatten_input_tensors
+
+        return output, saved_for_backward
+
+    def backward(
+        self,
+        stage: "_PipelineStageBase",
+        saved_for_backward: Any,
+        output_grads: tuple[torch.Tensor, ...] | None,
+        last_backward: bool = False,
+    ) -> tuple[torch.Tensor | None, ...]:
+        """
+        Execute full backward computation using autograd.
+        """
+        stage_output, input_values = saved_for_backward
+
+        bwd_kwargs = {
+            "stage_output": stage_output,
+            "output_grads": output_grads,
+            "input_values": input_values,
+        }
+
+        grads_input: tuple[torch.Tensor | None, ...] = ()
+
+        # Custom backward function
+        if stage.dw_builder:
+            grads_input, _ = stage.backward_maybe_with_nosync(
+                "full",
+                bwd_kwargs,
+                last_backward=last_backward,
+            )
+            stage.dw_builder()()
+        else:
+            grads_input, _ = stage.backward_maybe_with_nosync(
+                "full", bwd_kwargs, last_backward=last_backward
+            )
+
+        return grads_input
+
+    def backward_input(
+        self,
+        stage: "_PipelineStageBase",
+        saved_for_backward: Any,
+        output_grads: tuple[torch.Tensor, ...] | None,
+        last_backward: bool = False,
+    ) -> tuple[tuple[torch.Tensor | None, ...], Any]:
+        """
+        Execute input-only backward computation.
+        """
+        stage_output, input_values = saved_for_backward
+
+        bwd_kwargs = {
+            "stage_output": stage_output,
+            "output_grads": output_grads,
+            "input_values": input_values,
+        }
+
+        grads_input: tuple[torch.Tensor | None, ...] = ()
+        saved_for_backward_weight: Any = None
+
+        # Custom backward function
+        if stage.dw_builder:
+            grads_input, _ = stage.backward_maybe_with_nosync(
+                "full",
+                bwd_kwargs,
+                last_backward=last_backward,
+            )
+            saved_for_backward_weight = {"dw_runner": stage.dw_builder()}
+        else:
+            # Skip the backward for the first stage since we will perform the weight update with
+            # autograd.backward in backward_weight
+            if not stage.is_first:
+                if isinstance(bwd_kwargs["stage_output"], torch.Tensor):
+                    bwd_kwargs["stage_output"] = (bwd_kwargs["stage_output"],)
+
+                # perform the partial backwards for the inputs with a custom backward function
+                grads_input, param_groups = stage.backward_maybe_with_nosync(
+                    "input", bwd_kwargs, last_backward=last_backward
+                )
+            else:
+                param_groups = None
+
+            saved_for_backward_weight = {
+                "input_values": input_values,
+                "param_groups": param_groups,
+                "stage_output": stage_output,
+                "output_grads": output_grads,
+                "use_dw_builder": False,
+            }
+
+        return grads_input, saved_for_backward_weight
+
+    def backward_weight(
+        self,
+        stage: "_PipelineStageBase",
+        saved_for_backward_weight: Any,
+        last_backward: bool = False,
+    ) -> None:
+        """
+        Execute weight-only backward computation.
+        """
+        if saved_for_backward_weight is None:
+            return
+
+        if "dw_runner" in saved_for_backward_weight:
+            # Custom dw_builder was used
+            saved_for_backward_weight["dw_runner"]()
+        else:
+            input_values = saved_for_backward_weight["input_values"]
+            param_groups = saved_for_backward_weight["param_groups"]
+            stage_output = saved_for_backward_weight["stage_output"]
+            output_grads = saved_for_backward_weight["output_grads"]
+
+            if stage.stage_index != 0:
+                bwd_kwargs = {
+                    "stage_output": stage_output,
+                    "param_groups": param_groups,
+                }
+                stage.backward_maybe_with_nosync(
+                    "weight", bwd_kwargs, last_backward=last_backward
+                )
+            else:
+                # First stage: if inputs don't require gradient,
+                # param_groups won't be fully captured during stage_backward_input.
+                # In this case, call full backward on the parameters.
+                bwd_kwargs = {
+                    "stage_output": stage_output,
+                    "output_grads": output_grads,
+                    "input_values": input_values,
+                }
+                stage.backward_maybe_with_nosync(
+                    "full", bwd_kwargs, last_backward=last_backward
+                )
+
+
+class GraphExecutor(StageExecutor):
+    """
+    Graph-mode executor for pipeline stages.
+
+    Uses pre-compiled FX graphs for forward and backward passes, enabling
+    optimizations like kernel fusion and communication overlap.
+
+    Args:
+        graph_callables: Container holding the compiled forward and backward graphs.
+        graph_meta: Metadata about the graph structure (number of params, buffers, etc.).
+
+    The GraphExecutor expects the stage to provide access to:
+    - state["unsharded_params"]: Unsharded parameters for the current stage
+    - state["buffers"]: Buffers for the current stage
+    - state["unsharded_grads"]: Accumulated gradients (for backward)
+    """
+
+    def __init__(
+        self,
+        graph_callables: Any,  # GraphCallables from graph_pp.py
+        graph_meta: Any,  # GraphMeta from graph_pp.py
+    ):
+        self.graph_callables = graph_callables
+        self.graph_meta = graph_meta
+        # Cache for backward activations (similar to bwd_activation_cache in GraphPipelineStage)
+        self.bwd_activation_cache: dict[int, tuple[Any, ...]] = {}
+
+    def forward(
+        self,
+        stage: "_PipelineStageBase",
+        args: tuple[Any, ...],
+        kwargs: dict[str, Any],
+    ) -> tuple[Any, Any]:
+        """
+        Execute forward computation using compiled graph.
+        """
+        # Build forward args from state and inputs
+        # Note: The stage should have a 'state' attribute with unsharded_params and buffers
+        # when using GraphExecutor
+        if hasattr(stage, "state"):
+            fw_args = [
+                *stage.state.get("unsharded_params", []),
+                *stage.state.get("buffers", []),
+                *args,
+            ]
+        else:
+            fw_args = list(args)
+
+        # Run forward graph
+        fw_outputs = fx.Interpreter(self.graph_callables.fw).boxed_run(fw_args)
+
+        # Parse outputs
+        num_inner_fwd_outputs = (
+            self.graph_meta.num_mutate_inputs + self.graph_meta.num_user_outputs
+        )
+        saved_intermediates = fw_outputs[num_inner_fwd_outputs:]
+        num_tensors_for_backward = (
+            len(saved_intermediates) - self.graph_meta.num_symints_saved_for_bw
+        )
+        tensors_for_backward = saved_intermediates[:num_tensors_for_backward]
+        non_tensors_for_backward = saved_intermediates[num_tensors_for_backward:]
+        saved_for_backward = (tensors_for_backward, non_tensors_for_backward)
+
+        user_outputs = fw_outputs[
+            self.graph_meta.num_mutate_inputs : num_inner_fwd_outputs
+        ]
+        if len(user_outputs) == 1:
+            user_outputs = user_outputs[0]
+
+        return user_outputs, saved_for_backward
+
+    def _accumulate_grads(
+        self,
+        stage: "_PipelineStageBase",
+        param_buffer_grads: list[Any],
+    ) -> None:
+        """Accumulate gradients into stage state."""
+        if not hasattr(stage, "state"):
+            return
+
+        unsharded_grads = stage.state.get("unsharded_grads", [])
+        grads_to_accumulate = param_buffer_grads[: self.graph_meta.num_params]
+
+        if len(unsharded_grads) != len(grads_to_accumulate):
+            return
+
+        for i in range(len(unsharded_grads)):
+            if grads_to_accumulate[i] is not None:
+                if unsharded_grads[i] is None:
+                    unsharded_grads[i] = grads_to_accumulate[i]
+                else:
+                    unsharded_grads[i] += grads_to_accumulate[i]
+
+    def backward(
+        self,
+        stage: "_PipelineStageBase",
+        saved_for_backward: Any,
+        output_grads: tuple[torch.Tensor, ...] | None,
+        last_backward: bool = False,
+    ) -> tuple[torch.Tensor | None, ...]:
+        """
+        Execute full backward computation using compiled graph.
+        """
+        stage_output, saved_intermediates = saved_for_backward
+        tensors_for_backward, non_tensors_for_backward = saved_intermediates
+
+        # Determine tangents
+        if stage.is_last:
+            if isinstance(stage_output, (list, tuple)) and len(stage_output) == 1:
+                loss = stage_output[0]
+            else:
+                loss = stage_output
+            tangents = (torch.ones_like(loss),)
+        else:
+            tangents = output_grads
+
+        # Build backward args
+        bw_args = [
+            *non_tensors_for_backward,
+            *tensors_for_backward,
+            *tangents,
+        ]
+
+        # Run full backward graph
+        bw_outputs = fx.Interpreter(self.graph_callables.full_bw).boxed_run(bw_args)
+
+        num_params_buffers = self.graph_meta.num_params + self.graph_meta.num_buffers
+        param_buffer_grads = bw_outputs[:num_params_buffers]
+        input_grads = bw_outputs[num_params_buffers:]
+
+        # Accumulate gradients
+        self._accumulate_grads(stage, param_buffer_grads)
+
+        return tuple(input_grads)
+
+    def backward_input(
+        self,
+        stage: "_PipelineStageBase",
+        saved_for_backward: Any,
+        output_grads: tuple[torch.Tensor, ...] | None,
+        last_backward: bool = False,
+    ) -> tuple[tuple[torch.Tensor | None, ...], Any]:
+        """
+        Execute input-only backward computation using compiled dI graph.
+        """
+        # If there's no bw_dI graph (e.g., first stage), fall back to full backward
+        if self.graph_callables.bw_dI is None:
+            grads = self.backward(
+                stage, saved_for_backward, output_grads, last_backward
+            )
+            return grads, None
+
+        stage_output, saved_intermediates = saved_for_backward
+        tensors_for_backward, non_tensors_for_backward = saved_intermediates
+
+        # Determine tangents
+        if stage.is_last:
+            if isinstance(stage_output, (list, tuple)) and len(stage_output) == 1:
+                loss = stage_output[0]
+            else:
+                loss = stage_output
+            tangents = (torch.ones_like(loss),)
+        else:
+            tangents = output_grads
+
+        # Build backward args
+        bw_args = [
+            *non_tensors_for_backward,
+            *tensors_for_backward,
+            *tangents,
+        ]
+
+        # Run dI backward graph
+        inp_grads_and_activations = fx.Interpreter(
+            self.graph_callables.bw_dI
+        ).boxed_run(bw_args)
+        input_grads = inp_grads_and_activations[: self.graph_meta.num_input_grads]
+        activations = list(inp_grads_and_activations[self.graph_meta.num_input_grads :])
+
+        # Return input grads and save activations for weight backward
+        return tuple(input_grads), activations
+
+    def backward_weight(
+        self,
+        stage: "_PipelineStageBase",
+        saved_for_backward_weight: Any,
+        last_backward: bool = False,
+    ) -> None:
+        """
+        Execute weight-only backward computation using compiled dW graph.
+        """
+        if saved_for_backward_weight is None:
+            return
+
+        if self.graph_callables.bw_dW is None:
+            # No separate weight graph; gradients were computed in backward_input
+            return
+
+        activations_for_backward = saved_for_backward_weight
+        bw_args = list(activations_for_backward)
+
+        # Run dW backward graph
+        param_buffer_grads = fx.Interpreter(self.graph_callables.bw_dW).boxed_run(
+            bw_args
+        )
+
+        # Accumulate gradients
+        self._accumulate_grads(stage, param_buffer_grads)
+
 
 logger = logging.getLogger(__name__)
 
@@ -204,6 +680,10 @@ class _PipelineStageBase(ABC):
             i: i % self.group_size for i in range(self.num_stages)
         }
 
+        # Executor for forward/backward computation
+        # Default to EagerExecutor if not provided
+        self._executor: StageExecutor | None = None
+
     @property
     def has_backward(self) -> bool:
         """
@@ -214,6 +694,27 @@ class _PipelineStageBase(ABC):
     @has_backward.setter
     def has_backward(self, has_backward: bool):
         self._has_backward = has_backward
+
+    @property
+    def executor(self) -> StageExecutor:
+        """
+        Returns the executor for this stage.
+        Defaults to EagerExecutor if not explicitly set.
+        """
+        if self._executor is None:
+            self._executor = EagerExecutor()
+        return self._executor
+
+    def set_executor(self, executor: StageExecutor) -> None:
+        """
+        Set the executor for this stage.
+
+        This allows switching between eager and graph execution modes at runtime.
+
+        Args:
+            executor: The executor to use for forward/backward computation.
+        """
+        self._executor = executor
 
     @property
     def is_first(self):
@@ -694,17 +1195,9 @@ class _PipelineStageBase(ABC):
 
         self._validate_fwd_input(args, kwargs)
 
-        # Compute forward
-        try:
-            output = self.forward_maybe_with_nosync(*composite_args, **composite_kwargs)
-
-        except Exception as e:
-            exc_msg = f"""
-            {self.log_prefix} failed to run forward:
-            args: {map_debug_info(composite_args)}
-            kwargs: {map_debug_info(composite_kwargs)}
-            """
-            raise RuntimeError(exc_msg) from e
+        output, saved_for_backward = self.executor.forward(
+            self, composite_args, composite_kwargs
+        )
 
         # See [Note: pipeline model output type]
         output_tuple = _normalize_model_output_as_tuple(output)
@@ -713,13 +1206,11 @@ class _PipelineStageBase(ABC):
         # Output chunks is only used for the last stage since we only merge the output of the last stage
         if self.is_last and save_forward_output:
             self.output_chunks.append(output)
+
         # Save activations and inputs for backward
-        flat_args = flatten_args(composite_args)
-        flat_kwargs = flatten_args(composite_kwargs)
-        flatten_input_tensors = flat_args + flat_kwargs
         self.fwd_cache[fwd_chunk_id] = (
             output_tuple,  # stage_output
-            flatten_input_tensors,  # input_values
+            saved_for_backward,  # input_values or other saved data
         )
 
         logger.debug(
@@ -765,70 +1256,29 @@ class _PipelineStageBase(ABC):
             input_values,
         ) = self.fwd_cache.pop(bwd_chunk_id)
 
-        # Compute backward
+        # Determine output gradients
         if self.is_last:
-            # Last stage computes gradients from loss and has no gradients from
-            # next stage
-            bwd_kwargs = {
-                "stage_output": loss,
-                "output_grads": None,
-                "input_values": input_values,
-            }
+            # Last stage computes gradients from loss and has no gradients from next stage
+            output_grads = None
+            # For last stage, use the loss as stage_output for backward
+            saved_for_backward = (loss, input_values)
         else:
             # Otherwise, receive gradients from next stage
-            grads_output = self._retrieve_recv_grads(bwd_chunk_id)
-            # If an input to the pipeline requires gradient,
-            # `torch.autograd.backward` will accumulate the gradient into the
-            # `.grad` field of such input
-            bwd_kwargs = {
-                "stage_output": stage_output,
-                "output_grads": grads_output,
-                "input_values": input_values,
-            }
+            output_grads = self._retrieve_recv_grads(bwd_chunk_id)
+            saved_for_backward = (stage_output, input_values)
 
-        grads_input: tuple[torch.Tensor | None, ...] = ()
-
-        # Custom backward function
-        if self.dw_builder:
-            # TODO: We may want to change our semantics so we are allowed to ignore
-            # the 'dw_builder' and call full_backward directly when it is a full_backward op.
-            grads_input, _ = self.backward_maybe_with_nosync(
-                "full",
-                bwd_kwargs,
-                last_backward=last_backward,
+        if full_backward:
+            grads_input = self.executor.backward(
+                self, saved_for_backward, output_grads, last_backward=last_backward
             )
-            if full_backward:
-                self.dw_builder()()
-            else:
-                self.dw_runner[bwd_chunk_id] = self.dw_builder()
         else:
-            if full_backward:
-                grads_input, _ = self.backward_maybe_with_nosync(
-                    "full", bwd_kwargs, last_backward=last_backward
-                )
-            else:
-                param_groups: list[dict[str, Any]] | None = None
-                # Skip the backward for the first stage since we will perform the weight update with
-                # autograd.backward in backward_weight_one_chunk
-                if not self.is_first:
-                    if isinstance(bwd_kwargs["stage_output"], torch.Tensor):
-                        bwd_kwargs["stage_output"] = (bwd_kwargs["stage_output"],)
-
-                    # perform the partial backwards for the inputs with a custom backward function
-                    # when the "stage_ouput" is a loss, then it is a tensor, otherwise it is a tuple of tensors
-                    grads_input, param_groups = self.backward_maybe_with_nosync(
-                        "input", bwd_kwargs, last_backward=last_backward
-                    )
-
-                # TODO: we dont need to save this, add to dw_runner?
-                self.backward_state[bwd_chunk_id] = (
-                    bwd_kwargs["input_values"],
-                    param_groups,
-                    bwd_kwargs["stage_output"],
-                    bwd_kwargs["output_grads"],
-                )
-                # Save a placeholder for the dw_runner
-                self.dw_runner[bwd_chunk_id] = lambda: None
+            grads_input, saved_for_backward_weight = self.executor.backward_input(
+                self, saved_for_backward, output_grads, last_backward=last_backward
+            )
+            # Save intermediate values from backward_input for use in backward_weight
+            self.backward_state[bwd_chunk_id] = saved_for_backward_weight
+            # Save a placeholder for the dw_runner (for backwards compatibility)
+            self.dw_runner[bwd_chunk_id] = lambda: None
 
         self.bwd_cache[bwd_chunk_id] = grads_input
 
@@ -844,6 +1294,30 @@ class _PipelineStageBase(ABC):
 
         logger.debug("%s Backwarded chunk %s", self.log_prefix, bwd_chunk_id)
 
+    def backward_input_one_chunk(
+        self,
+        bwd_chunk_id: int,
+        loss=None,
+        last_backward=False,
+    ):
+        """
+        Perform input-only backward pass on the module (dI for F,I,W schedules).
+
+        This computes gradients for the inputs only and saves state for a subsequent
+        call to backward_weight_one_chunk to compute weight gradients.
+
+        Args:
+            bwd_chunk_id: The microbatch id for which to compute backward.
+            loss: The loss tensor if this is the last stage.
+            last_backward: Whether this is the last backward pass (for gradient sync).
+        """
+        self.backward_one_chunk(
+            bwd_chunk_id,
+            loss=loss,
+            full_backward=False,
+            last_backward=last_backward,
+        )
+
     def backward_weight_one_chunk(self, bwd_chunk_id: int, last_backward=False):
         # skip backward computation if backward is not enabled
         if not self.has_backward:
@@ -855,38 +1329,11 @@ class _PipelineStageBase(ABC):
                 " without first calling `backward_one_chunk(full_backward=False)`"
             )
 
-        if self.dw_builder is not None:
-            self.dw_runner.pop(bwd_chunk_id)()
-        else:
-            (
-                input_values,
-                param_groups,
-                stage_output,
-                output_grads,
-            ) = self.backward_state.pop(bwd_chunk_id)
+        # Retrieve intermediate values saved from backward_input
+        saved_for_backward_weight = self.backward_state.pop(bwd_chunk_id, None)
+        self.dw_runner.pop(bwd_chunk_id)
 
-            if self.stage_index != 0:
-                bwd_kwargs = {
-                    "stage_output": stage_output,
-                    "param_groups": param_groups,
-                }
-                self.backward_maybe_with_nosync(
-                    "weight", bwd_kwargs, last_backward=last_backward
-                )
-            else:
-                # TODO: figure out a better way to do this:
-                # if inputs does not require gradient,
-                # then the parameter group will not be fully captured during stage_backward_input
-                # in this case, we need call grad directly on the parameters
-                # To solve: make input fn do the intersect compute and then finish it off during W
-                bwd_kwargs = {
-                    "stage_output": stage_output,
-                    "output_grads": output_grads,
-                    "input_values": input_values,
-                }
-                self.backward_maybe_with_nosync(
-                    "full", bwd_kwargs, last_backward=last_backward
-                )
+        self.executor.backward_weight(self, saved_for_backward_weight, last_backward=last_backward)
 
     def _validate_fwd_input(self, args, kwargs):
         """Raises a RuntimeError if shapes of input args/kwargs do not match the shapes configured for this stage."""
@@ -1348,6 +1795,8 @@ class PipelineStage(_PipelineStageBase):
         group (dist.ProcessGroup, optional): The process group for distributed training. If None, default group.
         dw_builder (Optional[Callable[[], Callable[..., None]]): If provided, dw_builder will build a new dw_runner function
             that will the W action (input weights) for F, I, W (Fwd, Input, Weight) zero bubble schedules.
+        executor (Optional[StageExecutor]): The executor to use for forward/backward computation.
+            If None, defaults to EagerExecutor. Can also be set at runtime via set_executor().
     """
 
     def __init__(
@@ -1360,10 +1809,16 @@ class PipelineStage(_PipelineStageBase):
         output_args: torch.Tensor | tuple[torch.Tensor, ...] | None = None,
         group: dist.ProcessGroup | None = None,
         dw_builder: Callable[[], Callable[..., None]] | None = None,
+        executor: StageExecutor | None = None,
     ):
         super().__init__(submodule, stage_index, num_stages, device, group, dw_builder)
         self.inputs: list[torch.Tensor] | None = None
         self.inputs_meta: tuple[torch.Tensor, ...] | None = None
+
+        # Set the executor if provided
+        if executor is not None:
+            self.set_executor(executor)
+
         # Note: inputs and submod should ideally be on meta device. We decided not to assert this (yet) because it
         # might be breaking for existing users.
         if input_args is None:
