@@ -202,13 +202,6 @@ def register_opaque_type(
                 "a tuple of (repr_string, set_of_types)."
             )
 
-        if members is not None:
-            raise TypeError(
-                "No need to specify `members` for "
-                f"value-type opaque class {cls} as it will inline all methods "
-                "by default and be guarded based on `__eq__`."
-            )
-
         if guard_fn is not None:
             raise TypeError(
                 "No need to specify `guard_fn` for "

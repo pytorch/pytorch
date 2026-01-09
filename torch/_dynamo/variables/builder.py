@@ -196,6 +196,8 @@ from .dicts import (
 )
 from .distributed import (
     DeviceMeshVariable,
+    PlacementClassVariable,
+    PlacementVariable,
     ProcessGroupVariable,
     WorldMetaClassVariable,
 )
@@ -523,6 +525,7 @@ class VariableBuilder:
             TensorWithTFOverrideVariable,
             UserDefinedObjectVariable,
             NumpyNdarrayVariable,
+            TorchScriptObjectVariable,
         }
 
     def get_source(self) -> Source:
@@ -1180,6 +1183,17 @@ class VariableBuilder:
             # TODO: see if we need to add custom guard instead of a simple ID_MATCH
             self.install_guards(GuardBuilder.EQUALS_MATCH)
             return DeviceMeshVariable(value, source=self.source)
+        elif PlacementClassVariable.is_placement_type(value):
+            # TODO: see if we need to add custom guard instead of a simple ID_MATCH
+            self.install_guards(GuardBuilder.ID_MATCH)
+            return PlacementClassVariable(value, source=self.source)
+        elif PlacementVariable.is_placement(value):
+            # TODO: see if we need to add custom guard instead of a simple ID_MATCH
+            self.install_guards(GuardBuilder.EQUALS_MATCH)
+            return PlacementVariable(
+                value,
+                source=self.source,
+            )
         elif value is OrderedSet:
             self.install_guards(GuardBuilder.ID_MATCH)
             return OrderedSetClassVariable()
@@ -4032,6 +4046,8 @@ class SourcelessBuilder:
             return SourcelessGraphModuleVariable(value)
         elif isinstance(value, torch.utils._pytree.TreeSpec):
             return UserDefinedObjectVariable(value)
+        elif PlacementVariable.is_placement(value):
+            return PlacementVariable(value)
         elif DeviceMeshVariable.is_device_mesh(value):
             return DeviceMeshVariable(value)
         elif value is functools.wraps:
