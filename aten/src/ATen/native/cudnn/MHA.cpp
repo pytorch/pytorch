@@ -1875,8 +1875,6 @@ void run_cudnn_SDP_bprop_nestedtensor(
   }
   const fe::graph::Graph& mha_graph =
       mha_graph_storage ? *mha_graph_storage : *cache_it->second;
-  TORCH_WARN("RAG_DQ", rag_dq_off, rag_dq_off.device());
-  TORCH_WARN("SEQ_LEN_Q", seqlen_q, seqlen_q.device());
   std::unordered_map<int64_t, void*> variant_pack = {
       // inputs
       {Q, q.mutable_data_ptr()},
