@@ -319,7 +319,6 @@ std::string _memory_snapshot_pickled() {
   IValue name_s = "name";
   IValue line_s = "line";
   IValue frames_s = "frames";
-  IValue forward_frames_s = "forward_frames";
   IValue blocks_s = "blocks";
   IValue is_expandable_s = "is_expandable";
   IValue time_us_s = "time_us";
@@ -517,17 +516,6 @@ std::string _memory_snapshot_pickled() {
   auto frames = ivalue_symbolize(frame_tracebacks);
   for (auto i : c10::irange(frames.size())) {
     frame_dict.at(i).insert(frames_s, frames.at(i));
-
-    // Add forward frames if available
-    auto* tb = frame_tracebacks.at(i);
-    const auto& forward_tb = tb->forward_traceback();
-    if (forward_tb.has_value() && !forward_tb->empty()) {
-      auto forward_list = new_list();
-      for (const auto& frame_str : *forward_tb) {
-        forward_list.push_back(IValue(frame_str));
-      }
-      frame_dict.at(i).insert(forward_frames_s, forward_list);
-    }
   }
 
   return write_pickle(result);
