@@ -196,12 +196,12 @@ kernel_side_table = KernelSideTable()
 # Mutation Tracker
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class Param:
     idx: int
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class Intermediate:
     idx: int
 
@@ -209,7 +209,7 @@ class Intermediate:
         return self.idx < 0
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class Op:
     name: str
     fn_call_name: Optional[str]
@@ -321,6 +321,11 @@ def generate_ttir(
                 return True
         return False
 
+    def is_tensor_like_arg(arg: Any) -> bool:
+        if isinstance(arg, Tensor) or is_stable_tensor_descriptor_arg(arg):
+            return True
+        return False
+
     # Note: one would expect that each input to the triton kernel maps to
     # one input parameter in the TTIR. This is _not_ true for TMA descriptors:
     # one TMA descriptor gets converted into:
@@ -329,13 +334,9 @@ def generate_ttir(
     #   * N sizes, for a rank-N tensor
     # To account for this, we inject some fake arg names as placeholders for
     # the stride and size parameters.
-    #
-    # Tensors and scalars both become single TTIR parameters, whereas
-    # `constexpr` are inlined. This matters for "odd" ordering
-    # (eg. [tensor, scalar, tensor]).
-    def get_arg_names(name: str, arg: Any, is_constexpr) -> list[str]:
-        if is_constexpr or arg is None:
-            return []
+    def get_tensor_names(name: str, arg: Any) -> list[str]:
+        if isinstance(arg, Tensor):
+            return [name]
         if is_stable_tensor_descriptor_arg(arg):
             stable_meta = maybe_unpack_tma_stable_metadata(
                 tma_descriptor_metadata[name]
@@ -347,12 +348,11 @@ def generate_ttir(
             names.extend(name + f" STRIDE PLACEHOLDER {i}" for i in range(tensor_rank))
             names.extend(name + f" SIZE PLACEHOLDER {i}" for i in range(tensor_rank))
             return names
-        return [name]
+        return []
 
-    ordered_arg_names = list(
+    ordered_tensor_names = list(
         itertools.chain.from_iterable(
-            get_arg_names(name, arg, param.is_constexpr)
-            for (name, arg), param in zip(ordered_args.items(), kernel.params)
+            get_tensor_names(name, arg) for name, arg in ordered_args.items()
         )
     )
 
@@ -438,14 +438,8 @@ def generate_ttir(
             return attrs
 
     specialization = _get_specialization(ordered_args.values())
-
-    # Triton explicitly interprets ASTSource.constants entries as constexpr
-    # (triton-lang/triton#8248). Thus, only arguments marked `is_constexpr`
-    # should be treated as such, not just non-tensor-like arguments.
     constants = {
-        (i,): arg
-        for i, ((_, arg), param) in enumerate(zip(ordered_args.items(), kernel.params))
-        if param.is_constexpr
+        name: arg for name, arg in ordered_args.items() if not is_tensor_like_arg(arg)
     }
 
     if (mangle_type := getattr(triton.runtime.jit, "mangle_type", None)) is not None:
@@ -510,7 +504,7 @@ def generate_ttir(
     if not ttir_module.verify():
         raise RuntimeError("Verification for TTIR module has failed")
 
-    return ttir_module, ordered_arg_names
+    return ttir_module, ordered_tensor_names
 
 
 def ttir_to_functions(
@@ -955,12 +949,11 @@ def identify_mutated_tensors(
     2) Parses the TTIR and creates a control flow graph
     3) Analyzes the graph to detect all input tensor mutations
     """
-    from torch._inductor.ir import TensorBox
 
     ttir_module = None
     functions = None
     try:
-        ttir_module, ordered_arg_names = generate_ttir(
+        ttir_module, ordered_tensor_names = generate_ttir(
             kernel, kwargs, tma_descriptor_metadata
         )
 
@@ -978,13 +971,11 @@ def identify_mutated_tensors(
         analyze_kernel_mutations.reset()
         get_tma_stores.reset()
         mutations = analyze_kernel_mutations(
-            functions, kernel_name, len(ordered_arg_names)
+            functions, kernel_name, len(ordered_tensor_names)
         )
 
         return [
-            ordered_arg_names[i]
-            for i, mutated in enumerate(mutations)
-            if mutated and isinstance(kwargs[ordered_arg_names[i]], (Tensor, TensorBox))
+            ordered_tensor_names[i] for i, mutated in enumerate(mutations) if mutated
         ]
     except Exception:
         import torch._inductor.ir

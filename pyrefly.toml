@@ -86,6 +86,7 @@ ignore-missing-imports = [
     "future.utils.*",
     "past.builtins.*",
     "numba.*",
+    "nvMatmulHeuristics",
     "PIL.*",
     "moviepy.*",
     "cv2.*",
@@ -149,3 +150,17 @@ implicit-any = true
 # unannotated-attribute=true
 # unannotated-parameter=true
 # unannotated-return=true
+
+[[sub-config]]
+matches = "torch/_dispatch/**"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+
+
+[[sub-config]]
+# TODO: Widen this to the entire subclasses dir
+matches = "torch/_subclasses/fake_impls.py"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
