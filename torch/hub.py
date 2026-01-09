@@ -138,14 +138,14 @@ def _safe_extract_zip(zip_file, extract_to):
         ValueError: If any archive entry contains unsafe paths
     """
     # Normalize the extraction directory path
-    extract_to = os.path.abspath(extract_to)
+    extract_to = Path(extract_to).resolve(strict=False)
 
     for member in zip_file.infolist():
         # Get the normalized path
         filename = os.path.normpath(member.filename)
 
         # Check for directory traversal attempts
-        if filename.startswith("/") or filename.startswith("\\"):
+        if filename.startswith(("/","\\")):
             raise ValueError(f"Archive entry has absolute path: {member.filename}")
 
         if len(filename) >= 2 and filename[1] == ":" and filename[0].isalpha():
@@ -157,11 +157,10 @@ def _safe_extract_zip(zip_file, extract_to):
             )
 
         # Construct the full extraction path and verify it's within extract_to
-        full_path = os.path.abspath(os.path.join(extract_to, filename))
-        if not full_path.startswith(extract_to + os.sep) and full_path != extract_to:
-            raise ValueError(
-                f"Archive entry would extract outside target directory: {member.filename}"
-            )
+        out = (extract_to / filename).resolve(strict=False)
+
+        if not out.is_relative_to(extract_to):
+            raise ValueError(f"Archive entry escapes target directory: {member.filename!r}")
 
         # Extract the member safely
         zip_file.extract(member, extract_to)
