@@ -8170,6 +8170,7 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
         x = torch.randn(2, 3, 4, device=GPU_TYPE)
 
         ep = export(m, (x,))
+        print(f"ep.state_dict(): {ep.state_dict}")
         self.assertTrue(callable(ep.module()))
 
         eager_out = m(x)

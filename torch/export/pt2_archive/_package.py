@@ -584,6 +584,8 @@ def _package_exported_programs(
             model_name, ep, archive_writer, pickle_protocol
         )
         weights_config_file = WEIGHTS_CONFIG_FILENAME_FORMAT.format(model_name)
+        print(f"weights_config_file: {weights_config_file}")
+        print(f"weights_config: {_dataclass_to_dict(weights_config)}")
         _package_payload_config(archive_writer, weights_config, weights_config_file)
 
         constants_config = _package_constants(
@@ -875,7 +877,7 @@ def _load_state_dict(
             else:
                 tensor_meta = payload_meta.tensor_meta
                 print(f"tensor_meta: {tensor_meta}")
-                print(deserialize_storage_offset(tensor_meta.storage_offset))
+                print(f"weight_fqn: {weight_fqn}, {deserialize_storage_offset(tensor_meta.storage_offset)}")
                 assert tensor_meta is not None
                 weight_tensor = torch.as_strided(
                     input=state_dict_file_map[payload_meta.path_name],
