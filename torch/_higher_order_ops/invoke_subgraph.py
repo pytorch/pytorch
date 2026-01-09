@@ -24,9 +24,10 @@ from torch._higher_order_ops.utils import (
     redirect_to_mode,
     reenter_make_fx,
     register_fake,
-    save_tensors_and_symints_for_backward,
-    saved_tensors_and_symints,
+    save_tensors_and_objects_for_backward,
+    saved_tensors_and_objects,
 )
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_type
 from torch._ops import HigherOrderOperator
 from torch._subclasses.functional_tensor import disable_functional_mode
@@ -122,7 +123,9 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         )
 
         assert all(
-            isinstance(o, (torch.Tensor, int, torch.SymInt, torch.Generator))
+            isinstance(
+                o, (torch.Tensor, int, torch.SymInt, torch.Generator, FakeScriptObject)
+            )
             or is_opaque_type(type(o))
             for o in operands
             if o is not None
@@ -525,7 +528,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
 
-        save_tensors_and_symints_for_backward(ctx, operands)
+        save_tensors_and_objects_for_backward(ctx, operands)
 
         with torch._C._AutoDispatchBelowAutograd():
             out = invoke_subgraph(
@@ -551,7 +554,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         subgraph = ctx._subgraph
         identifier = ctx._identifier
         output_metadata = ctx._output_metadata
-        primals = saved_tensors_and_symints(ctx)
+        primals = saved_tensors_and_objects(ctx)
 
         # Filter out grads that are None or do not require_grad. This was
         # the assumption we made during the tracing of joint_graph.

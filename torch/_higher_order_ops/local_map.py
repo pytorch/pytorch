@@ -17,8 +17,8 @@ from torch._C import DispatchKey
 from torch._higher_order_ops.utils import (
     clone_outputs_aliasing_inputs,
     redirect_to_mode,
-    save_tensors_and_symints_for_backward,
-    saved_tensors_and_symints,
+    save_tensors_and_objects_for_backward,
+    saved_tensors_and_objects,
 )
 from torch._ops import HigherOrderOperator
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
@@ -417,7 +417,7 @@ class LocalMapAutogradOp(torch.autograd.Function):
 
         fw_outs = fw_outs_with_saved_activations[:num_fw_outs]
         saved_activations = fw_outs_with_saved_activations[num_fw_outs:]
-        save_tensors_and_symints_for_backward(ctx, saved_activations)
+        save_tensors_and_objects_for_backward(ctx, saved_activations)
 
         ctx.expected_tangent_metadata = {
             i: MemoryFormatMeta.from_tensor(fw_outs[i]) for i in filtered_grads_idx
@@ -437,8 +437,8 @@ class LocalMapAutogradOp(torch.autograd.Function):
         )
         ctx.pos = list(
             reversed(ctx.pos)
-        )  # make saved_tensors_and_symints return symints first
-        saved_activations = saved_tensors_and_symints(ctx)
+        )  # make saved_tensors_and_objects return symints first
+        saved_activations = saved_tensors_and_objects(ctx)
         with torch._C._AutoDispatchBelowAutograd():
             # Filter out grads that are None or do not require_grad.
             # The AOTAutograd utils we rely on force this assumption.

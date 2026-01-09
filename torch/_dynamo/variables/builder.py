@@ -1540,7 +1540,7 @@ class VariableBuilder:
                 # Value-type: guard on equality (will use __eq__)
                 self.install_guards(GuardBuilder.CONSTANT_MATCH)
             elif is_opaque_reference_type(type(value)):
-                # Reference-type: guard only on type/identity
+                # Reference-type: guard only on type, and registered guard_fn
                 self.install_guards(GuardBuilder.TYPE_MATCH)
                 self.install_guards(GuardBuilder.OPAQUE_OBJ_GUARD_FN_MATCH)
             elif not hasattr(value, "__obj_flatten__"):

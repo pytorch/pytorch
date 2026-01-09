@@ -501,13 +501,6 @@ inline InferredType tryToInferType(py::handle input) {
     return InferredType(AwaitType::create(awptr->aw_->elementType()));
   }
 
-  auto opaque_module = py::module::import("torch._library.opaque_object");
-  py::bool_ is_opaque =
-      opaque_module.attr("is_opaque_type")(py::type::handle_of(input));
-  if (py::cast<bool>(is_opaque)) {
-    return InferredType(PyObjectType::get());
-  }
-
   if (as_module(py::cast<py::object>(input))) {
     return InferredType("Cannot infer type of ScriptModule");
   }

@@ -12,6 +12,7 @@ import torch.utils._pytree as pytree
 from torch._dispatch.python import suspend_functionalization
 from torch._guards import detect_fake_mode
 from torch._higher_order_ops.schema import HopSchema
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_type
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
@@ -728,19 +729,19 @@ def _stack_pytree(pytrees):
 # can be used to save symints as direct attributes of ctx in autograd.Function.
 #
 # For example, if args = (x, y, s0, z, s1),
-# save_tensors_and_symints_for_backward will partition the args into two lists, and a bookkeeping list pos:
+# save_tensors_and_objects_for_backward will partition the args into two lists, and a bookkeeping list pos:
 #   partitioned_args[0] = (x, y, z)
 #   partitioned_args[1] = (s0, s1)
 #   pos = (0, 0, 1, 0, 1)
 # pos list keeps track of which partition the args
-# is partitioned into in order to recover it in saved_tensors_and_symints.
+# is partitioned into in order to recover it in saved_tensors_and_objects.
 #
-# In saved_tensors_and_symints, we can recover the original args by:
+# In saved_tensors_and_objects, we can recover the original args by:
 # iterating over the pos list and pop one item from the front of partitioned_args[pos[i]].
 # We use t_idx and s_idx to keep track of the next index of the item we are going to pop for the two lists.
-def save_tensors_and_symints_for_backward(ctx, args):
+def save_tensors_and_objects_for_backward(ctx, args):
     assert all(
-        isinstance(arg, (torch.Tensor, torch.SymInt, int, type(None)))
+        isinstance(arg, (torch.Tensor, torch.SymInt, int, type(None), FakeScriptObject))
         or is_opaque_type(type(arg))
         for arg in args
     ), args
@@ -751,14 +752,16 @@ def save_tensors_and_symints_for_backward(ctx, args):
         partitioned_args[idx].append(arg)
         pos.append(idx)
 
-    assert not hasattr(ctx, "sym_int_args"), "ctx already has sym_int_args attribute."
+    assert not hasattr(ctx, "non_tensor_args"), (
+        "ctx already has non_tensor_args attribute."
+    )
     assert not hasattr(ctx, "pos"), "ctx already has pos attribute."
     ctx.save_for_backward(*partitioned_args[0])
-    ctx.sym_int_args = partitioned_args[1]
+    ctx.non_tensor_args = partitioned_args[1]
     ctx.pos = pos
 
 
-def saved_tensors_and_symints(ctx):
+def saved_tensors_and_objects(ctx):
     args = []
     t_idx = 0
     s_idx = 0
@@ -768,7 +771,7 @@ def saved_tensors_and_symints(ctx):
             args.append(saved_tensors[t_idx])
             t_idx += 1
         else:
-            args.append(ctx.sym_int_args[s_idx])
+            args.append(ctx.non_tensor_args[s_idx])
             s_idx += 1
     assert t_idx + s_idx == len(ctx.pos)
     return tuple(args)
