@@ -21,6 +21,7 @@ exclude_patterns = [
     'test/test_torchfuzz_repros.py',
     # CPython tests
     'test/dynamo/cpython/**',
+    'test/cpython/**',
     # Tests from the NumPy test suite
     'test/torch_np/numpy_test/**/*.py',
     'third_party/**',
@@ -429,6 +430,7 @@ exclude_patterns=[
     'test/cpp/jit/upgrader_models/*.ptl',
     'test/cpp/jit/upgrader_models/*.ptl.ff',
     'test/dynamo/cpython/**',
+    'test/cpython/**',
     '**/*.png',
     '**/*.gz',
     '**/*.patch',
@@ -969,6 +971,7 @@ exclude_patterns = [
     'test/run_test.py',
     '**/fb/**',
     'test/dynamo/cpython/3.13/**',
+    'test/cpython/v3_13/**',
     'test/quantization/**',  # should be run through test/test_quantization.py
     'test/jit/**',  # should be run through test/test_jit.py
     'test/ao/sparsity/**',  # should be run through test/test_ao_sparsity.py
@@ -1161,6 +1164,7 @@ exclude_patterns = [
     '**/fb/**',
     'third_party/**',
     'test/dynamo/cpython/**',
+    'test/cpython/**',
     'torch/_vendor/**',
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
@@ -1196,6 +1200,7 @@ exclude_patterns = [
     'fb/**',
     '**/fb/**',
     'test/dynamo/cpython/**',
+    'test/cpython/**',
     'third_party/**/*.py',
     'third_party/**/*.pyi',
     'torch/_vendor/**',
@@ -1570,6 +1575,7 @@ exclude_patterns = [
     'torch/_inductor/fx_passes/serialized_patterns/**',
     'torch/_inductor/autoheuristic/artifacts/**',
     'test/dynamo/cpython/**',
+    'test/cpython/**',
     'test/test_torchfuzz_repros.py',
     'scripts/**',
     'third_party/**',
