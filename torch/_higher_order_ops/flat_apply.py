@@ -59,7 +59,7 @@ def func_to_graphable(
     return pytree.tree_flatten(_ConstantFunction(func))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _ConstantFunction(Generic[_P, _R]):
     func: Callable[_P, _R]
 
