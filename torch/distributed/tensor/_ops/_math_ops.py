@@ -17,6 +17,7 @@ from torch.distributed.tensor._op_schema import (
     RuntimeSchemaInfo,
     TupleStrategy,
 )
+from torch.distributed.tensor._ops._pointwise_ops import linear_pointwise_strategy
 from torch.distributed.tensor._ops.utils import (
     as_list,
     expand_to_full_mesh_op_strategy,
@@ -474,6 +475,70 @@ def vector_norm_strategy(op_schema: OpSchema) -> OpStrategy:
         reduction_linear=True,
         reduction_op=NormReduction(norm_type),
     )
+
+
+@register_op_strategy([aten.dist.default], schema_info=RuntimeSchemaInfo(2))
+def dist_strategy(op_schema: OpSchema) -> OpStrategy:
+    """
+    Sharding strategy for torch.dist(input, other, p=2).
+
+    Implements: dist(a, b, p) = linalg.vector_norm(a - b, ord=p)
+
+    Delegates to existing utilities:
+    - linear_pointwise_strategy for input alignment (subtraction)
+    - map_placements_after_reduction for placement logic
+    """
+    args_schema = op_schema.args_schema
+    input_strategy = cast(OpStrategy, args_schema[0])
+    other_strategy = cast(OpStrategy, args_schema[1])
+    norm_type = args_schema[2] if len(args_schema) > 2 else 2
+
+    if not isinstance(norm_type, (int, float, str)):
+        raise AssertionError(
+            f"Expected int, float, or str for norm_type, got {type(norm_type)}"
+        )
+
+    # Step 1: Align inputs via pointwise subtraction
+    sub_schema = OpSchema(
+        op=aten.sub.Tensor,
+        args_schema=(input_strategy, other_strategy),
+        kwargs_schema={},
+    )
+    aligned_strategy = cast(OpStrategy, linear_pointwise_strategy(sub_schema))
+
+    # Step 2: Apply reduction using existing placement logic
+    # NOTE: We can't delegate fully to common_reduction_strategy because:
+    # - linear_pointwise_strategy doesn't set tensor_meta on output specs
+    # - common_reduction_strategy needs tensor_meta to access .ndim
+    # - So we compute dimensions manually and reuse map_placements_after_reduction
+    common_shape = torch.broadcast_shapes(input_strategy.shape, other_strategy.shape)
+    result_ndim = len(common_shape)
+
+    reduce_dims = list(range(result_ndim))
+    reduce_dims_map = _infer_reduce_dims_map(reduce_dims, result_ndim, keep_dim=False)
+
+    output_strategy = OpStrategy([])
+    for aligned_spec in aligned_strategy.strategies:
+        # Reuse existing placement reduction logic (from common_reduction_strategy)
+        out_placements = map_placements_after_reduction(
+            aligned_spec.output_spec.placements,
+            reduce_dims,
+            reduce_dims_map,
+            NormReduction(norm_type),
+        )
+
+        output_strategy.strategies.append(
+            OpSpec(
+                output_specs=DTensorSpec(
+                    mesh=input_strategy.mesh,
+                    placements=out_placements,
+                ),
+                input_specs=aligned_spec.input_specs,
+                redistribute_cost=aligned_spec.redistribute_cost,
+            )
+        )
+
+    return output_strategy
 
 
 @register_op_strategy(
