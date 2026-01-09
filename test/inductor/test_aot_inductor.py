@@ -7734,10 +7734,6 @@ class AOTInductorTestsTemplate:
         with config.patch("triton.autotune_with_sample_inputs", True):
             AOTIRunnerUtil.run(Model(), example_inputs)
 
-    @unittest.skip(
-        "Skip this test, only for local test. SIGFPE is produced when viewing "
-        "empty tensor with dim=0. See D86125095 for model-side workaround."
-    )
     def test_view_zero_dim_empty_tensor(self):
         """
         Regression test for viewing an empty tensor with dim=0 in AOTInductor.
@@ -7747,17 +7743,17 @@ class AOTInductorTestsTemplate:
         - s55 is a backed symint from a DIFFERENT tensor's .size(0)
         - s55 can be 0 at runtime
 
-        The AOTInductor C++ runtime crashes with SIGFPE because:
+        Previously, the AOTInductor C++ runtime crashed with SIGFPE because:
         - The -1 computation is: (u1*520) / (s55*52)
         - When s55=0, this is division by zero
+
+        Now, we expect a proper RuntimeError to be raised with a meaningful
+        error message instead of crashing the process.
 
         Key pattern from exported_model_graph_aoti.txt line 1182:
         view_90: "bf16[s55, ((10*u1)//s55), 52]" = _broadcast_impl.view(getitem_1, -1, 52)
         - _broadcast_impl has shape [u1, 520] (u1 is unbacked from .item())
         - getitem_1 is s55 (backed from embeddings_1.size(0))
-
-        This bypasses guards because s55 is a backed symint that can be 0,
-        and u1 is an unbacked symint - they are independent.
 
         Model fix: D86125095 (early return when num_cache_hit_items == 0)
         See: https://fb.workplace.com/groups/1028545332188949/posts/3341672205981424/
@@ -7789,7 +7785,7 @@ class AOTInductorTestsTemplate:
 
                 # The problematic view: uses s55 (backed from embeddings, can be 0)
                 # but the tensor data has size u1 (unbacked) - DECOUPLED from s55
-                # When s55=0: -1 = (u1*520) / (s55*52) = 0/0 = SIGFPE
+                # When s55=0: -1 = (u1*520) / (s55*52) = 0/0
                 # This mimics line 1182:
                 #   view_90 = _broadcast_impl.view(getitem_1, -1, 52)
                 result = data.view(s55, -1, 52)
@@ -7818,22 +7814,39 @@ class AOTInductorTestsTemplate:
         ep = torch.export.export(
             model, compile_inputs, dynamic_shapes=dynamic_shapes, strict=False
         )
-        package_path = torch._inductor.aoti_compile_and_package(ep)
+
+        # Disable caches to force recompilation with the new code
+        with config.patch({"force_disable_caches": True}):
+            package_path = torch._inductor.aoti_compile_and_package(ep)
+
+        with zipfile.ZipFile(package_path, "r") as z:
+            for name in z.namelist():
+                if name.endswith("wrapper.cpp"):
+                    content = z.read(name).decode("utf-8", errors="replace")
+                    # Verify that division and modulo operations are guarded
+                    # The new implementation emits AOTI_TORCH_CHECK calls before
+                    # computing size expressions that contain division/modulo
+                    assert "AOTI_TORCH_CHECK(" in content and "by zero" in content, (
+                        "Division/modulo operations should be guarded with AOTI_TORCH_CHECK"
+                    )
+
         optimized = torch._inductor.aoti_load_package(package_path)
 
         # Run with s55=0 (embeddings is empty) and u1=0 (batch_sizes sum to 0)
         # data has shape [0, 520] (u1=0)
-        # view(s55=0, -1, 52): -1 = 0*520 / (0*52) = 0/0 = SIGFPE
+        # view(s55=0, -1, 52): -1 = 0*520 / (0*52) = 0/0 = division by zero
         # sum=0, u1=0
         run_batch_sizes = torch.tensor([0], dtype=torch.int64, device=self.device)
         run_embeddings = torch.randn(0, 104, device=self.device)  # s55=0
         run_inputs = (run_batch_sizes, run_embeddings)
 
-        # This should crash with SIGFPE in C++ runtime (unless bug is fixed)
-        result = optimized(*run_inputs)
-
-        # Verify result is empty tensor with correct shape
-        self.assertEqual(result.shape, torch.Size([0, 0, 52]))
+        # Should raise RuntimeError with meaningful message instead of crashing with SIGFPE.
+        # The modulo check triggers first (before the floor division check) and raises
+        # "Integer modulo by zero". The error message is logged by AOTI runtime but may
+        # not be in the Python exception message due to error wrapping by the AOTI runner.
+        # The key test here is that we get a catchable Python exception, not a process crash.
+        with self.assertRaises(RuntimeError):
+            optimized(*run_inputs)
 
 
 class AOTInductorLoggingTest(LoggingTestCase):

@@ -19,6 +19,7 @@ import torch._ops
 from torch._inductor.runtime.runtime_utils import dynamo_timed
 from torch.fx.experimental.symbolic_shapes import ConvertIntKey, DivideByKey, SymTypes
 from torch.utils._ordered_set import OrderedSet
+from torch.utils._sympy.functions import CleanDiv, FloorDiv, Mod, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 
 from .. import config, cpp_builder, ir
@@ -1490,7 +1491,86 @@ class CppWrapperCpu(PythonWrapperCodegen):
             return
         super().add_benchmark_harness(output)
 
+    def _extract_divisors_from_expr(
+        self, expr: sympy.Expr
+    ) -> list[tuple[sympy.Expr, str]]:
+        """
+        Walk the sympy expression and extract all divisors/modulos from
+        FloorDiv, CleanDiv, Mod, and ModularIndexing nodes.
+
+        Returns a list of (divisor_expr, operation_name) tuples for divisors
+        that are not constant positive integers (which cannot be zero).
+        """
+        divisors: list[tuple[sympy.Expr, str]] = []
+        seen: OrderedSet[str] = OrderedSet()
+
+        def is_constant_nonzero(e: sympy.Expr) -> bool:
+            """Check if expression is a constant that cannot be zero."""
+            if isinstance(e, sympy.Integer):
+                return int(e) != 0
+            if isinstance(e, sympy.Number):
+                return float(e) != 0
+            return False
+
+        def walk(e: sympy.Expr) -> None:
+            if isinstance(e, (FloorDiv, CleanDiv)):
+                # FloorDiv(x, div) - check div
+                _, div = e.args
+                if not is_constant_nonzero(div):
+                    key = str(div)
+                    if key not in seen:
+                        seen.add(key)
+                        divisors.append((div, "floor division"))
+                # Recurse into arguments
+                for arg in e.args:
+                    walk(arg)
+            elif isinstance(e, Mod):
+                # Mod(x, mod) - check mod
+                _, mod = e.args
+                if not is_constant_nonzero(mod):
+                    key = str(mod)
+                    if key not in seen:
+                        seen.add(key)
+                        divisors.append((mod, "modulo"))
+                # Recurse into arguments
+                for arg in e.args:
+                    walk(arg)
+            elif isinstance(e, ModularIndexing):
+                # ModularIndexing(x, div, mod) - check both div and mod
+                _, div, mod = e.args
+                if div != 1 and not is_constant_nonzero(div):
+                    key = str(div)
+                    if key not in seen:
+                        seen.add(key)
+                        divisors.append((div, "modular indexing division"))
+                if not is_constant_nonzero(mod):
+                    key = str(mod)
+                    if key not in seen:
+                        seen.add(key)
+                        divisors.append((mod, "modular indexing modulo"))
+                # Recurse into arguments
+                for arg in e.args:
+                    walk(arg)
+            elif hasattr(e, "args"):
+                for arg in e.args:
+                    if isinstance(arg, sympy.Expr):
+                        walk(arg)
+
+        walk(expr)
+        return divisors
+
     def codegen_cpp_sizevar(self, x: sympy.Expr, *, simplify: bool = True) -> str:
+        # In AOT mode, emit runtime checks for potential division/modulo by zero
+        # to prevent SIGFPE crashes when symbolic tensor shapes can be 0
+        if V.graph.aot_mode:
+            simplified_x = V.graph.sizevars.simplify(x) if simplify else x
+            divisors = self._extract_divisors_from_expr(simplified_x)
+            for divisor, op_name in divisors:
+                divisor_str = cexpr(divisor)
+                self.writeline(
+                    f'AOTI_TORCH_CHECK({divisor_str} != 0, "Integer {op_name} by zero");'
+                )
+            return cexpr(simplified_x)
         return cexpr(V.graph.sizevars.simplify(x) if simplify else x)
 
     def codegen_sizevar(self, x: sympy.Expr) -> str:
