@@ -1,10 +1,11 @@
 import collections
 import ctypes
+import pickle
 import sys
 from typing import Any, Literal
 
 import torch
-from torch._utils import _dummy_type
+from torch._utils import _augment_memory_snapshot_stack_traces, _dummy_type, _Snapshot
 from torch.types import Device
 
 from . import _get_device_index, _is_compiled, _lazy_init, is_initialized
@@ -263,6 +264,120 @@ def memory_snapshot(
     if not is_initialized():
         return []
     return torch._C._xpu_memorySnapshot(mempool_id)["segments"]
+
+
+def _snapshot(device: Device = None, augment_with_fx_traces: bool = False) -> _Snapshot:
+    """
+    Capture a snapshot of the XPU memory state at the time this function is called.
+
+    The returned snapshot is a dictionary with the following structure.
+
+    .. code-block:: python
+
+        class Snapshot(TypedDict):
+            segments: List[Segment]
+            device_traces: List[List[TraceEntry]]
+
+
+        class Segment(TypedDict):
+            # A Segment represents a contiguous memory region returned by the SYCL runtime.
+            #
+            # All reserved memory is composed of these segments. Segments are
+            # cached and reused by the allocator. When allocations are smaller
+            # than the segment, the segment may be split into multiple Blocks.
+            #
+            # Calling :func:`~torch.xpu.memory.empty_cache` releases segments that are entirely inactive.
+            address: int
+            total_size: int  #  total size of segment
+            stream: int
+            segment_type: Literal["small", "large"]  # 'large' (>1MB)
+            allocated_size: int  # size of memory in use
+            active_size: int  # size of memory in use or in active_awaiting_free state
+            blocks: List[Block]
+
+
+        class Block(TypedDict):
+            # A sub-region of a Segment, either currently allocated or cached for reuse.
+            size: int
+            requested_size: int  # Original requested size (may be smaller than `size`)
+            address: int
+            state: Literal[
+                "active_allocated",  # used by a tensor
+                "active_awaiting_free",  # waiting for another stream synchronization, then become free
+                "inactive",  # free for reuse
+            ]
+            frames: List[Frame]  # stack trace from where the allocation occurred
+
+
+        class Frame(TypedDict):
+            filename: str
+            line: int
+            name: str
+            # Optional fields when `augment_with_fx_traces=True` and the frame
+            # corresponds to FX-generated code.
+            fx_node_op: str  # FX node operation type (e.g., 'call_function', 'output')
+            fx_node_name: str  # FX node name (e.g., 'linear', 'relu_1')
+            fx_original_trace: str  # Original model source code stack trace
+
+
+        class TraceEntry(TypedDict):
+            # Trace entries are recorded only when :func:`~torch.xpu.memory._record_memory_history` is enabled.
+            action: Literal[
+                "alloc"  # memory allocated
+                "free_requested",  # received a call to free memory
+                "free_completed",  # memory reclaimed and reusable
+                "segment_alloc",  # ask SYCL runtime for more memory
+                "segment_free",  # called SYCL runtime to return memory to XPU
+                "segment_map",  # ask SYCL runtime to map memory
+                "segment_unmap",  # called SYCL runtime to unmap memory
+                "snapshot",  # snapshot taken
+                "oom",  # threw an OOM exception
+            ]
+            addr: int  # not present for OOM
+            frames: List[Frame]
+            size: int
+            stream: int
+            device_free: int  # only present for OOM, the amount of free memory reported by the device
+
+    Arguments:
+        device (torch.device or int or str, optional): selected device. It uses the current device,
+            given by :func:`~torch.xpu.current_device`, if :attr:`device` is ``None`` (default).
+        augment_with_fx_traces (bool, optional): If True, augment stack trace frames with FX debug information
+            that maps generated FX code back to original model source code. This adds the FX-related
+            fields (fx_node_op, fx_node_name, fx_original_trace) to Frame objects. Default is ``False``.
+
+    Returns:
+        The Snapshot dictionary object
+    """
+    s = torch._C._xpu_memorySnapshot(None)
+    if augment_with_fx_traces:
+        s = _augment_memory_snapshot_stack_traces(s)  # type: ignore[assignment, arg-type]
+    # pyrefly: ignore [bad-return]
+    return s
+
+
+def _dump_snapshot(
+    filename: str = "dump_snapshot.pickle", augment_with_fx_traces: bool = False
+) -> None:
+    """
+    Save a pickled version of the `torch.memory._snapshot()` dictionary to a file.
+
+    This file can be opened by the interactive snapshot viewer at pytorch.org/memory_viz
+
+    Snapshot file sizes scale with `max_entries` and stack trace depth per entry,
+    with several KB per entry. These can easily be in the GB range for longer running
+    workflows with large `max_entries`.
+
+    Arguments:
+        filename (str, optional): Name of the file to create. Defaults to "dump_snapshot.pickle".
+        augment_with_fx_traces (bool, optional): If True, augment the snapshot with FX debug information
+            before dumping. This maps generated FX code stack traces back to original model
+            source code. Defaults to ``False``.
+    """
+    s = _snapshot(augment_with_fx_traces=augment_with_fx_traces)
+
+    with open(filename, "wb") as f:
+        pickle.dump(s, f)
 
 
 def _record_memory_history(
