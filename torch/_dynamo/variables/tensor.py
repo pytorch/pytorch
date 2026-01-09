@@ -1728,11 +1728,12 @@ class TensorVariable(VariableTracker):
                 self.synchronize_attributes(tx)
 
                 # Return a RemovableHandleVariable for API compatibility
-                # Note: The actual removal functionality is not implemented for this case
+                # can't fall through because side_effects.register_hook
+                # require source.
                 return variables.RemovableHandleVariable(
                     mutation_type=variables.base.ValueMutationNew(),
                 )
-        
+
         handle_variable = variables.RemovableHandleVariable(
             mutation_type=variables.base.ValueMutationNew(),
         )
