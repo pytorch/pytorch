@@ -654,6 +654,7 @@ class TensorVariable(VariableTracker):
                 f"Can't unpack a tensor of {length} rows into a tuple of {len(idxes)} elements."
             )
 
+        # preserve tensor subclass type when unpacking
         if isinstance(self, TensorWithTFOverrideVariable):
             base_vars = [
                 wrap_fx_proxy_cls(
