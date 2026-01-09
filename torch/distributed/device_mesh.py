@@ -7,6 +7,7 @@ import warnings
 from collections.abc import Iterator
 from itertools import zip_longest
 from typing import Optional, TYPE_CHECKING, Union
+from typing_extensions import TypeIs
 
 import torch
 from torch.distributed import is_available
@@ -196,12 +197,12 @@ else:
         _marker = DEVICE_MESH_MARKER
 
         @staticmethod
-        def _isinstance(obj) -> bool:
+        def _isinstance(obj) -> TypeIs["DeviceMesh"]:
             # When tracing a DeviceMesh, we represent it as a FakeScriptObject.
             # This causes all `isinstance(x, DeviceMesh)` checks to return
             # False. So instead, we will use `DeviceMesh._isinstance(x)`, which
             # will check if this marker is on the DeviceMesh
-            return obj._marker == DEVICE_MESH_MARKER
+            return getattr(obj, "_marker", None) == DEVICE_MESH_MARKER
 
         def __init__(
             self,
