@@ -148,7 +148,7 @@ def contains_tensor_types(type_: Any) -> bool:
 @functools.cache
 def _is_tensor_constructor(func: OpOverload) -> bool:
     if not isinstance(func, OpOverload):
-        raise AssertionError(f"expected OpOverload, got {type(func)}")
+        raise AssertionError(f"func must be an OpOverload, got {type(func)}")
     schema = func._schema
     if any(contains_tensor_types(arg.type) for arg in schema.arguments):
         return False
@@ -210,7 +210,7 @@ def constructors(
 ) -> FakeTensor:
     if func in _non_kwarg_device_constructors:
         raise AssertionError(
-            f"func should not be in _non_kwarg_device_constructors: {func}"
+            f"func must not be in _non_kwarg_device_constructors, got {func}"
         )
     _, new_kwargs = _normalize_function_or_error(
         func, args=args, kwargs=kwargs, normalize_to_only_use_kwargs=True
@@ -895,7 +895,9 @@ def _padded_dense_to_jagged_forward(
 ) -> FakeTensor:
     # only one jagged dim is supported for now
     if len(offsets) != 1:
-        raise AssertionError(f"expected len(offsets) == 1, got {len(offsets)}")
+        raise AssertionError(
+            f"Only one jagged dim is supported, got {len(offsets)} offsets"
+        )
 
     if not total_L:
         if (
