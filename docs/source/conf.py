@@ -13,8 +13,8 @@
 
 import inspect
 import os
+import sys
 
-# import sys
 import pkgutil
 import re
 from os import path
@@ -44,6 +44,8 @@ import pytorch_sphinx_theme2
 html_theme = "pytorch_sphinx_theme2"
 html_theme_path = [pytorch_sphinx_theme2.get_html_theme_path()]
 
+# Add the source directory to sys.path so that redirects.py can be imported
+sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
 from redirects import redirects
 
 
