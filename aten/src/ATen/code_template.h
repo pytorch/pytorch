@@ -232,7 +232,7 @@ struct CodeTemplate {
         emitIndent(out, indent);
       emitStringWithIndents(out, indent, strings[i]);
       if (i + 1 != strings.size())
-        out << "\n";
+        out << '\n';
     }
   }
   std::string template_text;

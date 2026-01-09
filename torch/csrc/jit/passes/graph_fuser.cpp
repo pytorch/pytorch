@@ -3,18 +3,14 @@
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
 #include <torch/csrc/jit/codegen/fuser/interface.h>
-#include <torch/csrc/jit/frontend/ir_emitter.h>
 #include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/passes/common_subexpression_elimination.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/tensorexpr_fuser.h>
-#include <torch/csrc/jit/passes/utils/subgraph_utils.h>
 #include <torch/csrc/jit/runtime/autodiff.h>
-#include <torch/csrc/jit/runtime/custom_operator.h>
 #include <torch/csrc/jit/runtime/operator.h>
 
-#include <queue>
 #include <unordered_map>
 #include <utility>
 
@@ -363,10 +359,9 @@ struct GraphFuser {
           // the scalar is constant. In those cases we inline the constants
           // directly in the body of the fused group.
           AT_ASSERT(input->node()->kind() == prim::Constant);
-          Node* in_const =
-              subgraph.createClone(input->node(), [](Value*) -> Value* {
-                throw std::runtime_error("unexpected input");
-              });
+          Node* in_const = subgraph.createClone(
+              input->node(),
+              [](Value*) -> Value* { TORCH_CHECK(false, "unexpected input"); });
           subgraph.insertNode(in_const);
           inputs_map[input] = in_const->output();
         }

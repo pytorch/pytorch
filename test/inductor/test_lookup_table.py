@@ -2,18 +2,14 @@
 import re
 import unittest
 from functools import partial
-from typing import Any, Optional
+from typing import Any, Optional, Union
 from unittest.mock import patch
 
 import torch
 import torch.nn as nn
 from torch._inductor import config as inductor_config
 from torch._inductor.choices import InductorChoices
-from torch._inductor.kernel_inputs import (
-    ConvKernelInputs,
-    MMKernelInputs,
-    SerializableValue,
-)
+from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.lookup_table.choices import LookupTableChoices
 from torch._inductor.select_algorithm import (
     add_preprocessing_fn,
@@ -27,10 +23,15 @@ from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA_AND_TRITON, HAS_GPU
 from torch.utils._triton import has_triton_stable_tma_api, has_triton_tma_device
+
+
+# Conditional patch for decompose_k tests - override to 10 on ROCm, no-op elsewhere
+_DECOMPOSE_K_PATCH_ROCM = (
+    {"triton.num_decompose_k_splits": 10} if torch.version.hip else {}
+)
 
 
 class MockTensorNode:
@@ -58,7 +59,7 @@ class MockMMKernelInputs(MMKernelInputs):
     def __init__(
         self,
         tensors: list[torch.Tensor],
-        scalars: Optional[dict[str, SerializableValue]] = None,
+        scalars: Optional[dict[str, Union[float, int]]] = None,
         mat1_idx: int = -2,
         mat2_idx: int = -1,
     ):
@@ -78,37 +79,6 @@ class MockMMKernelInputs(MMKernelInputs):
     def mnk_hinted(self) -> tuple[int, int, int]:
         """Delegate to symbolic since real tensors already have int dimensions"""
         return self.mnk_symbolic()  # pyre-ignore
-
-    @property
-    def device_type(self) -> Optional[str]:
-        return self.tensors[0].device.type
-
-
-class MockConvKernelInputs(ConvKernelInputs):
-    """Mock ConvKernelInputs that subclasses the real class and uses real tensors"""
-
-    def __init__(
-        self,
-        tensors: list[torch.Tensor],
-        scalars: Optional[dict[str, SerializableValue]] = None,
-        x_idx: int = 0,
-        weight_idx: int = 1,
-        bias_idx: Optional[int] = None,
-    ):
-        """Initialize with real tensors, creating mock nodes for the base class"""
-        mock_nodes = [MockTensorNode(t) for t in tensors]
-        super().__init__(
-            mock_nodes, scalars, x_idx=x_idx, weight_idx=weight_idx, bias_idx=bias_idx
-        )
-        self.tensors = tensors  # Keep reference to original tensors
-
-    def shapes_hinted(self) -> tuple[tuple[int, ...], ...]:
-        """Delegate to symbolic since real tensors already have int shapes"""
-        return self.shapes_symbolic()
-
-    def strides_hinted(self) -> tuple[tuple[int, ...], ...]:
-        """Delegate to symbolic since real tensors already have int strides"""
-        return self.strides_symbolic()  # pyre-ignore
 
     @property
     def device_type(self) -> Optional[str]:
@@ -138,7 +108,7 @@ class BaseLookupTableTest(TestCase):
         shapes: Optional[list[tuple[int, ...]]] = None,
         device: torch.device = torch.device("cuda"),
         dtype: torch.dtype = torch.float32,
-        scalars: Optional[dict[str, SerializableValue]] = None,
+        scalars: Optional[dict[str, Union[float, int]]] = None,
     ) -> MockMMKernelInputs:
         """Create MockMMKernelInputs with real tensors"""
         if shapes is None:
@@ -868,7 +838,6 @@ class BaseE2ELookupTableTest(BaseLookupTableTest):
         ]
 
 
-@unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support lookup table")
 @unittest.skipIf(not HAS_CUDA_AND_TRITON, "CUDA not available")
 @instantiate_parametrized_tests
 class TestLookupTableE2E(BaseE2ELookupTableTest):
@@ -963,21 +932,26 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
             operation, tensors, {"triton.enable_persistent_tma_matmul": True}
         )
 
+    # Enable decompose_k for this test (disabled by default on ROCm)
     @fresh_cache()
     def test_decompose_k_lookup_table_entry(self):
         """Test decompose_k template entry"""
-        tensors = self.create_tensors("mm", m=32, n=32, k=32 * 32)
-        config = self.create_basic_config(
-            torch._inductor.kernel.mm.decompose_k_subgraph_template.uid
-        )
-
-        self.setup_lookup_table("mm", tensors, [config])
-        add_preprocessing_fn(
-            partial(
-                verify_choice_names, pattern="decompose_k|bmm_dtype", expected_count=1
+        with inductor_config.patch(_DECOMPOSE_K_PATCH_ROCM):
+            tensors = self.create_tensors("mm", m=32, n=32, k=32 * 32)
+            config = self.create_basic_config(
+                torch._inductor.kernel.mm.decompose_k_subgraph_template.uid
             )
-        )
-        self.run_model("mm", tensors)
+
+            self.setup_lookup_table("mm", tensors, [config])
+            add_preprocessing_fn(
+                partial(
+                    verify_choice_names,
+                    pattern="decompose_k|bmm_dtype",
+                    expected_count=1,
+                )
+            )
+
+            self.run_model("mm", tensors)
 
     @fresh_cache()
     def test_bias_addmm_lookup_table_entry(self):
@@ -1089,119 +1063,6 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
         # Ensure hash checking is enabled
         with patch.object(inductor_config.lookup_table, "check_src_hash", True):
             self.run_model("mm", tensors)
-
-    @fresh_cache()
-    def test_conv2d_lookup_table_entry_e2e(self):
-        """Test end-to-end conv2d with lookup table entry - verifies config is picked up and produces valid results"""
-        import torch._inductor.kernel.conv
-
-        # Create input tensors with specific shapes for conv2d
-        # Input: [batch=2, in_channels=3, height=32, width=32]
-        # Weight: [out_channels=64, in_channels=3, kernel_h=3, kernel_w=3]
-        # Make them channels-last to match what conv lowering uses
-        x = torch.randn(2, 3, 32, 32, device=self.device, dtype=torch.float16).to(
-            memory_format=torch.channels_last
-        )
-        weight = torch.randn(64, 3, 3, 3, device=self.device, dtype=torch.float16).to(
-            memory_format=torch.channels_last
-        )
-
-        # Define conv parameters - use these SAME values everywhere
-        stride = (1, 1)
-        padding = (1, 1)
-        dilation = (1, 1)
-        groups = 1
-
-        # Create MockConvKernelInputs using the SAME tensors and SAME scalar values
-        mock_scalars = {
-            "stride": stride,
-            "padding": padding,
-            "dilation": dilation,
-            "transposed": False,
-            "output_padding": (0, 0),
-            "groups": groups,
-        }
-        mock_kernel_inputs = MockConvKernelInputs([x, weight], mock_scalars)
-
-        # Create lookup key for "convolution" operation
-        choices_handler = LookupTableChoices()
-        lookup_key = choices_handler.make_lookup_key(mock_kernel_inputs, "convolution")
-
-        # Get the exact template UID from conv2d_template
-        template_uid = torch._inductor.kernel.conv.conv2d_template.uid
-
-        # Create a precisely configured conv2d config
-        # IMPORTANT: Only include per-config tunable parameters!
-        # Static parameters (KERNEL_H, STRIDE_H, GROUPS, UNROLL, ALLOW_TF32) are
-        # automatically generated by get_extra_kwargs() and should NOT be in the lookup table
-        conv2d_config = {
-            "template_id": template_uid,
-            # Per-config tunable parameters only (what you'd tune via autotuning)
-            "BLOCK_M": 64,
-            "BLOCK_N": 64,
-            "BLOCK_K": 32,
-            "num_stages": 2,
-            "num_warps": 4,
-        }
-
-        # Setup lookup table
-        inductor_config.lookup_table.table = {lookup_key: [conv2d_config]}
-
-        def validate_conv_choice(choices):
-            assert len(choices) == 1, (
-                f"Expected 1 choice from lookup table, got {len(choices)}"
-            )
-            assert isinstance(choices[0], TritonTemplateCaller), (
-                f"Expected TritonTemplateCaller, got {type(choices[0])}"
-            )
-            assert "convolution2d" in choices[0].name, (
-                f"Expected 'convolution2d' in name, got {choices[0].name}"
-            )
-            return choices
-
-        add_preprocessing_fn(validate_conv_choice)
-
-        # Create and compile the model using the SAME weight tensor
-        class SimpleConv2d(nn.Module):
-            def __init__(self, weight):
-                super().__init__()
-                self.register_buffer("weight", weight)
-
-            def forward(self, x):
-                return torch.conv2d(
-                    x,
-                    self.weight,
-                    bias=None,
-                    stride=stride,
-                    padding=padding,
-                    dilation=dilation,
-                    groups=groups,
-                )
-
-        model = SimpleConv2d(weight).to(self.device)
-
-        with inductor_config.patch({"max_autotune": True, "max_autotune_gemm": True}):
-            compiled_model = torch.compile(model)
-            result = compiled_model(x)  # Use the SAME x tensor
-
-        # Output shape: [batch=2, out_channels=64, out_h=32, out_w=32]
-        # (same spatial dims due to padding=1, stride=1, kernel=3)
-        expected_shape = (2, 64, 32, 32)
-        self.assertEqual(
-            result.shape,
-            expected_shape,
-            f"Expected shape {expected_shape}, got {result.shape}",
-        )
-
-        self.assertFalse(
-            torch.isnan(result).any().item(),
-            "Output contains NaN values",
-        )
-
-        self.assertFalse(
-            torch.isinf(result).any().item(),
-            "Output contains Inf values",
-        )
 
 
 if __name__ == "__main__":

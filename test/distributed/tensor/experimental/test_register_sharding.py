@@ -116,6 +116,34 @@ class TestRegisterSharding(DTensorTestBase):
         self.assertTrue(dist_y.placements[0].is_shard(dim=0))
         self.assertEqual(dist_y.full_tensor(), local_y)
 
+    @with_comms
+    def test_register_sharding_for_tensor_kwargs(self):
+        mesh = self.build_device_mesh()
+        x = torch.randn(4, 4, device=self.device_type)
+        x_dt = distribute_tensor(x, mesh, [Replicate()])
+
+        @register_sharding(aten.min.dim_min)
+        def min_dim_strategy(x, dim, keepdim, min, min_indices):
+            all_replicate = (
+                [Replicate(), Replicate()],
+                [Replicate(), None, None, Replicate(), Replicate()],
+            )
+            return [all_replicate]
+
+        value = torch.randn(4, 1, device=self.device_type)
+        indices = torch.randn(4, 1, device=self.device_type).long()
+        value_dt = distribute_tensor(value, mesh, [Replicate()])
+        indices_dt = distribute_tensor(indices, mesh, [Replicate()])
+
+        result = torch.min(x_dt, dim=1, keepdim=True, out=(value_dt, indices_dt))
+
+        self.assertIsInstance(result[0], DTensor)
+        self.assertIsInstance(result[1], DTensor)
+
+        expected_values, expected_indices = torch.min(x, dim=1, keepdim=True)
+        self.assertEqual(result[0].full_tensor(), expected_values)
+        self.assertEqual(result[1].full_tensor(), expected_indices)
+
 
 if __name__ == "__main__":
     run_tests()

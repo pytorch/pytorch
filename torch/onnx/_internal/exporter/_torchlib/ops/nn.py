@@ -1,7 +1,7 @@
 """torch.ops.aten operators under the `core` module."""
 # mypy: disable-error-code="misc,arg-type,type-arg,valid-type,assignment,return-value,type-var,operator,no-untyped-def,index"
 # pyrefly: ignore-errors
-# ruff: noqa: TCH001,TCH002
+# ruff: noqa: TC001,TC002
 # flake8: noqa: B950
 
 from __future__ import annotations
@@ -15,7 +15,7 @@ from onnxscript.onnx_opset import (  # type: ignore[attr-defined]
 )
 
 import torch
-from torch.onnx._internal._lazy_import import onnxscript_ir as ir
+from torch.onnx._internal._lazy_import import onnx_ir as ir
 from torch.onnx._internal.exporter._torchlib._tensor_typing import TFloat, TReal
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
 
@@ -31,7 +31,7 @@ def aten_gelu_opset20(
     self: TReal,
     approximate: str = "none",
 ) -> TReal:
-    """gelu(Tensor self, *, bool approximate=False) -> Tensor"""
+    """gelu(Tensor self, *, str approximate="none") -> Tensor"""
     return op20.Gelu(self, approximate=approximate)
 
 
@@ -198,7 +198,7 @@ def _attention_repeat_kv_for_group_query(
     Returns:
         Tuple of (expanded_key, expanded_value) where:
             - expanded_key: Tensor of shape [B, q_num_heads, kv_S, E]
-            - expanded_value: Tensor of shape [B, q_num_heads, kv_S, E
+            - expanded_value: Tensor of shape [B, q_num_heads, kv_S, E]
     """
 
     assert (

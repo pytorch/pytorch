@@ -30,6 +30,7 @@ from torch._export.verifier import load_verifier
 from torch._subclasses.fake_tensor import FakeTensor, FakeTensorMode
 from torch.fx._symbolic_trace import _ConstantAttributeType
 from torch.fx.experimental import symbolic_shapes
+from torch.fx.traceback import NodeSource
 from torch.utils import _pytree as pytree
 from torch.utils._pytree import treespec_dumps, treespec_loads
 from torch.utils._sympy.numbers import int_oo
@@ -39,6 +40,7 @@ from torch.utils._traceback import CapturedTraceback
 from torch.utils._triton import has_triton
 
 from ..utils import remove_proxy_from_state_dict
+from . import schema
 from .schema import (  # type: ignore[attr-defined]
     Argument,
     ArgumentKind,
@@ -188,8 +190,6 @@ _SYM_OPS = {
     operator.gt,
     operator.neg,
     operator.pos,
-    operator.and_,
-    operator.or_,
     math.trunc,
     torch.sym_not,
     operator.mul,
@@ -206,6 +206,9 @@ _SYM_OPS = {
     torch.sym_sqrt,
     operator.truediv,
     operator.and_,
+    operator.or_,
+    operator.lshift,
+    operator.rshift,
 }
 
 
@@ -746,6 +749,7 @@ class GraphModuleSerializer(metaclass=Final):
         ):
             assert len(node.kwargs) == 0
             ex_node = Node(
+                name=node.name,
                 target=self.serialize_operator(node.target),
                 inputs=self.serialize_sym_op_inputs(node.target, node.args),
                 outputs=[self.serialize_output(node.name, meta_val)],
@@ -753,6 +757,7 @@ class GraphModuleSerializer(metaclass=Final):
             )
         elif isinstance(node.target, torch._ops.OpOverload):
             ex_node = Node(
+                name=node.name,
                 target=self.serialize_operator(node.target),
                 inputs=self.serialize_inputs(node.target, node.args, node.kwargs),
                 outputs=self.serialize_outputs(node),
@@ -805,6 +810,7 @@ class GraphModuleSerializer(metaclass=Final):
                     return [Argument.create(as_tensors=tensor_args)]
 
                 ex_node = Node(
+                    name=node.name,
                     target=self.serialize_operator(node.target),
                     inputs=self.serialize_hoo_inputs(serializable_args, node.kwargs),
                     outputs=serialize_tensor_list_output(node),
@@ -867,6 +873,7 @@ class GraphModuleSerializer(metaclass=Final):
                     kwargs_new["shared_memory_bytes"] = kernel_cache_metadata.shared
 
                 ex_node = Node(
+                    name=node.name,
                     target=self.serialize_operator(node.target),
                     inputs=self.serialize_hoo_inputs(args_new, kwargs_new),
                     outputs=self.serialize_hoo_outputs(node),
@@ -875,6 +882,7 @@ class GraphModuleSerializer(metaclass=Final):
                 )
             else:
                 ex_node = Node(
+                    name=node.name,
                     target=self.serialize_operator(node.target),
                     inputs=self.serialize_hoo_inputs(node.args, node.kwargs),
                     outputs=self.serialize_hoo_outputs(node),
@@ -893,6 +901,7 @@ class GraphModuleSerializer(metaclass=Final):
             assert isinstance(namespace, str) and isinstance(op_name, str)
             assert ":" not in namespace and ":" not in op_name
             ex_node = Node(
+                name=node.name,
                 target=f"#{namespace}:{op_name}",
                 inputs=self.serialize_inputs(node.target, node.args, node.kwargs),
                 outputs=self.serialize_outputs(node),
@@ -967,7 +976,27 @@ class GraphModuleSerializer(metaclass=Final):
                     f"Failed to serialize custom metadata for node {node.name} with error {e}"
                 ) from e
 
+        if "from_node" in node.meta:
+            from_node = node.meta["from_node"]
+            # Serialize from_node as JSON since it's a complex nested structure
+            ret["from_node"] = json.dumps(self._serialize_from_node(from_node))
+
         return ret
+
+    def _serialize_from_node(
+        self, from_node: Optional[list[NodeSource]]
+    ) -> Optional[list[dict[str, Any]]]:
+        """
+        Serialize from_node metadata from a list of NodeSource objects to a list of dictionaries.
+        """
+        if from_node is None:
+            return None
+
+        return [
+            node_source.to_dict()
+            for node_source in from_node
+            if isinstance(node_source, NodeSource)
+        ]
 
     def serialize_script_obj_meta(
         self, script_obj_meta: ep.CustomObjArgument
@@ -1195,6 +1224,13 @@ class GraphModuleSerializer(metaclass=Final):
             )
         elif arg is None:
             return Argument.create(as_none=True)
+        elif isinstance(arg, dict):
+            serialized_dict = {}
+            for key, value in arg.items():
+                if not isinstance(key, str):
+                    raise SerializeError(f"Dict keys must be strings, got {type(key)}")
+                serialized_dict[key] = self.serialize_input(value)
+            return Argument.create(as_string_to_argument=serialized_dict)
         elif isinstance(arg, (list, tuple)):
             if len(arg) == 0:
                 if arg_type is not None:
@@ -1326,6 +1362,11 @@ class GraphModuleSerializer(metaclass=Final):
                 return Argument.create(
                     as_optional_tensors=list(map(serialize_optional_tensor_args, arg))
                 )
+            elif all(
+                isinstance(a, tuple) and all(type(x) is int for x in a) for a in arg
+            ):
+                # list of int tuples
+                return Argument.create(as_int_lists=[list(t) for t in arg])
             else:
                 raise SerializeError(
                     f"Unsupported list/tuple argument type: {[type(a) for a in arg]}"
@@ -2290,7 +2331,12 @@ class GraphModuleDeserializer(metaclass=Final):
             or target
             == torch.ops.aten.item.default  # this can produce either SymInt or SymBool
         ):
-            name = serialized_node.outputs[0].value.as_name
+            # BC: use serialized_node.name if available, otherwise fallback to original logic
+            name = (
+                serialized_node.name
+                if serialized_node.name
+                else serialized_node.outputs[0].value.as_name
+            )
             args = self.deserialize_sym_op_inputs(serialized_node.inputs)
 
             fx_node = self.graph.create_node("call_function", target, args, {}, name)
@@ -2320,13 +2366,17 @@ class GraphModuleDeserializer(metaclass=Final):
             # For BC, getattr() will return True if `is_single_tensor_return` doesn't
             # exist. This is because prior to adding `is_single_tensor_return`,
             # only (1) could happen as we handle (2) with type `as_tensors`
-            name = (
-                serialized_node.outputs[0].as_tensor.name
-                if len(serialized_node.outputs) == 1
-                and hasattr(serialized_node.outputs[0], "as_tensor")
-                and getattr(serialized_node, "is_hop_single_tensor_return", True)
-                else None
-            )
+            # BC: use serialized_node.name if available, otherwise fallback to original logic
+            if serialized_node.name:
+                name = serialized_node.name
+            else:
+                name = (
+                    serialized_node.outputs[0].as_tensor.name
+                    if len(serialized_node.outputs) == 1
+                    and hasattr(serialized_node.outputs[0], "as_tensor")
+                    and getattr(serialized_node, "is_hop_single_tensor_return", True)
+                    else None
+                )
             fx_node = self.graph.create_node(
                 "call_function", target, args, kwargs, name
             )
@@ -2339,11 +2389,16 @@ class GraphModuleDeserializer(metaclass=Final):
             # For convenience: if this node returns a single tensor, name the
             # newly-created node after it. This ensures that these tensor values
             # have names that are consistent with serialized.
-            name = (
-                serialized_node.outputs[0].as_tensor.name
-                if _is_single_tensor_return(target)
-                else None  # FX will generate a name for us.
-            )
+            # BC: use serialized_node.name if available, otherwise fallback to original logic
+            if serialized_node.name:
+                name = serialized_node.name
+            else:
+                name = (
+                    serialized_node.outputs[0].as_tensor.name
+                    if _is_single_tensor_return(target)
+                    else None  # FX will generate a name for us.
+                )
+
             args, kwargs = self.deserialize_inputs(target, serialized_node)
             fx_node = self.graph.create_node(
                 "call_function", target, args, kwargs, name
@@ -2735,6 +2790,12 @@ class GraphModuleDeserializer(metaclass=Final):
             return self.deserialize_sym_argument(inp.as_sym_float)
         elif typ_ == "as_sym_bool":
             return self.deserialize_sym_argument(inp.as_sym_bool)
+        elif isinstance(value, dict):
+            if typ_ == "as_string_to_argument":
+                # Deserialize dict[str, Argument] recursively
+                return {k: self.deserialize_input(v) for k, v in value.items()}
+            else:
+                raise SerializeError(f"Unknown dict type: {typ_}")
         elif isinstance(value, list):
             if len(value) == 0:
                 return []
@@ -2744,6 +2805,9 @@ class GraphModuleDeserializer(metaclass=Final):
             elif typ_ in ("as_ints", "as_floats", "as_bools", "as_strings"):
                 # convert from serialized.python.types.List to python list
                 return list(value)
+            elif typ_ == "as_int_lists":
+                # Convert list of lists back to list of tuples for Triton grids
+                return [tuple(dims) for dims in value]
             elif typ_ in ("as_sym_ints", "as_sym_bools", "as_sym_floats"):
                 return [self.deserialize_sym_argument(arg) for arg in value]
             elif typ_ == "as_optional_tensors":
@@ -3040,7 +3104,27 @@ class GraphModuleDeserializer(metaclass=Final):
         if custom_str := metadata.get("custom"):
             ret["custom"] = json.loads(custom_str)
 
+        if from_node_str := metadata.get("from_node"):
+            ret["from_node"] = self._deserialize_from_node(json.loads(from_node_str))
+
         return ret
+
+    def _deserialize_from_node(
+        self, from_node_data: Optional[list[dict[str, Any]]]
+    ) -> Optional[list[NodeSource]]:
+        """
+        Deserialize from_node metadata from JSON data.
+        """
+        if from_node_data is None:
+            return None
+
+        assert isinstance(from_node_data, list)
+
+        return [
+            node_source
+            for fn_dict in from_node_data
+            if (node_source := NodeSource._from_dict(fn_dict)) is not None
+        ]
 
     def deserialize_argument_spec(self, x: Argument) -> ep.ArgumentSpec:
         log.debug("[deserialize_argument_spec] %s", x)
@@ -3239,7 +3323,18 @@ def serialize(
     return artifact
 
 
+def _resolve_schema_cls(cls):
+    if isinstance(cls, str):
+        resolved = getattr(schema, cls, None)
+        if resolved is not None:
+            return resolved
+    if isinstance(cls, typing.ForwardRef):
+        return _resolve_schema_cls(cls.__forward_arg__)
+    return cls
+
+
 def _dict_to_dataclass(cls, data):
+    cls = _resolve_schema_cls(cls)
     assert not isinstance(cls, str), f"Unresolved class type: '{cls}'."
     if typing.get_origin(cls) is Annotated:
         return _dict_to_dataclass(cls.__origin__, data)
@@ -3255,12 +3350,13 @@ def _dict_to_dataclass(cls, data):
         _type = next(iter(data.keys()))
         _value = next(iter(data.values()))
         assert isinstance(_type, str)
-        field_type = cls.__annotations__[_type]
+        type_hints = typing.get_type_hints(cls, globalns=vars(schema))
+        field_type = type_hints[_type]
         # pyrefly: ignore [missing-attribute]
         return cls.create(**{_type: _dict_to_dataclass(field_type, _value)})
     elif dataclasses.is_dataclass(cls):
         fields = {}
-        type_hints = typing.get_type_hints(cls)
+        type_hints = typing.get_type_hints(cls, globalns=vars(schema))
         # For forward compatibility consideration, we ignore all the keys
         # that are not showing up in the dataclass definition.
         for f in dataclasses.fields(cls):
@@ -3364,6 +3460,10 @@ def _canonicalize_graph(
         elif a.type == "as_custom_obj":
             return a.as_custom_obj
         elif a.type == "as_operator":
+            return None
+        elif a.type == "as_int_lists":
+            return None
+        elif a.type == "as_string_to_argument":
             return None
         else:
             raise AssertionError(f"Unknown input type to the ExportedProgram: {a}")
@@ -3636,7 +3736,7 @@ def canonicalize(
         ExportedProgram: The canonicalized exported program.
     """
     ep = copy.deepcopy(ep)
-    # pyrefly: ignore [annotation-mismatch]
+    # pyrefly: ignore [annotation-mismatch, redefinition]
     constants: set[str] = constants or set()
 
     opset_version = dict(sorted(ep.opset_version.items(), key=operator.itemgetter(0)))

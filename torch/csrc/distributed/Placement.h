@@ -38,9 +38,12 @@ class Placement {
 class Shard : public Placement {
  public:
   std::int64_t dim;
-  explicit Shard(std::int64_t dim_) : dim(dim_) {}
+  explicit Shard(std::int64_t dim) : dim(dim) {}
 
   bool is_shard(std::optional<std::int64_t> dim_) const override {
+    if (typeid(*this) != typeid(Shard)) {
+      return false;
+    }
     return !dim_.has_value() || *dim_ == dim;
   }
 
@@ -53,27 +56,18 @@ class Shard : public Placement {
   }
 };
 
-class StridedShard : public Shard {
+class StridedShard : public Placement {
  public:
+  std::int64_t dim;
   std::int64_t split_factor;
   explicit StridedShard(std::int64_t dim, std::int64_t split_factor_)
-      : Shard(dim), split_factor(split_factor_) {}
+      : dim(dim), split_factor(split_factor_) {}
 
   bool operator==(const StridedShard& rhs) const {
     return dim == rhs.dim && split_factor == rhs.split_factor;
   }
 
-  bool operator==(const Shard& rhs) const {
-    if (auto* rhs_strided = dynamic_cast<const StridedShard*>(&rhs)) {
-      return operator==(*rhs_strided);
-    }
-    // TODO: this is to avoid extra all-gather in dtensor op dispatch
-    // note that sharding prop would not produce _StridedShard and a
-    // placement inequality would introduce an all-gather for resharding
-    return dim == rhs.dim;
-  }
-
-  bool operator!=(const Shard& rhs) const {
+  bool operator!=(const StridedShard& rhs) const {
     return !operator==(rhs);
   }
 };

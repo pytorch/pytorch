@@ -9,16 +9,7 @@ import warnings
 from bisect import bisect_right
 from collections import Counter
 from functools import partial, wraps
-from typing import (
-    Any,
-    cast,
-    Literal,
-    Optional,
-    SupportsFloat,
-    TYPE_CHECKING,
-    TypedDict,
-    Union,
-)
+from typing import Any, cast, Literal, SupportsFloat, TYPE_CHECKING, TypedDict
 from typing_extensions import override, Self
 from weakref import ref
 
@@ -244,7 +235,7 @@ class LRScheduler:
         """
         raise NotImplementedError
 
-    def step(self, epoch: Optional[int] = None) -> None:
+    def step(self, epoch: int | None = None) -> None:
         """Step the scheduler.
 
         Args:
@@ -290,7 +281,7 @@ class LRScheduler:
             warnings.warn(EPOCH_DEPRECATION_WARNING, UserWarning, stacklevel=2)
         self._update_lr(epoch)
 
-    def _update_lr(self, epoch: Optional[int] = None) -> None:
+    def _update_lr(self, epoch: int | None = None) -> None:
         with _enable_get_lr_call(self):
             if epoch is None:
                 self.last_epoch += 1
@@ -298,9 +289,7 @@ class LRScheduler:
             else:
                 self.last_epoch = epoch
                 if hasattr(self, "_get_closed_form_lr"):
-                    values = cast(
-                        list[Union[float, Tensor]], self._get_closed_form_lr()
-                    )
+                    values = cast(list[float | Tensor], self._get_closed_form_lr())
                 else:
                     values = self.get_lr()
 
@@ -389,7 +378,7 @@ class LambdaLR(LRScheduler):
     def __init__(
         self,
         optimizer: Optimizer,
-        lr_lambda: Union[Callable[[int], float], list[Callable[[int], float]]],
+        lr_lambda: Callable[[int], float] | list[Callable[[int], float]],
         last_epoch: int = -1,
     ) -> None:  # noqa: D107
         self.optimizer = optimizer
@@ -505,7 +494,7 @@ class MultiplicativeLR(LRScheduler):
     def __init__(
         self,
         optimizer: Optimizer,
-        lr_lambda: Union[Callable[[int], float], list[Callable[[int], float]]],
+        lr_lambda: Callable[[int], float] | list[Callable[[int], float]],
         last_epoch: int = -1,
     ) -> None:  # noqa: D107
         self.optimizer = optimizer
@@ -1519,7 +1508,7 @@ class ChainedScheduler(LRScheduler):
     """
 
     def __init__(
-        self, schedulers: Sequence[LRScheduler], optimizer: Optional[Optimizer] = None
+        self, schedulers: Sequence[LRScheduler], optimizer: Optimizer | None = None
     ) -> None:  # noqa: D107
         if len(schedulers) < 1:
             raise ValueError(
@@ -1659,7 +1648,7 @@ class ReduceLROnPlateau(LRScheduler):
         threshold: float = 1e-4,
         threshold_mode: Literal["rel", "abs"] = "rel",
         cooldown: int = 0,
-        min_lr: Union[list[float], float] = 0,
+        min_lr: list[float] | float = 0,
         eps: float = 1e-8,
     ) -> None:  # noqa: D107
         if factor >= 1.0:
@@ -1894,13 +1883,13 @@ class CyclicLR(LRScheduler):
     def __init__(
         self,
         optimizer: Optimizer,
-        base_lr: Union[float, list[float]],
-        max_lr: Union[float, list[float]],
+        base_lr: float | list[float],
+        max_lr: float | list[float],
         step_size_up: int = 2000,
-        step_size_down: Optional[int] = None,
+        step_size_down: int | None = None,
         mode: Literal["triangular", "triangular2", "exp_range"] = "triangular",
         gamma: float = 1.0,
-        scale_fn: Optional[Callable[[float], float]] = None,
+        scale_fn: Callable[[float], float] | None = None,
         scale_mode: Literal["cycle", "iterations"] = "cycle",
         cycle_momentum: bool = True,
         base_momentum: float = 0.8,
@@ -2396,15 +2385,15 @@ class OneCycleLR(LRScheduler):
     def __init__(
         self,
         optimizer: Optimizer,
-        max_lr: Union[float, list[float]],
-        total_steps: Optional[int] = None,
-        epochs: Optional[int] = None,
-        steps_per_epoch: Optional[int] = None,
+        max_lr: float | list[float],
+        total_steps: int | None = None,
+        epochs: int | None = None,
+        steps_per_epoch: int | None = None,
         pct_start: float = 0.3,
         anneal_strategy: Literal["cos", "linear"] = "cos",
         cycle_momentum: bool = True,
-        base_momentum: Union[float, list[float]] = 0.85,
-        max_momentum: Union[float, list[float]] = 0.95,
+        base_momentum: float | list[float] = 0.85,
+        max_momentum: float | list[float] = 0.95,
         div_factor: float = 25.0,
         final_div_factor: float = 1e4,
         three_phase: bool = False,

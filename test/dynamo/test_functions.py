@@ -153,7 +153,7 @@ def inline_script_if_tracing_fn_with_default_args(x, y, c=1.2):
     return torch.cos(x * y) + c
 
 
-class FunctionTests(torch._dynamo.test_case.TestCase):
+class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     @make_test
     def test_inline_jit_annotations(x):
         x = inline_script_if_tracing(x)
@@ -994,6 +994,26 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
         y += float("1.2")
         return torch.add(x, y)
 
+    def test_float_or_complex_from_number(self):
+        @make_test
+        def _float_from_number_impl(x):
+            y = float.from_number(10)
+            return torch.add(x, y)
+
+        @make_test
+        def _complex_from_number_impl(x):
+            y = complex.from_number(10)
+            return torch.add(x, y)
+
+        if sys.version_info < (3, 14):
+            with self.assertRaises(AttributeError):
+                _float_from_number_impl(self)
+            with self.assertRaises(AttributeError):
+                _complex_from_number_impl(self)
+        else:
+            _float_from_number_impl(self)
+            _complex_from_number_impl(self)
+
     @make_test
     def test_is_floating_point(x):
         y = x + 1
@@ -1276,12 +1296,10 @@ class FunctionTests(torch._dynamo.test_case.TestCase):
             results.append(x.sin())
         else:
             results.append(x.cos())
-        # TODO: add sourceless builder for types.UnionType
-        # if sys.version_info >= (3, 10):
-        #     if isinstance([x], list | tuple):
-        #         results.append(x.sin())
-        #     else:
-        #         results.append(x.cos())
+        if isinstance([x], list | tuple):
+            results.append(x.sin())
+        else:
+            results.append(x.cos())
         return results
 
     @make_test
@@ -3634,7 +3652,7 @@ class GraphModule(torch.nn.Module):
 
             self.assertEqual(
                 range[index],
-                range_variable.apply_index(index).as_python_constant(),
+                range_variable.apply_index(None, index).as_python_constant(),
             )
 
             if expected is not None:
@@ -4172,6 +4190,37 @@ class GraphModule(torch.nn.Module):
         finally:
             torch = old_torch
 
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
+    def test_wrap_triton_handled_during_tracing(self):
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def sin_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: "tl.constexpr"):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            tl.store(y_ptr + offsets, tl.sin(x), mask=mask)
+
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            wrapped = torch.library.wrap_triton(sin_kernel)
+            wrapped[grid](x, out, n_elements, BLOCK_SIZE=128)
+
+            return out
+
+        compiled = torch.compile(fn, fullgraph=True, backend="eager")
+
+        x = torch.randn(1024, device=device_type)
+        result = compiled(x)
+
+        self.assertEqual(result, torch.sin(x))
+
 
 def udf_mul(x, y):
     return x * y
@@ -4221,7 +4270,7 @@ class WrapperModule(torch.nn.Module):
         return self.m()
 
 
-class DefaultsTests(torch._dynamo.test_case.TestCase):
+class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     def test_func_default_tensor_args(self):
         """
         Tests that we indeed reference (and mutate) "the one" default tensor arg
@@ -4749,7 +4798,7 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
             x = x.clone()
             for y, z in zip(ys, zs, strict=True):
                 x += y * z
-            return x
+            return x, zip(ys, zs)
 
         opt_fn = torch.compile(fn, backend="eager")
         nopython_fn = torch.compile(fn, backend="eager", fullgraph=True)
@@ -4758,7 +4807,11 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
         ys = [1.0, 2.0, 3.0]
         zs = [2.0, 5.0, 8.0]
 
-        self.assertEqual(opt_fn(x, ys, zs), fn(x, ys, zs))
+        ref = fn(x, ys, zs)
+        res = opt_fn(x, ys, zs)
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(list(ref[1]), list(res[1]))
+        self.assertIsInstance(res[1], zip)
 
         # If nopython, should raise UserError
         with self.assertRaisesRegex(torch._dynamo.exc.UserError, "zip()"):
@@ -4773,6 +4826,76 @@ class DefaultsTests(torch._dynamo.test_case.TestCase):
 
         with self.assertRaisesRegex(ValueError, "zip()"):
             opt_fn(x, ys, zs[:1])
+
+    def test_map_strict(self):
+        def fn(x, ys, zs):
+            x = x.clone()
+            for y, z in map(lambda a, b: (a, b), ys, zs, strict=True):
+                x += y * z
+            return x, map(lambda a, b: a + b, ys, zs, strict=True)
+
+        opt_fn = torch.compile(fn, backend="eager")
+        nopython_fn = torch.compile(fn, backend="eager", fullgraph=True)
+
+        x = torch.ones(3)
+        ys = [1.0, 2.0, 3.0]
+        zs = [2.0, 5.0, 8.0]
+
+        if sys.version_info < (3, 14):
+            with self.assertRaises(TypeError):
+                opt_fn(x, ys, zs)
+            with self.assertRaises(TypeError):
+                nopython_fn(x, ys, zs)
+            return
+
+        ref = fn(x, ys, zs)
+        res = opt_fn(x, ys, zs)
+        self.assertEqual(ref[0], res[0])
+        self.assertEqual(list(ref[1]), list(res[1]))
+        self.assertIsInstance(res[1], map)
+
+        # If nopython, should raise UserError
+        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "map()"):
+            nopython_fn(x, ys[:1], zs)
+
+        with self.assertRaisesRegex(torch._dynamo.exc.UserError, "map()"):
+            nopython_fn(x, ys, zs[:1])
+
+        # Should cause fallback if allow graph break
+        with self.assertRaisesRegex(ValueError, "map()"):
+            opt_fn(x, ys[:1], zs)
+
+        with self.assertRaisesRegex(ValueError, "map()"):
+            opt_fn(x, ys, zs[:1])
+
+        # Check strict is set by testing a map returned from dynamo
+        opt_map_fn = torch.compile(
+            lambda ys, zs: map(lambda a, b: a + b, ys, zs, strict=True), backend="eager"
+        )
+        strict_map_from_dynamo = opt_map_fn(ys[:1], zs)
+        with self.assertRaises(ValueError):
+            list(strict_map_from_dynamo)
+
+    @unittest.skipIf(sys.version_info < (3, 14), "strict requires Python 3.14+")
+    def test_map_strict_with_graph_break(self):
+        def f(a):
+            a += 1
+
+            def g(x, y):
+                nonlocal a
+                a += 1
+                return x + y
+
+            m = map(g, [1, 2, 3, 4, 5], [1, 2, 3, 4, 5], strict=True)
+            a += next(m)  # won't graph break
+            torch._dynamo.graph_break()
+            a += next(m)  # will graph break
+            return a
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_f = torch.compile(f, backend=cnts)
+        self.assertEqual(f(torch.ones(3, 3)), opt_f(torch.ones(3, 3)))
+        self.assertEqual(cnts.frame_count, 3)
 
     @unittest.skipIf(not TEST_MULTIGPU, "detected only one GPU")
     def test_gpu_current_device(self):

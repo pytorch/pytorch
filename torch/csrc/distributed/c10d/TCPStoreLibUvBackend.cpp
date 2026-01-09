@@ -683,6 +683,7 @@ class LibUVStoreDaemon : public BackgroundThread {
       const std::string& queueName,
       const c10::intrusive_ptr<UvHandle>& client);
   int64_t queueLen(const std::string& queueName);
+  std::vector<std::string> listKeys();
 
   void registerClient(const c10::intrusive_ptr<UvHandle>& client);
   void unregisterClient(const c10::intrusive_ptr<UvHandle>& client);
@@ -820,6 +821,10 @@ class UvClient : public UvTcpSocket {
             break;
           case QueryType::QUEUE_LEN:
             if (!parse_queue_len_command())
+              return;
+            break;
+          case QueryType::LIST_KEYS:
+            if (!parse_list_keys_command())
               return;
             break;
           default:
@@ -1160,6 +1165,19 @@ class UvClient : public UvTcpSocket {
 
     StreamWriter sw(iptr());
     sw.write_value<int64_t>(store->queueLen(key));
+    sw.send();
+    return true;
+  }
+
+  bool parse_list_keys_command() {
+    C10D_TRACE("list_keys address:{}", this->address());
+
+    auto keys = store->listKeys();
+    StreamWriter sw(iptr());
+    sw.write_value<int64_t>(static_cast<int64_t>(keys.size()));
+    for (const auto& key : keys) {
+      sw.write_string(key);
+    }
     sw.send();
     return true;
   }
@@ -1542,6 +1560,16 @@ int64_t LibUVStoreDaemon::queueLen(const std::string& key) {
   }
   return static_cast<int64_t>(it->second.size());
 }
+
+std::vector<std::string> LibUVStoreDaemon::listKeys() {
+  std::vector<std::string> keys;
+  keys.reserve(tcpStore_.size());
+  for (const auto& kv : tcpStore_) {
+    keys.push_back(kv.first);
+  }
+  return keys;
+}
+
 #endif
 
 std::unique_ptr<BackgroundThread> create_libuv_tcpstore_backend(

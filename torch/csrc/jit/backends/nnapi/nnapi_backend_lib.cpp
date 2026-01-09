@@ -2,7 +2,6 @@
 
 #include <ATen/nnapi/nnapi_bind.h>
 #include <torch/csrc/jit/backends/backend.h>
-#include <torch/csrc/jit/backends/backend_exception.h>
 #include <torch/csrc/jit/mobile/import.h>
 #include <torch/csrc/jit/mobile/module.h>
 

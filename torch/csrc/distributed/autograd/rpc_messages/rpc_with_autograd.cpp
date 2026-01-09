@@ -2,7 +2,6 @@
 #include <torch/csrc/distributed/rpc/rpc_agent.h>
 #include <torch/csrc/distributed/rpc/utils.h>
 #include <torch/csrc/jit/serialization/pickle.h>
-#include <torch/csrc/utils/byte_order.h>
 
 namespace torch::distributed::autograd {
 

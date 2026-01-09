@@ -3,14 +3,17 @@ import contextlib
 import logging
 import warnings
 from collections.abc import Sequence
-from typing import cast, Optional
+from typing import cast
 
 import torch
 import torch.distributed as dist
 import torch.distributed.tensor._api as dtensor
 import torch.distributed.tensor._random as random
 from torch._library.utils import fill_defaults
+from torch._logging import LazyString
+from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor._argmin_argmax import argmin_argmax_handler
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpInfo,
@@ -26,6 +29,7 @@ from torch.distributed.tensor._tp_conv import (
     convolution_handler,
 )
 from torch.distributed.tensor._utils import (
+    _format_implicit_redistribution_msg,
     ExplicitRedistributionContext,
     try_find_mesh_from_args,
 )
@@ -152,6 +156,8 @@ class OpDispatcher:
             aten.convolution_backward.default: convolution_backward_handler,
             aten._amp_foreach_non_finite_check_and_unscale_.default: found_inf_reduce_handler,
             aten.as_strided.default: as_strided_handler,
+            aten.argmin.default: argmin_argmax_handler,
+            aten.argmax.default: argmin_argmax_handler,
         }
 
     # ********************************************************************************************
@@ -177,17 +183,46 @@ class OpDispatcher:
     def _allow_implicit_replication(self, value: bool) -> None:
         return torch._C._set_dtensor_allow_implicit_replication(value)
 
-    def _propagate_op_sharding_non_cached_dispatch_slow_path(
+    def _propagate_op_sharding_dispatch_slow_path(
         self,
         op_call: torch._ops.OpOverload,
         args: tuple[object, ...],
         kwargs: dict[str, object],
         op_info: OpInfo,
+        # The logic here is a bit messy.  There are several reasons why the
+        # C++ fastpath may have bailed out.  If we just cache missed, we will
+        # come here because we need to actually calculate the real thing.
+        # There's no need to have a SECOND Python cache lookup; the C++ native
+        # cache completely subsumes it.  But sometimes, we will have failed
+        # to compute the cache key in C++ entirely.  In this case, we DO need
+        # to do a cache lookup in Python, as the missing cache key in C++
+        # means we don't have access to it all.  Furthermore, without duping
+        # this function, we need to do the try_cache test inside of the
+        # try-except block so that either case hits the inference mode /
+        # exception rewrapping case.
+        #
+        # This should be cleaned up.  First, ensuring the C++ codepath can
+        # always compute a key will be a big help.  Second, we should properly
+        # fastpath inference mode composite implicit autograd so that you
+        # don't have to throw an exception even in "fastpath".
+        try_cache: bool,
     ) -> object:
+        # NOTE: schema should always be populated when calling this function,
+        # as it's only called from C++ after unwrap_to_op_info (create_schema=True).
+        # See dispatchDTensorOp in python_variable.cpp line 1453-1460.
+        assert op_info.schema is not None, (
+            "op_info.schema should not be None in sharding propagation. "
+            "This function should only be called after unwrap_to_op_info."
+        )
         try:
-            return self.sharding_propagator.propagate_op_sharding_non_cached(
-                op_info.schema
-            )
+            # We have basically inlined propagate() here, but WITHOUT the
+            # output_sharding assignment
+            if try_cache and not _are_we_tracing():
+                return self.sharding_propagator.propagate_op_sharding(op_info.schema)
+            else:
+                return self.sharding_propagator.propagate_op_sharding_non_cached(
+                    op_info.schema
+                )
         except NotImplementedError:
             if torch._C._dispatch_has_kernel_for_dispatch_key(
                 op_call.name(), torch._C.DispatchKey.CompositeImplicitAutograd
@@ -201,7 +236,7 @@ class OpDispatcher:
                 raise
         except Exception as e:
             raise RuntimeError(
-                f"{e}\n\nSharding propagation failed for {op_info.schema}"
+                f"{e}\n\nSharding propagation failed for {op_info.schema or op_call}"
             ) from e
 
     def _dispatch_get_local_results_slow_path(
@@ -212,9 +247,10 @@ class OpDispatcher:
     ) -> object:
         output_sharding = op_info.output_sharding
         assert output_sharding is not None, "output sharding should not be None"
+        assert op_info is not None, "op_info should never be None"
 
         mesh = op_info.compute_mesh
-        participating = mesh.get_coordinate() is not None
+        participating = mesh._is_current_rank_part_of_mesh()
         local_results = None
         if participating:
             # computation that happens in the current rank of the mesh, normal case
@@ -436,14 +472,16 @@ class OpDispatcher:
                         if debug_mode is not None
                         else contextlib.nullcontext()
                     )
-                    if not ExplicitRedistributionContext.is_redistribute_allowed(
+
+                    ExplicitRedistributionContext.observe_redistribution(
                         arg_spec,
                         # pyrefly: ignore [bad-argument-type]
                         reshard_arg_spec,
-                    ):
-                        raise RuntimeError(
-                            f"Implicit redistribution occurred for {op_info.schema} while ExplicitRedistributionContext was active"
-                        )
+                        LazyString(
+                            _format_implicit_redistribution_msg,
+                            op_info.schema or suggested_input_schema.op,
+                        ),
+                    )
                     with redistribute_context:
                         resharded_local_tensor = redistribute_local_tensor(
                             local_tensor,
@@ -495,7 +533,7 @@ class OpDispatcher:
         kwargs_schema: dict[str, object] = {}
         local_args: list[object] = []
         local_kwargs: dict[str, object] = {}
-        compute_mesh: Optional[DeviceMesh] = None
+        compute_mesh: DeviceMesh | None = None
 
         for arg in args_list:
             if isinstance(arg, dtensor.DTensor):
@@ -530,7 +568,6 @@ class OpDispatcher:
                 kwargs_schema[k] = self._try_replicate_spec_for_scalar_tensor(
                     op_call,
                     v,
-                    # pyrefly: ignore [bad-argument-type]
                     compute_mesh,
                 )
                 local_kwargs[k] = v
@@ -583,6 +620,7 @@ class OpDispatcher:
             )
             res_list = []
             for e, s in zip(res, spec):
+                # pyrefly: ignore [bad-argument-type]
                 res_list.append(OpDispatcher.wrap(e, s))
 
             return tuple(res_list) if isinstance(res, tuple) else res_list

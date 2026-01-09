@@ -800,6 +800,23 @@ class DistMathOpsTest(DTensorTestBase):
             )
 
     @with_comms
+    def test_foreach_compose(self):
+        """Test composing multiple foreach operations."""
+        device_mesh = self.build_device_mesh()
+        local_shards = tuple(torch.randn(4, 8) for _ in range(3))
+        dt_inputs = tuple(
+            distribute_tensor(shard, device_mesh, [Shard(0)]) for shard in local_shards
+        )
+        dt_abs = torch._foreach_abs(dt_inputs)
+        dt_max = torch._foreach_max(dt_abs)
+
+        abs = torch._foreach_abs(local_shards)
+        expected_max = torch._foreach_max(abs)
+
+        for max_val, expected in zip(dt_max, expected_max):
+            self.assertEqual(max_val.full_tensor(), expected)
+
+    @with_comms
     def test_linalg_eigh(self):
         A = torch.randn(2, 2, dtype=torch.float64)
         mesh = self.build_device_mesh()
@@ -1037,6 +1054,7 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertTrue(out_with_redistribute.placements[0].is_replicate())
         self.assertEqual(out_without_redistribute, out_with_redistribute)
 
+    @skip_if_lt_x_gpu(4)
     @with_comms
     def test_std(self):
         mesh = DeviceMesh(self.device_type, torch.arange(4).reshape(2, 2))

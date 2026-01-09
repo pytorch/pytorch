@@ -523,7 +523,7 @@ class TestFuseFx(QuantizationTestCase):
     @skipIfNoONEDNN
     def test_fuse_conv_bn_add_relu_lowering(self):
         """ Test fusion and lowering of Conv2d - (bn -) ReLU
-            by FX. For onednn backedn only.
+            by FX. For onednn backend only.
         """
         from torch.ao.quantization.backend_config import get_onednn_backend_config
         qconfig_mapping = get_default_qconfig_mapping('onednn')
@@ -5693,12 +5693,12 @@ class TestQuantizeFx(QuantizationTestCase):
         self.assertTrue(
             type(mod_prep.untraceable_module_class.linear)
             is not torch.ao.nn.qat.modules.linear.Linear,
-            "prepare_qat_fx shold not convert anything inside untraced module classes",
+            "prepare_qat_fx should not convert anything inside untraced module classes",
         )
         self.assertTrue(
             type(mod_prep.untraceable_module_name.linear)
             is not torch.ao.nn.qat.modules.linear.Linear,
-            "prepare_qat_fx shold not convert anything inside modules named in untraced_module_names",
+            "prepare_qat_fx should not convert anything inside modules named in untraced_module_names",
         )
 
     def test_qconfig_dict_setup(self):
@@ -6315,7 +6315,7 @@ class TestQuantizeFx(QuantizationTestCase):
     @skipIfNoONEDNN
     def test_linear_leaky_relu_lowering(self):
         """ Test fusion and lowering of Linear - (bn -) LeakyReLU
-            by FX. For onednn backedn only.
+            by FX. For onednn backend only.
         """
         from torch.ao.quantization.backend_config import get_onednn_backend_config
         qconfig_mapping = get_default_qconfig_mapping('onednn')
@@ -6334,7 +6334,7 @@ class TestQuantizeFx(QuantizationTestCase):
     @skipIfNoONEDNN
     def test_linear_tanh_lowering(self):
         """ Test fusion and lowering of Linear - Tanh
-            by FX. For onednn backedn only.
+            by FX. For onednn backend only.
         """
         from torch.ao.quantization.backend_config import get_onednn_backend_config
         qconfig_mapping = get_default_qconfig_mapping('onednn')
@@ -9646,6 +9646,11 @@ class TestQuantizeFxModels(QuantizationTestCase):
     @override_qengines
     def test_qat_embeddingbag_linear(self):
         for device in get_supported_device_types():
+            # Quantization backends (qnnpack, fbgemm, onednn) only support CPU tensors
+            # Skip other device for quantization tests (e.g. CUDA)
+            if device != 'cpu':
+                continue
+
             class EmbeddingBagLinear(torch.nn.Module):
                 def __init__(self) -> None:
                     super().__init__()

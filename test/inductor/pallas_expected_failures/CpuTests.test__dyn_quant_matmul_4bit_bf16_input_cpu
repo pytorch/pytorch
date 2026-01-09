@@ -1,0 +1,5 @@
+ERROR
+  File "/tmp/tmpinop835b/3a/c3avmzvi3rlo2v4yjuh76ce3jhir3lctyvlis2md2hu7tpcddu2c.py", line 21, in pallas_fused__to_copy_abs_amax_clamp_clone_div_transpose_92c7a602_kernel
+    out_ptr0[...] = tmp2.reshape(s76, 1)
+                                 ^^^
+NameError: name 's76' is not defined

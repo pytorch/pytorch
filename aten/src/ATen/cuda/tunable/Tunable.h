@@ -245,7 +245,7 @@ class TORCH_CUDA_CPP_API TuningContext {
     size_t results_count_from_input_file_;
     bool is_shutting_down_;
 
-    NumericalCheckConfig numerics_cfg_{};
+    NumericalCheckConfig numerics_cfg_;
 };
 
 TORCH_CUDA_CPP_API TuningContext* getTuningContext();

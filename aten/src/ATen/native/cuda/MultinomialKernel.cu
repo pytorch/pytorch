@@ -309,7 +309,7 @@ __global__ void sampleMultinomialOnce(
       } else {
         // This should address a rare bug where we don't select a valid index. This likely occurs when
         // due to floating point arithmetic rounding errors, our cumulative sum does not add up to 1, but
-        // and our uniform sample is greater than this value. In this case we likely have unitialized memory
+        // and our uniform sample is greater than this value. In this case we likely have uninitialized memory
         // in dest[curDist]. So basically we will loop through the distribution and pick the largest index
         // where the distribution is non-zero. This is obviously terribly inefficient, but due to the
         // rarity in which this occurs, this should not be an issue.

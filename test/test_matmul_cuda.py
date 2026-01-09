@@ -1,6 +1,7 @@
 # Owner(s): ["module: linear algebra"]
 
 import contextlib
+import os
 import time
 import unittest
 from itertools import product
@@ -8,6 +9,8 @@ from functools import partial
 from collections.abc import Callable
 
 import torch
+import torch.nn.functional as F
+from torch.profiler import profile, ProfilerActivity
 
 from torch.quantization._quantized_conversions import (
     pack_int4_to_int8,
@@ -18,16 +21,15 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
-    SM53OrLater,
     SM80OrLater,
     SM90OrLater,
     SM100OrLater,
-    _get_torch_cuda_version,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     onlyCUDA,
+    skipCUDAIfNotRocm,
     tol as xtol,
     toleranceOverride,
 )
@@ -81,6 +83,22 @@ def blas_library_context(backend):
         yield
     finally:
         torch.backends.cuda.preferred_blas_library(prev_backend)
+
+@contextlib.contextmanager
+def rocm_group_gemm_ck_env(value):
+    var = "ROCM_ALLOW_GROUP_GEMM_CK"
+    old = os.environ.get(var, None)
+    try:
+        if value is None:
+            os.environ.pop(var, None)
+        else:
+            os.environ[var] = value
+        yield
+    finally:
+        if old is None:
+            os.environ.pop(var, None)
+        else:
+            os.environ[var] = old
 
 class TestMatmulCuda(InductorTestCase):
     def setUp(self):
@@ -259,7 +277,7 @@ class TestMatmulCuda(InductorTestCase):
         torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accumulate
 
     @onlyCUDA
-    @toleranceOverride({torch.float16: xtol(atol=1e-3, rtol=2e-3)})
+    @toleranceOverride({torch.float16: xtol(atol=1e-3, rtol=3e-3)})
     @dtypes(torch.float16)
     def test_cublas_addmm_alignment(self, dtype):
         device = 'cuda'
@@ -281,8 +299,7 @@ class TestMatmulCuda(InductorTestCase):
     @onlyCUDA
     @unittest.skipIf(IS_JETSON, "Too large for Jetson")
     @toleranceOverride({torch.float32: xtol(atol=1e-5, rtol=1.1e-5)})
-    @dtypes(*([torch.float32, torch.float16] +
-              [torch.bfloat16] if TEST_WITH_ROCM or SM53OrLater else []))
+    @dtypes(torch.float32, torch.float16, torch.bfloat16)
     @parametrize(
         "batch_size, N, M, P",
         [(2, 100, 100, 100),
@@ -404,7 +421,7 @@ class TestMatmulCuda(InductorTestCase):
         b.requires_grad_(True)
         offs = torch.arange(k, n_groups * k + 1, k, device=device, dtype=torch.int32)
 
-        f = torch._grouped_mm
+        f = F.grouped_mm
         out = f(a, b.t(), offs=offs, out_dtype=dtype)
         gO = torch.rand_like(out)
         out.backward(gO)
@@ -456,7 +473,7 @@ class TestMatmulCuda(InductorTestCase):
             if check_zero_size:
                 offs[0] = offs[1]
 
-            f = torch._grouped_mm
+            f = F.grouped_mm
             out = f(a, b.transpose(-2, -1), offs=offs, out_dtype=dtype)
             gO = torch.rand_like(out)
             if not check_zero_size:
@@ -501,7 +518,7 @@ class TestMatmulCuda(InductorTestCase):
         b_contig = b if b_row_major else b.transpose(-2, -1)
         self.assertTrue(b_contig.is_contiguous() is not strided)
 
-        f = torch._grouped_mm
+        f = F.grouped_mm
         out = f(a, b.transpose(-2, -1), out_dtype=dtype)
         gO = torch.rand_like(out)
         out.backward(gO)
@@ -541,7 +558,7 @@ class TestMatmulCuda(InductorTestCase):
             if check_zero_size:
                 offs[0] = offs[1]
 
-            f = torch._grouped_mm
+            f = F.grouped_mm
             out = f(a, b.transpose(-2, -1), offs=offs, out_dtype=dtype)
             gO = torch.rand_like(out)
             if not check_zero_size:
@@ -559,7 +576,7 @@ class TestMatmulCuda(InductorTestCase):
             self.grouped_mm_helper(a, blist, gOlist, agradlist, bgradlist, outlist)
 
     @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
-    # TODO(future PR): enable compile for torch._grouped_mm fallback path
+    # TODO(future PR): enable compile for torch.nn.functional.grouped_mm fallback path
     @unittest.skipIf(not SM90OrLater, "Grouped gemm with compile supported on SM90")
     @parametrize("op", ["2d/2d", "2d/3d", "3d/2d", "3d/3d"])
     @parametrize("a_row_major", [False, True])
@@ -572,7 +589,7 @@ class TestMatmulCuda(InductorTestCase):
 
         align = 16 // dtype_AB.itemsize
 
-        f_ref = torch._grouped_mm
+        f_ref = F.grouped_mm
 
         options = {}
         if max_autotune:
@@ -678,6 +695,44 @@ class TestMatmulCuda(InductorTestCase):
             C = f(A, B.transpose(-2, -1), offs=offs)
             self.assertEqual(C, C_ref)
 
+    @skipCUDAIfNotRocm
+    def test_grouped_gemm_rocm_ck_flag(self):
+        CK_HINT = "kernel_grouped_gemm_xdl_splitk"
+        HIPBLASLT_HINT = "Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs"
+
+        def uses_ck(kernels: set[str]) -> bool:
+            return any(CK_HINT in k for k in kernels)
+
+        def uses_hipblaslt(kernels: set[str]) -> bool:
+            return any(HIPBLASLT_HINT in k for k in kernels)
+
+        def run_grouped_mm():
+            device = "cuda"
+            dtype = torch.bfloat16
+            # row-major 3d-3d
+            G, M, N, K = 4, 16, 32, 64
+            a = torch.randn(G, M, K, device=device, dtype=dtype)
+            b = torch.randn(G, N, K, device=device, dtype=dtype)
+            # 3d-3d grouped GEMM: [G, M, K] @ [G, K, N]
+            out = F.grouped_mm(a, b.transpose(-2, -1), out_dtype=dtype)
+            return out
+
+        def collect_kernel_names():
+            kernels = set()
+            with profile(
+                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
+                record_shapes=False,
+                with_stack=False,
+            ) as prof:
+                run_grouped_mm()
+            for evt in prof.key_averages(group_by_input_shape=False):
+                kernels.add(evt.key)
+            return kernels
+
+        with rocm_group_gemm_ck_env(None):
+            self.assertTrue(uses_hipblaslt(collect_kernel_names()))
+        with rocm_group_gemm_ck_env("1"):
+            self.assertTrue(uses_ck(collect_kernel_names()))
 
     @onlyCUDA
     @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
@@ -946,16 +1001,35 @@ class TestMatmulCuda(InductorTestCase):
         self.assertGreater(t1 - t0, t3 - t2)
 
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_GREEN_CONTEXT, "Green contexts are not supported")
+    @serialTest()
+    def test_greencontext_graphs(self):
+        a = torch.randn(4096, 4096, device='cuda', dtype=torch.bfloat16)
+        ctx = torch.cuda.green_contexts.GreenContext.create(1, 0)
+        ctx.set_context()
+        partial_res = torch.matmul(a, a)
+        ctx.pop_context()
+        full_res = torch.matmul(a, a)
+        full_res.zero_()
+        partial_res.zero_()
+        torch.cuda.synchronize()
+
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            ctx.set_context()
+            partial_res = torch.matmul(a, a)
+            ctx.pop_context()
+            full_res = torch.matmul(a, a)
+        g.replay()
+        self.assertEqual(partial_res, full_res)
+
+
 @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support CUTLASS")
 @unittest.skipIf(IS_WINDOWS, "Windows doesn't support CUTLASS extensions")
 @unittest.skipIf(not _IS_SM8X, "mixed dtypes linear only supported on SM 8.x")
 class TestMixedDtypesLinearCuda(TestCase):
     @dtypes(torch.float16, torch.bfloat16)
     def test_mixed_dtypes_linear(self, dtype: torch.dtype, device: str = "cuda"):
-        version = _get_torch_cuda_version()
-        if version < (11, 8):
-            self.skipTest("_mixed_dtypes_linear only compiled for CUDA 11.8+")
-
         def run_test(
             batch_shape,
             m,

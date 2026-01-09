@@ -49,7 +49,7 @@ set(CMAKE_CXX_STANDARD
     CACHE STRING
           "The C++ standard whose features are requested to build this target.")
 set(CMAKE_C_STANDARD
-    11
+    17
     CACHE STRING
           "The C standard whose features are requested to build this target.")
 
@@ -171,6 +171,7 @@ endif()
 set(CPU_AARCH64 OFF)
 set(CPU_INTEL OFF)
 set(CPU_POWER OFF)
+set(CPU_RISCV OFF)
 
 if(CMAKE_SYSTEM_PROCESSOR MATCHES "(AMD64|x86_64)")
   set(CPU_INTEL ON)
@@ -178,6 +179,8 @@ elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(aarch64|arm64)")
   set(CPU_AARCH64 ON)
 elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(ppc64le)")
   set(CPU_POWER ON)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "^(riscv64)")
+  set(CPU_RISCV ON)
 endif()
 
 # For non-supported platforms, turn USE_DISTRIBUTED off by default. It is not
@@ -212,7 +215,7 @@ cmake_dependent_option(
 cmake_dependent_option(
   CAFFE2_USE_MSVC_STATIC_RUNTIME "Using MSVC static runtime libraries" ON
   "NOT BUILD_SHARED_LIBS" OFF)
-option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" OFF)
+option(BUILD_TEST "Build C++ test binaries (need gtest and gbenchmark)" ON)
 option(BUILD_AOT_INDUCTOR_TEST "Build C++ test binaries for aot-inductor" OFF)
 option(BUILD_STATIC_RUNTIME_BENCHMARK
        "Build C++ binaries for static runtime benchmarks (need gbenchmark)" OFF)
@@ -327,8 +330,8 @@ cmake_dependent_option(USE_ITT "Use Intel(R) VTune Profiler ITT functionality"
 # Ensure that an MKLDNN build is the default for x86 CPUs but optional for
 # AArch64 (dependent on -DUSE_MKLDNN).
 cmake_dependent_option(
-  USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, AArch64, and ppc64le."
-  "${CPU_INTEL}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER" OFF)
+  USE_MKLDNN "Use MKLDNN. Only available on x86, x86_64, AArch64, ppc64le and riscv64."
+  "${CPU_INTEL}" "CPU_INTEL OR CPU_AARCH64 OR CPU_POWER OR CPU_RISCV" OFF)
 cmake_dependent_option(
   USE_MKLDNN_ACL "Use Compute Library for the Arm architecture." OFF
   "USE_MKLDNN AND CPU_AARCH64" OFF)
@@ -897,9 +900,9 @@ include(ExternalProject)
 
 # ---[ Dependencies ---[ FBGEMM doesn't work on x86 32bit and
 # CMAKE_SYSTEM_PROCESSOR thinks its 64bit
-if(USE_FBGEMM AND NOT CMAKE_SYSTEM_PROCESSOR STREQUAL "x86_64")
+if(USE_FBGEMM AND NOT CMAKE_SYSTEM_PROCESSOR MATCHES "^(x86_64|aarch64)$")
   message(WARNING
-    "x64 operating system is required for FBGEMM. "
+    "x86_64 or aarch64 required for FBGEMM. "
     "Not compiling with FBGEMM. "
     "Turn this warning off by USE_FBGEMM=OFF.")
   set(USE_FBGEMM OFF)
@@ -1212,41 +1215,6 @@ else()
   append_cxx_flag_if_supported("/wd4804" CMAKE_CXX_FLAGS)
   # inconsistent dll linkage
   append_cxx_flag_if_supported("/wd4273" CMAKE_CXX_FLAGS)
-endif()
-
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-  include(CheckCSourceCompiles)
-  check_c_source_compiles(
-    "#include <arm_neon.h>
-int main() {
-  float a[] = {1.0, 1.0};
-  float32x4x2_t v;
-  v.val[0] = vcombine_f32 (vcreate_f32 (0UL), vcreate_f32 (0UL));
-  v.val[1] = vcombine_f32 (vcreate_f32 (0UL), vcreate_f32 (0UL));
-  vst1q_f32_x2(a, v);
-  return 0;
-}"
-    HAS_VST1)
-
-  if(NOT HAS_VST1)
-    string(APPEND CMAKE_CXX_FLAGS " -DMISSING_ARM_VST1")
-  endif()
-endif()
-
-if(CMAKE_SYSTEM_PROCESSOR MATCHES "aarch64")
-  include(CheckCSourceCompiles)
-  check_c_source_compiles(
-    "#include <arm_neon.h>
-int main() {
-  float a[] = {1.0, 1.0};
-  vld1q_f32_x2(a);
-  return 0;
-}"
-    HAS_VLD1)
-
-  if(NOT HAS_VLD1)
-    string(APPEND CMAKE_CXX_FLAGS " -DMISSING_ARM_VLD1")
-  endif()
 endif()
 
 # Add code coverage flags to supported compilers

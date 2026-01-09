@@ -59,6 +59,22 @@ class MatMulBenchmark(op_bench.TorchBenchmarkBase):
     def forward(self, input_one, input_two):
         return torch.matmul(input_one, input_two)
 
+    def get_memory_traffic_bytes(self):
+        """Override for matmul: (M, N) @ (N, K) -> (M, K)
+        Memory traffic: read(M*N + N*K) + write(M*K)
+        """
+        input_one = self.inputs["input_one"]
+        input_two = self.inputs["input_two"]
+
+        # input_one and input_two are properly shaped for matmul regardless of transpose
+        M, N = input_one.shape
+        N_check, K = input_two.shape
+        assert N == N_check, "Matrix dimensions must match for matmul"
+
+        bytes_per_element = input_one.element_size()
+        total_elements = M * N + N * K + M * K
+        return total_elements * bytes_per_element
+
 
 op_bench.generate_pt_test(mm_long_configs + mm_short_configs, MatMulBenchmark)
 op_bench.generate_pt_gradient_test(mm_long_configs, MatMulBenchmark)

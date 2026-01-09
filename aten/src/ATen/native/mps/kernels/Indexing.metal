@@ -178,7 +178,7 @@ kernel void index_put_serial(
     constant uint4& ndim_nindices_numel,
     device ErrorMessages* error_buffer,
     uint thread_index [[thread_position_in_grid]]) {
-  (void)thread_index; // Suppress unused vairable varning
+  (void)thread_index; // Suppress unused variable warning
   for (uint idx = 0; idx < ndim_nindices_numel.z; ++idx) {
     index_put_impl(
         output,

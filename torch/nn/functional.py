@@ -492,7 +492,8 @@ def fractional_max_pool2d_with_indices(
             "fractional_max_pool2d requires specifying either an output_size or an output_ratio"
         )
     if output_size is None:
-        assert output_ratio is not None
+        if output_ratio is None:
+            raise AssertionError("output_ratio is unexpectedly None")
         if len(output_ratio) > 2:
             raise ValueError(
                 "fractional_max_pool2d requires output_ratio to either be a single Int or tuple of Ints."
@@ -611,7 +612,8 @@ def fractional_max_pool3d_with_indices(
             "fractional_max_pool3d requires specifying either an output_size or an output_ratio"
         )
     if output_size is None:
-        assert output_ratio is not None
+        if output_ratio is None:
+            raise AssertionError("output_ratio is unexpectedly None")
         _output_ratio = _triple(output_ratio)
         output_size = [
             int(input.size(-3) * _output_ratio[0]),
@@ -2542,13 +2544,11 @@ def embedding(
         )
     if padding_idx is not None:
         if padding_idx > 0:
-            assert padding_idx < weight.size(0), (
-                "Padding_idx must be within num_embeddings"
-            )
+            if padding_idx >= weight.size(0):
+                raise AssertionError("Padding_idx must be within num_embeddings")
         elif padding_idx < 0:
-            assert padding_idx >= -weight.size(0), (
-                "Padding_idx must be within num_embeddings"
-            )
+            if padding_idx < -weight.size(0):
+                raise AssertionError("Padding_idx must be within num_embeddings")
             padding_idx = weight.size(0) + padding_idx
     else:
         padding_idx = -1
@@ -2613,7 +2613,9 @@ def embedding_bag(
             :attr:`offsets`, if those are not None.
 
         include_last_offset (bool, optional): if ``True``, the size of offsets is equal to the number of bags + 1.
-            The last element is the size of the input, or the ending index position of the last bag (sequence).
+                                              The last element is the size of the input, or the ending index position
+                                              of the last bag (sequence). This matches the CSR format. Ignored when
+                                              input is 2D. Default ``False``.
 
         padding_idx (int, optional): If specified, the entries at :attr:`padding_idx` do not contribute to the
                                      gradient; therefore, the embedding vector at :attr:`padding_idx` is not updated
@@ -2724,7 +2726,7 @@ def embedding_bag(
         offsets = torch.arange(
             0, input.numel(), input.size(1), dtype=input.dtype, device=input.device
         )
-
+        include_last_offset = False
         input = input.reshape(-1)
         if per_sample_weights is not None:
             per_sample_weights = per_sample_weights.reshape(-1)
@@ -3588,8 +3590,9 @@ def binary_cross_entropy_with_logits(
     Args:
         input: Tensor of arbitrary shape as unnormalized scores (often referred to as logits).
         target: Tensor of the same shape as input with values between 0 and 1
-        weight (Tensor, optional): a manual rescaling weight
-            if provided it's repeated to match input tensor shape
+        weight (Tensor, optional): a manual rescaling weight. If provided, the dimension
+           of weight supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
+           with respect to the input (and target) shape.
         size_average (bool, optional): Deprecated (see :attr:`reduction`).
         reduce (bool, optional): Deprecated (see :attr:`reduction`).
         reduction (str, optional): Specifies the reduction to apply to the output:
@@ -4717,7 +4720,8 @@ def interpolate(  # noqa: F811
     if size is not None and scale_factor is not None:
         raise ValueError("only one of size or scale_factor should be defined")
     elif size is not None:
-        assert scale_factor is None
+        if scale_factor is not None:
+            raise AssertionError("scale_factor must be None when size is specified")
         scale_factors = None
         if isinstance(size, (list, tuple)):
             if len(size) != dim:
@@ -4737,7 +4741,8 @@ def interpolate(  # noqa: F811
         else:
             output_size = [size for _ in range(dim)]
     elif scale_factor is not None:
-        assert size is None
+        if size is not None:
+            raise AssertionError("size must be None when scale_factor is specified")
         output_size = None
         if isinstance(scale_factor, (list, tuple)):
             if len(scale_factor) != dim:
@@ -4771,7 +4776,8 @@ def interpolate(  # noqa: F811
     if recompute_scale_factor is not None and recompute_scale_factor:
         # We compute output_size here, then un-set scale_factors.
         # The C++ code will recompute it based on the (integer) output size.
-        assert scale_factors is not None
+        if scale_factors is None:
+            raise AssertionError("scale_factors is unexpectedly None")
         if not torch.jit.is_scripting() and torch._C._get_tracing_state():
             # make scale_factor a tensor in tracing so constant doesn't get baked in
             output_size = [
@@ -4823,18 +4829,22 @@ def interpolate(  # noqa: F811
         return torch._C._nn._upsample_nearest_exact3d(input, output_size, scale_factors)
 
     if input.dim() == 3 and mode == "area":
-        assert output_size is not None
+        if output_size is None:
+            raise AssertionError("output_size is unexpectedly None")
         # pyrefly: ignore [bad-argument-type]
         return adaptive_avg_pool1d(input, output_size)
     if input.dim() == 4 and mode == "area":
-        assert output_size is not None
+        if output_size is None:
+            raise AssertionError("output_size is unexpectedly None")
         return adaptive_avg_pool2d(input, output_size)
     if input.dim() == 5 and mode == "area":
-        assert output_size is not None
+        if output_size is None:
+            raise AssertionError("output_size is unexpectedly None")
         return adaptive_avg_pool3d(input, output_size)
 
     if input.dim() == 3 and mode == "linear":
-        assert align_corners is not None
+        if align_corners is None:
+            raise AssertionError("align_corners is unexpectedly None")
         return torch._C._nn.upsample_linear1d(
             input,
             # pyrefly: ignore [bad-argument-type]
@@ -4843,7 +4853,8 @@ def interpolate(  # noqa: F811
             scale_factors,
         )
     if input.dim() == 4 and mode == "bilinear":
-        assert align_corners is not None
+        if align_corners is None:
+            raise AssertionError("align_corners is unexpectedly None")
         if antialias:
             return torch._C._nn._upsample_bilinear2d_aa(
                 input,
@@ -4870,7 +4881,8 @@ def interpolate(  # noqa: F811
             scale_factors,
         )
     if input.dim() == 5 and mode == "trilinear":
-        assert align_corners is not None
+        if align_corners is None:
+            raise AssertionError("align_corners is unexpectedly None")
         # Two levels are necessary to prevent TorchScript from touching
         # are_deterministic_algorithms_enabled.
         if not torch.jit.is_scripting():
@@ -4889,7 +4901,8 @@ def interpolate(  # noqa: F811
             scale_factors,
         )
     if input.dim() == 4 and mode == "bicubic":
-        assert align_corners is not None
+        if align_corners is None:
+            raise AssertionError("align_corners is unexpectedly None")
         if antialias:
             return torch._C._nn._upsample_bicubic2d_aa(
                 input,
@@ -5698,7 +5711,8 @@ def normalize(
 
 
 def assert_int_or_pair(arg: list[int], arg_name: str, message: str) -> None:
-    assert isinstance(arg, int) or len(arg) == 2, message.format(arg_name)
+    if not (isinstance(arg, int) or len(arg) == 2):
+        raise AssertionError(message.format(arg_name))
 
 
 def unfold(
@@ -5903,27 +5917,30 @@ def _in_projection(
 
     """
     Eq, Ek, Ev = q.size(-1), k.size(-1), v.size(-1)
-    assert w_q.shape == (
-        Eq,
-        Eq,
-    ), f"expecting query weights shape of {(Eq, Eq)}, but got {w_q.shape}"
-    assert w_k.shape == (
-        Eq,
-        Ek,
-    ), f"expecting key weights shape of {(Eq, Ek)}, but got {w_k.shape}"
-    assert w_v.shape == (
-        Eq,
-        Ev,
-    ), f"expecting value weights shape of {(Eq, Ev)}, but got {w_v.shape}"
-    assert b_q is None or b_q.shape == (Eq,), (
-        f"expecting query bias shape of {(Eq,)}, but got {b_q.shape}"
-    )
-    assert b_k is None or b_k.shape == (Eq,), (
-        f"expecting key bias shape of {(Eq,)}, but got {b_k.shape}"
-    )
-    assert b_v is None or b_v.shape == (Eq,), (
-        f"expecting value bias shape of {(Eq,)}, but got {b_v.shape}"
-    )
+    if w_q.shape != (Eq, Eq):
+        raise AssertionError(
+            f"expecting query weights shape of {(Eq, Eq)}, but got {w_q.shape}"
+        )
+    if w_k.shape != (Eq, Ek):
+        raise AssertionError(
+            f"expecting key weights shape of {(Eq, Ek)}, but got {w_k.shape}"
+        )
+    if w_v.shape != (Eq, Ev):
+        raise AssertionError(
+            f"expecting value weights shape of {(Eq, Ev)}, but got {w_v.shape}"
+        )
+    if b_q is not None and b_q.shape != (Eq,):
+        raise AssertionError(
+            f"expecting query bias shape of {(Eq,)}, but got {b_q.shape}"
+        )
+    if b_k is not None and b_k.shape != (Eq,):
+        raise AssertionError(
+            f"expecting key bias shape of {(Eq,)}, but got {b_k.shape}"
+        )
+    if b_v is not None and b_v.shape != (Eq,):
+        raise AssertionError(
+            f"expecting value bias shape of {(Eq,)}, but got {b_v.shape}"
+        )
     return linear(q, w_q, b_q), linear(k, w_k, b_k), linear(v, w_v, b_v)
 
 
@@ -5985,6 +6002,21 @@ scaled_dot_product_attention = _add_docstr(
                 def forward(self, ...):
                     return F.scaled_dot_product_attention(...,
                         dropout_p=(self.p if self.training else 0.0))
+
+    Note:
+
+        The boolean mask semantics for ``attn_mask`` are the inverse of
+        :class:`~torch.nn.MultiheadAttention`'s ``key_padding_mask``.
+
+        In :func:`scaled_dot_product_attention`, ``True`` indicates values
+        to **participate** in attention.
+
+        In :class:`~torch.nn.MultiheadAttention`, ``True`` indicates values
+        to be **masked out** (padding).
+
+        If migrating from MHA, ensure you invert your boolean mask (e.g.,
+        using ``~mask`` or ``mask.logical_not()``).
+
 
     Note:
 
@@ -6103,44 +6135,51 @@ def _mha_shape_check(
     if query.dim() == 3:
         # Batched Inputs
         is_batched = True
-        assert key.dim() == 3 and value.dim() == 3, (
-            "For batched (3-D) `query`, expected `key` and `value` to be 3-D"
-            f" but found {key.dim()}-D and {value.dim()}-D tensors respectively"
-        )
+        if key.dim() != 3 or value.dim() != 3:
+            raise AssertionError(
+                "For batched (3-D) `query`, expected `key` and `value` to be 3-D"
+                f" but found {key.dim()}-D and {value.dim()}-D tensors respectively"
+            )
         if key_padding_mask is not None:
-            assert key_padding_mask.dim() == 2, (
-                "For batched (3-D) `query`, expected `key_padding_mask` to be `None` or 2-D"
-                f" but found {key_padding_mask.dim()}-D tensor instead"
-            )
+            if key_padding_mask.dim() != 2:
+                raise AssertionError(
+                    "For batched (3-D) `query`, expected `key_padding_mask` to be `None` or 2-D"
+                    f" but found {key_padding_mask.dim()}-D tensor instead"
+                )
         if attn_mask is not None:
-            assert attn_mask.dim() in (2, 3), (
-                "For batched (3-D) `query`, expected `attn_mask` to be `None`, 2-D or 3-D"
-                f" but found {attn_mask.dim()}-D tensor instead"
-            )
+            if attn_mask.dim() not in (2, 3):
+                raise AssertionError(
+                    "For batched (3-D) `query`, expected `attn_mask` to be `None`, 2-D or 3-D"
+                    f" but found {attn_mask.dim()}-D tensor instead"
+                )
     elif query.dim() == 2:
         # Unbatched Inputs
         is_batched = False
-        assert key.dim() == 2 and value.dim() == 2, (
-            "For unbatched (2-D) `query`, expected `key` and `value` to be 2-D"
-            f" but found {key.dim()}-D and {value.dim()}-D tensors respectively"
-        )
+        if key.dim() != 2 or value.dim() != 2:
+            raise AssertionError(
+                "For unbatched (2-D) `query`, expected `key` and `value` to be 2-D"
+                f" but found {key.dim()}-D and {value.dim()}-D tensors respectively"
+            )
 
         if key_padding_mask is not None:
-            assert key_padding_mask.dim() == 1, (
-                "For unbatched (2-D) `query`, expected `key_padding_mask` to be `None` or 1-D"
-                f" but found {key_padding_mask.dim()}-D tensor instead"
-            )
+            if key_padding_mask.dim() != 1:
+                raise AssertionError(
+                    "For unbatched (2-D) `query`, expected `key_padding_mask` to be `None` or 1-D"
+                    f" but found {key_padding_mask.dim()}-D tensor instead"
+                )
 
         if attn_mask is not None:
-            assert attn_mask.dim() in (2, 3), (
-                "For unbatched (2-D) `query`, expected `attn_mask` to be `None`, 2-D or 3-D"
-                f" but found {attn_mask.dim()}-D tensor instead"
-            )
+            if attn_mask.dim() not in (2, 3):
+                raise AssertionError(
+                    "For unbatched (2-D) `query`, expected `attn_mask` to be `None`, 2-D or 3-D"
+                    f" but found {attn_mask.dim()}-D tensor instead"
+                )
             if attn_mask.dim() == 3:
                 expected_shape = (num_heads, query.shape[0], key.shape[0])
-                assert attn_mask.shape == expected_shape, (
-                    f"Expected `attn_mask` shape to be {expected_shape} but got {attn_mask.shape}"
-                )
+                if attn_mask.shape != expected_shape:
+                    raise AssertionError(
+                        f"Expected `attn_mask` shape to be {expected_shape} but got {attn_mask.shape}"
+                    )
     else:
         raise AssertionError(
             f"query should be unbatched 2D or batched 3D tensor but received {query.dim()}-D query tensor"
@@ -6402,45 +6441,53 @@ def multi_head_attention_forward(
             # longer causal.
             is_causal = False
 
-    assert embed_dim == embed_dim_to_check, (
-        f"was expecting embedding dimension of {embed_dim_to_check}, but got {embed_dim}"
-    )
+    if embed_dim != embed_dim_to_check:
+        raise AssertionError(
+            f"was expecting embedding dimension of {embed_dim_to_check}, but got {embed_dim}"
+        )
     if isinstance(embed_dim, torch.Tensor):
         # embed_dim can be a tensor when JIT tracing
         head_dim = embed_dim.div(num_heads, rounding_mode="trunc")
     else:
         head_dim = embed_dim // num_heads
-    assert head_dim * num_heads == embed_dim, (
-        f"embed_dim {embed_dim} not divisible by num_heads {num_heads}"
-    )
+    if head_dim * num_heads != embed_dim:
+        raise AssertionError(
+            f"embed_dim {embed_dim} not divisible by num_heads {num_heads}"
+        )
     if use_separate_proj_weight:
         # allow MHA to have different embedding dimensions when separate projection weights are used
-        assert key.shape[:2] == value.shape[:2], (
-            f"key's sequence and batch dims {key.shape[:2]} do not match value's {value.shape[:2]}"
-        )
+        if key.shape[:2] != value.shape[:2]:
+            raise AssertionError(
+                f"key's sequence and batch dims {key.shape[:2]} do not match value's {value.shape[:2]}"
+            )
     else:
-        assert key.shape == value.shape, (
-            f"key shape {key.shape} does not match value shape {value.shape}"
-        )
+        if key.shape != value.shape:
+            raise AssertionError(
+                f"key shape {key.shape} does not match value shape {value.shape}"
+            )
 
     #
     # compute in-projection
     #
     if not use_separate_proj_weight:
-        assert in_proj_weight is not None, (
-            "use_separate_proj_weight is False but in_proj_weight is None"
-        )
+        if in_proj_weight is None:
+            raise AssertionError(
+                "use_separate_proj_weight is False but in_proj_weight is None"
+            )
         q, k, v = _in_projection_packed(query, key, value, in_proj_weight, in_proj_bias)
     else:
-        assert q_proj_weight is not None, (
-            "use_separate_proj_weight is True but q_proj_weight is None"
-        )
-        assert k_proj_weight is not None, (
-            "use_separate_proj_weight is True but k_proj_weight is None"
-        )
-        assert v_proj_weight is not None, (
-            "use_separate_proj_weight is True but v_proj_weight is None"
-        )
+        if q_proj_weight is None:
+            raise AssertionError(
+                "use_separate_proj_weight is True but q_proj_weight is None"
+            )
+        if k_proj_weight is None:
+            raise AssertionError(
+                "use_separate_proj_weight is True but k_proj_weight is None"
+            )
+        if v_proj_weight is None:
+            raise AssertionError(
+                "use_separate_proj_weight is True but v_proj_weight is None"
+            )
         if in_proj_bias is None:
             b_q = b_k = b_v = None
         else:
@@ -6481,8 +6528,10 @@ def multi_head_attention_forward(
 
     # add bias along batch dimension (currently second)
     if bias_k is not None and bias_v is not None:
-        assert static_k is None, "bias cannot be added to static key."
-        assert static_v is None, "bias cannot be added to static value."
+        if static_k is not None:
+            raise AssertionError("bias cannot be added to static key.")
+        if static_v is not None:
+            raise AssertionError("bias cannot be added to static value.")
         k = torch.cat([k, bias_k.repeat(1, bsz, 1)])
         v = torch.cat([v, bias_v.repeat(1, bsz, 1)])
         if attn_mask is not None:
@@ -6492,8 +6541,10 @@ def multi_head_attention_forward(
             # pyrefly: ignore [bad-argument-type]
             key_padding_mask = pad(key_padding_mask, (0, 1))
     else:
-        assert bias_k is None
-        assert bias_v is None
+        if bias_k is not None:
+            raise AssertionError("bias_k is set but bias_v is None")
+        if bias_v is not None:
+            raise AssertionError("bias_v is set but bias_k is None")
 
     #
     # reshape q, k, v for multihead attention and make them batch first
@@ -6505,24 +6556,28 @@ def multi_head_attention_forward(
         k = k.view(k.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
-        assert static_k.size(0) == bsz * num_heads, (
-            f"expecting static_k.size(0) of {bsz * num_heads}, but got {static_k.size(0)}"
-        )
-        assert static_k.size(2) == head_dim, (
-            f"expecting static_k.size(2) of {head_dim}, but got {static_k.size(2)}"
-        )
+        if static_k.size(0) != bsz * num_heads:
+            raise AssertionError(
+                f"expecting static_k.size(0) of {bsz * num_heads}, but got {static_k.size(0)}"
+            )
+        if static_k.size(2) != head_dim:
+            raise AssertionError(
+                f"expecting static_k.size(2) of {head_dim}, but got {static_k.size(2)}"
+            )
         k = static_k
     if static_v is None:
         # pyrefly: ignore [no-matching-overload]
         v = v.view(v.shape[0], bsz * num_heads, head_dim).transpose(0, 1)
     else:
         # TODO finish disentangling control flow so we don't do in-projections when statics are passed
-        assert static_v.size(0) == bsz * num_heads, (
-            f"expecting static_v.size(0) of {bsz * num_heads}, but got {static_v.size(0)}"
-        )
-        assert static_v.size(2) == head_dim, (
-            f"expecting static_v.size(2) of {head_dim}, but got {static_v.size(2)}"
-        )
+        if static_v.size(0) != bsz * num_heads:
+            raise AssertionError(
+                f"expecting static_v.size(0) of {bsz * num_heads}, but got {static_v.size(0)}"
+            )
+        if static_v.size(2) != head_dim:
+            raise AssertionError(
+                f"expecting static_v.size(2) of {head_dim}, but got {static_v.size(2)}"
+            )
         v = static_v
 
     # add zero attention along batch dimension (now first)
@@ -6575,9 +6630,8 @@ def multi_head_attention_forward(
         _B, _Nt, E = q.shape
         q_scaled = q * math.sqrt(1.0 / float(E))
 
-        assert not (is_causal and attn_mask is None), (
-            "FIXME: is_causal not implemented for need_weights"
-        )
+        if is_causal and attn_mask is None:
+            raise AssertionError("FIXME: is_causal not implemented for need_weights")
 
         if attn_mask is not None:
             attn_output_weights = torch.baddbmm(
@@ -6640,6 +6694,52 @@ def multi_head_attention_forward(
         return attn_output, None
 
 
+def grouped_mm(
+    mat_a: Tensor,
+    mat_b: Tensor,
+    *,
+    offs: Optional[Tensor] = None,
+    bias: Optional[Tensor] = None,
+    out_dtype: Optional[torch.dtype] = None,
+) -> Tensor:
+    r"""
+    grouped_mm(mat_a, mat_b, *, offs=None, bias=None, out_dtype=None)
+
+    Computes a grouped matrix multiply that shares weight shapes across experts but
+    allows jagged token counts per expert, which is common in Mixture-of-Experts
+    (MoE) layers. Both ``mat_a`` and ``mat_b`` must be 2D or 3D tensors that already
+    satisfy the physical layout restrictions of grouped GEMM kernels (e.g., row-major
+    ``mat_a`` and column-major ``mat_b`` for FP8 inputs). Inputs are currently
+    expected to be ``torch.bfloat16`` values on CUDA devices with :math:`SM \ge 80`.
+
+    Args:
+        mat_a: Left operand. When 2D, its leading dimension is sliced into groups
+            according to ``offs``. When 3D, its first dimension enumerates the groups
+            directly and ``offs`` must be ``None``.
+        mat_b: Right operand. When both operands are 2D (e.g., MoE weight-gradient
+            updates), the trailing dimension of ``mat_a`` and the leading dimension of
+            ``mat_b`` are partitioned according to the same ``offs`` tensor. For the
+            common forward pass (``out = input @ weight.T``) ``mat_b`` is 3D with
+            shape ``(num_groups, N, K)``.
+        offs: Optional 1D tensor of monotonically increasing ``int32`` offsets that
+            delimit the jagged dimension of any 2D operand. ``offs[i]`` marks the end
+            of group ``i`` and ``offs[-1]`` must be strictly less than the total
+            length of that operand's sliced dimension; elements beyond ``offs[-1]``
+            are ignored.
+        bias: Optional tensor that is added to the grouped outputs. Bias is not
+            jagged and must be broadcastable to the result shape of each group.
+        out_dtype: Optional dtype that controls the accumulation/output dtype.
+            Passing ``torch.float32`` accumulates BF16 inputs in FP32 while keeping
+            the grouped GEMM API non-differentiable.
+
+    Returns:
+        A tensor containing the concatenated results of each per-group GEMM with
+        shape inferred from the operands and ``offs``.
+    """
+
+    return torch._grouped_mm(mat_a, mat_b, offs=offs, bias=bias, out_dtype=out_dtype)
+
+
 def scaled_mm(
     mat_a: Tensor,
     mat_b: Tensor,
@@ -6651,7 +6751,7 @@ def scaled_mm(
     swizzle_b: SwizzleType | list[SwizzleType] | None = None,
     bias: Optional[Tensor] = None,
     output_dtype: Optional[torch.dtype] = torch.bfloat16,
-    contraction_dim: list[int] | tuple[int] = (),
+    contraction_dim: list[int] | tuple[int, ...] = (),
     use_fast_accum: bool = False,
 ) -> Tensor:
     r"""
@@ -6736,7 +6836,7 @@ def scaled_grouped_mm(
     bias: Optional[Tensor] = None,
     offs: Optional[Tensor] = None,
     output_dtype: Optional[torch.dtype] = torch.bfloat16,
-    contraction_dim: list[int] | tuple[int] = (),
+    contraction_dim: list[int] | tuple[int, ...] = (),
     use_fast_accum: bool = False,
 ) -> Tensor:
     r"""
