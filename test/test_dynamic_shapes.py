@@ -13,13 +13,11 @@ import sympy
 
 import torch
 import torch.fx
-import torch.nn as nn
 import torch.nn.functional as F
 from torch import sym_int, SymBool, SymFloat, SymInt
 from torch._C import _disabled_torch_function_impl
 from torch._dynamo.testing import CompileCounter, CompileCounterWithBackend
 from torch._inductor.utils import fresh_cache
-from torch.export import export
 from torch.fx.experimental import sym_node
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.fx.experimental.sym_node import method_to_operator, SymNode, to_node
@@ -33,9 +31,9 @@ from torch.fx.experimental.symbolic_shapes import (
     guard_int,
     GuardOnDataDependentSymNode,
     has_free_symbols,
-    hint_int,
     is_symbolic,
     ShapeEnv,
+    size_hint,
     StatelessSymbolicContext,
     statically_known_false,
     statically_known_true,
@@ -3069,16 +3067,16 @@ class TestGuardsExpressions(TestCase):
 
         guards = shape_env.produce_guards_expression([s0])
 
-        self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
-        self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
-        self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s2)]))
+        self.assertTrue(shape_env.evaluate_guards_expression(guards, [size_hint(s0)]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guards, [size_hint(s1)]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guards, [size_hint(s2)]))
 
     def test_guards_float_print(self):
         shape_env = ShapeEnv()
         s0 = create_symint(shape_env, 3)
         guard_bool(2 / s0 == 2 / 3)
         guards = shape_env.produce_guards_expression([s0])
-        self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
+        self.assertTrue(shape_env.evaluate_guards_expression(guards, [size_hint(s0)]))
 
     @skipIfTorchDynamo("Not a TorchDynamo suitable test")
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
@@ -3222,8 +3220,8 @@ class TestGuardsExpressions(TestCase):
 
         self.assertIn("math.trunc(", guards)
         self.assertIn("float(", guards)
-        self.assertTrue(shape_env.evaluate_guards_expression(guards, [hint_int(s0)]))
-        self.assertFalse(shape_env.evaluate_guards_expression(guards, [hint_int(s1)]))
+        self.assertTrue(shape_env.evaluate_guards_expression(guards, [size_hint(s0)]))
+        self.assertFalse(shape_env.evaluate_guards_expression(guards, [size_hint(s1)]))
 
     @unittest.skipIf(
         TEST_XPU, "Skipped on XPU"
@@ -4687,45 +4685,41 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         res2 = fn(torch.ones((12,)))
         self.assertEqual(res1, res2)
 
-    def test_hint_int(self):
-        class FunModule(nn.Module):
-            def forward(self, x, y):
-                d = torch.ones([x.item()])
-                return d * 10, torch.ones([x.item() * 2])
+    def test_size_hint(self):
+        @torch.compile(fullgraph=True)
+        def func(x):
+            u0 = x.item()
+            a = torch.ones([u0])
+            torch._check(
+                torch.fx.experimental.symbolic_shapes.size_hint(
+                    a.size()[0], fallback=300
+                )
+                == 300
+            )
+            b = torch.ones([x.item() * 2])
+            torch._check(
+                torch.fx.experimental.symbolic_shapes.size_hint(
+                    b.size()[0], fallback=300
+                )
+                == 600
+            )
 
-        # Create example inputs
-        x = torch.tensor(3)
-        y = torch.tensor([1.0, 2.0, 3.0])
+            return a * 10
 
-        # Create module instance
-        mod = FunModule()
+        func(torch.tensor([33]))
 
-        # Export the module
-        exported_program = export(mod, args=(x, y))
+    def test_size_hint_no_fallback(self):
+        @torch.compile(fullgraph=True)
+        def func(x):
+            u0 = x.item()
+            a = torch.ones([u0])
+            torch._check(
+                torch.fx.experimental.symbolic_shapes.size_hint(a.size()[0]) == 300
+            )
 
-        def test_pass(graph: torch.fx.Graph):
-            cnt = 0
-            for node in graph.nodes:
-                print(node.name)
-                if node.name == "ones":
-                    cnt += 1
-                    self.assertEqual(
-                        torch.fx.experimental.symbolic_shapes.hint_int(
-                            node.meta["val"].shape[0], fallback=300
-                        ),
-                        300,
-                    )
-                if node.name == "ones_1":
-                    self.assertEqual(
-                        torch.fx.experimental.symbolic_shapes.hint_int(
-                            node.meta["val"].shape[0], fallback=300
-                        ),
-                        600,
-                    )
-                    cnt += 1
-            self.assertEqual(cnt, 2)
+            return a * 10
 
-        test_pass(exported_program.graph_module.graph)
+        self.assertRaises(GuardOnDataDependentSymNode, lambda: func(torch.tensor([33])))
 
 
 instantiate_parametrized_tests(TestUnbacked)
