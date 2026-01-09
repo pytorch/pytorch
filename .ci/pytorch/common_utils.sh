@@ -226,6 +226,7 @@ function install_fbgemm() {
 
     git clone --recursive https://github.com/pytorch/fbgemm
     pushd fbgemm/fbgemm_gpu
+    git checkout "${fbgemm_commit}" --recurse-submodules
     python setup.py bdist_wheel --build-target=default --build-variant="${build_variant}"
     popd
 
