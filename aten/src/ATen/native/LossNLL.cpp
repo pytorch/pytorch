@@ -672,8 +672,7 @@ Tensor cross_entropy_loss_symint(
           log_probs, target, weight_half, Reduction::None, ignore_index);
 
       // upcast to FP32 only for the reduction step
-      auto loss_fp32 = unreduced_loss.to(ScalarType::Float);
-      auto sum_loss = loss_fp32.sum();
+      auto sum_loss = unreduced_loss.sum(ScalarType::Float);
 
       // perform reduction in FP32 to prevent overflow
       if (reduction == Reduction::Mean) {
