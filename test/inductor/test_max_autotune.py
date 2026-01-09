@@ -61,6 +61,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     NAVI_ARCH,
     parametrize,
+    random_matrix_with_scaled_reduction_dim,
     skipIfRocmArch,
     TEST_WITH_ROCM,
 )
@@ -134,6 +135,17 @@ class FailChoiceCaller(ChoiceCaller):
 @config.patch(enable_caching_generated_triton_templates=True)
 @instantiate_parametrized_tests
 class TestMaxAutotune(TestCase):
+    def _make_matrices(self, M, K, N, *batch_dims, dtype, device, requires_grad):
+        make_matrix = functools.partial(
+            random_matrix_with_scaled_reduction_dim,
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
+        a = make_matrix(M, K, *batch_dims, reduction_dim=-1)
+        b = make_matrix(K, N, *batch_dims, reduction_dim=-2)
+        return a, b
+
     @parametrize("dynamic", (False, True))
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     def test_max_autotune_mm_plus_mm_zero_size_input(self, dynamic, search_space):
@@ -1235,8 +1247,18 @@ class TestMaxAutotune(TestCase):
 
             M, N, K = sizes
 
-            a = torch.randn(M, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
-            b = torch.randn(K, N, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+            atol = 1e-4
+            rtol = 1e-4
+            # K can be huge huge, this is why the data distribution is set to iid N(0, K ** 0.5),
+            # which makes the result of reductions distributed as N(0, 1).
+            a, b = self._make_matrices(
+                M,
+                K,
+                N,
+                dtype=dtype,
+                device=GPU_TYPE,
+                requires_grad=True,
+            )
 
             possible_splits = range(2, min(K // M, K // N) + 1)
 
@@ -1269,7 +1291,7 @@ class TestMaxAutotune(TestCase):
                     "triton_.*_fused_0.run"
                 ).check("decompose_k").run(code[0])
                 check_divisors(code)
-                torch.testing.assert_close(out, a @ b, atol=1e-2, rtol=1e-2)
+                torch.testing.assert_close(out, a @ b, atol=atol, rtol=rtol)
 
             # Test adding epilogue also equivalent to eager
             compiled_func = torch.compile(lambda a, b: (a @ b).relu(), dynamic=dynamic)
@@ -1284,7 +1306,7 @@ class TestMaxAutotune(TestCase):
                 ).check("decompose_k").run(code[0])
                 check_divisors(code)
                 torch.testing.assert_close(
-                    compiled_func(a, b), (a @ b).relu(), atol=1e-2, rtol=1e-2
+                    compiled_func(a, b), (a @ b).relu(), atol=atol, rtol=rtol
                 )
 
             # Test adding reinterpret view before subgraph
@@ -1306,8 +1328,8 @@ class TestMaxAutotune(TestCase):
                 torch.testing.assert_close(
                     compiled_func(a, b),
                     (a.transpose(0, 1) @ b).relu(),
-                    atol=1e-2,
-                    rtol=1e-2,
+                    atol=atol,
+                    rtol=rtol,
                 )
 
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
@@ -1333,11 +1355,13 @@ class TestMaxAutotune(TestCase):
             a_in = torch.stack((a, a), dim=0)
             return (a_in @ b).relu()
 
-        a = torch.randn(
-            32, 32768, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
-        )
-        b = torch.randn(
-            32768, 64, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+        a, b = self._make_matrices(
+            M=32,
+            K=32768,
+            N=64,
+            dtype=torch.bfloat16,
+            device=GPU_TYPE,
+            requires_grad=True,
         )
 
         torch._dynamo.reset()
@@ -1360,8 +1384,8 @@ class TestMaxAutotune(TestCase):
             torch.testing.assert_close(
                 out,
                 f(a, b),
-                atol=1e-2,
-                rtol=1e-2,
+                atol=1e-4,
+                rtol=1e-4,
             )
 
     @unittest.skipIf(
@@ -1383,11 +1407,13 @@ class TestMaxAutotune(TestCase):
                 a_in = torch.cat([a for _ in range(256)], dim=0)
                 return (a_in @ b).relu().sum()
 
-            a = torch.randn(
-                8, 64, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
-            )
-            b = torch.randn(
-                64, 32768, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+            a, b = self._make_matrices(
+                M=8,
+                K=64,
+                N=32768,
+                dtype=torch.bfloat16,
+                device=GPU_TYPE,
+                requires_grad=True,
             )
 
             torch._dynamo.reset()
@@ -3416,9 +3442,9 @@ class TestPrologueFusion(TestCase):
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
         # check that we do not CSE any variables between prologues, epilogues
-        FileCheck().check("def triton").check_count("= 1.1", 3, exactly=True).check(
-            "tl.store"
-        ).run(code[0])
+        FileCheck().check("def triton").check_count(
+            "tl.full([1], 1.1, tl.float32)", 3, exactly=True
+        ).check("tl.store").run(code[0])
 
     @config.patch(
         {

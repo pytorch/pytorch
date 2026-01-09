@@ -21,8 +21,7 @@ logger = logging.getLogger(__name__)
 
 import torch
 import torch._appdirs
-from ._filelock import FileLock
-from filelock import Timeout
+from .file_baton import FileBaton
 from ._cpp_extension_versioner import ExtensionVersioner
 from typing_extensions import deprecated
 from torch.torch_version import TorchVersion, Version
@@ -2218,53 +2217,52 @@ def _jit_compile(name,
             logger.info('Bumping to version %s and re-building as %s_v%s...', version, name, version)
         name = f'{name}_v{version}'
 
-    lock = FileLock(os.path.join(build_directory, 'lock'))
+    baton = FileBaton(os.path.join(build_directory, 'lock'))
+    if baton.try_acquire():
+        try:
+            if version != old_version:
+                from .hipify import hipify_python
+                from .hipify.hipify_python import GeneratedFileCleaner
+                with GeneratedFileCleaner(keep_intermediates=keep_intermediates) as clean_ctx:
+                    if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
+                        hipify_result = hipify_python.hipify(
+                            project_directory=build_directory,
+                            output_directory=build_directory,
+                            header_include_dirs=(extra_include_paths if extra_include_paths is not None else []),
+                            extra_files=[os.path.abspath(s) for s in sources],
+                            ignores=[_join_rocm_home('*'), os.path.join(_TORCH_PATH, '*')],  # no need to hipify ROCm or PyTorch headers
+                            show_detailed=verbose,
+                            show_progress=verbose,
+                            is_pytorch_extension=True,
+                            clean_ctx=clean_ctx
+                        )
 
-    try:
-        lock.acquire(timeout=0)
-        if version != old_version:
-            from .hipify import hipify_python
-            from .hipify.hipify_python import GeneratedFileCleaner
-            with GeneratedFileCleaner(keep_intermediates=keep_intermediates) as clean_ctx:
-                if IS_HIP_EXTENSION and (with_cuda or with_cudnn):
-                    hipify_result = hipify_python.hipify(
-                        project_directory=build_directory,
-                        output_directory=build_directory,
-                        header_include_dirs=(extra_include_paths if extra_include_paths is not None else []),
-                        extra_files=[os.path.abspath(s) for s in sources],
-                        ignores=[_join_rocm_home('*'), os.path.join(_TORCH_PATH, '*')],  # no need to hipify ROCm or PyTorch headers
-                        show_detailed=verbose,
-                        show_progress=verbose,
-                        is_pytorch_extension=True,
-                        clean_ctx=clean_ctx
-                    )
+                        hipified_sources = set()
+                        for source in sources:
+                            s_abs = os.path.abspath(source)
+                            hipified_sources.add(hipify_result[s_abs].hipified_path if s_abs in hipify_result else s_abs)
 
-                    hipified_sources = set()
-                    for source in sources:
-                        s_abs = os.path.abspath(source)
-                        hipified_sources.add(hipify_result[s_abs].hipified_path if s_abs in hipify_result else s_abs)
+                        sources = list(hipified_sources)
 
-                    sources = list(hipified_sources)
-
-                _write_ninja_file_and_build_library(
-                    name=name,
-                    sources=sources,
-                    extra_cflags=extra_cflags or [],
-                    extra_cuda_cflags=extra_cuda_cflags or [],
-                    extra_sycl_cflags=extra_sycl_cflags or [],
-                    extra_ldflags=extra_ldflags or [],
-                    extra_include_paths=extra_include_paths or [],
-                    build_directory=build_directory,
-                    verbose=verbose,
-                    with_cuda=with_cuda,
-                    with_sycl=with_sycl,
-                    is_standalone=is_standalone)
-        elif verbose:
-            logger.debug('No modifications detected for re-loaded extension module %s, skipping build step...', name)
-    except Timeout:
-        lock.acquire()  # other compiling process is blocking, block until lock is available
-    finally:
-        lock.release()
+                    _write_ninja_file_and_build_library(
+                        name=name,
+                        sources=sources,
+                        extra_cflags=extra_cflags or [],
+                        extra_cuda_cflags=extra_cuda_cflags or [],
+                        extra_sycl_cflags=extra_sycl_cflags or [],
+                        extra_ldflags=extra_ldflags or [],
+                        extra_include_paths=extra_include_paths or [],
+                        build_directory=build_directory,
+                        verbose=verbose,
+                        with_cuda=with_cuda,
+                        with_sycl=with_sycl,
+                        is_standalone=is_standalone)
+            elif verbose:
+                logger.debug('No modifications detected for re-loaded extension module %s, skipping build step...', name)
+        finally:
+            baton.release()
+    else:
+        baton.wait()
 
     if verbose:
         logger.info('Loading extension module %s...', name)
