@@ -216,6 +216,15 @@ def gen_common_triton_imports() -> str:
         from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, DeviceProperties
         """
     )
+    if config.triton.proton_profiling:
+        imports.splice(
+            """
+            import triton.profiler as proton
+            import triton.profiler.language as pl
+            pl.enable_semantic('triton')
+            """
+        )
+
     return imports.getvalue()
 
 
@@ -1177,12 +1186,9 @@ class TritonOverrides(OpOverrides):
         triton_val = constant_repr(type_(value))
         triton_type = triton_compute_type(dtype)
 
-        if triton_type == "tl.float32":
-            # Float constants are always f32 in triton
-            return triton_val
-
-        # NOTE: We use a tensor here in order to get the expected type.
-        # Otherwise, e.g. float64 constants would be truncated to float32.
+        # NOTE: We use tl.full here to get the expected type.
+        # Otherwise, subnormal float32 values are treated as fp64
+        # causing fp32 * fp64 promotion and different numerical results.
         if value < 0 and not dtype.is_signed:
             triton_signed_type = f"tl.{triton_type[4:]}"
             return f"tl.full({shape}, {triton_val}, {triton_signed_type}).to({triton_type})"
@@ -5541,14 +5547,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 @triton.jit
             """
         code.splice(heuristics_line)
+        kernel_name = name or str(Placeholder.KERNEL_NAME)
         code.writeline(
-            f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join(x.full_name() for x in argdefs)}):"
+            f"def {kernel_name}({', '.join(x.full_name() for x in argdefs)}):"
         )
         with code.indent():
+            if config.triton.proton_profiling:
+                code.writeline(f'pl.enter_scope("{kernel_name}")')
             self.codegen_static_numels(code)
             for old, new in self.args.aliases():
                 code.writeline(f"{old} = {new}")
             code.splice(self.body)
+            if config.triton.proton_profiling:
+                code.writeline(f'pl.exit_scope("{kernel_name}")')
 
         if config.benchmark_kernel:
             code.splice(self.codegen_kernel_benchmark(num_gb))
