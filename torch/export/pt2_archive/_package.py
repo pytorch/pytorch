@@ -853,6 +853,9 @@ def _load_state_dict(
         assert weights_config_file in archive_reader.get_file_names(), (
             f"{weights_config_file} not found in PT2 archive"
         )
+        print(
+            f"weights_config_file: {weights_config_file}, {archive_reader.read_string(weights_config_file)}"
+        )
         weights_config = _load_payload_config(archive_reader, weights_config_file)
         # construct the mapping from file name (e.g. weight_0) to flat weight payload
         state_dict_file_map = _build_file_map(
