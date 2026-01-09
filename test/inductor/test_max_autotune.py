@@ -3442,9 +3442,9 @@ class TestPrologueFusion(TestCase):
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
         # check that we do not CSE any variables between prologues, epilogues
-        FileCheck().check("def triton").check_count("= 1.1", 3, exactly=True).check(
-            "tl.store"
-        ).run(code[0])
+        FileCheck().check("def triton").check_count(
+            "tl.full([1], 1.1, tl.float32)", 3, exactly=True
+        ).check("tl.store").run(code[0])
 
     @config.patch(
         {
