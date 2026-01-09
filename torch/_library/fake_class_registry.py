@@ -142,10 +142,10 @@ def tracing_with_real(x: torch.ScriptObject) -> bool:
     if not hasattr(x, "tracing_mode"):
         return False
 
-    assert x.tracing_mode() in [
-        "real",
-        "fake",
-    ], f"tracing_mode can be either real or fake but got {x.tracing_mode()}"
+    if x.tracing_mode() not in ["real", "fake"]:
+        raise AssertionError(
+            f"tracing_mode can be either real or fake but got {x.tracing_mode()}"
+        )
     return x.tracing_mode() == "real"
 
 
@@ -376,7 +376,8 @@ def _is_script_object(obj: Any) -> bool:
 # Return the namespace and class name from fully qualified name.
 def _ns_and_class_name(full_qualname: str) -> tuple[str, str]:
     splits = full_qualname.split(".")
-    assert len(splits) == 5, f"Could not split {full_qualname=}"
+    if len(splits) != 5:
+        raise AssertionError(f"Could not split {full_qualname=}, expected 5 parts")
     _torch, _torch_ns, _classes, ns, class_name = splits
     return ns, class_name
 
