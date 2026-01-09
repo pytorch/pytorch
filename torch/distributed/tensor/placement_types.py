@@ -225,14 +225,12 @@ class Shard(torch._C._distributed.Shard):
         """
         reduce and scatter a tensor on a mesh dimension
         """
-        my_coordinate = mesh.get_coordinate()
-        num_chunks = mesh.size(mesh_dim=mesh_dim)
-
-        if my_coordinate is None:
+        if not mesh._is_current_rank_part_of_mesh():
             # if rank is not part of mesh, we simply return local_tensor,
             # which should be an empty tensor
             return tensor
 
+        num_chunks = mesh.size(mesh_dim=mesh_dim)
         is_padded = tensor.size(self.dim) % num_chunks != 0
         pad_sizes = None
         if is_padded:
@@ -250,7 +248,7 @@ class Shard(torch._C._distributed.Shard):
         if is_padded:
             assert pad_sizes is not None
             output = Shard._maybe_unpad_tensor_with_sizes(
-                self.dim, output, pad_sizes, my_coordinate[mesh_dim], False
+                self.dim, output, pad_sizes, mesh._sym_get_coordinate(mesh_dim), False
             )
         return output
 
@@ -1060,8 +1058,7 @@ class _MaskPartial(Partial):
     def _partition_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
-        my_coordinate = mesh.get_coordinate()
-        assert my_coordinate is not None, "my_coordinate should not be None"
+        assert mesh._is_current_rank_part_of_mesh(), "rank is not part of mesh"
         # override parent logic to perform partial mask for embedding
         num_chunks = mesh.size(mesh_dim)
         # get local shard size and offset on the embedding_dim
@@ -1071,7 +1068,7 @@ class _MaskPartial(Partial):
         local_shard_size, local_offset_on_dim = Shard.local_shard_size_and_offset(
             self.offset_shape[self.offset_dim],
             num_chunks,
-            my_coordinate[mesh_dim],
+            mesh._sym_get_coordinate(mesh_dim),
         )
         mask, masked_tensor = _MaskPartial._mask_tensor(
             tensor, local_offset_on_dim, local_shard_size
@@ -1121,15 +1118,11 @@ class _MaskPartial(Partial):
         if not isinstance(other, _MaskPartial):
             return False
 
-        # if either data is not None, we invalidate the sharding cache, as this indicates
-        # the current _MaskPartial placement is still in use and should not be used for cache hit.
-        if self.mask_buffer.data is not None or other.mask_buffer.data is not None:
-            return False
-
         return (
             self.reduce_op == other.reduce_op
             and self.offset_shape == other.offset_shape
             and self.offset_dim == other.offset_dim
+            and self.mask_buffer is other.mask_buffer
         )
 
     def __hash__(self) -> int:
@@ -1138,6 +1131,7 @@ class _MaskPartial(Partial):
                 self.reduce_op,
                 self.offset_shape,
                 self.offset_dim,
+                id(self.mask_buffer),
             )
         )
 
