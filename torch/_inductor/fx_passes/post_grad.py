@@ -6,7 +6,7 @@ import logging
 import operator
 from collections import Counter, defaultdict
 from collections.abc import Callable
-from typing import Any, TypeVar
+from typing import Any, Optional, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -109,6 +109,20 @@ def _remove_profiler_ops(graph: torch.fx.Graph) -> None:
         graph.erase_node(node)
 
 
+def _custom_post_grad_pass_apply(
+    apply_fn: Callable[[Callable[..., _T]], Optional[_T]],
+    custom_pass: Callable[..., _T],
+    is_inference: bool,
+):
+    try:
+        apply_fn(functools.partial(custom_pass, is_inference=is_inference))
+    except TypeError as e:
+        if "got an unexpected keyword argument 'is_inference'" in str(e):
+            apply_fn(custom_pass)
+        else:
+            raise
+
+
 def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     """
     Passes that run on after grad.  This is called once on the forwards
@@ -136,8 +150,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
     fake_tensor_updater = FakeTensorUpdater(gm.graph)
 
     if post_grad_custom_pre_pass := config.post_grad_custom_pre_pass:
-        GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass(
-            post_grad_custom_pre_pass
+        _custom_post_grad_pass_apply(
+            GraphTransformObserver(gm, "post_grad_custom_pre_pass").apply_graph_pass,
+            post_grad_custom_pre_pass,
+            is_inference,
         )
 
     if torch._C._has_mkldnn:
@@ -212,8 +228,10 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
         )
 
     if post_grad_custom_post_pass := config.post_grad_custom_post_pass:
-        GraphTransformObserver(gm, "post_grad_custom_post_pass").apply_graph_pass(
-            post_grad_custom_post_pass
+        _custom_post_grad_pass_apply(
+            GraphTransformObserver(gm, "post_grad_custom_post_pass").apply_graph_pass,
+            post_grad_custom_post_pass,
+            is_inference,
         )
 
     GraphTransformObserver(gm, "stable_sort").apply_graph_pass(stable_topological_sort)
@@ -229,7 +247,11 @@ def post_grad_passes(gm: torch.fx.GraphModule, is_inference: bool):
             gm_devices = [d.type for d in get_all_devices(gm)]
             if device in gm_devices:
                 pass_name = "custom_backend_passes_" + device
-                GraphTransformObserver(gm, pass_name).apply_gm_pass(custom_backend_pass)
+                _custom_post_grad_pass_apply(
+                    GraphTransformObserver(gm, pass_name).apply_gm_pass,
+                    custom_backend_pass,
+                    is_inference,
+                )
 
     collectives_bucketing: bool = False
 
