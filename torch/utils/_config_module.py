@@ -6,6 +6,7 @@ import inspect
 import io
 import os
 import pickle
+import threading
 import tokenize
 import unittest
 from collections.abc import Callable
@@ -686,7 +687,8 @@ class ConfigModule(ModuleType):
                 )
         if not isinstance(changes, dict):
             raise AssertionError(f"expected `dict` got {type(changes)}")
-        prior: dict[str, Any] = {}
+        prior_tls = threading.local()
+        prior_tls.prior = {}
         config = self
 
         class ConfigPatch(ContextDecorator):
@@ -694,20 +696,20 @@ class ConfigModule(ModuleType):
                 self.changes = changes
 
             def __enter__(self) -> None:
-                if prior:
+                if prior_tls.prior:
                     raise AssertionError(
                         "prior should be empty when entering ConfigPatch"
                     )
                 for key in self.changes:
                     # KeyError on invalid entry
-                    prior[key] = config.__getattr__(key)
+                    prior_tls.prior[key] = config.__getattr__(key)
                 for k, v in self.changes.items():
                     config.__setattr__(k, v)
 
             def __exit__(self, exc_type, exc_val, exc_tb):  # type: ignore[no-untyped-def]
-                for k, v in prior.items():
+                for k, v in prior_tls.prior.items():
                     config.__setattr__(k, v)
-                prior.clear()
+                prior_tls.prior.clear()
 
         return ConfigPatch()
 
