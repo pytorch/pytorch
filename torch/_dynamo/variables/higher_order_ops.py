@@ -237,7 +237,9 @@ def _make_inlined(
 ) -> Callable[..., VariableTracker]:
     assert callable(f), "Expect f to be a python callable."
 
-    def inline_call(*args, **kwargs):
+    def inline_call(
+        *args: Sequence[VariableTracker], **kwargs: dict[str, VariableTracker]
+    ) -> VariableTracker:
         from torch._dynamo.trace_rules import force_inline
 
         with force_inline():

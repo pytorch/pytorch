@@ -35,7 +35,7 @@ import sys
 import types
 import unittest
 from collections import defaultdict
-from collections.abc import Callable
+from collections.abc import Callable, Iterator
 from pathlib import Path
 from typing import Any, cast, Optional, Union
 
@@ -3801,7 +3801,7 @@ import contextlib
 
 
 @contextlib.contextmanager
-def force_inline():
+def force_inline() -> Iterator[None]:
     global _force_inline
     old_val = _force_inline
     try:
