@@ -1551,7 +1551,7 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         so Dynamo wasn't tracing the property setter (fset), causing the setter code
         to run on uninitialized example objects.
 
-        See: https://github.com/pytorch/pytorch/issues/XXXXX
+        See: https://github.com/pytorch/pytorch/issues/172000
         """
         from collections.abc import MutableMapping
 
