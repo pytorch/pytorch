@@ -3899,6 +3899,16 @@ def run(runner, args, original_dir=None):
     elif args.performance:
         # Ensure that we test on real scenarios
         args.use_eval_mode = False
+        # same cudagraph disable for performance as for accuracy tests (see above):
+        if not args.disable_cudagraphs:
+            runner.skip_models.update(
+                {
+                    # xfail: https://github.com/pytorch/pytorch/issues/145773
+                    "convit_base",
+                    "llama",
+                    "cm3leon_generate",
+                }
+            )
 
     if args.partition_id > args.total_partitions or args.partition_id < 0:
         print("Invalid partition id")
