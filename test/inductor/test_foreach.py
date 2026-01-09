@@ -15,7 +15,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
-from torch.testing._internal.triton_utils import requires_gpu
+from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu
 from torch.utils._pytree import tree_flatten
 
 
@@ -1338,7 +1338,7 @@ class ForeachTests(TestCase):
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
-    @requires_gpu
+    @requires_cuda_and_triton
     def test_foreach_addcmul_fma_bitwise_equal(self):
         """Test that _foreach_addcmul with FMA lowering produces bitwise equal results to eager."""
         self_tensors = [
@@ -1378,7 +1378,7 @@ class ForeachTests(TestCase):
         for eager, compiled in zip(eager_result2, compiled_result2):
             self.assertEqual(eager, compiled, atol=0, rtol=0)
 
-    @requires_gpu
+    @requires_cuda_and_triton
     def test_foreach_addcmul_uses_fma_instruction(self):
         """Test that _foreach_addcmul generates code using FMA instruction."""
         from torch._inductor.utils import run_and_get_code
