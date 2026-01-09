@@ -248,6 +248,7 @@ from .misc import (
     MethodWrapperVariable,
     NumpyDTypeVariable,
     NumpyVariable,
+    ObjectVariable,
     PythonModuleVariable,
     RandomClassVariable,
     RandomVariable,
@@ -1769,6 +1770,9 @@ class VariableBuilder:
                 return self.wrap_symint(value.val, dynamism=DimDynamic.DYNAMIC)
             else:
                 raise RuntimeError(f"Undefined dynamism {value.dynamism}")
+        elif istype(value, object):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return ObjectVariable(value, source=self.source)
         else:
             return self.wrap_user_defined(value)
 
@@ -1947,9 +1951,9 @@ class VariableBuilder:
         # As long as this runs before AOT this is sound
         if value in self.tx.output.side_effects:
             var = self.tx.output.side_effects[value]
-            # type: ignore[attr-defiend]
+            # type: ignore[attr-defined]
             var.proxy.node.meta["tensor_dict"]["_dynamo_static_input_type"] = (
-                # type: ignore[attr-defiend]
+                # type: ignore[attr-defined]
                 value._dynamo_static_input_type
             )
 
@@ -2127,7 +2131,7 @@ class VariableBuilder:
 
             if is_unbacked_source(self.source.name):
                 log.debug("%s marked unbacked via source whitelist", self.source.name)
-                return self.wrap_symint(value, dynamism=DimDynamic.SIZE_LIKE_UNBACKED)
+                return self.wrap_symint(value, dynamism=DimDynamic.UNBACKED)
 
             if not config.specialize_int:
                 # unspecializing int by default, but still
@@ -3462,9 +3466,7 @@ def get_automatic_dynamic_shapes_mark_as() -> DimDynamic:
     if config.automatic_dynamic_shapes_mark_as == "dynamic":
         return DimDynamic.DYNAMIC
     elif config.automatic_dynamic_shapes_mark_as == "unbacked":
-        return DimDynamic.SIZE_LIKE_UNBACKED
-    elif config.automatic_dynamic_shapes_mark_as == "oblivious":
-        return DimDynamic.OBLIVIOUS_SIZE
+        return DimDynamic.UNBACKED
     else:
         raise ValueError(
             f"invalid automatic_dynamic_shapes_mark_as = {config.automatic_dynamic_shapes_mark_as}"
@@ -3813,7 +3815,7 @@ def _automatic_dynamic(
         constraint_strides.append(constraint_stride)
 
         if marked_unbacked or is_unbacked_source(name):
-            dynamic_size = DimDynamic.SIZE_LIKE_UNBACKED
+            dynamic_size = DimDynamic.UNBACKED
         elif (
             constraint_size is not None
             or marked_dynamic
@@ -4068,6 +4070,8 @@ class SourcelessBuilder:
         ):
             proxy = tx.output.bound_symbols[value.node.expr]
             return SymNodeVariable.create(tx, proxy)
+        elif istype(value, object):
+            return ObjectVariable(value)
         unimplemented(
             gb_type="Unexpected type in sourceless builder",
             context=f"{value_type.__module__}.{value_type.__qualname__}",
