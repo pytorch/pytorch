@@ -34,14 +34,14 @@ if not exist "%CUDA_PATH%\bin\nvcc.exe" (
 pushd "%PYTORCH_ROOT%\.ci\pytorch"
 call windows\internal\vc_install_helper.bat
 if errorlevel 1 (
-    echo ERROR: Failed to discover Visual Studio installation
+    echo ERROR: failed to discover VS installation
     popd
     exit /b 1
 )
 popd
 
 set "VS15VCVARSALL=%VS15INSTALLDIR%\VC\Auxiliary\Build\vcvarsall.bat"
-echo Found Visual Studio at: %VS15INSTALLDIR%
+echo found VS at: %VS15INSTALLDIR%
 
 call "%VS15VCVARSALL%" x64
 
@@ -53,9 +53,8 @@ if not exist "%FLASH_ATTENTION_HOPPER_DIR%" (
     exit /b 1
 )
 
-echo Installing dependencies...
+echo installing dependencies...
 python -m pip install einops packaging ninja numpy wheel setuptools
-if errorlevel 1 exit /b 1
 
 set FLASH_ATTENTION_FORCE_BUILD=TRUE
 set FLASH_ATTENTION_DISABLE_SPLIT=FALSE
@@ -86,20 +85,17 @@ echo MAX_JOBS=%MAX_JOBS%
 echo TORCH_CUDA_ARCH_LIST=%TORCH_CUDA_ARCH_LIST%
 
 pushd "%FLASH_ATTENTION_HOPPER_DIR%"
-if errorlevel 1 exit /b 1
-
 git submodule update --init ../csrc/cutlass
-if errorlevel 1 exit /b 1
 
 :: build the wheel
 python setup.py bdist_wheel -d "%FA_FINAL_PACKAGE_DIR%" -k --plat-name win_amd64
 if errorlevel 1 (
-    echo ERROR: Failed to build wheel
+    echo ERROR: failed to build wheel
     popd
     exit /b 1
 )
 
-echo Wheel built successfully:
+echo wheel built successfully:
 dir "%FA_FINAL_PACKAGE_DIR%\*.whl"
 
 popd
