@@ -779,14 +779,23 @@ class TensorVariable(VariableTracker):
 
         from .builder import wrap_fx_proxy
 
-        return wrap_fx_proxy(
-            tx,
-            tx.output.create_proxy(
-                "call_method",
-                name,
-                *proxy_args_kwargs([self, *args], kwargs),
-            ),
+        proxy = tx.output.create_proxy(
+            "call_method",
+            name,
+            *proxy_args_kwargs([self, *args], kwargs),
         )
+
+        # [Note: Inplace ops and VariableTracker metadata]
+        # For inplace operations (methods ending with _), we need to propagate
+        # tensor metadata from the arguments to self. For example:
+        #   x.add_(y) where y.requires_grad=True => x.requires_grad becomes True
+        # We only do this when there's a tensor argument, since that's when metadata
+        # propagation is relevant. Shape-changing inplace ops (unsqueeze_, etc.) have
+        # scalar args and shouldn't trigger early fake tensor execution.
+        if name.endswith("_") and any(arg.is_tensor() for arg in args):
+            self._propagate_inplace_metadata(tx, proxy)
+
+        return wrap_fx_proxy(tx, proxy)
 
     def method_size(
         self, tx: "InstructionTranslator", *args: Any, **kwargs: Any
@@ -1192,6 +1201,46 @@ class TensorVariable(VariableTracker):
             )
         return None
 
+    def _propagate_inplace_metadata(
+        self,
+        tx: "InstructionTranslator",
+        proxy: torch.fx.Proxy,
+    ) -> None:
+        """
+        Propagate tensor metadata to self after an inplace operation.
+        This ensures that properties like requires_grad are correctly tracked during tracing.
+
+        Args:
+            tx: InstructionTranslator instance
+            proxy: The proxy node representing the inplace operation
+        """
+        # [Note: Inplace Operations and VariableTracker metadata]
+        # At this point, we proxied a node representing an inplace operation into the graph.
+        # When executed, this node will mutate `self`'s tensor metadata, so it's important
+        # even during tracing to propagate. For example:
+        #   value.requires_grad is True => self.requires_grad becomes True
+        #   value.requires_grad is True => self.has_grad_fn becomes True
+
+        # The fake tensor execution already computes the correct metadata.
+
+        # Not sure if __setitem__ can ever save activations, disabling just in case
+
+        # Ignore fresh unbacked symbols that could arise from the internal indexing (selection),
+        # that happen in code like t[idx] += 1 when idx is unbacked. Namely the selection
+        # during 'setitem'.
+        # When the selection happens if idx is unbacked we allocate a new unbacked symbol for the
+        # storage offset in select_meta, but the output of the operation 'setitem' does not depend
+        # on the selection.
+        with (
+            torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing(),
+            tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols()
+            if tx.fake_mode and tx.fake_mode.shape_env
+            else nullcontext(),
+        ):
+            get_fake_value(proxy.node, tx, allow_non_graph_fake=False)
+
+        self.synchronize_attributes(tx)
+
     def method___setitem__(
         self,
         tx: "InstructionTranslator",
@@ -1205,34 +1254,7 @@ class TensorVariable(VariableTracker):
         )
 
         if value.is_tensor():
-            # [Note: Tensor.__setitem__ and VariableTracker metadata]
-            # At this point, we proxied a node representing `self[key] = value` into the graph.
-            # When executed, this node will mutate `self`'s tensor metadata, so it's important
-            # even during tracing to propagate. For example:
-            #   value.requires_grad is True => self.requires_grad becomes True
-            #   value.requires_grad is True => self.has_grad_fn becomes True
-
-            # Not sure if __setitem__ can ever save activations, disabling just in case
-
-            # Ignore fresh unbacked symbols that could arise from the internal indexing (selection),
-            # that happen in code like t[idx] += 1 when idx is unbacked. Namely the selection
-            # during 'setitem'.
-            # When the selection happens if idx is unbacked we allocate a new unbacked symbol for the
-            # storage offset in select_meta, but the output of the operation 'setitem' does not depend
-            # on the selection.
-            with (
-                torch._dynamo.utils._disable_saved_tensors_hooks_during_tracing(),
-                tx.fake_mode.shape_env.ignore_fresh_unbacked_symbols()
-                if tx.fake_mode and tx.fake_mode.shape_env
-                else nullcontext(),
-            ):
-                get_fake_value(proxy.node, tx, allow_non_graph_fake=False)
-
-            vt = value
-            if isinstance(vt, variables.lazy.LazyVariableTracker):
-                vt = variables.lazy.LazyVariableTracker.realize_all(vt)
-
-            self.synchronize_attributes(tx, type(vt))
+            self._propagate_inplace_metadata(tx, proxy)
 
         if config.use_graph_deduplication or config.track_nodes_for_deduplication:
             tx.output.region_tracker.add_node_mutation(proxy.node, 0)
