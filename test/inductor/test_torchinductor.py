@@ -13753,6 +13753,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             with self.assertRaisesRegex(RuntimeError, "Output size is too small"):
                 _ = torch.compile(model)(inputs)
 
+    @skipIfRocm
     @requires_cuda
     def test_conv_transpose_zero_size_output(self):
         # Only CUDA (cuDNN) supports zero-sized spatial outputs for conv_transpose.

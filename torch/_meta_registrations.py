@@ -2473,7 +2473,7 @@ def calc_conv_nd_return_shape(
     # CUDA (cuDNN) handles zero-sized outputs gracefully by short-circuiting,
     # but other backends fail: CPU rejects it, ROCm/miopen returns
     # miopenStatusBadParm, and MPS asserts "Placeholder tensor is empty".
-    # We only allow zero-sized outputs on CUDA where it's known to work.
+    # We only allow zero-sized outputs on CUDA with cuDNN (not ROCm/HIP).
     from torch._subclasses.fake_tensor import FakeTensor
     from torch.fx.experimental.symbolic_shapes import sym_or
 
@@ -2483,7 +2483,9 @@ def calc_conv_nd_return_shape(
         else input_tensor.device
     )
 
-    if device.type != "cuda":
+    # ROCm also reports device.type as "cuda", but miopen doesn't support zero-sized outputs
+    is_cudnn = device.type == "cuda" and torch.version.hip is None
+    if not is_cudnn:
         torch._check(
             sym_or(*[x > 0 for x in ret_shape[2:]]),
             lambda: f"Given input size per channel: {list(dims)}. "
