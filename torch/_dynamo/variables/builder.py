@@ -525,6 +525,7 @@ class VariableBuilder:
             TensorWithTFOverrideVariable,
             UserDefinedObjectVariable,
             NumpyNdarrayVariable,
+            TorchScriptObjectVariable,
         }
 
     def get_source(self) -> Source:
@@ -1544,6 +1545,9 @@ class VariableBuilder:
                 else:
                     # Reference-type: guard only on type/identity
                     self.install_guards(GuardBuilder.TYPE_MATCH)
+
+                    # Install guards on GUARDED members
+                    self.install_guards(GuardBuilder.OPAQUE_OBJ_GUARD_FN_MATCH)
 
             elif not hasattr(value, "__obj_flatten__"):
                 # This exists to allow a smoother transition.

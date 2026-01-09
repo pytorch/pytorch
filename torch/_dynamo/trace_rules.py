@@ -3372,6 +3372,8 @@ LEGACY_MOD_INLINELIST = {
     "torch._export.wrappers",
     "torch._functorch.apis",
     "torch._functorch.deprecated",
+    "torch._library.fake_class_registry",
+    "torch.utils._typing_utils",
     "torch.nn.attention.flex_attention",
     "torch.ao.quantization.stubs",
     "torch.ao.quantization.pt2e.export_utils",
