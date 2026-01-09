@@ -7010,7 +7010,6 @@ register_pointwise_numeric(aten.erfc)
 register_pointwise_numeric(aten.erfinv)
 register_pointwise_numeric(aten.hypot)
 register_pointwise_numeric(aten.log10)
-# register_pointwise_numeric(aten.ldexp)
 register_pointwise_numeric(aten.log2)
 register_pointwise_numeric(aten.nextafter)
 
