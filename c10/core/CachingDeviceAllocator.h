@@ -85,6 +85,7 @@ struct BlockInfo {
 // device allocation, such as one created by cudaMalloc).
 struct SegmentInfo {
   c10::DeviceIndex device = 0;
+  int32_t registration_counter = -1;
   size_t address = 0;
   size_t total_size = 0;
   size_t requested_size = 0; // Unrounded, actually requested size

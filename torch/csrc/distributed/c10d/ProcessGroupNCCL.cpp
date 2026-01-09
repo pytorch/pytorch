@@ -1105,6 +1105,7 @@ ErrorType ProcessGroupNCCL::getError() {
 }
 
 void ProcessGroupNCCL::registerMemPool(at::cuda::MemPool* pool, bool symm) {
+  using c10::cuda::CUDACachingAllocator::SegmentInfo;
   const auto key = std::to_string(pool->device());
   LOG(INFO) << logPrefix()
             << "Performing NCCL user buffer registration for all buffers in "
@@ -1125,7 +1126,16 @@ void ProcessGroupNCCL::registerMemPool(at::cuda::MemPool* pool, bool symm) {
   // register future segments allocated in this pool (this call is idempotent).
   attachAllocatorHooks();
   auto snapshot = c10::cuda::CUDACachingAllocator::snapshot(pool->id());
+  std::sort(
+      snapshot.segments.begin(),
+      snapshot.segments.end(),
+      [](const SegmentInfo& a, const SegmentInfo& b) {
+        return a.registration_counter < b.registration_counter;
+      });
   for (const auto& segmentInfo : snapshot.segments) {
+    TORCH_INTERNAL_ASSERT(
+        segmentInfo.registration_counter >= 0,
+        "SegmentInfo has uninitialized registration counter");
     TORCH_INTERNAL_ASSERT(
         segmentInfo.device == pool->device(),
         "Mismatch between CUDA memory segment device and pool's device");
