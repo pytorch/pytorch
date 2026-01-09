@@ -107,6 +107,170 @@ class _TransformInfo(NamedTuple):
     src_dst_placements: tuple[Placement, Placement]
     # logical_shape on this mesh dimension
     logical_shape: list[int]
+    # Optional mesh override (None means use the default device_mesh)
+    mesh: DeviceMesh | None = None
+
+
+class _FlattenedTransformInfo(NamedTuple):
+    """
+    Represents a flattened transform that combines multiple mesh dimensions
+    into a single collective operation using a flattened DeviceMesh.
+
+    Duck-type compatible with _TransformInfo: has mesh_dim=0 and mesh=flattened_mesh
+    so the main redistribute loop can handle both uniformly.
+    """
+
+    # Always 0 for flattened 1D mesh
+    mesh_dim: int
+    # Source and target placements (should be same type across all dims)
+    src_dst_placements: tuple[Placement, Placement]
+    # logical_shape (combined from all dims)
+    logical_shape: list[int]
+    # The flattened DeviceMesh to use for the collective operation
+    mesh: DeviceMesh
+    # The mesh dimensions from the original mesh that are being flattened (for debugging)
+    original_mesh_dims: tuple[int, ...]
+
+
+def _get_flattened_mesh_by_layout(
+    mesh: DeviceMesh, mesh_dims: tuple[int, ...]
+) -> DeviceMesh | None:
+    """
+    Query for an explicitly created flattened mesh using layout comparison.
+
+    Args:
+        mesh: The DeviceMesh to query
+        mesh_dims: Tuple of mesh dimension indices to look for
+
+    Returns:
+        The flattened DeviceMesh if it was explicitly created, None otherwise.
+    """
+    root_mesh = mesh._get_root_mesh()
+    mesh_dim_names = root_mesh.mesh_dim_names
+
+    if mesh_dim_names is None:
+        return None
+
+    # Convert mesh dim indices to dim names
+    dim_names = tuple(mesh_dim_names[i] for i in mesh_dims)
+
+    # Get the submesh for these dimensions
+    submesh = mesh[dim_names]
+
+    # Compute expected flattened layout
+    expected_layout = submesh._layout.coalesce()
+    if len(expected_layout) > 1:
+        expected_layout = expected_layout.nest()
+
+    # Search existing flattened meshes by comparing layouts
+    for flattened_mesh in root_mesh._flatten_mapping.values():
+        if flattened_mesh._layout == expected_layout:
+            return flattened_mesh
+
+    return None
+
+
+def _optimize_transform_infos_for_flattened_reductions(
+    transform_infos: list[_TransformInfo],
+    device_mesh: DeviceMesh,
+) -> list[_TransformInfo | _FlattenedTransformInfo]:
+    """
+    Optimize a list of transform infos by grouping same-type reduction operations
+    and replacing them with flattened transforms when a matching flattened DeviceMesh exists.
+
+    This function finds all transforms that perform the same type of reduction
+    (e.g., Partial("sum") -> Replicate), groups them by reduce_op, and checks if there
+    exists a flattened DeviceMesh that covers exactly those mesh dimensions. If such
+    a mesh exists, the group is replaced with a single _FlattenedTransformInfo.
+    Otherwise, the original _TransformInfo entries are preserved.
+
+    Reductions on different mesh dimensions are independent operations, so they can
+    be grouped even if they are not consecutive in the original transform list.
+
+    Args:
+        transform_infos: List of transform infos to optimize
+        device_mesh: The device mesh being used for redistribution
+
+    Returns:
+        List of transform infos (mix of _TransformInfo and _FlattenedTransformInfo)
+        with eligible reductions replaced by flattened versions where possible.
+    """
+    if not transform_infos:
+        return []
+
+    # Separate reductions by reduce_op, and track non-reductions
+    # Key: reduce_op string, Value: list of (original_index, transform_info)
+    reductions_by_op: dict[str, list[tuple[int, _TransformInfo]]] = defaultdict(list)
+    non_reductions: list[tuple[int, _TransformInfo]] = []
+
+    for idx, info in enumerate(transform_infos):
+        src, dst = info.src_dst_placements
+        if src.is_partial() and dst.is_replicate():
+            reduce_op = cast(Partial, src).reduce_op
+            reductions_by_op[reduce_op].append((idx, info))
+        else:
+            non_reductions.append((idx, info))
+
+    # Try to flatten each group of same-type reductions
+    # Track which indices have been consumed by flattening
+    consumed_indices: set[int] = set()
+    flattened_transforms: list[tuple[int, _FlattenedTransformInfo]] = []
+
+    for reduce_op, reductions in reductions_by_op.items():
+        if len(reductions) < 2:
+            # Single reduction, nothing to flatten
+            continue
+
+        # Extract mesh dims for this group
+        mesh_dims = tuple(info.mesh_dim for _, info in reductions)
+
+        # Check if a flattened mesh exists for these dims
+        flattened_mesh = _get_flattened_mesh_by_layout(device_mesh, mesh_dims)
+
+        if flattened_mesh is not None:
+            # Create a flattened transform to replace the group
+            # Use the first transform's info as representative
+            first_idx, first_info = reductions[0]
+            src, dst = first_info.src_dst_placements
+
+            flattened_transform = _FlattenedTransformInfo(
+                mesh_dim=0,  # Always 0 for flattened 1D mesh
+                src_dst_placements=(src, dst),
+                logical_shape=first_info.logical_shape,
+                mesh=flattened_mesh,
+                original_mesh_dims=mesh_dims,
+            )
+
+            # Mark all indices in this group as consumed
+            for idx, _ in reductions:
+                consumed_indices.add(idx)
+
+            # Insert the flattened transform at the position of the first reduction
+            flattened_transforms.append((first_idx, flattened_transform))
+
+    # Build result list preserving relative order
+    # - Non-consumed transforms keep their original order
+    # - Flattened transforms are inserted at the position of their first reduction
+    result_items: list[tuple[int, _TransformInfo | _FlattenedTransformInfo]] = []
+
+    # Add non-reductions that weren't consumed
+    for idx, info in non_reductions:
+        result_items.append((idx, info))
+
+    # Add reductions that weren't consumed (single reductions or no flattened mesh)
+    for reduce_op, reductions in reductions_by_op.items():
+        for idx, info in reductions:
+            if idx not in consumed_indices:
+                result_items.append((idx, info))
+
+    # Add flattened transforms
+    for idx, flattened in flattened_transforms:
+        result_items.append((idx, flattened))
+
+    # Sort by original index to preserve order
+    result_items.sort(key=lambda x: x[0])
+
+    return [item for _, item in result_items]
 
 
 # Global cache for DTensorRedistributePlanner instances
@@ -865,6 +1029,11 @@ def redistribute_local_tensor(
             current_spec, target_spec, use_graph_based_transform
         )
 
+    # Optimize by flattening multiple same-type reductions into single operations
+    optimized_transform_infos = _optimize_transform_infos_for_flattened_reductions(
+        transform_infos, device_mesh
+    )
+
     debug_mode = get_active_debug_mode()
     redistribute_context = (
         debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
@@ -883,10 +1052,12 @@ def redistribute_local_tensor(
     )
 
     with redistribute_context:
-        for transform_info in transform_infos:
+        for transform_info in optimized_transform_infos:
+            # Determine which mesh to use: flattened transforms have their own mesh
+            mesh_to_use = transform_info.mesh if transform_info.mesh else device_mesh
             i = transform_info.mesh_dim
             current, target = transform_info.src_dst_placements
-            num_chunks = device_mesh.size(mesh_dim=i)
+            num_chunks = mesh_to_use.size(mesh_dim=i)
 
             if current == target:
                 # short cut, just use the original local tensor
@@ -904,12 +1075,12 @@ def redistribute_local_tensor(
                 if current.is_partial():
                     partial_spec = cast(Partial, current)
                     new_local_tensor = partial_spec._reduce_value(
-                        local_tensor, device_mesh, i
+                        local_tensor, mesh_to_use, i
                     )
                 elif current.is_shard():
                     current_placement = cast(Shard, current)
                     new_local_tensor = current_placement._to_replicate_tensor(
-                        local_tensor, device_mesh, i, transform_info.logical_shape
+                        local_tensor, mesh_to_use, i, transform_info.logical_shape
                     )
                 else:
                     raise RuntimeError(
@@ -922,12 +1093,12 @@ def redistribute_local_tensor(
                 if current.is_partial():
                     partial_spec = cast(Partial, current)
                     new_local_tensor = partial_spec._reduce_shard_value(
-                        local_tensor, device_mesh, i, target_placement
+                        local_tensor, mesh_to_use, i, target_placement
                     )
                 elif current.is_replicate():
                     # split the tensor and return the corresponding cloned local shard
                     new_local_tensor = target_placement._replicate_to_shard(
-                        local_tensor, device_mesh, i, my_coordinate[i]
+                        local_tensor, mesh_to_use, i, my_coordinate[i]
                     )
                 else:
                     assert current.is_shard(), (
@@ -937,7 +1108,7 @@ def redistribute_local_tensor(
                     if shard_spec.dim != target_placement.dim:
                         new_local_tensor = shard_spec._to_new_shard_dim(
                             local_tensor,
-                            device_mesh,
+                            mesh_to_use,
                             i,
                             transform_info.logical_shape,
                             target_placement.dim,
@@ -946,7 +1117,7 @@ def redistribute_local_tensor(
                 if current.is_replicate():
                     partial_spec = cast(Partial, target)
                     new_local_tensor = partial_spec._partition_value(
-                        local_tensor, device_mesh, i
+                        local_tensor, mesh_to_use, i
                     )
                 elif current.is_shard():
                     raise RuntimeError(
