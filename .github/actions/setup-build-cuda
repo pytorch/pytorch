@@ -1,0 +1,150 @@
+name: Set up Runner for build
+
+inputs:
+  toolkit_type:
+    description: cuda or rocm
+    type: string
+  toolkit_short_version:
+    required: true
+    type: string
+    description: "Example: 117 for 11.7"
+  python:
+    description: Python version to install
+    type: string
+    default: "3.10"
+
+runs:
+  using: composite
+  steps:
+    - id: cuda_info
+      shell: python3 "{0}"
+      run: |
+        import os
+        import sys
+        print(sys.version)
+        cushort = "${{ inputs.toolkit_short_version }}"
+        # Version uploaded to pypi (rather than PyTorch s3)
+        TORCH_CUDA_DEFAULT = "128"  # since pytorch 2.9.0
+        # https://github.com/Jimver/cuda-toolkit/blob/master/src/links/linux-links.ts
+        full_version, install_script = {
+          "130": ("13.0.1", "https://developer.download.nvidia.com/compute/cuda/13.0.1/local_installers/cuda_13.0.1_580.82.07_linux.run"),
+          "129": ("12.9.1", "https://developer.download.nvidia.com/compute/cuda/12.9.1/local_installers/cuda_12.9.1_575.57.08_linux.run"),
+          "128": ("12.8.1", "https://developer.download.nvidia.com/compute/cuda/12.8.1/local_installers/cuda_12.8.1_570.124.06_linux.run"),
+          # (Build with nvcc 12.8 on linux even when building for 12.6 to avoid seg fault in Flash3 build)
+          "126": ("12.8.1", "https://developer.download.nvidia.com/compute/cuda/12.8.1/local_installers/cuda_12.8.1_570.124.06_linux.run"),
+          "118": ("11.8.0", "https://developer.download.nvidia.com/compute/cuda/11.8.0/local_installers/cuda_11.8.0_520.61.05_linux.run"),
+          "6.0": ("6.0.2", "https://repo.radeon.com/amdgpu-install/6.0.2/rhel/8.9/amdgpu-install-6.0.60002-1.el8.noarch.rpm"),
+          "6.1": ("6.1.3", "https://repo.radeon.com/amdgpu-install/6.1.3/rhel/8.9/amdgpu-install-6.1.60103-1.el8.noarch.rpm"),
+          "6.2.4": ("6.2.4", "https://repo.radeon.com/amdgpu-install/6.2.4/rhel/8.9/amdgpu-install-6.2.60204-1.el8.noarch.rpm"),
+          "6.3": ("6.3.1", "https://repo.radeon.com/amdgpu-install/6.3.1/rhel/8.9/amdgpu-install-6.3.60301-1.el8.noarch.rpm"),
+          "6.4": ("6.4.2", "https://repo.radeon.com/amdgpu-install/6.4.2/rhel/8.9/amdgpu-install-6.4.60402-1.el8.noarch.rpm"),
+          "7.0": ("7.0.3", "https://repo.radeon.com/amdgpu-install/7.0.3/rhel/8/amdgpu-install-7.0.3.70003-1.el8.noarch.rpm"),
+          "7.1": ("7.1.0", "https://repo.radeon.com/amdgpu-install/7.1/rhel/8/amdgpu-install-7.1.70100-1.el8.noarch.rpm"),
+        }[cushort]
+        with open(os.environ['GITHUB_OUTPUT'], "r+") as fp:
+          fp.write("CUDA_VERSION=" + full_version + "\n")
+          if cushort == TORCH_CUDA_DEFAULT:
+            fp.write("CUDA_VERSION_SUFFIX=\n")
+          else:
+            fp.write("CUDA_VERSION_SUFFIX=+" + ("cu" if "cuda" == "${{ inputs.toolkit_type }}" else "rocm") + cushort + "\n")
+          fp.write("CUDA_INSTALL_SCRIPT=" + install_script + "\n")
+    - run: echo "CUDA_VERSION_SUFFIX=${{ steps.cuda_info.outputs.CUDA_VERSION_SUFFIX }}" >> ${GITHUB_ENV}
+      shell: bash
+
+    # WINDOWS STEPS
+    - name: Install cuda
+      if: runner.os == 'Windows' && inputs.toolkit_type == 'cuda'
+      id: cuda-toolkit
+      # Using N-Storm fork until https://github.com/Jimver/cuda-toolkit/issues/395 is resolved
+      uses: N-Storm/cuda-toolkit@v0.2.28
+      with:
+        cuda: ${{ steps.cuda_info.outputs.CUDA_VERSION }}
+        method: network
+    - if: runner.os == 'Windows' && inputs.toolkit_type == 'cuda'
+      shell: bash
+      run: |
+        echo "Installed cuda version is: ${{ steps.cuda-toolkit.outputs.cuda }}"
+        echo "Cuda install location: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
+        echo "CUDA_HOME=${{ steps.cuda-toolkit.outputs.CUDA_PATH }}" >> ${GITHUB_ENV}
+        cat ${GITHUB_ENV}
+
+    - name: Install python
+      if: runner.os == 'Windows'
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ inputs.python }}
+
+    - name: Setup MSVC
+      if: runner.os == 'Windows'
+      uses: ilammy/msvc-dev-cmd@v1
+
+    # really unfortunate: https://github.com/ilammy/msvc-dev-cmd#name-conflicts-with-shell-bash
+    - name: Remove link.exe
+      if: runner.os == 'Windows'
+      shell: bash
+      run: rm /usr/bin/link
+
+    # LINUX STEPS
+    - if: ${{ runner.os == 'Linux' && !(contains(inputs.toolkit_type, 'cuda') && fromJSON(inputs.toolkit_short_version) > 124) }}
+      shell: bash
+      run: |
+        # Use GCC11 for ROCM / cu118 / cu124
+        yum list installed
+        yum install gcc-toolset-11-gcc gcc-toolset-11-gcc-c++ gcc-toolset-11-libstdc++-devel wget git -y
+        echo "source /opt/rh/gcc-toolset-11/enable" >> ~/.profile
+
+    - if: ${{ runner.os == 'Linux' && contains(inputs.toolkit_type, 'cuda') && fromJSON(inputs.toolkit_short_version) > 124 }}
+      shell: bash
+      run: |
+        # Use GCC13 for cu126+
+        yum list installed
+        yum install gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ gcc-toolset-13-libstdc++-devel wget git -y
+        echo "source /opt/rh/gcc-toolset-13/enable" >> ~/.profile
+
+    - if: runner.os == 'Linux'
+      shell: bash -l {0}
+      run: |
+        yum list installed
+        yum install wget git -y
+        which g++
+        g++ --version
+
+    - if: runner.os == 'Linux' && contains(inputs.toolkit_type, 'cuda')
+      name: (Linux) install cuda
+      shell: bash -l {0}
+      run: |
+        wget -q "${{ steps.cuda_info.outputs.CUDA_INSTALL_SCRIPT }}" -O cuda.run && \
+        sh ./cuda.run --silent --toolkit && \
+        rm ./cuda.run
+        echo "CUDA_HOME=/usr/local/cuda" >> ${GITHUB_ENV}
+
+    - if: runner.os == 'Linux' && contains(inputs.toolkit_type, 'cuda')
+      name: (Linux) print cuda setup info
+      shell: bash -l {0}
+      run: |
+        echo "CUDA_HOME=$CUDA_HOME"
+        echo "###############################"
+        echo "############ NVCC  ############"
+        echo "###############################"
+        $CUDA_HOME/bin/nvcc --version
+        md5sum $CUDA_HOME/bin/nvcc
+        echo "###############################"
+        echo "############ PTXAS ############"
+        echo "###############################"
+        $CUDA_HOME/bin/ptxas --version
+        md5sum $CUDA_HOME/bin/ptxas
+
+    - if: runner.os == 'Linux' && contains(inputs.toolkit_type, 'rocm')
+      name: (Linux) install rocm
+      shell: bash
+      run: |
+        yum install -y libzstd
+        yum install -y ${{ steps.cuda_info.outputs.CUDA_INSTALL_SCRIPT }}
+        amdgpu-install -y --usecase=rocm --no-dkms
+        echo "ROCM_PATH=/opt/rocm" >> ${GITHUB_ENV}
+        echo "PATH=$PATH:/opt/rocm/bin" >> ${GITHUB_ENV}
+        echo "MAX_JOBS=16" >> ${GITHUB_ENV}
+
+    # host compiler is too new for cuda 12.1 :(
+    - run: echo "NVCC_FLAGS=-allow-unsupported-compiler" >> $GITHUB_ENV
+      shell: bash
