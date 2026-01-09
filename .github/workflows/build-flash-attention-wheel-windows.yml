@@ -1,0 +1,98 @@
+name: Build Flash Attention 3 wheels (Windows)
+
+on:
+  workflow_dispatch:
+  # TODO: Remove this trigger before merging - only for testing from PR branch
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
+  cancel-in-progress: true
+
+jobs:
+  get-label-type:
+    if: github.repository_owner == 'pytorch'
+    name: get-label-type
+    uses: pytorch/pytorch/.github/workflows/_runner-determinator.yml@main
+    with:
+      triggering_actor: ${{ github.triggering_actor }}
+      issue_owner: ${{ github.event.pull_request.user.login || github.event.issue.user.login }}
+      curr_branch: ${{ github.head_ref || github.ref_name }}
+      curr_ref_type: ${{ github.ref_type }}
+
+  build-wheel:
+    name: "Build FA3 Windows ${{ matrix.cuda_version }}"
+    needs: get-label-type
+    runs-on: "${{ needs.get-label-type.outputs.label-type }}${{ matrix.runner }}"
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - cuda_version: "12.6"
+            cuda_short: "126"
+            torch_cuda_arch_list: "8.0;8.6;9.0"
+            runner: "windows.12xlarge"
+    timeout-minutes: 360
+    defaults:
+      run:
+        shell: bash
+    env:
+      CUDA_VERSION: ${{ matrix.cuda_short }}
+      TORCH_CUDA_ARCH_LIST: ${{ matrix.torch_cuda_arch_list }}
+      PYTHON_VERSION: "3.12"
+      VC_YEAR: "2022"
+    steps:
+      - name: Enable git long paths and symlinks on Windows
+        run: |
+          git config --global core.longpaths true
+          git config --global core.symlinks true
+          git config --global core.ignorecase false
+          git config --global core.fsmonitor false
+
+      - name: Setup SSH (Click me for login details)
+        uses: pytorch/test-infra/.github/actions/setup-ssh@main
+        with:
+          github-secret: ${{ secrets.GITHUB_TOKEN }}
+
+      - name: Checkout PyTorch
+        uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
+        with:
+          no-sudo: true
+          submodules: true
+
+      - name: Setup Windows
+        uses: ./.github/actions/setup-win
+        with:
+          cuda-version: ${{ matrix.cuda_version }}
+          python-version: ${{ env.PYTHON_VERSION }}
+
+      - name: Build Flash Attention 3 wheel
+        shell: bash
+        env:
+          FA_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
+          PYTORCH_ROOT: ${{ github.workspace }}
+        run: |
+          set -x
+          mkdir -p "${FA_FINAL_PACKAGE_DIR}"
+
+          pushd .ci/pytorch
+          cmd //c "call windows\\internal\\cuda_install.bat"
+          popd
+
+          python -m pip install torch --index-url "https://download.pytorch.org/whl/cu${CUDA_VERSION}"
+
+          cmd //c "call .ci\\flash-attention\\build-windows.bat"
+
+          echo "Wheel built:"
+          ls -la "${FA_FINAL_PACKAGE_DIR}"/*.whl || true
+
+      - uses: actions/upload-artifact@50769540e7f4bd5e21e526ee35c689e35e0d6874 # v4.4.0
+        with:
+          name: flash-attn-3-wheel-cu${{ matrix.cuda_short }}-windows_amd64
+          if-no-files-found: error
+          path: ${{ runner.temp }}/artifacts/*.whl
+
+      - name: Teardown Windows
+        uses: ./.github/actions/teardown-win
+        if: always()
+        timeout-minutes: 120
