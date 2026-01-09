@@ -27,6 +27,7 @@ from torch._higher_order_ops.utils import (
     save_tensors_and_symints_for_backward,
     saved_tensors_and_symints,
 )
+from torch._library.opaque_object import is_opaque_type
 from torch._ops import HigherOrderOperator
 from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
@@ -122,10 +123,11 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 
         assert all(
             isinstance(o, (torch.Tensor, int, torch.SymInt, torch.Generator))
+            or is_opaque_type(type(o))
             for o in operands
             if o is not None
         ), (
-            f"invoke_subgraph operands must be a list of tensors/ints/SymInts/Generator {operands}"
+            f"invoke_subgraph operands must be a list of tensors/ints/SymInts/Generator/opaque objects {operands}"
         )
 
         # pyrefly: ignore [missing-attribute]

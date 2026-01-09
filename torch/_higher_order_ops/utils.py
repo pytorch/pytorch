@@ -12,6 +12,7 @@ import torch.utils._pytree as pytree
 from torch._dispatch.python import suspend_functionalization
 from torch._guards import detect_fake_mode
 from torch._higher_order_ops.schema import HopSchema
+from torch._library.opaque_object import is_opaque_type
 from torch._ops import HigherOrderOperator, OperatorBase, OpOverload
 from torch._subclasses.fake_tensor import FakeTensor
 from torch._subclasses.functional_tensor import (
@@ -739,7 +740,9 @@ def _stack_pytree(pytrees):
 # We use t_idx and s_idx to keep track of the next index of the item we are going to pop for the two lists.
 def save_tensors_and_symints_for_backward(ctx, args):
     assert all(
-        isinstance(arg, (torch.Tensor, torch.SymInt, int, type(None))) for arg in args
+        isinstance(arg, (torch.Tensor, torch.SymInt, int, type(None)))
+        or is_opaque_type(type(arg))
+        for arg in args
     ), args
     partitioned_args: list[Any] = [[], []]
     pos = []

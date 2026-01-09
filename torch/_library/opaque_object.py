@@ -226,6 +226,14 @@ def is_opaque_type(cls: Any) -> bool:
     if isinstance(cls, str):
         return torch._C._is_opaque_type_registered(cls)
 
+    if (
+        isinstance(cls, type)
+        and torch._library.fake_class_registry.FakeScriptObject in cls.__bases__
+    ):
+        # When creating the fake class, we subclass the opaque type and
+        # FakeScriptObject.
+        cls = cls.__bases__[0]
+
     if cls not in _OPAQUE_TYPES:
         return False
 
@@ -243,6 +251,9 @@ def is_opaque_value_type(cls: Any) -> bool:
     if isinstance(cls, str):
         return _OPAQUE_TYPES_BY_NAME[cls].opaque_typ == "value"
 
+    if torch._library.fake_class_registry.FakeScriptObject in cls.__bases__:
+        cls = cls.__bases__[0]
+
     return _OPAQUE_TYPES[cls].opaque_typ == "value"
 
 
@@ -256,6 +267,9 @@ def is_opaque_reference_type(cls: Any) -> bool:
 
     if isinstance(cls, str):
         return _OPAQUE_TYPES_BY_NAME[cls].opaque_typ == "reference"
+
+    if torch._library.fake_class_registry.FakeScriptObject in cls.__bases__:
+        cls = cls.__bases__[0]
 
     return _OPAQUE_TYPES[cls].opaque_typ == "reference"
 
@@ -305,6 +319,9 @@ def get_opaque_obj_info(cls: Any) -> Optional[_OpaqueTypeInfo]:
 
     if isinstance(cls, str):
         return _OPAQUE_TYPES_BY_NAME[cls]
+
+    if torch._library.fake_class_registry.FakeScriptObject in cls.__bases__:
+        cls = cls.__bases__[0]
 
     return _OPAQUE_TYPES[cls]
 
