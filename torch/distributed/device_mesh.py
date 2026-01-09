@@ -230,7 +230,7 @@ else:
                 f"which isn't large enough for layout {_layout}"
             )
 
-            self._rank = _rank if _rank is not None else get_rank()
+            self._rank = _rank
             self._device_type = device_type
             self._layout = _layout
             self._rank_map = _rank_map
@@ -285,6 +285,10 @@ else:
                 if is_initialized() and get_backend() == "threaded":
                     # pyrefly: ignore [bad-assignment]
                     self._thread_id = threading.get_ident()
+
+                # Now that the process group is initialized, we can get the rank
+                if self._rank is None:
+                    self._rank = get_rank()
 
                 self._coordinate_on_dim = self._compute_coordinate_on_dim()
 
