@@ -18,7 +18,7 @@ class FlashAttentionHandle(Protocol):
 
 
 _RegisterFn = Callable[..., FlashAttentionHandle | None]
-_FlashAttentionImpl = Literal["FA4"]
+_FlashAttentionImpl = Literal["FA3", "FA4"]
 
 _FLASH_ATTENTION_IMPLS: dict[str, _RegisterFn] = {}
 
