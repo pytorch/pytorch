@@ -4,6 +4,9 @@ on:
   workflow_dispatch:
   # TODO: Remove this trigger before merging - only for testing from PR branch
   pull_request:
+    paths:
+      - .github/workflows/build-flash-attention-wheel.yml
+      - .ci/flash-attention/*.sh
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}
@@ -52,7 +55,7 @@ jobs:
             torch_cuda_arch_list: "8.0;8.6;9.0;10.0"
             docker_image: "pytorch/manylinuxaarch64-builder:cuda13.0"
             runner: "linux.arm64.r7g.12xlarge.memory"
-    timeout-minutes: 240
+    timeout-minutes: 360
     env:
       DOCKER_IMAGE: ${{ matrix.docker_image }}
       CUDA_VERSION: ${{ matrix.cuda_version }}
