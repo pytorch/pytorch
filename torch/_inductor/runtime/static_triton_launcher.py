@@ -299,6 +299,7 @@ class StaticallyLaunchedTritonKernel:
             stream,
         )
 
+
 class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
     @cached_property
     def C_impl(self):
