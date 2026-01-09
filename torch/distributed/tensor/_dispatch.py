@@ -14,8 +14,8 @@ from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._nonlinear_redux import (
-    register_argminmax_handler,
-    register_minmax_handler,
+    argminmax_handler,
+    minmax_dim_handler,
 )
 from torch.distributed.tensor._op_schema import (
     OpInfo,
@@ -157,10 +157,10 @@ class OpDispatcher:
             aten.convolution_backward.default: convolution_backward_handler,
             aten._amp_foreach_non_finite_check_and_unscale_.default: found_inf_reduce_handler,
             aten.as_strided.default: as_strided_handler,
-            aten.argmin.default: register_argminmax_handler(),
-            aten.argmax.default: register_argminmax_handler(),
-            aten.max.dim: register_minmax_handler(),
-            aten.min.dim: register_minmax_handler(),
+            aten.argmin.default: argminmax_handler,
+            aten.argmax.default: argminmax_handler,
+            aten.max.dim: minmax_dim_handler,
+            aten.min.dim: minmax_dim_handler,
         }
 
     # ********************************************************************************************
