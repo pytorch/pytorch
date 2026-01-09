@@ -388,10 +388,8 @@ pointwise_ops = [
     aten.square.out,
     aten.square_.default,
     aten.sub.Scalar,
-    aten.sub.Tensor,
     aten.sub.out,
     aten.sub_.Scalar,
-    aten.sub_.Tensor,
     aten.tan.default,
     aten.tan.out,
     aten.tan_.default,
@@ -426,13 +424,14 @@ linear_pointwise_ops = {
     aten.to.dtype: 0,
     aten.add.Tensor: 1,
     aten.add_.Tensor: 1,
+    aten.sub.Tensor: 1,
+    aten.sub_.Tensor: 1,
     aten.div.Scalar: 0,
     aten.div_.Scalar: 0,
     aten.mul.Scalar: 0,
     aten.mul_.Scalar: 0,
     aten.mul.Tensor: 2,
     aten.mul_.Tensor: 2,
-    aten.copy_.default: 1,
 }
 
 # Ops that preserve specific Partial types through the operation.
@@ -604,6 +603,16 @@ def single_mesh_dim_common_pointwise_strategy(
     return placements_list
 
 
+def copy_strategy(op_schema: OpSchema) -> StrategyType:
+    """
+    Strategy for copy_ that preserves any Partial placement.
+
+    copy_ simply copies data and should preserve whatever Partial placement
+    the destination has, regardless of the reduce_op type (sum, avg, max, min, etc.).
+    """
+    return pointwise_strategy(op_schema, preserve_partial="all")
+
+
 def common_pointwise_strategy(
     op,
     args_schema: Sequence[object],
@@ -675,7 +684,10 @@ def common_pointwise_strategy(
                     )
 
                 # Check if this partial type should be preserved
-                if preserve_partial is not None and placement.is_partial(
+                # preserve_partial="all" preserves any Partial type (used for copy_)
+                if preserve_partial == "all":
+                    out_placements.append(placement)
+                elif preserve_partial is not None and placement.is_partial(
                     preserve_partial
                 ):
                     out_placements.append(placement)
@@ -783,7 +795,12 @@ def common_pointwise_strategy(
     return pointwise_strategy
 
 
-p_sum_scalar_redistribute_ops = {aten.add.Tensor, aten.add_.Tensor}
+p_sum_scalar_redistribute_ops = {
+    aten.add.Tensor,
+    aten.add_.Tensor,
+    aten.sub.Tensor,
+    aten.sub_.Tensor,
+}
 
 norm_partial_avoidable_redistribute_ops = {
     aten.div.Scalar,
@@ -806,6 +823,11 @@ for op in partial_preserving_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
         partial_preserving_pointwise_strategy
     )
+
+# Register copy_ with its custom strategy that preserves all Partial types
+register_op_strategy(
+    aten.copy_.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+)(copy_strategy)
 
 for op in pointwise_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
