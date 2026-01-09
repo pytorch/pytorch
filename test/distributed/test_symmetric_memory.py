@@ -1297,14 +1297,9 @@ class LoweringTest(MultiProcContinuousTest):
         def func_no_reuse(x, w1, w2):
             a = torch.mm(x, w1)
             b = torch.mm(a, w2)
-
-            # Both a and b need comm buffers that are live simultaneously
+            # Both `a` and `b` need comm buffers that are live simultaneously
             a = torch.ops.symm_mem.one_shot_all_reduce(a, "sum", "0")
-            a = torch.ops._c10d_functional.wait_tensor(a)
-
             b = torch.ops._c10d_functional.all_reduce(b, "sum", "0")
-            b = torch.ops._c10d_functional.wait_tensor(b)
-
             return a + b
 
         compiled_no_reuse = torch.compile(func_no_reuse, fullgraph=True)
@@ -1315,21 +1310,25 @@ class LoweringTest(MultiProcContinuousTest):
             len(p2p_matches), 2, f"Expected 2 p2p allocations, got {len(p2p_matches)}"
         )
 
+        # Check numerical result for no_reuse path
+        eager_no_reuse = func_no_reuse(x, w1, w2)
+        compiled_output_no_reuse = compiled_no_reuse(x, w1, w2)
+        torch.testing.assert_close(
+            eager_no_reuse,
+            compiled_output_no_reuse,
+            rtol=1e-5,
+            atol=1e-5,
+            msg="Compiled and eager (no reuse) outputs do not match",
+        )
+
         def func_reuse(x, w1, w2, w3):
             a = torch.mm(x, w1)
-
             # First all_reduce uses a comm buffer
             a = torch.ops._c10d_functional.all_reduce(a, "sum", "0")
-            a = torch.ops._c10d_functional.wait_tensor(a)
-
-            # After wait_tensor, the comm buffer for 'a' can be freed
-            b = torch.mm(a, w2)  # b is a regular cuda allocation
+            b = torch.mm(a, w2)  # `b` is a regular cuda allocation
+            # `a` can be freed here, `c` can reuse the freed `a`
             c = torch.mm(b, w3)
-
-            # Second all_reduce can reuse the freed comm buffer
             c = torch.ops.symm_mem.one_shot_all_reduce(c, "sum", "0")
-            c = torch.ops._c10d_functional.wait_tensor(c)
-
             return c
 
         compiled_reuse = torch.compile(func_reuse, fullgraph=True)
@@ -1345,6 +1344,17 @@ class LoweringTest(MultiProcContinuousTest):
         cuda_matches = re.findall(r"buf\d+ = empty_strided_cuda", code_reuse)
         self.assertGreaterEqual(
             len(cuda_matches), 1, "Expected at least 1 regular cuda allocation"
+        )
+
+        # Check numerical result for reuse path
+        eager_reuse = func_reuse(x, w1, w2, w3)
+        compiled_output_reuse = compiled_reuse(x, w1, w2, w3)
+        torch.testing.assert_close(
+            eager_reuse,
+            compiled_output_reuse,
+            rtol=1e-5,
+            atol=1e-5,
+            msg="Compiled and eager (reuse) outputs do not match",
         )
 
 

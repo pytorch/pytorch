@@ -746,6 +746,8 @@ class EfficientPeakEstimate:
 
 @dataclasses.dataclass
 class AllocateLine(MemoryPlanningLine):
+    """Represents a buffer allocation during memory planning."""
+
     node: BufferLike
     comm_buffer: bool = False
 
