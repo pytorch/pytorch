@@ -177,6 +177,24 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
 
 #else
 
+/*
+This implementation of gatherTopK is a modified version of the original gatherTopK kernel.
+This kernel is called after we have found the k-th highest element in our input.
+It gathers values that are greater (or less than, depending on the sort direction) than the k-th highest element (phase 1)
+and then adds the values that are equal to the k-th highest element as long as there is space available (phase 2).
+In the original implementation, we call exclusiveBinaryPrefixScan to calculate the index to write the result to.
+However, exclusiveBinaryPrefixScan has two block level synchronization points, which is not efficient, specially
+considering that exclusiveBinaryPrefixScan is called in a loop.
+In this implementation, we use warp level compaction to calculate the index to write the result to.
+In both phases, each warp first counts the number of values it intends to add to the result.
+Then through an atomic add, the warp reserves space for itself (atomically increases the write index variable)
+and then writes the result to the corresponding indices. This requires no block level synchronization.
+It should be noted that we have added a block level synchronization point after phase 1 to make sure all threads have completed phase 1.
+This synchronization is cheaper than the ones in exclusiveBinaryPrefixScan because it is called only once.
+This synchronization is necessary because phase1 assumes it always has space to write all the values that are larger (or smaller) 
+than the k-th highest (or lowest) element but phase 2 tops off the output as long as there is space available.
+*/
+
 template <typename T, typename IndexType, int Dim, bool WithKthValues>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> input,
