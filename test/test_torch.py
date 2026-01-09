@@ -422,10 +422,27 @@ class TestTorchDeviceType(TestCase):
         # This is OK, it changes the meta storage size without allocating
         s0.resize_(10)
 
+    def test_storage_resize_invalid_access(self):
+        # Test that accessing tensor data after storage resize raises RuntimeError
+        # instead of segfaulting
+        tensor = torch.tensor([[1.0, 2.0, 3.0], [4.0, 5.0, 6.0]])
+        tensor.untyped_storage().resize_(0)
+
+        with self.assertRaisesRegex(RuntimeError, "Cannot access storage"):
+            tensor.cov()
+
+        # Test with nonzero
+        x = torch.tensor([[1, 0, 2], [0, 3, 0], [4, 0, 5]])
+        result = x.nonzero()
+        result.untyped_storage().resize_(0)
+
+        with self.assertRaisesRegex(RuntimeError, "Cannot access storage"):
+            str(result)
+
     @onlyCUDA
     def test_module_share_memory(self):
         # Test fix for issue #80733
-        # See https://github.com/pytorch/pytorch/issues/80733
+        # See https://github.com/pytorch/pytorch/issues/80733(regression test for issue
         model = torch.nn.Linear(3, 1)
         _model_cuda = model.to('cuda')
         model.share_memory()
