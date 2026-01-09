@@ -53,6 +53,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
     tf32_on_and_off,
     tf32_enabled,
+    math_sdp_precision,
 )
 
 if TEST_FAIRSEQ:
@@ -126,6 +127,12 @@ def _check_equal(
         for gold, ref, tst in zip(golden.unbind(), reference.unbind(), test.unbind()):
             _check_equal(gold, ref, tst, fudge_factor, tensor_name)
         return
+
+    if golden.is_cuda and golden.dtype == torch.float32:
+        assert torch.backends.cuda.math_sdp.fp32_precision == "ieee", (
+            "Testing script error: FP32 golden tensor must be calculated with IEEE"
+            " precision. Add @tf32_enabled() to related tests to fix it."
+        )
 
     # Compute error between golden
     test_error = (golden - test).abs().max()

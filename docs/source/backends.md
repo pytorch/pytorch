@@ -74,6 +74,18 @@ These backends include:
 ```
 
 ```{eval-rst}
+.. currentmodule:: torch.backends.cuda.math_sdp
+```
+
+```{eval-rst}
+.. attribute::  fp32_precision
+
+    A :class:`str` that controls whether TensorFloat-32 tensor cores may be
+    used in the MATH backend of scaled dot product attention (SDPA) API.
+    Allowed values are ``ieee`` and ``tf32``.
+```
+
+```{eval-rst}
 .. currentmodule:: torch.backends.cuda
 ```
 
