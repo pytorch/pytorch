@@ -419,6 +419,10 @@ class TorchBenchmarkRunner(BenchmarkRunner):
     def use_larger_multiplier_for_smaller_tensor(self, name):
         return name in self._require_larger_multiplier_for_smaller_tensor
 
+    def use_iou_for_bool_accuracy(self, name):
+        iou_models = self._tolerance.get("use_iou_for_bool_masks", [])
+        return name in iou_models
+
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         tolerance = 1e-4
         cosine = self.args.cosine
