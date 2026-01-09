@@ -127,7 +127,18 @@ else:
         """
         return getattr(torch, device_type, None)
 
-    class DeviceMesh:
+    DEVICE_MESH_MARKER = "torch.distributed.device_mesh.DeviceMesh"
+
+    class IsInstanceCheck(type):
+        def __instancecheck__(cls, instance):
+            logger.warning(
+                "Please use DeviceMesh._isinstance(x) instead of "
+                "isinstance(x, DeviceMesh) as this might cause some "
+                "incorrect behavior when tracing with torch.compile.",
+            )
+            return super().__instancecheck__(instance)
+
+    class DeviceMesh(metaclass=IsInstanceCheck):
         """
         DeviceMesh represents a mesh of devices, where layout of devices could be
         represented as a n-d dimension array, and each value of the n-d dimensional
@@ -182,6 +193,15 @@ else:
         _root_mesh: Optional["DeviceMesh"] = None
         # Record flatten mesh name to its flattened mesh in root mesh.
         _flatten_mapping: dict[str, "DeviceMesh"]
+        _marker = DEVICE_MESH_MARKER
+
+        @staticmethod
+        def _isinstance(obj) -> bool:
+            # When tracing a DeviceMesh, we represent it as a FakeScriptObject.
+            # This causes all `isinstance(x, DeviceMesh)` checks to return
+            # False. So instead, we will use `DeviceMesh._isinstance(x)`, which
+            # will check if this marker is on the DeviceMesh
+            return obj._marker == DEVICE_MESH_MARKER
 
         def __init__(
             self,
@@ -537,14 +557,18 @@ else:
         def __eq__(self, other: object) -> bool:
             if self is other:
                 return True
-            if not isinstance(other, DeviceMesh):
+            if not DeviceMesh._isinstance(other):
                 return False
             return (
-                self._flatten_rank_map == other._flatten_rank_map
-                and self._layout == other._layout
-                and self._device_type == other._device_type
-                and self._mesh_dim_names == other._mesh_dim_names
-                and self._thread_id == other._thread_id
+                self._flatten_rank_map
+                == other._flatten_rank_map  # pyrefly: ignore[missing-attribute]
+                and self._layout == other._layout  # pyrefly: ignore[missing-attribute]
+                and self._device_type
+                == other._device_type  # pyrefly: ignore[missing-attribute]
+                and self._mesh_dim_names
+                == other._mesh_dim_names  # pyrefly: ignore[missing-attribute]
+                and self._thread_id
+                == other._thread_id  # pyrefly: ignore[missing-attribute]
             )
 
         def __getitem__(self, mesh_dim_names: str | tuple[str, ...]) -> "DeviceMesh":

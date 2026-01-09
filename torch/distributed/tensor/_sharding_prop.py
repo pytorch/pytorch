@@ -485,7 +485,7 @@ class ShardingPropagator:
 
             if single_dim_strategy is not None:
                 mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
-                assert isinstance(mesh, DeviceMesh), "Expected to find a valid mesh"
+                assert DeviceMesh._isinstance(mesh), "Expected to find a valid mesh"
                 # if we run into a case where we register a single-dim rule for an op that can't propagate tensor meta,
                 # we could loosen this assert, but it's better to fix gaps in tensor meta prop. We want to end up
                 # with the invariant that all DTensorSpec have a valid tensormeta, but many existing sharding rules

@@ -193,7 +193,7 @@ def _is_valid_hybrid_shard_pg_type(process_group: Any) -> bool:
 
 @no_type_check
 def _is_valid_hybrid_shard_device_mesh(device_mesh: DeviceMesh) -> bool:
-    return isinstance(device_mesh, DeviceMesh) and device_mesh.ndim == 2
+    return DeviceMesh._isinstance(device_mesh) and device_mesh.ndim == 2
 
 
 @no_type_check

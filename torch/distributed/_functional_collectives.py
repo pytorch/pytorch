@@ -1146,20 +1146,20 @@ def _expand_group(group: RANK_TYPES, tag: str = "") -> tuple[str, list[int], int
         rankset = dist.get_process_group_ranks(group)
         group_size = len(rankset)
         tag = tag or c10d._get_group_tag(group)
-    elif isinstance(group, DeviceMesh):
-        if group.ndim != 1:
+    elif DeviceMesh._isinstance(group):
+        if group.ndim != 1:  # pyrefly: ignore[missing-attribute]
             raise AssertionError(
                 "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
             )
         # TODO: it should run collective in the whole mesh instead of dim 0
-        pg = group.get_group()
+        pg = group.get_group()  # pyrefly: ignore[missing-attribute]
         rankset = dist.get_process_group_ranks(pg)
         group_size = len(rankset)
         tag = tag or c10d._get_group_tag(pg)
     elif isinstance(group, tuple):
         if (
             len(group) == 2
-            and isinstance(group[0], DeviceMesh)
+            and DeviceMesh._isinstance(group[0])
             and isinstance(group[1], int)
         ):
             dmesh = group[0]
@@ -1192,16 +1192,16 @@ def _resolve_group_name(group: RANK_TYPES, tag: str = "") -> c10d.GroupName:
         # literally the underlying type so this is fine). I haven't been able to
         # reproduce it in isolation (see T247631668).
         return cast(c10d.GroupName, group)  # c10d.GroupName(group)
-    elif isinstance(group, DeviceMesh):
-        if group.ndim != 1:
+    elif DeviceMesh._isinstance(group):
+        if group.ndim != 1:  # pyrefly: ignore[missing-attribute]
             raise AssertionError(
                 "Only 1D mesh is supported, pass in (DeviceMesh, int) together if mesh > 1D"
             )
-        return group._dim_group_names[0]
+        return group._dim_group_names[0]  # pyrefly: ignore[missing-attribute]
     elif isinstance(group, tuple):
         if (
             len(group) == 2
-            and isinstance(group[0], DeviceMesh)
+            and DeviceMesh._isinstance(group[0])
             and isinstance(group[1], int)
         ):
             dmesh = group[0]
