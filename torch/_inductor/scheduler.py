@@ -4405,7 +4405,9 @@ class Scheduler:
                 pending_fusions[node1] = pending_fusion
                 pending_fusions[node2] = pending_fusion
 
-        def try_possible_fusions(possible_fusions: list[BaseSchedulerNode]):
+        def try_possible_fusions(
+            possible_fusions: list[tuple[BaseSchedulerNode, BaseSchedulerNode]],
+        ):
             for node1, node2 in possible_fusions:
                 # if either node is in a pending fusion, resolve it.
                 # since we iterate on potential fusions based on profitability
@@ -4433,21 +4435,34 @@ class Scheduler:
 
                     self.fuse_two_nodes(node1, node2, fused_nodes)
 
+        all_possible_fusions = self.get_possible_fusions(nodes, is_reorder_round)
         possible_fusions = [
             (node1, node2)
-            for (node1, node2) in self.get_possible_fusions(nodes, is_reorder_round)
+            for (node1, node2) in all_possible_fusions
             if not is_template_fusion(node1, node2)
         ]
-        if config.epilogue_fusion:
-            possible_fusions.extend(
-                [
-                    (node1, node2)
-                    for (node1, node2) in self.get_possible_fusions(
-                        nodes, is_reorder_round
-                    )
-                    if is_epilogue_fusion(node1, node2)
-                ]
-            )
+
+        possible_epilogues = []
+        epilogue_template_nodes: OrderedSet[BaseSchedulerNode] = OrderedSet()
+
+        possible_epilogues = [
+            (node1, node2)
+            for (node1, node2) in all_possible_fusions
+            if is_epilogue_fusion(node1, node2)
+        ]
+        possible_fusions.extend(possible_epilogues)
+
+        # For prologues that depend on a template eligible for an epilogue, delay
+        # fusion decision until after epilogue fusion has been evaluated
+        for node1, _ in possible_epilogues:
+            epilogue_template_nodes.add(node1)
+
+        possible_prologues = [
+            (node1, node2)
+            for (node1, node2) in all_possible_fusions
+            if is_prologue_fusion(node1, node2) and node2 not in epilogue_template_nodes
+        ]
+        possible_fusions.extend(possible_prologues)
 
         try_possible_fusions(possible_fusions)
         seen_pair_speedup_fn: OrderedSet[Callable[[], bool]] = OrderedSet()
@@ -4471,14 +4486,18 @@ class Scheduler:
 
         self.evaluate_pending_template_fusions(epilogue_fusion_nodes, fused_nodes)
 
-        if config.prologue_fusion:
-            possible_prologues = [
-                (node1, node2)
-                for (node1, node2) in self.get_possible_fusions(nodes, is_reorder_round)
-                if is_prologue_fusion(node1, node2)
-            ]
-            try_possible_fusions(possible_prologues)
-            self.evaluate_pending_template_fusions(prologue_fusion_nodes, fused_nodes)
+        self.evaluate_pending_template_fusions(prologue_fusion_nodes, fused_nodes)
+        prologue_fusion_nodes.clear()
+
+        # Now evaluate fusions for prologues which had overlapping templates with
+        # epilogues
+        possible_prologues = [
+            (node1, node2)
+            for (node1, node2) in all_possible_fusions
+            if is_prologue_fusion(node1, node2) and node2 in epilogue_template_nodes
+        ]
+        try_possible_fusions(possible_prologues)
+        self.evaluate_pending_template_fusions(prologue_fusion_nodes, fused_nodes)
 
         nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         nodes = self.topological_sort_schedule(nodes)
