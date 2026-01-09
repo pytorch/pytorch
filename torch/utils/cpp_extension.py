@@ -2634,6 +2634,12 @@ def _get_rocm_arch_flags(cflags: list[str] | None = None) -> list[str]:
             archs = archFlags.split()
         else:
             archs = []
+            logger.warning(
+                "Failed to auto-detect ROCm architecture. Extensions will be compiled "
+                "without architecture-specific optimizations. Set PYTORCH_ROCM_ARCH "
+                "environment variable to specify target architectures "
+                "(e.g., export PYTORCH_ROCM_ARCH='gfx90a;gfx942')."
+            )
     else:
         archs = _archs.replace(' ', ';').split(';')
     flags = [f'--offload-arch={arch}' for arch in archs]
