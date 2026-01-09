@@ -318,7 +318,7 @@ def _varlen_attn_backward_fake(
 
 
 def _backward(
-    ctx: Any, grad_out: torch.Tensor, grad_lse: torch.Tensor, grad_rng: torch.Tensor
+    ctx: Any, grad_out: torch.Tensor
 ) -> tuple[torch.Tensor | None, ...]:
     query, key, value, cu_seq_q, cu_seq_k, out, lse, rng_state = ctx.saved_tensors
 
@@ -342,7 +342,7 @@ def _backward(
         rng_state,
         scale,
     )
-    return dq, dk, dv, None, None, None, None, None, None
+    return dq, dk, dv, None, None, None, None, None
 
 
 _varlen_attn.register_autograd(_backward, setup_context=_setup_context)
