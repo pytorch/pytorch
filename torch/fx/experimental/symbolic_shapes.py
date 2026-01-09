@@ -480,6 +480,11 @@ def has_static_value(a: Union[SymBool, SymFloat, SymInt, bool, float, int]) -> b
     return a.node.shape_env.bound_sympy(a.node.expr).is_singleton()  # type: ignore[union-attr]
 
 
+@deprecated(
+    "guard_size_oblivious will be removed. Consider using explicit unbacked handling \
+    potentially utilizing guard_or_false, guard_or_true, or statically_known_true",
+    category=FutureWarning,
+)
 def guard_size_oblivious(expr: Union[torch.SymBool, bool]) -> bool:
     """
     Perform a guard on a symbolic boolean expression in a size oblivious way.
@@ -535,7 +540,7 @@ def resolve_unbacked_bindings(
     with these new symints. To ensure consistency we use PropagateUnbackedSymInts
     to rename unbacked bindings to their old ones. But all of the node metas are
     still using the old bindings from before the renaming. This function helps to
-    post facto apply any renamings discovered in the PropogateUnbackedSymInts pass.
+    post facto apply any renamings discovered in the PropagateUnbackedSymInts pass.
     """
     if bindings is None:
         return None
@@ -2493,7 +2498,7 @@ def _maybe_evaluate_static_worker(
         return None
 
     # We need to canonicalize, as after expand we may have something like `a + b = a` and
-    # sympy will not simplify the a. The two appeareances of the a will then make value ranges
+    # sympy will not simplify the a. The two appearances of the a will then make value ranges
     # analysis give lose bounds
     new_expr = canonicalize_bool_expr(safe_expand(new_expr))
     if new_expr.is_number:

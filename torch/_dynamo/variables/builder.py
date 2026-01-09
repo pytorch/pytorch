@@ -248,6 +248,7 @@ from .misc import (
     MethodWrapperVariable,
     NumpyDTypeVariable,
     NumpyVariable,
+    ObjectVariable,
     PythonModuleVariable,
     RandomClassVariable,
     RandomVariable,
@@ -1769,6 +1770,9 @@ class VariableBuilder:
                 return self.wrap_symint(value.val, dynamism=DimDynamic.DYNAMIC)
             else:
                 raise RuntimeError(f"Undefined dynamism {value.dynamism}")
+        elif istype(value, object):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return ObjectVariable(value, source=self.source)
         else:
             return self.wrap_user_defined(value)
 
@@ -1947,9 +1951,9 @@ class VariableBuilder:
         # As long as this runs before AOT this is sound
         if value in self.tx.output.side_effects:
             var = self.tx.output.side_effects[value]
-            # type: ignore[attr-defiend]
+            # type: ignore[attr-defined]
             var.proxy.node.meta["tensor_dict"]["_dynamo_static_input_type"] = (
-                # type: ignore[attr-defiend]
+                # type: ignore[attr-defined]
                 value._dynamo_static_input_type
             )
 
@@ -4066,6 +4070,8 @@ class SourcelessBuilder:
         ):
             proxy = tx.output.bound_symbols[value.node.expr]
             return SymNodeVariable.create(tx, proxy)
+        elif istype(value, object):
+            return ObjectVariable(value)
         unimplemented(
             gb_type="Unexpected type in sourceless builder",
             context=f"{value_type.__module__}.{value_type.__qualname__}",
