@@ -128,8 +128,11 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
             *(var_args.as_python_constant()),
             **(var_kwargs.as_python_constant()),
         )
+        fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
+            tx.output.fake_mode, opaque_obj
+        )
 
-        return TorchScriptObjectVariable.create(opaque_obj, opaque_obj)
+        return TorchScriptObjectVariable.create(opaque_obj, fake_script_obj)
 
 
 class TorchScriptObjectVariable(UserDefinedObjectVariable):
@@ -155,12 +158,6 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
     def as_proxy(self) -> Proxy:
         return self.proxy
 
-    def _is_opaque_type(self) -> bool:
-        return (
-            hasattr(self.value, "script_class_name")
-            and is_opaque_reference_type(self.value.script_class_name)
-        ) or is_opaque_value_type(type(self.value))
-
     @_raise_hard_error_if_graph_break(
         "Dynamo cannot safely trace script object due to graph break."
     )
@@ -169,12 +166,10 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
 
         from .higher_order_ops import TorchHigherOrderOperatorVariable
 
-        if self._is_opaque_type():
-            real_obj = (
-                self.value
-                if is_opaque_value_type(type(self.value))
-                else self.value.real_obj
-            )
+        if hasattr(self.value, "script_class_name") and is_opaque_type(
+            self.value.script_class_name
+        ):
+            real_obj = self.value.real_obj  # pyrefly: ignore[missing-attribute]
 
             member_type = get_member_type(
                 type(real_obj),
@@ -246,12 +241,10 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         args: Iterable[Any],
         kwargs: dict[str, Any],
     ) -> VariableTracker:
-        if self._is_opaque_type():
-            real_obj = (
-                self.value
-                if is_opaque_value_type(type(self.value))
-                else self.value.real_obj
-            )
+        if hasattr(self.value, "script_class_name") and is_opaque_type(
+            self.value.script_class_name
+        ):
+            real_obj = self.value.real_obj  # pyrefly: ignore[missing-attribute]
             value_type = type(real_obj)
 
             member_type = get_member_type(
@@ -325,6 +318,8 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         )
 
     def as_python_constant(self) -> Any:
-        if is_opaque_value_type(type(self.value)):
-            return self.value
+        if is_opaque_value_type(
+            type(self.value.real_obj)  # pyrefly: ignore[missing-attribute]
+        ):
+            return self.value.real_obj  # pyrefly: ignore[missing-attribute]
         return super().as_python_constant()
