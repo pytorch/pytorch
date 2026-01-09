@@ -684,13 +684,23 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
                 cache_key, debug_lines = autograd_cache_key(
                     gm, args, aot_config, fx_config
                 )
-                result: Optional[tuple[GenericAOTAutogradResult, bytes]] = (
-                    AOTAutogradCache._lookup(
-                        cache_key, local, remote, args, cache_info, aot_config
+                result: Optional[tuple[GenericAOTAutogradResult, bytes]] = None
+                remote_cache_hit = False
+                if local:
+                    result = AOTAutogradCache._lookup(
+                        cache_key, True, False, args, cache_info, aot_config
                     )
-                )
+                if result is None and remote:
+                    result = AOTAutogradCache._lookup(
+                        cache_key, False, True, args, cache_info, aot_config
+                    )
+                    if result is not None:
+                        remote_cache_hit = True
+
                 if result is not None:
                     (entry, pickled_content) = result
+                    if remote_cache_hit:
+                        AOTAutogradCache.save(cache_key, entry, False)
                     compiled_fn = entry.wrap_post_compile(args, aot_config, fx_config)
                     # Make the compiled_fn serializable, where the serialize function just
                     # makes a copy of the original entry before post compile via the pickled content
