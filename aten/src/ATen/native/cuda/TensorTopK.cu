@@ -319,8 +319,8 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
       // if hasTopK == true, we need to find the index to write the result to.
       if (hasTopK){
         int slots_available = outputSliceSize - warp_bases[warp_id]; // the number of slots available to write the result to.
-        uint64_t warp_offset = (1ULL << lane_id) - 1; // a bitmask: [0, 0, 0, ..., 0, 1, 1, 1, ..., 1] with (64-lane_id) 0s and lane_id 1s.
-        int my_offset = __popcll(ballot & warp_offset); // count the number of threads that have hasTopK == true to the right of the current thread in bitmask.
+        uint64_t warp_mask = (1ULL << lane_id) - 1; // a bitmask: [0, 0, 0, ..., 0, 1, 1, 1, ..., 1] with (64-lane_id) 0s and lane_id 1s.
+        int my_offset = __popcll(ballot & warp_mask); // count the number of threads that have hasTopK == true to the right of the current thread in bitmask.
         if (my_offset < slots_available){
           IndexType writeIndex = warp_bases[warp_id] + my_offset; // the index to write the result to.
           IndexType topKOffset = writeIndex * topKWithinSliceStride;
