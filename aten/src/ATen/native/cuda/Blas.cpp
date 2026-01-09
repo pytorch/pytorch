@@ -339,7 +339,7 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   // Handle copying bias (self) into result {
   const bool can_avoid_bias_copy = (
     // BLAS path without out-of-place/epilogue bias
-    (disable_addmm_cuda_lt && !args.bias.has_value())
+    (disable_addmm_cuda_lt && !args.bias.has_value() && result.is_same(self))
     // Lt path with a no-copy out-of-place/epilogue bias
     || (!disable_addmm_cuda_lt && !args.must_copy_bias_into_result())
   );
