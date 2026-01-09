@@ -66,7 +66,7 @@ class RNGState:
     def __init__(self, seed):
         self.seed = seed
         self.rng = random.Random(self.seed)
-        self.dummy = lambda x: x
+        self.dummy = lambda x: x  # test something not pickleable
 
     def get_seed(self):
         return self.seed
@@ -168,7 +168,11 @@ register_opaque_type(
 )
 register_opaque_type(AddModule, typ="reference")
 register_opaque_type(ValueConfig, typ="value")
-register_opaque_type(SizeStore, typ="value")
+register_opaque_type(
+    SizeStore,
+    typ="value",
+    members={"size": MemberType.USE_REAL, "increment_size": MemberType.USE_REAL},
+)
 register_opaque_type(NestedValueSize, typ="value")
 
 
@@ -586,10 +590,10 @@ def forward(self, arg0_1, arg1_1):
         self.assertExpectedInline(
             backend.fw_graphs[0].code.strip(),
             """\
-def forward(self, arg0_1, arg1_1, arg2_1):
-    noisy_inject = torch.ops._TestOpaqueObject.noisy_inject.default(arg1_1, arg0_1);  arg1_1 = arg0_1 = None
+def forward(self, arg0_1, arg1_1):
+    noisy_inject = torch.ops._TestOpaqueObject.noisy_inject.default(arg1_1, arg0_1);  arg1_1 = None
     mul = torch.ops.aten.mul.Tensor(noisy_inject, 1);  noisy_inject = None
-    noisy_inject_1 = torch.ops._TestOpaqueObject.noisy_inject.default(mul, arg2_1);  mul = arg2_1 = None
+    noisy_inject_1 = torch.ops._TestOpaqueObject.noisy_inject.default(mul, arg0_1);  mul = arg0_1 = None
     add = torch.ops.aten.add.Tensor(noisy_inject_1, noisy_inject_1);  noisy_inject_1 = None
     return (add,)""",  # noqa: B950
         )
@@ -823,11 +827,6 @@ def forward(self, primals, tangents):
 
             def __fx_repr__(self):
                 return f"SpecifyMember({self.x})"
-
-        with self.assertRaisesRegex(TypeError, "No need to specify `members`"):
-            register_opaque_type(
-                SpecifyMember, typ="value", members={"x": MemberType.USE_REAL}
-            )
 
         with self.assertRaisesRegex(TypeError, "No need to specify `guard_fn`"):
             register_opaque_type(SpecifyMember, typ="value", guard_fn=lambda obj: [])
