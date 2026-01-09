@@ -45,6 +45,7 @@ if is_available():
         _ControlCollectives,
         _DEFAULT_FIRST_BUCKET_BYTES,
         _make_nccl_premul_sum,
+        _make_xccl_premul_sum,
         _register_builtin_comm_hook,
         _register_comm_hook,
         _StoreCollectives,
