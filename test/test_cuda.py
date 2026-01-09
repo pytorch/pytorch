@@ -859,6 +859,7 @@ print(t.is_pinned())
             self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "none")
 
     @recover_orig_fp32_precision
+    @serialTest()
     def test_fp32_precision_with_float32_matmul_precision(self):
         torch.set_float32_matmul_precision("highest")
         self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "ieee")
@@ -868,6 +869,7 @@ print(t.is_pinned())
         self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "tf32")
 
     @recover_orig_fp32_precision
+    @serialTest()
     def test_invalid_status_for_legacy_api(self):
         torch.backends.cudnn.conv.fp32_precision = "none"
         torch.backends.cudnn.rnn.fp32_precision = "tf32"
