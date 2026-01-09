@@ -8,6 +8,9 @@ from torch._dynamo.testing import extract_graph_and_tracker
 from torch.utils._pytree import tree_map
 
 
+device_type = acc.type if (acc := torch.accelerator.current_accelerator()) else "cpu"
+
+
 class GraphRegionTrackerTests(TestCase):
     def setUp(self):
         self.exit_stack = contextlib.ExitStack()
