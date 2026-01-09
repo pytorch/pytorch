@@ -70,7 +70,7 @@ class CTypeGen:
         elif isinstance(obj, torch.SymBool):
             return torch._C.SymBoolType.get()
         elif isinstance(obj, FakeScriptObject) or is_opaque_type(type(obj)):
-            return torch._C.PyObjectType.get()
+            return torch._C.PyObjectType.get()  # pyrefly: ignore[missing-attribute]
         return torch._C._jit_try_infer_type(obj).type()
 
 

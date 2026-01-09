@@ -1525,7 +1525,7 @@ class GraphModule(torch.nn.Module):
 
             result_1: "f32[2, 2]" = result * 2;  result = None
             return (result_1,)
-""",
+""",  # noqa: B950
         )
 
         self.assertEqual(ref, res)
