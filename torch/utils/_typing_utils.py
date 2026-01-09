@@ -1,7 +1,7 @@
 """Miscellaneous utilities to aid with typing."""
 
 from collections.abc import Callable
-from typing import Any, cast, Concatenate, Literal, overload, TypeVar
+from typing import Any, cast, Concatenate, TypeVar
 from typing_extensions import ParamSpec
 
 
@@ -21,35 +21,43 @@ _R = TypeVar("_R")
 _A1 = TypeVar("_A1")
 
 
-# ---------------------------------------------------------------------------
-# Copy call signature utilities
-#   - validate_return=False: copy params only
-#   - validate_return=True:  copy params + enforce return type matches source
-# ---------------------------------------------------------------------------
-
-
-@overload
-def copy_func_params(
-    source_func: Callable[_P, _R],
-    *,
-    validate_return: Literal[True],
-) -> Callable[[Callable[..., _R]], Callable[_P, _R]]: ...
-@overload
 def copy_func_params(
     source_func: Callable[_P, Any],
-    *,
-    validate_return: Literal[False] = False,
-) -> Callable[[Callable[..., _R]], Callable[_P, _R]]: ...
-def copy_func_params(
-    source_func: Callable[_P, Any],
-    *,
-    validate_return: bool = False,
 ) -> Callable[[Callable[..., _R]], Callable[_P, _R]]:
     """Cast the decorated function's call signature to the source_func's.
 
-    If validate_return=True, also ties the decorated function's return type to the
-    source_func's return type (static type checking only).
+    Usage:
+        def upstream_func(a: int, b: float, *, double: bool = False) -> float: ...
+        @copy_func_params(upstream_func)
+        def enhanced(a: int, b: float, *args: Any, double: bool = False, **kwargs: Any) -> str: ...
     """
+
+    def return_func(func: Callable[..., _R]) -> Callable[_P, _R]:
+        return cast(Callable[_P, _R], func)
+
+    return return_func
+
+
+def copy_method_params(
+    source_method: Callable[Concatenate[Any, _P], Any],
+) -> Callable[[Callable[..., _R]], Callable[Concatenate[_A1, _P], _R]]:
+    """Cast the decorated *method*'s call signature to the source_method's.
+    Keeps the first argument type (e.g., self/cls).
+    """
+
+    def return_func(func: Callable[..., _R]) -> Callable[Concatenate[_A1, _P], _R]:
+        return cast(Callable[Concatenate[_A1, _P], _R], func)
+
+    return return_func
+
+
+# stricter variants to preserve the origin callers Return Type too.
+# TODO: consider folding both these into the above variants with an optional
+# parameter to control whether to copy the return type or not.
+def copy_func_sig(
+    source_func: Callable[_P, _R],
+) -> Callable[[Callable[..., _R]], Callable[_P, _R]]:
+    """Cast the decorated function's call signature and return type to the source_func's."""
 
     def _return(func: Callable[..., _R]) -> Callable[_P, _R]:
         return cast(Callable[_P, _R], func)
@@ -57,29 +65,10 @@ def copy_func_params(
     return _return
 
 
-@overload
-def copy_method_params(
-    source_method: Callable[Concatenate[Any, _P], _R],
-    *,
-    validate_return: Literal[True],
-) -> Callable[[Callable[..., _R]], Callable[Concatenate[_A1, _P], _R]]: ...
-@overload
-def copy_method_params(
-    source_method: Callable[Concatenate[Any, _P], Any],
-    *,
-    validate_return: Literal[False] = False,
-) -> Callable[[Callable[..., _R]], Callable[Concatenate[_A1, _P], _R]]: ...
-def copy_method_params(
-    source_method: Callable[Concatenate[Any, _P], Any],
-    *,
-    validate_return: bool = False,
+def copy_method_sig(
+    source_method: Callable[Concatenate[_A1, _P], _R],
 ) -> Callable[[Callable[..., _R]], Callable[Concatenate[_A1, _P], _R]]:
-    """Cast the decorated *method*'s call signature to the source_method's.
-
-    Keeps the first argument type (e.g., self/cls).
-    If validate_return=True, also ties the decorated method's return type to the
-    source_method's return type (static type checking only).
-    """
+    """Cast the decorated *method*'s call signature to the source_method and return type."""
 
     def _return(func: Callable[..., _R]) -> Callable[Concatenate[_A1, _P], _R]:
         return cast(Callable[Concatenate[_A1, _P], _R], func)

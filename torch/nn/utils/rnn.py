@@ -100,7 +100,7 @@ class PackedSequence(PackedSequence_):
             bind(self.unsorted_indices, lambda t: t.pin_memory()),
         )
 
-    @copy_method_params(torch.Tensor.to, validate_return=False)
+    @copy_method_params(torch.Tensor.to)
     def to(self, *args: Any, **kwargs: Any) -> Self:
         r"""Perform dtype and/or device conversion on `self.data`.
 
