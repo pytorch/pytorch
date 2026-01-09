@@ -123,14 +123,10 @@ def _collect_shard_mesh_dims(
     shard_mesh_dims: list[int] = []
     for mesh_dim, p in enumerate(placements):
         if isinstance(p, Shard):
-            if dim is None or p.dim == (
-                dim if dim >= 0 else local_tensor.ndim + dim
-            ):
+            if dim is None or p.dim == (dim if dim >= 0 else local_tensor.ndim + dim):
                 shard_mesh_dims.append(mesh_dim)
         elif isinstance(p, _StridedShard):
-            raise NotImplementedError(
-                f"{op_call_repr} does not support _StridedShard!"
-            )
+            raise NotImplementedError(f"{op_call_repr} does not support _StridedShard!")
     return shard_mesh_dims
 
 
@@ -210,8 +206,8 @@ def argminmax_handler(
     if op_call not in _ARGMINMAX_REDUCTION_OPS:
         raise NotImplementedError(f"Unsupported reduction op: {op_call}")
 
-    local_tensor, global_shape, device_mesh, placements, dim, keepdim = (
-        _prep_arguments(str(op_call), args, kwargs)
+    local_tensor, global_shape, device_mesh, placements, dim, keepdim = _prep_arguments(
+        str(op_call), args, kwargs
     )
     output_sharding = _get_output_sharding(op_call, args, kwargs)
 
@@ -258,8 +254,8 @@ def minmax_dim_handler(
 
     This is a pure function handler that doesn't require instantiation.
     """
-    local_tensor, global_shape, device_mesh, placements, dim, keepdim = (
-        _prep_arguments(str(op_call), args, kwargs)
+    local_tensor, global_shape, device_mesh, placements, dim, keepdim = _prep_arguments(
+        str(op_call), args, kwargs
     )
     output_sharding = _get_output_sharding(op_call, args, kwargs)
 
