@@ -2154,6 +2154,16 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
             return a - b
 
     @make_test
+    def test_namedtuple_equality(a, b):
+        mytuple_1 = FunctionTests.MyNamedTuple(a, b)
+        mytuple_2 = FunctionTests.MyNamedTuple(a, b)
+
+        if mytuple_1 == mytuple_2:
+            return 1.0 + a + b
+        else:
+            return a + b
+
+    @make_test
     def test_generic_namedtuple_hasattr(a, b):
         mytuple = FunctionTests.MyGenericNamedTuple(a, b)
 

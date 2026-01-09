@@ -21,7 +21,6 @@ These classes help Dynamo track and handle arbitrary Python objects during traci
 maintaining proper semantics while enabling optimizations where possible.
 """
 
-# from __future__ import annotations
 import _collections  # type: ignore[import-not-found]
 import builtins
 import collections
@@ -2560,7 +2559,7 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
 
     _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
 
-    def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):
+    def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):  # type: ignore[all]
         from .lists import TupleVariable
 
         tx = kwargs.pop("tx", None)
