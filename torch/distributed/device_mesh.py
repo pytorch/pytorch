@@ -175,6 +175,7 @@ else:
             >>> mesh = DeviceMesh(device_type="cuda", mesh=[[0, 1, 2, 3],[4, 5, 6, 7]])
         """
 
+        _rank: int
         _device_type: str
         _rank_map: torch.Tensor
         _mesh_dim_names: tuple[str, ...] | None
@@ -285,31 +286,65 @@ else:
                     # pyrefly: ignore [bad-assignment]
                     self._thread_id = threading.get_ident()
 
+                # Now that the process group is initialized, we can get the rank
                 if _rank is None:
-                    _rank = get_rank()
+                    self._rank = get_rank()
+                else:
+                    self._rank = _rank
 
-                # calculate the coordinates of the current global rank on the mesh
-                rank_coords = (self.mesh == _rank).nonzero()
-                if rank_coords.size(0) not in (0, 1):
-                    raise AssertionError(
-                        f"rank_coords.size(0) must be 0 or 1, got {rank_coords.size(0)}"
-                    )
-                self._coordinate_on_dim: list[int] | None = (
-                    rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
+                self._coordinate_on_dim = self._compute_coordinate_on_dim()
+
+        @staticmethod
+        def _compute_coordinates_from_mesh(
+            mesh_tensor: torch.Tensor,
+            rank: int,
+        ) -> tuple[int, ...] | None:
+            """
+            Compute the coordinates of a rank within a mesh tensor.
+
+            Args:
+                mesh_tensor: The mesh tensor to search in
+                rank: The rank to find coordinates for
+
+            Returns:
+                A tuple of coordinates if the rank is found in the mesh, None otherwise
+
+            Raises:
+                AssertionError: If the rank appears more than once in the mesh
+            """
+            rank_coords = (mesh_tensor == rank).nonzero()
+            if rank_coords.size(0) not in (0, 1):
+                raise AssertionError(
+                    f"rank_coords.size(0) must be 0 or 1, got {rank_coords.size(0)}"
                 )
+
+            if rank_coords.size(0) == 0:
+                return None
+
+            coords = rank_coords[0].tolist()
+            return tuple(coords)
+
+        def _compute_coordinate_on_dim(self) -> tuple[int, ...] | None:
+            # calculate the coordinates of the current global rank on the mesh
+            return self._compute_coordinates_from_mesh(self.mesh, self._rank)
 
         @property
         def device_type(self) -> str:
             """Returns the device type of the mesh."""
             return self._device_type
 
-        @property
-        def mesh(self) -> torch.Tensor:
-            """Returns the tensor representing the layout of devices."""
-            full_mesh = self._layout.remap_to_tensor(self._rank_map)
+        @staticmethod
+        def _get_mesh_tensor_from_full_mesh(
+            full_mesh: torch.Tensor,
+            current_rank: int | None = None,
+        ) -> torch.Tensor:
             if full_mesh.size(0) == 1:
                 return full_mesh[0]
-            my_coords = (full_mesh == get_rank()).nonzero()
+
+            if current_rank is None:
+                current_rank = get_rank()
+
+            my_coords = (full_mesh == current_rank).nonzero()
             if my_coords.size(0) > 0:
                 return full_mesh[my_coords[0, 0]]
             raise RuntimeError(
@@ -317,6 +352,12 @@ else:
                 "either have all its original dimensions (e.g., no slicing) "
                 "or it needs to contain the local rank"
             )
+
+        @property
+        def mesh(self) -> torch.Tensor:
+            """Returns the tensor representing the layout of devices."""
+            full_mesh = self._layout.remap_to_tensor(self._rank_map)
+            return self._get_mesh_tensor_from_full_mesh(full_mesh)
 
         @property
         def mesh_dim_names(self) -> tuple[str, ...] | None:
@@ -380,7 +421,7 @@ else:
             rank_map: torch.Tensor,
             dim_name: str,
             backend_override: BackendConfig,
-        ) -> GroupName | None:
+        ) -> GroupName:
             # Generate a 2D global mesh tensor for the current dim for PG creation.
             pg_ranks_by_dim = sub_layout.nest().remap_to_tensor(rank_map)
             backend, pg_options = backend_override
@@ -449,6 +490,17 @@ else:
             # Otherwise, we use `new_group` instead of `split_group` to create subgroups by looping over `pg_ranks_by_dim`
             # along with appending information to the `dim_group_names` list whenever necessary.
             pg_name = None
+            found_my_rank = False
+
+            # We want a consistent naming scheme across ranks so the output
+            # graphs are the same on each rank. To do this we'll always report
+            # the name of the first created group and if that's not our rank's
+            # name then we'll add an alias.
+            #
+            # Couldn't we just tell c10d to use the same name on every rank? In
+            # theory yes, but for consistency we want to create ALL groups (even
+            # ones that don't contain our rank) and there's checks to ensure
+            # that we don't duplicate names.
             for dim_mesh in pg_ranks_by_dim:
                 subgroup_ranks = dim_mesh.tolist()
                 dim_group = new_group(
@@ -457,16 +509,26 @@ else:
                     backend=backend,
                     pg_options=pg_options,
                     group_desc=group_desc,
+                    always_return_group_name=True,
                 )
+                if pg_name is None:
+                    pg_name = "group_" + dim_group.group_name
 
                 # only add to dim_groups if the current rank in the subgroup
                 if get_rank() in subgroup_ranks:
-                    if pg_name is not None:
+                    if found_my_rank:
                         raise RuntimeError(
                             f"Each device mesh dimension should get only one process group, but got {get_rank()} "
                             f"in {subgroup_ranks}!"
                         )
-                    pg_name = dim_group.group_name
+                    found_my_rank = True
+                    if pg_name != dim_group.group_name:
+                        torch._C._distributed_c10d._register_process_group_alias(
+                            pg_name, dim_group.group_name
+                        )
+
+            if not pg_name:
+                raise RuntimeError(f"Rank {get_rank()} not present in DeviceMesh")
             return pg_name
 
         @staticmethod
@@ -964,7 +1026,7 @@ else:
                     mesh_dim_names=mesh_dim_names,
                     _init_backend=False,
                 )
-                device_mesh._dim_group_names = [group.group_name]
+                device_mesh._dim_group_names = [group.group_name_or_alias]
                 return device_mesh
 
             # nD scenario
@@ -994,7 +1056,9 @@ else:
             device_mesh = DeviceMesh(
                 device_type, mesh, mesh_dim_names=mesh_dim_names, _init_backend=False
             )
-            device_mesh._dim_group_names = [group.group_name for group in groups]
+            device_mesh._dim_group_names = [
+                group.group_name_or_alias for group in groups
+            ]
             return device_mesh
 
         def size(self, mesh_dim: int | None = None) -> int:
@@ -1066,17 +1130,32 @@ else:
             """
             return self._coordinate_on_dim is not None
 
-        def get_coordinate(self) -> list[int] | None:
+        def get_coordinate(self) -> tuple[int, ...] | None:
             """
             Return the relative indices of this rank relative to all
             dimensions of the mesh. If this rank is not part of the mesh, return None.
             """
-            return self._coordinate_on_dim if self._coordinate_on_dim else None
+            return self._coordinate_on_dim
 
         def _sym_get_coordinate(self, index: int) -> int:
-            # This is only valid when the current rank is part of the mesh.
-            assert self._coordinate_on_dim
-            return self._coordinate_on_dim[index]
+            if not _in_fake_mode():
+                # This is only valid when the current rank is part of the mesh.
+                assert self._coordinate_on_dim is not None
+                return self._coordinate_on_dim[index]
+
+            # This will cause the ops to be registered
+            from ._ops import device_mesh  # noqa: F401
+
+            # Temporarily turn off tracing while we lift the constant
+            # rank_map to a list so it can be a constant in the graph.
+            with torch._subclasses.fake_tensor.unset_fake_temporarily():
+                rank_map_list = self._rank_map.tolist()
+            rank_map = torch.tensor(rank_map_list, device="cpu", dtype=torch.int)
+            full_mesh = self._layout.remap_to_tensor(rank_map)
+
+            return torch.ops.device_mesh._runtime_compute_coordinate_on_dim(
+                full_mesh, index
+            )
 
         def _flatten(
             self,
@@ -1389,3 +1468,9 @@ else:
         )
 
         return device_mesh
+
+
+def _in_fake_mode() -> bool:
+    if context := torch._guards.TracingContext.try_get():
+        return context.fake_mode is not None
+    return False
