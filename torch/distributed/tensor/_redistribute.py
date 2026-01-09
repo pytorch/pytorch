@@ -911,6 +911,10 @@ def redistribute_local_tensor(
                         f"redistribute from {current} to {target} not supported yet"
                     )
                 else:
+                    if current != target:
+                        raise AssertionError(
+                            f"Redistribution from one partial type ({current}) to another ({target}) is unsupported."
+                        )
                     # partial -> partial no op, should never hit
                     new_local_tensor = local_tensor
 
