@@ -2991,6 +2991,25 @@ class AlgorithmSelectorCache(PersistentCache):
 
         # if we got any timings at all, pick the best of those
         choice = min(timings, key=timings.__getitem__)
+        best_time = timings[choice]
+
+        # If the best timing is Infinity, all benchmarks failed.
+        # Fall back to ExternKernelCaller (e.g., ATen) if available, otherwise log a warning.
+        if best_time == float("inf"):
+            extern_choices = [c for c in choices if isinstance(c, ExternKernelCaller)]
+            if extern_choices:
+                choice = extern_choices[0]
+                log.warning(
+                    "All autotuning benchmarks failed (timing=inf). Falling back to ExternKernelCaller: %s",
+                    choice.name,
+                )
+            else:
+                log.warning(
+                    "All autotuning benchmarks failed (timing=inf) and no ExternKernelCaller fallback available. "
+                    "Selected kernel %s may cause runtime errors.",
+                    choice.name,
+                )
+
         node = choice.output_node()
 
         log.debug("Autotuning selected choice: %s", node)
@@ -3982,6 +4001,12 @@ class AlgorithmSelectorCache(PersistentCache):
         # skip prescreening if the number of candidates is too small
         if len(candidates) < 10:
             return []
+
+        # Always include ExternKernelCaller (ATen) choices in prescreening as fallback
+        # Put them FIRST so they run before potentially buggy CUTLASS kernels
+        # This ensures we have valid fallback timings if CUTLASS kernels cause GPU errors
+        extern_choices = [c for c in choices if isinstance(c, ExternKernelCaller)]
+        candidates = extern_choices + candidates
 
         return candidates  # type: ignore[return-value]
 

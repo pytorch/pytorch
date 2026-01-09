@@ -435,14 +435,13 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
 
         templates_to_use.append(mm_contiguous_subgraph_template)
 
-    choices.extend(
-        V.choices.get_template_configs(
-            kernel_inputs,
-            templates_to_use,
-            "mm",
-            kwarg_overrides=kwarg_overrides,
-        )
-    )
+    template_choices = list(V.choices.get_template_configs(
+        kernel_inputs,
+        templates_to_use,
+        "mm",
+        kwarg_overrides=kwarg_overrides,
+    ))
+    choices.extend(template_choices)
 
     if (
         out_dtype is None
@@ -674,9 +673,8 @@ def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
         templates_to_use.append(addmm_contiguous_subgraph_template)
 
     # Single unified call for all templates
-    choices.extend(
-        V.choices.get_template_configs(kernel_inputs, templates_to_use, name)
-    )
+    template_choices = list(V.choices.get_template_configs(kernel_inputs, templates_to_use, name))
+    choices.extend(template_choices)
 
     if (
         is_nonzero

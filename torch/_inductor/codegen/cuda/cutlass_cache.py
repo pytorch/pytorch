@@ -46,7 +46,7 @@ def get_config_request_key(
             cutlass_key().hex(),
             arch,
             cuda_version,
-            instantiation_level,
+            str(instantiation_level),
             serialization_hash,
             cutlass_utils_hash,
         ]
