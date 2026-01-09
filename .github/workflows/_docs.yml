@@ -194,15 +194,27 @@ jobs:
           path: pytorch_docs/main/
           s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}
 
-      - name: Upload C++ Docs Preview
+      # - name: Upload C++ Docs Preview
+      #   uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
+      #   if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
+      #   with:
+      #     retention-days: 14
+      #     if-no-files-found: error
+      #     s3-bucket: doc-previews
+      #     path: cppdocs/
+      #     s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}/cppdocs
+
+      # Temporary: Upload C++ docs preview for ciflow/nightly debugging
+      # TODO: Remove this step before merging
+      - name: Upload C++ Docs Preview (Debug - ciflow/nightly)
         uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
-        if: ${{ github.event_name == 'pull_request' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
+        if: ${{ github.event_name == 'push' && matrix.docs_type == 'cpp' && steps.build-docs.outcome == 'success' }}
         with:
           retention-days: 14
           if-no-files-found: error
           s3-bucket: doc-previews
           path: cppdocs/
-          s3-prefix: pytorch/pytorch/${{ github.event.pull_request.number }}/cppdocs
+          s3-prefix: pytorch/pytorch/171957/cppdocs
 
       - name: Teardown Linux
         uses: pytorch/test-infra/.github/actions/teardown-linux@main
