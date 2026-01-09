@@ -71,7 +71,7 @@ void launch_grouped_bgemm_ck_impl_dispatch(
 
     // Synchronize the stream to ensure all prior GPU ops
     // affecting host memory are done.
-    AT_CUDA_CHECK(hipStreamSynchronize(c10::hip::getCurrentHIPStream()));
+    AT_CUDA_CHECK(hipStreamSynchronize(c10::cuda::getCurrentCUDAStream()));
 
     // for each group, calculate m,n,k,lda,ldb,ldc and A,B,out pointer base addresses.
     if (mat_a_dim == 2 && mat_b_dim == 2) {
@@ -389,7 +389,7 @@ void launch_grouped_bgemm_ck_impl_dispatch(
     gemm_instance.SetWorkSpacePointer(&argument, ws_buf);
 
     auto invoker = gemm_instance.MakeInvoker();
-    hipStream_t stream = c10::hip::getCurrentHIPStream();
+    hipStream_t stream = c10::cuda::getCurrentCUDAStream();
     invoker.Run(argument, {stream});
     hipFree(gemm_arg_buf);
     hipFree(ws_buf);
