@@ -6846,3 +6846,4 @@ class BaseScheduling:  # noqa: docstring_linter
             V.graph.wrapper_code.write_provenance_debug_handle(
                 kernel_name, debug_handle
             )
+
