@@ -14,7 +14,7 @@ namespace at::vec {
 // See Note [CPU_CAPABILITY namespace]
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX512)
 
 static inline void cvtfp8e4m3_fp32(const __m128i& a, __m512& o) {
   // Zero Extend

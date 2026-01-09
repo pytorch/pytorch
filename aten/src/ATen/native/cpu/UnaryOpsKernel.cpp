@@ -471,8 +471,7 @@ inline Vectorized<scalar_t> _nan_to_num_replace(
     Vectorized<scalar_t> a, scalar_t nan, scalar_t posinf, scalar_t neginf) {
   using vec_t = Vectorized<scalar_t>;
   vec_t inf(std::numeric_limits<scalar_t>::infinity());
-  vec_t result;
-  result = vec_t::blendv(a, vec_t(nan), a.isnan());
+  vec_t result = vec_t::blendv(a, vec_t(nan), a.isnan());
   result = vec_t::blendv(result, vec_t(posinf), a == inf);
   return vec_t::blendv(result, vec_t(neginf), a == inf.neg());
 }
@@ -480,7 +479,7 @@ inline Vectorized<scalar_t> _nan_to_num_replace(
 template <typename scalar_t>
 inline Vectorized<c10::complex<scalar_t>> _nan_to_num_replace(
     Vectorized<c10::complex<scalar_t>> a, scalar_t nan, scalar_t posinf, scalar_t neginf) {
-#if !defined(_MSC_VER) && (defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512))
+#if defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_AVX512)
   return {_nan_to_num_replace(Vectorized<scalar_t>(a), nan, posinf, neginf)};
 #else
   __at_align__ c10::complex<scalar_t> buffer[a.size()];

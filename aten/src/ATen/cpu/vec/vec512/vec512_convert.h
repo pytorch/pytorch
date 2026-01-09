@@ -8,7 +8,7 @@
 namespace at::vec {
 inline namespace CPU_CAPABILITY {
 
-#if defined(CPU_CAPABILITY_AVX512) && !defined(_MSC_VER)
+#if defined(CPU_CAPABILITY_AVX512)
 
 template <>
 struct VecConvert<float, 1, BFloat16, 1> {

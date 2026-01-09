@@ -110,47 +110,62 @@ inline Vectorized<double> cast<double, int64_t>(
 }
 
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-#ifndef _MSC_VER
-// MSVC is not working well on complex function overload.
-template <int64_t scale = 1>
-std::enable_if_t<
-    scale == 1 || scale == 2 || scale == 4 || scale == 8,
-    Vectorized<
-        double>> inline gather(const double* base_addr, const Vectorized<int64_t>& vindex) {
-  return _mm256_i64gather_pd(base_addr, vindex, scale);
-}
+#define GATHER_DOUBLE_IMPL(SCALE)                                   \
+  template <>                                                       \
+  Vectorized<double> inline gather<SCALE, double>(                  \
+      const double* base_addr, const Vectorized<int64_t>& vindex) { \
+    return _mm256_i64gather_pd(base_addr, vindex, SCALE);           \
+  }
 
-template <int64_t scale = 1>
-std::enable_if_t<
-    scale == 1 || scale == 2 || scale == 4 || scale == 8,
-    Vectorized<
-        float>> inline gather(const float* base_addr, const Vectorized<int32_t>& vindex) {
-  return _mm256_i32gather_ps(base_addr, vindex, scale);
-}
-#endif
+GATHER_DOUBLE_IMPL(1)
+GATHER_DOUBLE_IMPL(2)
+GATHER_DOUBLE_IMPL(4)
+GATHER_DOUBLE_IMPL(8)
+
+#define GATHER_FLOAT_IMPL(SCALE)                                   \
+  template <>                                                      \
+  Vectorized<float> inline gather<SCALE, float>(                   \
+      const float* base_addr, const Vectorized<int32_t>& vindex) { \
+    return _mm256_i32gather_ps(base_addr, vindex, SCALE);          \
+  }
+
+GATHER_FLOAT_IMPL(1)
+GATHER_FLOAT_IMPL(2)
+GATHER_FLOAT_IMPL(4)
+GATHER_FLOAT_IMPL(8)
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ MASK GATHER ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
-#ifndef _MSC_VER
-// MSVC is not working well on complex function overload.
-template <int64_t scale = 1>
-std::
-    enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<double>> inline mask_gather(
-        const Vectorized<double>& src,
-        const double* base_addr,
-        const Vectorized<int64_t>& vindex,
-        Vectorized<double>& mask) {
-  return _mm256_mask_i64gather_pd(src, base_addr, vindex, mask, scale);
-}
 
-template <int64_t scale = 1>
-std::
-    enable_if_t<scale == 1 || scale == 2 || scale == 4 || scale == 8, Vectorized<float>> inline mask_gather(
-        const Vectorized<float>& src,
-        const float* base_addr,
-        const Vectorized<int32_t>& vindex,
-        Vectorized<float>& mask) {
-  return _mm256_mask_i32gather_ps(src, base_addr, vindex, mask, scale);
-}
-#endif
+#define MASK_GATHER_DOUBLE_IMPL(SCALE)                                    \
+  template <>                                                             \
+  Vectorized<double> inline mask_gather<SCALE, double>(                   \
+      const Vectorized<double>& src,                                      \
+      const double* base_addr,                                            \
+      const Vectorized<int64_t>& vindex,                                  \
+      Vectorized<double>& mask) {                                         \
+    return _mm256_mask_i64gather_pd(src, base_addr, vindex, mask, SCALE); \
+  }
+
+MASK_GATHER_DOUBLE_IMPL(1)
+MASK_GATHER_DOUBLE_IMPL(2)
+MASK_GATHER_DOUBLE_IMPL(4)
+MASK_GATHER_DOUBLE_IMPL(8)
+
+#define MASK_GATHER_FLOAT_IMPL(SCALE)                                     \
+  template <>                                                             \
+  Vectorized<float> inline mask_gather<SCALE, float>(                     \
+      const Vectorized<float>& src,                                       \
+      const float* base_addr,                                             \
+      const Vectorized<int32_t>& vindex,                                  \
+      Vectorized<float>& mask) {                                          \
+    return _mm256_mask_i32gather_ps(src, base_addr, vindex, mask, SCALE); \
+  }
+
+MASK_GATHER_FLOAT_IMPL(1)
+MASK_GATHER_FLOAT_IMPL(2)
+MASK_GATHER_FLOAT_IMPL(4)
+MASK_GATHER_FLOAT_IMPL(8)
+
 // ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ CONVERT ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 
 // Only works for inputs in the range: [-2^51, 2^51]
