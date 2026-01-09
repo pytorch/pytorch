@@ -131,6 +131,9 @@ class ValueConfig:
     def __fx_repr__(self):
         return f"ValueConfig(mode={self.mode!r})", {"ValueConfig": ValueConfig}
 
+    def print_mode(self):
+        print(self.mode)
+
 
 class SizeStore:
     def __init__(self, size: int):
@@ -864,7 +867,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         with self.assertRaisesRegex(
             RuntimeError, "Attempted to access unregistered member on an OpaqueObject"
         ):
-            torch.compile(foo)(counter, torch.ones(2, 3))
+            torch.compile(foo, backend="eager")(counter, torch.ones(2, 3))
 
         def bar(counter, x):
             x = x * x
@@ -874,7 +877,7 @@ def forward(self, arg0_1, arg1_1, arg2_1):
         with self.assertRaisesRegex(
             RuntimeError, "Attempted to access unregistered member on an OpaqueObject"
         ):
-            torch.compile(bar)(counter, torch.ones(2, 3))
+            torch.compile(bar, backend="eager")(counter, torch.ones(2, 3))
 
         def foo(counter, x):
             return counter.get_c()
@@ -883,7 +886,27 @@ def forward(self, arg0_1, arg1_1, arg2_1):
             RuntimeError,
             "Opaque object member with method-type USE_REAL returned a reference-type opaque object.",
         ):
-            torch.compile(foo)(NestedCounters(Counter(1, 5)), torch.ones(2, 3))
+            torch.compile(foo, backend="eager")(
+                NestedCounters(Counter(1, 5)), torch.ones(2, 3)
+            )
+
+        config = ValueConfig("double")
+
+        def foo(mode, x):
+            return config.mode
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Attempted to access unregistered member on an OpaqueObject"
+        ):
+            torch.compile(foo, backend="eager")(config, torch.ones(2, 3))
+
+        def bar(mode, x):
+            config.print_mode()
+
+        with self.assertRaisesRegex(
+            RuntimeError, "Attempted to access unregistered member on an OpaqueObject"
+        ):
+            torch.compile(bar, backend="eager")(config, torch.ones(2, 3))
 
     def test_export_joint(self):
         torch.library.define(
