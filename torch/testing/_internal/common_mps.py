@@ -699,6 +699,7 @@ if torch.backends.mps.is_available():
             "index_fill": [torch.float16, torch.float32],  # missing `aten::_unique`.
             "igamma": None,  # currently not supported for any device
             "igammac": None,  # currently not supported for any device
+            "linalg.pinvsingular": None,  # Missing `aten::linalg_qr.out`.
             "linalg.solve": [torch.float16, torch.float32],  # missing `aten::lu_solve`.
             "linalg.solve_ex": [
                 torch.float16,
