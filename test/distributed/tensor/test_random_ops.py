@@ -308,9 +308,6 @@ class DistTensorRandomInitTest(DTensorTestBase):
             def __init__(self, tracker):
                 self._tracker = tracker
 
-            def __getattr__(self, name):
-                return getattr(self._tracker, name)
-
             def _distribute_region(self, spec):
                 captured_specs.append(spec.tensor_meta)
                 return self._tracker._distribute_region(spec)
