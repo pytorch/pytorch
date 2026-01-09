@@ -352,6 +352,11 @@ onnxscript==0.5.4
 #Pinned versions:
 #test that import:
 
+onnx-ir==0.1.12
+#Description: In-memory IR for ONNX, dependency of onnxscript. Pinned to avoid breaking changes in newer versions.
+#Pinned versions: 0.1.12
+#test that import:
+
 parameterized==0.8.1
 #Description: Parameterizes unittests, both the tests themselves and the entire testing class
 #Pinned versions:
