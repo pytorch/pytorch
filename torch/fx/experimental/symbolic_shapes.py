@@ -2245,13 +2245,7 @@ class SubclassSymbolicContext(StatefulSymbolicContext):
     flexibility, with inner symbolic contexts mapped via attr -> symbolic context.
     """
 
-    inner_contexts: dict[str, SymbolicContext] = None  # type: ignore[assignment]
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        if self.inner_contexts is None:
-            # pyrefly: ignore [bad-assignment]
-            self.inner_contexts = {}
+    inner_contexts: dict[str, SymbolicContext] = field(default_factory=dict)
 
 
 @dataclass(slots=True)
