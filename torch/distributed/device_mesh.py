@@ -507,6 +507,19 @@ else:
                     split_ranks=pg_ranks_by_dim.tolist(),
                     group_desc=group_desc,
                 )
+                # For precompilation consistency, we need all ranks to use the
+                # same canonical name. The split_group creates different groups
+                # for different ranks, so we compute a deterministic canonical
+                # name and register it as an alias.
+                # Use the group_desc or a hash of the first subgroup ranks as
+                # the canonical name.
+                first_subgroup_ranks = tuple(pg_ranks_by_dim[0].tolist())
+                canonical_name = f"mesh_{group_desc}_{hash(first_subgroup_ranks) % (10**8)}"
+                if dim_group is not None and dim_group.group_name != canonical_name:
+                    torch._C._distributed_c10d._register_process_group_alias(
+                        canonical_name, dim_group.group_name
+                    )
+                    return canonical_name
                 return dim_group.group_name  # type: ignore[union-attr]
 
             # If the subgroup has been already created through `split_group`, we simply loop over `pg_ranks_by_dim`

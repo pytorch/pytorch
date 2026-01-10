@@ -379,6 +379,11 @@ class ProcessGroupVariable(DistributedVariable):
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         if name == "group_name":
             return variables.ConstantVariable.create(self.value.group_name)
+        if name == "group_name_or_alias":
+            return variables.ConstantVariable.create(self.value.group_name_or_alias)
+        if name == "group_name_alias":
+            alias = self.value.group_name_alias
+            return variables.ConstantVariable.create(alias if alias else None)
         if name in ["rank", "size"]:
             return variables.LambdaVariable(
                 lambda *args, **kwargs: self.call_method(tx, name, args, kwargs)

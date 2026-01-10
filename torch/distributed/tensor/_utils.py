@@ -215,8 +215,14 @@ def _compute_local_shape_and_global_offset(
     """
 
     empty_offset = ()
-    if my_coordinate is None:
-        # if rank not in the mesh, return empty offset
+    # Check if rank is in the mesh by trying to get coordinate for first dim.
+    # If coordinate_lookup returns None for any dimension, rank is not in mesh.
+    try:
+        # Try to get first coordinate - if this fails or returns None, rank not in mesh
+        first_coord = coordinate_lookup(0)
+        if first_coord is None:
+            return ((0,), empty_offset)
+    except (IndexError, AssertionError):
         return ((0,), empty_offset)
 
     local_shape = list(global_shape)
