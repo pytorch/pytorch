@@ -59,8 +59,10 @@ class CudaTritonKernelManager final : public TritonKernelManager {
   CudaTritonKernelManager& operator=(CudaTritonKernelManager&& other) noexcept;
 
   void launch(const LaunchParams& launch_params, void** args) final;
-  std::unique_ptr<KernelInputs> create_inputs(size_t num_args, size_t num_attrs)
-      const final {
+  std::unique_ptr<KernelInputs> create_inputs(
+      size_t num_args,
+      size_t num_attrs,
+      const KernelInputParams& /*params*/) const final {
     return std::unique_ptr<KernelInputs>(
         new CudaKernelInputs(num_args, num_attrs));
   }
