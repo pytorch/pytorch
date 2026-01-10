@@ -1251,6 +1251,19 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         if directly_update_dict:
             self.attrs_directly_modifed_on_dict.add(name_str)
         else:
+            # Check for property setter first - property.__set__ is a C slot,
+            # so we need to call fset directly (similar to how fget is called
+            # for property getters in var_getattr).
+            descriptor = inspect.getattr_static(type(self.value), name_str, None)
+            if isinstance(descriptor, property) and descriptor.fset is not None:
+                fset_source = None
+                if self.cls_source:
+                    fset_source = AttrSource(
+                        self.get_source_by_walking_mro(name_str), "fset"
+                    )
+                fset_vt = VariableTracker.build(tx, descriptor.fset, source=fset_source)
+                return fset_vt.call_function(tx, [self, value], {})
+
             tmp = self.try_get_descritor_and_setter_py_func(name_str)
             if tmp:
                 descriptor, setter = tmp
