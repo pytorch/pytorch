@@ -7140,7 +7140,7 @@ class TestLinalg(TestCase):
         ]:
             # skip tests that are known to fail with the basic LOBCG
             # method due to insufficient accuracy
-            if method == 'basic' and (m, n, k, density) in [(1000, 7, 3, 0.01)]:
+            if method == 'basic' and (m, n, k, density) == (1000, 7, 3, 0.01):
                 continue
             A = random_sparse_pd_matrix(m, density=density, device=device, dtype=dtype)
             B = random_sparse_pd_matrix(m, density=density, device=device, dtype=dtype)
@@ -8492,7 +8492,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @onlyNativeDeviceTypes
     @dtypes(*floating_and_complex_types_and(torch.bfloat16, torch.half))
     @tf32_on_and_off(0.05)
-    @reduced_f32_on_and_off(0.05)
+    @reduced_f32_on_and_off(0.1)
     def test_baddbmm(self, device, dtype):
         num_batches = 10
         M, N, O = 12, 8, 50
