@@ -3345,6 +3345,67 @@ class GraphModule(torch.nn.Module):
         result = compiled_mod(x)
         self.assertEqual(result[0].shape, torch.Size([3, 3]))
 
+    def test_leaf_function_dict_output(self):
+        class DictOutputModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(3, 3)
+                self.linear2 = torch.nn.Linear(3, 3)
+
+            @torch._dynamo.decorators.leaf_function(
+                fake_impl=lambda self, x: {
+                    "a": self.linear1(x),
+                    "b": self.linear2(x),
+                }
+            )
+            def forward(self, x):
+                if x.sum() > 0:
+                    return {"a": self.linear1(x), "b": self.linear2(x)}
+                else:
+                    return {"a": self.linear1(x) + 1, "b": self.linear2(x) + 1}
+
+        def args_fn():
+            return (torch.randn(3, 3, requires_grad=True),)
+
+        def loss_fn(out):
+            return out["a"].sum() + out["b"].sum()
+
+        self._test_leaf_function_helper(DictOutputModule, args_fn, loss_fn)
+
+    def test_leaf_function_nested_output(self):
+        class NestedOutputModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear1 = torch.nn.Linear(3, 3)
+                self.linear2 = torch.nn.Linear(3, 3)
+                self.linear3 = torch.nn.Linear(3, 3)
+
+            @torch._dynamo.decorators.leaf_function(
+                fake_impl=lambda self, x: {
+                    "out": (self.linear1(x), self.linear2(x)),
+                    "extra": self.linear3(x),
+                }
+            )
+            def forward(self, x):
+                if x.sum() > 0:
+                    return {
+                        "out": (self.linear1(x), self.linear2(x)),
+                        "extra": self.linear3(x),
+                    }
+                else:
+                    return {
+                        "out": (self.linear1(x) + 1, self.linear2(x) + 1),
+                        "extra": self.linear3(x) + 1,
+                    }
+
+        def args_fn():
+            return (torch.randn(3, 3, requires_grad=True),)
+
+        def loss_fn(out):
+            return out["out"][0].sum() + out["out"][1].sum() + out["extra"].sum()
+
+        self._test_leaf_function_helper(NestedOutputModule, args_fn, loss_fn)
+
 
 instantiate_parametrized_tests(DecoratorTests)
 

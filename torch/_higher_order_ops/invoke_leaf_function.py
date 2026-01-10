@@ -338,33 +338,24 @@ def _validate_outputs_match(
     real_output: Any,
 ) -> None:
     """
-    Validate that fake_fn and real_fn outputs have matching pytree structure,
-    shapes, and dtypes.
+    Validate that fake_fn and real_fn outputs have matching shapes and dtypes.
+
+    Note: Pytree structure validation is now handled by the flattening wrapper
+    in _call_leaf_function, so we only validate shapes and dtypes here.
+    The outputs are already flattened tuples.
 
     Raises:
         RuntimeError: If outputs don't match with detailed error message.
     """
-    # Check pytree structure matches
-    fake_flat, fake_spec = pytree.tree_flatten(fake_output)
-    real_flat, real_spec = pytree.tree_flatten(real_output)
-
-    if fake_spec != real_spec:
-        raise RuntimeError(
-            f"Output structure mismatch in @leaf_function decorator.\n"
-            f"fake_impl returned structure: {fake_spec}\n"
-            f"real_impl returned structure: {real_spec}\n"
-            f"The fake_impl must return outputs with the same pytree structure as real_impl."
-        )
-
-    if len(fake_flat) != len(real_flat):
-        raise RuntimeError(
-            f"Output count mismatch in @leaf_function decorator.\n"
-            f"fake_impl returned {len(fake_flat)} values\n"
-            f"real_impl returned {len(real_flat)} values"
-        )
+    # Outputs are already flattened tuples from the wrapper
+    assert len(fake_output) == len(real_output), (
+        f"Output count mismatch in @leaf_function decorator.\n"
+        f"fake_impl returned {len(fake_output)} values\n"
+        f"real_impl returned {len(real_output)} values"
+    )
 
     # Check each tensor's shape and dtype
-    for i, (fake_val, real_val) in enumerate(zip(fake_flat, real_flat)):
+    for i, (fake_val, real_val) in enumerate(zip(fake_output, real_output)):
         fake_is_tensor = isinstance(fake_val, torch.Tensor)
         real_is_tensor = isinstance(real_val, torch.Tensor)
 

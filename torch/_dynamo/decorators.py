@@ -264,7 +264,6 @@ def leaf_function(
           ``torch._dynamo.config.validate_leaf_function_outputs = True`` to validate.
         - (Temporary) Only nn.Module methods supported: Currently designed for methods
           on ``torch.nn.Module``, not standalone functions.
-        - (Temporary) Return value should be a tuple of tensors.
 
     Dangerous patterns (may cause silent incorrectness):
         - Side effects: fake_impl runs multiple times during compilation; real_impl
