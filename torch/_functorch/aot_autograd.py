@@ -1329,6 +1329,7 @@ def aot_compile_joint_with_descriptors(
         serializable: If True, configures the compilation to produce a serializable
             callable by leveraging AOTAutogradCache machinery. This sets up the
             necessary cache_info and patches config options required for serialization.
+            When True, this function will always return a BundledAOTAutogradSerializableCallable.
 
     TODO: Consider if we should allow_in_graph the result by default.
     """
