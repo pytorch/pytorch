@@ -214,15 +214,17 @@ def main():
     print("ANALYSIS")
     print("=" * 100)
     print("""
-1. MASK CREATION: Varlen is slower (~2-3x for 4k, ~50% for 8k) due to
-   offset/limit computation. This is a one-time cost, amortized over many
-   forward/backward passes.
+1. MASK CREATION: Varlen is ~26-33% slower for 4k and ~9-16% slower for 8k.
+   This overhead comes from:
+   - Offset/limit metadata computation (~0.5ms)
+   - Larger logical mask due to block-aligned doc boundaries (~0.5ms for 4k)
+   This is a one-time cost, amortized over many forward/backward passes.
 
-2. FORWARD PASS: Varlen is typically FASTER (-12% to -80%) because physical
-   tensors are smaller (no padding), reducing memory bandwidth requirements.
+2. FORWARD PASS: Varlen is consistently FASTER (-6% to -67%) because physical
+   tensors are compact (no padding), reducing memory bandwidth requirements.
 
-3. BACKWARD PASS: Mixed results - faster for longer sequences and complex
-   score_mods where compute savings outweigh offset overhead.
+3. BACKWARD PASS: Faster for longer sequences and complex score_mods (-17% to -54%
+   for 8k) where compute savings outweigh overhead.
 
 4. RECOMMENDATION: Use varlen for typical LLM document packing scenarios
    (8k+ sequences, multiple documents) where forward/backward speedups

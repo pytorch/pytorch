@@ -1354,28 +1354,29 @@ def create_varlen_block_mask(
     q_blocks_per_doc = (q_seq_lens + Q_BLOCK_SIZE - 1) // Q_BLOCK_SIZE
     kv_blocks_per_doc = (kv_seq_lens + KV_BLOCK_SIZE - 1) // KV_BLOCK_SIZE
 
-    # Rounded-up sequence lengths (aligned to block size)
-    q_seq_lens_rounded = q_blocks_per_doc * Q_BLOCK_SIZE
-    kv_seq_lens_rounded = kv_blocks_per_doc * KV_BLOCK_SIZE
+    # Compute cumulative block counts (with leading zero for indexing)
+    # These are reused for multiple purposes to avoid redundant cumsums
+    q_cumsum_blocks = torch.zeros(num_docs + 1, device=device, dtype=torch.int32)
+    kv_cumsum_blocks = torch.zeros(num_docs + 1, device=device, dtype=torch.int32)
+    q_cumsum_blocks[1:] = torch.cumsum(q_blocks_per_doc, dim=0)
+    kv_cumsum_blocks[1:] = torch.cumsum(kv_blocks_per_doc, dim=0)
 
-    # Total implied sequence lengths and block counts
-    total_q_len = q_seq_lens_rounded.sum().item()
-    total_kv_len = kv_seq_lens_rounded.sum().item()
-    total_q_blocks = q_blocks_per_doc.sum().item()
-    total_kv_blocks = kv_blocks_per_doc.sum().item()
+    # Derive logical offsets from block cumsums (avoids separate cumsum)
+    # logical_offset = cumsum(seq_lens_rounded) = cumsum(blocks_per_doc * BLOCK_SIZE) = cumsum_blocks * BLOCK_SIZE
+    q_logical_doc_offsets = q_cumsum_blocks * Q_BLOCK_SIZE
+    kv_logical_doc_offsets = kv_cumsum_blocks * KV_BLOCK_SIZE
 
-    # Compute document offsets for both logical (rounded) and physical (actual) layouts
-    # Logical offsets: cumsum of rounded lengths (used for iteration space)
     # Physical offsets: cumsum of actual lengths (used for memory access)
-    q_logical_doc_offsets = torch.zeros(num_docs + 1, device=device, dtype=torch.int32)
-    kv_logical_doc_offsets = torch.zeros(num_docs + 1, device=device, dtype=torch.int32)
-    q_logical_doc_offsets[1:] = torch.cumsum(q_seq_lens_rounded, dim=0)
-    kv_logical_doc_offsets[1:] = torch.cumsum(kv_seq_lens_rounded, dim=0)
-
     q_physical_doc_offsets = torch.zeros(num_docs + 1, device=device, dtype=torch.int32)
     kv_physical_doc_offsets = torch.zeros(num_docs + 1, device=device, dtype=torch.int32)
     q_physical_doc_offsets[1:] = torch.cumsum(q_seq_lens, dim=0)
     kv_physical_doc_offsets[1:] = torch.cumsum(kv_seq_lens, dim=0)
+
+    # Total implied sequence lengths and block counts (from precomputed cumsums)
+    total_q_blocks = q_cumsum_blocks[-1].item()
+    total_kv_blocks = kv_cumsum_blocks[-1].item()
+    total_q_len = total_q_blocks * Q_BLOCK_SIZE
+    total_kv_len = total_kv_blocks * KV_BLOCK_SIZE
 
     # Vectorized computation of per-block offsets and limits
     # offset = physical_doc_start - logical_doc_start (translates logical pos to physical pos)
@@ -1385,19 +1386,9 @@ def create_varlen_block_mask(
     q_block_indices = torch.arange(total_q_blocks, device=device, dtype=torch.int32)
     kv_block_indices = torch.arange(total_kv_blocks, device=device, dtype=torch.int32)
 
-    # Map each block to its document using searchsorted on cumsum boundaries
-    q_block_to_doc = torch.searchsorted(
-        torch.cumsum(q_blocks_per_doc, dim=0), q_block_indices, right=True
-    )
-    kv_block_to_doc = torch.searchsorted(
-        torch.cumsum(kv_blocks_per_doc, dim=0), kv_block_indices, right=True
-    )
-
-    # Compute block index within each document
-    q_cumsum_blocks = torch.zeros(num_docs + 1, device=device, dtype=torch.int32)
-    kv_cumsum_blocks = torch.zeros(num_docs + 1, device=device, dtype=torch.int32)
-    q_cumsum_blocks[1:] = torch.cumsum(q_blocks_per_doc, dim=0)
-    kv_cumsum_blocks[1:] = torch.cumsum(kv_blocks_per_doc, dim=0)
+    # Map each block to its document using searchsorted on precomputed cumsum boundaries
+    q_block_to_doc = torch.searchsorted(q_cumsum_blocks[1:], q_block_indices, right=True)
+    kv_block_to_doc = torch.searchsorted(kv_cumsum_blocks[1:], kv_block_indices, right=True)
 
     q_block_idx_in_doc = q_block_indices - q_cumsum_blocks[q_block_to_doc]
     kv_block_idx_in_doc = kv_block_indices - kv_cumsum_blocks[kv_block_to_doc]
@@ -1423,48 +1414,67 @@ def create_varlen_block_mask(
     kv_offsets = kv_offsets_1d.unsqueeze(0).unsqueeze(0).expand(B, H, -1).contiguous()
     kv_limits = kv_limits_1d.unsqueeze(0).unsqueeze(0).expand(B, H, -1).contiguous()
 
-    # Vectorized computation of position-to-document and position-to-local mappings
-    # Using searchsorted for O(log n) lookup instead of O(n) loop
-    # These mappings work on the logical (padded) iteration space
-
-    # For each position, find which document it belongs to
+    # Create O(seq_len) lookup tables for position-to-document mapping
+    # These are used both for direct mask computation and in the kernel mask_mod
+    q_boundaries = q_logical_doc_offsets[1:]
+    kv_boundaries = kv_logical_doc_offsets[1:]
     q_positions = torch.arange(total_q_len, device=device, dtype=torch.int32)
     kv_positions = torch.arange(total_kv_len, device=device, dtype=torch.int32)
-
-    # searchsorted with right=True gives us the document index
-    q_pos_to_doc = torch.searchsorted(q_logical_doc_offsets[1:], q_positions, right=True)
-    kv_pos_to_doc = torch.searchsorted(kv_logical_doc_offsets[1:], kv_positions, right=True)
-
-    # Local position = global (logical) position - logical document start offset
+    q_pos_to_doc = torch.searchsorted(q_boundaries, q_positions, right=True)
+    kv_pos_to_doc = torch.searchsorted(kv_boundaries, kv_positions, right=True)
     q_pos_to_local = q_positions - q_logical_doc_offsets[q_pos_to_doc]
     kv_pos_to_local = kv_positions - kv_logical_doc_offsets[kv_pos_to_doc]
 
-    # Create wrapped mask_mod
+    # Pre-compute sequence length lookups (avoids expensive indexing in mask computation)
+    q_seq_len_for_pos = q_seq_lens[q_pos_to_doc]  # [total_q_len]
+    kv_seq_len_for_pos = kv_seq_lens[kv_pos_to_doc]  # [total_kv_len]
+
+    # Compute mask directly using vectorized operations (avoids slow vmap)
+    # Use unsqueeze for broadcasting: [Q, 1] and [1, KV]
+    q_doc_2d = q_pos_to_doc.unsqueeze(-1)  # [Q, 1]
+    kv_doc_2d = kv_pos_to_doc.unsqueeze(0)  # [1, KV]
+    q_local_2d = q_pos_to_local.unsqueeze(-1)  # [Q, 1]
+    kv_local_2d = kv_pos_to_local.unsqueeze(0)  # [1, KV]
+    q_seq_len_2d = q_seq_len_for_pos.unsqueeze(-1)  # [Q, 1]
+    kv_seq_len_2d = kv_seq_len_for_pos.unsqueeze(0)  # [1, KV]
+
+    # Apply user's mask_mod with local indices
+    user_mask = mask_mod(
+        torch.zeros((), device=device, dtype=torch.int),  # b (scalar, broadcasts)
+        torch.zeros((), device=device, dtype=torch.int),  # h (scalar, broadcasts)
+        q_local_2d,
+        kv_local_2d,
+    )
+
+    # Combine all conditions in a single expression for efficiency
+    # - same_doc: only allow attention within same document
+    # - q_valid/kv_valid: positions within valid sequence lengths (not padding)
+    mask_2d = (
+        (q_doc_2d == kv_doc_2d)
+        & (q_local_2d < q_seq_len_2d)
+        & (kv_local_2d < kv_seq_len_2d)
+        & user_mask
+    )  # [Q, KV]
+
+    # Expand to [B, H, Q, KV] for block mask conversion
+    mask_tensor = mask_2d.view(1, 1, total_q_len, total_kv_len).expand(
+        B, H, total_q_len, total_kv_len
+    )
+
+    # Create varlen_mask_mod for kernel execution (uses lookup tables)
     def varlen_mask_mod(b, h, q_idx, kv_idx):
-        # Get document IDs for q and kv positions
         q_doc = q_pos_to_doc[q_idx]
         kv_doc = kv_pos_to_doc[kv_idx]
-
-        # Get local indices within documents
         q_local = q_pos_to_local[q_idx]
         kv_local = kv_pos_to_local[kv_idx]
-
-        # Cross-document masking: only allow attention within same document
         same_doc = q_doc == kv_doc
-
-        # Check if positions are within valid sequence lengths (not padding)
         q_seq_len_for_doc = q_seq_lens[q_doc]
         kv_seq_len_for_doc = kv_seq_lens[kv_doc]
         q_valid = q_local < q_seq_len_for_doc
         kv_valid = kv_local < kv_seq_len_for_doc
-
-        # Apply user's mask_mod with local indices
         user_mask = mask_mod(b, h, q_local, kv_local)
-
         return same_doc & q_valid & kv_valid & user_mask
 
-    # Create the block mask using standard create_block_mask
-    mask_tensor = create_mask(varlen_mask_mod, B, H, total_q_len, total_kv_len, device)
     partial_block_mask, full_block_mask = _convert_mask_to_block_mask(
         mask_tensor,
         Q_BLOCK_SIZE=Q_BLOCK_SIZE,
