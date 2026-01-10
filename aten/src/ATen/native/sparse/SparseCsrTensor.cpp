@@ -471,6 +471,12 @@ Tensor _sparse_compressed_tensor_unsafe_symint(
   AT_DISPATCH_ALL_SPARSE_COMPRESSED_LAYOUTS(layout_, "sparse_compressed_tensor_unsafe", [&]{});
   if (at::globalContext().checkSparseTensorInvariants()) {
     _validate_sparse_compressed_tensor_args_worker(compressed_indices, plain_indices, values, C10_AS_INTARRAYREF_SLOW(size), layout_, true);
+  } else {
+    TORCH_WARN_ONCE("WARNING THIS IS DANGEROUS as sparse tensor invariant checks are implicitly disabled."
+      "When invalid inputs are used to construct a sparse tensor, a crash of a running process is highly "
+      "likely when accessing these tensors by any code. See torch.sparse.check_sparse_tensor_invariants.__doc__ for enabling"
+      "sparse tensor invariant checks that will raise an exception on an attempt to construct a sparse tensor"
+      "with invalid data, and hence it helps keeping the running process alive for all relevant situations.");
   }
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
   SparseCsrTensor self = new_compressed_tensor(options);
@@ -495,6 +501,12 @@ static Tensor _sparse_compressed_tensor_unsafe_template(const Tensor& compressed
   TORCH_CHECK(layout_ == required_layout, "sparse compressed layout must be ",required_layout, " but got ", layout_);
   if (at::globalContext().checkSparseTensorInvariants()) {
     _validate_sparse_compressed_tensor_args_worker(compressed_indices, plain_indices, values, size, layout_, true);
+  } else {
+    TORCH_WARN_ONCE("WARNING THIS IS DANGEROUS, as sparse tensor invariant checks are implicitly disabled."
+      "When invalid inputs are used to construct a sparse tensor, a crash of a running process is highly "
+      "likely when accessing these tensors by any code. See torch.sparse.check_sparse_tensor_invariants.__doc__ for enabling"
+      "sparse tensor invariant checks that will raise an exception on an attempt to construct a sparse tensor"
+      "with invalid data, and hence it helps keeping the running process alive for all relevant situations.");
   }
   TensorOptions options = TensorOptions().dtype(dtype).layout(layout_).device(device).pinned_memory(pin_memory);
   SparseCsrTensor self = new_compressed_tensor(options);

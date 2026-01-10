@@ -490,6 +490,12 @@ Tensor _sparse_coo_tensor_unsafe(const Tensor& indices, const Tensor& values_, a
     std::optional<bool> is_coalesced) {
   if (at::globalContext().checkSparseTensorInvariants()) {
     at::native::_validate_sparse_coo_tensor_args(indices, values_, size, is_coalesced);
+  } else {
+    TORCH_WARN_ONCE("WARNING THIS IS DANGEROUS, as sparse tensor invariant checks are implicitly disabled."
+      "When invalid inputs are used to construct a sparse tensor, a crash of a running process is highly "
+      "likely when accessing these tensors by any code. See torch.sparse.check_sparse_tensor_invariants.__doc__ for enabling"
+      "sparse tensor invariant checks that will raise an exception on an attempt to construct a sparse tensor"
+      "with invalid data, and hence it helps keeping the running process alive for all relevant situations.");
   }
   return at::native::_sparse_coo_tensor_unsafe_symint(indices, values_, c10::fromIntArrayRefSlow(size), dtype, layout, device, pin_memory, is_coalesced);
 }
