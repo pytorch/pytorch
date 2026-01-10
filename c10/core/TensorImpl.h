@@ -1680,6 +1680,23 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
         dtype_initialized(),
         "Cannot access data pointer of Tensor that doesn't have initialized dtype "
         "(e.g., caffe2::Tensor x(CPU), prior to calling mutable_data<T>() on x)");
+
+    // Check that storage has sufficient capacity for this tensor
+    // This prevents segfaults when accessing data after storage has been shrunk
+    if (C10_UNLIKELY(numel_ > 0)) {
+      const size_t required_bytes =
+          (storage_offset_ + numel_) * data_type_.itemsize();
+      const size_t actual_bytes = storage_.nbytes();
+
+      TORCH_CHECK(
+          actual_bytes >= required_bytes,
+          "Cannot access storage: tensor needs ",
+          required_bytes,
+          " bytes but storage only has ",
+          actual_bytes,
+          " bytes. Accessing tensor data after shrinking its storage can cause a segmentation fault.");
+    }
+
     auto* data = get_data();
     static_assert(
         sizeof(*data) == 1, "get_data must return a byte-addressed pointer.");
