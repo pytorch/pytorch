@@ -23,7 +23,8 @@ _group_name_to_store: dict[str, c10d.Store] = {}
 
 
 @deprecated(
-    "`enable_symm_mem_for_group` is deprecated. There is no need to call this function anymore."
+    "`enable_symm_mem_for_group` is deprecated. There is no need to call this function anymore.",
+    category=FutureWarning,
 )
 def enable_symm_mem_for_group(group_name: c10d.GroupName) -> None:
     """
