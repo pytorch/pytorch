@@ -33,6 +33,12 @@ struct NVSHMEMAllocation {
   NVSHMEMAllocation(void* ptr, size_t buffer_size, int device_idx)
       : ptr(ptr), buffer_size(buffer_size), device_idx(device_idx) {}
 
+  // Delete copy and move operations to prevent double-free
+  NVSHMEMAllocation(const NVSHMEMAllocation&) = delete;
+  NVSHMEMAllocation& operator=(const NVSHMEMAllocation&) = delete;
+  NVSHMEMAllocation(NVSHMEMAllocation&&) = delete;
+  NVSHMEMAllocation& operator=(NVSHMEMAllocation&&) = delete;
+
   ~NVSHMEMAllocation() {
     // Avoid calling CUDA functions after driver shutting down
     if (is_finalizing()) {
@@ -397,7 +403,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
     // TODO: change the `ptr` below to `tensor.data_ptr()` when adding support
     // for user slice/view operations. For MemPool support,
-    // `tensor.storate().data_ptr()` is fine (today's `ptr`).
+    // `tensor.storage().data_ptr()` is fine (today's `ptr`).
 
     // If the tensor's ptr happen to be the same as allocation ptr
     if (ptr == allocation->ptr) {
