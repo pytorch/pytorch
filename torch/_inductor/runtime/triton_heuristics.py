@@ -829,8 +829,28 @@ class CachingAutotuner(KernelInterface):
         if not ASTSource:
             raise RuntimeError("Installed triton version too old, please upgrade")
 
+        # Detect if this is a Gluon kernel and use GluonASTSource if so
+        ast_source_class = ASTSource
+        is_gluon = False
+
+        # Detect Gluon kernels using two methods:
+        # 1. Check if gluon is imported in the function's module globals
+        if hasattr(self.fn, "__globals__") and "gluon" in self.fn.__globals__:
+            is_gluon = True
+        # 2. Check if it's a GluonJITFunction by class name
+        elif hasattr(self.fn, "__class__") and "GluonJIT" in self.fn.__class__.__name__:
+            is_gluon = True
+
+        if is_gluon:
+            try:
+                from triton.experimental.gluon._runtime import GluonASTSource
+
+                ast_source_class = GluonASTSource
+            except ImportError:
+                pass
+
         compile_args = (
-            ASTSource(
+            ast_source_class(
                 self.fn,
                 compile_meta["signature"],
                 compile_meta["constants"],
