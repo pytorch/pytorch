@@ -9021,6 +9021,7 @@ def sample_inputs_scaled_mm_v2(op_info, device, dtype, requires_grad, **kwargs):
 
 def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_grad, **kwargs):
     make = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_attn_mask = partial(make_tensor, device=device)
     batch, seq_q, seq_kv, num_heads, head_dim = 4, 3, 6, 4, 8
 
     dim_3_q_shape = (batch, seq_q, head_dim)
@@ -9055,13 +9056,24 @@ def sample_inputs_scaled_dot_product_attention(op_info, device, dtype, requires_
         dropout_p=dropout_p
     )
 
-    # Add an attn_mask
+    # Add an attn_mask, with matching dtype
     samples.append(
         SampleInput(
             make((batch, num_heads, seq_q, head_dim)),
             make((batch, num_heads, seq_kv, head_dim)),
             make((batch, num_heads, seq_kv, head_dim)),
-            attn_mask=make((seq_q, seq_kv)),
+            attn_mask=make_attn_mask((seq_q, seq_kv), dtype=dtype),
+            is_causal=False,
+            dropout_p=0.0)
+    )
+
+    # Add a boolean attn_mask
+    samples.append(
+        SampleInput(
+            make((batch, num_heads, seq_q, head_dim)),
+            make((batch, num_heads, seq_kv, head_dim)),
+            make((batch, num_heads, seq_kv, head_dim)),
+            attn_mask=make_attn_mask((seq_q, seq_kv), dtype=torch.bool),
             is_causal=False,
             dropout_p=0.0)
     )
@@ -16884,6 +16896,9 @@ op_db: list[OpInfo] = [
         supports_forward_ad=False,
         supports_fwgrad_bwgrad=True,
         check_batched_forward_grad=False,
+        # NOTE: since changing the sample inputs to not apply requires_grad on attn_mask, on CPU,
+        # the flash attention kernel is now used which materializes the attn_mask if it is COW
+        allow_cow_input_materialize_forward=["attn_mask"],
         decorators=[DecorateInfo(toleranceOverride(
             {torch.float32: tol(atol=5e-05, rtol=5e-6)}), 'TestCommon',), ],
         skips=(

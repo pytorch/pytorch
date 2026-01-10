@@ -530,8 +530,8 @@ inline void validate_sdpa_input(
       !query_.is_nested() && !key.is_nested(),
       "Scaled_dot_product_attention: Nested tensors for query / key are not supported "
       "when an explicit attn_mask is set");
+    TORCH_CHECK(!attn_mask_->requires_grad(), "attn_mask cannot require grad");
   }
-  return;
 }
 // This function is used to produce an attn_mask
 // in a standard format that can be consumed by both

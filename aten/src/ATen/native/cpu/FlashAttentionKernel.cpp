@@ -432,6 +432,9 @@ void cpu_flash_attention(
   const scalar_t* q_data = query.const_data_ptr<scalar_t>();
   const scalar_t* k_data = key.const_data_ptr<scalar_t>();
   const scalar_t* v_data = value.const_data_ptr<scalar_t>();
+  // NOTE: use of data_ptr over const_data_ptr here means that if the attn_mask is COW, it will be
+  // unnecessarily materialized (see also the allow_cow_input_materialize_forward kwarg to OpInfo
+  // for nn.functional.scaled_dot_product_attention in common_methods_invocations.py)
   mask_t* mask_data = has_attn_mask
       ? attn_mask.value().data_ptr<mask_t>()
       : nullptr;
