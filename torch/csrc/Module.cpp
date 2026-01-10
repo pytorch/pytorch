@@ -117,7 +117,7 @@
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
-#include <torch/csrc/inductor/static_launcher/static_cuda_launcher.h>
+#include <torch/csrc/inductor/static_launcher/cuda.h>
 #ifdef __HIP_PLATFORM_AMD__
 #include <ATen/native/cudnn/hip/BatchNorm.h>
 #else
@@ -2702,6 +2702,14 @@ Call this whenever a new thread is created in order to propagate values from
   });
   py_module.def("_get_rocm_fa_preferred_backend", []() {
     return at::globalContext().getROCmFAPreferredBackend();
+  });
+
+  py_module.def("_is_ck_sdpa_available", []() {
+#ifdef USE_ROCM
+    return at::globalContext().ckSupported() && at::globalContext().hasCKSDPA();
+#else
+    return false;
+#endif
   });
 
   py_module.def(
