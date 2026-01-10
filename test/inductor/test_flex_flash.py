@@ -682,6 +682,26 @@ GQA_MQA_BLOCK_MASK_CASES = [
         requires_grad=True,
     ),
     MaskModCase(
+        "backward_gqa_block_mask_causal_dim128",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=2,
+        block_mask_num_heads=1,
+        seq_len=257,
+        dim=128,
+        requires_grad=True,
+    ),
+    MaskModCase(
+        "backward_gqa_block_mask_causal_per_head_dim128",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=2,
+        block_mask_num_heads=8,
+        seq_len=257,
+        dim=128,
+        requires_grad=True,
+    ),
+    MaskModCase(
         "mqa_block_mask_causal",
         lambda _dtype, _device: _causal_mask,
         num_heads=8,
@@ -711,6 +731,26 @@ GQA_MQA_BLOCK_MASK_CASES = [
         num_heads_kv=1,
         block_mask_num_heads=8,
         seq_len=257,
+        requires_grad=True,
+    ),
+    MaskModCase(
+        "backward_mqa_block_mask_causal_dim128",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=1,
+        block_mask_num_heads=1,
+        seq_len=257,
+        dim=128,
+        requires_grad=True,
+    ),
+    MaskModCase(
+        "backward_mqa_block_mask_causal_per_head_dim128",
+        lambda _dtype, _device: _causal_mask,
+        num_heads=8,
+        num_heads_kv=1,
+        block_mask_num_heads=8,
+        seq_len=257,
+        dim=128,
         requires_grad=True,
     ),
 ]
@@ -783,10 +823,6 @@ class TestFlexFlash(InductorTestCase):
             ),
         )
 
-    @decorateIf(
-        unittest.expectedFailure,
-        lambda params: params["case"].dim == 64 and _is_sm90(),
-    )
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", GQA_MQA_BLOCK_MASK_CASES, name_fn=mask_case_name)
     def test_flash_attention_gqa_mqa_block_mask_cases(self, device, dtype, case):
@@ -868,7 +904,7 @@ class TestFlexFlash(InductorTestCase):
                 kernel_options={"BACKEND": "FLASH"},
             )
 
-    def test_mixed_dtypes(self, device, dtype):
+    def test_mixed_dtypes(self, device):
         dtype_high = torch.float16 if PLATFORM_SUPPORTS_FP8 else torch.float32
         dtype_low = e4m3_type if PLATFORM_SUPPORTS_FP8 else torch.float16
         """Ensure flash attention rejects mixed dtypes (e.g., fp32 Q with fp16 K/V)"""
