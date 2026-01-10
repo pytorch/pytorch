@@ -67,7 +67,7 @@ TYPED_TEST(OptionalTest, Empty) {
   EXPECT_FALSE(empty.has_value());
 
   // NOLINTNEXTLINE(bugprone-unchecked-optional-access,hicpp-avoid-goto,cppcoreguidelines-avoid-goto)
-  EXPECT_THROW(empty.value(), std::bad_optional_access);
+  EXPECT_THROW((void)empty.value(), std::bad_optional_access);
 }
 
 TYPED_TEST(OptionalTest, Initialized) {
