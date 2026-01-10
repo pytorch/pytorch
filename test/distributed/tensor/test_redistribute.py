@@ -7,6 +7,7 @@ import random
 import unittest
 
 import torch
+import torch.distributed as dist
 from torch.distributed._local_tensor import (
     maybe_disable_local_tensor_mode,
     maybe_run_for_local_tensor,
@@ -26,7 +27,10 @@ from torch.distributed.tensor._collective_utils import (
 )
 from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
 from torch.distributed.tensor._redistribute import (
+    _FlattenedTransformInfo,
     _gen_transform_infos,
+    _optimize_transform_infos_for_flattened_reductions,
+    _TransformInfo,
     use_min_cost_redistribution_plan,
 )
 from torch.distributed.tensor.debug import CommDebugMode
@@ -36,6 +40,7 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
     run_tests,
+    TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
@@ -1340,6 +1345,502 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
             shard_order=(ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 0)),),
         )
         self.assertEqual(x_ordered_dt.to_local(), x_strided_dt.to_local())
+
+
+class OptimizeFlattenedReductionsTest(TestCase):
+    """Tests for _optimize_transform_infos_for_flattened_reductions helper.
+
+    Uses fake process group since these tests don't perform actual communications.
+    """
+
+    def setUp(self):
+        super().setUp()
+        store = dist.HashStore()
+        dist.init_process_group(backend="fake", rank=0, world_size=8, store=store)
+
+    def tearDown(self):
+        super().tearDown()
+        dist.destroy_process_group()
+
+    def test_no_flattened_mesh_returns_original(self):
+        """When no flattened mesh exists, original transforms are returned."""
+        mesh = init_device_mesh("cpu", (2, 2, 2), mesh_dim_names=("A", "B", "C"))
+
+        transform_infos = [
+            _TransformInfo(
+                mesh_dim=0,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+            _TransformInfo(
+                mesh_dim=2,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+        ]
+
+        # Source placements match the transforms
+        src_placements = (Partial("sum"), Replicate(), Partial("sum"))
+
+        result = _optimize_transform_infos_for_flattened_reductions(
+            transform_infos, mesh, src_placements
+        )
+
+        self.assertEqual(len(result), 2)
+        self.assertTrue(all(isinstance(r, _TransformInfo) for r in result))
+
+    def test_consecutive_reductions_flattened(self):
+        """Consecutive same-type reductions on consecutive mesh dims are flattened."""
+        mesh = init_device_mesh("cpu", (2, 2, 2), mesh_dim_names=("A", "B", "C"))
+        mesh["A", "B"]._flatten("A_B")
+
+        # Dims 0 and 1 are consecutive
+        transform_infos = [
+            _TransformInfo(
+                mesh_dim=0,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+            _TransformInfo(
+                mesh_dim=1,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+        ]
+
+        src_placements = (Partial("sum"), Partial("sum"), Replicate())
+
+        result = _optimize_transform_infos_for_flattened_reductions(
+            transform_infos, mesh, src_placements
+        )
+
+        self.assertEqual(len(result), 1)
+        self.assertIsInstance(result[0], _FlattenedTransformInfo)
+        self.assertEqual(result[0].original_mesh_dims, (0, 1))
+
+    def test_non_consecutive_dims_with_shard_can_merge(self):
+        """Reductions on dims 0 and 2 with Shard on dim 1 CAN be merged.
+
+        When the skipped dim has a non-Partial placement (Shard, Replicate),
+        there's no ordering constraint, so we can merge.
+        """
+        mesh = init_device_mesh("cpu", (2, 2, 2), mesh_dim_names=("A", "B", "C"))
+        mesh["A", "C"]._flatten("A_C")
+
+        # Shard on dim 1 is being transformed to Replicate
+        transform_infos = [
+            _TransformInfo(
+                mesh_dim=0,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+            _TransformInfo(
+                mesh_dim=1,
+                src_dst_placements=(Shard(0), Replicate()),
+                logical_shape=[8, 8],
+            ),
+            _TransformInfo(
+                mesh_dim=2,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+        ]
+
+        # Source placements: Shard on dim 1 (not Partial)
+        src_placements = (Partial("sum"), Shard(0), Partial("sum"))
+
+        result = _optimize_transform_infos_for_flattened_reductions(
+            transform_infos, mesh, src_placements
+        )
+
+        # Should merge dims 0 and 2 (Shard on dim 1 doesn't block)
+        self.assertEqual(len(result), 2)
+        self.assertIsInstance(result[0], _FlattenedTransformInfo)
+        self.assertEqual(result[0].original_mesh_dims, (0, 2))
+        # The Shard->Replicate transform should be preserved
+        self.assertIsInstance(result[1], _TransformInfo)
+        self.assertEqual(result[1].mesh_dim, 1)
+
+    def test_non_consecutive_dims_with_partial_cannot_merge(self):
+        """Reductions on dims 0 and 2 with DIFFERENT Partial type on dim 1 CANNOT be merged.
+
+        When the skipped dim has a Partial placement of a different reduce_op type,
+        there's an ordering constraint that must be preserved.
+        """
+        mesh = init_device_mesh("cpu", (2, 2, 2), mesh_dim_names=("A", "B", "C"))
+        mesh["A", "C"]._flatten("A_C")
+
+        # Only transforms for dims 0 and 2 - dim 1 stays Pmax (no transform)
+        transform_infos = [
+            _TransformInfo(
+                mesh_dim=0,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+            _TransformInfo(
+                mesh_dim=2,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+        ]
+
+        # Source placements: Partial("max") on dim 1 - different type blocks merging!
+        src_placements = (Partial("sum"), Partial("max"), Partial("sum"))
+
+        result = _optimize_transform_infos_for_flattened_reductions(
+            transform_infos, mesh, src_placements
+        )
+
+        # Should NOT merge - different Partial type on dim 1 blocks
+        self.assertEqual(len(result), 2)
+        self.assertTrue(all(isinstance(r, _TransformInfo) for r in result))
+
+    def test_non_consecutive_dims_with_same_partial_can_merge(self):
+        """Reductions on dims 0 and 2 with SAME Partial type on dim 1 CAN be merged.
+
+        When the skipped dim has a Partial placement of the same reduce_op type,
+        there's no ordering issue since all reductions are commutative with themselves.
+        """
+        mesh = init_device_mesh("cpu", (2, 2, 2), mesh_dim_names=("A", "B", "C"))
+        mesh["A", "C"]._flatten("A_C")
+
+        # Transforms for dims 0 and 2 - dim 1 also has Psum but no transform (stays Psum)
+        transform_infos = [
+            _TransformInfo(
+                mesh_dim=0,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+            _TransformInfo(
+                mesh_dim=2,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+        ]
+
+        # Source placements: Partial("sum") on dim 1 - same type allows merging!
+        src_placements = (Partial("sum"), Partial("sum"), Partial("sum"))
+
+        result = _optimize_transform_infos_for_flattened_reductions(
+            transform_infos, mesh, src_placements
+        )
+
+        # Should merge dims 0 and 2 (same Partial type on dim 1 doesn't block)
+        self.assertEqual(len(result), 1)
+        self.assertIsInstance(result[0], _FlattenedTransformInfo)
+        self.assertEqual(result[0].original_mesh_dims, (0, 2))
+
+    def test_different_reduce_ops_not_grouped(self):
+        """Reductions with different reduce_ops are not grouped together."""
+        mesh = init_device_mesh("cpu", (2, 2, 2), mesh_dim_names=("A", "B", "C"))
+        mesh["A", "C"]._flatten("A_C")
+
+        transform_infos = [
+            _TransformInfo(
+                mesh_dim=0,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+            _TransformInfo(
+                mesh_dim=2,
+                src_dst_placements=(Partial("max"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+        ]
+
+        src_placements = (Partial("sum"), Replicate(), Partial("max"))
+
+        result = _optimize_transform_infos_for_flattened_reductions(
+            transform_infos, mesh, src_placements
+        )
+
+        # Should remain as 2 separate transforms since reduce ops differ
+        self.assertEqual(len(result), 2)
+        self.assertTrue(all(isinstance(r, _TransformInfo) for r in result))
+
+    def test_mixed_reduce_ops_not_flattened(self):
+        """Mixed reduce ops with different op in between: no flattening possible."""
+        mesh = init_device_mesh("cpu", (2, 2, 2), mesh_dim_names=("A", "B", "C"))
+        mesh["A", "C"]._flatten("A_C")
+
+        # sum on 0, max on 1, sum on 2 - the sums are not consecutive
+        transform_infos = [
+            _TransformInfo(
+                mesh_dim=0,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+            _TransformInfo(
+                mesh_dim=1,
+                src_dst_placements=(Partial("max"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+            _TransformInfo(
+                mesh_dim=2,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+        ]
+
+        src_placements = (Partial("sum"), Partial("max"), Partial("sum"))
+
+        result = _optimize_transform_infos_for_flattened_reductions(
+            transform_infos, mesh, src_placements
+        )
+
+        # No flattening because sums are not consecutive (max is in between)
+        self.assertEqual(len(result), 3)
+
+        # All should be regular TransformInfo
+        self.assertTrue(all(isinstance(r, _TransformInfo) for r in result))
+
+    def test_all_dims_flattened(self):
+        """All dims with same reduce_op are flattened when full mesh exists."""
+        mesh = init_device_mesh("cpu", (2, 2, 2), mesh_dim_names=("A", "B", "C"))
+        mesh["A", "B", "C"]._flatten("A_B_C")
+
+        transform_infos = [
+            _TransformInfo(
+                mesh_dim=0,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+            _TransformInfo(
+                mesh_dim=1,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+            _TransformInfo(
+                mesh_dim=2,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+        ]
+
+        src_placements = (Partial("sum"), Partial("sum"), Partial("sum"))
+
+        result = _optimize_transform_infos_for_flattened_reductions(
+            transform_infos, mesh, src_placements
+        )
+
+        self.assertEqual(len(result), 1)
+        self.assertIsInstance(result[0], _FlattenedTransformInfo)
+        self.assertEqual(result[0].original_mesh_dims, (0, 1, 2))
+
+    def test_single_reduction_not_flattened(self):
+        """A single reduction is not flattened even if mesh exists."""
+        mesh = init_device_mesh("cpu", (2, 2, 2), mesh_dim_names=("A", "B", "C"))
+        mesh["A", "C"]._flatten("A_C")
+
+        transform_infos = [
+            _TransformInfo(
+                mesh_dim=0,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+        ]
+
+        src_placements = (Partial("sum"), Replicate(), Replicate())
+
+        result = _optimize_transform_infos_for_flattened_reductions(
+            transform_infos, mesh, src_placements
+        )
+
+        self.assertEqual(len(result), 1)
+        self.assertIsInstance(result[0], _TransformInfo)
+
+    def test_empty_input(self):
+        """Empty input returns empty output."""
+        mesh = init_device_mesh("cpu", (2, 2, 2), mesh_dim_names=("A", "B", "C"))
+
+        src_placements = (Replicate(), Replicate(), Replicate())
+
+        result = _optimize_transform_infos_for_flattened_reductions(
+            [], mesh, src_placements
+        )
+
+        self.assertEqual(result, [])
+
+
+class FlattenedReductionIntegrationTest(DTensorTestBase):
+    """Integration tests for flattened reduction optimization.
+
+    These tests verify that redistribute actually performs fewer communications
+    when flattened meshes are available.
+    """
+
+    @property
+    def world_size(self):
+        return 8
+
+    @with_comms
+    def test_merging_reductions(self):
+        """Tests various combinations in the same test function to avoid setup time"""
+        mesh = init_device_mesh(
+            self.device_type, (2, 2, 2), mesh_dim_names=("A", "B", "C")
+        )
+
+        # Test: All three consecutive dims with same reduce op CAN be merged
+        mesh["A", "B", "C"]._flatten("A_B_C")
+
+        local_tensor = torch.ones(8, 8, device=self.device_type)
+        dt = DTensor.from_local(
+            local_tensor,
+            mesh,
+            (Partial("sum"), Partial("sum"), Partial("sum")),
+            run_check=False,
+        )
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            result = dt.redistribute(mesh, (Replicate(), Replicate(), Replicate()))
+
+        # With full flattened mesh, should have 1 allreduce instead of 3
+        self.assertEqual(comm_mode.get_total_counts(), 1)
+
+        # Verify correctness: result should be 8x (reduced across all 8 ranks)
+        expected = local_tensor * 8
+        self.assertEqual(result.to_local(), expected)
+
+        # Test: Two consecutive dims (A,B) with same reduce op CAN be merged
+        mesh["A", "B"]._flatten("A_B")
+
+        local_tensor = torch.ones(8, 8, device=self.device_type)
+        dt = DTensor.from_local(
+            local_tensor,
+            mesh,
+            (Partial("sum"), Partial("sum"), Replicate()),
+            run_check=False,
+        )
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            result = dt.redistribute(mesh, (Replicate(), Replicate(), Replicate()))
+
+        # Dims 0 and 1 are consecutive, should merge to 1 allreduce
+        self.assertEqual(comm_mode.get_total_counts(), 1)
+
+        # Verify correctness: sum across A (2) and B (2) = 4x
+        expected = local_tensor * 4
+        self.assertEqual(result.to_local(), expected)
+
+        # Test: Non-consecutive dims (A,C) with Replicate on B - CAN merge now
+        mesh["A", "C"]._flatten("A_C")
+
+        local_tensor = torch.ones(8, 8, device=self.device_type)
+        dt = DTensor.from_local(
+            local_tensor,
+            mesh,
+            (Partial("sum"), Replicate(), Partial("sum")),
+            run_check=False,
+        )
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            result = dt.redistribute(mesh, (Replicate(), Replicate(), Replicate()))
+
+        # Replicate on dim B (not Partial) - CAN merge dims 0 and 2
+        self.assertEqual(comm_mode.get_total_counts(), 1)
+
+        # Verify correctness: sum across A (2) and C (2) = 4x
+        expected = local_tensor * 4
+        self.assertEqual(result.to_local(), expected)
+
+        # Test: Non-consecutive dims (A,C) with Shard on B - CAN merge
+        local_tensor = torch.ones(8, 8, device=self.device_type)
+        dt = DTensor.from_local(
+            local_tensor,
+            mesh,
+            (Partial("sum"), Shard(0), Partial("sum")),
+            run_check=False,
+        )
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            result = dt.redistribute(mesh, (Replicate(), Replicate(), Replicate()))
+
+        # Shard on dim B (not Partial) - CAN merge dims 0 and 2
+        # Should have 2 ops: 1 merged allreduce on A_C + 1 allgather on B
+        self.assertEqual(comm_mode.get_total_counts(), 2)
+
+        # Verify correctness: sum across A (2) and C (2) = 4x, gather on B
+        expected = torch.ones(8 * 2, 8, device=self.device_type) * 4
+        self.assertEqual(result.to_local(), expected)
+
+        # Test: Mixed reduce ops - different types cannot be merged
+        local_tensor = torch.ones(8, 8, device=self.device_type) * dist.get_rank()
+        dt = DTensor.from_local(
+            local_tensor,
+            mesh,
+            (Partial("sum"), Partial("max"), Partial("sum")),
+            run_check=False,
+        )
+
+        comm_mode = CommDebugMode()
+        with comm_mode:
+            result = dt.redistribute(mesh, (Replicate(), Replicate(), Replicate()))
+
+        # Correct order (sum_A, max_B, sum_C) with values 0-7:
+        #   1. sum_A: (0+4)=4, (1+5)=6, (2+6)=8, (3+7)=10
+        #   2. max_B: max(4,8)=8, max(6,10)=10
+        #   3. sum_C: 8+10=18
+        expected = torch.ones(8, 8, device=self.device_type) * 18
+        self.assertEqual(result.to_local(), expected)
+
+        # Should have 3 comm ops: sum on A, max on B, sum on C (no merging)
+        self.assertEqual(comm_mode.get_total_counts(), 3)
+
+    @with_comms
+    def test_non_consecutive_reductions_not_flattened(self):
+        """Test that non-consecutive same-type reductions with different ops in between
+        are NOT incorrectly flattened, as this would produce wrong results.
+
+        Mesh (2,2,2) with dims (A,B,C):
+        - rank 0: A=0,B=0,C=0, rank 1: A=0,B=0,C=1
+        - rank 2: A=0,B=1,C=0, rank 3: A=0,B=1,C=1
+        - rank 4: A=1,B=0,C=0, rank 5: A=1,B=0,C=1
+        - rank 6: A=1,B=1,C=0, rank 7: A=1,B=1,C=1
+
+        Values chosen to show difference between correct and incorrect ordering:
+        rank 0: 10, rank 7: 10, all others: 0
+
+        Placements: [Partial("sum"), Partial("max"), Partial("sum")]
+        Correct order (sum_A, max_B, sum_C):
+          1. sum_A: y[0,0]=10, y[0,1]=0, y[1,0]=0, y[1,1]=10
+          2. max_B: z[0]=max(10,0)=10, z[1]=max(0,10)=10
+          3. sum_C: 10+10=20
+
+        Wrong order (sum_{A,C} flattened, then max_B):
+          1. sum_{A,C}: u[0]=10+0+0+0=10, u[1]=0+0+0+10=10
+          2. max_B: max(10,10)=10
+
+        20 != 10 - this catches the bug!
+        """
+        mesh = init_device_mesh(
+            self.device_type, (2, 2, 2), mesh_dim_names=("A", "B", "C")
+        )
+        # Create flattened mesh - the optimization should NOT use it for non-consecutive
+        mesh["A", "C"]._flatten("A_C")
+
+        # Set up values: rank 0 and rank 7 get 10, others get 0
+        rank = dist.get_rank()
+        if rank == 0 or rank == 7:
+            local_tensor = torch.ones(8, 8, device=self.device_type) * 10
+        else:
+            local_tensor = torch.zeros(8, 8, device=self.device_type)
+
+        dt = DTensor.from_local(
+            local_tensor,
+            mesh,
+            (Partial("sum"), Partial("max"), Partial("sum")),
+            run_check=False,
+        )
+
+        result = dt.redistribute(mesh, (Replicate(), Replicate(), Replicate()))
+
+        # Correct result is 20, NOT 10
+        expected = torch.ones(8, 8, device=self.device_type) * 20
+        self.assertEqual(result.to_local(), expected)
 
 
 RedistributeTestWithLocalTensor = create_local_tensor_test_class(
