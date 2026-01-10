@@ -126,6 +126,48 @@ def _remove_if_exists(path):
             shutil.rmtree(path)
 
 
+def _safe_extract_zip(zip_file, extract_to):
+    """
+    Safely extract a zip file, preventing zipslip attacks.
+
+    Args:
+        zip_file: ZipFile object to extract
+        extract_to: Directory to extract to
+
+    Raises:
+        ValueError: If any archive entry contains unsafe paths
+    """
+    # Normalize the extraction directory path
+    extract_to = Path(extract_to).resolve(strict=False)
+
+    for member in zip_file.infolist():
+        # Get the normalized path
+        filename = os.path.normpath(member.filename)
+
+        # Check for directory traversal attempts
+        if filename.startswith(("/", "\\")):
+            raise ValueError(f"Archive entry has absolute path: {member.filename}")
+
+        if len(filename) >= 2 and filename[1] == ":" and filename[0].isalpha():
+            raise ValueError(f"Archive entry has absolute path: {member.filename}")
+
+        if ".." in re.split("[/\\\\]", filename):
+            raise ValueError(
+                f"Archive entry contains directory traversal: {member.filename}"
+            )
+
+        # Construct the full extraction path and verify it's within extract_to
+        out = (extract_to / filename).resolve(strict=False)
+
+        if not out.is_relative_to(extract_to):
+            raise ValueError(
+                f"Archive entry escapes target directory: {member.filename}"
+            )
+
+        # Extract the member safely
+        zip_file.extract(member, extract_to)
+
+
 def _git_archive_link(repo_owner, repo_name, ref):
     # See https://docs.github.com/en/rest/reference/repos#download-a-repository-archive-zip
     return f"https://github.com/{repo_owner}/{repo_name}/zipball/{ref}"
@@ -296,8 +338,8 @@ def _get_cache_or_reload(
             extraced_repo_name = cached_zipfile.infolist()[0].filename
             extracted_repo = os.path.join(hub_dir, extraced_repo_name)
             _remove_if_exists(extracted_repo)
-            # Unzip the code and rename the base folder
-            cached_zipfile.extractall(hub_dir)
+            # Unzip the code and rename the base folder using safe extraction
+            _safe_extract_zip(cached_zipfile, hub_dir)
 
         _remove_if_exists(cached_file)
         _remove_if_exists(repo_dir)
@@ -806,7 +848,8 @@ def _legacy_zip_load(
         members = f.infolist()
         if len(members) != 1:
             raise RuntimeError("Only one file(not dir) is allowed in the zipfile")
-        f.extractall(model_dir)
+        # Use safe extraction to prevent zipslip attacks
+        _safe_extract_zip(f, model_dir)
         extraced_name = members[0].filename
         extracted_file = os.path.join(model_dir, extraced_name)
     return torch.load(
