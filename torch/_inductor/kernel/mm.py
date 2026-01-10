@@ -14,6 +14,7 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
 )
 from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
 from torch._inductor.remote_gemm_autotune_cache import gen_best_config
+from torch._inductor.runtime.caching import decoders, encoders, memoizers
 from torch._inductor.virtualized import ops, V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
@@ -302,6 +303,11 @@ addmm_contiguous_subgraph_template = ContiguousTemplate(
 
 
 @register_lowering(aten.mm, type_promotion_kind=None)
+@memoizers.tuned_mm_memoizer.memoize(
+    custom_params_encoder=encoders.tuned_mm_params_encoder,
+    custom_result_encoder=encoders.tuned_kernel_result_encoder,
+    custom_result_decoder=decoders.tuned_mm_result_decoder,
+)
 def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     """
     Lowering for autotuning aten.mm with different backends (Aten, Triton, CUTLASS, etc.)

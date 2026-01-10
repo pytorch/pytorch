@@ -17,6 +17,7 @@ from unittest.mock import patch
 
 from filelock import FileLock
 
+import torch
 from torch._inductor.runtime.caching import (
     config,
     context,
@@ -3865,6 +3866,553 @@ class DeferredRecordingTest(TestMixin, TestCase):
         # Finalize all deferred recordings
         for deferred in deferred_objs:
             deferred.finalize(10)
+
+
+@instantiate_parametrized_tests
+class TunedMMEncodingTest(TestMixin, TestCase):
+    """Test class for tuned kernel params and result encoding.
+
+    These tests verify that the encoders correctly extract and encode
+    the information needed for caching tuned_mm and tuned_addmm results.
+    """
+
+    @classmethod
+    def sub_dir(cls) -> str:
+        return f"testing-tuned-mm-encoding-{cls.cls_id}"
+
+    @classmethod
+    def setUpClass(cls) -> None:
+        rmtree(
+            impls._OnDiskCacheImpl(sub_dir=cls.sub_dir())._cache_dir,
+            ignore_errors=True,
+        )
+
+    @classmethod
+    def tearDownClass(cls) -> None:
+        rmtree(
+            impls._OnDiskCacheImpl(sub_dir=cls.sub_dir())._cache_dir,
+            ignore_errors=True,
+        )
+
+    # ============= Encoder Helper Function Tests =============
+
+    def test_encode_tensor_basic(self) -> None:
+        """Test that _encode_tensor correctly encodes tensor metadata."""
+        from torch._inductor.runtime.caching.encoders import _encode_tensor
+
+        # Setup: create a tensor
+        tensor = torch.randn(8, 16, dtype=torch.float32)
+
+        # Execute: encode the tensor
+        encoded = _encode_tensor(tensor)
+
+        # Assert: encoding contains expected fields
+        self.assertEqual(encoded["shape"], tuple(tensor.shape))
+        self.assertEqual(encoded["stride"], tuple(tensor.stride()))
+        self.assertEqual(encoded["dtype"], str(tensor.dtype))
+
+    def test_encode_tensor_with_different_dtypes(self) -> None:
+        """Test that _encode_tensor correctly handles different dtypes."""
+        from torch._inductor.runtime.caching.encoders import _encode_tensor
+
+        for dtype in [torch.float32, torch.float16, torch.bfloat16, torch.int32]:
+            # Setup: create a tensor with specific dtype
+            tensor = torch.zeros(4, 8, dtype=dtype)
+
+            # Execute: encode the tensor
+            encoded = _encode_tensor(tensor)
+
+            # Assert: dtype is correctly encoded
+            self.assertEqual(encoded["dtype"], str(dtype))
+
+    def test_encode_tensor_with_non_contiguous(self) -> None:
+        """Test that _encode_tensor correctly encodes non-contiguous tensors."""
+        from torch._inductor.runtime.caching.encoders import _encode_tensor
+
+        # Setup: create a transposed (non-contiguous) tensor
+        tensor = torch.randn(8, 16, dtype=torch.float32).t()
+        self.assertFalse(tensor.is_contiguous())
+
+        # Execute: encode the tensor
+        encoded = _encode_tensor(tensor)
+
+        # Assert: stride reflects the transposed layout
+        self.assertEqual(encoded["shape"], (16, 8))
+        self.assertEqual(encoded["stride"], (1, 16))
+
+    def test_encode_choice_from_ktc_with_valid_ktc(self) -> None:
+        """Test _encode_choice_from_ktc with a valid KernelTemplateChoice."""
+        from unittest.mock import MagicMock
+
+        from torch._inductor.runtime.caching.encoders import _encode_choice_from_ktc
+
+        # Setup: create a mock KTC with template and params
+        mock_ktc = MagicMock()
+        mock_ktc.template.uid = "mm"
+        mock_ktc.params.to_serializeable_dict.return_value = {
+            "BLOCK_M": 64,
+            "BLOCK_N": 64,
+        }
+
+        # Execute: encode the KTC
+        encoded = _encode_choice_from_ktc(mock_ktc, rank=0)
+
+        # Assert: encoding is correct
+        # Note: params values are converted to strings for JSON serialization
+        self.assertIsNotNone(encoded)
+        self.assertEqual(encoded["template_id"], "mm")
+        self.assertEqual(encoded["params"], {"BLOCK_M": "64", "BLOCK_N": "64"})
+        self.assertEqual(encoded["rank"], 0)
+
+    def test_encode_choice_from_ktc_without_rank(self) -> None:
+        """Test _encode_choice_from_ktc without rank parameter."""
+        from unittest.mock import MagicMock
+
+        from torch._inductor.runtime.caching.encoders import _encode_choice_from_ktc
+
+        # Setup: create a mock KTC
+        mock_ktc = MagicMock()
+        mock_ktc.template.uid = "aten::mm"
+        mock_ktc.params.to_serializeable_dict.return_value = {}
+
+        # Execute: encode without rank
+        encoded = _encode_choice_from_ktc(mock_ktc)
+
+        # Assert: encoding is correct, no rank
+        self.assertIsNotNone(encoded)
+        self.assertEqual(encoded["template_id"], "aten::mm")
+        self.assertNotIn("rank", encoded)
+
+    def test_encode_choice_from_ktc_with_none_template(self) -> None:
+        """Test _encode_choice_from_ktc returns None when template is None."""
+        from unittest.mock import MagicMock
+
+        from torch._inductor.runtime.caching.encoders import _encode_choice_from_ktc
+
+        # Setup: create a mock KTC with None template
+        mock_ktc = MagicMock()
+        mock_ktc.template = None
+
+        # Execute: encode
+        encoded = _encode_choice_from_ktc(mock_ktc)
+
+        # Assert: returns None
+        self.assertIsNone(encoded)
+
+    def test_encode_choice_from_ktc_with_none_params(self) -> None:
+        """Test _encode_choice_from_ktc returns None when params is None."""
+        from unittest.mock import MagicMock
+
+        from torch._inductor.runtime.caching.encoders import _encode_choice_from_ktc
+
+        # Setup: create a mock KTC with None params
+        mock_ktc = MagicMock()
+        mock_ktc.template.uid = "mm"
+        mock_ktc.params = None
+
+        # Execute: encode
+        encoded = _encode_choice_from_ktc(mock_ktc)
+
+        # Assert: returns None
+        self.assertIsNone(encoded)
+
+    def test_encode_choice_from_caller_or_node_with_choice_caller(self) -> None:
+        """Test _encode_choice_from_caller_or_node with a ChoiceCaller that has KTC annotation."""
+        from unittest.mock import MagicMock
+
+        from torch._inductor.runtime.caching.encoders import (
+            _encode_choice_from_caller_or_node,
+        )
+
+        # Setup: create mock KTC
+        mock_ktc = MagicMock()
+        mock_ktc.template.uid = "mm"
+        mock_ktc.params.to_serializeable_dict.return_value = {"BLOCK_M": 128}
+
+        # Setup: create mock ChoiceCaller with annotations
+        mock_caller = MagicMock()
+        mock_caller.annotations = {"ktc": mock_ktc}
+
+        # Execute: encode
+        encoded = _encode_choice_from_caller_or_node(mock_caller, rank=1)
+
+        # Assert: encoding is correct
+        # Note: params values are converted to strings for JSON serialization
+        self.assertIsNotNone(encoded)
+        self.assertEqual(encoded["template_id"], "mm")
+        self.assertEqual(encoded["params"], {"BLOCK_M": "128"})
+        self.assertEqual(encoded["rank"], 1)
+
+    def test_encode_choice_from_caller_or_node_with_buffer_node(self) -> None:
+        """Test _encode_choice_from_caller_or_node with a buffer node that has KTC annotation."""
+        from unittest.mock import MagicMock
+
+        from torch._inductor.runtime.caching.encoders import (
+            _encode_choice_from_caller_or_node,
+        )
+
+        # Setup: create mock KTC
+        mock_ktc = MagicMock()
+        mock_ktc.template.uid = "aten::mm"
+        mock_ktc.params.to_serializeable_dict.return_value = {}
+
+        # Setup: create mock buffer node with annotations (simulating output_node())
+        mock_buffer = MagicMock()
+        mock_buffer.annotations = {"ktc": mock_ktc}
+
+        # Execute: encode
+        encoded = _encode_choice_from_caller_or_node(mock_buffer)
+
+        # Assert: encoding is correct
+        self.assertIsNotNone(encoded)
+        self.assertEqual(encoded["template_id"], "aten::mm")
+        self.assertEqual(encoded["params"], {})
+        self.assertNotIn("rank", encoded)
+
+    def test_encode_choice_from_caller_or_node_without_annotations(self) -> None:
+        """Test _encode_choice_from_caller_or_node returns None when no annotations."""
+        from unittest.mock import MagicMock
+
+        from torch._inductor.runtime.caching.encoders import (
+            _encode_choice_from_caller_or_node,
+        )
+
+        # Setup: create mock object without annotations
+        mock_obj = MagicMock()
+        mock_obj.annotations = None
+
+        # Execute: encode
+        encoded = _encode_choice_from_caller_or_node(mock_obj)
+
+        # Assert: returns None
+        self.assertIsNone(encoded)
+
+    def test_encode_choice_from_caller_or_node_without_ktc_in_annotations(self) -> None:
+        """Test _encode_choice_from_caller_or_node returns None when ktc not in annotations."""
+        from unittest.mock import MagicMock
+
+        from torch._inductor.runtime.caching.encoders import (
+            _encode_choice_from_caller_or_node,
+        )
+
+        # Setup: create mock object with annotations but no ktc
+        mock_obj = MagicMock()
+        mock_obj.annotations = {"other_key": "value"}
+
+        # Execute: encode
+        encoded = _encode_choice_from_caller_or_node(mock_obj)
+
+        # Assert: returns None
+        self.assertIsNone(encoded)
+
+    # ============= Unknown Type Handling Tests =============
+
+    def test_result_encoder_handles_unknown_result_type_without_exception(self) -> None:
+        """Test that tuned_kernel_result_encoder handles unknown result types gracefully."""
+        from unittest.mock import MagicMock
+
+        from torch._inductor.runtime.caching.encoders import tuned_kernel_result_encoder
+
+        # Setup: create mock function
+        mock_fn = MagicMock()
+
+        # Execute: get the encoder factory (factory factory pattern)
+        # tuned_kernel_result_encoder(fn) -> params_to_encoder
+        # params_to_encoder(*args, **kwargs) -> encode_result
+        # encode_result(result) -> encoded dict
+        params_to_encoder = tuned_kernel_result_encoder(fn=mock_fn)
+        encode_result = params_to_encoder()  # Call with no args to get the encoder
+
+        # Execute: encode an unknown result type (not TensorBox)
+        unknown_result = MagicMock()
+        unknown_result.__class__.__name__ = "UnknownType"
+
+        # Assert: encoding completes without exception
+        try:
+            encoded = encode_result(unknown_result)
+            # Should return unknown type
+            self.assertEqual(encoded["_type"], "unknown")
+        except Exception as e:
+            self.fail(f"Encoding unknown result type raised exception: {e}")
+
+    def test_encode_choice_from_ktc_handles_missing_attributes_without_exception(
+        self,
+    ) -> None:
+        """Test that _encode_choice_from_ktc handles objects with missing attributes."""
+        from torch._inductor.runtime.caching.encoders import _encode_choice_from_ktc
+
+        # Execute: try to encode an object without template attribute
+        class FakeKTC:
+            pass
+
+        fake_ktc = FakeKTC()
+
+        # Assert: returns None without exception
+        try:
+            encoded = _encode_choice_from_ktc(fake_ktc)
+            self.assertIsNone(encoded)
+        except Exception as e:
+            self.fail(f"Encoding object with missing attributes raised exception: {e}")
+
+    # ============= Consistency Tests =============
+
+    def test_params_encoder_produces_consistent_keys(self) -> None:
+        """Test that params encoder produces consistent keys for same inputs."""
+        from torch._inductor.runtime.caching.encoders import (
+            EncodedNode,
+            TunedKernelEncodedParams,
+        )
+
+        # Setup: create two identical param encodings
+        params1 = TunedKernelEncodedParams(
+            nodes=[
+                EncodedNode(dtype="torch.float32", shape=[8, 16], stride=[16, 1]),
+                EncodedNode(dtype="torch.float32", shape=[16, 32], stride=[32, 1]),
+            ],
+        )
+        params2 = TunedKernelEncodedParams(
+            nodes=[
+                EncodedNode(dtype="torch.float32", shape=[8, 16], stride=[16, 1]),
+                EncodedNode(dtype="torch.float32", shape=[16, 32], stride=[32, 1]),
+            ],
+        )
+
+        # Assert: encodings are identical
+        self.assertEqual(params1, params2)
+
+        # Also verify they produce the same JSON
+        self.assertEqual(
+            json.dumps(params1, sort_keys=True), json.dumps(params2, sort_keys=True)
+        )
+
+    def test_different_shapes_produce_different_keys(self) -> None:
+        """Test that different shapes produce different encoded params."""
+        from torch._inductor.runtime.caching.encoders import (
+            EncodedNode,
+            TunedKernelEncodedParams,
+        )
+
+        # Setup: create params with different shapes
+        params_small = TunedKernelEncodedParams(
+            nodes=[
+                EncodedNode(dtype="torch.float32", shape=[8, 16], stride=[16, 1]),
+                EncodedNode(dtype="torch.float32", shape=[16, 32], stride=[32, 1]),
+            ],
+        )
+        params_large = TunedKernelEncodedParams(
+            nodes=[
+                EncodedNode(dtype="torch.float32", shape=[64, 128], stride=[128, 1]),
+                EncodedNode(dtype="torch.float32", shape=[128, 256], stride=[256, 1]),
+            ],
+        )
+
+        # Assert: encodings are different
+        self.assertNotEqual(params_small, params_large)
+        self.assertNotEqual(
+            json.dumps(params_small, sort_keys=True),
+            json.dumps(params_large, sort_keys=True),
+        )
+
+    def test_different_dtypes_produce_different_keys(self) -> None:
+        """Test that different dtypes produce different encoded params."""
+        from torch._inductor.runtime.caching.encoders import (
+            EncodedNode,
+            TunedKernelEncodedParams,
+        )
+
+        # Setup: create params with different dtypes
+        params_fp32 = TunedKernelEncodedParams(
+            nodes=[
+                EncodedNode(dtype="torch.float32", shape=[8, 16], stride=[16, 1]),
+                EncodedNode(dtype="torch.float32", shape=[16, 32], stride=[32, 1]),
+            ],
+        )
+        params_fp16 = TunedKernelEncodedParams(
+            nodes=[
+                EncodedNode(dtype="torch.float16", shape=[8, 16], stride=[16, 1]),
+                EncodedNode(dtype="torch.float16", shape=[16, 32], stride=[32, 1]),
+            ],
+        )
+
+        # Assert: encodings are different
+        self.assertNotEqual(params_fp32, params_fp16)
+
+    def test_different_strides_produce_different_keys(self) -> None:
+        """Test that different strides produce different encoded params."""
+        from torch._inductor.runtime.caching.encoders import (
+            EncodedNode,
+            TunedKernelEncodedParams,
+        )
+
+        # Setup: create params with different strides (contiguous vs transposed)
+        params_contiguous = TunedKernelEncodedParams(
+            nodes=[
+                EncodedNode(dtype="torch.float32", shape=[8, 16], stride=[16, 1]),
+                EncodedNode(dtype="torch.float32", shape=[16, 32], stride=[32, 1]),
+            ],
+        )
+        params_transposed = TunedKernelEncodedParams(
+            nodes=[
+                EncodedNode(dtype="torch.float32", shape=[8, 16], stride=[1, 8]),
+                EncodedNode(dtype="torch.float32", shape=[16, 32], stride=[32, 1]),
+            ],
+        )
+
+        # Assert: encodings are different
+        self.assertNotEqual(params_contiguous, params_transposed)
+
+    # ============= Integration Tests =============
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_tuned_mm_encoding_single_output_node(self) -> None:
+        """Test tuned_mm encoding with single output node (no MultiTemplateBuffer).
+
+        When max_autotune is disabled or there's only one choice, the algorithm
+        selector returns a single output node immediately. This test verifies
+        that the memoizer correctly caches encoded params and result.
+        """
+        import torch._inductor.config as inductor_config
+        from torch._inductor.runtime.caching import memoizers
+
+        # Skip if no CUDA available
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+
+        # Clear the memoizer cache before test
+        memoizers.tuned_mm_memoizer.cache_clear()
+
+        # Setup: create test matrices
+        mat1 = torch.randn(64, 128, device="cuda", dtype=torch.float32)
+        mat2 = torch.randn(128, 256, device="cuda", dtype=torch.float32)
+
+        # Setup: disable max_autotune so we get a single output node
+        # (algorithm selector returns immediately without MultiTemplateBuffer)
+        with (
+            patch.object(inductor_config, "max_autotune", False),
+            patch.object(inductor_config, "max_autotune_gemm", False),
+        ):
+
+            @torch.compile
+            def matmul_fn(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+                return torch.mm(a, b)
+
+            # Execute: run the compiled function
+            result = matmul_fn(mat1, mat2)
+
+            # Assert: result is correct
+            expected = torch.mm(mat1, mat2)
+            self.assertTrue(torch.allclose(result, expected, rtol=1e-3, atol=1e-3))
+
+        # Assert: memoizer cache has an entry
+        cache = memoizers.tuned_mm_memoizer._memoizer._cache
+        self.assertGreater(len(cache._memory), 0, "Memoizer cache should have entries")
+
+        # Verify the cached entry has expected structure
+        for cache_entry in cache._memory.values():
+            # Verify encoded_params structure (TunedKernelEncodedParams)
+            self.assertIn("nodes", cache_entry.encoded_params)
+            nodes = cache_entry.encoded_params["nodes"]
+            self.assertEqual(len(nodes), 2)  # mat1 and mat2
+            for node in nodes:
+                self.assertIn("dtype", node)
+                self.assertIn("shape", node)
+                self.assertIn("stride", node)
+
+            # Verify encoded_result structure (TunedKernelEncodedResult)
+            # For single output node, _type should be "single_choice" or "unknown"
+            self.assertIn("_type", cache_entry.encoded_result)
+            result_type = cache_entry.encoded_result["_type"]
+            self.assertIn(result_type, ["single_choice", "unknown"])
+
+            if result_type == "single_choice":
+                # Verify choice structure
+                self.assertIn("choice", cache_entry.encoded_result)
+                choice = cache_entry.encoded_result["choice"]
+                self.assertIn("template_id", choice)
+                self.assertIn("params", choice)
+
+    @patch_on_disk_cache_base_dir
+    @set_caching_module_enabled(True)
+    def test_tuned_mm_encoding_multi_template_buffer(self) -> None:
+        """Test tuned_mm encoding with MultiTemplateBuffer.
+
+        When max_autotune is enabled and benchmark_epilogue_fusion is True,
+        the algorithm selector returns a MultiTemplateBuffer that defers
+        autotuning. This test verifies that the memoizer correctly caches
+        encoded params and result with multiple ranked choices.
+
+        Note: In some environments, only a single choice may be available,
+        resulting in "single_choice" type instead of "multi_template_buffer".
+        """
+        import torch._inductor.config as inductor_config
+        from torch._inductor.runtime.caching import memoizers
+
+        # Skip if no CUDA available
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+
+        # Clear the memoizer cache before test
+        memoizers.tuned_mm_memoizer.cache_clear()
+
+        # Setup: create test matrices
+        mat1 = torch.randn(64, 128, device="cuda", dtype=torch.float32)
+        mat2 = torch.randn(128, 256, device="cuda", dtype=torch.float32)
+
+        # Setup: enable max_autotune AND benchmark_epilogue_fusion to get
+        # MultiTemplateBuffer (return_multi_template=True)
+        with (
+            patch.object(inductor_config, "max_autotune", True),
+            patch.object(inductor_config, "max_autotune_gemm_backends", "TRITON,ATEN"),
+            patch.object(inductor_config, "benchmark_epilogue_fusion", True),
+        ):
+
+            @torch.compile
+            def matmul_fn(a: torch.Tensor, b: torch.Tensor) -> torch.Tensor:
+                return torch.mm(a, b)
+
+            # Execute: run the compiled function
+            result = matmul_fn(mat1, mat2)
+
+            # Assert: result is correct
+            expected = torch.mm(mat1, mat2)
+            self.assertTrue(torch.allclose(result, expected, rtol=1e-3, atol=1e-3))
+
+        # Assert: memoizer cache has an entry
+        cache = memoizers.tuned_mm_memoizer._memoizer._cache
+        self.assertGreater(len(cache._memory), 0, "Memoizer cache should have entries")
+
+        # Verify the cached entry has expected structure
+        for cache_entry in cache._memory.values():
+            # Verify encoded_params structure (TunedKernelEncodedParams)
+            self.assertIn("nodes", cache_entry.encoded_params)
+            nodes = cache_entry.encoded_params["nodes"]
+            self.assertEqual(len(nodes), 2)  # mat1 and mat2
+            for node in nodes:
+                self.assertIn("dtype", node)
+                self.assertIn("shape", node)
+                self.assertIn("stride", node)
+
+            self.assertIn("_type", cache_entry.encoded_result)
+            result_type = cache_entry.encoded_result["_type"]
+            self.assertIn(
+                result_type, ["multi_template_buffer", "single_choice", "unknown"]
+            )
+
+            if result_type == "multi_template_buffer":
+                # Verify choices structure
+                self.assertIn("choices", cache_entry.encoded_result)
+                choices = cache_entry.encoded_result["choices"]
+                self.assertGreater(len(choices), 0)
+
+                # Verify each choice has expected structure with rank
+                for i, choice in enumerate(choices):
+                    self.assertIn("template_id", choice)
+                    self.assertIn("params", choice)
+                    self.assertIn("rank", choice)
+                    self.assertEqual(choice["rank"], i)  # Ranks should be 0, 1, 2, ...
+            else:
+                self.skipTest("MultiTemplateBuffer not returned")
 
 
 if __name__ == "__main__":
