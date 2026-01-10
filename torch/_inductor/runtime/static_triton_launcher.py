@@ -43,8 +43,6 @@ class StaticallyLaunchedTritonKernel:
         # pyrefly: ignore [missing-attribute]
         self.name = kernel.src.fn.__name__
         # pyrefly: ignore [missing-attribute]
-        self.cubin_raw = kernel.asm.get("cubin", None)
-        # pyrefly: ignore [missing-attribute]
         self.cubin_path = kernel._cubin_path
 
         # Used by torch.compile to filter constants in older triton versions
@@ -132,7 +130,7 @@ class StaticallyLaunchedTritonKernel:
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
             with open(filepath, "wb") as f:
                 f.write(self.cubin_raw)
-                self.cubin_path = filepath
+                self.cubin_path = filepath  # pyre-ignore
         return self.cubin_path
 
     def load_kernel(self, device: int) -> None:
@@ -278,11 +276,42 @@ class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
 
         return _StaticCudaLauncher
 
+    def __init__(self, kernel: CompiledKernel) -> None:
+        # pyrefly: ignore [missing-attribute]
+        if "hsaco" in kernel.asm:
+            # pyrefly: ignore [missing-attribute]
+            self.cubin_raw = kernel.asm["hsaco"]
+
+        # pyrefly: ignore [missing-attribute]
+        elif "cubin" in kernel.asm:
+            # pyrefly: ignore [missing-attribute]
+            self.cubin_raw = kernel.asm["cubin"]
+        else:
+            raise RuntimeError(
+                "Expected either 'hsaco' (ROCm) or 'cubin' (CUDA) in kernel.asm"
+            )
+        super().__init__(kernel)
+
+
+class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
+    @cached_property
+    def C_impl(self):
+        from torch._C import _StaticXpuLauncher
+
+        return _StaticXpuLauncher
+
+    def __init__(self, kernel: CompiledKernel) -> None:
+        # pyrefly: ignore [missing-attribute]
+        self.cubin_raw = kernel.asm.get("zebin", None)
+        super().__init__(kernel)
+
 
 def statically_launched_kernel_by_device(
     kernel: CompiledKernel, device_type: str = "cuda"
 ) -> StaticallyLaunchedTritonKernel:
     if device_type == "cuda":
         return StaticallyLaunchedCudaKernel(kernel)
+    elif device_type == "xpu":
+        return StaticallyLaunchedXpuKernel(kernel)
     else:
         raise NotImplementedError(f"Device type {device_type} not supported")
