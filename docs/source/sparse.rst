@@ -121,9 +121,7 @@ operations on Tensor with strided (or other) storage formats. The particularitie
 storage, that is the physical layout of the data, influences the performance of
 an operation but should not influence the semantics.
 
-
-We are actively increasing operator coverage for sparse tensors. Users should not
-expect support same level of support as for dense Tensors yet.
+We are actively increasing operator coverage for sparse tensors, but users should not yet expect the same level of support as for dense tensors.
 See our :ref:`operator<sparse-ops-docs>` documentation for a list.
 
     >>> b = torch.tensor([[0, 0, 1, 2, 3, 0], [4, 5, 0, 6, 0, 0]])
