@@ -161,6 +161,7 @@ from .variables.lists import (
     SliceVariable,
     TupleVariable,
 )
+from .variables.memory import SymbolicMempoolState
 from .variables.misc import (
     CellVariable,
     ExceptionVariable,
@@ -1110,6 +1111,7 @@ class InstructionTranslatorBase(
     symbolic_globals: dict[str, VariableTracker]
     symbolic_torch_function_state: SymbolicTorchFunctionState
     symbolic_stream_state: SymbolicStreamState
+    symbolic_mempool_state: SymbolicMempoolState
     post_prune_cell_and_freevars: Optional[dict[str, VariableTracker]]
     stack: list[VariableTracker]
     instruction_pointer: Optional[int]
@@ -4383,6 +4385,7 @@ class InstructionTranslatorBase(
         symbolic_globals: dict[str, VariableTracker],
         symbolic_torch_function_state: SymbolicTorchFunctionState,
         symbolic_stream_state: SymbolicStreamState,
+        symbolic_mempool_state: SymbolicMempoolState,
         f_code: types.CodeType,
         export: bool,
         inline_depth: int,
@@ -4403,6 +4406,7 @@ class InstructionTranslatorBase(
         self.symbolic_globals = symbolic_globals
         self.symbolic_torch_function_state = symbolic_torch_function_state
         self.symbolic_stream_state = symbolic_stream_state
+        self.symbolic_mempool_state = symbolic_mempool_state
         # used to keep cell/freevars alive after pruning symbolic_locals (prune_dead_locals)
         # in order to generate any nested closures
         self.post_prune_cell_and_freevars = None
@@ -4559,6 +4563,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             symbolic_globals={},
             symbolic_torch_function_state=None,  # type: ignore[arg-type] # set below
             symbolic_stream_state=None,  # type: ignore[arg-type] # set below
+            symbolic_mempool_state=None,  # type: ignore[arg-type] # set below
             f_code=f_code,
             export=export,
             inline_depth=0,
@@ -4666,6 +4671,7 @@ class InstructionTranslator(InstructionTranslatorBase):
             )
 
             self.symbolic_stream_state = SymbolicStreamState()
+            self.symbolic_mempool_state = SymbolicMempoolState()
 
             if export:
                 # export gets confused if we never realize unused inputs
@@ -5000,6 +5006,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 parent.symbolic_globals,
                 parent.symbolic_torch_function_state,
                 parent.symbolic_stream_state,
+                parent.symbolic_mempool_state,
                 func,
             )
         else:
@@ -5010,6 +5017,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
                 parent.symbolic_globals,
                 parent.symbolic_torch_function_state,
                 parent.symbolic_stream_state,
+                parent.symbolic_mempool_state,
                 func,
             )
         return tracer
@@ -5091,6 +5099,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
         symbolic_globals: dict[str, VariableTracker],
         symbolic_torch_function_state: SymbolicTorchFunctionState,
         symbolic_stream_state: SymbolicStreamState,
+        symbolic_mempool_state: SymbolicMempoolState,
         funcvar: BaseUserFunctionVariable | LocalGeneratorObjectVariable,
     ) -> None:
         f_globals = funcvar.get_globals()
@@ -5125,6 +5134,7 @@ class InliningInstructionTranslator(InstructionTranslatorBase):
             symbolic_globals=symbolic_globals,
             symbolic_torch_function_state=symbolic_torch_function_state,
             symbolic_stream_state=symbolic_stream_state,
+            symbolic_mempool_state=symbolic_mempool_state,
             instructions=instructions,
             code_options={k: getattr(code, k) for k in get_code_keys()},
             f_code=code,
