@@ -32,6 +32,22 @@ def set_module(obj, mod):
 cmake_prefix_path = _osp.join(_osp.dirname(_osp.dirname(__file__)), "share", "cmake")
 
 
+def _has_non_weakidref_weakrefs(obj) -> bool:
+    """
+    Check if obj has any weakrefs that are NOT WeakIdRef.
+
+    WeakIdRef uses id() for identity, which doesn't change during swap_tensors,
+    so those weakrefs are safe and don't need to be cleared. Other weakref types
+    may not be safe and should prevent swapping.
+    """
+    from torch.utils.weak import WeakIdRef
+
+    for wr in weakref.getweakrefs(obj):
+        if type(wr) is not WeakIdRef:
+            return True
+    return False
+
+
 def swap_tensors(t1, t2):
     """
     This function swaps the content of the two Tensor objects.
@@ -40,10 +56,14 @@ def swap_tensors(t1, t2):
 
     This will not work if t1 and t2 have different slots.
     """
-    # Ensure there are no weakrefs
-    if weakref.getweakrefs(t1):
+    # WeakIdRef weakrefs (from TracingContext.tensor_to_context,
+    # MetaTensorDescriber.lookup_tensor, etc.) are safe because they use id()
+    # for identity, which doesn't change during swap. Other weakref types
+    # may not be safe.
+    if _has_non_weakidref_weakrefs(t1):
         raise RuntimeError("Cannot swap t1 because it has weakref associated with it")
-    if weakref.getweakrefs(t2):
+
+    if _has_non_weakidref_weakrefs(t2):
         raise RuntimeError("Cannot swap t2 because it has weakref associated with it")
     t1_slots = set(copyreg._slotnames(t1.__class__))  # type: ignore[attr-defined]
     t2_slots = set(copyreg._slotnames(t2.__class__))  # type: ignore[attr-defined]

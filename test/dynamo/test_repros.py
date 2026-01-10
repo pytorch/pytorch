@@ -105,8 +105,6 @@ HAS_OMEGACONG = importlib.util.find_spec("omegaconf")
 if HAS_OMEGACONG:
     from omegaconf import OmegaConf
 
-HAS_CUDA = torch.cuda.is_available()
-
 
 def exists(val):
     return val is not None
@@ -8651,7 +8649,7 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         # Should compile successfully with fullgraph=True
         self.assertEqual(cnt.frame_count, 1)
 
-    @unittest.skipIf(not HAS_CUDA, "Tests moving from cuda to cpu and back")
+    @requires_cuda
     def test_move_tensor_subclass_parameter_after_compile(self):
         aten = torch.ops.aten
 
@@ -8696,32 +8694,24 @@ class ReproTestsDevice(torch._dynamo.test_case.TestCase):
         linear.compile()
         linear(torch.randn(1, 2, device=device))
 
-        # TODO @azahed98: We wish to test that there are no weakrefs, but there are known issues
-        # with weakrefs from
+        # After compile there are still WeakIDRefs from
         # 1. TracingContext.tensor_to_context
         # 2. MetaTensorDescriber.lookup_tensor
 
-        # Check for weakrefs
+        # Check for weakrefs - there should be WeakIdRef weakrefs from the above
         t1 = linear.weight
         self.assertEqual(len(weakref.getweakrefs(t1)), 2)
 
-        # TODO @azahed98: Once the aforementioned issue is fixed, we can remove the self.assertRaises
-        with self.assertRaises(RuntimeError):
-            # Move to cpu. Should work with no weakrefs
-            linear.cpu()
+        # Move to cpu. swap_tensors allows WeakIdRef weakrefs because they use id()
+        # for identity, which doesn't change during swap, so they're safe to keep.
+        linear.cpu()
 
-            # Move back to cuda and check that there is no recompile
-            linear.to(device)
-            prev_frame_count = torch._dynamo.utils.counters.get("frames", {}).get(
-                "ok", 0
-            )
-            linear(torch.randn(1, 2, device=device))
-            new_frame_count = torch._dynamo.utils.counters.get("frames", {}).get(
-                "ok", 0
-            )
-            assert new_frame_count == prev_frame_count, (
-                "linear() call caused a recompile"
-            )
+        # Move back to cuda and check that there is no recompile
+        linear.to(device)
+        prev_frame_count = torch._dynamo.utils.counters.get("frames", {}).get("ok", 0)
+        linear(torch.randn(1, 2, device=device))
+        new_frame_count = torch._dynamo.utils.counters.get("frames", {}).get("ok", 0)
+        assert new_frame_count == prev_frame_count, "linear() call caused a recompile"
 
 
 instantiate_parametrized_tests(ReproTests)
