@@ -457,6 +457,8 @@ def _tuned_grouped_mm_common(
             g = V.graph.sizevars.check_equals_and_simplify(g1, g2)
             k = V.graph.sizevars.check_equals(k1, k2)
             a_is_2d, b_is_2d = False, False
+    a_is_k_major = mat_a.get_stride()[-1] == 1
+    b_is_k_major = mat_b.get_stride()[-2] == 1
 
     if (
         is_nonzero
@@ -464,9 +466,6 @@ def _tuned_grouped_mm_common(
         and can_use_triton_kernel(mat_a, mat_b, offs, bias, scale_result)
     ):
         scaled = scale_a is not None
-
-        a_is_k_major = mat_a.get_stride()[-1] == 1
-        b_is_k_major = mat_b.get_stride()[-2] == 1
 
         triton_has_make_tensor_descriptor = hasattr(tl, "make_tensor_descriptor")
         triton_has_experimental_make_tensor_descriptor = hasattr(
@@ -528,6 +527,14 @@ def _tuned_grouped_mm_common(
             has_ragged_tma = True
         except ImportError:
             pass
+
+        kwargs = {
+            "A_IS_2D": a_is_2d,
+            "B_IS_2D": b_is_2d,
+            "A_IS_K_MAJOR": a_is_k_major,
+            "B_IS_K_MAJOR": b_is_k_major,
+            "USE_RAGGED_TENSOR_DESCRIPTOR": has_ragged_tma,
+        }
         for config in gluon_grouped_mm_configs(
             dtype_AB=mat_a.get_dtype(),
             dtype_C=layout.dtype,
@@ -542,8 +549,7 @@ def _tuned_grouped_mm_common(
                 layout=layout,
                 num_stages=config.num_stages,
                 num_warps=config.num_warps,
-                USE_RAGGED_TENSOR_DESCRIPTOR=has_ragged_tma,
-                **config.kwargs,
+                **(kwargs | config.kwargs),
             )
 
     input_gen_fns = {}

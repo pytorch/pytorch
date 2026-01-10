@@ -109,11 +109,15 @@ from triton.experimental.gluon import language as gl
                     dtype_str = f"gl.{dtype_name}"
 
                 # Compute layouts using get_default_for() with the actual dtype
+                a_is_k_major = kwargs.get("A_IS_K_MAJOR", True)
+                b_is_k_major = kwargs.get("B_IS_K_MAJOR", True)
                 a_layout = gl.NVMMASharedLayout.get_default_for(
-                    [BLOCK_M, BLOCK_K], gluon_dtype
+                    [BLOCK_M, BLOCK_K] if a_is_k_major else [BLOCK_K, BLOCK_M],
+                    gluon_dtype,
                 )
                 b_layout = gl.NVMMASharedLayout.get_default_for(
-                    [1, BLOCK_N, BLOCK_K], gluon_dtype
+                    [BLOCK_N, BLOCK_K] if b_is_k_major else [BLOCK_K, BLOCK_N],
+                    gluon_dtype,
                 )
                 c_layout = gl.NVMMASharedLayout.get_default_for(
                     [BLOCK_M, BLOCK_N], gluon_dtype

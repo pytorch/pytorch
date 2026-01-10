@@ -273,10 +273,24 @@ def load_partition(pargs: PartitionArgs):
 
                 with pl.scope("load_tma_async"):
                     tma.async_copy_global_to_shared(
-                        pargs.a_desc, [iter.m_offset, k], load_buf_full_bar, a_smem
+                        pargs.a_desc,
+{%- if A_IS_K_MAJOR %}
+                        [iter.m_offset, k],
+{%- else %}
+                        [k, iter.m_offset],
+{%- endif %}
+                        load_buf_full_bar,
+                        a_smem
                     )
                     tma.async_copy_global_to_shared(
-                        pargs.b_desc, [g, iter.n_offset, k], load_buf_full_bar, b_smem
+                        pargs.b_desc,
+{%- if B_IS_K_MAJOR %}
+                        [g, iter.n_offset, k],
+{%- else %}
+                        [g, k, iter.n_offset],
+{%- endif %}
+                        load_buf_full_bar,
+                        b_smem
                     )
 
                 state = state.next()
@@ -344,10 +358,15 @@ def compute_partition(pargs: PartitionArgs):
                 with pl.scope("compute_data_prep"):
                     a_smem = pargs.a_smem_bufs.index(load_state.index)
                     b_smem = pargs.b_smem_bufs.index(load_state.index)
-                    b = b_smem.reshape([BLOCK_N, BLOCK_K]).permute((1, 0))
+{%- if not A_IS_K_MAJOR %}
+                    a_smem = a_smem.permute((1, 0))
+{%- endif %}
+{%- if B_IS_K_MAJOR %}
+                    b_smem = b_smem.permute((1, 0))
+{%- endif %}
 
                 with pl.scope("compute_mma"):
-                    tcgen05_mma(a_smem, b, acc, use_acc=use_acc)
+                    tcgen05_mma(a_smem, b_smem, acc, use_acc=use_acc)
 
                 with pl.scope("compute_commit_empty"):
                     tcgen05_commit(load_buf_empty_bar)
@@ -398,8 +417,6 @@ def store_partition(pargs: PartitionArgs):
         instr_variant="32x32b",
     )
 
-    # Shared memory is always allocated with 2D shape [BLOCK_M, BLOCK_N]
-    # Always use 2D c_layout for shared memory, regardless of descriptor layout
     c_smem = gl.allocate_shared_memory(
         pargs.c_desc.dtype, [BLOCK_M, BLOCK_N], pargs.c_layout
     )
@@ -467,10 +484,38 @@ def store_partition(pargs: PartitionArgs):
 
 {{def_kernel("a_ptr", "b_ptr", "offs_ptr")}}
     # Layout objects with computed swizzle widths for the given block dimensions
-    a_layout: gl.constexpr = gl.NVMMASharedLayout(swizzle_byte_width={{A_LAYOUT_SWIZZLE_BYTE_WIDTH}}, element_bitwidth={{ELEMENT_BITWIDTH}}, rank=2, transposed=False, fp4_padded=False, cga_layout=[])
-    b_layout: gl.constexpr = gl.NVMMASharedLayout(swizzle_byte_width={{B_LAYOUT_SWIZZLE_BYTE_WIDTH}}, element_bitwidth={{ELEMENT_BITWIDTH}}, rank=3, transposed=False, fp4_padded=False, cga_layout=[])
-    c_layout: gl.constexpr = gl.NVMMASharedLayout(swizzle_byte_width={{C_LAYOUT_SWIZZLE_BYTE_WIDTH}}, element_bitwidth={{ELEMENT_BITWIDTH}}, rank=2, transposed=False, fp4_padded=False, cga_layout=[])
-    c_layout_ragged: gl.constexpr = gl.NVMMASharedLayout(swizzle_byte_width={{C_LAYOUT_SWIZZLE_BYTE_WIDTH}}, element_bitwidth={{ELEMENT_BITWIDTH}}, rank=4, transposed=False, fp4_padded=False, cga_layout=[])
+    a_layout: gl.constexpr = gl.NVMMASharedLayout(
+        swizzle_byte_width={{A_LAYOUT_SWIZZLE_BYTE_WIDTH}},
+        element_bitwidth={{ELEMENT_BITWIDTH}},
+        rank=2,
+        transposed=False,
+        fp4_padded=False,
+        cga_layout=[]
+    )
+    b_layout: gl.constexpr = gl.NVMMASharedLayout(
+        swizzle_byte_width={{B_LAYOUT_SWIZZLE_BYTE_WIDTH}},
+        element_bitwidth={{ELEMENT_BITWIDTH}},
+        rank=2,
+        transposed=False,
+        fp4_padded=False,
+        cga_layout=[]
+    )
+    c_layout: gl.constexpr = gl.NVMMASharedLayout(
+        swizzle_byte_width={{C_LAYOUT_SWIZZLE_BYTE_WIDTH}},
+        element_bitwidth={{ELEMENT_BITWIDTH}},
+        rank=2,
+        transposed=False,
+        fp4_padded=False,
+        cga_layout=[]
+    )
+    c_layout_ragged: gl.constexpr = gl.NVMMASharedLayout(
+        swizzle_byte_width={{C_LAYOUT_SWIZZLE_BYTE_WIDTH}},
+        element_bitwidth={{ELEMENT_BITWIDTH}},
+        rank=4,
+        transposed=False,
+        fp4_padded=False,
+        cga_layout=[]
+    )
     store_layout: gl.constexpr = gl.BlockedLayout(
         size_per_thread=[{{BLOCK_M}} // 1, {{BLOCK_N}} // 32],
         threads_per_warp=[1, 32],
@@ -498,17 +543,29 @@ def store_partition(pargs: PartitionArgs):
     # Create tensor descriptors
     a_desc = tma.make_tensor_descriptor(
         a_ptr,
+{%- if A_IS_K_MAJOR %}
         shape=[M, K],
         strides=[a_stride_m, a_stride_k],
         block_shape=[BLOCK_M, BLOCK_K],
+{%- else %}
+        shape=[K, M],
+        strides=[a_stride_k, a_stride_m],
+        block_shape=[BLOCK_K, BLOCK_M],
+{%- endif %}
         layout=a_layout,
     )
 
     b_desc = tma.make_tensor_descriptor(
         b_ptr,
+{%- if B_IS_K_MAJOR %}
         shape=[G, N, K],
         strides=[b_stride_g, b_stride_n, b_stride_k],
         block_shape=[1, BLOCK_N, BLOCK_K],
+{%- else %}
+        shape=[G, K, N],
+        strides=[b_stride_g, b_stride_k, b_stride_n],
+        block_shape=[1, BLOCK_K, BLOCK_N],
+{%- endif %}
         layout=b_layout,
     )
 
@@ -533,10 +590,22 @@ def store_partition(pargs: PartitionArgs):
 
     # Allocate shared memory buffers
     a_smem_bufs = gl.allocate_shared_memory(
-        dtype, [NUM_LOAD_BUFFERS, BLOCK_M, BLOCK_K], a_layout
+        dtype,
+{%- if A_IS_K_MAJOR %}
+        [NUM_LOAD_BUFFERS, BLOCK_M, BLOCK_K],
+{%- else %}
+        [NUM_LOAD_BUFFERS, BLOCK_K, BLOCK_M],
+{%- endif %}
+        a_layout
     )
     b_smem_bufs = gl.allocate_shared_memory(
-        dtype, [NUM_LOAD_BUFFERS, 1, BLOCK_N, BLOCK_K], b_layout
+        dtype,
+{%- if B_IS_K_MAJOR %}
+        [NUM_LOAD_BUFFERS, BLOCK_N, BLOCK_K],
+{%- else %}
+        [NUM_LOAD_BUFFERS, BLOCK_K, BLOCK_N],
+{%- endif %}
+        b_layout
     )
     load_buf_empty_bars = gl.allocate_shared_memory(
         gl.int64, [NUM_LOAD_BUFFERS, 1], mbarrier.MBarrierLayout()
