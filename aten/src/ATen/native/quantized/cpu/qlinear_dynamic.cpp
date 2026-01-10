@@ -31,7 +31,7 @@
 #include <string>
 #include <type_traits>
 
-#ifdef USE_FBGEMM
+#if defined(USE_FBGEMM) && !defined(__aarch64__)
 template <bool ReluFused>
 at::Tensor PackedLinearWeight::apply_dynamic_impl(
     at::Tensor input,
@@ -512,7 +512,7 @@ at::Tensor PackedLinearWeightsOnednn::apply_dynamic_impl(
   x.init(input_desc, input_contig.data_ptr());
   // Find quantization parameters
   float x_max = 0, x_min = 0;
-#ifdef USE_FBGEMM
+#if defined(USE_FBGEMM) && !defined(__aarch64__)
   // Use FBGEMM's FindMinMax if available since it's faster
   fbgemm::FindMinMax(
       /*m=*/input_contig.data_ptr<float>(),
@@ -738,7 +738,7 @@ at::Tensor PackedLinearWeightsACL::apply_dynamic_impl(
     // Find quantization parameters
     float x_max = 0, x_min = 0;
 
-#ifdef USE_FBGEMM
+#if defined(USE_FBGEMM) && !defined(__aarch64__)
     // Use FBGEMM's FindMinMax if available since it's faster
     fbgemm::FindMinMax(
         /*m=*/input_contig.data_ptr<float>(),
