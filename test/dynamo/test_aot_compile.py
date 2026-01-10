@@ -31,6 +31,7 @@ from torch._functorch.aot_autograd import (
     aot_compile_joint_with_descriptors,
     aot_export_joint_with_descriptors,
 )
+from torch._guards import tracing, TracingContext
 from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._tensor import DTensor
@@ -1263,6 +1264,7 @@ from user code:
 
             with contextlib.ExitStack() as stack:
                 if fake_mode is not None:
+                    stack.enter_context(tracing(TracingContext(fake_mode)))
                     stack.enter_context(fake_mode)
 
                 with contextlib.ExitStack() as export_stack:
