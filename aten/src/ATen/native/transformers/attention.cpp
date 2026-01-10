@@ -1,4 +1,5 @@
 #include <ATen/core/TensorBody.h>
+#include <ATen/ops/tanh.h>
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/TensorOperators.h>
@@ -1158,4 +1159,31 @@ Tensor triton_multi_head_attention(
 #endif
   return proj;
 }
+
+std::tuple<Tensor, Tensor> attn(
+    const Tensor& q,
+    const Tensor& k,
+    const Tensor& v) {
+  TORCH_CHECK(q.dim() == 2, "q must have 2 dimensions");
+  TORCH_CHECK(k.dim() == 2, "k must have 2 dimensions");
+  TORCH_CHECK(v.dim() == 2, "v must have 2 dimensions");
+  TORCH_CHECK(
+      q.sym_size(0) == k.sym_size(0) && q.sym_size(0) == v.sym_size(0),
+      "The first dim for all tensors must be equal for q, k, v, got",
+      q.sym_size(0),
+      k.sym_size(0),
+      v.sym_size(0));
+  TORCH_CHECK(
+      q.sym_size(1) == k.sym_size(1),
+      "The second dim for q and k must be the same, got",
+      q.sym_size(1),
+      k.sym_size(1));
+
+  auto x = at::matmul(q, k.t());
+  auto a = at::tanh(x);
+  auto o = at::matmul(a, v);
+
+  return std::make_tuple(o, a);
+}
+
 } // namespace at::native
