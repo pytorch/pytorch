@@ -63,6 +63,15 @@ tolerance:
 
   cosine: []
 
+  # Models with boolean mask outputs that should use IoU (Intersection over Union)
+  # for accuracy checking instead of exact boolean matching. This is useful for
+  # segmentation models where small floating-point differences get thresholded
+  # into boolean masks.
+  use_iou_for_bool_masks:
+    - sam
+    - sam_fast
+    - vision_maskrcnn
+
 require_larger_multiplier_for_smaller_tensor:
   - yolov3
 
@@ -88,7 +97,6 @@ slow:
 non_deterministic:
   # https://github.com/pytorch/pytorch/issues/98355
   - mobilenet_v3_large
-  - sam_fast
 
 
 disable_cudagraph:
