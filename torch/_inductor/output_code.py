@@ -945,14 +945,27 @@ class RegionalOutputCode(OutputCode):
         default=None, init=False
     )
 
-    def __init__(self, graph_module: torch.fx.GraphModule):
+    # Optional filter for ops during serialization
+    _ops_filter: Callable[[str], bool] | None = dataclasses.field(
+        default=None, init=False
+    )
+
+    def __init__(
+        self,
+        graph_module: torch.fx.GraphModule,
+        ops_filter: Callable[[str], bool] | None = None,
+    ):
         """
         Args:
             graph_module: The torch.fx.GraphModule returned by regional_inductor
+            ops_filter: Optional filter function for op names during serialization.
+                If provided, only ops whose name passes the filter will be serialized.
         """
         super().__init__()
         self._graph_module = graph_module
         self._serialized_graph_module = None
+        self._ops_filter = ops_filter
+        self._boxed_call = True
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
         """Execute the regional compiled graph."""
@@ -1008,8 +1021,18 @@ class RegionalOutputCode(OutputCode):
         custom pickling.
         """
         if self._graph_module is not None:
-            from torch.fx._graph_pickler import GraphPickler
+            from torch.fx._graph_pickler import GraphPickler, Options
 
-            self._serialized_graph_module = GraphPickler.dumps(self._graph_module)
+            # Only pass Options if user specified a custom ops_filter,
+            # otherwise let GraphPickler use its default safe filter
+            options = (
+                Options(ops_filter=self._ops_filter)
+                if self._ops_filter is not None
+                else None
+            )
+            self._serialized_graph_module = GraphPickler.dumps(
+                self._graph_module,
+                options,
+            )
             # Clear the graph module to avoid pickling it with standard pickle
             self._graph_module = None

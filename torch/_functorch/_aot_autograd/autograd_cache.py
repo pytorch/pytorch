@@ -779,6 +779,12 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
                         time.time_ns(),
                         forward_symints=symints,
                     )
+                elif should_bundle_autograd_cache() and cache_state != "bypass":
+                    aot_config.cache_info = AOTAutogradCacheInfo(
+                        "bundled_cache_placeholder",
+                        time.time_ns(),
+                        forward_symints=symints,
+                    )
 
             cache_info.update(
                 {
@@ -820,7 +826,10 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
         cls: type[AOTAutogradCache], cache_info: AOTAutogradCacheInfo
     ) -> Optional[str]:
         shape_env = cls._get_shape_env()
-        assert shape_env is not None
+
+        if shape_env is None:
+            return None
+
         symints = cache_info.forward_symints
         guards = shape_env.get_pruned_guards(symints)
         return shape_env.produce_guards_expression(placeholders=symints, guards=guards)
@@ -941,6 +950,8 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
             AOTAutogradCache._write_to_local_cache(key, content)
             counters["aot_autograd"]["autograd_cache_saved"] += 1
         except BypassAOTAutogradCache as e:
+            if config.strict_autograd_cache:
+                raise e
             counters["aot_autograd"]["autograd_cache_bypass"] += 1
             log.info("Bypassing autograd cache due to: %s", e)  # noqa: G200
             if remote:

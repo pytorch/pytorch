@@ -1281,12 +1281,15 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
         get_plain_tensors,
     )
 
-    fake_modes = []
-
+    # If TracingContext has a fake_mode, use it authoritatively.
+    # This is the case when Dynamo is driving compilation - any fake tensors
+    # from other modes in the inputs will be refakified by the caller.
     if context := TracingContext.try_get():
         fake_mode = context.fake_mode
         if fake_mode is not None:
-            fake_modes.append((fake_mode, "tracing context", 0))
+            return fake_mode
+
+    fake_modes = []
 
     from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
 
