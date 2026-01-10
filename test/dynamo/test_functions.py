@@ -5392,6 +5392,66 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         x = torch.randn(1)
         self.assertEqual(opt_mod(x), x + 1)
 
+    def test_property_setter_on_mutable_mapping(self):
+        """Test that property setters are properly traced on MutableMapping subclasses.
+
+        This tests that property setters call fset directly (similar to how
+        property getters call fget), rather than deferring to STORE_ATTR
+        bytecode which would execute the setter at the wrong time.
+        """
+
+        class Container(collections.abc.MutableMapping):
+            def __init__(self, data=None, batch_size=None):
+                self._data = data if data is not None else {}
+                self._batch_size = batch_size if batch_size is not None else ()
+                self._names = None
+
+            def __getitem__(self, key):
+                return self._data[key]
+
+            def __setitem__(self, key, value):
+                self._data[key] = value
+
+            def __delitem__(self, key):
+                del self._data[key]
+
+            def __iter__(self):
+                return iter(self._data)
+
+            def __len__(self):
+                return len(self._data)
+
+            @property
+            def batch_size(self):
+                return self._batch_size
+
+            @property
+            def names(self):
+                return self._names
+
+            @names.setter
+            def names(self, value):
+                self._set_names(value)
+
+            def _set_names(self, value):
+                """Set names and propagate to nested containers."""
+                self._names = value
+                for item in self._data.values():
+                    if isinstance(item, Container):
+                        child_size = len(item.batch_size)
+                        item._names = list(value) + [None] * (child_size - len(value))
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def using_property_setter():
+            nested = Container({"b": torch.tensor(2.0)}, (3,))
+            root = Container({"nested": nested}, (3,))
+            root.names = ["time"]  # Property setter
+            return root
+
+        result = using_property_setter()
+        self.assertEqual(result._names, ["time"])
+        self.assertEqual(result["nested"]._names, ["time"])
+
     def test_full_with_tensor_fill_value(self):
         """Test that torch.full works correctly with dynamic tensor fill_value"""
 
