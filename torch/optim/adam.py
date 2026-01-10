@@ -370,7 +370,7 @@ def _single_tensor_adam(
         raise AssertionError("Expected grad_scale and found_inf to be None")
 
     if torch.jit.is_scripting():
-        # this assert is due to JIT being dumb and not realizing that the ops below
+        # This assert is required because torch.jit.script does not recognize certain overloads and not realizing that the ops below
         # have overloads to handle both float and Tensor lrs, so we just assert it's
         # a float since most people using JIT are using floats
         if not isinstance(lr, float):
@@ -384,10 +384,10 @@ def _single_tensor_adam(
         beta1 = _to_scalar(beta1)
         beta2 = _to_scalar(beta2)
 
-    # We only shuffle around the beta when it is a Tensor, otherwise, we prefer
+    # We only shuffle beta when it is a Tensor; otherwise, we treat it as a scalar.
     # treating it as a scalar.
     # Note: ensure type declaration is under conditional check for isinstance
-    # or else torchscript will get cranky about the DeviceDict type.
+    # or else Torchscript will get cranky about the DeviceDict type.
     if isinstance(beta1, Tensor):
         beta1_dict: DeviceDtypeDict | None = {(beta1.device, beta1.dtype): beta1}
     else:
@@ -399,7 +399,7 @@ def _single_tensor_adam(
         exp_avg_sq = exp_avg_sqs[i]
         step_t = state_steps[i]
 
-        # If compiling, the compiler will handle cudagraph checks, see note [torch.compile x capturable]
+        # If compiling, the compiler will handle cudagraph checks, See internal note "[torch.compile x capturable]"
         if not torch.compiler.is_compiling() and capturable:
             capturable_supported_devices = _get_capturable_supported_devices()
             if not (
@@ -415,10 +415,10 @@ def _single_tensor_adam(
 
         if weight_decay != 0:
             if decoupled_weight_decay:
-                # Perform stepweight decay
+                # Perform step weight decay
                 param.mul_(1 - lr * weight_decay)
             else:
-                # Nested if is necessary to bypass jitscript rules
+                # Nested if is necessary to bypass TorchScript rules
                 if differentiable and isinstance(weight_decay, Tensor):
                     if weight_decay.requires_grad:
                         grad = grad.addcmul_(param.clone(), weight_decay)
@@ -456,7 +456,7 @@ def _single_tensor_adam(
 
         exp_avg.lerp_(grad, 1 - device_beta1)
 
-        # Nested if is necessary to bypass jitscript rules
+        # Nested if is necessary to bypass TorchScript rules
         if differentiable and isinstance(beta2, Tensor):
             if beta2.requires_grad:
                 # Using lerp to only use 2 operations bc addcmul's value cannot be a tensor
@@ -478,7 +478,7 @@ def _single_tensor_adam(
         if capturable or differentiable:
             step = step_t
 
-            # Nested if is necessary to bypass jitscript rules
+            # Nested if is necessary to bypass TorchScript rules
             if differentiable and isinstance(beta1, Tensor):
                 if beta1.requires_grad:
                     bias_correction1 = 1 - beta1 ** step.clone()
@@ -487,7 +487,7 @@ def _single_tensor_adam(
             else:
                 bias_correction1 = 1 - beta1**step
 
-            # Nested if is necessary to bypass jitscript rules
+            # Nested if is necessary to bypass TorchScript rules
             if differentiable and isinstance(beta2, Tensor):
                 if beta2.requires_grad:
                     bias_correction2 = 1 - beta2 ** step.clone()
@@ -628,8 +628,7 @@ def _multi_tensor_adam(
         [params, grads, exp_avgs, exp_avg_sqs, max_exp_avg_sqs, state_steps]  # type: ignore[list-item]
     )
 
-    # We only shuffle around the beta when it is a Tensor and on CUDA, otherwise, we prefer
-    # treating it as a scalar.
+    # We only shuffle beta when it is a Tensor; otherwise, we treat it as a scalar.
     beta1_dict: DeviceDict | None = (  # type: ignore[attr-defined]
         {beta1.device: beta1}
         if isinstance(beta1, Tensor) and str(beta1.device) != "cpu"
@@ -688,7 +687,7 @@ def _multi_tensor_adam(
 
         if weight_decay != 0:
             if decoupled_weight_decay:
-                # Perform stepweight decay
+                # Perform step weight decay
                 torch._foreach_mul_(device_params, 1 - lr * weight_decay)
             else:
                 # Reuse the intermediate memory (device_grads) already allocated for maximize
@@ -908,7 +907,7 @@ def adam(
     exp_avg_sqs: list[Tensor],
     max_exp_avg_sqs: list[Tensor],
     state_steps: list[Tensor],
-    # kwonly args with defaults are not supported by functions compiled with torchscript issue #70627
+    # kwonly args with defaults are not supported by functions compiled with Torchscript issue #70627
     # setting this as kwarg for now as functional API is compiled by torch/distributed/optim
     foreach: bool | None = None,
     capturable: bool = False,
