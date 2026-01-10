@@ -214,17 +214,6 @@ def _compute_local_shape_and_global_offset(
               empty tuple.
     """
 
-    empty_offset = ()
-    # Check if rank is in the mesh by trying to get coordinate for first dim.
-    # If coordinate_lookup returns None for any dimension, rank is not in mesh.
-    try:
-        # Try to get first coordinate - if this fails or returns None, rank not in mesh
-        first_coord = coordinate_lookup(0)
-        if first_coord is None:
-            return ((0,), empty_offset)
-    except (IndexError, AssertionError):
-        return ((0,), empty_offset)
-
     local_shape = list(global_shape)
     # Perform shard from left to right. For example,
     #   global tensor: [0, 1, 2, 3, 4, 5, 6, 7]
@@ -260,7 +249,7 @@ def _compute_local_shape_and_global_offset(
         local_shape[shard_dim] = shard_size
         shard_dim_to_global_offsets[shard_dim] = shard_offsets
     if skip_offset:
-        return tuple(local_shape), empty_offset
+        return tuple(local_shape), ()
     global_offset = [0] * len(global_shape)
     for shard_dim, global_offsets in shard_dim_to_global_offsets.items():
         global_offset[shard_dim] = _get_first_offset(global_offsets)
