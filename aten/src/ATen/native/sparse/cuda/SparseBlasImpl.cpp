@@ -1189,9 +1189,7 @@ void triangular_solve_out_sparse_csr(
       block_sparse_triangular_solve_mat(A, B, X, upper, transpose, unitriangular); return;
     }
   }
-#ifdef USE_ROCM
-  TORCH_CHECK(false, "ROCm is not supported");
-#else
+
   c10::MaybeOwned<Tensor> X_ = prepare_dense_matrix_for_cusparse(X);
   // It should be possible to use mixed memory format
   // but there is a bug in CUDA 11.3.1 version:
@@ -1308,13 +1306,18 @@ void triangular_solve_out_sparse_csr(
               descX.descriptor(),
               compute_type,
               CUSPARSE_SPSM_ALG_DEFAULT,
-              desc_spsm.descriptor()));
+#ifdef USE_ROCM
+              desc_spsm.descriptor(),
+              nullptr
+#else
+              desc_spsm.descriptor()
+#endif
+            ));
         });
   }
   if (!X.is_same(*X_)) {
     X.copy_(*X_);
   }
-#endif
 }
 
 void sampled_addmm_out_sparse_csr(
