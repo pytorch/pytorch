@@ -11,6 +11,7 @@ namespace torch::nn {
 /// Example:
 /// ```
 /// Linear model(LinearOptions(5, 2).bias(false));
+/// Linear cuda_model(LinearOptions(5, 2).device(torch::kCUDA));
 /// ```
 struct TORCH_API LinearOptions {
   LinearOptions(int64_t in_features, int64_t out_features);
@@ -22,6 +23,12 @@ struct TORCH_API LinearOptions {
 
   /// If set to false, the layer will not learn an additive bias. Default: true
   TORCH_ARG(bool, bias) = true;
+
+  /// Device to create tensors on (optional, defaults to CPU)
+  TORCH_ARG(std::optional<torch::Device>, device) = std::nullopt;
+
+  /// Data type for the tensors (optional, defaults to float32)
+  TORCH_ARG(std::optional<torch::Dtype>, dtype) = std::nullopt;
 };
 
 // ============================================================================
