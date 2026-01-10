@@ -1794,6 +1794,8 @@ test_operator_benchmark() {
       --output-csv "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.json" \
 
+  sleep 8h
+
   pip_install pandas
   python check_perf_csv.py \
       --actual "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
