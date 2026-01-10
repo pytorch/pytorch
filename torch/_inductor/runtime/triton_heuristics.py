@@ -645,14 +645,6 @@ class CachingAutotuner(KernelInterface):
 
         # load binary to the correct device
         with DeviceGuard(device_interface, self.triton_meta["device"]):
-            # need to initialize context
-            with dynamo_timed(
-                "CachingAutotuner.synchronize",
-                # Deliberately avoid overloading pt2_compile_events:
-                log_pt2_compile_event=False,
-            ):
-                device_interface.synchronize(device_interface.current_device())
-
             launchers = []
             exc = None
             for result in self.compile_results:
@@ -3549,7 +3541,18 @@ def persistent_reduction(
         min_x_block = 1
         if rnumel_hint <= 512:
             min_x_block = 4
-        x_block = min(max(rsplit_size // 32, min_x_block), 16)
+        # If TMA tensor descriptors are in use, Triton requires the last dimension
+        # of a descriptor's block_shape to cover at least 16 bytes.
+        # Codegen records such minimums in `tma_min_block_sizes`.
+        # Ensuring our RSPLIT-driven XBLOCK override does not violate them.
+        required_x_block = 1
+        if (
+            tma_min_block_sizes := inductor_meta.get("tma_min_block_sizes")
+        ) is not None:
+            required_x_block = max(
+                required_x_block, tma_min_block_sizes.get("XBLOCK", 1)
+            )
+        x_block = min(max(rsplit_size // 32, min_x_block, required_x_block), 16)
         for c in configs:
             c.kwargs["RSPLIT_SIZE"] = rsplit_size
             # small XBLOCK to use less registers/smem

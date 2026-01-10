@@ -1262,6 +1262,25 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             return None
 
+        @register(torch.fx.experimental.symbolic_shapes.size_hint)
+        def handle_size_hint(
+            self,
+            tx: "InstructionTranslator",
+            expr: VariableTracker,
+            fallback: Optional[VariableTracker] = None,
+        ) -> VariableTracker | None:
+            fallback_int = fallback.as_python_constant() if fallback else None
+            if isinstance(expr, SymNodeVariable):
+                return variables.ConstantVariable.create(
+                    torch.fx.experimental.symbolic_shapes.size_hint(
+                        expr.sym_num, fallback_int
+                    )
+                )
+            elif expr.is_python_constant():
+                return expr
+            else:
+                return None
+
         @register(torch.fx.experimental.symbolic_shapes.guard_size_oblivious)
         def handle_guard_size_oblivious(
             self, tx: "InstructionTranslator", expr: VariableTracker
@@ -1695,8 +1714,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         gb_type="Can't extract message from torch._check()",
                         context=str(message_vt),
                         explanation=(
-                            "The second argument of torch._check() must be a function"
-                            "defined within the torch.compile region"
+                            "The second argument of torch._check() must be a function "
+                            "defined within the torch.compile region "
                             "that does not reference a non-local variable."
                         ),
                         hints=[

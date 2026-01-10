@@ -340,6 +340,229 @@ x = add_1, y = add_2);  getitem = None
             "Generated code should not call torch.ops.higher_order.print directly",
         )
 
+    @skipIfTorchDynamo("Skipped under Dynamo")
+    def test_inductor_fusion_with_intermediate_print(self):
+        def f(a, b, c):
+            x = a * b
+            torch._higher_order_ops.print("intermediate x: {}", x)
+            y = x + c
+            z = y**2
+            return z
+
+        a = torch.randn(4)
+        b = torch.randn(4)
+        c = torch.randn(4)
+
+        # Compile with inductor and get generated code
+        compiled_f = torch.compile(f, backend="inductor")
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            result = compiled_f(a, b, c)
+            printed_output = mock_stdout.getvalue().strip()
+
+        # Verify correctness
+        expected_x = a * b
+        expected_z = (expected_x + c) ** 2
+        self.assertTrue(torch.allclose(result, expected_z))
+        self.assertIn("intermediate x:", printed_output)
+
+        # Get generated code to verify fusion behavior
+        _, codes = run_and_get_code(compiled_f, a, b, c)
+        merged_code = "\n".join(codes)
+
+        # Verify that print is using Python print (not HOP)
+        self.assertIn("print(", merged_code)
+        self.assertNotIn("torch.ops.higher_order.print", merged_code)
+
+    @skipIfTorchDynamo("Skipped under Dynamo")
+    def test_inductor_multiple_intermediate_prints(self):
+        """Test Inductor handling of multiple prints with intermediate values.
+
+        This tests a more complex case where multiple intermediate values
+        need to be printed during a sequence of fuseable operations.
+        """
+
+        def f(a, b, c):
+            x = a * b
+            torch._higher_order_ops.print("after mul: {}", x)
+            y = x + c
+            torch._higher_order_ops.print("after add: {}", y)
+            z = y**2
+            torch._higher_order_ops.print("after pow: {}", z)
+            return z
+
+        a = torch.randn(4)
+        b = torch.randn(4)
+        c = torch.randn(4)
+
+        # Compile with inductor
+        compiled_f = torch.compile(f, backend="inductor")
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            result = compiled_f(a, b, c)
+            printed_output = mock_stdout.getvalue().strip()
+
+        # Verify correctness
+        expected_x = a * b
+        expected_y = expected_x + c
+        expected_z = expected_y**2
+        self.assertTrue(torch.allclose(result, expected_z))
+
+        # Verify all prints happened in order
+        self.assertIn("after mul:", printed_output)
+        self.assertIn("after add:", printed_output)
+        self.assertIn("after pow:", printed_output)
+
+        # Verify ordering
+        mul_idx = printed_output.find("after mul:")
+        add_idx = printed_output.find("after add:")
+        pow_idx = printed_output.find("after pow:")
+        self.assertLess(mul_idx, add_idx)
+        self.assertLess(add_idx, pow_idx)
+
+    @skipIfTorchDynamo("Skipped under Dynamo")
+    def test_inductor_fusion_same_with_and_without_print(self):
+        """Test that Inductor fusion is the same with and without print HOP.
+
+        This validates that adding print HOPs doesn't change the fusion pattern -
+        the same kernels should be generated, just with print calls interleaved.
+        """
+        import re
+
+        # Function WITHOUT print
+        def f_no_print(a, b, c):
+            x = a * b
+            y = x + c
+            z = y**2
+            return z
+
+        # Function WITH print (same computation, but with intermediate prints)
+        def f_with_print(a, b, c):
+            x = a * b
+            torch._higher_order_ops.print("x: {}", x)
+            y = x + c
+            z = y**2
+            return z
+
+        a = torch.randn(4)
+        b = torch.randn(4)
+        c = torch.randn(4)
+
+        # Compile both versions
+        compiled_no_print = torch.compile(f_no_print, backend="inductor")
+        compiled_with_print = torch.compile(f_with_print, backend="inductor")
+
+        # Get generated code for both
+        _, codes_no_print = run_and_get_code(compiled_no_print, a, b, c)
+        with patch("sys.stdout", new_callable=io.StringIO):
+            _, codes_with_print = run_and_get_code(compiled_with_print, a, b, c)
+
+        merged_no_print = "\n".join(codes_no_print)
+        merged_with_print = "\n".join(codes_with_print)
+
+        # Extract kernel names - pattern matches names like "cpp_fused_add_mul_pow_0"
+        kernel_pattern = r"cpp_fused_([\w_]+?)_\d+"
+
+        # Extract the fusion patterns (the ops being fused, not including the trailing number)
+        def extract_fusion_ops(code):
+            """Extract the set of fused operation patterns from kernel names."""
+            matches = re.findall(kernel_pattern, code)
+            # Each match is the ops part like "add_mul_pow"
+            return set(matches)
+
+        fusion_ops_no_print = extract_fusion_ops(merged_no_print)
+        fusion_ops_with_print = extract_fusion_ops(merged_with_print)
+
+        # Verify that the fusion patterns are the same
+        # The print version should have the same fused ops as the no-print version
+        self.assertEqual(
+            fusion_ops_no_print,
+            fusion_ops_with_print,
+            f"Fusion patterns differ!\n"
+            f"Without print: {fusion_ops_no_print}\n"
+            f"With print: {fusion_ops_with_print}",
+        )
+
+        # Verify the with_print version has print calls
+        self.assertIn("print(", merged_with_print)
+
+        # Verify both compute the same result
+        result_no_print = compiled_no_print(a, b, c)
+        with patch("sys.stdout", new_callable=io.StringIO):
+            result_with_print = compiled_with_print(a, b, c)
+        self.assertTrue(torch.allclose(result_no_print, result_with_print))
+
+    @skipIfTorchDynamo("Skipped under Dynamo")
+    def test_inductor_fusion_complex_pattern(self):
+        """Test complex fusion patterns with multiple intermediate prints.
+
+        Tests that a complex chain of fuseable ops maintains fusion structure
+        even with prints interleaved.
+        """
+        import re
+
+        # Complex computation chain without prints
+        def f_no_print(a, b, c, d):
+            x = a * b  # mul
+            y = x + c  # add
+            z = y - d  # sub
+            w = z * z  # mul
+            return w.sum()
+
+        # Same computation with prints at various points
+        def f_with_print(a, b, c, d):
+            x = a * b
+            torch._higher_order_ops.print("mul result: {}", x)
+            y = x + c
+            z = y - d
+            torch._higher_order_ops.print("sub result: {}", z)
+            w = z * z
+            return w.sum()
+
+        a = torch.randn(8, 8)
+        b = torch.randn(8, 8)
+        c = torch.randn(8, 8)
+        d = torch.randn(8, 8)
+
+        # Compile both versions
+        compiled_no_print = torch.compile(f_no_print, backend="inductor")
+        compiled_with_print = torch.compile(f_with_print, backend="inductor")
+
+        # Get generated code for both
+        _, codes_no_print = run_and_get_code(compiled_no_print, a, b, c, d)
+        with patch("sys.stdout", new_callable=io.StringIO):
+            _, codes_with_print = run_and_get_code(compiled_with_print, a, b, c, d)
+
+        merged_no_print = "\n".join(codes_no_print)
+        merged_with_print = "\n".join(codes_with_print)
+
+        # Extract fusion patterns
+        kernel_pattern = r"cpp_fused_([\w_]+?)_\d+"
+
+        def extract_fusion_ops(code):
+            """Extract the set of fused operation patterns from kernel names."""
+            return set(re.findall(kernel_pattern, code))
+
+        fusion_ops_no_print = extract_fusion_ops(merged_no_print)
+        fusion_ops_with_print = extract_fusion_ops(merged_with_print)
+
+        # Verify the fusion patterns are the same
+        self.assertEqual(
+            fusion_ops_no_print,
+            fusion_ops_with_print,
+            f"Fusion patterns differ!\n"
+            f"Without print: {fusion_ops_no_print}\n"
+            f"With print: {fusion_ops_with_print}",
+        )
+
+        # Verify results are the same
+        result_no_print = compiled_no_print(a, b, c, d)
+        with patch("sys.stdout", new_callable=io.StringIO) as mock_stdout:
+            result_with_print = compiled_with_print(a, b, c, d)
+            printed = mock_stdout.getvalue()
+
+        self.assertTrue(torch.allclose(result_no_print, result_with_print))
+        self.assertIn("mul result:", printed)
+        self.assertIn("sub result:", printed)
+
 
 if __name__ == "__main__":
     run_tests()

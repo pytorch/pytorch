@@ -110,6 +110,7 @@ if typing.TYPE_CHECKING:
         ValuesView,
     )
 
+    from torch._dynamo.bytecode_transformation import Instruction
     from torch._dynamo.replay_record import ExecutionRecord
     from torch._dynamo.symbolic_convert import (
         InstructionTranslator,
@@ -2334,6 +2335,8 @@ def preserve_rng_state() -> Generator[None, None, None]:
         skip_frame_if_in_functorch_mode(rng_state)
         if torch.cuda.is_available():
             cuda_rng_state = torch.clone(torch.cuda.get_rng_state())
+        if torch.xpu.is_available():
+            xpu_rng_state = torch.clone(torch.xpu.get_rng_state())
     try:
         yield
     finally:
@@ -2341,6 +2344,8 @@ def preserve_rng_state() -> Generator[None, None, None]:
             torch.random.set_rng_state(rng_state)
             if torch.cuda.is_available():
                 torch.cuda.set_rng_state(cuda_rng_state)  # type: ignore[possibly-undefined]
+            if torch.xpu.is_available():
+                torch.xpu.set_rng_state(xpu_rng_state)  # type: ignore[possibly-undefined]
 
 
 def is_jit_model(
@@ -4375,7 +4380,7 @@ def _extract_anchors_from_expr(segment: str) -> Optional[_Anchors]:
     return None
 
 
-def get_instruction_source_311(code: types.CodeType, inst: dis.Instruction) -> str:
+def get_instruction_source_311(code: types.CodeType, inst: Instruction) -> str:
     """
     Python 3.11+ only. Returns lines of source code (from code object `code`)
     corresponding to `inst`'s location data, and underlines relevant code to `inst`.
