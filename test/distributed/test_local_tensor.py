@@ -11,6 +11,7 @@ from torch.distributed._local_tensor import (
     LocalRunnerMode,
     LocalTensor,
     LocalTensorMode,
+    maybe_disable_local_tensor_mode,
 )
 from torch.distributed.tensor import (
     DeviceMesh,
@@ -533,14 +534,15 @@ class TestLocalRunner(LocalTensorTestBase):
 
     @staticmethod
     def _get_pp_peer(pp_index, mesh, dim, dir):
-        pp_meshes = mesh._get_all_submeshes(dim)
-        pp_ret = {}
-        for pp_mesh in pp_meshes:
-            global_rank = pp_mesh.mesh[pp_index].item()
-            global_peer = pp_mesh.mesh[(pp_index + dir) % pp_mesh.size()].item()
-            pp_ret[global_rank] = global_peer
+        with maybe_disable_local_tensor_mode():
+            pp_meshes = mesh._get_all_submeshes(dim)
+            pp_ret = {}
+            for pp_mesh in pp_meshes:
+                global_rank = pp_mesh.mesh[pp_index].item()
+                global_peer = pp_mesh.mesh[(pp_index + dir) % pp_mesh.size()].item()
+                pp_ret[global_rank] = global_peer
 
-        return torch.SymInt(LocalIntNode(pp_ret))
+            return torch.SymInt(LocalIntNode(pp_ret))
 
     def _run_dp_pp(
         self,
