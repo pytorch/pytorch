@@ -1919,6 +1919,9 @@ class MultiProcContinuousTest(TestCase):
                         except queue.Empty:
                             # If not alive do a last check because the timeout might have happened just before completion
                             if not p.is_alive() and completion_queue.empty():
+                                # Clean up process to avoid keeping a zombie process
+                                p.terminate()  # Just to be sure
+                                p.join(600)  # Usually completes immediately
                                 rv = RuntimeError(f"Exited with {p.exitcode}")
                                 break
                     if isinstance(rv, unittest.SkipTest):
