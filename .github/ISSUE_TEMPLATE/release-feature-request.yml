@@ -4,10 +4,11 @@ labels: ["release-feature-request"]
 
 body:
 - type: textarea
+  id: feature-title
   attributes:
     label: New Feature for Release
     description: >
-      Example: “A torch.special module, analogous to SciPy's special module.”
+      Example: "A torch.special module, analogous to SciPy's special module."
 - type: input
   id: contact
   attributes:
@@ -27,6 +28,7 @@ body:
   validations:
     required: true
 - type: textarea
+  id: out-of-tree-repo
   attributes:
     label: Out-Of-Tree Repo
     description: >
@@ -34,6 +36,7 @@ body:
   validations:
     required: false
 - type: textarea
+  id: description
   attributes:
     label: Description and value to the user
     description: >
@@ -41,11 +44,13 @@ body:
   validations:
     required: false
 - type: textarea
+  id: links
   attributes:
     label: Link to design doc, GitHub issues, past submissions, etc
   validations:
     required: false
 - type: textarea
+  id: feedback
   attributes:
     label: What feedback adopters have provided
     description: >
@@ -65,6 +70,7 @@ body:
   validations:
     required: true
 - type: textarea
+  id: tutorial-context
   attributes:
     label: Additional context for tutorials
     description: >
@@ -82,6 +88,7 @@ body:
   validations:
     required: true
 - type: textarea
+  id: marketing-assistance
   attributes:
     label: Are you requesting other marketing assistance with this feature?
     description: >
@@ -89,6 +96,7 @@ body:
   validations:
     required: false
 - type: textarea
+  id: release-version
   attributes:
     label: Release Version
     description: >
@@ -96,6 +104,7 @@ body:
   validations:
     required: false
 - type: textarea
+  id: platform-coverage
   attributes:
     label: OS / Platform / Compute Coverage
     description: >
@@ -103,6 +112,7 @@ body:
   validations:
     required: false
 - type: textarea
+  id: testing-support
   attributes:
     label: Testing Support (CI, test cases, etc..)
     description: >
