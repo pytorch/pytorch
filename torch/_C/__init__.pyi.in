@@ -2840,7 +2840,7 @@ class _NodeIter(Iterator[FxNode]):
     def __iter__(self) -> Self: ...
     def __next__(self) -> FxNode: ...
 
-# Defined in torch/csrc/inductor/static_cuda_launcher.cpp
+# Defined in torch/csrc/inductor/static_launcher/cuda.cpp
 class _StaticCudaLauncher:
     @staticmethod
     def _load_kernel(

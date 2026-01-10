@@ -8,7 +8,7 @@ import torch
 from torch._dynamo.device_interface import get_interface_for_device
 from torch._inductor.codecache import PyCodeCache
 from torch._inductor.runtime import triton_helpers
-from torch._inductor.runtime.static_cuda_launcher import StaticallyLaunchedCudaKernel
+from torch._inductor.runtime.static_triton_launcher import StaticallyLaunchedCudaKernel
 from torch._inductor.runtime.triton_compat import CompiledKernel, tl, triton
 from torch._inductor.runtime.triton_helpers import libdevice
 from torch._inductor.test_case import TestCase
@@ -492,7 +492,7 @@ class TestStaticTritonCompileResult(TestCase):
         self.assertEqual(eager_result, compiled_result)
 
     @skipIfRocm
-    def test_disable_static_cuda_launcher(self):
+    def test_disable_static_triton_launcher(self):
         @torch.compile
         def fn(x, y):
             return torch.cat(((x * 4), y + 10))
