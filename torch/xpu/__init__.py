@@ -11,12 +11,12 @@ import threading
 import traceback
 from collections.abc import Callable
 from functools import lru_cache
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 import torch
 import torch._C
+from torch import device as _device
 from torch._utils import _dummy_type, _LazySeedTracker
-from torch.types import Device
 
 from ._utils import _get_device_index
 from .streams import Event, Stream
@@ -29,6 +29,7 @@ _queued_calls: list[
     tuple[Callable[[], None], list[str]]
 ] = []  # don't invoke these until initialization occurs
 _is_in_bad_fork = getattr(torch._C, "_xpu_isInBadFork", lambda: False)
+_device_t = Union[_device, str, int, None]
 _lazy_seed_tracker = _LazySeedTracker()
 default_generators: tuple[torch._C.Generator] = ()  # type: ignore[assignment]
 
@@ -204,7 +205,7 @@ class device_of(device):
         super().__init__(idx)
 
 
-def set_device(device: Device) -> None:
+def set_device(device: _device_t) -> None:
     r"""Set the current device.
 
     Args:
@@ -217,7 +218,7 @@ def set_device(device: Device) -> None:
         torch._C._xpu_setDevice(device)
 
 
-def get_device_name(device: Device = None) -> str:
+def get_device_name(device: _device_t | None = None) -> str:
     r"""Get the name of a device.
 
     Args:
@@ -233,7 +234,7 @@ def get_device_name(device: Device = None) -> str:
 
 
 @lru_cache(None)
-def get_device_capability(device: Device = None) -> dict[str, Any]:
+def get_device_capability(device: _device_t | None = None) -> dict[str, Any]:
     r"""Get the xpu capability of a device.
 
     Args:
@@ -258,7 +259,7 @@ def get_device_capability(device: Device = None) -> dict[str, Any]:
 
 
 def get_device_properties(
-    device: Device = None,
+    device: _device_t | None = None,
 ) -> _XpuDeviceProperties:  # pyrefly: ignore  # not-a-type
     r"""Get the properties of a device.
 
@@ -293,7 +294,7 @@ def _get_device(device: int | str | torch.device) -> torch.device:
     return device
 
 
-def can_device_access_peer(device: Device, peer: Device) -> bool:
+def can_device_access_peer(device: _device_t, peer: _device_t) -> bool:
     r"""Query whether a device can access a peer device's memory.
 
     Args:
@@ -376,7 +377,7 @@ def _set_stream_by_id(stream_id, device_index, device_type) -> None:
 
 
 def set_stream(stream: Stream) -> None:
-    r"""Set the current stream. This is a wrapper API to set the stream.
+    r"""Set the current stream.This is a wrapper API to set the stream.
         Usage of this function is discouraged in favor of the ``stream``
         context manager.
 
@@ -394,7 +395,7 @@ def set_stream(stream: Stream) -> None:
     )
 
 
-def current_stream(device: Device = None) -> Stream:
+def current_stream(device: _device_t | None = None) -> Stream:
     r"""Return the currently selected :class:`Stream` for a given device.
 
     Args:
@@ -412,7 +413,7 @@ def current_stream(device: Device = None) -> Stream:
     )
 
 
-def get_stream_from_external(data_ptr: int, device: Device = None) -> Stream:
+def get_stream_from_external(data_ptr: int, device: _device_t | None = None) -> Stream:
     r"""Return a :class:`Stream` from an external SYCL queue.
 
     This function is used to wrap SYCL queue created in other libraries in order
@@ -437,7 +438,7 @@ def get_stream_from_external(data_ptr: int, device: Device = None) -> Stream:
     )
 
 
-def synchronize(device: Device = None) -> None:
+def synchronize(device: _device_t = None) -> None:
     r"""Wait for all kernels in all streams on a XPU device to complete.
 
     Args:

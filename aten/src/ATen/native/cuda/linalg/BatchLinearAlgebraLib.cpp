@@ -78,6 +78,12 @@ void apply_ldl_factor_cusolver(
     const Tensor& pivots,
     const Tensor& info,
     bool upper) {
+#if !defined(USE_LINALG_SOLVER)
+  TORCH_CHECK(
+      false,
+      "Calling torch.linalg.ldl_factor on a CUDA tensor requires compiling ",
+      "PyTorch with cuSOLVER. Please use PyTorch built with cuSOLVER support.");
+#else
   auto batch_size = batchCount(A);
   auto n = cuda_int_cast(A.size(-2), "A.size(-2)");
   auto lda = cuda_int_cast(A.stride(-1), "A.stride(-1)");
@@ -112,6 +118,7 @@ void apply_ldl_factor_cusolver(
         lwork,
         info_working_ptr);
   }
+#endif
 }
 
 template <typename scalar_t>
@@ -239,6 +246,8 @@ void ldl_solve_cusolver(
         apply_ldl_solve_cusolver<scalar_t>(LD, pivots, B, upper);
       });
 }
+
+#if defined(USE_LINALG_SOLVER)
 
 // call cusolver gesvd function to calculate svd
 template<typename scalar_t>
@@ -1602,7 +1611,7 @@ void linalg_eigh_cusolver(const Tensor& eigenvalues, const Tensor& eigenvectors,
 #endif // ROCSOLVER_SYEVD_BATCHED_ENABLED
     linalg_eigh_cusolver_syevd(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
 #else // not USE_ROCM
-  if (batchCount(eigenvectors) > 1 && eigenvectors.size(-1) <= 32) {
+  if (use_cusolver_syevj_batched_ && batchCount(eigenvectors) > 1 && eigenvectors.size(-1) <= 32) {
     // Use syevjBatched for batched matrix operation when matrix size <= 32
     // See https://github.com/pytorch/pytorch/pull/53040#issuecomment-788264724
     linalg_eigh_cusolver_syevj_batched(eigenvalues, eigenvectors, infos, upper, compute_eigenvectors);
@@ -1826,5 +1835,7 @@ void lu_solve_looped_cusolver(const Tensor& LU, const Tensor& pivots, const Tens
     }
   });
 }
+
+#endif  // USE_LINALG_SOLVER
 
 } // namespace at::native

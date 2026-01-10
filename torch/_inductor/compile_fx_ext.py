@@ -7,7 +7,6 @@ import logging
 import os
 import queue
 import sys
-import tempfile
 import warnings
 from abc import abstractmethod
 from dataclasses import dataclass
@@ -663,25 +662,19 @@ class _DebugFileFxCompile(_SerializedFxCompile):
         idx = _DebugFileFxCompile.file_index
         _DebugFileFxCompile.file_index += 1
 
-        name = os.path.join(
-            tempfile.gettempdir(), f"pytorch_compile_fx_tmp_input_{idx}.bin"
-        )
+        name = f"/tmp/aorenste/pytorch_compile_fx_tmp_input_{idx}.bin"
         with open(name, "wb") as f:
             f.write(pickled_input.value)
         print(f"Wrote to {name}")
 
         if False:
-            name = os.path.join(
-                tempfile.gettempdir(), f"pytorch_compile_fx_tmp_actual_{idx}.bin"
-            )
+            name = f"/tmp/aorenste/pytorch_compile_fx_tmp_actual_{idx}.bin"
             actual = self._run_in_child(pickled_input)
             with open(name, "wb") as f:
                 f.write(actual.value)
             return actual
         elif False:
-            name = os.path.join(
-                tempfile.gettempdir(), f"pytorch_compile_fx_tmp_output_{idx}.bin"
-            )
+            name = f"/tmp/aorenste/pytorch_compile_fx_tmp_output_{idx}.bin"
             with open(name, "rb") as f:
                 result = _WireProtocolPickledOutput(f.read())
                 print(f"Read from {name}")

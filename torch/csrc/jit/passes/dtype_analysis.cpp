@@ -1,7 +1,5 @@
 #include <ATen/core/jit_type.h>
 #include <c10/util/ArrayRef.h>
-#include <c10/util/Exception.h>
-#include <torch/csrc/jit/ir/alias_analysis.h>
 #include <torch/csrc/jit/ir/ir.h>
 #include <torch/csrc/jit/jit_log.h>
 #include <torch/csrc/jit/passes/dtype_analysis.h>
@@ -47,15 +45,14 @@ std::unique_ptr<Stack> MTensorArgumentCreator(Node* n) {
     } else if (inp->type() == IntType::get()) {
       stack->emplace_back(1);
     } else if (inp->type() == BoolType::get()) {
-      TORCH_CHECK(
-          false,
+      throw std::runtime_error(
           "Bool currently unsupported, need to verify it's safe to add for all ops");
       stack->emplace_back(false);
     } else {
       // Arrays of values are specifically not handled due
       // to the fact that naive default values would likely be
       // incorrect anyways.
-      TORCH_CHECK(false, "Unsupported input type for Tensor argument");
+      throw std::runtime_error("Unsupported input type for Tensor argument");
     }
   }
   return stack;

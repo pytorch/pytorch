@@ -47,8 +47,7 @@ class _ConvNd(nn.modules.conv._ConvNd):
             padding_mode,
             **factory_kwargs,
         )
-        if not qconfig:
-            raise AssertionError("qconfig must be provided for QAT module")
+        assert qconfig, "qconfig must be provided for QAT module"
         self.qconfig = qconfig
         self.weight_fake_quant = qconfig.weight(factory_kwargs=factory_kwargs)
 
@@ -63,15 +62,14 @@ class _ConvNd(nn.modules.conv._ConvNd):
            `mod`: a float module, either produced by torch.ao.quantization utilities
            or directly from user
         """
-        if type(mod) is not cls._FLOAT_MODULE:
-            raise AssertionError(
-                f"qat.{cls.__name__}.from_float only works for "
-                f"{cls._FLOAT_MODULE.__name__}, got {type(mod).__name__}"
-            )
-        if not hasattr(mod, "qconfig"):
-            raise AssertionError("Input float module must have qconfig defined")
-        if not mod.qconfig:
-            raise AssertionError("Input float module must have a valid qconfig")
+        assert type(mod) is cls._FLOAT_MODULE, (
+            "qat."
+            + cls.__name__
+            + ".from_float only works for "
+            + cls._FLOAT_MODULE.__name__
+        )
+        assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
+        assert mod.qconfig, "Input float module must have a valid qconfig"
         if issubclass(type(mod), _FusedModule):
             mod = mod[0]
         qconfig = mod.qconfig
@@ -113,13 +111,10 @@ class _ConvNd(nn.modules.conv._ConvNd):
         # conv relu
         if issubclass(cls, _FusedModule):
             modules = [conv]
-            if not hasattr(cls, "_FLOAT_RELU_MODULE"):
-                raise AssertionError(
-                    f"{cls.__name__} must have _FLOAT_RELU_MODULE attribute"
-                )
+            assert hasattr(cls, "_FLOAT_RELU_MODULE")
             relu = cls._FLOAT_RELU_MODULE()
             modules.append(relu)
-
+            # pyrefly: ignore [missing-attribute]
             fused = cls._FLOAT_MODULE(*modules)
             fused.train(self.training)
             return fused

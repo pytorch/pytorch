@@ -248,11 +248,7 @@ class NamedMemberAccessor:
             names = list(names)
         if not isinstance(values, (list, tuple)):
             values = list(values)
-        if len(names) != len(values):
-            raise AssertionError(
-                f"names and values must have the same length, "
-                f"got {len(names)} names and {len(values)} values"
-            )
+        assert len(names) == len(values), "names and values must have the same length"
 
         for name, value in zip(names, values, strict=True):
             self.set_tensor(name, value)
@@ -298,11 +294,7 @@ class NamedMemberAccessor:
             names = list(names)
         if not isinstance(values, (list, tuple)):
             values = list(values)
-        if len(names) != len(values):
-            raise AssertionError(
-                f"names and values must have the same length, "
-                f"got {len(names)} names and {len(values)} values"
-            )
+        assert len(names) == len(values), "names and values must have the same length"
 
         return [
             self.swap_tensor(name, value, allow_missing=allow_missing)

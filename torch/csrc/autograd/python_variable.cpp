@@ -903,26 +903,9 @@ DEFINE_CACHING_PYTHON_IMPORT_GETTER(
         .attr("_op_schema")
         .attr("OutputSharding"))
 
-DEFINE_CACHING_PYTHON_IMPORT_GETTER(
-    get_op_strategy_class,
-    py::module::import("torch.distributed.tensor")
-        .attr("_op_schema")
-        .attr("OpStrategy"))
-
-DEFINE_CACHING_PYTHON_IMPORT_GETTER(
-    get_tuple_strategy_class,
-    py::module::import("torch.distributed.tensor")
-        .attr("_op_schema")
-        .attr("TupleStrategy"))
-
 static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
   const auto dtensor_spec_class = get_dtensor_spec_class();
-  const auto op_strategy_class = get_op_strategy_class();
-  const auto tuple_strategy_class = get_tuple_strategy_class();
-
-  if (py::isinstance(arg, dtensor_spec_class) ||
-      py::isinstance(arg, op_strategy_class) ||
-      py::isinstance(arg, tuple_strategy_class)) {
+  if (py::isinstance(arg, dtensor_spec_class)) {
     return true;
   }
   if (!PyList_Check(arg.ptr())) {
@@ -930,9 +913,7 @@ static bool arg_type_tensor_or_tensor_list_like(py::handle arg) {
   }
   py::list arg_list = py::reinterpret_borrow<py::list>(arg);
   for (const auto e : arg_list) {
-    if (!e.is_none() && !py::isinstance(e, dtensor_spec_class) &&
-        !py::isinstance(e, op_strategy_class) &&
-        !py::isinstance(e, tuple_strategy_class)) {
+    if (!e.is_none() && !py::isinstance(e, dtensor_spec_class)) {
       return false;
     }
   }
@@ -1120,7 +1101,7 @@ class NativeOpSchema {
         comparison_key_ == rhs.comparison_key_;
   }
 
-  std::size_t hash() const noexcept {
+  std::size_t hash() const {
     return hash_;
   }
 
@@ -1150,7 +1131,7 @@ class NativeOpSchema {
 namespace std {
 template <>
 struct hash<NativeOpSchema> {
-  std::size_t operator()(const NativeOpSchema& schema) const noexcept {
+  std::size_t operator()(const NativeOpSchema& schema) const {
     return schema.hash();
   }
 };

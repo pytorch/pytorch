@@ -878,8 +878,9 @@ void initJITBindings(PyObject* module) {
               } else if (pair.first == "DYNAMIC") {
                 vec_conv.emplace_back(FusionBehavior::DYNAMIC, pair.second);
               } else {
-                throw py::value_error(
-                    "FusionBehavior only supported 'STATIC' or 'DYNAMIC', got: " +
+                TORCH_INTERNAL_ASSERT(
+                    false,
+                    "FusionBehavior only supported 'STATIC' or 'DYNAMIC', got: ",
                     pair.first);
               }
             }
@@ -1613,22 +1614,9 @@ void initJITBindings(PyObject* module) {
              const std::string& key,
              size_t numel,
              py::object data_type_obj) {
-            auto [data, size] = self.getRecord(key);
+            at::DataPtr data(std::get<0>(self.getRecord(key)));
             auto scalar_type =
                 reinterpret_cast<THPDtype*>(data_type_obj.ptr())->scalar_type;
-
-            TORCH_CHECK(
-                size == numel * elementSize(scalar_type),
-                "record size (",
-                size,
-                " bytes) does not match expected size (",
-                numel * elementSize(scalar_type),
-                " bytes = ",
-                numel,
-                " elements * ",
-                elementSize(scalar_type),
-                " bytes/element) for dtype ",
-                scalar_type);
 
             c10::Storage storage(
                 c10::Storage::use_byte_size_t(),

@@ -18,10 +18,7 @@ def conv_picker(func, conv1dOpt, conv2dOpt, conv3dOpt):
     if func is F.conv2d:
         return conv2dOpt
     else:
-        if func is not F.conv3d:
-            raise AssertionError(
-                f"Expected func to be F.conv1d, F.conv2d, or F.conv3d, got {func}"
-            )
+        assert func is F.conv3d
         return conv3dOpt
 
 
@@ -239,7 +236,7 @@ def conv_unfold_weight_grad_sample(
     # n=batch_sz; o=num_out_channels; p=(num_in_channels/groups)*kernel_sz
     weight_grad_sample = torch.einsum("noq,npq->nop", grad_output, input)
     # rearrange the above tensor and extract diagonals.
-
+    # pyrefly: ignore [no-matching-overload]
     weight_grad_sample = weight_grad_sample.view(
         n,
         groups,

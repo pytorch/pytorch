@@ -550,8 +550,6 @@ class IRNode:
     # traces back to where the IRNode is created in Inductor
     traceback: Optional[list[str]] = dataclasses.field(init=False)
     origin_node: Optional[torch.fx.Node] = dataclasses.field(init=False)
-    # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
-    annotations: dict[str, Any] = dataclasses.field(init=False)
 
     @staticmethod
     @contextlib.contextmanager
@@ -589,8 +587,6 @@ class IRNode:
             "traceback", traceback.format_stack() if config.debug_ir_traceback else None
         )
         self._post_init_setattr("origin_node", None)
-        # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
-        self._post_init_setattr("annotations", {})
 
     def get_read_names(self) -> OrderedSet[str]:
         return OrderedSet(dep.name for dep in self.get_reads())
@@ -5053,8 +5049,6 @@ class TemplateBuffer(OperationBuffer):
         self.make_kernel_render = make_kernel_render
         self.name = V.graph.register_buffer(self)
         V.graph.register_operation(self)
-        # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
-        self.annotations: dict[str, Any] = {}
 
     def get_read_writes(self) -> dependencies.ReadWrites:
         return self.extract_read_writes(normalize=True)
@@ -5133,6 +5127,15 @@ class TritonTemplateBuffer(TemplateBuffer):
         self.mutated_inputs = mutated_inputs
         self.outputs: list[Buffer] = [self]
         if mutated_inputs is not None:
+            # Ensure that the mutated inputs are only allowed for certain nodes
+            allowed_set = (
+                torch.ops.higher_order.flex_attention,
+                torch.ops.higher_order.flex_attention_backward,
+            )
+            current_node = V.graph.current_node.target
+            assert current_node in allowed_set, (
+                f"Mutated inputs are only allowed for {allowed_set} but got {current_node}"
+            )
             assert isinstance(self.inputs[0], IRNode), type(self.inputs[0])
             device = self.inputs[0].get_device()
             self.outputs += [
@@ -5391,7 +5394,7 @@ class CppTemplateBuffer(TemplateBuffer):
     def get_layout(self) -> Layout:
         if isinstance(self.layout, MultiOutputLayout):
             assert isinstance(self.outputs, Iterable), type(self.outputs)
-
+            # pyrefly: ignore [index-error]
             first_output = self.outputs[0]
             assert isinstance(first_output, Buffer), type(first_output)
             layout = first_output.layout
@@ -5430,77 +5433,6 @@ class CuteDSLTemplateBuffer(TemplateBuffer):
 
     def get_outputs(self) -> list[Buffer]:
         return self.outputs
-
-
-class NVUniversalGemmBuffer(TemplateBuffer):
-    """
-    Buffer for NVIDIA Universal GEMM kernels.
-
-    Unlike CuteDSL templates which use Jinja templates, this generates
-    simpler Python code that directly calls the cutlass_api library.
-    """
-
-    def __init__(
-        self,
-        layout: Layout,
-        inputs: Sequence[IRNode],
-        kernel: Any,
-        accumulator_type: Any,
-    ) -> None:
-        # We pass None initially, then override with our method below
-        super().__init__(layout, inputs, make_kernel_render=None)
-        self.kernel = kernel
-        self.accumulator_type = accumulator_type
-        self.outputs: list[Buffer] = [self]
-        # Store kernel metadata for code generation since kernels aren't serializeable yet
-        self.kernel_metadata = {
-            "kernel_name": kernel.metadata.kernel_name,
-            "min_cc": kernel.metadata.min_cc,
-        }
-        # Override the instance attribute set by parent with our method
-        # This is necessary because TemplateBuffer stores make_kernel_render as instance attr
-        self.make_kernel_render = self._make_kernel_render
-
-    def get_outputs(self) -> list[Buffer]:
-        return self.outputs
-
-    def _make_kernel_render(
-        self, out_node: Any, hint_override: Optional[int] = None
-    ) -> tuple[Any, Any]:
-        """
-        Create a kernel renderer for code generation.
-
-        Returns (kernel, render) tuple where:
-        - kernel: NVUniversalGemmKernel object with call_kernel() method
-        - render: function that returns source code string
-        """
-        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
-            NVUniversalGemmKernel,
-        )
-        from torch._inductor.utils import Placeholder
-
-        input_nodes: list[Any] = []
-        for inp in self.inputs:
-            if isinstance(inp, TensorBox):
-                inp = inp.data
-            if isinstance(inp, StorageBox):
-                inp = inp.data
-            input_nodes.append(inp)
-
-        kernel_name = str(Placeholder.KERNEL_NAME)
-
-        render_kernel = NVUniversalGemmKernel(
-            kernel_name=kernel_name,
-            input_nodes=input_nodes,
-            output_node=out_node,
-            kernel_metadata=self.kernel_metadata,
-            accumulator_type=self.accumulator_type,
-        )
-
-        def render():
-            return render_kernel.render()
-
-        return render_kernel, render
 
 
 def is_node_sequence(
@@ -5834,7 +5766,7 @@ class ExternKernel(InputsKernel):
         layout: OutputSpec,
         inputs: Sequence[Union[IRNode, Sequence[IRNode]]],
         constant_args: Sequence[Any] = (),
-        kwargs: dict[str, Any] | None = None,
+        kwargs: Optional[dict[str, Any]] = None,
         output_view: Optional[ReinterpretView] = None,
         python_kernel_name: Optional[str] = None,
         cpp_kernel_name: Optional[str] = None,
@@ -5857,8 +5789,6 @@ class ExternKernel(InputsKernel):
         self.unbacked_bindings = {}
         self.mutation_outputs = []
         self.fx_node = V.graph.current_node
-        # Annotations dict for storing metadata (e.g., KernelTemplateChoice)
-        self.annotations: dict[str, Any] = {}
 
     def get_outputs(self) -> list[Buffer]:
         return [self, *self.mutation_outputs]
@@ -6110,13 +6040,8 @@ class ExternKernel(InputsKernel):
             if not isinstance(example_output, (list, tuple))
             else example_output
         )
-        # When graph_partition is enabled, skip - partitioning handles sparse outputs
         for t in example_out_li:
-            if (
-                isinstance(t, torch.Tensor)
-                and t.is_sparse
-                and not config.graph_partition
-            ):
+            if isinstance(t, torch.Tensor) and t.is_sparse:
                 msg = "sparsity not handled. Please file issue for sparse inference weights."
                 if stack_trace := V.graph.current_node.meta.get("stack_trace", None):
                     msg = f"{msg} Found from : \n {stack_trace}"
@@ -7052,7 +6977,7 @@ class UserDefinedTritonKernel(ExternKernel):
 
             configs = kernel.configs
             kernel = kernel.fn
-
+        # pyrefly: ignore  # bad-return
         return kernel, configs, restore_value_args, reset_to_zero_args
 
     @override
@@ -7208,6 +7133,7 @@ class UserDefinedTritonKernel(ExternKernel):
         self.mutable_args = [
             kernel_args[key]
             for key in identify_mutated_tensors(
+                # pyrefly: ignore  # bad-argument-type
                 kernel,
                 {**kernel_args, **autotuned_kwargs},
                 tma_descriptor_metadata,
@@ -7859,7 +7785,7 @@ class FallbackKernel(ExternKernelAlloc):
                         add_alias(optional_tensor_arg)
             else:
                 assert library_utils.is_tensor_like_type(info.type)
-
+                # pyrefly: ignore [bad-argument-type]
                 add_alias(arg)
 
         for info, arg in torch._library.utils.zip_schema(schema, args, kwargs):
@@ -8227,11 +8153,10 @@ class FallbackKernel(ExternKernelAlloc):
 
         device = cls.find_device(tensor_args, example_output)
 
-        # Default to CPU for torchbind methods or HOPs that don't produce tensors
-        if not device and (
-            isinstance(kernel, torch._higher_order_ops.torchbind.CallTorchBind)
-            or kernel is torch.ops.higher_order.print
+        if not device and isinstance(
+            kernel, torch._higher_order_ops.torchbind.CallTorchBind
         ):
+            # use CPU device for torchbind methods that don't take in or output any tensor, e.g. size()
             device = torch.device("cpu")
 
         if example_output is None:
@@ -8241,7 +8166,6 @@ class FallbackKernel(ExternKernelAlloc):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
-                kwargs=kwargs,
                 unbacked_bindings=unbacked_bindings,
             )
 
@@ -8253,7 +8177,6 @@ class FallbackKernel(ExternKernelAlloc):
                 tensor_args,
                 non_tensor_args,
                 unflatten_args,
-                kwargs=kwargs,
                 unbacked_bindings=unbacked_bindings,
             )
 
@@ -8298,7 +8221,7 @@ class FallbackKernel(ExternKernelAlloc):
             packed.outputs = tuple(outputs)
         else:
             packed.outputs = [outputs]
-
+        # pyrefly: ignore [bad-return]
         return outputs
 
 
@@ -8321,7 +8244,6 @@ class ComplexView(FallbackKernel):
         nontensor_args: Sequence[Any],
         unflatten_args: Callable[..., Any],
         *,
-        kwargs: dict[str, Any] | None = None,
         unbacked_bindings: Optional[dict[sympy.Symbol, pytree.KeyPath]] = None,
     ) -> None:
         super().__init__(
@@ -8330,7 +8252,6 @@ class ComplexView(FallbackKernel):
             tensor_args,
             nontensor_args,
             unflatten_args,
-            kwargs=kwargs,
             unbacked_bindings=unbacked_bindings,
         )
 
@@ -9728,7 +9649,7 @@ class _WaitKernel(_CollectiveKernel):
             # Case 1
             if isinstance(coll, _CollectiveKernel):
                 _, idx = inp.indices[0]
-
+                # pyrefly: ignore [bad-return]
                 return [coll.inputs[idx]]
             # Case 2
             return []

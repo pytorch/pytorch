@@ -674,15 +674,13 @@ class CUDATemplateCaller(ChoiceCaller):
 
     def output_node(self) -> TensorBox:
         self.bmreq.update_workspace_size()
-        buffer = CUDATemplateBuffer(
-            layout=self.layout,
-            inputs=self.input_nodes,
-            make_kernel_render=self.make_kernel_render,
-            workspace_size=self.bmreq.workspace_size,
-            supports_epilogue_fusion=self.supports_epilogue_fusion,
-            template=self.template,
+        return TensorBox.create(
+            CUDATemplateBuffer(
+                layout=self.layout,
+                inputs=self.input_nodes,
+                make_kernel_render=self.make_kernel_render,
+                workspace_size=self.bmreq.workspace_size,
+                supports_epilogue_fusion=self.supports_epilogue_fusion,
+                template=self.template,
+            )
         )
-        # Pass KTC annotation to the buffer for encoding
-        if "ktc" in self.annotations:
-            buffer.annotations["ktc"] = self.annotations["ktc"]
-        return TensorBox.create(buffer)

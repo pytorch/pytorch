@@ -17,8 +17,6 @@ flaky_models = {
     "mobilenetv3_large_100",
     # https://github.com/pytorch/pytorch/issues/163670
     "vision_maskrcnn",
-    # boolean mask outputs are non-deterministic due to thresholding
-    "sam",
 }
 
 
@@ -50,7 +48,6 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
                 "BERT_pytorch",
                 # LLM
                 "google/gemma-2-2b",
-                "tts_angular",  # RuntimeError: Cannot access data pointer of Tensor
             }
         )
 
@@ -58,13 +55,7 @@ def check_accuracy(actual_csv, expected_csv, expected_filename):
         accuracy = get_field(actual_csv, model, "accuracy")
         expected_accuracy = get_field(expected_csv, model, "accuracy")
 
-        if accuracy is None:
-            status = "MISSING_ACCURACY:"
-            failed.append(model)
-        elif expected_accuracy is None:
-            status = "MISSING_EXPECTED:"
-            failed.append(model)
-        elif accuracy == expected_accuracy:
+        if accuracy == expected_accuracy:
             status = "PASS" if expected_accuracy == "pass" else "XFAIL"
             print(f"{model:34}  {status}")
             continue

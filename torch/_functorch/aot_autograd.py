@@ -2,9 +2,11 @@
 
 import contextlib
 import itertools
+import time
 from collections.abc import Callable
 from contextlib import nullcontext
 from functools import wraps
+from hashlib import sha256
 from typing import Any, Optional
 from unittest.mock import patch
 
@@ -707,7 +709,6 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
         # Packaging this just for later use
         aot_config=aot_config,
         stack=stack,
-        fake_mode=fake_mode,
     )
 
 
@@ -1086,10 +1087,7 @@ def aot_module_simplified(
 
         compiled_fn = None
 
-        if (
-            isinstance(fw_compiler, SerializableAOTDispatchCompiler)
-            or torch._functorch.config.force_autograd_cache
-        ):
+        if isinstance(fw_compiler, SerializableAOTDispatchCompiler):
             local = should_use_local_autograd_cache()
             remote = should_use_remote_autograd_cache()
             if local or remote:
@@ -1317,6 +1315,7 @@ def aot_compile_joint_with_descriptors(
     partition_fn: Callable = default_partition,
     fw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
     bw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
+    serializable: bool = False,
 ) -> callable:
     """
     Companion function for aot_export_joint_with_descriptors which compiles the joint
@@ -1326,15 +1325,66 @@ def aot_compile_joint_with_descriptors(
     Note: We do NOT instantiate the module; this gives you the flexibility to subclass it and
     customize its behavior without having to worry about FQN rebinding.
 
+    Args:
+        serializable: If True, configures the compilation to produce a serializable
+            callable by leveraging AOTAutogradCache machinery. This sets up the
+            necessary cache_info and patches config options required for serialization.
+
     TODO: Consider if we should allow_in_graph the result by default.
     """
-    compiled_fn, _ = aot_stage2_compile(
-        jd._aot_state,
-        jd._aot_graph_capture,
-        partition_fn,
-        fw_compiler,
-        bw_compiler,
+    from torch._dynamo.aot_compile_types import (
+        BundledAOTAutogradSerializableCallable,
+        SerializableCallable,
     )
+    from torch._functorch._aot_autograd.schemas import AOTAutogradCacheInfo
+    from torch._guards import detect_fake_mode
+    from torch._inductor.output_code import OutputCode
+
+    fw_compiler = SerializableAOTDispatchCompiler(OutputCode, fw_compiler)
+
+    cache_ctx = nullcontext()
+    if serializable:
+        jd._aot_state.aot_config.cache_info = AOTAutogradCacheInfo(
+            sha256(str(jd).encode("utf-8")).hexdigest(),
+            time.time_ns(),
+            forward_symints=[],
+        )
+        cache_ctx = torch._functorch.config.patch(
+            {
+                "strict_autograd_cache": True,
+                "bundled_autograd_cache": True,
+                "force_non_lazy_backward_lowering": True,
+                "bypass_autograd_cache_key": True,
+            }
+        )
+
+    # Set up a TracingContext if one isn't already available.
+    # This is needed for compilers (like regional_inductor) that call
+    # standalone_compile with dynamic_shapes="from_tracing_context".
+    tracing_context = torch._guards.TracingContext.try_get()
+    if tracing_context is None:
+        fake_mode = detect_fake_mode(jd._aot_state.flat_args)
+        if fake_mode is not None:
+            tracing_context = torch._guards.TracingContext(fake_mode)
+            tracing_ctx = torch._guards.tracing(tracing_context)
+        else:
+            tracing_ctx = nullcontext()
+    else:
+        tracing_ctx = nullcontext()
+
+    with cache_ctx, tracing_ctx:
+        compiled_fn, _ = aot_stage2_compile(
+            jd._aot_state,
+            jd._aot_graph_capture,
+            partition_fn,
+            fw_compiler,
+            bw_compiler,
+        )
+
+    if not isinstance(compiled_fn, SerializableCallable) and hasattr(
+        compiled_fn, "serialize"
+    ):
+        compiled_fn = BundledAOTAutogradSerializableCallable(compiled_fn)
 
     # Cribbed from torch/export/pt2_archive/_package.py
     @simple_wraps(compiled_fn)

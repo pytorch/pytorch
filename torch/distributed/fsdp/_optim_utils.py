@@ -930,7 +930,7 @@ def _rekey_sharded_optim_state_dict(
         flat_param_key = unflat_param_names_to_flat_param_key.get(
             key.unflat_param_names, key.unflat_param_names
         )
-
+        # pyrefly: ignore [unsupported-operation]
         rekeyed_osd_state[flat_param_key] = param_state
 
     # Only process param_groups if it exists in sharded_osd

@@ -940,6 +940,9 @@ class MetaConverter(Generic[_TensorT]):
                 torch.fx.experimental.symbolic_shapes.SymbolicContext
             ] = symbolic_context,
         ) -> tuple[tuple[int, ...], tuple[int, ...], int]:
+            # local import to prevent circular import
+            from torch.fx.experimental.symbolic_shapes import is_symbolic
+
             assert t.stride is not None
             if shape_env is not None:
                 fake_mode = t.fake_mode
@@ -947,6 +950,47 @@ class MetaConverter(Generic[_TensorT]):
                     # Don't reallocate the sizes; the shape envs are the same,
                     # so reuse the old sizes/strides/etc
                     return (t.size, t.stride, t.storage_offset)
+                elif fake_mode is not None:
+                    # When transferring tensors between fake modes with different
+                    # shape_envs, we need to handle two cases:
+                    #
+                    # 1. Static tensors: all sizes/strides/storage_offset are concrete
+                    #    integers - preserve them as static
+                    #
+                    # 2. Symbolic tensors: contain SymInt values - allocate new symbols
+                    #    in the new shape_env
+                    has_symbolic = (
+                        any(is_symbolic(sz) for sz in t.size)
+                        or any(is_symbolic(sd) for sd in t.stride)
+                        or is_symbolic(t.storage_offset)
+                    )
+
+                    if not has_symbolic and symbolic_context is None:
+                        return (t.size, t.stride, t.storage_offset)
+
+                    # There are some export use cases where we do have a symbolic_context
+                    # and an outer fake mode. In these cases we want to respect the
+                    # symbolic_context and properly allocate dynamism properly.
+                    t_size = tuple(
+                        shape_env._maybe_specialize_sym_int_with_hint(sz)
+                        for sz in t.size
+                    )
+                    t_stride = tuple(
+                        shape_env._maybe_specialize_sym_int_with_hint(sd)
+                        for sd in t.stride
+                    )
+                    t_storage_offset = shape_env._maybe_specialize_sym_int_with_hint(
+                        t.storage_offset
+                    )
+                    return shape_env._create_symbolic_sizes_strides_storage_offset(
+                        t_size,
+                        t_stride,
+                        t_storage_offset,
+                        [d in t.dynamo_dynamic_indices for d in range(t.ndim)],
+                        src,
+                        symbolic_context=symbolic_context,
+                        hint_overrides=t.dynamo_hint_overrides,
+                    )
                 else:
                     # TODO: deduplicate this
                     t_size = tuple(
@@ -1408,6 +1452,7 @@ class MetaConverter(Generic[_TensorT]):
                     if t.requires_grad:
                         r.requires_grad = True
                     if t.requires_grad and not is_leaf:
+                        # pyrefly: ignore [bad-argument-type]
                         r = self._backward_error(r)
                 elif t.is_nested and not t.is_traceable_wrapper_subclass:
                     # TODO: Handle this better in Dynamo?
@@ -1450,6 +1495,7 @@ class MetaConverter(Generic[_TensorT]):
                     if t.requires_grad:
                         r.requires_grad = True
                     if t.requires_grad and not is_leaf:
+                        # pyrefly: ignore [bad-argument-type]
                         r = self._backward_error(r)
                 elif t.is_functorch_wrapped:
                     if t.is_view:

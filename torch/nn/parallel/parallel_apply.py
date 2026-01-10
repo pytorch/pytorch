@@ -46,31 +46,20 @@ def parallel_apply(
     element of :attr:`inputs` can either be a single object as the only argument
     to a module, or a collection of positional arguments.
     """
-    if len(modules) != len(inputs):
-        raise AssertionError(
-            f"The number of modules {len(modules)} is not equal to "
-            f"the number of inputs {len(inputs)}"
-        )
+    assert len(modules) == len(inputs), (
+        f"The number of modules {len(modules)} is not equal to the number of inputs {len(inputs)}"
+    )
     if kwargs_tup is not None:
-        if len(modules) != len(kwargs_tup):
-            raise AssertionError(
-                f"The number of modules {len(modules)} is not equal to "
-                f"the number of kwargs_tup {len(kwargs_tup)}"
-            )
+        assert len(modules) == len(kwargs_tup)
     else:
         kwargs_tup = (cast(dict[str, Any], {}),) * len(modules)
     if devices is not None:
-        if len(modules) != len(devices):
-            raise AssertionError(
-                f"The number of modules {len(modules)} is not equal to "
-                f"the number of devices {len(devices)}"
-            )
+        assert len(modules) == len(devices)
     else:
         devices = [None] * len(modules)
     devices = [_get_device_index(x, True) for x in devices]
     streams = [torch.accelerator.current_stream(x) for x in devices]
-    if not torch.accelerator.is_available():
-        raise AssertionError("No available accelerator found.")
+    assert torch.accelerator.is_available(), "No available accelerator found."
     device_type = torch.accelerator.current_accelerator().type  # type: ignore[union-attr]
     lock = threading.Lock()
     results = {}

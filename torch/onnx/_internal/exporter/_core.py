@@ -1274,7 +1274,7 @@ def _verbose_printer(verbose: bool | None) -> Callable[..., None]:
     """Prints messages based on `verbose`."""
     if verbose is False:
         return lambda *_, **__: None
-
+    # pyrefly: ignore [not-iterable]
     return lambda *args, **kwargs: print("[torch.onnx]", *args, **kwargs)
 
 
@@ -1350,6 +1350,7 @@ def export(
     else:
         # Convert an nn.Module to an ExportedProgram
         # Try everything 🐰 (all paths for getting an ExportedProgram)
+        # When input is a JIT module, the last strategy will succeed so it is handled
         result: _capture_strategies.Result | None = None
         for strategy_class in _capture_strategies.CAPTURE_STRATEGIES:
             strategy = strategy_class(  # type: ignore[abstract]

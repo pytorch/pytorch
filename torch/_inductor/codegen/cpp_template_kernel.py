@@ -411,6 +411,7 @@ class CppTemplateKernel(CppKernel):
                     )
                     epilogue_nodes = scope.localize_nodes(epilogue_nodes)
                 return self.store_pointwise_nodes(
+                    # pyrefly: ignore [bad-argument-type]
                     dst,
                     epilogue_nodes,  # type: ignore[arg-type]
                     offsets,
@@ -422,7 +423,7 @@ class CppTemplateKernel(CppKernel):
                 copy = L.copy(dst, src).data.data
                 with LocalBufferContext(self.args) as scope:
                     scope.add_local_buffer(src)
-
+                    # pyrefly: ignore [bad-argument-type]
                     return self.store_pointwise_nodes(dst, [copy])
             else:
                 assert dst.layout == src.layout, f"{dst=}, {src=}"
@@ -609,14 +610,12 @@ class CppTemplateCaller(ir.ChoiceCaller):
         return {"backend": "CPP", "op_type": "unknown"}
 
     def output_node(self) -> ir.TensorBox:
-        buffer = ir.CppTemplateBuffer(
-            layout=self.layout,
-            inputs=self.input_nodes,
-            make_kernel_render=self.make_kernel_render,
-            template=self.template,
-            choice=self,
+        return ir.TensorBox.create(
+            ir.CppTemplateBuffer(
+                layout=self.layout,
+                inputs=self.input_nodes,
+                make_kernel_render=self.make_kernel_render,
+                template=self.template,
+                choice=self,
+            )
         )
-        # Pass KTC annotation to the buffer for encoding
-        if "ktc" in self.annotations:
-            buffer.annotations["ktc"] = self.annotations["ktc"]
-        return ir.TensorBox.create(buffer)

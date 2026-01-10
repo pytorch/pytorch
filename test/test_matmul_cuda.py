@@ -1,7 +1,6 @@
 # Owner(s): ["module: linear algebra"]
 
 import contextlib
-import os
 import time
 import unittest
 from itertools import product
@@ -10,7 +9,6 @@ from collections.abc import Callable
 
 import torch
 import torch.nn.functional as F
-from torch.profiler import profile, ProfilerActivity
 
 from torch.quantization._quantized_conversions import (
     pack_int4_to_int8,
@@ -21,15 +19,16 @@ from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
+    SM53OrLater,
     SM80OrLater,
     SM90OrLater,
     SM100OrLater,
+    _get_torch_cuda_version,
 )
 from torch.testing._internal.common_device_type import (
     dtypes,
     instantiate_device_type_tests,
     onlyCUDA,
-    skipCUDAIfNotRocm,
     tol as xtol,
     toleranceOverride,
 )
@@ -83,22 +82,6 @@ def blas_library_context(backend):
         yield
     finally:
         torch.backends.cuda.preferred_blas_library(prev_backend)
-
-@contextlib.contextmanager
-def rocm_group_gemm_ck_env(value):
-    var = "ROCM_ALLOW_GROUP_GEMM_CK"
-    old = os.environ.get(var, None)
-    try:
-        if value is None:
-            os.environ.pop(var, None)
-        else:
-            os.environ[var] = value
-        yield
-    finally:
-        if old is None:
-            os.environ.pop(var, None)
-        else:
-            os.environ[var] = old
 
 class TestMatmulCuda(InductorTestCase):
     def setUp(self):
@@ -277,7 +260,7 @@ class TestMatmulCuda(InductorTestCase):
         torch.backends.cuda.matmul.allow_fp16_accumulation = orig_fp16_accumulate
 
     @onlyCUDA
-    @toleranceOverride({torch.float16: xtol(atol=1e-3, rtol=3e-3)})
+    @toleranceOverride({torch.float16: xtol(atol=1e-3, rtol=2e-3)})
     @dtypes(torch.float16)
     def test_cublas_addmm_alignment(self, dtype):
         device = 'cuda'
@@ -299,7 +282,8 @@ class TestMatmulCuda(InductorTestCase):
     @onlyCUDA
     @unittest.skipIf(IS_JETSON, "Too large for Jetson")
     @toleranceOverride({torch.float32: xtol(atol=1e-5, rtol=1.1e-5)})
-    @dtypes(torch.float32, torch.float16, torch.bfloat16)
+    @dtypes(*([torch.float32, torch.float16] +
+              [torch.bfloat16] if TEST_WITH_ROCM or SM53OrLater else []))
     @parametrize(
         "batch_size, N, M, P",
         [(2, 100, 100, 100),
@@ -695,44 +679,6 @@ class TestMatmulCuda(InductorTestCase):
             C = f(A, B.transpose(-2, -1), offs=offs)
             self.assertEqual(C, C_ref)
 
-    @skipCUDAIfNotRocm
-    def test_grouped_gemm_rocm_ck_flag(self):
-        CK_HINT = "kernel_grouped_gemm_xdl_splitk"
-        HIPBLASLT_HINT = "Cijk_Alik_Bljk_BBS_BH_Bias_HA_S_SAV_UserArgs"
-
-        def uses_ck(kernels: set[str]) -> bool:
-            return any(CK_HINT in k for k in kernels)
-
-        def uses_hipblaslt(kernels: set[str]) -> bool:
-            return any(HIPBLASLT_HINT in k for k in kernels)
-
-        def run_grouped_mm():
-            device = "cuda"
-            dtype = torch.bfloat16
-            # row-major 3d-3d
-            G, M, N, K = 4, 16, 32, 64
-            a = torch.randn(G, M, K, device=device, dtype=dtype)
-            b = torch.randn(G, N, K, device=device, dtype=dtype)
-            # 3d-3d grouped GEMM: [G, M, K] @ [G, K, N]
-            out = F.grouped_mm(a, b.transpose(-2, -1), out_dtype=dtype)
-            return out
-
-        def collect_kernel_names():
-            kernels = set()
-            with profile(
-                activities=[ProfilerActivity.CPU, ProfilerActivity.CUDA],
-                record_shapes=False,
-                with_stack=False,
-            ) as prof:
-                run_grouped_mm()
-            for evt in prof.key_averages(group_by_input_shape=False):
-                kernels.add(evt.key)
-            return kernels
-
-        with rocm_group_gemm_ck_env(None):
-            self.assertTrue(uses_hipblaslt(collect_kernel_names()))
-        with rocm_group_gemm_ck_env("1"):
-            self.assertTrue(uses_ck(collect_kernel_names()))
 
     @onlyCUDA
     @parametrize("input_dtype", [torch.float32, torch.float16, torch.bfloat16])
@@ -1030,6 +976,10 @@ class TestMatmulCuda(InductorTestCase):
 class TestMixedDtypesLinearCuda(TestCase):
     @dtypes(torch.float16, torch.bfloat16)
     def test_mixed_dtypes_linear(self, dtype: torch.dtype, device: str = "cuda"):
+        version = _get_torch_cuda_version()
+        if version < (11, 8):
+            self.skipTest("_mixed_dtypes_linear only compiled for CUDA 11.8+")
+
         def run_test(
             batch_shape,
             m,

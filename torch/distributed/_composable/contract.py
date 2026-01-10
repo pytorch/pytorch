@@ -234,6 +234,7 @@ def contract(
             # TODO: verify that installed distributed paradigms are compatible with
             # each other.
 
+            # pyrefly: ignore [bad-return]
             return updated
 
         def get_state(module: nn.Module) -> _State:

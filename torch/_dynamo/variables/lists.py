@@ -19,7 +19,7 @@ import inspect
 import operator
 import sys
 from collections.abc import Sequence
-from typing import Any, Literal, Optional, TYPE_CHECKING
+from typing import Any, Optional, TYPE_CHECKING
 
 import torch
 import torch.fx
@@ -453,12 +453,13 @@ class RangeVariable(BaseListVariable):
 
         return [start, stop, step]
 
-    def apply_index(self, tx: "InstructionTranslator", index: int) -> VariableTracker:
+    def apply_index(self, index: int) -> VariableTracker:
         length = self.range_length()
         if index < 0:
             index = length + index
 
         if index < 0 or index >= length:
+            tx = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
             raise_observed_exception(
                 IndexError,
                 tx,
@@ -500,7 +501,7 @@ class RangeVariable(BaseListVariable):
         if isinstance(index, slice):
             return self.apply_slice(index)
         elif isinstance(index, int):
-            return self.apply_index(tx, index)
+            return self.apply_index(index)
         else:
             msg = ConstantVariable("range indices must be integers or slices")
             raise_observed_exception(TypeError, tx, args=[msg])
@@ -619,16 +620,16 @@ class RangeVariable(BaseListVariable):
             return self.items[fields.index(name)]
         return super().var_getattr(tx, name)
 
-    def is_python_hashable(self) -> Literal[True]:
+    def is_python_hashable(self):
         return True
 
-    def get_python_hash(self) -> int:
+    def get_python_hash(self):
         l = self.range_length()
         start = self.start()
         step = self.step()
         return hash((l, start, step))
 
-    def is_python_equal(self, other: object) -> bool:
+    def is_python_equal(self, other):
         if not isinstance(other, variables.RangeVariable):
             return False
 
@@ -954,23 +955,20 @@ class ListVariable(CommonListMethodsVariable):
                     hints=["Use something else as the key."],
                 )
 
-            try:
-                tx.output.side_effects.mutation(self)
-                sorted_items_with_keys = sorted(
+            tx.output.side_effects.mutation(self)
+            sorted_items_with_keys = sorted(
+                (
                     (
-                        (
-                            x,
-                            k.as_python_constant(),
-                            -i if reverse else i,  # extra key to ensure stable sort
-                        )
-                        for i, (k, x) in enumerate(zip(keys, self.items))
-                    ),
-                    key=operator.itemgetter(1, 2),
-                    reverse=reverse,
-                )
-                self.items[:] = [x for x, *_ in sorted_items_with_keys]
-            except Exception as e:
-                raise_observed_exception(type(e), tx, args=list(e.args))
+                        x,
+                        k.as_python_constant(),
+                        -i if reverse else i,  # extra key to ensure stable sort
+                    )
+                    for i, (k, x) in enumerate(zip(keys, self.items))
+                ),
+                key=operator.itemgetter(1, 2),
+                reverse=reverse,
+            )
+            self.items[:] = [x for x, *_ in sorted_items_with_keys]
             return ConstantVariable.create(None)
 
         if name == "__init__" and self.is_mutable():
@@ -1003,7 +1001,7 @@ class ListVariable(CommonListMethodsVariable):
             return super().call_obj_hasattr(tx, name)
         return variables.ConstantVariable.create(hasattr([], name))
 
-    def is_python_hashable(self) -> bool:
+    def is_python_hashable(self):
         return False
 
 
@@ -1195,14 +1193,14 @@ class TupleVariable(BaseListVariable):
             return super().call_obj_hasattr(tx, name)
         return variables.ConstantVariable.create(hasattr((), name))
 
-    def is_python_hashable(self) -> bool:
+    def is_python_hashable(self):
         return all(item.is_python_hashable() for item in self.items)
 
-    def get_python_hash(self) -> int:
+    def get_python_hash(self):
         items = tuple(x.get_python_hash() for x in self.items)
         return hash(items)
 
-    def is_python_equal(self, other: object) -> bool:
+    def is_python_equal(self, other):
         return isinstance(other, variables.TupleVariable) and all(
             a.is_python_equal(b) for (a, b) in zip(self.items, other.items)
         )
@@ -1349,22 +1347,10 @@ class SizeVariable(TupleVariable):
     def get_item_dyn(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
-        from .tensor import SymNodeVariable, TensorVariable
+        from .tensor import SymNodeVariable
 
         if isinstance(arg, SymNodeVariable):
             index = arg.sym_num
-        elif isinstance(arg, TensorVariable):
-            value = get_fake_value(arg.as_proxy().node, tx)
-            if value.constant is None or value.constant.numel() != 1:
-                unimplemented(
-                    gb_type="Indexing torch.Size with non-scalar tensor",
-                    context=f"get_item_dyn {self} {arg}",
-                    explanation=(
-                        "Attempted to index torch.Size with a tensor that is not a scalar constant."
-                    ),
-                    hints=[*graph_break_hints.USER_ERROR],
-                )
-            index = value.constant.item()
         else:
             index = arg.as_python_constant()
 
@@ -1583,6 +1569,7 @@ class NamedTupleVariable(TupleVariable):
                     variables.UserDefinedClassVariable(self.tuple_cls),
                 )
             elif isinstance(method, staticmethod):
+                # pyrefly: ignore[bad-argument-type]
                 return UserFunctionVariable(method.__func__)
             elif inspect.isfunction(method):
                 return UserMethodVariable(method, self)

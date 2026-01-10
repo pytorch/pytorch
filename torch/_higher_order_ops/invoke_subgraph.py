@@ -742,7 +742,7 @@ def _(ctx, subgraph, identifier, *operands):
 
     with ctx.redispatch_to_next():
         # NB: There is an assumption that subgraph does not mutate inputs and
-        # there is no aliasing. It's Dynamo's responsibility to prevent formation
+        # there is no aliasing. Its Dynamo responsibility to prevent formation
         # of invoke_subgraph ops if input aliasing/mutation is detected.
         functionalized_subgraph = FunctionalizeCtxWrapper(ctx, subgraph)
         out = invoke_subgraph(functionalized_subgraph, identifier, *unwrapped_operands)
@@ -830,7 +830,7 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
             # exist as a submodule in the new tracer's root. Therefore, we register it as a submodule below.
             #
             # The alternative is to give a new identifier when we re-trace the invoke_subgraph but this will increase
-            # the compilation time, which defeats the purpose of caching.
+            # the compilatoin time, which defeats the purpose of caching.
             registered_before = False
             for (
                 _,

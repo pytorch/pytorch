@@ -261,7 +261,6 @@ GRADIENT_IMPLEMENTED_FOR_COMPLEX = {
     "diagonal",
     "alias",
     "atan",
-    "ldexp",
     "log",
     "log10",
     "log1p",

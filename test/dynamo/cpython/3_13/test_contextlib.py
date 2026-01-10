@@ -12,7 +12,7 @@ import torch
 import torch._dynamo.test_case
 import unittest
 from torch._dynamo.test_case import CPythonTestCase
-from torch.testing._internal.common_utils import run_tests, slowTest
+from torch.testing._internal.common_utils import run_tests
 
 __TestCase = CPythonTestCase
 
@@ -1166,7 +1166,6 @@ class _TestBaseExitStack:
             stack.push(lambda *exc: 1/0)
             stack.push(lambda *exc: {}[1])
 
-    @slowTest
     def test_excessive_nesting(self):
         # The original implementation would die with RecursionError here
         with self.exit_stack() as stack:

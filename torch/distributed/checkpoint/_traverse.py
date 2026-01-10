@@ -155,6 +155,7 @@ def get_element(
         elif not isinstance(cur_value, Mapping) or part not in cur_value:
             return default_value
 
+        # pyrefly: ignore [index-error]
         cur_value = cast(CONTAINER_TYPE, cur_value[part])
     return cast(T | None, cur_value)
 

@@ -33,12 +33,6 @@ struct NVSHMEMAllocation {
   NVSHMEMAllocation(void* ptr, size_t buffer_size, int device_idx)
       : ptr(ptr), buffer_size(buffer_size), device_idx(device_idx) {}
 
-  // Delete copy and move operations to prevent double-free
-  NVSHMEMAllocation(const NVSHMEMAllocation&) = delete;
-  NVSHMEMAllocation& operator=(const NVSHMEMAllocation&) = delete;
-  NVSHMEMAllocation(NVSHMEMAllocation&&) = delete;
-  NVSHMEMAllocation& operator=(NVSHMEMAllocation&&) = delete;
-
   ~NVSHMEMAllocation() {
     // Avoid calling CUDA functions after driver shutting down
     if (is_finalizing()) {
@@ -261,7 +255,7 @@ static void maybe_initialize_env_vars() {
   auto nccl_ib_gid_index = c10::utils::get_env("NCCL_IB_GID_INDEX");
   auto nvshmem_socket_if_name =
       c10::utils::get_env("NVSHMEM_BOOTSTRAP_UID_SOCK_IFNAME");
-  auto nvshmem_hca_list = c10::utils::get_env("NVSHMEM_HCA_LIST");
+  auto nvshmem_hca_list = c10::utils::get_env("NCCL_IB_HCA");
   auto nvshmem_ib_gid_index = c10::utils::get_env("NVSHMEM_IB_GID_INDEX");
 
   if (!nvshmem_socket_if_name.has_value() && nccl_socket_if_name.has_value()) {
@@ -403,7 +397,7 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
     // TODO: change the `ptr` below to `tensor.data_ptr()` when adding support
     // for user slice/view operations. For MemPool support,
-    // `tensor.storage().data_ptr()` is fine (today's `ptr`).
+    // `tensor.storate().data_ptr()` is fine (today's `ptr`).
 
     // If the tensor's ptr happen to be the same as allocation ptr
     if (ptr == allocation->ptr) {

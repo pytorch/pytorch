@@ -27,8 +27,7 @@ struct TORCH_API SimplifierHashType {
 namespace std {
 template <>
 struct hash<torch::jit::tensorexpr::SimplifierHashType> {
-  size_t operator()(
-      const torch::jit::tensorexpr::SimplifierHashType& k) const noexcept {
+  size_t operator()(const torch::jit::tensorexpr::SimplifierHashType& k) const {
     return k._h;
   }
 };

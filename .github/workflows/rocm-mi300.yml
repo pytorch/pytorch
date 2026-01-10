@@ -6,6 +6,7 @@ on:
       - main
       - release/*
     tags:
+      - ciflow/rocm/*
       - ciflow/rocm-mi300/*
   workflow_dispatch:
   schedule:

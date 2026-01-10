@@ -398,9 +398,6 @@ class OpsHandler(Generic[T]):
     def log2(self, x0: T) -> T:
         raise NotImplementedError
 
-    def ldexp(self, x0: T, n: T) -> T:
-        raise NotImplementedError
-
     def nextafter(self, x0: T, x1: T) -> T:
         raise NotImplementedError
 

@@ -43,10 +43,6 @@ def _get_template_filtered_operators(
         from torchfuzz.codegen import DTensorFuzzTemplate
 
         fuzz_template = DTensorFuzzTemplate()
-    elif template == "dtensor_placements":
-        from torchfuzz.codegen import DTensorFuzzPlacementsTemplate
-
-        fuzz_template = DTensorFuzzPlacementsTemplate()
     elif template == "unbacked":
         from torchfuzz.codegen import UnbackedFuzzTemplate
 
@@ -244,10 +240,6 @@ def fuzz_spec(template: str = "default") -> Spec:
             from torchfuzz.codegen import DTensorFuzzTemplate
 
             fuzz_template = DTensorFuzzTemplate()
-        elif template == "dtensor_placements":
-            from torchfuzz.codegen import DTensorFuzzPlacementsTemplate
-
-            fuzz_template = DTensorFuzzPlacementsTemplate()
         elif template == "unbacked":
             from torchfuzz.codegen import UnbackedFuzzTemplate
 

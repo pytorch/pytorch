@@ -5,8 +5,8 @@ from __future__ import annotations
 import multiprocessing
 import os
 import warnings
-from typing import Any, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import ParamSpec, TypeVarTuple, Unpack
+from typing import Any, TYPE_CHECKING, TypeVar, TypeVarTuple, Union, Unpack
+from typing_extensions import ParamSpec
 
 
 if TYPE_CHECKING:
@@ -26,6 +26,7 @@ def _call_function_and_return_exception(
     """Call function and return a exception if there is one."""
 
     try:
+        # pyrefly: ignore [bad-argument-type]
         return func(*args, **kwargs)
     except Exception as e:
         return e

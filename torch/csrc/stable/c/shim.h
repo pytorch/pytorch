@@ -16,6 +16,7 @@ extern "C" {
 #endif
 
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
+using StableIValue = uint64_t;
 
 // Has the same semantic as aoti_torch_call_dispatcher, but takes an
 // additional argument for the extension build version. This is

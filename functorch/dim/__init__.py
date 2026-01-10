@@ -1000,7 +1000,7 @@ class Tensor(_Tensor):
         seen_dims = 0
         last = 0
 
-        for l in levels:
+        for i, l in enumerate(levels):
             if l.is_positional():
                 # Validate consecutive positional dimensions
                 assert last == 0 or last + 1 == l.position(), (

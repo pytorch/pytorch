@@ -126,10 +126,7 @@ class Quantize(torch.nn.Module):
 
     @staticmethod
     def from_float(mod, use_precomputed_fake_quant=False):
-        if not hasattr(mod, "activation_post_process"):
-            raise AssertionError(
-                f"Module {type(mod).__name__} must have activation_post_process attribute"
-            )
+        assert hasattr(mod, "activation_post_process")
         scale, zero_point = mod.activation_post_process.calculate_qparams()
         return Quantize(
             scale.float().item(),

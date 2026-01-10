@@ -17,6 +17,7 @@ from torch.distributed.tensor._op_schema import (
     RuntimeSchemaInfo,
     TupleStrategy,
 )
+from torch.distributed.tensor._ops.registration import register_op_strategy
 from torch.distributed.tensor._ops.utils import (
     as_list,
     expand_to_full_mesh_op_strategy,
@@ -25,7 +26,6 @@ from torch.distributed.tensor._ops.utils import (
     is_tensor_evenly_shardable_on_dim,
     normalize_dim,
     normalize_dims,
-    register_op_strategy,
 )
 from torch.distributed.tensor._utils import normalize_to_torch_size
 from torch.distributed.tensor.placement_types import (
@@ -141,6 +141,7 @@ class _NormPartial(Partial):
                     f"Expected int or float, got {type(self.norm_type)}"
                 )
             if self.norm_type != 0 and self.norm_type != 1:
+                # pyrefly: ignore [unsupported-operation]
                 return tensor**self.norm_type
         return tensor
 
@@ -151,6 +152,7 @@ class _NormPartial(Partial):
                     f"Expected int or float, got {type(self.norm_type)}"
                 )
             if self.norm_type != 0 and self.norm_type != 1:
+                # pyrefly: ignore [unsupported-operation]
                 return tensor ** (1.0 / self.norm_type)
         return tensor
 

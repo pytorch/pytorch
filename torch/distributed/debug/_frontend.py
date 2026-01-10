@@ -461,7 +461,7 @@ class FrontendServer:
 
     def _render_fr_trace(self, addrs: list[str], resps: list[Response]) -> bytes:
         config = JobConfig()
-
+        # pyrefly: ignore [bad-assignment]
         args = config.parse_args(args=[])
         args.allow_incomplete_ranks = True
         args.verbose = True

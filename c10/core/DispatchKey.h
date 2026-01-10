@@ -738,7 +738,7 @@ struct hash<c10::DispatchKey> {
   typedef size_t result_type;
   typedef c10::DispatchKey argument_type;
 
-  size_t operator()(c10::DispatchKey x) const noexcept {
+  size_t operator()(c10::DispatchKey x) const {
     return static_cast<size_t>(x);
   }
 };

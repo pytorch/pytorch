@@ -346,7 +346,6 @@ test_python_smoke() {
 test_python_smoke_b200() {
   # Targeted smoke tests for B200 including FlashAttention CuTe coverage
   install_flash_attn_cute
-  install_cutlass_api
   time python test/run_test.py \
     --include \
       test_matmul_cuda \
@@ -356,7 +355,6 @@ test_python_smoke_b200() {
       nn/attention/test_open_registry \
       inductor/test_flex_flash \
       inductor/test_torchinductor \
-      inductor/test_nv_universal_gemm \
     $PYTHON_TEST_EXTRA_OPTION \
     --upload-artifacts-while-running
   assert_git_not_dirty
@@ -1298,7 +1296,7 @@ test_libtorch_agnostic_targetting() {
 
     # Build wheel with current PyTorch (this has TORCH_TARGET_VERSION 2_9_0)
     echo "Building 2.9 extension wheel with current PyTorch..."
-    pushd test/cpp_extensions/libtorch_agn_2_9_extension
+    pushd test/cpp_extensions/libtorch_agnostic_2_9_extension
     time python setup.py bdist_wheel
 
     # Save the wheel
@@ -1751,7 +1749,7 @@ test_executorch() {
 }
 
 test_linux_aarch64() {
-  python test/run_test.py --include test_modules test_utils test_mkldnn test_mkldnn_fusion test_openmp test_torch test_dynamic_shapes \
+  python test/run_test.py --include test_modules test_mkldnn test_mkldnn_fusion test_openmp test_torch test_dynamic_shapes \
         test_transformers test_multiprocessing test_numpy_interop test_autograd test_binary_ufuncs test_complex test_spectral_ops \
         test_foreach test_reductions test_unary_ufuncs test_tensor_creation_ops test_ops profiler/test_memory_profiler \
         distributed/elastic/timer/api_test distributed/elastic/timer/local_timer_example distributed/elastic/timer/local_timer_test \
@@ -1813,7 +1811,7 @@ test_operator_microbenchmark() {
   cd "${TEST_DIR}"/benchmarks/operator_benchmark
 
   # NOTE: When adding a new test here, please update README: ../../benchmarks/operator_benchmark/README.md
-  for OP_BENCHMARK_TESTS in matmul mm addmm bmm conv optimizer activation norm scaled_mm scaled_grouped_mm; do
+  for OP_BENCHMARK_TESTS in matmul mm addmm bmm conv optimizer; do
     $TASKSET python -m pt.${OP_BENCHMARK_TESTS}_test --tag-filter long \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_microbenchmark_${OP_BENCHMARK_TESTS}_compile.json" \
       --benchmark-name "PyTorch operator microbenchmark" --use-compile
@@ -1872,12 +1870,6 @@ elif [[ "${TEST_CONFIG}" == *xla* ]]; then
 elif [[ "$TEST_CONFIG" == *vllm* ]]; then
     echo "vLLM CI uses TORCH_CUDA_ARCH_LIST: $TORCH_CUDA_ARCH_LIST"
     (cd .ci/lumen_cli && python -m pip install -e .)
-
-    if [[ -d "${HF_CACHE}" ]]; then
-        # Enable HF_CACHE directory for vLLM tests. If this works out, we can enable
-        # this for (1) all CI jobs and (2) LF fleet
-        export HF_HOME="${HF_CACHE}"
-    fi
     python -m cli.run test external vllm --test-plan "$TEST_CONFIG" --shard-id "$SHARD_NUMBER" --num-shards "$NUM_TEST_SHARDS"
 elif [[ "${TEST_CONFIG}" == *executorch* ]]; then
   test_executorch

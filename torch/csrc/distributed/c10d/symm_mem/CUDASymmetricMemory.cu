@@ -23,7 +23,20 @@
 #define CUDART_SUPPORTS_MULTICAST
 #endif
 
-namespace c10d::symmetric_memory {
+// add these definitions so that we can compile with CUDA < 12.3
+// borrowed from
+// https://github.com/NVIDIA/nccl/blob/3ea7eedf3b9b94f1d9f99f4e55536dfcbd23c1ca/src/include/p2p.h#L20
+#if CUDA_VERSION < 12030
+#define CU_MEM_HANDLE_TYPE_FABRIC ((CUmemAllocationHandleType)0x8ULL)
+#define CU_IPC_HANDLE_SIZE 64
+typedef struct CUmemFabricHandle_st {
+  unsigned char data[CU_IPC_HANDLE_SIZE];
+} CUmemFabricHandle_v1;
+typedef CUmemFabricHandle_v1 CUmemFabricHandle;
+#endif
+
+namespace c10d {
+namespace symmetric_memory {
 
 /* Start of CUDASymmetricMemory implementation */
 
@@ -209,7 +222,7 @@ void CUDASymmetricMemory::barrier(int channel, size_t timeout_ms) {
   c10::cuda::CUDAGuard guard(local_device_idx_);
   barrier_kernel<<<
       1,
-      max(at::cuda::warp_size(), world_size_),
+      at::cuda::warp_size(),
       0,
       at::cuda::getCurrentCUDAStream()>>>(
       reinterpret_cast<uint32_t**>(pai_->signal_pads_dev_),
@@ -901,4 +914,5 @@ struct RegisterCUDASymmetricMemoryAllocator {
 
 static RegisterCUDASymmetricMemoryAllocator register_allocator_;
 
-} // namespace c10d::symmetric_memory
+} // namespace symmetric_memory
+} // namespace c10d

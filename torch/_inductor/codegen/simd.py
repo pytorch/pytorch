@@ -192,7 +192,7 @@ class IterationRangesRoot(IterationRanges):
 
         # True if the dimension is implemented as a single program looping over
         # the full dimension (currently only used for non-persistent reduction)
-
+        # pyrefly: ignore [missing-argument]
         assert not is_loop or (self.is_reduction and grid_dim is None)
         self.is_loop = is_loop
         # Index of corresponding dimension on triton tensors
@@ -589,6 +589,7 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
             if tree.tensor_dim is None:
                 continue
 
+            # pyrefly: ignore [missing-argument]
             if not tree.is_reduction or self.inside_reduction:
                 sizes[tree.tensor_dim] = f"{tree.prefix.upper()}BLOCK"
         return sizes
@@ -782,23 +783,9 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
                         )
                     )
 
-                # Two-dimensional tiling: split size across current_group and next group.
-                elif current_group + 1 < len(remaining) and (
-                    sv.statically_known_gt(size, remaining[current_group])
-                    or
-                    # statically_known_gt(size, remaining) may return False for symbolic
-                    # expressions like 64*u0 vs u0, because both could be 0. Similarly for
-                    # backed expressions like s25*(((s70 - 5)//4)) - s25 and
-                    # (s25*(((s70 - 5)//4)) - s25)*64.
-                    # We want to assume tensor sizes are not 0 and pass the gt
-                    # using the following logic.
-                    #
-                    # if A//B = C and C >= 1
-                    # then A = B * C + R
-                    # and assuming A!=0
-                    # A must be > B .
-                    #
-                    sv.statically_known_gt(FloorDiv(size, remaining[current_group]), 1)
+                # Two-dimensional tiling
+                elif current_group + 1 < len(remaining) and sv.statically_known_gt(
+                    size, remaining[current_group]
                 ):
                     # need to break size in two
                     if not sv.statically_known_multiple_of(
@@ -1006,7 +993,10 @@ class SIMDKernel(Kernel[CSEVariableType], Generic[CSEVariableType]):
 
     def active_range_trees(self) -> list[IterationRangesRoot]:
         return [
-            t for t in self.range_trees if not t.is_reduction or self.inside_reduction
+            t
+            for t in self.range_trees
+            # pyrefly: ignore [missing-argument]
+            if not t.is_reduction or self.inside_reduction
         ]
 
     def codegen_indexing(self, expr: sympy.Expr) -> sympy.Expr:
@@ -2082,13 +2072,13 @@ class SIMDScheduling(BaseScheduling):
 
             for input_name in kernel.named_input_nodes:
                 subgraph_name = f"<LOAD_INPUT_{input_name}>"
-
+                # pyrefly: ignore [missing-attribute]
                 partial_code.finalize_hook(subgraph_name, strict=False)
 
             num_store_subgraphs = kernel.get_store_output_count()
             for i in range(num_store_subgraphs):
                 subgraph_name = kernel._get_store_output_subgraph_name(i)
-
+                # pyrefly: ignore [missing-attribute]
                 partial_code.finalize_hook(subgraph_name)
 
             if isinstance(partial_code, str):
@@ -3122,7 +3112,7 @@ class CandidateTiling:
     @staticmethod
     def is_good_size(s):
         """Somewhat arbitrary heuristic used to boost scores for some sizes"""
-        s = V.graph.sizevars.size_hint(s, fallback=8192)
+        s = V.graph.sizevars.size_hint(s)
         return s >= 32 and (s % 32 == 0)
 
 

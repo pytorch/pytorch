@@ -50,6 +50,7 @@ from torch._inductor.utils import (
     output_node,
     set_tracing_context_output_strides,
 )
+from torch.autograd.profiler import record_function
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_in_torch_dispatch_mode
 
@@ -629,9 +630,8 @@ class CompiledFxGraph(OutputCode):
         try:
             # Checking the profiler directly is faster than nullcontext
             if torch.autograd.profiler._is_profiler_enabled:
-                with torch._C._profiler._RecordFunctionFast(
-                    f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##",
-                    keyword_values={"scope": "user_scope"},
+                with record_function(
+                    f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##"
                 ):
                     return self.current_callable(inputs)
             else:
@@ -941,24 +941,31 @@ class RegionalOutputCode(OutputCode):
     )
 
     # The actual graph module (cleared during serialization)
-    _graph_module: Optional[torch.nn.Module] = dataclasses.field(
+    _graph_module: Optional[torch.fx.GraphModule] = dataclasses.field(
         default=None, init=False
     )
 
-    def __init__(self, graph_module: torch.nn.Module):
+    # Optional filter for ops during serialization
+    _ops_filter: Callable[[str], bool] | None = dataclasses.field(
+        default=None, init=False
+    )
+
+    def __init__(
+        self,
+        graph_module: torch.fx.GraphModule,
+        ops_filter: Callable[[str], bool] | None = None,
+    ):
         """
         Args:
             graph_module: The torch.fx.GraphModule returned by regional_inductor
+            ops_filter: Optional filter function for op names during serialization.
+                If provided, only ops whose name passes the filter will be serialized.
         """
         super().__init__()
         self._graph_module = graph_module
         self._serialized_graph_module = None
-        self._serialized_wrappers = []
+        self._ops_filter = ops_filter
         self._boxed_call = True
-        _, module = self._unwrap_graph_module()
-        self._inner_boxed_call = isinstance(
-            module.graph._codegen, torch.fx.graph._BoxedCodeGen
-        )
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
         """Execute the regional compiled graph."""
@@ -967,33 +974,7 @@ class RegionalOutputCode(OutputCode):
                 "RegionalOutputCode has no graph module loaded. "
                 "Did you forget to call post_compile()?"
             )
-
-        if self._inner_boxed_call:
-            return self._graph_module(inputs)
         return self._graph_module(*inputs)
-
-    @property
-    def graph(self):
-        _, module = self._unwrap_graph_module()
-        return module.graph
-
-    def _unwrap_graph_module(
-        self,
-    ) -> tuple[list[tuple[Callable, dict[str, Any]]], torch.fx.GraphModule]:
-        module = self._graph_module
-        serialized_wrappers = []
-        if isinstance(module, torch._dynamo.OptimizedModule):
-            dynamo_ctx = module.dynamo_ctx
-            assert isinstance(dynamo_ctx, torch._dynamo.eval_frame.DisableContext)
-            serialized_wrappers.append(
-                (
-                    torch._dynamo.disable,
-                    {"reason": dynamo_ctx.msg, "wrapping": dynamo_ctx.wrapping},
-                )
-            )
-            module = module._orig_mod
-        assert isinstance(module, torch.fx.GraphModule)
-        return serialized_wrappers, module
 
     def post_compile(
         self,
@@ -1026,8 +1007,6 @@ class RegionalOutputCode(OutputCode):
         gm = GraphPickler.loads(self._serialized_graph_module, fake_mode)
         assert isinstance(gm, torch.fx.GraphModule)
         gm.recompile()
-        for fn, kwargs in reversed(self._serialized_wrappers):
-            gm = fn(gm, **kwargs)
         self._graph_module = gm
 
     def set_triton_bundle(self, triton_bundle: Any) -> None:
@@ -1044,19 +1023,16 @@ class RegionalOutputCode(OutputCode):
         if self._graph_module is not None:
             from torch.fx._graph_pickler import GraphPickler, Options
 
-            self._serialized_graph_module = None
-            self._serialized_wrappers, graph_module = self._unwrap_graph_module()
-
+            # Only pass Options if user specified a custom ops_filter,
+            # otherwise let GraphPickler use its default safe filter
+            options = (
+                Options(ops_filter=self._ops_filter)
+                if self._ops_filter is not None
+                else None
+            )
             self._serialized_graph_module = GraphPickler.dumps(
-                graph_module,
-                options=Options(
-                    ops_filter=None,
-                    ignore_metadata_fields=(
-                        "source_fn_stack",
-                        "nn_module_stack",
-                        "fwd_source_fn_stack",
-                    ),
-                ),
+                self._graph_module,
+                options,
             )
             # Clear the graph module to avoid pickling it with standard pickle
             self._graph_module = None

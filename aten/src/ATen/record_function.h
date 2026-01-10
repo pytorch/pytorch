@@ -50,7 +50,7 @@ enum class C10_API_ENUM RecordScope : uint8_t {
 namespace std {
 template <>
 struct hash<at::RecordScope> {
-  size_t operator()(const at::RecordScope& sc) const noexcept {
+  size_t operator()(const at::RecordScope& sc) const {
     return static_cast<std::size_t>(sc);
   }
 };

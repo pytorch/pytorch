@@ -698,7 +698,9 @@ def just_print_entries(
 def check_no_missing_dump_files(
     entries: dict[int, Any], memberships: list[Membership]
 ) -> None:
-    all_ranks = {int(membership.global_rank) for membership in memberships}
+    all_ranks = set()
+    for membership in memberships:
+        all_ranks.add(int(membership.global_rank))
     dumps_ranks = {int(key) for key in entries}
     missing = all_ranks - dumps_ranks
     assert len(missing) == 0, f"Missing dump files from ranks {missing}"

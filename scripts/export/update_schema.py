@@ -29,8 +29,7 @@ if __name__ == "__main__":
 
     commit = schema_check.update_schema()
 
-    abs_yaml_path = os.path.join(args.prefix, commit.yaml_path)
-    if os.path.exists(abs_yaml_path):
+    if os.path.exists(args.prefix + commit.yaml_path):
         if commit.result["SCHEMA_VERSION"] < commit.base["SCHEMA_VERSION"]:
             raise RuntimeError(
                 f"Schema version downgraded from {commit.base['SCHEMA_VERSION']} to {commit.result['SCHEMA_VERSION']}."
@@ -42,7 +41,7 @@ if __name__ == "__main__":
             )
     else:
         assert args.force_unsafe, (
-            f"Existing schema yaml file not found in {abs_yaml_path}, please check if you provided correct prefix path, or use --force-unsafe to try again."
+            "Existing schema yaml file not found, please use --force-unsafe to try again."
         )
 
     next_version, reason = schema_check.check(commit, args.force_unsafe)

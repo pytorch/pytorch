@@ -440,10 +440,7 @@ class _SpectralNorm(Module):
 
     def _reshape_weight_to_matrix(self, weight: torch.Tensor) -> torch.Tensor:
         # Precondition
-        if weight.ndim <= 1:
-            raise AssertionError(
-                f"Expected weight to have more than 1 dimension, got {weight.ndim}"
-            )
+        assert weight.ndim > 1
 
         if self.dim != 0:
             # permute dim to front
@@ -487,10 +484,7 @@ class _SpectralNorm(Module):
         #    (i.e., the `u` and `v` vectors) are changed in the second forward.
 
         # Precondition
-        if weight_mat.ndim <= 1:
-            raise AssertionError(
-                f"Expected weight_mat to have more than 1 dimension, got {weight_mat.ndim}"
-            )
+        assert weight_mat.ndim > 1
 
         for _ in range(n_power_iterations):
             # Spectral norm of weight equals to `u^T W v`, where `u` and `v`

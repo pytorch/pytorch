@@ -21,7 +21,6 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
     pad_mm_operations,
     pad_mm_precondition,
 )
-from torch._inductor.runtime.caching import encoders, memoizers
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
 
@@ -484,9 +483,6 @@ def get_do_bench() -> Callable[[Callable[[], Any]], float]:
         )
 
 
-@memoizers.should_pad_memoizer.memoize(
-    custom_params_encoder=encoders.should_pad_params_encoder
-)
 def _should_pad(
     match: Match,
     mat1: Tensor,

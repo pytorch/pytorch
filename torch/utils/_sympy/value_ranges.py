@@ -687,6 +687,7 @@ class SymPyValueRangeAnalysis:
             return ValueRanges.coordinatewise_monotone_map(
                 a,
                 b,
+                # pyrefly: ignore [bad-argument-type]
                 _keep_float(IntTrueDiv),
             )
 
@@ -702,6 +703,7 @@ class SymPyValueRangeAnalysis:
             return ValueRanges.coordinatewise_monotone_map(
                 a,
                 b,
+                # pyrefly: ignore [bad-argument-type]
                 _keep_float(FloatTrueDiv),
             )
 

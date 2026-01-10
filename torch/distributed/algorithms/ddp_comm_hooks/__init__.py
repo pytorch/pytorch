@@ -5,8 +5,7 @@ from functools import partial
 
 
 # To suppress FutureWarning from partial since 3.13
-if sys.version_info >= (3, 11):
-    # member was introduced in Python 3.11
+if sys.version_info >= (3, 13):
     from enum import member
 
     def _enum_member(x):

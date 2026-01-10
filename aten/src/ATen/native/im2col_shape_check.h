@@ -217,7 +217,7 @@ inline void im2col_shape_check(
         "Given input with spatial size (",
         input_height,
         ", ",
-        input_width,
+        input_height,
         "), kernel_size=(",
         kernel_height,
         ", ",

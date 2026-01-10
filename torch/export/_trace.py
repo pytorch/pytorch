@@ -149,7 +149,6 @@ class ATenExportArtifact:
     gm: torch.fx.GraphModule
     sig: ExportGraphSignature
     constants: dict[str, _ConstantAttributeType]
-    inferred_out_spec: TreeSpec
 
 
 @dataclasses.dataclass(frozen=True)
@@ -179,14 +178,11 @@ DEFAULT_EXPORT_DYNAMO_CONFIG.reorderable_logging_functions = {
 def _ignore_backend_decomps():
     orig_mkldnn_flag = torch.backends.mkldnn.set_flags(False)
     orig_nnpack_flag = torch.backends.nnpack.set_flags(False)
-    orig_cudnn_flag = torch.backends.cudnn.set_flags(False)
-
     try:
         yield
     finally:
         torch.backends.mkldnn.set_flags(*orig_mkldnn_flag)
         torch.backends.nnpack.set_flags(*orig_nnpack_flag)
-        torch.backends.cudnn.set_flags(*orig_cudnn_flag)
 
 
 @contextmanager
@@ -281,43 +277,24 @@ def _extract_fake_inputs(gm, args, kwargs):
         else:
             fake_vals.append(node.meta.get("example_value"))
 
-    if dynamo_bytecode_flatten := getattr(gm, "_dynamo_bytecode_flatten", None):
-        # In _extract_fake_inputs, the goal is to make real inputs into
-        # fake (and symbolic) inputs. The way currently it's implemented
-        # is by looking at the node.meta["val"] of the placeholder nodes.
-        # This doesn't work when the graph is Dynamo flattened, because now
-        # plceholder nodes doesn't have the ordering like pytree inputs do.
-        # Instead, we need to look at how the inputs are shuffled, and map
-        # the inputs to their actual fake inputs and symbolic inputs.
-        # Since inputs can also contain symints, we cannot simply use the
-        # FakeTensorMode memo to look up tensors only there.
-
-        fake_inps = []
-        positions = {}
-        idx = 0
-
-        def mark_inputs(x):
-            # x can be a tensor or symbolic integer or a normal constant.
-            nonlocal idx
-            fake_inps.append(x)
-            if isinstance(x, torch.Tensor):
-                ret = x
-            else:
-                ret = object()
-            if id(ret) not in positions:
-                positions[id(ret)] = idx
-            idx += 1
-            return ret
-
-        dummy_args = pytree.tree_map(mark_inputs, args + tuple(kwargs.values()))
-        shuffled_args = dynamo_bytecode_flatten(*dummy_args)
-
-        for node, shuffled_arg in zip(
-            gm.graph.find_nodes(op="placeholder"), shuffled_args
+    if in_shuffle_graph := getattr(gm, "_in_shuffle_graph", None):
+        flat_args = pytree.tree_leaves((args, kwargs))
+        node_map = {
+            node: i
+            for i, node in enumerate(
+                next(iter(reversed(in_shuffle_graph.graph.nodes))).args[0]
+            )
+            if node.op == "placeholder"
+        }
+        new_fake_inps: list[Any] = []
+        for i, node in enumerate(
+            in_shuffle_graph.graph.find_nodes(op="placeholder")[1:]
         ):
-            if id(shuffled_arg) in positions:
-                fake_inps[positions[id(shuffled_arg)]] = node.meta.get("val")
-
+            if node in node_map:
+                new_fake_inps.append(fake_inps[node_map[node]])
+            else:
+                new_fake_inps.append(flat_args[i])
+        fake_inps = new_fake_inps
     # We get both because now we might have a combination of symint and tensor
     # inputs, and we want to check that the shape env is consistent between
     # both. Unfortunately we can't see what fake mode is attached to the shape
@@ -665,7 +642,6 @@ def _produce_aten_artifact(
         gm,
         export_graph_signature,
         constants,
-        inferred_out_spec=graph_signature.out_spec,
     )
 
 
@@ -1583,36 +1559,30 @@ def _strict_export(
                 )
 
     # Fix the graph output signature to be tuple if scalar
-    wrap_tuple = False
+
+    # gm_torch_level.graph._codegen is made a _PyTreeCodeGen in rewrite_signature in eval_frame.py
+    assert isinstance(gm_torch_level.graph._codegen, torch.fx.graph._PyTreeCodeGen)
+
     # Calling gm_torch_level._out_spec is not safe because gm_torch_level might be
     # a _LazyGraphModule, which does not populate _out_spec when calling recompile().
     # TODO: Fix recompile() in  _LazyGraphModule. T207713214
-    if isinstance(gm_torch_level.graph._codegen, torch.fx.graph._PyTreeCodeGen):
-        out_spec = orig_out_spec = gm_torch_level.graph._codegen.pytree_info.out_spec
-        orig_arg_names = gm_torch_level.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
+    out_spec = orig_out_spec = gm_torch_level.graph._codegen.pytree_info.out_spec
 
-        assert out_spec is not None
-        if out_spec.type not in (list, tuple):
-            # aot_export expect the return type to always be a tuple.
-            out_spec = pytree.treespec_tuple([out_spec])
-            wrap_tuple = True
-        gm_torch_level.graph._codegen.pytree_info = _PyTreeInfo(
-            orig_arg_names,
-            gm_torch_level._in_spec,
-            out_spec,
-        )
-    elif isinstance(
-        gm_torch_level.graph._codegen,
-        torch._dynamo.functional_export._DynamoBytecodeCodeGen,
-    ):
-        # Since we're using bytecode codegen, we need to separately apply tuple
-        # output instead of modifying pytree spec inplace.
-        orig_arg_names = gm_torch_level.graph._codegen.orig_arg_names
-        out_spec = orig_out_spec = None
-        wrap_tuple = gm_torch_level.graph._codegen.wrap_tuple = True
-    else:
-        raise RuntimeError(f"Unknown codegen type: {gm_torch_level.graph._codegen}")
+    # Used to get rid of lint type error.
+    assert out_spec is not None
+    assert orig_out_spec is not None
 
+    # aot_export expect the return type to always be a tuple.
+    if out_spec.type not in (list, tuple):
+        out_spec = pytree.treespec_tuple([out_spec])
+
+    orig_arg_names = gm_torch_level.graph._codegen.pytree_info.orig_args  # type: ignore[attr-defined]
+
+    gm_torch_level.graph._codegen.pytree_info = _PyTreeInfo(
+        orig_arg_names,
+        gm_torch_level._in_spec,
+        out_spec,
+    )
     gm_torch_level.recompile()
 
     _normalize_nn_module_stack(gm_torch_level, type(mod))
@@ -1685,16 +1655,10 @@ def _strict_export(
     # 5. Rename constants nodes in graph module from buffers to constants
     _rename_constants_nodes(gm, export_graph_signature)
 
-    if orig_out_spec is None:
-        out_spec = aten_export_artifact.inferred_out_spec
-        if wrap_tuple:
-            out_spec = out_spec.children()[0]
-    else:
-        out_spec = orig_out_spec
     return ExportArtifact(
         aten=aten_export_artifact,
         in_spec=orig_in_spec,
-        out_spec=out_spec,
+        out_spec=orig_out_spec,
         fake_mode=dynamo_fake_mode,
         module_call_specs=gm_torch_level.meta["module_call_specs"],
     )

@@ -22,7 +22,7 @@ import textwrap
 import traceback
 from collections.abc import Iterator
 from dataclasses import dataclass, field
-from typing import Any, TypeVar
+from typing import Any, Optional, TypeVar
 
 import torch
 import torch.cuda._gpu_trace as gpu_trace
@@ -90,7 +90,7 @@ class UnsynchronizedAccessError(SynchronizationError):
     def __init__(
         self,
         data_ptr: DataPtr,
-        allocation_stack_trace: traceback.StackSummary | None,
+        allocation_stack_trace: Optional[traceback.StackSummary],
         current_access: Access,
         previous_access: Access,
     ):
@@ -161,9 +161,9 @@ class TensorInfo:
         write: the last write access to the tensor.
     """
 
-    allocation_stack_trace: traceback.StackSummary | None
+    allocation_stack_trace: Optional[traceback.StackSummary]
     reads: list[Access] = field(default_factory=list)
-    write: Access | None = None
+    write: Optional[Access] = None
 
 
 class _TensorsAccessed:
@@ -192,7 +192,7 @@ class _TensorsAccessed:
             self.delete_tensor(data_ptr)
 
     def create_tensor(
-        self, data_ptr: DataPtr, stack_trace: traceback.StackSummary | None
+        self, data_ptr: DataPtr, stack_trace: Optional[traceback.StackSummary]
     ) -> None:
         self.accesses[data_ptr] = TensorInfo(stack_trace)
 
@@ -204,10 +204,10 @@ class _TensorsAccessed:
 
     def get_allocation_stack_trace(
         self, data_ptr: DataPtr
-    ) -> traceback.StackSummary | None:
+    ) -> Optional[traceback.StackSummary]:
         return self.accesses[data_ptr].allocation_stack_trace
 
-    def get_write(self, data_ptr: DataPtr) -> Access | None:
+    def get_write(self, data_ptr: DataPtr) -> Optional[Access]:
         return self.accesses[data_ptr].write
 
     def get_reads(self, data_ptr: DataPtr) -> list[Access]:
@@ -357,7 +357,7 @@ class EventHandler:
         tensor_aliases: dict[int, list[str]],
     ) -> list[SynchronizationError]:
         def check_conflict(
-            data_ptr: DataPtr, current_access: Access, previous_access: Access | None
+            data_ptr: DataPtr, current_access: Access, previous_access: Optional[Access]
         ) -> None:
             if previous_access is None:
                 return
@@ -493,7 +493,7 @@ class ArgumentHandler:
         value: Any,
         is_write: bool,
         metadata_only: bool,
-        name: str | None = None,
+        name: Optional[str] = None,
         is_output: bool = False,
     ) -> None:
         if isinstance(value, torch.Tensor) and value.is_cuda:

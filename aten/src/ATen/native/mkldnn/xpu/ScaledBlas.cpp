@@ -133,12 +133,6 @@ Tensor& _scaled_gemm(
     const bool use_fast_accum,
     Tensor& out,
     const std::optional<Tensor>& alpha = std::nullopt) {
-  // Note: XPU does not support fast_accum for now, we will warn and always pass
-  // false to the call.
-  if (use_fast_accum) {
-    TORCH_WARN(
-        "scaled_mm: fast_accum is not supported in XPU for now. It would silently set use_fast_accum to false.");
-  }
   // TODO: scale_result and alpha is not defined or used!
   std::optional<Tensor> scaled_result = std::nullopt;
   at::native::onednn::scaled_matmul(
@@ -151,7 +145,7 @@ Tensor& _scaled_gemm(
       scaling_choice_b,
       bias,
       scaled_result,
-      false /* use_fast_accum */);
+      use_fast_accum);
 
   return out;
 }
@@ -195,12 +189,8 @@ Tensor& _scaled_mm_out_xpu(
     std::optional<c10::ScalarType> out_dtype,
     bool use_fast_accum,
     Tensor& out) {
-  // Note: XPU does not support fast_accum for now, we will warn and always pass
-  // false to the call.
-  if (use_fast_accum) {
-    TORCH_WARN(
-        "scaled_mm: fast_accum is not supported in XPU for now. It would silently set use_fast_accum to false.");
-  }
+  // Note: fast_accum is not supported in XPU for now.
+  TORCH_CHECK(!use_fast_accum, "fast_accum is not supported in XPU for now.");
 
   TORCH_CHECK(mat1.dim() == 2, "mat1 must be a matrix");
   TORCH_CHECK(mat2.dim() == 2, "mat2 must be a matrix");
@@ -323,7 +313,7 @@ Tensor& _scaled_mm_out_xpu(
       scaling_choice_a,
       scaling_choice_b,
       bias,
-      false /* use_fast_accum */,
+      use_fast_accum,
       out);
 }
 
