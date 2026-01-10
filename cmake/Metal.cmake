@@ -2,9 +2,38 @@ if(NOT APPLE)
     return()
 endif()
 
+# macOS SDK version
+execute_process(
+    COMMAND zsh "-c" "/usr/bin/xcrun -sdk macosx --show-sdk-version"
+    OUTPUT_VARIABLE MACOS_SDK_VERSION
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    COMMAND_ERROR_IS_FATAL ANY)
+
+# Metal version
+execute_process(
+    COMMAND
+        zsh "-c"
+        "echo \"__METAL_VERSION__\" | xcrun -sdk macosx metal ${XCRUN_FLAGS} -E -x metal -P - | tail -1 | tr -d '\n'"
+    OUTPUT_VARIABLE MPS_METAL_VERSION
+    OUTPUT_STRIP_TRAILING_WHITESPACE
+    COMMAND_ERROR_IS_FATAL ANY)
+
+# Check for Metal 4 support based on Metal version
+if(MPS_METAL_VERSION GREATER_EQUAL 400)
+    set(MPS_METAL_4 TRUE CACHE BOOL "Enable metal 4 for MPS")
+else()
+    set(MPS_METAL_4 FALSE CACHE BOOL "Enable metal 4 for MPS")
+endif()
+
 set(METAL_CFLAGS -Wall -Wextra -fno-fast-math)
+
+if(MPS_METAL_4)
+    set(METAL_FLAGS ${METAL_FLAGS} -Wno-c++20-extensions -std=metal4.0)
+    list(APPEND METAL_CFLAGS ${METAL_FLAGS})
+endif()
+
 if(WERROR)
-    string(APPEND METAL_CFLAGS -Werror)
+    list(APPEND METAL_CFLAGS -Werror)
 endif()
 
 function(metal_to_air SRC TARGET FLAGS)
@@ -47,7 +76,7 @@ set(BFLOAT_METAL_CODE "
 ")
 if(NOT CAN_COMPILE_METAL_FOUND)
     file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/bfloat_inc.metal" "${BFLOAT_METAL_CODE}")
-    execute_process(COMMAND xcrun metal -std=metal3.1 bfloat_inc.metal
+    execute_process(COMMAND xcrun metal ${METAL_CFLAGS} bfloat_inc.metal
                     WORKING_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}"
                     OUTPUT_VARIABLE XCRUN_OUTPUT
                     ERROR_VARIABLE XCRUN_OUTPUT
