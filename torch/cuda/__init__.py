@@ -986,7 +986,7 @@ def _transform_uuid_to_ordinals(candidates: list[str], uuids: list[str]) -> list
     def uuid_to_ordinal(candidate: str, uuids: list[str]) -> int:
         best_match = -1
         for idx, uuid in enumerate(uuids):
-            if not uuid.startswith(candidate):
+            if not (uuid.startswith(candidate) or candidate.startswith(uuid)):
                 continue
             # Ambiguous candidate
             if best_match != -1:
@@ -1000,6 +1000,7 @@ def _transform_uuid_to_ordinals(candidates: list[str], uuids: list[str]) -> list
             candidate = candidate.replace(
                 "GPU-", "", 1
             )  # Remove GPU-prefix to match amdsmi asic serial
+            candidate = candidate.lower()
         idx = uuid_to_ordinal(candidate, uuids)
         # First invalid ordinal stops parsing
         if idx < 0:

@@ -4993,17 +4993,26 @@ import torch
 import os
 print(f"{torch.cuda.device_count()}")
         """
-        cmd = "rocminfo | grep -o 'Uuid:.*GPU-.*' | sed 's/Uuid://'"
+        # Use rocm-smi to get device UUIDs that match amdsmi's asic_serial format
+        cmd = "rocm-smi --showuniqueid | grep -oP '0x[0-9a-fA-F]+' | sed 's/0x/GPU-/'"
         uuids = subprocess.check_output(cmd, shell=True, text=True).strip().split("\n")
-        uuids = [s.strip() for s in uuids]
+        uuids = [s.strip() for s in uuids if s.strip()]
 
         custom_envs = []
         for uuid in uuids:
             custom_envs.append(
-                {"CUDA_VISIBLE_DEVICES": f"{uuid}", "HIP_VISIBLE_DEVICES": None}
+                {
+                    "CUDA_VISIBLE_DEVICES": f"{uuid}",
+                    "HIP_VISIBLE_DEVICES": None,
+                    "ROCR_VISIBLE_DEVICES": None,
+                }
             )
             custom_envs.append(
-                {"HIP_VISIBLE_DEVICES": f"{uuid}", "CUDA_VISIBLE_DEVICES": None}
+                {
+                    "HIP_VISIBLE_DEVICES": f"{uuid}",
+                    "CUDA_VISIBLE_DEVICES": None,
+                    "ROCR_VISIBLE_DEVICES": None,
+                }
             )
 
         for env_config in custom_envs:
