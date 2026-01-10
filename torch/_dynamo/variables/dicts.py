@@ -43,7 +43,6 @@ from ..utils import (
 )
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
-from .lists import ListIteratorVariable
 
 
 if TYPE_CHECKING:
@@ -791,6 +790,8 @@ class ConstDictVariable(VariableTracker):
             self.call_method(tx, "update", args, kwargs)
             return self
         elif name == "__iter__":
+            from .lists import ListIteratorVariable
+
             if self.source and not is_constant_source(self.source):
                 tx.output.guard_on_key_order.add(self.source)
             return ListIteratorVariable(
@@ -1575,6 +1576,8 @@ class DictViewVariable(VariableTracker):
         if name == "__len__":
             return self.dv_dict.call_method(tx, name, args, kwargs)
         elif name == "__iter__":
+            from .lists import ListIteratorVariable
+
             return ListIteratorVariable(
                 self.view_items_vt, mutation_type=ValueMutationNew()
             )

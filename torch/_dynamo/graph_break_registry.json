@@ -2307,6 +2307,16 @@
       ]
     }
   ],
+  "GB9198": [
+    {
+      "Gb_type": "Attempted to call repr() method implemented in C/C++",
+      "Context": "",
+      "Explanation": "{type(arg.value)} has a C/C++ based repr method. This is not supported.",
+      "Hints": [
+        "Write the repr method in Python"
+      ]
+    }
+  ],
   "GB0206": [
     {
       "Gb_type": "setattr() on Tensor.requires_grad",
