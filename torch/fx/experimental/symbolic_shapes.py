@@ -2088,7 +2088,9 @@ def _assert_symbol_context(symbolic_context: object) -> TypeGuard[SymbolicContex
     return True
 
 
-def _is_supported_equivalence(expr: sympy.Expr) -> bool:
+def _is_supported_equivalence(
+    expr: sympy.Expr,
+) -> TypeGuard[sympy.Add | sympy.Mul | sympy.Symbol]:
     # Currently supported Dim ops are linear expressions with integer coefficients.
     # So check that expr only contains +, *, ints, and a single occurrence of a symbol.
     # (See also documentation of dynamic_shapes._DerivedDim.)
@@ -7876,7 +7878,7 @@ class ShapeEnv:
             )
 
 
-def _is_int(expr: object) -> bool:
+def _is_int(expr: object) -> TypeGuard[SymInt]:
     return isinstance(expr, SymInt) and expr.node.expr.is_number
 
 
