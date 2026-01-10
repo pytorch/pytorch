@@ -6105,6 +6105,38 @@ class CommonTemplate:
 
         self.common(fn, (x,))
 
+    def test_complex_real_imag_conj(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/171665
+        # Tests that extracting real/imag from conjugated tensors works when compiled.
+        # The issue was that clone operations from resolve_conj() were incorrectly
+        # removed by remove_noop_ops because same_meta didn't check is_conj().
+        def fn(x):
+            x = x.conj()
+            return x.real + x.imag
+
+        x = torch.randn(4, dtype=torch.complex64)
+
+        self.common(fn, (x,))
+
+    def test_complex_conv2d_conj(self):
+        # Regression test for https://github.com/pytorch/pytorch/issues/171665
+        # Tests that complex convolution works on conjugated inputs when compiled.
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(1, 1, 2, dtype=torch.complex64)
+
+            def forward(self, x):
+                x = x.conj()
+                x = x.view(2, 1, 2, 2)
+                return self.conv(x)
+
+        model = Model().to(self.device)
+        x = torch.randn(2, 4, dtype=torch.complex64, device=self.device)
+
+        self.common(model, (x,), check_lowp=False)
+
     def test_polar(self):
         def fn(dist, angle):
             return torch.polar(dist, angle)
