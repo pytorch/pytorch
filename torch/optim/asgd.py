@@ -60,6 +60,35 @@ class ASGD(Optimizer):
         }
         super().__init__(params, defaults)
 
+    def load_state_dict(self, state_dict: dict) -> None:
+        r"""
+        Load the optimizer state.
+
+        Args:
+            state_dict (dict): optimizer state. Should be an object returned
+                from a call to :meth:`state_dict`.
+
+        .. warning::
+            Make sure this method is called **after** initializing
+            :class:`torch.optim.lr_scheduler.LRScheduler`, as calling it beforehand
+            will overwrite the loaded learning rates.
+
+        .. note::
+            The parameter names (if stored under the ``param_names`` key of each param group
+            in :meth:`state_dict`) will not affect the loading process.
+            To handle custom cases (for example, when the parameters in the loaded state
+            differ from those initialized in the optimizer), register a pre-hook with
+            :meth:`register_load_state_dict_pre_hook`.
+
+        Example:
+            >>> model = torch.nn.Linear(10, 10)
+            >>> optim = torch.optim.ASGD(model.parameters(), lr=1e-2)
+            >>> torch.save(optim.state_dict(), "asgd.pt")
+            >>> optim.load_state_dict(torch.load("asgd.pt"))
+            >>> print(optim)
+        """
+        return super().load_state_dict(state_dict)
+
     def __setstate__(self, state):
         super().__setstate__(state)
         for group in self.param_groups:
@@ -477,3 +506,32 @@ def asgd(
         capturable=capturable,
         has_complex=has_complex,
     )
+
+
+# Explicitly override load_state_dict docstring for ASGD
+ASGD.load_state_dict.__doc__ = r"""
+Load the optimizer state.
+
+Args:
+    state_dict (dict): optimizer state. Should be an object returned
+        from a call to :meth:`state_dict`.
+
+.. warning::
+    Make sure this method is called **after** initializing
+    :class:`torch.optim.lr_scheduler.LRScheduler`, as calling it beforehand
+    will overwrite the loaded learning rates.
+
+.. note::
+    The parameter names (if stored under the ``param_names`` key of each param group
+    in :meth:`state_dict`) will not affect the loading process.
+    To handle custom cases (for example, when the parameters in the loaded state
+    differ from those initialized in the optimizer), register a pre-hook with
+    :meth:`register_load_state_dict_pre_hook`.
+
+Example:
+    >>> model = torch.nn.Linear(10, 10)
+    >>> optim = torch.optim.ASGD(model.parameters(), lr=1e-2)
+    >>> torch.save(optim.state_dict(), "asgd.pt")
+    >>> optim.load_state_dict(torch.load("asgd.pt"))
+    >>> print(optim)
+"""
