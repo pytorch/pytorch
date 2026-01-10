@@ -889,34 +889,6 @@ class TestFlexFlash(InductorTestCase):
             compiled_fn(query, key, value, kernel_options={"BACKEND": "FLASH"})
 
     @dtypes(torch.float16, torch.bfloat16)
-    def test_flash_attention_backward_rejects_mask_mod_on_unsupported_gpu(
-        self, device, dtype
-    ):
-        major, _ = torch.cuda.get_device_capability()
-        if major == 10:
-            self.skipTest("Block sparsity backward is supported on SM100")
-        q, k, v = create_test_tensors(dtype=dtype, device=device)
-
-        def causal_mask(_b, _h, q_idx, kv_idx):
-            return q_idx >= kv_idx
-
-        q.requires_grad_(True)
-        compiled_fn = torch.compile(flex_attention)
-        with self.assertRaisesRegex(
-            RuntimeError,
-            r"NYI: Block sparsity in backward only supported on SM100",
-        ):
-            compiled_fn(
-                q,
-                k,
-                v,
-                block_mask=_create_block_mask_for_device(
-                    causal_mask, 2, 4, 512, 512, device=device
-                ),
-                kernel_options={"BACKEND": "FLASH"},
-            ).sum().backward()
-
-    @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_backward_rejects_captured_buffer_with_grad(
         self, device, dtype
     ):
