@@ -2084,7 +2084,7 @@ class BlockParameters:
 
         def revert(self, attr):
             if not self.is_identity:
-                return [attr[i] for i in self.sort_idx]
+                return [attr[i] for i in self.revert_sort_idx]
             return attr
 
     @dataclasses.dataclass
