@@ -986,20 +986,41 @@ Tensor& _index_put_impl_(
       at::assert_no_overlap(self, *index);
     }
   }
-  if ((self.device().type() == DeviceType::CUDA ||
-       self.device().type() == DeviceType::XPU) &&
-      (accumulate ||
-       (globalContext().deterministicAlgorithms() && value_.numel() > 1))) {
-    TORCH_CHECK(
-        value_.device() == self.device(),
-        "expected device ",
-        self.device(),
-        " but got device ",
-        value_.device(),
-        " for value tensor");
-    index_put_with_sort_stub(
-        self.device().type(), self, indices, value_, accumulate, unsafe);
-    return self;
+  // Determine if we need the slow sort-based path for determinism or unsupported types
+  const bool is_cuda_or_xpu = (self.device().type() == DeviceType::CUDA ||
+                               self.device().type() == DeviceType::XPU);
+  const bool is_deterministic = globalContext().deterministicAlgorithms();
+  // Fast atomic accumulation path supports floating point types
+  // See https://github.com/pytorch/pytorch/issues/41162
+  const bool supports_fast_accumulate = at::isFloatingType(self.scalar_type());
+
+  if (is_cuda_or_xpu) {
+    // Use slow sort-based path when:
+    // 1. Deterministic algorithms required with accumulate or multi-value scatter, OR
+    // 2. Accumulate requested but dtype doesn't support fast atomics
+    const bool need_deterministic_path =
+        is_deterministic && (accumulate || value_.numel() > 1);
+    const bool need_sort_for_unsupported_type =
+        accumulate && !supports_fast_accumulate;
+
+    if (need_deterministic_path || need_sort_for_unsupported_type) {
+      TORCH_CHECK(
+          value_.device() == self.device(),
+          "expected device ",
+          self.device(),
+          " but got device ",
+          value_.device(),
+          " for value tensor");
+      index_put_with_sort_stub(
+          self.device().type(), self, indices, value_, accumulate, unsafe);
+      return self;
+    }
+
+    // For non-deterministic accumulate with supported types, alert and use fast atomic path
+    if (accumulate && !is_deterministic) {
+      // See Note [Writing Nondeterministic Operations]
+      globalContext().alertNotDeterministic("index_put_ with accumulate=true");
+    }
   }
 
   auto info = make_info(self, indices);
