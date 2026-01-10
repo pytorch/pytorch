@@ -392,6 +392,9 @@ def _create_scaling_case(device="cuda", dtype=torch.float, optimizer_ctor=torch.
 def xfailIfSM89(func):
     return func if not IS_SM89 else unittest.expectedFailure(func)
 
+def xfailIfSM90(func):
+    return func if not IS_SM90 else unittest.expectedFailure(func)
+
 def xfailIfSM89PreCUDA13(func):
     """xfail on SM89 only for CUDA < 13. On CUDA 13+, test should pass on all architectures."""
     if IS_SM89 and _get_torch_cuda_version() < (13, 0):
