@@ -211,7 +211,7 @@ def _check_bf16_tensor_supported(device: Device):
     try:
         torch.tensor([1.0], dtype=torch.bfloat16, device=device)
         return True
-    except Exception:
+    except RuntimeError:
         return False
 
 
@@ -1365,11 +1365,11 @@ def _get_amdsmi_power_draw(device: Device = None) -> int:
     handle = _get_amdsmi_handler(device)
     socket_power = amdsmi.amdsmi_get_power_info(handle)["average_socket_power"]
     if socket_power != "N/A":
-        return socket_power
+        return int(socket_power)
     else:
         socket_power = amdsmi.amdsmi_get_power_info(handle)["current_socket_power"]
         if socket_power != "N/A":
-            return socket_power
+            return int(socket_power)
         else:
             return 0
 
@@ -1382,7 +1382,7 @@ def _get_amdsmi_clock_rate(device: Device = None) -> int:
     else:
         clock_rate = clock_info["clk"]
     if clock_rate != "N/A":
-        return clock_rate
+        return int(clock_rate)
     else:
         return 0
 
