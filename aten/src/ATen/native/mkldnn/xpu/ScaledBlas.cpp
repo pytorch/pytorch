@@ -357,13 +357,47 @@ using acceptance_fn = std::function<bool(
     c10::ScalarType,
     std::vector<ScalingType>&,
     ArrayRef<Tensor>&)>;
+
 using namespace std::placeholders;
 
 namespace scaled_blas = at::native::onednn::scaled;
 using scaled_blas::convert_int_to_enum;
 using scaled_blas::ScaledGemmImplementation;
 
-std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 2>
+// Adapter functions for A16W8 that don't need recipe_a or scales_a
+// But keep them to match the acceptance_fn signature
+auto check_a16w8_tensorwise_adapter = [](c10::ScalarType type_a,
+                                         std::vector<ScalingType>& recipe_a,
+                                         ArrayRef<Tensor>& scales_a,
+                                         c10::ScalarType type_b,
+                                         std::vector<ScalingType>& recipe_b,
+                                         ArrayRef<Tensor>& scales_b) -> bool {
+  return scaled_blas::check_a16w8_tensorwise_recipe(
+      type_a, type_b, recipe_b, scales_b);
+};
+
+auto check_a16w8_rowwise_adapter = [](c10::ScalarType type_a,
+                                      std::vector<ScalingType>& recipe_a,
+                                      ArrayRef<Tensor>& scales_a,
+                                      c10::ScalarType type_b,
+                                      std::vector<ScalingType>& recipe_b,
+                                      ArrayRef<Tensor>& scales_b) -> bool {
+  return scaled_blas::check_a16w8_rowwise_recipe(
+      type_a, type_b, recipe_b, scales_b);
+};
+
+auto check_a16w8_channelwise_adapter = [](c10::ScalarType type_a,
+                                          std::vector<ScalingType>& recipe_a,
+                                          ArrayRef<Tensor>& scales_a,
+                                          c10::ScalarType type_b,
+                                          std::vector<ScalingType>& recipe_b,
+                                          ArrayRef<Tensor>& scales_b) -> bool {
+  return scaled_blas::check_a16w8_channelwise_recipe(
+      type_a, type_b, recipe_b, scales_b);
+};
+
+// Put the a16w8 dispatch to end of the array. As they are less prioritized.
+std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 5>
     scale_kernel_dispatch = {{
         {"tensorwise_tensorwise",
          scaled_blas::check_tensorwise_recipe,
@@ -371,6 +405,15 @@ std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 2>
         {"rowwise_rowwise",
          scaled_blas::check_rowwise_recipe,
          ScaledGemmImplementation::ROWWISE_ROWWISE},
+        {"a16w8_tensorwise",
+         check_a16w8_tensorwise_adapter,
+         ScaledGemmImplementation::A16W8_TENSORWISE},
+        {"a16w8_rowwise",
+         check_a16w8_rowwise_adapter,
+         ScaledGemmImplementation::A16W8_ROWWISE},
+        {"a16w8_channelwise",
+         check_a16w8_channelwise_adapter,
+         ScaledGemmImplementation::A16W8_CHANNELWISE},
 
     }};
 
@@ -462,6 +505,152 @@ Tensor& _scaled_rowwise_rowwise(
 
   auto scaling_choice_a = ScalingType::RowWise;
   auto scaling_choice_b = ScalingType::RowWise;
+
+  _scaled_gemm(
+      mat_a,
+      mat_b,
+      scale_a,
+      scale_b,
+      scaling_choice_a,
+      scaling_choice_b,
+      bias,
+      use_fast_accum,
+      out);
+
+  return out;
+}
+
+Tensor& _scaled_a16w8_tensorwise(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const Tensor& scale_a,
+    const Tensor& scale_b,
+    const std::optional<Tensor>& bias,
+    const c10::ScalarType out_dtype,
+    bool use_fast_accum,
+    Tensor& out) {
+  // Restrictions:
+  // A is FP16/BF16, B is FP8, scales are fp32
+
+  TORCH_CHECK_VALUE(
+      (mat_a.scalar_type() == c10::ScalarType::Half ||
+       mat_a.scalar_type() == c10::ScalarType::BFloat16) &&
+          isFloat8Type(mat_b.scalar_type()),
+      "mat_a must be fp16/bf16 type and mat_b must be fp8 type, got: ",
+      mat_a.scalar_type(),
+      ", ",
+      mat_b.scalar_type());
+  TORCH_CHECK_VALUE(
+      scale_a.numel() == 1 && scale_a.scalar_type() == kFloat,
+      "scale_a must have 1 Float element")
+  TORCH_CHECK_VALUE(
+      scale_b.numel() == 1 && scale_b.scalar_type() == kFloat,
+      "scale_b must have 1 Float element")
+
+  auto scaling_choice_a = ScalingType::TensorWise;
+  auto scaling_choice_b = ScalingType::TensorWise;
+
+  _scaled_gemm(
+      mat_a,
+      mat_b,
+      scale_a,
+      scale_b,
+      scaling_choice_a,
+      scaling_choice_b,
+      bias,
+      use_fast_accum,
+      out);
+
+  return out;
+}
+
+Tensor& _scaled_a16w8_rowwise(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const Tensor& scale_a,
+    const Tensor& scale_b,
+    const std::optional<Tensor>& bias,
+    const c10::ScalarType out_dtype,
+    bool use_fast_accum,
+    Tensor& out) {
+  // Restrictions:
+  // A is FP16/BF16, B is FP8
+  // scale_a is TensorWise (scalar 1.0, since A doesn't need scaling)
+  // scale_b is RowWise (per-row scales for B)
+  TORCH_CHECK_VALUE(
+      (mat_a.scalar_type() == c10::ScalarType::Half ||
+       mat_a.scalar_type() == c10::ScalarType::BFloat16) &&
+          isFloat8Type(mat_b.scalar_type()),
+      "mat_a must be fp16/bf16 type and mat_b must be fp8 type, got: ",
+      mat_a.scalar_type(),
+      ", ",
+      mat_b.scalar_type());
+  TORCH_CHECK_VALUE(
+      scale_a.numel() == 1 && scale_a.scalar_type() == kFloat,
+      "scale_a must have 1 Float element (value 1.0), got ",
+      scale_a.numel())
+  TORCH_CHECK_VALUE(
+      scale_b.numel() == mat_b.size(1) && scale_b.scalar_type() == kFloat,
+      "scale_b must have ",
+      mat_b.size(1),
+      " Float elements, got ",
+      scale_b.numel())
+
+  TORCH_CHECK_VALUE(
+      scale_b.stride(1) == 1,
+      "expected scale_b.stride(1) to be 1, but got ",
+      scale_b.stride(1));
+
+  // A uses TensorWise (scale 1.0), B uses RowWise
+  auto scaling_choice_a = ScalingType::TensorWise;
+  auto scaling_choice_b = ScalingType::RowWise;
+
+  _scaled_gemm(
+      mat_a,
+      mat_b,
+      scale_a,
+      scale_b,
+      scaling_choice_a,
+      scaling_choice_b,
+      bias,
+      use_fast_accum,
+      out);
+
+  return out;
+}
+
+Tensor& _scaled_a16w8_channelwise(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const Tensor& scale_a,
+    const Tensor& scale_b,
+    const std::optional<Tensor>& bias,
+    const c10::ScalarType out_dtype,
+    bool use_fast_accum,
+    Tensor& out) {
+  // Restrictions:
+  // A is FP16/BF16, B is FP8, scales are fp32
+
+  TORCH_CHECK_VALUE(
+      (mat_a.scalar_type() == c10::ScalarType::Half ||
+       mat_a.scalar_type() == c10::ScalarType::BFloat16) &&
+          isFloat8Type(mat_b.scalar_type()),
+      "mat_a must be fp16/bf16 type and mat_b must be fp8 type, got: ",
+      mat_a.scalar_type(),
+      ", ",
+      mat_b.scalar_type());
+  TORCH_CHECK_VALUE(
+      scale_a.numel() == 1 && scale_a.scalar_type() == kFloat,
+      "scale_a must have 1 Float element")
+  TORCH_CHECK_VALUE(
+      scale_b.numel() == mat_b.size(1) && scale_b.scalar_type() == kFloat,
+      "scale_b must have ",
+      mat_b.size(1),
+      " Float elements (one per output channel), got ",
+      scale_b.numel())
+
+  auto scaling_choice_a = ScalingType::TensorWise;
+  auto scaling_choice_b = ScalingType::ChannelWise;
 
   _scaled_gemm(
       mat_a,
@@ -707,6 +896,36 @@ Tensor& _scaled_mm_xpu_v2_out(
         out_dtype_,
         use_fast_accum,
         out);
+  } else if (gemm_impl == ScaledGemmImplementation::A16W8_TENSORWISE) {
+    return _scaled_a16w8_tensorwise(
+        mat_a,
+        mat_b,
+        scale_a[0],
+        scale_b[0],
+        bias,
+        out_dtype_,
+        use_fast_accum,
+        out);
+  } else if (gemm_impl == ScaledGemmImplementation::A16W8_ROWWISE) {
+    return _scaled_a16w8_rowwise(
+        mat_a,
+        mat_b,
+        scale_a[0],
+        scale_b[0],
+        bias,
+        out_dtype_,
+        use_fast_accum,
+        out);
+  } else if (gemm_impl == ScaledGemmImplementation::A16W8_CHANNELWISE) {
+    return _scaled_a16w8_channelwise(
+        mat_a,
+        mat_b,
+        scale_a[0],
+        scale_b[0],
+        bias,
+        out_dtype_,
+        use_fast_accum,
+        out);
   } else {
     TORCH_CHECK_VALUE(
         false, "Invalid state - found an implementation, but not really");
@@ -736,6 +955,173 @@ Tensor _scaled_mm_xpu_v2(
       scale_recipe_a,
       swizzle_a,
       scale_b,
+      scale_recipe_b,
+      swizzle_b,
+      bias,
+      out_dtype,
+      contraction_dim,
+      use_fast_accum,
+      out);
+}
+
+// Weight-only Quantization (WoQ) Matrix Multiplication for A16W8
+//
+// [Note]: This comment is partially generated with copilot.
+// This function performs matrix multiplication with A16 (fp16/bf16) activations
+// and W8 (fp8) weights, with optional per-channel or per-tensor scaling.
+//
+// Arguments:
+//   A (Tensor): Activation matrix
+//     - Type: fp16 (Half) or bf16 (BFloat16)
+//     - Shape: [M, K] where M is batch size, K is input channels
+//     - Must be 2D and contiguous. For 3D tensor, need to be first flattened to
+//     [:, K]
+//
+//   B (Tensor): Weight matrix (quantized)
+//     - Type: fp8 (float8_e4m3fn or float8_e5m2)
+//     - Shape: [K, N] where K is input channels, N is output channels
+//     - Must be 2D and contiguous
+//
+//   scale_b (optional<Tensor>): Scaling factors for dequantizing B
+//     - Type: float32 (kFloat)
+//     - Shape options (determines scaling type):
+//       * [1] or scalar: TensorWise scaling (single scale for entire weight)
+//       * [N] or [1, N]: ChannelWise scaling (one scale per output channel)
+//       * [1, N] contiguous stride: RowWise scaling (one scale per output
+//       channel, kept as 2D)
+//     - If not provided, defaults to 1.0 (no scaling)
+//     - Note: scale_a is implicitly 1.0 since A is already in high precision
+//
+// Returns:
+//   Tensor: Result of matrix multiplication A @ B with dequantization
+//     - Type: Same as A (fp16 or bf16)
+//     - Shape: [M, N]
+//
+// Scaling Types:
+//   - TensorWise: Single scale applied to entire weight matrix (scale_b: [1])
+//   - ChannelWise: One scale per output channel, accepts flexible shapes
+//   (scale_b shape: [N] or [1,N])
+//   - RowWise: One scale per output channel with explicit 2D shape and
+//   contiguous stride (scale_b shape: [1,N])
+//
+// Example:
+//   A = torch.randn(128, 512, dtype=torch.float16, device='xpu')
+//   B = torch.randn(512, 1024, dtype=torch.float8_e4m3fn, device='xpu')
+//   scales = torch.randn(1024, dtype=torch.float32, device='xpu') #ChannelWise
+//   result = torch._weight_fp8pack_mm(A, B, scales) # shape: [128, 1024]
+//
+Tensor _weight_fp8pack_mm_xpu(
+    const Tensor& A, // [M, K]
+    const Tensor& B, // [K, N]
+    const std::optional<Tensor>& scale_b) {
+  // Internally, this will call `_scaled_mm_v2`. This function is an API wrapper
+  // for simpler usage in WoQ (Weight-only Quantization) cases.
+  // A is in fp16/bf16, B is in fp8, scale_a is implicitly 1.0
+
+  TORCH_CHECK(
+      A.scalar_type() == c10::ScalarType::Half ||
+          A.scalar_type() == c10::ScalarType::BFloat16,
+      "A must be fp16 or bf16, got: ",
+      A.scalar_type());
+  TORCH_CHECK(
+      isFloat8Type(B.scalar_type()),
+      "B must be fp8 type, got: ",
+      B.scalar_type());
+  TORCH_CHECK(A.dim() == 2, "A must be a 2D matrix");
+  TORCH_CHECK(B.dim() == 2, "B must be a 2D matrix");
+  TORCH_CHECK(
+      A.size(1) == B.size(0),
+      "A and B shapes cannot be multiplied (",
+      A.size(0),
+      "x",
+      A.size(1),
+      " and ",
+      B.size(0),
+      "x",
+      B.size(1),
+      ")");
+
+  // scale_a is always 1.0 (since A is already in fp16/bf16, no scaling needed)
+  at::Tensor scale_a = at::ones({1}, A.options().dtype(kFloat));
+
+  // Use provided scale_b or default to 1.0
+  at::Tensor scale_b_tensor = scale_b.has_value()
+      ? scale_b.value()
+      : at::ones({1}, B.options().dtype(kFloat));
+
+  TORCH_CHECK(
+      scale_b_tensor.scalar_type() == kFloat,
+      "scale_b must be float, got dtype: ",
+      scale_b_tensor.scalar_type());
+
+  // Determine scaling type for scale_b based on its shape
+  ScalingType scale_recipe_b_type;
+  at::Tensor scale_b_normalized;
+
+  if (scale_b_tensor.numel() == 1) {
+    // TensorWise: single scalar value
+    scale_recipe_b_type = ScalingType::TensorWise;
+    scale_b_normalized = scale_b_tensor;
+  } else if (
+      scale_b_tensor.numel() == B.size(1) &&
+      (scale_b_tensor.dim() == 1 ||
+       (scale_b_tensor.dim() == 2 && scale_b_tensor.size(0) == 1))) {
+    // ChannelWise: N elements (one per output channel)
+    // Accepts both [N] (flattened) or [1, N] (2D) shape
+    // Flatten to 1D for consistency
+    scale_recipe_b_type = ScalingType::ChannelWise;
+    scale_b_normalized = scale_b_tensor.reshape({scale_b_tensor.numel()});
+  } else if (
+      scale_b_tensor.dim() == 2 && scale_b_tensor.size(0) == 1 &&
+      scale_b_tensor.size(1) == B.size(1) && scale_b_tensor.is_contiguous()) {
+    // RowWise: shape [1, N]
+    // One scale per output channel (per column of B)
+    scale_recipe_b_type = ScalingType::RowWise;
+    scale_b_normalized = scale_b_tensor;
+  } else {
+    TORCH_CHECK(
+        false,
+        "scale_b must be either:\n",
+        "  - scalar [1] for TensorWise, or\n",
+        "  - ",
+        B.size(1),
+        " elements (shape [N] or [1,N]) for ChannelWise (one per output channel), or\n",
+        "  - shape [1, ",
+        B.size(1),
+        "] with contiguous stride for RowWise (one per output channel).\n",
+        "Got ",
+        scale_b_tensor.numel(),
+        " elements with shape: ",
+        scale_b_tensor.sizes());
+  }
+
+  // Prepare arguments for _scaled_mm_xpu_v2_out (unified path for all scaling
+  // types)
+  c10::SmallVector<Tensor, 1> scale_a_vec = {scale_a};
+  c10::SmallVector<Tensor, 1> scale_b_vec = {scale_b_normalized};
+  c10::SmallVector<int64_t, 1> scale_recipe_a = {static_cast<int64_t>(
+      ScalingType::TensorWise)}; // A always uses TensorWise (scale 1.0)
+  c10::SmallVector<int64_t, 1> scale_recipe_b = {
+      static_cast<int64_t>(scale_recipe_b_type)};
+  c10::SmallVector<int64_t, 1> swizzle_a = {
+      static_cast<int64_t>(SwizzleType::NO_SWIZZLE)};
+  c10::SmallVector<int64_t, 1> swizzle_b = {
+      static_cast<int64_t>(SwizzleType::NO_SWIZZLE)};
+
+  std::optional<Tensor> bias = std::nullopt;
+  std::optional<c10::ScalarType> out_dtype = A.scalar_type();
+  c10::SmallVector<int64_t, 0> contraction_dim = {};
+  bool use_fast_accum = false;
+
+  Tensor out = at::empty({0}, A.options());
+
+  return _scaled_mm_xpu_v2_out(
+      A,
+      B,
+      scale_a_vec,
+      scale_recipe_a,
+      swizzle_a,
+      scale_b_vec,
       scale_recipe_b,
       swizzle_b,
       bias,
