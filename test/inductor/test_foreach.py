@@ -1244,6 +1244,7 @@ class ForeachTests(TestCase):
     @requires_gpu
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
     @torch._inductor.config.patch("emulate_precision_casts", True)
+    @torch._inductor.config.patch("_use_fp64_for_unbacked_floats", True)
     @parametrize(
         "beta2",
         [
@@ -1408,9 +1409,7 @@ class ForeachTests(TestCase):
 
         _, code = run_and_get_code(fn, self_tensors, tensor1_list, tensor2_list)
         code = " ".join(code)
-        self.assertIn(
-            "libdevice.fma", code, "Expected FMA to be used in generated code"
-        )
+        self.assertIn("tl.fma", code, "Expected FMA to be used in generated code")
 
 
 if __name__ == "__main__":

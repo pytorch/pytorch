@@ -917,6 +917,11 @@ class OpDecompositions:
         return ops.add(ops.mul(x, y), z)
 
     @staticmethod
+    def mul_rn(x: OpVarT, y: OpVarT) -> OpVarT:
+        # for backends that don't override this, just use regular mul
+        return ops.mul(x, y)
+
+    @staticmethod
     def floor_to_int(a: OpVarT, dtype: torch.dtype) -> OpVarT:
         return ops.to_dtype(ops.floor(a), dtype)
 
@@ -1236,8 +1241,22 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x, y, z: f"std::fma({x}, {y}, {z})",
         cppvec=lambda x, y, z: f"fmadd({x}, {y}, {z})",
-        triton=lambda x, y, z: f"libdevice.fma({x}, {y}, {z})",
+        # NOTE: We use tl.fma instead of libdevice.fma because libdevice.fma
+        # has Flush-To-Zero (FTZ) behavior for subnormal values, which causes
+        # numerical differences compared to eager CUDA execution. tl.fma
+        # preserves subnormals and matches eager's FMA precision.
+        triton=lambda x, y, z: f"tl.fma({x}, {y}, {z})",
         name="fma",
+    ),
+    # mul_rn: Multiplication with round-to-nearest. This prevents Triton's
+    # compiler from fusing the multiplication with subsequent operations,
+    # which is needed to match eager's rounding behavior in operations like
+    # addcmul where the product must be rounded before use.
+    mul_rn=OverridesData(
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+        cpp=lambda x, y: f"({x}) * ({y})",  # C++ doesn't need special handling
+        triton=lambda x, y: f"libdevice.mul_rn({x}, {y})",
+        name="mul_rn",
     ),
     # erfinv, exp2, expit, gammaln
     igamma=OverridesData(
