@@ -4518,6 +4518,9 @@ flattened shape is input's data copied. See :meth:`torch.Tensor.view` for detail
 
 .. note::
     Flattening a zero-dimensional tensor will return a one-dimensional view.
+    
+    When using :class:`~torch.nn.Sequential`, prefer :class:`~torch.nn.Flatten`
+    to insert a flattening step into the module pipeline.
 
 Args:
     {input}
