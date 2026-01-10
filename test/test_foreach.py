@@ -81,7 +81,9 @@ class ForeachFuncWrapper:
 
         # Skip profiler check for CUDA 12.6, 12.8 as the upgrade makes profiler results flaky
         # https://github.com/pytorch/pytorch/issues/148681. TODO: ADD IT BACK!!!
-        skip_profiler_check = _get_torch_cuda_version() in [(12, 6), (12, 8)]
+        # Also skip on ROCm where rocTracer has similar kernel detection issues
+        # https://github.com/pytorch/pytorch/issues/97167
+        skip_profiler_check = _get_torch_cuda_version() in [(12, 6), (12, 8)] or TEST_WITH_ROCM
         if (
             is_cuda
             and not skip_profiler_check
