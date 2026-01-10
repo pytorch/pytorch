@@ -182,8 +182,54 @@ def _supports_nontrivial_mask_graphs() -> bool:
     return torch.cuda.get_device_capability()[0] == 10
 
 
+def _is_symbol_from_tensor_shape(symbol: sympy.Symbol, shape_env: Any) -> bool:
+    """Check if a symbol originates from a tensor size/stride (TensorPropertySource)."""
+    from torch._dynamo.source import TensorPropertySource
+
+    sources = shape_env.var_to_sources.get(symbol, [])
+    return any(isinstance(s, TensorPropertySource) for s in sources)
+
+
+def _has_unsupported_captured_scalars(
+    score_mod_other_buffers: Sequence[Any],
+    mask_mod_other_buffers: Sequence[Any],
+) -> bool:
+    """Check if any captured buffers are dynamic scalars that cannot be inlined.
+
+    When compiling with dynamic=True, captured Python scalars in score_mod or
+    mask_mod may become:
+    - sympy symbols from LocalSource (captured ints) - NOT from tensor shapes
+    - 0-dim CPU tensors (captured floats)
+
+    Symbols from TensorPropertySource (tensor size/stride) are fine because they
+    get resolved at runtime.
+
+    The FLASH backend cannot inline captured scalar symbolic values into the CuteDSL template.
+    """
+    from torch._inductor.virtualized import V
+
+    shape_env = V.graph.sizevars.shape_env
+
+    for buf in list(score_mod_other_buffers) + list(mask_mod_other_buffers):
+        # Captured int becomes sympy.Symbol - check if it's NOT from a tensor shape
+        if isinstance(buf, sympy.Expr):
+            for symbol in buf.free_symbols:
+                if not _is_symbol_from_tensor_shape(symbol, shape_env):
+                    return True
+        # Captured float becomes 0-dim TensorBox on CPU
+        if isinstance(buf, TensorBox):
+            device = buf.get_device()
+            size = buf.get_size()
+            if device is not None and device.type == "cpu" and len(size) == 0:
+                # 0-dimensional CPU tensor (scalar) - can't be inlined into CUDA kernel
+                return True
+    return False
+
+
 def _can_use_flex_flash_attention(
-    subgraph: Subgraph, mask_graph: Subgraph, num_score_mod_placeholders: int
+    subgraph: Subgraph,
+    mask_graph: Subgraph,
+    num_score_mod_placeholders: int,
 ) -> tuple[bool, str]:
     """Check if flex flash attention can be used for the given inputs.
 
@@ -198,6 +244,7 @@ def _can_use_flex_flash_attention(
             False,
             "Input buffers require gradients (not supported by flash attention)",
         )
+
     mask_trivial = is_trivial_mask_graph(mask_graph.graph_module)
 
     if mask_trivial:
@@ -236,7 +283,9 @@ def _use_flex_flash_attention(
         return False
 
     can_use, reason = _can_use_flex_flash_attention(
-        subgraph, mask_graph, num_score_mod_placeholders
+        subgraph,
+        mask_graph,
+        num_score_mod_placeholders,
     )
 
     if not can_use:
@@ -455,7 +504,7 @@ def create_flex_flash_attention_backward_kernel(
         raise RuntimeError("CUTE flash attention not available")
 
     batch_size, num_heads, seq_len_q, head_dim = query.get_size()
-    v_head_dim = value.get_size()[-1]
+    _, num_heads_kv, seq_len_kv, v_head_dim = value.get_size()
     device = query.get_device()
     dtype = query.get_dtype()
     assert device is not None
@@ -471,25 +520,26 @@ def create_flex_flash_attention_backward_kernel(
     )
 
     grad_key_strides = infer_dense_strides(
-        [batch_size, num_heads, value.get_size()[2], head_dim], key.get_stride()
+        [batch_size, num_heads_kv, seq_len_kv, head_dim], key.get_stride()
     )
     grad_key = empty_strided(
-        size=[batch_size, num_heads, value.get_size()[2], head_dim],
+        size=[batch_size, num_heads_kv, seq_len_kv, head_dim],
         stride=grad_key_strides,
         dtype=dtype,
         device=device,
     )
 
     grad_value_strides = infer_dense_strides(
-        [batch_size, num_heads, value.get_size()[2], v_head_dim], value.get_stride()
+        [batch_size, num_heads_kv, seq_len_kv, v_head_dim], value.get_stride()
     )
     grad_value = empty_strided(
-        size=[batch_size, num_heads, value.get_size()[2], v_head_dim],
+        size=[batch_size, num_heads_kv, seq_len_kv, v_head_dim],
         stride=grad_value_strides,
         dtype=dtype,
         device=device,
     )
 
+    # we use dq as the output layout
     output_layout = FixedLayout(
         device=device,
         dtype=dtype,

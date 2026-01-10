@@ -80,7 +80,6 @@ from .utils import (
     is_multi_outputs_template,
     is_output_of_multi_outputs_template,
     is_wait,
-    maybe_log_cudagraph_partition,
     sympy_product,
 )
 from .virtualized import V
@@ -92,6 +91,7 @@ loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
 compute_dependencies_log = torch._logging.getArtifactLogger(
     __name__, "compute_dependencies"
 )
+cudagraphs_log = torch._logging.getArtifactLogger(__name__, "cudagraphs")
 
 PartitionType: TypeAlias = list["BaseSchedulerNode"]
 _T = TypeVar("_T")
@@ -1303,7 +1303,7 @@ def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> Optional[float
         if mm_fn is None:
             return None
         bench_fn = mm_fn
-        # pyrefly: ignore [unbound-name]
+
         args_kwargs_fn = lambda: snode_args_kwargs(snode)  # noqa: E731
     else:
         return None
@@ -2821,6 +2821,7 @@ class Scheduler:
             ]
         )
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
+        self.previous_node: Optional[BaseSchedulerNode] = None
         self.current_node: Optional[BaseSchedulerNode] = None
         self.update_zero_dim_cpu_tensor()
         # some new constants could have been created above
@@ -2837,6 +2838,7 @@ class Scheduler:
         self.name_to_node: dict[str, BaseSchedulerNode] = {
             n.get_name(): n for n in self.nodes
         }
+
         self.name_to_buf: dict[str, SchedulerBuffer] = {
             buf.get_name(): buf for node in self.nodes for buf in node.get_outputs()
         }
@@ -4545,7 +4547,7 @@ class Scheduler:
         The current attempt is a quick, possibly hacky, heuristic to prevent the
         fusion of nodes that are far away in the original order.
 
-        A better but difficult to implement heurisitic would be to use live
+        A better but difficult to implement heuristic would be to use live
         intervals of the buffers, find region of peak pressure in the original
         program and prevent fusion that crosses that peak region. We might need
         special care or good approximation in this implementation, as fusion of
@@ -5553,10 +5555,11 @@ class Scheduler:
             and name not in self.mutation_real_name
         )
 
-    def should_partition(
-        self, node: BaseSchedulerNode, should_log: bool = False
-    ) -> bool:
-        """Return True if we should partition the inductor graph on this node"""
+    def should_partition(self, node: BaseSchedulerNode) -> Optional[str]:
+        """
+        Return the reason why we should partition the inductor graph on this node,
+        or None if the node is cudagraphable.
+        """
 
         # Allow users to manually specify if a node should be partitioned
         # Can only do this for FallbackKernels
@@ -5575,7 +5578,7 @@ class Scheduler:
                 or op_overload_name in config.custom_should_partition_ops
             ):
                 assert isinstance(op, torch._ops.OpOverload)
-                return True
+                return f"custom partition op: {op_overload_name}"
 
         # When not using cudagraphs, keep all kernels in the `call` function
         # instead of graph partition functions, since graph partition only brings
@@ -5584,53 +5587,38 @@ class Scheduler:
             not torch._inductor.config.triton.cudagraphs
             and _unstable_customized_partition_wrapper.wrapper is None
         ):
-            return True
-
-        # avoid duplicating logs when should_partition is called multiple times
-        # on the same node
-        def noop_log(msg: str, node: Optional[BaseSchedulerNode]) -> None:
-            return
-
-        # Don't log partition reasons for CPU-only graphs since cudagraph
-        # partitioning is not relevant when there are no GPU devices
-        has_gpu_device = any(is_gpu(device) for device in V.graph.device_types)
-        log_partition_reason = (
-            maybe_log_cudagraph_partition if should_log and has_gpu_device else noop_log
-        )
+            return "partition includes all ops when cudagraphs is disabled"
 
         if isinstance(node, FusedSchedulerNode):
-            return any(self.should_partition(snode) for snode in node.snodes)
+            for snode in node.snodes:
+                reason = self.should_partition(snode)
+                if reason:
+                    return reason
+            return None
 
         assert node.node is not None
 
         if not node.is_gpu():
-            log_partition_reason("non gpu ops", node=node)
-
-            return True
+            return f"{node.get_device()} ops"
 
         if isinstance(node.node, ir.DeviceCopy):
-            log_partition_reason("DeviceCopy ops", node=node)
-            return True
+            return "DeviceCopy ops"
 
         if isinstance(node.node, ir.Conditional):
-            log_partition_reason("Conditional ops", node=node)
-            return True
+            return "Conditional ops"
 
         if getattr(node.node, "unbacked_bindings", None):
-            log_partition_reason("unbacked binding ops", node=node)
-            return True
+            return "unbacked binding ops"
 
         if is_cudagraph_unsafe_op(node.node):
-            log_partition_reason("CUDAGraph-unsafe custom ops", node=node)
-            return True
+            return "CUDAGraph-unsafe custom ops"
 
         # Partition around nodes with dynamic shapes when cudagraph_skip_dynamic_graphs is enabled
         if config.triton.cudagraph_skip_dynamic_graphs:
             if get_scheduler_node_symbol_uses(node):
-                log_partition_reason("dynamic shape ops", node=node)
-                return True
+                return "dynamic shape ops"
 
-        return False
+        return None
 
     def get_name_to_nodes(
         self,
@@ -5891,7 +5879,6 @@ class Scheduler:
             signatures.append(partition_signature)
 
             unmet_output_names = partition_input_names.union(
-                # pyrefly: ignore [unsupported-operation]
                 unmet_output_names - returned_output_names
             )
 
@@ -6051,7 +6038,7 @@ class Scheduler:
             return True
 
         for node in nodes:
-            should_partition = self.should_partition(node)
+            should_partition = self.should_partition(node) is not None
             if should_partition and len(node.unmet_dependencies) == 0:
                 front.append(node)
             elif should_partition and only_output_user(node):
@@ -6073,13 +6060,13 @@ class Scheduler:
         cur_partition: PartitionType = []
         skip_cudagraphs = []
         for node in self.nodes:
-            should_partition = self.should_partition(node, should_log=True)
-            if cur_partition and skip_cudagraph != should_partition:
+            node_should_partition = self.should_partition(node) is not None
+            if cur_partition and skip_cudagraph != node_should_partition:
                 partitions.append(cur_partition)
                 skip_cudagraphs.append(skip_cudagraph)
                 cur_partition = []
 
-            skip_cudagraph = should_partition
+            skip_cudagraph = node_should_partition
             cur_partition.append(node)
 
         if cur_partition:
@@ -6091,7 +6078,69 @@ class Scheduler:
         )
         self.compute_graph_partition_maps(signatures)
 
+        self._log_graph_partitions(partitions, signatures)
+
         return partitions, signatures
+
+    def _log_graph_partitions(
+        self,
+        partitions: list[PartitionType],
+        signatures: list[GraphPartitionSignature],
+    ) -> None:
+        if not cudagraphs_log.isEnabledFor(logging.DEBUG):
+            return
+
+        # Don't log partition reasons for CPU-only graphs since cudagraph
+        # partitioning is not relevant when there are no GPU devices
+        has_gpu_device = any(is_gpu(device) for device in V.graph.device_types)
+        if not has_gpu_device:
+            return
+
+        cudagraphable_count = sum(1 for s in signatures if not s.skip_cudagraph)
+        non_cudagraphable_count = len(signatures) - cudagraphable_count
+        cudagraphs_log.debug(
+            "Created %d graph partitions: %d cudagraphable, %d non-cudagraphable",
+            len(partitions),
+            cudagraphable_count,
+            non_cudagraphable_count,
+        )
+        for i, (partition, signature) in enumerate(zip(partitions, signatures)):
+            cudagraphs_log.debug(
+                "  Partition %d: %d nodes, %s, inputs=%d, outputs=%d",
+                i,
+                len(partition),
+                "non-cudagraphable" if signature.skip_cudagraph else "cudagraphable",
+                len(signature.input_nodes),
+                len(signature.output_nodes),
+            )
+            if signature.skip_cudagraph:
+                # Log details for each non-cudagraphable node
+                for node in partition:
+                    self._log_non_cudagraphable_node(node)
+
+    def _log_non_cudagraphable_node(self, node: BaseSchedulerNode) -> None:
+        """Log details for a non-cudagraphable node."""
+        reason = self.should_partition(node)
+        if not reason:
+            return
+
+        node_name = node.get_name()
+        fx_node = node.node.get_origin_node() if node.node is not None else None
+        parts = [f"reason={reason}"]
+        ir_type = type(node.node).__name__
+        parts.append(f"ir={ir_type}")
+        if fx_node is not None:
+            fx_str = f"{fx_node.target}({', '.join(str(a) for a in fx_node.args)})"
+            parts.append(f"fx={fx_str}")
+
+        cudagraphs_log.debug("    %s: %s", node_name, ", ".join(parts))
+
+        # Log full stack trace if available
+        if fx_node is not None:
+            stack_trace = fx_node.meta.get("stack_trace", None)
+            if stack_trace:
+                for line in stack_trace.strip().split("\n"):
+                    cudagraphs_log.debug("         %s", line)
 
     def codegen(self) -> None:
         with dynamo_timed("Scheduler.codegen"):
@@ -6227,8 +6276,6 @@ class Scheduler:
         partitions, signatures = self.graph_partition()
 
         if len(partitions) > 1:
-            msg = f"cudagraph partition into {len(partitions)} partitions"
-            maybe_log_cudagraph_partition(msg=msg, prefix="")
             counters["inductor"]["cudagraph_partitions"] += len(partitions)
 
         with self.use_default_device_context(partitions, signatures):
@@ -6274,6 +6321,7 @@ class Scheduler:
                 seen.add(key)
 
         self.current_device = self.default_device_context
+        assert self.previous_node is None
 
         # pyrefly: ignore [unbound-name]
         if self.default_device_context and config.triton.autotune_at_compile_time:
@@ -6365,6 +6413,11 @@ class Scheduler:
                 ):
                     self.flush()
 
+            if all(isinstance(n, SchedulerNode) for n in node.get_nodes()):
+                self.previous_node = node
+            else:
+                self.previous_node = None
+
         if self.current_device != self.default_device_context:
             # when default_device_context is not None, we are codegen
             # for graph partitions and all nodes must be on
@@ -6375,6 +6428,7 @@ class Scheduler:
                 # important for nested indentation codegen-ing.
                 V.graph.wrapper_code.codegen_device_guard_exit()
 
+        self.previous_node = None
         self.flush()
 
     def benchmark_combo_kernel(
