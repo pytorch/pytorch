@@ -43,7 +43,7 @@ verify_correctness = False
 minimum_call_count = 1
 
 # turn on/off DCE pass (deprecated: always true)
-dead_code_elimination = True
+dead_code_elimination = None
 
 # Enable or disable side effect replay after graph execution.
 # When False, mutations to Python objects (lists, dicts, attributes) won't be
