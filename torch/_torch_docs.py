@@ -460,8 +460,8 @@ add_docstr(
     r"""
 addcdiv(input, tensor1, tensor2, *, value=1, out=None) -> Tensor
 
-Performs the element-wise division of :attr:`tensor1` by :attr:`tensor2`,
-multiplies the result by the scalar :attr:`value` and adds it to :attr:`input`.
+Multiplies :attr:`tensor1` by the scalar :attr:`value`, divides the result by :attr:`tensor2`,
+and adds it to :attr:`input`.
 
 .. warning::
     Integer division with addcdiv is no longer supported, and in a future
