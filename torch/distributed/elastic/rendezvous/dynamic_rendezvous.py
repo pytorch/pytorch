@@ -1203,25 +1203,22 @@ class DynamicRendezvousHandler(RendezvousHandler):
             )
 
         # This will only be hit when TCPStore sharing is enabled.
-        if self._bootstrap_store_info is None:
-            # To avoid race in get_free_port because we release the port after the call,
-            # we want to create a TCPStore server soon afterwards.
-            server_port = 0
-            if rank == 0:
+        server_port = 0
+        if rank == 0:
+            if self._shared_tcp_store_server is None:
                 self._shared_tcp_store_server = self._create_tcp_store_server(
                     self._this_node.addr, server_port
                 )
-                server_port = self._shared_tcp_store_server.port
-            self._bootstrap_store_info = RendezvousStoreInfo.build(
-                rank,
-                store,
-                local_addr=self._this_node.addr,
-                server_port=server_port,  # For non-0 rank, this is a no-op
-            )
-
-        assert self._bootstrap_store_info is not None
-        if rank == 0:
             assert self._shared_tcp_store_server is not None
+            server_port = self._shared_tcp_store_server.port
+
+        self._bootstrap_store_info = RendezvousStoreInfo.build(
+            rank,
+            store,
+            local_addr=self._this_node.addr,
+            server_port=server_port,  # For non-0 rank, this is a no-op
+        )
+        assert self._bootstrap_store_info is not None
 
         return RendezvousInfo(
             store,
