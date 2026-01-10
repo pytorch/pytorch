@@ -65,10 +65,13 @@ class AttentionBlock(nn.Module):
         cu_seq: torch.Tensor,
         max_len: int,
         is_causal: bool = False,
+        scale: float | None = None,
     ):
         q, k, v = self.get_varlen_qkv(x_packed)
 
-        attn_out = varlen_attn(q, k, v, cu_seq, cu_seq, max_len, max_len, is_causal)
+        attn_out = varlen_attn(
+            q, k, v, cu_seq, cu_seq, max_len, max_len, is_causal, scale=scale
+        )
         attn_out = attn_out.view(-1, self.embed_dim)
 
         return self.out_proj(attn_out)
@@ -78,6 +81,7 @@ class AttentionBlock(nn.Module):
         x_padded: torch.Tensor,
         seq_lengths: torch.Tensor,
         is_causal: bool = False,
+        scale: float | None = None,
     ):
         batch_size, seq_len, _ = x_padded.shape
 
@@ -105,7 +109,9 @@ class AttentionBlock(nn.Module):
         v = v.view(batch_size, seq_len, self.num_heads, self.head_dim).transpose(1, 2)
 
         # Don't pass is_causal since we already incorporated it into attn_mask
-        attn_out = F.scaled_dot_product_attention(q, k, v, attn_mask=attn_mask)
+        attn_out = F.scaled_dot_product_attention(
+            q, k, v, attn_mask=attn_mask, scale=scale
+        )
 
         attn_out = (
             attn_out.transpose(1, 2)
@@ -325,11 +331,12 @@ class TestVarlenAttention(NNTestCase):
     )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("is_causal", [False, True])
-    def test_varlen_vs_sdpa(self, device, dtype, is_causal):
+    @parametrize("scale", [None, 0.1])
+    def test_varlen_vs_sdpa(self, device, dtype, is_causal, scale):
         torch.manual_seed(42)
 
         shape = VarlenShape(
-            batch_size=8, max_seq_len=2048, embed_dim=1024, num_heads=16
+            batch_size=4, max_seq_len=1024, embed_dim=1024, num_heads=16
         )
 
         attention_block = AttentionBlock(
@@ -350,17 +357,20 @@ class TestVarlenAttention(NNTestCase):
             variable_length_batch_data["cu_seq"],
             variable_length_batch_data["max_len"],
             is_causal=is_causal,
+            scale=scale,
         )
         sdpa_output = attention_block.forward_sdpa(
             variable_length_batch_data["x_padded"],
             variable_length_batch_data["seq_lengths"],
             is_causal=is_causal,
+            scale=scale,
         )
 
         golden_sdpa_output = golden_attention_block.forward_sdpa(
             golden_variable_length_batch_data["x_padded"],
             golden_variable_length_batch_data["seq_lengths"],
             is_causal=is_causal,
+            scale=scale,
         )
 
         start_idx = 0
