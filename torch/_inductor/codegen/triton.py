@@ -863,9 +863,6 @@ class TritonPrinter(PythonPrinter):
         return f"libdevice.ceil({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
 
     def _helper_sqrt(self, expr: sympy.Expr) -> str:
-        # work around for https://github.com/pytorch/pytorch/issues/165738
-        if torch.xpu.is_available():
-            return f"libdevice.sqrt(({self._print(expr)}).to(tl.float32))"
         return f"tl.sqrt_rn(({self._print(expr)}).to(tl.float32))"
 
     def _print_FloatPow(self, expr: sympy.Expr) -> str:
@@ -1186,9 +1183,12 @@ class TritonOverrides(OpOverrides):
         triton_val = constant_repr(type_(value))
         triton_type = triton_compute_type(dtype)
 
-        # NOTE: We use tl.full here to get the expected type.
-        # Otherwise, subnormal float32 values are treated as fp64
-        # causing fp32 * fp64 promotion and different numerical results.
+        if triton_type == "tl.float32":
+            # Float constants are always f32 in triton
+            return triton_val
+
+        # NOTE: We use a tensor here in order to get the expected type.
+        # Otherwise, e.g. float64 constants would be truncated to float32.
         if value < 0 and not dtype.is_signed:
             triton_signed_type = f"tl.{triton_type[4:]}"
             return f"tl.full({shape}, {triton_val}, {triton_signed_type}).to({triton_type})"
@@ -1221,12 +1221,6 @@ class TritonOverrides(OpOverrides):
             # we want div_rn to adhere with eager
             out = f"triton.language.div_rn({x}, {y})"
         else:
-            out = f"({x} / {y})"
-
-        # Workaround here since the functionality of div_rn has not ready on XPU.
-        # TODO: remove this workaround after https://github.com/intel/intel-xpu-backend-for-triton/issues/5306
-        # resolved.
-        if torch.xpu.is_available():
             out = f"({x} / {y})"
 
         if low_precision_fp_var(x) or low_precision_fp_var(y):
@@ -1273,9 +1267,6 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def sqrt(x):
-        # work around for https://github.com/pytorch/pytorch/issues/165738
-        if torch.xpu.is_available():
-            return f"libdevice.sqrt({x})"
         return f"tl.sqrt_rn({x})"
 
     @staticmethod

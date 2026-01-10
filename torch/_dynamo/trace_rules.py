@@ -355,6 +355,7 @@ manual_torch_name_rule_map: dict[
     "torch._dynamo.patch_dynamo_config": UserFunctionVariable,
     "torch._dynamo.error_on_graph_break": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
+    "torch.fx.experimental.symbolic_shapes.size_hint": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_or_true": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_or_false": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.statically_known_true": TorchInGraphFunctionVariable,
