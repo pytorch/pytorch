@@ -924,7 +924,6 @@ class TestFlexFlash(InductorTestCase):
         ):
             compiled_fn(query, key, value, kernel_options={"BACKEND": "FLASH"})
 
-
     @dtypes(torch.float16, torch.bfloat16)
     def test_flash_attention_backward_rejects_captured_buffer_with_grad(
         self, device, dtype
