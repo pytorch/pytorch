@@ -93,138 +93,10 @@ namespace at::native {
 
 static bool conv_benchmark_empty_cache = true;
 
-// Check workload to activate fast depthwise FP16 cudnn conv kernels
-template <typename T>
-static bool check_cudnn_depthwise_workload(const at::Tensor& input, T stride) {
-  auto w = at::symint::size<T>(input, 3);  // same as h
-  auto ch = at::symint::size<T>(input, 1);
-  auto bs = at::symint::size<T>(input, 0);
-  if (stride==1) {
-    if (w >= 7) {
-      // All batch sizes and nb_channels
-      if (w >= 112) {
-        return true;
-      }
-
-      // large nb_channels
-      if (ch >= 1024) {
-        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
-        if (w >= 56) {
-          return true;
-        } else if (bs >= 32) {
-          return true;
-        }
-      }
-
-      // batch_size specific
-      if (bs >= 128) {
-        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
-        if (ch >= 512) {
-          return true;
-        } else if (ch >= 64) {
-          if (w >= 14) {
-            return true;
-          }
-        } else if ((ch >= 32) && (w >=28)) {
-          return true;
-        }
-      } else if (bs >= 64) {
-        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
-        if ((ch >= 256) && (w >= 14)) {
-          return true;
-        } else if ((ch >= 32) && (w >= 28)) {
-          return true;
-        }
-      } else if (bs >= 32) {
-        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
-        if ((ch >= 256) && (w >= 14)) {
-          return true;
-        } else if ((ch >= 128) && (w >= 28)) {
-          return true;
-        } else if ((ch >= 32) && (w >= 56)) {
-          return true;
-        }
-      } else if (bs >= 16) {
-        if ((ch >= 1024) && (w >= 14)) {
-          return true;
-        }
-        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
-        if ((ch >= 256) && (w >= 28)) {
-          return true;
-        } else if ((ch >= 32) && (w >= 56)) {
-          return true;
-        }
-      } else if (bs >= 8) {
-        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
-        if ((ch >= 512) && (w >= 28)) {
-          return true;
-        } else if ((ch >= 64) && (w >= 56)) {
-          return true;
-        }
-      }
-    }
-  } else if (stride==2) {
-    if (ch < 256) {
-      return false;
-    }
-
-    if (w >= 7) {
-      if (bs >= 128) {
-        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
-        if (ch >= 1024) {
-          return true;
-        } else if ((ch >= 512) && (w >= 14)) {
-          return true;
-        } else if (w >= 28) {
-          return true;
-        }
-      } else if (bs >= 64) {
-        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
-        if ((ch >= 512) && (w >= 14)) {
-          return true;
-        } else if (w >= 28) {
-          return true;
-        }
-      } else if (bs >= 32) {
-        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
-        if ((ch >= 1024) && (w >= 14)) {
-          return true;
-        } else if (w >= 28) {
-          return true;
-        }
-      } else if (bs >= 16) {
-        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
-        if ((ch >= 512) && (w >= 28)) {
-          return true;
-        } else if (w >= 56) {
-          return true;
-        }
-      } else if (bs >= 8) {
-        // NOLINTNEXTLINE(bugprone-branch-clone,cppcoreguidelines-avoid-magic-numbers)
-        if ((ch >= 1024) && (w >= 28)) {
-          return true;
-        } else if (w >= 56) {
-          return true;
-        }
-      } else if (bs >= 1) {
-        if ((ch >= 512) && (w >=112)) {
-          return true;
-        }
-      }
-    }
-  }
-  return false;
-}
-
-// simplified version for cudnn 8.2 and above
+// benchmark-generated heuristic
 template <typename T>
 static bool check_cudnn_depthwise_workload_with_filter(const at::Tensor& input, T stride, const at::Tensor& weight) {
-  // 1D conv
-  if(at::symint::size<T>(input, 2) == 1 && stride == 1){
-    return true;
-  }
-
-  // 2d conv
+  // input and filter restrictions
   // only square filters
   if (at::symint::size<T>(weight, 2) != at::symint::size<T>(weight, 3)) return false;
   auto filter = at::symint::size<T>(weight, 3);
@@ -233,20 +105,201 @@ static bool check_cudnn_depthwise_workload_with_filter(const at::Tensor& input, 
   // we don't enforce square input but only check width to reduce heuristic space
   if (at::symint::size<T>(input, 3) < 7) return false; // min width 7
   auto w = at::symint::size<T>(input, 3);
-  // only 1/2 stride, use cudnn for all stride 1
-  if (stride == 1) return true;
-  if (stride != 2) return false;
-
   auto ch = at::symint::size<T>(input, 1);
-  auto bs = at::symint::size<T>(input, 0);
-  // special case since bs1 show good perf in lots of cases
-  if (bs == 1) {
-    if (filter == 1 && w <= 28) return true;
-    if (filter == 3 || filter == 5) return true;
-  } else {
-    if (filter == 1 && bs <= 16 && ch >= 128 && w <= 7) return true;
-    if (filter == 3 || filter == 5) {
-      if ((ch >= 512) || (ch >= 256 && w >= 28)) return true;
+  auto b = at::symint::size<T>(input, 0);
+
+  // auto-generated heuristic decision tree
+  if (stride == 1) {
+    if (ch <= 96) {
+      if (w <= 30){
+        if (b <= 24) {
+          if (filter < 5) {
+            if (w <= 21){
+              if (ch <= 48) return false;
+              else{
+                if (filter == 1) {
+                  if (b <= 12) return false;
+                  else {
+                    if (w <= 10) return false;
+                    else return true;
+                  }
+                }
+                else return true;
+              }
+            }
+            else return true;
+          }
+          else {
+            if (b <= 3) {
+              if (w <= 21) return true;
+              else {
+                if (b == 1) return true;
+                else return false;
+              }
+            }
+            else return true;
+          }
+        }
+        else{
+          if (filter == 1){
+            if (w <= 10){
+              if (b <= 48) return false;
+              else return true;
+            }
+            else return true;
+          }
+          else return true;
+        }
+      }
+      else return true;
+    }
+    else return true;
+  }
+  if (stride == 2) {
+    if (ch <= 192) {
+      if (w <= 88) {
+        if (ch <= 96) {
+          if (w <= 10) {
+            if (b <= 10) return false;
+            else return true;
+          }
+          else {
+            if (b == 1) {
+              if (filter < 5) return true;
+              else return false;
+            }
+            else {
+              if (b <= 48) return false;
+              else {
+                if (ch <= 48) return false;
+                else {
+                  if (filter == 1) return false;
+                  else{
+                    if (filter < 5){
+                      if (w <= 42){
+                        if (w <= 21) return true;
+                        else return false;
+                      }
+                      else return true;
+                    }
+                    else return false;
+                  }
+                }
+              }
+            }
+          }
+        }
+        else {
+          if (w <= 21) {
+            if (b <= 3) return false;
+            else return true;
+          }
+          else {
+            if (filter == 1)
+              if (b <= 2) return true;
+              else return false;
+            else {
+              if (filter < 5) return true;
+              else {
+                if (b <= 48) return false;
+                else return true;
+              }
+            }
+          }
+        }
+      }
+      else {
+        if (b <= 12) {
+          if (filter < 5) {
+            if (b == 1) return true;
+            else {
+              if (filter == 1) return false;
+              else {
+                if (ch <= 48) return false;
+                else {
+                  if (b <= 3) return false;
+                  else return true;
+                }
+              }
+            }
+          }
+          else return false;
+        }
+        else {
+          if (filter < 5) return true;
+          else {
+            if (ch <= 48) return false;
+            else return true;
+          }
+        }
+      }
+    }
+    else {
+      if (b <= 3) {
+        if (filter < 5) return true;
+        else{
+          if (w <= 21) return true;
+          else{
+            if (w <= 88) return false;
+            else {
+              if (ch <= 768) return false;
+              else return true;
+            }
+          }
+        }
+      }
+      else {
+        if (ch <= 384) {
+          if (filter == 1) {
+            if (w <= 21) return true;
+            else return false;
+          }
+          else {
+            if (filter < 5) return true;
+            else {
+              if (b <= 12) {
+                if (w <= 21) return true;
+                else {
+                  if (w <= 88) return false;
+                  else return true;
+                }
+              }
+              else {
+                if (b <= 24){
+                  if (w <= 23) return true;
+                  else{
+                    if (w <= 44) return false;
+                    else return true;
+                  }
+                }
+                else return true;
+              }
+            }
+          }
+        }
+        else {
+          if (b <= 6) {
+            if (filter < 5) return true;
+            else {
+              if (w <= 21) return true;
+              else {
+                if (w <= 42) return false;
+                else return true;
+              }
+            }
+          }
+          else {
+            if (filter == 1) {
+              if (w <= 60) return true;
+              else {
+                if (ch <= 768) return false;
+                else return true;
+              }
+            }
+            else return true;
+          }
+        }
+      }
     }
   }
   return false;
