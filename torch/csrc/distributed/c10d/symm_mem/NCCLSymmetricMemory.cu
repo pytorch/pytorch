@@ -313,6 +313,15 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
       void* ptr,
       const std::optional<std::string>& group_name) override {
     TORCH_CHECK(group_name.has_value(), "group_name must be provided");
+    // Search for cached SymmetricMemory handle first
+    auto key = std::make_tuple(ptr, *group_name);
+    {
+      auto it = symm_mems_.find(key);
+      if (it != symm_mems_.end()) {
+        return it->second;
+      }
+    }
+
     // Then search allocation covering the ptr, get the base address
     auto alloc_it = std::find_if(
         allocations_.begin(), allocations_.end(), [&](const auto& pair) {
@@ -340,9 +349,14 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
           c10::make_intrusive<NCCLPeerAllocInfo>(allocation.get(), *group_name));
     }
 
+    // Create SymmetricMemory handle for this tensor, specified by its offset
     auto& pai = pai_it->second;
     size_t offset = reinterpret_cast<uintptr_t>(ptr) - reinterpret_cast<uintptr_t>(allocation->ptr);
-    return c10::make_intrusive<NCCLSymmetricMemory>(pai, offset);
+    auto symm_mem = c10::make_intrusive<NCCLSymmetricMemory>(pai, offset);
+
+    // Cache SymmetricMemory handle using tensor pointer and group name as key
+    symm_mems_[key] = symm_mem;
+    return symm_mem;
   }
 
   bool has_multicast_support(int device_idx) override {
@@ -360,6 +374,8 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
 
  private:
   std::unordered_map<void*, std::unique_ptr<NCCLAllocation>> allocations_;
+  // Map from tensor pointer and group name to tensor's SymmetricMemory handle.
+  std::map<std::tuple<void*, std::string>, c10::intrusive_ptr<SymmetricMemory>> symm_mems_;
 };
 
 struct RegisterNCCLSymmetricMemoryAllocator {
