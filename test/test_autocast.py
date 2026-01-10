@@ -158,7 +158,9 @@ class TestAutocastCPU(TestAutocast):
             m = torch.nn.LSTM(1, 1, 2).to(torch.bfloat16)
 
             # Raise ValueError when autocast is not enabled
-            with self.assertRaisesRegex(ValueError, "input must have the type"):
+            with self.assertRaisesRegex(
+                ValueError, r"RNN input dtype .* does not match weight dtype"
+            ):
                 m(x, (hx, cx))
 
             # Should be able to run the below case with autocast
