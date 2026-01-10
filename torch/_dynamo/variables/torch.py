@@ -46,7 +46,6 @@ from torch._dynamo.variables.torch_function import TorchFunctionModeVariable
 from torch._guards import Source, TracingContext
 from torch._logging import warning_once
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
-
 from .. import config, graph_break_hints, polyfills, variables
 from ..codegen import PyCodegen
 from ..create_parameter_op import (
@@ -544,7 +543,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             return _register
 
         from torch.backends.cuda import SDPAParams
-
         from . import (
             ConstantVariable,
             DeterministicAlgorithmsVariable,
@@ -1281,6 +1279,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             else:
                 return None
 
+        # pyrefly: ignore [deprecated]
         @register(torch.fx.experimental.symbolic_shapes.guard_size_oblivious)
         def handle_guard_size_oblivious(
             self, tx: "InstructionTranslator", expr: VariableTracker
@@ -1289,6 +1288,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # TODO: this probably should be folded somewhere else but I'm not sure where
                 # TODO: some of the other symbolic_shapes special tools can also get this treatment too
                 return variables.ConstantVariable.create(
+                    # pyrefly: ignore [deprecated]
                     torch.fx.experimental.symbolic_shapes.guard_size_oblivious(
                         expr.sym_num
                     )
@@ -2059,7 +2059,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         )
         from torch._subclasses.fake_tensor import fake_tensor_tls
         from torch.utils._pytree import tree_flatten
-
         from .base import AsPythonConstantNotImplementedError
         from .builder import wrap_fx_proxy
 

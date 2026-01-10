@@ -5,7 +5,6 @@ from collections import OrderedDict
 from typing import Any, TYPE_CHECKING
 
 import torch
-
 from .fake_quantize import default_weight_fake_quant, FixedQParamsFakeQuantize
 from .observer import (
     _PartialWrapper,

@@ -24,7 +24,6 @@ from torch._C._onnx import (  # Deprecated members that are excluded from __all_
     TensorProtoDataType as TensorProtoDataType,
     TrainingMode as TrainingMode,
 )
-
 from . import errors, ops
 from ._internal.exporter._exportable_module import ExportableModule
 from ._internal.exporter._onnx_program import ONNXProgram

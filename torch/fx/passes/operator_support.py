@@ -5,7 +5,6 @@ import typing as t
 import torch
 import torch.fx
 from torch.fx._compatibility import compatibility
-
 from .shape_prop import TensorMetadata
 from .tools_common import CALLABLE_NODE_OPS, get_node_target
 

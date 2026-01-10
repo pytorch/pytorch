@@ -7,7 +7,6 @@ from unittest.mock import patch
 import torch
 import torch.utils
 from torch.utils._ordered_set import OrderedSet
-
 from ..._dynamo.utils import counters
 from .. import config, ir
 from ..kernel.mm_common import mm_args

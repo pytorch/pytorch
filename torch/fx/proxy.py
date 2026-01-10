@@ -20,7 +20,6 @@ from torch._C import _fx_map_aggregate as map_aggregate, _fx_map_arg as map_arg
 from torch._library.opaque_object import is_opaque_value_type
 from torch._logging import getArtifactLogger
 from torch.utils._traceback import CapturedTraceback
-
 from ._compatibility import compatibility
 from .graph import Graph, magic_methods, reflectable_magic_methods
 from .immutable_collections import immutable_dict, immutable_list

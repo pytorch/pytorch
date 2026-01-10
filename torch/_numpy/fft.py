@@ -5,7 +5,6 @@ from __future__ import annotations
 import functools
 
 import torch
-
 from . import _dtypes_impl, _util
 from ._normalizations import ArrayLike, normalizer
 

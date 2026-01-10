@@ -6,7 +6,6 @@ try:
     from . import test_export, testing
 except ImportError:
     import test_export  # @manual=fbcode//caffe2/test:test_export-library
-
     import testing  # @manual=fbcode//caffe2/test:test_export-library
 
 

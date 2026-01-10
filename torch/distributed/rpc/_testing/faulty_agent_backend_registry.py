@@ -30,7 +30,6 @@ def _faulty_tensorpipe_init_backend_handler(
     store, name, rank, world_size, rpc_backend_options
 ):
     from torch.distributed.rpc import api
-
     from . import FaultyTensorPipeAgent, FaultyTensorPipeRpcBackendOptions
 
     if not isinstance(store, dist.Store):

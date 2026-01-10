@@ -2,7 +2,6 @@
 
 import torch
 import torch.nn.functional as F
-
 from .expanded_weights_utils import (
     set_grad_sample_if_exists,
     unpack_expanded_weight_or_tensor,

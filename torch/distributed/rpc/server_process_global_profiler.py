@@ -7,7 +7,6 @@ import torch
 
 # pyrefly: ignore [deprecated]
 from torch.autograd.profiler_legacy import profile
-
 from . import (
     _disable_server_process_global_profiler,
     _enable_server_process_global_profiler,

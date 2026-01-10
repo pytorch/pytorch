@@ -12,7 +12,6 @@ from torch import _VF, Tensor
 from torch.nn import init
 from torch.nn.parameter import Parameter
 from torch.nn.utils.rnn import PackedSequence
-
 from .module import Module
 
 

@@ -22,7 +22,6 @@ from typing import Any, TypeVar
 
 import torch
 from torch.distributed.checkpoint._state_dict_stager import StateDictStager
-
 from .types import STATE_DICT
 
 

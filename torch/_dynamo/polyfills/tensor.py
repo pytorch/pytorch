@@ -1,7 +1,6 @@
 from typing import Any
 
 import torch
-
 from ..decorators import substitute_in_graph
 
 

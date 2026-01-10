@@ -8,6 +8,5 @@ from torch.distributed._shard.sharding_spec.chunk_sharding_spec_ops.embedding im
 from torch.distributed._shard.sharding_spec.chunk_sharding_spec_ops.embedding_bag import (
     sharded_embedding_bag,
 )
-
 from .binary_cmp import allclose, equal
 from .init import constant_, kaiming_uniform_, normal_, uniform_

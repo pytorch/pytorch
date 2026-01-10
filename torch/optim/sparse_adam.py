@@ -2,7 +2,6 @@
 
 import torch
 from torch import Tensor
-
 from . import _functional as F
 from .optimizer import _maximize_doc, _params_doc, _to_scalar, Optimizer, ParamsT
 

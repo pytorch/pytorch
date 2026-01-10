@@ -21,7 +21,6 @@ from torch._prims_common import is_float_dtype, is_integer_dtype
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv, FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import free_symbol_is_type, symbol_is_type, SymT
-
 from ..._dynamo.utils import counters
 from .. import config, cpp_builder, cpu_vec_isa, ir, metrics
 from ..debug import set_kernel_post_grad_provenance_tracing

@@ -89,7 +89,6 @@ from torch.utils._python_dispatch import (
 )
 from torch.utils._sympy.value_ranges import ValueRanges
 from torch.utils.weak import TensorWeakRef
-
 from .. import config, graph_break_hints, mutation_guard, replay_record, trace_rules
 from ..device_interface import get_registered_device_interfaces
 from ..exc import InternalTorchDynamoError, raise_observed_exception, unimplemented
@@ -684,7 +683,6 @@ class VariableBuilder:
             has_triton_experimental_host_tma,
             has_triton_tensor_descriptor_host_tma,
         )
-
         from ..decorators import (
             DynamoConfigPatchProxy,
             ErrorOnGraphBreakDecoratorContextManager,

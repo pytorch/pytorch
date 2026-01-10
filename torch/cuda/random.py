@@ -3,7 +3,6 @@ from collections.abc import Iterable
 
 import torch
 from torch import Tensor
-
 from . import _lazy_call, _lazy_init, current_device, device_count, is_initialized
 
 

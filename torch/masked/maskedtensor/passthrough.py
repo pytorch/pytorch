@@ -8,7 +8,6 @@ a new MaskedTensor as a result.
 """
 
 import torch
-
 from .core import _map_mt_args_kwargs, _wrap_result
 
 

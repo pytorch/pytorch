@@ -11,7 +11,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.fx import GraphModule
 from torch.fx.graph import Node
-
 from .ns_types import NSSingleResultType, NSSingleResultValuesType
 from .utils import get_target_type_str, getattr_from_fqn, return_first_non_observer_node
 

@@ -17,7 +17,6 @@ from torch.ao.quantization.observer import (
 from torch.ao.quantization.utils import _parent_name, check_min_max_valid
 from torch.fx import GraphModule
 from torch.fx.graph import Node
-
 from .utils import (
     get_new_attr_name_with_prefix,
     maybe_get_next_module,

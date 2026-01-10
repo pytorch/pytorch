@@ -379,7 +379,6 @@ class NestedTensor(torch.Tensor):
             kwargs = {}
 
         from torch.fx.experimental.proxy_tensor import maybe_enable_thunkify
-
         from .ops import jagged_torch_function
 
         # This should be removed after

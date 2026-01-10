@@ -40,7 +40,6 @@ from typing import Any, Literal, NewType
 from weakref import WeakKeyDictionary
 
 import torch
-
 from .fake_class_registry import register_fake_class
 
 

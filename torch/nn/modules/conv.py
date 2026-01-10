@@ -9,7 +9,6 @@ from torch._torch_docs import reproducibility_notes
 from torch.nn import functional as F, init
 from torch.nn.common_types import _size_1_t, _size_2_t, _size_3_t
 from torch.nn.parameter import Parameter, UninitializedParameter
-
 from .lazy import LazyModuleMixin
 from .module import Module
 from .utils import _pair, _reverse_repeat_tuple, _single, _triple

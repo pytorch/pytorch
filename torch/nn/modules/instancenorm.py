@@ -4,7 +4,6 @@ import warnings
 
 import torch.nn.functional as F
 from torch import Tensor
-
 from .batchnorm import _LazyNormBase, _NormBase
 
 

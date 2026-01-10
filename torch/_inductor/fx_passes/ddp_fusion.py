@@ -16,7 +16,6 @@ from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import _extract_tensor_metadata, TensorMetadata
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
-
 from ..fx_utils import get_fake_args_kwargs
 from ..virtualized import V
 

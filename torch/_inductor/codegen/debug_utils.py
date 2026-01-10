@@ -9,7 +9,6 @@ from typing import Optional, TYPE_CHECKING
 
 import torch
 from torch import dtype as torch_dtype
-
 from .. import config
 from ..virtualized import V
 from .multi_kernel import MultiKernel

@@ -9,7 +9,6 @@ from torch import nn
 from torch.ao.pruning.sparsifier.base_sparsifier import BaseSparsifier
 from torch.fx import symbolic_trace
 from torch.nn.utils import parametrize
-
 from .match_utils import apply_match, MatchAllNode
 from .parametrization import BiasHook, FakeStructuredSparsity, module_contains_param
 from .prune_functions import (

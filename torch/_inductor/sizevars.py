@@ -19,7 +19,6 @@ from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, IntInfinity, ValueRanges
-
 from .runtime.runtime_utils import is_power_of_2
 from .utils import (
     has_free_symbols,

@@ -22,7 +22,6 @@ from torch._inductor import config as inductor_config
 from torch._inductor.fx_passes.overlap_scheduling import benchmark_node, is_compute_node
 from torch._subclasses.fake_tensor import extract_tensor_metadata
 from torch.utils._ordered_set import OrderedSet
-
 from .. import config
 from ..partitioners import _size_of, get_default_op_list, OpTypes
 

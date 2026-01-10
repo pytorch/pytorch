@@ -17,7 +17,6 @@ from torch._C._profiler import _ExperimentalConfig, ProfilerActivity, RecordScop
 from torch._environment import is_fbcode
 from torch.autograd.profiler import KinetoStepTracker, record_function
 from torch.optim.optimizer import Optimizer, register_optimizer_step_post_hook
-
 from .profiler import (
     _KinetoProfile,
     ExecutionTraceObserver,

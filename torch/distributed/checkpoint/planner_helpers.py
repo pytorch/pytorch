@@ -12,7 +12,6 @@ from torch.distributed._shard.metadata import ShardMetadata
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed.tensor import DTensor
 from torch.distributed.tensor._utils import compute_local_shape_and_global_offset
-
 from .metadata import (
     BytesStorageMetadata,
     ChunkStorageMetadata,

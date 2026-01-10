@@ -10,7 +10,6 @@ import torch
 import torch.distributed._shard.sharded_tensor.metadata as sharded_tensor_meta
 from torch.distributed._shard.metadata import ShardMetadata
 from torch.distributed._shard.op_registry_utils import _decorator_func
-
 from ._internals import (
     check_tensor,
     get_chunked_dim_size,

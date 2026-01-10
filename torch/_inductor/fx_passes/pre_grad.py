@@ -20,7 +20,6 @@ from torch.fx.passes.graph_transform_observer import (
 from torch.fx.passes.shape_prop import ShapeProp
 from torch.nn import functional as F
 from torch.nn.utils.fusion import fuse_conv_bn_eval, fuse_conv_bn_weights
-
 from .. import config
 from ..fx_utils import matches_module_function_pattern
 from ..pattern_matcher import (

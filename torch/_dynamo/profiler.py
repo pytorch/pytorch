@@ -20,7 +20,6 @@ from typing import Any
 from typing_extensions import Self
 
 import torch
-
 from .utils import print_once
 
 

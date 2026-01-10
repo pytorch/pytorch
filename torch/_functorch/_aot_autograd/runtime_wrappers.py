@@ -50,7 +50,6 @@ from torch.utils._python_dispatch import (
     TorchDispatchMode,
 )
 from torch.utils._pytree import tree_flatten
-
 from .. import config
 from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
 from .descriptors import (

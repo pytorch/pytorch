@@ -63,7 +63,6 @@ from typing import Any, Optional, TypeVar, Union
 from typing_extensions import ParamSpec
 
 from torch.distributed.elastic.utils.logging import get_logger
-
 from .error_handler import ErrorHandler  # noqa: F401
 from .handlers import get_error_handler  # noqa: F401
 

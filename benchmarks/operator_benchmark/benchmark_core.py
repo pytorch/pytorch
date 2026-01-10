@@ -11,7 +11,6 @@ from dataclasses import asdict, dataclass
 from typing import Any, Optional
 
 import benchmark_utils
-
 import numpy as np
 
 import torch

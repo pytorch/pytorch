@@ -62,7 +62,6 @@ from threading import local
 from typing import Any, cast, Generic, TYPE_CHECKING, TypeVar, Union
 
 from torch.utils._ordered_set import OrderedSet
-
 from .ops_handler import (  # noqa: F401
     DefaultHandler,
     KernelFormatterHandler,
@@ -85,7 +84,6 @@ if TYPE_CHECKING:
     from torch._inductor.ir import ExternKernelNode
     from torch._inductor.loop_body import InterpreterShim
     from torch._subclasses import FakeTensorMode
-
     from .distributed_autotune import _DistributedAutotuneState
 
 threadlocal = local()

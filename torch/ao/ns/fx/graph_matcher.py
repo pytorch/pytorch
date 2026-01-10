@@ -8,7 +8,6 @@ from torch.ao.quantization import FakeQuantizeBase, ObserverBase
 from torch.ao.quantization.utils import getattr_from_fqn
 from torch.fx import GraphModule
 from torch.fx.graph import Graph, Node
-
 from .mappings import get_base_name_to_sets_of_related_ops, get_unmatchable_types_map
 from .ns_types import NSNodeTargetType, NSSubgraph
 from .pattern_utils import (

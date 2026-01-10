@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 
 import torch
-
 from .expanded_weights_impl import ExpandedWeight
 
 

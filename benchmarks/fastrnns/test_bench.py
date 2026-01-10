@@ -1,7 +1,6 @@
 import pytest
 
 import torch
-
 from .fuser import set_fuser
 from .runner import get_nn_runners
 

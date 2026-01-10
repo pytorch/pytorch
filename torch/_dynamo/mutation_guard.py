@@ -19,7 +19,6 @@ from typing import Any
 
 import torch.nn
 from torch.nn import Module
-
 from . import config
 from .utils import ExactWeakKeyDictionary, nn_module_has_global_hooks
 

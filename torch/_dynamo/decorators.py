@@ -15,7 +15,6 @@ import torch
 from torch.compiler import is_compiling
 from torch.utils._contextlib import _DecoratorContextManager
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-
 from . import trace_rules, variables
 from .comptime import comptime
 from .eval_frame import (
@@ -44,7 +43,6 @@ if TYPE_CHECKING:
         set_guard_error_hook,
         unsupported,
     )
-
     from .variables import VariableTracker
 else:
     for name in dir(torch._C._dynamo.eval_frame):

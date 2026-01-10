@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 from torch import _VF, Tensor
 from torch.nn.utils.rnn import PackedSequence
-
 from .utils import _quantize_and_dequantize_weight, _quantize_weight
 
 

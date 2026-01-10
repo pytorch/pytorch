@@ -6,7 +6,6 @@ from collections.abc import Callable
 from typing import TYPE_CHECKING
 
 from torch.utils._ordered_set import OrderedSet
-
 from ..utils import get_max_numwarps
 from .hints import TRITON_MAX_BLOCK
 from .runtime_utils import red_text, triton_config_to_hashable

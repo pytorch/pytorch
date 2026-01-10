@@ -5,7 +5,6 @@ from typing import cast
 
 import torch
 from torch import Tensor
-
 from .optimizer import (
     _default_to_fused_or_foreach,
     _device_dtype_check_for_fused,

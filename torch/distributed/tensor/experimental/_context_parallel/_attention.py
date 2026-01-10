@@ -24,7 +24,6 @@ from torch.nn.attention.flex_attention import (
     create_block_mask,
 )
 from torch.utils._pytree import tree_flatten, tree_unflatten
-
 from ._cp_custom_ops import flex_cp_allgather
 from ._load_balancer import _create_default_load_balancer, _LoadBalancer
 

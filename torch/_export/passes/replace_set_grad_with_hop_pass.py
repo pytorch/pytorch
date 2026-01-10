@@ -5,7 +5,6 @@ from typing import TYPE_CHECKING
 
 import torch
 from torch._higher_order_ops.wrap import wrap_with_set_grad_enabled
-
 from ..utils import node_inline_, nodes_filter, nodes_first, nodes_map, sequential_split
 from .replace_with_hop_pass_util import (
     _replace_with_hop_helper,

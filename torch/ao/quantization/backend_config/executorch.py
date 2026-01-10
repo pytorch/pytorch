@@ -13,7 +13,6 @@ from torch.ao.quantization.fuser_method_mappings import (
     fuse_conv_bn,
     fuse_conv_bn_relu,
 )
-
 from ._common_operator_config_utils import _Conv2dMetadata
 from .backend_config import (
     BackendConfig,

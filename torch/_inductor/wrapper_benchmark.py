@@ -9,7 +9,6 @@ from typing import Any, Optional, Protocol
 import torch
 from torch.autograd import DeviceType
 from torch.utils._ordered_set import OrderedSet
-
 from .runtime.benchmarking import benchmarker
 from .runtime.runtime_utils import create_bandwidth_info_str, get_num_bytes
 

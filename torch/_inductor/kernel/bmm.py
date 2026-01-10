@@ -6,7 +6,6 @@ import torch
 from torch._dynamo.utils import counters
 from torch._inductor.codegen.rocm.ck_universal_gemm_template import CKGemmTemplate
 from torch._inductor.kernel.mm_common import load_kernel_template
-
 from .. import config as inductor_config, ir, lowering as L
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import lowerings, make_pointwise, make_reduction, transform_args

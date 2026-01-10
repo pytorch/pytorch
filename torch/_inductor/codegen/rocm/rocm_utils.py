@@ -2,7 +2,6 @@
 
 
 import torch
-
 from ..cpp_utils import DTYPE_TO_CPP
 
 

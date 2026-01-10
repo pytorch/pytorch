@@ -14,7 +14,6 @@ from torch._inductor.codegen.triton import (
 from torch._inductor.runtime.triton_heuristics import SplitScanGrid
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import CeilDiv
-
 from ..utils import sympy_product
 
 

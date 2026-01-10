@@ -14,7 +14,6 @@ import sympy
 
 import torch
 import torch._logging
-
 from ..._prims_common import is_integer_dtype
 from ...utils._ordered_set import OrderedSet
 from ...utils._sympy.functions import FloorDiv, ModularIndexing

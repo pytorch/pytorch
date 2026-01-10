@@ -8,7 +8,6 @@ from torch import Tensor
 from torch._dynamo.utils import detect_fake_mode
 from torch.fx import Graph, GraphModule, Node
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
-
 from .core import get_chunking_meta, reorder_nodes
 from .utils import get_args_of_node_type, get_fake_tensor_from_node_arg, is_tangent_node
 

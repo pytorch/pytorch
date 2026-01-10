@@ -23,7 +23,6 @@ from torch.ao.quantization.fake_quantize import (
     fused_wt_fake_quant_range_neg_127_to_127,
     FusedMovingAvgObsFakeQuantize,
 )
-
 from .observer import (
     _PartialWrapper,
     default_debug_observer,

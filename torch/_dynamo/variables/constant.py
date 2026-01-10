@@ -14,7 +14,6 @@ from typing_extensions import override
 
 import torch
 from torch._dynamo.source import AttrSource, GetItemSource
-
 from .. import graph_break_hints, variables
 from ..exc import raise_observed_exception, unimplemented
 from ..utils import (
@@ -30,7 +29,6 @@ from .base import ValueMutationNew, VariableTracker
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
-
     from .functions import UserFunctionVariable
 
 

@@ -5,7 +5,6 @@
 import io
 
 import onnx
-
 import onnxscript
 from onnxscript.onnx_types import FLOAT
 

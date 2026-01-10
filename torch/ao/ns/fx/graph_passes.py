@@ -8,7 +8,6 @@ from torch.ao.quantization.fx.utils import get_new_attr_name_with_prefix
 from torch.ao.quantization.observer import _is_activation_post_process
 from torch.fx import GraphModule, map_arg
 from torch.fx.graph import Graph, Node
-
 from .ns_types import NSNodeTargetType, NSSingleResultValuesType, NSSubgraph
 from .utils import (
     get_arg_indices_of_inputs_to_log,

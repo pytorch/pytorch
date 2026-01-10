@@ -7,7 +7,6 @@ from enum import Enum
 from typing import Any, Optional, Union
 
 from torch._utils_internal import signpost_event
-
 from ._compatibility import compatibility
 from .graph import Graph
 from .graph_module import GraphModule

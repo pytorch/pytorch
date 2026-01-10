@@ -25,7 +25,6 @@ from optree import (
 import torch.utils._cxx_pytree as cxx_pytree  # noqa: F401
 import torch.utils._pytree as python_pytree
 from torch.utils._pytree import BUILTIN_TYPES, STANDARD_DICT_TYPES
-
 from ..decorators import substitute_in_graph
 
 

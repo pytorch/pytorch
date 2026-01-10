@@ -8,7 +8,6 @@ recommend reading :mod:torch._functorch._aot_autograd.descriptors`.
 from typing import NoReturn, Optional, Union
 
 import torch.fx as fx
-
 from .descriptors import (
     AOTInput,
     AOTOutput,

@@ -7,7 +7,6 @@ import torch.fx
 from torch.fx._compatibility import compatibility
 from torch.fx.graph import map_arg
 from torch.fx.passes.utils import HolderModule, lift_subgraph_as_module
-
 from .tools_common import CALLABLE_NODE_OPS, is_node_output_tensor, NodeList
 
 

@@ -5,7 +5,6 @@ import torch
 from torch._dynamo.utils import counters
 from torch._ops import OpOverload, OpOverloadPacket
 from torch.utils._ordered_set import OrderedSet
-
 from ..pattern_matcher import fwd_only, register_replacement
 
 

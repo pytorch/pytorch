@@ -2,7 +2,6 @@ from collections import OrderedDict
 from typing import Any
 
 import torch
-
 from ._utils import _device_t, _get_device_index
 
 

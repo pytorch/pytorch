@@ -71,7 +71,6 @@ from torchgen.model import (
 )
 from torchgen.utils import FileManager, split_name_params
 from torchgen.yaml_utils import YamlLoader
-
 from .gen_inplace_or_view_type import is_tensor_list_type
 from .gen_trace_type import should_trace
 

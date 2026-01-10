@@ -19,7 +19,6 @@ import torch
 from torch.serialization import location_tag, normalize_storage_type
 from torch.types import FileLike, Storage
 from torch.utils.hooks import RemovableHandle
-
 from ._digraph import DiGraph
 from ._importlib import _normalize_path
 from ._mangling import demangle, is_mangled

@@ -4,7 +4,6 @@ from typing import Optional, Union
 import sympy
 
 import torch
-
 from .ir import Pointwise, TensorBox
 from .virtualized import ops
 

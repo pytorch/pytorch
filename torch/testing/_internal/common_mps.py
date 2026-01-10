@@ -3,7 +3,6 @@ from collections.abc import Sequence
 from typing import Optional
 
 import torch
-
 from .common_utils import MACOS_VERSION
 from .opinfo.core import DecorateInfo, OpInfo
 

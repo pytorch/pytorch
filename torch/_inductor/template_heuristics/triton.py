@@ -14,7 +14,6 @@ import torch
 from torch._inductor.template_heuristics.triton_addmm import AddMMConfigMixin
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._triton import has_triton_stable_tma_api
-
 from .. import config, config as inductor_config
 from ..kernel.bmm import bmm_template
 from ..kernel.mm import (

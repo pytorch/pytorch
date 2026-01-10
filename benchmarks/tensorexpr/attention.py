@@ -3,7 +3,6 @@
 # https://github.com/mlcommons/training/blob/master/retired_benchmarks/gnmt/pytorch/seq2seq/models/attention.py
 
 import torch
-
 from . import benchmark
 
 

@@ -1,5 +1,4 @@
 import operator_benchmark as op_bench
-
 import torch
 from torch import nn
 

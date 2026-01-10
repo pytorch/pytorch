@@ -11,7 +11,6 @@ from torch.distributed._shard.sharding_spec._internals import (
     check_tensor,
     validate_non_overlapping_shards_metadata,
 )
-
 from .metadata import ShardedTensorMetadata, TensorProperties
 from .shard import Shard
 

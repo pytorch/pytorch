@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import torch
-
 from . import base_sparsifier
 
 

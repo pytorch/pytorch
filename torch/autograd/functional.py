@@ -2,7 +2,6 @@
 
 import torch
 from torch._vmap_internals import _vmap
-
 from . import forward_ad as fwAD
 
 

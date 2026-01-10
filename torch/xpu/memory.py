@@ -5,7 +5,6 @@ from typing import Any
 import torch
 from torch._utils import _dummy_type
 from torch.types import Device
-
 from . import _get_device_index, _is_compiled, _lazy_init, is_initialized
 
 

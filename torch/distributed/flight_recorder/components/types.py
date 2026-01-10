@@ -7,8 +7,8 @@
 import math
 import os
 from enum import auto, Enum
-from typing import (  # type: ignore[attr-defined]
-    _eval_type,
+from typing import (
+    _eval_type,  # pyrefly: ignore [missing-module-attribute]
     Any,
     Generic,
     NamedTuple,
@@ -161,9 +161,11 @@ class Collective(NamedTuple):
 
 class NCCLCall(NamedTuple):
     id: int
+    # pyrefly: ignore [bad-specialization]
     collective_id: Ref[Collective]
     group_id: str
     global_rank: int  # technically Ref[Process] once we have it
+    # pyrefly: ignore [bad-specialization]
     traceback_id: Ref[Traceback]
     collective_type: str
     sizes: list[list[int]]

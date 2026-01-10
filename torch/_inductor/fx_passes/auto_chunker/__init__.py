@@ -15,7 +15,6 @@ from torch.fx import GraphModule
 from torch.fx.passes.fake_tensor_prop import FakeTensorProp
 from torch.utils import _pytree
 from torch.utils._ordered_set import OrderedSet
-
 from .applier import ChunkingApplier
 from .common import CantChunk
 from .core import find_amplifier_node

@@ -12,7 +12,6 @@ import torch
 from torch import Tensor
 from torch._utils import _LazySeedTracker
 from torch.types import Device
-
 from ._utils import _get_device_index
 
 

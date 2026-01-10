@@ -6,7 +6,6 @@ from typing import Optional, TYPE_CHECKING, TypedDict
 
 import torch
 from torch._inductor.codegen.rocm.ck_conv_template import CKGroupedConvFwdTemplate
-
 from .. import config, ir
 from ..lowering import (
     add_layout_constraint,

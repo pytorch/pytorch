@@ -13,7 +13,6 @@ from torch.ao.quantization.observer import _is_activation_post_process
 from torch.ao.quantization.utils import getattr_from_fqn
 from torch.fx import GraphModule
 from torch.fx.graph import Node
-
 from .ns_types import NSNodeTargetType, NSResultsType
 
 

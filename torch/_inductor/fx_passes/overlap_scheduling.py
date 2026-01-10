@@ -22,7 +22,6 @@ from torch.utils._python_dispatch import _disable_current_modes
 log = logging.getLogger(__name__)
 
 from torch._inductor.fx_passes.bucketing import bucket_key
-
 from ..pattern_matcher import stable_topological_sort
 
 

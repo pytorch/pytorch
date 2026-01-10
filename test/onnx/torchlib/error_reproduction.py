@@ -12,7 +12,6 @@ import traceback
 from typing import Any, TYPE_CHECKING
 
 import numpy as np
-
 import onnx
 import onnxruntime as ort
 import onnxscript

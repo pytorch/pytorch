@@ -4,7 +4,6 @@ import logging
 from typing import TYPE_CHECKING, Union
 
 import torch
-
 from .. import config as inductor_config
 from ..kernel_inputs import MMKernelInputs
 from ..lowering import lowerings

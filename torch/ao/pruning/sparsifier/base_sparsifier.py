@@ -8,7 +8,6 @@ import torch
 from torch import nn
 from torch.nn.utils import parametrize
 from torch.nn.utils.parametrize import type_before_parametrizations
-
 from .utils import (
     FakeSparsity,
     get_arg_info_from_tensor_fqn,

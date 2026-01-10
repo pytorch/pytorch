@@ -14,5 +14,4 @@ if is_available():
         FaultyTensorPipeAgent,
         FaultyTensorPipeRpcBackendOptions,
     )
-
     from . import faulty_agent_backend_registry

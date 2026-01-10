@@ -4,7 +4,6 @@ from typing import cast, TYPE_CHECKING
 
 import torch
 from torch import Tensor
-
 from .optimizer import (
     _disable_dynamo_if_unsupported,
     _get_scalar_dtype,

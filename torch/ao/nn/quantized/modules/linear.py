@@ -8,7 +8,6 @@ import torch.ao.nn.intrinsic.qat as nniqat
 import torch.nn as nn
 from torch.nn.utils.fusion import fuse_linear_bn_weights
 from torch.nn.utils.parametrize import type_before_parametrizations
-
 from .utils import _hide_packed_params_repr, _quantize_weight, WeightedQuantizedModule
 
 

@@ -19,7 +19,6 @@ import torch.utils._pytree as pytree
 from torch._C import ScriptObject  # type: ignore[attr-defined]
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_reference_type, is_opaque_type
-
 from ._compatibility import compatibility
 from ._lazy_graph_module import _make_graph_module
 from .graph import _PyTreeCodeGen, _PyTreeInfo, Graph

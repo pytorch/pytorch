@@ -9,7 +9,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.ao.quantization.fuser_method_mappings import _sequential_wrapper2
 from torch.ao.quantization.utils import MatchAllNode
-
 from ._common_operator_config_utils import (
     _get_binary_op_configs,
     _get_bn_configs,

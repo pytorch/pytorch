@@ -13,7 +13,6 @@ from typing import Any
 
 import torch
 from torch._subclasses.fake_tensor import FakeTensorMode
-
 from .types import RankInfo, STATE_DICT
 
 

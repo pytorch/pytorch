@@ -8,7 +8,6 @@ import torch
 from torch._dynamo.utils import counters
 from torch.fx.experimental.symbolic_shapes import has_free_symbols
 from torch.utils._ordered_set import OrderedSet
-
 from .. import ir, mkldnn_ir
 from ..lowering import lowerings as L
 from ..pattern_matcher import (

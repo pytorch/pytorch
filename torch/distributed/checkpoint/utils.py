@@ -15,7 +15,6 @@ import torch
 import torch.distributed as dist
 from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharded_tensor.shard import Shard
-
 from .api import (
     _is_wrapped_exception,
     _wrap_exception,

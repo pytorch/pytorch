@@ -2,7 +2,6 @@ import argparse
 
 import torch
 import torch.nn as nn
-
 from .factory import pytorch_lstm_creator, varlen_pytorch_lstm_creator
 from .runner import get_nn_runners
 

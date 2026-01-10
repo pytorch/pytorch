@@ -2,7 +2,6 @@
 
 import torch._C._lazy
 from torch.utils._pytree import tree_flatten, tree_unflatten
-
 from .closure import add_step_closure, run_step_closures
 
 

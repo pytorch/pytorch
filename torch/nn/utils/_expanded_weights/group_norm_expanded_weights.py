@@ -4,7 +4,6 @@ from functools import reduce
 
 import torch
 import torch.nn.functional as F
-
 from .expanded_weights_impl import ExpandedWeight, implements_per_sample_grads
 from .expanded_weights_utils import (
     forward_helper,

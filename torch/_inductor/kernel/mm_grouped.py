@@ -10,7 +10,6 @@ from torch._inductor.runtime.triton_compat import tl
 from torch._inductor.template_heuristics.cutedsl import get_groupgemm_configs
 from torch._inductor.virtualized import V
 from torch.utils._triton import has_triton
-
 from ..ir import ChoiceCaller, Layout, TensorBox
 from ..lowering import register_lowering
 from ..select_algorithm import (

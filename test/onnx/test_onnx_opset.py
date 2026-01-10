@@ -4,7 +4,6 @@ import io
 import itertools
 
 import onnx
-
 import pytorch_test_common
 
 import torch

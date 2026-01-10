@@ -117,7 +117,6 @@ from torch.ao.quantization.fx.qconfig_mapping_utils import (
 from torch.ao.quantization.fx.quantize_handler import _get_pattern_to_quantize_handlers
 from torch.fx import GraphModule
 from torch.fx.graph import Node
-
 from .fx.graph_passes import add_loggers_to_model, create_a_shadows_b
 from .fx.ns_types import NSNodeTargetType, NSResultsType, NSSingleResultValuesType
 from .fx.utils import (

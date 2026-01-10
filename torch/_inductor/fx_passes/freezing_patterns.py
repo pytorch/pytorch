@@ -4,7 +4,6 @@ import functools
 import torch
 from torch._inductor.compile_fx import fake_tensor_prop
 from torch._inductor.utils import GPU_TYPES
-
 from ..._dynamo.utils import counters
 from .. import config
 from ..pattern_matcher import (
