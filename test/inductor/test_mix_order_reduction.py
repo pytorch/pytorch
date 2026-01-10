@@ -1,10 +1,14 @@
 # Owner(s): ["module: inductor"]
 
+from unittest import mock
+from unittest.mock import patch
+
 import torch
 import torch._inductor.config as inductor_config
 import torch.nn.functional as F
 from torch._dynamo.utils import same
 from torch._inductor import metrics, utils
+from torch._inductor.scheduler import MixOrderReduction
 from torch._inductor.test_case import run_tests, TestCase
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
@@ -630,6 +634,71 @@ class MixOrderReductionTest(TestBase):
         # one is the mix-order reduction kernel
         # the other is the piontwise kernel
         self.assertTrue(2, metrics.generated_kernel_count)
+
+    @patch("torch._inductor.scheduler.MixOrderReduction.get_numel_rnumel")
+    @patch("torch._inductor.scheduler.MixOrderReduction.get_common_read")
+    @patch("torch._inductor.scheduler.MixOrderReduction.has_mix_reduction_orders")
+    def test_mix_order_reduction_non_strict_mode(
+        self,
+        mock_has_mix_reduction_orders: mock.Mock,
+        mock_get_common_read: mock.Mock,
+        mock_get_numel_rnumel: mock.Mock,
+    ):
+        """
+        This tests whether we can skip some non-critical checks
+        when non_strict mode is on
+        """
+        if not inductor_config.triton.mix_order_reduction:
+            self.skipTest("Mix order reduction not enabled")
+
+        from torch._inductor.scheduler import BaseSchedulerNode
+
+        mock_node_1 = mock.create_autospec(BaseSchedulerNode)
+        mock_node_2 = mock.create_autospec(BaseSchedulerNode)
+
+        mock_node_1.is_gpu.return_value = True
+        mock_node_2.is_gpu.return_value = True
+
+        mock_node_1.get_device.return_value.type = "cuda"
+        mock_node_1.is_reduction.return_value = True
+        mock_node_2.is_reduction.return_value = True
+
+        from torch._inductor.utils import OrderedSet
+
+        mock_node_1.ancestors = OrderedSet()
+        mock_node_2.ancestors = OrderedSet()
+        mock_node_1.get_operation_names.return_value = OrderedSet()
+        mock_node_2.get_operation_names.return_value = OrderedSet()
+
+        mock_has_mix_reduction_orders.return_value = True
+        mock_get_common_read.return_value = "common_read"
+        from sympy import Integer
+
+        mock_get_numel_rnumel.return_value = (Integer(1), Integer(1))
+
+        mock_node_1.read_writes = mock.Mock()
+        mock_node_1.read_writes.reads = []
+
+        # Create a dummy graph
+        from torch._inductor.graph import GraphLowering
+        from torch._inductor.virtualized import V
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        gm = make_fx(lambda: torch.zeros(2, 3))()
+        graph = GraphLowering(gm)
+
+        with (
+            V.set_graph_handler(graph),
+            inductor_config.patch(
+                {"triton.mix_order_reduction_non_strict_mode": False}
+            ),
+        ):
+            self.assertFalse(MixOrderReduction.can_fuse(mock_node_1, mock_node_2))
+        with (
+            V.set_graph_handler(graph),
+            inductor_config.patch({"triton.mix_order_reduction_non_strict_mode": True}),
+        ):
+            self.assertTrue(MixOrderReduction.can_fuse(mock_node_1, mock_node_2))
 
 
 @inductor_config.patch(
