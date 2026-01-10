@@ -452,11 +452,12 @@ def expand_to_full_mesh_op_strategy(
                 raise RuntimeError("output spec is None")
 
         # check all inputs are shardable
-        if not all(
-            is_tensor_shardable(inp.shape, s)
-            for inp, s in zip(input_args_strategy, input_specs)
-        ):
-            continue
+        # assert False, "fix is_tensor_shardable for _StridedShard"
+        # if not all(
+        #     is_tensor_shardable(inp.shape, s)
+        #     for inp, s in zip(input_args_strategy, input_specs)
+        # ):
+        #     continue
 
         # perform additional op-specific filtering
         if is_valid_strategy_cb is not None:
