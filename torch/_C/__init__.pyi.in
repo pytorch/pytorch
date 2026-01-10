@@ -2862,6 +2862,9 @@ class _StaticCudaLauncher:
         stream: _int,
     ) -> None: ...
 
+# Defined in torch/csrc/inductor/static_launcher/xpu.cpp
+class _StaticXpuLauncher(_StaticCudaLauncher): ...
+
 # Defined in torch/csrc/cuda/GreenContext.cpp
 class GreenContext:
     @staticmethod
