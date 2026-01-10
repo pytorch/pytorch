@@ -1757,10 +1757,8 @@ def quantized_decomposed_quantize_per_tensor_tensor(
             _scale = ops.to_dtype(_scale, torch.float32)
         if zero_point.dtype != torch.float32:
             _zero_point = ops.to_dtype(_zero_point, torch.float32)
-        val = ops.round(input * ops.reciprocal(_scale)) + _zero_point
-        qmin, qmax = _create_constants(quant_min, quant_max, dtype=torch.float32)
-        clamped = ops.minimum(ops.maximum(val, qmin), qmax)
-        return ops.to_dtype(clamped, dtype)
+        val = ops.fma(input, ops.reciprocal(_scale), _zero_point)
+        return ops.round_to_int(val, dtype)
 
     return Pointwise.create(
         device=input.get_device(),
