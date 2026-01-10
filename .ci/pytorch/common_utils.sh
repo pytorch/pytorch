@@ -219,11 +219,11 @@ function install_fbgemm() {
     fi
   done
 
+  pip_install tabulate==0.9.0 tensordict==0.10.0  # needed for newer fbgemm
+  pip_install patchelf  # needed for rocm fbgemm
+
   # Build the wheel if it doesn't exist
   if [ "${found_whl}" == "0" ]; then
-    pip_install tabulate==0.9.0 tensordict==0.10.0  # needed for newer fbgemm
-    pip_install patchelf  # needed for rocm fbgemm
-
     git clone --recursive https://github.com/pytorch/fbgemm
     pushd fbgemm/fbgemm_gpu
     git checkout "${fbgemm_commit}" --recurse-submodules
