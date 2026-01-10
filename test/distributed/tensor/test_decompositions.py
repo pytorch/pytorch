@@ -1,0 +1,214 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates
+# Owner(s): ["oncall: distributed"]
+
+import torch
+import torch.distributed as dist
+from torch._decomp import register_decomposition
+from torch.distributed.device_mesh import DeviceMesh
+from torch.distributed.tensor import DTensor
+from torch.distributed.tensor.placement_types import (
+    _StridedShard,
+    Partial,
+    Replicate,
+    Shard,
+)
+from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.distributed.fake_pg import FakeStore
+
+
+class TestDecompSharding(TestCase):
+    world_size = 4
+
+    def setUp(self):
+        super().setUp()
+        fake_store = FakeStore()
+        dist.init_process_group(
+            "fake", store=fake_store, rank=0, world_size=self.world_size
+        )
+
+    def tearDown(self):
+        super().tearDown()
+        dist.destroy_process_group()
+
+    def test_aminmax_decomp(self):
+        """
+        def decomp(x):
+            amin = aten.amin.default(x)
+            amax = aten.amax.default(x)
+            return return_types_aminmax(amin, amax)
+        """
+        from torch.distributed.tensor import empty as d_empty
+
+        # 1d mesh
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+
+        x_local = torch.randn(16)
+        x = DTensor.from_local(x_local, mesh, [Shard(0)], run_check=False)
+        out = torch.aminmax(x)
+        self.assertTrue(out.min.placements, Partial("min"))
+        self.assertTrue(out.max.placements, Partial("max"))
+
+        # 2d mesh
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size).reshape(-1, 2))
+
+        x = d_empty(16, 16, device_mesh=mesh, placements=[Shard(1), Partial("min")])
+        out = torch.aminmax(x)
+        self.assertTrue(out.min.placements, (Partial("min"), Partial("min")))
+        self.assertTrue(out.max.placements, (Partial("max"), Replicate()))
+
+    def test_custom_recursive_decomp(self):
+        """
+        op1 decomps -> op2, which decomps -> matmul
+
+        def op1(x, y):
+            return op2(x, y) + 1.0
+
+        def op2(x, y):
+            return x @ y
+
+        We also test that sharding prop caching kicks in for decompositions;
+        1) calling op1 twice should cache hit
+        2) since op1 runs op2's decomposition, calling op2 after should also cache hit
+        """
+        from torch.distributed.tensor import empty as d_empty
+        from torch.distributed.tensor.debug import _get_python_sharding_prop_cache_info
+
+        with torch.library._scoped_library("sharding_decomps", "FRAGMENT") as my_lib:
+            my_lib.define("op1(Tensor x, Tensor y) -> Tensor")
+            my_lib.define("op2(Tensor x, Tensor y) -> Tensor")
+
+            @torch.library.impl(my_lib, "op1", "CPU")
+            def op1_impl(x, y):
+                return x @ y + 1.0
+
+            @torch.library.impl(my_lib, "op2", "CPU")
+            def op2_impl(x, y):
+                return x @ y
+
+            @register_decomposition(torch.ops.sharding_decomps.op1.default)
+            def op1_decomp(x, y):
+                return torch.ops.sharding_decomps.op2(x, y) + 1.0
+
+            @register_decomposition(torch.ops.sharding_decomps.op2.default)
+            def op2_decomp(x, y):
+                return x @ y
+
+            @torch.library.register_fake("sharding_decomps::op1")
+            def op1_fake(x, y):
+                return torch.empty_like(x) @ torch.empty_like(y)
+
+            @torch.library.register_fake("sharding_decomps::op2")
+            def op2_fake(x, y):
+                return torch.empty_like(x) @ torch.empty_like(y)
+
+            mesh = DeviceMesh("cpu", torch.arange(self.world_size).reshape(-1, 2))
+            x = d_empty(16, 16, device_mesh=mesh, placements=[Shard(0), Shard(1)])
+            y = d_empty(16, 16, device_mesh=mesh, placements=[Replicate(), Shard(0)])
+
+            # op1 1st call
+            out = torch.ops.sharding_decomps.op1(x, y)
+
+            # expect matmul placements
+            self.assertEqual(out.placements, (Shard(0), Partial("sum")))
+
+            # starting cache size
+            cache = _get_python_sharding_prop_cache_info()
+            cache_size = cache.currsize
+
+            # op1 2nd call
+            torch.ops.sharding_decomps.op1(x, y)
+            cache = _get_python_sharding_prop_cache_info()
+            self.assertEqual(cache_size, cache.currsize)
+
+            # op2 1st call, expect same placements + cache hit
+            out = torch.ops.sharding_decomps.op2(x, y)
+            self.assertEqual(out.placements, (Shard(0), Partial("sum")))
+            cache = _get_python_sharding_prop_cache_info()
+            self.assertEqual(cache_size, cache.currsize)
+
+    def test_misc_ops_with_no_sharding_rules(self):
+        """miscellaneous aten ops"""
+        from torch.distributed.tensor import empty as d_empty
+
+        aten = torch.ops.aten
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        mesh_2d = DeviceMesh("cpu", torch.arange(self.world_size).reshape(-1, 2))
+
+        def check_no_strategy(op):
+            # if someone registers a rule for these ops, delete the test
+            sharding_prop = DTensor._op_dispatcher.sharding_propagator
+            self.assertTrue(op not in sharding_prop.op_strategy_funcs)
+            self.assertTrue(op not in sharding_prop.op_single_dim_strategy_funcs)
+            self.assertTrue(op not in sharding_prop.op_to_rules)
+
+        # binary_cross_entropy_with_logits
+        check_no_strategy(aten.binary_cross_entropy_with_logits.default)
+        input = d_empty(16, device_mesh=mesh, placements=[Shard(0)])
+        target = d_empty(16, device_mesh=mesh, placements=[Shard(0)])
+        weight = d_empty(16, device_mesh=mesh, placements=[Shard(0)])
+        out = aten.binary_cross_entropy_with_logits.default(input, target, weight)
+        self.assertEqual(out.placements, (Partial("avg"),))
+
+        # mse_loss
+        check_no_strategy(aten.mse_loss.default)
+        input = d_empty(16, device_mesh=mesh, placements=[Shard(0)])
+        target = d_empty(16, device_mesh=mesh, placements=[Shard(0)])
+        out = aten.mse_loss.default(input, target)
+        self.assertEqual(out.placements, (Partial("avg"),))
+
+        # smooth_l1_loss
+        check_no_strategy(aten.smooth_l1_loss.default)
+        input = d_empty(
+            16,
+            device_mesh=mesh_2d,
+            placements=[_StridedShard(0, split_factor=2), Shard(0)],
+        )
+        target = d_empty(
+            16,
+            device_mesh=mesh_2d,
+            placements=[_StridedShard(0, split_factor=2), Shard(0)],
+        )
+        out = aten.smooth_l1_loss.default(input, target)
+        self.assertEqual(out.placements, (Partial("avg"), Partial("avg")))
+
+        # expand_copy
+        check_no_strategy(aten.expand_copy.default)
+        input = d_empty(16, 1, device_mesh=mesh, placements=[Partial("min")])
+        out = aten.expand_copy.default(input, [-1, 16])
+        self.assertEqual(out.placements, (Partial("min"),))
+
+        # # index_add
+        # # index_put decomp errors; https://github.com/pytorch/pytorch/issues/170934
+        # check_no_strategy(aten.index_add.default)
+        # input = d_empty(16, device_mesh=mesh, placements=[Shard(0)])
+        # index = d_ones(16, device_mesh=mesh, placements=[Shard(0)]).int()
+        # source = d_empty(16, device_mesh=mesh, placements=[Shard(0)])
+        # out = aten.index_add.default(input, 0, index, source)
+        # self.assertEqual(out.placements, (Replicate(),))
+
+        # glu: force replicate
+        check_no_strategy(aten.glu.default)
+        x = d_empty(16, device_mesh=mesh, placements=[Partial()])
+        out = aten.glu.default(x)
+        self.assertEqual(out.placements, (Replicate(),))
+
+        # polar: force replicate
+        check_no_strategy(aten.polar.default)
+        x = d_empty(16, device_mesh=mesh, placements=[Partial()])
+        y = d_empty(16, device_mesh=mesh, placements=[Partial()])
+        out = aten.polar.default(x, y)
+        self.assertEqual(out.placements, (Replicate(),))
+
+        # # pixel_shuffle
+        # # the Shard(0) case fails (forced Replicate()),
+        # # because .needs_redistribute semantics are stricter than input placements != starting placements?
+        # check_no_strategy(aten.pixel_shuffle.default)
+        # x = d_empty(32, 3, 3, device_mesh=mesh, placements=[Shard(0)])
+        # out = aten.pixel_shuffle.default(x, 2)
+        # self.assertEqual(out.placements, (Shard(0),))
+        # out = aten.pixel_shuffle.default(x.redistribute(placements=[Shard(1)]), 2)
+        # self.assertEqual(out.placements, (Replicate(),))
+
+
+if __name__ == "__main__":
+    run_tests()
