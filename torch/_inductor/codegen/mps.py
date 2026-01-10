@@ -217,14 +217,11 @@ class MetalOverrides(OpOverrides):
         with V.kernel.swap_buffers(masked_code), masked_code.indent():
             rc = body()
 
-        var = V.kernel.cse.generate(
-            V.kernel.compute,
-            f"static_cast<{DTYPE_TO_METAL[rc.dtype]}>({other})",
-            dtype=rc.dtype,
-        )
+        var = V.kernel.cse.newvar(dtype=rc.dtype)
         with masked_code.indent():
             masked_code.writeline(f"{var} = {rc};")
         masked_code.writeline("}")
+        V.kernel.compute.writeline(f"auto {var} = static_cast<{DTYPE_TO_METAL[rc.dtype]}>({other});")
         V.kernel.compute.splice(masked_code)
         return var
 
