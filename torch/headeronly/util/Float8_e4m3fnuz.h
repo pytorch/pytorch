@@ -69,13 +69,19 @@ namespace detail {
  */
 inline C10_HOST_DEVICE uint8_t fp8e4m3fnuz_from_fp32_value(float f) {
   /*
-   * Binary representation of 256.0f, which is the first value not representable
-   * (i.e. the first value which would overflow in to the sign bit, resulting in
-   * a NaN) in fp8e4m3fnuz range:
-   * 1 0000 000 - fp8e4m3fnuz
-   * 0 10000111 00000000000000000000000 - fp32
+   * Representation of +inf in fp32 format, which is the last
+   * non-NaN fp32 value:
+   * 0 11111111 00000000000000000000000 - fp32
    */
-  constexpr uint32_t fnuz_max = UINT32_C(0x87) << 23;
+  constexpr uint32_t fp32_inf = UINT32_C(0xFF) << 23;
+
+  /*
+   * Representation of 240.0f, which is the last
+   * non-NaN fp8e4m3fnuz value:
+   * 0 1111 111 - fp8e4m3fnuz
+   * 0 10000110 11100000000000000000000 - fp32
+   */
+  constexpr uint32_t fnuz_max = UINT32_C(0x437) << 20;
 
   /*
    * A mask for converting fp32 numbers lower than fp8e4m3fnuz normal range
@@ -94,7 +100,7 @@ inline C10_HOST_DEVICE uint8_t fp8e4m3fnuz_from_fp32_value(float f) {
    *      +---+----------------------------------+
    *      | S |0000000 00000000 00000000 00000000|
    *      +---+----------------------------------+
-   * Bits  31                 0-31
+   * Bits  31                30-0
    */
   const uint32_t sign = f_bits & UINT32_C(0x80000000);
 
@@ -103,12 +109,14 @@ inline C10_HOST_DEVICE uint8_t fp8e4m3fnuz_from_fp32_value(float f) {
    */
   f_bits ^= sign;
 
-  if (f_bits >= fnuz_max) {
+  if (f_bits > fp32_inf) {
     // NaN -- sign bit set to 1, rest 0s.
     return 0x80;
-  }
-
-  if (f_bits < (UINT32_C(0x78) << 23) /* 2^-7 in float32 */) {
+  } else if (f_bits >= fnuz_max) {
+    // Input number is 240 or larger and thus needs to be clamped
+    // Largest fp8e4m3fnuz normal number is 240
+    result = 0x7F;
+  } else if (f_bits < (UINT32_C(0x78) << 23) /* 2^-7 in float32 */) {
     // Input exponent is less than -7, the smallest e4m3fnuz exponent, so the
     // number will become subnormal.
     f_bits = fp32_to_bits(fp32_from_bits(f_bits) + fp32_from_bits(denorm_mask));
