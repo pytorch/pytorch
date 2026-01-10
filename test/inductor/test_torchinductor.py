@@ -15156,9 +15156,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         _, code = run_and_get_code(fn, self_tensor, tensor1, tensor2)
         code = " ".join(code)
-        self.assertIn(
-            "libdevice.fma", code, "Expected FMA to be used in generated code"
-        )
+        self.assertIn("tl.fma", code, "Expected FMA to be used in generated code")
 
     @requires_cuda_and_triton
     def test_addcmul_type_promotion(self):

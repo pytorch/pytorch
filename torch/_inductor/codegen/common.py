@@ -1252,10 +1252,14 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
     # compiler from fusing the multiplication with subsequent operations,
     # which is needed to match eager's rounding behavior in operations like
     # addcmul where the product must be rounded before use.
+    # Note: libdevice.mul_rn is not supported on ROCm, so we fall back to
+    # regular multiplication there.
     mul_rn=OverridesData(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
         cpp=lambda x, y: f"({x}) * ({y})",  # C++ doesn't need special handling
-        triton=lambda x, y: f"libdevice.mul_rn({x}, {y})",
+        triton=lambda x, y: f"({x}) * ({y})"
+        if torch.version.hip
+        else f"libdevice.mul_rn({x}, {y})",
         name="mul_rn",
     ),
     # erfinv, exp2, expit, gammaln
