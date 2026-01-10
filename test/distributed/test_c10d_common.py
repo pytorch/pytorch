@@ -43,6 +43,7 @@ from torch.testing._internal.common_utils import (
     retry_on_connect_failures,
     run_tests,
     TEST_WITH_DEV_DBG_ASAN,
+    TEST_WITH_ROCM,
     TEST_XPU,
     TestCase,
 )
@@ -364,7 +365,8 @@ class CommonDistributedDataParallelTest:
         gradient_as_bucket_view=False,
     ):
         model = Net()
-        device = devices[0] if devices else torch.device(f"cuda:{self.rank:d}")
+        device_type = "hip" if TEST_WITH_ROCM else "cuda"
+        device = devices[0] if devices else torch.device(f"{device_type}:{self.rank:d}")
         ddp_model = DistributedDataParallel(
             copy.deepcopy(model).to(device),
             device_ids=device_ids,
@@ -1394,7 +1396,7 @@ class AbstractCommTest:
             rank=self.rank,
             store=store,
         )
-        device = "cuda" if backend == "nccl" else "xpu" if backend == "xccl" else "cpu"
+        device = "hip" if (backend == "nccl" and TEST_WITH_ROCM) else "cuda" if backend == "nccl" else "xpu" if backend == "xccl" else "cpu"
         # test alltoall_base
         tensor = torch.tensor([1, 0, 0, 1], dtype=torch.bool, device=device)
         zeros = torch.tensor([0, 0, 0, 0], dtype=torch.bool, device=device)
