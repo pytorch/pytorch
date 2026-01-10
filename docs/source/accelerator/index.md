@@ -48,7 +48,6 @@ guard
 autoload
 operators
 amp
-profiler
 ```
 
 [OpenReg URL]: https://github.com/pytorch/pytorch/tree/main/test/cpp_extensions/open_registration_extension/torch_openreg "OpenReg URL"

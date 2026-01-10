@@ -85,6 +85,7 @@ def compile_time_strobelight_meta(
         @functools.wraps(function)
         def wrapper_function(*args: _P.args, **kwargs: _P.kwargs) -> _T:
             if "skip" in kwargs and isinstance(
+                # pyrefly: ignore [unsupported-operation]
                 skip := kwargs["skip"],
                 int,
             ):

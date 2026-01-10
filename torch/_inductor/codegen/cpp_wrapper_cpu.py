@@ -2654,13 +2654,19 @@ if (!custom_op_wrapper) {
                 )
             dispatch_lines.writeline(");")
 
-            # assign result(s), ignoring None
-            for idx, output_arg in enumerate(output_args):
-                if output_arg is None:
-                    continue
+            if len(output_args) == 1 and (output := output_args[0]) is not None:
+                # result is a single tensor
                 dispatch_lines.writeline(
-                    f"{output_arg} = torch::stable::detail::to<AtenTensorHandle>(dispatch_vars[{idx}]);"
+                    f"{output} = torch::stable::detail::to<AtenTensorHandle>(dispatch_vars[0]);"
                 )
+            else:
+                # result is a tuple of tensors
+                for idx, output_arg in enumerate(output_args):
+                    if output_arg is None:
+                        continue
+                    dispatch_lines.writeline(
+                        f"{output_arg} = torch::stable::detail::to<AtenTensorHandle>(dispatch_vars[{idx}]);"
+                    )
 
         dispatch_lines.writeline("}")
         self.writelines(dispatch_lines.getvalue().splitlines())

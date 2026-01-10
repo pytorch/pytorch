@@ -640,7 +640,7 @@ def _annotate_fake(tag: str) -> None:
 
 class DebugInterpreter(torch.fx.Interpreter):
     """
-    Interpreter class for running aot_eager compiled regions when DebugMode is active,
+    Interpreter class for running eager/aot_eager compiled regions when DebugMode is active,
     instead of using the compiled code. This gives us access to fx.Node metadata to decorate
     and contextualize DebugMode logs (e.g. nn_module_stack, stack_trace, compiled region boundaries).
 
@@ -665,27 +665,17 @@ class DebugInterpreter(torch.fx.Interpreter):
         )
 
     def run_node(self, n: torch.fx.Node) -> Any:
-        if self.mode is None:
-            raise RuntimeError("No DebugMode is currently active")
-
         # handling of nn.Module stack
-        if self.mode.record_nn_module and n.op not in ["placeholder", "output"]:
-            self.mode._handle_fx_nn_module_stack(
+        if (
+            self.mode.record_nn_module  # type: ignore[attr-defined]
+            and n.op not in ["placeholder", "output"]
+        ):
+            self.mode._handle_fx_nn_module_stack(  # type: ignore[attr-defined]
                 self.base_nn_module_stack,
                 n.meta.get("nn_module_stack", {}),
                 n.meta.get("fwd_nn_module_stack", {}),
             )
-
-        # override stack trace with n.meta
-        if (
-            self.mode.record_stack_trace
-            and n.op not in ["placeholder", "output"]
-            and (stack_trace := n.meta.get("stack_trace", None)) is not None
-        ):
-            with self.mode.set_fx_stack_trace(stack_trace):
-                return super().run_node(n)
-        else:
-            return super().run_node(n)
+        return super().run_node(n)
 
     def run(self, *args, **kwargs):
         if self.mode is None:
@@ -777,7 +767,7 @@ class DebugMode(TorchDispatchMode):
         # Currently does not preserve contexts inside torch.compile-d regions.
         self.record_profiler_context: bool = record_profiler_context
 
-        # For aot_eager compiled regions, wraps the compiled fx.GraphModule with a DebugInterpreter,
+        # For eager & aot_eager compiled regions, wraps the compiled fx.GraphModule with a DebugInterpreter,
         # and uses it at runtime for node metadata visibility.
         self.run_compile_with_interpreter: bool = run_compile_with_interpreter
 
@@ -790,7 +780,6 @@ class DebugMode(TorchDispatchMode):
         self._output_info: dict[int, object] = {}
         self.ignored_record_functions = 0
         self.current_nn_module_stack = []
-        self.fx_stack_trace = None
 
     def _track_op_output(self, op_index, result) -> None:
         """Assign IDs to output tensors and store in output_info"""
@@ -816,8 +805,6 @@ class DebugMode(TorchDispatchMode):
                 self.record_tensor_attributes,
                 self._tensor_memo if self.record_ids else None,
             )
-        if self.fx_stack_trace:
-            call.stack_trace = call.fwd_stack_trace = self.fx_stack_trace
         self.operators.append(call)
 
     def _record_call_output(self, call, output) -> None:
@@ -981,14 +968,6 @@ class DebugMode(TorchDispatchMode):
             torch._C._pop_torch_function_stack()
         if self.record_stack_trace:
             self.anomaly_for_traces.__exit__(*args)
-
-    @contextlib.contextmanager
-    def set_fx_stack_trace(self, stack_trace):
-        self.fx_stack_trace = stack_trace
-        try:
-            yield
-        finally:
-            self.fx_stack_trace = None
 
     def _enter_nn_module_call(self, fqn, header):
         call = _AnnotateCall(

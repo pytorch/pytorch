@@ -373,7 +373,7 @@ class FSDPMemTracker(MemTracker):
         # get the unique _MultiHandlers/RemoveHandlers and store in dictionary
         # the _MultiHandlers object will only need to be grabbed once.
         unique_handlers: dict[RemovableHandle, bool] = {}
-
+        # pyrefly: ignore  # missing-attribute
         for module in self._root_mod.modules():
             if isinstance(module, FSDPModule):
                 fsdp_state = module._get_fsdp_state()
@@ -385,13 +385,14 @@ class FSDPMemTracker(MemTracker):
         # call remove on the handles once
         for f_hook_handle in unique_handlers:
             f_hook_handle.remove()
-
+        # pyrefly: ignore  # missing-attribute
         for module in self._root_mod.modules():
             if isinstance(module, FSDPModule):
                 fsdp_state = module._get_fsdp_state()
                 if fsdp_param_group := fsdp_state._fsdp_param_group:
                     self._instrument_fsdp_sharded_params_grads(fsdp_param_group)
                     fsdp_state._pre_forward_hook_handle = (
+                        # pyrefly: ignore [missing-attribute]
                         module.register_forward_pre_hook(
                             self._fsdp_state_pre_forward(
                                 module, fsdp_state._pre_forward
@@ -400,7 +401,7 @@ class FSDPMemTracker(MemTracker):
                             with_kwargs=True,
                         )
                     )
-
+                    # pyrefly: ignore [missing-attribute]
                     fsdp_state._post_forward_hook_handle = module.register_forward_hook(
                         self._fsdp_state_post_forward(module, fsdp_state._post_forward),
                         prepend=False,
@@ -419,6 +420,7 @@ class FSDPMemTracker(MemTracker):
                         )
                     )
 
+        # pyrefly: ignore [missing-attribute]
         for buffer in self._root_mod.buffers():
             self._update_and_maybe_create_winfos(
                 buffer,

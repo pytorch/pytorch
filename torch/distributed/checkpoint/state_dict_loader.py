@@ -173,15 +173,17 @@ def load(
         # the same order.
         keys = sorted(state_dict.keys())
 
-        stateful_sd = {}
+        statetful_sd = {}
         for key in keys:
             if key not in state_dict:
                 continue
             elem = state_dict[key]
-            stateful_sd[key] = elem.state_dict() if isinstance(elem, Stateful) else elem
+            statetful_sd[key] = (
+                elem.state_dict() if isinstance(elem, Stateful) else elem
+            )
 
         _load_state_dict(
-            state_dict=stateful_sd,
+            state_dict=statetful_sd,
             storage_reader=storage_reader,
             process_group=process_group,
             no_dist=no_dist,
@@ -194,10 +196,10 @@ def load(
             if isinstance(elem, Stateful):
                 # If the state_dict is a Stateful object,
                 # DCP does an in-place load in the original state dict.
-                elem.load_state_dict(stateful_sd[key])
+                elem.load_state_dict(statetful_sd[key])
             else:
                 # Otherwise, replace the state_dict with the loaded state_dict.
-                state_dict[key] = stateful_sd[key]
+                state_dict[key] = statetful_sd[key]
 
 
 def _load_state_dict(

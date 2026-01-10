@@ -646,40 +646,14 @@ static nlohmann::json errata_json_handle;
 
 bool plan_errata_exception(
     const cudnnHandle_t handle,
-    const std::string& executionPlanTag,
-    const Tensor& x) {
+    const std::string& executionPlanTag) {
   static bool has_json =
       cudnn_frontend::load_from_config(errata_json_handle, "");
-  // rule_id is an arbitrary string, here we use the issue number if there is
-  // one
-  static auto hardcoded_errata_json_handle_3d = nlohmann::json::parse(R"(
-            { "version" : 1,
-              "rules"   :
-                [
-                    { "rule_id"             : "163539",
-                      "operation"           : "ConvFwd",
-                      "engine"              : 23,
-                      "cudnn_version_start" : 90800,
-                      "cudnn_version_end"   : 91500
-                    },
-                    { "rule_id"             : "ConvBwdData",
-                      "operation"           : "ConvBwdData",
-                      "engine"              : 23,
-                      "cudnn_version_start" : 8000,
-                      "cudnn_version_end"   : -1
-                    }
-                ]
-            })");
-  if (!has_json && x.dim() > 4) {
-    return cudnn_frontend::check_errata(
-        hardcoded_errata_json_handle_3d, executionPlanTag, handle, []() {
-          return true;
-        });
-  } else if (has_json) {
+  if (!has_json) {
+    return false;
+  } else {
     return cudnn_frontend::check_errata(
         errata_json_handle, executionPlanTag, handle, []() { return true; });
-  } else {
-    return false;
   }
 }
 
@@ -692,7 +666,7 @@ void generate_and_filter_plans(
     at::DataPtr& workspace_ptr) {
   auto initial_predicate_function =
       [&](cudnn_frontend::ExecutionPlan const& plan) -> bool {
-    return plan_errata_exception(handle, plan.getTag(), x);
+    return plan_errata_exception(handle, plan.getTag());
   };
   auto plans =
       generator.cudnnGetPlan(handle, opGraph, initial_predicate_function);
@@ -967,7 +941,7 @@ bool try_configs(
                       .setHandle(handle)
                       .setEngineConfig(config, opgraph_tag)
                       .build();
-      if (plan_errata_exception(handle, plan.getTag(), x)) {
+      if (plan_errata_exception(handle, plan.getTag())) {
         continue;
       }
       run_conv_plan(handle, x, y, w, plan, operation);
@@ -998,7 +972,7 @@ bool try_configs_fused(
                       .setHandle(handle)
                       .setEngineConfig(config, opgraph_tag)
                       .build();
-      if (plan_errata_exception(handle, plan.getTag(), x)) {
+      if (plan_errata_exception(handle, plan.getTag())) {
         continue;
       }
       run_conv_plan_fused(handle, x, y, w, z, b, plan);

@@ -50,7 +50,9 @@ class TORCH_API SymmetricMemory : public c10::intrusive_ptr_target {
   virtual size_t get_buffer_size() = 0;
   size_t get_signal_pad_size();
 
-  virtual size_t get_offset() = 0;
+  virtual size_t get_offset() {
+    TORCH_CHECK(false, "NYI");
+  }
 
   virtual bool has_multicast_support() = 0;
   virtual void* get_multicast_ptr() = 0;

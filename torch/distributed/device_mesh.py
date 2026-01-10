@@ -377,6 +377,14 @@ else:
                     f"Mesh should not be bigger than default world size {world_size}, but found {self._layout.numel()} ranks!"
                 )
 
+            # Skip device setup for fake backend (cross-compilation mode).
+            # The fake backend is used to simulate distributed training on a
+            # single process without actual devices, enabling compilation of
+            # GPU programs on CPU-only machines.
+            backend = get_backend()
+            if backend == "fake":
+                return _get_default_group()
+
             # ONLY set the device if the current device is not initialized, if user already
             # set the device before DeviceMesh init, we respect the user's choice.
             device_handle = _get_device_handle(self._device_type)
@@ -391,6 +399,17 @@ else:
                     )
                     device_handle.set_device(local_rank)
                 else:
+                    # heuristic to set the current cuda/cuda-like device base on num of gpu devices available in each host
+                    # NOTE: This device selection would only work for homogeneous hardware.
+                    num_devices_per_host = device_handle.device_count()
+                    # Skip device setup if no devices are available (cross-compilation mode)
+                    if num_devices_per_host == 0:
+                        logger.warning(
+                            "No %s devices available. Skipping device selection "
+                            "(cross-compilation mode).",
+                            self._device_type,
+                        )
+                        return _get_default_group()
                     warnings.warn(
                         "It seems like you did not set/select the default device for the current process before the DeviceMesh "
                         "initialization or use a launcher (i.e. torchrun) which populates `LOCAL_RANK` environment variable. "
@@ -400,9 +419,6 @@ else:
                         "device_id via `global_rank % num_devices_per_host`, assuming homogeneous hardware cluster. ",
                         stacklevel=2,
                     )
-                    # heuristic to set the current cuda/cuda-like device base on num of gpu devices available in each host
-                    # NOTE: This device selection would only work for homogeneous hardware.
-                    num_devices_per_host = device_handle.device_count()
                     if (
                         world_size > num_devices_per_host
                         and world_size % num_devices_per_host != 0
@@ -467,15 +483,23 @@ else:
             # Otherwise, we need to make more than one API call (`new_group`) for subgroup creations. The
             # numbers of API calls are equal to the number of subgroups for each mesh dimension. In a 2 * 4
             # mesh, we need to make two API calls per ranks to create all the subgroups.
-            if (
-                getattr(default_group, "bound_device_id", None) is not None
-                and torch.cuda.is_available()
-                and (
-                    backend is None
-                    or default_group._get_backend(torch.device("cuda")).name()
-                    == backend
+            #
+            # For fake backend, we also use split_group to ensure consistent hash-based
+            # process group naming between precompilation (fake) and runtime (real) backends.
+            is_fake_backend = get_backend(default_group) == "fake"
+            can_use_split_group = (
+                (
+                    getattr(default_group, "bound_device_id", None) is not None
+                    and torch.cuda.is_available()
+                    and (
+                        backend is None
+                        or default_group._get_backend(torch.device("cuda")).name()
+                        == backend
+                    )
                 )
-            ):
+                or is_fake_backend
+            )
+            if can_use_split_group:
                 dim_group = split_group(
                     parent_pg=default_group,
                     timeout=timeout,

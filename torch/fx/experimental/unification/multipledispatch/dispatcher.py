@@ -407,6 +407,7 @@ class MethodDispatcher(Dispatcher):
         Dispatcher
     """
 
+    # pyrefly: ignore [bad-override]
     __slots__ = ("obj", "cls")
 
     @classmethod

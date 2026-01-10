@@ -1062,6 +1062,7 @@ class LOBPCG:
 
         return torch.matmul(
             U * d_col.mT,
+            # pyrefly: ignore [unsupported-operation]
             Z * E**-0.5,
         )
 

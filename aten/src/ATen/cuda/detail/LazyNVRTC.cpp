@@ -174,7 +174,7 @@ CUDA_STUB3(cuFuncGetAttribute, int*, CUfunction_attribute, CUfunction)
 CUDA_STUB3(cuPointerGetAttribute, void*, CUpointer_attribute, CUdeviceptr)
 
 
-#if defined(CUDA_VERSION)
+#if defined(CUDA_VERSION) && CUDA_VERSION >= 12000
 CUresult CUDAAPI
 cuTensorMapEncodeTiled(
     CUtensorMap* tensorMap,

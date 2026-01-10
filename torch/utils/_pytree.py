@@ -475,9 +475,9 @@ def is_constant_class(cls: type[Any]) -> bool:
     return isinstance(cls, type) and cls in CONSTANT_NODES
 
 
-@dataclasses.dataclass(frozen=True, slots=True)
-class ConstantNode(Generic[T]):
-    value: T
+@dataclasses.dataclass(frozen=True)
+class ConstantNode:
+    value: Any
 
 
 def _is_constant_holder(spec: "TreeSpec") -> bool:
@@ -647,7 +647,7 @@ def _private_register_pytree_node(
         SERIALIZED_TYPE_TO_PYTHON_TYPE[serialized_type_name] = cls
 
 
-@dataclasses.dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True)
 class SequenceKey(Generic[T]):
     idx: int
 
@@ -661,7 +661,7 @@ class SequenceKey(Generic[T]):
 K = TypeVar("K", bound=Hashable)
 
 
-@dataclasses.dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True)
 class MappingKey(Generic[K, T]):
     key: K
 
@@ -672,7 +672,7 @@ class MappingKey(Generic[K, T]):
         return mapping[self.key]
 
 
-@dataclasses.dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True)
 class GetAttrKey:
     name: str
 
@@ -1981,7 +1981,7 @@ def enum_object_hook(obj: dict[str, Any]) -> Enum | dict[str, Any]:
         for attr in classname.split("."):
             enum_cls = getattr(enum_cls, attr)
         enum_cls = cast(type[Enum], enum_cls)
-
+        # pyrefly: ignore [unsupported-operation]
         return enum_cls[obj["name"]]
     return obj
 

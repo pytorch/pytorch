@@ -38,7 +38,7 @@ from .bytecode_transformation import (
     create_rot_n,
     Instruction,
 )
-from .exc import unimplemented
+from .exc import IncorrectUsage, unimplemented
 from .source import AttrSource, ChainedSource, DictGetItemSource, Source
 from .utils import is_safe_constant, rot_n_helper
 from .variables.base import ValueMutationExisting, VariableTracker
@@ -245,13 +245,8 @@ class PyCodegen:
         if value.is_realized() and isinstance(
             value, ContextlibContextManagerLocalGeneratorObjectVariable
         ):
-            unimplemented(
-                gb_type="reconstructing @contextmanager object",
-                context=f"object: {value}",
-                explanation="Returning a @contextmanager object from a compiled function is not supported.",
-                hints=[
-                    *graph_break_hints.SUPPORTABLE,
-                ],
+            raise IncorrectUsage(
+                "NYI: Returning a @contextmanager object from a torch.compile function"
             )
 
         # Dynamo normally prefers codegen from source to account for aliasing.
@@ -363,7 +358,7 @@ class PyCodegen:
             self.uses[value] += 1
             try:
                 self.call_reconstruct(value)
-            except NotImplementedError as e:
+            except NotImplementedError:
                 unimplemented(
                     gb_type="Reconstruction failure",
                     context=str(value),
@@ -375,7 +370,6 @@ class PyCodegen:
                         "Report an issue to PyTorch if you need reconstrtuction support. Note that objects that don't have "
                         "reconstruction rules may be fundamentally unreconstructable.",
                     ],
-                    from_exc=e,
                 )
             if allow_cache and value in self.tempvars:
                 self._output.append(create_dup_top())

@@ -17,7 +17,7 @@
 #include <ATen/native/nested/NestedTensorTransformerFunctions.h>
 #include <ATen/native/nested/NestedTensorUtils.h>
 
-#if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION)
+#if !defined(USE_ROCM) && !defined(_WIN32) && (defined(CUDA_VERSION) && CUDA_VERSION > 12000)
 #define build_grouped_gemm
 #endif
 

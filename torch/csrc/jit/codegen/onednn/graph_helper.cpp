@@ -350,9 +350,9 @@ static void mayAddListConstructIntoConcatPartition(
   // We emphasize on 'virtually' because get_num_ops() for cat's partition
   // would still return 1.
   if (n->kind() == aten::cat && opToOwningPartition.has(n)) {
-    auto listConstruct = n->namedInput("tensors")->node();
+    auto listConstrcut = n->namedInput("tensors")->node();
     auto partitionId = opToOwningPartition.get(n);
-    opToOwningPartition.add(listConstruct, partitionId);
+    opToOwningPartition.add(listConstrcut, partitionId);
   }
 }
 

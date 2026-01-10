@@ -38,6 +38,7 @@ from torch._C._distributed_c10d import (
     DebugLevel,
     GatherOptions,
     get_debug_level,
+    HashStore,
     PrefixStore,
     ProcessGroup,
     ReduceOp,
@@ -855,7 +856,7 @@ def _get_object_coll_device(group: ProcessGroup | None = None) -> str:
 def _get_pg_default_device(group: ProcessGroup | None = None) -> torch.device:
     """
     .. note:: This method will be deprecated, it only stays for
-        backward-compatibility reason. Alternatives:
+        backward-compatiblity reason. Alternatives:
 
         - If you need to find a device for object collectives, please use
         `_get_object_coll_device(group)`.
@@ -880,7 +881,7 @@ def _get_pg_default_device(group: ProcessGroup | None = None) -> torch.device:
 
     warnings.warn(
         "`_get_pg_default_device` will be deprecated, it only stays for "
-        "backward-compatibility reason. If you need to find a device for object "
+        "backward-compatiblity reason. If you need to find a device for object "
         "collectives, please use `_get_object_coll_device`. If you need to query "
         "the device types supported by group, please use "
         "`_device_capability(group)`. ",
@@ -1203,7 +1204,7 @@ def _as_iterable(obj) -> collections.abc.Iterable:
 
 def _ensure_all_tensors_same_dtype(*tensors) -> None:
     last_dtype = None
-
+    # pyrefly: ignore [bad-assignment]
     for tensor in itertools.chain.from_iterable(map(_as_iterable, tensors)):
         tensor_dtype = tensor.dtype
         # Mixing complex and its element type is allowed
@@ -1802,9 +1803,10 @@ def init_process_group(
         # backward compatible API
         if store is None:
             if backend == "fake":
-                from torch.testing._internal.distributed.fake_pg import FakeStore
-
-                store = FakeStore()
+                # Use HashStore instead of FakeStore because HashStore implements
+                # all required C++ virtual methods (including clone()) needed for
+                # split_group support.
+                store = HashStore()
             else:
                 rendezvous_iterator = rendezvous(
                     not_none(init_method), rank, world_size, timeout=timeout
@@ -1885,6 +1887,7 @@ def _get_split_source(pg: ProcessGroup):
         split_from = pg._get_backend(pg.bound_device_id)
     elif pg is _world.default_pg:
         try:
+            # pyrefly: ignore [missing-attribute]
             split_from = pg._get_backend(torch.device("cuda"))
         except RuntimeError:
             # no cuda device associated with this backend
@@ -3397,7 +3400,7 @@ def gather_object(
 
     if object_gather_list is None:
         raise AssertionError("Must provide object_gather_list on dst rank")
-    # pyrefly: ignore [unbound-name]
+    # pyrefly: ignore  # unbound-name
     for i, tensor in enumerate(output_tensors):
         tensor = tensor.type(torch.uint8)
         tensor_size = object_size_list[i]
@@ -5182,8 +5185,15 @@ def split_group(
 
     global _world
     default_pg = _get_default_group()
+    parent_backend_str, _ = _world.pg_map[default_pg]
+
+    # For fake backend, we skip the bound_device_id check since it doesn't
+    # use real CUDA devices. This allows DeviceMesh to use split_group for
+    # consistent hash-based process group naming during precompilation.
+    is_fake_backend = parent_backend_str == "fake"
+
     device_id = default_pg.bound_device_id
-    if not device_id:
+    if not device_id and not is_fake_backend:
         raise RuntimeError(
             "No device associated with the default pg, not safe to split any process groups"
         )
@@ -5207,10 +5217,19 @@ def split_group(
         )
 
     parent_group_rank = parent_global_to_group_ranks[global_rank]
-    parent_backend = parent_pg._get_backend(torch.device("cuda"))
+
+    # Get the parent backend. For fake backend, we get it via CPU device
+    # since fake backend is registered for all device types.
+    parent_backend_str_pg, _ = _world.pg_map[parent_pg]
+    is_fake_backend_pg = parent_backend_str_pg == "fake"
+    if is_fake_backend_pg:
+        # For fake backend, get backend via CPU device type
+        parent_backend = parent_pg._get_backend(torch.device("cpu"))
+    else:
+        parent_backend = parent_pg._get_backend(torch.device("cuda"))
 
     # if the parent backend does not support splitting, raise error
-    # currently this API only support NCCL backend
+    # currently this API only support NCCL backend and fake backend
     if not parent_backend or not parent_backend.supports_splitting:
         raise RuntimeError(
             "No backend for the parent process group or its backend does not support splitting"
@@ -5220,16 +5239,23 @@ def split_group(
     if hasattr(parent_backend, "comm_split_count") and group_desc is None:
         group_desc = f"{parent_pg.group_desc}:split:{parent_backend.comm_split_count()}"  # type: ignore[attr-defined]
 
-    parent_backend_str, _ = _world.pg_map[parent_pg]
     # same type of backend as the parent process group
-    backend = Backend(parent_backend_str)
+    backend = Backend(parent_backend_str_pg)
     backend_config = BackendConfig(backend)
 
     if pg_options is None:
         # default pg_options same as the parent process group
         # A deep copy is needed because if the option will be modified inside split
         # and if we split parent pg multiple times, we will run into device out of bound error.
-        pg_options = copy.deepcopy(parent_backend.options)
+        # For fake backend, don't try to deepcopy options since they can't be pickled.
+        # The C++ split code will handle options correctly via getBackendOptions().
+        if is_fake_backend_pg:
+            # For fake backend, let C++ handle options - pass None to use defaults
+            pg_options = None
+        elif hasattr(parent_backend, "options") and parent_backend.options is not None:
+            pg_options = copy.deepcopy(parent_backend.options)
+        elif hasattr(parent_backend, "getBackendOptions"):
+            pg_options = parent_backend.getBackendOptions()
 
     # this timeout defaulting/validation is used for all the new_groups/new_subgroups variants,
     # which may just pass their timeout value (or None)
@@ -5272,9 +5298,13 @@ def split_group(
         return None
 
     global_ranks_in_my_group = [parent_group_to_global_ranks[rank] for rank in my_group]
-    split_pg.bound_device_id = device_id  # type: ignore[union-attr]
-    split_backend_class = split_pg._get_backend(torch.device("cuda"))
-    split_backend_class._set_sequence_number_for_group()
+
+    # For fake backend, skip device-specific operations since it doesn't use real devices.
+    if not is_fake_backend_pg:
+        split_pg.bound_device_id = device_id  # type: ignore[union-attr]
+        split_backend_class = split_pg._get_backend(torch.device("cuda"))
+        split_backend_class._set_sequence_number_for_group()
+
     if split_pg.group_name != group_name:
         raise AssertionError(
             f"group name should be set to {group_name} but got {split_pg.group_name}"

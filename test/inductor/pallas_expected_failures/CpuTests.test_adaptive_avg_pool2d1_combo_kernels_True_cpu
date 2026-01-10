@@ -1,3 +1,1 @@
-FAIL
-AssertionError: Tensor-likes are not close!
-Numerical accuracy issue in adaptive_avg_pool2d
+NotImplementedError

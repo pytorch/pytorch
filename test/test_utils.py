@@ -1014,10 +1014,8 @@ def _deprecated_api(x, y=15):
 class TestDeprecate(TestCase):
     def test_deprecated(self):
         with self.assertWarnsRegex(Warning, "is DEPRECATED"):
-            # pyrefly: ignore [unknown-name]
             deprecated_api(1, 2)  # noqa: F821
         with self.assertWarnsRegex(Warning, "is DEPRECATED"):
-            # pyrefly: ignore [unknown-name]
             deprecated_api(1, y=2)  # noqa: F821
         _deprecated_api(1, 2)
         _deprecated_api(1, y=2)

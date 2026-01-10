@@ -279,8 +279,7 @@ def data_parallel(
         inputs = ((),)
         module_kwargs = ({},)
 
-    if module_kwargs is None:
-        raise AssertionError("module_kwargs should not be None after scatter_kwargs")
+    assert module_kwargs is not None
 
     if len(device_ids) == 1:
         return module(*inputs[0], **module_kwargs[0])

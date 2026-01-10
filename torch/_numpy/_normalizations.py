@@ -7,7 +7,6 @@ from __future__ import annotations
 import functools
 import inspect
 import operator
-import types
 import typing
 
 import torch
@@ -38,9 +37,10 @@ KeepDims = typing.TypeVar("KeepDims")
 #
 OutArray = typing.TypeVar("OutArray")
 
-NotImplementedType = typing.TypeVar(
-    "NotImplementedType", bound=types.NotImplementedType
-)
+try:
+    from typing import NotImplementedType
+except ImportError:
+    NotImplementedType = typing.TypeVar("NotImplementedType")
 
 
 def normalize_array_like(x, parm=None):  # codespell:ignore
@@ -149,7 +149,7 @@ normalizers = {
 
 def maybe_normalize(arg, parm):  # codespell:ignore
     """Normalize arg if a normalizer is registered."""
-    normalizer = normalizers.get(parm.annotation)  # codespell:ignore
+    normalizer = normalizers.get(parm.annotation, None)  # codespell:ignore
     return normalizer(arg, parm) if normalizer else arg  # codespell:ignore
 
 

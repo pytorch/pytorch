@@ -472,6 +472,7 @@ class MultiheadAttention(nn.MultiheadAttention):
             assert static_v.size(2) == head_dim
             v = static_v
 
+        # pyrefly: ignore [missing-attribute]
         src_len = k.size(1)
 
         if key_padding_mask is not None:
@@ -480,29 +481,35 @@ class MultiheadAttention(nn.MultiheadAttention):
 
         if self.add_zero_attn:
             src_len += 1
-
+            # pyrefly: ignore [missing-attribute]
             k_zeros = torch.zeros((k.size(0), 1) + k.size()[2:])
-
+            # pyrefly: ignore [missing-attribute]
             if k.is_quantized:
                 k_zeros = torch.quantize_per_tensor(
                     k_zeros,
+                    # pyrefly: ignore [missing-attribute]
                     k.q_scale(),
+                    # pyrefly: ignore [missing-attribute]
                     k.q_zero_point(),
+                    # pyrefly: ignore [missing-attribute]
                     k.dtype,
                 )
-
+            # pyrefly: ignore [no-matching-overload]
             k = torch.cat([k, k_zeros], dim=1)
-
+            # pyrefly: ignore [missing-attribute]
             v_zeros = torch.zeros((v.size(0), 1) + k.size()[2:])
-
+            # pyrefly: ignore [missing-attribute]
             if v.is_quantized:
                 v_zeros = torch.quantize_per_tensor(
                     v_zeros,
+                    # pyrefly: ignore [missing-attribute]
                     v.q_scale(),
+                    # pyrefly: ignore [missing-attribute]
                     v.q_zero_point(),
+                    # pyrefly: ignore [missing-attribute]
                     v.dtype,
                 )
-
+            # pyrefly: ignore [no-matching-overload]
             v = torch.cat([v, v_zeros], dim=1)
 
             if attn_mask is not None:

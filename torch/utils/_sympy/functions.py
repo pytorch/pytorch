@@ -106,6 +106,7 @@ def _keep_float(
 ) -> Callable[[Unpack[_Ts]], _T | sympy.Float]:
     @functools.wraps(f)
     def inner(*args: Unpack[_Ts]) -> _T | sympy.Float:
+        # pyrefly: ignore [bad-argument-type]
         r: _T | sympy.Float = f(*args)
         if any(isinstance(a, sympy.Float) for a in args) and not isinstance(
             r, sympy.Float
@@ -1243,8 +1244,6 @@ class TruncToFloat(sympy.Function):
 
     @classmethod
     def eval(cls, number):
-        if number in (sympy.oo, -sympy.oo):
-            return number
         # assert number.is_integer is not True, number
         if isinstance(number, sympy.Number):
             # NB: It is safe to use truncation to integer, which is what

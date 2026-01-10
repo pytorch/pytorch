@@ -6,14 +6,12 @@ from typing import Any, cast
 import torch
 import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._api as dtensor
-from torch._logging import LazyString
 from torch._prims_common import ShapeType
 from torch.distributed import RankType
 from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._collective_utils import redistribute_cost
 from torch.distributed.tensor._dtensor_spec import DTensorSpec
-from torch.distributed.tensor._op_schema import OpSchema
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
     Partial,
@@ -24,10 +22,6 @@ from torch.distributed.tensor.placement_types import (
 
 
 logger = logging.getLogger(__name__)
-
-
-def _format_implicit_redistribution_msg(schema: OpSchema) -> str:
-    return f"Implicit redistribution occurred for {schema} while ExplicitRedistributionContext was active"
 
 
 class ExplicitRedistributionContext:
@@ -47,7 +41,7 @@ class ExplicitRedistributionContext:
     communication.
 
     mode (str) Determines what happens when ExplicitRedistributionContext triggers:
-    "raise": raises an exception, "warn" issues a warning
+    "raise": raises an exceptoin, "warn" issues a warning
     """
 
     _local = threading.local()
@@ -61,11 +55,9 @@ class ExplicitRedistributionContext:
 
     @classmethod
     def observe_redistribution(
-        cls,
-        src_spec: DTensorSpec,
-        dst_spec: DTensorSpec,
-        redistribution_msg: LazyString,
+        cls, src_spec: DTensorSpec, dst_spec: DTensorSpec, message_fn: Callable[[], str]
     ):
+        assert callable(message_fn)
         if instance := getattr(cls._local, "_active", None):
             allowed = True
             if instance._enable:
@@ -75,9 +67,11 @@ class ExplicitRedistributionContext:
                     allowed = redistribute_cost(src_spec, dst_spec) <= 0
             if not allowed:
                 if instance._raise_on_redistribution:
-                    raise RuntimeError(redistribution_msg)
+                    raise RuntimeError(message_fn())
                 else:
-                    logger.warning(redistribution_msg)
+                    # TODO: this is still suboptimal when redistribution is on
+                    # but warnings are being suppressed
+                    logger.warning(message_fn())
 
     def __enter__(self):
         self._prev = getattr(ExplicitRedistributionContext._local, "_active", None)
@@ -136,11 +130,6 @@ def compute_local_shape_and_global_offset(
         skip_offset is True, this will be an empty tuple.
 
     """
-    empty_offset = ()
-    if not mesh._is_current_rank_part_of_mesh():
-        # if rank not in the mesh, return empty offset
-        return ((0,), empty_offset)
-
     return _compute_local_shape_and_global_offset(
         global_shape, mesh.shape, mesh._sym_get_coordinate, placements, skip_offset
     )
@@ -225,6 +214,11 @@ def _compute_local_shape_and_global_offset(
               empty tuple.
     """
 
+    empty_offset = ()
+    if my_coordinate is None:
+        # if rank not in the mesh, return empty offset
+        return ((0,), empty_offset)
+
     local_shape = list(global_shape)
     # Perform shard from left to right. For example,
     #   global tensor: [0, 1, 2, 3, 4, 5, 6, 7]
@@ -260,7 +254,7 @@ def _compute_local_shape_and_global_offset(
         local_shape[shard_dim] = shard_size
         shard_dim_to_global_offsets[shard_dim] = shard_offsets
     if skip_offset:
-        return tuple(local_shape), ()
+        return tuple(local_shape), empty_offset
     global_offset = [0] * len(global_shape)
     for shard_dim, global_offsets in shard_dim_to_global_offsets.items():
         global_offset[shard_dim] = _get_first_offset(global_offsets)

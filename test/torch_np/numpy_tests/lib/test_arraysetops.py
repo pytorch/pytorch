@@ -270,7 +270,7 @@ class TestSetOps(TestCase):
 
             if dtype in {np.int64, np.float64}:
                 ar = np.array([10, 20, 30], dtype=dtype)
-            elif dtype is bool:
+            elif dtype in {bool}:
                 ar = np.array([True, False, False])
 
             empty_array = np.array([], dtype=dtype)

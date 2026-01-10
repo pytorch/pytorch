@@ -229,14 +229,8 @@ def TensorMeta(
     device: torch.device | str | None = None,
 ):
     if isinstance(tensorlike, Number):
-        if shape and not isinstance(shape, Sequence):
-            raise AssertionError(
-                f"shape must be None or a Sequence for Number input, got {type(shape)}"
-            )
-        if strides and not isinstance(strides, Sequence):
-            raise AssertionError(
-                f"strides must be None or a Sequence for Number input, got {type(strides)}"
-            )
+        assert not shape and (shape is None or isinstance(shape, Sequence))
+        assert not strides and (strides is None or isinstance(strides, Sequence))
         inferred_shape: tuple[int, ...] = ()
         inferred_strides: tuple[int, ...] = ()
         inferred_dtype = type_to_dtype(type(tensorlike))
@@ -245,10 +239,7 @@ def TensorMeta(
         # needs to behave differently than a scalar tensor for type
         # promotion purposes
     elif tensorlike is not None:
-        if not isinstance(tensorlike, torch.Tensor):
-            raise AssertionError(
-                f"tensorlike must be torch.Tensor, got {type(tensorlike)}"
-            )  # mypy
+        assert isinstance(tensorlike, torch.Tensor)
         inferred_shape = tuple(tensorlike.shape)
         inferred_strides = tuple(tensorlike.stride())
         inferred_dtype = tensorlike.dtype
@@ -256,14 +247,10 @@ def TensorMeta(
     else:
         # If no tensorlike "example" is given then all metadata
         # must be provided explicitly
-        if shape is None:
-            raise AssertionError("shape must be provided when tensorlike is None")
-        if strides is None:
-            raise AssertionError("strides must be provided when tensorlike is None")
-        if dtype is None:
-            raise AssertionError("dtype must be provided when tensorlike is None")
-        if device is None:
-            raise AssertionError("device must be provided when tensorlike is None")
+        assert shape is not None
+        assert strides is not None
+        assert dtype is not None
+        assert device is not None
 
     shape = inferred_shape if shape is None else tuple(shape)  # type: ignore[possibly-undefined]
     strides = inferred_strides if strides is None else tuple(strides)  # type: ignore[possibly-undefined]
@@ -407,8 +394,7 @@ def _prim_elementwise_meta(
     Stride logic is currently incorrect.
     """
 
-    if len(args) == 0:
-        raise AssertionError("elementwise operation requires at least one argument")
+    assert len(args) > 0
 
     utils.check_same_dtype(*args)
 
@@ -460,8 +446,7 @@ def _prim_elementwise_meta(
     # references will typically handle the type promotion properly even if this doesn't
     # (but getting it wrong will cause too many casts to be inserted in traces!)
     if device is not None:
-        if dtype is None:
-            raise AssertionError("dtype must not be None when device is not None")
+        assert dtype is not None
         if type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.ALWAYS_BOOL:
             dtype = torch.bool
         elif type_promotion == ELEMENTWISE_PRIM_TYPE_PROMOTION_KIND.INT_TO_FLOAT:
@@ -471,8 +456,7 @@ def _prim_elementwise_meta(
             if utils.is_complex_dtype(dtype):
                 dtype = utils.corresponding_real_dtype(dtype)
 
-        if shape is None:
-            raise AssertionError("shape must not be None when device is not None")
+        assert shape is not None
         return torch.empty_permuted(shape, l2p_perm, device=device, dtype=dtype)  # type: ignore[return-value]
 
     # Number case
@@ -482,10 +466,7 @@ def _prim_elementwise_meta(
     seen_float = False
     if isinstance(number, (torch.SymInt, torch.SymFloat)):
         for a in args:
-            if not isinstance(a, (int, float, torch.SymInt, torch.SymFloat)):
-                raise AssertionError(
-                    f"Expected int, float, SymInt, or SymFloat, got {type(a)}"
-                )
+            assert isinstance(a, (int, float, torch.SymInt, torch.SymFloat)), "NYI"
             seen_float = seen_float or isinstance(a, (float, torch.SymFloat))
         if seen_float:
             number = sym_float(number)
@@ -712,7 +693,12 @@ def _clone_meta(
     else:
         # Match eager behavior by preserving strides for non_overlapping_and_dense tensors
         # If not, eager clone creates contiguous strides
-        computed_stride = utils.compute_elementwise_output_strides(input)
+        computed_stride = None
+        if utils.is_non_overlapping_and_dense(input):
+            computed_stride = input.stride()
+        else:
+            computed_stride = utils.compute_elementwise_output_strides(input)
+
         return torch.empty_strided(
             input.shape,
             computed_stride,
@@ -1026,8 +1012,10 @@ def _div_aten(a, b):
     )
 
     if is_integral:
+        # pyrefly: ignore [bad-argument-type]
         return torch.div(a, b, rounding_mode="trunc")
     else:
+        # pyrefly: ignore [bad-argument-type]
         return torch.true_divide(a, b)
 
 
@@ -1235,10 +1223,8 @@ zeta = _make_elementwise_binary_prim(
 def _as_strided_meta(
     a: TensorLikeType, size: ShapeType, stride: StrideType, storage_offset: int
 ) -> TensorLikeType:
-    if len(size) != len(stride):
-        raise AssertionError(f"len(size)={len(size)} != len(stride)={len(stride)}")
-    if storage_offset < 0:
-        raise AssertionError(f"storage_offset must be >= 0, got {storage_offset}")
+    assert len(size) == len(stride)
+    assert storage_offset >= 0
     utils.validate_strides(stride)
     utils.validate_shape(size)
 
@@ -1284,41 +1270,23 @@ def _broadcast_in_dim_meta(
     )
 
     # Type checks
-    if not isinstance(a, TensorLike):
-        raise AssertionError(f"a must be TensorLike, got {type(a)}")  # mypy
-    if not isinstance(shape, Sequence):
-        raise AssertionError(f"shape must be a Sequence, got {type(shape)}")
-    if not isinstance(broadcast_dimensions, Sequence):
-        raise AssertionError(
-            f"broadcast_dimensions must be a Sequence, got {type(broadcast_dimensions)}"
-        )
+    assert isinstance(a, TensorLike)
+    assert isinstance(shape, Sequence)
+    assert isinstance(broadcast_dimensions, Sequence)
 
     # every dimension must be accounted for
-    if a.ndim != len(broadcast_dimensions):
-        raise AssertionError(
-            f"a.ndim ({a.ndim}) != len(broadcast_dimensions) ({len(broadcast_dimensions)})"
-        )
+    assert a.ndim == len(broadcast_dimensions)
 
     # broadcast shape must have weakly more dimensions
-    if len(shape) < a.ndim:
-        raise AssertionError(f"len(shape) ({len(shape)}) must be >= a.ndim ({a.ndim})")
+    assert len(shape) >= a.ndim
 
     # broadcast_dimensions must be an ascending sequence
     # (no relative reordering of dims) of integers and
     # each dimension must be within the new shape
     def _greater_than_reduce(acc, x):
-        if not isinstance(x, Dim):
-            raise AssertionError(
-                f"broadcast_dimensions element must be Dim, got {type(x)}"
-            )
-        if x <= acc:
-            raise AssertionError(
-                f"broadcast_dimensions must be strictly ascending: {x} <= {acc}"
-            )
-        if x >= len(shape):
-            raise AssertionError(
-                f"broadcast_dimension {x} out of bounds for shape of length {len(shape)}"
-            )
+        assert isinstance(x, Dim)
+        assert x > acc
+        assert x < len(shape)
 
         return x
 
@@ -1430,8 +1398,7 @@ def _collapsed_shape(shape: ShapeType, start: int, end: int) -> tuple[int, ...]:
 def _collapse_view_helper(
     a: TensorLikeType, start: int, end: int, must_be_valid: str | None
 ) -> tuple[ShapeType | None, StrideType | None]:
-    if not isinstance(a, TensorLike):
-        raise AssertionError(f"a must be TensorLike, got {type(a)}")  # mypy
+    assert isinstance(a, TensorLike)
 
     from torch.fx.experimental.symbolic_shapes import (
         guard_or_false,
@@ -1514,12 +1481,8 @@ def _collapse_view_meta(a: TensorLikeType, start: int, end: int) -> TensorLikeTy
     new_shape, new_strides = _collapse_view_helper(
         a, start, end, "Attempting to view a collapsed tensor, but no such view exists!"
     )
-    if new_strides is None:
-        raise AssertionError(
-            "new_strides should not be None after _collapse_view_helper"
-        )
-    if new_shape is None:
-        raise AssertionError("new_shape should not be None after _collapse_view_helper")
+    assert new_strides is not None
+    assert new_shape is not None
     return a.as_strided(new_shape, new_strides, a.storage_offset())
 
 
@@ -1602,8 +1565,7 @@ def expand_dims(
 
 
 def _split_dim_meta(a: TensorLikeType, dim: int, outer_length: int) -> TensorLikeType:
-    if not isinstance(a, TensorLike):
-        raise AssertionError(f"a must be TensorLike, got {type(a)}")  # mypy
+    assert isinstance(a, TensorLike)
     utils.validate_idx(a.ndim, dim)
     utils.validate_dim_length(outer_length)
 
@@ -1656,15 +1618,11 @@ split_dim = _make_prim(
 
 # Note: allows dimensions to be specified redundantly
 def _squeeze_meta(a: TensorLikeType, dimensions: Sequence) -> TensorLikeType:
-    if not isinstance(a, TensorLike):
-        raise AssertionError(f"a must be TensorLike, got {type(a)}")  # mypy
+    assert isinstance(a, TensorLike)
 
     for idx in dimensions:
         utils.validate_idx(a.ndim, idx)
-        if a.shape[idx] != 1:
-            raise AssertionError(
-                f"Cannot squeeze dimension {idx} with size {a.shape[idx]} (must be 1)"
-            )
+        assert a.shape[idx] == 1
 
     new_shape = []
     new_strides = []
@@ -1859,16 +1817,11 @@ collapse = _make_prim(
 # never negative
 def _cat_meta(tensors: Sequence[TensorLikeType], dim: int) -> TensorLikeType:
     # Verifies same shape (except in the concat dimension)
-    if dim < 0:
-        raise AssertionError(f"dim must be non-negative, got {dim}")
+    assert dim >= 0
     shape = tensors[0].shape
     sym_sum_args = []
     for tensor_idx, tensor in enumerate(tensors):
-        if len(shape) != len(tensor.shape):
-            raise AssertionError(
-                f"All tensors must have the same number of dimensions. "
-                f"Expected {len(shape)} but tensor {tensor_idx} has {len(tensor.shape)}"
-            )
+        assert len(shape) == len(tensor.shape)
         for idx, (common_length, length) in enumerate(zip(shape, tensor.shape)):
             if idx == dim:
                 sym_sum_args.append(length)
@@ -1909,8 +1862,7 @@ cat = _make_prim(
 
 
 def _reshape_meta(a: TensorLikeType, shape: ShapeType):
-    if not isinstance(a, TensorLike):
-        raise AssertionError(f"a must be TensorLike, got {type(a)}")  # mypy
+    assert isinstance(a, TensorLike)
     utils.validate_shape(shape)
 
     # Validates the tensor and the requested shape have the
@@ -1994,13 +1946,11 @@ where = _make_prim(
 #
 def _convert_element_type_meta(a: TensorLikeType, dtype: torch.dtype) -> TensorLikeType:
     # Type checks
-    if not isinstance(a, TensorLike):
-        raise AssertionError(f"a must be TensorLike, got {type(a)}")  # mypy
-    if not isinstance(dtype, torch.dtype):
-        raise AssertionError(f"dtype must be torch.dtype, got {type(dtype)}")
+    assert isinstance(a, TensorLike)
+    assert isinstance(dtype, torch.dtype)
 
     # dtype conversion preserves dense strides
-    if torch._prims_common.is_non_overlapping_and_dense_or_false(a):
+    if torch._prims_common.is_non_overlapping_and_dense(a):
         strides = a.stride()
     else:
         strides = utils.compute_elementwise_output_strides(a)
@@ -2043,12 +1993,9 @@ convert_element_type = _make_prim(
 def _device_put_meta(
     a: TensorLikeType, device: str | torch.device, non_blocking=False
 ) -> TensorLikeType:
-    if not isinstance(a, TensorLike):
-        raise AssertionError(f"a must be TensorLike, got {type(a)}")  # mypy
-    if not isinstance(device, (str, torch.device)):
-        raise AssertionError(f"device must be str or torch.device, got {type(device)}")
-    if not isinstance(non_blocking, bool):
-        raise AssertionError(f"non_blocking must be bool, got {type(non_blocking)}")
+    assert isinstance(a, TensorLike)
+    assert isinstance(device, (str, torch.device))
+    assert isinstance(non_blocking, bool)
 
     return TensorMeta(a, device=utils.canonicalize_device(device))
 
@@ -2173,10 +2120,8 @@ minimum_value = _make_prim(
 
 
 def _copy_to_meta(a: TensorLikeType, b: TensorLikeType):
-    if not isinstance(a, TensorLike):
-        raise AssertionError(f"a must be TensorLike, got {type(a)}")  # mypy
-    if not isinstance(b, TensorLike):
-        raise AssertionError(f"b must be TensorLike, got {type(b)}")  # mypy
+    assert isinstance(a, TensorLike)
+    assert isinstance(b, TensorLike)
 
     # Validates the cast is safe
     # TODO: move this as an option on the reference
@@ -2213,8 +2158,7 @@ copy_to = _make_prim(
 
 
 def _copy_strided_meta(a: TensorLikeType, stride: ShapeType):
-    if not isinstance(a, TensorLike):
-        raise AssertionError(f"a must be TensorLike, got {type(a)}")  # mypy
+    assert isinstance(a, TensorLike)
     return torch.empty_strided(
         a.shape,
         stride,
@@ -2281,8 +2225,7 @@ def _reduction_meta(inp, dims, *, output_dtype=None):
     Meta function for single output reduction operations
     Stride logic is incorrect
     """
-    if not isinstance(inp, TensorLike):
-        raise AssertionError(f"inp must be TensorLike, got {type(inp)}")  # mypy
+    assert isinstance(inp, TensorLike)
     if output_dtype is None:
         output_dtype = inp.dtype
     output_shape = utils.compute_reduction_output_shape(inp.shape, dims)
@@ -2382,8 +2325,7 @@ def _prod_aten(
         if len(dims) == 0:
             return inp.clone()
         for d in sorted(dims, reverse=True):
-            if d < 0:
-                raise AssertionError(f"dimension must be non-negative, got {d}")
+            assert d >= 0
             inp = torch.prod(inp, d, dtype=dtype)
         return inp
     else:

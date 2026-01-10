@@ -4,6 +4,7 @@
 #include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/macros/Export.h>
 
+#if defined(CUDART_VERSION) || defined(USE_ROCM)
 
 namespace at::cuda::solver {
 
@@ -2279,8 +2280,9 @@ void xgeev<c10::complex<double>>(
 }
 
 
-#endif // defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
 
+
+#endif // defined(CUSOLVER_VERSION) && (CUSOLVER_VERSION >= 11702)
 
 #endif // USE_CUSOLVER_64_BIT
 
@@ -2553,3 +2555,5 @@ void xsyevBatched<c10::complex<double>, double>(
 #endif // USE_CUSOLVER_64_BIT_XSYEV_BATCHED
 
 } // namespace at::cuda::solver
+
+#endif // CUDART_VERSION

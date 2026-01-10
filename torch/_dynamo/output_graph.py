@@ -145,6 +145,7 @@ from .utils import (
     same,
     set_example_value,
 )
+from .variables.base import VariableTracker
 from .variables.builder import (
     BackwardStateGraphArg,
     GraphArg,
@@ -152,7 +153,6 @@ from .variables.builder import (
     wrap_fx_proxy,
 )
 from .variables.ctx_manager import ContextWrappingVariable
-from .variables.functions import ClosureConversionError, VariableTracker
 from .variables.lists import BaseListVariable
 from .variables.misc import NullVariable
 from .variables.nn_module import NNModuleVariable
@@ -261,7 +261,7 @@ def _get_gen_rand_values_fn(random_calls: Any) -> Callable[[], list[Any]]:
 class FakeRootModule(torch.nn.Module):
     """Trick the constructor of fx.GraphModule"""
 
-    def __init__(self, nn_modules: dict[str, torch.nn.Module]) -> None:
+    def __init__(self, nn_modules: dict[str, torch.nn.Module]):
         super().__init__()
         for k, v in nn_modules.items():
             setattr(self, k, v)
@@ -400,9 +400,7 @@ class ExportMetaData:
     # maps graph input index to its' source which is later
     # used in export to map to correct user input. In its' flat form,
     # just looks like GetItem(base=LocalSource("foo", idx=0))
-    graph_input_idx_to_local_source: dict[int, Source | None] = dc_field(
-        default_factory=dict
-    )
+    graph_input_idx_to_local_source: dict[int, Source] = dc_field(default_factory=dict)
     # maps user output idx to what type of output it is. There are 3 options:
     # 1) graph out
     # 2) user input
@@ -469,7 +467,7 @@ class OutputGraphCommon(OutputGraphGuardsState):
         shape_env: Optional[ShapeEnv] = None,
         export_metadata: Optional[ExportMetaData] = None,
         tracked_fakes_id_to_source: Optional[dict[int, list[Source]]] = None,
-    ) -> None:
+    ):
         super().__init__(
             output_graph_guards_state.local_scope,
             output_graph_guards_state.global_scope,
@@ -1628,7 +1626,7 @@ class OutputGraph(OutputGraphCommon):
                 graph_output_var,
                 overridden_sources=overridden_sources,
             )
-            self.codegen_suffix(tx, stack_values_flat, pass1, False)
+            self.codegen_suffix(tx, stack_values_flat, pass1)
 
             # Use `pass1.uses` to selectively cache multi-user variables into a
             # temporary local source. This (a). speeds up loading VTs with long
@@ -1646,7 +1644,7 @@ class OutputGraph(OutputGraphCommon):
                 tempvars=tempvars,
                 overridden_sources=overridden_sources,
             )
-            self.codegen_suffix(tx, stack_values_flat, pass2, True)
+            self.codegen_suffix(tx, stack_values_flat, pass2)
 
             if (
                 torch._dynamo.config.log_graph_in_out_metadata
@@ -1697,20 +1695,22 @@ class OutputGraph(OutputGraphCommon):
                             )
                     try:
                         self.export_metadata.out_spec = out_spec.as_python_constant()
-                    except ClosureConversionError as e:
-                        unimplemented(
-                            gb_type="nested function with non-constructible closure in output",
-                            context=f"as_python_constant for out_spec {out_spec}",
-                            explanation=(
-                                "Cannot return a nested function with closure from a compiled function. "
-                                "Dynamo failed to construct the function defined in the compiled region with closure objects."
-                            ),
-                            hints=[
-                                "Define the function at module scope instead of inside another function ",
-                                "Ensure that all closure variables are constants.",
-                            ],
-                            from_exc=e,
-                        )
+                    except NotImplementedError as e:
+                        if e.args and e.args[0] == "get_function":
+                            unimplemented(
+                                gb_type="nested function with closure in output",
+                                context="as_python_constant for out_spec",
+                                explanation=(
+                                    "Cannot return a nested function with closure from a compiled function. "
+                                    "Dynamo cannot reconstruct the function."
+                                ),
+                                hints=[
+                                    "Define the function at module scope instead of inside another function"
+                                ],
+                                from_exc=e,
+                            )
+                        else:
+                            raise
 
             output = []
             if count_calls(self.graph) != 0 or len(pass2.graph_outputs) != 0:
@@ -1919,7 +1919,6 @@ class OutputGraph(OutputGraphCommon):
         tx: "InstructionTranslatorBase",
         stack_values: list[VariableTracker],
         cg: PyCodegen,
-        log_side_effects: bool,
     ) -> None:
         # NOTE: `codegen_save_tempvars` must run first to update `source` fields
         # for variables with `AttributeMutationNew`, as they don't implement
@@ -1948,7 +1947,7 @@ class OutputGraph(OutputGraphCommon):
         self.codegen_cells(tx, cg)
 
         cg.restore_stack(stack_values, value_from_source=not tx.export)
-        self.side_effects.codegen_update_mutated(cg, log_side_effects)
+        self.side_effects.codegen_update_mutated(cg)
 
     def cleanup_graph(self) -> None:
         """
@@ -2450,10 +2449,10 @@ class OutputGraph(OutputGraphCommon):
                     "Report an issue to the backend compiler repo.",
                 ],
             )
-        except SkipFrame:
+        except SkipFrame as e:
             # The backend compiler has requested that we skip the frame, instead of
             # aborting execution.
-            raise
+            raise e
         except Exception as e:
             raise BackendCompilerFailed(
                 self.compiler_fn, e, inspect.currentframe()
@@ -2490,7 +2489,6 @@ class OutputGraph(OutputGraphCommon):
 
     def example_inputs(self) -> list[torch.Tensor]:
         result = [arg.example for arg in self.graphargs]
-        # pyrefly: ignore[bad-return]
         return result
 
     def remove_unused_get_attr_nodes(self) -> None:
@@ -3054,7 +3052,7 @@ class SubgraphTracer(fx.Tracer):
 
         self.tracked_tensor_or_symint_vt: OrderedSet[VariableTracker] = OrderedSet()
 
-    def record_tensor_or_symint_vt(self, vt: VariableTracker) -> None:
+    def record_tensor_or_symint_vt(self, vt: VariableTracker):
         self.tracked_tensor_or_symint_vt.add(vt)
 
     # preserve original meta if it is available
@@ -3290,14 +3288,14 @@ class SubgraphTracer(fx.Tracer):
 
     def create_node(
         self,
-        kind: str,
+        op: str,
         target: Target,
         args: Any = None,
         kwargs: Any = None,
         name: Optional[str] = None,
         type_expr: Optional[Any] = None,
     ) -> fx.Node:
-        check_pt2_compliant_op(self.output_graph, kind, target, args, kwargs)
+        check_pt2_compliant_op(self.output_graph, op, target, args, kwargs)
         if self.parent is not None:
             flat_args = pytree.arg_tree_leaves(*args, **kwargs)
             for arg in flat_args:
@@ -3307,7 +3305,7 @@ class SubgraphTracer(fx.Tracer):
                     "create_node using arg not from this SubgraphTracer"
                 )
 
-        node = super().create_node(kind, target, args, kwargs, name, type_expr)
+        node = super().create_node(op, target, args, kwargs, name, type_expr)
         node.meta["creation_timestamp"] = self.output_graph.timestamp
         self._used_names.add(node.name)
         return node
@@ -3446,9 +3444,7 @@ class SubgraphTracer(fx.Tracer):
                         e_source = None
                         if source:
                             e_source = GetItemSource(
-                                base=source,
-                                index=i,
-                                index_is_slice=False,
+                                base=source, index=i, index_is_slice=False
                             )
 
                         self._lift_basic_symbols(e, e_source)

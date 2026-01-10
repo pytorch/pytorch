@@ -2490,7 +2490,7 @@ class FlatParamHandle:
     ###########
     def flat_param_to(self, *args, **kwargs):
         """Wrap an in-place call to ``.to()`` for ``self.flat_param``."""
-
+        # pyrefly: ignore [not-iterable]
         self.flat_param.data = self.flat_param.to(*args, **kwargs)
         if self._use_orig_params:
             # Refresh the views because their storage may have changed

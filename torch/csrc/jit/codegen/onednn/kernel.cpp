@@ -60,30 +60,30 @@ void LlgaKernel::initializeConstantInputs() {
   }
 }
 
-std::map<size_t, int64_t> LlgaKernel::initializeTensorIdToOccurrence() const {
-  std::map<size_t, int64_t> tensorIdToOccurrence;
+std::map<size_t, int64_t> LlgaKernel::initializeTensorIdToOccurence() const {
+  std::map<size_t, int64_t> tensorIdToOccurence;
   for (auto& lt : partition_.get_input_ports()) {
     auto inputId = lt.get_id();
-    std::map<size_t, int64_t>::iterator it(tensorIdToOccurrence.find(inputId));
-    if (it != tensorIdToOccurrence.end()) {
+    std::map<size_t, int64_t>::iterator it(tensorIdToOccurence.find(inputId));
+    if (it != tensorIdToOccurence.end()) {
       it->second++;
     } else {
-      tensorIdToOccurrence[inputId] = 1;
+      tensorIdToOccurence[inputId] = 1;
     }
   }
-  return tensorIdToOccurrence;
+  return tensorIdToOccurence;
 }
 
 ArgSpecs LlgaKernel::initializeInputSpecs(const TensorArgs& inputs) {
   ArgSpecs inputSpecs;
   inputSpecs.reserve(nPartitionInputs_);
   GRAPH_DEBUG("Initializing graph input logical tensors");
-  std::map<size_t, int64_t> tensorIdToOccurrence =
-      initializeTensorIdToOccurrence();
+  std::map<size_t, int64_t> tensorIdToOccurence =
+      initializeTensorIdToOccurence();
   for (const auto i : c10::irange(nGraphInputs_)) {
     auto spec = ArgSpec(graph_->inputs()[i]).supplementTensorInfo(inputs[i]);
     initializedInputIds_.insert(spec.tid());
-    int64_t occurrence = tensorIdToOccurrence[spec.tid()];
+    int64_t occurrence = tensorIdToOccurence[spec.tid()];
     inputSpecs.insert(inputSpecs.end(), occurrence, spec);
     runArgsIdx_.insert(runArgsIdx_.end(), occurrence, i);
   }

@@ -1065,7 +1065,6 @@ command = [
     'python3',
     'tools/linter/adapters/grep_linter.py',
     '--pattern=@.*(dynamo_timed|preserve_rng_state|clear_frame|with_fresh_cache_if_config|use_lazy_graph_module|_disable_current_modes)',
-    '--allowlist-pattern=clear_frames',
     '--linter-name=CONTEXT_DECORATOR',
     '--error-name=avoid context decorator',
     """--error-description=\
@@ -1799,29 +1798,4 @@ include_patterns = ["torch/_dynamo/**/*.py"]
 command = [
   "python3",
   "tools/linter/adapters/gb_registry_linter.py",
-]
-
-[[linter]]
-code = 'STABLE_SHIM_VERSION'
-include_patterns = [
-    'torch/csrc/stable/c/shim.h',
-    'torch/csrc/inductor/aoti_torch/c/shim.h'
-]
-command = [
-    'python3',
-    'tools/linter/adapters/stable_shim_version_linter.py',
-    '--',
-    '@{{PATHSFILE}}'
-]
-
-[[linter]]
-code = 'STABLE_SHIM_USAGE'
-include_patterns = [
-    'torch/csrc/stable/**/*.h',
-]
-command = [
-    'python3',
-    'tools/linter/adapters/stable_shim_usage_linter.py',
-    '--',
-    '@{{PATHSFILE}}'
 ]

@@ -6,6 +6,7 @@ on:
       - main
       - release/*
     tags:
+      - ciflow/inductor-rocm/*
       - ciflow/inductor-rocm-mi300/*
   workflow_dispatch:
 

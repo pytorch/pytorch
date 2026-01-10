@@ -278,14 +278,12 @@ class ROCmTemplateCaller(ChoiceCaller):
 
     def output_node(self) -> TensorBox:
         self.bmreq.update_workspace_size()
-        buffer = ROCmTemplateBuffer(
-            layout=self.layout,
-            inputs=self.input_nodes,
-            make_kernel_render=self.make_kernel_render,
-            workspace_size=self.bmreq.workspace_size,
-            template=self.template,
+        return TensorBox.create(
+            ROCmTemplateBuffer(
+                layout=self.layout,
+                inputs=self.input_nodes,
+                make_kernel_render=self.make_kernel_render,
+                workspace_size=self.bmreq.workspace_size,
+                template=self.template,
+            )
         )
-        # Pass KTC annotation to the buffer for encoding
-        if "ktc" in self.annotations:
-            buffer.annotations["ktc"] = self.annotations["ktc"]
-        return TensorBox.create(buffer)

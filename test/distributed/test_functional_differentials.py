@@ -1,17 +1,11 @@
 # Owner(s): ["oncall: distributed"]
 
 import sys
-from functools import partial, wraps
 
 import torch
 import torch.distributed as dist
 from torch.distributed import _functional_collectives as fcols
-from torch.testing._internal.common_device_type import instantiate_device_type_tests
-from torch.testing._internal.common_distributed import (
-    DistributedTestBase,
-    MultiThreadedTestCase,
-    TEST_SKIPS,
-)
+from torch.testing._internal.common_distributed import MultiThreadedTestCase
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -29,28 +23,6 @@ DEVICE = "cuda"
 devices = ["cpu"]
 if acc := torch.accelerator.current_accelerator(True):
     devices += [acc.type]
-
-
-def with_comms(func=None):
-    if func is None:
-        return partial(with_comms)
-
-    @wraps(func)
-    def wrapper(self, *args, **kwargs):
-        if (
-            torch.cuda.is_available()
-            and torch.accelerator.device_count() < self.world_size
-        ):
-            sys.exit(TEST_SKIPS[f"multi-gpu-{self.world_size}"].exit_code)
-
-        self.pg = self.create_pg(device=DEVICE)
-        self.device = DEVICE
-        try:
-            return func(self, *args, **kwargs)
-        finally:
-            torch.distributed.destroy_process_group()
-
-    return wrapper
 
 
 @instantiate_parametrized_tests
@@ -597,18 +569,10 @@ class TestFunctionalDifferentials(MultiThreadedTestCase):
             test_utils=test_utils,
         )
 
-
-@instantiate_parametrized_tests
-class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
     # ============================================================
-    # torch.compile Integration Tests
+    # Phase 4: torch.compile Integration Tests
     # ============================================================
 
-    @property
-    def world_size(self) -> int:
-        return 2
-
-    @with_comms
     def test_all_reduce_compile(self):
         """Test that all_reduce backward works with torch.compile."""
         group_name = dist.group.WORLD.group_name
@@ -618,7 +582,7 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
             output = fcols.all_reduce(tensor, "sum", group=group_name)
             return output.sum()
 
-        input_tensor = torch.randn(3, 3, device=self.device, requires_grad=True)
+        input_tensor = torch.randn(3, 3, requires_grad=True)
 
         loss = compiled_fn(input_tensor)
         loss.backward()
@@ -628,7 +592,6 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
         expected_grad = torch.full((3, 3), fill_value=float(self.world_size))
         self.assertEqual(input_tensor.grad, expected_grad)
 
-    @with_comms
     def test_all_gather_tensor_compile(self):
         """Test that all_gather_tensor backward works with torch.compile."""
         group_name = dist.group.WORLD.group_name
@@ -638,7 +601,7 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
             output = fcols.all_gather_tensor(tensor, gather_dim=0, group=group_name)
             return output.sum()
 
-        input_tensor = torch.randn(3, 3, 3, device=self.device, requires_grad=True)
+        input_tensor = torch.randn(3, 3, 3, requires_grad=True)
 
         loss = compiled_fn(input_tensor)
         loss.backward()
@@ -648,7 +611,6 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
         expected_grad = torch.full((3, 3, 3), fill_value=float(self.world_size))
         self.assertEqual(input_tensor.grad, expected_grad)
 
-    @with_comms
     def test_reduce_scatter_tensor_compile(self):
         """Test that reduce_scatter_tensor backward works with torch.compile."""
         group_name = dist.group.WORLD.group_name
@@ -661,9 +623,7 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
             return output.sum()
 
         # Input should be divisible by world_size
-        input_tensor = torch.randn(
-            4 * self.world_size, 3, device=self.device, requires_grad=True
-        )
+        input_tensor = torch.randn(4 * self.world_size, 3, requires_grad=True)
 
         loss = compiled_fn(input_tensor)
         loss.backward()
@@ -673,7 +633,6 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
         expected_grad = torch.ones_like(input_tensor)
         self.assertEqual(input_tensor.grad, expected_grad)
 
-    @with_comms
     def test_all_to_all_single_compile(self):
         """Test that all_to_all_single backward works with torch.compile."""
         group_name = dist.group.WORLD.group_name
@@ -689,9 +648,7 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
             return output.sum()
 
         # Input should be divisible by world_size
-        input_tensor = torch.randn(
-            4 * self.world_size, 3, device=self.device, requires_grad=True
-        )
+        input_tensor = torch.randn(4 * self.world_size, 3, requires_grad=True)
 
         loss = compiled_fn(input_tensor)
         loss.backward()
@@ -701,10 +658,6 @@ class TestFunctionalDifferentialsWithCompile(DistributedTestBase):
         expected_grad = torch.ones_like(input_tensor)
         self.assertEqual(input_tensor.grad, expected_grad)
 
-
-instantiate_device_type_tests(
-    TestFunctionalDifferentialsWithCompile, globals(), only_for=DEVICE
-)
 
 if __name__ == "__main__":
     run_tests()

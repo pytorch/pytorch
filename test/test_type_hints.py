@@ -9,12 +9,7 @@ import unittest
 from pathlib import Path
 
 import torch
-from torch.testing._internal.common_utils import (
-    run_tests,
-    set_cwd,
-    TestCase,
-    xfailIfS390X,
-)
+from torch.testing._internal.common_utils import run_tests, set_cwd, TestCase
 
 
 try:
@@ -96,8 +91,6 @@ def get_all_examples():
 
 
 class TestTypeHints(TestCase):
-    # when this test fails on s390x, it also leads to OOM on test reruns
-    @xfailIfS390X
     @unittest.skipIf(not HAVE_MYPY, "need mypy")
     def test_doc_examples(self):
         """

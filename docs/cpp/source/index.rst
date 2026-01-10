@@ -161,7 +161,6 @@ Contents
 
    installing
    frontend
-   stable
    api/library_root
 
 .. toctree::

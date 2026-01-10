@@ -7,11 +7,7 @@ from typing import Any, Optional
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey
-from torch._higher_order_ops.utils import (
-    redirect_to_mode,
-    reenter_make_fx,
-    register_fake,
-)
+from torch._higher_order_ops.utils import redirect_to_mode, reenter_make_fx
 from torch._logging import warning_once
 from torch._ops import HigherOrderOperator
 from torch.fx import GraphModule
@@ -76,15 +72,6 @@ def inductor_compiled_code_impl(func, inputs):
 redirect_to_mode(inductor_compiled_code, DebugMode)
 redirect_to_mode(inductor_compiled_code, _CachingTorchDispatchMode)
 redirect_to_mode(inductor_compiled_code, _CachedTorchDispatchMode)
-
-
-@register_fake(inductor_compiled_code)
-def inductor_compiled_code_fake(func, inputs):
-    raise RuntimeError(
-        "Inductor compiled code cannot be run with FakeTensor inputs. "
-        "This can happen when torch.compile is called inside a FakeTensorMode. "
-        "Consider using backend='eager' or backend='aot_eager' instead."
-    )
 
 
 class WrapWithSetGradEnabled(HigherOrderOperator):

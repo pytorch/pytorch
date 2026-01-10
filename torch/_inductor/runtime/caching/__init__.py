@@ -1,4 +1,4 @@
-from . import config, encoders, memoizers
+from . import config
 from .context import IsolationSchema, SelectedCompileContext, SelectedRuntimeContext
 from .exceptions import (
     CacheError,
@@ -10,7 +10,6 @@ from .exceptions import (
     ValueDecodingError,
     ValueEncodingError,
 )
-from .interfaces import Memoizer, PersistentMemoizer
 
 
 __all__ = [
@@ -19,14 +18,10 @@ __all__ = [
     "IsolationSchema",
     "KeyEncodingError",
     "LockTimeoutError",
-    "Memoizer",
-    "PersistentMemoizer",
     "SelectedCompileContext",
     "SelectedRuntimeContext",
     "SystemError",
     "UserError",
     "ValueDecodingError",
     "ValueEncodingError",
-    "encoders",
-    "memoizers",
 ]

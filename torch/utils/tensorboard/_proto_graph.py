@@ -42,8 +42,7 @@ def node_proto(
     shape: tuple[int, ...] | None = None,
     outputsize: Sequence[int] | None = None,
     attributes: str = "",
-    # pyrefly: ignore [not-a-type]
-) -> NodeDef:
+) -> NodeDef:  # pyrefly: ignore [not-a-type]
     """Create an object matching a NodeDef.
 
     Follows https://github.com/tensorflow/tensorboard/blob/master/tensorboard/compat/proto/node_def.proto .

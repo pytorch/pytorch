@@ -3341,16 +3341,6 @@ def module_error_inputs_torch_nn_LSTMCell(module_info, device, dtype, requires_g
 
 
 def module_error_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_grad, training, **kwargs):
-    # use float64 for dtype mismatch test if current dtype is float32, otherwise use float32
-    # MPS doesn't support float64, so use float16 instead
-    # Extract device type from device string (e.g., 'mps:0' -> 'mps')
-    device_type = device.split(':')[0] if isinstance(device, str) else device.type
-    if dtype == torch.float32:
-        mismatched_dtype = torch.float16 if device_type == 'mps' else torch.float64
-    else:
-        mismatched_dtype = torch.float32
-    make_input = partial(make_tensor, device=device, dtype=mismatched_dtype, requires_grad=requires_grad)
-
     samples = [
         ErrorModuleInput(
             ModuleInput(constructor_input=FunctionInput(10, 0, 1)),
@@ -3363,17 +3353,6 @@ def module_error_inputs_torch_nn_RNN_GRU(module_info, device, dtype, requires_gr
             error_on=ModuleErrorEnum.CONSTRUCTION_ERROR,
             error_type=ValueError,
             error_regex="num_layers must be greater than zero"
-        ),
-        # Test dtype mismatch error message
-        ErrorModuleInput(
-            ModuleInput(
-                constructor_input=FunctionInput(3, 5, dtype=dtype, device=device),
-                forward_input=FunctionInput(make_input((2, 4, 3))),
-            ),
-            error_on=ModuleErrorEnum.FORWARD_ERROR,
-            error_type=ValueError,
-            error_regex=(r"RNN input dtype .* does not match weight dtype .* "
-                         r"Convert input: input\.to\(.*\), or convert model: model\.to\(.*\)")
         ),
         # Test bias parameter type validation
         ErrorModuleInput(
@@ -3728,8 +3707,6 @@ module_db: list[ModuleInfo] = [
                    # Not implemented for chalf on CPU
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
                                 dtypes=(torch.chalf,), device_type='cuda'),
-                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_cpu_gpu_parity',
-                                dtypes=(torch.chalf,), device_type='xpu'),
                ),
                decorators=(
                    DecorateInfo(precisionOverride({torch.float32: 1e-04}), 'TestModule', 'test_memory_format'),
@@ -4051,9 +4028,7 @@ module_db: list[ModuleInfo] = [
                    DecorateInfo(toleranceOverride({torch.float16: tol(atol=3e-2, rtol=1e-3)}), "TestModule",
                                 "test_forward", dtypes=[torch.float16], device_type='cpu'),
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity", dtypes=[torch.float16],
-                                device_type='cuda'),
-                   DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity", dtypes=[torch.float16],
-                                device_type='xpu'),),
+                                device_type='cuda'),),
                ),
     ModuleInfo(torch.nn.CTCLoss,
                module_inputs_func=module_inputs_torch_nn_CTCLoss,
@@ -4090,7 +4065,6 @@ module_db: list[ModuleInfo] = [
                    # No channels_last support for GroupNorm currently.
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', device_type='cuda'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', device_type='mps'),
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format', device_type='xpu'),
                    DecorateInfo(unittest.skip("Skipped!"), "TestModule", "test_grad",
                                 active_if=TEST_WITH_ROCM, device_type='cuda'),)
                ),
@@ -4390,9 +4364,7 @@ module_db: list[ModuleInfo] = [
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
                                 device_type='cuda'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
-                                device_type='mps'),
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
-                                device_type='xpu'),)
+                                device_type='mps'),)
                ),
     ModuleInfo(torch.nn.ReflectionPad3d,
                module_inputs_func=module_inputs_torch_nn_ReflectionPad3d,
@@ -4401,9 +4373,7 @@ module_db: list[ModuleInfo] = [
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
                                 device_type='cuda'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
-                                device_type='mps'),
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
-                                device_type='xpu'),)
+                                device_type='mps'),)
                ),
     ModuleInfo(torch.nn.ReplicationPad1d,
                module_inputs_func=module_inputs_torch_nn_ReplicationPad1d,
@@ -4415,9 +4385,7 @@ module_db: list[ModuleInfo] = [
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
                                 device_type='cuda'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
-                                device_type='mps'),
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
-                                device_type='xpu'),)
+                                device_type='mps'),)
                ),
     ModuleInfo(torch.nn.ReplicationPad3d,
                module_inputs_func=module_inputs_torch_nn_ReplicationPad3d,
@@ -4426,9 +4394,7 @@ module_db: list[ModuleInfo] = [
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
                                 device_type='cuda'),
                    DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
-                                device_type='mps'),
-                   DecorateInfo(unittest.skip("Skipped!"), 'TestModule', 'test_memory_format',
-                                device_type='xpu'),)
+                                device_type='mps'),)
                ),
     ModuleInfo(torch.nn.SELU,
                module_inputs_func=module_inputs_torch_nn_SELU,

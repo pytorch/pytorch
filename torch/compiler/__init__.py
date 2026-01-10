@@ -34,7 +34,6 @@ __all__ = [
     "is_exporting",
     "save_cache_artifacts",
     "load_cache_artifacts",
-    "keep_portable_guards_unsafe",
     "skip_guard_on_inbuilt_nn_modules_unsafe",
     "skip_guard_on_all_nn_modules_unsafe",
     "keep_tensor_guards_unsafe",
@@ -396,7 +395,7 @@ def cudagraph_mark_step_begin():
             torch.compiler.cudagraph_mark_step_begin()
             rand_foo() + rand_foo()
 
-    For more details, see `torch.compiler_cudagraph_trees <https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_cudagraph_trees.html>`__  # noqa: B950
+    For more details, see `torch.compiler_cudagraph_trees <https://pytorch.org/docs/main/torch.compiler_cudagraph_trees.html>`__
     """
     from torch._inductor import cudagraph_trees
 
@@ -534,30 +533,6 @@ def load_cache_artifacts(serialized_artifacts: bytes) -> Optional["CacheInfo"]:
     if artifacts is not None:
         return CacheArtifactManager.populate_caches(artifacts)
     return None
-
-
-def keep_portable_guards_unsafe(guard_entries):
-    """
-    A common function to only keep guards that can be used in both Python and non-Python environments.
-    This includes:
-    - Tensor metadata and dynamic shape information.
-    - Global contexts state (e.g. autocast, no_grad, etc.)
-
-    This is unsafe to use by default.
-    To use this API, use guard_filter_fn argument while calling torch.compile
-
-    >> opt_mod = torch.compile(
-    >>     mod,
-    >>     options={"guard_filter_fn": torch.compiler.keep_global_context_and_tensor_guards_unsafe},
-    >> )
-    """
-    return [
-        (
-            g.guard_type in ("GLOBAL_STATE", "SHAPE_ENV")
-            or (g.guard_type == "TENSOR_MATCH" and not g.is_global)
-        )
-        for g in guard_entries
-    ]
 
 
 def skip_guard_on_inbuilt_nn_modules_unsafe(guard_entries):
@@ -701,7 +676,7 @@ def nested_compile_region(
 
         if not dynamo_config.enable_invoke_subgraph_regional_compile:
             raise RuntimeError(
-                "nested_compile_region config is an experimental feature for testing only."
+                "nested_compile_region config is an experiemntal feature for testing only."
             )
 
     from torch._higher_order_ops.invoke_subgraph import (
@@ -712,10 +687,7 @@ def nested_compile_region(
 
 
 def load_compiled_function(
-    file: io.IOBase,
-    *,
-    f_globals: dict[str, object] | None = None,
-    external_data: dict[str, Any] | None = None,
+    file: io.IOBase, *, f_globals: Optional[dict[str, object]] = None
 ) -> Callable[..., Any]:
     """
     Load an aot-compiled function from a file.
@@ -726,10 +698,7 @@ def load_compiled_function(
 
     Args:
         file: A file-like object containing the serialized compiled function.
-        f_globals: Optional global scope enclosing the compiled function.
-        external_data: Optional data to be loaded into the runtime environment
-                       of the compiled function. This should contains the same
-                       data as AOTCompileResult.external_data returned from save_compiled_function() call.
+        f_globals: Optional globals to be loaded into the compiled function.
 
     Returns:
         A torch-compiled function with compilation preloaded from disk.
@@ -737,4 +706,4 @@ def load_compiled_function(
     from torch._dynamo.aot_compile import AOTCompiledFunction
 
     data = file.read()
-    return AOTCompiledFunction.deserialize(data, f_globals, external_data)
+    return AOTCompiledFunction.deserialize(data, f_globals)

@@ -162,17 +162,15 @@ class CuteDSLTemplateCaller(ChoiceCaller):
 
     def output_node(self) -> TensorBox:
         """Create the output node for this template choice."""
-        buffer = CuteDSLTemplateBuffer(
-            layout=self.layout,
-            inputs=self.input_nodes,
-            make_kernel_render=self.make_kernel_render,
-            template=self.template,
-            mutated_inputs=self.mutated_inputs,
+        return TensorBox.create(
+            CuteDSLTemplateBuffer(
+                layout=self.layout,
+                inputs=self.input_nodes,
+                make_kernel_render=self.make_kernel_render,
+                template=self.template,
+                mutated_inputs=self.mutated_inputs,
+            )
         )
-        # Pass KTC annotation to the buffer for encoding
-        if "ktc" in self.annotations:
-            buffer.annotations["ktc"] = self.annotations["ktc"]
-        return TensorBox.create(buffer)
 
     def call_name(self) -> str:
         """Return the kernel call name."""

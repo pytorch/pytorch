@@ -604,11 +604,6 @@ at::Tensor _cudnn_ctc_loss_backward(
     const at::Tensor& loss,
     const at::Tensor& raw_grad,
     bool zero_infinity);
-at::Tensor _miopen_ctc_loss_backward(
-    const at::Tensor& grad_out,
-    const at::Tensor& loss,
-    const at::Tensor& raw_grad,
-    bool zero_infinity);
 at::Tensor elu_double_backward(
     const Tensor& grad,
     const Tensor& grad_output,
@@ -902,7 +897,8 @@ Tensor linalg_solve_jvp(
     const Tensor& X,
     const Tensor& LU,
     const Tensor& pivots,
-    const bool left);
+    const bool left,
+    const bool use_A_T);
 Tensor lu_unpack_backward(
     const Tensor& L_grad,
     const Tensor& U_grad,

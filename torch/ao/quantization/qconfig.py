@@ -1,9 +1,10 @@
 # mypy: allow-untyped-defs
 import copy
+import sys
 import warnings
 from collections import namedtuple
-from typing import Any, Union
-from typing_extensions import deprecated, TypeAliasType
+from typing import Any, Optional, Union
+from typing_extensions import deprecated
 
 import torch
 import torch.nn as nn
@@ -571,7 +572,13 @@ def _assert_valid_qconfig(qconfig: QConfig | None, mod: torch.nn.Module) -> None
             )
 
 
-QConfigAny = TypeAliasType("QConfigAny", QConfig | None)
+if sys.version_info < (3, 12):
+    QConfigAny = Optional[QConfig]
+    QConfigAny.__module__ = "torch.ao.quantization.qconfig"
+else:
+    from typing import TypeAliasType
+
+    QConfigAny = TypeAliasType("QConfigAny", QConfig | None)
 
 
 def _add_module_to_qconfig_obs_ctr(

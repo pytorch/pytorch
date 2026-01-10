@@ -1,5 +1,6 @@
 # mypy: allow-untyped-defs
 import logging
+import pdb
 import sys
 import traceback
 import typing
@@ -67,27 +68,21 @@ if is_available():
         Work as _Work,
     )
 
-    def _make_distributed_pdb():
+    class _DistributedPdb(pdb.Pdb):
         """
         Supports using PDB from inside a multiprocessing child process.
 
         Usage:
-        _make_distributed_pdb().set_trace()
+        _DistributedPdb().set_trace()
         """
 
-        # Lazy import pdb only if we set breakpoints.
-        import pdb
-
-        class _DistributedPdb(pdb.Pdb):
-            def interaction(self, *args, **kwargs):
-                _stdin = sys.stdin
-                try:
-                    with open("/dev/stdin") as sys.stdin:
-                        pdb.Pdb.interaction(self, *args, **kwargs)
-                finally:
-                    sys.stdin = _stdin
-
-        return _DistributedPdb()
+        def interaction(self, *args, **kwargs):
+            _stdin = sys.stdin
+            try:
+                with open("/dev/stdin") as sys.stdin:
+                    pdb.Pdb.interaction(self, *args, **kwargs)
+            finally:
+                sys.stdin = _stdin
 
     _breakpoint_cache: dict[int, typing.Any] = {}
 
@@ -116,7 +111,7 @@ if is_available():
                 )
 
         if get_rank() == rank:
-            pdb = _make_distributed_pdb()
+            pdb = _DistributedPdb()
             pdb.message(
                 "\n!!! ATTENTION !!!\n\n"
                 f"Type 'up' to get to the frame that called dist.breakpoint(rank={rank})\n"
@@ -141,8 +136,9 @@ if is_available():
     # Variables prefixed with underscore are not auto imported
     # See the comment in `distributed_c10d.py` above `_backend` on why we expose
     # this.
+    # pyrefly: ignore [deprecated]
     from .distributed_c10d import *  # noqa: F403
-    from .distributed_c10d import (
+    from .distributed_c10d import (  # pyrefly: ignore  # deprecated; pyrefly: ignore [deprecated]
         _all_gather_base,
         _coalescing_manager,
         _CoalescingManager,

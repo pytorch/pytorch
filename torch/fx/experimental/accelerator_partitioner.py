@@ -659,6 +659,7 @@ class Partitioner:
                 find_combination, partitions = find_partition_to_combine_based_on_size(
                     sorted_partitions,
                     available_mem_bytes,
+                    # pyrefly: ignore [bad-argument-type]
                     partitions,
                 )
             return
@@ -835,10 +836,10 @@ class Partitioner:
                     return float("inf")
                 # Check if the modified partition list can be mapped to devices after combination
                 reset_partition_device(partitions)
-                found_device = get_device_to_partitions_mapping(
+                found_deivce = get_device_to_partitions_mapping(
                     partitions, self.devices
                 )
-                if not found_device:
+                if not found_deivce:
                     return float("inf")
                 # Calculate the new cost
                 partition_to_latency_mapping = get_partition_to_latency_mapping(

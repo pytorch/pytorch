@@ -7,6 +7,7 @@ import numpy as np
 
 import torch
 from torch.testing import make_tensor
+from torch.testing._internal.common_cuda import SM53OrLater
 from torch.testing._internal.common_device_type import precisionOverride
 from torch.testing._internal.common_dtype import (
     all_types_and,
@@ -124,7 +125,10 @@ op_db: list[OpInfo] = [
         ndimensional=SpectralFuncType.OneD,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+        dtypesIfCUDA=all_types_and_complex_and(
+            torch.bool,
+            *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
+        ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=1),
         error_inputs_func=error_inputs_fft,
         # https://github.com/pytorch/pytorch/issues/80411
@@ -142,7 +146,10 @@ op_db: list[OpInfo] = [
         ndimensional=SpectralFuncType.TwoD,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+        dtypesIfCUDA=all_types_and_complex_and(
+            torch.bool,
+            *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
+        ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
         error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
@@ -173,8 +180,7 @@ op_db: list[OpInfo] = [
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool,
-            torch.half,
-            torch.complex32,
+            *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
         ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
         error_inputs_func=error_inputs_fftn,
@@ -196,8 +202,7 @@ op_db: list[OpInfo] = [
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool,
-            torch.half,
-            torch.complex32,
+            *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
         ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=2),
         error_inputs_func=error_inputs_fft,
@@ -228,8 +233,7 @@ op_db: list[OpInfo] = [
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool,
-            torch.half,
-            torch.complex32,
+            *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
         ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(2, 2)),
         error_inputs_func=error_inputs_fftn,
@@ -271,7 +275,10 @@ op_db: list[OpInfo] = [
         ndimensional=SpectralFuncType.ND,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+        dtypesIfCUDA=all_types_and_complex_and(
+            torch.bool,
+            *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
+        ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(2, 2)),
         error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
@@ -305,7 +312,9 @@ op_db: list[OpInfo] = [
         ndimensional=SpectralFuncType.OneD,
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+        dtypesIfCUDA=all_types_and(
+            torch.bool, *(() if (not SM53OrLater) else (torch.half,))
+        ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=1),
         error_inputs_func=error_inputs_fft,
         # https://github.com/pytorch/pytorch/issues/80411
@@ -324,7 +333,9 @@ op_db: list[OpInfo] = [
         ndimensional=SpectralFuncType.TwoD,
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+        dtypesIfCUDA=all_types_and(
+            torch.bool, *(() if (not SM53OrLater) else (torch.half,))
+        ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
         error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
@@ -345,7 +356,9 @@ op_db: list[OpInfo] = [
         ndimensional=SpectralFuncType.ND,
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+        dtypesIfCUDA=all_types_and(
+            torch.bool, *(() if (not SM53OrLater) else (torch.half,))
+        ),
         sample_inputs_func=partial(sample_inputs_fft_with_min, min_size=(1, 1)),
         error_inputs_func=error_inputs_fftn,
         # https://github.com/pytorch/pytorch/issues/80411
@@ -374,7 +387,10 @@ op_db: list[OpInfo] = [
         check_batched_forward_grad=False,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+        dtypesIfCUDA=all_types_and_complex_and(
+            torch.bool,
+            *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
+        ),
     ),
     SpectralFuncInfo(
         "fft.ifft2",
@@ -392,7 +408,10 @@ op_db: list[OpInfo] = [
         check_batched_forward_grad=False,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+        dtypesIfCUDA=all_types_and_complex_and(
+            torch.bool,
+            *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
+        ),
         decorators=[
             DecorateInfo(
                 precisionOverride({torch.float: 1e-4, torch.cfloat: 1e-4}),
@@ -419,8 +438,7 @@ op_db: list[OpInfo] = [
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
         dtypesIfCUDA=all_types_and_complex_and(
             torch.bool,
-            torch.half,
-            torch.complex32,
+            *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
         ),
         decorators=[
             DecorateInfo(
@@ -444,7 +462,9 @@ op_db: list[OpInfo] = [
         check_batched_forward_grad=False,
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+        dtypesIfCUDA=all_types_and(
+            torch.bool, *(() if (not SM53OrLater) else (torch.half,))
+        ),
         skips=(),
         check_batched_grad=False,
     ),
@@ -464,7 +484,9 @@ op_db: list[OpInfo] = [
         check_batched_forward_grad=False,
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+        dtypesIfCUDA=all_types_and(
+            torch.bool, *(() if (not SM53OrLater) else (torch.half,))
+        ),
         check_batched_grad=False,
         check_batched_gradgrad=False,
         decorators=(
@@ -494,7 +516,9 @@ op_db: list[OpInfo] = [
         check_batched_forward_grad=False,
         dtypes=all_types_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archss
-        dtypesIfCUDA=all_types_and(torch.bool, torch.half),
+        dtypesIfCUDA=all_types_and(
+            torch.bool, *(() if (not SM53OrLater) else (torch.half,))
+        ),
         check_batched_grad=False,
         check_batched_gradgrad=False,
         decorators=[
@@ -523,7 +547,10 @@ op_db: list[OpInfo] = [
         check_batched_forward_grad=False,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+        dtypesIfCUDA=all_types_and_complex_and(
+            torch.bool,
+            *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
+        ),
         check_batched_gradgrad=False,
     ),
     SpectralFuncInfo(
@@ -542,7 +569,10 @@ op_db: list[OpInfo] = [
         check_batched_forward_grad=False,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+        dtypesIfCUDA=all_types_and_complex_and(
+            torch.bool,
+            *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
+        ),
         check_batched_gradgrad=False,
         decorators=[
             DecorateInfo(
@@ -568,7 +598,10 @@ op_db: list[OpInfo] = [
         check_batched_forward_grad=False,
         dtypes=all_types_and_complex_and(torch.bool),
         # CUDA supports Half/ComplexHalf Precision FFT only on SM53 or later archs
-        dtypesIfCUDA=all_types_and_complex_and(torch.bool, torch.half, torch.complex32),
+        dtypesIfCUDA=all_types_and_complex_and(
+            torch.bool,
+            *(() if (not SM53OrLater) else (torch.half, torch.complex32)),
+        ),
         check_batched_gradgrad=False,
         decorators=[
             DecorateInfo(
@@ -684,7 +717,6 @@ python_ref_db: list[OpInfo] = [
             ),
             # AssertionError: Reference result was farther (0.09746177145360499) from the precise
             # computation than the torch result was (0.09111555632069855)
-            # See https://github.com/pytorch/pytorch/pull/170856 for more details.
             DecorateInfo(
                 unittest.skip("Skipped!"),
                 "TestCommon",

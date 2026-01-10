@@ -3039,8 +3039,7 @@ main()
             self.assertNotIn("skipping cudagraphs", stderr_msgs.getvalue())
             self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
-    @parametrize("graph_partition", [False, True])
-    def test_cudagraphs_cpu_graph(self, graph_partition):
+    def test_cudagraphs_cpu_graph(self):
         from torch._dynamo.testing import reduce_to_scalar_loss
 
         model = torch.nn.Linear(10, 10, dtype=torch.float16)
@@ -3048,16 +3047,11 @@ main()
         out = model(inputs)
         loss = reduce_to_scalar_loss(out)
 
-        with (
-            torch._inductor.config.patch(graph_partition=graph_partition),
-            compiled_autograd._enable(compiler_fn),
-        ):
+        with compiled_autograd._enable(compiler_fn):
             torch._inductor.config.triton.cudagraphs = True
             loss.backward()
             torch._inductor.config.triton.cudagraphs = False
 
-        # CPU-only graphs skip cudagraphs regardless of graph_partition setting
-        # (no GPU devices to use cudagraphs with)
         self.assertEqual(counters["inductor"]["cudagraph_skips"], 1)
 
     @skipIfXpu(msg="cudagraphs not supported on xpu for now!")

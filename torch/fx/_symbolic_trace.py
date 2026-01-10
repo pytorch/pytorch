@@ -425,7 +425,9 @@ class Tracer(TracerBase):
         if isinstance(a, _constant_attribute_types) or (
             is_opaque_reference_type(type(a))
         ):
-            qualname: Optional[str] = self.tensor_attrs.get(a)
+            qualname: Optional[str] = self.tensor_attrs.get(
+                a
+            )  # pyrefly: ignore[no-matching-overload]
 
             # Tensor was not found in the Module hierarchy, stow it away in a
             # special attribute and set the qualname to refer to that
@@ -444,7 +446,9 @@ class Tracer(TracerBase):
                     )
                 qualname = self.get_fresh_qualname(base_name)
                 assert isinstance(qualname, str)
-                self.tensor_attrs[a] = qualname
+                self.tensor_attrs[a] = (  # pyrefly: ignore[unsupported-operation]
+                    qualname
+                )
                 setattr(self.root, qualname, a)
 
             return self.create_node("get_attr", qualname, (), {})

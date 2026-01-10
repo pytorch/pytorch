@@ -52,14 +52,16 @@ class FileLinter:
 
     @classmethod
     def run(cls) -> Never:
-        linter = cls()
-        sys.exit(not (linter.lint_all() or linter.args.lintrunner))
+        sys.exit(not cls().lint_all())
 
     def lint_all(self) -> bool:
+        if self.args.fix and self.args.lintrunner:
+            raise ValueError("--fix and --lintrunner are incompatible")
+
         success = True
         for p in self.paths:
             success = self._lint_file(p) and success
-        return success
+        return self.args.lintrunner or success
 
     @classmethod
     def make_file(cls, pc: Path | str | None = None) -> PythonFile:
@@ -69,8 +71,6 @@ class FileLinter:
     def args(self) -> Namespace:
         args = self.parser.parse_args(self.argv)
 
-        if args.fix and args.lintrunner:
-            raise ValueError("--fix and --lintrunner are incompatible")
         return args
 
     @cached_property
@@ -109,10 +109,10 @@ class FileLinter:
         # Because of recursive replacements, we need to repeat replacing and reparsing
         # from the inside out until all possible replacements are complete
         previous_result_count = float("inf")
-        first_results: list[LintResult] = []
+        first_results = None
         original = replacement = pf.contents
-        results: list[LintResult] = []
 
+        # pyrefly: ignore [bad-assignment]
         while True:
             try:
                 results = sorted(self._lint(pf), key=LintResult.sort_key)
@@ -141,7 +141,8 @@ class FileLinter:
 
             lines = pf.lines[:]
             for r in reversed(results):
-                r.apply(lines)
+                if r.is_edit and not r.is_recursive:
+                    r.apply(lines)
             replacement = "".join(lines)
 
             if not any(r.is_recursive for r in results):

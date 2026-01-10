@@ -182,23 +182,6 @@ class OpSpec:
         output_spec_str = _pretty_print_spec(self.output_specs)
         return f"{input_specs_str}{output_spec_str}"
 
-    def __hash__(self) -> int:
-        output_hash = hash(
-            self.output_specs
-            if isinstance(self.output_specs, DTensorSpec)
-            else tuple(self.output_specs)
-        )
-        input_hash = hash(tuple(self.input_specs)) if self.input_specs else 0
-        return hash((output_hash, input_hash))
-
-    def __eq__(self, other: object) -> bool:
-        if not isinstance(other, OpSpec):
-            return False
-        return (
-            self.output_specs == other.output_specs
-            and self.input_specs == other.input_specs
-        )
-
 
 class StrategyType:
     """
@@ -252,12 +235,6 @@ class OpStrategy(StrategyType):
         assert self.strategies[0].output_spec.tensor_meta is not None
         return self.strategies[0].output_spec.tensor_meta
 
-    def __hash__(self) -> int:
-        return hash(tuple(self.strategies))
-
-    def __eq__(self, other: object) -> bool:
-        return isinstance(other, OpStrategy) and self.strategies == other.strategies
-
 
 class TupleStrategy(StrategyType):
     """
@@ -303,12 +280,6 @@ class TupleStrategy(StrategyType):
             [f"{str(strat)}" for idx, strat in enumerate(self.children)]
         )
         return f"TupleStrategy({child_strategies_str})"
-
-    def __hash__(self) -> int:
-        return hash(tuple(self.children))
-
-    def __eq__(self, other: object) -> bool:
-        return isinstance(other, TupleStrategy) and self.children == other.children
 
 
 try:
@@ -673,13 +644,7 @@ class OpInfo:
     compute_mesh: DeviceMesh
 
     # compete runtime operator infos
-    # NOTE: schema can be None due to C++ fast path optimization. When the C++
-    # dispatch layer (dispatchDTensorOp in python_variable.cpp) finds a cached
-    # sharding decision, it skips creating the full OpSchema to reduce CPU overhead.
-    # In this case, OpInfo is created with create_schema=False, setting schema to None.
-    # The operator information is still available through output_sharding.redistribute_schema
-    # when redistribution is needed.
-    schema: OpSchema | None
+    schema: OpSchema
     flat_args_schema: list[object]
     local_args: Sequence[object]
     local_kwargs: dict[str, object]

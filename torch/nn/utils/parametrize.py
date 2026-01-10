@@ -384,8 +384,7 @@ def _inject_property(module: Module, tensor_name: str) -> None:
     """
     # We check the precondition.
     # This should never fire if register_parametrization is correctly implemented
-    if hasattr(module, tensor_name):
-        raise AssertionError(f"Module already has an attribute named '{tensor_name}'")
+    assert not hasattr(module, tensor_name)
 
     @torch.jit.unused
     def get_cached_parametrization(parametrization) -> Tensor:
@@ -610,11 +609,7 @@ def register_parametrization(
             # else right_inverse is assumed to be the identity
 
         # add the new parametrization to the parametrization list
-        if not isinstance(module.parametrizations, ModuleDict):
-            raise AssertionError(
-                f"Expected module.parametrizations to be a ModuleDict, "
-                f"got {type(module.parametrizations).__name__}"
-            )
+        assert isinstance(module.parametrizations, ModuleDict)  # Make mypy happy
         module.parametrizations[tensor_name].append(parametrization)  # type: ignore[operator]
         # If unsafe was True in previous parametrization, keep it enabled
         module.parametrizations[tensor_name].unsafe |= unsafe  # type: ignore[index, union-attr, operator]
@@ -638,11 +633,7 @@ def register_parametrization(
         # Add a property into the class
         _inject_property(module, tensor_name)
         # Add a ParametrizationList
-        if not isinstance(module.parametrizations, ModuleDict):
-            raise AssertionError(
-                f"Expected module.parametrizations to be a ModuleDict, "
-                f"got {type(module.parametrizations).__name__}"
-            )
+        assert isinstance(module.parametrizations, ModuleDict)  # Make mypy happy
         module.parametrizations[tensor_name] = parametrizations
     else:
         raise ValueError(
@@ -707,20 +698,12 @@ def remove_parametrizations(
         )
 
     # Fetch the original tensor
-    if not isinstance(module.parametrizations, ModuleDict):
-        raise AssertionError(
-            f"Expected module.parametrizations to be a ModuleDict, "
-            f"got {type(module.parametrizations).__name__}"
-        )
+    assert isinstance(module.parametrizations, ModuleDict)  # Make mypy happy
     parametrizations = module.parametrizations[tensor_name]
-
+    # pyrefly: ignore [invalid-argument]
     if parametrizations.is_tensor:
         original = parametrizations.original
-        if not isinstance(original, torch.Tensor):
-            raise AssertionError(
-                f"Expected original to be a Tensor (is_tensor promised us a Tensor), "
-                f"got {type(original).__name__}"
-            )
+        assert isinstance(original, torch.Tensor), "is_tensor promised us a Tensor"
         if leave_parametrized:
             with torch.no_grad():
                 t = getattr(module, tensor_name)
@@ -809,22 +792,14 @@ def transfer_parametrizations_and_params(
         Module: to_module
     """
     if is_parametrized(from_module):
-        if not isinstance(from_module.parametrizations, ModuleDict):
-            raise AssertionError(
-                f"Expected from_module.parametrizations to be a ModuleDict, "
-                f"got {type(from_module.parametrizations).__name__}"
-            )
+        assert isinstance(from_module.parametrizations, ModuleDict)  # for mypy
 
         # get list of all params or the single param to transfer
         parameters_to_transfer: list | ModuleDict = (
             from_module.parametrizations if tensor_name is None else [tensor_name]
         )
 
-        if not hasattr(parameters_to_transfer, "__iter__"):
-            raise AssertionError(
-                f"Expected parameters_to_transfer to be iterable, "
-                f"got {type(parameters_to_transfer).__name__}"
-            )
+        assert hasattr(parameters_to_transfer, "__iter__")  # for mypy
         for parameter_name in parameters_to_transfer:
             # initialize the to-be-transferred param in to_module if it doesn't exist already
             if not hasattr(to_module, parameter_name):
@@ -839,11 +814,7 @@ def transfer_parametrizations_and_params(
                 parameter_name
             ]:
                 register_parametrization(to_module, parameter_name, param_func)
-            if not isinstance(to_module.parametrizations, ModuleDict):
-                raise AssertionError(
-                    f"Expected to_module.parametrizations to be a ModuleDict, "
-                    f"got {type(to_module.parametrizations).__name__}"
-                )
+            assert isinstance(to_module.parametrizations, ModuleDict)  # for mypy
 
             # make values match, original values can be stored in either original or
             # original0, original1..., need to check both cases

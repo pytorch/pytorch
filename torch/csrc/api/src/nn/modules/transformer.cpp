@@ -145,7 +145,7 @@ void TransformerDecoderLayerImpl::reset_parameters() {
   multihead_attn->_reset_parameters();
 
   linear1->reset_parameters();
-  // dropout->reset_parameters();
+  // dropout->reset_paramteres();
   linear2->reset_parameters();
 
   norm1->reset_parameters();
@@ -153,7 +153,7 @@ void TransformerDecoderLayerImpl::reset_parameters() {
   norm3->reset_parameters();
   // dropout1->reset_parameters();
   // dropout2->reset_parameters();
-  // dropout3->reset_parameters();
+  // dropout3->reset_paramteres();
 }
 
 /// Pass the inputs (and mask) through the decoder layer.

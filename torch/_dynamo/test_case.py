@@ -169,7 +169,6 @@ class CPythonTestCase(TestCase):
     assertListEqual = unittest.TestCase.assertListEqual
     assertTupleEqual = unittest.TestCase.assertTupleEqual
     assertSetEqual = unittest.TestCase.assertSetEqual
-    # pyrefly: ignore [bad-override]
     assertDictEqual = polyfills.assert_dict_equal
     # pyrefly: ignore [bad-override]
     assertRaises = unittest.TestCase.assertRaises
