@@ -9,7 +9,7 @@ from torch import nn, optim
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._tools.runtime_estimator import RuntimeEstimator
 from torch.testing._internal.common_cuda import TEST_CUDA
-from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
+from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     ModelArgs,
     Transformer,
@@ -129,7 +129,6 @@ class TestRuntimeEstimator(TestCase):
             raise NotImplementedError("Only Transformer and CNN is supported")
         return (model, optimizer, inp)
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_transformer_runtime(
         self,
@@ -166,7 +165,6 @@ class TestRuntimeEstimator(TestCase):
         # self.assertAlmostEqual(benchmark_accuracy, 1.0, delta=0.2)
         # self.assertAlmostEqual(roofline_accuracy, 1.0, delta=0.3)
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_conv_model_runtime(
         self,
