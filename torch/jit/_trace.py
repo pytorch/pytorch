@@ -19,7 +19,7 @@ import sys
 import warnings
 from collections.abc import Callable
 from enum import Enum
-from typing import Any, Optional, TypeVar
+from typing import Any, TypeVar
 from typing_extensions import ParamSpec
 
 import torch
@@ -1031,7 +1031,7 @@ def trace(
     return traced_func
 
 
-_trace_module_map: Optional[dict[Any, Any]] = None
+_trace_module_map: dict[Any, Any] | None = None
 
 
 def trace_module(

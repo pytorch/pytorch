@@ -1,4 +1,4 @@
-from typing import *  # noqa: F403
+from typing import Any
 
 
 # Python version of c10/core/ConstantSymNodeImpl.cpp
