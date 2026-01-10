@@ -1705,6 +1705,86 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
                     node.meta.get("bucketing_nn_module_stack_sources", None) is not None
                 )
 
+    @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
+    def test_manual_reordering_bucketing_pass_all_gathers_different_streams(self):
+        STREAM_1 = torch.cuda.Stream()
+        STREAM_2 = torch.cuda.Stream()
+
+        def func(a, b, c, d, *, ranks):
+            # Launch collectives on *different* CUDA streams.
+            # Important: streams are module-level constants so Dynamo doesn't need to
+            # create streams inside the compiled graph.
+            with torch.cuda.stream(STREAM_1):
+                ag1 = _functional_collectives.all_gather_tensor(a, 0, ranks)
+            with torch.cuda.stream(STREAM_2):
+                ag2 = _functional_collectives.all_gather_tensor(b, 0, ranks)
+            with torch.cuda.stream(STREAM_1):
+                ag3 = _functional_collectives.all_gather_tensor(c[:4], 0, ranks)
+            with torch.cuda.stream(STREAM_2):
+                ag4 = _functional_collectives.all_gather_tensor(d[:4], 0, ranks)
+
+            # Make subsequent compute happen on the default stream.
+            # This forces proper synchronization edges to appear (wait_tensor nodes),
+            # while still testing that the all_gather launches came from different streams.
+            torch.cuda.current_stream().wait_stream(STREAM_1)
+            torch.cuda.current_stream().wait_stream(STREAM_2)
+
+            # First compute - can hide ag1/ag2
+            e = a * 5  # Use a to avoid fusion
+            mm1 = torch.matmul(e, e.T)
+
+            # Force ag1/ag2 to complete before mm2 (but ag3/ag4 can still be deferred)
+            intermediate = ag1[:8, :8] + ag2[:8, :8]
+
+            # Second compute - depends on ag1/ag2 via intermediate, can hide ag3/ag4
+            mm2 = torch.matmul(mm1 + intermediate, c[:8])
+
+            # Use all results
+            result = (
+                ag1.sum() * 1.1
+                + ag2.sum() * 1.2
+                + ag3.sum() * 1.3
+                + ag4.sum() * 1.4
+                + mm1.sum()
+                + mm2.sum()
+            )
+            return result
+
+        with _dynamo_dist_per_rank_init(
+            self.rank,
+            self.world_size,
+            self.backend(device_type),
+            fake_pg=not at_least_x_gpu(2),
+        ):
+            a = torch.ones(8, 8, dtype=torch.float, device=device_type)
+            b = torch.ones(8, 8, dtype=torch.float, device=device_type) * 2
+            c = torch.ones(8, 8, dtype=torch.float, device=device_type) * 3
+            d = torch.ones(8, 8, dtype=torch.float, device=device_type) * 4
+            ranks = list(range(self.world_size))
+
+            func_c = functools.partial(func, ranks=ranks)
+            compiled = torch.compile(func_c)
+
+            out, aten_graph = run_and_get_manual_aten_graph(
+                compiled, ["module_1", "module_2"], a, b, c, d
+            )
+
+            # Same expectations as your "separate buckets" test: bucketing markers exist,
+            # and extra waits inserted for the pre-bucketed collectives.
+            (
+                FileCheck()
+                .check("_pre_bucket_all_gather")
+                .check("all_gather_into_tensor_out")
+                .check("_pre_bucket_all_gather_1")
+                .check("all_gather_into_tensor_out_1")
+                .check("wait_tensor_4")
+                .check("wait_tensor_5")
+                .run(str(aten_graph))
+            )
+
+            correct = func(a, b, c, d, ranks=ranks)
+            self.assertTrue(same(out, correct))
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
