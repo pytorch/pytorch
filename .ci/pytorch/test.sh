@@ -980,6 +980,10 @@ test_inductor_set_cpu_affinity(){
     export LD_PRELOAD="$IOMP_LIB":"$LD_PRELOAD"
     export KMP_AFFINITY=granularity=fine,compact,1,0
     export KMP_BLOCKTIME=1
+  else
+    # Fix version `GLIBCXX_3.4.32' not found until we get rid of conda
+    GLIBCXX_LIB="$(find /usr/lib -name libstdc++.so.6)"
+    export LD_PRELOAD="$GLIBCXX_LIB":"$LD_PRELOAD"
   fi
 
   # Use nproc here instead of lscpu because it takes into account cgroups slice
@@ -1793,8 +1797,6 @@ test_operator_benchmark() {
   $TASKSET python -m benchmark_all_test --device "$1" --tag-filter "$2" \
       --output-csv "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.csv" \
       --output-json-for-dashboard "${TEST_REPORTS_DIR}/operator_benchmark_eager_float32_cpu.json" \
-
-  sleep 8h
 
   pip_install pandas
   python check_perf_csv.py \
