@@ -6956,7 +6956,12 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     This is computed as: fma(value, tensor1 * tensor2, self)
 
     Note: FMA is only used for floating-point types. For integer types,
-    we fall back to regular arithmetic since libdevice.fma doesn't support integers.
+    we fall back to regular arithmetic since FMA doesn't support integers.
+
+    For floating-point types, we use mul_rn (round-to-nearest multiplication)
+    to force rounding of the product before the FMA. This prevents Triton's
+    compiler from fusing the multiplication with the FMA, matching eager's
+    rounding behavior.
     """
     dtype = get_promoted_dtype(
         self,
@@ -6979,7 +6984,12 @@ def addcmul(self, tensor1, tensor2, *, value=1):
 
         # Match eager order: self + value * (tensor1 * tensor2)
         # Compute tensor1 * tensor2 first
-        t1_times_t2 = ops.mul(t1_val, t2_val)
+        if use_fma:
+            # Use mul_rn to force rounding of the product, preventing Triton
+            # from fusing t1*t2 with the subsequent FMA
+            t1_times_t2 = ops.mul_rn(t1_val, t2_val)
+        else:
+            t1_times_t2 = ops.mul(t1_val, t2_val)
 
         # Use index_expr for sympy expressions (e.g., from .item()), constant otherwise
         if isinstance(value, sympy.Basic):

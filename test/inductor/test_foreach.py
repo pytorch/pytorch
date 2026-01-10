@@ -1242,6 +1242,73 @@ class ForeachTests(TestCase):
             self.assertEqual(a, b, atol=0, rtol=0)
 
     @requires_gpu
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._inductor.config.patch("emulate_precision_casts", True)
+    @torch._inductor.config.patch("_use_fp64_for_unbacked_floats", True)
+    @parametrize(
+        "beta2",
+        [
+            0.999,  # Typical Adam beta2
+            0.9999,  # Higher beta2
+            0.99,  # Lower beta2
+            0.999999,  # Very high beta2
+            0.9990000128746033,  # Between fp32 representable values
+            1.0 - 1e-8,  # Near 1.0
+            1.0 - 1e-38,  # Very close to 1.0
+            0.333333333333333333,  # 1/3 with full fp64 precision
+            0.1,  # Cannot be exactly represented in binary
+        ],
+    )
+    def test_adam_ema_update_scalar_precision(self, beta2):
+        """Test that Adam-style EMA update compiled matches eager bitwise.
+
+        Tests the pattern:
+            torch._foreach_mul_(exp_avg_sqs, beta2)
+            torch._foreach_addcmul_(exp_avg_sqs, grads, grads, value=1-beta2)
+        """
+
+        def fn(exp_avg_sq0, exp_avg_sq1, grad0, grad1):
+            exp_avg_sqs = [exp_avg_sq0.clone(), exp_avg_sq1.clone()]
+            grads = [grad0, grad1]
+            torch._foreach_mul_(exp_avg_sqs, beta2)
+            torch._foreach_addcmul_(exp_avg_sqs, grads, grads, value=1 - beta2)
+            return exp_avg_sqs
+
+        # Use values sensitive to fp32/fp64 precision differences
+        inputs = (
+            torch.tensor(
+                [[1.0000001192092896, 0.333333333333333333], [1e-7, 1e-30]],
+                device=GPU_TYPE,
+                dtype=torch.float32,
+            ),
+            torch.tensor(
+                [[1.0000000000000002, 0.1], [1e-38, 2.718281828459045]],
+                device=GPU_TYPE,
+                dtype=torch.float32,
+            ),
+            torch.tensor(
+                [[0.01, 0.02], [0.001, 0.0001]],
+                device=GPU_TYPE,
+                dtype=torch.float32,
+            ),
+            torch.tensor(
+                [[0.1, 0.2], [0.01, 0.001]],
+                device=GPU_TYPE,
+                dtype=torch.float32,
+            ),
+        )
+
+        # Eager execution
+        eager_result = fn(*inputs)
+
+        # Compiled execution
+        compiled_result = torch.compile(fn, fullgraph=True)(*inputs)
+
+        # Assert bitwise equality between eager and compiled
+        for a, b in zip(eager_result, compiled_result):
+            self.assertEqual(a, b, atol=0, rtol=0)
+
+    @requires_gpu
     @foreach_map_un_ops
     def test_foreach_map_backward_unary(self, op):
         from torch._dynamo.polyfills import foreach_map_fn
@@ -1342,9 +1409,7 @@ class ForeachTests(TestCase):
 
         _, code = run_and_get_code(fn, self_tensors, tensor1_list, tensor2_list)
         code = " ".join(code)
-        self.assertIn(
-            "libdevice.fma", code, "Expected FMA to be used in generated code"
-        )
+        self.assertIn("tl.fma", code, "Expected FMA to be used in generated code")
 
 
 if __name__ == "__main__":
