@@ -1757,10 +1757,8 @@ def quantized_decomposed_quantize_per_tensor_tensor(
             _scale = ops.to_dtype(_scale, torch.float32)
         if zero_point.dtype != torch.float32:
             _zero_point = ops.to_dtype(_zero_point, torch.float32)
-        val = ops.round(input * ops.reciprocal(_scale)) + _zero_point
-        qmin, qmax = _create_constants(quant_min, quant_max, dtype=torch.float32)
-        clamped = ops.minimum(ops.maximum(val, qmin), qmax)
-        return ops.to_dtype(clamped, dtype)
+        val = ops.fma(input, ops.reciprocal(_scale), _zero_point)
+        return ops.round_to_int(val, dtype)
 
     return Pointwise.create(
         device=input.get_device(),
@@ -6339,8 +6337,11 @@ def var_mean_sum_(x, axis, correction, keepdim, return_mean):
     return x_var, x_mean
 
 
-def use_two_step_variance(x, axis, keepdim):
-    # Instead of unrolling welford, just unroll the simpler two-step var
+def use_two_step_variance(x, axis, keepdim, threshold=1024):
+    # two-step algorithm can get better performance in small reductions size
+    # while it can accumulate more numerical error than Welford algorithm.
+    # 1024 is a default value to pass all the UTs about accuracy.
+    # A larger threshold can still get performance benefits.
     axis = _validate_reduction_axis(x, axis)
     kwargs = _make_reduction_inner(
         x, axis=axis, keepdims=keepdim, dtype=None, override_return_dtype=None
@@ -6350,7 +6351,7 @@ def use_two_step_variance(x, axis, keepdim):
     reduction_numel = sympy_product(kwargs["reduction_ranges"])
     return (
         isinstance(reduction_numel, sympy.Integer)
-        and int(reduction_numel) < config.unroll_reductions_threshold
+        and int(reduction_numel) <= threshold
         and sympy_product(ranges) != 1
     )
 
