@@ -238,6 +238,10 @@ void direct_copy_kernel_cuda(TensorIteratorBase &iter) {
     TORCH_CHECK(dtype == iter.dtype(1), "copy_() does not support casting "
       "Float4_e2m1fn_x2 to different types. Source dtype is ", iter.dtype(1), "target dtype is ", dtype);
     gpu_kernel_nocast(iter, [] GPU_LAMBDA(Float4_e2m1fn_x2 x) { return x; });
+  } else if (dtype == ScalarType::Float8_e8m0fnu_x4) {
+    TORCH_CHECK(dtype == iter.dtype(1), "copy_() does not support casting "
+      "Float8_e8m0fnu_x4 to different types. Source dtype is ", iter.dtype(1), "target dtype is ", dtype);
+    gpu_kernel_nocast(iter, [] GPU_LAMBDA(Float8_e8m0fnu_x4 x) { return x; });
   } else {
     AT_DISPATCH_V2(
         dtype, "copy_", AT_WRAP([&] {

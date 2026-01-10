@@ -34,7 +34,8 @@ dtype                                            description
 ``torch.float8_e4m3fnuz`` [shell]_, [1]_         8-bit floating point, S-E-M 1-4-3, from https://arxiv.org/pdf/2206.02915
 ``torch.float8_e5m2fnuz`` [shell]_, [1]_         8-bit floating point, S-E-M 1-5-2, from https://arxiv.org/pdf/2206.02915
 ``torch.float8_e8m0fnu`` [shell]_, [1]_          8-bit floating point, S-E-M 0-8-0, from https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf
-``torch.float4_e2m1fn_x2`` [shell]_, [1]_, [3]_  packed 4-bit floating point, S-E-M 1-2-1, from https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf
+``torch.float8_e8m0fnu_x4`` [shell]_, [1]_, [3]_ packed 8-bit floating point, S-E-M 0-8-0, from https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf
+``torch.float4_e2m1fn_x2`` [shell]_, [1]_, [4]_  packed 4-bit floating point, S-E-M 1-2-1, from https://www.opencompute.org/documents/ocp-microscaling-formats-mx-v1-0-spec-final-pdf
 ===============================================  ===============================
 
 **Integer dtypes**
@@ -74,6 +75,11 @@ dtype                                      description
   https://github.com/pytorch/pytorch/issues/58734 for more details.
 
 .. [3]
+  The `torch.float8_e8m0fnu_x4` dtype represents four 8-bit values packed into 4 bytes.
+  Note that PyTorch operations which modify the shape/strides of a tensor (such as transposing)
+  operate at the 4-bytes boundary and will **not** unpack/repack the values.
+
+.. [4]
   The `torch.float4_e2m1fn_x2` dtype represents two 4-bit values packed into a byte.
   Note that PyTorch operations which modify the shape/strides of a tensor (such as transposing)
   operate at the byte boundary and will **not** unpack/repack sub-byte values.

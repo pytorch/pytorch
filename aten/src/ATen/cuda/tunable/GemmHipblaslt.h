@@ -78,10 +78,15 @@ constexpr hipDataType HipDataTypeFor<c10::Float8_e5m2>() {
 #endif
 }
 
-// This type is not intended for matrix types but rather a scale factor.
+// These two types are not intended for matrix types but rather a scale factor.
 // Return a dummy value to satisfy linker.
 template <>
 constexpr hipDataType HipDataTypeFor<c10::Float8_e8m0fnu>() {
+  return static_cast<hipDataType>(500);
+}
+
+template <>
+constexpr hipDataType HipDataTypeFor<c10::Float8_e8m0fnu_x4>() {
   return static_cast<hipDataType>(500);
 }
 

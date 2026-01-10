@@ -78,6 +78,11 @@ DLDataType getDLDataType(const Tensor& t) {
     case ScalarType::Float8_e8m0fnu:
       dtype.code = DLDataTypeCode::kDLFloat8_e8m0fnu;
       break;
+    case ScalarType::Float8_e8m0fnu_x4:
+      dtype.code = DLDataTypeCode::kDLFloat8_e8m0fnu;
+      dtype.lanes = 4;
+      dtype.bits = 8;
+      break;
     case ScalarType::Float4_e2m1fn_x2:
       dtype.code = DLDataTypeCode::kDLFloat4_e2m1fn;
       dtype.lanes = 2;
@@ -189,7 +194,7 @@ Device dlDeviceToTorchDevice(
 
 ScalarType toScalarType(const DLDataType& dtype) {
   ScalarType stype = ScalarType::Undefined;
-  if (dtype.code != DLDataTypeCode::kDLFloat4_e2m1fn) {
+  if (dtype.code != DLDataTypeCode::kDLFloat4_e2m1fn and dtype.code != DLDataTypeCode::kDLFloat8_e8m0fnu) {
     TORCH_CHECK_BUFFER(
         dtype.lanes == 1,
         "ATen does not support lanes != 1 for dtype code", std::to_string(dtype.code));
@@ -328,7 +333,17 @@ ScalarType toScalarType(const DLDataType& dtype) {
     case DLDataTypeCode::kDLFloat8_e8m0fnu:
       switch (dtype.bits) {
         case 8:
-          stype = ScalarType::Float8_e8m0fnu;
+          switch (dtype.lanes) {
+            case 1:
+              stype = ScalarType::Float8_e8m0fnu;
+              break;
+            case 4:
+              stype = ScalarType::Float8_e8m0fnu_x4;
+              break;
+            default:
+              TORCH_CHECK_BUFFER(
+                false, "Unsupported kDLFloat8_e8m0fnu lanes ", std::to_string(dtype.lanes));
+          }
           break;
         default:
           TORCH_CHECK_BUFFER(
