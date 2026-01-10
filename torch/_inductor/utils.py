@@ -134,14 +134,17 @@ from .runtime.runtime_utils import ceildiv as runtime_ceildiv
 _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
-perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 
 
 _T = TypeVar("_T")
 VarRanges = dict[sympy.Expr, sympy.Expr]
 InputType = Optional[Union[torch.Tensor, int, torch.SymInt]]
 
-GPU_KERNEL_BIN_EXTS = {"cuda": ".cubin", "xpu": ".spv"}
+XPU_KERNEL_FORMAT = (
+    "spv" if _IS_WINDOWS else os.getenv("TORCHINDUCTOR_XPU_KERNEL_FORMAT", "zebin")
+)
+
+GPU_KERNEL_BIN_EXTS = {"cuda": ".cubin", "xpu": f".{XPU_KERNEL_FORMAT}"}
 
 GPU_ALIGN_BYTES = 16
 ALIGNMENT = 16
@@ -713,11 +716,13 @@ def cache_on_self(fn: Callable[Concatenate[Any, P], RV]) -> CachedMethod[P, RV]:
     return wrapper  # type: ignore[return-value]
 
 
-def cache_property_on_self(fn: Callable[P, RV]) -> CachedMethod[P, RV]:
+def cache_property_on_self(
+    fn: Callable[Concatenate[Any, P], RV],
+) -> CachedMethod[P, RV]:
     """
     Variant of cache_on_self for properties. The only difference is the type signature.
     """
-    # pyrefly: ignore [bad-argument-type]
+
     return cache_on_self(fn)
 
 
@@ -1543,7 +1548,7 @@ class IndentedBuffer:
     ) -> None:
         if isinstance(other_code, IndentedBuffer):
             dedent = float("inf")
-            # pyrefly: ignore [bad-assignment]
+
             for line in other_code._lines:
                 if not isinstance(line, LineContext) and line:
                     dedent = min(dedent, len(line) - len(line.lstrip()))
@@ -1653,20 +1658,6 @@ class DelayReplaceLine(DeferredLineBase):
 
     def _new_line(self, line: str) -> DelayReplaceLine:
         return DelayReplaceLine(self.key, self.value_fn, line)
-
-
-class DelayMaybeLine(DeferredLineBase):
-    """At end of codegen return `line if `pred_fn() else None`"""
-
-    def __init__(self, pred_fn: Callable[[], bool], line: str):
-        super().__init__(line)
-        self.pred_fn = pred_fn
-
-    def __call__(self) -> str | None:
-        return self.line if self.pred_fn() else None
-
-    def _new_line(self, line: str) -> DelayMaybeLine:
-        return DelayMaybeLine(self.pred_fn, line)
 
 
 @functools.cache
@@ -1977,6 +1968,22 @@ def ensure_nv_universal_gemm_available() -> bool:
         return False
 
 
+@functools.lru_cache(maxsize=1)
+def ensure_nvmatmul_heuristics_available() -> bool:
+    """Check if nvMatmulHeuristics is importable; cache the result for reuse.
+
+    nvMatmulHeuristics provides performance model-based kernel selection
+    for NVIDIA GEMM operations.
+
+    Call ensure_nvmatmul_heuristics_available.cache_clear() after installing
+    nvMatmulHeuristics in the same interpreter to retry the import.
+    """
+    try:
+        return importlib.util.find_spec("nvMatmulHeuristics") is not None
+    except ImportError:
+        return False
+
+
 def use_blackwell_cutedsl_grouped_mm(
     mat_a: Any,
     mat_b: Any,
@@ -2165,8 +2172,7 @@ def use_decompose_k_choice(
     decompose_k_threshold = config.triton.decompose_k_threshold * threshold_multiple
 
     return (
-        not torch.version.hip
-        and V.graph.sizevars.statically_known_true(
+        V.graph.sizevars.statically_known_true(
             sympy.And(
                 sympy.Ge(k, decompose_k_threshold * m),
                 sympy.Ge(k, decompose_k_threshold * n),
@@ -2407,7 +2413,7 @@ def use_cpp_gemm_template(
         return False
 
     int8_gemm = mat1.get_dtype() in [torch.uint8, torch.int8]
-    layout_dtypes = [torch.float32, torch.bfloat16, torch.half, torch.uint8]
+    layout_dtypes = [torch.float32, torch.bfloat16, torch.half, torch.uint8, torch.int8]
     m, n, k, layout, mat1, mat2 = mm_args(
         mat1,
         mat2,
@@ -2767,14 +2773,11 @@ def get_device_tflops(dtype: torch.dtype) -> float:
             return get_max_simd_tflops(torch.float32, sm_clock)
     else:
         if dtype in (torch.float16, torch.bfloat16) and SM80OrLater:
-            # pyrefly: ignore [missing-argument]
             return get_max_tensorcore_tflops(dtype)
 
         if torch.backends.cuda.matmul.allow_tf32:
-            # pyrefly: ignore [missing-argument]
             return get_max_tensorcore_tflops(torch.float32)
         else:
-            # pyrefly: ignore [missing-argument]
             return get_max_simd_tflops(torch.float32)
 
 
@@ -2788,7 +2791,6 @@ def get_gpu_dram_gbps() -> int:
 def get_gpu_shared_memory() -> int:
     from triton.runtime import driver
 
-    # pyrefly: ignore [missing-attribute]
     return driver.active.utils.get_device_properties(0).get("max_shared_mem", 0)
 
 
@@ -4098,31 +4100,6 @@ def get_free_symbols(x: IterateExprs, unbacked_only: bool) -> OrderedSet[sympy.S
         return free_unbacked_symbols(x)
     else:
         return free_symbols(x)
-
-
-def maybe_log_cudagraph_partition(
-    msg: str,
-    prefix: Optional[str] = "cudagraph partition due to ",
-    node: Optional[BaseSchedulerNode] = None,
-) -> None:
-    """
-    Cudagraph partition may lead to extra memory overhead so we
-    log partition reasons to help users understand the overhead.
-    """
-    if not config.triton.cudagraphs:
-        return
-
-    warning_msg = f"{prefix}{msg}"
-
-    if (
-        node
-        and (ir_node := node.node)
-        and (fx_node := ir_node.get_origin_node())
-        and (stack_trace := fx_node.meta.get("stack_trace", None))
-    ):
-        warning_msg = f"{warning_msg}. Found from : \n {stack_trace}"
-
-    perf_hint_log.warning(warning_msg)
 
 
 def python_subprocess_env() -> dict[str, str]:

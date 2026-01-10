@@ -246,6 +246,39 @@ class FakeTensorTest(TestCase):
         ) as exc:
             torch.nextafter(fake_x, fake_y)
 
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_diagonal_scatter_one_dim_single_elem_cpu_with_cuda_tensor(self):
+        with FakeTensorMode():
+            base = torch.zeros((1, 2), device="cuda")
+            src = torch.tensor([1.0])
+            out = torch.diagonal_scatter(base, src, dim1=0, dim2=1)
+            self.assertEqual(out.shape, (1, 2))
+            self.assertEqual(out.device, base.device)
+            self.assertTrue(isinstance(out, FakeTensor))
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_diagonal_scatter_two_dim_cpu_with_cuda_tensor(self):
+        with FakeTensorMode():
+            base = torch.zeros((3, 3, 3))
+            src = torch.ones((3, 3), device="cuda")
+            out = torch.diagonal_scatter(base, src)
+            self.assertEqual(out.shape, (3, 3, 3))
+            self.assertEqual(out.device, base.device)
+            self.assertTrue(isinstance(out, FakeTensor))
+
+    @unittest.skipIf(not RUN_CUDA, "requires cuda")
+    def test_add_one_dim_single_elem_cpu_with_cuda_tensor(self):
+        if torch._functorch.config.fake_tensor_propagate_real_tensors:
+            self.skipTest("Propagate real tensor not supported")
+        with FakeTensorMode():
+            x = torch.randn([1])
+            y = torch.randn(10, device="cuda")
+
+            with self.assertRaisesRegex(
+                RuntimeError, "Unhandled FakeTensor Device Propagation for.*"
+            ) as exc:
+                x + y
+
     def test_nan_to_num(self):
         with FakeTensorMode():
             for dtype in [torch.float16, torch.float32]:
@@ -1661,6 +1694,54 @@ class FakeTensorOperatorInvariants(TestCase):
 
         with torch._subclasses.CrossRefFakeMode():
             Repro()(*args)
+
+    def test_convolution_backward_channels_last_memory_format(self):
+        """Regression test: meta convolution_backward must predict channels_last
+        output strides when inputs are channels_last, matching CUDA/MPS backends.
+        See https://github.com/pytorch/pytorch/issues/171622
+        """
+        with FakeTensorMode():
+            # channels_last inputs: outputs should be channels_last
+            grad_out = torch.randn(2, 3, 4, 4).to(memory_format=torch.channels_last)
+            inp = torch.randn(2, 3, 4, 4).to(memory_format=torch.channels_last)
+            weight = torch.randn(3, 3, 3, 3).to(memory_format=torch.channels_last)
+            grad_input, grad_weight, _ = torch.ops.aten.convolution_backward(
+                grad_out,
+                inp,
+                weight,
+                [3],
+                [1, 1],
+                [1, 1],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+                [True, True, True],
+            )
+            self.assertTrue(grad_input.is_contiguous(memory_format=torch.channels_last))
+            self.assertTrue(
+                grad_weight.is_contiguous(memory_format=torch.channels_last)
+            )
+
+            # contiguous inputs: outputs should be contiguous
+            grad_out_c = torch.randn(2, 3, 4, 4)
+            inp_c = torch.randn(2, 3, 4, 4)
+            weight_c = torch.randn(3, 3, 3, 3)
+            grad_input_c, grad_weight_c, _ = torch.ops.aten.convolution_backward(
+                grad_out_c,
+                inp_c,
+                weight_c,
+                [3],
+                [1, 1],
+                [1, 1],
+                [1, 1],
+                False,
+                [0, 0],
+                1,
+                [True, True, True],
+            )
+            self.assertTrue(grad_input_c.is_contiguous())
+            self.assertTrue(grad_weight_c.is_contiguous())
 
     def test_no_dispatch_with_like_function(self):
         class CountingMode(TorchDispatchMode):

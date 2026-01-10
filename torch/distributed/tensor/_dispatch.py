@@ -250,7 +250,7 @@ class OpDispatcher:
         assert op_info is not None, "op_info should never be None"
 
         mesh = op_info.compute_mesh
-        participating = mesh.get_coordinate() is not None
+        participating = mesh._is_current_rank_part_of_mesh()
         local_results = None
         if participating:
             # computation that happens in the current rank of the mesh, normal case
@@ -568,7 +568,6 @@ class OpDispatcher:
                 kwargs_schema[k] = self._try_replicate_spec_for_scalar_tensor(
                     op_call,
                     v,
-                    # pyrefly: ignore [bad-argument-type]
                     compute_mesh,
                 )
                 local_kwargs[k] = v
@@ -582,7 +581,6 @@ class OpDispatcher:
         )
         op_info = OpInfo(
             compute_mesh,
-            # pyrefly: ignore [bad-argument-type]
             OpSchema(
                 op_call,
                 (
