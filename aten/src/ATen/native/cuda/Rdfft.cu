@@ -1,9 +1,44 @@
 // Copyright (c) 2025 PyTorch Contributors.
 // All rights reserved.
+
+/*
+ * NOTE ON SEMANTICS
+ * -----------------
+ * This operator implements an in-place real-domain FFT (rdFFT),
+ * which is fundamentally different from torch.fft.rfft.
+ *
+ * - rFFT:
+ *     Input : real-valued tensor
+ *     Output: complex-valued tensor (Hermitian-packed, reduced size)
+ *     Semantics: frequency-domain representation
+ *
+ * - rdFFT (this operator):
+ *     Input : real-valued tensor
+ *     Output: real-valued tensor (same shape as input)
+ *     Semantics: real-domain transform used as an internal primitive
+ *                for structured linear layers and memory-efficient
+ *                training (NOT a public spectral representation).
+ *
+ * In particular:
+ *   - No complex output is produced
+ *   - No Hermitian packing is produced
+ *   - The output is NOT interpretable as a frequency-domain spectrum
+ *   - This operator is NOT a drop-in replacement for rfft
+ *
+ * This operator is only guaranteed to be invertible by the corresponding
+ * in-place inverse operator (irdFFT). Using torch.fft.irfft on the output
+ * of this operator is semantically invalid.
+ *
+ * The kernel operates entirely in the real domain and is intended as a
+ * low-level internal primitive. Passing arbitrary real tensors or treating
+ * the output as a spectral representation results in undefined semantics.
+ */
+
+
 #include "Rdfft.h"
+#include "RdfftUtils.cuh"
 #include <cuda.h>
 #include <cuda_runtime.h>
-#include <cuda_bf16.h>
 #include <ATen/ATen.h>
 #include <ATen/cuda/CUDAContext.h>
 #include <c10/core/SymInt.h>
@@ -15,22 +50,6 @@
 
 namespace at {
 namespace native {
-static __device__ uint32_t reverse_bits_rdfft(uint32_t x) {
-  x = ((x & 0xaaaaaaaa) >> 1) | ((x & 0x55555555) << 1);
-  x = ((x & 0xcccccccc) >> 2) | ((x & 0x33333333) << 2);
-  x = ((x & 0xf0f0f0f0) >> 4) | ((x & 0x0f0f0f0f) << 4);
-  x = ((x & 0xff00ff00) >> 8) | ((x & 0x00ff00ff) << 8);
-  return (x >> 16) | (x << 16);
-}
-
-static __device__ __forceinline__ float device_cos(float x) {
-return ::cosf(x);}
-static __device__ __forceinline__ float device_sin(float x) {
-return ::sinf(x);}
-static __device__ __forceinline__ double device_cos(double x) {
-return ::cos(x);}
-static __device__ __forceinline__ double device_sin(double x) {
-return ::sin(x);}
 
 template<typename real_t>
 __global__ void fft_inplace_kernel(
@@ -39,7 +58,6 @@ int N, int log2N) {
   int b = blockIdx.z;
   int r = blockIdx.y;
   int c = blockIdx.x;
-  // int i = threadIdx.x;
   int tid = threadIdx.x;
   int stride = blockDim.x;
 
@@ -47,9 +65,8 @@ int N, int log2N) {
     return;
   int block_offset = b * rows * cols * N + r * cols * N + c * N;
 
-  // --- Step 1: Bit-reversal permutation ---
   for (uint32_t i = tid; i < N; i += stride) {
-    uint32_t j = reverse_bits_rdfft(i) >> (32 - log2N);
+    uint32_t j = rdfft_utils::reverse_bits_32(i) >> (32 - log2N);
     if (j > i) {
       real_t tmp = x[block_offset+i];
       x[block_offset+i] = x[block_offset+j];
@@ -58,7 +75,6 @@ int N, int log2N) {
   }
   __syncthreads();
 
-  // --- Step 2: FFT computation ---
   for (int s = 1; s <= log2N; ++s) {
     int L = 1 << s;
     int num_groups = N / L;
@@ -79,21 +95,21 @@ int N, int log2N) {
         real_t angle1 = -2 * M_PI * j / L;
         real_t angle2 = -1 * M_PI * (L-2*j) / L;
         real_t t1 = (j == L/4)
-          ? x[block_offset+k+j]+x[block_offset+k+j+L/2]*device_cos(angle1)
-          : x[block_offset+k+j]+x[block_offset+k+j+L/2]*device_cos(angle1)
-            -x[block_offset+k+L-j]*device_sin(angle1);
+          ? x[block_offset+k+j]+x[block_offset+k+j+L/2]*rdfft_utils::device_cos(angle1)
+          : x[block_offset+k+j]+x[block_offset+k+j+L/2]*rdfft_utils::device_cos(angle1)
+            -x[block_offset+k+L-j]*rdfft_utils::device_sin(angle1);
         real_t t2 = (j == L/4)
           ? 0
-          : x[block_offset+k+L/2-j]+x[block_offset+k+j+L/2]*device_sin(angle1)
-            +x[block_offset+k+L-j]*device_cos(angle1);
+          : x[block_offset+k+L/2-j]+x[block_offset+k+j+L/2]*rdfft_utils::device_sin(angle1)
+            +x[block_offset+k+L-j]*rdfft_utils::device_cos(angle1);
         real_t t3 = (j == L/4)
           ? 0
-          : x[block_offset+k+j]+x[block_offset+k+j+L/2]*device_cos(angle2)
-            +x[block_offset+k+L-j]*device_sin(angle2);
+          : x[block_offset+k+j]+x[block_offset+k+j+L/2]*rdfft_utils::device_cos(angle2)
+            +x[block_offset+k+L-j]*rdfft_utils::device_sin(angle2);
         real_t t4 = (j == L/4)
-          ? x[block_offset+k+j+L/2]*device_sin(angle1)
-          : -x[block_offset+k+L/2-j]+x[block_offset+k+j+L/2]*device_sin(angle2)
-            -x[block_offset+k+L-j]*device_cos(angle2);
+          ? x[block_offset+k+j+L/2]*rdfft_utils::device_sin(angle1)
+          : -x[block_offset+k+L/2-j]+x[block_offset+k+j+L/2]*rdfft_utils::device_sin(angle2)
+            -x[block_offset+k+L-j]*rdfft_utils::device_cos(angle2);
 
         x[block_offset+k+j] = t1;
         x[block_offset+k+L/2-j] = (t3!= 0) ? t3 : x[block_offset+k+L/2-j];
@@ -106,8 +122,7 @@ int N, int log2N) {
 }
 
 
-template<typename real_t>
-__global__ void fft_inplace_kernel_bf16(real_t *x,
+__global__ void fft_inplace_kernel_bf16(__nv_bfloat16 *x,
 int _, int rows, int cols, int N, int log2N) {
   int b = blockIdx.z;
   int r = blockIdx.y;
@@ -120,18 +135,16 @@ int _, int rows, int cols, int N, int log2N) {
     return;
   int block_offset = b * rows * cols * N + r * cols * N + c * N;
 
-  // --- Step 1: Bit-reversal permutation ---
   for (uint32_t i = tid; i < N; i += stride) {
-    uint32_t j = reverse_bits_rdfft(i) >> (32 - log2N);
+    uint32_t j = rdfft_utils::reverse_bits_32(i) >> (32 - log2N);
     if (j > i) {
-      real_t tmp = x[block_offset+i];
+      __nv_bfloat16 tmp = x[block_offset+i];
       x[block_offset+i] = x[block_offset+j];
       x[block_offset+j] = tmp;
     }
   }
   __syncthreads();
 
-  // --- Step 2: FFT computation ---
   for (int s = 1; s <= log2N; ++s) {
     int L = 1 << s;
     int num_groups = N / L;
@@ -144,8 +157,8 @@ int _, int rows, int cols, int N, int log2N) {
       int k = group_id * L;
 
       if (j == 0) {
-        real_t t1 = x[block_offset+k+j]+x[block_offset+k+j+L/2];
-        real_t t2 = x[block_offset+k+j]-x[block_offset+k+j+L/2];
+        __nv_bfloat16 t1 = x[block_offset+k+j]+x[block_offset+k+j+L/2];
+        __nv_bfloat16 t2 = x[block_offset+k+j]-x[block_offset+k+j+L/2];
         x[block_offset+k+j] = t1;
         x[block_offset+k+j+L/2] = t2;
       } else {
@@ -158,21 +171,21 @@ int _, int rows, int cols, int N, int log2N) {
         float a_kL2_j = __bfloat162float(x[block_offset+k+L/2-j]);
 
         float t1 = (j == L/4)
-          ? a_kj+a_kj_L2*device_cos(angle1)
-          : a_kj+a_kj_L2*device_cos(angle1)
-            -a_kL_j*device_sin(angle1);
+          ? a_kj+a_kj_L2*rdfft_utils::device_cos(angle1)
+          : a_kj+a_kj_L2*rdfft_utils::device_cos(angle1)
+            -a_kL_j*rdfft_utils::device_sin(angle1);
         float t2 = (j == L/4)
           ? 0
-          : a_kL2_j+a_kj_L2*device_sin(angle1)
-            +a_kL_j*device_cos(angle1);
+          : a_kL2_j+a_kj_L2*rdfft_utils::device_sin(angle1)
+            +a_kL_j*rdfft_utils::device_cos(angle1);
         float t3 = (j == L/4)
           ? 0
-          : a_kj+a_kj_L2*device_cos(angle2)
-            +a_kL_j*device_sin(angle2);
+          : a_kj+a_kj_L2*rdfft_utils::device_cos(angle2)
+            +a_kL_j*rdfft_utils::device_sin(angle2);
         float t4 = (j == L/4)
-          ? a_kj_L2*device_sin(angle1)
-          : -a_kL2_j+a_kj_L2*device_sin(angle2)
-            -a_kL_j*device_cos(angle2);
+          ? a_kj_L2*rdfft_utils::device_sin(angle1)
+          : -a_kL2_j+a_kj_L2*rdfft_utils::device_sin(angle2)
+            -a_kL_j*rdfft_utils::device_cos(angle2);
 
         x[block_offset+k+j] =  __float2bfloat16(t1);
         x[block_offset+k+L/2-j] =  (t3!= 0)
@@ -197,6 +210,10 @@ int64_t dim, std::optional<std::string> norm) {
     int64_t r = self.size(1);
     int64_t c = self.size(2);
     int64_t k = self.size(3);
+
+    TORCH_CHECK((k & (k - 1)) == 0,
+              "Last dimension must be power of 2");
+
     int num_steps = static_cast<int>(std::log2(static_cast<double>(k)));
 
     dim3 block_wx1(1024);
@@ -205,23 +222,28 @@ int64_t dim, std::optional<std::string> norm) {
     cudaStream_t stream = at::cuda::getCurrentCUDAStream();
 
     if (self.dtype() == at::kFloat) {
-        float* d_data = self.data_ptr<float>();
-        fft_inplace_kernel<float><<<
-          grid_wx1, block_wx1, 0, stream>>>(
-            d_data, batch, r, c, k, num_steps);
+      float* d_data = self.data_ptr<float>();
+      fft_inplace_kernel<float><<<
+        grid_wx1, block_wx1, 0, stream>>>(
+          d_data, batch, r, c, k, num_steps);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else if (self.dtype() == at::kDouble) {
-        double* d_data = self.data_ptr<double>();
-        fft_inplace_kernel<double><<<
-          grid_wx1, block_wx1, 0, stream>>>(
-            d_data, batch, r, c, k, num_steps);
+      double* d_data = self.data_ptr<double>();
+      fft_inplace_kernel<double><<<
+        grid_wx1, block_wx1, 0, stream>>>(
+          d_data, batch, r, c, k, num_steps);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
     } else if (self.dtype() == at::kBFloat16) {
-        __nv_bfloat16* d_data = reinterpret_cast<__nv_bfloat16*>(
-          self.data_ptr<at::BFloat16>());
-        fft_inplace_kernel_bf16<__nv_bfloat16><<<
-          grid_wx1, block_wx1, 0, stream>>>(
-            d_data, batch, r, c, k, num_steps);
+      __nv_bfloat16* d_data = reinterpret_cast<__nv_bfloat16*>(
+        self.data_ptr<at::BFloat16>());
+      fft_inplace_kernel_bf16<<<
+        grid_wx1, block_wx1, 0, stream>>>(
+          d_data, batch, r, c, k, num_steps);
+      C10_CUDA_KERNEL_LAUNCH_CHECK();
+    } else {
+      TORCH_CHECK(false, "rdfft_: unsupported dtype");
     }
-    // cudaDeviceSynchronize();
+
 }
 
 }  // namespace native
