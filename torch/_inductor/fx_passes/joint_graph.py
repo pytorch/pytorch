@@ -71,6 +71,9 @@ def remove_no_ops(
     zeros: OrderedSet[torch.fx.Node],
     ones: OrderedSet[torch.fx.Node],
 ):
+    """
+    Removes operations that are essentially no-ops e.g. (+ 0, - 0, * 1, / 1)
+    """
     with torch.utils._python_dispatch._disable_current_modes():
         "Removes no-ops: (+ 0, - 0, * 1, / 1)"
         graph = gm.graph
@@ -83,14 +86,21 @@ def remove_no_ops(
                     return False
             return True
 
+        def isScalarValue(arg):
+            return isinstance(arg, (int, float))
+
         def replace_no_op(node, replace_input_index):
             replacement = node.args[replace_input_index]
 
             # https://github.com/pytorch/pytorch/issues/86128 causes
             # non-Tensor inputs even for ops with only Tensor inputs.
             # TODO - decompose/type promote to avoid this
+
             if not all(isinstance(arg, torch.fx.Node) for arg in node.args):
-                return
+                if all(isScalarValue(arg) for arg in node.args) or not isinstance(
+                    replacement, torch.fx.Node
+                ):
+                    return
 
             if not fake_tensors_eq(node.meta["val"], replacement.meta["val"]):
                 if fake_tensors_eq(
@@ -111,34 +121,56 @@ def remove_no_ops(
             graph.erase_node(node)
 
         for node in graph.find_nodes(op="call_function", target=aten.add.Tensor):
-            # TODO handle Tensor-Scalar adds, it's a different schema
             if len(node.args) == 2:
                 if (
-                    not any(e in zeros for e in node.args)
+                    not any(
+                        e in zeros or (isScalarValue(e) and e == 0) for e in node.args
+                    )
                     or node.kwargs.get("alpha", 1) != 1
                 ):
                     continue
 
-                replace_index = 1 if node.args[0] in zeros else 0
+                replace_index = (
+                    1
+                    if node.args[0] in zeros
+                    or (isScalarValue(node.args[0]) and node.args[0] == 0)
+                    else 0
+                )
                 replace_no_op(node, replace_index)
 
         for node in graph.find_nodes(op="call_function", target=aten.sub.Tensor):
             if len(node.args) == 2:
-                if node.args[1] not in zeros or node.kwargs.get("alpha", 1) != 1:
+                if (
+                    not (
+                        node.args[1] in zeros
+                        or (isScalarValue(node.args[1]) and node.args[1] == 0)
+                    )
+                    or node.kwargs.get("alpha", 1) != 1
+                ):
                     continue
 
                 replace_no_op(node, 0)
 
         for node in graph.find_nodes(op="call_function", target=aten.mul.Tensor):
             if len(node.args) == 2:
-                if not any(e in ones for e in node.args):
+                if not any(
+                    e in ones or (isScalarValue(e) and e == 1) for e in node.args
+                ):
                     continue
 
-                replace_input_index = 1 if node.args[0] in ones else 0
+                replace_input_index = (
+                    1
+                    if node.args[0] in ones
+                    or (isScalarValue(node.args[0]) and node.args[0] == 1)
+                    else 0
+                )
                 replace_no_op(node, replace_input_index)
 
         for node in graph.find_nodes(op="call_function", target=aten.div.Tensor):
-            if len(node.args) == 2 and node.args[1] in ones:
+            if len(node.args) == 2 and (
+                node.args[1] in ones
+                or (isScalarValue(node.args[1]) and node.args[1] == 1)
+            ):
                 replace_no_op(node, 0)
 
         # meta tensors returned from the graph have no data and can be replaced with empty_strided
