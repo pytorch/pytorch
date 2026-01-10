@@ -244,7 +244,7 @@ Tensor embedding_dense_backward_cuda(const Tensor & grad_, const Tensor & indice
                                bool scale_grad_by_freq) {
   auto grad_arg = TensorArg(grad_, "grad", 1);
   auto indices_arg = TensorArg(indices_, "indices", 1);
-  checkScalarTypes("embedding_backward", indices_arg, {kLong, kInt});
+  checkScalarTypes("embedding_backward", indices_arg, {kLong, kInt, kShort, kUInt16, kByte});
   checkSameGPU("embedding_backward", grad_arg, indices_arg);
 
   auto indices = indices_.contiguous();
