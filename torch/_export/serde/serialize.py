@@ -601,20 +601,41 @@ def get_triton_kernel_and_cache_entry(node: torch.fx.Node):
             if actual_kernel.arg_names[idx] in constexpr_vals
         ]
 
+        # Normalize expected values for comparison with parsed constexpr values.
+        # The kernel signature key stores constexprs as strings (e.g., "True", "1.5", "42"),
+        # which we parse back to Python types. To ensure proper comparison, we normalize
+        # the expected values: booleans, ints, and floats are kept as-is since they can
+        # be compared directly with parsed values. Other types (like dtype or string
+        # constants) are converted to strings to match the parsed format.
+        normalized_expected = []
+        for val in expected_values:
+            if isinstance(val, (bool, int, float)):
+                normalized_expected.append(val)
+            else:
+                normalized_expected.append(str(val))
+
         matching_entries = []
         for sig_key, cache_entry in cache.items():
             constexpr_matches = re.findall(r"\('constexpr',\s*([^)]+)\)", sig_key)
             if constexpr_matches:
+                # Parse constexpr string values back to Python types for comparison.
+                # Booleans are stored as "True"/"False" strings, numbers as their string
+                # representation. Values that can't be parsed as numbers are kept as strings
+                # (e.g., dtype names like "torch.float32").
                 constexpr_values = []
                 for match in constexpr_matches:
                     if match in ("True", "False"):
                         constexpr_values.append(match == "True")
-                    elif "." in match or "e" in match or "E" in match:
-                        constexpr_values.append(float(match))
                     else:
-                        constexpr_values.append(int(match))
+                        try:
+                            constexpr_values.append(float(match))
+                        except ValueError:
+                            try:
+                                constexpr_values.append(int(match))
+                            except ValueError:
+                                constexpr_values.append(match)
 
-                if constexpr_values == expected_values:
+                if constexpr_values == normalized_expected:
                     matching_entries.append((sig_key, cache_entry))
     else:
         matching_entries = list(cache.items())
@@ -870,7 +891,42 @@ class GraphModuleSerializer(metaclass=Final):
                     )
 
                 if hasattr(kernel_cache_metadata, "shared"):
-                    kwargs_new["shared_memory_bytes"] = kernel_cache_metadata.shared
+                    if isinstance(kernel_cache_metadata.shared, bool):
+                        kwargs_new["shared_memory_bytes"] = int(kernel_cache_metadata.shared)
+                    else:
+                        kwargs_new["shared_memory_bytes"] = kernel_cache_metadata.shared
+
+                # MTIA-specific parameters for triton kernel compilation
+                if hasattr(kernel_cache_metadata, "tile_width"):
+                    kwargs_new["tile_width"] = kernel_cache_metadata.tile_width
+                if hasattr(kernel_cache_metadata, "tile_height"):
+                    kwargs_new["tile_height"] = kernel_cache_metadata.tile_height
+                if hasattr(kernel_cache_metadata, "base_pe"):
+                    kwargs_new["base_pe"] = kernel_cache_metadata.base_pe
+
+                # Kernel parameter metadata for MTIA fatbin compilation
+                kwargs_new["kernel_param_names"] = [
+                    p.name for p in kernel.params if not p.is_constexpr
+                ]
+                # Use inferred signature types from the compiled kernel's ASTSource
+                # when available. The signature is populated at runtime with actual
+                # types like "i32", "*fp32" based on the values passed to the kernel
+                # (see specialize_impl in jit.py). Fall back to static annotations
+                # for architectures that don't rely on precise type information.
+                compiled_signature = getattr(
+                    getattr(kernel_cache_entry, "src", None), "signature", None
+                )
+                if compiled_signature is not None:
+                    kwargs_new["kernel_param_types"] = [
+                        str(compiled_signature.get(p.name, p.annotation))
+                        for p in kernel.params
+                        if not p.is_constexpr
+                    ]
+                else:
+                    # Default behavior: use static annotations (may be empty)
+                    kwargs_new["kernel_param_types"] = [
+                        str(p.annotation) for p in kernel.params if not p.is_constexpr
+                    ]
 
                 ex_node = Node(
                     name=node.name,
