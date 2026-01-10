@@ -143,13 +143,18 @@ def get_transform_func(num_tensors, dtype, device, is_fastpath):
     return transform
 
 
+def get_cuda_device_type():
+    """Helper function to get CUDA device type for ROCm compatibility."""
+    return "hip" if TEST_WITH_ROCM else "cuda"
+
+
 # note(crcrpar): `zero_size` is `False` unless (dtype, device) == (torch.float32, "cuda")
 # as the pair would go through `multi_tensor_apply_kernel` if inputs are not zero size.
 @unittest.mock.patch.dict(os.environ, {"KINETO_LOG_LEVEL": "5"})
 class TestForeach(TestCase):
     @property
     def is_cuda(self):
-        return self.device_type == "cuda"
+        return self.device_type == get_cuda_device_type()
 
     def _get_funcs(self, op):
         return (
@@ -679,7 +684,7 @@ class TestForeach(TestCase):
             foreach_op_(tensors1, tensors2)
 
         # different devices
-        if self.device_type == "cuda" and torch.cuda.device_count() > 1:
+        if self.device_type == get_cuda_device_type() and torch.cuda.device_count() > 1:
             tensor1 = torch.zeros(10, 10, device="cuda:0", dtype=dtype)
             tensor2 = torch.ones(10, 10, device="cuda:1", dtype=dtype)
             with self.assertRaisesRegex(
