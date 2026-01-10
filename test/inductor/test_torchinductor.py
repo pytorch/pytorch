@@ -1884,7 +1884,6 @@ class CommonTemplate:
                 self.assertTrue(("TORCH_REPORT_ERROR" in code) is has_assert)
                 # Check for wrapping (ternary operator for negative index handling)
                 self.assertTrue((" ? " in code) is has_wrapping)
-                pass  # no device asserts in MPS
             elif is_pallas_backend(self.device):
                 pass  # Pallas generates Python/JAX code, not C++/Triton
             elif self.device == "cpu" and not is_triton_cpu_backend(self.device):
