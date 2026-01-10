@@ -22,6 +22,7 @@
 
 #include <ATen/ATen.h>
 #include <ATen/MapAllocator.h>
+#include <ATen/UsmAllocator.h>
 #include <ATen/StorageUtils.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_arg_parser.h>
@@ -104,6 +105,36 @@ static PyObject* THPStorage_copy_(
 
   Py_INCREF(self);
   return self;
+
+  END_HANDLE_TH_ERRORS
+}
+
+static PyObject* THPStorage_usm_share_(
+    PyObject* self,
+    PyObject* args,
+    PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  THPStorage_assertNotNull(self);
+
+  at::Storage self_ = torch::createStorage(self);
+
+  static torch::PythonArgParser parser({
+      "usm_share_(Device device)",
+  });
+  torch::ParsedArgs<1> parsed_args;
+  auto r = parser.parse(args, kwargs, parsed_args);
+
+  c10::Device device = r.device(0);
+
+  // Check if source storage is valid
+  auto invalid = self_.data() == nullptr &&
+      self_.device_type() != c10::DeviceType::Meta && self_.sym_nbytes() != 0;
+  TORCH_CHECK(
+      !invalid, "Attempted to call usm_share_() on an invalid python storage.")
+  
+  at::Storage result = at::usm_share(self_, device);
+
+  return THPStorage_Wrap(std::move(result));
 
   END_HANDLE_TH_ERRORS
 }
@@ -362,27 +393,40 @@ static PyObject* THPStorage_fromFile(
   const char* filename = nullptr;
   Py_ssize_t nbytes = 0;
   int shared = 0;
+  bool usm = false;
   // NOLINTNEXTLINE(cppcoreguidelines-avoid-c-arrays,modernize-avoid-c-arrays)
-  constexpr const char* kwlist[] = {"filename", "shared", "nbytes", nullptr};
+  constexpr const char* kwlist[] = {"filename", "shared", "nbytes", "usm", nullptr};
   if (!PyArg_ParseTupleAndKeywords(
           args,
           keywds,
-          "s|in",
+          "s|inp",
           // NOLINTNEXTLINE(cppcoreguidelines-pro-type-const-cast)
           const_cast<char**>(kwlist),
           &filename,
           &shared,
-          &nbytes)) {
+          &nbytes,
+          &usm)) {
     return nullptr;
   }
   if (shared)
     shared = at::ALLOCATOR_MAPPED_SHARED;
 
   size_t actual_nbytes = -1;
+
+  // share storage for unified shared memory
+  at::DataPtr data_ptr;
+
+  if (usm) {
+    data_ptr = at::UsmAllocator::makeDataPtr(filename, nbytes, &actual_nbytes);
+  } else {
+    data_ptr = at::MapAllocator::makeDataPtr(filename, shared, nbytes, &actual_nbytes);
+  }
+
+
   auto storage = c10::make_intrusive<at::StorageImpl>(
       c10::StorageImpl::use_byte_size_t(),
       nbytes,
-      at::MapAllocator::makeDataPtr(filename, shared, nbytes, &actual_nbytes),
+      std::move(data_ptr),
       /*allocator=*/nullptr,
       /*resizable=*/false);
 
@@ -607,6 +651,10 @@ static PyObject* THPStorage__get_filename(PyObject* self, PyObject* noargs) {
 static PyMethodDef THPStorage_methods[] = {
     {"copy_",
      castPyCFunctionWithKeywords(THPStorage_copy_),
+     METH_VARARGS | METH_KEYWORDS,
+     nullptr},
+    {"usm_share_",
+     castPyCFunctionWithKeywords(THPStorage_usm_share_),
      METH_VARARGS | METH_KEYWORDS,
      nullptr},
     {"element_size", THPStorage_elementSize, METH_NOARGS, nullptr},
