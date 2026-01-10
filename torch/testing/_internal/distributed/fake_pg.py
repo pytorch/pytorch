@@ -22,13 +22,6 @@ def _create_fake_pg(common_opts, backend_opts):
     for every collective. It should be used as a convenient tool when playing
     with distributed but don't care about the actual data.
     """
-    # If backend_opts is None, don't pass it so the C++ default (new Options())
-    # is used. This ensures options_ is never null, which is required for
-    # getBackendOptions() to return a valid pointer for split_group support.
-    if backend_opts is None:
-        return FakeProcessGroup._create_internal(
-            common_opts.group_rank, common_opts.group_size
-        )
     return FakeProcessGroup._create_internal(
         common_opts.group_rank, common_opts.group_size, backend_opts
     )

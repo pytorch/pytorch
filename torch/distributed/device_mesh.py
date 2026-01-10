@@ -483,23 +483,15 @@ else:
             # Otherwise, we need to make more than one API call (`new_group`) for subgroup creations. The
             # numbers of API calls are equal to the number of subgroups for each mesh dimension. In a 2 * 4
             # mesh, we need to make two API calls per ranks to create all the subgroups.
-            #
-            # For fake backend, we also use split_group to ensure consistent hash-based
-            # process group naming between precompilation (fake) and runtime (real) backends.
-            is_fake_backend = get_backend(default_group) == "fake"
-            can_use_split_group = (
-                (
-                    getattr(default_group, "bound_device_id", None) is not None
-                    and torch.cuda.is_available()
-                    and (
-                        backend is None
-                        or default_group._get_backend(torch.device("cuda")).name()
-                        == backend
-                    )
+            if (
+                getattr(default_group, "bound_device_id", None) is not None
+                and torch.cuda.is_available()
+                and (
+                    backend is None
+                    or default_group._get_backend(torch.device("cuda")).name()
+                    == backend
                 )
-                or is_fake_backend
-            )
-            if can_use_split_group:
+            ):
                 dim_group = split_group(
                     parent_pg=default_group,
                     timeout=timeout,

@@ -45,40 +45,6 @@ class FakeProcessGroup : public Backend {
     return c10::static_intrusive_pointer_cast<Backend::Options>(options_);
   }
 
-  // FakeProcessGroup supports splitting to enable consistent process group
-  // naming between fake and real backends (both use hash-based names).
-  bool supportsSplitting() const override {
-    return true;
-  }
-
-  // Split creates a child FakeProcessGroup for the given ranks.
-  // This enables DeviceMesh to use split_group() path with fake backend,
-  // ensuring consistent hash-based process group naming.
-  c10::intrusive_ptr<Backend> split(
-      const c10::intrusive_ptr<Store>& /* store */,
-      const std::vector<int>& ranks,
-      const c10::intrusive_ptr<Backend::Options>& /* opts */) override {
-    // Find the new rank within the split group
-    int new_rank = -1;
-    for (size_t i = 0; i < ranks.size(); ++i) {
-      if (ranks[i] == rank_) {
-        new_rank = static_cast<int>(i);
-        break;
-      }
-    }
-
-    // If current rank is not in the split, return nullptr
-    // (this matches NCCL behavior)
-    if (new_rank < 0) {
-      return nullptr;
-    }
-
-    // Create a new FakeProcessGroup with default options
-    // (we don't use the passed opts because it might not be FakeProcessGroup::Options)
-    return c10::make_intrusive<FakeProcessGroup>(
-        new_rank, static_cast<int>(ranks.size()), c10::make_intrusive<FakeProcessGroup::Options>());
-  }
-
   c10::intrusive_ptr<Work> broadcast(
       std::vector<at::Tensor>& /* tensors */,
       const BroadcastOptions& /* opts */ = BroadcastOptions()) override {
