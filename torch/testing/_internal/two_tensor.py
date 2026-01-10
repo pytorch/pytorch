@@ -15,12 +15,15 @@ class TwoTensor(torch.Tensor):
         if outer_stride is None:
             outer_stride = a.stride()
 
-        assert (
-            a.device == b.device
-            and a.layout == b.layout
-            and a.requires_grad == b.requires_grad
-            and a.dtype == b.dtype
-        )
+        if (
+            a.device != b.device
+            or a.layout != b.layout
+            or a.requires_grad != b.requires_grad
+            or a.dtype != b.dtype
+        ):
+            raise AssertionError(
+                "Inner tensors a and b must have matching device, layout, requires_grad, and dtype"
+            )
         # I guess it would be more accurate to represent the shape as torch.cat(a, b).shape
         shape = outer_size
         kwargs = {}
@@ -32,9 +35,18 @@ class TwoTensor(torch.Tensor):
         kwargs["dtype"] = a.dtype
         out = torch.Tensor._make_wrapper_subclass(cls, shape, **kwargs)
 
-        assert a.shape == b.shape
-        assert a.stride() == b.stride()
-        assert a.storage_offset() == b.storage_offset()
+        if a.shape != b.shape:
+            raise AssertionError(
+                f"Tensors must have same shape: a.shape={a.shape}, b.shape={b.shape}"
+            )
+        if a.stride() != b.stride():
+            raise AssertionError(
+                f"Tensors must have same stride: a.stride={a.stride()}, b.stride={b.stride()}"
+            )
+        if a.storage_offset() != b.storage_offset():
+            raise AssertionError(
+                f"Tensors must have same storage_offset: a={a.storage_offset()}, b={b.storage_offset()}"
+            )
         return out
 
     @torch._disable_dynamo
@@ -53,11 +65,14 @@ class TwoTensor(torch.Tensor):
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, meta, outer_size, outer_stride):
-        assert meta is None
+        if meta is not None:
+            raise AssertionError("meta must be None for TwoTensor")
         a, b = inner_tensors["a"], inner_tensors["b"]
         if type(a) is torch.Tensor:
-            assert outer_size is not None
-            assert outer_stride is not None
+            if outer_size is None:
+                raise AssertionError("outer_size must not be None when a is a Tensor")
+            if outer_stride is None:
+                raise AssertionError("outer_stride must not be None when a is a Tensor")
         return TwoTensor(a, b, outer_size, outer_stride)
 
     @classmethod

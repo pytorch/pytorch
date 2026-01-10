@@ -242,7 +242,8 @@ def simple_local_map_hop(inp1, inp2):
 
     gm = torch.fx.symbolic_trace(body_gm)
 
-    assert torch.distributed.is_available()
+    if not torch.distributed.is_available():
+        raise RuntimeError("torch.distributed must be available")
     from torch.distributed.tensor.placement_types import Replicate
 
     gm.meta["local_map_kwargs"] = {

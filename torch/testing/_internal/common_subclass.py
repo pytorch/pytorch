@@ -116,7 +116,8 @@ class WrapperTensorWithCustomStrides(WrapperTensor):
 class DiagTensorBelow(WrapperTensor):
     @classmethod
     def get_wrapper_properties(cls, diag, requires_grad=False):
-        assert diag.ndim == 1
+        if diag.ndim != 1:
+            raise ValueError(f"diag must be 1-dimensional, got {diag.ndim} dimensions")
         return diag, {"size": diag.size() + diag.size(), "requires_grad": requires_grad}
 
     def __init__(self, diag, requires_grad=False):
@@ -126,7 +127,7 @@ class DiagTensorBelow(WrapperTensor):
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-        if not all(issubclass(cls, t) for t in types):
+        if any(not issubclass(cls, t) for t in types):
             return NotImplemented
 
         # For everything else, call the handler:
@@ -158,7 +159,8 @@ class DiagTensorBelow(WrapperTensor):
 class SparseTensor(WrapperTensor):
     @classmethod
     def get_wrapper_properties(cls, size, values, indices, requires_grad=False):
-        assert values.device == indices.device
+        if values.device != indices.device:
+            raise ValueError(f"Device mismatch: values on {values.device}, indices on {indices.device}")
         return values, {"size": size, "requires_grad": requires_grad}
 
     def __init__(self, size, values, indices, requires_grad=False):

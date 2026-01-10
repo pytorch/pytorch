@@ -767,7 +767,9 @@ def _get_py3_code(code, fn_name):
         spec = importlib.util.spec_from_file_location(fn_name, script_path)
         module = importlib.util.module_from_spec(spec)
         loader = spec.loader
-        assert isinstance(loader, Loader)  # Assert type to meet MyPy requirement
+        # Assert type to meet MyPy requirement
+        if not isinstance(loader, Loader):
+            raise TypeError(f"Expected Loader, got {type(loader).__name__}")
         loader.exec_module(module)
         fn = getattr(module, fn_name)
         return fn

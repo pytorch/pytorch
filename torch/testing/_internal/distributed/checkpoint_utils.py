@@ -127,7 +127,8 @@ def with_temp_dir(
     """
     Wrapper to initialize temp directory for distributed checkpoint.
     """
-    assert func is not None
+    if func is None:
+        raise TypeError("func must not be None")
 
     @wraps(func)
     def wrapper(self, *args: tuple[object], **kwargs: dict[str, Any]) -> None:
@@ -174,7 +175,8 @@ def with_checkpoint_logging(
         logger_name: Name of the logger to configure (default: 'torch.distributed.checkpoint')
         level: Logging level to set (default: logging.INFO)
     """
-    assert func is not None
+    if func is None:
+        raise TypeError("func must not be None")
 
     @wraps(func)
     def wrapper(self, *args: tuple[object], **kwargs: dict[str, Any]) -> None:

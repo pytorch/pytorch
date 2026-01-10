@@ -3659,9 +3659,12 @@ class DistributedTest:
                         ]
                         for rank_iter in group
                     ]
-                    assert self._run_all_gather_coalesced_and_verify(
+                    if not self._run_all_gather_coalesced_and_verify(
                         output_tensor_lists, input_tensors, expected_tensors, group_id
-                    ), "output tensors do not match expected outputs"
+                    ):
+                        raise AssertionError(
+                            "output tensors do not match expected outputs"
+                        )
 
             self._barrier()
 
@@ -3733,9 +3736,10 @@ class DistributedTest:
                 ]
                 for r in group
             ]
-            assert self._run_all_gather_coalesced_and_verify(
+            if not self._run_all_gather_coalesced_and_verify(
                 output_tensors_lists, input_tensors, expected_tensors, group_id
-            )
+            ):
+                raise AssertionError("all_gather_coalesced verification failed")
             self._barrier()
 
         # AllToAll
@@ -5024,7 +5028,10 @@ class DistributedTest:
                 for n, param in net.named_parameters():
                     self.assertEqual(param.dtype, torch.float32)
                     if param.grad is None:
-                        assert n == "module.p"  # Only param that doesn't require grad
+                        if n != "module.p":
+                            raise AssertionError(
+                                f"param name should be 'module.p', got {n}"
+                            )
                     else:
                         self.assertEqual(param.grad.dtype, torch.float32)
                         tensor_list = [
@@ -9335,7 +9342,10 @@ class DistributedTest:
                     x = self.fc2(F.relu(self.fc1(x)))
                     y = x.clone()
                     x = x.detach()
-                    assert not x.requires_grad
+                    if x.requires_grad:
+                        raise AssertionError(
+                            "detached tensor should not require gradients"
+                        )
                     return (x, y)
 
             model = MyModel().to(self.rank)

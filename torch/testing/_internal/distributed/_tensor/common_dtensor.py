@@ -138,7 +138,10 @@ class ModelArgs:
 class Attention(nn.Module):
     def __init__(self, args: ModelArgs):
         super().__init__()
-        assert args.dim % args.n_heads == 0
+        if args.dim % args.n_heads:
+            raise AssertionError(
+                f"args.dim ({args.dim}) must be divisible by args.n_heads ({args.n_heads})"
+            )
         self.head_dim = args.dim // args.n_heads
         self.n_heads = args.n_heads
         self.dropout_p = args.dropout_p
@@ -206,8 +209,10 @@ class TransformerBlock(nn.Module):
 class Transformer(nn.Module):
     def __init__(self, args: ModelArgs):
         super().__init__()
-        assert args.vocab_size is not None
-        assert args.max_seq_len is not None
+        if args.vocab_size is None:
+            raise AssertionError("args.vocab_size must not be None")
+        if args.max_seq_len is None:
+            raise AssertionError("args.max_seq_len must not be None")
         self.model_args = args
         self.max_seq_len = args.max_seq_len
         self.tok_embeddings = nn.Embedding(args.vocab_size, args.dim)
@@ -224,7 +229,10 @@ class Transformer(nn.Module):
 
     def forward(self, tokens):
         _bsz, seq_len = tokens.size()
-        assert seq_len <= self.max_seq_len
+        if seq_len > self.max_seq_len:
+            raise AssertionError(
+                f"seq_len ({seq_len}) exceeds max_seq_len ({self.max_seq_len})"
+            )
         h = self.tok_embeddings(tokens)
         pos = torch.arange(0, seq_len, device=tokens.device)
         p = self.pos_embeddings(pos)  # positional embeddings of shape (seq_len, dim)
@@ -246,7 +254,8 @@ class Transformer(nn.Module):
         use_seq_parallel: bool,
         local_output_for_attn: bool = False,
     ) -> nn.Module:
-        assert isinstance(module, Transformer), f"Requires Transformer but got {module}"
+        if not isinstance(module, Transformer):
+            raise TypeError(f"Requires Transformer but got {module}")
         # Parallelize the root submodules.
         if use_seq_parallel:
             root_plan = {
@@ -1014,7 +1023,10 @@ def generate_shard_orders(mesh, tensor_rank):
                     range(tensor_rank), len(splitted_list)
                 ):
                     shard_order = {}
-                    assert len(tensor_dims) == len(splitted_list)
+                    if len(tensor_dims) != len(splitted_list):
+                        raise AssertionError(
+                            f"tensor_dims and splitted_list must have same length, got {len(tensor_dims)} != {len(splitted_list)}"
+                        )
                     for tensor_dim, mesh_dims in zip(tensor_dims, splitted_list):
                         shard_order[tensor_dim] = device_order[
                             mesh_dims[0] : mesh_dims[-1] + 1
