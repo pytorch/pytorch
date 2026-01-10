@@ -542,7 +542,9 @@ class MicroPipelineTP4GPUTest(TestCase):
         w1 = torch.rand(7, 10, device="cuda")
         w2 = torch.rand(10, 7, device="cuda")
 
-        with _test_mode(group_names={device_mesh["tp"].get_group().group_name}):
+        with _test_mode(
+            group_names={device_mesh["tp"].get_group().group_name_or_alias}
+        ):
             compiled = torch.compile(func)
             code = run_and_get_triton_code(compiled, inp, w1, w2)
 
