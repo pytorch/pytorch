@@ -1248,12 +1248,12 @@ class TestDeserialize(TestCase):
                 super().__init__()
 
             def forward(self, x, y):
-                z = x[:, -y.shape[0] :, :]
+                z = x[:, -((y.shape[0] >> 1) << 1) :, :]
                 return z
 
         inputs = (torch.ones(4, 5, 10), torch.ones(3))
         dynamic_shapes = {"x": {}, "y": {0: Dim("seqlen", max=4)}}
-        # Compile with dynamic_shapes set to get operator.neg involved
+        # Compile with dynamic_shapes set to get operator.neg/shifts involved
         self.check_graph(MyModule(), inputs, dynamic_shapes=dynamic_shapes)
 
     def test_auto_functionalize(self):
@@ -1698,9 +1698,9 @@ class TestDeserialize(TestCase):
             deserialized_ep.graph_module.code.strip("\n"),
             """\
 def forward(self, x):
-    topk_default = torch.ops.aten.topk.default(x, 2);  x = None
-    getitem = topk_default[0]
-    getitem_1 = topk_default[1];  topk_default = None
+    topk = torch.ops.aten.topk.default(x, 2);  x = None
+    getitem = topk[0]
+    getitem_1 = topk[1];  topk = None
     mul_tensor = torch.ops.aten.mul.Tensor(getitem, 2)
     mul = torch.ops.aten.mul.Tensor(getitem, mul_tensor);  getitem = mul_tensor = None
     return (mul, getitem_1)
@@ -2068,6 +2068,59 @@ class TestSaveLoad(TestCase):
         self.assertEqual(unf.int_buffer.dtype, torch.uint8)
         self.assertEqual(unf.int_buffer2.dtype, torch.uint8)
         self.assertEqual(unf.float_buffer.dtype, torch.float32)
+
+    def test_from_node_metadata_serialization(self):
+        """Test that from_node metadata is properly serialized and deserialized."""
+
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.conv_layer = torch.nn.Conv2d(
+                    in_channels=1, out_channels=64, kernel_size=3, padding=1
+                )
+
+            def forward(self, x):
+                return self.conv_layer(x)
+
+        m = Model()
+        inputs = (torch.randn(1, 1, 32, 32),)
+
+        ep = export(m, inputs, strict=True)
+        reexported_ep = export(
+            ep.module(), inputs, strict=True
+        )  # for generating more complex from_node metadata
+        serialized = serialize(reexported_ep)
+        reexported_ep_loaded = deserialize(serialized)
+
+        # Verify that node names and from_node metadata are preserved after serialization/deserialization
+        self.assertEqual(
+            len(list(reexported_ep.graph_module.graph.nodes)),
+            len(list(reexported_ep_loaded.graph_module.graph.nodes)),
+        )
+        for node, node_loaded in zip(
+            reexported_ep.graph_module.graph.nodes,
+            reexported_ep_loaded.graph_module.graph.nodes,
+        ):
+            # Verify node name consistency
+            self.assertEqual(node.name, node_loaded.name)
+            self.assertEqual(node.op, node_loaded.op)
+            self.assertEqual(node.target, node_loaded.target)
+
+            if node.op not in {"placeholder", "output"}:
+                from_node_orig = node.meta.get("from_node")
+                from_node_loaded = node_loaded.meta.get("from_node")
+
+                if from_node_orig is None:
+                    self.assertIsNone(from_node_loaded)
+                else:
+                    self.assertIsNotNone(from_node_loaded)
+                    self.assertEqual(len(from_node_orig), len(from_node_loaded))
+                    for node_source_orig, node_source_loaded in zip(
+                        from_node_orig, from_node_loaded
+                    ):
+                        self.assertEqual(
+                            node_source_orig.to_dict(), node_source_loaded.to_dict()
+                        )
 
 
 @unittest.skipIf(not torchdynamo.is_dynamo_supported(), "dynamo doesn't support")

@@ -2666,50 +2666,6 @@ def forward(self, arg0_1, arg1_1):
                 ) from e
             raise
 
-    @requires_gpu
-    def test_constexpr_handling(self):
-        @triton.jit
-        def copy_kernel(
-            src_ptr,
-            dst_ptr,
-            n_elements,
-            stride,
-            BLOCK_SIZE: tl.constexpr,
-        ):
-            pid = tl.program_id(0)
-            offs = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-            mask = offs < n_elements
-            x = tl.load(src_ptr + offs * stride, mask=mask)
-            tl.store(dst_ptr + offs * stride, x, mask=mask)
-
-        t = torch.randn(1024, device=GPU_TYPE)
-        out = torch.empty(1024, device=GPU_TYPE)
-
-        kwargs = {
-            "src_ptr": t,
-            "dst_ptr": out,
-            "n_elements": 1024,
-            "stride": 1,
-            "BLOCK_SIZE": 256,
-        }
-
-        ttir_module, ordered_arg_names = generate_ttir(
-            copy_kernel, kwargs, tma_descriptor_metadata={}
-        )
-        ttir_str = str(ttir_module)
-
-        # `constexpr` values get inlined, and do not appear as function parameters.
-        # Non-constexpr arguments should appear either in the TTIR string (older Triton)
-        # or in the ordered_arg_names list (newer Triton).
-        for arg_name in ["src_ptr", "dst_ptr", "n_elements", "stride"]:
-            self.assertTrue(
-                arg_name in ttir_str or arg_name in ordered_arg_names,
-                f"{arg_name} should appear in TTIR or ordered_arg_names",
-            )
-        # BLOCK_SIZE is constexpr, so it should not appear in ordered_arg_names or TTIR.
-        self.assertNotIn("BLOCK_SIZE", ordered_arg_names)
-        self.assertNotIn("BLOCK_SIZE", ttir_str)
-
 
 def make_mutation_test(fn):
     @requires_gpu
@@ -3058,7 +3014,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             in_ptr0,
             in_ptr1,
             out_ptr,
-            n_elements: "tl.constexpr",
+            n_elements,
             BLOCK_SIZE: "tl.constexpr",
         ):
             pid = tl.program_id(axis=0)
@@ -3128,7 +3084,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             in_ptr0,
             in_ptr1,
             out_ptr,
-            n_elements: "tl.constexpr",
+            n_elements,
             BLOCK_SIZE: "tl.constexpr",
         ):
             pid = tl.program_id(axis=0)
@@ -3164,7 +3120,7 @@ class MutationTests(torch._inductor.test_case.TestCase):
             in_ptr0,
             in_ptr1,
             out_ptr,
-            n_elements: "tl.constexpr",
+            n_elements,
             BLOCK_SIZE: "tl.constexpr",
         ):
             pid = tl.program_id(axis=0)

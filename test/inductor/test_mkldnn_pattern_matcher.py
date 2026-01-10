@@ -49,7 +49,7 @@ unary_list = {
     torch.nn.GELU(approximate="none"): 6,
     torch.nn.GELU(approximate="tanh"): 10,
     torch.nn.ReLU6(): 3,
-    torch.nn.SiLU(): 3,
+    torch.nn.SiLU(): 5,
     torch.nn.Hardsigmoid(): 5,
 }
 
@@ -1119,9 +1119,12 @@ class TestPatternMatcher(TestPatternMatcherBase):
             dtypes.append(torch.float16)
 
         def matcher_check_fn():
+            # SiLU: 5 base nodes + 2 dtype conversion = 7
+            # ReLU: 2 base nodes (non-decomposed, no dtype conversion)
+            # Total: 7 + 2 = 9
             self.assertEqual(
                 counters["inductor"]["mkldnn_unary_fusion_matcher_nodes"],
-                0 if TEST_ACL else 7,
+                0 if TEST_ACL else 9,
             )
             self.assertEqual(
                 counters["inductor"]["mkldnn_unary_fusion_matcher_count"],
