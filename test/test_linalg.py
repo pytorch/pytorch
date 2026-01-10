@@ -1983,6 +1983,18 @@ class TestLinalg(TestCase):
                     result = torch.linalg.norm(x, ord=ord)
                     self.assertEqual(result, result_n, msg=msg)
 
+    @onlyCPU
+    @dtypes(torch.float32)
+    def test_norm_large_tensor_precision(self, device, dtype):
+        # 100M elements of value 100: L2 norm = 100 * sqrt(100M) = 1,000,000
+        size = 100_000_000
+        value = 100.0
+        expected = value * math.sqrt(size)
+        t = torch.full((size,), value, dtype=dtype, device=device)
+        result = torch.linalg.norm(t).item()
+        rel_error = abs(result - expected) / expected
+        self.assertLess(rel_error, 0.001)
+
     # Test degenerate shape results match numpy for linalg.norm vector norms
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
