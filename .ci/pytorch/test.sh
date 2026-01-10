@@ -982,8 +982,9 @@ test_inductor_set_cpu_affinity(){
     export KMP_BLOCKTIME=1
   else
     # Fix version `GLIBCXX_3.4.32' not found until we get rid of conda
-    GLIBCXX_LIB="$(find /usr/lib -name libstdc++.so.6)"
-    export LD_PRELOAD="$GLIBCXX_LIB":"$LD_PRELOAD"
+    #GLIBCXX_LIB="$(find /usr/lib -name libstdc++.so.6)"
+    #export LD_PRELOAD="$GLIBCXX_LIB":"$LD_PRELOAD"
+    echo "DEBUG DEBUG"
   fi
 
   # Use nproc here instead of lscpu because it takes into account cgroups slice

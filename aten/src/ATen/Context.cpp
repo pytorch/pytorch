@@ -684,7 +684,7 @@ at::QEngine Context::qEngine() const {
     qengine = at::kONEDNN;
 #endif
 
-#ifdef USE_FBGEMM
+#ifdef USE_FBGEMM && defined(__x86_64__)
     if (fbgemm::fbgemmSupportedCPU()) {
       /* X86 is enabled if and only if fbgemm is available.
        * It combines goodness of fbgemm and onednn by dispatching.
