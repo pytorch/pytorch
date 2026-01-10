@@ -261,7 +261,7 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
 
   IndexType WARP_BITS = __builtin_ctz(warpSize);
   int warp_id = threadIdx.x >> WARP_BITS; // = threadIdx.x / warpSize
-  int lane_id = threadIdx.x & (warpSize - 1); // = threadIdx.x % warpSize
+  int lane_id = at::cuda::getLaneId(); // = threadIdx.x % warpSize
   // Initialize writeIndexStart to 0 by the first thread in the block.
   if (threadIdx.x == 0) {
     writeIndexStart = 0;
