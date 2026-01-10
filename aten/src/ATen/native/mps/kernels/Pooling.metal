@@ -1,5 +1,6 @@
 #include <ATen/native/mps/kernels/Pooling.h>
 #include <c10/metal/atomic.h>
+#include <c10/metal/error.h>
 #include <c10/metal/utils.h>
 #include <metal_array>
 #include <metal_stdlib>
@@ -386,7 +387,8 @@ void max_unpool_impl(
     int32_t input_index,
     constant int32_t* output_sizes,
     constant int32_t* output_strides,
-    int32_t pooling_dims) {
+    int32_t pooling_dims,
+    device c10::metal::ErrorMessages* error_buffer) {
   int32_t size_prod = 1;
   int32_t pool_offset = 0;
 
@@ -395,6 +397,18 @@ void max_unpool_impl(
     pool_offset +=
         output_strides[dim] * ((input_index % next_size_prod) / size_prod);
     size_prod *= output_sizes[dim];
+  }
+
+  // Check that the index is within the valid output range
+  if (input_index < 0 || input_index >= size_prod) {
+    TORCH_REPORT_ERROR(
+        error_buffer,
+        "Found an invalid max index: ",
+        input_index,
+        " (size_prod is ",
+        size_prod,
+        ")");
+    return;
   }
 
   output[pool_offset] = input_element;
@@ -407,6 +421,7 @@ kernel void max_unpool(
     constant T* input [[buffer(1)]],
     constant int64_t* indices [[buffer(2)]],
     constant MaxUnpoolingParams<5>& params [[buffer(3)]],
+    device c10::metal::ErrorMessages* error_buffer [[buffer(4)]],
     uint tid [[thread_position_in_grid]]) {
   auto pooling_dims = params.pooling_dims;
   auto dims = params.dims;
@@ -438,7 +453,8 @@ kernel void max_unpool(
       indices[offsets.indices],
       output_sizes + leading_dims,
       output_strides + leading_dims,
-      pooling_dims);
+      pooling_dims,
+      error_buffer);
 }
 
 template <typename T>
@@ -760,6 +776,7 @@ kernel void avg_pool_backward(
       constant DTYPE * input [[buffer(1)]],                                   \
       constant int64_t* indices [[buffer(2)]],                                \
       constant MaxUnpoolingParams<5>& params [[buffer(3)]],                   \
+      device ::c10::metal::ErrorMessages* error_buffer [[buffer(4)]],         \
       uint tid [[thread_position_in_grid]]);                                  \
                                                                               \
   template [[host_name("avg_pool_" #DTYPE)]] kernel void avg_pool<DTYPE>(     \
