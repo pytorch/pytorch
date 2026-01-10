@@ -36,7 +36,7 @@ void NnapiCompilation::init(
 ) {
   init2(
     std::move(serialized_model_tensor),
-    std::move(parameter_buffers),
+    parameter_buffers,
     ANEURALNETWORKS_PREFER_SUSTAINED_SPEED,
     false);
 }

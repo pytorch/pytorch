@@ -18,7 +18,7 @@ HIDDEN_NAMESPACE_BEGIN(torch, stable, detail)
 
 class StableLibrary final {
  private:
-  TorchLibraryHandle lib_;
+  TorchLibraryHandle lib_{};
 
  public:
   enum class Kind {

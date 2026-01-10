@@ -30,7 +30,7 @@ class ConvOpContext : public torch::jit::CustomClassHolder {
   std::vector<int64_t> stride_;
   std::vector<int64_t> padding_;
   std::vector<int64_t> dilation_;
-  int64_t groups_;
+  int64_t groups_{};
   std::vector<int64_t> input_size_;
   std::string attr_;
 
