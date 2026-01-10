@@ -203,6 +203,9 @@ def autograd_sharing(queue, ready, master_modified, device, is_parameter):
     ready.set()
     master_modified.wait()
 
+    if device == "cuda":
+        torch.cuda.synchronize()
+
     expected_var = torch.arange(1.0, 26, device=device).view(5, 5)
     expected_var[0, 0] = 1000
     is_ok = var.data.equal(expected_var)
@@ -215,6 +218,9 @@ def autograd_sharing(queue, ready, master_modified, device, is_parameter):
     else:
         is_ok &= type(var) is torch.Tensor
     var._grad = torch.ones(5, 5, device=device)
+
+    if device == "cuda":
+        torch.cuda.synchronize()
 
     queue.put(is_ok)
 
@@ -892,6 +898,8 @@ if __name__ == "__main__":
         ready.wait()
         var.data[0, 0] = 1000
         var.grad.data[:] = torch.ones(5, 5, device=device) * 4
+        if device == "cuda":
+            torch.cuda.synchronize()
         master_modified.set()
 
         worker_ok = queue.get()
