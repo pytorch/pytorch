@@ -1836,10 +1836,22 @@ class ReductionOpInfo(OpInfo):
         assert nan_policy in (None, "propagate", "omit")
 
         # These are mutually exclusive options
-        assert not (result_dtype and promotes_int_to_float)
-        assert not (result_dtype and promotes_int_to_int64)
-        assert not (result_dtype and complex_to_real)
-        assert not (promotes_int_to_float and promotes_int_to_int64)
+        if result_dtype and promotes_int_to_float:
+            raise AssertionError(
+                "result_dtype and promotes_int_to_float are mutually exclusive options"
+            )
+        if result_dtype and promotes_int_to_int64:
+            raise AssertionError(
+                "result_dtype and promotes_int_to_int64 are mutually exclusive options"
+            )
+        if result_dtype and complex_to_real:
+            raise AssertionError(
+                "result_dtype and complex_to_real are mutually exclusive options"
+            )
+        if promotes_int_to_float and promotes_int_to_int64:
+            raise AssertionError(
+                "promotes_int_to_float and promotes_int_to_int64 are mutually exclusive options"
+            )
 
         # Default sample_inputs_func for ReductionOpInfo which augments sample
         # inputs from sample_inputs_reduction with the args and kwargs from
@@ -3108,8 +3120,14 @@ class ForeachFuncInfo(OpInfo):
             # `_getattr_qual` in `OpInfo.__post_init__` which should fail since `_foreach_zero`
             # is not defined at the moment. Thus to skip the qualification, set a similar torch
             # function.
-            assert foreach_method is None
-            assert torch_ref_method is None
+            if foreach_method is not None:
+                raise AssertionError(
+                    "foreach_method must be None when supports_out is False"
+                )
+            if torch_ref_method is not None:
+                raise AssertionError(
+                    "torch_ref_method must be None when supports_out is False"
+                )
             foreach_method = foreach_method_inplace
             torch_ref_method = torch_ref_inplace
 
