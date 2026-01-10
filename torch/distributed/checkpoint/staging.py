@@ -266,6 +266,8 @@ class DefaultStager(AsyncStager):
         if self._staging_executor:
             self._staging_executor.shutdown(wait=True)
 
+        self._state_dict_stager.close()
+
     def synchronize_staging(self) -> None:
         """
         When use_async_staging is True, this method will wait until staging is complete.
