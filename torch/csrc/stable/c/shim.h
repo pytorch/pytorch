@@ -116,7 +116,7 @@ torch_string_length(StringHandle handle, size_t* length);
 AOTI_TORCH_EXPORT AOTITorchError
 torch_string_c_str(StringHandle handle, const char** data);
 
-#ifdef USE_CUDA
+#if defined(USE_CUDA) || defined(USE_ROCM)
 
 AOTI_TORCH_EXPORT AOTITorchError
 torch_get_current_cuda_blas_handle(void** ret_handle);
@@ -146,7 +146,7 @@ AOTI_TORCH_EXPORT AOTITorchError torch_c10_cuda_check_msg(
 // Free error message allocated by torch_c10_cuda_check_msg
 AOTI_TORCH_EXPORT void torch_c10_cuda_free_error_msg(char* error_msg);
 
-#endif // USE_CUDA
+#endif // USE_CUDA || USE_ROCM
 
 // Set requires_grad on a tensor
 AOTI_TORCH_EXPORT AOTITorchError
