@@ -2,7 +2,7 @@
 
 import unittest
 
-from sympy import Symbol, sympify
+from sympy import I, Max, Min, Symbol, sympify
 
 import torch
 from torch._inductor.fx_utils import count_flops_fx, countable_fx
@@ -79,6 +79,18 @@ class TestUtils(TestCase):
         self.assertEqual(result.name, "y")
         self.assertEqual(result.is_integer, None)
         self.assertEqual(result.is_nonnegative, None)
+
+    def testSympySubsNonComparableMinMax(self):
+        q0 = Symbol("q0")
+        q1 = Symbol("q1")
+        q2 = Symbol("q2")
+        expr = (
+            2073600 * Min(2, Max(0, q0))
+            + 1920 * Min(1079, Max(0, q1 - 4))
+            + Min(1919, q2)
+        )
+        result = sympy_subs(expr, {q0: I, q1: 0, q2: 0})
+        self.assertTrue(result.has(I))
 
     def test_sympy_str(self):
         self.assertEqual(sympy_str(sympify("a+b+c")), "a + b + c")

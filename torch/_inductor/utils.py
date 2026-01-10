@@ -1164,10 +1164,36 @@ def sympy_subs(expr: sympy.Expr, replacements: dict[sympy.Expr, Any]) -> sympy.E
         else:
             return replacement
 
+    def safe_rebuild(node: sympy.Expr, repl: dict[sympy.Expr, Any]) -> sympy.Expr:
+        try:
+            if node in repl:
+                return sympy.sympify(repl[node])
+        except Exception:
+            pass
+        if not getattr(node, "args", None):
+            return node
+        new_args = tuple(safe_rebuild(arg, repl) for arg in node.args)
+        func = node.func
+        if func in (sympy.Min, sympy.Max) or getattr(func, "__name__", "") in (
+            "Min",
+            "Max",
+        ):
+            try:
+                return func(*new_args, evaluate=False)
+            except TypeError:
+                return func(*new_args)
+        return func(*new_args)
+
     # xreplace is faster than subs, but is way more picky
-    return sympy.sympify(expr).xreplace(
-        {k: to_symbol(k, v) for k, v in replacements.items()}
-    )
+    repl = {k: to_symbol(k, v) for k, v in replacements.items()}
+    try:
+        return sympy.sympify(expr).xreplace(repl)
+    except ValueError as exc:
+        if "not comparable" not in str(exc):
+            raise
+        # SymPy Min/Max can raise on non-comparable args (e.g., I). Rebuild
+        # with evaluate=False to preserve the expression shape.
+        return safe_rebuild(sympy.sympify(expr), repl)
 
 
 def is_symbolic(a: Any) -> TypeGuard[Union[torch.SymInt, torch.Tensor]]:
