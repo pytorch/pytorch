@@ -214,11 +214,6 @@ def _compute_local_shape_and_global_offset(
               empty tuple.
     """
 
-    empty_offset = ()
-    if my_coordinate is None:
-        # if rank not in the mesh, return empty offset
-        return ((0,), empty_offset)
-
     local_shape = list(global_shape)
     # Perform shard from left to right. For example,
     #   global tensor: [0, 1, 2, 3, 4, 5, 6, 7]
@@ -254,7 +249,7 @@ def _compute_local_shape_and_global_offset(
         local_shape[shard_dim] = shard_size
         shard_dim_to_global_offsets[shard_dim] = shard_offsets
     if skip_offset:
-        return tuple(local_shape), empty_offset
+        return tuple(local_shape), ()
     global_offset = [0] * len(global_shape)
     for shard_dim, global_offsets in shard_dim_to_global_offsets.items():
         global_offset[shard_dim] = _get_first_offset(global_offsets)
