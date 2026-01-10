@@ -43,7 +43,7 @@ struct FunctionExtractor {
 
     void PopulateInputsOutputs(
         const std::unordered_set<std::string>& param_names);
-    bool IsIdenticalFuncion(const ScopeContext& other_ctx) const;
+    bool IsIdenticalFunction(const ScopeContext& other_ctx) const;
   };
 
   using ScopeCtxPtr = ScopeContext*;
@@ -738,7 +738,7 @@ void FunctionExtractor::ConvertScopeToFunction(
   }
 }
 
-bool FunctionExtractor::ScopeContext::IsIdenticalFuncion(
+bool FunctionExtractor::ScopeContext::IsIdenticalFunction(
     const ScopeContext& other_ctx) const {
   // Differentiate same function under different inputs.
   // When constants are passed in place of inputs, it leads to different
@@ -931,7 +931,7 @@ std::unordered_map<ScopePtr, scope_list> FunctionExtractor::
       auto key_scope = kv_it.first;
       const auto& key_scope_ctx = scope_ctxs[key_scope];
       auto& key_scope_vec = kv_it.second;
-      if (key_scope_ctx->IsIdenticalFuncion(*scope_ctx)) {
+      if (key_scope_ctx->IsIdenticalFunction(*scope_ctx)) {
         key_scope_vec.emplace_back(scope);
         unique = false;
         break;

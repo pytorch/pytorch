@@ -52,17 +52,42 @@ def get_arg_return_types_from_interface(module_interface):
 
 
 class _StringLoader(importlib.abc.SourceLoader):
-    def __init__(self, data):
+    """
+    A custom loader for dynamically generated Python source code.
+
+    Inherits from SourceLoader for API compatibility but overrides exec_module()
+    to avoid bytecode caching issues. The default SourceLoader.exec_module() calls
+    cache_from_source() which fails with IndexError when the filename doesn't
+    correspond to a real filesystem path with a .py extension.
+    """
+
+    def __init__(self, data: str) -> None:
         self.data = data
 
-    def get_source(self, fullname):
+    def get_source(self, fullname: str) -> str:
         return self.data
 
-    def get_data(self, path):
+    def get_data(self, path: str) -> bytes:
         return self.data.encode("utf-8")
 
-    def get_filename(self, fullname):
-        return fullname
+    def get_filename(self, fullname: str) -> str:
+        return f"<{fullname}>.py"
+
+    def path_stats(self, path: str) -> dict:
+        # Raise OSError since source is dynamically generated (no filesystem stats)
+        raise OSError("dynamically generated module has no filesystem stats")
+
+    def exec_module(self, module) -> None:
+        """
+        Execute the module by compiling and running the source directly.
+
+        This overrides SourceLoader.exec_module() to bypass the problematic
+        get_code() -> cache_from_source() code path that fails on dynamic modules.
+        """
+        source = self.get_source(module.__name__)
+        filename = self.get_filename(module.__name__)
+        code = compile(source, filename, "exec", dont_inherit=True)
+        exec(code, module.__dict__)
 
 
 def _do_instantiate_remote_module_template(

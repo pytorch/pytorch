@@ -251,7 +251,7 @@ class StaticallyLaunchedTritonKernel:
             if has_scratch:
                 arg_tys = arg_tys + "O"
                 args = (*args, None)
-        # pyrefly: ignore [bad-argument-type]
+
         assert len(args) == len(arg_tys)
 
         # TODO: can handle grid functions here or in C++, so
@@ -264,7 +264,6 @@ class StaticallyLaunchedTritonKernel:
             self.num_warps,
             self.shared,
             arg_tys,
-            # pyrefly: ignore [bad-argument-type]
             args,
             stream,
         )

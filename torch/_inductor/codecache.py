@@ -1023,12 +1023,23 @@ class GuardedCache(Generic[T]):
         raise NotImplementedError("Implement _get_tmp_dir_for_key on parent class")
 
     @classmethod
+    def _record_result(
+        cls: type[GuardedCache[T]],
+        key: str,
+        local_hit: bool,
+        local_miss: bool,
+        remote_hit: bool,
+        remote_miss: bool,
+    ) -> None:
+        raise NotImplementedError("Implement _record_result on parent class")
+
+    @classmethod
     def iterate_over_candidates(
         cls: type[GuardedCache[T]],
         local: bool,
         remote_cache: RemoteCache[JsonDataTy] | None,
         key: str,
-    ) -> Generator[tuple[T, bytes], None, None]:
+    ) -> Generator[tuple[T, bytes, bool], None, None]:
         if local:
             subdir = cls._get_tmp_dir_for_key(key)
             if os.path.exists(subdir):
@@ -1036,7 +1047,7 @@ class GuardedCache(Generic[T]):
                     try:
                         with open(os.path.join(subdir, path), "rb") as f:
                             content = f.read()
-                            yield pickle.loads(content), content
+                            yield pickle.loads(content), content, True
                     except Exception:
                         log.warning(
                             "fx graph cache unable to load compiled graph",
@@ -1050,7 +1061,7 @@ class GuardedCache(Generic[T]):
                     data = cache_data["data"]
                     assert isinstance(data, (str, bytes))
                     content = base64.b64decode(data)
-                    yield pickle.loads(content), content
+                    yield pickle.loads(content), content, False
             except Exception:
                 log.warning(
                     "%s unable to load compiled graph", cls.__name__, exc_info=True
@@ -1083,11 +1094,14 @@ class GuardedCache(Generic[T]):
         pickled_content = None
         result_status = "full_miss"
         sample_guards_expr = None
+        in_local = False
 
         # Iterate over any entries in the subdir for this key and evaluate
         # guards to determine whether there's a hit.
 
-        for candidate, content in cls.iterate_over_candidates(local, remote_cache, key):
+        for candidate, content, in_local in cls.iterate_over_candidates(
+            local, remote_cache, key
+        ):
             assert hasattr(candidate, "guards_expr")
             if not candidate.guards_expr:  # type: ignore[attr-defined]
                 # No guards to evaluate, so this is a hit.
@@ -1115,6 +1129,21 @@ class GuardedCache(Generic[T]):
         info = {"cache_status_detailed": result_status}
         if sample_guards_expr is not None:
             info["cache_status_guard_expr"] = sample_guards_expr
+
+        # Record hits/misses for compilation event logging. The tricky part is that a
+        # remote hit would imply a local miss (if local caching is enabled).
+        local_hit = graph is not None and in_local
+        remote_hit = graph is not None and not in_local
+        local_miss = (graph is None or remote_hit) and local
+        remote_miss = graph is None and remote_cache is not None
+        cls._record_result(
+            key,
+            local_hit=local_hit,
+            local_miss=local_miss,
+            remote_hit=remote_hit,
+            remote_miss=remote_miss,
+        )
+
         return graph, pickled_content, info
 
     @classmethod
@@ -1193,6 +1222,49 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
         Return the disk location for a given cache key.
         """
         return os.path.join(FxGraphCache._get_tmp_dir(), key[1:3], key)
+
+    @classmethod
+    def _record_result(
+        cls: type[FxGraphCache],
+        key: str,
+        local_hit: bool,
+        local_miss: bool,
+        remote_hit: bool,
+        remote_miss: bool,
+    ) -> None:
+        """
+        Called by GuardedCache to record hit/miss statistics.
+        """
+        if local_hit:
+            CompileEventLogger.try_(
+                CompileEventLogger.increment_toplevel,
+                "inductor_fx_local_cache_hit_count",
+            )
+        if remote_hit:
+            CompileEventLogger.try_(
+                CompileEventLogger.increment_toplevel,
+                "inductor_fx_remote_cache_hit_count",
+            )
+            CompileEventLogger.try_(
+                CompileEventLogger.add_to_set_toplevel,
+                "inductor_fx_remote_cache_hit_keys",
+                key,
+            )
+        if local_miss:
+            CompileEventLogger.try_(
+                CompileEventLogger.increment_toplevel,
+                "inductor_fx_local_cache_miss_count",
+            )
+        if remote_miss:
+            CompileEventLogger.try_(
+                CompileEventLogger.increment_toplevel,
+                "inductor_fx_remote_cache_miss_count",
+            )
+            CompileEventLogger.try_(
+                CompileEventLogger.add_to_set_toplevel,
+                "inductor_fx_remote_cache_miss_keys",
+                key,
+            )
 
     @staticmethod
     def cache_hit_post_compile(
@@ -1575,17 +1647,6 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
             log.info("fx graph cache hit for key %s", key)
             counters["inductor"]["fxgraph_cache_hit"] += 1
             cache_info["cache_state"] = "hit"
-            if remote_cache:
-                # Count remote cache hit stats
-                CompileEventLogger.try_(
-                    CompileEventLogger.increment_toplevel,
-                    "inductor_fx_remote_cache_hit_count",
-                )
-                CompileEventLogger.try_(
-                    CompileEventLogger.add_to_set_toplevel,
-                    "inductor_fx_remote_cache_hit_keys",
-                    key,
-                )
 
             if (time_saved_ns := compiled_graph._time_taken_ns) is not None:
                 cache_info["time_saved_ns"] = time_saved_ns
@@ -1600,17 +1661,6 @@ class FxGraphCache(GuardedCache[CompiledFxGraph]):
                 ) != 0:
                     cache_info["ephemeral_timeout_increase"] = ephemeral_increase
         else:
-            if remote_cache:
-                # Count remote cache miss stats
-                CompileEventLogger.try_(
-                    CompileEventLogger.increment_toplevel,
-                    "inductor_fx_remote_cache_miss_count",
-                )
-                CompileEventLogger.try_(
-                    CompileEventLogger.add_to_set_toplevel,
-                    "inductor_fx_remote_cache_miss_keys",
-                    key,
-                )
             log.info("fx graph cache miss for key %s", key)
             counters["inductor"]["fxgraph_cache_miss"] += 1
             cache_info["cache_state"] = "miss"
