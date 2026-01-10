@@ -7,8 +7,10 @@ import itertools
 import logging
 import operator
 import textwrap
+import time
 import traceback
 from collections.abc import Callable, Container, Generator, Iterable, Iterator, Sequence
+from concurrent.futures import Future
 from contextlib import AbstractContextManager, nullcontext
 from enum import Enum
 from functools import partial
@@ -5308,7 +5310,17 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         self, hint_override: Optional[int] = None
     ) -> dict[ChoiceCaller, float]:
         if hint_override not in self._choice_timings:
-            self._choice_timings[hint_override] = self._choice_timings_fn(hint_override)
+            timings, log_results_fn = self._choice_timings_fn(hint_override)
+            if config.pipeline_max_autotune_gemm:
+                # Get autotune timings for async autotuning
+                autotune_start = time.time()
+                for choice, t in timings.items():
+                    if isinstance(t, Future):
+                        timings[choice] = t.result()
+                elapse = time.time() - autotune_start
+                log_results_fn(elapse)
+
+            self._choice_timings[hint_override] = timings
         return self._choice_timings[hint_override]
 
     @contextlib.contextmanager

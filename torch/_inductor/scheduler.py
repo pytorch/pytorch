@@ -3954,10 +3954,24 @@ class Scheduler:
 
             # Eagerly compile and benchmark non-template nodes
             choice_timings = multi_node.choice_timings()
-            min_choice, ms1 = multi_node.get_min_choice()
 
-            ms2 = float("inf")
+            num_triton_callers = sum(isinstance(c, int) for c in choice_timings.keys())
             bench_epilogue = config.benchmark_epilogue_fusion
+
+            ms1, ms2 = float("inf"), float("inf")
+            if (
+                config.pipeline_max_autotune_gemm
+                and not bench_epilogue
+                and num_triton_callers <= config.max_epilogue_benchmarked_choices
+            ):
+                # Don't sort, allow timings to not be retrieved yet for pipelined autotuning
+                choice_timings_iter = choice_timings.items()
+            else:
+                _, ms1 = multi_node.get_min_choice()
+                choice_timings_iter = sorted(
+                    choice_timings.items(), key=operator.itemgetter(1)
+                )
+
             if bench_epilogue:
                 ms2, path2 = (
                     self.benchmark_fused_nodes(node_list_2)
@@ -3975,9 +3989,7 @@ class Scheduler:
             # Start compiling choices in parallel
             future_choices: list[tuple[Any, Optional[LambdaFuture], ModuleType]] = []
             triton_choices = 0
-            for choice, unfused_time in sorted(
-                choice_timings.items(), key=operator.itemgetter(1)
-            ):
+            for choice, unfused_time in choice_timings_iter:
                 if not isinstance(choice, torch._inductor.ir.TritonTemplateCallerBase):
                     continue
 
@@ -4045,9 +4057,10 @@ class Scheduler:
                                 min_ms_fused = ms_fused
                                 ms_fused_choice = choice
                     else:
+                        min_choice, _ms1 = multi_node.get_min_choice()
                         fusible_choice = (
-                            min_choice == choice
-                            or ms2 + ms1 > choice_timings[choice] + ms2_fused
+                            isinstance(min_choice, TritonTemplateCallerBase)
+                            or ms2 + _ms1 > choice_timings[choice] + ms2_fused
                         )
 
                         if (
