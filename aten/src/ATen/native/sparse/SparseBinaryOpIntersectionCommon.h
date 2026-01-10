@@ -14,6 +14,7 @@
 #include <ATen/ops/arange.h>
 #include <ATen/ops/empty.h>
 #include <ATen/ops/_sparse_coo_tensor_with_dims_and_tensors.h>
+#include <ATen/ops/result_type.h>
 #include <ATen/ops/result_type_native.h>
 #endif
 
