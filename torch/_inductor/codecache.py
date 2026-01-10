@@ -1044,6 +1044,8 @@ class GuardedCache(Generic[T]):
             subdir = cls._get_tmp_dir_for_key(key)
             if os.path.exists(subdir):
                 for path in sorted(os.listdir(subdir)):
+                    if path.startswith("."):
+                        continue  # Skip temp files from concurrent write_atomic() calls
                     try:
                         with open(os.path.join(subdir, path), "rb") as f:
                             content = f.read()
