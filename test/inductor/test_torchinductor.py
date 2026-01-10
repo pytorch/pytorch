@@ -13752,6 +13752,36 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             with self.assertRaisesRegex(RuntimeError, "Output size is too small"):
                 _ = torch.compile(model)(inputs)
 
+    def test_conv_transpose_zero_size_output(self):
+        # https://github.com/pytorch/pytorch/issues/171093
+        # ConvTranspose2d that produces zero-size output should work in both modes
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # Output size = (input_size - 1) * stride - 2 * padding + kernel_size
+                #             = (2 - 1) * 2 - 2 * 2 + 2 = 0
+                self.conv_transpose = torch.nn.ConvTranspose2d(
+                    3, 1, 2, 2, 2, bias=False
+                )
+
+            def forward(self, x):
+                return torch.tanh(self.conv_transpose(x))
+
+        model = Model()
+        x = torch.randn(1, 3, 2, 2)
+
+        # Eager mode should succeed with zero-size output
+        eager_out = model(x)
+        self.assertEqual(eager_out.shape, torch.Size([1, 1, 0, 0]))
+
+        # Compiled mode should also succeed
+        compiled_model = torch.compile(model)
+        compiled_out = compiled_model(x.clone())
+        self.assertEqual(compiled_out.shape, torch.Size([1, 1, 0, 0]))
+
+        # Results should match
+        self.assertEqual(eager_out, compiled_out)
+
     @requires_gpu()
     @config.patch(fallback_random=True)
     @unittest.skipIf(
