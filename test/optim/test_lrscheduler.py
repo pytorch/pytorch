@@ -2106,6 +2106,14 @@ class TestLRScheduler(TestCase):
             lambda: MultiStepLR(self.opt, gamma=0.01, milestones=[1, 4, 6]),
         )
 
+    def test_multi_step_lr_state_dict_with_string_keys(self):
+        scheduler = MultiStepLR(self.opt, gamma=0.1, milestones=[3, 6, 9])
+        state_dict = scheduler.state_dict()
+        state_dict["milestones"] = {"3": 1, "6": 1, "9": 1}
+        scheduler.load_state_dict(state_dict)
+        self.assertEqual(dict(scheduler.milestones), {3: 1, 6: 1, 9: 1})
+        self.assertTrue(all(isinstance(k, int) for k in scheduler.milestones))
+
     def test_exp_step_lr_state_dict(self):
         self._check_scheduler_state_dict(
             lambda: ExponentialLR(self.opt, gamma=0.1),
