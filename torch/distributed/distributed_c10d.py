@@ -38,7 +38,6 @@ from torch._C._distributed_c10d import (
     DebugLevel,
     GatherOptions,
     get_debug_level,
-    HashStore,
     PrefixStore,
     ProcessGroup,
     ReduceOp,
@@ -1803,10 +1802,9 @@ def init_process_group(
         # backward compatible API
         if store is None:
             if backend == "fake":
-                # Use HashStore instead of FakeStore because HashStore implements
-                # all required C++ virtual methods (including clone()) needed for
-                # split_group support.
-                store = HashStore()
+                from torch.testing._internal.distributed.fake_pg import FakeStore
+
+                store = FakeStore()
             else:
                 rendezvous_iterator = rendezvous(
                     not_none(init_method), rank, world_size, timeout=timeout

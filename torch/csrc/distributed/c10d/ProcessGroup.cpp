@@ -182,9 +182,24 @@ c10::intrusive_ptr<ProcessGroup> ProcessGroup::splitGroup(
   std::string groupName = name.has_value()
       ? name.value()
       : c10::str(getGroupName(), ":split:", fmt::format("{}", sorted_ranks));
+
+  // Check if all backends are fake. Fake backend doesn't use the store for
+  // communication, so we can skip cloning. This allows FakeStore (which doesn't
+  // implement clone()) to work with split_group.
+  bool allBackendsFake = true;
+  for (const auto& pair : deviceTypeToBackendType_) {
+    auto parentBackend = getBackend(pair.first);
+    if (parentBackend->getBackendName() != "fake") {
+      allBackendsFake = false;
+      break;
+    }
+  }
+
+  c10::intrusive_ptr<Store> underlyingStore =
+      allBackendsFake ? store_ : store_->clone();
   c10::intrusive_ptr<Store> store = c10::static_intrusive_pointer_cast<Store>(
       c10::make_intrusive<PrefixStore>(
-          fmt::format("{}/", groupName), store_->clone()));
+          fmt::format("{}/", groupName), underlyingStore));
   std::string groupDesc = desc.has_value()
       ? desc.value()
       : c10::str(getGroupDesc(), ":split:", incrementSplitCount());
