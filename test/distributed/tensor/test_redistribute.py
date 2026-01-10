@@ -1462,9 +1462,9 @@ class OptimizeFlattenedReductionsTest(TestCase):
         self.assertEqual(result[1].mesh_dim, 1)
 
     def test_non_consecutive_dims_with_partial_cannot_merge(self):
-        """Reductions on dims 0 and 2 with Partial on dim 1 CANNOT be merged.
+        """Reductions on dims 0 and 2 with DIFFERENT Partial type on dim 1 CANNOT be merged.
 
-        When the skipped dim has a Partial placement (even if unchanged),
+        When the skipped dim has a Partial placement of a different reduce_op type,
         there's an ordering constraint that must be preserved.
         """
         mesh = init_device_mesh("cpu", (2, 2, 2), mesh_dim_names=("A", "B", "C"))
@@ -1484,16 +1484,51 @@ class OptimizeFlattenedReductionsTest(TestCase):
             ),
         ]
 
-        # Source placements: Partial("max") on dim 1 - blocks merging!
+        # Source placements: Partial("max") on dim 1 - different type blocks merging!
         src_placements = (Partial("sum"), Partial("max"), Partial("sum"))
 
         result = _optimize_transform_infos_for_flattened_reductions(
             transform_infos, mesh, src_placements
         )
 
-        # Should NOT merge - Partial on dim 1 blocks
+        # Should NOT merge - different Partial type on dim 1 blocks
         self.assertEqual(len(result), 2)
         self.assertTrue(all(isinstance(r, _TransformInfo) for r in result))
+
+    def test_non_consecutive_dims_with_same_partial_can_merge(self):
+        """Reductions on dims 0 and 2 with SAME Partial type on dim 1 CAN be merged.
+
+        When the skipped dim has a Partial placement of the same reduce_op type,
+        there's no ordering issue since all reductions are commutative with themselves.
+        """
+        mesh = init_device_mesh("cpu", (2, 2, 2), mesh_dim_names=("A", "B", "C"))
+        mesh["A", "C"]._flatten("A_C")
+
+        # Transforms for dims 0 and 2 - dim 1 also has Psum but no transform (stays Psum)
+        transform_infos = [
+            _TransformInfo(
+                mesh_dim=0,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+            _TransformInfo(
+                mesh_dim=2,
+                src_dst_placements=(Partial("sum"), Replicate()),
+                logical_shape=[8, 8],
+            ),
+        ]
+
+        # Source placements: Partial("sum") on dim 1 - same type allows merging!
+        src_placements = (Partial("sum"), Partial("sum"), Partial("sum"))
+
+        result = _optimize_transform_infos_for_flattened_reductions(
+            transform_infos, mesh, src_placements
+        )
+
+        # Should merge dims 0 and 2 (same Partial type on dim 1 doesn't block)
+        self.assertEqual(len(result), 1)
+        self.assertIsInstance(result[0], _FlattenedTransformInfo)
+        self.assertEqual(result[0].original_mesh_dims, (0, 2))
 
     def test_different_reduce_ops_not_grouped(self):
         """Reductions with different reduce_ops are not grouped together."""

@@ -228,8 +228,11 @@ def _optimize_transform_infos_for_flattened_reductions(
                         # We need to verify no Partial placements on skipped dims
                         can_merge = True
                         for dim in range(last_mesh_dim + 1, next_info.mesh_dim):
-                            if src_placements[dim].is_partial():
-                                # There's a Partial on a skipped dim - can't merge
+                            if (
+                                src_placements[dim].is_partial()
+                                and src_placements[dim] != src
+                            ):
+                                # There's a Partial of different reduce_op type on a skipped dim - can't merge
                                 can_merge = False
                                 break
 
