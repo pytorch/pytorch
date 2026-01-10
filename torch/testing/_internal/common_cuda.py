@@ -127,6 +127,8 @@ def evaluate_platform_supports_fp8():
                     return True
         else:
             return SM90OrLater or torch.cuda.get_device_capability() == (8, 9)
+    if torch.cpu.is_available():
+        return True
     return False
 
 def evaluate_platform_supports_fp8_grouped_gemm():
