@@ -476,7 +476,8 @@ def sample_inputs_matrix_rank(op_info, device, dtype, requires_grad=False, **kwa
             return None
         if kwarg_type == "float":
             return 1.0
-        assert kwarg_type == "tensor"
+        if kwarg_type != "tensor":
+            raise AssertionError(f"kwarg_type must be 'tensor', got {kwarg_type}")
         return torch.ones(inp.shape[:-2], device=device)
 
     for tol_type in ["float", "tensor"]:
@@ -488,7 +489,10 @@ def sample_inputs_matrix_rank(op_info, device, dtype, requires_grad=False, **kwa
             for sample in sample_inputs_linalg_invertible(
                 op_info, device, dtype, requires_grad
             ):
-                assert sample.kwargs == {}
+                if sample.kwargs != {}:
+                    raise AssertionError(
+                        f"sample.kwargs must be empty, got {sample.kwargs}"
+                    )
                 sample.kwargs = {
                     "atol": make_tol_arg(atol_type, sample.input),
                     "rtol": make_tol_arg(rtol_type, sample.input),
