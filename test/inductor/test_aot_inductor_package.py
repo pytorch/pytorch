@@ -32,7 +32,7 @@ from torch.testing._internal.common_cuda import (
     requires_triton_ptxas_compat,
     TRITON_PTXAS_VERSION,
 )
-from torch.testing._internal.common_utils import IS_FBCODE, skipIfXpu, TEST_CUDA
+from torch.testing._internal.common_utils import IS_FBCODE, TEST_CUDA
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
 
 
@@ -453,7 +453,6 @@ class TestAOTInductorPackage(TestCase):
                 a_path = build_path / "libcos.a"
                 self.assertTrue(a_path.exists())
 
-    @skipIfXpu(msg="Standalone compile API in _Exporter is not supported on XPU yet")
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @requires_triton_ptxas_compat
     @torch._inductor.config.patch("test_configs.use_libtorch", True)
@@ -495,11 +494,20 @@ class TestAOTInductorPackage(TestCase):
                 # Test compiling generated files
                 result = self.cmake_compile_and_run(tmp_dir)
                 if package_example_inputs:
+                    out_str = result.stdout
                     if self.device == GPU_TYPE:
+                        if self.device == "xpu":
+                            out_tensor_meta = "XPUFloatType{3,3}"
+                            lines = out_str.splitlines(keepends=True)
+                            if lines and "warning" in lines[0].lower():
+                                out_str = "".join(lines[1:])
+                        else:
+                            out_tensor_meta = "CUDAFloatType{3,3}"
+
                         self.assertEqual(
-                            result.stdout,
-                            "output_tensor1\n 2  2  2\n 2  2  2\n 2  2  2\n[ CUDAFloatType{3,3} ]\noutput_tensor2\n 0  0  0\n"
-                            " 0  0  0\n 0  0  0\n[ CUDAFloatType{3,3} ]\n",
+                            out_str,
+                            f"output_tensor1\n 2  2  2\n 2  2  2\n 2  2  2\n[ {out_tensor_meta} ]\noutput_tensor2\n 0  0  0\n"
+                            f" 0  0  0\n 0  0  0\n[ {out_tensor_meta} ]\n",
                         )
                     else:
                         self.assertEqual(
@@ -508,7 +516,6 @@ class TestAOTInductorPackage(TestCase):
                             " 0  0  0\n 0  0  0\n[ CPUFloatType{3,3} ]\n",
                         )
 
-    @skipIfXpu(msg="Standalone compile API in _Exporter is not supported on XPU yet")
     @requires_triton_ptxas_compat
     @unittest.skipIf(IS_FBCODE, "cmake won't work in fbcode")
     @torch._inductor.config.patch("test_configs.use_libtorch", True)
