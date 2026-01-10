@@ -2305,6 +2305,9 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
         self.assertEqual(result, a + b)
         self.assertIn("znumel", code)
 
+    # ROCm: Skip due to kernel differences in masked load operations
+    # See https://github.com/pytorch/pytorch/issues/163701
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm: masked load kernel differences")
     @unittest.skipIf(config.is_fbcode(), "Dependence on functorch.einops")
     def test_repeated_masked_load(self):
         counters.clear()
@@ -2652,6 +2655,9 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
                 self.assertEqual(eager_div, compiled_div)
 
+    # ROCm: Skip due to division rounding differences
+    # See https://github.com/pytorch/pytorch/issues/165671
+    @unittest.skipIf(TEST_WITH_ROCM, "ROCm: division rounding differences")
     @config.patch({"emulate_divison_rounding": False})
     def test_truediv_base_not_bitwise_equivalent(self):
         from decimal import Decimal
