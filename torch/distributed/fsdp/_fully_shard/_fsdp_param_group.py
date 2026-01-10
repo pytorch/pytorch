@@ -523,7 +523,9 @@ class FSDPParamGroup:
                     fsdp_param.unsharded_accumulated_grad = None
                 elif fsdp_param.unsharded_param.grad is not None:
                     fsdp_params_with_grad.append(fsdp_param)
-                    unsharded_grads.append(fsdp_param.unsharded_grad_data)
+                    unsharded_grads.append(
+                        fsdp_param.unsharded_grad_data.to(fsdp_param.reduce_dtype)
+                    )
                     fsdp_param.unsharded_param.grad = None
             if self.reshard_after_backward:
                 self.reshard()
