@@ -71,9 +71,9 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
   Tensor uniqueOffsets = at::empty({nnz}, self._indices().options());
 
   typedef thrust::device_ptr<int64_t> thrust_ptr;
-  thrust_ptr indicesIter(indices1D.data_ptr<int64_t>());
-  thrust_ptr origIndicesIter(origIndices.data_ptr<int64_t>());
-  thrust_ptr uniqueOffsetsIter(uniqueOffsets.data_ptr<int64_t>());
+  thrust_ptr indicesIter(indices1D.mutable_data_ptr<int64_t>());
+  thrust_ptr origIndicesIter(origIndices.mutable_data_ptr<int64_t>());
+  thrust_ptr uniqueOffsetsIter(uniqueOffsets.mutable_data_ptr<int64_t>());
 
 
   // Fill sortedOrigIndices with sequential indices
@@ -122,10 +122,10 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
       values.scalar_type(), "coalesce_sparse_cuda", [&] {
         using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
         apply::coalesceValuesKernel<scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
-          uniqueOffsets.data_ptr<int64_t>(),
-          origIndices.data_ptr<int64_t>(),
-          values.data_ptr<scalar_t>(),
-          newValues.data_ptr<scalar_t>(),
+          uniqueOffsets.mutable_data_ptr<int64_t>(),
+          origIndices.mutable_data_ptr<int64_t>(),
+          values.mutable_data_ptr<scalar_t>(),
+          newValues.mutable_data_ptr<scalar_t>(),
           nnz,
           newNnz,
           nsegments,
@@ -139,10 +139,10 @@ SparseTensor _coalesce_sparse_cuda(const SparseTensor& self) {
       values.scalar_type(), "coalesce_sparse_cuda", [&] {
         using cuda_accscalar_t = acc_type<scalar_t, /* is_cuda */ true>;
         apply::coalesceValuesKernel<scalar_t, cuda_accscalar_t><<<grid, block, 0, stream>>>(
-          uniqueOffsets.data_ptr<int64_t>(),
-          origIndices.data_ptr<int64_t>(),
-          values.data_ptr<scalar_t>(),
-          newValues.data_ptr<scalar_t>(),
+          uniqueOffsets.mutable_data_ptr<int64_t>(),
+          origIndices.mutable_data_ptr<int64_t>(),
+          values.mutable_data_ptr<scalar_t>(),
+          newValues.mutable_data_ptr<scalar_t>(),
           nnz,
           newNnz,
           stride

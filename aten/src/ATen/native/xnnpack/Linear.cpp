@@ -87,9 +87,9 @@ ContextLinear create(
       weight_contig.size(Layout::Filter::output),                       // output_channels
       weight_contig.size(Layout::Filter::input),                        // input_pixel_stride
       weight_contig.size(Layout::Filter::output),                       // output_pixel_stride
-      weight_contig.data_ptr<float>(),                                  // kernel
+      weight_contig.const_data_ptr<float>(),                            // kernel
       (bias && bias->defined()) ?
-          bias->contiguous().data_ptr<float>() :
+          bias->contiguous().const_data_ptr<float>() :
           nullptr,                                                      // bias
       output_min,                                                     // output_min
       output_max,                                                     // output_max
@@ -149,8 +149,8 @@ Tensor run(
 
   const xnn_status setup_status = xnn_setup_fully_connected_nc_f32(
       context.op.get(),                                   // operator
-      padded_input.data_ptr<float>(),                     // input
-      output.data_ptr<float>());                          // output
+      padded_input.const_data_ptr<float>(),               // input
+      output.mutable_data_ptr<float>());                  // output
 
   TORCH_CHECK(
       xnn_status_success == setup_status,

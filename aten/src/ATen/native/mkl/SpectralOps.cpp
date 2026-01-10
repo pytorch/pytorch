@@ -225,7 +225,7 @@ inline shape_t shape_from_tensor(const Tensor& t) {
 
 template<typename T>
 inline std::complex<T> *tensor_cdata(Tensor& t) {
-  return reinterpret_cast<std::complex<T>*>(t.data_ptr<c10::complex<T>>());
+  return reinterpret_cast<std::complex<T>*>(t.mutable_data_ptr<c10::complex<T>>());
 }
 
 template<typename T>
@@ -268,11 +268,11 @@ Tensor _fft_c2r_mkl(const Tensor& self, IntArrayRef dim, int64_t normalization, 
   if (self.scalar_type() == kComplexFloat) {
     pocketfft::c2r(shape_from_tensor(out), stride_from_tensor(self), stride_from_tensor(out), axes, false,
                    tensor_cdata<float>(self),
-                   out.data_ptr<float>(), compute_fct<float>(out, dim, normalization));
+                   out.mutable_data_ptr<float>(), compute_fct<float>(out, dim, normalization));
   } else {
     pocketfft::c2r(shape_from_tensor(out), stride_from_tensor(self), stride_from_tensor(out), axes, false,
                    tensor_cdata<double>(self),
-                   out.data_ptr<double>(), compute_fct<double>(out, dim, normalization));
+                   out.mutable_data_ptr<double>(), compute_fct<double>(out, dim, normalization));
     }
   return out;
 }

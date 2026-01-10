@@ -982,7 +982,7 @@ bool check_for_seq_len_1_nested_tensor(sdp_params const& params, bool debug) {
   const auto nt_q_tensor_impl =
       at::native::get_nested_tensor_impl(params.query);
   const at::Tensor& sizes = nt_q_tensor_impl->get_nested_sizes();
-  auto* sizes_ptr = sizes.data_ptr<int64_t>();
+  auto* sizes_ptr = sizes.const_data_ptr<int64_t>();
   const int64_t n_tensors = params.query.size(0);
   const int64_t size_tensor_stride = sizes.stride(0);
 

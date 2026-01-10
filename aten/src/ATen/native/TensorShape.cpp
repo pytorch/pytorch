@@ -1958,7 +1958,7 @@ Tensor repeat(const Tensor& self, IntArrayRef repeats) {
   auto range_a = at::arange(xtensor.dim(), at::TensorOptions(at::kLong));
   auto range_b = range_a + n_dims;
   auto stacked = stack({std::move(range_a), std::move(range_b)}, 1).flatten();
-  auto permutation = IntArrayRef(stacked.data_ptr<int64_t>(), n_dims * 2);
+  auto permutation = IntArrayRef(stacked.const_data_ptr<int64_t>(), n_dims * 2);
   // Permute from [a0, ..., ad-1, b0, ..., bd-1] to [a0, b0, ..., ad-1, bd-1]
   urtensor = urtensor.permute(permutation);
   // Reshape from [a0, b0, ..., ad-1, bd-1] to [a0 * b0, ..., ad-1 * bd-1]
@@ -2454,8 +2454,8 @@ Tensor index_select_sparse_cpu(
       const auto index_contiguous = index.contiguous();
       auto nneg_index = at::empty_like(index_contiguous);
       // nneg_index = (index < 0) * (index + size) + (index >= 0) * index
-      auto* ptr_index = index_contiguous.data_ptr<int64_t>();
-      auto* ptr_nneg_index = nneg_index.data_ptr<int64_t>();
+      const auto* ptr_index = index_contiguous.const_data_ptr<int64_t>();
+      auto* ptr_nneg_index = nneg_index.mutable_data_ptr<int64_t>();
       at::parallel_for(
           0,
           index_len,
@@ -2590,11 +2590,11 @@ Tensor index_select_sparse_cpu(
               const auto start = tid * chunk_size_src;
               const auto end = std::min(start + chunk_size_src, src_len);
               auto* ptr_tid_src_int_idx =
-                  src_int_idx.select(0, tid).data_ptr<int64_t>();
+                  src_int_idx.select(0, tid).mutable_data_ptr<int64_t>();
               auto* ptr_tid_sorted_int_idx =
-                  sorted_int_idx.select(0, tid).data_ptr<int64_t>();
+                  sorted_int_idx.select(0, tid).mutable_data_ptr<int64_t>();
               auto* ptr_tid_int_counts =
-                  int_counts.select(0, tid).data_ptr<int64_t>();
+                  int_counts.select(0, tid).mutable_data_ptr<int64_t>();
               const auto* ptr_src = src.const_data_ptr<int64_t>() + start;
 
               for (const auto i : c10::irange(start, end)) {
@@ -2646,8 +2646,8 @@ Tensor index_select_sparse_cpu(
 
       // fill in selected_sorted, selected_src
       {
-        auto* ptr_selected_sorted = selected_sorted.data_ptr<int64_t>();
-        auto* ptr_selected_src = selected_src.data_ptr<int64_t>();
+        auto* ptr_selected_sorted = selected_sorted.mutable_data_ptr<int64_t>();
+        auto* ptr_selected_src = selected_src.mutable_data_ptr<int64_t>();
 
         const auto thread_offsets =
             compressed_int_counts.cumsum(0).sub_(compressed_int_counts);
@@ -2699,7 +2699,7 @@ Tensor index_select_sparse_cpu(
       auto cidx = at::empty({len + 1}, idx.options());
 
       const auto* ptr_idx = idx.const_data_ptr<int64_t>();
-      auto* ptr_cidx = cidx.data_ptr<int64_t>();
+      auto* ptr_cidx = cidx.mutable_data_ptr<int64_t>();
 
       const auto idx_len = idx.numel();
 
@@ -2743,7 +2743,7 @@ Tensor index_select_sparse_cpu(
           at::sub_out(
               counts, cidx.slice(0, 1, bins + 1), cidx.slice(0, 0, bins));
         } else {
-          auto* ptr_counts = counts.data_ptr<int64_t>();
+          auto* ptr_counts = counts.mutable_data_ptr<int64_t>();
           const auto* ptr_vals = t.const_data_ptr<int64_t>();
           for ([[maybe_unused]] const auto _ : c10::irange(t.numel())) {
             ++ptr_counts[*ptr_vals++];
@@ -2889,7 +2889,7 @@ Tensor index_select_sparse_cpu(
             src_intersection_counts.const_data_ptr<int64_t>();
         const auto* ptr_src_intersection_offsets =
             src_intersection_offsets.const_data_ptr<int64_t>();
-        auto* ptr_src_idx = src_idx.data_ptr<int64_t>();
+        auto* ptr_src_idx = src_idx.mutable_data_ptr<int64_t>();
 
         const auto src_len = src.numel();
         const auto n_threads_src = std::max<int64_t>(
@@ -2910,7 +2910,7 @@ Tensor index_select_sparse_cpu(
                   src_offset_counts_per_thread.select(0, tid)
                       .const_data_ptr<int64_t>();
               auto tid_counts = at::zeros({size}, src.options());
-              auto* ptr_tid_counts = tid_counts.data_ptr<int64_t>();
+              auto* ptr_tid_counts = tid_counts.mutable_data_ptr<int64_t>();
 
               for (const auto i : c10::irange(start, end)) {
                 const auto idx_val = *ptr_src_tid++;
@@ -2959,8 +2959,8 @@ Tensor index_select_sparse_cpu(
         const auto* ptr_src_idx = src_idx.const_data_ptr<int64_t>();
         const auto* ptr_src_idx_offsets =
             src_idx_offsets.const_data_ptr<int64_t>();
-        auto* ptr_idx_selected = idx_selected.data_ptr<int64_t>();
-        auto* ptr_src_selected = src_selected.data_ptr<int64_t>();
+        auto* ptr_idx_selected = idx_selected.mutable_data_ptr<int64_t>();
+        auto* ptr_src_selected = src_selected.mutable_data_ptr<int64_t>();
 
         const auto idx_len = idx.numel();
         const auto n_threads_idx = std::max<int64_t>(

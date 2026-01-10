@@ -229,8 +229,8 @@ Tensor max_pool2d(
 
   const xnn_status setup_status = xnn_setup_max_pooling2d_nhwc_f32(
       max_pool_op,                                                  // operator
-      input_padded_contig_nhwc.data_ptr<float>(),                   // input
-      output_padded_contig_nhwc.data_ptr<float>());                 // output
+      input_padded_contig_nhwc.const_data_ptr<float>(),             // input
+      output_padded_contig_nhwc.mutable_data_ptr<float>());         // output
 
   TORCH_CHECK(
       xnn_status_success == setup_status,

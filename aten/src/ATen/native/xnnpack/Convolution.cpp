@@ -144,8 +144,8 @@ const Tensor reorder_weights_for_transpose_conv(const Tensor& weight_nhwc,
      MemoryFormat::ChannelsLast,
      weight_nhwc.opt_names());
 
-  float* out_ptr = reordered.data_ptr<float>();
-  float* in_ptr = weight_nhwc.data_ptr<float>();
+  float* out_ptr = reordered.mutable_data_ptr<float>();
+  const float* in_ptr = weight_nhwc.const_data_ptr<float>();
 
   int out_index = 0;
   for (const auto g : c10::irange(num_groups)) {
@@ -225,9 +225,9 @@ ContextConv2D create(
       weight_reordered.size(Layout::Filter::input),                   // group_output_channels
       weight_reordered.size(Layout::Filter::output),                  // input_pixel_stride
       weight_reordered.size(Layout::Filter::input) * groups,          // output_pixel_stride
-      weight_reordered.data_ptr<float>(),                             // kernel
+      weight_reordered.const_data_ptr<float>(),                       // kernel
       (bias && bias->defined())
-          ? bias->contiguous().data_ptr<float>()
+          ? bias->contiguous().const_data_ptr<float>()
           : nullptr,                                                  // bias
       output_min,                                                     // output_min
       output_max,                                                     // output_max
@@ -255,9 +255,9 @@ ContextConv2D create(
       weight_nhwc.size(Layout::Filter::output) / groups,              // group_output_channels
       weight_nhwc.size(Layout::Filter::input) * groups,               // input_pixel_stride
       weight_nhwc.size(Layout::Filter::output),                       // output_pixel_stride
-      weight_nhwc.data_ptr<float>(),                                  // kernel
+      weight_nhwc.const_data_ptr<float>(),                            // kernel
       (bias && bias->defined())
-          ? bias->contiguous().data_ptr<float>()
+          ? bias->contiguous().const_data_ptr<float>()
           : nullptr,                                                  // bias
       output_min,                                                     // output_min
       output_max,                                                     // output_max
@@ -349,8 +349,8 @@ Tensor run(
 
     setup_status = xnn_setup_deconvolution2d_nhwc_f32(
       context.op.get(),                                      // operator
-      padded_input_nhwc.data_ptr<float>(),                   // input
-      output.data_ptr<float>());                             // output
+      padded_input_nhwc.const_data_ptr<float>(),             // input
+      output.mutable_data_ptr<float>());                     // output
   } else {
     size_t workspace_size = SIZE_MAX;
     size_t workspace_alignment = SIZE_MAX;
@@ -369,8 +369,8 @@ Tensor run(
     setup_status = xnn_setup_convolution2d_nhwc_f32(
       context.op.get(),                                      // operator
       nullptr,                                               // workspace
-      padded_input_nhwc.data_ptr<float>(),                   // input
-      output.data_ptr<float>());                             // output
+      padded_input_nhwc.const_data_ptr<float>(),             // input
+      output.mutable_data_ptr<float>());                     // output
   }
 
   TORCH_CHECK(

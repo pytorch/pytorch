@@ -546,7 +546,7 @@ __host__ std::tuple<Tensor, Tensor, Tensor> transform_bias_rescale_qkv_cuda(
           at::native::narrow_symint(offsets, 0, sizes.numel() + 1, sizes.numel())
               .copy_(sizes.reshape({-1}));
           auto metadata = offsets.to(at::Device(kCUDA), at::kInt, true, true);
-          const auto offsets_ptr = metadata.data_ptr<int>();
+          const auto offsets_ptr = metadata.const_data_ptr<int>();
           const auto sizes_ptr = offsets_ptr + sizes.numel() + 1;
           const auto input_dim = sizes.sizes()[1];
           TORCH_INTERNAL_ASSERT_DEBUG_ONLY(input_dim == 1);
@@ -1491,9 +1491,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     auto seed = use_philox_state ? mk_philoxtensor(philox_state.seed_.ptr) : mk_aoscalartensor(seed_t);
     auto offset1 = use_philox_state ? mk_philoxtensor(philox_state.offset_.ptr) : mk_aoscalartensor(offset_t);
     auto offset2 = use_philox_state ? philox_state.offset_intragraph_ : 0;
-    auto seed_output = mk_philoxtensor(use_philox_state ? seed_t.data_ptr<int64_t>() : nullptr);
-    auto offset_output = mk_philoxtensor(use_philox_state ? offset_t.data_ptr<int64_t>() : nullptr);
-    auto persistent_counter = mk_atomictensor(is_causal ? atomic_counter.data_ptr<int32_t>() : nullptr);
+    auto seed_output = mk_philoxtensor(use_philox_state ? seed_t.mutable_data_ptr<int64_t>() : nullptr);
+    auto offset_output = mk_philoxtensor(use_philox_state ? offset_t.mutable_data_ptr<int64_t>() : nullptr);
+    auto persistent_counter = mk_atomictensor(is_causal ? atomic_counter.mutable_data_ptr<int32_t>() : nullptr);
     hipError_t err; // TODO: Error handling
     if constexpr (AOTRITON_ALWAYS_V3_API) {  // Better readability than nesting ifdef
 #if AOTRITON_V3_API  // if constexpr does not stop errors from undefined functions
@@ -1729,8 +1729,8 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_
     if (p.use_dropout) {
       p.rng_engine_inputs = philox_state;
       p.dropout_prob = dropout_p;
-      p.seed = seed_t.data_ptr<int64_t>();
-      p.extragraph_offset = offset_t.data_ptr<int64_t>();
+      p.seed = seed_t.mutable_data_ptr<int64_t>();
+      p.extragraph_offset = offset_t.mutable_data_ptr<int64_t>();
     }
 
     if (smem_bytes > 0xc000) {
