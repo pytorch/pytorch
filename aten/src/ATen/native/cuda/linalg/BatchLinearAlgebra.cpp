@@ -1367,11 +1367,7 @@ static void cholesky_kernel(const Tensor& input, const Tensor& info, bool upper)
       cholesky_helper_magma(input, upper, info);
       break;
     default:
-      if (batchCount(input) == 1 || !use_magma_ || use_cusolver_potrf_batched_) {
-        cholesky_helper_cusolver(input, upper, info);
-      } else {
-        cholesky_helper_magma(input, upper, info);
-      }
+      cholesky_helper_cusolver(input, upper, info);
   }
 #else
   cholesky_helper_magma(input, upper, info);
