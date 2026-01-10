@@ -897,6 +897,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   py::str garbage_collection_threshold_s = "garbage_collection_threshold";
   py::str expandable_segments_s = "expandable_segments";
   py::str pinned_num_register_threads_s = "pinned_num_register_threads";
+  py::str pinned_max_power2_size_mb_s = "pinned_max_power2_size_mb";
   py::str release_lock_on_malloc_s = "release_lock_on_cudamalloc";
   py::str pinned_use_host_register_s = "pinned_use_cuda_host_register";
   py::str roundup_power2_divisions_s = "roundup_power2_divisions";
@@ -913,6 +914,8 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
       snapshot.config_metadata.expandable_segments;
   allocator_settings[pinned_num_register_threads_s] =
       int64_t(snapshot.config_metadata.pinned_num_register_threads);
+  allocator_settings[pinned_max_power2_size_mb_s] =
+      int64_t(snapshot.config_metadata.pinned_max_power2_size_mb);
   allocator_settings[release_lock_on_malloc_s] =
       snapshot.config_metadata.release_lock_on_malloc;
   allocator_settings[pinned_use_host_register_s] =

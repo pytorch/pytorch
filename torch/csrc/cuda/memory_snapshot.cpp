@@ -460,6 +460,7 @@ std::string _memory_snapshot_pickled() {
   IValue garbage_collection_threshold_s = "garbage_collection_threshold";
   IValue expandable_segments_s = "expandable_segments";
   IValue pinned_num_register_threads_s = "pinned_num_register_threads";
+  IValue pinned_max_power2_size_mb_s = "pinned_max_power2_size_mb";
   IValue release_lock_on_malloc_s = "release_lock_on_cudamalloc";
   IValue pinned_use_host_register_s = "pinned_use_cuda_host_register";
   IValue roundup_power2_divisions_s = "roundup_power2_divisions";
@@ -479,6 +480,9 @@ std::string _memory_snapshot_pickled() {
   allocator_settings.insert(
       pinned_num_register_threads_s,
       int64_t(snapshot.config_metadata.pinned_num_register_threads));
+  allocator_settings.insert(
+      pinned_max_power2_size_mb_s,
+      int64_t(snapshot.config_metadata.pinned_max_power2_size_mb));
   allocator_settings.insert(
       release_lock_on_malloc_s,
       snapshot.config_metadata.release_lock_on_malloc);

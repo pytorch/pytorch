@@ -270,6 +270,319 @@ class TestCuda(TestCase):
 
         expected = empty_stats()
 
+    @serialTest()
+    def test_pinned_memory_max_power2_size_config(self):
+        """
+        Test pinned_max_power2_size_mb config option.
+
+        Verifies that when pinned_max_power2_size_mb is configured, pinned memory
+        allocations above that threshold are not rounded up to the next power
+        of two and are not cached, avoiding memory waste.
+
+        Without the config, a 129MB tensor results in 256MB allocation due to
+        power-of-two rounding. With pinned_max_power2_size_mb set, the
+        allocation should be close to the requested size.
+
+        See https://github.com/pytorch/pytorch/issues/150517
+        """
+        gc.collect()
+        torch._C._host_emptyCache()
+        torch.cuda.reset_accumulated_host_memory_stats()
+        torch.cuda.reset_peak_host_memory_stats()
+
+        # 129 MB in bytes (just above 128MB power-of-two boundary)
+        mb_129 = 129 * 1024 * 1024
+        # Number of float16 elements for ~129MB
+        num_elements = mb_129 // 2  # 2 bytes per float16
+        requested_bytes = num_elements * 2
+
+        # Sanity check: requested size should be just above 128MB
+        mb_128 = 128 * 1024 * 1024
+        self.assertGreater(requested_bytes, mb_128)
+
+        # Enable the fix: allocations > 64MB will not be rounded to power-of-two
+        # and will not be cached for reuse
+        with pinned_memory_max_power2_size(64):
+            t = torch.empty(num_elements, dtype=torch.float16, pin_memory=True)
+            self.assertTrue(t.is_pinned())
+
+            # Check the actual allocated bytes
+            stats = torch.cuda.host_memory_stats()
+            allocated_bytes = stats["allocated_bytes.current"]
+
+            # With pinned_max_power2_size_mb set, the allocation should NOT be
+            # rounded up to 256MB. We allow some overhead (up to 50%) but NOT 2x.
+            max_acceptable_overhead = 1.5
+            max_acceptable_bytes = int(requested_bytes * max_acceptable_overhead)
+
+            self.assertLessEqual(
+                allocated_bytes,
+                max_acceptable_bytes,
+                f"Pinned memory allocation is too wasteful: "
+                f"requested {requested_bytes / (1024**2):.2f} MB but got "
+                f"{allocated_bytes / (1024**2):.2f} MB "
+                f"(expected at most {max_acceptable_bytes / (1024**2):.2f} MB). "
+                f"See https://github.com/pytorch/pytorch/issues/150517",
+            )
+
+            del t
+
+    @serialTest()
+    def test_pinned_memory_max_power2_size_no_caching(self):
+        """
+        Test that allocations above threshold are NOT cached.
+
+        When pinned_max_power2_size_mb is set, allocations above the threshold
+        should be freed immediately and not reused. This prevents the bug where
+        a smaller uncached block could be returned for a larger request.
+
+        See https://github.com/pytorch/pytorch/issues/150517
+        """
+        gc.collect()
+        torch._C._host_emptyCache()
+        torch.cuda.reset_accumulated_host_memory_stats()
+        torch.cuda.reset_peak_host_memory_stats()
+
+        with pinned_memory_max_power2_size(64):
+            # Allocate 129MB (above 64MB threshold, won't be cached)
+            mb_129 = 129 * 1024 * 1024
+            num_elements_129 = mb_129 // 2
+            t1 = torch.empty(num_elements_129, dtype=torch.float16, pin_memory=True)
+            self.assertTrue(t1.is_pinned())
+
+            stats_before_free = torch.cuda.host_memory_stats()
+            allocated_before = stats_before_free["allocated_bytes.current"]
+
+            # Free the tensor
+            del t1
+            gc.collect()
+
+            # Check that memory was actually freed (not cached)
+            stats_after_free = torch.cuda.host_memory_stats()
+            allocated_after = stats_after_free["allocated_bytes.current"]
+
+            self.assertLess(
+                allocated_after,
+                allocated_before,
+                "Large allocation should be freed immediately, not cached. "
+                f"Before: {allocated_before}, After: {allocated_after}",
+            )
+
+    @serialTest()
+    def test_pinned_memory_max_power2_size_below_threshold_cached(self):
+        """
+        Test that allocations AT or BELOW the threshold ARE cached normally.
+
+        Allocations <= pinned_max_power2_size_mb should use power-of-two rounding
+        and be cached for reuse.
+
+        See https://github.com/pytorch/pytorch/issues/150517
+        """
+        gc.collect()
+        torch._C._host_emptyCache()
+        torch.cuda.reset_accumulated_host_memory_stats()
+        torch.cuda.reset_peak_host_memory_stats()
+
+        # Set threshold to 64MB
+        with pinned_memory_max_power2_size(64):
+            # Allocate 32MB (below 64MB threshold, should be rounded to 32MB and cached)
+            mb_32 = 32 * 1024 * 1024
+            num_elements_32 = mb_32 // 2
+            t1 = torch.empty(num_elements_32, dtype=torch.float16, pin_memory=True)
+            self.assertTrue(t1.is_pinned())
+
+            stats_with_alloc = torch.cuda.host_memory_stats()
+            allocated_with_t1 = stats_with_alloc["allocated_bytes.current"]
+
+            # Free the tensor - it should be cached, not freed
+            del t1
+            gc.collect()
+
+            stats_after_free = torch.cuda.host_memory_stats()
+            allocated_after_free = stats_after_free["allocated_bytes.current"]
+
+            # Memory should still be allocated (cached in free list)
+            self.assertEqual(
+                allocated_after_free,
+                allocated_with_t1,
+                "Allocation below threshold should be cached, not freed. "
+                f"With tensor: {allocated_with_t1}, After del: {allocated_after_free}",
+            )
+
+            # Allocate again - should reuse the cached block
+            t2 = torch.empty(num_elements_32, dtype=torch.float16, pin_memory=True)
+            self.assertTrue(t2.is_pinned())
+
+            stats_realloc = torch.cuda.host_memory_stats()
+            allocated_realloc = stats_realloc["allocated_bytes.current"]
+
+            # Should be the same (reused cached block)
+            self.assertEqual(
+                allocated_realloc,
+                allocated_with_t1,
+                "Should reuse cached block, not allocate new memory. "
+                f"Original: {allocated_with_t1}, After realloc: {allocated_realloc}",
+            )
+
+            del t2
+
+    @serialTest()
+    def test_pinned_memory_max_power2_size_exact_threshold(self):
+        """
+        Test allocation at exactly the threshold boundary.
+
+        An allocation of exactly pinned_max_power2_size_mb should still use
+        power-of-two behavior (it's <= threshold, not < threshold).
+
+        See https://github.com/pytorch/pytorch/issues/150517
+        """
+        gc.collect()
+        torch._C._host_emptyCache()
+        torch.cuda.reset_accumulated_host_memory_stats()
+        torch.cuda.reset_peak_host_memory_stats()
+
+        # Set threshold to 64MB and allocate exactly 64MB
+        with pinned_memory_max_power2_size(64):
+            mb_64 = 64 * 1024 * 1024
+            num_elements_64 = mb_64 // 2
+            t1 = torch.empty(num_elements_64, dtype=torch.float16, pin_memory=True)
+            self.assertTrue(t1.is_pinned())
+
+            stats_with_alloc = torch.cuda.host_memory_stats()
+            allocated_with_t1 = stats_with_alloc["allocated_bytes.current"]
+
+            # 64MB is a power of two, so no rounding needed
+            # But it should still be cached
+            del t1
+            gc.collect()
+
+            stats_after_free = torch.cuda.host_memory_stats()
+            allocated_after_free = stats_after_free["allocated_bytes.current"]
+
+            # Memory should still be allocated (cached)
+            self.assertEqual(
+                allocated_after_free,
+                allocated_with_t1,
+                "Allocation at exact threshold should be cached. "
+                f"With tensor: {allocated_with_t1}, After del: {allocated_after_free}",
+            )
+
+    @serialTest()
+    def test_pinned_memory_max_power2_size_multiple_large_allocs(self):
+        """
+        Test multiple large allocations don't incorrectly reuse blocks.
+
+        This is the key bug scenario: without proper handling, a 129MB block
+        freed and then a 200MB allocation could incorrectly return the 129MB
+        block because both map to the same bucket (bucket 28).
+
+        With our fix, neither block is cached, so each allocation is fresh.
+
+        See https://github.com/pytorch/pytorch/issues/150517
+        """
+        gc.collect()
+        torch._C._host_emptyCache()
+        torch.cuda.reset_accumulated_host_memory_stats()
+        torch.cuda.reset_peak_host_memory_stats()
+
+        with pinned_memory_max_power2_size(64):
+            # Allocate 129MB
+            mb_129 = 129 * 1024 * 1024
+            num_elements_129 = mb_129 // 2
+            t1 = torch.empty(num_elements_129, dtype=torch.float16, pin_memory=True)
+            self.assertTrue(t1.is_pinned())
+            self.assertEqual(t1.numel() * t1.element_size(), mb_129)
+
+            # Free it
+            del t1
+            gc.collect()
+
+            # Allocate 200MB - this should NOT get the old 129MB block
+            mb_200 = 200 * 1024 * 1024
+            num_elements_200 = mb_200 // 2
+            t2 = torch.empty(num_elements_200, dtype=torch.float16, pin_memory=True)
+            self.assertTrue(t2.is_pinned())
+
+            # Verify the tensor has the correct size
+            actual_size = t2.numel() * t2.element_size()
+            self.assertEqual(
+                actual_size,
+                mb_200,
+                f"200MB allocation got wrong size: {actual_size / (1024**2):.2f} MB",
+            )
+
+            # Verify the underlying allocation is sufficient
+            stats = torch.cuda.host_memory_stats()
+            allocated_bytes = stats["allocated_bytes.current"]
+            self.assertGreaterEqual(
+                allocated_bytes,
+                mb_200,
+                f"Allocated memory ({allocated_bytes / (1024**2):.2f} MB) is less than "
+                f"requested ({mb_200 / (1024**2):.2f} MB). "
+                "This would indicate the bug where a smaller cached block was returned.",
+            )
+
+            del t2
+
+    @serialTest()
+    def test_pinned_memory_max_power2_size_mixed_sizes(self):
+        """
+        Test mixed allocation sizes with threshold.
+
+        Small allocations (below threshold) should be cached and reused.
+        Large allocations (above threshold) should not be cached.
+
+        See https://github.com/pytorch/pytorch/issues/150517
+        """
+        gc.collect()
+        torch._C._host_emptyCache()
+        torch.cuda.reset_accumulated_host_memory_stats()
+        torch.cuda.reset_peak_host_memory_stats()
+
+        with pinned_memory_max_power2_size(64):
+            # Small allocation (32MB, below threshold)
+            mb_32 = 32 * 1024 * 1024
+            num_elements_32 = mb_32 // 2
+            t_small = torch.empty(num_elements_32, dtype=torch.float16, pin_memory=True)
+
+            # Large allocation (129MB, above threshold)
+            mb_129 = 129 * 1024 * 1024
+            num_elements_129 = mb_129 // 2
+            t_large = torch.empty(
+                num_elements_129, dtype=torch.float16, pin_memory=True
+            )
+
+            stats_both = torch.cuda.host_memory_stats()
+            allocated_both = stats_both["allocated_bytes.current"]
+
+            # Free large tensor first
+            del t_large
+            gc.collect()
+
+            stats_after_large_free = torch.cuda.host_memory_stats()
+            allocated_after_large = stats_after_large_free["allocated_bytes.current"]
+
+            # Large allocation should be freed (not cached)
+            self.assertLess(
+                allocated_after_large,
+                allocated_both,
+                "Large allocation should be freed immediately",
+            )
+
+            # Free small tensor
+            del t_small
+            gc.collect()
+
+            stats_after_small_free = torch.cuda.host_memory_stats()
+            allocated_after_small = stats_after_small_free["allocated_bytes.current"]
+
+            # Small allocation should still be there (cached)
+            self.assertEqual(
+                allocated_after_small,
+                allocated_after_large,
+                "Small allocation should be cached, not freed",
+            )
+
     def test_pinned_memory_empty_cache(self):
         try:
             for alloc_settings in (True, False):
@@ -5489,6 +5802,28 @@ def caching_host_allocator_use_background_threads(use_background_threads: bool):
             torch.cuda.memory._set_allocator_settings(
                 "pinned_use_background_threads:False"
             )
+
+
+@contextlib.contextmanager
+def pinned_memory_max_power2_size(size_mb: int):
+    """
+    Context manager to set pinned_max_power2_size_mb for pinned memory allocations.
+
+    When set, allocations larger than size_mb will not be rounded up to the next
+    power of two and will not be cached, avoiding memory waste for large allocations.
+
+    See https://github.com/pytorch/pytorch/issues/150517
+    """
+    # Save current value to restore later
+    snapshot = torch.cuda.memory._snapshot()
+    cur_value = snapshot["allocator_settings"].get("pinned_max_power2_size_mb", 0)
+    torch._C._accelerator_setAllocatorSettings(f"pinned_max_power2_size_mb:{size_mb}")
+    try:
+        yield
+    finally:
+        torch._C._accelerator_setAllocatorSettings(
+            f"pinned_max_power2_size_mb:{cur_value}"
+        )
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")

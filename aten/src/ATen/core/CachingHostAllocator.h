@@ -298,7 +298,14 @@ struct CachingHostAllocatorImpl {
 
     // Round up the allocation to the nearest power of two to improve reuse.
     // These power of two sizes are also used to index into the free list.
-    size_t roundSize = c10::llvm::PowerOf2Ceil(size);
+    // However, for large allocations above a configurable threshold, we skip
+    // rounding (and later, caching) to avoid memory waste.
+    // See https://github.com/pytorch/pytorch/issues/150517
+    size_t roundSize = size;
+    size_t maxPower2Size = pinned_max_power2_size();
+    if (maxPower2Size == 0 || size <= maxPower2Size) {
+      roundSize = c10::llvm::PowerOf2Ceil(size);
+    }
 
     // First, try to allocate from the free list of the chosen pool
     auto* block = get_free_block(roundSize, pool);
@@ -381,10 +388,35 @@ struct CachingHostAllocatorImpl {
     }
 
     if (!events.has_value()) {
-      auto& pool = pool_from_block(block);
-      auto index = size_index(block->size_);
-      std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
-      pool.free_list_[index].list_.push_back(block);
+      // Check if block is too large to cache (same threshold as rounding)
+      // See https://github.com/pytorch/pytorch/issues/150517
+      size_t maxPower2Size = pinned_max_power2_size();
+      if (maxPower2Size > 0 && block->size_ > maxPower2Size) {
+        // Block too large to cache, free it immediately
+        auto& pool = pool_from_block(block);
+        {
+          std::lock_guard<std::mutex> g(pool.blocks_mutex_);
+          pool.blocks_.erase(block);
+          pool.ptr_to_block_.erase(block->ptr_);
+        }
+        auto index = size_index(block->size_);
+        {
+          std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
+          stats_.allocations.decrease(1);
+          stats_.allocated_bytes.decrease(block->size_);
+          stats_.allocation_bucket_stats[index].decrease(1);
+          stats_.allocated_bytes_bucket_stats[index].decrease(block->size_);
+          stats_.active_bucket_stats[index].decrease(1);
+          stats_.active_bytes_bucket_stats[index].decrease(block->size_);
+        }
+        free_block(block);
+        delete block;
+      } else {
+        auto& pool = pool_from_block(block);
+        auto index = size_index(block->size_);
+        std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
+        pool.free_list_[index].list_.push_back(block);
+      }
     } else if (allocated_during_capture) {
       // pass: No events are ever recorded during stream capture.
 
@@ -477,6 +509,18 @@ struct CachingHostAllocatorImpl {
   virtual bool pinned_use_background_threads() {
     return c10::CachingAllocator::AcceleratorAllocatorConfig::
         pinned_use_background_threads();
+  }
+
+  /**
+   * Returns the maximum allocation size (in bytes) that will use power-of-two
+   * behavior (rounding up to next power of two and caching for reuse).
+   * Allocations larger than this will use their exact size and will not be
+   * cached, avoiding memory waste for large allocations.
+   * Returns 0 if power-of-two behavior should always be applied (default).
+   * See https://github.com/pytorch/pytorch/issues/150517
+   */
+  virtual size_t pinned_max_power2_size() {
+    return 0;  // Default: always use power-of-two behavior (0 = disabled)
   }
 
   virtual void copy_data(void* dest [[maybe_unused]], const void* src [[maybe_unused]], std::size_t count [[maybe_unused]]) const {
@@ -720,10 +764,33 @@ struct CachingHostAllocatorImpl {
 
       if (available) {
         auto index = size_index(block->size_);
-        std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
-        pool.free_list_[index].list_.push_back(block);
-        stats_.active_bucket_stats[index].decrease(1);
-        stats_.active_bytes_bucket_stats[index].decrease(size);
+        // Check if block is too large to cache (same threshold as rounding)
+        // See https://github.com/pytorch/pytorch/issues/150517
+        size_t maxPower2Size = pinned_max_power2_size();
+        if (maxPower2Size > 0 && block->size_ > maxPower2Size) {
+          // Block too large to cache, free it immediately
+          {
+            std::lock_guard<std::mutex> g(pool.blocks_mutex_);
+            pool.blocks_.erase(block);
+            pool.ptr_to_block_.erase(block->ptr_);
+          }
+          {
+            std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
+            stats_.allocations.decrease(1);
+            stats_.allocated_bytes.decrease(block->size_);
+            stats_.allocation_bucket_stats[index].decrease(1);
+            stats_.allocated_bytes_bucket_stats[index].decrease(block->size_);
+            stats_.active_bucket_stats[index].decrease(1);
+            stats_.active_bytes_bucket_stats[index].decrease(block->size_);
+          }
+          free_block(block);
+          delete block;
+        } else {
+          std::lock_guard<std::mutex> g(pool.free_list_[index].mutex_);
+          pool.free_list_[index].list_.push_back(block);
+          stats_.active_bucket_stats[index].decrease(1);
+          stats_.active_bytes_bucket_stats[index].decrease(size);
+        }
         if (size != -1) {
           return;
         }

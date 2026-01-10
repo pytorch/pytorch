@@ -85,6 +85,19 @@ class C10_CUDA_API CUDAAllocatorConfig {
     return instance().m_pinned_reserve_segment_size_mb;
   }
 
+  /**
+   * Maximum allocation size (in MB) that will use power-of-two behavior
+   * (rounding up and caching). Allocations larger than this will use their
+   * exact size and will not be cached for reuse.
+   * Default is 0 (disabled), meaning all allocations use power-of-two behavior.
+   * Set to a positive value (e.g., 256) to avoid memory waste for large
+   * allocations slightly above a power-of-two boundary.
+   * See https://github.com/pytorch/pytorch/issues/150517
+   */
+  static size_t pinned_max_power2_size_mb() {
+    return instance().m_pinned_max_power2_size_mb;
+  }
+
   static size_t pinned_max_register_threads() {
     // Based on the benchmark results, we see better allocation performance
     // with 8 threads. However on future systems, we may need more threads
@@ -157,6 +170,7 @@ class C10_CUDA_API CUDAAllocatorConfig {
         "graph_capture_record_stream_reuse",
         "pinned_reserve_segment_size_mb",
         "pinned_num_register_threads",
+        "pinned_max_power2_size_mb",
         "per_process_memory_fraction"};
     return keys;
   }
@@ -179,6 +193,9 @@ class C10_CUDA_API CUDAAllocatorConfig {
   size_t parsePinnedReserveSegmentSize(
       const c10::CachingAllocator::ConfigTokenizer& tokenizer,
       size_t i);
+  size_t parsePinnedMaxPower2Size(
+      const c10::CachingAllocator::ConfigTokenizer& tokenizer,
+      size_t i);
   size_t parseGraphCaptureRecordStreamReuse(
       const c10::CachingAllocator::ConfigTokenizer& tokenizer,
       size_t i);
@@ -188,6 +205,8 @@ class C10_CUDA_API CUDAAllocatorConfig {
 
   std::atomic<size_t> m_pinned_num_register_threads{1};
   std::atomic<size_t> m_pinned_reserve_segment_size_mb{0};
+  // Default 0 means disabled (all allocations use power-of-two behavior)
+  std::atomic<size_t> m_pinned_max_power2_size_mb{0};
   std::atomic<Expandable_Segments_Handle_Type> m_expandable_segments_handle_type
 #if CUDA_VERSION >= 12030
       {Expandable_Segments_Handle_Type::UNSPECIFIED};
