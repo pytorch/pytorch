@@ -63,7 +63,14 @@ def _fp8_all_gather(
 @instantiate_parametrized_tests
 class MicroPipelineTPTest(TestCase):
     def setUp(self):
-        torch._inductor.config._micro_pipeline_tp = True
+        # Avoid test-order flakes: these are global Inductor configs that other
+        # tests may patch without restoring.
+        self._inductor_config_patch = torch._inductor.config.patch(
+            _micro_pipeline_tp=True,
+            reorder_for_compute_comm_overlap=False,
+        )
+        self._inductor_config_patch.__enter__()
+        self.addCleanup(self._inductor_config_patch.__exit__, None, None, None)
 
         self.rank = 0
         self.world_size = 2
@@ -505,7 +512,14 @@ class MicroPipelineTPTest(TestCase):
 @instantiate_parametrized_tests
 class MicroPipelineTP4GPUTest(TestCase):
     def setUp(self):
-        torch._inductor.config._micro_pipeline_tp = True
+        # Avoid test-order flakes: these are global Inductor configs that other
+        # tests may patch without restoring.
+        self._inductor_config_patch = torch._inductor.config.patch(
+            _micro_pipeline_tp=True,
+            reorder_for_compute_comm_overlap=False,
+        )
+        self._inductor_config_patch.__enter__()
+        self.addCleanup(self._inductor_config_patch.__exit__, None, None, None)
 
         self.rank = 0
         self.world_size = 4
