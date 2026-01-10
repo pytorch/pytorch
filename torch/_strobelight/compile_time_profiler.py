@@ -145,7 +145,7 @@ class StrobelightCompileTimeProfiler:
             async_stack_max_len=cls.max_stack_length,
             run_user_name="pt2-profiler/"
             + os.environ.get("USER", os.environ.get("USERNAME", "")),
-            sample_tags={cls.identifier},  # pyrefly: ignore  # bad-argument-type
+            sample_tags={cls.identifier},
         )
 
     @classmethod

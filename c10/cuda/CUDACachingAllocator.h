@@ -71,6 +71,7 @@ struct BlockInfo {
 // Struct containing info of a memory segment (i.e. one contiguous cudaMalloc).
 struct SegmentInfo {
   c10::DeviceIndex device = 0;
+  int32_t registration_counter = -1;
   size_t address = 0;
   size_t total_size = 0;
   size_t requested_size = 0; // unrounded, actually requested size
@@ -256,7 +257,7 @@ class CUDAAllocator : public DeviceAllocator {
   virtual void createOrIncrefPool(
       c10::DeviceIndex /*device*/,
       MempoolId_t /*mempool_id*/,
-      CUDAAllocator* allocator = nullptr) {
+      std::shared_ptr<CUDAAllocator> allocator = nullptr) {
     TORCH_CHECK(
         false,
         name(),
@@ -526,8 +527,8 @@ inline void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
 inline void createOrIncrefPool(
     c10::DeviceIndex device,
     MempoolId_t mempool_id,
-    CUDAAllocator* allocator_ptr = nullptr) {
-  get()->createOrIncrefPool(device, mempool_id, allocator_ptr);
+    std::shared_ptr<CUDAAllocator> allocator_ptr = nullptr) {
+  get()->createOrIncrefPool(device, mempool_id, std::move(allocator_ptr));
 }
 inline void setUseOnOOM(
     c10::DeviceIndex device,
