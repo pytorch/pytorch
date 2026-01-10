@@ -1223,6 +1223,8 @@ profile_bandwidth_with_do_bench_using_profiling = (
     os.environ.get("TORCHINDUCTOR_PROFILE_WITH_DO_BENCH_USING_PROFILING") == "1"
 )
 
+# Disable aten conv (uses cudnn for nvda and miopen for amd)
+disable_aten_conv = os.environ.get("TORCHINDUCTOR_DISABLE_ATEN_CONV") == "1"
 
 # TODO: remove later
 # incompatible with cpp_wrapper

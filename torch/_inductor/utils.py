@@ -1758,7 +1758,13 @@ def _use_autotune_backend(backend: str) -> bool:
 
 
 def _use_conv_autotune_backend(backend: str) -> bool:
-    return backend.upper() in [
+    backend_upper = backend.upper()
+    # When aten conv is disabled (via config.disable_aten_conv), skip ATEN backend
+    # since it relies on cudnn/miopen for GPU convolutions
+    if backend_upper == "ATEN" and config.disable_aten_conv:
+        log.info("Skipping ATEN convolution backend because config.disable_aten_conv=True")
+        return False
+    return backend_upper in [
         x.strip() for x in config.max_autotune_conv_backends.upper().split(",")
     ]
 
