@@ -151,29 +151,31 @@ def varlen_attn(
     Compute variable-length attention using Flash Attention.
     This function is similar to scaled_dot_product_attention but optimized for
     variable-length sequences using cumulative sequence position tensors.
-    Args:
-    - query (Tensor): Query tensor; shape :math:`(T_q, H, D)`
-    - key (Tensor): Key tensor; shape :math:`(T_k, H, D)`
-    - value (Tensor): Value tensor; shape :math:`(T_k, H, D)`
-    - cu_seq_q (Tensor): Cumulative sequence positions for queries; shape :math:`(N+1,)`
-    - cu_seq_k (Tensor): Cumulative sequence positions for keys/values; shape :math:`(N+1,)`
-    - max_q (int): Maximum query sequence length in the batch.
-    - max_k (int): Maximum key/value sequence length in the batch.
-    - is_causal (bool, optional): If set to True, applies causal masking (default: False).
-    - return_aux (Optional[AuxRequest]): If not None and ``return_aux.lse`` is True, also returns the logsumexp tensor.
-    - scale (float, optional): Scaling factor for attention scores
 
-    Shape legend:
-    - :math:`N`: Batch size
-    - :math:`T_q`: Total number of query tokens in the batch (sum of all query sequence lengths)
-    - :math:`T_k`: Total number of key/value tokens in the batch (sum of all key/value sequence lengths)
-    - :math:`H`: Number of attention heads
-    - :math:`D`: Head dimension
+    Args:
+        query (Tensor): Query tensor; shape :math:`(T_q, H, D)`
+        key (Tensor): Key tensor; shape :math:`(T_k, H, D)`
+        value (Tensor): Value tensor; shape :math:`(T_k, H, D)`
+        cu_seq_q (Tensor): Cumulative sequence positions for queries; shape :math:`(N+1,)`
+        cu_seq_k (Tensor): Cumulative sequence positions for keys/values; shape :math:`(N+1,)`
+        max_q (int): Maximum query sequence length in the batch.
+        max_k (int): Maximum key/value sequence length in the batch.
+        is_causal (bool, optional): If set to True, applies causal masking (default: False).
+        return_aux (Optional[AuxRequest]): If not None and ``return_aux.lse`` is True, also returns the logsumexp tensor.
+        scale (float, optional): Scaling factor for attention scores
 
     Returns:
-    - Tensor: Output tensor from attention computation
-    - If ``return_aux`` is not None and ``return_aux.lse`` is True, returns a tuple of Tensors:
-    (output, lse), where lse is the logsumexp
+        output (Tensor): Output tensor from attention computation; shape :math:`(T_q, H, D)`.
+
+        If ``return_aux`` is not None and ``return_aux.lse`` is True:
+            lse (Tensor): Log-sum-exp of attention scores; shape :math:`(T_q, H)`.
+
+    Shape legend:
+        - :math:`N`: Batch size
+        - :math:`T_q`: Total number of query tokens in the batch (sum of all query sequence lengths)
+        - :math:`T_k`: Total number of key/value tokens in the batch (sum of all key/value sequence lengths)
+        - :math:`H`: Number of attention heads
+        - :math:`D`: Head dimension
 
     Example::
 
