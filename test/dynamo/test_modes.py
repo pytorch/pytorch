@@ -829,7 +829,9 @@ class InvokeSubgraphBackendTests(torch._dynamo.test_case.TestCase):
             y = torch.randn(3, 3)
 
             # Trace with make_fx - the compiled_fn should appear as invoke_subgraph HOP
-            traced = make_fx(outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True)(x, y)
+            traced = make_fx(
+                outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True
+            )(x, y)
 
             self.assertExpectedInline(
                 normalize_gm(traced.print_readable(print_output=False)),
@@ -883,7 +885,9 @@ class outer_fn(torch.nn.Module):
             # Set up TracingContext so invoke_subgraph cache works
             tracing_ctx = TracingContext(fake_mode=None)
             with tracing(tracing_ctx):
-                traced = make_fx(outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True)(x, y)
+                traced = make_fx(
+                    outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True
+                )(x, y)
 
             self.assertExpectedInline(
                 normalize_gm(traced.print_readable(print_output=False)),
@@ -937,7 +941,9 @@ class outer_fn(torch.nn.Module):
 
             x = torch.randn(3, 3)
 
-            traced = make_fx(outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True)(x)
+            traced = make_fx(
+                outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True
+            )(x)
 
             self.assertExpectedInline(
                 normalize_gm(traced.print_readable(print_output=False)),
@@ -991,7 +997,9 @@ class outer_fn(torch.nn.Module):
             y = torch.randn(3, 3)
             z = torch.randn(3, 3)
 
-            traced = make_fx(outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True)(w, x, y, z)
+            traced = make_fx(
+                outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True
+            )(w, x, y, z)
 
             self.assertExpectedInline(
                 normalize_gm(traced.print_readable(print_output=False)),
@@ -1037,7 +1045,9 @@ class outer_fn(torch.nn.Module):
             a = torch.randn(3, 3)
             b = torch.randn(3, 3)
 
-            traced = make_fx(outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True)(a, b)
+            traced = make_fx(
+                outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True
+            )(a, b)
 
             self.assertExpectedInline(
                 normalize_gm(traced.print_readable(print_output=False)),
@@ -1089,7 +1099,9 @@ class outer_fn(torch.nn.Module):
             y = torch.randn(3, 3)
             z = torch.randn(3, 3)
 
-            traced = make_fx(outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True)(x, y, z)
+            traced = make_fx(
+                outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True
+            )(x, y, z)
 
             self.assertExpectedInline(
                 normalize_gm(traced.print_readable(print_output=False)),
