@@ -179,7 +179,13 @@ def _make_forward(
             arg.requires_grad_(True) if idx in requires_grad_indices else arg
             for idx, arg in enumerate(args)
         )
-        with torch._C._ForceDispatchKeyGuard(include_keys, exclude_keys):
+        # Dynamically remove PythonDispatcher if the forward is called at runtime
+        effective_keys = include_keys
+        if include_keys.has(DispatchKey.PythonDispatcher):
+            current_include = torch._C._dispatch_tls_local_include_set()
+            if not current_include.has(DispatchKey.PythonDispatcher):
+                effective_keys = include_keys.remove(DispatchKey.PythonDispatcher)
+        with torch._C._ForceDispatchKeyGuard(effective_keys, exclude_keys):
             with torch.enable_grad():
                 state["outputs"] = invoke_with_flattened_inputs(fn, input_spec, *args)
         return state["outputs"]
@@ -400,6 +406,26 @@ def _invoke_leaf_function_impl(fn_spec, input_spec, *flat_args):
     return _detach_tensors(out)
 
 
+def _check_no_input_mutation(
+    flat_args: tuple[Any, ...],
+    version_before: list[int],
+) -> None:
+    """
+    Check that no input tensors were mutated in-place during leaf function execution.
+
+    Raises RuntimeError if any input tensor's version counter changed.
+    """
+    for i, arg in enumerate(flat_args):
+        if isinstance(arg, torch.Tensor):
+            if arg._version != version_before[i]:
+                raise RuntimeError(
+                    f"In-place mutation detected on input tensor at position {i} in "
+                    f"@leaf_function. In-place mutations on inputs are not tracked "
+                    f"across the leaf function boundary and may cause incorrect results. "
+                    f"Consider cloning the input before mutating it."
+                )
+
+
 @contextlib.contextmanager
 def _allow_non_fake_inputs() -> Generator[None, None, None]:
     """
@@ -428,7 +454,15 @@ def invoke_leaf_function_fake(real_fn_spec, fake_fn_spec, input_spec, *flat_args
 def invoke_leaf_function_dense(real_fn_spec, fake_fn_spec, input_spec, *flat_args):
     from torch._dynamo import config as dynamo_config
 
+    # Record version counters before calling function to detect input mutations
+    version_before = [
+        arg._version if isinstance(arg, torch.Tensor) else 0 for arg in flat_args
+    ]
+
     real_output = _invoke_leaf_function_impl(real_fn_spec, input_spec, *flat_args)
+
+    # Check for input mutations
+    _check_no_input_mutation(flat_args, version_before)
 
     # Validate fake_impl outputs match real_impl outputs when enabled
     if dynamo_config.validate_leaf_function_outputs:
