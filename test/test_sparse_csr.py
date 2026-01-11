@@ -1467,12 +1467,9 @@ class TestSparseCSR(TestCase):
     @skipCUDAIfNoSparseGeneric
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
-                  *[torch.half] if not TEST_WITH_ROCM else [],
+                  *[torch.half],
                   *[torch.bfloat16] if SM80OrLater else []))
     def test_csr_matvec(self, device, dtype):
-
-        if TEST_WITH_ROCM and (dtype == torch.half or dtype == torch.bfloat16):
-            self.skipTest("ROCm doesn't work with half dtypes correctly.")
 
         side = 100
         for index_dtype in [torch.int32, torch.int64]:
