@@ -647,7 +647,10 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
+        if functorch_config.bundled_autograd_cache:
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+        else:
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
 
         # Clear FX graph cache: second call should also be a miss
         self._clear_dynamo_and_codecache()
@@ -655,7 +658,10 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 2)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
+        if functorch_config.bundled_autograd_cache:
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
+        else:
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
@@ -1770,13 +1776,14 @@ class AOTAutogradCacheTests(InductorTestCase):
                 self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
                 self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
                 self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
             else:
                 self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 3)
                 self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
                 self.assertEqual(counters["inductor"]["fxgraph_lookup_write_file"], 0)
+                self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 1)
             self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
-            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
             self.assertEqual(counters["compiled_autograd"]["captures"], 1)
 
         artifacts = torch.compiler.save_cache_artifacts()
@@ -1789,10 +1796,11 @@ class AOTAutogradCacheTests(InductorTestCase):
 
         if functorch_config.bundled_autograd_cache:
             self.assertEqual(len(cache_info.inductor_artifacts), 0)
+            self.assertEqual(len(cache_info.aot_autograd_artifacts), 2)
         else:
             self.assertEqual(len(cache_info.inductor_artifacts), 3)
+            self.assertEqual(len(cache_info.aot_autograd_artifacts), 1)
         self.assertEqual(len(cache_info.autotune_artifacts), autotune_expect)
-        self.assertEqual(len(cache_info.aot_autograd_artifacts), 1)
         self.assertEqual(len(cache_info.pgo_artifacts), 0)
 
         self._clear_all_caches()
@@ -1805,11 +1813,12 @@ class AOTAutogradCacheTests(InductorTestCase):
             cache_info = torch.compiler.load_cache_artifacts(artifact_bytes)
 
             if functorch_config.bundled_autograd_cache:
+                self.assertEqual(len(cache_info.aot_autograd_artifacts), 2)
                 self.assertEqual(len(cache_info.inductor_artifacts), 0)
             else:
+                self.assertEqual(len(cache_info.aot_autograd_artifacts), 1)
                 self.assertEqual(len(cache_info.inductor_artifacts), 3)
             self.assertEqual(len(cache_info.autotune_artifacts), autotune_expect)
-            self.assertEqual(len(cache_info.aot_autograd_artifacts), 1)
             self.assertEqual(len(cache_info.pgo_artifacts), 0)
 
             for i in range(3):
@@ -1834,17 +1843,20 @@ class AOTAutogradCacheTests(InductorTestCase):
                     if functorch_config.bundled_autograd_cache:
                         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
                         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 0)
+                        self.assertEqual(
+                            counters["aot_autograd"]["autograd_cache_saved"], 1
+                        )
                     else:
                         self.assertEqual(counters["inductor"]["fxgraph_cache_miss"], 0)
                         self.assertEqual(counters["inductor"]["fxgraph_cache_hit"], 3)
                         self.assertEqual(
                             counters["inductor"]["fxgraph_lookup_write_file"], 3
                         )
+                        self.assertEqual(
+                            counters["aot_autograd"]["autograd_cache_saved"], 0
+                        )
                     self.assertEqual(counters["aot_autograd"]["autograd_cache_miss"], 0)
                     self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 1)
-                    self.assertEqual(
-                        counters["aot_autograd"]["autograd_cache_saved"], 0
-                    )
                     self.assertEqual(counters["compiled_autograd"]["captures"], 1)
                 else:
                     # no recompiles

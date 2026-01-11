@@ -51,6 +51,7 @@ from torch._inductor.utils import (
     set_tracing_context_output_strides,
 )
 from torch.autograd.profiler import record_function
+from torch.fx._graph_pickler import _ops_filter_safe
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_in_torch_dispatch_mode
 
@@ -953,7 +954,7 @@ class RegionalOutputCode(OutputCode):
     def __init__(
         self,
         graph_module: torch.fx.GraphModule,
-        ops_filter: Callable[[str], bool] | None = None,
+        ops_filter: Callable[[str], bool] = _ops_filter_safe,
     ):
         """
         Args:
@@ -1023,16 +1024,9 @@ class RegionalOutputCode(OutputCode):
         if self._graph_module is not None:
             from torch.fx._graph_pickler import GraphPickler, Options
 
-            # Only pass Options if user specified a custom ops_filter,
-            # otherwise let GraphPickler use its default safe filter
-            options = (
-                Options(ops_filter=self._ops_filter)
-                if self._ops_filter is not None
-                else None
-            )
             self._serialized_graph_module = GraphPickler.dumps(
                 self._graph_module,
-                options,
+                Options(ops_filter=self._ops_filter),
             )
             # Clear the graph module to avoid pickling it with standard pickle
             self._graph_module = None
