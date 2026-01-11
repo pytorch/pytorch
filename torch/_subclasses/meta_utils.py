@@ -971,6 +971,9 @@ class MetaConverter(Generic[_TensorT]):
                     # There are some export use cases where we do have a symbolic_context
                     # and an outer fake mode. In these cases we want to respect the
                     # symbolic_context and properly allocate dynamism properly.
+                    # One particular test that exercises this path is:
+                    #   ExportTests.test_symbolic_tracing_within_fake_mode_with_constraints
+
                     t_size = tuple(
                         shape_env._maybe_specialize_sym_int_with_hint(sz)
                         for sz in t.size

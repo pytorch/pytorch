@@ -647,7 +647,10 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 1)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
+        if functorch_config.bundled_autograd_cache:
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 1)
+        else:
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
 
         # Clear FX graph cache: second call should also be a miss
         self._clear_dynamo_and_codecache()
@@ -655,7 +658,10 @@ class AOTAutogradCacheTests(InductorTestCase):
         self.assertEqual(fn(a, b), compiled_fn(a, b))
         self.assertEqual(counters["aot_autograd"]["autograd_cache_bypass"], 2)
         self.assertEqual(counters["aot_autograd"]["autograd_cache_hit"], 0)
-        self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
+        if functorch_config.bundled_autograd_cache:
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 2)
+        else:
+            self.assertEqual(counters["aot_autograd"]["autograd_cache_saved"], 0)
 
     @inductor_config.patch("fx_graph_remote_cache", False)
     @inductor_config.patch("fx_graph_cache", True)
