@@ -13,6 +13,7 @@
 | `PYTORCH_MPS_LOW_WATERMARK_RATIO` | Low watermark ratio for MPS allocator. Default is 1.4 (unified) or 1.0 (discrete). |
 | `PYTORCH_MPS_FAST_MATH`         | If `1`, enables fast math for MPS kernels. See section 1.6.3 in the [Metal Shading Language Spec](https://developer.apple.com/metal/Metal-Shading-Language-Specification.pdf). |
 | `PYTORCH_MPS_PREFER_METAL`      | If `1`, uses metal kernels instead of MPS Graph APIs. Used for matmul. |
+| `PYTORCH_MPS_GEMM_PREFER_FAST_MATH` | When set together with `PYTORCH_MPS_PREFER_METAL` and `PYTORCH_MPS_FAST_MATH`, keeps GEMM on the fast-math MPS Graph path instead of Metal kernels. |
 | `PYTORCH_ENABLE_MPS_FALLBACK`   | If `1`, falls back to CPU when MPS ops aren't supported. |
 
 ```{note}

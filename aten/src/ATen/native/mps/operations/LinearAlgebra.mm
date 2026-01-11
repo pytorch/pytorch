@@ -293,11 +293,17 @@ std::tuple<MPSGraphTensor*, MPSGraphTensor*, MPSGraphTensor*> do_mm(MPSGraph* gr
 }
 
 bool use_metal_mm(const Tensor& self, const Tensor& other, const Tensor& output) {
-  static bool always_use_metal = c10::utils::has_env("PYTORCH_MPS_PREFER_METAL");
+  static bool prefer_metal = c10::utils::has_env("PYTORCH_MPS_PREFER_METAL");
+  static bool prefer_fast_gemm = c10::utils::has_env("PYTORCH_MPS_GEMM_PREFER_FAST_MATH");
+  static bool fast_math_enabled = []() {
+    auto val = c10::utils::get_env("PYTORCH_MPS_FAST_MATH");
+    return val.has_value() && val != "0";
+  }();
+  const bool force_metal = prefer_metal && !(prefer_fast_gemm && fast_math_enabled);
   constexpr auto max_stride_size = 32768;
   constexpr auto max_complex_inner_size = 2048;
   static bool is_macos_14_4_or_newer = is_macos_13_or_newer(MacOSVersion::MACOS_VER_14_4_PLUS);
-  if (always_use_metal || c10::isIntegralType(self.scalar_type(), true)) {
+  if (force_metal || c10::isIntegralType(self.scalar_type(), true)) {
     return true;
   }
   // multiplicationWithPrimaryTensor: returns incorrect results if inner size exceeds 2048
