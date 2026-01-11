@@ -225,6 +225,23 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         for peer, tensor in enumerate(remote_tensors):
             self.assertEqual(tensor, peer)
 
+    def test_multicast_ptr(self) -> None:
+        """
+        Get the multicast pointer
+        """
+        from torch._C._autograd import DeviceType
+        from torch._C._distributed_c10d import _SymmetricMemory
+
+        self._init_device()
+        group_name = dist.group.WORLD.group_name
+
+        tensor = symm_mem.empty(1, device=self.device)
+        handle = symm_mem.rendezvous(tensor, group_name)
+        if _SymmetricMemory.has_multicast_support(DeviceType.CUDA, self.device.index):
+            self.assertNotEqual(handle.multicast_ptr, 0)
+        else:
+            self.assertEqual(handle.multicast_ptr, 0)
+
     @skipIfRocm
     def test_nvshmem_put(self) -> None:
         self._init_device()
