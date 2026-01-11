@@ -2358,11 +2358,13 @@ def use_ck_tile_gemm_template(layout: Layout, m: int, n: int, k: int) -> bool:
     )
 
 def use_origami_gemm_template(layout: Layout) -> bool:
-    if config.origami:  
+    if config.origami:
         try:
             import origami
         except ImportError:
-            print("Origami not imported, install it with `pip install git+https://github.com/origami-ai/origami.git`")
+            print(
+                "Origami not imported, install it with `pip install git+https://github.com/origami-ai/origami.git`"
+            )
             return False
         else:
             return use_triton_template(layout, check_max_autotune=False)
@@ -2471,7 +2473,7 @@ def use_cpp_gemm_template(
 def use_aten_gemm_kernels() -> bool:
     return not (
         config.max_autotune or config.max_autotune_gemm or config.origami
-    ) and _use_autotune_backend("ATEN")
+    ) or _use_autotune_backend("ATEN")
 
 
 class DebugDirManager:
