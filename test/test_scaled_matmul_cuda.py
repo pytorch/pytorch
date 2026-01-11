@@ -976,14 +976,20 @@ class TestFP8Matmul(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @parametrize("base_dtype", [torch.float16, torch.bfloat16, torch.float32])
-    def test_scaled_mm_vs_emulated(self, base_dtype, device="cuda"):
+    @parametrize("x_cm", [True, False])
+    @parametrize("y_cm", [True, False])
+    def test_scaled_mm_vs_emulated(self, base_dtype, x_cm, y_cm, device="cuda"):
+        # Blackwell (SM_10) supports all possible layout permutations, while Hopper only TN
+        if (x_cm, y_cm) != (True, False) and torch.cuda.get_device_properties(0).major != 10:
+            raise unittest.SkipTest("Unsupported layout on the architecture")
         torch.manual_seed(42)
         input_dtype = e4m3_type
         output_dtype = base_dtype
         compare_type = torch.float32
 
-        x = torch.randn(16, 16, device=device, dtype=base_dtype)
-        y = torch.randn(32, 16, device=device, dtype=base_dtype).t()
+        M, N, K = 16, 32, 16
+        x = torch.randn(M, K, device=device, dtype=base_dtype) if x_cm else torch.randn(K, M, device=device, dtype=base_dtype).t()
+        y = torch.randn(K, N, device=device, dtype=base_dtype) if y_cm else torch.randn(N, K, device=device, dtype=base_dtype).t()
 
         x_scale = tensor_to_scale(x, input_dtype).float()
         y_scale = tensor_to_scale(y, input_dtype).float()
