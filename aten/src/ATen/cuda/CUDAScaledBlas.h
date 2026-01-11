@@ -100,6 +100,7 @@ enum class ScaledGemmImplementation {
   NVFP4_NVFP4 = 7,
   NVFP4_NVFP4_SINGLE_SCALE = 8,
   MXFP4_MXFP4 = 9,
+  MXFP4_MXFP4_SINGLE_SCALE = 10,
 };
 
 /**
@@ -164,6 +165,13 @@ bool check_mxfp8_recipe(c10::ScalarType,
                         ArrayRef<Tensor>&);
 
 bool check_mxfp4_recipe(c10::ScalarType,
+                        std::vector<ScalingType>&,
+                        ArrayRef<Tensor>&,
+                        c10::ScalarType,
+                        std::vector<ScalingType>&,
+                        ArrayRef<Tensor>&);
+
+bool check_mxfp4_recipe_single_scale(c10::ScalarType,
                         std::vector<ScalingType>&,
                         ArrayRef<Tensor>&,
                         c10::ScalarType,
