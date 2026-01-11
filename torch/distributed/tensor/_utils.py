@@ -227,6 +227,7 @@ def _compute_local_shape_and_global_offset(
 
     if isinstance(my_coordinate, (list, tuple)):
         _coord: list | tuple = my_coordinate
+
         def coordinate_lookup(dim: int) -> RankType:
             return _coord[dim]
     else:
