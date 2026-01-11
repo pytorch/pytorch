@@ -342,7 +342,13 @@ class UniformValueConstantFolder(ConstantFolder):
 
         # handle before view ops because this changes value
         if node.target is aten.view.dtype:
-            return super(ConstantFolder, self).run_node(node)
+            # view.dtype can fail if the tensor has wrong shape due to view ops
+            # passing through unchanged (e.g., 0-d complex tensors can't be viewed
+            # as float). In that case, return unknown_value to skip constant folding.
+            try:
+                return super(ConstantFolder, self).run_node(node)
+            except RuntimeError:
+                return self.unknown_value
 
         # view ops, return input tensor, the first argument
         if hasattr(node.target, "overloadpacket") and (
