@@ -8039,6 +8039,7 @@ class TestMPS(TestCaseMPS):
             self.assertTrue((a != 0).all())
 
     def test_log_normal(self):
+        # test with kl divergence
         cpu_a = torch.zeros(50, 50).log_normal_(mean=1.0, std=2.0).flatten()
         mps_a = torch.zeros(50, 50, device="mps").log_normal_(mean=1.0, std=2.0).cpu().flatten()
 
