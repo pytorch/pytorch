@@ -4,6 +4,8 @@ import copy
 import logging
 import operator
 import re
+import textwrap
+import types
 from collections import defaultdict
 from collections.abc import Callable
 from contextlib import contextmanager
@@ -33,7 +35,6 @@ from torch.fx.graph_module import _get_attr, _get_attr_via_attr_list, _print_rea
 from torch.utils._pytree import GetAttrKey, SequenceKey
 
 from ._remove_effect_tokens_pass import _remove_effect_tokens
-
 
 log = logging.getLogger(__name__)
 
@@ -552,6 +553,7 @@ class UnflattenedModule(_SubmoduleBase, torch.nn.Module):
         _reorder_submodules(self, fqn_order)
         self.graph.lint()
         self.finalize()
+        self._configure_forward()
 
     def _print_graph(self):
         for fqn, mod in self.named_modules():
@@ -647,7 +649,7 @@ class UnflattenedModule(_SubmoduleBase, torch.nn.Module):
 
         return flat_args
 
-    def forward(self, *args, **kwargs):
+    def _forward_impl(self, *args, **kwargs):
         flat_args = self.process_forward_inputs(*args, **kwargs)
         signature = self.module_call_graph[0].signature
 
@@ -667,6 +669,25 @@ class UnflattenedModule(_SubmoduleBase, torch.nn.Module):
                 *flat_args, enable_io_processing=False
             )
         return pytree.tree_unflatten(tree_out, signature.out_spec)
+        
+    # Dynamically creates a forward method with the correct signature
+    def _configure_forward(self):
+        user_input_names = []
+        if self.graph_signature and self.graph_signature.input_specs:
+            for spec in self.graph_signature.input_specs:
+                if spec.kind == InputKind.USER_INPUT:
+                    user_input_names.append(spec.arg.name)
+        if not user_input_names:
+            self.forward = self._forward_impl
+        else:
+            sig_str = ", ".join(user_input_names)
+            func_code = textwrap.dedent(f"""
+            def forward(self, {sig_str}, **kwargs):
+                return self._forward_impl({sig_str}, **kwargs)"""
+            )
+            namespace = {}
+            exec(func_code, globals(), namespace)
+            self.forward = types.MethodType(namespace['forward'], self)
 
     def finalize(self):
         self.__dict__["graph_module"] = torch.fx.GraphModule(self, self.graph)
