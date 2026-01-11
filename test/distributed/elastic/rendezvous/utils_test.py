@@ -13,6 +13,8 @@ from datetime import timedelta
 from unittest import TestCase
 from unittest.mock import patch
 
+from torch.testing._internal.common_utils import run_tests
+
 from torch.distributed.elastic.rendezvous.utils import (
     _delay,
     _matches_machine_hostname,
@@ -401,3 +403,7 @@ class PeriodicTimerTest(TestCase):
                 f"The interval between two function calls was {actual_call_interval} second(s) but "
                 f"expected to be at least {call_interval} second(s).",
             )
+
+
+if __name__ == "__main__":
+    run_tests()

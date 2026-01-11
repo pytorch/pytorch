@@ -14,6 +14,8 @@ from datetime import timedelta
 from typing import cast, ClassVar
 from unittest import mock, TestCase
 
+from torch.testing._internal.common_utils import run_tests
+
 from rendezvous_backend_test import RendezvousBackendTestMixin
 
 from torch.distributed import FileStore, TCPStore
@@ -283,3 +285,7 @@ class CreateBackendTest(TestCase):
             r"details.$",
         ):
             create_backend(self._params_filestore)
+
+
+if __name__ == "__main__":
+    run_tests()

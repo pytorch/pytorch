@@ -13,6 +13,8 @@ from base64 import b64encode
 from typing import cast, ClassVar
 from unittest import TestCase
 
+from torch.testing._internal.common_utils import run_tests
+
 from etcd import EtcdKeyNotFound  # type: ignore[import]
 from rendezvous_backend_test import RendezvousBackendTestMixin
 
@@ -178,3 +180,7 @@ class CreateBackendTest(TestCase):
 
         assert result_dict["get_result"] == "foo"
         assert result_dict["time"] >= 2
+
+
+if __name__ == "__main__":
+    run_tests()
