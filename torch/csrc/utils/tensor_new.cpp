@@ -475,7 +475,7 @@ Tensor internal_new_from_data(
     // to dispatch to it.
     // TODO: arguably it should have an autograd implementation that noops
     at::AutoDispatchBelowADInplaceOrView guard;
-    tensor = at::lift_fresh(tensor);
+    tensor = at::lift_fresh(tensor, device);
   }
   if (only_lift_cpu_tensors() && device.type() != DeviceType::CPU) {
     if (!device.has_index() &&

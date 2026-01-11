@@ -26,6 +26,8 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   // See Note [Explicit Registration of Generators to the CUDA Graph]
   void register_generator_state(c10::intrusive_ptr<at::CUDAGeneratorState> state);
   void register_generator_state(const at::Generator& generator);
+  bool prev_only_lift_cpu_tensors() const;
+  void set_prev_only_lift_cpu_tensors(bool value);
   void capture_begin(
       MempoolId_t pool = {0, 0},
       cudaStreamCaptureMode capture_mode = cudaStreamCaptureModeGlobal);
@@ -89,6 +91,7 @@ struct TORCH_CUDA_CPP_API CUDAGraph {
   c10::DeviceIndex capture_dev_{UNDEFINED_DEVICE};
 
   bool keep_graph_;
+  bool prev_only_lift_cpu_tensors_{false};
 };
 
 } // namespace cuda

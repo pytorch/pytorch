@@ -5,6 +5,9 @@
 
 namespace at::native {
 
+using lift_fresh_fn = at::Tensor (*)(const at::Tensor&, Device device);
+DECLARE_DISPATCH(lift_fresh_fn, lift_fresh_stub)
+
 TORCH_API at::Tensor clone_preserve_strides(const at::Tensor& self);
 
 inline bool cat_should_skip_tensor(const Tensor& t) {

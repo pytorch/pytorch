@@ -216,8 +216,8 @@ Tensor FunctionalInverses::detach_inverse(const Tensor& base, const Tensor& muta
     return mutated_view;
 }
 
-Tensor FunctionalInverses::lift_fresh_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode) {
-    return mutated_view;
+Tensor FunctionalInverses::lift_fresh_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, Device device) {
+  return mutated_view;
 }
 
 Tensor FunctionalInverses::slice_Tensor_inverse(const Tensor& base, const Tensor& mutated_view, InverseReturnMode inverse_return_mode, int64_t dim, std::optional<c10::SymInt> start, std::optional<c10::SymInt> end, c10::SymInt step) {
