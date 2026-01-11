@@ -35,8 +35,8 @@ from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     find_symbol_binding_fx_nodes,
     free_symbols,
-    hint_int,
     is_symbol_binding_fx_node,
+    size_hint,
     statically_known_false,
     statically_known_true,
 )
@@ -1257,7 +1257,7 @@ def _size_of(node: fx.Node) -> int:
     def object_nbytes(x) -> int:
         if not isinstance(x, torch.Tensor):
             return 0
-        return _tensor_nbytes(hint_int(x.numel(), fallback=4096), x.dtype)
+        return _tensor_nbytes(size_hint(x.numel(), fallback=4096), x.dtype)
 
     if "val" in node.meta:
         val = node.meta["val"]
@@ -2460,7 +2460,7 @@ def _remove_symbols_without_guarding(x: torch.Tensor, fallback: int) -> torch.Te
     shape = list(x.shape)
 
     def realize_symbol(d):
-        return hint_int(d, fallback=fallback)
+        return size_hint(d, fallback=fallback)
 
     shape = [realize_symbol(s) for s in shape]
     stride = [realize_symbol(s) for s in x.stride()]
@@ -2474,7 +2474,7 @@ def estimate_runtime(node):
         if isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.Tensor):
             return _remove_symbols_without_guarding(x.meta["val"], fallback=4096)
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymInt):
-            return hint_int(x.meta["val"], fallback=4096)
+            return size_hint(x.meta["val"], fallback=4096)
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymFloat):
             return 1.0
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymBool):
@@ -2502,6 +2502,10 @@ def estimate_runtime(node):
             node.target(*args, **kwargs)
         counted_flops = mode.get_total_flops()
         return max(counted_flops, 1)
+
+    elif callable(RUNTIME_MODE):
+        return RUNTIME_MODE(node)
+
     else:
         raise RuntimeError(f"Not aware of runtime estimator: {RUNTIME_MODE}")
 
