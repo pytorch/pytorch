@@ -406,6 +406,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
             fully_shard(mlp, mp_policy=mp_policy)
         fully_shard(model, mp_policy=mp_policy)
 
+        # verify grad_dtype preserved on sharded params after fully_shard
         for param in model.parameters():
             self.assertEqual(param.grad_dtype, desired_grad_dtype)
 
@@ -413,6 +414,7 @@ class TestFullyShardMixedPrecisionTraining(FSDPTest):
         inp = torch.randn(2, 16, device=device_type, dtype=torch.bfloat16)
         model(inp).sum().backward()
 
+        # verify gradients have correct dtype after backward
         for param in model.parameters():
             self.assertIsNotNone(param.grad)
             self.assertEqual(param.grad.dtype, desired_grad_dtype)
