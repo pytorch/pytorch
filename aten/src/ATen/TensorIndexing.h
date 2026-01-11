@@ -4,6 +4,7 @@
 #include <ATen/ScalarOps.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/TensorBody.h>
+#include <ATen/functorch/BatchedTensorImpl.h>
 #include <c10/core/SymInt.h>
 #include <c10/util/irange.h>
 #include <optional>
@@ -495,8 +496,28 @@ inline Tensor handleDimInMultiDimIndexing(
     Tensor result = prev_dim_result;
     const Tensor& tensor = index.tensor();
     auto scalar_type = tensor.scalar_type();
+    // NOTE: [Avoiding .item() on BatchedTensors in vmap]
+    // When a 0-dimensional integral tensor is used as an index, we normally
+    // optimize by calling tensor.item<int64_t>() to extract the scalar value
+    // and use it with applySelect(). However, this optimization cannot be
+    // applied when the tensor is a BatchedTensor from torch.vmap().
+    //
+    // Under vmap, scalar indices become BatchedTensors where the logical
+    // dimension is 0 but the underlying tensor has a batch dimension. Calling
+    // .item() on a BatchedTensor is not supported and raises:
+    //   "vmap: It looks like you're calling .item() on a Tensor. We don't
+    //    support vmap over calling .item() on a Tensor..."
+    //
+    // This commonly occurs in FlexAttention mask functions that use patterns
+    // like `document_idx[b_idx, q_idx]` where b_idx and q_idx are vmapped
+    // scalar indices. By skipping the .item() optimization for BatchedTensors,
+    // we fall through to recordTensorIndex() which handles batched indexing
+    // correctly via the vmap fallback mechanism.
+    //
+    // See: BatchRulesDynamic.cpp for the vmap .item() restriction.
     if (tensor.dim() == 0 &&
-        at::isIntegralType(scalar_type, /*includeBool=*/true)) {
+        at::isIntegralType(scalar_type, /*includeBool=*/true) &&
+        !at::functorch::isBatchedTensor(tensor)) {
       if (scalar_type != at::kByte && scalar_type != at::kBool) {
         result = impl::applySelect(
             result,
