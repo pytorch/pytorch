@@ -1945,6 +1945,9 @@ class BenchmarkRunner:
     def use_larger_multiplier_for_smaller_tensor(self, name):
         return False
 
+    def use_iou_for_bool_accuracy(self, name):
+        return False
+
     def iter_models(self, args):
         for model_name in self.iter_model_names(args):
             for device in args.devices:
@@ -2415,6 +2418,7 @@ class BenchmarkRunner:
                     cos_similarity=cos_similarity,
                     tol=tolerance,
                     force_max_multiplier=force_max_multiplier,
+                    use_iou_for_bool=self.use_iou_for_bool_accuracy(name),
                 ):
                     is_same = False
             except Exception:
