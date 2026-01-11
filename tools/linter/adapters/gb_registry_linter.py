@@ -17,13 +17,7 @@ from typing import Any, NamedTuple
 # get_source_segment() calls _splitlines_no_ff() for every keyword argument,
 # but the same source string is passed repeatedly for the same file.
 if hasattr(ast, "_splitlines_no_ff"):
-    _original_splitlines_no_ff = ast._splitlines_no_ff
-
-    @functools.lru_cache(maxsize=128)
-    def _cached_splitlines_no_ff(*args: Any) -> Any:
-        return _original_splitlines_no_ff(*args)
-
-    ast._splitlines_no_ff = _cached_splitlines_no_ff
+    ast._splitlines_no_ff = functools.lru_cache(maxsize=128)(ast._splitlines_no_ff)
 
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
