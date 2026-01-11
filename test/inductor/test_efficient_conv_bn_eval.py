@@ -115,6 +115,48 @@ class EfficientConvBNEvalTemplate(TestCase):
         opt = torch.compile(mod, backend="inductor")
         opt(x, mean, var)
 
+    @tf32_on_and_off(0.003)
+    @inductor_config.patch({"efficient_conv_bn_eval_fx_passes": True})
+    def test_fx_graph_batch_norm_defaults(self):
+        """Regression test for issue #169011.
+
+        Tests that torch.compile handles FX graphs containing F.batch_norm
+        with only 3 positional arguments (input, running_mean, running_var).
+        The original bug was an AssertionError: assert len(bn_node.args) == 8.
+        """
+        from torch.fx import Graph, GraphModule
+
+        graph = Graph()
+
+        # Create input placeholders
+        inp = graph.placeholder("input")
+        mean = graph.placeholder("mean")
+        var = graph.placeholder("var")
+
+        # Create F.batch_norm call with only 3 args (the original bug case)
+        z = graph.call_function(torch.nn.functional.batch_norm, args=(inp, mean, var))
+
+        # Create output node
+        graph.output(z)
+
+        # Wrap in a GraphModule
+        gm = GraphModule({}, graph)
+
+        device = getattr(self, "device", "cpu")
+        gm.to(device)
+        gm_compiled = torch.compile(gm, backend="inductor")
+
+        inp_tensor = torch.randn(4, 4, device=device)
+        mean_tensor = torch.randn(4, device=device)
+        var_tensor = torch.abs(torch.randn(4, device=device))  # Must be positive
+
+        # This should not raise AssertionError
+        out = gm_compiled(inp_tensor, mean_tensor, var_tensor)
+
+        # Verify result matches eager evaluation
+        expected = gm(inp_tensor, mean_tensor, var_tensor)
+        self.assertEqual(out, expected)
+
     def test_basic(self):
         def test_conv_bn_eval(
             test_class, use_bias, module, sync_bn, decompose_nn_module
