@@ -13,9 +13,10 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_FBCODE,
     parametrize,
+    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_CPU, HAS_GPU
-from torch.testing._internal.triton_utils import requires_gpu
+from torch.testing._internal.triton_utils import requires_cuda_and_triton, requires_gpu
 from torch.utils._pytree import tree_flatten
 
 
@@ -157,7 +158,7 @@ un_ops_under_test = [
     *foreach_map_un_ops_under_test,
 ]
 
-compose_ops = [torch._foreach_addcdiv, torch._foreach_addcmul]
+compose_ops = [torch._foreach_addcdiv]
 all_ops = parametrize(
     "op",
     ternary_ops_under_test + bin_ops_under_test + un_ops_under_test,
@@ -1241,6 +1242,73 @@ class ForeachTests(TestCase):
             self.assertEqual(a, b, atol=0, rtol=0)
 
     @requires_gpu
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._inductor.config.patch("emulate_precision_casts", True)
+    @torch._inductor.config.patch("_use_fp64_for_unbacked_floats", True)
+    @parametrize(
+        "beta2",
+        [
+            0.999,  # Typical Adam beta2
+            0.9999,  # Higher beta2
+            0.99,  # Lower beta2
+            0.999999,  # Very high beta2
+            0.9990000128746033,  # Between fp32 representable values
+            1.0 - 1e-8,  # Near 1.0
+            1.0 - 1e-38,  # Very close to 1.0
+            0.333333333333333333,  # 1/3 with full fp64 precision
+            0.1,  # Cannot be exactly represented in binary
+        ],
+    )
+    def test_adam_ema_update_scalar_precision(self, beta2):
+        """Test that Adam-style EMA update compiled matches eager bitwise.
+
+        Tests the pattern:
+            torch._foreach_mul_(exp_avg_sqs, beta2)
+            torch._foreach_addcmul_(exp_avg_sqs, grads, grads, value=1-beta2)
+        """
+
+        def fn(exp_avg_sq0, exp_avg_sq1, grad0, grad1):
+            exp_avg_sqs = [exp_avg_sq0.clone(), exp_avg_sq1.clone()]
+            grads = [grad0, grad1]
+            torch._foreach_mul_(exp_avg_sqs, beta2)
+            torch._foreach_addcmul_(exp_avg_sqs, grads, grads, value=1 - beta2)
+            return exp_avg_sqs
+
+        # Use values sensitive to fp32/fp64 precision differences
+        inputs = (
+            torch.tensor(
+                [[1.0000001192092896, 0.333333333333333333], [1e-7, 1e-30]],
+                device=GPU_TYPE,
+                dtype=torch.float32,
+            ),
+            torch.tensor(
+                [[1.0000000000000002, 0.1], [1e-38, 2.718281828459045]],
+                device=GPU_TYPE,
+                dtype=torch.float32,
+            ),
+            torch.tensor(
+                [[0.01, 0.02], [0.001, 0.0001]],
+                device=GPU_TYPE,
+                dtype=torch.float32,
+            ),
+            torch.tensor(
+                [[0.1, 0.2], [0.01, 0.001]],
+                device=GPU_TYPE,
+                dtype=torch.float32,
+            ),
+        )
+
+        # Eager execution
+        eager_result = fn(*inputs)
+
+        # Compiled execution
+        compiled_result = torch.compile(fn, fullgraph=True)(*inputs)
+
+        # Assert bitwise equality between eager and compiled
+        for a, b in zip(eager_result, compiled_result):
+            self.assertEqual(a, b, atol=0, rtol=0)
+
+    @requires_gpu
     @foreach_map_un_ops
     def test_foreach_map_backward_unary(self, op):
         from torch._dynamo.polyfills import foreach_map_fn
@@ -1271,6 +1339,77 @@ class ForeachTests(TestCase):
             torch.allclose(ref.grad, act.grad)
 
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
+
+    @requires_cuda_and_triton
+    def test_foreach_addcmul_fma_bitwise_equal(self):
+        """Test that _foreach_addcmul with FMA lowering produces bitwise equal results to eager."""
+        self_tensors = [
+            torch.randn(64, 64, device=GPU_TYPE),
+            torch.randn(32, 32, device=GPU_TYPE),
+        ]
+        tensor1_list = [
+            torch.randn(64, 64, device=GPU_TYPE),
+            torch.randn(32, 32, device=GPU_TYPE),
+        ]
+        tensor2_list = [
+            torch.randn(64, 64, device=GPU_TYPE),
+            torch.randn(32, 32, device=GPU_TYPE),
+        ]
+
+        # ROCm may have small numerical differences
+        # For some reason ROCm isn't bitwise equivalent between eager and compiled
+        atol = 1e-5 if TEST_WITH_ROCM else 0
+        rtol = 1e-5 if TEST_WITH_ROCM else 0
+
+        # Test with default value=1
+        eager_result = torch._foreach_addcmul(self_tensors, tensor1_list, tensor2_list)
+
+        @torch.compile
+        def fn(s, t1, t2):
+            return torch._foreach_addcmul(s, t1, t2)
+
+        compiled_result = fn(self_tensors, tensor1_list, tensor2_list)
+        for eager, compiled in zip(eager_result, compiled_result):
+            self.assertEqual(eager, compiled, atol=atol, rtol=rtol)
+
+        # Test with value != 1
+        eager_result2 = torch._foreach_addcmul(
+            self_tensors, tensor1_list, tensor2_list, value=2.5
+        )
+
+        @torch.compile
+        def fn2(s, t1, t2):
+            return torch._foreach_addcmul(s, t1, t2, value=2.5)
+
+        compiled_result2 = fn2(self_tensors, tensor1_list, tensor2_list)
+        for eager, compiled in zip(eager_result2, compiled_result2):
+            self.assertEqual(eager, compiled, atol=atol, rtol=rtol)
+
+    @requires_cuda_and_triton
+    def test_foreach_addcmul_uses_fma_instruction(self):
+        """Test that _foreach_addcmul generates code using FMA instruction."""
+        from torch._inductor.utils import run_and_get_code
+
+        self_tensors = [
+            torch.randn(64, 64, device=GPU_TYPE),
+            torch.randn(32, 32, device=GPU_TYPE),
+        ]
+        tensor1_list = [
+            torch.randn(64, 64, device=GPU_TYPE),
+            torch.randn(32, 32, device=GPU_TYPE),
+        ]
+        tensor2_list = [
+            torch.randn(64, 64, device=GPU_TYPE),
+            torch.randn(32, 32, device=GPU_TYPE),
+        ]
+
+        @torch.compile
+        def fn(s, t1, t2):
+            return torch._foreach_addcmul(s, t1, t2, value=2.0)
+
+        _, code = run_and_get_code(fn, self_tensors, tensor1_list, tensor2_list)
+        code = " ".join(code)
+        self.assertIn("tl.fma", code, "Expected FMA to be used in generated code")
 
 
 if __name__ == "__main__":

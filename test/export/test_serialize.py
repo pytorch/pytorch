@@ -1698,9 +1698,9 @@ class TestDeserialize(TestCase):
             deserialized_ep.graph_module.code.strip("\n"),
             """\
 def forward(self, x):
-    topk_default = torch.ops.aten.topk.default(x, 2);  x = None
-    getitem = topk_default[0]
-    getitem_1 = topk_default[1];  topk_default = None
+    topk = torch.ops.aten.topk.default(x, 2);  x = None
+    getitem = topk[0]
+    getitem_1 = topk[1];  topk = None
     mul_tensor = torch.ops.aten.mul.Tensor(getitem, 2)
     mul = torch.ops.aten.mul.Tensor(getitem, mul_tensor);  getitem = mul_tensor = None
     return (mul, getitem_1)
@@ -2101,6 +2101,11 @@ class TestSaveLoad(TestCase):
             reexported_ep.graph_module.graph.nodes,
             reexported_ep_loaded.graph_module.graph.nodes,
         ):
+            # Verify node name consistency
+            self.assertEqual(node.name, node_loaded.name)
+            self.assertEqual(node.op, node_loaded.op)
+            self.assertEqual(node.target, node_loaded.target)
+
             if node.op not in {"placeholder", "output"}:
                 from_node_orig = node.meta.get("from_node")
                 from_node_loaded = node_loaded.meta.get("from_node")
