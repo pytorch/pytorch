@@ -6,9 +6,10 @@ import platform
 import re
 import subprocess
 import sys
+import abc
 import warnings
 from collections.abc import Callable
-from typing import Any, Union
+from typing import Any, Dict, List, Optional, Union, ClassVar
 
 import torch
 from torch._inductor import config
@@ -33,12 +34,8 @@ def _get_isa_dry_compile_fingerprint(isa_flags: str) -> str:
     return fingerprint
 
 
-class VecISA:
-    _bit_width: int
-    _macro: list[str]
-    _arch_flags: str
-    _dtype_nelements: dict[torch.dtype, int]
-
+@dataclasses.dataclass(frozen=True)
+class VecISA(abc.ABC):
     # Note [Checking for Vectorized Support in Inductor]
     # TorchInductor CPU vectorization reuses PyTorch vectorization utility functions
     # Hence, TorchInductor would depend on Sleef* to accelerate mathematical functions
@@ -54,7 +51,13 @@ class VecISA:
     # also needs the logic
     # In fbcode however, we are using the same compiler for pytorch and for inductor codegen,
     # making the runtime check unnecessary.
-    _avx_code = """
+    
+    _bit_width: ClassVar[int]
+    _macro: ClassVar[list[str]]
+    _arch_flags: ClassVar[str]
+    _dtype_nelements: ClassVar[dict[torch.dtype, int]]
+
+    _avx_code: ClassVar[str] = """
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON) || defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_SVE)
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
@@ -69,7 +72,7 @@ extern "C" void __avx_chk_kernel() {
 }
 """  # noqa: B950
 
-    _avx_py_load = """
+    _avx_py_load: ClassVar[str] = """
 import torch
 from ctypes import cdll
 cdll.LoadLibrary("__lib_path__")
@@ -87,8 +90,7 @@ cdll.LoadLibrary("__lib_path__")
     def build_arch_flags(self) -> str:
         return self._arch_flags
 
-    def __hash__(self) -> int:
-        return hash(str(self))
+    # No manual __hash__ needed: frozen=True generates a safe and correct one.
 
     def check_build(self, code: str) -> bool:
         from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT, write
@@ -129,7 +131,7 @@ cdll.LoadLibrary("__lib_path__")
                     [
                         sys.executable,
                         "-c",
-                        VecISA._avx_py_load.replace("__lib_path__", output_path),
+                        self._avx_py_load.replace("__lib_path__", output_path),
                     ],
                     cwd=output_dir,
                     stderr=subprocess.DEVNULL,
@@ -144,17 +146,21 @@ cdll.LoadLibrary("__lib_path__")
         return self.__bool__impl(config.cpp.vec_isa_ok)
 
     @functools.cache  # noqa: B019
-    def __bool__impl(self, vec_isa_ok) -> bool:
+    def __bool__impl(self, vec_isa_ok: Optional[bool]) -> bool:
         if vec_isa_ok is not None:
             return vec_isa_ok
 
         if config.is_fbcode():
             return True
 
-        return self.check_build(VecISA._avx_code)
+        return self.check_build(self._avx_code)
+
+    @abc.abstractmethod
+    def __str__(self) -> str:
+        pass
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class VecNEON(VecISA):
     _bit_width = 128  # This is required to leverage the compute implemented in aten/src/ATen/cpu/vec/vec128/vec128_float_neon.h
     _macro = ["CPU_CAPABILITY_NEON", "AT_BUILD_ARM_VEC256_WITH_SLEEF"]
@@ -169,7 +175,7 @@ class VecNEON(VecISA):
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class VecSVE256(VecISA):
     # this function can be repurposed for SVE with variable vec length
     _bit_width = 256
@@ -191,7 +197,7 @@ class VecSVE256(VecISA):
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class VecAVX512(VecISA):
     _bit_width = 512
     _macro = ["CPU_CAPABILITY_AVX512"]
@@ -248,7 +254,7 @@ extern "C" __m512bh __avx512_bf16_chk_kernel(__m512 a, __m512 b) {
             return self._arch_flags
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class VecAVX512VNNI(VecAVX512):
     _bit_width = 512
     _arch_flags = VecAVX512._arch_flags + " -mavx512vnni -mavx512vl"
@@ -295,7 +301,7 @@ extern "C" __m512i __avx512_vnni_chk_kernel_2(__m512i src, __m512i a, __m512i b)
         return self._arch_flags
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class VecAMX(VecAVX512VNNI):
     _arch_flags = VecAVX512VNNI._arch_flags + " -mamx-tile -mamx-bf16 -mamx-int8"
     # check amx_fp16 separately since it is not always supported when amx is supported
@@ -365,7 +371,7 @@ extern "C" void __amx_chk_kernel() {
         return self._arch_flags + extra_flags
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class VecAVX2(VecISA):
     _bit_width = 256
     _macro = ["CPU_CAPABILITY_AVX2"]
@@ -380,7 +386,7 @@ class VecAVX2(VecISA):
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class VecZVECTOR(VecISA):
     _bit_width = 256
     _macro = [
@@ -397,7 +403,7 @@ class VecZVECTOR(VecISA):
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
-@dataclasses.dataclass
+@dataclasses.dataclass(frozen=True)
 class VecVSX(VecISA):
     _bit_width = 256  # VSX simd supports 128 bit_width, but aten is emulating it as 256
     _macro = ["CPU_CAPABILITY_VSX"]
