@@ -26,6 +26,7 @@ from typing import Any, TypeVar
 
 import torch
 import torch.cuda._gpu_trace as gpu_trace
+from torch.ops import aten
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 
@@ -497,7 +498,9 @@ class ArgumentHandler:
         is_output: bool = False,
     ) -> None:
         if isinstance(value, torch.Tensor) and value.is_cuda:
-            data_ptr = value.data_ptr()
+            # data_ptr() is preferred, but distinguish Tensors with null data_ptr()
+            # otherwise two empty Tensors could incorrectly match as a conflict
+            data_ptr = value.data_ptr() if value.data_ptr() else id(value)
             if is_write:
                 self.dataptrs_written.add(data_ptr)
             elif not metadata_only:
@@ -590,6 +593,10 @@ class CUDASanitizerDispatchMode(TorchDispatchMode):
     def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         if kwargs is None:
             kwargs = {}
+
+        # record_stream is not a kernel dispatch, skip it
+        if func is aten.record_stream.default:
+            return func(*args, **kwargs)
 
         is_factory = bool(FACTORY_FUNCTION_REGEX.match(func._schema.name))
 
