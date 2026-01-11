@@ -1107,6 +1107,11 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
                     or globals_vt.var_getattr(tx, "_global_backward_hooks").len()  # type: ignore[attr-defined]
                     or globals_vt.var_getattr(tx, "_global_forward_hooks").len()  # type: ignore[attr-defined]
                     or globals_vt.var_getattr(tx, "_global_forward_pre_hooks").len()  # type: ignore[attr-defined]
+                    # When the forward method is marked as leaf_function,
+                    # we don't do the short circuit.
+                    # The alternative would be directly construct a TorchInGraphVariable
+                    or id(self.value_type.forward)  # type: ignore[attr-defined]
+                    in trace_rules._leaf_function_ids
                 ):
                     name = "forward"
                     fn = self.value_type.forward  # type: ignore[attr-defined]
