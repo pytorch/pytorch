@@ -7980,6 +7980,7 @@ class TestMPS(TestCaseMPS):
             ("random_", lambda t: t.random_()),
             ("random_with_to", lambda t: t.random_(10)),
             ("random_with_range", lambda t: t.random_(0, 10)),
+            ("log_normal_", lambda t: t.log_normal_(mean=1.0, std=2.0)),
         ]
 
         for name, op_func in ops:
@@ -8036,6 +8037,20 @@ class TestMPS(TestCaseMPS):
         for _ in range(100):
             a = torch.empty(32_000, device="mps", dtype=dtype).exponential_()
             self.assertTrue((a != 0).all())
+
+    def test_log_normal(self):
+        cpu_a = torch.zeros(50, 50).log_normal_(mean=1.0, std=2.0).flatten()
+        mps_a = torch.zeros(50, 50, device="mps").log_normal_(mean=1.0, std=2.0).cpu().flatten()
+
+        all_vals = torch.cat([cpu_a, mps_a])
+        min_val, max_val = all_vals.min().item(), all_vals.max().item()
+
+        cpu_hist = torch.histc(cpu_a, bins=50, min=min_val, max=max_val) + 1e-10
+        mps_hist = torch.histc(mps_a, bins=50, min=min_val, max=max_val) + 1e-10
+
+        p, q = cpu_hist / cpu_hist.sum(), mps_hist / mps_hist.sum()
+        kl_div = (p * (p / q).log()).sum().item()
+        self.assertLess(kl_div, 0.05)
 
     # Test add
     def test_add_sub(self):
