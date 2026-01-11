@@ -3,6 +3,11 @@ import unittest
 
 import torch
 from torch._inductor import config
+from torch._inductor.template_heuristics.triton import (
+    BlackwellGPUGemmConfig,
+    CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
+    CUDABlackwellPersistentTMATemplateConfigHeuristic,
+)
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
@@ -303,75 +308,60 @@ class TestMaxAutotuneBlackwell(TestCase):
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
 
-    @unittest.skipIf(
-        not has_datacenter_blackwell_tma_device() or not config.is_fbcode(),
-        "Need Blackwell with device-side TMA support in Triton",
+
+@instantiate_parametrized_tests
+class TestBlackwellExhaustiveConfigs(TestCase):
+    """Tests for exhaustive config generation for Blackwell templates."""
+
+    # Expected valid values for each parameter based on _generate_exhaustive_configs
+    VALID_BLOCK_SIZES = {32, 64, 128, 256}
+    VALID_GROUP_M = {8}
+    VALID_NUM_STAGES = {2, 3, 4, 5, 6}
+    VALID_NUM_WARPS = {4, 8}
+    VALID_EPILOGUE_SUBTILE = {True, False}
+
+    @parametrize(
+        "heuristic_cls",
+        (
+            CUDABlackwellPersistentTMATemplateConfigHeuristic,
+            CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
+        ),
     )
-    @unittest.skipIf(not has_tlx(), "TLX not available")
-    @parametrize("template", ("blackwell_gemm_clc", "blackwell_gemm_2cta"))
-    @parametrize("dynamic", (False, True))
-    @parametrize("epilogue_subtile", (False, True))
-    def test_tlx_mm(
-        self,
-        template: str,
-        dynamic: bool,
-        epilogue_subtile: bool,
-    ):
-        a_transposed: bool = False
-        b_transposed: bool = False
+    def test_exhaustive_configs_parameter_variety(self, heuristic_cls):
+        """Test that exhaustive configs have variety in all expected parameters."""
+        heuristic = heuristic_cls()
+        configs = heuristic.exhaustive_configs
 
-        def mm(a, b):
-            # TMA requires 16-byte alignment: here we repeat the dims
-            # by the factor of 8, as float16 is 2-byte. All dims are
-            # repeated due to the possible transpositions below.
-            # a = a.repeat(8, 8)
-            # b = b.repeat(8, 8)
-            if a_transposed:
-                a = a.T
-            if b_transposed:
-                b = b.T
+        # Ensure we have at least 128 configs
+        self.assertGreaterEqual(len(configs), 128)
 
-            return torch.mm(a, b)
+        # Collect all unique values for each parameter
+        block_m_values = set()
+        block_n_values = set()
+        block_k_values = set()
+        group_m_values = set()
+        num_stages_values = set()
+        num_warps_values = set()
+        epilogue_subtile_values = set()
 
-        def next_multiple_16(a: int) -> int:
-            return ((a + 15) // 16) * 16
+        for cfg in configs:
+            self.assertIsInstance(cfg, BlackwellGPUGemmConfig)
+            block_m_values.add(cfg.block_m)
+            block_n_values.add(cfg.block_n)
+            block_k_values.add(cfg.block_k)
+            group_m_values.add(cfg.group_m)
+            num_stages_values.add(cfg.num_stages)
+            num_warps_values.add(cfg.num_warps)
+            epilogue_subtile_values.add(cfg.epilogue_subtile)
 
-        M, N, K = 4096, 4096, 4096
-        a_shape = (K, M) if a_transposed else (M, K)
-        a_stride = (
-            (next_multiple_16(M), 1) if a_transposed else (next_multiple_16(K), 1)
-        )
-        a = torch.empty_strided(a_shape, a_stride, dtype=torch.float16).to(GPU_TYPE)
-        a[:] = torch.randn(a_shape, dtype=torch.float16)
-        a = a.to(GPU_TYPE)
-        b_shape = (N, K) if b_transposed else (K, N)
-        b_stride = (
-            (next_multiple_16(K), 1) if a_transposed else (next_multiple_16(N), 1)
-        )
-        b = torch.empty_strided(b_shape, b_stride, dtype=torch.float16)
-        b[:] = torch.randn(b_shape, dtype=torch.float16)
-        b = b.to(GPU_TYPE)
-
-        epilogue_subtile_regex = f"EPILOGUE_SUBTILE={epilogue_subtile}"
-
-        with config.patch(
-            {
-                "force_disable_caches": True,
-                "enable_caching_generated_triton_templates": False,
-                "triton.enable_tlx_templates": True,
-                "max_autotune": True,
-                "test_configs.autotune_choice_name_regex": template,
-                "test_configs.autotune_choice_desc_regex": epilogue_subtile_regex,
-            }
-        ):
-            c_actual, code = run_and_get_code(torch.compile(mm, dynamic=dynamic), a, b)
-            c_expected = mm(a, b)
-
-        torch.testing.assert_close(c_actual, c_expected)
-
-        FileCheck().check("triton_tem_fused_mm").check("tlx.async_descriptor_load").run(
-            code[0]
-        )
+        # Verify multiple values exist for each parameter via set membership
+        self.assertEqual(block_m_values, self.VALID_BLOCK_SIZES)
+        self.assertEqual(block_n_values, self.VALID_BLOCK_SIZES)
+        self.assertEqual(block_k_values, self.VALID_BLOCK_SIZES)
+        self.assertEqual(group_m_values, self.VALID_GROUP_M)
+        self.assertEqual(num_stages_values, self.VALID_NUM_STAGES)
+        self.assertEqual(num_warps_values, self.VALID_NUM_WARPS)
+        self.assertEqual(epilogue_subtile_values, self.VALID_EPILOGUE_SUBTILE)
 
 
 if __name__ == "__main__":

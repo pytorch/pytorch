@@ -76,7 +76,6 @@ inductor_decompositions = get_decompositions(
         aten.gelu,
         aten.hardtanh,
         aten.lcm,
-        aten.ldexp,
         aten.leaky_relu,
         aten.linalg_vector_norm,
         aten._log_softmax,
@@ -117,6 +116,7 @@ decomps_to_exclude: list[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacke
     aten._unsafe_masked_index_put_accumulate,
     aten._scaled_dot_product_flash_attention_for_cpu.default,  # See comments in torch/_decomp/decompositions.py
     aten._softmax_backward_data,
+    aten.addcmul,  # inductor lowers this directly using FMA for precision
     aten.clamp_max,
     aten.clamp_min,
     aten.embedding_dense_backward,  # we fall back on xpu
@@ -125,6 +125,7 @@ decomps_to_exclude: list[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacke
     aten.glu,  # inductor lowers this directly
     aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
     aten.slice_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
+    aten.silu,  # inductor uses exact eager decomposition
     aten.split.Tensor,  # inductor lowers this directly
     aten.squeeze,  # inductor lowers this directly
     aten.sum,  # inductor lowers this directly
@@ -198,6 +199,15 @@ def clamp(
     if max is not None:
         x = x.clamp_max(max)
     return x
+
+
+# Inductor-specific SiLU decomposition for exact eager matching.
+# The core decomposition uses x * sigmoid(x), but this form
+# x / (1 + exp(-x)) matches eager execution more precisely.
+@register_decomposition([aten.silu])
+@pw_cast_for_opmath
+def silu(x: torch.Tensor) -> torch.Tensor:
+    return x / (1 + x.neg().exp())
 
 
 @register_decomposition([aten.full])
@@ -605,7 +615,7 @@ def view_copy_dtype(
     self: torch.Tensor,
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    return self.to(dtype).clone()
+    return self.clone().view(dtype)
 
 
 def _get_shape_permutation_like(
@@ -813,16 +823,8 @@ def grid_sampler_2d(
     return output
 
 
-@register_decomposition(aten._foreach_addcmul.Scalar)
-def _foreach_addcmul_scalar(
-    self: list[torch.Tensor],
-    left_tensors: list[torch.Tensor],
-    right_tensors: list[torch.Tensor],
-    scalar: float = 1,
-) -> list[torch.Tensor]:
-    return aten._foreach_add.List(
-        self, aten._foreach_mul.List(left_tensors, right_tensors), alpha=scalar
-    )
+# _foreach_addcmul.Scalar is not decomposed - we use the native CUDA kernel
+# which preserves FMA semantics for better precision matching with eager
 
 
 @register_decomposition(aten._foreach_addcdiv.Scalar)
@@ -912,7 +914,15 @@ def select_decomp_table() -> dict[Any, Callable[..., Any]]:
         # remove q_embedding_bag_byte_unpack_decomp from decompositions
         decompositions.pop(torch.ops.quantized.embedding_bag_byte_unpack.default, None)
         return decompositions
-    return fast_random_decomps()
+    result = fast_random_decomps()
+    if config.emulate_precision_casts:
+        # When emulating precision casts, skip decomposition of foreach addcdiv
+        # so that we use the native CUDA kernel which preserves FMA semantics.
+        # The decomposed version uses separate div+add ops which don't match
+        # eager's FMA rounding behavior.
+        # Note: _foreach_addcmul.Scalar is unconditionally not decomposed.
+        result = {k: v for k, v in result.items() if k != aten._foreach_addcdiv.Scalar}
+    return result
 
 
 @register_decomposition(aten.masked_scatter)
