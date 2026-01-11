@@ -136,6 +136,16 @@ def send_tensor_with_untyped_storage(queue, event):
     event.wait()
 
 
+def rebuild_cuda_tensor_twice(spec, done_event):
+    torch.cuda.set_device(spec["storage_device"])
+    t1 = mp.reductions.rebuild_cuda_tensor(**spec)
+    t2 = mp.reductions.rebuild_cuda_tensor(**spec)
+    del t1, t2
+    gc.collect()
+    torch.cuda.synchronize(device=spec["storage_device"])
+    done_event.set()
+
+
 def receive_and_send_sum(queue, out_queue, event, device, dtype, count, size=5):
     s = torch.full([size], 0, device=device, dtype=dtype)
     for _ in range(count):
@@ -688,6 +698,71 @@ if __name__ == "__main__":
 
         del tensors, spec
         event.set()
+
+    @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
+    def test_cuda_ipc_refcount_underflow(self):
+        ctx = mp.get_context("spawn")
+        done = ctx.Event()
+        device = torch.cuda.current_device()
+
+        # Regression test for #149187: rebuilding a shared CUDA storage twice in a
+        # consumer can decrement the refcounter below zero; this must not prevent
+        # ipc_collect() from reclaiming the producer allocation.
+        with torch.cuda.device(device), self.assertLeaksNoCudaTensors():
+            # Allocate a tensor large enough that a leak is visible.
+            t = torch.empty(
+                (16, 1024, 1024), device="cuda", dtype=torch.float32
+            )  # ~64MB
+            storage = t.untyped_storage()
+            (
+                storage_device,
+                storage_handle,
+                storage_size_bytes,
+                storage_offset_bytes,
+                ref_counter_handle,
+                ref_counter_offset,
+                event_handle,
+                event_sync_required,
+            ) = storage._share_cuda_()
+
+            spec = {
+                "tensor_cls": type(t),
+                "tensor_size": t.shape,
+                "tensor_stride": t.stride(),
+                "tensor_offset": t.storage_offset(),
+                "storage_cls": type(storage),
+                "dtype": t.dtype,
+                "storage_device": storage_device,
+                "storage_handle": storage_handle,
+                "storage_size_bytes": storage_size_bytes,
+                "storage_offset_bytes": storage_offset_bytes,
+                "requires_grad": t.requires_grad,
+                "ref_counter_handle": ref_counter_handle,
+                "ref_counter_offset": ref_counter_offset,
+                "event_handle": event_handle,
+                "event_sync_required": event_sync_required,
+            }
+
+            p = ctx.Process(target=rebuild_cuda_tensor_twice, args=(spec, done))
+            p.start()
+
+            # Drop the producer reference so the allocation is moved to the IPC limbo.
+            del t, storage
+            gc.collect()
+            torch.cuda.synchronize(device=device)
+
+            try:
+                self.assertTrue(done.wait(MAX_WAITING_TIME_IN_SECONDS))
+                p.join(MAX_WAITING_TIME_IN_SECONDS)
+                self.assertFalse(p.is_alive())
+                self.assertEqual(p.exitcode, 0)
+            finally:
+                if p.is_alive():
+                    p.terminate()
+                    p.join(MAX_WAITING_TIME_IN_SECONDS)
+
+            torch.cuda.ipc_collect()
+            torch.cuda.synchronize(device=device)
 
     @unittest.skipIf(not TEST_CUDA_IPC, "CUDA IPC not available")
     def test_event(self):
