@@ -61,12 +61,15 @@ class TestFxFusion(TestCase):
         def test_kwarg3(x, y):
             return torch.cat(tensors=[x, y], dim=0).view(128).tanh()
 
+        def test_axis(x, y):
+            return torch.cat([x, y], axis=-1).tanh()
+
         trace_func = chain_passes(torch.fx.symbolic_trace, sink_cat_after_pointwise)
         inputs = [
             torch.randn(8, 8),
             torch.randn(8, 8),
         ]
-        for f in [test_kwarg, test_arg, test_arg2, test_kwarg2, test_kwarg3]:
+        for f in [test_kwarg, test_arg, test_arg2, test_kwarg2, test_kwarg3, test_axis]:
             traced = trace_func(f, inputs)
             torch.testing.assert_close(f(*inputs), traced(*inputs))
             self.assertEqual(count_call_method(traced, "tanh"), 2)
