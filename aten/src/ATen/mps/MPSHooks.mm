@@ -2,6 +2,7 @@
 
 #include <ATen/mps/MPSAllocatorInterface.h>
 #include <ATen/mps/MPSDevice.h>
+#include <ATen/mps/MPSEvent.h>
 #include <ATen/mps/MPSGeneratorImpl.h>
 #include <ATen/mps/MPSHooks.h>
 #include <ATen/mps/MPSProfiler.h>
@@ -81,7 +82,12 @@ void* MPSHooks::getDispatchQueue() const {
 }
 
 void MPSHooks::emptyCache() const {
+  // Synchronize first to ensure command buffers complete before cleanup
+  // This allows completion handlers to execute, which is critical for proper buffer freeing
+  deviceSynchronize();
   at::mps::getIMPSAllocator()->emptyCache();
+  // Clear the event pool to release accumulated events and their listeners
+  at::mps::getMPSEventPool()->emptyCache();
 }
 
 size_t MPSHooks::getCurrentAllocatedMemory() const {
