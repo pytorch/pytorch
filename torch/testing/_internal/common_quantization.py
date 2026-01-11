@@ -519,26 +519,35 @@ def lengths_to_offsets(t, offset_type=np.int64, use_begin_offset=True):
 
 
 def _group_quantize_tensor(w, n_bit=4, q_group_size=16):
-    assert w.dim() == 2
+    if w.dim() != 2:
+        raise AssertionError(f"w must be 2-dimensional, got {w.dim()} dimensions")
     w = w.transpose(0, 1).contiguous()
-    assert q_group_size > 1
-    assert w.shape[-1] % q_group_size == 0
+    if q_group_size <= 1:
+        raise AssertionError(f"q_group_size must be > 1, got {q_group_size}")
+    if w.shape[-1] % q_group_size:
+        raise AssertionError(
+            f"w.shape[-1] ({w.shape[-1]}) must be divisible by q_group_size ({q_group_size})"
+        )
 
     to_quant = w.reshape(-1, q_group_size)
-    assert torch.isnan(to_quant).sum() == 0
+    if torch.isnan(to_quant).sum() != 0:
+        raise AssertionError("to_quant contains NaN values")
 
     max_val = to_quant.amax(dim=1, keepdim=True)
     min_val = to_quant.amin(dim=1, keepdim=True)
     max_int = 2**n_bit - 1
     min_int = 0
     scales = (max_val - min_val).clamp(min=1e-6) / max_int
-    assert torch.isnan(scales).sum() == 0
+    if torch.isnan(scales).sum() != 0:
+        raise AssertionError("scales contains NaN values")
 
     zeros = min_val + scales * (2 ** (n_bit - 1))
-    assert torch.isnan(zeros).sum() == 0
+    if torch.isnan(zeros).sum() != 0:
+        raise AssertionError("zeros contains NaN values")
 
     out = to_quant.sub(min_val).div(scales).round().clamp_(min_int, max_int)
-    assert torch.isnan(out).sum() == 0
+    if torch.isnan(out).sum() != 0:
+        raise AssertionError("out contains NaN values")
 
     out = out.to(dtype=torch.int32).reshape(w.shape)
     if out.device != torch.device("cpu"):
@@ -567,9 +576,14 @@ def _group_quantize_tensor_symmetric(w, n_bit=4, groupsize=32):
     # W is of shape [K x N]
     # We transpose W as Quantization is applied on [N x K]
     w = w.transpose(0, 1).contiguous()
-    assert w.dim() == 2
-    assert groupsize > 1
-    assert w.shape[-1] % groupsize == 0
+    if w.dim() != 2:
+        raise AssertionError(f"w must be 2-dimensional, got {w.dim()} dimensions")
+    if groupsize <= 1:
+        raise AssertionError(f"groupsize must be > 1, got {groupsize}")
+    if w.shape[-1] % groupsize:
+        raise AssertionError(
+            f"w.shape[-1] ({w.shape[-1]}) must be divisible by groupsize ({groupsize})"
+        )
     # Calculate scale and zeros
     to_quant = w.reshape(-1, groupsize)
     max_val = to_quant.abs().amax(dim=1, keepdim=True)
@@ -1060,7 +1074,10 @@ class QuantizationTestCase(TestCase):
                     mod = getattr(gm, node.target)
                     return type(mod)
                 else:
-                    assert node.op in ("call_function", "call_method")
+                    if node.op not in ("call_function", "call_method"):
+                        raise AssertionError(
+                            f"node.op must be 'call_function' or 'call_method', got '{node.op}'"
+                        )
                     return node.target
 
             self.assertTrue(
@@ -1147,14 +1164,33 @@ class QuantizationTestCase(TestCase):
                                         + f"have a shape mismatch at idx {idx}.",
                                     )
                                 else:
-                                    assert isinstance(
-                                        values_0, tuple
-                                    ), f"unhandled type {type(values_0)}"
-                                    assert len(values_0) == 2
-                                    assert len(values_0[1]) == 2
-                                    assert values_0[0].shape == values_1[0].shape
-                                    assert values_0[1][0].shape == values_1[1][0].shape
-                                    assert values_0[1][1].shape == values_1[1][1].shape
+                                    if not isinstance(values_0, tuple):
+                                        raise TypeError(
+                                            f"unhandled type {type(values_0)}"
+                                        )
+                                    if len(values_0) != 2:
+                                        raise AssertionError(
+                                            f"values_0 must have length 2, got {len(values_0)}"
+                                        )
+                                    if len(values_0[1]) != 2:
+                                        raise AssertionError(
+                                            f"values_0[1] must have length 2, got {len(values_0[1])}"
+                                        )
+                                    if values_0[0].shape != values_1[0].shape:
+                                        raise AssertionError(
+                                            f"Shape mismatch: values_0[0].shape={values_0[0].shape}, "
+                                            f"values_1[0].shape={values_1[0].shape}"
+                                        )
+                                    if values_0[1][0].shape != values_1[1][0].shape:
+                                        raise AssertionError(
+                                            f"Shape mismatch: values_0[1][0].shape={values_0[1][0].shape}, "
+                                            f"values_1[1][0].shape={values_1[1][0].shape}"
+                                        )
+                                    if values_0[1][1].shape != values_1[1][1].shape:
+                                        raise AssertionError(
+                                            f"Shape mismatch: values_0[1][1].shape={values_0[1][1].shape}, "
+                                            f"values_1[1][1].shape={values_1[1][1].shape}"
+                                        )
 
                         # verify that ref_node_name is valid
                         ref_node_name_0 = layer_data_0["ref_node_name"]
@@ -1255,10 +1291,10 @@ class QuantizationTestCase(TestCase):
 
             # overwrite qconfig_dict with custom_qconfig_dict
             if custom_qconfig_dict is not None:
-                assert type(custom_qconfig_dict) in (
-                    QConfigMapping,
-                    dict,
-                ), "custom_qconfig_dict should be a QConfigMapping or a dict"
+                if not isinstance(custom_qconfig_dict, (QConfigMapping, dict)):
+                    raise TypeError(
+                        "custom_qconfig_dict should be a QConfigMapping or a dict"
+                    )
                 if isinstance(custom_qconfig_dict, QConfigMapping):
                     qconfig_mapping = custom_qconfig_dict
                 else:
@@ -1340,7 +1376,10 @@ class QuantizationTestCase(TestCase):
         # Check unpacked weight values explicitly
         for key in emb_dict:
             if isinstance(emb_dict[key], torch._C.ScriptObject):
-                assert isinstance(loaded_dict[key], torch._C.ScriptObject)
+                if not isinstance(loaded_dict[key], torch._C.ScriptObject):
+                    raise TypeError(
+                        f"loaded_dict[{key}] must be a ScriptObject, got {type(loaded_dict[key]).__name__}"
+                    )
                 emb_weight = embedding_unpack(emb_dict[key])
                 loaded_weight = embedding_unpack(loaded_dict[key])
                 self.assertEqual(emb_weight, loaded_weight)
