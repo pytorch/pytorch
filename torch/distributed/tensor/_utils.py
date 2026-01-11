@@ -189,7 +189,7 @@ def _get_first_offset(offsets: torch.Tensor) -> int:
 def _compute_local_shape_and_global_offset(
     global_shape: ShapeType,
     mesh_shape: ShapeType,
-    coordinate_lookup: Callable[[int], RankType],
+    my_coordinate: list[int] | Callable[[int], RankType] | None,
     placements: Sequence[Placement],
     skip_offset: bool = False,
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
@@ -224,6 +224,14 @@ def _compute_local_shape_and_global_offset(
               this shard begins in the global tensor. If skip_offset is True, this will be an
               empty tuple.
     """
+
+    if isinstance(my_coordinate, (list, tuple)):
+        _coord: list | tuple = my_coordinate
+        def coordinate_lookup(dim: int) -> RankType:
+            return _coord[dim]
+    else:
+        assert my_coordinate is not None
+        coordinate_lookup = my_coordinate
 
     local_shape = list(global_shape)
     # Perform shard from left to right. For example,
