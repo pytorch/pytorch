@@ -22,10 +22,16 @@ def get_sha(pytorch_root: str | Path) -> str:
             rev = subprocess.check_output(
                 ["git", "rev-parse", "HEAD"], cwd=pytorch_root
             )
-        elif os.path.exists(os.path.join(pytorch_root, ".hg")):
-            rev = subprocess.check_output(
-                ["hg", "identify", "-r", "."], cwd=pytorch_root
-            )
+        else:
+            # Try hg command - works anywhere inside an hg repo
+            try:
+                rev = subprocess.check_output(
+                    ["hg", "identify", "-r", "."],
+                    cwd=pytorch_root,
+                    stderr=subprocess.DEVNULL,
+                )
+            except Exception:
+                pass
         if rev:
             return rev.decode("ascii").strip()
     except Exception:
