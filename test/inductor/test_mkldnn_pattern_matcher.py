@@ -110,7 +110,7 @@ def cal_conv_generated_kernel_number(mod, input, dtype, dim=4, device="cpu"):
     ):
         input_kernel = 1
     if output.is_contiguous(memory_format=torch.contiguous_format) or (
-        TEST_ACL and dtype == torch.bfloat16
+        TEST_ACL and (dtype == torch.bfloat16 or dtype == torch.half)
     ):
         output_kernel = 1
 
