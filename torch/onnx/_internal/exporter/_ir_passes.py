@@ -55,15 +55,27 @@ def _replace_names(shape_expr: str, rename_mapping: dict[str, str]) -> str:
     return shape_expr
 
 
-def rename_axis(model: ir.Model, rename_mapping: dict[str, str]) -> None:
+def rename_axis(
+    model: ir.Model, rename_mapping: dict[str | ir.SymbolicDim, str]
+) -> None:
     """Rename dynamic axes in a model according to the specified dynamic_axes names."""
+
+    # Create a mapping from string to string for easier replacement
+    string_mapping: dict[str, str] = {}
+    for key, value in tuple(rename_mapping.items()):
+        if isinstance(key, ir.SymbolicDim):
+            if isinstance(key.value, str):
+                string_mapping[key.value] = value
+            # Skip non-string keys (None)
+        else:
+            string_mapping[key] = value
 
     # NOTE: Mapping needs to be srted by length because the shape expression
     # could have multiple ways to be expressed, for example,
     # {"s1": sequence_length, "s11": "past_sequence_length", "s1 + s11": "masked_sequence_length"}
     # We prefer the replacement starts from the longest match.
     sorted_rename_mapping = dict(
-        sorted(rename_mapping.items(), key=lambda item: len(item[0]), reverse=True)
+        sorted(string_mapping.items(), key=lambda item: len(item[0]), reverse=True)
     )
     for value in _all_values(model):
         if value.shape is None:
