@@ -1881,6 +1881,8 @@ class TestDtypeMismatch(TestCase):
     @parametrize("device", ["cpu", "cuda", "meta"])
     def test_mm_dtype_mismatch(self, device):
         """Test that mm raises an error when input dtypes don't match."""
+        if device == "cuda" and not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
         a = torch.rand((2, 3), dtype=torch.float16, device=device)
         b = torch.rand((3, 4), dtype=torch.float32, device=device)
         with self.assertRaisesRegex(RuntimeError, "expected .* (to have the same dtype|but found)"):
@@ -1889,6 +1891,8 @@ class TestDtypeMismatch(TestCase):
     @parametrize("device", ["cpu", "cuda", "meta"])
     def test_bmm_dtype_mismatch(self, device):
         """Test that bmm raises an error when input dtypes don't match."""
+        if device == "cuda" and not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
         a = torch.rand((2, 3, 4), dtype=torch.float16, device=device)
         b = torch.rand((2, 4, 5), dtype=torch.float32, device=device)
         with self.assertRaisesRegex(RuntimeError, "expected .* (to have the same dtype|but found)"):
@@ -1897,6 +1901,8 @@ class TestDtypeMismatch(TestCase):
     @parametrize("device", ["cpu", "cuda", "meta"])
     def test_matmul_dtype_mismatch(self, device):
         """Test that matmul raises an error when input dtypes don't match."""
+        if device == "cuda" and not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
         # Test 2D @ 2D (uses mm)
         a = torch.rand((2, 3), dtype=torch.float16, device=device)
         b = torch.rand((3, 4), dtype=torch.float32, device=device)
