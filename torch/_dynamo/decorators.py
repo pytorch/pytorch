@@ -297,7 +297,7 @@ def leaf_function(fn: Callable[..., Any]) -> Callable[..., Any]:
 
     Restrictions:
         - (Temporary) Only nn.Module methods supported currently.
-        - (Temporary) Return value should be a tuple of tensors.
+        - Output should be a pytree of primitives (e.g. Tenosr, int, str etc).
 
 
     Example:
