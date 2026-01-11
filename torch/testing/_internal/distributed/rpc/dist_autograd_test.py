@@ -27,6 +27,7 @@ from torch.testing._internal.dist_utils import (
     wait_until_node_failure,
     worker_name,
 )
+from torch.testing._internal.distributed.rpc.common_utils import _get_device_name
 from torch.testing._internal.distributed.rpc.rpc_agent_test_fixture import (
     RpcAgentTestFixture,
 )
@@ -2505,12 +2506,12 @@ class DistAutogradTest(CommonDistAutogradTest):
             )
 
 
-class CudaDistAutogradTest(CommonDistAutogradTest):
+class DeviceDistAutogradTest(CommonDistAutogradTest):
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_gpu_simple(self):
-        t1 = torch.rand(3, 3, requires_grad=True, device="cuda:0")
-        t2 = torch.rand(3, 3, requires_grad=True, device="cuda:0")
+        t1 = torch.rand(3, 3, requires_grad=True, device=_get_device_name(0))
+        t2 = torch.rand(3, 3, requires_grad=True, device=_get_device_name(0))
         (t1 + t2).sum().backward()
         with dist_autograd.context() as context_id:
             t3 = t1 + t2
@@ -2523,7 +2524,7 @@ class CudaDistAutogradTest(CommonDistAutogradTest):
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_gpu_to_cpu_continuation(self):
-        t1 = torch.rand(3, 3, requires_grad=True, device="cuda:0")
+        t1 = torch.rand(3, 3, requires_grad=True, device=_get_device_name(0))
         t2 = torch.rand(3, 3, requires_grad=True)
         # Run a few iterations.
         for _ in range(3):
@@ -2534,9 +2535,9 @@ class CudaDistAutogradTest(CommonDistAutogradTest):
             for exec_mode in [ExecMode.LOCAL, ExecMode.RPC_SYNC]:
                 with dist_autograd.context() as context_id:
                     t3 = self._exec_func(exec_mode, torch.add, t2, t2)
-                    t4 = t3.cuda(0) + t1
+                    t4 = t3.to(_get_device_name(0)) + t1
                     t5 = self._exec_func(exec_mode, torch.add, t4.cpu(), t2)
-                    t6 = t5.cuda(0) + t4
+                    t6 = t5.to(_get_device_name(0)) + t4
                     t7 = self._exec_func(exec_mode, torch.add, t6.cpu(), t5)
                     # Autograd graph consists of CPU -> GPU -> CPU execution.
                     ret = self._verify_backwards(
@@ -2547,7 +2548,7 @@ class CudaDistAutogradTest(CommonDistAutogradTest):
     @skip_if_lt_x_gpu(1)
     @dist_init
     def test_gpu_to_cpu_continuation_gpu_root(self):
-        t1 = torch.rand(3, 3, requires_grad=True, device="cuda:0")
+        t1 = torch.rand(3, 3, requires_grad=True, device=_get_device_name(0))
         t2 = torch.rand(3, 3, requires_grad=True)
         # Run a few iterations.
         for _ in range(3):
@@ -2558,9 +2559,9 @@ class CudaDistAutogradTest(CommonDistAutogradTest):
             for exec_mode in [ExecMode.LOCAL, ExecMode.RPC_SYNC]:
                 with dist_autograd.context() as context_id:
                     t3 = self._exec_func(exec_mode, torch.add, t2, t2)
-                    t4 = t3.cuda(0) + t1
+                    t4 = t3.to(_get_device_name(0)) + t1
                     t5 = self._exec_func(exec_mode, torch.add, t4.cpu(), t2)
-                    t6 = t5.cuda(0) + t4
+                    t6 = t5.to(_get_device_name(0)) + t4
                     # Autograd graph consists of CPU -> GPU -> CPU execution.
                     ret = self._verify_backwards(
                         exec_mode, [t6.sum()], context_id, local_grads, t1, t2
@@ -2626,7 +2627,7 @@ class WrapperModule(nn.Module):
         return [grads[p] for p in self.model.parameters()]
 
 
-class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
+class TensorPipeDeviceDistAutogradTest(RpcAgentTestFixture):
     @skip_if_lt_x_gpu(4)
     def test_device_maps_backward_pass(self):
         options = self.rpc_backend_options
@@ -2685,10 +2686,14 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
             rpc_backend_options=options,
         )
 
-        remote_compute = rpc.remote(dst, TensorPipeCudaDistAutogradTest.MyRemoteCompute)
-        local_compute = TensorPipeCudaDistAutogradTest.MyLocalCompute(remote_compute)
+        remote_compute = rpc.remote(
+            dst, TensorPipeDeviceDistAutogradTest.MyRemoteCompute
+        )
+        local_compute = TensorPipeDeviceDistAutogradTest.MyLocalCompute(remote_compute)
         for _ in range(10):
-            input = torch.rand([1000, 10000], device=self.rank, requires_grad=True)
+            input = torch.rand(
+                [1000, 10000], device=_get_device_name(self.rank), requires_grad=True
+            )
             # Run local autograd
             result = input * 2.0
             r = random.random()
@@ -2724,7 +2729,7 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
         if self.rank == 0:
             # this is master
             layers = [nn.Linear(2000, 2000) for _ in range(self.world_size - 1)]
-            local_layers = [l.to(0) for l in layers]
+            local_layers = [l.to(_get_device_name(0)) for l in layers]
             remote_layers = [
                 rpc.remote(
                     worker_name(rank), WrapperModule, args=(layers[rank - 1], rank)
@@ -2732,7 +2737,7 @@ class TensorPipeCudaDistAutogradTest(RpcAgentTestFixture):
                 for rank in range(1, self.world_size)
             ]
 
-            x = torch.randn(5000, 2000).to(0)
+            x = torch.randn(5000, 2000).to(_get_device_name(0))
             # local iteration
             local_model = nn.Sequential(*local_layers)
             local_model(x).sum().backward()
