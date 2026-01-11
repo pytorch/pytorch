@@ -309,6 +309,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(256, 128, 128, 3, 8),
         ]
 
+        
         self.mixed_mm_configs: list[BaseConfig] = [
             GemmConfig(16, 128, 256, 3, 4),
             GemmConfig(16, 128, 256, 5, 8),
@@ -956,6 +957,7 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
     def get_exhaustive_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
         return partial(self.preprocess_mm_configs, configs=self.exhaustive_configs)
+    
 
     def get_conv_configs(self) -> partial[Generator[TritonConfig, None, None]]:
         return partial(
@@ -1393,6 +1395,8 @@ class ROCmConfigHeuristic(BaseConfigHeuristic):
             for waves_per_eu in [0, 2]
             for kpack in [2]
         ]
+
+        # Exhaustive search for mm configs
 
         self.default_flex_config = {
             (torch.float32, 64): ROCmFlexConfig(128, 32, 1, 4),
@@ -1846,27 +1850,56 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
 
         # Extract dtype and device_type from kernel_inputs
         dtype = kernel_inputs.dtype()
+        device = kernel_inputs.device()
 
         # Get the appropriate config generator
         configs = self._get_config_generator()
 
         # Generate and process configs
-        for c in configs(
-            m,
-            n,
-            k,
-            dtype_size=dtype.itemsize,
-            op_name=op_name,
-            **kwargs,
-        ):
-            template_kwargs = self._convert_config_to_template_kwargs(
-                c,
+        if (torch.version.hip is not None) and config.origami:
+            import origami
+            #import pdb; pdb.set_trace()
+            origami_cfg_gen = self.get_exhaustive_mm_configs()
+            allcfgs = origami_cfg_gen(
+                m, n, k, dtype_size=dtype.itemsize, op_name=op_name
+            )
+            selector = origami.TorchMatmulHeuristic(
+                allcfgs, m, n, k, dtype, dtype, dtype, device
+            )
+            origami_config_kwargs = {
+                'EVEN_K': selector.even_k,
+                'USE_FAST_ACCUM': False,
+                'ACC_TYPE': 'tl.float32',
+                'num_stages': 2,
+                'num_warps': 8,
+                'BLOCK_M': selector.block_m,
+                'BLOCK_N': selector.block_n,
+                'BLOCK_K': selector.block_k,
+                'GROUP_M': selector.group_m,
+                'matrix_instr_nonkdim': 16,
+                'waves_per_eu': selector.waves_per_eu,
+                'kpack': 2,
+                '_origami_config': True,
+            }
+            yield origami_config_kwargs
+        else:
+            for c in configs(
                 m,
                 n,
                 k,
-                kernel_inputs.out_dtype(),
-            )
-            yield template_kwargs
+                dtype_size=dtype.itemsize,
+                op_name=op_name,
+                **kwargs,
+            ):
+                template_kwargs = self._convert_config_to_template_kwargs(
+                    c,
+                    m,
+                    n,
+                    k,
+                    kernel_inputs.out_dtype(),
+                )
+                yield template_kwargs
+
 
     def _convert_config_to_template_kwargs(
         self,

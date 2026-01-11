@@ -2356,6 +2356,19 @@ def use_ck_tile_gemm_template(layout: Layout, m: int, n: int, k: int) -> bool:
         and V.graph.sizevars.size_hint(m * n * k, fallback=-1) > 0
     )
 
+def use_origami_gemm_template(layout: Layout) -> bool:
+    if config.origami:
+        try:
+            import origami
+        except ImportError:
+            print(
+                "Origami not imported, install it with `pip install git+https://github.com/origami-ai/origami.git`"
+            )
+            return False
+        else:
+            return use_triton_template(layout, check_max_autotune=False)
+    return False
+
 
 def use_ck_conv_template(layout: Layout) -> bool:
     return _use_conv_autotune_backend("CK") and use_ck_template(layout)
@@ -2458,7 +2471,7 @@ def use_cpp_gemm_template(
 
 def use_aten_gemm_kernels() -> bool:
     return not (
-        config.max_autotune or config.max_autotune_gemm
+        config.max_autotune or config.max_autotune_gemm or config.origami
     ) or _use_autotune_backend("ATEN")
 
 
