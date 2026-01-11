@@ -1598,7 +1598,7 @@ class TestSparseCSR(TestCase):
     @skipIfTorchDynamo("raises 'sparse matrix length is ambiguous; use getnnz()'")
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
-                  *[torch.half] if not TEST_WITH_ROCM else [],
+                  *[torch.half],
                   *[torch.bfloat16] if SM80OrLater else []))
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-5, torch.complex128: 1e-5,
@@ -1919,8 +1919,8 @@ class TestSparseCSR(TestCase):
     @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
-                  *[torch.half] if not TEST_WITH_ROCM else [],
-                  *[torch.bfloat16] if SM80OrLater and TEST_CUSPARSE_GENERIC else []))
+                  *[torch.half],
+                  *[torch.bfloat16] if SM80OrLater else []))
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
     def test_sparse_mm(self, device, dtype):
         def test_shape(d1, d2, d3, nnz, transposed, index_dtype):
@@ -1938,8 +1938,8 @@ class TestSparseCSR(TestCase):
 
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
-                  *[torch.half] if not TEST_WITH_ROCM else [],
-                  *[torch.bfloat16] if SM80OrLater and TEST_CUSPARSE_GENERIC else []))
+                  *[torch.half],
+                  *[torch.bfloat16] if SM80OrLater else []))
     @precisionOverride({torch.bfloat16: 3.5e-2, torch.float16: 1e-2})
     def test_sparse_addmm(self, device, dtype):
         def test_shape(m, n, p, nnz, broadcast, index_dtype, alpha_beta=None):
@@ -1972,8 +1972,8 @@ class TestSparseCSR(TestCase):
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_types_and(torch.complex64,
-                                      *[torch.bfloat16] if (SM80OrLater and not TEST_WITH_ROCM) else [],
-                                      *[torch.half] if not TEST_WITH_ROCM else [],
+                                      *[torch.bfloat16] if SM80OrLater else [],
+                                      *[torch.half],
                                       *[torch.complex128]
                                       if CUSPARSE_SPMM_COMPLEX128_SUPPORTED or HIPSPARSE_SPMM_COMPLEX128_SUPPORTED
                                       else []))
@@ -2048,8 +2048,8 @@ class TestSparseCSR(TestCase):
     @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_types_and(torch.complex64,
-                                      *[torch.bfloat16] if SM80OrLater and not TEST_WITH_ROCM else [],
-                                      *[torch.half] if not TEST_WITH_ROCM else [],
+                                      *[torch.bfloat16] if SM80OrLater else [],
+                                      *[torch.half],
                                       *[torch.complex128]
                                       if CUSPARSE_SPMM_COMPLEX128_SUPPORTED or HIPSPARSE_SPMM_COMPLEX128_SUPPORTED
                                       else []))
