@@ -827,7 +827,7 @@ GraphExecutor::GraphExecutor(
                         std::move(function_name)))) {}
 
 void GraphExecutor::run(Stack& inputs) {
-  return pImpl->run(inputs);
+  pImpl->run(inputs);
 }
 
 c10::intrusive_ptr<Future> GraphExecutor::runAsync(

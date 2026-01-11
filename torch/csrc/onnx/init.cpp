@@ -68,7 +68,8 @@ void initONNXBindings(PyObject* module) {
           ::torch::wrap_pybind_function([](std::shared_ptr<Graph>& graph,
                                            int opset_version,
                                            bool fixed_batch_size) {
-            return PeepholeOptimizeONNX(graph, opset_version, fixed_batch_size);
+            PeepholeOptimizeONNX(graph, opset_version, fixed_batch_size);
+            return;
           }))
       .def(
           "_jit_pass_onnx_preprocess",
@@ -114,8 +115,8 @@ void initONNXBindings(PyObject* module) {
           ::torch::wrap_pybind_function([](std::shared_ptr<Graph>& graph,
                                            bool lowprecision_cast,
                                            int opset_version) {
-            return ScalarTypeAnalysisForONNX(
-                graph, lowprecision_cast, opset_version);
+            ScalarTypeAnalysisForONNX(graph, lowprecision_cast, opset_version);
+            return;
           }),
           py::arg("graph"),
           py::arg("lowprecision_cast") = true,

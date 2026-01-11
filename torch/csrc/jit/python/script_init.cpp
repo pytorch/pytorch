@@ -1656,7 +1656,8 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "_debug_flush_compilation_cache",
           [](Method& self) {
-            return self.get_executor().debugFlushCompilationCache();
+            self.get_executor().debugFlushCompilationCache();
+            return;
           })
       .def_property_readonly(
           "code_with_constants",
@@ -2169,22 +2170,31 @@ void initJitScriptBindings(PyObject* module) {
       .def(
           "run",
           [](testing::FileCheck& f, const std::string& str) {
-            return f.run(str);
+            f.run(str);
+            return;
           })
       .def(
-          "run", [](testing::FileCheck& f, const Graph& g) { return f.run(g); })
+          "run",
+          [](testing::FileCheck& f, const Graph& g) {
+            f.run(g);
+            return;
+          })
       .def(
           "run",
           [](testing::FileCheck& f,
              const std::string& input,
-             const std::string& output) { return f.run(input, output); },
+             const std::string& output) {
+            f.run(input, output);
+            return;
+          },
           "Run",
           py::arg("checks_file"),
           py::arg("test_file"))
       .def(
           "run",
           [](testing::FileCheck& f, const std::string& input, const Graph& g) {
-            return f.run(input, g);
+            f.run(input, g);
+            return;
           },
           "Run",
           py::arg("checks_file"),
@@ -2482,14 +2492,15 @@ void initJitScriptBindings(PyObject* module) {
       [](const torch::jit::mobile::Module& module,
          const std::string& filename,
          const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
-        return torch::jit::save_mobile_module(module, filename, _extra_files);
+        torch::jit::save_mobile_module(module, filename, _extra_files);
       });
   m.def(
       "_save_jit_module",
       [](const torch::jit::Module& module,
          const std::string& filename,
          const ExtraFilesMap& _extra_files = ExtraFilesMap()) {
-        return torch::jit::save_jit_module(module, filename, _extra_files);
+        torch::jit::save_jit_module(module, filename, _extra_files);
+        return;
       });
   m.def(
       "_save_mobile_module_to_bytes",

@@ -215,8 +215,9 @@ void initScriptListBindings(PyObject* module) {
           "remove",
           [](const std::shared_ptr<ScriptList>& self, py::object value) {
             try {
-              return self->remove(
+              self->remove(
                   toIValue(std::move(value), self->type()->getElementType()));
+              return;
             } catch (const py::cast_error&) {
               throw py::type_error();
             }
@@ -225,8 +226,9 @@ void initScriptListBindings(PyObject* module) {
           "append",
           [](const std::shared_ptr<ScriptList>& self, py::object value) {
             try {
-              return self->append(
+              self->append(
                   toIValue(std::move(value), self->type()->getElementType()));
+              return;
             } catch (const py::cast_error&) {
               throw py::type_error();
             }

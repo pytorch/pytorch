@@ -72,7 +72,7 @@ struct Tree : c10::intrusive_ptr_target {
     }
   }
   void matchNumSubtrees(int k, size_t expected_subtrees) {
-    return matchNumSubtreesD(k, "unknown", 0, expected_subtrees, false);
+    matchNumSubtreesD(k, "unknown", 0, expected_subtrees, false);
   }
   void matchNumSubtreesD(
       int k,

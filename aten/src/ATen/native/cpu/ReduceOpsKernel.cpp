@@ -256,10 +256,12 @@ void norm_kernel_tensor_iterator_impl(
   } else {
     if (iter.input_dtype() == kHalf && iter.dtype(0) == kFloat) {
       // type promotion that does cast and reduction in a single kernel
-      norm_kernel_cpu_impl<at::Half, float>(iter, val); return;
+      norm_kernel_cpu_impl<at::Half, float>(iter, val);
+      return;
     } else if (iter.input_dtype() == kBFloat16 && iter.dtype(0) == kFloat) {
       // type promotion that does cast and reduction in a single kernel
-      norm_kernel_cpu_impl<at::BFloat16, float>(iter, val); return;
+      norm_kernel_cpu_impl<at::BFloat16, float>(iter, val);
+      return;
     }
 
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND3(kHalf, kBFloat16, kComplexHalf, iter.input_dtype(), "norm_cpu", [&] {

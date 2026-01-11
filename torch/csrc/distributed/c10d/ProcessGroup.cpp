@@ -434,8 +434,8 @@ size_t get_work_registry_size() {
 }
 
 void set_allow_inflight_collective_as_graph_input(bool value) {
-  return RankLocal<WorkRegistry>::get()
-      .set_allow_inflight_collective_as_graph_input(value);
+  RankLocal<WorkRegistry>::get().set_allow_inflight_collective_as_graph_input(
+      value);
 }
 
 bool allow_inflight_collective_as_graph_input() {

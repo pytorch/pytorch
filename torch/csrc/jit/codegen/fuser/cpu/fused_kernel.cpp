@@ -280,7 +280,8 @@ static void runCompiler(
     std::cerr
         << "warning: pytorch jit fuser failed to compile with openmp, trying without it...\n";
     config.openmp = false; // disable for future compiles
-    return runCompiler(cpp_file, so_file);
+    runCompiler(cpp_file, so_file);
+    return;
   }
   TORCH_CHECK(r == 0, "Failed to compile a fused CPU kernel");
 }
