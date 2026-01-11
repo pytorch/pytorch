@@ -81,7 +81,10 @@ class TestHSDPCheckpoint(DTensorTestBase):
     @with_comms
     @with_temp_dir
     @parametrize("is_even_sharded_model", [True, False])
-    def test_hsdp_checkpoint(self, is_even_sharded_model) -> None:
+    @parametrize("experimental_broadcast_replication", [False, True])
+    def test_hsdp_checkpoint(
+        self, is_even_sharded_model, experimental_broadcast_replication
+    ) -> None:
         CHECKPOINT_DIR = self.temp_dir
         simple_model = SimpleModel if is_even_sharded_model else SimpleModelUneven
 
@@ -92,12 +95,14 @@ class TestHSDPCheckpoint(DTensorTestBase):
             device_mesh=mesh_2d,
         )
         optim = torch.optim.Adam(model.parameters(), lr=0.1)
+        model(model.get_input()).sum().backward()
+        optim.step()
 
         FSDP.set_state_dict_type(
             model,
             StateDictType.SHARDED_STATE_DICT,
         )
-        state_dict = {"model": model.state_dict()}
+        state_dict = {"model": model.state_dict(), "optim": optim.state_dict()}
         state_dict_to_save = deepcopy(state_dict)
 
         dist_cp.save(
@@ -119,12 +124,35 @@ class TestHSDPCheckpoint(DTensorTestBase):
             self.assertEqual(v1.placements, v2.placements)
             self.assertNotEqual(v1.to_local(), v2.to_local())
 
+        for (k1, v1), (k2, v2) in zip(
+            state_dict_to_save["optim"]["state"].items(),
+            optim.state_dict()["state"].items(),
+        ):
+            self.assertEqual(k1, k2)
+            for (k3, v3), (k4, v4) in zip(v1.items(), v2.items()):
+                self.assertEqual(k3, k4)
+                if isinstance(v3, dist.tensor.DTensor):
+                    self.assertEqual(v3.device_mesh, v4.device_mesh)
+                    self.assertEqual(v3.placements, v4.placements)
+                    self.assertNotEqual(v3.to_local(), v4.to_local())
+                else:
+                    self.assertNotEqual(v3, v4)
+        for kv1, kv2 in zip(
+            state_dict_to_save["optim"]["param_groups"],
+            optim.state_dict()["param_groups"],
+        ):
+            for (k1, v1), (k2, v2) in zip(kv1.items(), kv2.items()):
+                self.assertEqual(k1, k2)
+                self.assertEqual(v1, v2)
+
         dist_cp.load(
             state_dict=state_dict_to_save,
             storage_reader=dist_cp.FileSystemReader(CHECKPOINT_DIR),
             planner=DefaultLoadPlanner(),
+            experimental_broadcast_replication=experimental_broadcast_replication,
         )
         model.load_state_dict(state_dict_to_save["model"])
+        optim.load_state_dict(state_dict_to_save["optim"])
 
         # After loading, the current model state dict should be the same as state_dict_to_save.
         for (k1, v1), (k2, v2) in zip(
@@ -134,6 +162,27 @@ class TestHSDPCheckpoint(DTensorTestBase):
             self.assertEqual(v1.device_mesh, v2.device_mesh)
             self.assertEqual(v1.placements, v2.placements)
             self.assertEqual(v1.to_local(), v2.to_local())
+
+        for (k1, v1), (k2, v2) in zip(
+            state_dict_to_save["optim"]["state"].items(),
+            optim.state_dict()["state"].items(),
+        ):
+            self.assertEqual(k1, k2)
+            for (k3, v3), (k4, v4) in zip(v1.items(), v2.items()):
+                self.assertEqual(k3, k4)
+                if isinstance(v3, dist.tensor.DTensor):
+                    self.assertEqual(v3.device_mesh, v4.device_mesh)
+                    self.assertEqual(v3.placements, v4.placements)
+                    self.assertEqual(v3.to_local(), v4.to_local())
+                else:
+                    self.assertEqual(v3, v4)
+        for kv1, kv2 in zip(
+            state_dict_to_save["optim"]["param_groups"],
+            optim.state_dict()["param_groups"],
+        ):
+            for (k1, v1), (k2, v2) in zip(kv1.items(), kv2.items()):
+                self.assertEqual(k1, k2)
+                self.assertEqual(v1, v2)
 
     @skip_if_lt_x_gpu(4)
     @with_comms
