@@ -7756,10 +7756,11 @@ def with_effects(token, op, *args, **kwargs):
         return (token, *result)
 
 
-from .comm_lowering import register_comm_lowerings
+from .comm_lowering import register_comm_lowerings, register_symm_mem_lowerings
 
 
 register_comm_lowerings()
+register_symm_mem_lowerings()
 
 
 @register_lowering(inductor_prims.prepare_softmax_online, type_promotion_kind=None)
