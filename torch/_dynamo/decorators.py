@@ -239,59 +239,69 @@ def nonstrict_trace(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
     return wrapped
 
 
-def leaf_function(
-    fn: Optional[Callable[..., Any]] = None,
-    /,
-    *,
-    fake_impl: Optional[Callable[..., Any]] = None,
-) -> Any:
+def leaf_function(fn: Callable[..., Any]) -> Callable[..., Any]:
     """
     Decorator to mark a function as a leaf function for dynamo.
 
-    A leaf function is treated as an opaque operation during compilation- dynamo
-    and aot dispatcher will not trace into it, but will capture it in the FX graph.
+    A leaf function appears as an opaque operation in the compiled graph. During
+    compilation, dynamo and aot dispatcher do not trace into it. At runtime, the
+    original eager Python code is executed once per call directly.
+
+    Since the function body is not traced, a "fake implementation" (fake_impl) is
+    needed to tell the compiler about output shapes and dtypes. This is similar to
+    registering a fake implementation for custom ops. The fake_impl runs during
+    compilation with fake tensors (which have shapes/dtypes but no actual values)
+    and must return outputs with the same pytree structure, shapes, and dtypes as
+    the real function. Note: fake_impl may run multiple times during compilation;
+    real_impl runs once per call at runtime.
 
     Can be used in two ways:
-    1. @leaf_function - use the decorated function as fake_impl (works for simple cases)
-    2. @leaf_function(fake_impl=...) - provide explicit fake implementation for tracing
+    1. @leaf_function - uses the decorated function itself as fake_impl. This works
+       when the function can run with fake tensors (avoids data-dependent control
+       flow, etc.), avoids dangerous patterns, and meets the Restrictions below.
+    2. @<method>.fake_impl - provide an explicit fake_impl, where ``<method>`` is the
+       name of the decorated method (e.g., ``@forward.fake_impl``).
+       Required when the annotated function cannot run with fake tensors (e.g., has
+       data-dependent control flow like ``if x.sum() > 0:``), or when you don't want
+       the annotated function to run multiple times during compilation (e.g., it
+       produces side-effects). Output validation against the annotated function is
+       enabled by default; set
+       ``torch._dynamo.config.validate_leaf_function_outputs = False`` to disable
+       and reduce runtime overhead.
 
-    Restrictions:
-        - Data-dependent control flow requires explicit fake_impl: If the function has
-          branches like ``if x.sum() > 0:``, tracing will fail because fake tensors
-          don't have real values. Provide an explicit fake_impl in this case.
-        - fake_impl must match real_impl output structure: The fake_impl must return
-          the same pytree structure, tensor shapes, and dtypes as real_impl. Enable
-          ``torch._dynamo.config.validate_leaf_function_outputs = True`` to validate.
-        - (Temporary) Only nn.Module methods supported: Currently designed for methods
-          on ``torch.nn.Module``, not standalone functions.
-        - (Temporary) Return value should be a tuple of tensors.
-
-    Dangerous patterns (may cause silent incorrectness):
-        - Side effects: fake_impl runs multiple times during compilation; real_impl
-          runs exactly once at runtime. Don't rely on side effects for correctness.
+    Dangerous patterns (apply to both usage options, may cause silent incorrectness):
+        - Side effects: Don't rely on side effects for correctness.
           For example, the leaf function should not depend on variables mutated by
-          upstream code, and downstream code should not depend on mutations made by
-          the leaf function. Logging/printing in real_impl is fine.
+          other code inside the compiled function before calling the leaf function,
+          and code after the leaf function call should not depend on mutations made
+          by it. Logging/printing in the annotated function is fine.
 
           Bad::
 
-              self.counter += 1  # Upstream mutation
+              # Compiled region
+              self.counter += 1
               y = self.leaf_fn(x)  # Don't depend on self.counter inside leaf_fn
 
               y = self.leaf_fn(x)
               result = self.state  # Don't depend on state mutated by leaf_fn
 
-        - Aliasing and in-place mutations: These are not tracked across the leaf
+        - Aliasing and in-place mutations on inputs: Not tracked across the leaf
           function boundary and may produce incorrect results.
 
           Bad::
 
               @leaf_function
               def forward(self, x):
-                  x.add_(1)  # In-place mutation are dangerous
+                  x.add_(1)  # In-place mutation on input is dangerous
                   return (x,)
 
+    Restrictions:
+        - (Temporary) Only nn.Module methods supported currently.
+        - (Temporary) Return value should be a tuple of tensors.
+
+
     Example:
+        # Simple usage - function itself is used as fake_impl:
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -307,47 +317,54 @@ def leaf_function(
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10)
 
-            @leaf_function(fake_impl=lambda self, x: (self.linear(x),))
+            @leaf_function
             def forward(self, x):
                 if x.sum() > 0:  # data-dependent branch
                     return (self.linear(x),)
                 return (self.linear(x) + 1,)
 
+            @forward.fake_impl
+            def forward(self, x):
+                return (self.linear(x),)
+
     Args:
-        fn: The function being decorated (positional-only, used when called as @leaf_function).
-        fake_impl: Optional fake implementation for tracing. Must be passed as keyword argument.
+        fn: The function being decorated.
     """
+    # Create state to hold the fake_impl (can be mutated by fake_impl setter)
+    state = _LeafFunctionState(fn)
 
-    def decorator(real_impl: Callable[..., Any]) -> Callable[..., Any]:
-        # Determine the actual fake_impl to use
-        actual_fake_impl = fake_impl if fake_impl is not None else real_impl
+    @functools.wraps(fn)
+    def inner(*args: Any, **kwargs: Any) -> Any:
+        return fn(*args, **kwargs)
 
-        @functools.wraps(real_impl)
-        def inner(*args: Any, **kwargs: Any) -> Any:
-            return real_impl(*args, **kwargs)
+    # Add leaf function attributes
+    # Initially, fake_fn is the same as real_fn (unless fake_impl setter is called)
+    inner._torchdynamo_leaf_real_fn = fn  # type: ignore[attr-defined]
+    inner._torchdynamo_leaf_fake_fn = fn  # type: ignore[attr-defined]
+    inner._torchdynamo_leaf_state = state  # type: ignore[attr-defined]
 
-        inner._torchdynamo_leaf_real_fn = real_impl  # type: ignore[attr-defined]
-        inner._torchdynamo_leaf_fake_fn = actual_fake_impl  # type: ignore[attr-defined]
+    # Register with trace_rules
+    wrapped_id = id(inner)
+    trace_rules._allowed_callable_ids.add(wrapped_id)
+    trace_rules._leaf_function_ids.add(wrapped_id)
 
-        wrapped_id = id(inner)
-        # This line allows us to reuse much of the `allow_in_graph` impl.
-        trace_rules._allowed_callable_ids.add(wrapped_id)
+    # Avoid id reuse
+    def deregister() -> None:
+        trace_rules._allowed_callable_ids.remove(wrapped_id)
+        trace_rules._leaf_function_ids.remove(wrapped_id)
 
-        # This line allows us to diverge the impl from `allow_in_graph`.
-        trace_rules._leaf_function_ids.add(wrapped_id)
+    weakref.finalize(inner, deregister)
 
-        # Avoid id reuse which creates subtle bugs.
-        def deregister() -> None:
-            trace_rules._allowed_callable_ids.remove(wrapped_id)
-            trace_rules._leaf_function_ids.remove(wrapped_id)
+    # Add fake_impl setter method to the function
+    def fake_impl_setter(fake_fn: Callable[..., Any]) -> Callable[..., Any]:
+        """Setter for fake_impl (like @property.setter)."""
+        state.fake_impl_fn = fake_fn
+        inner._torchdynamo_leaf_fake_fn = fake_fn  # type: ignore[attr-defined]
+        return inner  # Return the original wrapper to keep it in class dict
 
-        weakref.finalize(inner, deregister)
+    inner.fake_impl = fake_impl_setter  # type: ignore[attr-defined]
 
-        return inner
-
-    if fn is None:
-        return decorator
-    return decorator(fn)
+    return inner
 
 
 def get_leaf_function_fake_impl(fn: Any) -> Any:
@@ -358,6 +375,14 @@ def get_leaf_function_fake_impl(fn: Any) -> Any:
 def get_leaf_function_real_impl(fn: Any) -> Any:
     """Get the real_impl associated with a leaf_function decorated callable."""
     return getattr(fn, "_torchdynamo_leaf_real_fn", None)
+
+
+class _LeafFunctionState:
+    """Stores the fake_impl for a leaf function wrapper."""
+
+    def __init__(self, real_impl: Callable[..., Any]) -> None:
+        self.real_impl = real_impl
+        self.fake_impl_fn: Callable[..., Any] = real_impl
 
 
 def _disallow_in_graph_helper(throw_if_not_allowed: bool) -> Callable[..., Any]:

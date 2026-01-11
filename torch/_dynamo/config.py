@@ -42,7 +42,7 @@ verify_correctness = False
 # Validate that fake_fn and real_fn in @leaf_function decorators produce outputs
 # with matching shapes and dtypes in eager mode. Helps catch mismatches early.
 # [@compile_ignored: debug]
-validate_leaf_function_outputs = False
+validate_leaf_function_outputs = True
 
 # need this many ops to create an FX graph (deprecated: not used)
 minimum_call_count = 1
