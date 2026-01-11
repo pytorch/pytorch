@@ -165,7 +165,11 @@ class HybridModel(nn.Module):
             RemoteEM.forward, self.remote_em_rref, input.sparse_features
         )
         # The same size of mini batch.
-        assert sparse.shape[0] == input.dense_features.shape[0]
+        if sparse.shape[0] != input.dense_features.shape[0]:
+            raise AssertionError(
+                f"Shape mismatch: sparse.shape[0]={sparse.shape[0]}, "
+                f"dense_features.shape[0]={input.dense_features.shape[0]}"
+            )
         dense = self.fc1(input.dense_features)
         x = torch.cat((dense, sparse), 1)
         gLogger.debug("Concatenated feature: %s", x)
@@ -299,7 +303,10 @@ def get_training_examples():
                     idx += 1
 
     # Split the examples among NUM_TRAINERS trainers
-    assert 0 == (n % NUM_TRAINERS)
+    if n % NUM_TRAINERS:
+        raise AssertionError(
+            f"n ({n}) must be divisible by NUM_TRAINERS ({NUM_TRAINERS})"
+        )
     examples_per_trainer = int(n / NUM_TRAINERS)
     return [
         FeatureSet(

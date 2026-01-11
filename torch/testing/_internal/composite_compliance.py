@@ -120,8 +120,9 @@ def generate_cct_and_mode(autograd_view_consistency=True):
 
         @staticmethod
         def __new__(cls, elem, mode, *args, **kwargs):
-            assert type(elem) is not cls, \
-                "Wrapping a CompositeCompliantTensor in a CompositeCompliantTensor is not supported"
+            if type(elem) is cls:
+                raise AssertionError(
+                    "Wrapping a CompositeCompliantTensor in a CompositeCompliantTensor is not supported")
 
             # The storage of CompositeCompliantTensor should never be used directly
             # by a Composite operation; if the Composite
@@ -155,7 +156,8 @@ def generate_cct_and_mode(autograd_view_consistency=True):
             else:
                 r.elem = elem
 
-            assert r.stride() == r.elem.stride()
+            if r.stride() != r.elem.stride():
+                raise AssertionError(f"stride mismatch: tensor stride {r.stride()} != elem stride {r.elem.stride()}")
 
             # Propagate conjugate bits to the wrapper tensor
             # Ref: https://github.com/albanD/subclass_zoo/issues/24
@@ -436,11 +438,13 @@ def compute_expected_grads(op, args, kwargs, output_process_fn_grad=None, gradch
     flat_results = pytree.tree_leaves(results)
     flat_results = [r for r in flat_results if isinstance(r, torch.Tensor)]
     flat_diff_results = [r for r in flat_results if r.requires_grad]
-    assert len(flat_diff_results) > 0
+    if len(flat_diff_results) == 0:
+        raise AssertionError("At least one result must require gradients")
 
     grads = [torch.ones(r.shape, device=r.device, dtype=r.dtype) for r in flat_diff_results]
     leaf_tensors = gather_leaf_tensors(args, kwargs)
-    assert len(leaf_tensors) > 0
+    if len(leaf_tensors) == 0:
+        raise AssertionError("At least one leaf tensor required for gradient computation")
     return torch.autograd.grad(flat_diff_results, leaf_tensors,
                                grads, allow_unused=True, retain_graph=True)
 
@@ -462,7 +466,8 @@ def check_backward_formula(op: Callable, args, kwargs,
     for choice in generate_subclass_choices_args_kwargs(args, kwargs, CCT, cct_mode):
         new_args, new_kwargs, which_args_are_wrapped, which_kwargs_are_wrapped = choice
         leaf_tensors = gather_leaf_tensors(new_args, new_kwargs)
-        assert len(leaf_tensors) > 0
+        if len(leaf_tensors) == 0:
+            raise AssertionError("At least one leaf tensor required for gradient computation")
 
         try:
             if gradcheck_wrapper is None:
@@ -482,7 +487,8 @@ def check_backward_formula(op: Callable, args, kwargs,
         flat_results = pytree.tree_leaves(results)
         flat_results = [r for r in flat_results if isinstance(r, torch.Tensor)]
         flat_diff_results = [r for r in flat_results if r.requires_grad]
-        assert len(flat_diff_results) > 0
+        if len(flat_diff_results) == 0:
+            raise AssertionError("At least one result must require gradients for backward check")
 
         # NB: ones, not ones_like, so we get a regular Tensor here
         grads = [torch.ones(r.shape, device=r.device, dtype=r.dtype)
@@ -516,7 +522,8 @@ def check_forward_ad_formula(op: Callable, args, kwargs, gradcheck_wrapper=None,
     CCT, cct_mode = generate_cct_and_mode(autograd_view_consistency=False)
 
     def maybe_tangent(t):
-        assert type(t) is not CCT
+        if type(t) is CCT:
+            raise AssertionError(f"Input should not be a CompositeCompliantTensor, got {type(t).__name__}")
         # Generate `tangent` tensor
         # if given object is a Tensor and requires grad is set.
         if isinstance(t, torch.Tensor) and t.requires_grad:

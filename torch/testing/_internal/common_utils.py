@@ -195,7 +195,8 @@ class TestEnvironment:
             TestEnvironment.repro_env_vars[env_var] = env_var_val
 
         # export flag globally for convenience
-        assert name not in globals(), f"duplicate definition of flag '{name}'"
+        if name in globals():
+            raise AssertionError(f"duplicate definition of flag '{name}'")
         globals()[name] = enabled
         return enabled
 
@@ -230,7 +231,8 @@ class TestEnvironment:
             TestEnvironment.repro_env_vars[env_var] = value
 
         # export setting globally for convenience
-        assert name not in globals(), f"duplicate definition of setting '{name}'"
+        if name in globals():
+            raise AssertionError(f"duplicate definition of setting '{name}'")
         globals()[name] = value
         return value
 
@@ -585,7 +587,8 @@ def instantiate_parametrized_tests(generic_cls):
             def instantiated_test(self, param_kwargs=param_kwargs):
                 test(self, **param_kwargs)
 
-            assert not hasattr(generic_cls, name), f"Redefinition of test {name}"
+            if hasattr(generic_cls, name):
+                raise AssertionError(f"Redefinition of test {name}")
             setattr(generic_cls, name, instantiated_test)
 
         for (test, test_suffix, param_kwargs, decorator_fn) in class_attr.parametrize_fn(
@@ -890,7 +893,8 @@ def cppProfilingFlagsToProfilingMode():
 def enable_profiling_mode_for_profiling_tests():
     old_prof_exec_state = False
     old_prof_mode_state = False
-    assert GRAPH_EXECUTOR
+    if not GRAPH_EXECUTOR:
+        raise RuntimeError("GRAPH_EXECUTOR must be set")
     if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
         old_prof_exec_state = torch._C._jit_set_profiling_executor(True)
         old_prof_mode_state = torch._C._get_graph_executor_optimize(True)
@@ -925,7 +929,8 @@ meth_call = torch._C.ScriptMethod.__call__
 def prof_callable(callable, *args, **kwargs):
     if 'profile_and_replay' in kwargs:
         del kwargs['profile_and_replay']
-        assert GRAPH_EXECUTOR
+        if not GRAPH_EXECUTOR:
+            raise RuntimeError("GRAPH_EXECUTOR must be set")
         if GRAPH_EXECUTOR == ProfilingMode.PROFILING:
             with enable_profiling_mode_for_profiling_tests():
                 callable(*args, **kwargs)
@@ -1078,7 +1083,8 @@ def shell(command, cwd=None, env=None, stdout=None, stderr=None, timeout=None):
     #      `p.wait()` in a `final` block for the code to be portable.
     #
     # https://github.com/python/cpython/blob/71b6c1af727fbe13525fb734568057d78cea33f3/Lib/subprocess.py#L309-L323
-    assert not isinstance(command, str), "Command to shell should be a list or tuple of tokens"
+    if isinstance(command, str):
+        raise TypeError("Command to shell should be a list or tuple of tokens")
     p = subprocess.Popen(command, universal_newlines=True, cwd=cwd, env=env, stdout=stdout, stderr=stderr)
     return wait_for_process(p, timeout=timeout)
 
@@ -1094,9 +1100,8 @@ def retry_shell(
     was_rerun=False,
 ) -> tuple[int, bool]:
     # Returns exicode + whether it was rerun
-    assert (
-        retries >= 0
-    ), f"Expecting non negative number for number of retries, got {retries}"
+    if retries < 0:
+        raise AssertionError(f"Expecting non negative number for number of retries, got {retries}")
     try:
         exit_code = shell(
             command, cwd=cwd, env=env, stdout=stdout, stderr=stderr, timeout=timeout
@@ -1315,8 +1320,9 @@ def run_tests(argv=None):
                 print(f"Test exited with non-zero exitcode {exitcode}. Command to reproduce: {string_cmd}")
                 failed_tests.append(test_case_full_name)
 
-            assert len(failed_tests) == 0, "{} unit test(s) failed:\n\t{}".format(
-                len(failed_tests), '\n\t'.join(failed_tests))
+            if len(failed_tests) != 0:
+                raise AssertionError("{} unit test(s) failed:\n\t{}".format(
+                    len(failed_tests), '\n\t'.join(failed_tests)))
 
     elif RUN_PARALLEL > 1:
         test_cases = discover_test_cases_recursively(suite)
@@ -1328,7 +1334,8 @@ def run_tests(argv=None):
         failed = False
         for p in processes:
             failed |= wait_for_process(p) != 0
-        assert not failed, "Some test shards have failed"
+        if failed:
+            raise AssertionError("Some test shards have failed")
     elif USE_PYTEST:
         pytest_args = argv + ["--use-main-module"]
         test_report_path = ""
@@ -1724,7 +1731,8 @@ def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
     def test_blah(self):
         ...
     """
-    assert isinstance(msg, str), "Are you using skipIfTorchDynamo correctly?"
+    if not isinstance(msg, str):
+        raise TypeError("Are you using skipIfTorchDynamo correctly?")
 
     def decorator(fn):
         if not isinstance(fn, type):
@@ -1736,7 +1744,8 @@ def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
                     fn(*args, **kwargs)
             return wrapper
 
-        assert isinstance(fn, type)
+        if not isinstance(fn, type):
+            raise TypeError("fn must be a type")
         if TEST_WITH_TORCHDYNAMO:
             fn.__unittest_skip__ = True  # type: ignore[attr-defined]
             fn.__unittest_skip_why__ = msg  # type: ignore[attr-defined]
@@ -1757,7 +1766,8 @@ def skipIfTorchInductor(msg="test doesn't currently work with torchinductor",
                     fn(*args, **kwargs)
             return wrapper
 
-        assert isinstance(fn, type)
+        if not isinstance(fn, type):
+            raise TypeError("fn must be a type")
         if condition:
             fn.__unittest_skip__ = True  # type: ignore[attr-defined]
             fn.__unittest_skip_why__ = msg  # type: ignore[attr-defined]
@@ -1773,7 +1783,8 @@ def runWithoutCompiledAutograd(msg="test doesn't currently work with compiled au
     def test_blah(self):
         ...
     """
-    assert isinstance(msg, str)
+    if not isinstance(msg, str):
+        raise TypeError("msg must be a string")
 
     def decorator(func):
         @wraps(func)
@@ -1790,7 +1801,8 @@ def serialTest(condition=True):
     """
     # If one apply decorator directly condition will be callable
     # And test will essentially be essentially skipped, which is undesirable
-    assert type(condition) is bool
+    if type(condition) is not bool:
+        raise TypeError("condition must be a bool")
 
     def decorator(fn):
         if has_pytest and condition:
@@ -1847,14 +1859,16 @@ def skipIfLegacyJitExecutor(msg="test doesn't currently work with legacy JIT exe
         if not isinstance(fn, type):
             @wraps(fn)
             def wrapper(*args, **kwargs):
-                assert GRAPH_EXECUTOR
+                if not GRAPH_EXECUTOR:
+                    raise RuntimeError("GRAPH_EXECUTOR must be set")
                 if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
                     raise unittest.SkipTest(msg)
                 else:
                     fn(*args, **kwargs)
             return wrapper
 
-        assert isinstance(fn, type)
+        if not isinstance(fn, type):
+            raise TypeError("fn must be a type")
         if GRAPH_EXECUTOR == ProfilingMode.LEGACY:
             fn.__unittest_skip__ = True  # type: ignore[attr-defined]
             fn.__unittest_skip_why__ = msg  # type: ignore[attr-defined]
@@ -1988,7 +2002,8 @@ def skipIfNNModuleInlined(
 
             return wrapper
 
-        assert isinstance(fn, type)
+        if not isinstance(fn, type):
+            raise TypeError("fn must be a type")
         if condition:
             fn.__unittest_skip__ = True  # type: ignore[attr-defined]
             fn.__unittest_skip_why__ = msg  # type: ignore[attr-defined]
@@ -2230,7 +2245,8 @@ class DeterministicGuard:
 
 class AlwaysWarnTypedStorageRemoval:
     def __init__(self, always_warn):
-        assert isinstance(always_warn, bool)
+        if not isinstance(always_warn, bool):
+            raise TypeError("always_warn must be a bool")
         self.always_warn = always_warn
 
     def __enter__(self):
@@ -2471,7 +2487,8 @@ def to_gpu(obj, type_map=None):
     if type_map is None:
         type_map = {}
     if isinstance(obj, torch.Tensor):
-        assert obj.is_leaf
+        if not obj.is_leaf:
+            raise ValueError("Tensor must be a leaf")
         t = type_map.get(obj.dtype, obj.dtype)
         with torch.no_grad():
             res = obj.to(dtype=t, device="cuda", copy=True)
@@ -3502,7 +3519,8 @@ class TestCase(expecttest.TestCase):
                 # This shouldn't really happen, but if does add fake failure
                 # For more details see https://github.com/pytorch/pytorch/issues/71973
                 result.failures.append((case, "TestSuite execution was aborted early"))
-                assert result.wasSuccessful() is False
+                if result.wasSuccessful():
+                    raise RuntimeError("result.wasSuccessful() must not be True")
             result.stop()
 
 
@@ -3531,7 +3549,8 @@ class TestCase(expecttest.TestCase):
         torch.sparse.check_sparse_tensor_invariants.enable()
 
         if self._default_dtype_check_enabled:
-            assert torch.get_default_dtype() == torch.float
+            if torch.get_default_dtype() != torch.float:
+                raise RuntimeError("Default dtype must be torch.float")
 
         # attempt to reset some global state at the end of the test
         self._prev_grad_state = torch.is_grad_enabled()
@@ -3548,7 +3567,8 @@ class TestCase(expecttest.TestCase):
                 torch.sparse.check_sparse_tensor_invariants.disable()
 
         if self._default_dtype_check_enabled:
-            assert torch.get_default_dtype() == torch.float
+            if torch.get_default_dtype() != torch.float:
+                raise RuntimeError("Default dtype must be torch.float")
 
         # attribute may not be defined, per above
         if hasattr(self, '_prev_grad_state'):
@@ -3608,7 +3628,8 @@ class TestCase(expecttest.TestCase):
         final correction, while the external part of the window is
         filled with counts to meet the nnz constraint exactly.
         """
-        assert 0 <= nnz <= n_rows * n_cols, (nnz, n_rows, n_cols)
+        if not (0 <= nnz <= n_rows * n_cols):
+            raise AssertionError(f"nnz constraint violated: {(nnz, n_rows, n_cols)}")
 
         def sawteeth(n, m):
             # return the total number of counts in the sequence of
@@ -3641,7 +3662,8 @@ class TestCase(expecttest.TestCase):
                     n_left = n_middle
             n, N = n_right, N_right
             # fill the right rectangle with counts:
-            assert n
+            if not n:
+                raise ValueError("n must be non-zero")
             counts[-n:].fill_(n_cols)
 
         if N and nnz - n * n_cols >= max(N, n_rows - n):
@@ -3660,7 +3682,8 @@ class TestCase(expecttest.TestCase):
                     m_left = m_middle
             m, N = m_right, N_right
             # fill the bottom rectangle with counts:
-            assert m
+            if not m:
+                raise ValueError("m must be non-zero")
             counts[1:n_rows - n + 1].fill_(m)
 
         if N:
@@ -3672,7 +3695,8 @@ class TestCase(expecttest.TestCase):
             if k * (k + 1) > 2 * r:
                 k -= 1
             corr = r - k * (k + 1) // 2
-            assert not ((p > 1) and (m > 0))  # full sawteeth are never on top of a bottom rectangle
+            if p > 1 and m > 0:  # full sawteeth are never on top of a bottom rectangle
+                raise AssertionError("full sawteeth cannot be on top of a bottom rectangle")
             # sequence of full sawteeth:
             counts[1:p] = torch.arange(p - 1, dtype=dtype, device=counts.device) % (n_cols - m + 1)
             # incomplete sawtooth:
@@ -3700,12 +3724,17 @@ class TestCase(expecttest.TestCase):
         from operator import mul
         from functools import reduce
         sparse_dim = 2
-        assert all(size[d] > 0 for d in range(len(size))) or nnz == 0, 'invalid arguments'
-        assert len(size) >= sparse_dim
+        if any(size[d] <= 0 for d in range(len(size))) and nnz != 0:
+            raise AssertionError('invalid arguments')
+        if len(size) < sparse_dim:
+            raise ValueError(f"size length {len(size)} must be >= sparse_dim {sparse_dim}")
         if blocksize:
-            assert len(blocksize) == 2, (size, blocksize)
-            assert size[-2 - dense_dims] % blocksize[0] == 0, (size, blocksize)
-            assert size[-1 - dense_dims] % blocksize[1] == 0, (size, blocksize)
+            if len(blocksize) != 2:
+                raise ValueError(f"blocksize length must be 2: {(size, blocksize)}")
+            if size[-2 - dense_dims] % blocksize[0]:
+                raise ValueError(f"size[-2-dense_dims] must be divisible by blocksize[0]: {(size, blocksize)}")
+            if size[-1 - dense_dims] % blocksize[1]:
+                raise ValueError(f"size[-1-dense_dims] must be divisible by blocksize[1]: {(size, blocksize)}")
             blocksize0, blocksize1 = blocksize
         else:
             blocksize0 = blocksize1 = 1
@@ -3751,19 +3780,22 @@ class TestCase(expecttest.TestCase):
                                               dtype=dtype, index_dtype=index_dtype, blocksize=(), dense_dims=0)
 
     def genSparseBSRTensor(self, size, blocksize, nnz, *, device, dtype, index_dtype, dense_dims=0):
-        assert len(blocksize) == 2
+        if len(blocksize) != 2:
+            raise ValueError(f"blocksize length must be 2, got {len(blocksize)}")
         return self.genSparseCompressedTensor(size, nnz, layout=torch.sparse_bsr, device=device,
                                               dtype=dtype, index_dtype=index_dtype, blocksize=blocksize, dense_dims=dense_dims)
 
     def genSparseBSCTensor(self, size, blocksize, nnz, *, device, dtype, index_dtype, dense_dims=0):
-        assert len(blocksize) == 2
+        if len(blocksize) != 2:
+            raise ValueError(f"blocksize length must be 2, got {len(blocksize)}")
         return self.genSparseCompressedTensor(size, nnz, layout=torch.sparse_bsc, device=device,
                                               dtype=dtype, index_dtype=index_dtype, blocksize=blocksize, dense_dims=dense_dims)
 
     def genSparseTensor(self, size, sparse_dim, nnz, is_uncoalesced, device, dtype):
         # Assert not given impossible combination, where the sparse dims have
         # empty numel, but nnz > 0 makes the indices containing values.
-        assert all(size[d] > 0 for d in range(sparse_dim)) or nnz == 0, 'invalid arguments'
+        if not any(size[d] <= 0 for d in range(sparse_dim)) and nnz != 0:
+            raise AssertionError('invalid arguments')
 
         v_size = [nnz] + list(size[sparse_dim:])
         v = make_tensor(v_size, device=device, dtype=dtype, low=-1, high=1)
@@ -3843,9 +3875,11 @@ class TestCase(expecttest.TestCase):
                 if members_pin_memory:
                     args = tuple(a.pin_memory() for a in args)
                 if layout is torch.strided:
-                    assert len(args) == 1
+                    if len(args) != 1:
+                        raise ValueError(f"Expected 1 arg for strided layout, got {len(args)}")
                     size = kwargs.pop('size', None)  # to ensure that a zero-sized tensor has the desired shape
-                    assert size is not None
+                    if size is None:
+                        raise ValueError("size must be provided for strided layout")
                     if pin_memory:
                         yield args[0].reshape(size).pin_memory()
                     else:
@@ -3856,13 +3890,15 @@ class TestCase(expecttest.TestCase):
                     kwargs.update(layout=layout)
                     yield torch.sparse_compressed_tensor(*args, **kwargs)
                 else:
-                    assert 0  # unreachable
+                    raise AssertionError("unreachable: unknown layout")  # unreachable
             return
 
         def get_blockpattern(pattern, blocksize):
             basesize = pattern.shape
-            assert basesize[0] % blocksize[0] == 0, (basesize, blocksize)
-            assert basesize[1] % blocksize[1] == 0, (basesize, blocksize)
+            if basesize[0] % blocksize[0]:
+                raise AssertionError(f"basesize[0] must be divisible by blocksize[0]: {(basesize, blocksize)}")
+            if basesize[1] % blocksize[1]:
+                raise AssertionError(f"basesize[1] must be divisible by blocksize[1]: {(basesize, blocksize)}")
             blockpattern = pattern.reshape(-1,
                                            blocksize[0],
                                            basesize[1] // blocksize[1],
@@ -3872,7 +3908,8 @@ class TestCase(expecttest.TestCase):
 
         def get_sparse_data(pattern):
             basesize = pattern.shape
-            assert len(basesize) == 2, basesize  # pattern is expected to be a matrix
+            if len(basesize) != 2:
+                raise AssertionError(f"pattern must be a matrix, got shape {basesize}")  # pattern is expected to be a matrix
 
             # We cannot use `torch.sparse_xyz_tensor(pattern)` to
             # compute the sparse layout indices and values because
@@ -4042,7 +4079,8 @@ class TestCase(expecttest.TestCase):
             self.assertTrue(t.is_contiguous())
             if dim < 0:
                 dim = dim + t.ndim
-            assert dim >= 0 and dim < t.ndim
+            if dim < 0 or dim >= t.ndim:
+                raise AssertionError(f"dim {dim} out of range for tensor with ndim {t.ndim}")
             step = max(2, offset + 1)
             tmp = torch.zeros((*t.shape[:dim], t.shape[dim] * step, *t.shape[dim + 1:]), dtype=t.dtype, device=t.device)
             dim_slices = (*((slice(None),) * dim), slice(offset, None, step))
@@ -4120,7 +4158,7 @@ class TestCase(expecttest.TestCase):
                             indices = (ccol_indices, row_indices)  # type: ignore[assignment]
                             values = torch.empty((0, *blocksize, *densesize), device=device, dtype=dtype)
                         else:
-                            assert 0  # unreachable
+                            raise AssertionError("unreachable: unknown layout")  # unreachable
                         kwargs = dict(device=device, dtype=dtype, size=basesize + densesize)
                         if pin_memory is not None:
                             kwargs.update(pin_memory=pin_memory)
@@ -4151,11 +4189,14 @@ class TestCase(expecttest.TestCase):
     # TODO: add args/kwargs for passing to assertEqual (e.g. rtol, atol)
     def compare_with_numpy(self, torch_fn, np_fn, tensor_like,
                            device=None, dtype=None, **kwargs):
-        assert TEST_NUMPY
+        if not TEST_NUMPY:
+            raise AssertionError("TEST_NUMPY must be enabled")
 
         if isinstance(tensor_like, torch.Tensor):
-            assert device is None
-            assert dtype is None
+            if device is not None:
+                raise AssertionError("device must be None when tensor_like is a Tensor")
+            if dtype is not None:
+                raise AssertionError("dtype must be None when tensor_like is a Tensor")
             t_cpu = tensor_like.detach().cpu()
             if t_cpu.dtype is torch.bfloat16:
                 t_cpu = t_cpu.float()
@@ -4754,7 +4795,8 @@ def retry(ExceptionToCheck, tries=3, delay=3, skip_after_retries=False):
 # Methods for matrix generation
 
 def random_square_matrix_of_rank(l, rank, dtype=torch.double, device='cpu'):
-    assert rank <= l
+    if rank > l:
+        raise AssertionError(f"rank {rank} must be <= l {l}")
     A = torch.randn(l, l, dtype=dtype, device=device)
     u, s, vh = torch.linalg.svd(A, full_matrices=False)
     for i in range(l):
@@ -4821,7 +4863,8 @@ def random_symmetric_matrix(l, *batches, **kwargs):
 # Creates a symmetric matrix or batch of symmetric matrices
 # Shape must be a square matrix or batch of square matrices
 def make_symmetric_matrices(*shape, device, dtype):
-    assert shape[-1] == shape[-2]
+    if shape[-1] != shape[-2]:
+        raise AssertionError(f"shape must be square matrix: {shape}")
     t = make_tensor(shape, device=device, dtype=dtype)
     t = (t + t.mT).div_(2)
     return t
@@ -4873,7 +4916,8 @@ def random_symmetric_pd_matrix(matrix_size, *batch_dims, **kwargs):
 # Creates a symmetric positive-definite matrix or batch of
 #   such matrices
 def make_symmetric_pd_matrices(*shape, device, dtype):
-    assert shape[-1] == shape[-2]
+    if shape[-1] != shape[-2]:
+        raise AssertionError(f"shape must be square matrix: {shape}")
     t = make_tensor(shape, device=device, dtype=dtype)
     i = torch.eye(shape[-1], device=device, dtype=dtype) * 1e-5
     return t @ t.mT + i
@@ -5146,9 +5190,13 @@ def check_test_defined_in_running_script(test_case):
     if running_script_path is None:
         return
     test_case_class_file = os.path.abspath(os.path.realpath(inspect.getfile(test_case.__class__)))
-    assert test_case_class_file == running_script_path, f'Class of loaded TestCase "{test_case.id()}" ' \
-        f'is not defined in the running script "{running_script_path}", but in "{test_case_class_file}". Did you ' \
-        "accidentally import a unittest.TestCase from another file?"
+    if test_case_class_file != running_script_path:
+        raise AssertionError(
+            f'Class of loaded TestCase "{test_case.id()}" '
+            f'is not defined in the running script "{running_script_path}", '
+            f'but in "{test_case_class_file}". Did you '
+            "accidentally import a unittest.TestCase from another file?"
+        )
 
 def load_tests(loader, tests, pattern):
     set_running_script_path()
@@ -5369,10 +5417,12 @@ def bytes_to_scalar(byte_list: list[int], dtype: torch.dtype, device: torch.devi
 
     def check_bytes(byte_list):
         for byte in byte_list:
-            assert 0 <= byte <= 255
+            if not (0 <= byte <= 255):
+                raise AssertionError(f"byte {byte} must be in range 0-255")
 
     if dtype.is_complex:
-        assert len(byte_list) == (num_bytes * 2)
+        if len(byte_list) != (num_bytes * 2):
+            raise AssertionError(f"byte_list length {len(byte_list)} must equal num_bytes * 2 ({num_bytes * 2})")
         check_bytes(byte_list)
         real = ctype.from_buffer((ctypes.c_byte * num_bytes)(
             *byte_list[:num_bytes])).value
@@ -5380,7 +5430,8 @@ def bytes_to_scalar(byte_list: list[int], dtype: torch.dtype, device: torch.devi
             *byte_list[num_bytes:])).value
         res = real + 1j * imag
     else:
-        assert len(byte_list) == num_bytes
+        if len(byte_list) != num_bytes:
+            raise AssertionError(f"byte_list length {len(byte_list)} must equal num_bytes {num_bytes}")
         check_bytes(byte_list)
         res = ctype.from_buffer((ctypes.c_byte * num_bytes)(
             *byte_list)).value
@@ -5534,7 +5585,8 @@ class TestGradients(TestCase):
 
     def _check_helper(self, device, dtype, op, variant, check, *, check_forward_ad=False, check_backward_ad=True,
                       check_batched_grad=None, check_batched_forward_grad=False):
-        assert check in ('gradcheck', 'bwgrad_bwgrad', 'fwgrad_bwgrad')
+        if check not in ('gradcheck', 'bwgrad_bwgrad', 'fwgrad_bwgrad'):
+            raise AssertionError(f"check must be one of ('gradcheck', 'bwgrad_bwgrad', 'fwgrad_bwgrad'), got {check}")
         # NB: check_backward_ad does not affect gradgradcheck (always True)
         if variant is None:
             self.skipTest("Skipped! Variant not implemented.")
@@ -5845,7 +5897,8 @@ def scoped_load_inline(func):
                 # TODO(xmfan): even using TemporaryDirectoryName will result in permission error
                 return cpp_extension.load_inline(*args, **kwargs)
 
-            assert "build_directory" not in kwargs
+            if "build_directory" in kwargs:
+                raise AssertionError("build_directory should not be in kwargs")
             with TemporaryDirectoryName() as temp_dir_name:
                 if kwargs.get("verbose", False):
                     print(f'Using temporary extension directory {temp_dir_name}...', file=sys.stderr)
