@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING
 from torch.utils._ordered_set import OrderedSet
 
 from ..utils import get_max_numwarps
-from .hints import TRITON_MAX_BLOCK
+from .hints import TRITON_MAX_BLOCK, TRITON_MAX_TENSOR_NUMEL
 from .runtime_utils import red_text, triton_config_to_hashable
 
 
@@ -219,6 +219,14 @@ class CoordescTuner:
             xblock = config.kwargs["XBLOCK"]
             split_size = config.kwargs["RSPLIT_SIZE"]
             return xblock <= split_size
+        if self.is_native_matmul:
+            # Native matmul uses 3D blocks [YBLOCK, XBLOCK, R0_BLOCK].
+            # Triton enforces a maximum tensor numel of 2^20 elements.
+            yblock = config.kwargs.get("YBLOCK", 1)
+            xblock = config.kwargs.get("XBLOCK", 1)
+            r0_block = config.kwargs.get("R0_BLOCK", 1)
+            if yblock * xblock * r0_block > TRITON_MAX_TENSOR_NUMEL:
+                return False
         return True
 
     def check_all_tuning_directions(
