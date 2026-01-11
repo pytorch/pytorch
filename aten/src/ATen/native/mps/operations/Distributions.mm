@@ -439,7 +439,7 @@ Tensor& exponential_mps_(Tensor& self, double lambda, std::optional<Generator> g
 }
 
 Tensor& log_normal_mps_(Tensor& self, double mean, double std, std::optional<Generator> gen) {
-  TORCH_CHECK(std >= 0.0, "log_normal_ expects std >= 0.0, but found std=", std);
+  TORCH_CHECK(std > 0.0, "log_normal_ expects std > 0.0, but found std=", std);
 
   mps::RandomOpBlock random_op_block = ^RandomOpFn(cachedGraph, randomTensor) {
     MPSGraph* mpsGraph = cachedGraph->graph();
