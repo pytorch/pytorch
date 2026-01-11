@@ -382,6 +382,13 @@ class autocast:
     def __call__(self, func):
         if torch._jit_internal.is_scripting():
             return func
+        if not callable(func):
+            raise TypeError(
+                f"autocast()(func) requires a callable, but got {type(func).__name__}. "
+                f"Did you mean to use autocast as a context manager? For example:\n"
+                f"    with torch.autocast(device_type=...):\n"
+                f"        output = model(input)"
+            )
         return autocast_decorator(self, func)
 
 
