@@ -2300,7 +2300,7 @@ class VariableBuilder:
                 gb_type="Attempted to wrap sparse Tensor",
                 context="",
                 explanation="torch.compile does not support sparse Tensors",
-                hints=[*graph_break_hints.SUPPORTABLE],
+                hints=[*graph_break_hints.SPARSE_TENSOR],
             )
 
         if (
@@ -3161,7 +3161,7 @@ def handle_traced_output(
                 gb_type="Attempted to wrap sparse Tensor with VariableTracker",
                 context=str(example_value),
                 explanation="torch.compile does not support sparse Tensors with VariableTracker",
-                hints=[*graph_break_hints.SUPPORTABLE],
+                hints=[*graph_break_hints.SPARSE_TENSOR],
             )
         var = construct_tensor_variable(
             target_cls, tx, proxy, example_value, subclass_type, options
