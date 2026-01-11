@@ -1429,8 +1429,6 @@ static Tensor& cholesky_inverse_kernel_impl_mps(Tensor& result, Tensor& infos, b
                                    /*left=*/true,
                                    /*unitriangular=*/false,
                                    temp);
-
-  // Compute A inverse
   if (upper) {
     result.copy_(at::matmul(temp, temp.mT()));
   } else {
