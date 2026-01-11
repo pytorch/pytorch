@@ -212,7 +212,11 @@ def object_annotation(obj):
     """
 
     def format_sequence(obj):
-        body = ','.join(repr(x) if isinstance(x, BASE_TYPES) else type(x).__name__ for x in obj[:8])
+        def safe_repr(x):
+            if isinstance(x, weakref.ProxyTypes):
+                return "weakref (dead)"
+            return repr(x) if isinstance(x, BASE_TYPES) else type(x).__name__
+        body = ','.join(safe_repr(x) for x in obj[:8])
         if len(obj) > 8:
             body = f'{body}, ...{len(obj) - 8}'
         return body
@@ -477,7 +481,7 @@ def observe_tensor_cycles(callback):
 
     def observer(garbage) -> None:
         if garbage:
-            if not any(is_cuda_tensor(obj) for obj in garbage):
+            if not any((not isinstance(obj, weakref.ProxyTypes) and is_cuda_tensor(obj)) for obj in garbage):
                 logger.info("No CUDA Tensors found in garbage")
                 return
             callback(to_html(create_graph(garbage)))
