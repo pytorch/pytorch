@@ -118,14 +118,15 @@ def _reserve_rng_state(device: torch.device, used_offset):
         dev_index = torch.cuda.current_device()
 
     gen = torch.cuda.default_generators[dev_index]
-    seed_base, offset_base, internal_offset = torch.ops.aten.inductor_reserve_rng_state(
+    seed_t, off_t, intra_t = torch.ops.inductor_prims.inductor_reserve_rng_state(
         gen, int(used_offset)
     )
-    offset_val = internal_offset.item()
-    final_offset = offset_base + offset_val
-    base = final_offset.div(4, rounding_mode="floor")
-
-    return seed_base, base
+    # NOTE: for correctness in eager, intra_t should be 0.
+    # Keep everything as tensor math to avoid host sync.
+    if intra_t.device.type != "cuda":
+        intra_t = intra_t.to(device=device, non_blocking=True)
+    base = torch.div(off_t + intra_t, 4, rounding_mode="floor")
+    return seed_t, base
 
 
 def _rand_eager_offset_impl(offset, device: torch.device) -> Tensor:

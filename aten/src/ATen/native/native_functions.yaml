@@ -8972,14 +8972,6 @@
     CPU, CUDA, XPU: addbmm
     MPS: addbmm_mps
 
-- func: inductor_reserve_rng_state(Generator? generator, int increment) -> (Tensor, Tensor, Tensor)
-  variants: function
-  tags: nondeterministic_seeded
-  device_guard: False
-  manual_cpp_binding: True
-  dispatch:
-    CUDA: inductor_reserve_rng_state
-
 - func: random_.from(Tensor(a!) self, int from, int? to, *, Generator? generator=None) -> Tensor(a!)
   device_check: NoCheck   # TensorIterator
   variants: method

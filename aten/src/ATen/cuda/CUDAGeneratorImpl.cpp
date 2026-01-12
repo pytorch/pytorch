@@ -514,53 +514,5 @@ CUDAGeneratorImpl* CUDAGeneratorImpl::clone_impl() const {
   auto gen = new CUDAGeneratorImpl(this->device().index(), state_->clone());
   return gen;
 }
-namespace native {
 
-/**
- * Reserves RNG state for Inductor with CUDA Graph support.
- *
- * This function allows Inductor to reserve a specific amount of RNG offset
- * (increment) for a kernel. It is designed to be safe for CUDA Graph capture
- * by explicitly handling the internal generator state, bypassing checks in
- * standard methods (like philox_engine_inputs) that forbid capture.
- *
- * Behavior:
- * - Graph Mode: Manually advances `offset_intragraph_` and returns pointers
- * (tensors) to the extragraph state. These tensors are automatically updated
- * by `replay_prologue` during graph execution.
- * - Eager Mode: Manually advances `philox_offset_per_thread_` and returns
- * concrete values wrapped in 1D tensors to maintain shape consistency.
- *
- * param gen The CUDA generator to use.
- * param increment The number of RNG values to reserve (will be aligned to 4).
- * return A tuple of (Seed Tensor, Offset Tensor, Intragraph Offset CPU Tensor).
- */
-
-std::tuple<Tensor, Tensor, Tensor> inductor_reserve_rng_state(const Generator& gen, int64_t increment) {
-  auto gen_impl = check_generator<at::cuda::detail::CUDAGeneratorImpl>(gen);
-  auto options = at::TensorOptions().dtype(at::kLong).device(gen.device());
-  bool is_capturing = false;
-  if (c10::hip::currentStreamCaptureStatusMayInitCtx() != c10::hip::CaptureStatus::None) {
-    is_capturing = true;
-  }
-  if (is_capturing) {
-    int64_t current_intragraph_val = gen_impl->state_->offset_intragraph_;
-    gen_impl->philox_cuda_state(increment);
-    auto state = gen_impl->state_;
-    Tensor intragraph_offset = at::tensor({current_intragraph_val}, options.device(at::kCPU));
-    return std::make_tuple(
-      state->seed_extragraph_,
-      state->offset_extragraph_,
-      intragraph_offset
-    );
-  } else {
-    PhiloxCudaState rng_state = gen_impl->philox_cuda_state(increment);
-    Tensor seed = at::scalar_tensor(static_cast<int64_t>(rng_state.seed_.val), options).unsqueeze(0);
-    Tensor offset = at::scalar_tensor(static_cast<int64_t>(rng_state.offset_.val), options).unsqueeze(0);
-    Tensor zero = at::tensor({0}, options.device(at::kCPU));
-    return std::make_tuple(seed, offset, zero);
-  }
-}
-
-} // namespace native
 } // namespace at

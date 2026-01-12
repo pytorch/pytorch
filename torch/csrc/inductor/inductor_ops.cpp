@@ -7,6 +7,9 @@
 #include <torch/csrc/autograd/functions/accumulate_grad.h>
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/library.h>
+#include <ATen/cuda/CUDAContext.h>
+#include <ATen/cuda/CUDAGeneratorImpl.h>
+#include <ATen/ops/from_blob.h>
 
 namespace torch::inductor {
 using namespace at;
@@ -88,6 +91,70 @@ static void accumulate_grad_(const Tensor& variable, const Tensor& new_grad) {
   }
 }
 
+// Reserves RNG state for Inductor with CUDA Graph support.
+//
+// This function allows Inductor to reserve a specific amount of RNG offset
+// (increment) for a kernel. It is designed to be safe for CUDA Graph capture
+// by explicitly handling the internal generator state via public APIs.
+//
+// Behavior:
+// - Graph Mode: Advances the generator state and returns pointers (wrapped as
+// tensors) to the extragraph state. These tensors effectively point to the
+// GPU memory that will be updated by `replay_prologue`.
+// - Eager Mode: Advances the generator state and returns concrete values
+// wrapped in 1D tensors to maintain shape consistency.
+//
+// -param gen The CUDA generator to use.
+// -param increment The number of RNG values to reserve.
+// -return A tuple of (Seed Tensor, Offset Tensor, Intragraph Offset CPU Tensor).
+static Generator get_or_default_cuda_generator(
+    const c10::optional<Generator>& gen_opt) {
+  if (gen_opt.has_value()) {
+    return *gen_opt;
+  }
+  const int device_index = at::cuda::current_device();
+  return at::cuda::detail::getDefaultCUDAGenerator(device_index);
+}
+
+static std::tuple<Tensor, Tensor, Tensor> inductor_reserve_rng_state(
+    const c10::optional<Generator>& generator,
+    int64_t increment) {
+  const auto gen = get_or_default_cuda_generator(generator);
+  auto* gen_impl = at::check_generator<at::CUDAGeneratorImpl>(gen);
+
+  const auto opts =
+      at::TensorOptions().dtype(at::kLong).device(gen.device());
+  const auto cpu_opts =
+      at::TensorOptions().dtype(at::kLong).device(at::kCPU);
+
+  const at::PhiloxCudaState st =
+      gen_impl->philox_cuda_state(static_cast<uint64_t>(increment));
+
+  if (st.captured_) {
+    auto seed_t = at::from_blob(
+        static_cast<void*>(st.seed_.ptr),
+        {1},
+        [](void*) {},
+        opts);
+    auto off_t = at::from_blob(
+        static_cast<void*>(st.offset_.ptr),
+        {1},
+        [](void*) {},
+        opts);
+    auto intra_t = at::tensor(
+        {static_cast<int64_t>(st.offset_intragraph_)},
+        cpu_opts);
+    return {seed_t, off_t, intra_t};
+  }
+
+  auto seed_t = at::scalar_tensor(
+      static_cast<int64_t>(st.seed_.val),opts).unsqueeze(0);
+  auto off_t = at::scalar_tensor(
+      static_cast<int64_t>(st.offset_.val),opts).unsqueeze(0);
+  auto intra_t = at::tensor({0}, cpu_opts);
+  return {seed_t, off_t, intra_t};
+}
+
 TORCH_LIBRARY_FRAGMENT(inductor, m) {
   m.def(
       "_mm_plus_mm(Tensor a, Tensor b, Tensor c, Tensor d, Tensor(t!) out) -> Tensor(t!)",
@@ -106,6 +173,10 @@ TORCH_LIBRARY_FRAGMENT(inductor, m) {
       "accumulate_grad_(Tensor variable, Tensor new_grad) -> ()",
       dispatch(c10::DispatchKey::CompositeExplicitAutograd, accumulate_grad_),
       {at::Tag::pt2_compliant_tag});
+  m.def(
+      "inductor_reserve_rng_state(Generator? generator, int increment)"
+      "-> (Tensor, Tensor, Tensor)",
+      &inductor_reserve_rng_state);
 }
 
 } // namespace torch::inductor
