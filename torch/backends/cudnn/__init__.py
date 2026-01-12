@@ -15,6 +15,8 @@ from torch.backends import (
     PropModule,
 )
 
+from . import rnn
+
 
 try:
     from torch._C import _cudnn
@@ -229,7 +231,6 @@ class CudnnModule(PropModule):
         torch._C._get_cudnn_allow_tf32, torch._C._set_cudnn_allow_tf32
     )
     conv = _FP32Precision("cuda", "conv")
-    rnn = _FP32Precision("cuda", "rnn")
     fp32_precision = ContextProp(
         _get_fp32_precision_getter("cuda", "all"),
         _set_fp32_precision_setter("cuda", "all"),
