@@ -132,6 +132,9 @@ namespace Native {
  *                  notifyCaptureDestroy.
  */
 
+// counter to track order for Mempool Registration
+thread_local int32_t registration_counter_global = -1;
+
 static char SHAREABLE_HANDLE_VERSION = 2;
 enum ShareableHandleType : char {
   SHAREABLE_CUDA_MALLOC = 'c',
@@ -187,6 +190,7 @@ struct Block {
   c10::DeviceIndex device; // gpu
   cudaStream_t stream; // allocation stream
   stream_set stream_uses; // streams on which the block was used
+  int32_t registration_counter{-1};
   size_t size; // block size in bytes
   size_t requested_size; // memory originally requested
   BlockPool* pool{nullptr}; // owning memory pool
@@ -221,11 +225,15 @@ struct Block {
         size(size),
         requested_size(0),
         pool(pool),
-        ptr(ptr) {}
+        ptr(ptr) {
+    registration_counter = ++registration_counter_global;
+  }
 
   // constructor for search key
   Block(c10::DeviceIndex device, cudaStream_t stream, size_t size)
-      : device(device), stream(stream), size(size), requested_size(0) {}
+      : device(device), stream(stream), size(size), requested_size(0) {
+    registration_counter = ++registration_counter_global;
+  }
 
   size_t gc_count() {
     TORCH_INTERNAL_ASSERT(pool);
@@ -960,9 +968,11 @@ class EventPool {
 
 // CUDA graphs helper
 struct PrivatePool {
-  explicit PrivatePool(MempoolId_t id, CUDAAllocator* allocator = nullptr)
+  explicit PrivatePool(
+      MempoolId_t id,
+      std::shared_ptr<CUDAAllocator> allocator = nullptr)
       : id(std::move(id)),
-        allocator_(allocator),
+        allocator_(std::move(allocator)),
         large_blocks(/*small=*/false, this),
         small_blocks(/*small=*/true, this) {}
   PrivatePool(const PrivatePool&) = delete;
@@ -983,13 +993,13 @@ struct PrivatePool {
   // distinguish private blocks by adding a "pool id" check above the stream
   // check in BlockComparator. BlockComparator is performance- critical though,
   // I'd rather not add more logic to it.
-  CUDAAllocator* allocator_;
+  std::shared_ptr<CUDAAllocator> allocator_;
   BlockPool large_blocks;
   BlockPool small_blocks;
 
  public:
   CUDAAllocator* allocator() {
-    return allocator_;
+    return allocator_.get();
   }
 };
 
@@ -2494,6 +2504,7 @@ class DeviceCachingAllocator {
           id == mempool_id) {
         segment_info.owner_private_pool_id = id;
       }
+      segment_info.registration_counter = head_block->registration_counter;
 
       const Block* block = head_block;
       while (block != nullptr && block->mapped) {
@@ -2561,14 +2572,14 @@ class DeviceCachingAllocator {
     // divide the space between these 2's power into equal divisions
     // If division is zero, return the power-of-2 ceiling.
     size_t power2_floor = llvm::PowerOf2Floor(size);
-    size_t power2_divison =
+    size_t power2_division =
         power2_floor >> (63 - llvm::countLeadingZeros(divisions));
-    if (C10_UNLIKELY(power2_divison == 0)) {
+    if (C10_UNLIKELY(power2_division == 0)) {
       return (power2_floor << 1);
     }
-    size_t round_size_floor = size & (~(power2_divison - 1));
+    size_t round_size_floor = size & (~(power2_division - 1));
     return (round_size_floor == size) ? size
-                                      : round_size_floor + power2_divison;
+                                      : round_size_floor + power2_division;
   }
 
   static size_t round_size(size_t size) {
@@ -2585,11 +2596,13 @@ class DeviceCachingAllocator {
     }
   }
 
-  void createOrIncrefPool(MempoolId_t mempool_id, CUDAAllocator* allocator) {
+  void createOrIncrefPool(
+      MempoolId_t mempool_id,
+      std::shared_ptr<CUDAAllocator> allocator) {
     // Create a PrivatePool object if it does not exist yet
     // and increment its use_count
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    create_or_incref_pool(mempool_id, allocator);
+    create_or_incref_pool(mempool_id, std::move(allocator));
   }
 
   void setUseOnOOM(MempoolId_t mempool_id, bool use_on_oom) {
@@ -2753,7 +2766,7 @@ class DeviceCachingAllocator {
 
   void create_or_incref_pool(
       MempoolId_t mempool_id,
-      CUDAAllocator* allocator = nullptr) {
+      std::shared_ptr<CUDAAllocator> allocator = nullptr) {
     auto it = graph_pools.find(mempool_id);
     if (it == graph_pools.end()) {
       // mempool_id does not reference an existing pool.
@@ -2761,14 +2774,15 @@ class DeviceCachingAllocator {
       // usage. use_count is initially 1, which means the pool is
       // being used since somebody called createOrIncrefPool.
       graph_pools.emplace(
-          mempool_id, std::make_unique<PrivatePool>(mempool_id, allocator));
+          mempool_id,
+          std::make_unique<PrivatePool>(mempool_id, std::move(allocator)));
     } else {
       // mempool_id references an existing pool, which the current CUDAGraph
       // capture or torch.cuda.use_mem_pool will
       // share. Check this pool is live (at least one other capture already
       // references it). Increment it to establish the usage.
       TORCH_INTERNAL_ASSERT(it->second->use_count > 0);
-      TORCH_INTERNAL_ASSERT(allocator == nullptr);
+      TORCH_INTERNAL_ASSERT(!allocator);
       it->second->use_count++;
     }
   }
@@ -3400,6 +3414,15 @@ class DeviceCachingAllocator {
     return true;
   }
 
+  /**
+   * If mempool_id is {0,0} (the default pool) and there are no
+   * currently capturing memory pools, free the default pool's blocks
+   * and also free the blocks of the freeable private pools.
+   *
+   * If mempool_id corresponds to a private pool that is freeable,
+   * call synchronize_and_free_events() on that private pool. Free the
+   * blocks of all freeable private pools, including this one.
+   */
   bool release_cached_blocks(
       const std::shared_ptr<GatheredContext>& context,
       MempoolId_t mempool_id) {
@@ -4277,10 +4300,10 @@ class NativeCachingAllocator : public CUDAAllocator {
   void createOrIncrefPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
-      CUDAAllocator* allocator) override {
+      std::shared_ptr<CUDAAllocator> allocator) override {
     assertValidDevice(device);
     device_allocator[device]->createOrIncrefPool(
-        std::move(mempool_id), allocator);
+        std::move(mempool_id), std::move(allocator));
   }
 
   void setUseOnOOM(
