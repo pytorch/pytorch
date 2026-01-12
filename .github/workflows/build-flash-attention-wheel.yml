@@ -164,7 +164,7 @@ jobs:
         shell: bash -l {0}
         run: |
           CUDA_HOME_NORMALIZED="${CUDA_HOME//\\//}"
-          export PYTORCH_NVCC="sccache \"${CUDA_HOME_NORMALIZED}/bin/nvcc\""
+          # export PYTORCH_NVCC="sccache \"${CUDA_HOME_NORMALIZED}/bin/nvcc\""
           cd flash-attention/hopper
           df -h
           $PY setup.py bdist_wheel -d dist/ -k $PLAT_ARG
