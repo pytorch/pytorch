@@ -233,8 +233,6 @@ def make_tracing_wrappers(
 ) -> tuple[Callable, Callable]:
     """
     Create forward/backward wrappers for tracing.
-
-    Keeps PythonDispatcher in dispatch keys (already active in TLS).
     """
     forward, state = _make_forward(
         fn, requires_grad_indices, input_spec, include_keys, exclude_keys
@@ -416,7 +414,8 @@ def _check_no_input_mutation(
         if isinstance(arg, torch.Tensor):
             if arg._version != version_before[i]:
                 raise RuntimeError(
-                    f"In-place mutation detected on input tensor at position {i} in "
+                    f"In-place mutation detected on input tensor at position {i} "
+                    f"(in the pytree-flattened inputs with nn.Module states expanded) in "
                     f"@leaf_function. In-place mutations on inputs are not tracked "
                     f"across the leaf function boundary and may cause incorrect results. "
                     f"Consider cloning the input before mutating it."

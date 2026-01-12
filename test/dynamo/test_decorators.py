@@ -3671,22 +3671,25 @@ class GraphModule(torch.nn.Module):
     def test_leaf_function_dict_output(self):
         from torch._dynamo.decorators import leaf_function
 
+        @leaf_function
+        def dict_output_fn(linear1, linear2, x):
+            if x.sum() > 0:
+                return {"a": linear1(x), "b": linear2(x)}
+            else:
+                return {"a": linear1(x) + 1, "b": linear2(x) + 1}
+
+        @dict_output_fn.fake_impl
+        def dict_output_fn_fake(linear1, linear2, x):
+            return {"a": linear1(x), "b": linear2(x)}
+
         class DictOutputModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.linear1 = torch.nn.Linear(3, 3)
                 self.linear2 = torch.nn.Linear(3, 3)
 
-            @leaf_function
             def forward(self, x):
-                if x.sum() > 0:
-                    return {"a": self.linear1(x), "b": self.linear2(x)}
-                else:
-                    return {"a": self.linear1(x) + 1, "b": self.linear2(x) + 1}
-
-            @forward.fake_impl
-            def forward(self, x):
-                return {"a": self.linear1(x), "b": self.linear2(x)}
+                return dict_output_fn(self.linear1, self.linear2, x)
 
         def args_fn():
             return (torch.randn(3, 3, requires_grad=True),)
@@ -3699,6 +3702,26 @@ class GraphModule(torch.nn.Module):
     def test_leaf_function_nested_output(self):
         from torch._dynamo.decorators import leaf_function
 
+        @leaf_function
+        def nested_output_fn(linear1, linear2, linear3, x):
+            if x.sum() > 0:
+                return {
+                    "out": (linear1(x), linear2(x)),
+                    "extra": linear3(x),
+                }
+            else:
+                return {
+                    "out": (linear1(x) + 1, linear2(x) + 1),
+                    "extra": linear3(x) + 1,
+                }
+
+        @nested_output_fn.fake_impl
+        def nested_output_fn_fake(linear1, linear2, linear3, x):
+            return {
+                "out": (linear1(x), linear2(x)),
+                "extra": linear3(x),
+            }
+
         class NestedOutputModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -3706,25 +3729,8 @@ class GraphModule(torch.nn.Module):
                 self.linear2 = torch.nn.Linear(3, 3)
                 self.linear3 = torch.nn.Linear(3, 3)
 
-            @leaf_function
             def forward(self, x):
-                if x.sum() > 0:
-                    return {
-                        "out": (self.linear1(x), self.linear2(x)),
-                        "extra": self.linear3(x),
-                    }
-                else:
-                    return {
-                        "out": (self.linear1(x) + 1, self.linear2(x) + 1),
-                        "extra": self.linear3(x) + 1,
-                    }
-
-            @forward.fake_impl
-            def forward(self, x):
-                return {
-                    "out": (self.linear1(x), self.linear2(x)),
-                    "extra": self.linear3(x),
-                }
+                return nested_output_fn(self.linear1, self.linear2, self.linear3, x)
 
         def args_fn():
             return (torch.randn(3, 3, requires_grad=True),)

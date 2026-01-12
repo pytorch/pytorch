@@ -405,9 +405,6 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
             f"@nonstrict_trace. Please use only one decorator."
         )
 
-    # Create state to hold the fake_impl (can be mutated by fake_impl setter)
-    state = _LeafFunctionState(fn)
-
     @functools.wraps(fn)
     def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         return fn(*args, **kwargs)
@@ -416,7 +413,6 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     # Initially, fake_fn is the same as real_fn (unless fake_impl setter is called)
     inner._torchdynamo_leaf_real_fn = fn  # type: ignore[attr-defined]
     inner._torchdynamo_leaf_fake_fn = fn  # type: ignore[attr-defined]
-    inner._torchdynamo_leaf_state = state  # type: ignore[attr-defined]
 
     # Register with trace_rules
     wrapped_id = id(inner)
@@ -432,10 +428,8 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
 
     # Add fake_impl setter method to the function
     def fake_impl_setter(fake_fn: Callable[..., Any]) -> Callable[..., Any]:
-        """Setter for fake_impl (like @property.setter)."""
-        state.fake_impl_fn = fake_fn
         inner._torchdynamo_leaf_fake_fn = fake_fn  # type: ignore[attr-defined]
-        return inner  # Return the original wrapper to keep it in class dict
+        return inner
 
     inner.fake_impl = fake_impl_setter  # type: ignore[attr-defined]
 
@@ -450,14 +444,6 @@ def get_leaf_function_fake_impl(fn: Any) -> Any:
 def get_leaf_function_real_impl(fn: Any) -> Any:
     """Get the real_impl associated with a leaf_function decorated callable."""
     return getattr(fn, "_torchdynamo_leaf_real_fn", None)
-
-
-class _LeafFunctionState:
-    """Stores the fake_impl for a leaf function wrapper."""
-
-    def __init__(self, real_impl: Callable[..., Any]) -> None:
-        self.real_impl = real_impl
-        self.fake_impl_fn: Callable[..., Any] = real_impl
 
 
 def _disallow_in_graph_helper(throw_if_not_allowed: bool) -> Callable[..., Any]:

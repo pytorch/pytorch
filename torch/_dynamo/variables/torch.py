@@ -2053,6 +2053,7 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             is_valid_output,
             to_graphable,
         )
+        from torch._subclasses.fake_tensor import fake_tensor_tls
         from torch.utils._pytree import tree_flatten
 
         from .base import AsPythonConstantNotImplementedError
@@ -2154,16 +2155,13 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             # This enables reads to global/captured tensors, and we'll just
             # treat them as constants in the graph. Note that after
             # AOTDispatcher, this logic would disappear.
-            # We directly set the TLS flag here rather than using
-            # _allow_non_fake_inputs() since that checks a leaf_function-specific config.
-            from torch._subclasses.fake_tensor import fake_tensor_tls
-
-            old_override = fake_tensor_tls.allow_non_fake_inputs_override
+            old_val = fake_tensor_tls.allow_non_fake_inputs_override
+            fake_tensor_tls.allow_non_fake_inputs_override = True
             try:
-                fake_tensor_tls.allow_non_fake_inputs_override = True
-                return fn(*args, **kwargs)
-            finally:
-                fake_tensor_tls.allow_non_fake_inputs_override = old_override
+                res = fn(*args, **kwargs)
+            finally:  # reset even when `fn` raises
+                fake_tensor_tls.allow_non_fake_inputs_override = old_val
+            return res
 
         # `flat_apply` wants a TreeSpec for the function input.
         _, f_spec = func_to_graphable(patched_fn)
