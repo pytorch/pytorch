@@ -2,6 +2,7 @@
 # ruff: noqa: F841
 
 import collections
+import copy
 import gc
 import json
 import mmap
@@ -16,6 +17,7 @@ import tempfile
 import threading
 import time
 import unittest
+import warnings
 from dataclasses import dataclass, field
 from typing import Optional, TYPE_CHECKING
 from unittest.mock import patch
@@ -1189,6 +1191,39 @@ class TestProfiler(TestCase):
                 except ValueError:
                     pass
                 assert is_int, "Invalid stacks record"
+
+    def test_experimental_config_pickle(self):
+        with warnings.catch_warnings():
+            warnings.simplefilter("ignore", BytesWarning)
+
+            # Test with default values
+            config = _ExperimentalConfig()
+            pickled = pickle.dumps(config)
+            unpickled = pickle.loads(pickled)
+            self.assertIsInstance(unpickled, _ExperimentalConfig)
+
+            # Test with non-default values
+            config = _ExperimentalConfig(
+                profiler_metrics=["metric1", "metric2"],
+                profiler_measure_per_kernel=True,
+                verbose=True,
+                performance_events=["event1", "event2"],
+                enable_cuda_sync_events=True,
+                adjust_profiler_step=True,
+                disable_external_correlation=True,
+                profile_all_threads=True,
+                capture_overload_names=True,
+                record_python_gc_info=True,
+                expose_kineto_event_metadata=True,
+                custom_profiler_config="custom_config",
+            )
+            pickled = pickle.dumps(config)
+            unpickled = pickle.loads(pickled)
+            self.assertIsInstance(unpickled, _ExperimentalConfig)
+
+            # Test deepcopy (which uses pickle internally)
+            copied = copy.deepcopy(config)
+            self.assertIsInstance(copied, _ExperimentalConfig)
 
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     def test_tensorboard_trace_handler(self):
