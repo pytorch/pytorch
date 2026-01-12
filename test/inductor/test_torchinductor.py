@@ -4671,6 +4671,41 @@ class CommonTemplate:
 
         self.common(fn, (torch.randn(1, 3, *[10] * dim),))
 
+    @skipIfMPS
+    def test_max_unpool_empty_output(self):
+        class Unpool1d(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.unpool = nn.MaxUnpool1d(kernel_size=2, stride=2, padding=1)
+
+            def forward(self, x, indices):
+                return self.unpool(x, indices)
+
+        x1d = torch.randn(1, 1, 1, device=self.device)
+        self.common(Unpool1d().to(self.device), (x1d, x1d.long()))
+
+        class Unpool2d(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.unpool = nn.MaxUnpool2d(kernel_size=2, stride=2, padding=1)
+
+            def forward(self, x, indices):
+                return self.unpool(x, indices)
+
+        x2d = torch.randn(1, 1, 1, 1, device=self.device)
+        self.common(Unpool2d().to(self.device), (x2d, x2d.long()))
+
+        class Unpool3d(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.unpool = nn.MaxUnpool3d(kernel_size=2, stride=2, padding=1)
+
+            def forward(self, x, indices):
+                return self.unpool(x, indices)
+
+        x3d = torch.randn(1, 1, 1, 1, 1, device=self.device)
+        self.common(Unpool3d().to(self.device), (x3d, x3d.long()))
+
     def test_to_dtype(self):
         new_dtype = torch.float64 if self.device != "mps" else torch.bfloat16
 
