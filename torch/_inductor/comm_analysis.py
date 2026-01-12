@@ -9,7 +9,7 @@ import sympy
 
 import torch
 import torch.utils._pytree as pytree
-from torch.fx.experimental.symbolic_shapes import hint_int
+from torch.fx.experimental.symbolic_shapes import size_hint
 from torch.fx.operator_schemas import normalize_function
 
 from . import ir
@@ -83,7 +83,7 @@ def get_ir_node_size_numel(size: torch.Size, fallback: int = 4096 * 4096) -> int
 
 def get_fx_node_size_numel(size: torch.Size, fallback: int = 4096 * 4096) -> int:
     numel = functools.reduce(operator.mul, size, 1)
-    result = hint_int(numel, fallback=fallback)
+    result = size_hint(numel, fallback=fallback)
     return result
 
 

@@ -32,6 +32,7 @@ import torch._numpy as tnp
 import torch.fx
 import torch.random
 from torch._dynamo import compiled_autograd
+from torch._library.opaque_object import is_opaque_reference_type
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
@@ -69,6 +70,7 @@ from ..utils import (
 from .base import AttributeMutationNew, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .lists import ListIteratorVariable, SizeVariable
+from .script_object import TorchScriptObjectVariable
 from .user_defined import UserDefinedClassVariable
 
 
@@ -308,6 +310,11 @@ class TensorVariable(VariableTracker):
                 from .builder import wrap_fx_proxy
 
                 return wrap_fx_proxy(tx=tx, proxy=proxy, example_value=example_value)
+            elif is_opaque_reference_type(type(example_value)):
+                fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
+                    tx.output.fake_mode, example_value
+                )
+                return TorchScriptObjectVariable.create(proxy, fake_script_obj)
             # any other attributes on the subclass (that are not methods)
             # are assumed to be constant metadata.
             elif not callable(example_value):
@@ -621,6 +628,7 @@ class TensorVariable(VariableTracker):
         self, tx: "InstructionTranslator", idxes: Sequence[int] | None = None
     ) -> list[VariableTracker]:
         from .builder import wrap_fx_proxy_cls
+        from .torch_function import TensorWithTFOverrideVariable
 
         if self.valid_size():
             size_len = len(self.size)
@@ -652,6 +660,22 @@ class TensorVariable(VariableTracker):
             assert len(idxes) == length, (
                 f"Can't unpack a tensor of {length} rows into a tuple of {len(idxes)} elements."
             )
+
+        # preserve tensor subclass type when unpacking
+        if isinstance(self, TensorWithTFOverrideVariable):
+            base_vars = [
+                wrap_fx_proxy_cls(
+                    target_cls=TensorVariable, tx=tx, proxy=self.as_proxy()[i]
+                )
+                for i in idxes
+            ]
+            return [
+                TensorWithTFOverrideVariable.from_tensor_var(
+                    tx, v, self.class_type, self.source
+                )
+                for v in base_vars
+            ]
+
         return [
             wrap_fx_proxy_cls(target_cls=type(self), tx=tx, proxy=self.as_proxy()[i])
             for i in idxes
@@ -1474,7 +1498,9 @@ class TensorVariable(VariableTracker):
                     gb_type="Compilation of intermediate hooks requires compiled autograd",
                     context=f"var_getattr {self} {name}",
                     explanation="Dynamo must be in compiled_autograd to register hooks.",
-                    hints=[],
+                    hints=[
+                        "Consider using torch.autograd.Function with a custom backward() method instead of register_hook()."
+                    ],
                 )
 
             hook_name, bw_state_proxy = tx.output.add_backward_state_hook(hook)

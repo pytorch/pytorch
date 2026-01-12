@@ -978,6 +978,7 @@ def _record_memory_history(
             Defaults to "all".
         max_entries (int, optional): Keep a maximum of `max_entries`
             alloc/free events in the recorded history recorded.
+        clear_history (bool, optional): Clear history when enabling, defaults to False.
         skip_actions (list[str], optional): List of action types to skip when recording
             memory history. This can be used to reduce memory overhead by excluding
             certain types of events from being recorded. Valid action types are:
@@ -1362,8 +1363,10 @@ class CUDAPluggableAllocator(_CUDAAllocator):
         allocator = ctypes.CDLL(path_to_so_file)
         alloc_fn = ctypes.cast(getattr(allocator, alloc_fn_name), ctypes.c_void_p).value
         free_fn = ctypes.cast(getattr(allocator, free_fn_name), ctypes.c_void_p).value
-        assert alloc_fn is not None
-        assert free_fn is not None
+        if alloc_fn is None:
+            raise AssertionError(f"alloc_fn '{alloc_fn_name}' is None")
+        if free_fn is None:
+            raise AssertionError(f"free_fn '{free_fn_name}' is None")
         self._allocator = torch._C._cuda_customAllocator(alloc_fn, free_fn)
 
 
