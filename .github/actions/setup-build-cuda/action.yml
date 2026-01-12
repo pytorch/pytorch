@@ -37,7 +37,8 @@ runs:
           "129": ("12.9.1", "https://developer.download.nvidia.com/compute/cuda/12.9.1/local_installers/cuda_12.9.1_575.57.08_linux.run"),
           "128": ("12.8.1", "https://developer.download.nvidia.com/compute/cuda/12.8.1/local_installers/cuda_12.8.1_570.124.06_linux.run"),
           # (Build with nvcc 12.8 on linux even when building for 12.6 to avoid seg fault in Flash3 build)
-          "126": ("12.8.1", "https://developer.download.nvidia.com/compute/cuda/12.8.1/local_installers/cuda_12.8.1_570.124.06_linux.run"),
+          # "126": ("12.8.1", "https://developer.download.nvidia.com/compute/cuda/12.8.1/local_installers/cuda_12.8.1_570.124.06_linux.run"),
+          "126": ("12.6.3", "https://developer.download.nvidia.com/compute/cuda/12.6.3/local_installers/cuda_12.6.3_560.35.05_linux.run"),
           "118": ("11.8.0", "https://developer.download.nvidia.com/compute/cuda/11.8.0/local_installers/cuda_11.8.0_520.61.05_linux.run"),
           "6.0": ("6.0.2", "https://repo.radeon.com/amdgpu-install/6.0.2/rhel/8.9/amdgpu-install-6.0.60002-1.el8.noarch.rpm"),
           "6.1": ("6.1.3", "https://repo.radeon.com/amdgpu-install/6.1.3/rhel/8.9/amdgpu-install-6.1.60103-1.el8.noarch.rpm"),
