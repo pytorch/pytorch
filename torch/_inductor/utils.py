@@ -2096,8 +2096,8 @@ def use_nv_universal_gemm_template(
         5. Max autotune or max autotune gemm is enabled
         6. We are not using dynamic shapes
         7. A and B base pointers are 16B aligned
-        8. n and k are divisible by 16
-        9. Non-unit strides are divisible by 16
+        8. m, n and k are divisible by 16
+        9. Non-innermost strides are divisible by 16 (row-major layout)
         10. Not in AOT Inductor mode (requires runtime JIT compilation)
     """
     if not ensure_cute_available():
@@ -2132,6 +2132,7 @@ def use_nv_universal_gemm_template(
         return False
 
     # TODO(nikhilap) There is a bug in cutlass_api, their compatibility check does not catch these failure cases
+    # N and K must be divisible by 16 for all cases
     if not V.graph.sizevars.statically_known_true(sympy.Eq(n % 16, 0)):
         return False
     if not V.graph.sizevars.statically_known_true(sympy.Eq(k % 16, 0)):
@@ -2139,16 +2140,26 @@ def use_nv_universal_gemm_template(
 
     a_layout = mat_a.get_layout()
     b_layout = mat_b.get_layout()
+    a_strides = list(a_layout.stride)
+    b_strides = list(b_layout.stride)
 
-    for stride in a_layout.stride:
-        if stride != 1:
-            if not V.graph.sizevars.statically_known_true(sympy.Eq(stride % 16, 0)):
+    # For 3D tensors (BMM), additional restrictions apply:
+    # - M must be > 1
+    # - strides[1] must not be 1
+    is_batched = len(a_strides) == 3
+    if is_batched:
+        if not V.graph.sizevars.statically_known_true(sympy.Gt(m, 1)):
+            return False
+        for strides in [a_strides, b_strides]:
+            if strides[1] == 1:
                 return False
 
-    for stride in b_layout.stride:
-        if stride != 1:
-            if not V.graph.sizevars.statically_known_true(sympy.Eq(stride % 16, 0)):
-                return False
+    # Check non-unit strides are divisible by 16 (both 2D and 3D)
+    for strides in [a_strides, b_strides]:
+        for stride in strides:
+            if stride != 1:
+                if not V.graph.sizevars.statically_known_true(sympy.Eq(stride % 16, 0)):
+                    return False
 
     return True
 
