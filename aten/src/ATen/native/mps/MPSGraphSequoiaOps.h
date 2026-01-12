@@ -38,4 +38,8 @@ typedef NS_ENUM(NSInteger, MTLMathFloatingPointFunctions) {
 @property(readwrite, nonatomic) MTLMathFloatingPointFunctions mathFloatingPointFunctions;
 @end
 
-#endif
+#endif // MacOS-15 is not defined
+
+#if !defined(__MAC_26_0) && (!defined(MAC_OS_X_VERSION_26_0) || (MAC_OS_X_VERSION_MIN_REQUIRED < MAC_OS_X_VERSION_26_0))
+#define MTLLanguageVersion4_0 ((MTLLanguageVersion)((4 << 16) + 0))
+#endif // MacOS-26 not defined
