@@ -66,7 +66,7 @@ class _FlatLayout:
         flat_shape = flatten(coalesced_layout.shape)
         flat_stride = flatten(coalesced_layout.stride)
 
-        assert sorted(flat_stride, reverse=True) == flat_stride, (
+        assert tuple(sorted(flat_stride, reverse=True)) == flat_stride, (
             "For the time being we don't support transposing mesh dimensions "
             "hence layouts should always remain sorted. If we choose to allow this, "
             "we first need to decide whether we consider [0, 1, 2, 3] and "
