@@ -153,11 +153,9 @@ jobs:
       #   uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Install corresponding PyTorch
+        shell: bash -l {0}
         run: |
-          PYTORCH_INDEX_URL="https://download.pytorch.org/whl/cu${CUDA_SHORT}"
-          PYTORCH_TEST_INDEX_URL="https://download.pytorch.org/whl/test/cu${CUDA_SHORT}"
-          PYTORCH_NIGHTLY_INDEX_URL="https://download.pytorch.org/whl/nightly/cu${CUDA_SHORT}"
-          pip install torch==2.9.0 --index-url $PYTORCH_INDEX_URL
+          pip install torch==2.9.0 --index-url https://download.pytorch.org/whl/cu${CUDA_SHORT}
           pip install packaging ninja wheel setuptools twine numpy
 
       - name: Build wheel
