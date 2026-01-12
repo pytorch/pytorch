@@ -43,7 +43,6 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     TEST_CUDA,
 )
-from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.utils.checkpoint import checkpoint
 
 
@@ -1309,6 +1308,7 @@ from user code:
         from torch.distributed._tensor import DTensor
         from torch.distributed.device_mesh import init_device_mesh
         from torch.distributed.tensor import Placement, Replicate, Shard
+        from torch.testing._internal.distributed.fake_pg import FakeStore
 
         def dtensorify_module(
             module: nn.Module,
