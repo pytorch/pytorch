@@ -1339,28 +1339,28 @@ def bsr_dense_addmm(
         # pyrefly: ignore [unsupported-operation]
         _bsr_strided_addmm_kernel[grid](
             *ptr_stride_extractor(*sliced_tensors),
-            # pyrefly: ignore  # bad-argument-count
+            # pyrefly: ignore [bad-argument-count]
             beta,
             alpha,
-            # pyrefly: ignore  # bad-keyword-argument, bad-argument-type
+            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             beta_is_one=beta == 1,
-            # pyrefly: ignore  # bad-keyword-argument, bad-argument-type
+            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             beta_is_nonzero=beta != 0,
-            # pyrefly: ignore  # bad-keyword-argument, bad-argument-type
+            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             alpha_is_one=alpha == 1,
-            # pyrefly: ignore  # bad-keyword-argument, bad-argument-type
+            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             left_alpha_is_one=left_alpha_is_one,
-            # pyrefly: ignore  # bad-keyword-argument, bad-argument-type
+            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             right_alpha_is_one=right_alpha_is_one,
-            # pyrefly: ignore  # bad-keyword-argument, bad-argument-type
+            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             BLOCKSIZE_ROW=BM,
-            # pyrefly: ignore  # bad-keyword-argument, bad-argument-type
+            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             BLOCKSIZE_INNER=BK,
-            # pyrefly: ignore  # bad-keyword-argument
+            # pyrefly: ignore [bad-keyword-argument]
             BLOCKSIZE_COL=BN,
-            # pyrefly: ignore  # bad-keyword-argument
+            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             allow_tf32=dot_out_dtype == tl.float32,
-            # pyrefly: ignore  # bad-keyword-argument, bad-argument-type
+            # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
             acc_dtype=dot_out_dtype,
             **meta,
         )
@@ -1681,17 +1681,17 @@ if has_triton():
                 beta,
                 is_beta_zero,
                 *blocksize,
-                # pyrefly: ignore  # bad-argument-count
+                # pyrefly: ignore [bad-argument-count]
                 k,
                 tile_k,
                 *ptr_stride_extractor(*sliced_tensors),
-                # pyrefly: ignore  # bad-keyword-argument, bad-argument-type
+                # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
                 acc_dtype=acc_dtype,
-                # pyrefly: ignore  # bad-keyword-argument, bad-argument-type
+                # pyrefly: ignore [bad-keyword-argument, bad-argument-type]
                 allow_tf32=allow_tf32,
-                # pyrefly: ignore  # unexpected-keyword
+                # pyrefly: ignore [unexpected-keyword]
                 num_stages=1,
-                # pyrefly: ignore  # unexpected-keyword
+                # pyrefly: ignore [unexpected-keyword]
                 num_warps=4,
             )
 
@@ -1976,7 +1976,7 @@ if has_triton():
         def kernel(grid, *sliced_tensors):
             _bsr_softmax_kernel[grid](
                 *ptr_stride_extractor(*sliced_tensors),
-                # pyrefly: ignore  # bad-argument-count
+                # pyrefly: ignore [bad-argument-count]
                 row_block,
                 col_block,
                 max_row_nnz,
@@ -2151,11 +2151,11 @@ if has_triton():
         if "allow_tf32" not in meta:
             meta.update(allow_tf32=dot_out_dtype == tl.float32)
         _scatter_mm2_kernel[grid](
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             M,
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             K,
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             N,
             blocks,
             blocks.stride(0),
@@ -2174,9 +2174,9 @@ if has_triton():
             pq_indices,
             pq_indices.stride(0),
             pq_indices.stride(1),
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             dot_out_dtype=dot_out_dtype,
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             **meta,
         )
 
@@ -2373,7 +2373,7 @@ if has_triton():
         _scatter_mm6_kernel[grid](
             B,
             Ms,
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             Ks,
             N,
             blocks,
@@ -2392,7 +2392,7 @@ if has_triton():
             r_offsets,
             p_offsets,
             q_offsets,
-            # pyrefly: ignore  # bad-argument-type
+            # pyrefly: ignore [bad-argument-type]
             dot_out_dtype=dot_out_dtype,
             **meta,
         )
