@@ -175,7 +175,7 @@ _asterisk = _Asterisk()
 del _Asterisk
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class PyTreeSpec:
     """Analog for :class:`optree.PyTreeSpec` in Python."""
 
