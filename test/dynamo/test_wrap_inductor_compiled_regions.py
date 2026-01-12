@@ -1072,11 +1072,9 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
             model = torch.nn.Linear(4, 4)
             inp = torch.rand(4, 4)
 
-            # Disable FX graph cache to ensure we get the FX graph for fake tensor propagation
-            # In production, caching should be handled separately
-            with inductor_config.patch(
-                {"wrap_inductor_compiled_regions": True, "fx_graph_cache": False}
-            ):
+            # The FX graph is now serialized using SerializedGraphModule, so it
+            # survives cache serialization/deserialization and works with caching
+            with inductor_config.patch({"wrap_inductor_compiled_regions": True}):
                 # This should now work - the inductor_compiled_code HOP will
                 # use the stored FX graph to propagate fake tensors
                 result = torch.compile(model)(inp)
