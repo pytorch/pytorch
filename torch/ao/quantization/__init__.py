@@ -3,6 +3,7 @@
 import sys
 from collections.abc import Callable
 from typing import Optional, Union
+from typing_extensions import TypeAliasType
 
 import torch
 from torch import Tensor
@@ -11,8 +12,6 @@ from .fake_quantize import *  # noqa: F403
 from .fuse_modules import fuse_modules, fuse_modules_qat  # noqa: F403
 from .fuser_method_mappings import *  # noqa: F403
 from .observer import *  # noqa: F403
-
-# pyrefly: ignore [deprecated]
 from .qconfig import *  # noqa: F403
 from .qconfig_mapping import *  # noqa: F403
 from .quant_type import *  # noqa: F403
@@ -23,15 +22,9 @@ from .stubs import *  # noqa: F403
 
 
 # ensure __module__ is set correctly for public APIs
-if sys.version_info < (3, 12):
-    ObserverOrFakeQuantize = Union[ObserverBase, FakeQuantizeBase]
-    ObserverOrFakeQuantize.__module__ = "torch.ao.quantization"
-else:
-    from typing import TypeAliasType
-
-    ObserverOrFakeQuantize = TypeAliasType(
-        "ObserverOrFakeQuantize", ObserverBase | FakeQuantizeBase
-    )
+ObserverOrFakeQuantize = TypeAliasType(
+    "ObserverOrFakeQuantize", ObserverBase | FakeQuantizeBase
+)
 
 
 __all__ = [
