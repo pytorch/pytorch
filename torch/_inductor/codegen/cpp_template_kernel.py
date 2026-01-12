@@ -204,16 +204,23 @@ class CppTemplateKernel(CppKernel):
         else:
             return f"#pragma unroll {unroll}"
 
-    def define_buffer(self, name, sizes: list[Any], dtype=torch.float) -> str:
+    def define_buffer(self, name, sizes: list[Any], dtype=torch.float, alloc: bool=True) -> str:
         """Define kernel local buffer"""
         sizes = parse_expr_with_index_symbols(sizes)
-        buf = ir.Buffer(
-            name=name, layout=ir.FixedLayout(torch.device("cpu"), dtype, sizes)
-        )
-        self.local_buffers[name] = buf
-        ctype = f"{DTYPE_TO_CPP[dtype]}"
-        numel = f"{cexpr_index(buf.get_numel())}"
-        return f"auto _{name} = std::make_unique<{ctype}[]>({numel}); auto {name} = _{name}.get();"
+        if name in self.local_buffers.keys():
+            buf = self.local_buffers[name]
+        else:
+            buf = ir.Buffer(
+                name=name, layout=ir.FixedLayout(torch.device("cpu"), dtype, sizes)
+            )
+            self.local_buffers[name] = buf
+
+        if alloc:
+            ctype = f"{DTYPE_TO_CPP[dtype]}"
+            numel = f"{cexpr_index(buf.get_numel())}"
+            return f"auto _{name} = std::make_unique<{ctype}[]>({numel}); auto {name} = _{name}.get();"
+        else:
+            return ""
 
     def define_stack_allocated_buffer(
         self, name, sizes: list[Any], dtype=torch.float
@@ -241,13 +248,48 @@ class CppTemplateKernel(CppKernel):
         assert name in self.local_buffers
         return f"_{name}.release()"
 
+    def _microgemm_epilogue_overrides(
+        self, dst: ir.Buffer, src: ir.Buffer
+    ) -> tuple[dict[str, str], dict[str, ir.FixedLayout]]:
+        assert len(dst.get_size()) == 2, "microgemm epilogue expects 2D dst"
+        assert len(src.get_size()) == 2, "microgemm epilogue expects 2D src"
+
+        name_overrides = {
+            dst.get_name(): "MICROGEMM_EPILOGUE_DST_BUF",
+            src.get_name(): "MICROGEMM_EPILOGUE_ACC_BUF",
+        }
+
+        one = sympy.Integer(1)
+        dst_s0 = sympy.Symbol("microgemm_epilogue_dst_ld", integer=True)
+        src_s0 = sympy.Symbol("microgemm_epilogue_acc_ld", integer=True)
+
+        layout_overrides = {
+            dst.get_name(): ir.FixedLayout(
+                device=torch.device("cpu"),
+                dtype=dst.get_dtype(),
+                size=dst.get_size(),
+                stride=[dst_s0, one],
+                offset=sympy.Integer(0),
+            ),
+            src.get_name(): ir.FixedLayout(
+                device=torch.device("cpu"),
+                dtype=src.get_dtype(),
+                size=src.get_size(),
+                stride=[src_s0, one],
+                offset=sympy.Integer(0),
+            ),
+        }
+        return name_overrides, layout_overrides
+
     def store_pointwise_nodes(
         self,
         dst: ir.Buffer,
         nodes: list[ir.IRNode],
         offsets: Optional[list[sympy.Expr]] = None,
         reindexers: Optional[list[Optional[Callable[[list[Any]], list[Any]]]]] = None,
-    ) -> str:
+        in_microgemm: bool = False,
+        inner_layouts: Optional[dict[str, ir.FixedLayout]] = None,
+    ):
         var_sizes = (tuple(dst.get_size()), ())
         var_ranges = {
             sympy_index_symbol_with_prefix(SymT.INDEX, i): sz
@@ -258,7 +300,12 @@ class CppTemplateKernel(CppKernel):
         if not reindexers:
             reindexers = [None] * len(nodes)
         assert len(offsets) == len(var_sizes[0])
-        output_index = dst.get_layout().make_indexer()([*var_ranges.keys()])
+
+        if in_microgemm:
+            assert inner_layouts is not None and dst.get_name() in inner_layouts
+            output_index = inner_layouts[dst.get_name()].make_indexer()([*var_ranges.keys()])
+        else:
+            output_index = dst.get_layout().make_indexer()([*var_ranges.keys()])
         kernel_group = KernelGroup()
         kernel_group.args = self.args
         cpp_kernel_proxy = CppKernelProxy(kernel_group)
@@ -302,6 +349,9 @@ class CppTemplateKernel(CppKernel):
             cpp_kernel_proxy.loop_nest, "max_parallel_depth", max_parallel_depth
         ):
             kernel_group.finalize_kernel(cpp_kernel_proxy, [])
+
+        if in_microgemm:
+            return cpp_kernel_proxy
         return kernel_group.loops_code.getvalue()
 
     def store_grouped_gemm_pointwise_nodes(
@@ -374,6 +424,7 @@ class CppTemplateKernel(CppKernel):
         epilogue_nodes: Optional[list[ir.IRNode]] = None,
         offsets: Optional[list[Any]] = None,
         reindexers: Optional[list[Optional[Callable[[list[Any]], list[Any]]]]] = None,
+        in_microgemm: bool = False,
     ):
         """
         Store the `src` buffer to the `dst` buffer. The size of `src` and `dst` should match.
@@ -396,11 +447,22 @@ class CppTemplateKernel(CppKernel):
               in `epilogue_nodes` with `src`.
         """
         assert isinstance(dst, (ir.Buffer, ir.ReinterpretView))
-        assert dst.get_size() == src.get_size(), f"{dst=}, {src=}"
+        # assert dst.get_size() == src.get_size(), f"{dst=}, {src=}"
+        # TODO simplfy the above sizes
+        name_overrides: Optional[dict[str, str]] = None
+        layout_overrides: Optional[dict[str, ir.FixedLayout]] = None
+        if in_microgemm:
+            name_overrides, layout_overrides = self._microgemm_epilogue_overrides(dst, src)
+
         if offsets:
             offsets = parse_expr_with_index_symbols(offsets)
         if epilogue_nodes:
-            with LocalBufferContext(self.args) as scope:
+            with LocalBufferContext(
+                self.args,
+                in_microgemm,
+                inner_layouts=layout_overrides,
+                inner_names=name_overrides,
+            ) as scope:
                 assert orig_src is not None
                 if orig_src.get_name() != src.get_name():
                     scope.add_local_buffer(
@@ -415,6 +477,8 @@ class CppTemplateKernel(CppKernel):
                     epilogue_nodes,  # type: ignore[arg-type]
                     offsets,
                     reindexers,
+                    in_microgemm=in_microgemm,
+                    inner_layouts=layout_overrides,
                 )
         else:
             if dst.get_name() != src.get_name():
