@@ -455,7 +455,7 @@ def forward(self, L_x_ : torch.Tensor):
 
         self.assertEqual(x_eager.grad, x_compiled.grad)
 
-    def test_hook_side_effects(self):
+    def test_hook_bwd_inside_side_effects(self):
         global_list = []
 
         def fn(x):

@@ -21,7 +21,7 @@ import operator
 import textwrap
 import traceback
 import types
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from contextlib import nullcontext
 from itertools import chain
 from types import NoneType
@@ -33,6 +33,7 @@ import torch._numpy as tnp
 import torch.fx
 import torch.random
 from torch._dynamo import compiled_autograd
+from torch._library.opaque_object import is_opaque_reference_type
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
@@ -71,6 +72,7 @@ from ..utils import (
 from .base import AttributeMutationNew, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .lists import ListIteratorVariable, SizeVariable
+from .script_object import TorchScriptObjectVariable
 from .user_defined import UserDefinedClassVariable
 
 
@@ -310,6 +312,11 @@ class TensorVariable(VariableTracker):
                 from .builder import wrap_fx_proxy
 
                 return wrap_fx_proxy(tx=tx, proxy=proxy, example_value=example_value)
+            elif is_opaque_reference_type(type(example_value)):
+                fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
+                    tx.output.fake_mode, example_value
+                )
+                return TorchScriptObjectVariable.create(proxy, fake_script_obj)
             # any other attributes on the subclass (that are not methods)
             # are assumed to be constant metadata.
             elif not callable(example_value):
@@ -623,6 +630,7 @@ class TensorVariable(VariableTracker):
         self, tx: "InstructionTranslator", idxes: Sequence[int] | None = None
     ) -> list[VariableTracker]:
         from .builder import wrap_fx_proxy_cls
+        from .torch_function import TensorWithTFOverrideVariable
 
         if self.valid_size():
             size_len = len(self.size)
@@ -654,6 +662,22 @@ class TensorVariable(VariableTracker):
             assert len(idxes) == length, (
                 f"Can't unpack a tensor of {length} rows into a tuple of {len(idxes)} elements."
             )
+
+        # preserve tensor subclass type when unpacking
+        if isinstance(self, TensorWithTFOverrideVariable):
+            base_vars = [
+                wrap_fx_proxy_cls(
+                    target_cls=TensorVariable, tx=tx, proxy=self.as_proxy()[i]
+                )
+                for i in idxes
+            ]
+            return [
+                TensorWithTFOverrideVariable.from_tensor_var(
+                    tx, v, self.class_type, self.source
+                )
+                for v in base_vars
+            ]
+
         return [
             wrap_fx_proxy_cls(target_cls=type(self), tx=tx, proxy=self.as_proxy()[i])
             for i in idxes
@@ -1074,7 +1098,9 @@ class TensorVariable(VariableTracker):
         out = tolist(tensor, self.as_proxy())
         return VariableTracker.build(tx, out)
 
-    def _collect_backward_inputs(self, vars_iter, error_on_non_leaf=False):
+    def _collect_backward_inputs(
+        self, vars_iter: Iterable[VariableTracker], error_on_non_leaf: bool = False
+    ) -> Optional[list[VariableTracker]]:
         """
         Collect unique leaf tensors from vars_iter for backward.
 
@@ -1089,7 +1115,7 @@ class TensorVariable(VariableTracker):
         from ..source import SyntheticLocalSource
 
         result = []
-        seen_nodes: set = set()
+        seen_nodes: set[torch.fx.Node] = set()
         for var in vars_iter:
             if isinstance(var, TensorVariable) and var.requires_grad:
                 # Non-leaf tensors (has_grad_fn=True) must be skipped because:
@@ -1130,11 +1156,11 @@ class TensorVariable(VariableTracker):
     def method_backward(
         self,
         tx: "InstructionTranslator",
-        gradient=None,
-        retain_graph=None,
-        create_graph=None,
-        inputs=None,
-    ):
+        gradient: Optional[VariableTracker] = None,
+        retain_graph: Optional[VariableTracker] = None,
+        create_graph: Optional[VariableTracker] = None,
+        inputs: Optional[VariableTracker] = None,
+    ) -> Optional[VariableTracker]:
         """
         Trace tensor.backward() by rewriting as autograd.grad() + accumulate_grad.
 
@@ -1233,6 +1259,7 @@ class TensorVariable(VariableTracker):
         accumulate_grad_fn = VariableTracker.build(
             tx, torch.ops.inductor.accumulate_grad_.default
         )
+        assert input_vars is not None
         for idx, input_var in enumerate(input_vars):
             grad_i = grads_var.call_method(
                 tx, "__getitem__", [VariableTracker.build(tx, idx)], {}
@@ -1615,7 +1642,6 @@ class TensorVariable(VariableTracker):
             # For intermediate tensors (those without a source), we have two approaches:
             # 1. When compiled autograd is enabled: use BackwardState to defer hook execution
             # 2. When compiled autograd is NOT enabled: use a custom autograd function
-
             if compiled_autograd.compiled_autograd_enabled:
                 # Use the BackwardState approach for compiled autograd
                 hook_name, bw_state_proxy = tx.output.add_backward_state_hook(hook)
@@ -1632,6 +1658,9 @@ class TensorVariable(VariableTracker):
                             hook_name=hook_name,
                         )
                     )
+                    # TODO(jansel): returning None here is wrong, it should be
+                    # RemovableHandle, but we need some extra work to support
+                    # this properly.
                     return None
 
                 from .builder import wrap_fx_proxy
@@ -1716,12 +1745,12 @@ class TensorVariable(VariableTracker):
                 insert_point.append(node)
                 insert_point = node
 
-            # Replace uses of tensor with hooked version, but only for the users
+            # Replace uses of tensor with tensor_prime, but only for the users
             # that existed before we created the hook node
             for user in users_to_replace:
                 user.replace_input_with(tensor_node, tensor_prime_node)
 
-            # Update self to point to the tensor_prime
+            # Update tensor to point to the tensor_prime
             assert isinstance(result, TensorVariable)
             self.proxy = result.as_proxy()
             # TensorVariable doesn't actually store the grad_fn
@@ -1809,7 +1838,9 @@ class TensorVariable(VariableTracker):
     def get_python_hash(self) -> int:
         return hash(self.as_proxy().node.meta["example_value"])
 
-    def is_python_equal(self, other: "VariableTracker") -> bool:
+    def is_python_equal(self, other: object) -> bool:
+        if not isinstance(other, VariableTracker):
+            return False
         a = self.as_proxy().node.meta["example_value"]
         b = other.as_proxy().node.meta["example_value"]
         return a is b
@@ -1921,11 +1952,14 @@ class SymNodeVariable(VariableTracker):
         # searched for a dict key.
         return hash(self.evaluate_expr())
 
-    def is_python_equal(self, other: "VariableTracker") -> bool:
+    def is_python_equal(self, other: object) -> bool:
         if isinstance(other, SymNodeVariable):
             return self.evaluate_expr() == other.evaluate_expr()
         # could be constant variable as well
-        return self.evaluate_expr() == other.as_python_constant()
+        return (
+            isinstance(other, VariableTracker)
+            and self.evaluate_expr() == other.as_python_constant()
+        )
 
 
 class NumpyNdarrayVariable(TensorVariable):

@@ -1394,12 +1394,10 @@ test_torchinductor.copy_tests(CommonTemplate, TritonBlockPointerTestGPU, GPU_TYP
 
 
 @unittest.skipIf(
-    not (
-        HAS_CUDA_AND_TRITON
-        and torch.cuda.get_device_capability()[0] >= 9
-        and torch.version.hip is None
-    ),
-    "Requires Triton CUDA backend and CUDA compute capability >= 9.0",
+    not (HAS_CUDA_AND_TRITON and torch.cuda.get_device_capability()[0] >= 9)
+    or torch.version.hip,
+    "Requires Triton CUDA backend and CUDA compute capability >= 9.0. Not supported on ROCm",
+    # ROCm triton doesn't support/generate "tl.make_tensor_descriptor" which is exactly what this unit test is about
 )
 @config.patch({"triton.use_tensor_descriptor": True, "assume_aligned_inputs": True})
 @instantiate_parametrized_tests
@@ -1446,6 +1444,22 @@ class TritonTensorDescriptorTestCUDA(BlockDescriptorTestBase):
 
         transpose_count = code.count("tl.trans")
         self.assertEqual(transpose_count, 1 if expect_transpose else 0)
+
+    def test_rms_norm_backward_does_not_crash_with_tma(self):
+        B, S, D = 1, 1024, 40096
+        with torch.device(self.device):
+            x = torch.randn(B, S, D, dtype=torch.bfloat16, requires_grad=True)
+            w = torch.randn(D, dtype=torch.bfloat16, requires_grad=True)
+
+        def f(x: torch.Tensor, w: torch.Tensor) -> torch.Tensor:
+            y = torch.rms_norm(x, (D,), w, 1e-5)
+            return (y * 0.1).sum()
+
+        compiled_f = torch.compile(f, backend="inductor", fullgraph=True)
+        loss = compiled_f(x, w)
+        loss.backward()
+        self.assertIsNotNone(x.grad)
+        self.assertIsNotNone(w.grad)
 
 
 test_torchinductor.copy_tests(
