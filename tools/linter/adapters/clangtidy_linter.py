@@ -138,6 +138,7 @@ include_dir = [
     "/usr/lib/llvm-11/include/openmp",
     get_python_include_dir(),
     os.path.join(PYTORCH_ROOT, "third_party/pybind11/include"),
+    PYTORCH_ROOT,
 ] + clang_search_dirs()
 for dir in include_dir:
     include_args += ["--extra-arg", f"-I{dir}"]
@@ -147,11 +148,22 @@ def check_file(
     filename: str,
     binary: str,
     build_dir: Path,
+    std: str | None,
 ) -> list[LintMessage]:
+    # Explicitly pass include path for linters that only check headers.
+    build_include_args = include_args + ["--extra-arg", f"-I{build_dir}"]
+    cmd = [
+        binary,
+        f"-p={build_dir}",
+        *build_include_args,
+        filename,
+    ]
+    # Only add -- and -std flag if std is explicitly specified
+    if std is not None:
+        cmd.extend(["--", f"-std={std}"])
+
     try:
-        proc = run_command(
-            [binary, f"-p={build_dir}", *include_args, filename],
-        )
+        proc = run_command(cmd)
     except OSError as err:
         return [
             LintMessage(
@@ -218,6 +230,14 @@ def main() -> None:
         ),
     )
     parser.add_argument(
+        "--std",
+        default=None,
+        help=(
+            "C++ standard to use for compilation (e.g., c++17, c++20). "
+            "If not specified, uses the standard from compile_commands.json."
+        ),
+    )
+    parser.add_argument(
         "--verbose",
         action="store_true",
         help="verbose logging",
@@ -277,6 +297,7 @@ def main() -> None:
                 filename,
                 binary_path,
                 abs_build_dir,
+                args.std,
             ): filename
             for filename in args.filenames
         }

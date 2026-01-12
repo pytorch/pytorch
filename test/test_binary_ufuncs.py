@@ -3501,6 +3501,14 @@ class TestBinaryUfuncs(TestCase):
         exponents = torch.randint(-5, 5, (64,), device=device)
         self.assertEqual(torch.ldexp(mantissas, exponents).dtype, torch.half)
 
+        # test half dtype bound ends (very small and very large exponents)
+        mantissas = torch.tensor([-2, 2**-10], device=device, dtype=torch.half)
+        exponents = torch.tensor([-25, 20], device=device)
+        self.assertEqual(
+            torch.ldexp(mantissas, exponents),
+            torch.tensor([-(2**-24), 2**10], dtype=torch.half),
+        )
+
         # test float64 computation
         mantissas = torch.tensor([1], dtype=torch.float64, device=device)
         exponents = torch.tensor([128], dtype=torch.int64, device=device)
@@ -4027,14 +4035,20 @@ class TestBinaryUfuncs(TestCase):
         def test_dx(sizes, dim, dx, device):
             t = torch.randn(sizes, device=device)
             actual = torch.trapezoid(t, dx=dx, dim=dim)
-            expected = np.trapz(t.cpu().numpy(), dx=dx, axis=dim)  # noqa: NPY201
+            if int(np.__version__.split(".")[0]) >= 2:
+                expected = np.trapezoid(t.cpu().numpy(), dx=dx, axis=dim)  # noqa: NPY201
+            else:
+                expected = np.trapz(t.cpu().numpy(), dx=dx, axis=dim)  # noqa: NPY201
             self.assertEqual(expected.shape, actual.shape)
             self.assertEqual(expected, actual, exact_dtype=False)
 
         def test_x(sizes, dim, x, device):
             t = torch.randn(sizes, device=device)
             actual = torch.trapezoid(t, x=torch.tensor(x, device=device), dim=dim)
-            expected = np.trapz(t.cpu().numpy(), x=x, axis=dim)  # noqa: NPY201
+            if int(np.__version__.split(".")[0]) >= 2:
+                expected = np.trapezoid(t.cpu().numpy(), x=x, axis=dim)  # noqa: NPY201
+            else:
+                expected = np.trapz(t.cpu().numpy(), x=x, axis=dim)  # noqa: NPY201
             self.assertEqual(expected.shape, actual.shape)
             self.assertEqual(expected, actual.cpu(), exact_dtype=False)
 

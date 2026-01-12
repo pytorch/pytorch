@@ -475,9 +475,9 @@ def is_constant_class(cls: type[Any]) -> bool:
     return isinstance(cls, type) and cls in CONSTANT_NODES
 
 
-@dataclasses.dataclass(frozen=True)
-class ConstantNode:
-    value: Any
+@dataclasses.dataclass(frozen=True, slots=True)
+class ConstantNode(Generic[T]):
+    value: T
 
 
 def _is_constant_holder(spec: "TreeSpec") -> bool:
@@ -608,6 +608,14 @@ def _private_register_pytree_node(
     for the Python pytree only. End-users should use :func:`register_pytree_node`
     instead.
     """
+    from torch._library.opaque_object import is_opaque_type
+
+    if is_opaque_type(cls):
+        raise ValueError(
+            f"{cls} cannot be registered as a pytree as it has been "
+            "registered as an opaque object. Opaque objects must be pytree leaves."
+        )
+
     with _NODE_REGISTRY_LOCK:
         if cls in SUPPORTED_NODES:
             # TODO: change this warning to an error after OSS/internal stabilize
@@ -639,7 +647,7 @@ def _private_register_pytree_node(
         SERIALIZED_TYPE_TO_PYTHON_TYPE[serialized_type_name] = cls
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class SequenceKey(Generic[T]):
     idx: int
 
@@ -653,7 +661,7 @@ class SequenceKey(Generic[T]):
 K = TypeVar("K", bound=Hashable)
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class MappingKey(Generic[K, T]):
     key: K
 
@@ -664,7 +672,7 @@ class MappingKey(Generic[K, T]):
         return mapping[self.key]
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class GetAttrKey:
     name: str
 
@@ -1015,6 +1023,7 @@ _private_register_pytree_node(
 
 
 STANDARD_DICT_TYPES: frozenset[type] = frozenset({dict, OrderedDict, defaultdict})
+# pyrefly: ignore [no-matching-overload]
 BUILTIN_TYPES: frozenset[type] = frozenset(
     {
         tuple,
@@ -1090,7 +1099,7 @@ def _is_leaf(tree: PyTree, is_leaf: Callable[[PyTree], bool] | None = None) -> b
 #   num_leaves: the number of leaves
 #   num_children: the number of children of the root Node (i.e., len(children()))
 #   is_leaf(): whether the root Node is a leaf
-@dataclasses.dataclass(init=False, frozen=True, eq=True, repr=False)
+@dataclasses.dataclass(init=False, frozen=True, eq=True, repr=False, slots=True)
 class TreeSpec:
     type: Any
     _context: Context
@@ -1113,8 +1122,10 @@ class TreeSpec:
 
     def __post_init__(self) -> None:
         if self.type is None:
-            assert self._context is None
-            assert len(self._children) == 0
+            if self._context is not None:
+                raise AssertionError("leaf node should not have a context")
+            if len(self._children) != 0:
+                raise AssertionError("leaf node should not have children")
             num_nodes = 1
             num_leaves = 1
             num_children = 0
@@ -1322,7 +1333,7 @@ PyTreeSpec: TypeAlias = TreeSpec
     "use `isinstance(treespec, TreeSpec) and treespec.is_leaf()` instead.",
     category=FutureWarning,
 )
-@dataclasses.dataclass(init=True, frozen=True, eq=False, repr=False)
+@dataclasses.dataclass(init=True, frozen=True, eq=False, repr=False, slots=True)
 class LeafSpec(TreeSpec):
     type: Any = dataclasses.field(default=None, init=False)
     _context: Context = dataclasses.field(default=None, init=False)
@@ -1970,7 +1981,7 @@ def enum_object_hook(obj: dict[str, Any]) -> Enum | dict[str, Any]:
         for attr in classname.split("."):
             enum_cls = getattr(enum_cls, attr)
         enum_cls = cast(type[Enum], enum_cls)
-        # pyrefly: ignore [unsupported-operation]
+
         return enum_cls[obj["name"]]
     return obj
 

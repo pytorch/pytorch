@@ -11,6 +11,7 @@ from torch.distributed._local_tensor import (
     LocalRunnerMode,
     LocalTensor,
     LocalTensorMode,
+    maybe_disable_local_tensor_mode,
 )
 from torch.distributed.tensor import (
     DeviceMesh,
@@ -193,8 +194,7 @@ class TestLocalTensorWorld2(LocalTensorTestBase):
 
     def test_empty_local_tensors(self):
         """Test behavior with empty local tensors dict."""
-        # TODO: raise a better error here
-        with self.assertRaises(StopIteration):  # next() on empty iterator
+        with self.assertRaises(ValueError):
             LocalTensor({})
 
     def test_collectives_within_local_tensor_mode(self):
@@ -273,6 +273,27 @@ class TestLocalTensorWorld2(LocalTensorTestBase):
             full = mean.full_tensor()
             self.assertEqual(tensor.mean(), full)
             self.assertEqual(mean.placements, [Partial("avg")])
+
+    def test_local_int_node_sym_min(self):
+        node1 = LocalIntNode({0: 10, 1: 5})
+        node2 = LocalIntNode({0: 7, 1: 8})
+        result = node1.sym_min(node2)
+        self.assertEqual(result._local_ints[0], 7)
+        self.assertEqual(result._local_ints[1], 5)
+
+    def test_local_int_node_le(self):
+        node1 = LocalIntNode({0: 3, 1: 4})
+        node2 = LocalIntNode({0: 10, 1: 10})
+        result = node1.le(node2)
+        self.assertTrue(bool(result))
+
+    def test_sym_and_sym_or(self):
+        node1 = LocalIntNode({0: 3, 1: 4})
+        node2 = LocalIntNode({0: 10, 1: 10})
+        sym_true = torch.SymBool(node1.le(node2))
+        self.assertTrue(bool(sym_true & True))
+        self.assertFalse(bool(sym_true & False))
+        self.assertTrue(bool(sym_true | False))
 
 
 class TestLocalTensorWorld3(LocalTensorTestBase):
@@ -534,14 +555,15 @@ class TestLocalRunner(LocalTensorTestBase):
 
     @staticmethod
     def _get_pp_peer(pp_index, mesh, dim, dir):
-        pp_meshes = mesh._get_all_submeshes(dim)
-        pp_ret = {}
-        for pp_mesh in pp_meshes:
-            global_rank = pp_mesh.mesh[pp_index].item()
-            global_peer = pp_mesh.mesh[(pp_index + dir) % pp_mesh.size()].item()
-            pp_ret[global_rank] = global_peer
+        with maybe_disable_local_tensor_mode():
+            pp_meshes = mesh._get_all_submeshes(dim)
+            pp_ret = {}
+            for pp_mesh in pp_meshes:
+                global_rank = pp_mesh.mesh[pp_index].item()
+                global_peer = pp_mesh.mesh[(pp_index + dir) % pp_mesh.size()].item()
+                pp_ret[global_rank] = global_peer
 
-        return torch.SymInt(LocalIntNode(pp_ret))
+            return torch.SymInt(LocalIntNode(pp_ret))
 
     def _run_dp_pp(
         self,

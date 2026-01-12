@@ -3,6 +3,8 @@
 #include <c10/util/FbcodeMaps.h>
 #include <torch/nativert/graph/Graph.h>
 
+#include <utility>
+
 namespace torch::nativert {
 
 /*
@@ -138,7 +140,7 @@ struct RewriteRule {
  **/
 class SubgraphRewriter {
  public:
-  SubgraphRewriter(const std::string& name) : name_(name) {}
+  SubgraphRewriter(std::string name) : name_(std::move(name)) {}
 
   /**
    * Registers the rewrite pattern.

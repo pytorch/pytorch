@@ -5,7 +5,7 @@ import copy
 import inspect
 import warnings
 from collections.abc import Callable, Sequence
-from typing import Any, cast
+from typing import Any
 from typing_extensions import deprecated
 
 import torch
@@ -138,8 +138,8 @@ class _FromTorchTensor(torch.autograd.Function):
         shape: torch.Size | None = None,
         stride: tuple[int, ...] | None = None,
     ) -> "DTensor":
-        ctx.previous_placement = placements
-        ctx.previous_device_mesh = device_mesh
+        ctx.forward_input_placements = placements
+        ctx.forward_input_device_mesh = device_mesh
 
         if shape and stride:
             tensor_shape, tensor_stride = shape, stride
@@ -157,7 +157,7 @@ class _FromTorchTensor(torch.autograd.Function):
                 "Please pass both shape and stride at the same time.",
             )
 
-        if device_mesh.get_coordinate() is None:
+        if not device_mesh._is_current_rank_part_of_mesh():
             # if the global rank is not participating in the device mesh, we
             # simply set the local tensor to an empty tensor
             input = input.new_empty(0, requires_grad=input.requires_grad)
@@ -200,22 +200,40 @@ class _FromTorchTensor(torch.autograd.Function):
 
     @staticmethod
     def backward(ctx, grad_output: "DTensor"):  # type: ignore[override]
-        previous_placement = ctx.previous_placement
-        previous_device_mesh = ctx.previous_device_mesh
+        forward_input_placements = ctx.forward_input_placements
+        forward_input_device_mesh = ctx.forward_input_device_mesh
 
         # reshard to the placement when creating DistributedTensor
         # so that the gradient layout matches, and we could return
         # local gradients directly
-        if grad_output.placements != previous_placement:
+        if grad_output.placements != forward_input_placements:
             current_spec = grad_output._spec
+
+            # for backward shard -> partial, we do shard -> replicate
+            # for backward replicate -> partial, we do replicate -> replicate / skip transformation
+            # TODO: for backward partial -> partial, right now we keep it unchanged,
+            # but this might need revisit
+            normalized_placements: list[Placement] = []
+            for current, target in zip(
+                current_spec.placements, forward_input_placements
+            ):
+                if (
+                    current.is_shard() or current.is_replicate()
+                ) and target.is_partial():
+                    normalized_placements.append(Replicate())
+                else:
+                    normalized_placements.append(target)
+
             target_spec = DTensorSpec(
-                previous_device_mesh,
-                previous_placement,
+                forward_input_device_mesh,
+                tuple(normalized_placements),
                 tensor_meta=grad_output._spec.tensor_meta,
             )
             local_tensor = grad_output._local_tensor
             output = redistribute_local_tensor(
-                local_tensor, current_spec, target_spec, is_backward=True
+                local_tensor,
+                current_spec,
+                target_spec,
             )
             # TODO: return the redistributed local tensor directly without
             # differentiable backward. see if this make sense for all cases.
@@ -430,10 +448,15 @@ class DTensor(torch.Tensor):
             placements = list(placements)
             for idx, placement in enumerate(placements):
                 # normalize shard dim to be positive
-                if placement.is_shard():
-                    placement = cast(Shard, placement)
+                if isinstance(placement, Shard | _StridedShard):
                     if placement.dim < 0:
-                        placements[idx] = Shard(placement.dim + local_tensor.ndim)
+                        normalized_dim = placement.dim + local_tensor.ndim
+                        if type(placement) is _StridedShard:
+                            placements[idx] = _StridedShard(
+                                normalized_dim, split_factor=placement.split_factor
+                            )
+                        elif type(placement) is Shard:
+                            placements[idx] = Shard(normalized_dim)
 
         # `from_local` is differentiable, and the gradient of the dist tensor this function
         # created should flow back the gradients to the local_tensor, so we call an autograd
@@ -560,6 +583,10 @@ class DTensor(torch.Tensor):
             elif isinstance(placement, Shard) and placement.dim < 0:
                 # normalize shard dim to be positive
                 placements[i] = Shard(placement.dim + self.ndim)
+            elif isinstance(placement, _StridedShard) and placement.dim < 0:
+                placements[i] = _StridedShard(
+                    placement.dim + self.ndim, split_factor=placement.split_factor
+                )
         placements = tuple(placements)
 
         # pyre-fixme[16]: `Redistribute` has no attribute `apply`.
@@ -796,11 +823,16 @@ def distribute_tensor(
     # distribute the tensor according to the placements.
     placements = list(placements)
     for idx, placement in enumerate(placements):
-        if isinstance(placement, Shard):
+        if isinstance(placement, Shard | _StridedShard):
             placement_dim = (
                 placement.dim + tensor.ndim if placement.dim < 0 else placement.dim
             )
-            if isinstance(placement, _StridedShard):
+            if isinstance(placement, Shard):
+                local_tensor = Shard._make_shard_tensor(
+                    placement_dim, local_tensor, device_mesh, idx, src_data_rank
+                )
+                placements[idx] = Shard(placement_dim)
+            else:
                 local_tensor = _StridedShard._make_shard_tensor(
                     placement_dim,
                     local_tensor,
@@ -812,11 +844,6 @@ def distribute_tensor(
                 placements[idx] = _StridedShard(
                     placement_dim, split_factor=placement.split_factor
                 )
-            else:
-                local_tensor = Shard._make_shard_tensor(
-                    placement_dim, local_tensor, device_mesh, idx, src_data_rank
-                )
-                placements[idx] = Shard(placement_dim)
         elif isinstance(placement, Replicate):
             local_tensor = Replicate._make_replicate_tensor(
                 local_tensor, device_mesh, idx, src_data_rank
@@ -1082,7 +1109,7 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
         # this tensor meta is not used except `shape`
         dtype = kwargs.get("dtype", torch.get_default_dtype())
 
-        tensor_meta = TensorMeta(size, (0,), dtype)
+        tensor_meta = TensorMeta(size, torch_stride, dtype)
         spec = DTensorSpec(device_mesh, tuple(placements), tensor_meta=tensor_meta)
 
         if random.is_rng_supported_mesh(device_mesh) and not random._rng_tracker:
