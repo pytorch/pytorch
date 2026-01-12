@@ -13,7 +13,7 @@ from typing_extensions import deprecated
 
 import torch
 from torch import _C
-from torch._utils import _augment_memory_snapshot_stack_traces, _dummy_type, _Snapshot
+from torch._utils import _augment_memory_snapshot_stack_traces, _dummy_type
 
 from . import (
     _get_amdsmi_device_index,
@@ -974,7 +974,7 @@ def _record_memory_history_impl(
 _record_memory_history.__signature__ = signature(_record_memory_history_impl)  # type: ignore[attr-defined]
 
 
-def _snapshot(device: "Device" = None, augment_with_fx_traces=False) -> _Snapshot:
+def _snapshot(device: "Device" = None, augment_with_fx_traces=False):
     """Save a snapshot of CUDA memory state at the time it was called.
 
     The state is represented as a dictionary with the following structure.
@@ -1069,7 +1069,6 @@ def _snapshot(device: "Device" = None, augment_with_fx_traces=False) -> _Snapsho
     s = _C._cuda_memorySnapshot(None)
     if augment_with_fx_traces:
         s = _augment_memory_snapshot_stack_traces(s)  # type: ignore[assignment, arg-type]
-    # pyrefly: ignore [bad-return]
     return s
 
 
