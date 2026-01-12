@@ -341,7 +341,7 @@ class _ListOfFlatLayouts:
         Returns:
             bool: True if no overlap, False if overlap detected
         """
-        ranks = self.all_ranks_from_zero()
+        ranks = self.merge_axes_into_one().codomain()
         return len(ranks) == len(set(ranks))
 
     def remap_to_tensor(self, rank_map: torch.Tensor) -> torch.Tensor:
