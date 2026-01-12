@@ -477,6 +477,16 @@ class LocalIntNode:
             }
         )
 
+    def sym_min(
+        self, other: "int | LocalIntNode | ConstantIntNode"
+    ) -> "LocalIntNode | ConstantIntNode":
+        return LocalIntNode(
+            {
+                r: min(self._local_ints[r], _int_on_rank(other, r))
+                for r in self._local_ints
+            }
+        )
+
     def sym_sum(self, other: Any) -> "LocalIntNode | ConstantIntNode":
         t = LocalIntNode(dict.fromkeys(self._local_ints, 0))
         for o in other:
@@ -538,6 +548,11 @@ class LocalIntNode:
 
     def ge(self, other: "int | LocalIntNode | ConstantIntNode") -> bool | SymBool:
         r = {self._local_ints[r] >= _int_on_rank(other, r) for r in self._local_ints}
+        assert len(r) == 1, (self, other)
+        return torch._C._get_constant_bool_symnode(next(iter(r)))
+
+    def le(self, other: "int | LocalIntNode | ConstantIntNode") -> bool | SymBool:
+        r = {self._local_ints[r] <= _int_on_rank(other, r) for r in self._local_ints}
         assert len(r) == 1, (self, other)
         return torch._C._get_constant_bool_symnode(next(iter(r)))
 

@@ -26,6 +26,36 @@ DEFINE_BINARY_OP(mul, mul)
 
 #undef DEFINE_BINARY_OP
 
+template <typename T>
+c10::SymNode ConstantSymNodeImpl<T>::sym_and(const c10::SymNode& other) {
+  TORCH_INTERNAL_ASSERT(is_bool_(), "sym_and only works on bool");
+
+  // If other is also a constant bool, compute the result directly
+  if (auto other_const = other->constant_bool()) {
+    bool result = this->bool_() && *other_const;
+    return c10::make_intrusive<ConstantSymNodeImpl<bool>>(result);
+  }
+
+  // If other is a nested int or other symbolic type, defer to it
+  return other->sym_and(
+      c10::intrusive_ptr<ConstantSymNodeImpl<T>>::reclaim_copy(this));
+}
+
+template <typename T>
+c10::SymNode ConstantSymNodeImpl<T>::sym_or(const c10::SymNode& other) {
+  TORCH_INTERNAL_ASSERT(is_bool_(), "sym_or only works on bool");
+
+  // If other is also a constant bool, compute the result directly
+  if (auto other_const = other->constant_bool()) {
+    bool result = this->bool_() || *other_const;
+    return c10::make_intrusive<ConstantSymNodeImpl<bool>>(result);
+  }
+
+  // If other is a nested int or other symbolic type, defer to it
+  return other->sym_or(
+      c10::intrusive_ptr<ConstantSymNodeImpl<T>>::reclaim_copy(this));
+}
+
 template class ConstantSymNodeImpl<bool>;
 template class ConstantSymNodeImpl<int64_t>;
 

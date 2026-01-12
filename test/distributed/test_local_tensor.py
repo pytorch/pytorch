@@ -274,6 +274,27 @@ class TestLocalTensorWorld2(LocalTensorTestBase):
             self.assertEqual(tensor.mean(), full)
             self.assertEqual(mean.placements, [Partial("avg")])
 
+    def test_local_int_node_sym_min(self):
+        node1 = LocalIntNode({0: 10, 1: 5})
+        node2 = LocalIntNode({0: 7, 1: 8})
+        result = node1.sym_min(node2)
+        self.assertEqual(result._local_ints[0], 7)
+        self.assertEqual(result._local_ints[1], 5)
+
+    def test_local_int_node_le(self):
+        node1 = LocalIntNode({0: 3, 1: 4})
+        node2 = LocalIntNode({0: 10, 1: 10})
+        result = node1.le(node2)
+        self.assertTrue(bool(result))
+
+    def test_sym_and_sym_or(self):
+        node1 = LocalIntNode({0: 3, 1: 4})
+        node2 = LocalIntNode({0: 10, 1: 10})
+        sym_true = torch.SymBool(node1.le(node2))
+        self.assertTrue(bool(sym_true & True))
+        self.assertFalse(bool(sym_true & False))
+        self.assertTrue(bool(sym_true | False))
+
 
 class TestLocalTensorWorld3(LocalTensorTestBase):
     world_size = 3
