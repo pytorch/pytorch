@@ -404,11 +404,6 @@ else:
                     num_devices_per_host = device_handle.device_count()
                     # Skip device setup if no devices are available (cross-compilation mode)
                     if num_devices_per_host == 0:
-                        logger.warning(
-                            "No %s devices available. Skipping device selection "
-                            "(cross-compilation mode).",
-                            self._device_type,
-                        )
                         return _get_default_group()
                     warnings.warn(
                         "It seems like you did not set/select the default device for the current process before the DeviceMesh "
