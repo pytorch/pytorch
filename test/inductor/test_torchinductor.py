@@ -1876,10 +1876,14 @@ class CommonTemplate:
             fn_opt = torch.compile(fn)
             if is_halide_backend(self.device):
                 pass  # no device asserts in halide
-            # TODO: remove once https://github.com/pytorch/pytorch/issues/144634
-            # is fixed.
             elif is_mps_backend(self.device):
-                pass  # no device asserts in MPS
+                _, codes = run_and_get_code(fn_opt, *inps)
+                # MPS generates Metal shader code
+                code = "\n".join(codes)
+                # Check for error reporting in MPS kernels
+                self.assertTrue(("TORCH_REPORT_ERROR" in code) is has_assert)
+                # Check for wrapping (ternary operator for negative index handling)
+                self.assertTrue((" ? " in code) is has_wrapping)
             elif is_pallas_backend(self.device):
                 pass  # Pallas generates Python/JAX code, not C++/Triton
             elif self.device == "cpu" and not is_triton_cpu_backend(self.device):
