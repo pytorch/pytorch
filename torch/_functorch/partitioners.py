@@ -26,6 +26,7 @@ from torch._functorch._activation_checkpointing.ac_logging_utils import (
     create_structured_trace_for_min_cut_info,
 )
 from torch._inductor import config as inductor_config
+from torch._library.utils import is_builtin
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import extract_tensor_metadata
 from torch.fx.experimental._backward_state import BackwardState
@@ -34,8 +35,8 @@ from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     find_symbol_binding_fx_nodes,
     free_symbols,
-    hint_int,
     is_symbol_binding_fx_node,
+    size_hint,
     statically_known_false,
     statically_known_true,
 )
@@ -52,7 +53,11 @@ from ._activation_checkpointing.knapsack import (
     ilp_knapsack,
 )
 from ._activation_checkpointing.knapsack_evaluator import KnapsackEvaluator
-from ._aot_autograd.descriptors import AOTOutput, SavedForBackwardsAOTOutput
+from ._aot_autograd.descriptors import (
+    AOTOutput,
+    SavedForBackwardsAOTOutput,
+    SavedForBackwardsNoVcCheckAOTOutput,
+)
 from ._aot_autograd.functional_utils import _is_functional_graph
 from ._aot_autograd.logging_utils import get_aot_graph_name
 from ._aot_autograd.utils import get_cuda_generator_meta_val, is_with_effects
@@ -174,6 +179,11 @@ class InvalidNodeBase:
         return "Invalid Node"
 
 
+# Run DCE while overriding the definition of is_impure_node
+def is_not_collective(node):
+    return getattr(node.target, "namespace", None) != "_c10d_functional"
+
+
 InvalidNode = InvalidNodeBase()
 
 
@@ -280,6 +290,13 @@ def _is_tangent(node: fx.Node) -> bool:
     return node.op == "placeholder" and "tangents" in str(node.target)
 
 
+def is_non_builtin_to_include(node: fx.Node) -> bool:
+    return config.is_non_builtin_to_include and (
+        (isinstance(node.target, torch._ops.OpOverload) and not is_builtin(node.target))
+        or node.target == torch.ops.higher_order.triton_kernel_wrapper_functional
+    )
+
+
 def _is_bwd_seed_offset(node: fx.Node) -> bool:
     return node.op == "placeholder" and (
         "bwd_seed" in str(node.target) or "bwd_base_offset" in str(node.target)
@@ -362,7 +379,7 @@ def _remove_by_name(saved_values: list[fx.Node], name: str):
 
 
 def find_first_sym_node(
-    fwd_module_outputs: Union[list[fx.Node], tuple[fx.Node]],
+    fwd_module_outputs: Union[list[fx.Node], tuple[fx.Node, ...]],
 ) -> int:
     idx = len(fwd_module_outputs)
     for i in range(len(fwd_module_outputs) - 1, -1, -1):
@@ -964,15 +981,43 @@ def _extract_fwd_bwd_modules(
     saved_sym_nodes.clear()
     saved_sym_nodes.extend(saved_sym_nodes_binding + saved_sym_nodes_derived)
 
+    # See Note [Activations with no version counter checks in eager]
+    # Sort saved_values so that tensors with saved_tensor_with_no_vc_check=True
+    # are at the end. This allows us to have two consecutive slices:
+    # 1. tensors_saved_with_vc_check_slice - tensors saved via save_for_backward
+    # 2. tensors_saved_with_no_vc_check_slice - tensors stashed on ctx without save_for_backward
+    # The sort is stable, so the relative order within each group is preserved.
+    saved_values_with_vc_check = []
+    saved_values_no_vc_check = []
+    for node in saved_values:
+        if node.meta.get("saved_tensor_with_no_vc_check", False):
+            saved_values_no_vc_check.append(node)
+        else:
+            saved_values_with_vc_check.append(node)
+    saved_values.clear()
+    saved_values.extend(saved_values_with_vc_check + saved_values_no_vc_check)
+    no_vc_check_start_idx = len(saved_values_with_vc_check)
+
+    # debug assert: given saved_values where the last k of them are expected to not
+    # require VC checks, they should all have node metadata indicating so.
+    for i, node in enumerate(saved_values):
+        if i >= no_vc_check_start_idx:
+            assert node.meta.get("saved_tensor_with_no_vc_check", False), (
+                f"i={i}, no_vc_check_start_idx={no_vc_check_start_idx}, len(saved_values)={len(saved_values)}"
+            )
+
     # Now, we re-generate the fwd/bwd graphs.
     # NB: This might increase compilation time, but I doubt it matters
+    # Convention for saved acts is (tensors_with_vc_check, tensors_no_vc_check, symints)
     fwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
         primal_inputs + fwd_seed_offset_inputs,
         fwd_outputs + saved_values + saved_sym_nodes,
         fwd_outputs_descs
         + [
-            SavedForBackwardsAOTOutput(i)
+            SavedForBackwardsNoVcCheckAOTOutput(i)
+            if i >= no_vc_check_start_idx and i < len(saved_values)
+            else SavedForBackwardsAOTOutput(i)
             for i in range(len(saved_values) + len(saved_sym_nodes))
         ],
         "forward",
@@ -1114,7 +1159,16 @@ def default_partition(
             k for k, v in joint_module.named_modules()
         ):
             continue
-        if node.target is torch.ops.aten._assert_scalar.default:
+        if node.target in (
+            torch.ops.aten._assert_scalar.default,
+            # Profiler record_function ops are technically impure (they set up
+            # profiling spans), but they're safe to duplicate during AC recompute.
+            # We skip both enter and exit to keep profiling spans balanced.
+            torch.ops.profiler._record_function_enter_new.default,
+            torch.ops.profiler._record_function_enter.default,
+            torch.ops.profiler._record_function_exit.default,
+            torch.ops.profiler._record_function_exit._RecordFunction,
+        ):
             continue
         if is_sym_node(node):
             # Symints must be kept separate from tensors so that PythonFunction only calls
@@ -1170,9 +1224,6 @@ def default_partition(
     )
 
     # Run DCE while overriding the definition of is_impure_node
-    def is_not_collective(node):
-        return getattr(node.target, "namespace", None) != "_c10d_functional"
-
     fw_module.graph.eliminate_dead_code(is_impure_node=is_not_collective)
     bw_module.graph.eliminate_dead_code(is_impure_node=is_not_collective)
 
@@ -1206,7 +1257,7 @@ def _size_of(node: fx.Node) -> int:
     def object_nbytes(x) -> int:
         if not isinstance(x, torch.Tensor):
             return 0
-        return _tensor_nbytes(hint_int(x.numel(), fallback=4096), x.dtype)
+        return _tensor_nbytes(size_hint(x.numel(), fallback=4096), x.dtype)
 
     if "val" in node.meta:
         val = node.meta["val"]
@@ -1855,7 +1906,11 @@ def solve_min_cut(
             if not op_types.is_recomputable(node):
                 return True
         else:
-            if op_types.is_random(node) or op_types.is_compute_intensive(node):
+            if (
+                op_types.is_random(node)
+                or op_types.is_compute_intensive(node)
+                or is_non_builtin_to_include(node)
+            ):
                 return True
 
         # If a node *must* be materialized in the backwards pass, then we
@@ -2405,7 +2460,7 @@ def _remove_symbols_without_guarding(x: torch.Tensor, fallback: int) -> torch.Te
     shape = list(x.shape)
 
     def realize_symbol(d):
-        return hint_int(d, fallback=fallback)
+        return size_hint(d, fallback=fallback)
 
     shape = [realize_symbol(s) for s in shape]
     stride = [realize_symbol(s) for s in x.stride()]
@@ -2419,7 +2474,7 @@ def estimate_runtime(node):
         if isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.Tensor):
             return _remove_symbols_without_guarding(x.meta["val"], fallback=4096)
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymInt):
-            return hint_int(x.meta["val"], fallback=4096)
+            return size_hint(x.meta["val"], fallback=4096)
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymFloat):
             return 1.0
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymBool):
@@ -2447,6 +2502,10 @@ def estimate_runtime(node):
             node.target(*args, **kwargs)
         counted_flops = mode.get_total_flops()
         return max(counted_flops, 1)
+
+    elif callable(RUNTIME_MODE):
+        return RUNTIME_MODE(node)
+
     else:
         raise RuntimeError(f"Not aware of runtime estimator: {RUNTIME_MODE}")
 
@@ -2541,7 +2600,10 @@ def choose_saved_values_set(
             if (
                 # Only allow recomputing nodes that are actually required for BW
                 i.dist_from_bw < int(1e9)  # type: ignore[attr-defined]
-                and get_node_storage(i) not in input_storages
+                and (
+                    get_node_storage(i) not in input_storages
+                    or is_non_builtin_to_include(i)
+                )
             )
         ]
 
@@ -3023,6 +3085,19 @@ def min_cut_rematerialization_partition(
                 joint_module, fw_module, bw_module, len(saved_sym_nodes)
             )
     bw_module = reordering_to_mimic_autograd_engine(bw_module)
+
+    # pyrefly: ignore [unbound-name]
+    if config.enable_activation_offloading:
+        from ._activation_offloading.activation_offloading import (
+            enable_activation_offloading,
+        )
+
+        enable_activation_offloading(
+            fw_module,
+            bw_module,
+            num_fwd_outputs,
+            node_info.static_lifetime_input_nodes,
+        )
 
     # raise all getitem ops to as early as possible
     # this is helpful for memory, especially in the case of aot_eager backend

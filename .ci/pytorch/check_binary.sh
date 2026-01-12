@@ -26,6 +26,8 @@ set -eux -o pipefail
 # libtorch package.
 
 # ensure we don't link to system libraries, linked libraries should be found from RPATH
+# Save the old LD_LIBRARY_PATH to restore it later
+OLD_LD_LIBRARY_PATH="${LD_LIBRARY_PATH:-}"
 unset LD_LIBRARY_PATH
 
 if [[ -z ${DESIRED_PYTHON:-} ]]; then
@@ -307,4 +309,11 @@ except RuntimeError as e:
     echo "PyTorch doesn't support TLS_TCP transport, please build with USE_GLOO_WITH_OPENSSL=1"
     exit 1
   fi
+fi
+
+###############################################################################
+# Restore LD_LIBRARY_PATH to its original value
+###############################################################################
+if [[ -n "$OLD_LD_LIBRARY_PATH" ]]; then
+  export LD_LIBRARY_PATH="$OLD_LD_LIBRARY_PATH"
 fi

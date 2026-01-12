@@ -273,7 +273,8 @@ class StoreTestBase:
 class FileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
         super().setUp()
-        self.file = tempfile.NamedTemporaryFile(delete=False)
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            self.file = f
 
     def _create_store(self):
         store = dist.FileStore(self.file.name, 1)
@@ -281,34 +282,34 @@ class FileStoreTest(TestCase, StoreTestBase):
         return store
 
     def test_init_pg_and_rpc_with_same_file(self):
-        file = tempfile.NamedTemporaryFile(delete=False)
-        # Init RPC using file
-        rpc_backend_options = rpc.TensorPipeRpcBackendOptions()
-        rpc_backend_options.init_method = f"file://{file.name}"
-        rpc_backend_options._transports = tp_transports()
-        rpc.init_rpc(
-            "worker", rank=0, world_size=1, rpc_backend_options=rpc_backend_options
-        )
+        with tempfile.NamedTemporaryFile(delete=False) as file:
+            # Init RPC using file
+            rpc_backend_options = rpc.TensorPipeRpcBackendOptions()
+            rpc_backend_options.init_method = f"file://{file.name}"
+            rpc_backend_options._transports = tp_transports()
+            rpc.init_rpc(
+                "worker", rank=0, world_size=1, rpc_backend_options=rpc_backend_options
+            )
 
-        # Init PG using file
-        dist.init_process_group(
-            "gloo", rank=0, world_size=1, init_method=f"file://{file.name}"
-        )
-        dist.destroy_process_group()
-        assert os.path.exists(file.name)
+            # Init PG using file
+            dist.init_process_group(
+                "gloo", rank=0, world_size=1, init_method=f"file://{file.name}"
+            )
+            dist.destroy_process_group()
+            assert os.path.exists(file.name)
 
-        rpc.shutdown()
-        os.remove(file.name)
+            rpc.shutdown()
+            os.remove(file.name)
 
     def test_refcount(self):
-        file = tempfile.NamedTemporaryFile(delete=False)
-        store = dist.FileStore(file.name, 1)
-        store2 = dist.FileStore(file.name, 1)
+        with tempfile.NamedTemporaryFile(delete=False) as file:
+            store = dist.FileStore(file.name, 1)
+            store2 = dist.FileStore(file.name, 1)
 
-        del store
-        assert os.path.exists(file.name)
-        del store2
-        assert not os.path.exists(file.name)
+            del store
+            assert os.path.exists(file.name)
+            del store2
+            assert not os.path.exists(file.name)
 
     @property
     def num_keys_total(self):
@@ -327,7 +328,8 @@ class PrefixStoreTest(TestCase):
     def setUp(self):
         super().setUp()
         # delete is false as FileStore will automatically clean up the file
-        self.file = tempfile.NamedTemporaryFile(delete=False)
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            self.file = f
 
     def test_get_underlying_store(self):
         tcp_store = dist.TCPStore(
@@ -348,7 +350,8 @@ class PrefixStoreTest(TestCase):
 class PrefixFileStoreTest(TestCase, StoreTestBase):
     def setUp(self):
         super().setUp()
-        self.file = tempfile.NamedTemporaryFile(delete=False)
+        with tempfile.NamedTemporaryFile(delete=False) as f:
+            self.file = f
         self.filestore = dist.FileStore(self.file.name, 1)
         self.prefix = "test_prefix"
         self.filestore.set_timeout(timedelta(seconds=300))
@@ -977,7 +980,7 @@ class TestPythonStore(TestCase):
 
 
 class TestMultiThreadedWait(MultiThreadedTestCase):
-    file_store = dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1)
+    file_store = dist.FileStore(tempfile.NamedTemporaryFile(delete=False).name, 1)  # noqa: SIM115
     hash_store = dist.HashStore()
 
     tcp_store = create_tcp_store(use_libuv=False)
@@ -1058,7 +1061,7 @@ class TimeoutTest(TestCase):
                 else:
                     my_store.wait(["foo"], datetime.timedelta(seconds=10))
                 rank_res[rank] = True
-            except Error as e:  # noqa: F821
+            except BaseException as e:  # noqa: B036,E261
                 rank_res[rank] = e
             time.sleep(1)
 

@@ -471,9 +471,8 @@ CREATE_UNARY_UFUNC(tanh)
 CREATE_UNARY_UFUNC(trunc)
 CREATE_UNARY_UFUNC(conj_physical)
 
-C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-function")
-static CREATE_UNARY_UFUNC(relu)
-C10_DIAGNOSTIC_POP()
+CREATE_UNARY_UFUNC_FUNCTIONAL(relu)
+CREATE_UNARY_UFUNC_INPLACE(relu)
 
 // With addition of `round.decimals` overload, using CREATE_UNARY_UFUNC leads
 // to unresolved overload.
@@ -531,7 +530,7 @@ static void addmm_out_sparse_csr_native_cpu(
     const Tensor& dense,
     const Tensor& r,
     Scalar alpha,
-    Scalar beta) {
+    const Scalar& beta) {
   auto dim_i = sparse.size(0);
   auto dim_k = dense.size(1);
 

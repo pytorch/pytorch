@@ -1,19 +1,12 @@
 #include <torch/nativert/kernels/TritonKernel.h>
 
-#include <fmt/ostream.h>
-
-#include <c10/util/Enumerate.h>
 #include <c10/util/Exception.h>
-
-#include <ATen/Tensor.h>
-#include <ATen/core/op_registration/op_registration.h>
 
 #include <torch/nativert/executor/DelegateExecutor.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
 #else
-#include <ATen/ops/empty.h>
 #endif
 
 namespace torch::nativert {
@@ -98,6 +91,22 @@ TritonKernel::TritonKernel(
       }
     } else if (attr.name == "output_indices") {
       output_indices_ = std::get<std::vector<int64_t>>(attr.value);
+      kernel_input_params_.output_indices = output_indices_;
+    } else if (attr.name == "tile_width") {
+      launch_params_.mtia_tile_width =
+          static_cast<int>(std::get<int64_t>(attr.value));
+    } else if (attr.name == "tile_height") {
+      launch_params_.mtia_tile_height =
+          static_cast<int>(std::get<int64_t>(attr.value));
+    } else if (attr.name == "base_pe") {
+      launch_params_.mtia_base_pe =
+          static_cast<int>(std::get<int64_t>(attr.value));
+    } else if (attr.name == "kernel_param_names") {
+      kernel_input_params_.kernel_param_names =
+          std::get<std::vector<std::string>>(attr.value);
+    } else if (attr.name == "kernel_param_types") {
+      kernel_input_params_.kernel_param_types =
+          std::get<std::vector<std::string>>(attr.value);
     }
   }
 
@@ -122,12 +131,20 @@ TritonKernel::TritonKernel(
     TORCH_CHECK(
         loader_ != nullptr,
         "couldn't find cuda loader -- is this a gpu build?");
-  } else {
+  } else if (reader->hasRecord(kernel_prefix + "/" + kernel_name + ".so")) {
     loader_ = TritonKernelManagerRegistry()->Create(
         at::kCPU,
         symbol_name,
         tmp_dir + kernel_name + ".so",
         tmp_dir + kernel_name + ".launcher.so");
+    TORCH_CHECK(
+        loader_ != nullptr, "couldn't find CPU loader -- is this a cpu build?");
+  } else if (reader->hasRecord(kernel_prefix + "/" + kernel_name + ".bin")) {
+    loader_ = TritonKernelManagerRegistry()->Create(
+        at::kMTIA, symbol_name, tmp_dir + kernel_name + ".bin", "");
+    TORCH_CHECK(
+        loader_ != nullptr,
+        "couldn't find MTIA loader -- is this a mtia build?");
   }
 
   TORCH_CHECK(
@@ -143,10 +160,11 @@ void TritonKernel::computeInternal(ExecutionFrame& executionFrame) const {
 
   auto* loader = const_cast<TritonKernelManager*>(loader_.get());
 
-  auto inputs = loader->create_inputs(num_inputs, num_attrs);
+  auto inputs =
+      loader->create_inputs(num_inputs, num_attrs, kernel_input_params_);
 
   for (const auto i : c10::irange(num_inputs)) {
-    inputs->add_arg(input(i, executionFrame).toTensor().data_ptr());
+    inputs->add_tensor_arg(input(i, executionFrame).toTensor());
   }
 
   for (const auto i : c10::irange(num_attrs)) {

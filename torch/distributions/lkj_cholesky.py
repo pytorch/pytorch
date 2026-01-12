@@ -9,7 +9,6 @@ Original copyright notice:
 """
 
 import math
-from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -67,8 +66,8 @@ class LKJCholesky(Distribution):
     def __init__(
         self,
         dim: int,
-        concentration: Union[Tensor, float] = 1.0,
-        validate_args: Optional[bool] = None,
+        concentration: Tensor | float = 1.0,
+        validate_args: bool | None = None,
     ) -> None:
         if dim < 2:
             raise ValueError(

@@ -108,10 +108,6 @@ test_failures_gpu_wrapper = {
     "test_mm_plus_mm2_dynamic_shapes": test_torchinductor.TestFailure(
         ("gpu_wrapper",), is_skip=True
     ),
-    "test_randint_xpu": test_torchinductor.TestFailure(("gpu_wrapper",), is_skip=False),
-    "test_randint_xpu_dynamic_shapes": test_torchinductor.TestFailure(
-        ("gpu_wrapper",), is_skip=False
-    ),
     # ATen ops: scaled_dot_product_efficient_attention not implemented on XPU.
     "test_scaled_dot_product_efficient_attention_xpu": test_torchinductor.TestFailure(
         ("gpu_wrapper",), is_skip=False
@@ -196,7 +192,8 @@ if RUN_GPU:
         BaseTest("test_add_complex4"),
         BaseTest("test_as_strided"),  # buffer reuse
         BaseTest("test_batch_norm_2d_2"),
-        BaseTest("test_bernoulli1"),
+        BaseTest("test_bernoulli1_combo_kernels_False"),
+        BaseTest("test_bernoulli1_combo_kernels_True"),
         BaseTest("test_bitwise"),  # int32
         BaseTest("test_bmm1"),
         BaseTest("test_bmm2"),
