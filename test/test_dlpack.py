@@ -11,7 +11,6 @@ from torch.testing._internal.common_device_type import (
     onlyCUDA,
     onlyNativeDeviceTypes,
     skipCUDAIfNotRocm,
-    skipCUDAIfRocm,
     skipMeta,
 )
 from torch.testing._internal.common_dtype import (
@@ -277,7 +276,6 @@ class TestTorchDlPack(TestCase):
 
     @skipMeta
     @onlyCUDA
-    @skipCUDAIfRocm
     def test_dlpack_convert_default_stream(self, device):
         # tests run on non-default stream, so _sleep call
         # below will run on a non-default stream, causing
@@ -290,7 +288,9 @@ class TestTorchDlPack(TestCase):
             x = torch.zeros(1, device=device)
             torch.cuda._sleep(2**20)
             self.assertTrue(torch.cuda.default_stream().query())
-            x.__dlpack__(stream=1)
+            # ROCm uses stream 0 for default stream, CUDA uses stream 1
+            default_stream_id = 0 if torch.version.hip else 1
+            x.__dlpack__(stream=default_stream_id)
         # check that the default stream has work (a pending cudaStreamWaitEvent)
         self.assertFalse(torch.cuda.default_stream().query())
 
