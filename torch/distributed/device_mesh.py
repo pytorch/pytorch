@@ -377,6 +377,14 @@ else:
                     f"Mesh should not be bigger than default world size {world_size}, but found {self._layout.numel()} ranks!"
                 )
 
+            # Skip device setup for fake backend (cross-compilation mode).
+            # The fake backend is used to simulate distributed training on a
+            # single process without actual devices, enabling compilation of
+            # GPU programs on CPU-only machines.
+            backend = get_backend()
+            if backend == "fake":
+                return _get_default_group()
+
             # ONLY set the device if the current device is not initialized, if user already
             # set the device before DeviceMesh init, we respect the user's choice.
             device_handle = _get_device_handle(self._device_type)
@@ -391,6 +399,12 @@ else:
                     )
                     device_handle.set_device(local_rank)
                 else:
+                    # heuristic to set the current cuda/cuda-like device base on num of gpu devices available in each host
+                    # NOTE: This device selection would only work for homogeneous hardware.
+                    num_devices_per_host = device_handle.device_count()
+                    # Skip device setup if no devices are available (cross-compilation mode)
+                    if num_devices_per_host == 0:
+                        return _get_default_group()
                     warnings.warn(
                         "It seems like you did not set/select the default device for the current process before the DeviceMesh "
                         "initialization or use a launcher (i.e. torchrun) which populates `LOCAL_RANK` environment variable. "
@@ -400,9 +414,6 @@ else:
                         "device_id via `global_rank % num_devices_per_host`, assuming homogeneous hardware cluster. ",
                         stacklevel=2,
                     )
-                    # heuristic to set the current cuda/cuda-like device base on num of gpu devices available in each host
-                    # NOTE: This device selection would only work for homogeneous hardware.
-                    num_devices_per_host = device_handle.device_count()
                     if (
                         world_size > num_devices_per_host
                         and world_size % num_devices_per_host != 0
