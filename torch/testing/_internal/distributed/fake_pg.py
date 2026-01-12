@@ -28,5 +28,8 @@ def _create_fake_pg(common_opts, backend_opts):
 
 
 dist.Backend.register_backend(
-    "fake", _create_fake_pg, extended_api=True, devices=["cpu", "cuda", "hpu", "xpu"]
+    dist.Backend.FAKE,
+    _create_fake_pg,
+    extended_api=True,
+    devices=["cpu", "cuda", "hpu", "xpu"],
 )
