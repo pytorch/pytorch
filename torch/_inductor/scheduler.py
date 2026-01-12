@@ -80,7 +80,6 @@ from .utils import (
     is_multi_outputs_template,
     is_output_of_multi_outputs_template,
     is_wait,
-    maybe_log_cudagraph_partition,
     sympy_product,
 )
 from .virtualized import V
@@ -92,6 +91,7 @@ loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
 compute_dependencies_log = torch._logging.getArtifactLogger(
     __name__, "compute_dependencies"
 )
+cudagraphs_log = torch._logging.getArtifactLogger(__name__, "cudagraphs")
 
 PartitionType: TypeAlias = list["BaseSchedulerNode"]
 _T = TypeVar("_T")
@@ -1133,6 +1133,9 @@ class BaseSchedulerNode:
         if flops is None:
             return None
 
+        if isinstance(flops, torch.SymInt):
+            flops = flops.node.expr
+
         resolved_flops = V.graph.sizevars.size_hint(flops, fallback=0)
         counters["inductor"]["flop_count"] += resolved_flops
         return resolved_flops
@@ -1303,7 +1306,7 @@ def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> Optional[float
         if mm_fn is None:
             return None
         bench_fn = mm_fn
-        # pyrefly: ignore [unbound-name]
+
         args_kwargs_fn = lambda: snode_args_kwargs(snode)  # noqa: E731
     else:
         return None
@@ -2399,6 +2402,13 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                 "ComboKernels: %d grouped nodes are filtered",
                 len(grouped),
             )
+        mix_order = [x for x in nodes if isinstance(x, FusedMixOrderReductions)]
+        if mix_order:
+            log.debug(
+                "ComboKernels: %d FusedMixOrderReductions nodes are filtered",
+                len(mix_order),
+            )
+
         filtered_nodes = [
             x
             for x in nodes
@@ -2408,6 +2418,7 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                     NopKernelSchedulerNode,
                     ExternKernelSchedulerNode,
                     GroupedSchedulerNode,
+                    FusedMixOrderReductions,
                 ),
             )
         ]
@@ -2439,6 +2450,16 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
         sorted_nodes = scheduler._topological_sort_nodes()
         grouped_nodes = []
         max_num_nodes = 8
+
+        excluded_buffer_names: OrderedSet[str] = OrderedSet(
+            [
+                buf_name
+                for group in sorted_nodes
+                for node in group
+                if isinstance(node, FusedMixOrderReductions)
+                for buf_name in node.get_buffer_names()
+            ]
+        )
         for nodes in sorted_nodes:
             # Group nodes by device first to avoid mixed-device fusion
             device_groups: dict[Optional[torch.device], list[BaseSchedulerNode]] = (
@@ -2447,6 +2468,10 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
             for node in nodes:
                 device = node.get_device()
                 if device and (device.type == "mps" or device.type == "cpu"):
+                    continue
+
+                # exclude nodes that read from FusedMixOrderReductions output buffers'
+                if node.used_buffer_names() & excluded_buffer_names:
                     continue
                 device_groups[device].append(node)
 
@@ -2458,7 +2483,6 @@ class ForeachKernelSchedulerNode(FusedSchedulerNode):
                         for i in range(0, len(device_nodes), max_num_nodes)
                     ]
                 )
-
         return grouped_nodes
 
     group_algorithm_for_combo_kernels: Callable[
@@ -2685,6 +2709,19 @@ def _replace_operation_buffer(
     V.graph.name_to_op[orig_op_name] = new_node
 
 
+def _estimate_fused_epilogue_runtime(node1, node2, epilogue_runtime) -> float:
+    # If no extra memory read by epilogue, assume epilogue is free
+    # if extra memory is read by epilogue, add to minimum choice
+    total_read_bytes = node2.get_read_buffer_sizes()
+    template_write_bytes = node1.get_write_buffer_sizes()
+    extra_bytes = total_read_bytes - template_write_bytes
+    extra_bytes_ratio = extra_bytes / template_write_bytes
+
+    # Smoothly approaches 1 as extra_bytes_ratio increases
+    extra_memory_ratio = extra_bytes_ratio / (1 + extra_bytes_ratio)
+    return extra_memory_ratio * epilogue_runtime
+
+
 @dataclasses.dataclass
 class NodeUser:
     node: Union[BaseSchedulerNode, OutputNode]
@@ -2724,6 +2761,43 @@ def used_non_deterministic_runtime_estimations() -> bool:
     return config.runtime_estimations_mms_benchmark
 
 
+def get_layout_symints(node: ir.IRNode) -> OrderedSet[sympy.Symbol]:
+    """Get free symbols from a node's layout (size, stride, offset)."""
+    free_symbol_uses: OrderedSet[sympy.Symbol] = OrderedSet()
+    layout = node.maybe_get_layout()
+    if isinstance(layout, ir.Layout):
+        free_symbol_uses.update(
+            free_symbols(layout.size)
+            | free_symbols(layout.stride)
+            | free_symbols(layout.offset)
+        )
+        if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
+            # symint may be used as index in layout.target
+            free_symbol_uses.update(get_layout_symints(layout.target))
+    else:
+        assert layout is None, f"Expect layout to be None but found layout={layout}"
+    return free_symbol_uses
+
+
+def get_scheduler_node_symbol_uses(
+    node: BaseSchedulerNode,
+) -> OrderedSet[sympy.Symbol]:
+    """
+    Gets symbols used in a scheduler node, including free symbols from
+    the node's operations and layout symints from outputs.
+    """
+    if isinstance(node, FusedSchedulerNode):
+        return OrderedSet().union(
+            *(get_scheduler_node_symbol_uses(snode) for snode in node.snodes)
+        )
+    assert node.node is not None
+    free_symbol_uses = node.node.get_free_symbol_uses()
+    free_symbol_uses.update(
+        *(get_layout_symints(ir_node) for ir_node in node.node.get_outputs())
+    )
+    return free_symbol_uses
+
+
 class Scheduler:
     """
     A Scheduler is a graph of BaseSchedulerNodes. It is responsible for
@@ -2750,6 +2824,7 @@ class Scheduler:
             ]
         )
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
+        self.previous_node: Optional[BaseSchedulerNode] = None
         self.current_node: Optional[BaseSchedulerNode] = None
         self.update_zero_dim_cpu_tensor()
         # some new constants could have been created above
@@ -2766,6 +2841,7 @@ class Scheduler:
         self.name_to_node: dict[str, BaseSchedulerNode] = {
             n.get_name(): n for n in self.nodes
         }
+
         self.name_to_buf: dict[str, SchedulerBuffer] = {
             buf.get_name(): buf for node in self.nodes for buf in node.get_outputs()
         }
@@ -2826,6 +2902,11 @@ class Scheduler:
 
         self.merge_loops()
         self.finalize_multi_template_buffers()
+        if (
+            config.max_autotune_gemm or config.max_autotune
+        ) and config.pipeline_max_autotune_gemm:
+            torch._inductor.select_algorithm.PrecompileThreadPool.shutdown_instance()
+
         if config.combo_kernels:
             with dynamo_timed(
                 "Scheduler.create_combo_kernel_nodes",
@@ -3873,12 +3954,23 @@ class Scheduler:
 
             # Eagerly compile and benchmark non-template nodes
             choice_timings = multi_node.choice_timings()
-            _, ms1 = multi_node.get_min_choice()
-            ms2, path2 = (
-                self.benchmark_fused_nodes(node_list_2)
-                if epilogue_fusion
-                else self.benchmark_fused_nodes(node_list_1)
-            )
+            min_choice, ms1 = multi_node.get_min_choice()
+
+            ms2 = float("inf")
+            bench_epilogue = config.benchmark_epilogue_fusion
+            if bench_epilogue:
+                ms2, path2 = (
+                    self.benchmark_fused_nodes(node_list_2)
+                    if epilogue_fusion
+                    else self.benchmark_fused_nodes(node_list_1)
+                )
+            else:
+                # By default, don't do prologue fusion. Generally slower
+                if not epilogue_fusion:
+                    return False
+
+                ms2 = node2._get_estimated_runtime()
+                ms2_fused = _estimate_fused_epilogue_runtime(node1, node2, ms2)
 
             # Start compiling choices in parallel
             future_choices: list[tuple[Any, Optional[LambdaFuture], ModuleType]] = []
@@ -3901,7 +3993,7 @@ class Scheduler:
                 ):
                     continue
 
-                if unfused_time >= ms1 + ms2:
+                if bench_epilogue and unfused_time >= ms1 + ms2:
                     break
 
                 triton_choices += 1
@@ -3917,13 +4009,17 @@ class Scheduler:
             def benchmark_when_ready() -> bool:
                 min_ms_fused = float("inf")
                 ms_fused_choice = None
-
                 new_timings = {}
                 # Benchmark each choice after compilation completes
                 for choice, future, mod_fused in future_choices:
                     try:
                         if future is not None:
-                            future.result()
+                            res = future.result()
+                        elif not bench_epilogue:
+                            res = mod_fused.triton_
+                            res.precompile()
+                        else:
+                            res = None
 
                     # Ideally we would more narrowly catch Exceptions here but
                     # triton  will unpredictably error with valid prologue fusions
@@ -3935,21 +4031,42 @@ class Scheduler:
                                 str(e),
                             )
                         continue
-                    # pyrefly: ignore [missing-attribute]
-                    with multi_node.swap_as_triton_caller(choice):
-                        ms_fused, path = self.benchmark_codegened_module(
-                            mod_fused,
-                            # pyrefly: ignore [bad-argument-type]
-                            device,
+
+                    if bench_epilogue:
+                        # pyrefly: ignore [missing-attribute]
+                        with multi_node.swap_as_triton_caller(choice):
+                            ms_fused, path = self.benchmark_codegened_module(
+                                mod_fused,
+                                # pyrefly: ignore [bad-argument-type]
+                                device,
+                            )
+                            new_timings[choice] = ms_fused
+                            if ms_fused < min_ms_fused:
+                                min_ms_fused = ms_fused
+                                ms_fused_choice = choice
+                    else:
+                        fusible_choice = (
+                            min_choice == choice
+                            or ms2 + ms1 > choice_timings[choice] + ms2_fused
                         )
-                        new_timings[choice] = ms_fused
-                        if ms_fused < min_ms_fused:
-                            min_ms_fused = ms_fused
+
+                        if (
+                            res
+                            # pyrefly: ignore [missing-attribute]
+                            and len(res.launchers) == 1
+                            # pyrefly: ignore [bad-index]
+                            and res.launchers[0].n_spills <= 8
+                            and fusible_choice
+                        ):
                             ms_fused_choice = choice
+                            break
 
-                log_fusion(min_ms_fused, ms1, ms2)
+                if bench_epilogue:
+                    log_fusion(min_ms_fused, ms1, ms2)
 
-                if min_ms_fused < (ms1 + ms2) and ms_fused_choice is not None:
+                if (
+                    not bench_epilogue or min_ms_fused < (ms1 + ms2)
+                ) and ms_fused_choice is not None:
                     if config.multi_kernel_hints:
                         hint_override_best_fusion_choice[None] = ms_fused_choice
                         # pyrefly: ignore [missing-attribute]
@@ -4103,7 +4220,7 @@ class Scheduler:
             ):
                 pending_fusion = pending_fusions.get(
                     self.get_fused_node(node1),
-                    pending_fusions.get(self.get_fused_node(node2), None),
+                    pending_fusions.get(self.get_fused_node(node2)),
                 )
                 assert pending_fusion is not None
 
@@ -4433,7 +4550,7 @@ class Scheduler:
         The current attempt is a quick, possibly hacky, heuristic to prevent the
         fusion of nodes that are far away in the original order.
 
-        A better but difficult to implement heurisitic would be to use live
+        A better but difficult to implement heuristic would be to use live
         intervals of the buffers, find region of peak pressure in the original
         program and prevent fusion that crosses that peak region. We might need
         special care or good approximation in this implementation, as fusion of
@@ -5441,10 +5558,11 @@ class Scheduler:
             and name not in self.mutation_real_name
         )
 
-    def should_partition(
-        self, node: BaseSchedulerNode, should_log: bool = False
-    ) -> bool:
-        """Return True if we should partition the inductor graph on this node"""
+    def should_partition(self, node: BaseSchedulerNode) -> Optional[str]:
+        """
+        Return the reason why we should partition the inductor graph on this node,
+        or None if the node is cudagraphable.
+        """
 
         # Allow users to manually specify if a node should be partitioned
         # Can only do this for FallbackKernels
@@ -5463,7 +5581,7 @@ class Scheduler:
                 or op_overload_name in config.custom_should_partition_ops
             ):
                 assert isinstance(op, torch._ops.OpOverload)
-                return True
+                return f"custom partition op: {op_overload_name}"
 
         # When not using cudagraphs, keep all kernels in the `call` function
         # instead of graph partition functions, since graph partition only brings
@@ -5472,42 +5590,38 @@ class Scheduler:
             not torch._inductor.config.triton.cudagraphs
             and _unstable_customized_partition_wrapper.wrapper is None
         ):
-            return True
-
-        # avoid duplicating logs when should_partition is called multiple times
-        # on the same node
-        def noop_log(msg: str, node: Optional[BaseSchedulerNode]) -> None:
-            return
-
-        log_partition_reason = maybe_log_cudagraph_partition if should_log else noop_log
+            return "partition includes all ops when cudagraphs is disabled"
 
         if isinstance(node, FusedSchedulerNode):
-            return any(self.should_partition(snode) for snode in node.snodes)
+            for snode in node.snodes:
+                reason = self.should_partition(snode)
+                if reason:
+                    return reason
+            return None
 
         assert node.node is not None
 
         if not node.is_gpu():
-            log_partition_reason("non gpu ops", node=node)
-
-            return True
+            return f"{node.get_device()} ops"
 
         if isinstance(node.node, ir.DeviceCopy):
-            log_partition_reason("DeviceCopy ops", node=node)
-            return True
+            return "DeviceCopy ops"
 
         if isinstance(node.node, ir.Conditional):
-            log_partition_reason("Conditional ops", node=node)
-            return True
+            return "Conditional ops"
 
         if getattr(node.node, "unbacked_bindings", None):
-            log_partition_reason("unbacked binding ops", node=node)
-            return True
+            return "unbacked binding ops"
 
         if is_cudagraph_unsafe_op(node.node):
-            log_partition_reason("CUDAGraph-unsafe custom ops", node=node)
-            return True
+            return "CUDAGraph-unsafe custom ops"
 
-        return False
+        # Partition around nodes with dynamic shapes when cudagraph_skip_dynamic_graphs is enabled
+        if config.triton.cudagraph_skip_dynamic_graphs:
+            if get_scheduler_node_symbol_uses(node):
+                return "dynamic shape ops"
+
+        return None
 
     def get_name_to_nodes(
         self,
@@ -5578,41 +5692,6 @@ class Scheduler:
         - free symbols in partition input/node shapes, strides, and offsets. This is needed
           for recording cudagraphs for tensors with dynamic shapes.
         """
-
-        def get_layout_symints(node: ir.IRNode) -> OrderedSet[sympy.Symbol]:
-            free_symbol_uses: OrderedSet[sympy.Symbol] = OrderedSet()
-            layout = node.maybe_get_layout()
-            if isinstance(layout, ir.Layout):
-                free_symbol_uses.update(
-                    free_symbols(layout.size)
-                    | free_symbols(layout.stride)
-                    | free_symbols(layout.offset)
-                )
-                if isinstance(layout, ir.MutationLayoutSHOULDREMOVE):
-                    # symint may be used as index in layout.target
-                    free_symbol_uses.update(get_layout_symints(layout.target))
-            else:
-                assert layout is None, (
-                    f"Expect layout to be None but found layout={layout}"
-                )
-            return free_symbol_uses
-
-        def get_scheduler_node_symbol_uses(
-            node: BaseSchedulerNode,
-        ) -> OrderedSet[sympy.Symbol]:
-            """
-            Gets symbols used in node.
-            """
-            if isinstance(node, FusedSchedulerNode):
-                return OrderedSet().union(
-                    *(get_scheduler_node_symbol_uses(snode) for snode in node.snodes)
-                )
-            assert node.node is not None
-            free_symbol_uses = node.node.get_free_symbol_uses()
-            free_symbol_uses.update(
-                *(get_layout_symints(ir_node) for ir_node in node.node.get_outputs())
-            )
-            return free_symbol_uses
 
         def get_input_node_symbols(
             node: Union[ir.IRNode, sympy.Expr, ir.TorchBindObject],
@@ -5803,7 +5882,6 @@ class Scheduler:
             signatures.append(partition_signature)
 
             unmet_output_names = partition_input_names.union(
-                # pyrefly: ignore [unsupported-operation]
                 unmet_output_names - returned_output_names
             )
 
@@ -5963,7 +6041,7 @@ class Scheduler:
             return True
 
         for node in nodes:
-            should_partition = self.should_partition(node)
+            should_partition = self.should_partition(node) is not None
             if should_partition and len(node.unmet_dependencies) == 0:
                 front.append(node)
             elif should_partition and only_output_user(node):
@@ -5985,13 +6063,13 @@ class Scheduler:
         cur_partition: PartitionType = []
         skip_cudagraphs = []
         for node in self.nodes:
-            should_partition = self.should_partition(node, should_log=True)
-            if cur_partition and skip_cudagraph != should_partition:
+            node_should_partition = self.should_partition(node) is not None
+            if cur_partition and skip_cudagraph != node_should_partition:
                 partitions.append(cur_partition)
                 skip_cudagraphs.append(skip_cudagraph)
                 cur_partition = []
 
-            skip_cudagraph = should_partition
+            skip_cudagraph = node_should_partition
             cur_partition.append(node)
 
         if cur_partition:
@@ -6003,7 +6081,69 @@ class Scheduler:
         )
         self.compute_graph_partition_maps(signatures)
 
+        self._log_graph_partitions(partitions, signatures)
+
         return partitions, signatures
+
+    def _log_graph_partitions(
+        self,
+        partitions: list[PartitionType],
+        signatures: list[GraphPartitionSignature],
+    ) -> None:
+        if not cudagraphs_log.isEnabledFor(logging.DEBUG):
+            return
+
+        # Don't log partition reasons for CPU-only graphs since cudagraph
+        # partitioning is not relevant when there are no GPU devices
+        has_gpu_device = any(is_gpu(device) for device in V.graph.device_types)
+        if not has_gpu_device:
+            return
+
+        cudagraphable_count = sum(1 for s in signatures if not s.skip_cudagraph)
+        non_cudagraphable_count = len(signatures) - cudagraphable_count
+        cudagraphs_log.debug(
+            "Created %d graph partitions: %d cudagraphable, %d non-cudagraphable",
+            len(partitions),
+            cudagraphable_count,
+            non_cudagraphable_count,
+        )
+        for i, (partition, signature) in enumerate(zip(partitions, signatures)):
+            cudagraphs_log.debug(
+                "  Partition %d: %d nodes, %s, inputs=%d, outputs=%d",
+                i,
+                len(partition),
+                "non-cudagraphable" if signature.skip_cudagraph else "cudagraphable",
+                len(signature.input_nodes),
+                len(signature.output_nodes),
+            )
+            if signature.skip_cudagraph:
+                # Log details for each non-cudagraphable node
+                for node in partition:
+                    self._log_non_cudagraphable_node(node)
+
+    def _log_non_cudagraphable_node(self, node: BaseSchedulerNode) -> None:
+        """Log details for a non-cudagraphable node."""
+        reason = self.should_partition(node)
+        if not reason:
+            return
+
+        node_name = node.get_name()
+        fx_node = node.node.get_origin_node() if node.node is not None else None
+        parts = [f"reason={reason}"]
+        ir_type = type(node.node).__name__
+        parts.append(f"ir={ir_type}")
+        if fx_node is not None:
+            fx_str = f"{fx_node.target}({', '.join(str(a) for a in fx_node.args)})"
+            parts.append(f"fx={fx_str}")
+
+        cudagraphs_log.debug("    %s: %s", node_name, ", ".join(parts))
+
+        # Log full stack trace if available
+        if fx_node is not None:
+            stack_trace = fx_node.meta.get("stack_trace", None)
+            if stack_trace:
+                for line in stack_trace.strip().split("\n"):
+                    cudagraphs_log.debug("         %s", line)
 
     def codegen(self) -> None:
         with dynamo_timed("Scheduler.codegen"):
@@ -6139,8 +6279,7 @@ class Scheduler:
         partitions, signatures = self.graph_partition()
 
         if len(partitions) > 1:
-            msg = f"cudagraph partition into {len(partitions)} partitions"
-            maybe_log_cudagraph_partition(msg=msg, prefix="")
+            counters["inductor"]["cudagraph_partitions"] += len(partitions)
 
         with self.use_default_device_context(partitions, signatures):
             for partition, signature in zip(partitions, signatures):
@@ -6185,6 +6324,7 @@ class Scheduler:
                 seen.add(key)
 
         self.current_device = self.default_device_context
+        assert self.previous_node is None
 
         # pyrefly: ignore [unbound-name]
         if self.default_device_context and config.triton.autotune_at_compile_time:
@@ -6276,6 +6416,11 @@ class Scheduler:
                 ):
                     self.flush()
 
+            if all(isinstance(n, SchedulerNode) for n in node.get_nodes()):
+                self.previous_node = node
+            else:
+                self.previous_node = None
+
         if self.current_device != self.default_device_context:
             # when default_device_context is not None, we are codegen
             # for graph partitions and all nodes must be on
@@ -6286,6 +6431,7 @@ class Scheduler:
                 # important for nested indentation codegen-ing.
                 V.graph.wrapper_code.codegen_device_guard_exit()
 
+        self.previous_node = None
         self.flush()
 
     def benchmark_combo_kernel(

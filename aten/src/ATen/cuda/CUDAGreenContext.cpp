@@ -1,6 +1,6 @@
 #include <ATen/cuda/CUDAGreenContext.h>
 
-#if defined(CUDA_VERSION) && (CUDA_VERSION >= 12030) && !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
+#if defined(CUDA_VERSION) && !defined(USE_ROCM) && defined(PYTORCH_C10_DRIVER_API_SUPPORTED)
 #include <c10/cuda/driver_api.h>
 #include <stdexcept>
 #include <vector>
@@ -180,7 +180,9 @@ GreenContext::GreenContext(uint32_t device_id, uint32_t num_sms) {
         c10::cuda::DriverAPI::get()->cuCtxPopCurrent_(&popped));
     TORCH_INTERNAL_ASSERT(
         popped == context_, "expected popped context to be the current ctx");
-    ev.block(c10::cuda::getStreamFromExternal(parent_stream_, device_id_));
+    auto parent_stream = c10::cuda::getStreamFromExternal(parent_stream_, device_id_);
+    ev.block(parent_stream);
+    c10::cuda::setCurrentCUDAStream(parent_stream);
 #else
     TORCH_CHECK(false, "Green Context is only supported on CUDA 12.8+!");
 #endif

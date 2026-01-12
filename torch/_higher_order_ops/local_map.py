@@ -178,6 +178,7 @@ class LocalMapHOP(HigherOrderOperator):
         super().__init__("local_map_hop")
 
     def __call__(self, gm: GraphModule, *args: Any, **kwargs: Any) -> Any:
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(gm, *args, **kwargs)
 
 
@@ -447,7 +448,6 @@ class LocalMapAutogradOp(torch.autograd.Function):
             )
 
             for i, meta in ctx.expected_tangent_metadata.items():
-                # pyrefly: ignore [bad-argument-type]
                 grads[i] = coerce_to_expected_memory_format(grads[i], meta)
 
             grad_ins = local_map_hop(ctx.bw_gm, *saved_activations, *grads)

@@ -64,7 +64,7 @@
 // algo, under the hood, cudnn will run with the slower kernel since it sees
 // fastest algorithm combination with a sub optimal mathType.
 
-constexpr size_t operator"" _TiB(unsigned long long n) {
+constexpr size_t operator""_TiB(unsigned long long n) {
   return static_cast<size_t>(n) * 1024 * 1024 * 1024 * 1024;
 }
 
@@ -147,8 +147,17 @@ struct Workspace {
     data = c10::cuda::CUDACachingAllocator::raw_alloc(size);
   }
   Workspace(const Workspace&) = delete;
-  Workspace(Workspace&&) = default;
-  Workspace& operator=(Workspace&&) = default;
+  Workspace(Workspace&& other) noexcept
+      : size(std::exchange(other.size, 0)),
+        data(std::exchange(other.data, nullptr)) {}
+  Workspace& operator=(const Workspace& other) = delete;
+  Workspace& operator=(Workspace&& other) noexcept {
+    if (this != &other) {
+      std::swap(size, other.size);
+      std::swap(data, other.data);
+    }
+    return *this;
+  }
   ~Workspace() {
     if (data) {
       c10::cuda::CUDACachingAllocator::raw_delete(data);

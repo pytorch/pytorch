@@ -774,7 +774,8 @@ class BCEWithLogitsLoss(_Loss):
 
     Args:
         weight (Tensor, optional): a manual rescaling weight given to the loss
-            of each batch element. If given, has to be a Tensor of size `nbatch`.
+            of each batch element. The dimension of weight supports :ref:`broadcasting to a common shape <broadcasting-semantics>`
+            with respect to the output (and target) shape.
         size_average (bool, optional): Deprecated (see :attr:`reduction`). By default,
             the losses are averaged over each loss element in the batch. Note that for
             some losses, there are multiple elements per sample. If the field :attr:`size_average`
@@ -1918,6 +1919,7 @@ class TripletMarginWithDistanceLoss(_Loss):
                 f"TripletMarginWithDistanceLoss: expected margin to be greater than 0, got {margin} instead"
             )
         self.distance_function: Callable[[Tensor, Tensor], Tensor] | None = (
+            # pyrefly: ignore [bad-assignment]
             distance_function if distance_function is not None else PairwiseDistance()
         )
         self.margin = margin

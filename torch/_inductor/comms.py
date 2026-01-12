@@ -820,7 +820,6 @@ def _format_and_log_reordering_stats(
         for snode, node_info in node_stats.items()
     ]
     if importlib.util.find_spec("tabulate"):
-        # pyrefly: ignore[import-error]
         from tabulate import tabulate
 
         reorder_log_str += tabulate(
@@ -889,6 +888,18 @@ def _reorder_communication_preserving_peak_memory_internal(
         snode: estimate_op_runtime(snode) * _op_runtime_estimate_mult(snode)
         for snode in snodes
     }
+
+    # Pre-compute output and dependency sets for O(1) lookup instead of O(N) creation per iteration
+    node_output_sets: dict[BaseSchedulerNode, frozenset[str]] = {
+        snode: frozenset(o.get_name() for o in snode.get_outputs()) for snode in snodes
+    }
+    node_dep_sets: dict[BaseSchedulerNode, frozenset[str]] = {
+        snode: frozenset(
+            d.name for d in snode.unmet_dependencies if not _is_fake_dep(d)
+        )
+        for snode in snodes
+    }
+
     # debug stats
     stats: dict[BaseSchedulerNode, ReorderInfo] = {}
 
@@ -911,7 +922,7 @@ def _reorder_communication_preserving_peak_memory_internal(
         _next_curr = _next[curr]
         if iterative_recompute_error:
             break
-        # pyrefly: ignore [bad-argument-type]
+
         if not contains_async_collective(curr):
             curr = _next_curr
             continue
@@ -938,11 +949,9 @@ def _reorder_communication_preserving_peak_memory_internal(
         group_runtime = 0.0
         group_peak_memory = _curr_memory[curr][0]  # post_alloc memory
 
-        # Track group dependencies incrementally
-        group_unmet_deps_names = OrderedSet(
-            d.name for d in curr.unmet_dependencies if not _is_fake_dep(d)
-        )
-        group_output_names = OrderedSet(o.get_name() for o in curr.get_outputs())
+        # Track group dependencies incrementally - initialize from pre-computed sets
+        group_unmet_deps_names = OrderedSet(node_dep_sets[curr])
+        group_output_names = OrderedSet(node_output_sets[curr])
 
         while candidate is not None:
             if config_comms.reorder_iterative_use_runtime_estimations and (
@@ -966,9 +975,8 @@ def _reorder_communication_preserving_peak_memory_internal(
                 data_dep = False
             else:
                 # Calculate effective dependencies (not satisfied within group)
-                candidate_out_names = OrderedSet(
-                    o.get_name() for o in candidate.get_outputs()
-                )
+                # Use pre-computed set for O(1) lookup
+                candidate_out_names = node_output_sets[candidate]
                 data_dep = bool(candidate_out_names & data_deps_names)
 
             if data_dep:
@@ -978,17 +986,10 @@ def _reorder_communication_preserving_peak_memory_internal(
                 if is_groupable_result:
                     group_head = candidate
 
-                    # Update incremental dependency tracking
-                    group_unmet_deps_names.update(
-                        d.name
-                        for d in candidate.unmet_dependencies
-                        if not _is_fake_dep(d)
-                    )
-                    group_output_names.update(
-                        o.get_name() for o in candidate.get_outputs()
-                    )
+                    # Update incremental dependency tracking using pre-computed sets
+                    group_unmet_deps_names.update(node_dep_sets[candidate])
+                    group_output_names.update(node_output_sets[candidate])
 
-                    # pyrefly: ignore[unbound-name]
                     if config_comms.reorder_iterative_use_runtime_estimations:
                         if contains_wait(candidate):
                             comm_time, comp_time, _ = wait_exposed_communication_time(
@@ -1014,7 +1015,6 @@ def _reorder_communication_preserving_peak_memory_internal(
                     info.limiting_factor = msg
                     break
 
-            # pyrefly: ignore[unbound-name]
             if config_comms.reorder_iterative_use_runtime_estimations:
                 # Check if candidate has sync runtime
                 if not contains_async_collective(candidate):
@@ -1118,7 +1118,6 @@ def _reorder_communication_preserving_peak_memory_internal(
 
             if (
                 potential_peak - peak_memory
-                # pyrefly: ignore[unbound-name]
                 > peak_memory * config_comms.reorder_iterative_peak_memory_budget
             ):
                 info.limiting_factor = (
@@ -1417,7 +1416,6 @@ def _is_node_groupable_for_sink_waits(
             f"candidate contains_async_collective {candidate.get_name()}",
         )
 
-    # pyrefly: ignore[unbound-name]
     if not config_comms.sink_iterative_use_runtime_estimations:
         # Heuristics pre-use_runtime_estimations:
         # TODO(ivankobzarev): Remove them after confirming,
@@ -1669,7 +1667,6 @@ def _format_and_log_sink_waits_stats(
     ]
     log_str = ""
     if importlib.util.find_spec("tabulate"):
-        # pyrefly: ignore[import-error]
         from tabulate import tabulate
 
         log_str += tabulate(
@@ -1780,6 +1777,17 @@ def _sink_waits_iterative_internal(
         for snode in snodes
     }
 
+    # Pre-compute output and dependency sets for O(1) lookup instead of O(N) creation per iteration
+    node_output_sets: dict[BaseSchedulerNode, frozenset[str]] = {
+        snode: frozenset(o.get_name() for o in snode.get_outputs()) for snode in snodes
+    }
+    node_dep_sets: dict[BaseSchedulerNode, frozenset[str]] = {
+        snode: frozenset(
+            d.name for d in snode.unmet_dependencies if not _is_fake_dep(d)
+        )
+        for snode in snodes
+    }
+
     curr: Optional[BaseSchedulerNode] = snodes[-1]
 
     processed_waits = OrderedSet()  # type: ignore[var-annotated]
@@ -1801,7 +1809,6 @@ def _sink_waits_iterative_internal(
         ):
             break
 
-        # pyrefly: ignore [bad-argument-type]
         if not (contains_wait(curr) and curr not in processed_waits):
             curr = _prev_curr
             continue
@@ -1823,8 +1830,8 @@ def _sink_waits_iterative_internal(
         group_runtime = 0.0
         group_peak_memory = _curr_memory[curr][0]
 
-        # Track group outputs and check collective status incrementally
-        group_output_names = OrderedSet(o.get_name() for o in curr.get_outputs())
+        # Track group outputs and check collective status incrementally - initialize from pre-computed set
+        group_output_names = OrderedSet(node_output_sets[curr])
         group_contains_collective = contains_collective(curr)
 
         while candidate is not None:
@@ -1839,16 +1846,14 @@ def _sink_waits_iterative_internal(
             if not group_output_names:
                 data_dep = False
             else:
-                # Calculate candidate dependencies
-                candidate_dep_names = OrderedSet(
-                    d.name for d in candidate.unmet_dependencies if not _is_fake_dep(d)
-                )
+                # Calculate candidate dependencies using pre-computed set
+                candidate_dep_names = node_dep_sets[candidate]
                 data_dep = bool(candidate_dep_names & group_output_names)
 
             # Conservative sink wait, limiting by space before next collective.
             # The global strategy is that bucketing should create space.
             # For 2D we can experiment with allowing to sink Wait beyond non current group collective.
-            # pyrefly: ignore[unbound-name]
+
             if not config_comms.sink_waits_iterative_swap_with_collectives:
                 if contains_async_collective(candidate):
                     info.limiting_factor = (
@@ -1868,16 +1873,13 @@ def _sink_waits_iterative_internal(
                 if _is_groupable:
                     group_tail = candidate
 
-                    # Update incremental tracking
-                    group_output_names.update(
-                        o.get_name() for o in candidate.get_outputs()
-                    )
+                    # Update incremental tracking using pre-computed set
+                    group_output_names.update(node_output_sets[candidate])
                     group_contains_collective = (
                         group_contains_collective or contains_collective(candidate)
                     )
 
                     if (
-                        # pyrefly: ignore[unbound-name]
                         config_comms.sink_iterative_use_runtime_estimations
                         and contains_collective(candidate)
                     ):
@@ -1897,7 +1899,6 @@ def _sink_waits_iterative_internal(
                     continue
                 elif not data_dep:
                     if (
-                        # pyrefly: ignore[unbound-name]
                         not config_comms.sink_waits_iterative_unsafe_collectives_reorder
                         and both_contain_comms
                     ):
@@ -1914,7 +1915,6 @@ def _sink_waits_iterative_internal(
                     )
                     break
 
-            # pyrefly: ignore[unbound-name]
             if config_comms.sink_iterative_use_runtime_estimations:
                 if is_wait(candidate.node):
                     # Corresponding collective is before the group,
@@ -2008,7 +2008,6 @@ def _sink_waits_iterative_internal(
             )
             if (
                 potential_peak - peak_memory
-                # pyrefly: ignore[unbound-name]
                 > peak_memory * config_comms.sink_iterative_peak_memory_budget
             ):
                 info.limiting_factor = (
@@ -2195,6 +2194,7 @@ def reorder_compute_and_comm_for_overlap(
     order = snodes
     graph_inputs: OrderedSet[str] = OrderedSet(V.graph.graph_inputs.keys())
     graph_outputs: OrderedSet[str] = OrderedSet(V.graph.get_output_names())
+    # pyrefly: ignore [bad-assignment]
     for p in config.reorder_for_compute_comm_overlap_passes:
         if isinstance(p, str) and p in globals():
             p = globals()[p]  # it is a builtin pass

@@ -4,6 +4,7 @@ import lldb  # type: ignore[import]
 
 
 def get_target() -> Any:
+    # pyrefly: ignore [missing-attribute]
     target = lldb.debugger.GetSelectedTarget()
     if not target:
         print("[-] error: no target available. please add a target to lldb.")
