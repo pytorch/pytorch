@@ -1081,6 +1081,59 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
                 # Verify the result has the expected shape
                 self.assertEqual(result.shape, (4, 4))
 
+    def test_proxy_tensor_mode_works(self):
+        """Test that running compiled code inside ProxyTensorMode works with FX graph fallback"""
+        from torch._higher_order_ops.wrap import (
+            InductorCompiledCallable,
+            inductor_code_side_table,
+            inductor_compiled_code,
+        )
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        # Reset the side table for a clean test
+        inductor_code_side_table.reset_table()
+
+        # Create a simple FX graph
+        class SimpleModel(torch.nn.Module):
+            def forward(self, x):
+                return x + 1
+
+        model = SimpleModel()
+        gm = torch.fx.symbolic_trace(model)
+
+        # Create an InductorCompiledCallable
+        # The compiled callable should match FX graph's output convention
+        def simple_compiled(inputs):
+            return inputs[0] + 1
+
+        callable_obj = InductorCompiledCallable(simple_compiled, gm)
+
+        # Wrapper that uses the HOP
+        def wrapper(x):
+            return inductor_compiled_code(callable_obj, [x])
+
+        inp = torch.randn(4, 4)
+        traced = make_fx(wrapper)(inp)
+
+        # Verify the traced graph contains the inductor_compiled_code HOP
+        hop_found = False
+        for node in traced.graph.nodes:
+            if node.op == "call_function" and "inductor_compiled_code" in str(
+                node.target
+            ):
+                hop_found = True
+                # Verify the callable index is an int
+                self.assertIsInstance(node.args[0], int)
+                break
+        self.assertTrue(
+            hop_found, "inductor_compiled_code HOP not found in traced graph"
+        )
+
+        # Verify the traced graph can be executed and produces correct results
+        result = traced(inp)
+        expected = inp + 1
+        torch.testing.assert_close(result, expected)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
