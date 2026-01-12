@@ -78,6 +78,22 @@ def _permute_strides(out: torch.Tensor, query_strides: tuple[int, ...]) -> torch
     return new_out
 
 
+def _maybe_unwrap_boxed_call(fn: Callable) -> Callable:
+    """
+    If fn is a boxed GraphModule, wrap it to accept unpacked arguments.
+
+    Boxed GraphModules expect a single list argument: fn([arg1, arg2, ...])
+    This wrapper allows calling them with unpacked args: wrapper(arg1, arg2, ...)
+    """
+    if isinstance(fn, GraphModule) and getattr(fn, "_boxed_call", False):
+
+        def wrapper(*args):
+            return fn(list(args))
+
+        return wrapper
+    return fn
+
+
 class FlexAttentionHOP(HigherOrderOperator):
     def __init__(self) -> None:
         super().__init__("flex_attention", cacheable=True)
@@ -184,10 +200,13 @@ def _math_attention_inner(
     captured_buffers_in_dim = (None,) * len(score_mod_other_buffers)
     from torch.nn.attention.flex_attention import _vmap_for_bhqkv
 
+    # Wrap callables to handle boxed GraphModule calling convention
+    score_mod = _maybe_unwrap_boxed_call(score_mod)
+
     # first input is score
     score_mod = _vmap_for_bhqkv(score_mod, prefix=(0,), suffix=captured_buffers_in_dim)
 
-    mask_mod = block_mask[-1]
+    mask_mod = _maybe_unwrap_boxed_call(block_mask[-1])
     mask_mod_in_dim_buffers = (None,) * len(mask_mod_other_buffers)
     mask_mod = _vmap_for_bhqkv(mask_mod, prefix=(), suffix=mask_mod_in_dim_buffers)
 
@@ -636,6 +655,9 @@ def create_fw_bw_graph(
     from torch._subclasses.functional_tensor import disable_functional_mode
     from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
+    # Wrap score_mod to handle boxed GraphModule calling convention
+    score_mod = _maybe_unwrap_boxed_call(score_mod)
+
     dummy_aot_config = AOTConfig(
         fw_compiler=None,  # type: ignore[arg-type]
         bw_compiler=None,  # type: ignore[arg-type]
@@ -1028,6 +1050,10 @@ def sdpa_dense_backward(
     captured_buffers_in_dim = (None,) * len(score_mod_other_buffers)
     out_dims = [0, None, None, None, None] + [None] * len(score_mod_other_buffers)
     from torch.nn.attention.flex_attention import _vmap_for_bhqkv
+
+    # Wrap callables to handle boxed GraphModule calling convention
+    joint_graph = _maybe_unwrap_boxed_call(joint_graph)
+    mask_graph = _maybe_unwrap_boxed_call(mask_graph)
 
     # inputs are [score, b, h, q_idx, kv_idx, gradOut, ...]
     # score and gradOut are "fully" batched

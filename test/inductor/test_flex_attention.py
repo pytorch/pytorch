@@ -5319,6 +5319,69 @@ class GraphModule(torch.nn.Module):
 
         self.assertEqual(out.shape, (B, H, S, D))
 
+    @supported_platform
+    def test_boxed_graphmodule_mask_mod(self, device):
+        """Test that flex_attention works with boxed GraphModule as mask_mod.
+
+        Boxed GraphModules (_boxed_call=True) use a different calling convention
+        (single list argument vs unpacked args). This tests that flex_attention
+        handles both conventions correctly.
+
+        Regression test for invoke_subgraph + flex_attention integration where
+        AOT Autograd may create boxed GraphModules.
+        """
+        from torch.fx.experimental.proxy_tensor import make_fx
+        from torch.fx.graph import _BoxedCodeGen
+
+        B, H, S, D = 2, 4, 64, 32
+
+        def causal_mask(b, h, q_idx, kv_idx):
+            return q_idx >= kv_idx
+
+        query = torch.randn(B, H, S, D, device=device, dtype=torch.float32)
+        key = torch.randn(B, H, S, D, device=device, dtype=torch.float32)
+        value = torch.randn(B, H, S, D, device=device, dtype=torch.float32)
+
+        # Create block mask with normal function
+        block_mask = create_block_mask(causal_mask, B=B, H=H, Q_LEN=S, KV_LEN=S, device=device)
+
+        # Trace mask_mod to get a GraphModule
+        b = torch.tensor(0)
+        h = torch.tensor(0)
+        q_idx = torch.tensor(0)
+        kv_idx = torch.tensor(0)
+        mask_gm = make_fx(block_mask.mask_mod)(b, h, q_idx, kv_idx)
+
+        # Convert to boxed calling convention (simulating what AOT Autograd might do)
+        mask_gm.graph._codegen = _BoxedCodeGen()
+        mask_gm.recompile()
+        self.assertTrue(mask_gm._boxed_call)
+
+        # Create BlockMask with boxed GraphModule as mask_mod
+        boxed_block_mask = BlockMask(
+            seq_lengths=block_mask.seq_lengths,
+            kv_num_blocks=block_mask.kv_num_blocks,
+            kv_indices=block_mask.kv_indices,
+            full_kv_num_blocks=block_mask.full_kv_num_blocks,
+            full_kv_indices=block_mask.full_kv_indices,
+            q_num_blocks=block_mask.q_num_blocks,
+            q_indices=block_mask.q_indices,
+            full_q_num_blocks=block_mask.full_q_num_blocks,
+            full_q_indices=block_mask.full_q_indices,
+            BLOCK_SIZE=block_mask.BLOCK_SIZE,
+            mask_mod=mask_gm,
+        )
+
+        # Use eager path to test the _math_attention_inner code path
+        import torch.nn.attention.flex_attention as flex_module
+        original_flag = flex_module._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG
+        try:
+            flex_module._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = True
+            out = flex_attention(query, key, value, block_mask=boxed_block_mask)
+            self.assertEqual(out.shape, (B, H, S, D))
+        finally:
+            flex_module._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = original_flag
+
 
 class TestBlockMask(InductorTestCase):
     def setUp(self):
