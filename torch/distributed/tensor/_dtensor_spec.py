@@ -124,7 +124,7 @@ class DTensorSpec:
 
     @staticmethod
     def compute_default_shard_order(
-        placements: tuple[Placement, ...],
+        placements: tuple[Placement, ...], treat_strided_shard_as_shard: bool = False
     ) -> ShardOrder:
         """
         Compute the default shard order from placements.
@@ -137,11 +137,13 @@ class DTensorSpec:
         mesh_ndim = len(placements)
         for mesh_dim in range(mesh_ndim):
             # shard_order doesn't work with _StridedShard
-            if isinstance(placements[mesh_dim], _StridedShard):
+            if not treat_strided_shard_as_shard and isinstance(
+                placements[mesh_dim], _StridedShard
+            ):
                 return ()
-            if isinstance(placements[mesh_dim], Shard):
-                placement = cast(Shard, placements[mesh_dim])
-                shard_dim = placement.dim
+            if isinstance(placements[mesh_dim], Shard | _StridedShard):
+                placement = placements[mesh_dim]
+                shard_dim = placement.dim  # pyrefly: ignore [missing-attribute]
                 assert shard_dim >= 0, (
                     f"Shard dim {shard_dim} in placements {placements} must be normalized"
                 )
@@ -455,6 +457,10 @@ class DTensorSpec:
         """
         Check if the device order is the default left-to-right order.
         """
+        if shard_order is None:
+            # Missing `shard_order` attribute, possibly due to _StridedShard in
+            # placements.
+            return False
         for entry in shard_order:
             mesh_dims = entry.mesh_dims
             is_increasing = all(
