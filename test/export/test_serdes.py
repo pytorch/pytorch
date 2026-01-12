@@ -21,6 +21,10 @@ def mocked_serder_export_strict(*args, **kwargs):
     else:
         ep = export(*args, **kwargs)
 
+    if "rnn.weight_hh_l0" in ep.state_dict:
+        print(f"ep.state_dict(): {ep.state_dict}")
+        tensor = ep.state_dict["rnn.weight_hh_l0"].data
+        print("tensor's info: ", tensor.size(), tensor.stride(), tensor.storage_offset())
     buffer = io.BytesIO()
     save(ep, buffer)
     buffer.seek(0)
