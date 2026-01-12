@@ -1408,7 +1408,6 @@ class MetaConverter(Generic[_TensorT]):
                     if t.requires_grad:
                         r.requires_grad = True
                     if t.requires_grad and not is_leaf:
-                        # pyrefly: ignore [bad-argument-type]
                         r = self._backward_error(r)
                 elif t.is_nested and not t.is_traceable_wrapper_subclass:
                     # TODO: Handle this better in Dynamo?
@@ -1451,7 +1450,6 @@ class MetaConverter(Generic[_TensorT]):
                     if t.requires_grad:
                         r.requires_grad = True
                     if t.requires_grad and not is_leaf:
-                        # pyrefly: ignore [bad-argument-type]
                         r = self._backward_error(r)
                 elif t.is_functorch_wrapped:
                     if t.is_view:

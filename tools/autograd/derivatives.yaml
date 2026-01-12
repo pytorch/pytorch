@@ -919,6 +919,11 @@
   self: value_selecting_reduction_backward_symint(grad, dim, indices, self.sym_sizes(), keepdim)
   values: gather_with_keepdimed_indices(self_t, dim, indices, keepdim)
 
+- name: ldexp.Tensor(Tensor self, Tensor other) -> Tensor
+  self: grad * at::pow(2, other).conj()
+  other: grad * result.conj() * M_LN2
+  result: self_t * at::pow(2, other_p) + other_t * result * M_LN2
+
 - name: le_.Scalar(Tensor(a!) self, Scalar other) -> Tensor(a!)
   self: zeros_like(self)
   result: self_t.zero_()
@@ -1581,7 +1586,7 @@
 
 - name: _linalg_solve_ex(Tensor A, Tensor B, *, bool left=True, bool check_errors=False) -> (Tensor result, Tensor LU, Tensor pivots, Tensor info)
   A, B: linalg_solve_backward(grad, result, A, LU, pivots, left, grad_input_mask[1])
-  result: "linalg_solve_jvp(A_t, B_t, result, LU, pivots, left, A_p.is_contiguous() && !A_p.is_complex())"
+  result: "linalg_solve_jvp(A_t, B_t, result, LU, pivots, left)"
   output_differentiability: [True, False, False, False]  # LU is an auxiliary tensor not exposed to the user
 
 - name: sort(Tensor self, int dim=-1, bool descending=False) -> (Tensor values, Tensor indices)
@@ -2811,6 +2816,12 @@
 
 - name: miopen_rnn_backward(Tensor input, Tensor[] weight, int weight_stride0, Tensor weight_buf, Tensor hx, Tensor? cx, Tensor output, Tensor? grad_output, Tensor? grad_hy, Tensor? grad_cy, int mode, int hidden_size, int num_layers, bool batch_first, float dropout, bool train, bool bidirectional, int[] batch_sizes, Tensor? dropout_state, Tensor reserve, bool[4] output_mask) -> (Tensor, Tensor, Tensor, Tensor[])
   dropout_state: non_differentiable
+
+- name: miopen_ctc_loss(Tensor log_probs, Tensor targets, int[] input_lengths, int[] target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
+  log_probs: _miopen_ctc_loss_backward(grad, result0, result1, zero_infinity)
+
+- name: miopen_ctc_loss.Tensor(Tensor log_probs, Tensor targets, Tensor input_lengths, Tensor target_lengths, int blank, bool deterministic, bool zero_infinity) -> (Tensor, Tensor)
+  log_probs: _miopen_ctc_loss_backward(grad, result0, result1, zero_infinity)
 
 - name: mkldnn_rnn_layer(Tensor input, Tensor weight0, Tensor weight1, Tensor weight2, Tensor weight3, Tensor hx_, Tensor cx_, bool reverse, int[] batch_sizes, int mode, int hidden_size, int num_layers, bool has_biases, bool bidirectional, bool batch_first, bool train) -> (Tensor, Tensor, Tensor, Tensor)
   output_differentiability: [True, True, True, False]
