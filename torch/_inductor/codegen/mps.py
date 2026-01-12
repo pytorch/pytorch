@@ -212,6 +212,7 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def masked(mask: CSEVariable, body: sympy.Expr, other: CSEVariable) -> str:
         # TODO: Type annotation for other is wrong, it's often float or int
+        # TODO: Use lambda here rather than allocating variable with default type when on MacOS-15+
         masked_code = IndentedBuffer()
         masked_code.writeline(f"if ({mask}) {{")
         with V.kernel.swap_buffers(masked_code), masked_code.indent():
@@ -221,7 +222,9 @@ class MetalOverrides(OpOverrides):
         with masked_code.indent():
             masked_code.writeline(f"{var} = {rc};")
         masked_code.writeline("}")
-        V.kernel.compute.writeline(f"auto {var} = static_cast<{DTYPE_TO_METAL[rc.dtype]}>({other});")
+        V.kernel.compute.writeline(
+            f"{DTYPE_TO_METAL[rc.dtype]} {var} = {value_to_metal(other)};"
+        )
         V.kernel.compute.splice(masked_code)
         return var
 
