@@ -779,12 +779,6 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
                         time.time_ns(),
                         forward_symints=symints,
                     )
-                elif should_bundle_autograd_cache():
-                    aot_config.cache_info = AOTAutogradCacheInfo(
-                        "bundled_cache_placeholder",
-                        time.time_ns(),
-                        forward_symints=symints,
-                    )
 
             cache_info.update(
                 {
@@ -964,7 +958,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
                     "bypass_aot_autograd", "Unable to serialize: " + str(e)
                 )
             if config.strict_autograd_cache:
-                raise e
+                raise
             return None
 
         if remote:
