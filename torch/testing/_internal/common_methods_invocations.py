@@ -6766,6 +6766,66 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
         yield SampleInput(input, target, **kwargs)
 
 
+def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, **kwargs_unused):
+    assert dtype.is_floating_point, dtype
+    batch_size, num_classes = shape = (2, 3)
+    reductions = ("mean", "sum", "none")
+
+    kwargs_list: list[dict[str, Any]] = [
+        {},
+        *[dict(reduction=reduction) for reduction in reductions],
+        *[dict(weight=None, reduction=reduction) for reduction in reductions],
+        dict(ignore_index=1),
+    ]
+
+    for kwargs, probabilities_target in itertools.product(kwargs_list, (False, True)):
+        for linear_sample in sample_inputs_linear(op_info, device, dtype, requires_grad):
+            linear_input = linear_sample.input
+            if len(linear_sample.args) == 1:
+                linear_weight, linear_bias = linear_sample.args[0], None
+            else:
+                linear_weight, linear_bias = linear_sample.args
+
+            input_shape = (*linear_input.shape[:-1], *linear_weight.shape[:1])
+            if len(input_shape) <= 2:
+                target_shape = input_shape[:-1]
+                num_classes = input_shape[-1]
+            else:
+                target_shape = (*input_shape[:1], *input_shape[2:])
+                num_classes = input_shape[1]
+
+            if "weight" in kwargs:
+                kwargs["weight"] = make_tensor((num_classes,), device=device, dtype=dtype)
+            if probabilities_target:
+                # ignore_index is not supported for probabilities target
+                if "ignore_index" in kwargs:
+                    continue
+                target = make_tensor(
+                    input_shape,
+                    low=0,
+                    high=1,
+                    device=device,
+                    dtype=dtype,
+                    requires_grad=requires_grad,
+                )
+            else:
+                target = make_tensor(
+                    target_shape,
+                    low=0,
+                    high=num_classes,
+                    device=device,
+                    dtype=torch.long,
+                )
+                assert input_shape != target_shape, (input_shape, target_shape)
+
+            if "ignore_index" in kwargs and torch.all(target == kwargs["ignore_index"]) and 0 not in target.shape:
+                # make sure at least one item in target is not ignored
+                t = random.sample(sorted(set(range(num_classes)) - {kwargs["ignore_index"]}), 1)[0]
+                target[0 if target.shape else ()] = t
+
+            yield SampleInput(linear_input, linear_weight, target, **dict(linear_bias=linear_bias, **kwargs))
+
+
 def sample_inputs_logit(op_info, device, dtype, requires_grad, **kwargs):
     low, high = op_info.domain
 
@@ -15194,6 +15254,44 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("FP16 corss_entropy cases have not been enabled on MPS yet"),
                          dtypes=(torch.half,), device_type="mps"),
 
+        )
+    ),
+    OpInfo(
+        "nn.functional.linear_cross_entropy",
+        dtypes=floating_types_and(torch.float16, torch.bfloat16),
+        sample_inputs_func=sample_inputs_linear_cross_entropy,
+        supports_out=False,
+        supports_forward_ad=True,
+        supports_fwgrad_bwgrad=True,
+        allow_cow_input_materialize_forward=[2],
+        allow_cow_input_materialize_backward=[2, 'output grad 0'],
+        decorators=(
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=3e-3, rtol=1e-3)}),
+                "TestJit",
+                "test_variant_consistency_jit",
+                device_type="cpu",
+            ),
+        ),
+        skips=(
+            # AssertionError: False is not true : Scalars failed to compare as equal! 0 != 1536
+            # test_ops.TestJitCUDA.test_variant_consistency_jit_nn_functional_cross_entropy_cuda_float32 leaked
+            # 1536 bytes CUDA memory on device 0
+            # DecorateInfo(
+            #    unittest.expectedFailure,
+            #    "TestJit",
+            #    "test_variant_consistency_jit",
+            #    device_type="cuda",
+            # ),
+            # DecorateInfo(unittest.skip("FP16 cross_entropy cases have not been enabled on MPS yet"),
+            #             dtypes=(torch.half,), device_type="mps"),
+
+            # RuntimeError: Difference from float64 is larger with
+            # decomposition nll_loss2d_forward.default than original
+            # on output 0. Original max diff: 0.0004882961511611938,
+            # Decomp max diff: 0.015136703848838806
+            DecorateInfo(unittest.skip("Inconsistent accuracy"), 'TestDecomp', 'test_comprehensive',
+                         dtypes=(torch.float16,)),
         )
     ),
     OpInfo('nn.functional.normalize',

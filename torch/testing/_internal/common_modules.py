@@ -20,7 +20,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_nn import (
     cosineembeddingloss_reference, cross_entropy_loss_reference, ctcloss_reference,
-    hingeembeddingloss_reference, huberloss_reference, kldivloss_reference,
+    hingeembeddingloss_reference, huberloss_reference, kldivloss_reference, linear_cross_entropy_loss_reference,
     marginrankingloss_reference, multimarginloss_reference, multilabelmarginloss_reference,
     nllloss_reference, nlllossNd_reference, smoothl1loss_reference, softmarginloss_reference, get_reduction)
 from torch.testing._internal.common_utils import (
@@ -1654,6 +1654,116 @@ def module_inputs_torch_nn_CrossEntropyLoss(module_info, device, dtype, requires
                             desc=f"higher_dim_prob_target_{desc}_{reduction}",
                             reference_fn=reference_fn)
             )
+            module_inputs.append(
+                ModuleInput(constructor_input=FunctionInput(reduction=reduction, **constructor_kwargs),
+                            forward_input=FunctionInput(make_input((3,)),
+                                                        make_target((), low=0, high=3)),
+                            desc=f"no_batch_dim_{desc}_{reduction}",
+                            reference_fn=partial(no_batch_dim_reference_fn, is_criterion=True))
+            )
+
+    return module_inputs
+
+
+def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, requires_grad, training, **kwargs):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_target = partial(make_tensor, device=device, dtype=torch.long, requires_grad=False)
+    make_linear_weight = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+    make_linear_bias = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+
+    def make_linear_args(N, M):
+        b = make_linear_bias((N,))
+        w = make_linear_weight((N, M))
+        return {'linear_weight': w,
+                'linear_bias': b,
+                }
+
+    reductions: list[str] = ['mean', 'sum', 'none']
+    cases: list[tuple[str, dict]] = [
+        ('', {}),
+        ('ignore_index', {'ignore_index': 1}),
+        ('label_smoothing', {'label_smoothing': 0.15}),
+        ('ignore_index_label_smoothing', {'ignore_index': 1, 'label_smoothing': 0.5})
+    ]
+
+    module_inputs = []
+    for reduction, (desc, constructor_kwargs_) in product(reductions, cases):
+
+        def reference_fn(m, p, i, t, reduction=reduction, constructor_kwargs=None):
+            constructor_kwargs = constructor_kwargs.copy()
+            lw = constructor_kwargs.pop("linear_weight")
+            return linear_cross_entropy_loss_reference(i, lw, t, reduction=reduction, **constructor_kwargs)
+
+        constructor_kwargs = dict(constructor_kwargs_, **make_linear_args(5, 5))
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(reduction=reduction, **constructor_kwargs),
+                        forward_input=FunctionInput(make_input((2, 3, 5, 5)),
+                                                    make_target((2, 5, 5), low=0, high=3)),
+                        desc=f"4d_{desc}_{reduction}",
+                        reference_fn=partial(reference_fn, constructor_kwargs=constructor_kwargs))
+        )
+        constructor_kwargs = dict(constructor_kwargs_, **make_linear_args(5, 5))
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(reduction=reduction, **constructor_kwargs),
+                        forward_input=FunctionInput(make_input((2, 3, 5)),
+                                                    make_target((2, 5), low=0, high=3)),
+                        desc=f"3d_{desc}_{reduction}",
+                        reference_fn=partial(reference_fn, constructor_kwargs=constructor_kwargs))
+        )
+        constructor_kwargs = dict(constructor_kwargs_, **make_linear_args(3, 5))
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(reduction=reduction, **constructor_kwargs),
+                        forward_input=FunctionInput(make_input((2, 5)),
+                                                    make_target((2), low=0, high=3)),
+                        desc=f"2d_{desc}_{reduction}",
+                        reference_fn=partial(reference_fn, constructor_kwargs=constructor_kwargs))
+        )
+        constructor_kwargs = dict(constructor_kwargs_, **make_linear_args(2, 1))
+        module_inputs.append(
+            ModuleInput(constructor_input=FunctionInput(reduction=reduction, **constructor_kwargs),
+                        forward_input=FunctionInput(make_input((2, 3, 5, 5, 2, 1)),
+                                                    make_target((2, 5, 5, 2, 2), low=0, high=3)),
+                        desc=f"higher_dim_{desc}_{reduction}",
+                        reference_fn=partial(reference_fn, constructor_kwargs=constructor_kwargs))
+        )
+
+        if constructor_kwargs_.get('ignore_index', None) is None:
+            constructor_kwargs = dict(constructor_kwargs_, **make_linear_args(2, 2))
+            module_inputs.append(
+                ModuleInput(constructor_input=FunctionInput(reduction=reduction, **constructor_kwargs),
+                            forward_input=FunctionInput(make_input((5, 3, 4, 2)),
+                                                        make_input((5, 3, 4, 2)).softmax(dim=1)),
+                            desc=f"4d_prob_target_{desc}_{reduction}",
+                            reference_fn=partial(reference_fn, constructor_kwargs=constructor_kwargs))
+            )
+            constructor_kwargs = dict(constructor_kwargs_, **make_linear_args(4, 4))
+            module_inputs.append(
+                ModuleInput(constructor_input=FunctionInput(reduction=reduction, **constructor_kwargs),
+                            forward_input=FunctionInput(make_input((5, 3, 4)),
+                                                        make_input((5, 3, 4)).softmax(dim=1)),
+                            desc=f"3d_prob_target_{desc}_{reduction}",
+                            reference_fn=partial(reference_fn, constructor_kwargs=constructor_kwargs))
+            )
+
+            constructor_kwargs = dict(constructor_kwargs_, **make_linear_args(3, 2))
+            module_inputs.append(
+                ModuleInput(constructor_input=FunctionInput(reduction=reduction, **constructor_kwargs),
+                            forward_input=FunctionInput(make_input((5, 2)),
+                                                        make_input((5, 3)).softmax(dim=1)),
+                            desc=f"2d_prob_target_{desc}_{reduction}",
+                            reference_fn=partial(reference_fn, constructor_kwargs=constructor_kwargs))
+            )
+
+            constructor_kwargs = dict(constructor_kwargs_, **make_linear_args(2, 2))
+            module_inputs.append(
+                ModuleInput(constructor_input=FunctionInput(reduction=reduction, **constructor_kwargs),
+                            forward_input=FunctionInput(make_input((2, 3, 5, 5, 2, 2)),
+                                                        make_input((2, 3, 5, 5, 2, 2)).softmax(dim=1)),
+                            desc=f"higher_dim_prob_target_{desc}_{reduction}",
+                            reference_fn=partial(reference_fn, constructor_kwargs=constructor_kwargs))
+            )
+
+            constructor_kwargs = dict(constructor_kwargs_, **make_linear_args(3, 3))
             module_inputs.append(
                 ModuleInput(constructor_input=FunctionInput(reduction=reduction, **constructor_kwargs),
                             forward_input=FunctionInput(make_input((3,)),
@@ -4054,6 +4164,21 @@ module_db: list[ModuleInfo] = [
                                 device_type='cuda'),
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity", dtypes=[torch.float16],
                                 device_type='xpu'),),
+               ),
+    ModuleInfo(torch.nn.LinearCrossEntropyLoss,
+               module_inputs_func=module_inputs_torch_nn_LinearCrossEntropyLoss,
+               dtypes=get_all_fp_dtypes(include_half=not True,  # TODO: include half
+                                        include_bfloat16=False),
+               decorators=(
+                   # No channels_last support for loss functions.
+                   DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format'),
+                   # DecorateInfo(toleranceOverride({torch.float16: tol(atol=3e-2, rtol=1e-3)}), "TestModule",
+                   #             "test_forward", dtypes=[torch.float16], device_type='cpu'),
+                   # DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity", dtypes=[torch.float16],
+                   #             device_type='cuda'),
+                   # DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity", dtypes=[torch.float16],
+                   #             device_type='xpu'),
+               ),
                ),
     ModuleInfo(torch.nn.CTCLoss,
                module_inputs_func=module_inputs_torch_nn_CTCLoss,
