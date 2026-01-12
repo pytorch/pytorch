@@ -33,7 +33,7 @@
 
     {% if NEEDS_BLOCK_MASK %}
     @cute.jit
-    def mask_mod(b_idx, h_idx, q_idx, kv_idx, aux_tensors):
+    def mask_mod(b_idx, h_idx, q_idx, kv_idx, seqlen_info, aux_tensors):
         {{unpack_buffers("aux_tensors", indent_width=8)}}
         {{ modification(
         subgraph_number=1,
