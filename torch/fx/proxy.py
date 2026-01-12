@@ -667,9 +667,6 @@ class Proxy:
                 "call_method", orig_method.__name__, args, kwargs
             )
         else:
-            if isinstance(orig_method, torch._ops.HigherOrderOperator):
-                # TODO: Define how to symbolically trace HigherOrderOperators
-                raise RuntimeError("Unable to symbolically trace HigherOrderOperators")
             return tracer.create_proxy(
                 "call_function",
                 orig_method,
