@@ -24,8 +24,8 @@ if not dist.is_available():
 from torch.testing._internal.common_distributed import (
     DistributedTestBase,
     MultiThreadedTestCase,
+    require_accelerator_for_each_rank,
     requires_accelerator_dist_backend,
-    skip_if_no_gpu,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -500,7 +500,7 @@ def with_comms(func=None):
 
 
 class TestCollectivesWithDistributedBackend(DistributedTestBase):
-    @skip_if_no_gpu
+    @require_accelerator_for_each_rank
     @with_comms()
     def test_all_gather_into_tensor_coalesced(self, device):
         tensors = [
@@ -574,7 +574,7 @@ class TestCollectivesWithDistributedBackend(DistributedTestBase):
         compiled_allreduce(torch.randn(8, device=device), self.pg)
 
     @unittest.skipIf(not HAS_GPU, "Inductor+gpu needs triton and recent GPU arch")
-    @skip_if_no_gpu
+    @require_accelerator_for_each_rank
     def test_tracing_with_fakepg(self, device=DEVICE):
         def allreduce(t, pg):
             return ft_c.all_reduce(t, "sum", pg)
@@ -616,7 +616,7 @@ class TestDistributedBackendCollectivesWithWorldSize4(
     def world_size(self):
         return 4
 
-    @skip_if_no_gpu
+    @require_accelerator_for_each_rank
     @with_comms()
     def test_permute_tensor_with_sub_group(self, device):
         mesh_dim_names = ["dp", "tp"]

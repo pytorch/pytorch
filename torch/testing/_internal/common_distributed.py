@@ -137,6 +137,20 @@ def exit_if_lt_x_accelerators(x: int):
         sys.exit(TEST_SKIPS[f"multi-gpu-{x}"].exit_code)
 
 
+def require_accelerator_for_each_rank(func):
+    """Check that at least `self.world_size` accelerators are available.
+    Skip early if none are available."""
+
+    @wraps(func)
+    def wrapper(self, *args, **kwargs):
+        exit_if_lt_x_accelerators(self.world_size)
+        return func(self, *args, **kwargs)
+
+    return unittest.skipUnless(
+        torch.accelerator.current_accelerator is not None, TEST_SKIPS["no_cuda"].message
+    )(wrapper)
+
+
 def skip_if_no_gpu(func):
     """Skips if the world size exceeds the number of GPUs, ensuring that if the
     test is run, each rank has its own GPU via ``torch.cuda.device(rank)``."""
