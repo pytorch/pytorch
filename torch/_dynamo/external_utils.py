@@ -178,7 +178,7 @@ def call_hook_from_backward_state(
     return getattr(bw_state, hook_name)(*args, **kwargs)
 
 
-class ApplyBackwardHook(torch.autograd.Function):
+class _ApplyBackwardHook(torch.autograd.Function):
     """Custom autograd function that applies a hook during backward.
 
     This is used to implement register_hook on intermediate tensors without

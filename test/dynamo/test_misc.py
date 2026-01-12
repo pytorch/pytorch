@@ -14706,6 +14706,50 @@ def forward(self, L_x_ : torch.Tensor):
 
         self.assertEqual(x_eager.grad, x_compiled.grad)
 
+    def test_hook_on_intermediate_from_split(self):
+        def fn(x):
+            splits = x.split(2)
+            result = torch.cat(splits)  # use splits before register_hook
+            y = splits[0]
+            y.register_hook(lambda g: g + 1)
+            return result.sum() + y.sum()
+
+        x_eager = torch.ones(6, requires_grad=True)
+        result_eager = fn(x_eager)
+        result_eager.backward()
+
+        x_compiled = torch.ones(6, requires_grad=True)
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        result_compiled = compiled_fn(x_compiled)
+        result_compiled.backward()
+
+        self.assertEqual(x_eager.grad, x_compiled.grad)
+
+        backend = torch._dynamo.testing.EagerAndRecordGraphs()
+        torch.compile(fn, backend=backend, fullgraph=True)(
+            torch.ones(6, requires_grad=True)
+        )
+        self.assertEqual(len(backend.graphs), 1)
+        self.assertExpectedInline(
+            backend.graphs[0].code.strip(),
+            """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    split = l_x_.split(2);  l_x_ = None
+    y = split[0]
+    fwd_body_0 = self.fwd_body_0
+    bwd_body_0 = self.bwd_body_0
+    autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, y, non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = y = None
+    getitem_3 = autograd_function_apply[0];  autograd_function_apply = None
+    getitem_1 = split[1]
+    getitem_2 = split[2];  split = None
+    result = torch.cat((getitem_3, getitem_1, getitem_2));  getitem_1 = getitem_2 = None
+    sum_1 = result.sum();  result = None
+    sum_2 = getitem_3.sum();  getitem_3 = None
+    add = sum_1 + sum_2;  sum_1 = sum_2 = None
+    return (add,)""",
+        )
+
     @unittest.skipIf(not TEST_CUDA, "This test requires a CUDA device")
     def test_module_to_move_compile(self):
         class Model(torch.nn.Module):

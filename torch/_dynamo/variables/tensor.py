@@ -52,7 +52,7 @@ from ..exc import (
     UserError,
     UserErrorType,
 )
-from ..external_utils import ApplyBackwardHook, call_hook_from_backward_state
+from ..external_utils import _ApplyBackwardHook, call_hook_from_backward_state
 from ..guards import GuardBuilder, install_guard
 from ..source import AttrSource
 from ..utils import (
@@ -1668,7 +1668,7 @@ class TensorVariable(VariableTracker):
             # The algo works by:
             #    1. When we see a hook, create a node with custom autograd function apply (y')
             #    2. Move the custom autograd node just after definition of the intermediate tensor (y in above),
-            #       this ensures that all the other nodes that reference y refers to y' instead.
+            #       THEN update references to y with y'.
             # As a result of this algo, above example turns into:
             # def fn(x):
             #     y = x * 2
@@ -1684,7 +1684,7 @@ class TensorVariable(VariableTracker):
             users_to_replace = list(tensor_node.users.keys())
 
             # Create the ApplyBackwardHook call
-            apply_hook_var = variables.AutogradFunctionVariable(ApplyBackwardHook)
+            apply_hook_var = variables.AutogradFunctionVariable(_ApplyBackwardHook)
             result = apply_hook_var.call_apply(tx, [self, hook], {})
 
             # Get the hooked tensor's node (this is the getitem node)
