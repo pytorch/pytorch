@@ -21,6 +21,7 @@ compilation boundaries and optimize PyTorch programs effectively.
 
 import abc
 import builtins
+import contextlib
 import copy
 import dataclasses
 import functools
@@ -3795,27 +3796,35 @@ The reason to have this flag is that if the upper level function call (e.g, f2) 
 we don't want to inline the lower level function call (e.g, f3) by default.
 """
 
-_force_inline = False
-
-import contextlib
+_force_inline_flag = False
 
 
 @contextlib.contextmanager
-def force_inline() -> Iterator[None]:
-    global _force_inline
-    old_val = _force_inline
+def _force_inline() -> Iterator[None]:
+    """
+    A context manager used within the dynamo codebase that forces a function
+    and nested function calls to be inlined during dynamo tracing.
+
+    When active, check_verbose() will skip all inline/skip decision logic and
+    always return SkipResult(False, ...), meaning functions will be inlined.
+
+    See _make_inlined() in higher_order_ops.py which uses this to ensure that
+    a python function is fully traced to produce the needed variable trackers.
+    """
+    global _force_inline_flag
+    old_val = _force_inline_flag
     try:
-        _force_inline = True
+        _force_inline_flag = True
         yield
     finally:
-        _force_inline = old_val
+        _force_inline_flag = old_val
 
 
 def check_verbose(obj: Any, is_inlined_call: bool = False) -> SkipResult:
-    if _force_inline:
+    if _force_inline_flag:
         return SkipResult(
             False,
-            "don't skip since it's marked as force inline",
+            "don't skip because we're inside _force_inline() context",
         )
 
     if isinstance(
