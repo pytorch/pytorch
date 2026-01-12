@@ -631,8 +631,9 @@ class CompiledFxGraph(OutputCode):
         try:
             # Checking the profiler directly is faster than nullcontext
             if torch.autograd.profiler._is_profiler_enabled:
-                with record_function(
-                    f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##"
+                with torch._C._profiler._RecordFunctionFast(
+                    f"## Call CompiledFxGraph {self._fx_graph_cache_key} ##",
+                    keyword_values={"scope": "user_scope"},
                 ):
                     return self.current_callable(inputs)
             else:
@@ -942,7 +943,7 @@ class RegionalOutputCode(OutputCode):
     )
 
     # The actual graph module (cleared during serialization)
-    _graph_module: Optional[torch.fx.GraphModule] = dataclasses.field(
+    _graph_module: Optional[torch.nn.Module] = dataclasses.field(
         default=None, init=False
     )
 
@@ -965,8 +966,13 @@ class RegionalOutputCode(OutputCode):
         super().__init__()
         self._graph_module = graph_module
         self._serialized_graph_module = None
-        self._ops_filter = ops_filter
+        self._serialized_wrappers = []
         self._boxed_call = True
+        _, module = self._unwrap_graph_module()
+        self._inner_boxed_call = isinstance(
+            module.graph._codegen, torch.fx.graph._BoxedCodeGen
+        )
+        self._ops_filter = ops_filter
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
         """Execute the regional compiled graph."""
@@ -975,7 +981,33 @@ class RegionalOutputCode(OutputCode):
                 "RegionalOutputCode has no graph module loaded. "
                 "Did you forget to call post_compile()?"
             )
+
+        if self._inner_boxed_call:
+            return self._graph_module(inputs)
         return self._graph_module(*inputs)
+
+    @property
+    def graph(self):
+        _, module = self._unwrap_graph_module()
+        return module.graph
+
+    def _unwrap_graph_module(
+        self,
+    ) -> tuple[list[tuple[Callable, dict[str, Any]]], torch.fx.GraphModule]:
+        module = self._graph_module
+        serialized_wrappers = []
+        if isinstance(module, torch._dynamo.OptimizedModule):
+            dynamo_ctx = module.dynamo_ctx
+            assert isinstance(dynamo_ctx, torch._dynamo.eval_frame.DisableContext)
+            serialized_wrappers.append(
+                (
+                    torch._dynamo.disable,
+                    {"reason": dynamo_ctx.msg, "wrapping": dynamo_ctx.wrapping},
+                )
+            )
+            module = module._orig_mod
+        assert isinstance(module, torch.fx.GraphModule)
+        return serialized_wrappers, module
 
     def post_compile(
         self,
@@ -1008,6 +1040,8 @@ class RegionalOutputCode(OutputCode):
         gm = GraphPickler.loads(self._serialized_graph_module, fake_mode)
         assert isinstance(gm, torch.fx.GraphModule)
         gm.recompile()
+        for fn, kwargs in reversed(self._serialized_wrappers):
+            gm = fn(gm, **kwargs)
         self._graph_module = gm
 
     def set_triton_bundle(self, triton_bundle: Any) -> None:
@@ -1024,9 +1058,14 @@ class RegionalOutputCode(OutputCode):
         if self._graph_module is not None:
             from torch.fx._graph_pickler import GraphPickler, Options
 
+            self._serialized_graph_module = None
+            self._serialized_wrappers, graph_module = self._unwrap_graph_module()
+
             self._serialized_graph_module = GraphPickler.dumps(
-                self._graph_module,
-                Options(ops_filter=self._ops_filter),
+                graph_module,
+                options=Options(
+                    ops_filter=self._ops_filter,
+                ),
             )
             # Clear the graph module to avoid pickling it with standard pickle
             self._graph_module = None
