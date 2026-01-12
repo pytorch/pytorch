@@ -214,7 +214,7 @@ class _FlatLayout:
 
 
 @dataclass(frozen=True)
-class _ListOfFlatLayouts:
+class _ListOfFlatLayouts(Sequence[_FlatLayout]):
     """
     A list of normalized layouts, one per mesh dimension.
 
@@ -382,17 +382,13 @@ class _ListOfFlatLayouts:
         assert rank_map.is_contiguous()
         assert rank_map.numel() >= self.cosize()
 
-        complement_layout = self.merge_axes_into_one().complement(rank_map.numel())
+        self_layout = self.merge_axes_into_one()
+        complement_layout = self_layout.complement(rank_map.numel())
 
-        shapes: list[int] = [*complement_layout.shape]
-        strides: list[int] = [*complement_layout.stride]
-        for axis in self.axes:
-            shapes.extend(axis.shape)
-            strides.extend(axis.stride)
-
-        return rank_map.as_strided(tuple(shapes), tuple(strides)).reshape(
-            -1, *self.top_level_sizes
-        )
+        return rank_map.as_strided(
+            complement_layout.shape + self_layout.shape,
+            complement_layout.stride + self_layout.stride,
+        ).reshape(-1, *self.top_level_sizes)
 
     def __str__(self) -> str:
         axes_str = ", ".join(str(axis) for axis in self.axes)

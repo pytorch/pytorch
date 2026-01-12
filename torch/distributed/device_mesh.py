@@ -388,7 +388,7 @@ else:
             backend_override: BackendConfig,
         ) -> GroupName | None:
             # Generate a 2D global mesh tensor for the current dim for PG creation.
-            pg_ranks_by_dim = _MeshLayout((sub_layout,)).remap_to_tensor(rank_map)
+            pg_ranks_by_dim = _MeshLayout([sub_layout]).remap_to_tensor(rank_map)
             backend, pg_options = backend_override
             # We need to explicitly pass in timeout when specified in option, otherwise
             # the default timeout will be used to override the timeout set in option.
@@ -741,7 +741,7 @@ else:
                     f"Please specify another valid mesh_dim_name.",
                 )
 
-            flattened_mesh_layout = _MeshLayout((self._layout.merge_axes_into_one(),))
+            flattened_mesh_layout = _MeshLayout([self._layout.merge_axes_into_one()])
             # Quick return if the flatten mesh has been created before.
             if mesh_dim_name in root_mesh._flatten_mapping:
                 if (
@@ -807,7 +807,6 @@ else:
 
             # The slice mesh_dim_names should consist either the current device_mesh's mesh_dim_names
             # or its flattened mesh's mesh_dim_names if it's root_mesh.
-            # Note: flattened meshes have a single-axis _MeshLayout, so we extract that axis
             flatten_name_to_root_layout: dict[str, _FlatLayout] = (
                 {
                     key: mesh._layout[0]  # Extract the single axis from flattened mesh
@@ -887,7 +886,7 @@ else:
             """
             mesh_dim = self._get_mesh_dim_by_name(mesh_dim_name)
             layout = self._layout[mesh_dim]
-            pg_ranks_by_dim = _MeshLayout((layout,)).remap_to_tensor(self._rank_map)
+            pg_ranks_by_dim = _MeshLayout([layout]).remap_to_tensor(self._rank_map)
             cur_rank = self.get_rank()
             res_submeshes = []
             for mesh_1d in pg_ranks_by_dim:
@@ -1223,8 +1222,7 @@ else:
             concat_dim_group_name: list[GroupName] = []
             flatten_rank_map = device_mesh_list[0]._flatten_rank_map
             for dm in device_mesh_list:
-                for i in range(len(dm._layout)):
-                    concat_axes.append(dm._layout[i])
+                concat_axes.extend(dm._layout)
                 concat_dim_names.extend(not_none(dm.mesh_dim_names))
                 concat_dim_group_name.extend(not_none(dm._dim_group_names))
                 # Concatenate device mesh having different root mesh tensors are meaningless
