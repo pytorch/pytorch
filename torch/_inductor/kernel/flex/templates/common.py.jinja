@@ -5,6 +5,8 @@
 def forward_block_mn(
     {{gen_argdefs()}},
     q, K, V, desc_k, desc_v, Q_LEN, KV_LEN,
+    # Logical sequence lengths for mask_mod bounds (may differ from Q_LEN/KV_LEN for varlen)
+    LOGICAL_Q_LEN, LOGICAL_KV_LEN,
     # accumulated values
     acc, l_i, m_i,
     # Offsets
@@ -130,6 +132,8 @@ def forward_inner(
     q, K, V,
     KV_OFFSETS,
     desc_k, desc_v, Q_LEN, KV_LEN,
+    # Logical sequence lengths for mask_mod bounds (may differ from Q_LEN/KV_LEN for varlen)
+    LOGICAL_Q_LEN, LOGICAL_KV_LEN,
     # accumulated values
     acc, l_i, m_i,
     # Offsets used as inputs to score_mod & mask_mod
@@ -173,6 +177,7 @@ def forward_inner(
             acc, l_i, m_i = forward_block_mn(
                 {{gen_argdefs()}},
                 q, K, V, desc_k, desc_v, Q_LEN, KV_LEN,
+                LOGICAL_Q_LEN, LOGICAL_KV_LEN,
                 # accumulated values
                 acc, l_i, m_i,
                 # Offsets
@@ -193,6 +198,7 @@ def forward_inner(
             acc, l_i, m_i = forward_block_mn(
                 {{gen_argdefs()}},
                 q, K, V, desc_k, desc_v, Q_LEN, KV_LEN,
+                LOGICAL_Q_LEN, LOGICAL_KV_LEN,
                 # accumulated values
                 acc, l_i, m_i,
                 # Offsets

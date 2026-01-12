@@ -1,4 +1,4 @@
-{{def_kernel("Q", "K", "V", "LSE", "DELTA", "DO", "DQ", "DV", "KV_NUM_BLKS", "KV_IDX", "Q_NUM_BLKS", "Q_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "Q_OFFSETS", "KV_OFFSETS", "Q_LIMITS", "KV_LIMITS")}}
+{{def_kernel("Q", "K", "V", "LSE", "DELTA", "DO", "DQ", "DV", "KV_NUM_BLKS", "KV_IDX", "Q_NUM_BLKS", "Q_IDX", "FULL_KV_NUM_BLKS", "FULL_KV_IDX", "FULL_Q_NUM_BLKS", "FULL_Q_IDX", "Q_OFFSETS", "KV_OFFSETS", "Q_LIMITS", "KV_LIMITS", "LOGICAL_Q_LEN_BUF", "LOGICAL_KV_LEN_BUF")}}
     # Sub notation for this kernel:
     #
     # Q: Query, K: Key, V: Value
@@ -49,18 +49,24 @@
     ZKV = {{size("K", 0)}}
     KV_LEN = {{size("K", 2)}}
 
+    # Compute logical sequence lengths (for mask_mod bounds checking and grid iteration)
+    # For varlen, these are loaded from scalar tensors to avoid constexpr recompilation
+    # For non-varlen, logical lengths equal physical lengths
+    {%- if HAS_OFFSETS %}
+    LOGICAL_Q_LEN = tl.load(LOGICAL_Q_LEN_BUF).to(INDEX_DTYPE)
+    LOGICAL_KV_LEN = tl.load(LOGICAL_KV_LEN_BUF).to(INDEX_DTYPE)
+    {%- else %}
+    LOGICAL_Q_LEN = Q_LEN
+    LOGICAL_KV_LEN = KV_LEN
+    {%- endif %}
+
     MATMUL_PRECISION = Q.dtype.element_ty
 
     pid = tl.program_id(0).to(INDEX_DTYPE)
     # For varlen, use logical sequence lengths for grid iteration
     # (logical = padded to block boundaries, physical = actual data size)
-    {%- if HAS_OFFSETS %}
     NUM_KV_BLOCKS = tl.cdiv(LOGICAL_KV_LEN, BLOCK_N1)
     NUM_Q_BLOCKS = tl.cdiv(LOGICAL_Q_LEN, BLOCK_M2)
-    {%- else %}
-    NUM_KV_BLOCKS = tl.cdiv(KV_LEN, BLOCK_N1)
-    NUM_Q_BLOCKS = tl.cdiv(Q_LEN, BLOCK_M2)
-    {%- endif %}
 
     off_zq = tl.program_id(1).to(INDEX_DTYPE) # q batch idx
     off_hkv = tl.program_id(2).to(INDEX_DTYPE) # kv head idx
@@ -191,6 +197,7 @@
             stride_kn, stride_kd, stride_vn, stride_vd,
             kv_indices, sparse_kv_num_blocks,
             MATMUL_PRECISION,
+            LOGICAL_Q_LEN, LOGICAL_KV_LEN,
             IS_FULL_BLOCKS=False,
         )
 
@@ -222,6 +229,7 @@
                 stride_kn, stride_kd, stride_vn, stride_vd,
                 kv_indices, sparse_kv_num_blocks,
                 MATMUL_PRECISION,
+                LOGICAL_Q_LEN, LOGICAL_KV_LEN,
                 IS_FULL_BLOCKS=True,
             )
 
@@ -340,6 +348,7 @@
                 stride_qm, stride_qd, stride_dom, stride_dod,
                 q_indices, sparse_q_num_blocks,
                 MATMUL_PRECISION,
+                LOGICAL_Q_LEN, LOGICAL_KV_LEN,
                 IS_FULL_BLOCKS=False,
             )
 
@@ -372,6 +381,7 @@
                     stride_qm, stride_qd, stride_dom, stride_dod,
                     q_indices, sparse_q_num_blocks,
                     MATMUL_PRECISION,
+                    LOGICAL_Q_LEN, LOGICAL_KV_LEN,
                     IS_FULL_BLOCKS=True,
                 )
 
@@ -425,6 +435,8 @@ def bwd_dq_inner(
     stride_kn, stride_kd, stride_vn, stride_vd,
     kv_indices, sparse_kv_num_blocks,
     MATMUL_PRECISION,
+    # Logical sequence lengths for mask_mod bounds (may differ from Q_LEN/KV_LEN for varlen)
+    LOGICAL_Q_LEN, LOGICAL_KV_LEN,
     IS_FULL_BLOCKS,
 ):
     {{gen_defines() | indent_except_first(1) }}
@@ -479,6 +491,7 @@ def bwd_dq_inner(
         dq = bwd_dq_block_mn(
             {{gen_argdefs()}},
             dq, q, kT_ptrs, vT_ptrs, do, Di, lse, Q_LEN, KV_LEN,
+            LOGICAL_Q_LEN, LOGICAL_KV_LEN,
             off_z, off_hq, offs_m2, offs_n2, offs_k, offs_v,
             stride_kn, stride_kd, stride_vn, stride_vd,
             kv_indices, sparse_kv_num_blocks,
@@ -520,6 +533,8 @@ def bwd_dq_inner(
 def bwd_dq_block_mn(
     {{gen_argdefs()}},
     dq, q, kT_ptrs, vT_ptrs, do, Di, lse, Q_LEN, KV_LEN,
+    # Logical sequence lengths for mask_mod bounds (may differ from Q_LEN/KV_LEN for varlen)
+    LOGICAL_Q_LEN, LOGICAL_KV_LEN,
     off_z, off_hq, offs_m2, offs_n2, offs_k, offs_v,
     stride_kn, stride_kd, stride_vn, stride_vd,
     kv_indices, sparse_kv_num_blocks,
@@ -683,6 +698,8 @@ def bwd_dkdv_inner(
     stride_qm, stride_qd, stride_dom, stride_dod,
     q_indices, sparse_q_num_blocks,
     MATMUL_PRECISION,
+    # Logical sequence lengths for mask_mod bounds (may differ from Q_LEN/KV_LEN for varlen)
+    LOGICAL_Q_LEN, LOGICAL_KV_LEN,
     IS_FULL_BLOCKS,
 ):
     {{gen_defines() | indent_except_first(1) }}
@@ -742,6 +759,7 @@ def bwd_dkdv_inner(
             q_indices, sparse_q_num_blocks,
             MATMUL_PRECISION, RCP_LN2,
             IS_FULL_BLOCKS, q_limit, start_m,
+            LOGICAL_Q_LEN, LOGICAL_KV_LEN,
         )
         # Increment pointers.
         offset = get_offset_for_next_block(
@@ -783,6 +801,8 @@ def bwd_dkdv_block_mn(
     q_indices, sparse_q_num_blocks,
     MATMUL_PRECISION, RCP_LN2,
     IS_FULL_BLOCKS, q_limit, start_m,
+    # Logical sequence lengths for mask_mod bounds (may differ from Q_LEN/KV_LEN for varlen)
+    LOGICAL_Q_LEN, LOGICAL_KV_LEN,
 ):
     {{gen_defines() | indent_except_first(1) }}
 
