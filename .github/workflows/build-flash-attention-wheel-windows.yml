@@ -59,7 +59,15 @@ jobs:
         uses: pytorch/pytorch/.github/actions/checkout-pytorch@main
         with:
           no-sudo: true
-          submodules: true
+          submodules: false
+
+      - name: Checkout Flash-Attention
+        uses: actions/checkout@v4
+        with:
+          repository: Dao-AILab/flash-attention
+          ref: bc0e4ac01484ffb61ddc694724826bec4d9cf1c2
+          submodules: recursive
+          path: flash-attention
 
       - name: Setup Windows
         uses: ./.github/actions/setup-win
@@ -72,20 +80,24 @@ jobs:
         env:
           FA_FINAL_PACKAGE_DIR: ${{ runner.temp }}/artifacts
           PYTORCH_ROOT: ${{ github.workspace }}
+          FLASH_ATTENTION_FORCE_BUILD: "TRUE"
+          FLASH_ATTENTION_OFFLINE_BUILD: "TRUE"
         run: |
           set -x
           mkdir -p "${FA_FINAL_PACKAGE_DIR}"
 
           sed -i 's/if bare_metal_version != Version("12.8"):/if not is_offline_build() and bare_metal_version != Version("12.8"):/' \
-              third_party/flash-attention/hopper/setup.py
+              flash-attention/hopper/setup.py
 
           pushd .ci/pytorch
           cmd //c "call windows\\internal\\cuda_install.bat"
           popd
 
           python -m pip install torch --index-url "https://download.pytorch.org/whl/cu${CUDA_VERSION}"
+          python -m pip install einops packaging ninja numpy wheel setuptools
 
-          cmd //c "call .ci\\flash-attention\\build-windows.bat"
+          cd flash-attention/hopper
+          python setup.py bdist_wheel -d "${FA_FINAL_PACKAGE_DIR}" -k --plat-name win_amd64
 
           echo "Wheel built:"
           ls -la "${FA_FINAL_PACKAGE_DIR}"/*.whl || true
