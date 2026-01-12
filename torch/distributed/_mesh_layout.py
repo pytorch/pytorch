@@ -11,9 +11,9 @@ from typing import NoReturn
 import torch
 from torch.distributed._pycute import (
     as_tuple,
-    coalesce as pycute_coalesce,
-    complement as pycute_complement,
-    composition as pycute_composition,
+    coalesce,
+    complement,
+    composition,
     flatten,
     IntTuple,
     is_int,
@@ -62,7 +62,7 @@ class _FlatLayout:
         if not match_structure(shape, stride):
             raise ValueError(f"sizes {shape} and strides {stride} don't match")
 
-        coalesced_layout = pycute_coalesce(Layout(shape, stride))
+        coalesced_layout = coalesce(Layout(shape, stride))
         flat_shape = flatten(coalesced_layout.shape)
         flat_stride = flatten(coalesced_layout.stride)
 
@@ -97,6 +97,67 @@ class _FlatLayout:
 
     def numel(self) -> int:
         return math.prod(self.shape)
+
+    def composition(self, other: "_ListOfFlatLayouts") -> "_ListOfFlatLayouts":
+        """
+        By-dimension composition allows one layout to "select from" or "filter through" another layout.
+        Think of it as function composition: (self ∘ layout)(input) = self(layout(input))
+        between two layouts. This function is a wrapper of pycute's composition.
+
+        The composition preserves the structure of the right operand (other), returning a
+        _ListOfFlatLayouts with the same number of axes.
+
+        Mental model about how to understand the composition logic:
+        - The LEFT layout (self) defines the "output space" - what indices are possible
+        - The RIGHT layout (other parameter) acts as a "selector" - which specific indices to pick
+        - The composition only generates indices that the left layout could originally produce,
+          but the right layout determines which indices to be picked.
+        - The stride of the composition layout will not be smaller than the stride of the right layout,
+          because when picking the indices the composition will at least follow the the right layout's stride
+          to move forward.
+
+        Example:
+          self = (6,2):(2,1)      # sizes=(6,2), strides=(2,1)
+          other = _ListOfFlatLayouts with 2 axes: [(3,):(2,), (2,):(1,)]
+          self o other = _ListOfFlatLayouts with 2 axes preserving structure
+
+        Args:
+            other: A _ListOfFlatLayouts whose structure will be preserved in the result
+
+        Returns:
+            A _ListOfFlatLayouts with the same number of axes as other
+        """
+        result = composition(self.to_pycute(), other.to_pycute())
+        result_axes = [
+            _FlatLayout(shape, stride)
+            for shape, stride in zip(as_tuple(result.shape), as_tuple(result.stride))
+        ]
+        return _ListOfFlatLayouts(result_axes)
+
+    def complement(self, world_size: int) -> "_FlatLayout":
+        """
+        Compute the "complement layout" relative to a given world_size.
+        A complement layout fills in the "missing" factor so that: self repeat a layout of complement(self, world_size)
+        will get a complete world_size. We use ⊗ to denote the repeat operation.
+
+        Example:
+          self = (4:1)   # size=4, stride=1
+          world_size = 8
+          Then:
+            complete needed factor = 8 / 4 = 2
+            complement(self, 8) = (2:1)
+
+          Together they form:
+            (4:1) ⊗ (2:1) = (4,2):(2,1)
+          which has world_size = 4 * 2 = 8, as required.
+
+        In distributed terms, complement() is often used to derive the "other"
+        rank grouping when splitting processes into 2D meshes.
+
+        For a visualized explanation, see https://x.com/ezyang/status/1962364978393981433/
+        """
+        result = complement(self.to_pycute(), world_size)
+        return _FlatLayout(result.shape, result.stride)
 
     def codomain(self) -> list[int]:
         """
@@ -136,67 +197,6 @@ class _FlatLayout:
             sum(c * s for c, s in zip(coord, self.stride))
             for coord in product(*(range(s) for s in self.shape))
         ]
-
-    def complement(self, world_size: int) -> "_FlatLayout":
-        """
-        Compute the "complement layout" relative to a given world_size.
-        A complement layout fills in the "missing" factor so that: self repeat a layout of complement(self, world_size)
-        will get a complete world_size. We use ⊗ to denote the repeat operation.
-
-        Example:
-          self = (4:1)   # size=4, stride=1
-          world_size = 8
-          Then:
-            complete needed factor = 8 / 4 = 2
-            complement(self, 8) = (2:1)
-
-          Together they form:
-            (4:1) ⊗ (2:1) = (4,2):(2,1)
-          which has world_size = 4 * 2 = 8, as required.
-
-        In distributed terms, complement() is often used to derive the "other"
-        rank grouping when splitting processes into 2D meshes.
-
-        For a visualized explanation, see https://x.com/ezyang/status/1962364978393981433/
-        """
-        result = pycute_complement(self.to_pycute(), world_size)
-        return _FlatLayout(result.shape, result.stride)
-
-    def composition(self, other: "_ListOfFlatLayouts") -> "_ListOfFlatLayouts":
-        """
-        By-dimension composition allows one layout to "select from" or "filter through" another layout.
-        Think of it as function composition: (self ∘ layout)(input) = self(layout(input))
-        between two layouts. This function is a wrapper of pycute's composition.
-
-        The composition preserves the structure of the right operand (other), returning a
-        _ListOfFlatLayouts with the same number of axes.
-
-        Mental model about how to understand the composition logic:
-        - The LEFT layout (self) defines the "output space" - what indices are possible
-        - The RIGHT layout (other parameter) acts as a "selector" - which specific indices to pick
-        - The composition only generates indices that the left layout could originally produce,
-          but the right layout determines which indices to be picked.
-        - The stride of the composition layout will not be smaller than the stride of the right layout,
-          because when picking the indices the composition will at least follow the the right layout's stride
-          to move forward.
-
-        Example:
-          self = (6,2):(2,1)      # sizes=(6,2), strides=(2,1)
-          other = _ListOfFlatLayouts with 2 axes: [(3,):(2,), (2,):(1,)]
-          self o other = _ListOfFlatLayouts with 2 axes preserving structure
-
-        Args:
-            other: A _ListOfFlatLayouts whose structure will be preserved in the result
-
-        Returns:
-            A _ListOfFlatLayouts with the same number of axes as other
-        """
-        result = pycute_composition(self.to_pycute(), other.to_pycute())
-        result_axes = [
-            _FlatLayout(shape, stride)
-            for shape, stride in zip(as_tuple(result.shape), as_tuple(result.stride))
-        ]
-        return _ListOfFlatLayouts(result_axes)
 
     def to_pycute(self) -> Layout:
         """Convert to a pycute Layout for compatibility with pycute operations."""
