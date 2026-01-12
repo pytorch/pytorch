@@ -41,8 +41,15 @@ verify_correctness = False
 
 # Validate that fake_fn and real_fn in @leaf_function decorators produce outputs
 # with matching shapes and dtypes in eager mode. Helps catch mismatches early.
+# Disabled by default to avoid runtime overhead.
 # [@compile_ignored: debug]
-validate_leaf_function_outputs = True
+leaf_function_validate_outputs = False
+
+# Allow leaf function's fake_impl to reference real (non-fake) tensors in closures.
+# When True, real tensors are auto-converted to fake tensors. When False, an error
+# is raised if the fake_impl tries to use non-fake tensors.
+# [@compile_ignored: runtime_behaviour]
+leaf_function_allow_non_fake_inputs = False
 
 # need this many ops to create an FX graph (deprecated: not used)
 minimum_call_count = 1

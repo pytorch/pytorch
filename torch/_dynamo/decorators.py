@@ -265,9 +265,8 @@ def leaf_function(fn: Callable[..., Any]) -> Callable[..., Any]:
        data-dependent control flow like ``if x.sum() > 0:``), or when you don't want
        the annotated function to run multiple times during compilation (e.g., it
        produces side-effects). Output validation against the annotated function is
-       enabled by default; set
-       ``torch._dynamo.config.validate_leaf_function_outputs = False`` to disable
-       and reduce runtime overhead.
+       disabled by default to avoid runtime overhead; set
+       ``torch._dynamo.config.leaf_function_validate_outputs = True`` to enable.
 
     Dangerous patterns (apply to both usage options, may cause silent incorrectness):
         - Side effects: Don't rely on side effects for correctness.

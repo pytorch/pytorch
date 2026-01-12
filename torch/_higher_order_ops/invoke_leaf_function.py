@@ -16,11 +16,19 @@ from .flat_apply import func_to_graphable
 
 class LeafModuleState(NamedTuple):
     """
-    Represents an nn.Module's state for leaf function's nn module argument.
+    A pytree representation of an nn.Module for use in invoke_leaf_function.
 
-    This is used to pass nn module information through the FX graph:
-    - nn_module_index: Index to retrieve the original nn module from the side table
-      defined in graph_bytecode_inputs.py
+    In dynamo, nn.Module arguments to leaf functions are converted to this
+    pytree format (index, parameters, buffers). This structure is then
+    flattened to produce the actual inputs to invoke_leaf_function. At
+    runtime, the original module is reconstructed via pytree unflatten and
+    _reparametrize_module.
+
+    Fields:
+    - nn_module_index: Index to retrieve the original nn module at runtime.
+      See register_user_object() and get_external_object_by_index() in
+      graph_bytecode_inputs.py - objects are registered during tracing and
+      retrieved by index during graph execution.
     - named_parameters: Named parameters of the module, used to reparametrize
     - named_buffers: Named buffers of the module, used to reparametrize
     """
@@ -90,17 +98,6 @@ def reconstruct_original_args(
             is_leaf=lambda x: isinstance(x, LeafModuleState),
         )
         yield new_args, new_kwargs
-
-
-def invoke_with_flattened_inputs(
-    fn: Callable, input_spec: pytree.TreeSpec | None, *flat_args: Any
-) -> Any:
-    """
-    Invoke fn after reconstructing its original argument
-    structure (e.g. nn modules are restored).
-    """
-    with reconstruct_original_args(input_spec, flat_args) as (args, kwargs):
-        return fn(*args, **kwargs)
 
 
 def autograd_grad_with_mixed_inputs(
@@ -179,7 +176,8 @@ def _make_forward(
             arg.requires_grad_(True) if idx in requires_grad_indices else arg
             for idx, arg in enumerate(args)
         )
-        # Dynamically remove PythonDispatcher if the forward is called at runtime
+        # For fake_impl, it can be called at tracing time and runtime (for output validation).
+        # So dynamically remove PythonDispatcher if the forward is called at runtime
         effective_keys = include_keys
         if include_keys.has(DispatchKey.PythonDispatcher):
             current_include = torch._C._dispatch_tls_local_include_set()
@@ -187,7 +185,11 @@ def _make_forward(
                 effective_keys = include_keys.remove(DispatchKey.PythonDispatcher)
         with torch._C._ForceDispatchKeyGuard(effective_keys, exclude_keys):
             with torch.enable_grad():
-                state["outputs"] = invoke_with_flattened_inputs(fn, input_spec, *args)
+                with reconstruct_original_args(input_spec, args) as (
+                    new_args,
+                    new_kwargs,
+                ):
+                    state["outputs"] = fn(*new_args, **new_kwargs)
         return state["outputs"]
 
     return forward, state
@@ -202,15 +204,9 @@ def make_runtime_wrappers(
 ) -> tuple[Callable, Callable]:
     """
     Create forward/backward wrappers for runtime execution.
-
-    Removes PythonDispatcher from dispatch keys (only needed during tracing).
     """
-    effective_keys = include_keys
-    if include_keys.has(DispatchKey.PythonDispatcher):
-        effective_keys = include_keys.remove(DispatchKey.PythonDispatcher)
-
     forward, state = _make_forward(
-        fn, requires_grad_indices, input_spec, effective_keys, exclude_keys
+        fn, requires_grad_indices, input_spec, include_keys, exclude_keys
     )
 
     def backward(*grads):
@@ -411,7 +407,8 @@ def _invoke_leaf_function_impl(fn_spec, input_spec, *flat_args):
     """
     fn = unwrap_fn_spec(fn_spec)
     flat_args = _detach_tensors(flat_args)
-    out = invoke_with_flattened_inputs(fn, input_spec, *flat_args)
+    with reconstruct_original_args(input_spec, flat_args) as (args, kwargs):
+        out = fn(*args, **kwargs)
     return _detach_tensors(out)
 
 
@@ -440,10 +437,16 @@ def _allow_non_fake_inputs() -> Generator[None, None, None]:
     """
     Context manager to temporarily allow non-fake inputs in fake tensor mode.
 
-    This is needed for leaf functions where fake_impl may capture real constant
-    tensors in its closure. These will be auto-converted to fake tensors.
+    This is controlled by torch._dynamo.config.leaf_function_allow_non_fake_inputs.
+    When enabled, real tensors in closures are auto-converted to fake tensors.
+    When disabled (default), an error is raised if fake_impl uses non-fake tensors.
     """
+    from torch._dynamo import config as dynamo_config
     from torch._subclasses.fake_tensor import fake_tensor_tls
+
+    if not dynamo_config.leaf_function_allow_non_fake_inputs:
+        yield
+        return
 
     old_override = fake_tensor_tls.allow_non_fake_inputs_override
     try:
@@ -474,7 +477,7 @@ def invoke_leaf_function_dense(real_fn_spec, fake_fn_spec, input_spec, *flat_arg
     _check_no_input_mutation(flat_args, version_before)
 
     # Validate fake_impl outputs match real_impl outputs when enabled
-    if dynamo_config.validate_leaf_function_outputs:
+    if dynamo_config.leaf_function_validate_outputs:
         fake_output = _invoke_leaf_function_impl(fake_fn_spec, input_spec, *flat_args)
         _validate_outputs_match(fake_output, real_output)
 

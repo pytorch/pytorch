@@ -3294,6 +3294,7 @@ class GraphModule(torch.nn.Module):
         self.assertEqual(result[0], result_compiled[0])
 
     def test_leaf_function_no_fake_fn_with_constant_tensor_closure(self):
+        import torch._dynamo.config as config
         from torch._dynamo.decorators import leaf_function
 
         constant_weight = torch.randn(3, 3)
@@ -3315,11 +3316,14 @@ class GraphModule(torch.nn.Module):
         expected = x @ constant_weight
         self.assertEqual(result[0], expected)
 
-        compiled_mod = torch.compile(mod, backend="eager", fullgraph=True)
-        result_compiled = compiled_mod(x)
-        self.assertEqual(result[0], result_compiled[0])
+        # Need to allow non-fake inputs since forward captures constant_weight
+        with config.patch(leaf_function_allow_non_fake_inputs=True):
+            compiled_mod = torch.compile(mod, backend="eager", fullgraph=True)
+            result_compiled = compiled_mod(x)
+            self.assertEqual(result[0], result_compiled[0])
 
     def test_leaf_function_validation_shape_mismatch(self):
+        import torch._dynamo.config as config
         from torch._dynamo.decorators import leaf_function
 
         class MismatchedModule(torch.nn.Module):
@@ -3338,11 +3342,13 @@ class GraphModule(torch.nn.Module):
         mod = MismatchedModule()
         x = torch.randn(3, 3)
 
-        compiled_mod = torch.compile(mod, backend="eager")
-        with self.assertRaisesRegex(RuntimeError, "Shape mismatch"):
-            compiled_mod(x)
+        with config.patch(leaf_function_validate_outputs=True):
+            compiled_mod = torch.compile(mod, backend="eager")
+            with self.assertRaisesRegex(RuntimeError, "Shape mismatch"):
+                compiled_mod(x)
 
     def test_leaf_function_validation_dtype_mismatch(self):
+        import torch._dynamo.config as config
         from torch._dynamo.decorators import leaf_function
 
         class DtypeMismatchModule(torch.nn.Module):
@@ -3361,11 +3367,13 @@ class GraphModule(torch.nn.Module):
         mod = DtypeMismatchModule()
         x = torch.randn(3, 3)
 
-        compiled_mod = torch.compile(mod, backend="eager")
-        with self.assertRaisesRegex(RuntimeError, "Dtype mismatch"):
-            compiled_mod(x)
+        with config.patch(leaf_function_validate_outputs=True):
+            compiled_mod = torch.compile(mod, backend="eager")
+            with self.assertRaisesRegex(RuntimeError, "Dtype mismatch"):
+                compiled_mod(x)
 
     def test_leaf_function_validation_structure_mismatch(self):
+        import torch._dynamo.config as config
         from torch._dynamo.decorators import leaf_function
 
         class StructureMismatchModule(torch.nn.Module):
@@ -3384,9 +3392,10 @@ class GraphModule(torch.nn.Module):
         mod = StructureMismatchModule()
         x = torch.randn(3, 3)
 
-        compiled_mod = torch.compile(mod, backend="eager")
-        with self.assertRaises((RuntimeError, AssertionError)):
-            compiled_mod(x)
+        with config.patch(leaf_function_validate_outputs=True):
+            compiled_mod = torch.compile(mod, backend="eager")
+            with self.assertRaises((RuntimeError, AssertionError)):
+                compiled_mod(x)
 
     def test_leaf_function_validation_disabled(self):
         import torch._dynamo.config as config
@@ -3409,7 +3418,7 @@ class GraphModule(torch.nn.Module):
         x = torch.randn(3, 3)
 
         # With validation disabled, shape mismatch should not raise
-        with config.patch(validate_leaf_function_outputs=False):
+        with config.patch(leaf_function_validate_outputs=False):
             compiled_mod = torch.compile(mod, backend="eager")
             result = compiled_mod(x)
             self.assertEqual(result[0].shape, (3, 3))
