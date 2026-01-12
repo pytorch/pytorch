@@ -75,6 +75,9 @@ jobs:
           set -x
           mkdir -p "${FA_FINAL_PACKAGE_DIR}"
 
+          sed -i 's/if bare_metal_version >= Version("12.3")/if not is_offline_build() and bare_metal_version >= Version("12.3")/' \
+              third_party/flash-attention/hopper/setup.py
+
           pushd .ci/pytorch
           cmd //c "call windows\\internal\\cuda_install.bat"
           popd
