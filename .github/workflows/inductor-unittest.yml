@@ -65,7 +65,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: linux-jammy-py3.12-gcc11
+      build-environment: linux-jammy-py3.12-gcc11-halide
       docker-image-name: ci-image:pytorch-linux-jammy-py3.12-halide
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
@@ -89,7 +89,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: linux-jammy-py3.12-gcc11
+      build-environment: linux-jammy-py3.12-gcc11-pallas
       docker-image-name: ci-image:pytorch-linux-jammy-py3.12-pallas
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |
@@ -113,7 +113,7 @@ jobs:
     uses: ./.github/workflows/_linux-build.yml
     needs: get-label-type
     with:
-      build-environment: linux-jammy-py3.12-gcc11
+      build-environment: linux-jammy-py3.12-gcc11-triton-cpu
       docker-image-name: ci-image:pytorch-linux-jammy-py3.12-triton-cpu
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       test-matrix: |

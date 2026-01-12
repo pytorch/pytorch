@@ -5,9 +5,12 @@ from __future__ import annotations
 import argparse
 import json
 import sys
+from argparse import Namespace
 from typing import Any
 
 import yaml
+
+# pyrefly: ignore [missing-import]
 from gen_op_registration_allowlist import (
     canonical_name,
     gen_transitive_closure,
@@ -197,6 +200,7 @@ def create_debug_info_from_selected_models(
         asset = model_info["asset"]
         hash = model_info["md5_hash"]
 
+        # pyrefly: ignore [missing-attribute]
         asset_info = model_dict["asset_info"].setdefault(asset, {})
 
         asset_info.setdefault("md5_hash", []).append(hash)
@@ -205,7 +209,7 @@ def create_debug_info_from_selected_models(
     output["debug_info"] = [json.dumps(model_dict)]
 
 
-def fill_output(output: dict[str, object], options: object) -> None:
+def fill_output(output: dict[str, object], options: Namespace) -> None:
     """Populate the output dict with the information required to serialize
     the YAML file used for selective build.
     """
@@ -310,6 +314,7 @@ def fill_output(output: dict[str, object], options: object) -> None:
             all_build_features = all_build_features | set(model_info["build_features"])
 
     # This following section on transitive closure is relevant to static build only
+    # pyrefly: ignore [bad-argument-type]
     canonical_root_ops = canonical_opnames(static_root_ops)
     # If no canonical_root_ops exist, don't compute the transitive closure
     # otherwise, we will include __BASE__ and __ROOT__ ops and mark them as required
@@ -319,6 +324,7 @@ def fill_output(output: dict[str, object], options: object) -> None:
     else:
         closure_op_list = set()
 
+    # pyrefly: ignore [bad-argument-type]
     canonical_training_root_ops = canonical_opnames(static_training_root_ops)
     # If no canonical_training_root_ops exist, don't compute the transitive closure
     # otherwise, we will include __BASE__ and __ROOT__ ops and mark them as required
@@ -609,7 +615,7 @@ def main(argv) -> None:
         "asset_info": {},
         "is_new_style_rule": False,
     }
-    output = {
+    output: dict[str, object] = {
         "debug_info": [json.dumps(model_dict)],
     }
 
