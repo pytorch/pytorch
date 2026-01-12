@@ -2,7 +2,6 @@ import argparse
 import sys
 
 import torch
-
 from .utils import Event, gen_sparse_coo, gen_sparse_coo_and_csr, gen_sparse_csr
 
 

@@ -19,7 +19,6 @@ except ImportError:
 import audio_text_models
 import ppl_models
 import vision_models
-
 from utils import GetterType, InputsType, TimingResultType, to_markdown_table, VType
 
 
