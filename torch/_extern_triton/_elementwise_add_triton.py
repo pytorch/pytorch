@@ -95,6 +95,15 @@ class ElementwiseAddLibFinder:
             torch_lib = os.path.join(os.path.dirname(torch.__file__), "lib")
             lib_path = os.path.join(torch_lib, "elementwise_add.bc")
             paths.append(lib_path)
+
+            # Also check CMAKE_LIBRARY_OUTPUT_DIRECTORY path (build directory)
+            build_lib = os.path.join(
+                os.path.dirname(os.path.dirname(torch.__file__)),
+                "build",
+                "lib",
+                "elementwise_add.bc",
+            )
+            paths.append(build_lib)
         except ImportError:
             pass
 
