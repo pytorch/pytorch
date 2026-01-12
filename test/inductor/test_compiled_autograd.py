@@ -5398,7 +5398,6 @@ class TestCompiledAutogradOpInfo(TestCase):
         super(TestCase, self).tearDown()
         reset()
 
-    @skipIfXpu(msg="NotImplementedError: The operator 'testlib::mutating_custom_op'")
     @ops(
         list(filter(lambda op: op.name not in xfail_hops, hop_db)),
         allowed_dtypes=(torch.float,),

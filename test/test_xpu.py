@@ -1,7 +1,10 @@
 # Owner(s): ["module: intel"]
 
+import collections
 import ctypes
 import gc
+import json
+import random
 import re
 import subprocess
 import sys
@@ -23,6 +26,7 @@ from torch.testing._internal.common_utils import (
     find_library_location,
     IS_LINUX,
     IS_WINDOWS,
+    IS_X86,
     run_tests,
     serialTest,
     suppress_warnings,
@@ -454,6 +458,28 @@ if __name__ == "__main__":
             torch.empty(1024 * 1024 * 1024 * 1024, device="xpu")
 
     @serialTest()
+    def test_1mb_allocation_uses_small_block(self):
+        gc.collect()
+        torch.xpu.empty_cache()
+        prev_allocated = torch.xpu.memory_allocated()
+        prev_reserved = torch.xpu.memory_reserved()
+
+        # Allocate a 1MB float32 tensor
+        one_mb = 1024 * 1024
+        a = torch.ones(one_mb // 4, device="xpu")
+
+        b = a.clone()
+        for _ in range(5):
+            b = b.clone() + 1
+
+        torch.xpu.synchronize()
+        current_allocated = torch.xpu.memory_allocated()
+        current_reserved = torch.xpu.memory_reserved()
+        # Two live tensors remain (a and b), each 1MB
+        self.assertEqual(current_allocated, prev_allocated + 2 * 1024 * 1024)
+        self.assertEqual(current_reserved, prev_reserved + 4 * 1024 * 1024)  # 4MB
+
+    @serialTest()
     def test_set_per_process_memory_fraction(self):
         gc.collect()
         torch.xpu.empty_cache()
@@ -594,6 +620,247 @@ if __name__ == "__main__":
                     torch.xpu.can_device_access_peer(device, peer),
                     torch.xpu.can_device_access_peer(peer, device),
                 )
+
+    @serialTest()
+    def test_memory_snapshot(self):
+        def _test_memory_stats_generator(N=35):
+            m0 = torch.xpu.memory_allocated()
+
+            def alloc(*size):
+                return torch.empty(*size, device="xpu")
+
+            yield
+
+            tensors1 = [alloc(1), alloc(10, 20), alloc(200, 300, 2000)]
+            m1 = torch.xpu.memory_allocated()
+            yield
+
+            tensors2 = []
+
+            for i in range(1, int(N / 2) + 1):
+                # small ones
+                tensors2.append(alloc(i, i * 4))
+                yield
+
+            for i in range(5, int(N / 2) + 5):
+                # large ones
+                tensors2.append(alloc(i, i * 7, i * 9, i * 11))
+                yield
+
+            tensors2.append(alloc(0, 0, 0))
+            yield
+
+            permute = []
+            for i in torch.randperm(len(tensors2)):
+                permute.append(tensors2[i])
+                yield
+
+            del tensors2
+            yield
+            tensors2 = permute
+            yield
+            del permute
+            yield
+
+            for i in range(int(N / 2)):
+                del tensors2[i]
+                yield
+
+            for i in range(2, int(2 * N / 3) + 2):
+                tensors2.append(alloc(i, i * 3, i * 8))
+                yield
+
+            del tensors2
+            self.assertEqual(torch.xpu.memory_allocated(), m1)
+            yield True
+
+            del tensors1
+            self.assertEqual(torch.xpu.memory_allocated(), m0)
+
+        def _check_memory_stat_consistency():
+            snapshot = torch.xpu.memory_snapshot()
+
+            expected_each_device = collections.defaultdict(
+                lambda: collections.defaultdict(int)
+            )
+
+            for segment in snapshot:
+                expandable = segment["is_expandable"]
+                expected = expected_each_device[segment["device"]]
+                pool_str = segment["segment_type"] + "_pool"
+
+                if not expandable:
+                    expected["segment.all.current"] += 1
+                    expected[f"segment.{pool_str}.current"] += 1
+
+                expected["allocated_bytes.all.current"] += segment["allocated_size"]
+                expected[f"allocated_bytes.{pool_str}.current"] += segment[
+                    "allocated_size"
+                ]
+
+                expected["reserved_bytes.all.current"] += segment["total_size"]
+                expected[f"reserved_bytes.{pool_str}.current"] += segment["total_size"]
+
+                expected["active_bytes.all.current"] += segment["active_size"]
+                expected[f"active_bytes.{pool_str}.current"] += segment["active_size"]
+
+                expected["requested_bytes.all.current"] += segment["requested_size"]
+                expected[f"requested_bytes.{pool_str}.current"] += segment[
+                    "requested_size"
+                ]
+
+                sum_requested = 0
+                is_split = len(segment["blocks"]) > 1
+                for block in segment["blocks"]:
+                    if block["state"] == "active_allocated":
+                        expected["allocation.all.current"] += 1
+                        expected[f"allocation.{pool_str}.current"] += 1
+
+                    if block["state"].startswith("active_"):
+                        sum_requested += block["requested_size"]
+                        expected["active.all.current"] += 1
+                        expected[f"active.{pool_str}.current"] += 1
+
+                    if block["state"] == "inactive" and is_split and not expandable:
+                        expected["inactive_split.all.current"] += 1
+                        expected[f"inactive_split.{pool_str}.current"] += 1
+                        expected["inactive_split_bytes.all.current"] += block["size"]
+                        expected[f"inactive_split_bytes.{pool_str}.current"] += block[
+                            "size"
+                        ]
+
+                self.assertEqual(sum_requested, segment["requested_size"])
+
+            for device, expected in expected_each_device.items():
+                stats = torch.xpu.memory_stats(device)
+                for k, v in expected.items():
+                    self.assertEqual(v, stats[k])
+
+        gc.collect()
+        torch.xpu.empty_cache()
+        for _ in _test_memory_stats_generator():
+            _check_memory_stat_consistency()
+
+    @unittest.skipUnless(IS_X86 and IS_LINUX, "x86 linux only cpp unwinding")
+    def test_direct_traceback(self):
+        from torch._C._profiler import gather_traceback, symbolize_tracebacks
+
+        c = gather_traceback(True, True, True)
+        (r,) = symbolize_tracebacks([c])
+        r = str(r)
+        self.assertTrue("test_xpu.py" in r)
+        self.assertTrue("unwind" in r)
+
+    def test_memory_snapshot_with_python(self):
+        try:
+            gc.collect()
+            torch.xpu.memory.empty_cache()
+            torch.xpu.memory._record_memory_history("state", stacks="python")
+            # Make x the second block in a segment
+            torch.rand(2 * 311, 411, device="xpu")
+            unused = torch.rand(310, 410, device="xpu")
+            x = torch.rand(311, 411, device="xpu")
+
+            # Allocate many 512B tensors to fill a segment and test history merging.
+            tensors = [torch.rand(128, device="xpu") for _ in range(1000)]
+            while tensors:
+                del tensors[random.randint(0, len(tensors) - 1)]
+
+            torch.rand(128 * 5, device="xpu")
+
+            ss = torch._C._xpu_memorySnapshot(None)
+            found_it = False
+            for seg in ss["segments"]:
+                self.assertTrue("frames" in seg)
+                for b in seg["blocks"]:
+                    # Look for x by size
+                    if b["requested_size"] == 311 * 411 * 4:
+                        self.assertTrue("test_xpu" in b["frames"][0]["filename"])
+                        found_it = True
+                        self.assertEqual(x.untyped_storage().data_ptr(), b["address"])
+            self.assertTrue(found_it)
+
+            del unused
+            del x
+            gc.collect()
+            torch.xpu.empty_cache()
+            ss = torch._C._xpu_memorySnapshot(None)
+            self.assertTrue(
+                ss["device_traces"][0][-1]["action"]
+                in ("segment_free", "segment_unmap")
+            )
+
+        finally:
+            torch.xpu.memory._record_memory_history(None)
+
+    @unittest.skipUnless(IS_X86 and IS_LINUX, "x86 linux only cpp unwinding")
+    def test_memory_snapshot_with_cpp(self):
+        try:
+            gc.collect()
+            torch.xpu.memory.empty_cache()
+            torch.xpu.memory._record_memory_history("state", stacks="all")
+            _ = torch.rand(311, 411, device="xpu")
+
+            ss = torch.xpu.memory.memory_snapshot()
+            found_it = False
+            for seg in ss:
+                for b in seg["blocks"]:
+                    if b["requested_size"] == 311 * 411 * 4:
+                        self.assertTrue("::rand" in str(b["frames"]))
+                        found_it = True
+            self.assertTrue(found_it)
+
+        finally:
+            torch.xpu.memory._record_memory_history(None)
+
+    @unittest.skipUnless(IS_X86 and IS_LINUX, "x86 linux only cpp unwinding")
+    def test_memory_plots_free_stack(self):
+        for context in ["alloc", "all", "state"]:
+            try:
+                gc.collect()
+                torch.xpu.memory.empty_cache()
+                torch.xpu.memory._record_memory_history(context=context)
+                x = None
+
+                def thealloc():
+                    nonlocal x
+                    x = torch.rand(3, 4, device="xpu")
+
+                def thefree():
+                    nonlocal x
+                    del x
+
+                thealloc()
+                thefree()
+                ss = json.dumps(torch._C._xpu_memorySnapshot(None))
+                self.assertEqual(("thefree" in ss), (context == "all"))
+                self.assertEqual(("thealloc" in ss), (context != "state"))
+            finally:
+                torch.xpu.memory._record_memory_history(None)
+
+    def test_memory_snapshot_script(self):
+        try:
+            gc.collect()
+            torch.xpu.memory.empty_cache()
+            torch.xpu.memory._record_memory_history("state", stacks="python")
+
+            @torch.jit.script
+            def foo():
+                return torch.rand(311, 411, device="xpu")
+
+            _ = foo()
+
+            ss = torch.xpu.memory.memory_snapshot()
+            found_it = False
+            for seg in ss:
+                for b in seg["blocks"]:
+                    if b["requested_size"] == 311 * 411 * 4:
+                        self.assertEqual(b["frames"][0]["name"], "foo")
+                        found_it = True
+            self.assertTrue(found_it)
+
+        finally:
+            torch.xpu.memory._record_memory_history(None)
 
     def get_dummy_allocator(self, check_vars):
         dummy_allocator_source_vars = """

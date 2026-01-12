@@ -48,7 +48,7 @@ from torch.compiler._cache import (
     CacheArtifactFactory,
     CacheArtifactManager,
 )
-from torch.fx.experimental.symbolic_shapes import hint_int
+from torch.fx.experimental.symbolic_shapes import size_hint
 from torch.utils._triton import has_triton_package
 
 from .aot_autograd_result import (
@@ -149,6 +149,7 @@ def check_node_safe(node: Node):
         "torch._sym_sqrt",
         "torch.sym_float",
         "torch.sym_sum",
+        "torch.autograd.grad",
     )
     SAFE_NON_TORCH_FUNCTIONS = (
         "einops.einops.rearrange",
@@ -839,6 +840,39 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
         """
         return os.path.join(cls._get_tmp_dir(), key)
 
+    @classmethod
+    def _record_result(
+        cls: type[AOTAutogradCache],
+        _key: str,
+        local_hit: bool,
+        local_miss: bool,
+        remote_hit: bool,
+        remote_miss: bool,
+    ) -> None:
+        """
+        Called by GuardedCache to record hit/miss statistics.
+        """
+        if local_hit:
+            CompileEventLogger.try_(
+                CompileEventLogger.increment_toplevel,
+                "aotautograd_local_cache_hit_count",
+            )
+        if remote_hit:
+            CompileEventLogger.try_(
+                CompileEventLogger.increment_toplevel,
+                "aotautograd_remote_cache_hit_count",
+            )
+        if local_miss:
+            CompileEventLogger.try_(
+                CompileEventLogger.increment_toplevel,
+                "aotautograd_local_cache_miss_count",
+            )
+        if remote_miss:
+            CompileEventLogger.try_(
+                CompileEventLogger.increment_toplevel,
+                "aotautograd_remote_cache_miss_count",
+            )
+
     @staticmethod
     def evaluate_guards(guard_expr: str, hints: Union[list[int], list[torch.SymInt]]):
         if torch._inductor.config.unsafe_skip_cache_dynamic_shape_guards:
@@ -863,7 +897,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
             remote_cache = AOTAutogradCache.get_remote_cache()
 
         symints = AOTAutogradCache._filter_backed_symints(args)
-        hints = [hint_int(s) for s in symints]
+        hints = [size_hint(s) for s in symints]
         entry = None
         pickled_content = None
         try:
