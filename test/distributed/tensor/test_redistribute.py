@@ -3,6 +3,7 @@
 
 import contextlib
 import itertools
+import random
 import unittest
 
 import torch
@@ -19,10 +20,18 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed.tensor._collective_utils import shard_dim_alltoall
-from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
+from torch.distributed.tensor._collective_utils import (
+    redistribute_cost,
+    shard_dim_alltoall,
+)
+from torch.distributed.tensor._dtensor_spec import (
+    DTensorSpec,
+    ShardOrderEntry,
+    TensorMeta,
+)
 from torch.distributed.tensor._redistribute import (
     _gen_transform_infos,
+    redistribute_local_tensor,
     use_min_cost_redistribution_plan,
 )
 from torch.distributed.tensor.debug import CommDebugMode
@@ -964,12 +973,6 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                     (ShardOrderEntry(tensor_dim=0, mesh_dims=(0, 1)),),
                 ),
             ),
-            # If we use the graph search solution, the redistribution path will
-            # be S(0)[0, 1] -> S(0)[0]S(1)[1] -> S(1)[1] -> S(0)[2]S(1)[1],
-            # which takes only 1 comm count. However, this placement follows the
-            # default device order and the greedy solution will be triggered,
-            # which results in path: S(0)[0, 1] -> S(0)[0]S(1)[1] -> S(1)[1] ->
-            # S(0)[2]S(1)[1] with 2 comm count
             (
                 (
                     [Shard(0), Shard(0), Replicate()],
@@ -998,22 +1001,22 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
             if idx == 0:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[0]S(0)[1]S(0)[2]->S(0)[0]S(0)[1]S(1)->S(0)S(1)[1]S(1)[0]->RS(1)[1]S(1)[0]->RS(0)S(1)->RS(0)[0]S(0)[1]""",
+                    """S(0)[0]S(0)[1]S(0)[2]->S(0)[0]S(0)[1]R->S(0)RR->RRR->RS(0)R->RS(0)[0]S(0)[1]""",
                 )
             elif idx == 1:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[1]S(0)[0]S(0)[2]->S(0)[1]S(0)[0]S(1)->RS(0)S(1)->RS(0)[0]S(0)[1]""",
+                    """S(0)[1]S(0)[0]S(0)[2]->S(0)[1]S(0)[0]R->RS(0)R->RS(0)[0]S(0)[1]""",
                 )
             elif idx == 2:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[1]S(0)[0]S(0)[2]->S(0)[1]S(0)[0]R->S(1)S(0)R->S(1)S(2)R->S(0)S(2)R->S(0)[0]S(0)[1]R""",
+                    """S(0)[1]S(0)[0]S(0)[2]->S(0)[1]S(0)[0]R->RS(0)R->RRR->S(0)RR->S(0)[0]S(0)[1]R""",
                 )
             elif idx == 3:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[0]S(0)[1]R->S(0)S(1)R->RS(1)R->RS(1)S(0)""",
+                    """S(0)[0]S(0)[1]R->S(0)RR->S(0)S(1)R->RS(1)R->RS(1)S(0)""",
                 )
             expected_dt = _distribute_tensor(
                 input_data.clone(), mesh, dst_placement, shard_order=dst_order
@@ -1068,7 +1071,7 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
             if idx == 0:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[0]S(0)[1]S(0)[2]->S(0)[0]S(0)[1]S(2)->S(0)S(2)[1]S(2)[0]->S(1)S(2)[1]S(2)[0]->S(1)[0]S(1)[1]S(2)->S(1)[0]S(1)[1]S(1)[2]""",
+                    """S(0)[0]S(0)[1]S(0)[2]->S(0)[0]S(0)[1]R->S(0)RR->RRR->S(1)RR->S(1)[0]S(1)[1]R->S(1)[0]S(1)[1]S(1)[2]""",
                 )
             # Validate greedy algorithm trace (idx=1, disable_graph=True)
             # Greedy uses simple heuristic approach (processes mesh dims sequentially)
@@ -1184,6 +1187,77 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                     prev_sharded_dt = sharded_dt
 
     @with_comms
+    def test_graph_based_redistribute_cost(self):
+        """
+        This test verifies the correctness of
+            1. redistribute_cost, and
+            2. min-cost redistribution algorithm
+
+        Give src placements `SRC` and target placements `DST`, below formula
+        should always hold based on the min cost graph algorithm:
+        redistribute_cost(SRC, DST) <= redistribute_cost(SRC, INT) + redistribute_cost(INT, DST) for all INT
+        """
+        torch.manual_seed(21)
+
+        with maybe_disable_local_tensor_mode():
+            mesh = init_device_mesh(self.device_type, (2, 2, 2))
+            input_tensor_shape = [
+                # even sharding
+                (16, 8),
+                # uneven sharding with padding
+                (13, 2, 13),
+            ]
+
+        for tensor_shape in input_tensor_shape:
+            input_data = torch.randn(tensor_shape, device=self.device_type)
+            tensor_rank = input_data.ndim
+            with maybe_disable_local_tensor_mode():
+                shard_orders = generate_shard_orders(mesh, tensor_rank)
+
+            shard_orders = list(shard_orders)
+            rng = random.Random(42)
+            rng.shuffle(shard_orders)
+            with use_min_cost_redistribution_plan(enabled=True):
+                for i in range(0, len(shard_orders), 2):
+                    src_order, dst_order = shard_orders[i : i + 2]
+                    # prepare SRC DTensorSpec
+                    src_dtensor = _distribute_tensor(
+                        input_data.clone(),
+                        mesh,
+                        placements=None,
+                        shard_order=src_order,
+                    )
+                    # prepare DST DTensorSpec
+                    dst_dtensor = _distribute_tensor(
+                        input_data.clone(),
+                        mesh,
+                        placements=None,
+                        shard_order=dst_order,
+                    )
+                    src_to_dst_cost = redistribute_cost(
+                        src_dtensor._spec, dst_dtensor._spec
+                    )
+                    # chose every two to reduce the number of tests
+                    for intermediate_order in shard_orders[::2]:
+                        # prepare INT DTensorSpec
+                        intermediate_dtensor = _distribute_tensor(
+                            input_data.clone(),
+                            mesh,
+                            placements=None,
+                            shard_order=intermediate_order,
+                        )
+                        src_to_int_cost = redistribute_cost(
+                            src_dtensor._spec, intermediate_dtensor._spec
+                        )
+                        int_to_dst_cost = redistribute_cost(
+                            intermediate_dtensor._spec, dst_dtensor._spec
+                        )
+                        self.assertTrue(
+                            src_to_dst_cost <= src_to_int_cost + int_to_dst_cost,
+                            f"{tensor_shape=}, {src_order=}, {dst_order=}, {intermediate_order=}",
+                        )
+
+    @with_comms
     def test_ordered_redistribute_with_partial(self):
         """Test mixing Partial in the original placements and do redistribute."""
         # This test takes 226s to complete on 8XA100...
@@ -1233,6 +1307,42 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                     self.assertEqual(
                         make_full_tensor(sharded_dt), make_full_tensor(full_tensor)
                     )
+
+    @with_comms
+    def test_redistribute_partial_to_different_partial_not_supported(self):
+        # Test that redistributing from one Partial type to another raises an error
+        device_mesh = self.build_device_mesh()
+        local_tensor = torch.randn(4, 4, device=self.device_type)
+
+        src_spec = DTensorSpec(
+            device_mesh,
+            (Partial("sum"),),
+            tensor_meta=TensorMeta(
+                local_tensor.size(),
+                local_tensor.stride,
+                local_tensor.dtype,
+            ),
+        )
+        tgt_spec = DTensorSpec(
+            device_mesh,
+            (Partial("avg"),),
+            tensor_meta=TensorMeta(
+                local_tensor.size(),
+                local_tensor.stride,
+                local_tensor.dtype,
+            ),
+        )
+
+        # Attempting to redistribute to Partial("max") should raise an error
+        with self.assertRaisesRegex(
+            AssertionError,
+            r"Redistribution from one partial type.*to another.*is unsupported",
+        ):
+            redistribute_local_tensor(
+                local_tensor,
+                src_spec,
+                tgt_spec,
+            )
 
     @unittest.skip(
         "Temporarily skipping until we support special placement types in "
@@ -1357,7 +1467,7 @@ class DistributeWithStridedShardTest(DTensorTestBase):
             if idx == 0:
                 self.assertExpectedInline(
                     trace_str,
-                    """S(0)[0]S(0)[1]_S(0, 3)->S(0)[0]S(0)[1]S(1)->S(0)[0]S(1)[1]S(1)[0]->RS(1)[1]S(1)[0]->RS(0)[1]S(1)->RS(0)[1]S(0)[2]""",
+                    """S(0)[0]S(0)[1]_S(0, 3)->S(0)[0]S(0)[1]S(1)->S(0)[0]S(1)[1]S(1)[0]->RS(1)[1]S(1)[0]->RS(0)[1]S(1)->RS(0)[1]S(0)[2]""",  # noqa: B950
                 )
             elif idx == 1:
                 self.assertExpectedInline(

@@ -46,7 +46,7 @@ class LlgaKernel {
   dnnl::graph::compiled_partition compile(
       const dnnl::graph::partition& partition);
 
-  std::map<size_t, int64_t> initializeTensorIdToOccurence() const;
+  std::map<size_t, int64_t> initializeTensorIdToOccurrence() const;
 
   std::tuple<RunArgs, RunArgs> prepareRunArgs(
       const TensorArgs& inputs,
