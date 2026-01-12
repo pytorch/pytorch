@@ -1016,22 +1016,17 @@ def _extract_fwd_bwd_modules(
 
     # Now, we re-generate the fwd/bwd graphs.
     # NB: This might increase compilation time, but I doubt it matters
-    # Convention for saved acts is (tensors_with_vc_check, tensors_no_vc_check, symints)
+    # Convention for saved acts is (tensors_with_vc_check, tensors_no_vc_check, symints, opaque_objects)
     fwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
         primal_inputs + fwd_seed_offset_inputs,
         fwd_outputs + saved_values + saved_sym_nodes + saved_opaque_nodes,
         fwd_outputs_descs
         + [
-            SavedForBackwardsAOTOutput(i)
-            for i in range(
-                len(saved_values) + len(saved_sym_nodes) + len(saved_opaque_nodes)
-            )
-        ] +[
             SavedForBackwardsNoVcCheckAOTOutput(i)
             if i >= no_vc_check_start_idx and i < len(saved_values)
             else SavedForBackwardsAOTOutput(i)
-            for i in range(len(saved_values) + len(saved_sym_nodes))
+            for i in range(len(saved_values) + len(saved_sym_nodes) + len(saved_opaque_nodes))
         ],
         "forward",
     )
