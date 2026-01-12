@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/cuda/CUDAConfig.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/ConvUtils.h>
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
@@ -260,6 +261,17 @@ PyObject* THCPModule_getCompiledVersion(PyObject* self, PyObject* noargs) {
 #else
   return THPUtils_packInt64((int64_t)CUDA_VERSION);
 #endif
+}
+
+PyObject* THCPModule_getHipblasltVersion(PyObject* self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+#if defined(USE_ROCM)
+  return THPUtils_packInt64(
+      (int64_t)at::detail::getCUDAHooks().versionHipBLASLt());
+#else
+  Py_RETURN_NONE;
+#endif
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THCPModule_cudaHostAllocator(PyObject* _unused, PyObject* noargs) {
@@ -701,16 +713,6 @@ PyObject* THCPModule_resetPeakHostMemoryStats(
   Py_RETURN_NONE;
 }
 
-CapturedTraceback* getFromContext(
-    const std::shared_ptr<c10::GatheredContext>& x) {
-  if (CapturedTraceback* sc = dynamic_cast<CapturedTraceback*>(x.get())) {
-    return sc;
-  }
-  TORCH_CHECK(
-      false,
-      "attempting to gather stack context from the wrong StackContext type.");
-}
-
 PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   c10::cuda::MempoolId_t mempool_id = {0, 0};
@@ -749,7 +751,6 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   py::str active_pending_free_s = "active_pending_free";
   py::str inactive_s = "inactive";
   py::str addr_s = "addr";
-  py::str cpp_frames_s = "cpp_frames";
   py::str blocks_s = "blocks";
   py::str is_expandable_s = "is_expandable";
   py::str frames_s = "frames";
@@ -764,7 +765,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   auto add_frame_key = [&](const py::dict& d,
                            const std::shared_ptr<c10::GatheredContext>& ctx) {
     if (ctx) {
-      auto sc = getFromContext(ctx);
+      auto sc = getCapturedTracebackFromContext(ctx);
       to_gather_frames.emplace_back(sc);
       to_gather_dest.emplace_back(d);
     } else {
@@ -862,7 +863,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
       py::dict trace_entry;
       if (te.context_) {
         // without further compression frames can get really large on dump
-        auto sc = getFromContext(te.context_);
+        auto sc = getCapturedTracebackFromContext(te.context_);
         to_gather_frames.emplace_back(sc);
         to_gather_dest.emplace_back(trace_entry);
       }
@@ -2028,6 +2029,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {"_cuda_getCompiledVersion",
      THCPModule_getCompiledVersion,
+     METH_NOARGS,
+     nullptr},
+    {"_cuda_getHipblasltVersion",
+     THCPModule_getHipblasltVersion,
      METH_NOARGS,
      nullptr},
     {"_cuda_hasPrimaryContext", THCPModule_hasPrimaryContext, METH_O, nullptr},
