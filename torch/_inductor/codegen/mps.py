@@ -212,13 +212,21 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def masked(mask: CSEVariable, body: sympy.Expr, other: CSEVariable) -> str:
         # TODO: Type annotation for other is wrong, it's often float or int
-        with V.kernel.mask_loads(mask, other) as new_mask:
-            result = body()
+        # TODO: Use lambda here rather than allocating variable with default type when on MacOS-15+
+        masked_code = IndentedBuffer()
+        masked_code.writeline(f"if ({mask}) {{")
+        with V.kernel.swap_buffers(masked_code), masked_code.indent():
+            rc = body()
 
-        if result.bounds.is_bool:
-            other = bool(other)  # type: ignore[assignment]
-
-        return ops.where(new_mask, result, other)
+        var = V.kernel.cse.newvar(dtype=rc.dtype)
+        with masked_code.indent():
+            masked_code.writeline(f"{var} = {rc};")
+        masked_code.writeline("}")
+        V.kernel.compute.writeline(
+            f"{DTYPE_TO_METAL[rc.dtype]} {var} = {value_to_metal(other)};"
+        )
+        V.kernel.compute.splice(masked_code)
+        return var
 
     @staticmethod
     def where(a: OpVarT, b: OpVarT, c: OpVarT) -> str:
@@ -936,6 +944,10 @@ class MetalKernel(SIMDKernel):
                     else:
                         code.writeline(f"constant long& {idx_var.prefix}numel,")
 
+                # Add error buffer parameter if error header is used
+                if "error" in self.headers:
+                    code.writeline("device c10::metal::ErrorMessages* error_buf,")
+
                 assert len(idx_vars) < 4, "Up to 3 index variables are supported"
                 thread_pos_dtype = (
                     f"uint{len(idx_vars)}" if len(idx_vars) > 1 else "uint"
@@ -1047,6 +1059,13 @@ class MetalKernel(SIMDKernel):
                 args += [None]  # type: ignore[list-item]
                 arg_types.append(None)
 
+        # Add error buffer index if error reporting is used
+        # TODO(malfet) Figure out how to do it for aoti
+        if "error" in self.headers and not V.graph.cpp_wrapper:
+            args.append(
+                f"error_buf_idx={len([arg for arg in args if arg is not None and '=' not in arg])}"
+            )
+
         wrapper.generate_kernel_call(
             name,
             args,
@@ -1060,17 +1079,27 @@ class MetalKernel(SIMDKernel):
     ) -> None:
         if not (lower or upper):
             return
-        # TODO(malfet): support asserts
-        # See https://github.com/pytorch/pytorch/issues/144634
+        # Add error header for error reporting
+        self.headers.add("error")
+
         expr_str = self.index_to_str(expr)
-        lower_expr = f"{expr_str} < 0" if lower else ""
+        size_str = self.index_to_str(size)
+
+        # Generate bounds checking with error reporting
         # TODO(malfet): Is upper bound inclusive or exclusive?
-        upper_expr = f"{expr_str} > {self.index_to_str(size)}" if upper else ""
         if lower and upper:
-            line = f"if (({lower_expr}) && ({upper_expr})) return"
+            # Check both lower and upper bounds
+            condition = f"({expr_str} < 0 || {expr_str} >= {size_str})"
+        elif lower:
+            condition = f"{expr_str} < 0"
         else:
-            line = f"if ({lower_expr}{upper_expr}) return"
-        self.cse.generate(self.compute, line, assignment=False)
+            condition = f"{expr_str} >= {size_str}"
+
+        # Generate error reporting code
+        self.compute.splice(f"""if ({condition}) {{
+    TORCH_REPORT_ERROR(error_buf, "Index ", {expr_str}, " out of range [0, ", {size_str}, ")");
+    return;
+}}""")
 
 
 class MetalScheduling(SIMDScheduling):
