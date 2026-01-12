@@ -3923,7 +3923,7 @@ def _nvcc_arch_as_compile_option() -> str:
         # Required by cutlass compilation.
         return "90a"
     if arch == "103":
-        return "100"
+        return "100f"
     if arch == "100":
         return "100a"
     return arch
