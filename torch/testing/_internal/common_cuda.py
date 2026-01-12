@@ -321,6 +321,22 @@ def _get_torch_rocm_version():
     rocm_version = rocm_version.split("-", maxsplit=1)[0]    # ignore git sha
     return tuple(int(x) for x in rocm_version.split("."))
 
+def _get_torch_hipblaslt_version():
+    if not TEST_WITH_ROCM:
+        return None
+    try:
+        # Access through direct C binding
+        # versionHipBLASLt returns: MAJOR * 10000 + MINOR * 100 + PATCH
+        version_int = torch._C._cuda_getHipblasltVersion()
+        if version_int is None or version_int == 0:
+            return None
+        major = version_int // 10000
+        minor = (version_int % 10000) // 100
+        patch = version_int % 100
+        return (major, minor, patch)
+    except (AttributeError, RuntimeError):
+        return None
+
 def _check_cusparse_generic_available():
     return not TEST_WITH_ROCM
 
@@ -375,6 +391,9 @@ def _create_scaling_case(device="cuda", dtype=torch.float, optimizer_ctor=torch.
 
 def xfailIfSM89(func):
     return func if not IS_SM89 else unittest.expectedFailure(func)
+
+def xfailIfSM90(func):
+    return func if not IS_SM90 else unittest.expectedFailure(func)
 
 def xfailIfSM89PreCUDA13(func):
     """xfail on SM89 only for CUDA < 13. On CUDA 13+, test should pass on all architectures."""
