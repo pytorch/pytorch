@@ -52,7 +52,6 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     onlyAccelerator,
     onlyOn,
-    skipIf,
 )
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -67,6 +66,7 @@ from torch.testing._internal.common_utils import (
     serialTest,
     skipIfRocm,
     skipIfTorchDynamo,
+    skipIfXpu,
     TemporaryDirectoryName,
     TemporaryFileName,
     TEST_WITH_CROSSREF,
@@ -2592,11 +2592,13 @@ class TestProfilerDevice(TestCase):
         for i in range(max_gpu_count):
             self.assertEqual(gpu_dict["GPU " + str(i)], 1)
 
-    def _validate_basic_json(self, traceEvents, device_available=False):
-        MAX_GPU_COUNT = 8
+    def _validate_basic_json(self, traceEvents):
         PROFILER_IDX = -4
         RECORD_END = -1
         RECORD_START = -2
+        if torch.xpu.is_available():
+            PROFILER_IDX = -7
+            RECORD_START = -5
         traceEventProfiler = traceEvents[PROFILER_IDX]
 
         self.assertTrue(traceEventProfiler["name"] == "PyTorch Profiler (0)")
@@ -2628,7 +2630,12 @@ class TestProfilerDevice(TestCase):
                     traceEventProfiler["ts"],
                     "Trace event is out of bounds",
                 )
-            if "dur" in traceEvent:
+            tid = traceEvent.get("tid", "")
+            if (
+                "dur" in traceEvent
+                and isinstance(tid, str)
+                and "__xpu_profiler__" not in tid
+            ):
                 self.assertLessEqual(
                     traceEvent["ts"] + traceEvent["dur"],
                     traceEvents[RECORD_END]["ts"],
@@ -2642,19 +2649,6 @@ class TestProfilerDevice(TestCase):
                     traceEvents[i + 1]["args"]["sort_index"]
                     == kExceedMaxPid + int(gpu_value.split()[1])
                 )
-
-    def _test_chrome_trace_basic_helper(self, device):
-        x, y = (torch.rand(4, 4).to(device) for _ in range(2))
-        device_type = device.split(":")[0]
-        device_available = device_type != "cpu"
-
-        with profile(with_stack=True) as p:
-            torch.add(x, y)
-        with TemporaryFileName(mode="w+") as fname:
-            p.export_chrome_trace(fname)
-            with open(fname) as f:
-                report = json.load(f)
-                self._validate_basic_json(report["traceEvents"], device_available)
 
     @onlyOn(["cpu", "cuda"])
     @unittest.skipIf(not kineto_available(), "Kineto is required")
@@ -3150,16 +3144,18 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
 
         event_list.table()
 
-    @skipIf(
-        True,
-        "XPU Trace event ends too late! Refer https://github.com/intel/torch-xpu-ops/issues/2263",
-        device_type="xpu",
-    )
     @unittest.skipIf(not kineto_available(), "Kineto is required")
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_basic_chrome_trace(self, device):
-        device_type = device.split(":")[0]
-        self._test_chrome_trace_basic_helper(device)
+        x, y = (torch.rand(4, 4).to(device) for _ in range(2))
+
+        with profile(with_stack=True) as p:
+            torch.add(x, y)
+        with TemporaryFileName(mode="w+") as fname:
+            p.export_chrome_trace(fname)
+            with open(fname) as f:
+                report = json.load(f)
+                self._validate_basic_json(report["traceEvents"])
 
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
     def test_cpu_annotation_overlap(self, device):
@@ -3222,6 +3218,7 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
 
     @onlyAccelerator
     @skipIfTorchDynamo("profiler gets ignored if dynamo activated")
+    @skipIfXpu(msg="https://github.com/intel/torch-xpu-ops/issues/3479")
     def test_dynamic_toggle(self, device):
         device_type = device.split(":")[0]
         gpu_activity = getattr(ProfilerActivity, device_type.upper(), None)
@@ -3464,8 +3461,18 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
             for ke in kernel_events:
                 args = ke.get("args", {})
                 name = ke.get("name", "<unknown>")
-                for key in ["device", "stream", "correlation"]:
+                for key in ["device", "correlation"]:
                     self.assertIn(key, args, f"kernel '{name}' missing '{key}'")
+
+                if device_type == "xpu":
+                    self.assertTrue(
+                        any(
+                            key in args for key in ("l0 queue", "sycl queue", "stream")
+                        ),
+                        f"kernel '{name}' missing queue metadata",
+                    )
+                else:
+                    self.assertIn("stream", args, f"kernel '{name}' missing 'stream'")
                 has_grid = "grid" in args
                 has_block = "block" in args
                 self.assertEqual(
@@ -3473,14 +3480,19 @@ if KinetoStepTracker.current_step() != initial_step + 2 * niters:
                     has_block,
                     lambda msg: f"{msg}\nkernel '{name}' should provide grid and block together",
                 )
-                has_kernel_launch_metadata |= has_grid
+                if device_type == "xpu":
+                    has_kernel_launch_metadata |= (
+                        "kernel_id" in args and "sycl_node_id" in args
+                    )
+                else:
+                    has_kernel_launch_metadata |= has_grid
             self.assertTrue(
                 has_kernel_launch_metadata,
                 "Error: No kernel events in trace contained grid/block metadata",
             )
 
 
-instantiate_device_type_tests(TestProfilerDevice, globals())
+instantiate_device_type_tests(TestProfilerDevice, globals(), allow_xpu=True)
 
 
 class TestExperimentalUtils(TestCase):
