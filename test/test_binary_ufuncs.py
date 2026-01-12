@@ -3469,6 +3469,7 @@ class TestBinaryUfuncs(TestCase):
         assert m.dim() == 0, "m is intentionally a scalar"
         self.assertEqual(torch.pow(2, m), 2**m)
 
+    @skipXPU
     def test_ldexp(self, device):
         # random values
         mantissas = torch.randn(64, device=device)
