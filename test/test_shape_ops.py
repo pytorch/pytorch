@@ -7,7 +7,6 @@ from functools import partial
 from itertools import chain, combinations, permutations, product
 
 import numpy as np
-
 import torch
 from torch import nan
 from torch.testing import make_tensor
@@ -28,10 +27,10 @@ from torch.testing._internal.common_dtype import (
 )
 from torch.testing._internal.common_utils import (
     IS_JETSON,
-    run_tests,
-    skipIfTorchDynamo,
     TEST_PRIVATEUSE1_DEVICE_TYPE,
     TestCase,
+    run_tests,
+    skipIfTorchDynamo,
     torch_to_numpy_dtype_dict,
 )
 
@@ -389,6 +388,13 @@ class TestShapeOps(TestCase):
                     Y_out = torch.empty_like(X)
                     op(X, min_val, max_val, out=Y_out)
                     self.assertEqual(Y_expected, torch.isnan(Y_out))
+
+    def test_clamp_scalar_nan_bounds(self, device):
+        x = torch.ones(3, device=device)
+        y = torch.clamp(x, None, float("nan"))
+        self.assertTrue(torch.isnan(y).all())
+        y = torch.clamp(x, float("nan"), None)
+        self.assertTrue(torch.isnan(y).all())
 
     def test_clamp_raises_arg_errors(self, device):
         X = torch.randn(100, dtype=torch.float, device=device)
