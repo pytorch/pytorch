@@ -380,9 +380,11 @@ _run_symm_mem_tests() {
 }
 
 test_h100_symm_mem() {
-  # Configure NVSHMEM to use smaller heap
+  # Configure NVSHMEM to use smaller heap and work without NVSwitch
   # Default heap is 128GB which fails cuMemMap on AWS H100 instances
   export NVSHMEM_SYMMETRIC_SIZE=4G
+  # Disable NVLink Switch features (not available on AWS H100 instances)
+  export NVSHMEM_DISABLE_NVLS=1
   _run_symm_mem_tests
 }
 

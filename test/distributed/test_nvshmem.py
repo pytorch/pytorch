@@ -4,6 +4,8 @@
 # python test/distributed/test_nvshmem.py
 
 
+import os
+
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
@@ -32,6 +34,9 @@ def requires_nvshmem():
 
 def has_nvls_support():
     if not symm_mem.is_nvshmem_available():
+        return False
+
+    if os.environ.get("NVSHMEM_DISABLE_NVLS", "0") == "1":
         return False
 
     # Set NVSHMEM as SymmMem backend before running the check
