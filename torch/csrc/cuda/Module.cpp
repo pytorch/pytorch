@@ -1,6 +1,7 @@
 #include <ATen/ATen.h>
 #include <ATen/core/TensorBody.h>
 #include <ATen/cuda/CUDAConfig.h>
+#include <ATen/detail/CUDAHooksInterface.h>
 #include <ATen/native/ConvUtils.h>
 #include <c10/core/Device.h>
 #include <c10/core/TensorImpl.h>
@@ -260,6 +261,17 @@ PyObject* THCPModule_getCompiledVersion(PyObject* self, PyObject* noargs) {
 #else
   return THPUtils_packInt64((int64_t)CUDA_VERSION);
 #endif
+}
+
+PyObject* THCPModule_getHipblasltVersion(PyObject* self, PyObject* noargs) {
+  HANDLE_TH_ERRORS
+#if defined(USE_ROCM)
+  return THPUtils_packInt64(
+      (int64_t)at::detail::getCUDAHooks().versionHipBLASLt());
+#else
+  Py_RETURN_NONE;
+#endif
+  END_HANDLE_TH_ERRORS
 }
 
 PyObject* THCPModule_cudaHostAllocator(PyObject* _unused, PyObject* noargs) {
@@ -2017,6 +2029,10 @@ static struct PyMethodDef _THCPModule_methods[] = {
      nullptr},
     {"_cuda_getCompiledVersion",
      THCPModule_getCompiledVersion,
+     METH_NOARGS,
+     nullptr},
+    {"_cuda_getHipblasltVersion",
+     THCPModule_getHipblasltVersion,
      METH_NOARGS,
      nullptr},
     {"_cuda_hasPrimaryContext", THCPModule_hasPrimaryContext, METH_O, nullptr},
