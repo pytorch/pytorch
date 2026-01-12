@@ -4114,7 +4114,8 @@ class CommonTemplate:
                 torch.compile(fn)(t)
         # Either "Autograd not support dtype" or dtype mismatch error from mm
         with self.assertRaisesRegex(
-            RuntimeError, "(Autograd not support dtype:.*|expected .* to have the same dtype)"
+            RuntimeError,
+            "(Autograd not support dtype:.*|expected .* to have the same dtype)",
         ):
             torch.compile(fn)(t)
 
