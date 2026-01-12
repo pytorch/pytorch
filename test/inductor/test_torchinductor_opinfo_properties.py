@@ -1,10 +1,11 @@
 # Owner(s): ["module: inductor"]
 """
-Tests for useful PyTorch ops under inductor with various compilation modes.
+OpInfo-based property tests for inductor numerical correctness.
 
 Tests three properties:
 1. Batch invariance - output shouldn't change based on batch size
-2. Run-to-run determinism - same input should give same output
+2. Run-to-run determinism - same input should give same output across
+   compilations, even with different autotuning choices
 3. Bitwise equivalence with torch eager mode
 
 Tests three compilation backends:
@@ -13,6 +14,25 @@ Tests three compilation backends:
 3. inductor_numerics - Inductor with strict numerics flags
 
 Focuses on ops commonly used in LLMs from unary_ufuncs, binary_ufuncs, and op_db.
+
+Note: How to modify this test
+-----------------------------
+To add a new op:
+    Add the op name to LLM_UNARY_OP_NAMES, LLM_BINARY_OP_NAMES, or LLM_OP_DB_NAMES
+    depending on which OpInfo database contains the op.
+
+To add an expected failure:
+    Add an entry to the EXPECTED_FAILURES dict with the key:
+        (device_type, op_name, backend, test_type, dtype)
+    where test_type is one of: "batch_invariance", "determinism", "eager_equivalence",
+    "unary_numerical", "binary_numerical". Use dtype=None to match all dtypes.
+
+To remove a stale expected failure:
+    Run the tests - any expected failure that now passes will fail with
+    "XPASS (strict)" and tell you which entry to remove from EXPECTED_FAILURES.
+
+To run a specific test:
+    pytest test/inductor/test_torchinductor_opinfo_properties.py -k "silu and eager"
 """
 
 import unittest
