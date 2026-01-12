@@ -5446,12 +5446,14 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         inputs: Sequence[IRNode],
         kernel: Any,
         accumulator_type: Any,
+        workspace_size: int = 0,
     ) -> None:
         # We pass None initially, then override with our method below
         super().__init__(layout, inputs, make_kernel_render=None)
         self.kernel = kernel
         self.accumulator_type = accumulator_type
         self.outputs: list[Buffer] = [self]
+        self.workspace_size = workspace_size
         # Store kernel metadata for code generation since kernels aren't serializeable yet
         self.kernel_metadata = {
             "kernel_name": kernel.metadata.kernel_name,
@@ -5460,6 +5462,10 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         # Override the instance attribute set by parent with our method
         # This is necessary because TemplateBuffer stores make_kernel_render as instance attr
         self.make_kernel_render = self._make_kernel_render
+
+    def get_workspace_size(self) -> int:
+        """Return the workspace size in bytes."""
+        return self.workspace_size
 
     def get_outputs(self) -> list[Buffer]:
         return self.outputs
@@ -5495,6 +5501,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             output_node=out_node,
             kernel_metadata=self.kernel_metadata,
             accumulator_type=self.accumulator_type,
+            workspace_size=self.workspace_size,
         )
 
         def render():
