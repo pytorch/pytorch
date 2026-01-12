@@ -237,7 +237,9 @@ def regional_inductor(gm, *example_args):
     """
     # fuser utils create new nodes using create_proxy which retains the seq_nr
     # metadata and cause issues
+    from torch._inductor.output_code import RegionalOutputCode
+
     with torch.fx.traceback.preserve_node_meta(enable=False):
         gm = _create_inductor_marked_regions(gm)
         gm = _compile_inductor_marked_regions(gm)
-        return gm
+        return RegionalOutputCode(gm)

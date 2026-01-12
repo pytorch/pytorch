@@ -4,7 +4,7 @@
 #include <ATen/ScalarOps.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/core/TensorBody.h>
-#include <ATen/functorch/BatchedTensorImpl.h>
+#include <c10/core/DispatchKey.h>
 #include <c10/core/SymInt.h>
 #include <c10/util/irange.h>
 #include <optional>
@@ -514,10 +514,16 @@ inline Tensor handleDimInMultiDimIndexing(
     // we fall through to recordTensorIndex() which handles batched indexing
     // correctly via the vmap fallback mechanism.
     //
+    // We check for FuncTorchBatched dispatch key directly to avoid including
+    // BatchedTensorImpl.h which causes namespace conflicts with legacy batched
+    // tensor implementations.
+    //
     // See: BatchRulesDynamic.cpp for the vmap .item() restriction.
+    bool is_batched = tensor.unsafeGetTensorImpl()->key_set().has(
+        c10::DispatchKey::FuncTorchBatched);
     if (tensor.dim() == 0 &&
         at::isIntegralType(scalar_type, /*includeBool=*/true) &&
-        !at::functorch::isBatchedTensor(tensor)) {
+        !is_batched) {
       if (scalar_type != at::kByte && scalar_type != at::kBool) {
         result = impl::applySelect(
             result,

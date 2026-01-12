@@ -16,9 +16,14 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.convert_frame import CaptureOutput, fullgraph_capture, get_traced_fn
 from torch._dynamo.eval_frame import argument_names, check_user_input_output
 from torch._dynamo.exc import UserErrorType
-from torch._dynamo.utils import dynamo_timed, get_metrics_context
+from torch._dynamo.utils import (
+    dynamo_timed,
+    get_metrics_context,
+    set_torch_function_mode_stack,
+)
 from torch._export.utils import _compiling_state_context
 from torch._guards import TracingContext
+from torch.export import _restore_state_dict
 from torch.export.dynamic_shapes import _RelaxedConstraint, Constraint
 from torch.fx import Node
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -233,6 +238,7 @@ class DynamoGraphTransformer(torch.fx.Transformer):
         graph_input_order: dict[int, int],
         graph_output_map: dict[int, tuple[str, Any]],
         fake_mode: Optional[Any] = None,
+        attr_source_mapping: Optional[dict[int, tuple[int, str]]] = None,
     ) -> None:
         super().__init__(module)
 
@@ -243,6 +249,9 @@ class DynamoGraphTransformer(torch.fx.Transformer):
         self.graph_input_order = graph_input_order
         self.graph_output_map = graph_output_map
         self.fake_mode = fake_mode
+        # Maps graph_placeholder_idx -> (parent_user_input_idx, attr_name)
+        # Used for DTensor._local_tensor handling
+        self.attr_source_mapping = attr_source_mapping or {}
 
         # Get original placeholders and output
         self.placeholders = [n for n in module.graph.nodes if n.op == "placeholder"]
@@ -254,6 +263,8 @@ class DynamoGraphTransformer(torch.fx.Transformer):
 
         # Iterator for replacing old placeholders
         self.old_to_new_mapping = {}
+        # Maps old placeholder -> getattr info for AttrSource placeholders
+        self.attr_getattr_mapping: dict[torch.fx.Node, tuple[int, str]] = {}
         self._create_placeholder_mapping()
 
     def _create_flattened_inputs(self) -> None:
@@ -308,6 +319,13 @@ class DynamoGraphTransformer(torch.fx.Transformer):
                 new_placeholder = self.new_input_nodes[user_input_idx]
                 self.old_to_new_mapping[old_placeholder] = new_placeholder
 
+        # For AttrSource placeholders (e.g., DTensor._local_tensor), record
+        # that we need to create a getattr call on the parent input
+        for graph_placeholder_idx, (parent_input_idx, attr_name) in self.attr_source_mapping.items():
+            if graph_placeholder_idx < len(self.placeholders):
+                old_placeholder = self.placeholders[graph_placeholder_idx]
+                self.attr_getattr_mapping[old_placeholder] = (parent_input_idx, attr_name)
+
     def placeholder(self, target, args, kwargs) -> Any:
         """Replace old placeholders with new flattened ones."""
         # Return the corresponding new placeholder
@@ -324,6 +342,22 @@ class DynamoGraphTransformer(torch.fx.Transformer):
                 new_arg.node.meta["val"] = self.current_node.meta["val"]
 
             return new_arg
+        elif self.current_node in self.attr_getattr_mapping:
+            # For AttrSource placeholders (e.g., DTensor._local_tensor), create
+            # a getattr call on the parent input instead of a new placeholder
+            parent_input_idx, attr_name = self.attr_getattr_mapping[self.current_node]
+            parent_node = self.new_input_nodes[parent_input_idx]
+            # Use tracer.create_proxy to create a proper Proxy node
+            getattr_proxy = self.tracer.create_proxy(
+                "call_function",
+                getattr,
+                (parent_node, attr_name),
+                {},
+            )
+            # Copy metadata from the original placeholder
+            if "val" in self.current_node.meta:
+                getattr_proxy.node.meta["val"] = self.current_node.meta["val"]
+            return getattr_proxy
         else:
             # Shouldn't happen if mapping is correct, but fallback
             return super().placeholder(target, args, kwargs)
@@ -530,6 +564,9 @@ def pytreeify(
                 self.gm_inputs = example_inputs
                 raise Yield
 
+            # Save mode stack before running forward_callable, as the captured
+            # bytecode may include side effects that modify the mode stack.
+            saved_mode_stack = torch.overrides._get_current_function_mode_stack()
             try:
                 out.forward_callable(
                     compiled_fn=backend_dummy, extra_globals=f_globals
@@ -537,6 +574,8 @@ def pytreeify(
             except Yield:
                 assert self.gm_inputs is not None
                 return self.gm_inputs
+            finally:
+                set_torch_function_mode_stack(saved_mode_stack)
             raise RuntimeError
 
     fake_mode = torch._dynamo.utils.detect_fake_mode(flat_real_args)
@@ -571,9 +610,15 @@ def pytreeify(
                     for i in range(self.num_outputs)
                 ]
 
-            results = out.forward_callable(
-                compiled_fn=backend_dummy, extra_globals=f_globals
-            )(*args, **kwargs)
+            # Save mode stack before running forward_callable, as the captured
+            # bytecode may include side effects that modify the mode stack.
+            saved_mode_stack = torch.overrides._get_current_function_mode_stack()
+            try:
+                results = out.forward_callable(
+                    compiled_fn=backend_dummy, extra_globals=f_globals
+                )(*args, **kwargs)
+            finally:
+                set_torch_function_mode_stack(saved_mode_stack)
             ret, self.out_spec = pytree.tree_flatten(results)
             return ret
 
@@ -691,6 +736,7 @@ def dynamo_graph_capture_for_export(
         tracing_context = TracingContext(graph_module.meta["fake_mode"])
         tracing_context.tensor_to_context = out.backend_input.tensor_to_context  # type: ignore[attr-defined]
         graph_module.meta["tracing_context"] = tracing_context
+        _restore_state_dict(mod, graph_module)
         return graph_module
 
     return inner
@@ -817,11 +863,36 @@ def _dynamo_graph_capture_for_export(
             ]
 
             # Create input order mapping from dynamo's internal order to user order
+            # Handle both GetItemSource (regular inputs) and AttrSource (DTensor's _local_tensor)
+            #
+            # When DTensors are passed as inputs, dynamo may capture their _local_tensor
+            # as a separate graph input. We need to:
+            # 1. Map GetItemSource inputs directly to their user input index
+            # 2. For AttrSource with _local_tensor, record that we need to extract
+            #    the attribute from the parent input during graph transformation
             graph_input_order: dict[int, int] = {}
+            # Maps graph_placeholder_idx -> (parent_user_input_idx, attr_name)
+            attr_source_mapping: dict[int, tuple[int, str]] = {}
+
             for inp in graph_inputs:
                 source = graph_inputs[inp]
-                assert isinstance(source, torch._dynamo.source.GetItemSource)
-                graph_input_order[source.index] = len(graph_input_order)
+                if isinstance(source, torch._dynamo.source.GetItemSource):
+                    graph_input_order[source.index] = len(graph_input_order)
+                elif isinstance(source, torch._dynamo.source.AttrSource):
+                    # For DTensors, dynamo captures the _local_tensor attribute.
+                    # We record this so DynamoGraphTransformer can create getattr
+                    # calls instead of extra placeholders.
+                    base = source.base
+                    if isinstance(base, torch._dynamo.source.GetItemSource):
+                        attr_source_mapping[inp] = (base.index, source.member)
+                    else:
+                        raise AssertionError(
+                            f"Expected AttrSource base to be GetItemSource but got {type(base)}: {base}"
+                        )
+                else:
+                    raise AssertionError(
+                        f"Expected GetItemSource or AttrSource but got {type(source)}: {source}"
+                    )
 
             for real_idx, graph_idx in graph_input_order.items():
                 flat_inputs[real_idx] = example_inputs[graph_idx]
@@ -834,6 +905,7 @@ def _dynamo_graph_capture_for_export(
                 graph_input_order,
                 graph_output_map,
                 fake_mode,
+                attr_source_mapping,
             ).transform()
 
             # Set up PyTree codegen for proper input/output handling
