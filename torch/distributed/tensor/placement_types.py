@@ -68,66 +68,30 @@ class Shard(torch._C._distributed.Shard):
             few ranks before calling the collectives (i.e. scatter/all_gather, etc.).
             This is because collectives usually require equal size tensor inputs
         """
-        return self._split_tensor_helper(
-            tensor, num_chunks, with_padding, contiguous, self.dim
-        )
-
-    @staticmethod
-    def _split_tensor_helper(
-        tensor: torch.Tensor,
-        num_chunks: int,
-        with_padding: bool,
-        contiguous: bool,
-        dim: int,
-    ) -> tuple[list[torch.Tensor], list[int]]:
-        assert dim <= tensor.ndim, (
-            f"Sharding dim {dim} greater than tensor ndim {tensor.ndim}"
+        assert self.dim <= tensor.ndim, (
+            f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
         )
 
         # chunk tensor over dimension `dim` into n slices
-        tensor_list = list(torch.chunk(tensor, num_chunks, dim=dim))
+        tensor_list = list(torch.chunk(tensor, num_chunks, dim=self.dim))
         tensor_list = fill_empty_tensor_to_shards(
-            tensor_list, dim, num_chunks - len(tensor_list)
+            tensor_list, self.dim, num_chunks - len(tensor_list)
         )
 
         # compute the chunk size inline with ``torch.chunk`` to calculate padding
-        full_chunk_size = (tensor.size(dim) + num_chunks - 1) // num_chunks
+        full_chunk_size = (tensor.size(self.dim) + num_chunks - 1) // num_chunks
 
         shard_list: list[torch.Tensor] = []
         pad_sizes: list[int] = []
         for shard in tensor_list:
             if with_padding:
-                pad_size = Shard._get_shard_pad_size(full_chunk_size, shard, dim)
-                shard = pad_tensor(shard, dim, pad_size)
+                pad_size = Shard._get_shard_pad_size(full_chunk_size, shard, self.dim)
+                shard = pad_tensor(shard, self.dim, pad_size)
                 pad_sizes.append(pad_size)
             if contiguous:
                 shard = shard.contiguous()
             shard_list.append(shard)
         return shard_list, pad_sizes
-
-    @maybe_run_for_local_tensor
-    def _select_split_tensor(
-        self,
-        tensor: torch.Tensor,
-        num_chunks: int,
-        index: int,
-        *,
-        with_padding: bool = True,
-        contiguous: bool = True,
-        clone: bool = True,
-    ) -> torch.Tensor:
-        """
-        Like _split_tensor() but only returns a single Tensor
-        """
-        shards, _ = self._split_tensor(
-            tensor, num_chunks, with_padding=with_padding, contiguous=False
-        )
-        result = shards[index]
-        if clone:
-            result = result.clone()
-        elif contiguous:
-            result = result.contiguous()
-        return result
 
     @staticmethod
     @maybe_run_for_local_tensor
@@ -220,13 +184,11 @@ class Shard(torch._C._distributed.Shard):
         if src_data_rank is None:
             # src_data_rank specified as None explicitly means to skip the
             # communications, simply split
-            return self._select_split_tensor(
-                tensor,
-                num_chunks,
-                mesh_dim_local_rank,
-                with_padding=False,
-                contiguous=True,
+            scatter_list, _ = self._split_tensor(
+                tensor, num_chunks, with_padding=False, contiguous=True
             )
+
+            return self._select_shard(scatter_list, mesh_dim_local_rank)
 
         scatter_list, pad_sizes = self._split_tensor(
             tensor, num_chunks, with_padding=True, contiguous=True
@@ -361,6 +323,11 @@ class Shard(torch._C._distributed.Shard):
 
         return result
 
+    @staticmethod
+    @maybe_run_for_local_tensor
+    def _select_shard(shards: list[torch.Tensor], shard_index) -> torch.Tensor:
+        return shards[shard_index].clone()
+
     def _replicate_to_shard(
         self,
         local_tensor: torch.Tensor,
@@ -373,13 +340,14 @@ class Shard(torch._C._distributed.Shard):
         the current rank, which would perform a local chunk
         """
         num_chunks = mesh.size(mesh_dim=mesh_dim)
-        return self._select_split_tensor(
+        shards, _ = self._split_tensor(
             local_tensor,
             num_chunks,
-            shard_index,
             with_padding=False,
-            clone=True,
+            contiguous=False,
         )
+
+        return Shard._select_shard(shards, shard_index)
 
     @staticmethod
     @maybe_run_for_local_tensor
@@ -734,30 +702,6 @@ class _StridedShard(torch._C._distributed.StridedShard):
             pad_sizes = [max_chunk_size - shard.size(self.dim) for shard in shard_list]
 
         return shard_list, pad_sizes
-
-    @maybe_run_for_local_tensor
-    def _select_split_tensor(
-        self,
-        tensor: torch.Tensor,
-        num_chunks: int,
-        index: int,
-        *,
-        with_padding: bool = True,
-        contiguous: bool = True,
-        clone: bool = True,
-    ) -> torch.Tensor:
-        """
-        Like _split_tensor() but only returns a single Tensor
-        """
-        shards, _ = self._split_tensor(
-            tensor, num_chunks, with_padding=with_padding, contiguous=False
-        )
-        result = shards[index]
-        if clone:
-            result = result.clone()
-        elif contiguous:
-            result = result.contiguous()
-        return result
 
     def _to_replicate_tensor(
         self,
