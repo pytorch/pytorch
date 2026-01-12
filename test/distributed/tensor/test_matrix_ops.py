@@ -95,6 +95,44 @@ class DistMatrixOpsTest(DTensorTestBase):
         self.assertEqual(out.placements, expected_placements)
 
     @with_comms
+    def test_mm_with_shardable_input(self):
+        mesh = self.build_device_mesh()
+        global_inps_viewed = (
+            torch.arange((self.world_size) * self.world_size, device="cuda")
+            .float()
+            .view(self.world_size, self.world_size)
+        )
+        inps_viewed = distribute_tensor(
+            global_inps_viewed,
+            mesh,
+            (Shard(dim=0),),
+        )
+        global_weight = (
+            torch.arange(self.world_size * self.world_size).float().view(self.world_size, self.world_size)
+        )
+        weight = distribute_tensor(global_weight, mesh, (Replicate(),))
+        out = torch.mm(inps_viewed, weight)
+        expected_placements = (Shard(dim=0),)
+        self.assertEqual(out.placements, expected_placements)
+
+    @with_comms
+    def test_addmm_empty_operand(self):
+        device_mesh = self.build_device_mesh()
+        shard_spec = [Shard(0)]
+        replica_spec = [Replicate()]
+
+        tensor_to_shard = torch.randn(12, 0)
+        mat1 = distribute_tensor(tensor_to_shard, device_mesh, shard_spec)
+        tensor_to_replicate = torch.randn(0, 4)
+        mat2 = distribute_tensor(tensor_to_replicate, device_mesh, replica_spec)
+        input_tensor = torch.randn(4)
+        inp = distribute_tensor(input_tensor, device_mesh, replica_spec)
+
+        dist_res = torch.addmm(inp, mat1, mat2)
+        local_res = torch.addmm(input_tensor, tensor_to_shard, tensor_to_replicate)
+        self.assertEqual(dist_res.full_tensor(), local_res)
+    
+    @with_comms
     def test_mm_with_strided_input(self):
         mesh = self.build_device_mesh()
         batch_size, seq_len, contract_dim, out_dim = 2, 4, 3, 7
@@ -139,23 +177,6 @@ class DistMatrixOpsTest(DTensorTestBase):
         #     _StridedShard(dim=0, split_factor=16),
         # )
         # self.assertEqual(out.placements, expected_placements)
-
-    @with_comms
-    def test_addmm_empty_operand(self):
-        device_mesh = self.build_device_mesh()
-        shard_spec = [Shard(0)]
-        replica_spec = [Replicate()]
-
-        tensor_to_shard = torch.randn(12, 0)
-        mat1 = distribute_tensor(tensor_to_shard, device_mesh, shard_spec)
-        tensor_to_replicate = torch.randn(0, 4)
-        mat2 = distribute_tensor(tensor_to_replicate, device_mesh, replica_spec)
-        input_tensor = torch.randn(4)
-        inp = distribute_tensor(input_tensor, device_mesh, replica_spec)
-
-        dist_res = torch.addmm(inp, mat1, mat2)
-        local_res = torch.addmm(input_tensor, tensor_to_shard, tensor_to_replicate)
-        self.assertEqual(dist_res.full_tensor(), local_res)
 
     @with_comms
     def test_addmm_auto_redistribute(self):
