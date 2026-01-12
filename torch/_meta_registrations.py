@@ -2322,7 +2322,7 @@ def meta_mm(a, b, out_dtype: torch.dtype | None = None):
     torch._check(b.dim() == 2, lambda: "b must be 2D")
     torch._check(
         a.dtype == b.dtype,
-        lambda: f"expected a and b to have the same dtype, but got {a.dtype} and {b.dtype}",
+        lambda: f"expected m1 and m2 to have the same dtype, but got: {a.dtype} != {b.dtype}",
     )
     N, M1 = a.shape
     M2, P = b.shape
@@ -4540,7 +4540,7 @@ def common_meta_baddbmm_bmm(batch1, batch2, is_bmm, self_baddbmm=None, out_dtype
     torch._check(batch2.dim() == 3, lambda: "batch2 must be a 3D tensor")
     torch._check(
         batch1.dtype == batch2.dtype,
-        lambda: f"expected batch1 and batch2 to have the same dtype, but got {batch1.dtype} and {batch2.dtype}",
+        lambda: f"expected batch1 and batch2 to have the same dtype, but got: {batch1.dtype} != {batch2.dtype}",
     )
 
     batch1_sizes = batch1.size()
