@@ -259,7 +259,8 @@ class TestExpandPlaceholder(TestCase):
         ]
         expected_output_placements = [
             (Shard(0), Replicate(), Shard(1)),
-            (Partial("sum"), Partial("sum"), Partial("sum")),
+            # P(avg) -> P(sum) is currently not supported, but could be in principle
+            (Partial("sum"), Partial("sum"), Replicate()),
         ]
         tuple_strategy = _expand_foreach_add_list(
             inputs_a, inputs_b, placements_a, placements_b
@@ -531,8 +532,8 @@ class TestExpandPlaceholder(TestCase):
 
         self.assertEqual(expanded_replicate, expected_replicate)
 
-        # Test Case 2: Shard-only inputs - only Shard expansion
-        # Expected: 3 strategies with placeholders filled using Shard + implicit replicate
+        # Test Case 2: (_Strided)Shard-only inputs - only (_Strided)Shard expansion
+        # Expected: 3 strategies with placeholders filled using (_Strided)Shard + implicit replicate
         expected_shard = [
             [Partial(), Shard(1), Shard(0)],
             [Shard(0), Shard(0), Replicate()],
@@ -543,6 +544,48 @@ class TestExpandPlaceholder(TestCase):
         expanded_shard = _fill_single_dim_strategy_placeholders(
             {Replicate(), Shard(0), Shard(1)}, single_dim_strategies
         )
+
+        expected_strided_shard = [
+            [
+                Partial(),
+                _StridedShard(1, split_factor=2),
+                _StridedShard(0, split_factor=2),
+            ],
+            [
+                Partial(),
+                _StridedShard(1, split_factor=4),
+                _StridedShard(0, split_factor=4),
+            ],
+            [
+                _StridedShard(dim=0, split_factor=2),
+                _StridedShard(dim=0, split_factor=2),
+                Replicate(),
+            ],
+            [
+                _StridedShard(dim=0, split_factor=4),
+                _StridedShard(dim=0, split_factor=4),
+                Replicate(),
+            ],
+            [
+                _StridedShard(dim=1, split_factor=2),
+                Replicate(),
+                _StridedShard(dim=1, split_factor=2),
+            ],
+            [
+                _StridedShard(dim=1, split_factor=4),
+                Replicate(),
+                _StridedShard(dim=1, split_factor=4),
+            ],
+            [Replicate(), Replicate(), Replicate()],
+        ]
+        expanded_strided_shard = _fill_single_dim_strategy_placeholders(
+            {
+                _StridedShard(0, split_factor=2),
+                _StridedShard(0, split_factor=4),
+            },
+            single_dim_strategies,
+        )
+        self.assertEqual(expanded_strided_shard, expected_strided_shard)
 
         self.assertEqual(expanded_shard, expected_shard)
 
@@ -582,6 +625,29 @@ class TestExpandPlaceholder(TestCase):
         )
 
         self.assertEqual(expanded_mixed, expected_mixed)
+
+    def test_opschema_hash_includes_placements(self):
+        """Test OpSchema hashing includes placements for LRU cache correctness."""
+        mesh = DeviceMesh("cpu", mesh=torch.arange(8).reshape(2, 2, 2))
+        meta = TensorMeta(torch.Size([8, 8]), (8, 1), torch.float32)
+
+        # Identical placements should hash the same
+        spec1 = DTensorSpec(mesh, (Shard(0), Replicate(), Replicate()), meta)
+        spec2 = DTensorSpec(mesh, (Shard(0), Replicate(), Replicate()), meta)
+        schema1 = OpSchema(
+            torch.ops.aten.add.Tensor, (OpStrategy([OpSpec(spec1)]),), {}
+        )
+        schema2 = OpSchema(
+            torch.ops.aten.add.Tensor, (OpStrategy([OpSpec(spec2)]),), {}
+        )
+        self.assertEqual(hash(schema1), hash(schema2))
+
+        # Different placements should hash differently
+        spec3 = DTensorSpec(mesh, (Replicate(), Shard(1), Replicate()), meta)
+        schema3 = OpSchema(
+            torch.ops.aten.add.Tensor, (OpStrategy([OpSpec(spec3)]),), {}
+        )
+        self.assertNotEqual(hash(schema1), hash(schema3))
 
 
 @torch.library.custom_op("mylib::dummy_add", mutates_args=())
