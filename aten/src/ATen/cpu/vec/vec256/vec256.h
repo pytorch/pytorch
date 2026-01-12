@@ -29,7 +29,6 @@
 #include <ATen/cpu/vec/vec256/vsx/vec256_common_vsx.h>
 #else
 // clang-format off
-#include <ATen/cpu/vec/vec256/zarch/vec256_zarch.h>
 #include <ATen/cpu/vec/vec256/vec256_bfloat16.h>
 #include <ATen/cpu/vec/vec256/vec256_half.h>
 // clang-format on
