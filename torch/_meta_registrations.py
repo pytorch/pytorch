@@ -752,11 +752,11 @@ def meta_index_reduce(
     source_device = _get_tensor_device(source)
     torch._check(
         index_device == self_device,
-        lambda: f"index_reduce_(): index must be on the same device as self, but got index on {index_device} and self on {self_device}",
+        lambda: f"index_reduce_(): index must be on the same device as self, but got index on {index_device} and self on {self_device}",  # noqa: B950
     )
     torch._check(
         source_device == self_device,
-        lambda: f"index_reduce_(): source must be on the same device as self, but got source on {source_device} and self on {self_device}",
+        lambda: f"index_reduce_(): source must be on the same device as self, but got source on {source_device} and self on {self_device}",  # noqa: B950
     )
     return torch.empty_like(self, memory_format=torch.contiguous_format)
 
@@ -777,11 +777,11 @@ def meta_index_reduce_(
     source_device = _get_tensor_device(source)
     torch._check(
         index_device == self_device,
-        lambda: f"index_reduce_(): index must be on the same device as self, but got index on {index_device} and self on {self_device}",
+        lambda: f"index_reduce_(): index must be on the same device as self, but got index on {index_device} and self on {self_device}",  # noqa: B950
     )
     torch._check(
         source_device == self_device,
-        lambda: f"index_reduce_(): source must be on the same device as self, but got source on {source_device} and self on {self_device}",
+        lambda: f"index_reduce_(): source must be on the same device as self, but got source on {source_device} and self on {self_device}",  # noqa: B950
     )
     return self
 
@@ -4572,11 +4572,11 @@ def meta_index_add(self, dim, index, source, *, alpha=1):
     source_device = _get_tensor_device(source)
     torch._check(
         index_device == self_device,
-        lambda: f"index_add_(): index must be on the same device as self, but got index on {index_device} and self on {self_device}",
+        lambda: f"index_add_(): index must be on the same device as self, but got index on {index_device} and self on {self_device}",  # noqa: B950
     )
     torch._check(
         source_device == self_device,
-        lambda: f"index_add_(): source must be on the same device as self, but got source on {source_device} and self on {self_device}",
+        lambda: f"index_add_(): source must be on the same device as self, but got source on {source_device} and self on {self_device}",  # noqa: B950
     )
     return self.new_empty(self.shape)
 
