@@ -177,7 +177,8 @@ def maybe_to_fake_obj(
 
         # Set specified members onto the fake object
         opaque_info = get_opaque_obj_info(x_type)
-        assert opaque_info is not None
+        if opaque_info is None:
+            raise AssertionError(f"opaque_info for type {x_type} must not be None")
         for attr_name in opaque_info.members:
             with unset_fake_temporarily():
                 if not hasattr(x, attr_name):
