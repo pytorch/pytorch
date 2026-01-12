@@ -10189,7 +10189,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             self.assertEqual(bw_code.count("halide_helpers.rand"), 0)
         elif self.device == GPU_TYPE:
             self.assertEqual(fw_code.count("tl.rand"), 1)
-            self.assertEqual(bw_code.count("tl.rand"), 0)
+            self.assertEqual(bw_code.count("tl.rand"), 1)
         g2 = weight.grad.clone()
         check(r2, g2)
 
@@ -10228,14 +10228,47 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         if is_halide_backend(self.device):
             self.assertEqual(fw_code.count("halide_helpers.rand"), 2)
             self.assertEqual(bw_code.count("halide_helpers.rand"), 0)
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
         elif self.device == GPU_TYPE:
             # the load_seed_offset arg can be 1 or non-1; depending on whether
             # the triton signature specializes on 1 vs non-1, you might get 1
             # or 2 kernels. In newer versions of triton, there's no specialization
             # so we get only 1 kernel.
-            self.assertEqual(fw_code.count("tl.rand"), 2)
-            self.assertEqual(bw_code.count("tl.rand"), 0)
-        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 4)
+            self.assertEqual(fw_code.count("tl.rand"), 1)
+            self.assertEqual(bw_code.count("tl.rand"), 2)
+
+            # seed generation
+            self.assertEqual(fw_code.count("aten.randint.low_out"), 1)
+            self.assertEqual(bw_code.count("aten.randint.low_out"), 0)
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 6)
+        else:
+            self.assertEqual(torch._inductor.metrics.generated_kernel_count, 6)
+
+    @xfail_if_mps
+    @config.patch(search_autotune_cache=False)
+    @torch._functorch.config.patch(partitioner_aggressive_fusion=True)
+    def test_dropout4(self):
+        m = torch.nn.Dropout(0.2)
+
+        @torch._dynamo.optimize_assert("inductor")
+        def run(x):
+            return m(x)
+
+        inp = torch.randn([8, 32], device=self.device, requires_grad=True)
+        result, (fw_code, bw_code) = run_fw_bw_and_get_code(lambda: run(inp))
+        zero_out = (result == 0).sum().item()
+        grad_zero = (inp.grad == 0).sum().item()
+        self.assertEqual(zero_out, grad_zero)
+        if is_halide_backend(self.device):
+            self.assertEqual(fw_code.count("halide_helpers.rand"), 1)
+            self.assertEqual(bw_code.count("halide_helpers.rand"), 0)
+        elif self.device == GPU_TYPE:
+            self.assertEqual(fw_code.count("tl.rand"), 1)
+            self.assertEqual(bw_code.count("tl.rand"), 1)
+
+            # seed generation
+            self.assertEqual(fw_code.count("aten.randint.low_out"), 1)
+            self.assertEqual(bw_code.count("aten.randint.low_out"), 0)
 
     @xfail_if_mps  # Only works for triton
     def test_randint_kernel_count(self):

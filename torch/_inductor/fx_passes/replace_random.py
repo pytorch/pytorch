@@ -1,17 +1,25 @@
 # mypy: allow-untyped-defs
 import collections
+import functools
 import logging
+from typing import Any
 
 import torch
+from torch import Tensor
+from torch._dynamo.utils import counters
 from torch.fx.passes.graph_transform_observer import GraphTransformObserver
 from torch.fx.passes.shape_prop import _extract_tensor_metadata
 
 from .. import config, inductor_prims
 from ..pattern_matcher import (
     CallFunctionVarArgs,
+    fwd_only,
+    init_once_fakemode,
+    joint_fwd_bwd,
     Match,
     PatternMatcherPass,
     register_graph_pattern,
+    register_replacement,
 )
 from ..virtualized import V
 
@@ -26,6 +34,7 @@ def replace_random_passes(gm: torch.fx.GraphModule):
     if config.fallback_random:
         return 0
 
+    lazy_init()
     count = patterns.apply(gm)
     with GraphTransformObserver(gm, "fuse_seed_creation_pass", "joint_graph_passes"):
         count += fuse_seed_creation_pass(gm.graph)
@@ -126,6 +135,71 @@ def replace_random(
     device = get_device(device)
     # pyrefly: ignore [bad-argument-type]
     match.replace_by_example(replacement, [size])
+
+
+@init_once_fakemode
+def lazy_init():
+    if not torch.cuda.is_available():
+        return
+
+    # workaround https://github.com/pytorch/pytorch/issues/97894
+    device = "cuda"
+    # sizes/values don't actually matter for initial trace
+    # once we get a possible match we re-trace with the actual values and verify the match still holds
+    t = functools.partial(torch.empty, [1], device=device)
+    # workaround https://github.com/pytorch/pytorch/issues/97894
+    # 0.113377 is a "magic" value that lets us recover the lost input arg relationship
+    workaround = {"dropout_p": 0.113377}
+
+    register_replacement(
+        # pyrefly: ignore [bad-argument-type]
+        _dropout_pattern,
+        # pyrefly: ignore [bad-argument-type]
+        _dropout_replacement,
+        [t(requires_grad=True), *workaround.values()],
+        # pyrefly: ignore [bad-argument-type]
+        fwd_only,
+        # pyrefly: ignore [bad-argument-type]
+        patterns,
+        scalar_workaround=workaround,
+    )
+    register_replacement(
+        # pyrefly: ignore [bad-argument-type]
+        _dropout_pattern,
+        # pyrefly: ignore [bad-argument-type]
+        _dropout_replacement,
+        [t(requires_grad=True), *workaround.values()],
+        # pyrefly: ignore [bad-argument-type]
+        joint_fwd_bwd,
+        # pyrefly: ignore [bad-argument-type]
+        patterns,
+        scalar_workaround=workaround,
+    )
+
+
+def _dropout_pattern(x: torch.Tensor, dropout_p: float):
+    return torch.dropout(x, dropout_p, True)
+
+
+def _dropout_replacement(x: torch.Tensor, dropout_p: float):
+    assert 0 < dropout_p < 1, "should have been handled in decomps"
+    counters["inductor"]["replace_random"] += 1
+    seed = inductor_prims.seed(x.device)
+    scale = float(1.0 / (1.0 - dropout_p))
+
+    def get_bool_mask():
+        return inductor_prims.random(x.size(), seed, "rand") > dropout_p
+
+    class Dropout(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx: Any, x: Tensor) -> Tensor:  # type: ignore[override]
+            return get_bool_mask().to(x.dtype) * x * scale
+
+        @staticmethod
+        def backward(ctx: Any, grad_output: Tensor) -> Tensor:  # type: ignore[override]
+            return get_bool_mask().to(grad_output.dtype) * grad_output * scale
+
+    return Dropout.apply(x)
 
 
 # pyrefly: ignore [bad-argument-type]
