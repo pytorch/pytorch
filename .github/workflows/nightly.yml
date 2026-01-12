@@ -59,7 +59,7 @@ jobs:
       build-environment: linux-jammy-py3.10-gcc11
       docker-image: ${{ needs.docs-build.outputs.docker-image }}
       push: ${{ github.event_name == 'schedule' || github.event_name == 'workflow_dispatch' || startsWith(github.event.ref, 'refs/tags/v') }}
-      run-doxygen: true
+      run-doxygen: false  # TODO: Re-enable after testing S3 upload fix
     secrets:
       GH_PYTORCHBOT_TOKEN: ${{ secrets.GH_PYTORCHBOT_TOKEN }}
 
