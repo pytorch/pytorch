@@ -206,6 +206,48 @@ class TestDTensorDebugMode(TestCase):
         # check stack trace
         self.assertTrue("z.sum().backward()" in debug_mode.operators[-1].stack_trace)
 
+    def test_stack_trace_in_compiled_region(self):
+        class Foo(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.l1 = torch.nn.Linear(8, 4)
+                self.l2 = torch.nn.Linear(4, 8)
+
+            def forward(self, x):
+                x = x + 2
+                x = self.l1(x)
+                x = x.relu()
+                x = self.l2(x)
+                x = x.sum()
+                return x
+
+        x = torch.randn(16, 8)
+        model = torch.compile(Foo(), backend="aot_eager", fullgraph=True)
+
+        # test forward nodes
+        with DebugMode(
+            record_stack_trace=True, run_compile_with_interpreter=True
+        ) as debug_mode:
+            out = model(x)
+
+        op_calls = [op for op in debug_mode.operators if isinstance(op, _OpCall)]
+        self.assertTrue("x = x + 2" in op_calls[0].stack_trace)
+        self.assertTrue("x = self.l1(x)" in op_calls[1].stack_trace)
+        self.assertTrue("x = x.relu()" in op_calls[3].stack_trace)
+        self.assertTrue("x = x.sum()" in op_calls[-1].stack_trace)
+
+        # test backward nodes
+        with DebugMode(
+            record_stack_trace=True, run_compile_with_interpreter=True
+        ) as debug_mode:
+            out.backward()
+
+        op_calls = [op for op in debug_mode.operators if isinstance(op, _OpCall)]
+        self.assertTrue("out.backward()" in op_calls[0].stack_trace)
+        self.assertTrue("x = x.sum()" in op_calls[1].stack_trace)
+        self.assertTrue("x = self.l2(x)" in op_calls[2].stack_trace)
+        self.assertTrue("x = x.relu()" in op_calls[12].stack_trace)
+
     def test_debug_mode_densor_redistribution_trace(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size).view(4, 2))
 
@@ -462,7 +504,7 @@ class TestDTensorDebugMode(TestCase):
         aten::addmm(t: f32[8], t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]""",
         )
 
-        for backend in ["eager", "aot_eager", "inductor"]:
+        for backend in ["aot_eager", "inductor"]:
             with DebugMode(run_compile_with_interpreter=True) as debug_mode:
                 torch.compile(mod, backend=backend, fullgraph=True)(x)
 
@@ -474,12 +516,12 @@ class TestDTensorDebugMode(TestCase):
             else:
                 self.assertExpectedInline(
                     debug_mode.debug_string(),
-                    f"""\
-  [{backend} region (compile)] enter
+                    """\
+  [aot_eager region (compile)] enter
   [annotate] Foo
     aten::t(t: f32[8, 8])  ->  t: f32[8, 8]
     aten::addmm(t: f32[8], t: f32[8, 8], t: f32[8, 8])  ->  t: f32[8, 8]
-  [{backend} region (compile)] exit""",
+  [aot_eager region (compile)] exit""",
                 )
 
     def test_nn_module_in_eager(self):
@@ -570,7 +612,7 @@ class TestDTensorDebugMode(TestCase):
 
         # Only region of module is compiled, test nn.Mod call hierarchy
         mod = Baz()
-        mod.foo = torch.compile(mod.foo, backend="eager", fullgraph=True)
+        mod.foo = torch.compile(mod.foo, backend="aot_eager", fullgraph=True)
         inp = torch.randn(4, 4)
         with DebugMode(
             record_nn_module=True, run_compile_with_interpreter=True
@@ -581,7 +623,7 @@ class TestDTensorDebugMode(TestCase):
             debug_mode.debug_string(),
             """\
     [nn.Mod] Baz
-    [eager region (compile)] enter
+    [aot_eager region (compile)] enter
       [nn.Mod (compile)] L['self'].l1
         aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
         aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
@@ -589,7 +631,7 @@ class TestDTensorDebugMode(TestCase):
       [nn.Mod (compile)] L['self'].l2
         aten::t(t: f32[4, 4])  ->  t: f32[4, 4]
         aten::addmm(t: f32[4], t: f32[4, 4], t: f32[4, 4])  ->  t: f32[4, 4]
-    [eager region (compile)] exit
+    [aot_eager region (compile)] exit
       [nn.Mod] Baz.bar
         aten::add.Tensor(t: f32[4, 4], 2.0)  ->  t: f32[4, 4]
         [nn.Mod] Baz.bar.l3

@@ -72,7 +72,7 @@ runs:
       with:
         role-to-assume: ${{ inputs.aws-role-to-assume != '' && inputs.aws-role-to-assume || 'arn:aws:iam::308535385114:role/gha_workflow_s3_and_ecr_read_only' }}
         role-session-name: gha-ecr-login
-        aws-region: ${{ inputs.aws-region || 'us-east-1' }}
+        aws-region: ${{ inputs.aws-region }}
         role-duration-seconds: ${{ inputs.role-duration-seconds }}
         role-skip-session-tagging: true
 
@@ -99,6 +99,7 @@ runs:
       uses: aws-actions/amazon-ecr-login@062b18b96a7aff071d4dc91bc00c4c1a7945b076 # v2.0.1
       with:
         registries: 308535385114  # META_AWS_ACCOUNT_ID
+        aws-region: ${{ inputs.aws-region }}
 
     - name: Verify ECR login
       shell: bash
