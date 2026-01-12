@@ -196,8 +196,8 @@ jobs:
           FLASH_ATTENTION_DISABLE_HDIMDIFF64: "TRUE"  # "FALSE"
           FLASH_ATTENTION_DISABLE_HDIMDIFF192: "TRUE"  # "FALSE"
 
-      - name: Show sccache stats
-        run: ${SCCACHE_PATH} --show-stats
+      # - name: Show sccache stats
+      #   run: ${SCCACHE_PATH} --show-stats
 
       - run: du -h flash-attention/hopper/dist/*.whl
       - uses: actions/upload-artifact@v4.4.0
