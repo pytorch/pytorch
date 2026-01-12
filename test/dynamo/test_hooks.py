@@ -365,7 +365,7 @@ def forward(self, L_x_ : torch.Tensor):
     y = l_x_ * 2;  l_x_ = None
     fwd_body_0 = self.fwd_body_0
     bwd_body_0 = self.bwd_body_0
-    autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, y, non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = y = None
+    autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, y, non_differentiable_idx = [], saved_for_backward_idx = []);  fwd_body_0 = bwd_body_0 = y = None
     getitem = autograd_function_apply[0];  autograd_function_apply = None
     a = getitem * 3
     add = a + getitem;  a = None

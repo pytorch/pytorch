@@ -6383,6 +6383,7 @@ Done""",
         check(fast_mode=True)
         check(fast_mode=False)
 
+    @skipIfTorchDynamo("hook's None grad check is lost when backward is traced")
     def test_gradcheck_undefined_grad(self):
         def check(fast_mode):
             # when encounter runtime error while running backward
