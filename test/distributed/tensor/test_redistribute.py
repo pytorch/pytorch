@@ -848,9 +848,9 @@ class RedistributeTest(DTensorTestBase):
         """
         mesh = init_device_mesh(self.device_type, (2, 2))
 
-        # Create a local tensor where each rank has a distinct value
-        # This makes it easy to verify the reduction order matters
-        local_tensor = torch.full((4, 4), float(self.rank), device=self.device_type)
+        # Create a local tensor - we use randn since we only care about
+        # testing the planner's transform generation, not the actual values
+        local_tensor = torch.randn(4, 4, device=self.device_type)
 
         # Create DTensor with (Partial("sum"), Partial("max"))
         src_placements = [Partial("sum"), Partial("max")]
