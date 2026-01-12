@@ -820,10 +820,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
         cls: type[AOTAutogradCache], cache_info: AOTAutogradCacheInfo
     ) -> Optional[str]:
         shape_env = cls._get_shape_env()
-
-        if shape_env is None:
-            return None
-
+        assert shape_env is not None
         symints = cache_info.forward_symints
         guards = shape_env.get_pruned_guards(symints)
         return shape_env.produce_guards_expression(placeholders=symints, guards=guards)
@@ -977,8 +974,6 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
             AOTAutogradCache._write_to_local_cache(key, content)
             counters["aot_autograd"]["autograd_cache_saved"] += 1
         except BypassAOTAutogradCache as e:
-            if config.strict_autograd_cache:
-                raise
             counters["aot_autograd"]["autograd_cache_bypass"] += 1
             log.info("Bypassing autograd cache due to: %s", e)  # noqa: G200
             if remote:
@@ -991,7 +986,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
                     "bypass_aot_autograd", "Unable to serialize: " + str(e)
                 )
             if config.strict_autograd_cache:
-                raise
+                raise e
             return None
 
         if remote:

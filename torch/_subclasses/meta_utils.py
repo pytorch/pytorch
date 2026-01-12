@@ -940,26 +940,12 @@ class MetaConverter(Generic[_TensorT]):
                 torch.fx.experimental.symbolic_shapes.SymbolicContext
             ] = symbolic_context,
         ) -> tuple[tuple[int, ...], tuple[int, ...], int]:
-            # local import to prevent circular import
-            from torch.fx.experimental.symbolic_shapes import is_symbolic
-
             assert t.stride is not None
             if shape_env is not None:
                 fake_mode = t.fake_mode
-                has_symbolic = (
-                    any(is_symbolic(sz) for sz in t.size)
-                    or any(is_symbolic(sd) for sd in t.stride)
-                    or is_symbolic(t.storage_offset)
-                )
                 if fake_mode is not None and fake_mode.shape_env is shape_env:
                     # Don't reallocate the sizes; the shape envs are the same,
                     # so reuse the old sizes/strides/etc
-                    return (t.size, t.stride, t.storage_offset)
-                elif (
-                    fake_mode is not None
-                    and not has_symbolic
-                    and symbolic_context is None
-                ):
                     return (t.size, t.stride, t.storage_offset)
                 else:
                     # TODO: deduplicate this
