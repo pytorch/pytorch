@@ -1364,6 +1364,25 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 )
             return None
 
+        @register(torch.fx.experimental.symbolic_shapes.size_hint)
+        def handle_size_hint(
+            self,
+            tx: "InstructionTranslator",
+            expr: VariableTracker,
+            fallback: Optional[VariableTracker] = None,
+        ) -> VariableTracker | None:
+            fallback_int = fallback.as_python_constant() if fallback else None
+            if isinstance(expr, SymNodeVariable):
+                return variables.ConstantVariable.create(
+                    torch.fx.experimental.symbolic_shapes.size_hint(
+                        expr.sym_num, fallback_int
+                    )
+                )
+            elif expr.is_python_constant():
+                return expr
+            else:
+                return None
+
         @register(torch.fx.experimental.symbolic_shapes.guard_size_oblivious)
         def handle_guard_size_oblivious(
             self, tx: "InstructionTranslator", expr: VariableTracker
@@ -1838,6 +1857,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
 
         @register(torch.autograd.grad)
+        # pyrefly: ignore[implicit-any]
         def handle_autograd_grad(self, tx: "InstructionTranslator", *args, **kwargs):
             """
             Handle torch.autograd.grad() calls within compiled regions.
@@ -2768,11 +2788,6 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # grad_enabled. Since this is parameter, we can just override the
         # has_grad_fn field to False to workaround the issue.
         result.has_grad_fn = False  # type: ignore[union-attr]
-
-        # Register this parameter as a leaf tensor for backward() auto-detection.
-        # When backward() is called without inputs, we need to find all leaf tensors,
-        # including those created in-graph like nn.Parameter.
-        tx.output.leaf_var_creation_order.append(result)
 
         # TODO(jansel): if the new param falls out of scope, currently it won't get freed until
         # the end of the graph.  We should fix this.
