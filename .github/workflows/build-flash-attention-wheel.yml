@@ -54,7 +54,7 @@ jobs:
       MAX_JOBS: 6 # (FA3 is memory hungry!)
       DISTUTILS_USE_SDK: 1 # otherwise distutils will complain on windows about multiple versions of msvc
       SCCACHE_IDLE_TIMEOUT: "0"
-      PY: python
+      PY: python3
       TORCH_CUDA_ARCH_LIST: "8.0+PTX 8.6 9.0a"
 
     steps:

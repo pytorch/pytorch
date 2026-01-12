@@ -16,6 +16,12 @@ inputs:
 runs:
   using: composite
   steps:
+    - name: Install python
+      if: runner.os == 'Windows'
+      uses: actions/setup-python@v4
+      with:
+        python-version: ${{ inputs.python }}
+
     - id: cuda_info
       shell: python3 "{0}"
       run: |
@@ -67,12 +73,6 @@ runs:
         echo "Cuda install location: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
         echo "CUDA_HOME=${{ steps.cuda-toolkit.outputs.CUDA_PATH }}" >> ${GITHUB_ENV}
         cat ${GITHUB_ENV}
-
-    - name: Install python
-      if: runner.os == 'Windows'
-      uses: actions/setup-python@v4
-      with:
-        python-version: ${{ inputs.python }}
 
     - name: Setup MSVC
       if: runner.os == 'Windows'
