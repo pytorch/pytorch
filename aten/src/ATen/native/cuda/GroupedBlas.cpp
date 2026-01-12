@@ -28,7 +28,7 @@
 #include <ATen/ceil_div.h>
 
 #ifdef USE_FBGEMM_GENAI
-#include <fbgemm_gpu/torch_ops.h>
+#include <mslk/gemm/gemm_torch.h>
 #endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -103,7 +103,7 @@ _mx8_mx8_bf16_grouped_mm_fbgemm(
 #endif
 
 #if defined(USE_FBGEMM_GENAI) and !defined(USE_ROCM)
-    fbgemm_gpu::mx8mx8bf16_grouped_mm(
+    mslk::gemm::mx8mx8bf16_grouped_mm(
         mat_a,
         mat_b,
         scale_a,
@@ -159,7 +159,7 @@ _f8_f8_bf16_rowwise_grouped_mm_rocm(
   TORCH_CHECK_VALUE(mat_b.dtype() == at::kFloat8_e4m3fnuz, "Expected mat_a to be Float8_e4m3fnuz matrix got ", mat_b.scalar_type());
 
 #if defined(USE_FBGEMM_GENAI) && defined(USE_ROCM)
-  fbgemm_gpu::f8f8bf16_rowwise_grouped_mm(
+  mslk::gemm::f8f8bf16_rowwise_grouped_mm(
       mat_a,
       // FBGEMM expects B matrix shape to be (.., N, K)
       mat_b.transpose(-2, -1),
@@ -251,7 +251,7 @@ _f4_f4_bf16_grouped_mm_fbgemm(
           "scale_b must be Float8_e8m0fnu, got: ", scale_b.scalar_type());
   }
 
-  auto o = fbgemm_gpu::f4f4bf16_grouped_mm(
+  auto o = mslk::gemm::f4f4bf16_grouped_mm(
       mat_a,
       mat_b,
       scale_a,
