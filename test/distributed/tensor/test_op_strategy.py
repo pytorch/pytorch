@@ -31,8 +31,10 @@ from torch.distributed.tensor._ops._einsum_strategy import (
     EinsumDims,
     gen_einsum_strategies,
 )
-from torch.distributed.tensor._ops.registration import register_op_strategy
-from torch.distributed.tensor._ops.utils import replicate_op_strategy
+from torch.distributed.tensor._ops.utils import (
+    register_op_strategy,
+    replicate_op_strategy,
+)
 from torch.distributed.tensor.debug import _clear_sharding_prop_cache, CommDebugMode
 from torch.testing._internal.common_utils import run_tests, TestCase
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -377,6 +379,23 @@ class TestCostModel(DTensorOpTestBase):
                 op_schema
             )
             self.assertFalse(output_sharding.needs_redistribute)
+
+    def test_redistribute_cost_partial_to_different_partial_is_infinite(self):
+        """Test that redistributing from Partial("sum") to Partial("avg") has infinite cost.
+
+        Converting between different Partial types (e.g., sum -> avg) is not supported,
+        so the redistribute cost should be infinite to prevent this strategy from being chosen.
+        """
+        mesh_1d = self.build_device_mesh()
+        global_tensor = torch.randn(10, 10)
+        global_tensor_meta = extract_tensor_meta(global_tensor)
+
+        partial_sum_spec = DTensorSpec(mesh_1d, (Partial("sum"),), global_tensor_meta)
+        partial_avg_spec = DTensorSpec(mesh_1d, (Partial("avg"),), global_tensor_meta)
+
+        # Cost should be infinite since converting between different Partial types is unsupported
+        cost = redistribute_cost(partial_sum_spec, partial_avg_spec)
+        self.assertEqual(cost, float("inf"))
 
     def test_redistribute_cost_with_order(self):
         mesh_2d = DeviceMesh(
