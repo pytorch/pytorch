@@ -9712,6 +9712,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(f, (torch.zeros((4, 2)),))
 
+    @xfail_if_triton_cpu  # libdevice.fma
     def test_softmax_backward_data(self):
         def fn(a, b):
             return aten._softmax_backward_data(a, b, dim=1, input_dtype=torch.float32)
@@ -15141,136 +15142,20 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             .check("store")
         ).run(code)
 
-    @xfail_if_triton_cpu
-    @requires_cuda_and_triton
-    def test_addcmul_fma_bitwise_equal(self):
-        """Test that addcmul with FMA lowering produces bitwise equal results to eager."""
-        self_tensor = torch.randn(64, 64, device=GPU_TYPE)
-        tensor1 = torch.randn(64, 64, device=GPU_TYPE)
-        tensor2 = torch.randn(64, 64, device=GPU_TYPE)
+    def test_use_deterministic_algorithms(self):
+        @torch.compile(backend="inductor", fullgraph=True)
+        def fn(src, index, base_tensor):
+            src = src + 10
+            torch.use_deterministic_algorithms(True)
+            base_tensor.scatter_(0, index, src)
+            return base_tensor.clone() + 1
 
-        # ROCm may have small numerical differences
-        # For some reason ROCm isn't bitwise equivalent between eager and compiled
-        atol = 1e-5 if TEST_WITH_ROCM else 0
-        rtol = 1e-5 if TEST_WITH_ROCM else 0
-
-        # Test value=1
-        eager_result = torch.addcmul(self_tensor, tensor1, tensor2)
-
-        @torch.compile
-        def fn(s, t1, t2):
-            return torch.addcmul(s, t1, t2)
-
-        compiled_result = fn(self_tensor, tensor1, tensor2)
-        self.assertEqual(eager_result, compiled_result, atol=atol, rtol=rtol)
-
-        # Test value != 1
-        eager_result2 = torch.addcmul(self_tensor, tensor1, tensor2, value=2.5)
-
-        @torch.compile
-        def fn2(s, t1, t2):
-            return torch.addcmul(s, t1, t2, value=2.5)
-
-        compiled_result2 = fn2(self_tensor, tensor1, tensor2)
-        self.assertEqual(eager_result2, compiled_result2, atol=atol, rtol=rtol)
-
-    @xfail_if_triton_cpu
-    @requires_cuda_and_triton
-    def test_addcmul_fma_uses_fma_instruction(self):
-        """Test that addcmul generates code using FMA instruction."""
-        self_tensor = torch.randn(64, 64, device=GPU_TYPE)
-        tensor1 = torch.randn(64, 64, device=GPU_TYPE)
-        tensor2 = torch.randn(64, 64, device=GPU_TYPE)
-
-        @torch.compile
-        def fn(s, t1, t2):
-            return torch.addcmul(s, t1, t2, value=2.0)
-
-        _, code = run_and_get_code(fn, self_tensor, tensor1, tensor2)
-        code = " ".join(code)
-        self.assertIn("tl.fma", code, "Expected FMA to be used in generated code")
-
-    @requires_cuda_and_triton
-    def test_addcmul_type_promotion(self):
-        """Test that addcmul correctly promotes types when inputs have different dtypes."""
-        # Test int + float promotion
-        self_int = torch.randint(0, 10, (32, 32), device=GPU_TYPE, dtype=torch.int32)
-        tensor1_float = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float32)
-        tensor2_float = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float32)
-
-        eager_result = torch.addcmul(self_int, tensor1_float, tensor2_float)
-
-        @torch.compile
-        def fn(s, t1, t2):
-            return torch.addcmul(s, t1, t2)
-
-        compiled_result = fn(self_int, tensor1_float, tensor2_float)
-        self.assertEqual(eager_result.dtype, compiled_result.dtype)
-        self.assertEqual(eager_result, compiled_result)
-
-        # Test float16 + float32 promotion
-        self_fp16 = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float16)
-        tensor1_fp32 = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float32)
-        tensor2_fp32 = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float32)
-
-        eager_result2 = torch.addcmul(self_fp16, tensor1_fp32, tensor2_fp32)
-
-        @torch.compile
-        def fn2(s, t1, t2):
-            return torch.addcmul(s, t1, t2)
-
-        compiled_result2 = fn2(self_fp16, tensor1_fp32, tensor2_fp32)
-        self.assertEqual(eager_result2.dtype, compiled_result2.dtype)
-        self.assertEqual(eager_result2, compiled_result2)
-
-        # Test all float16 inputs
-        self_fp16_2 = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float16)
-        tensor1_fp16 = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float16)
-        tensor2_fp16 = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float16)
-
-        eager_result3 = torch.addcmul(
-            self_fp16_2, tensor1_fp16, tensor2_fp16, value=2.0
-        )
-
-        @torch.compile
-        def fn3(s, t1, t2):
-            return torch.addcmul(s, t1, t2, value=2.0)
-
-        compiled_result3 = fn3(self_fp16_2, tensor1_fp16, tensor2_fp16)
-        self.assertEqual(eager_result3.dtype, compiled_result3.dtype)
-        self.assertEqual(eager_result3, compiled_result3)
-
-        # Test with scalar tensor (0-d tensor) broadcasting
-        self_tensor = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float32)
-        tensor1_scalar = torch.tensor(2.5, device=GPU_TYPE, dtype=torch.float32)
-        tensor2_tensor = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float32)
-
-        eager_result4 = torch.addcmul(self_tensor, tensor1_scalar, tensor2_tensor)
-
-        @torch.compile
-        def fn4(s, t1, t2):
-            return torch.addcmul(s, t1, t2)
-
-        compiled_result4 = fn4(self_tensor, tensor1_scalar, tensor2_tensor)
-        self.assertEqual(eager_result4.dtype, compiled_result4.dtype)
-        self.assertEqual(eager_result4, compiled_result4)
-
-        # Test with scalar tensor and type promotion
-        self_fp32 = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float32)
-        tensor1_fp64_scalar = torch.tensor(1.5, device=GPU_TYPE, dtype=torch.float64)
-        tensor2_fp32 = torch.randn(32, 32, device=GPU_TYPE, dtype=torch.float32)
-
-        eager_result5 = torch.addcmul(
-            self_fp32, tensor1_fp64_scalar, tensor2_fp32, value=0.5
-        )
-
-        @torch.compile
-        def fn5(s, t1, t2):
-            return torch.addcmul(s, t1, t2, value=0.5)
-
-        compiled_result5 = fn5(self_fp32, tensor1_fp64_scalar, tensor2_fp32)
-        self.assertEqual(eager_result5.dtype, compiled_result5.dtype)
-        self.assertEqual(eager_result5, compiled_result5)
+        src = torch.tensor([[100.0], [200.0], [300.0]])
+        index = torch.tensor([[0], [0], [0]])
+        base_tensor = torch.zeros(2, 1)
+        out = fn(src, index, base_tensor)
+        expected = torch.tensor([[311.0], [1.0]])
+        self.assertEqual(out, expected)
 
     # end of class CommonTemplate - add new tests here
 

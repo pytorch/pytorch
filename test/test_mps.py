@@ -6007,6 +6007,47 @@ class TestMPS(TestCaseMPS):
         with self.assertRaisesRegex(RuntimeError, r'leading minor of order 2 is not positive-definite'):
             torch.linalg.cholesky_ex(A, check_errors=True)
 
+    def test_linalg_cholesky_inverse(self):
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+
+        def run_test(size, *batch_dims, upper=False):
+            A_cpu = random_hermitian_pd_matrix(size, *batch_dims, dtype=torch.float32, device="cpu")
+            A_mps = A_cpu.to("mps")
+            L_cpu = torch.linalg.cholesky(A_cpu, upper=upper)
+            L_mps = torch.linalg.cholesky(A_mps, upper=upper)
+            inv_cpu = torch.cholesky_inverse(L_cpu, upper=upper)
+            inv_mps = torch.cholesky_inverse(L_mps, upper=upper)
+            self.assertEqual(inv_cpu, inv_mps)
+
+        # 2D case
+        for size, upper in product([3, 7, 32], [True, False]):
+            run_test(size, upper=upper)
+
+        # 3D case
+        for batch in [1, 4, 7]:
+            run_test(16, batch, upper=False)
+            run_test(16, batch, upper=True)
+
+        # 5D case
+        run_test(5, 2, 3, 2, 2, upper=False)
+        run_test(5, 2, 3, 2, 2, upper=True)
+
+        # Non-contiguous input (column-major / transposed strides)
+        A_cpu = random_hermitian_pd_matrix(16, 4, dtype=torch.float32, device="cpu")
+        A_mps = A_cpu.to("mps")
+        L_mps = torch.linalg.cholesky(A_mps).mT.contiguous().mT
+        self.assertFalse(L_mps.is_contiguous())
+        inv_mps = torch.cholesky_inverse(L_mps)
+        inv_cpu = torch.cholesky_inverse(A_cpu.clone())
+        L_cpu = torch.linalg.cholesky(A_cpu)
+        inv_cpu = torch.cholesky_inverse(L_cpu)
+        self.assertEqual(inv_cpu, inv_mps.cpu())
+
+        # Irregular matrix sizes
+        for size in [0, 1, 13, 127]:
+            run_test(size, upper=False)
+            run_test(size, upper=True)
+
     def test_upsample_nearest2d(self):
         def helper(N, C, H, W, memory_format):
             inputCPU = torch.arange(N * C * H * W, device='cpu', dtype=torch.float,
