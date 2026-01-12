@@ -74,48 +74,6 @@ class DistMatrixOpsTest(DTensorTestBase):
         self.assertEqual(dist_res.full_tensor(), local_res)
 
     @with_comms
-    def test_mm_with_unshardable_input(self):
-        mesh = self.build_device_mesh()
-        global_inps_viewed = (
-            torch.arange((self.world_size - 1) * self.world_size, device="cuda")
-            .float()
-            .view(self.world_size - 1, self.world_size)
-        )
-        inps_viewed = distribute_tensor(
-            global_inps_viewed,
-            mesh,
-            (Shard(dim=0),),
-        )
-        global_weight = (
-            torch.arange(self.world_size * self.world_size).float().view(self.world_size, self.world_size)
-        )
-        weight = distribute_tensor(global_weight, mesh, (Replicate(),))
-        out = torch.mm(inps_viewed, weight)
-        expected_placements = (Replicate(),)
-        self.assertEqual(out.placements, expected_placements)
-
-    @with_comms
-    def test_mm_with_shardable_input(self):
-        mesh = self.build_device_mesh()
-        global_inps_viewed = (
-            torch.arange((self.world_size) * self.world_size, device="cuda")
-            .float()
-            .view(self.world_size, self.world_size)
-        )
-        inps_viewed = distribute_tensor(
-            global_inps_viewed,
-            mesh,
-            (Shard(dim=0),),
-        )
-        global_weight = (
-            torch.arange(self.world_size * self.world_size).float().view(self.world_size, self.world_size)
-        )
-        weight = distribute_tensor(global_weight, mesh, (Replicate(),))
-        out = torch.mm(inps_viewed, weight)
-        expected_placements = (Shard(dim=0),)
-        self.assertEqual(out.placements, expected_placements)
-
-    @with_comms
     def test_addmm_empty_operand(self):
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
@@ -131,7 +89,7 @@ class DistMatrixOpsTest(DTensorTestBase):
         dist_res = torch.addmm(inp, mat1, mat2)
         local_res = torch.addmm(input_tensor, tensor_to_shard, tensor_to_replicate)
         self.assertEqual(dist_res.full_tensor(), local_res)
-    
+
     @with_comms
     def test_mm_with_strided_input(self):
         mesh = self.build_device_mesh()
@@ -238,6 +196,28 @@ class DistMatrixOpsTest(DTensorTestBase):
         shard_specs_comb = list(itertools.product(placement_specs, placement_specs))
         for spec in shard_specs_comb:
             test_placement_comb([spec[0]], [spec[1]])
+
+        # cover unshardable input where some rank have empty _local_tensor
+        # eg sharding tensor (world_size - 1) over world_size
+        global_inps_viewed = (
+            torch.arange((self.world_size - 1) * self.world_size, device="cuda")
+            .float()
+            .view(self.world_size - 1, self.world_size)
+        )
+        inps_viewed = distribute_tensor(
+            global_inps_viewed,
+            device_mesh,
+            (Shard(dim=0),),
+        )
+        global_weight = (
+            torch.arange(self.world_size * self.world_size)
+            .float()
+            .view(self.world_size, self.world_size)
+        )
+        weight = distribute_tensor(global_weight, device_mesh, (Replicate(),))
+        out = torch.mm(inps_viewed, weight)
+        expected_placements = (Replicate(),)
+        self.assertEqual(out.placements, expected_placements)
 
     @with_comms
     @skip_unless_torch_gpu
