@@ -70,6 +70,7 @@ class AotAutograd:
         if use_fallback:
             log.debug("Unable to use AOT Autograd because graph has mutation")
             counters["aot_autograd"]["not_ok"] += 1
+            # pyrefly: ignore [bad-return]
             return gm
 
         def wrap_bw_compiler(bw_compiler_fn: Callable[P, R]) -> Callable[..., R]:

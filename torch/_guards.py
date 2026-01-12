@@ -6,7 +6,6 @@ import enum
 import functools
 import logging
 import re
-import sys
 import threading
 import traceback
 import unittest.mock
@@ -16,18 +15,7 @@ from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Generic, NamedTuple, Optional, overload, TYPE_CHECKING, TypeVar
-
-
-if sys.version_info >= (3, 11):
-    from typing import dataclass_transform
-else:
-
-    def dataclass_transform():
-        def decorator(fn):
-            return fn
-
-        return decorator
-
+from typing_extensions import dataclass_transform
 
 import torch
 from torch.utils import _pytree as pytree
@@ -95,14 +83,22 @@ class CompileId:
     def __str__(self) -> str:
         # NOTE: Keep this in sync with both from_string and the tlparse repo
         if self.compiled_autograd_id is not None:
-            assert (self.frame_id is None) == (self.frame_compile_id is None)
+            if (self.frame_id is None) != (self.frame_compile_id is None):
+                raise AssertionError(
+                    f"frame_id and frame_compile_id must both be None or both be set, "
+                    f"got frame_id={self.frame_id}, frame_compile_id={self.frame_compile_id}"
+                )
             frame_str = ""
             if self.frame_id is not None:
                 frame_str = f"/{self.frame_id}/{self.frame_compile_id}"
 
             return f"!{self.compiled_autograd_id}{frame_str}"
         else:
-            assert self.frame_id is not None and self.frame_compile_id is not None
+            if self.frame_id is None or self.frame_compile_id is None:
+                raise AssertionError(
+                    f"frame_id and frame_compile_id must not be None, "
+                    f"got frame_id={self.frame_id}, frame_compile_id={self.frame_compile_id}"
+                )
             return f"{self.frame_id}/{self.frame_compile_id}"
 
     @classmethod
@@ -402,10 +398,11 @@ class Guard:
 
         self.guard_types.append(guard_type)
 
-        assert self.guarded_class_weakref in (
-            guarded_class,
-            None,
-        ), "Guarded class id must be identical, or None"
+        if self.guarded_class_weakref not in (guarded_class, None):
+            raise AssertionError(
+                f"Guarded class id must be identical, or None, "
+                f"got {self.guarded_class_weakref} vs {guarded_class}"
+            )
         self.guarded_class_weakref = guarded_class
 
         if not self.code_list:
@@ -417,11 +414,16 @@ class Guard:
         # multiple guards on the same object, the weakref can die between the
         # invocation of set_export_info calls. So a dead weakref is also
         # acceptable.
-        assert (
+        is_valid = (
             self.obj_weakref in (obj_weakref, None)
             or callable(self.obj_weakref)
             and self.obj_weakref() is None
-        ), "Guarded object must be identical, None or ephemeral (dead weakref)"
+        )
+        if not is_valid:
+            raise AssertionError(
+                f"Guarded object must be identical, None or ephemeral (dead weakref), "
+                f"got {self.obj_weakref} vs {obj_weakref}"
+            )
         self.obj_weakref = obj_weakref
 
 
@@ -452,7 +454,11 @@ class DuplicateInputs(GuardEnvExpr):
     input_source_b: Source
 
     def __post_init__(self) -> None:
-        assert self.input_source_a != self.input_source_b
+        if self.input_source_a == self.input_source_b:
+            raise AssertionError(
+                f"input_source_a and input_source_b must be different, "
+                f"got {self.input_source_a}"
+            )
 
 
 """
@@ -556,7 +562,10 @@ class ModuleContext(Checkpointable[ModuleContextCheckpointState]):
         return ModuleContextCheckpointState(dict(self.nn_modules))
 
     def restore_graphstate(self, state: ModuleContextCheckpointState) -> None:
-        assert isinstance(state, ModuleContextCheckpointState)
+        if not isinstance(state, ModuleContextCheckpointState):
+            raise AssertionError(
+                f"expected ModuleContextCheckpointState, got {type(state)}"
+            )
         self.nn_modules = state.nn_modules
 
 
@@ -606,12 +615,19 @@ class GlobalContext(Checkpointable[GlobalContextCheckpointState]):
         return GlobalContextCheckpointState(self.global_state)
 
     def restore_graphstate(self, state: GlobalContextCheckpointState) -> None:
-        assert isinstance(state, GlobalContextCheckpointState)
+        if not isinstance(state, GlobalContextCheckpointState):
+            raise AssertionError(
+                f"expected GlobalContextCheckpointState, got {type(state)}"
+            )
         self.global_state = state.global_state
-        assert (
+        if not (
             len(self.global_state) == len(self._supported_global_states)
             and set(self.global_state.keys()) == self._supported_global_states
-        ), "Global state mismatch"
+        ):
+            raise AssertionError(
+                f"Global state mismatch: got keys {set(self.global_state.keys())}, "
+                f"expected {self._supported_global_states}"
+            )
         for func, args in self.global_state.values():
             func(args)
 
@@ -683,7 +699,8 @@ class GuardsContext(Checkpointable[GuardsCheckpointState]):
 
     def restore_graphstate(self, state: GuardsCheckpointState) -> None:
         # NB: "steals" the passed in state
-        assert isinstance(state, GuardsCheckpointState)
+        if not isinstance(state, GuardsCheckpointState):
+            raise AssertionError(f"expected GuardsCheckpointState, got {type(state)}")
         self.dynamo_guards = GuardsSet(state.dynamo_guards)
 
 
@@ -772,12 +789,13 @@ class InvokeSubgraphCache(HopSubgraphCache):
     def add_effects(self, identifier: str, effects: set) -> None:
         """Store the effect types for a given invoke_subgraph identifier."""
         if prev_effects := self.effects_cache.get(identifier, None):
-            assert effects == prev_effects, (
-                "Different number of effects were found for invoke_subgraph "
-                f"call with identifier {identifier}. \n"
-                f"Previously we had the following effects: {prev_effects}.\n"
-                f"But now we have: {effects}."
-            )
+            if effects != prev_effects:
+                raise AssertionError(
+                    "Different number of effects were found for invoke_subgraph "
+                    f"call with identifier {identifier}. \n"
+                    f"Previously we had the following effects: {prev_effects}.\n"
+                    f"But now we have: {effects}."
+                )
         self.effects_cache[identifier] = effects
 
     def get_effects(self, identifier: str) -> set | None:
@@ -822,7 +840,8 @@ CompileContext is a more overarching context that encompasses multiple restarts.
 class CompileContext:
     @staticmethod
     def get() -> CompileContext:
-        assert _TLS.compile_context is not None
+        if _TLS.compile_context is None:
+            raise AssertionError("compile_context is not set")
         return _TLS.compile_context
 
     @staticmethod
@@ -830,7 +849,10 @@ class CompileContext:
         return getattr(_TLS, "compile_context", None)
 
     def __init__(self, compile_id: CompileId | None) -> None:
-        assert compile_id is None or isinstance(compile_id, CompileId)
+        if compile_id is not None and not isinstance(compile_id, CompileId):
+            raise AssertionError(
+                f"compile_id must be None or CompileId, got {type(compile_id)}"
+            )
         self.compile_id: CompileId | None = compile_id
         self.attempt = 0
         # Verbose ShapeEnv guards produced.
@@ -959,7 +981,8 @@ class TracingContext:
         return traceback.StackSummary.from_list(stack)
 
     def _populate_loc_in_frame_summary(self) -> traceback.FrameSummary:
-        assert self.loc_in_frame is not None
+        if self.loc_in_frame is None:
+            raise AssertionError("loc_in_frame must not be None")
         filename, lineno, frame_name = self.loc_in_frame
         return traceback.FrameSummary(filename, lineno, frame_name, lookup_line=False)
 
@@ -1114,7 +1137,16 @@ def dataclass_with_cached_hash(
                 object.__setattr__(self, "_hash", old_hash(self))
             return self._hash
 
+        def __reduce__(self):
+            # Exclude _hash from pickling to ensure deterministic cache keys.
+            # The _hash is a cached value that can be nondeterministically computed
+            # (e.g., based on id() of objects), so it should not affect pickling.
+            fields = dataclasses.fields(self)
+            field_values = tuple(getattr(self, f.name) for f in fields)
+            return (self.__class__, field_values)
+
         new_cls.__hash__ = __hash__
+        new_cls.__reduce__ = __reduce__
         return new_cls  # type: ignore[return-value]
 
     if cls is None:
@@ -1246,24 +1278,25 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
         get_plain_tensors,
     )
 
-    fake_modes = []
-
+    # If TracingContext has a fake_mode, use it authoritatively.
+    # This is the case when Dynamo is driving compilation - any fake tensors
+    # from other modes in the inputs will be refakified by the caller.
     if context := TracingContext.try_get():
         fake_mode = context.fake_mode
         if fake_mode is not None:
-            fake_modes.append((fake_mode, "tracing context", 0))
+            return fake_mode
+
+    fake_modes = []
 
     from torch.utils._python_dispatch import _get_current_dispatch_mode_stack
 
     for i, m in enumerate(reversed(_get_current_dispatch_mode_stack())):
         if isinstance(m, FakeTensorMode):
-            # pyrefly: ignore [bad-argument-type]
             fake_modes.append((m, "active fake mode", i))
 
     flat_inputs = pytree.tree_leaves(inputs)
     for i, flat_input in enumerate(flat_inputs):
         if isinstance(flat_input, FakeTensor):
-            # pyrefly: ignore [bad-argument-type]
             fake_modes.append((flat_input.fake_mode, "fake tensor input", i))
         if is_traceable_wrapper_subclass(flat_input):
             out: list[torch.Tensor | int | torch.SymInt] = []
@@ -1272,7 +1305,6 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
                 x for x in out if isinstance(x, FakeTensor)
             ]
             fake_modes.extend(
-                # pyrefly: ignore [bad-argument-type]
                 [
                     (tensor.fake_mode, f"subclass input {i}", ix)
                     for ix, tensor in enumerate(fake_tensors)
@@ -1282,14 +1314,13 @@ def detect_fake_mode(inputs: Any = None) -> FakeTensorMode | None:
     if fake_modes:
         fake_mode, desc1, i1 = fake_modes[0]
         for m, desc2, i2 in fake_modes[1:]:
-            assert fake_mode is m, (
-                f"fake mode ({fake_mode}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}\n\n"
-                # pyrefly: ignore [missing-attribute]
-                f"fake mode from {desc1} {i1} allocated at:\n{fake_mode.stack}\n"
-                # pyrefly: ignore [missing-attribute]
-                f"fake mode from {desc2} {i2} allocated at:\n{m.stack}"
-            )
-        # pyrefly: ignore [bad-return]
+            if fake_mode is not m:
+                raise AssertionError(
+                    f"fake mode ({fake_mode}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}\n\n"
+                    f"fake mode from {desc1} {i1} allocated at:\n{fake_mode.stack}\n"
+                    f"fake mode from {desc2} {i2} allocated at:\n{m.stack}"
+                )
+
         return fake_mode
     else:
         return None

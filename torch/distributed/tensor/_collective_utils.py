@@ -313,6 +313,120 @@ def reduce_scatter_cost(
     return latency + bw * 1e6
 
 
+def _compute_placement_transition_cost(
+    current_placement: "dtensor_spec.Placement",
+    target_placement: "dtensor_spec.Placement",
+    mesh_topo: MeshTopoInfo,
+    mesh_dim: int,
+    comm_bytes_gb: float,
+) -> tuple[float, float]:
+    """
+    Compute the cost of transitioning from one placement to another on a single mesh dimension.
+
+    Args:
+        current_placement: The current placement on the mesh dimension.
+        target_placement: The target placement on the mesh dimension.
+        mesh_topo: Mesh topology information for cost estimation.
+        mesh_dim: The mesh dimension where the transition happens.
+        comm_bytes_gb: The communication bytes in GB for this step.
+
+    Returns:
+        A tuple of (cost, updated_comm_bytes_gb):
+            - cost: The communication cost for this transition (float("inf") if invalid).
+            - updated_comm_bytes_gb: The updated communication bytes after this step.
+    """
+    if current_placement == target_placement:
+        return 0.0, comm_bytes_gb
+
+    num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[mesh_dim]
+
+    if current_placement.is_shard() and target_placement.is_replicate():
+        # allgather gives larger comm bytes
+        comm_bytes_gb *= num_devices_on_mesh_dim
+        return allgather_cost(comm_bytes_gb, mesh_topo, mesh_dim), comm_bytes_gb
+    elif current_placement.is_shard() and target_placement.is_shard():
+        # should be alltoall comm, since we haven't implement it yet, add 1.0 as penalty
+        # to favor allgather instead
+        # TODO: add alltoall_cost
+        return allgather_cost(comm_bytes_gb, mesh_topo, mesh_dim) + 1.0, comm_bytes_gb
+    elif current_placement.is_partial() and target_placement.is_replicate():
+        return allreduce_cost(comm_bytes_gb, mesh_topo, mesh_dim), comm_bytes_gb
+    elif current_placement.is_partial() and target_placement.is_shard():
+        cost = reduce_scatter_cost(comm_bytes_gb, mesh_topo, mesh_dim)
+        # after reduce_scatter the comm bytes for further collectives halved.
+        comm_bytes_gb /= num_devices_on_mesh_dim
+        return cost, comm_bytes_gb
+    elif current_placement.is_shard() and target_placement.is_partial():
+        # ban shard -> partial as it does not make sense to perform
+        # this redistribute
+        return float("inf"), comm_bytes_gb
+    elif current_placement.is_partial() and target_placement.is_partial():
+        # we already handled the == case at the top, and we ban converting between partial types.
+        return float("inf"), comm_bytes_gb
+    elif current_placement.is_replicate() and target_placement.is_shard():
+        comm_bytes_gb /= num_devices_on_mesh_dim
+        return 0.0, comm_bytes_gb
+
+    return 0.0, comm_bytes_gb
+
+
+def one_step_redistribute_cost(
+    current_spec: "dtensor_spec.DTensorSpec",
+    target_spec: "dtensor_spec.DTensorSpec",
+) -> float:
+    """
+    Calculate the cost of a single redistribution step between two DTensorSpecs.
+
+    This function computes the communication cost for a one-step redistribution
+    where the current and target specs differ by exactly one placement on one
+    mesh dimension.
+
+    Args:
+        current_spec: The current DTensorSpec.
+        target_spec: The target DTensorSpec.
+
+    Returns:
+        The communication cost for this step (float("inf") if invalid).
+    """
+    if current_spec.mesh != target_spec.mesh:
+        return float("inf")
+
+    if current_spec.placements == target_spec.placements:
+        return 0.0
+
+    # Find the mesh dimension that differs
+    mesh_dim = -1
+    current_placement = None
+    target_placement = None
+    for i, (cur, tgt) in enumerate(
+        zip(current_spec.placements, target_spec.placements)
+    ):
+        if cur != tgt:
+            if mesh_dim != -1:
+                # More than one dimension differs - not a single step
+                raise ValueError(
+                    "one_step_redistribute_cost expects specs that differ by exactly one placement"
+                )
+            mesh_dim = i
+            current_placement = cur
+            target_placement = tgt
+
+    if mesh_dim == -1:
+        return 0.0
+
+    assert current_placement is not None and target_placement is not None
+
+    mesh_topo = MeshTopoInfo.build_from_mesh(current_spec.mesh)
+    comm_bytes_gb = (
+        spec_to_bytes(current_spec) / current_spec.num_shards / 1024 / 1024 / 1024
+    )
+
+    cost, _ = _compute_placement_transition_cost(
+        current_placement, target_placement, mesh_topo, mesh_dim, comm_bytes_gb
+    )
+    return cost
+
+
 def redistribute_cost(
     current_spec: "dtensor_spec.DTensorSpec",
     target_spec: "dtensor_spec.DTensorSpec",
@@ -330,10 +444,16 @@ def redistribute_cost(
         # make infinite cost if meshes are not same
         # TODO: see if we want to support this once there's cross mesh communication
         return float("inf")
-
     if current_spec.is_replicated():
-        # short-cut:
-        # comm cost is 0 if current spec is already full replication
+        # short-cut: comm cost is 0 if current spec is already full replication
+        return 0.0
+
+    # TODO(zpcore): test placements with _StridedShard if we replace shard_order
+    # with _StridedShard.
+    if (
+        current_spec.placements == target_spec.placements
+        and current_spec.shard_order == target_spec.shard_order
+    ):
         return 0.0
 
     mesh_topo = MeshTopoInfo.build_from_mesh(current_spec.mesh)
@@ -344,33 +464,44 @@ def redistribute_cost(
     # Transformation that considered for redistribute cost:
     # 1. allgather 2. alltoall
     # 3. allreduce 4. reduce_scatter
-    for i, (current, target) in enumerate(
-        zip(current_spec.placements, target_spec.placements)
-    ):
-        if current == target:
-            continue
+    from torch.distributed._functional_collectives import _are_we_tracing
+    from torch.distributed.tensor._redistribute import (
+        _gen_transform_infos,
+        _gen_transform_infos_non_cached,
+    )
 
-        num_devices_on_mesh_dim = mesh_topo.mesh_dim_devices[i]
-        if current.is_shard() and target.is_replicate():
-            # allgather gives larger comm bytes
-            comm_bytes_gb *= num_devices_on_mesh_dim
-            # add up allgather comm cost
-            cost += allgather_cost(comm_bytes_gb, mesh_topo, i)
-        elif current.is_shard() and target.is_shard():
-            # should be alltoall comm, since we haven't implement it yet, add penalty
-            # to favor allgather instead
-            cost += allgather_cost(comm_bytes_gb, mesh_topo, i) + 1.0
-        elif current.is_partial() and target.is_replicate():
-            # add up allreduce comm cost
-            cost += allreduce_cost(comm_bytes_gb, mesh_topo, i)
-        elif current.is_partial() and target.is_shard():
-            # add up reduce_scatter comm cost
-            cost += reduce_scatter_cost(comm_bytes_gb, mesh_topo, i)
-            # after reduce_scatter the comm bytes for further collectives halved.
-            comm_bytes_gb /= num_devices_on_mesh_dim
-        elif current.is_shard() and target.is_partial():
-            # ban shard -> partial as it does not make sense to perform
-            # this redistribute
+    # TODO(zpcore): Support _StridedShard redistribution. Remove the temporary
+    # fix, which is to prevent StridedShard erroring out.
+    if current_spec.shard_order is None or target_spec.shard_order is None:
+        return float("inf")
+
+    # No redistribution needed when placements are already identical.
+    # This also prevents potential failures in _gen_transform_infos for certain configurations
+    # (e.g., sub-meshes) where finding a transform path between identical states may error out.
+    # TODO(zpcore): test placements with _StridedShard if we replace shard_order
+    # with _StridedShard.
+    if (
+        current_spec.placements == target_spec.placements
+        and current_spec.shard_order == target_spec.shard_order
+    ):
+        return cost
+
+    if _are_we_tracing():
+        transform_infos = _gen_transform_infos_non_cached(current_spec, target_spec)
+    else:
+        transform_infos = _gen_transform_infos(current_spec, target_spec)
+    for transform_info in transform_infos:
+        assert current_spec.tensor_meta is not None, (
+            "spec should have tensor meta defined!"
+        )
+        current = transform_info.src_dst_placements[0]
+        target = transform_info.src_dst_placements[1]
+        mesh_dim = transform_info.mesh_dim
+        step_cost, comm_bytes_gb = _compute_placement_transition_cost(
+            current, target, mesh_topo, mesh_dim, comm_bytes_gb
+        )
+        if step_cost == float("inf"):
             return float("inf")
+        cost += step_cost
 
     return cost

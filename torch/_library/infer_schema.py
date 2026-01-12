@@ -128,7 +128,7 @@ def infer_schema(
         schema_type = None
         if annotation_type not in SUPPORTED_PARAM_TYPES:
             if is_opaque_type(annotation_type):
-                schema_type = _OPAQUE_TYPES[annotation_type]
+                schema_type = _OPAQUE_TYPES[annotation_type].class_name
             elif annotation_type == torch._C.ScriptObject:
                 error_fn(
                     f"Parameter {name}'s type cannot be inferred from the schema "
@@ -252,7 +252,6 @@ def derived_types(
 
 
 def get_supported_param_types():
-    # pyrefly: ignore [bad-assignment]
     data: list[tuple[Union[type, typing._SpecialForm], str, bool, bool, bool]] = [
         # (python type, schema type, type[] variant, type?[] variant, type[]? variant
         (Tensor, "Tensor", True, True, False),
@@ -264,6 +263,12 @@ def get_supported_param_types():
         (dtype, "ScalarType", False, False, False),
         (device, "Device", False, False, False),
     ]
+
+    if torch.distributed.is_available():
+        from torch.distributed.distributed_c10d import GroupName
+
+        data.append((typing.cast(type, GroupName), "str", False, False, False))
+
     result = []
     for line in data:
         result.extend(derived_types(*line))
@@ -295,7 +300,7 @@ def parse_return(annotation, error_fn):
                 f"Return has unsupported type {annotation}. "
                 f"The valid types are: {SUPPORTED_RETURN_TYPES}."
             )
-        # pyrefly: ignore [index-error]
+
         return SUPPORTED_RETURN_TYPES[annotation]
 
     args = typing.get_args(annotation)

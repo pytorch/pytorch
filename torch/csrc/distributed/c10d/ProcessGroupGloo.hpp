@@ -242,7 +242,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
    protected:
     at::Tensor tensor_;
     std::unique_ptr<::gloo::transport::UnboundBuffer> buffer_;
-    int srcRank_;
+    int srcRank_{-1};
     const uint64_t seq_;
   };
 
@@ -260,7 +260,7 @@ class TORCH_API ProcessGroupGloo : public Backend {
         std::chrono::milliseconds timeout = kBackendDefaultTimeout);
 
     std::vector<std::shared_ptr<::gloo::transport::Device>> devices;
-    int threads;
+    int threads{2};
   };
 
   const std::string getBackendName() const override {
@@ -454,13 +454,13 @@ class TORCH_API ProcessGroupGloo : public Backend {
   // a single device), you need multiple contexts.
   std::vector<std::shared_ptr<::gloo::Context>> contexts_;
   std::vector<std::thread> threads_;
-  bool stop_;
+  bool stop_{false};
 
   // Incremented for every collective we kick off.
   // The value is used as tag for collective operations. Collectives are kicked
   // off in identical order across processes. Therefore the tag can be used
   // to match up operations during concurrent execution.
-  uint32_t collectiveCounter_;
+  uint32_t collectiveCounter_{0};
 
   // Returns next collective tag to use (uses collectiveCounter_).
   uint32_t nextTag();

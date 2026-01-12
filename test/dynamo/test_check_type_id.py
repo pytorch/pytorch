@@ -64,7 +64,7 @@ class TestCheckTypeId(torch._dynamo.test_case.TestCase):
         matches = self._find_guard_lines(guard_str, "ID_MATCH")
         self.assertIn("___check_obj_id", matches[0])
         self.assertIn(
-            "type=<class '__main__.TestCheckTypeId.test_type_match_with_different_values.<locals>.Config'>",
+            ".TestCheckTypeId.test_type_match_with_different_values.<locals>.Config'>",
             matches[0],
         )
         # Match the first part (everything before "type=")

@@ -14,6 +14,10 @@
 #include <torch/csrc/jit/tensorexpr/reduction.h>
 #include <torch/csrc/jit/tensorexpr/tensorexpr_init.h>
 
+#ifdef TORCH_ENABLE_LLVM
+#include <torch/csrc/jit/tensorexpr/llvm_codegen.h>
+#endif
+
 #include <utility>
 
 template <>

@@ -37,7 +37,6 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     make_tensor,
     NOTEST_CPU,
-    IS_WINDOWS,
     TEST_WITH_TORCHDYNAMO,
     TEST_XPU,
 )
@@ -52,6 +51,7 @@ from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     PLATFORM_SUPPORTS_FUSED_ATTENTION,
     PLATFORM_SUPPORTS_CUDNN_ATTENTION,
+    PLATFORM_SUPPORTS_CK_SDPA,
     tf32_on_and_off,
     tf32_enabled,
 )
@@ -88,7 +88,6 @@ isSM120Device = torch.cuda.is_available() and torch.cuda.get_device_capability()
 isSM5xDevice = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] == 5
 isLessThanSM80Device = torch.cuda.is_available() and torch.cuda.get_device_capability()[0] < 8
 
-TEST_WITH_CK = TEST_WITH_ROCM and torch.backends.cuda.preferred_rocm_fa_library() == torch.backends.cuda._ROCmFABackends['ck']
 
 def _check_equal(
     golden: torch.Tensor,
@@ -2686,7 +2685,9 @@ class TestSDPACudaOnly(NNTestCase):
                     attn_mask=None, dropout_p=0.0, is_causal=False)
             self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
-        if torch.cuda.get_device_capability() in [(9, 0)]:
+        # head_dim=256 support on SM 9.0 requires cuDNN >= 9.10.0 (91000) per sdp_utils.cpp:495
+        cudnn_version = torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
+        if torch.cuda.get_device_capability() == (9, 0) and cudnn_version >= 91000:
             test()
         else:
             with self.assertRaisesRegex(RuntimeError, "No available kernel."):
@@ -3222,10 +3223,13 @@ class TestSDPACudaOnly(NNTestCase):
         if "cuda" in str(device):
             device_capability = torch.cuda.get_device_capability()
         prefer_cudnn = "TORCH_CUDNN_SDPA_PREFERRED" not in os.environ or bool(os.environ["TORCH_CUDNN_SDPA_PREFERRED"])
-        prefer_cudnn = prefer_cudnn and device_capability and (device_capability == (9, 0) or device_capability == (10, 0))
+        # cuDNN prioritization requires cuDNN >= 9.9.0 (90900) per sdp_utils.cpp:83
+        cudnn_version = torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
+        is_hopper_or_newer = device_capability and (device_capability == (9, 0) or device_capability == (10, 0))
+        prefer_cudnn = prefer_cudnn and is_hopper_or_newer and cudnn_version >= 90900
 
-        # TODO we are currently disabling this by default, lets assert that this returns
-        # FlashAttention, we need to change when we make remove opt-in for cudnn
+        # cuDNN is enabled by default on SM 9.0/10.0 with cuDNN >= 9.9.0 (per #162073)
+        # For older cuDNN versions or other architectures, Flash Attention is preferred
         if type != "nested" and PLATFORM_SUPPORTS_CUDNN_ATTENTION and prefer_cudnn:
             self.assertEqual(torch._fused_sdp_choice(query, key, value), SDPBackend.CUDNN_ATTENTION.value)
         elif PLATFORM_SUPPORTS_FLASH_ATTENTION:
@@ -3249,7 +3253,6 @@ class TestSDPACudaOnly(NNTestCase):
 
         assert torch._fused_sdp_choice(query, key, value) == SDPBackend.EFFICIENT_ATTENTION.value
 
-    @skipIfRocm  # Missing triton.float32 ("triton" prefix is to locate skipped UTs), and deterministic algo
     @unittest.skipIf(not PLATFORM_SUPPORTS_MEM_EFF_ATTENTION, "Platform does not support fused SDPA")
     @parametrize("warn_only", [True, False])
     def test_sdp_choice_with_determinism(self, device, warn_only):
@@ -3640,10 +3643,12 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("scale", [None, "l1"])
     @parametrize("enable_gqa", [True, False])
     @parametrize("n_heads", [[16, 8], [10, 2]])
+    @parametrize("sdpa_backend", ["aotriton", "ck"] if PLATFORM_SUPPORTS_CK_SDPA else ["aotriton"])
     @tf32_enabled()
     def test_flash_attention_vs_math_ref_grads(self, device, batch_size: int, seq_len_q: int, seq_len_k: int,
-                                               head_dim: int, is_causal: bool, dropout_p: float, dtype: torch.dtype,
-                                               scale: str, enable_gqa: bool, n_heads: list[int]):
+                                               head_dim: int, is_causal: bool, dropout_p: float,
+                                               dtype: torch.dtype, scale: str, enable_gqa: bool,
+                                               n_heads: list[int], sdpa_backend: str):
         if isSM8XDevice or isSM120Device and head_dim in range(193, 256 + 1):
             self.skipTest("Flash attention on sm86, sm87, and sm89 for headdim > 192 currently disabled")
         if is_causal and seq_len_q != seq_len_k:
@@ -3653,8 +3658,14 @@ class TestSDPACudaOnly(NNTestCase):
         if max(seq_len_q, seq_len_k) >= 2048 and torch.cuda.get_device_properties('cuda').total_memory < 40 * 2**30:
             unittest.skip("Reference implementation OOM")
             return
-        if TEST_WITH_CK and dropout_p != 0:
-            self.skipTest("CK does not support tensor format dropout masks")
+
+        # ROCm now supports 2 different backends for SDPA that require different set up.
+        TEST_WITH_CK = False
+        if TEST_WITH_ROCM:
+            torch.backends.cuda.preferred_rocm_fa_library(sdpa_backend)
+            # When no args are given to preferred_rocm_fa_library, it acts as a getter
+            TEST_WITH_CK = (torch.backends.cuda.preferred_rocm_fa_library() == torch._C._ROCmFABackend.Ck)
+
         if TEST_WITH_CK and head_dim > 128:
             self.skipTest("CK does not support head dims over 128")
 
@@ -3710,15 +3721,24 @@ class TestSDPACudaOnly(NNTestCase):
             softmax_mask = self.convert_flash_attn_S_to_softmax(
                 dbug_mask, seq_len_q, seq_len_k, query_padding_mask, key_padding_mask,
                 causal=is_causal)[:, :, :seq_len_q, :seq_len_k]
+
+            # This is the default implementation for the mask but we need to match CK if we are using it
             dropout_mask = softmax_mask >= 0
+
+            # This logic matches how CK calculates the dropout mask.
+            # This is necessary because CK doesn't support passing in custom dropout masks
+            # So we use this logic to ensure we are comparing apples to apples.
+            if TEST_WITH_CK:
+                dropout_mask = (softmax_mask <= int((1.0 - dropout_p) * 255.0)).to(torch.float32)
+
             # High Precision Math Reference
             out_ref = torch.ops.aten._scaled_dot_product_attention_math(
                 query_ref, key_ref, value_ref, dropout_p=dropout_p, is_causal=is_causal,
                 scale=scale, dropout_mask=dropout_mask, enable_gqa=enable_gqa)[0]
             # Low Precision Math Reference
             out_lp_ref = torch.ops.aten._scaled_dot_product_attention_math(
-                query, key, value, dropout_p=dropout_p, is_causal=is_causal, scale=scale,
-                dropout_mask=dropout_mask, enable_gqa=enable_gqa)[0]
+                query, key, value, dropout_mask=dropout_mask, dropout_p=dropout_p,
+                is_causal=is_causal, scale=scale, enable_gqa=enable_gqa)[0]
 
         upstream_grad = torch.rand_like(out, requires_grad=False)
 
@@ -3738,6 +3758,7 @@ class TestSDPACudaOnly(NNTestCase):
             'grad_value': 4,
         }
         if TEST_WITH_ROCM:
+
             fudge_factors['grad_value'] = 6.0
             if TEST_WITH_CK:
                 fudge_factors['out'] = 5.0
@@ -4811,7 +4832,6 @@ class TestAttnBias(NNTestCase):
         "shape",
         [(16, 16, 128, 128, 16), (16, 16, 128, 256, 32), (16, 16, 256, 128, 32), (1, 1, 23, 56, 15)],
     )
-    @unittest.skipIf(IS_WINDOWS, "torch.compile is not supported on windows")
     @skipIfTorchDynamo("This function already calls torch.compile.")
     def test_causal_variants_compile(self, device, causal_variant: CausalVariant, shape: list[tuple[int]]):
         cnts = CompileCounterWithBackend("aot_eager")

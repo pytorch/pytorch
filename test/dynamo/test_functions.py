@@ -994,6 +994,26 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         y += float("1.2")
         return torch.add(x, y)
 
+    def test_float_or_complex_from_number(self):
+        @make_test
+        def _float_from_number_impl(x):
+            y = float.from_number(10)
+            return torch.add(x, y)
+
+        @make_test
+        def _complex_from_number_impl(x):
+            y = complex.from_number(10)
+            return torch.add(x, y)
+
+        if sys.version_info < (3, 14):
+            with self.assertRaises(AttributeError):
+                _float_from_number_impl(self)
+            with self.assertRaises(AttributeError):
+                _complex_from_number_impl(self)
+        else:
+            _float_from_number_impl(self)
+            _complex_from_number_impl(self)
+
     @make_test
     def test_is_floating_point(x):
         y = x + 1
@@ -1276,12 +1296,10 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
             results.append(x.sin())
         else:
             results.append(x.cos())
-        # TODO: add sourceless builder for types.UnionType
-        # if sys.version_info >= (3, 10):
-        #     if isinstance([x], list | tuple):
-        #         results.append(x.sin())
-        #     else:
-        #         results.append(x.cos())
+        if isinstance([x], list | tuple):
+            results.append(x.sin())
+        else:
+            results.append(x.cos())
         return results
 
     @make_test
@@ -3634,7 +3652,7 @@ class GraphModule(torch.nn.Module):
 
             self.assertEqual(
                 range[index],
-                range_variable.apply_index(index).as_python_constant(),
+                range_variable.apply_index(None, index).as_python_constant(),
             )
 
             if expected is not None:
@@ -4171,6 +4189,37 @@ class GraphModule(torch.nn.Module):
             self.assertIsInstance(f(), types.ModuleType)
         finally:
             torch = old_torch
+
+    @unittest.skipIf(not HAS_GPU, "requires gpu")
+    def test_wrap_triton_handled_during_tracing(self):
+        import triton
+        import triton.language as tl
+
+        @triton.jit
+        def sin_kernel(x_ptr, y_ptr, n_elements, BLOCK_SIZE: "tl.constexpr"):
+            pid = tl.program_id(axis=0)
+            offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
+            mask = offsets < n_elements
+            x = tl.load(x_ptr + offsets, mask=mask)
+            tl.store(y_ptr + offsets, tl.sin(x), mask=mask)
+
+        def fn(x: torch.Tensor) -> torch.Tensor:
+            out = torch.empty_like(x)
+            n_elements = x.numel()
+
+            grid = lambda meta: (triton.cdiv(n_elements, meta["BLOCK_SIZE"]),)
+
+            wrapped = torch.library.wrap_triton(sin_kernel)
+            wrapped[grid](x, out, n_elements, BLOCK_SIZE=128)
+
+            return out
+
+        compiled = torch.compile(fn, fullgraph=True, backend="eager")
+
+        x = torch.randn(1024, device=device_type)
+        result = compiled(x)
+
+        self.assertEqual(result, torch.sin(x))
 
 
 def udf_mul(x, y):
