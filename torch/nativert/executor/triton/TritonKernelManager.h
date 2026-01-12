@@ -1,7 +1,10 @@
 #pragma once
 
+#include <optional>
 #include <string>
+#include <vector>
 
+#include <ATen/core/TensorBody.h>
 #include <c10/core/DeviceType.h>
 #include <c10/util/Exception.h>
 #include <c10/util/Registry.h>
@@ -16,6 +19,15 @@ struct GridDims {
   int z;
 };
 
+// Parameters for kernel inputs, used for backend-specific initialization.
+// MTIA uses kernel_param_names and kernel_param_types for fatbin compilation
+// and proper scalar type casting. Other backends can ignore this struct.
+struct KernelInputParams {
+  std::vector<std::string> kernel_param_names;
+  std::vector<std::string> kernel_param_types;
+  std::vector<int64_t> output_indices;
+};
+
 struct LaunchParams {
   // CPU params
   int num_cpu_threads = 0; // 0 means use all available threads
@@ -24,6 +36,11 @@ struct LaunchParams {
   int num_warps = 4;
   int shared_memory_bytes = 0;
   GridDims grid_dims;
+
+  // MTIA params
+  std::optional<int> mtia_tile_width;
+  std::optional<int> mtia_tile_height;
+  std::optional<int> mtia_base_pe;
 };
 
 class KernelInputs {
@@ -39,12 +56,19 @@ class KernelInputs {
     inputs_[arg_idx_++] = arg;
   }
 
-  void add_attribute(void* attr) {
+  // Add a tensor argument. The default implementation just uses data_ptr(),
+  // this option allows any custom logic to take the tensor directly instead
+  // of just the data pointer if needed.
+  virtual void add_tensor_arg(const at::Tensor& tensor) {
+    add_arg(tensor.data_ptr());
+  }
+
+  virtual void add_attribute(void* attr) {
     TORCH_CHECK(attr_idx_ < num_attrs_, "Too many attributes");
     inputs_[num_args_ + attr_idx_++] = attr;
   }
 
-  void** as_void() {
+  virtual void** as_void() {
     return inputs_.data();
   }
 
@@ -66,7 +90,8 @@ class TritonKernelManager {
   virtual ~TritonKernelManager() = default;
   virtual std::unique_ptr<KernelInputs> create_inputs(
       size_t num_args,
-      size_t num_attrs) const {
+      size_t num_attrs,
+      const KernelInputParams& /*params*/) const {
     return std::make_unique<KernelInputs>(num_args, num_attrs);
   }
   virtual void launch(const LaunchParams& launch_params, void** args) = 0;

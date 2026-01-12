@@ -5584,16 +5584,29 @@ class TestCachingHostAllocatorCudaGraph(TestCase):
                 assert new_data_ptr != old_data_ptr
 
     def test_unpinned_memory_use(self):
-        # It is allowed to call copy_(non_blocking=True) on pageable
-        # host memory. TODO: We should test that a warning is emitted
-        # here, since we have no way to guarantee that pageable host
-        # memory allocated during stream capture stays alive so long
-        # as the graph is alive.
+        # Copying between CPU and CUDA tensors during graph capture
+        # with unpinned CPU memory should raise an error.
         graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph):
-            data = torch.empty(8)
-            data_gpu = torch.randn(8, device="cuda")
-            data_gpu.copy_(data, non_blocking=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Cannot copy between CPU and CUDA tensors during CUDA graph capture",
+        ):
+            with torch.cuda.graph(graph):
+                data = torch.empty(8)
+                data_gpu = torch.randn(8, device="cuda")
+                data_gpu.copy_(data, non_blocking=True)
+
+    def test_unpinned_memory_use_device_to_host(self):
+        # Copying from CUDA to unpinned CPU during graph capture should also error.
+        graph = torch.cuda.CUDAGraph()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Cannot copy between CPU and CUDA tensors during CUDA graph capture",
+        ):
+            with torch.cuda.graph(graph):
+                data_gpu = torch.randn(8, device="cuda")
+                data = torch.empty(8)
+                data.copy_(data_gpu, non_blocking=True)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
