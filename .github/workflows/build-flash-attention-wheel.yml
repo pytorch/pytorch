@@ -176,25 +176,25 @@ jobs:
           SCCACHE_GHA_ENABLED: "true"
           TORCH_EXTENSION_SKIP_NVCC_GEN_DEPENDENCIES: "1"
           FLASH_ATTENTION_FORCE_BUILD: "TRUE"
-          FLASH_ATTENTION_DISABLE_SPLIT: "TRUE"  # "FALSE"
-          FLASH_ATTENTION_DISABLE_PAGEDKV: "TRUE"  # "FALSE"
-          FLASH_ATTENTION_DISABLE_APPENDKV: "TRUE"  # "FALSE"
-          FLASH_ATTENTION_DISABLE_LOCAL: "TRUE"  # "FALSE"
-          FLASH_ATTENTION_DISABLE_SOFTCAP: "TRUE"  # "FALSE"
-          FLASH_ATTENTION_DISABLE_PACKGQA: "TRUE"  # "FALSE"
-          FLASH_ATTENTION_DISABLE_FP16: "TRUE"  # "FALSE"
-          FLASH_ATTENTION_DISABLE_FP8: "TRUE"  # "FALSE"
-          FLASH_ATTENTION_DISABLE_VARLEN: "TRUE"  # "FALSE"
-          FLASH_ATTENTION_DISABLE_CLUSTER: "TRUE"  # "FALSE"
-          FLASH_ATTENTION_DISABLE_HDIM64: "FALSE"
-          FLASH_ATTENTION_DISABLE_HDIM96: "TRUE"  # "FALSE"
-          FLASH_ATTENTION_DISABLE_HDIM128: "FALSE"
-          FLASH_ATTENTION_DISABLE_HDIM192: "TRUE"  # "FALSE"
-          FLASH_ATTENTION_DISABLE_HDIM256: "FALSE"
-          FLASH_ATTENTION_DISABLE_SM80: "TRUE"  # "FALSE"
-          FLASH_ATTENTION_ENABLE_VCOLMAJOR: "FALSE"
-          FLASH_ATTENTION_DISABLE_HDIMDIFF64: "TRUE"  # "FALSE"
-          FLASH_ATTENTION_DISABLE_HDIMDIFF192: "TRUE"  # "FALSE"
+          # FLASH_ATTENTION_DISABLE_SPLIT: "TRUE"  # "FALSE"
+          # FLASH_ATTENTION_DISABLE_PAGEDKV: "TRUE"  # "FALSE"
+          # FLASH_ATTENTION_DISABLE_APPENDKV: "TRUE"  # "FALSE"
+          # FLASH_ATTENTION_DISABLE_LOCAL: "TRUE"  # "FALSE"
+          # FLASH_ATTENTION_DISABLE_SOFTCAP: "TRUE"  # "FALSE"
+          # FLASH_ATTENTION_DISABLE_PACKGQA: "TRUE"  # "FALSE"
+          # FLASH_ATTENTION_DISABLE_FP16: "TRUE"  # "FALSE"
+          # FLASH_ATTENTION_DISABLE_FP8: "TRUE"  # "FALSE"
+          # FLASH_ATTENTION_DISABLE_VARLEN: "TRUE"  # "FALSE"
+          # FLASH_ATTENTION_DISABLE_CLUSTER: "TRUE"  # "FALSE"
+          # FLASH_ATTENTION_DISABLE_HDIM64: "FALSE"
+          # FLASH_ATTENTION_DISABLE_HDIM96: "TRUE"  # "FALSE"
+          # FLASH_ATTENTION_DISABLE_HDIM128: "FALSE"
+          # FLASH_ATTENTION_DISABLE_HDIM192: "TRUE"  # "FALSE"
+          # FLASH_ATTENTION_DISABLE_HDIM256: "FALSE"
+          # FLASH_ATTENTION_DISABLE_SM80: "TRUE"  # "FALSE"
+          # FLASH_ATTENTION_ENABLE_VCOLMAJOR: "FALSE"
+          # FLASH_ATTENTION_DISABLE_HDIMDIFF64: "TRUE"  # "FALSE"
+          # FLASH_ATTENTION_DISABLE_HDIMDIFF192: "TRUE"  # "FALSE"
 
       # - name: Show sccache stats
       #   run: ${SCCACHE_PATH} --show-stats
@@ -213,10 +213,10 @@ jobs:
         if: always()
         timeout-minutes: 120
         run: |
-          .github\scripts\wait_for_ssh_to_drain.ps1
+          pytorch\.github\scripts\wait_for_ssh_to_drain.ps1
       - name: Kill active ssh sessions if still around (Useful if workflow was cancelled)
         shell: powershell
         working-directory: flash-attention
         if: always()
         run: |
-          .github\scripts\kill_active_ssh_sessions.ps1
+          pytorch\.github\scripts\kill_active_ssh_sessions.ps1
