@@ -10,8 +10,10 @@ from torch.distributed.tensor._op_schema import (
     PlacementList,
     StrategyType,
 )
-from torch.distributed.tensor._ops.registration import register_op_strategy
-from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
+from torch.distributed.tensor._ops.utils import (
+    expand_to_full_mesh_op_strategy,
+    register_op_strategy,
+)
 from torch.distributed.tensor.placement_types import (
     _MaskPartial,
     Partial,
