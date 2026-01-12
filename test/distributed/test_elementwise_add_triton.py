@@ -15,11 +15,11 @@ Prerequisites:
 """
 
 import sys
-import unittest
 
 # Import TEST_WITH_ROCM first to check for ROCm before importing CUDA-specific modules
 from torch.testing._internal.common_utils import TEST_WITH_ROCM
-from torch.testing._internal.inductor_utils import IS_H100, requires_triton
+from torch.testing._internal.inductor_utils import requires_triton
+
 
 # Skip entire module on ROCm before importing CUDA-specific modules
 if TEST_WITH_ROCM:
@@ -36,7 +36,6 @@ from torch.testing._internal.common_utils import (
     skip_but_pass_in_sandcastle_if,
     TestCase,
 )
-from torch.testing._internal.inductor_utils import requires_triton
 
 
 # Skip if CUDA is not available
@@ -49,6 +48,7 @@ if not TEST_CUDA:
 try:
     import triton
     import triton.language as tl
+
     from torch._extern_triton import (
         requires_elementwise_add_lib,
         scalar_add_f16,

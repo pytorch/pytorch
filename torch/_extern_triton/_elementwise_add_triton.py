@@ -128,11 +128,10 @@ class ElementwiseAddLibFinder:
 
 
 if has_triton():
-    from triton.runtime.jit import JITFunction, KernelInterface
-
     import triton
     import triton.language as tl
     from triton.language import core
+    from triton.runtime.jit import JITFunction, KernelInterface
 
     # =========================================================================
     # EXTERN LIBRARY WRAPPER CLASS

@@ -1,14 +1,11 @@
 #!/usr/bin/env python3
 """Quick verification test for elementwise add extern library."""
 
-import torch
 import triton
 import triton.language as tl
-from torch._extern_triton import (
-    requires_elementwise_add_lib,
-    scalar_add_f32,
-    scalar_add_f16,
-)
+
+import torch
+from torch._extern_triton import requires_elementwise_add_lib, scalar_add_f32
 
 
 @requires_elementwise_add_lib

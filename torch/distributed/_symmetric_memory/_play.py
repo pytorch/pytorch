@@ -1,8 +1,10 @@
-from typing import Callable
+from collections.abc import Callable
 
-import torch
 import triton
 import triton.language as tl
+
+import torch
+
 
 # ==============================================================================
 # Part 1: The Reusable Skeleton Component (Framework Level)
