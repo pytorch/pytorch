@@ -157,8 +157,8 @@ jobs:
           PYTORCH_INDEX_URL="https://download.pytorch.org/whl/cu${CUDA_SHORT}"
           PYTORCH_TEST_INDEX_URL="https://download.pytorch.org/whl/test/cu${CUDA_SHORT}"
           PYTORCH_NIGHTLY_INDEX_URL="https://download.pytorch.org/whl/nightly/cu${CUDA_SHORT}"
-          $PY -m pip install torch==2.9.0 --index-url $PYTORCH_INDEX_URL
-          $PY -m pip install packaging ninja wheel setuptools twine numpy
+          pip install torch==2.9.0 --index-url $PYTORCH_INDEX_URL
+          pip install packaging ninja wheel setuptools twine numpy
 
       - name: Build wheel
         shell: bash -l {0}
