@@ -453,10 +453,11 @@ def estimate_nccl_collective_runtime_from_fx_node(
         from torch.distributed.distributed_c10d import (
             _get_pg_default_device,
             _resolve_process_group,
+            Backend,
         )
 
         pg = _resolve_process_group(group_name)
-        if torch.distributed.distributed_c10d.get_backend(pg) == "fake":
+        if torch.distributed.distributed_c10d.get_backend(pg) == Backend.FAKE:
             # nccl estimator requires real process group
             return None
 
