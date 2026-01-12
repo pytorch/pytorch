@@ -16,7 +16,12 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed.tensor._ops._matrix_ops import mm_single_dim_strategy
+from torch.distributed.tensor._ops.single_dim_strategy import (
+    register_single_dim_strategy,
+)
 from torch.distributed.tensor.debug import CommDebugMode
+
 # from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import E4M3_MAX_POS, e4m3_type
@@ -195,6 +200,32 @@ class DistMatrixOpsTest(DTensorTestBase):
 
         # cover unshardable input where some rank have empty _local_tensor
         # eg sharding tensor (world_size - 1) over world_size
+        global_inps_viewed = (
+            torch.arange((self.world_size - 1) * self.world_size, device="cuda")
+            .float()
+            .view(self.world_size - 1, self.world_size)
+        )
+        inps_viewed = distribute_tensor(
+            global_inps_viewed,
+            device_mesh,
+            (Shard(dim=0),),
+        )
+        global_weight = (
+            torch.arange(self.world_size * self.world_size)
+            .float()
+            .view(self.world_size, self.world_size)
+        )
+        weight = distribute_tensor(global_weight, device_mesh, (Replicate(),))
+        out = torch.mm(inps_viewed, weight)
+        expected_placements = (Replicate(),)
+        self.assertEqual(out.placements, expected_placements)
+
+    @with_comms
+    def test_mm_single_dim_strategy(self):
+        register_single_dim_strategy(torch.ops.aten.mm.default)(mm_single_dim_strategy)
+        # unshardable input where some rank have empty _local_tensor
+        # eg sharding tensor (world_size - 1) over world_size
+        device_mesh = self.build_device_mesh()
         global_inps_viewed = (
             torch.arange((self.world_size - 1) * self.world_size, device="cuda")
             .float()
