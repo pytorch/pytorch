@@ -314,6 +314,8 @@ class DeviceMeshTest(DTensorTestBase):
         self.assertEqual(device_mesh.ndim, 1)
         self.assertEqual(device_mesh.size(), 1)
         self.assertEqual(device_mesh.mesh_dim_names, ("dp",))
+        backend = device_mesh.get_all_groups()[0]._get_backend(torch.device("cuda"))
+        self.assertIsInstance(backend, torch._C._distributed_c10d.FakeProcessGroup)
 
     @with_comms
     def test_from_group_with_global_pg(self):

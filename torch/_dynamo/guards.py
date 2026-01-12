@@ -3511,17 +3511,10 @@ class GuardsStatePickler(pickle.Pickler):
                     inner_data,
                 )
 
-            # For FakeTensors, use pytype if set, otherwise default to
-            # torch.Tensor. This is important for cross-compilation where
-            # we compile with fake tensors but run with real tensors.
-            pytype = type(obj)
-            if isinstance(obj, torch._subclasses.FakeTensor):
-                pytype = obj.pytype if obj.pytype is not None else torch.Tensor
-
             return type(self)._unpickle_tensor, (
                 torch.empty_like(obj, device="meta", requires_grad=obj.requires_grad),
                 obj.device,
-                pytype,
+                type(obj),
                 torch._C._dispatch_keys(obj).raw_repr(),
                 obj.grad,
             )

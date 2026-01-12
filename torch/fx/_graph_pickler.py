@@ -3,7 +3,7 @@ import importlib
 import io
 import pickle
 from abc import abstractmethod
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, NewType, Optional, TypeVar, Union
 from typing_extensions import override, Self
 
@@ -44,6 +44,7 @@ class Options:
     # A filter for which ops will cause the pickler to raise a
     # BypassFxGraphCache exception. If None then all ops are allowed.
     ops_filter: Optional[Callable[[str], bool]] = _ops_filter_safe
+    ignore_metadata_fields: Sequence[str] = dataclasses.field(default_factory=tuple)
 
 
 class GraphPickler(pickle.Pickler):
@@ -371,14 +372,6 @@ class _GraphModulePickleData:
 
 
 class _NodePickleData:
-    # These often times contain stacks with pointers to unserializable
-    # objects, so we clear them out.
-    _UNSERIALIZABLE_META_KEYS = (
-        "source_fn_stack",
-        "nn_module_stack",
-        "fwd_source_fn_stack",
-    )
-
     def __init__(
         self,
         node: torch.fx.Node,
@@ -398,12 +391,11 @@ class _NodePickleData:
         self.type = node.type
         # self.sort_key = node._sort_key
         # self.repr_fn = node._repr_fn
-        # self.meta = node.meta
-        self.meta = {
-            k: v
-            for k, v in node.meta.items()
-            if k not in self._UNSERIALIZABLE_META_KEYS
-        }
+        self.meta = node.meta
+        if options.ignore_metadata_fields:
+            self.meta = self.meta.copy()
+            for k in options.ignore_metadata_fields:
+                self.meta.pop(k, None)
 
     def unpickle(
         self,
