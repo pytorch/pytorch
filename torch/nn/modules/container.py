@@ -10,7 +10,6 @@ from typing_extensions import deprecated, Self
 import torch
 from torch._jit_internal import _copy_to_script_wrapper
 from torch.nn.parameter import Parameter
-
 from .module import Module
 
 

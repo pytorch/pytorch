@@ -5,7 +5,6 @@ import logging
 import math
 
 import torch
-
 from ..._dynamo.utils import counters
 from ..pattern_matcher import (
     filter_nodes,

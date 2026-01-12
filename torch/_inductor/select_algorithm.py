@@ -40,7 +40,6 @@ from torch._inductor.await_utils import await_sync
 from torch._inductor.utils import clear_on_fresh_cache
 from torch.utils._filelock import FileLock
 from torch.utils._ordered_set import OrderedSet
-
 from ..utils._sympy.functions import CeilDiv
 from . import config, ir
 from .autotune_process import (
@@ -110,7 +109,6 @@ if TYPE_CHECKING:
 
     from torch._inductor.autotune_process import BenchmarkRequest
     from torch._inductor.codegen.simd import IterationRangesEntry, IterationRangesRoot
-
     from .codegen.common import CSE
 
 

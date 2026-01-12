@@ -65,7 +65,6 @@ from torch.export.decomp_utils import CustomDecompTable
 from torch.fx._compatibility import compatibility
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.fx.passes.infra.pass_manager import PassManager
-
 from .graph_signature import (  # noqa: F401
     ArgumentSpec,
     ConstantArgument,

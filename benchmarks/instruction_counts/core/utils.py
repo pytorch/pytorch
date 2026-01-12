@@ -7,7 +7,6 @@ from typing import Optional
 
 from core.api import GroupedBenchmark, TimerArgs
 from core.types import Definition, FlatIntermediateDefinition, Label
-
 from torch.utils.benchmark.utils.common import _make_temp_dir
 
 

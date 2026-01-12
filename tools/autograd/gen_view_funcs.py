@@ -21,7 +21,6 @@ from torchgen.api.types import (
 from torchgen.code_template import CodeTemplate
 from torchgen.model import Argument, NativeFunction, OptionalType
 from torchgen.utils import FileManager
-
 from .gen_inplace_or_view_type import (
     CALL_DISPATCH,
     extract_bindings,

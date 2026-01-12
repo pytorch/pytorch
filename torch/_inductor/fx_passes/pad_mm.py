@@ -24,7 +24,6 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
 from torch._inductor.runtime.caching import encoders, memoizers
 from torch._subclasses.fake_tensor import FakeTensor
 from torch.utils._mode_utils import no_dispatch
-
 from ...utils._triton import has_triton
 from ..pattern_matcher import (
     fwd_only,

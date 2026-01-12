@@ -21,7 +21,6 @@ from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch.nn
 from torch.utils._ordered_set import OrderedSet
-
 from . import config, graph_break_hints, utils
 from .bytecode_transformation import (
     add_push_null,
@@ -58,7 +57,6 @@ from .variables.torch_function import TensorWithTFOverrideVariable
 
 if TYPE_CHECKING:
     from torch._dynamo.variables.builder import GraphArg
-
     from .symbolic_convert import InstructionTranslatorBase
 
 

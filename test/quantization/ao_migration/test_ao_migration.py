@@ -1,7 +1,6 @@
 # Owner(s): ["oncall: quantization"]
 
 from torch.testing._internal.common_utils import raise_on_run_directly
-
 from .common import AOMigrationTestCase
 
 

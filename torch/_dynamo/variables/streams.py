@@ -6,7 +6,6 @@ import torch
 from torch._dynamo.variables.dicts import ConstDictVariable
 from torch._dynamo.variables.lists import TupleVariable
 from torch.fx import has_side_effect, Proxy
-
 from .. import graph_break_hints
 from ..bytecode_transformation import create_call_function
 from ..exc import TYPE_CHECKING, unimplemented
@@ -23,7 +22,6 @@ from .lazy import LazyVariableTracker
 
 if TYPE_CHECKING:
     from torch._dynamo.symbolic_convert import InstructionTranslator
-
     from ..codegen import PyCodegen
 
 from torch._library.custom_ops import custom_op

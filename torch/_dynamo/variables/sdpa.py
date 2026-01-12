@@ -5,7 +5,6 @@ from typing import Any, TYPE_CHECKING, TypeGuard
 from torch._guards import Source
 from torch.backends.cuda import SDPAParams
 from torch.fx.proxy import Proxy
-
 from ..bytecode_transformation import create_call_function
 from ..exc import unimplemented
 from ..source import AttrSource
@@ -64,7 +63,6 @@ class SDPAParamsVariable(VariableTracker):
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         import torch._C
-
         from .builder import wrap_fx_proxy
         from .misc import GetAttrVariable
 

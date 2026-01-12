@@ -32,7 +32,6 @@ from torch.utils._triton import (
     has_triton_package,
     has_triton_stable_tma_api,
 )
-
 from ...utils._sympy.symbol import free_symbol_is_type, prefix_str, symbol_is_type, SymT
 from ...utils._sympy.value_ranges import ValueRanges
 from .. import config, ir, metrics, utils
@@ -113,7 +112,6 @@ if TYPE_CHECKING:
 
     from torch._inductor.dtype_propagation import DtypePropagationOpsHandler
     from torch.fx.experimental.symbolic_shapes import ShapeEnv
-
     from ..ir import IRNode
     from .common import BlockShapeType
     from .simd_kernel_features import SIMDKernelFeatures

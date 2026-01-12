@@ -13,7 +13,6 @@ import dataclasses
 from collections.abc import Callable, Sequence
 
 from torch._guards import GuardsSet
-
 from .types import GuardFail, GuardFilterEntry
 
 

@@ -35,7 +35,6 @@ from torch._library.opaque_object import (
     MemberType,
 )
 from torch.fx.proxy import Proxy
-
 from .. import graph_break_hints
 from ..eval_frame import skip_code
 from ..exc import unimplemented, UnsafeScriptObjectError, Unsupported
@@ -163,7 +162,6 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
     )
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
         from torch._higher_order_ops.torchbind import call_torchbind
-
         from .higher_order_ops import TorchHigherOrderOperatorVariable
 
         if hasattr(self.value, "script_class_name") and is_opaque_type(

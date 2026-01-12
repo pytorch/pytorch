@@ -10,7 +10,6 @@ import torch
 from torch._environment import is_fbcode
 from torch._utils_internal import signpost_event
 from torch.utils._ordered_set import OrderedSet
-
 from . import config
 from .ir import MultiOutputLayout, NoneLayout
 from .utils import get_dtype_size, is_nonfreeable_buffers

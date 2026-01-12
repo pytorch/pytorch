@@ -31,7 +31,6 @@ from torch.distributed.checkpoint.staging import (
 from torch.distributed.checkpoint.stateful import Stateful
 from torch.distributed.checkpoint.storage import StorageWriter, WriteResult
 from torch.distributed.distributed_c10d import _get_default_group
-
 from .utils import _api_bc_check, _DistWrapper, _profile
 
 

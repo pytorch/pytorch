@@ -6,7 +6,6 @@ from typing import Any
 from typing_extensions import override
 
 from torch._inductor.virtualized import V
-
 from .rocm_template import ArgInfo
 
 

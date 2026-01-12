@@ -10,7 +10,6 @@ from collections.abc import Callable
 from typing import Any
 
 import torch.distributed as dist
-
 from .barriers import create_barrier_from_config
 from .checkpoint_process import CheckpointProcess
 from .checkpoint_reader import CheckpointReader

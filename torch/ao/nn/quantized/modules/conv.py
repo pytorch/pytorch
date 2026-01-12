@@ -12,7 +12,6 @@ from torch._ops import ops
 from torch.nn.common_types import _size_1_t
 from torch.nn.modules.utils import _pair, _single, _triple
 from torch.nn.utils import fuse_conv_bn_weights
-
 from .utils import _quantize_weight, WeightedQuantizedModule
 
 

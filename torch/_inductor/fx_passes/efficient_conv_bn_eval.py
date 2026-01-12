@@ -4,7 +4,6 @@ import torch.nn as nn
 from torch._dynamo.utils import counters
 from torch._inductor import config as inductor_config
 from torch.func import functional_call
-
 from ..pattern_matcher import (
     CallFunctionVarArgs,
     CallModuleVarArgs,

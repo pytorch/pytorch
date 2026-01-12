@@ -7,7 +7,6 @@ import torch
 from torch import Tensor
 from torch.jit.annotations import BroadcastingList2
 from torch.nn.modules.utils import _pair, _triple
-
 from .modules.utils import _pair_from_first
 
 

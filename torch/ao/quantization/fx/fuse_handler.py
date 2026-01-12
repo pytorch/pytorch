@@ -9,7 +9,6 @@ from torch.ao.quantization.fuser_method_mappings import get_fuser_method_new
 from torch.ao.quantization.utils import _parent_name, NodePattern, Pattern
 from torch.fx.graph import Graph, Node
 from torch.nn.utils.parametrize import type_before_parametrizations
-
 from .custom_config import FuseCustomConfig
 from .match_utils import MatchAllNode
 

@@ -6,7 +6,6 @@ import re
 import warnings
 
 import onnx
-
 import parameterized
 import pytorch_test_common
 import torchvision

@@ -3,13 +3,11 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Union
 
 from torch._logging import trace_structured
-
 from .memory import estimate_peak_memory_allocfree
 
 
 if TYPE_CHECKING:
     from torch.utils._ordered_set import OrderedSet
-
     from .memory import FreeableInputBuffer, SNodeMemory
     from .scheduler import BaseSchedulerNode, SchedulerBuffer
 

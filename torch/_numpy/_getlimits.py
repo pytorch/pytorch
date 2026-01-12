@@ -1,7 +1,6 @@
 # mypy: ignore-errors
 
 import torch
-
 from . import _dtypes
 
 

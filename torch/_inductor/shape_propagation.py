@@ -5,7 +5,6 @@ from typing import Optional, Protocol, Union
 import sympy
 
 import torch
-
 from .virtualized import OpsValue, V
 
 

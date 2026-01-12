@@ -7,7 +7,6 @@ from enum import Enum
 from typing import Optional
 
 import torch
-
 from .. import cpp_builder, ir
 from ..cpu_vec_isa import (
     pick_vec_isa,

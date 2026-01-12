@@ -6,7 +6,6 @@ from functools import total_ordering
 
 import torch
 from torch import inf, Tensor
-
 from .bernoulli import Bernoulli
 from .beta import Beta
 from .binomial import Binomial

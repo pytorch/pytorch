@@ -10,7 +10,6 @@ from torch.ao.quantization.fx.quantize_handler import _get_pattern_to_quantize_h
 from torch.ao.quantization.utils import getattr_from_fqn
 from torch.fx import GraphModule
 from torch.fx.graph import Node
-
 from .ns_types import NSNodeTargetType
 
 

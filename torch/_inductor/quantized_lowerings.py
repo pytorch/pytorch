@@ -3,7 +3,6 @@ from typing import Any
 
 import torch
 from torch._inductor.kernel.mm_common import mm_args
-
 from . import config, lowering
 from .codegen.cpp_gemm_template import CppGemmTemplate, CppWoqInt4GemmTemplate
 from .codegen.cpp_utils import create_epilogue_with_attr

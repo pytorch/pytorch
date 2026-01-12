@@ -11,7 +11,6 @@ import torch
 import torch.utils._pytree as pytree
 from torch.fx.experimental.symbolic_shapes import size_hint
 from torch.fx.operator_schemas import normalize_function
-
 from . import ir
 from .utils import get_dtype_size, snode_args_kwargs, sympy_product
 from .virtualized import V

@@ -2,7 +2,6 @@
 import os
 
 import torch
-
 from torchfuzz.operators import get_operator
 from torchfuzz.ops_fuzzer import OperationGraph
 from torchfuzz.tensor_descriptor import format_tensor_descriptor

@@ -11,7 +11,6 @@ import queue
 
 import torch
 from torch._utils import ExceptionWrapper
-
 from . import MP_STATUS_CHECK_INTERVAL
 
 

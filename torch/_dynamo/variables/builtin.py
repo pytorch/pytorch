@@ -39,7 +39,6 @@ from torch import sym_float, sym_int
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.overrides import BaseTorchFunctionMode
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
-
 from .. import config, graph_break_hints, polyfills, variables
 from ..exc import (
     ObservedAttributeError,

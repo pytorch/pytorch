@@ -4,7 +4,6 @@ from dataclasses import dataclass
 from typing import Any, NamedTuple, Optional, TYPE_CHECKING, Union
 
 import torch
-
 from ._compatibility import compatibility
 from ._symbolic_trace import symbolic_trace
 from .graph import Graph

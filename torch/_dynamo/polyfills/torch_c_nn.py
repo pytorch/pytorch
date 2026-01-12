@@ -6,7 +6,6 @@ from typing import Any
 
 import torch
 from torch.overrides import _is_torch_function_mode_enabled, _pop_mode_temporarily
-
 from ..decorators import substitute_in_graph
 
 

@@ -11,7 +11,6 @@ import torch
 from torch._dynamo.utils import counters
 from torch.fx.experimental.symbolic_shapes import free_symbols, guard_or_false
 from torch.utils._ordered_set import OrderedSet
-
 from ..pattern_matcher import (
     Arg,
     CallFunction,

@@ -5,7 +5,6 @@ import torch
 from torch import Tensor
 from torch.nn import functional as F, init
 from torch.nn.parameter import Parameter, UninitializedBuffer, UninitializedParameter
-
 from ._functions import SyncBatchNorm as sync_batch_norm
 from .lazy import LazyModuleMixin
 from .module import Module

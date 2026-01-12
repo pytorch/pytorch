@@ -30,7 +30,6 @@ from torch.ao.quantization.quantization_mappings import (
 )
 from torch.ao.quantization.stubs import DeQuantStub, QuantWrapper
 from torch.nn.utils.parametrize import type_before_parametrizations
-
 from .utils import (
     DEPRECATION_WARNING,
     get_qparam_dict,

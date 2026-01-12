@@ -24,7 +24,6 @@ from torch._inductor.fx_passes.overlap_scheduling import (
     OverlapScheduler,
 )
 from torch.utils._ordered_set import OrderedSet
-
 from .graph_view import get_subgraph_by_path, GraphView, make_graph_view
 
 

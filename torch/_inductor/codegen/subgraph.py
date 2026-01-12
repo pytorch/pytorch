@@ -337,7 +337,6 @@ class SubgraphTemplate(KernelTemplate):
             ) -> Any:
                 # decomp_kwargs contains all merged parameters: CustomOpConfig params + runtime kwargs
                 from torch.fx.experimental.proxy_tensor import make_fx
-
                 from ..decomposition import select_decomp_table
 
                 decomposition_table = select_decomp_table()

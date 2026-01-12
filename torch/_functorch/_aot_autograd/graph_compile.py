@@ -51,7 +51,6 @@ from torch.multiprocessing.reductions import StorageWeakRef
 from torch.types import py_sym_types
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torchgen.utils import dataclass_repr
-
 from .. import config
 from .aot_autograd_result import GenericAOTAutogradResult, serialize_graph_module
 from .autograd_cache import (
@@ -1077,7 +1076,6 @@ def maybe_log_graph(
 
 def create_wrap_fn(fn, args):
     from torch.fx.experimental.proxy_tensor import maybe_enable_thunkify
-
     from .functional_utils import from_fun, has_data_mutation, to_fun
 
     def assert_no_mutation(t):

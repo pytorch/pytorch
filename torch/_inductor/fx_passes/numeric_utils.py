@@ -10,7 +10,6 @@ import numpy
 import torch
 import torch.optim as optim
 from torch.utils._ordered_set import OrderedSet
-
 from .. import config
 
 

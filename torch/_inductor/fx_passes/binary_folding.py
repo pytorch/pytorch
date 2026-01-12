@@ -3,7 +3,6 @@ import functools
 import itertools
 
 import torch
-
 from ..._dynamo.utils import counters
 from .. import config
 from ..pattern_matcher import Arg, CallFunction, KeywordArg

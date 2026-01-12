@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 from torch.fx.proxy import Proxy
-
 from ._compatibility import compatibility
 
 

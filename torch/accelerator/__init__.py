@@ -7,7 +7,6 @@ from typing import Any
 from typing_extensions import deprecated
 
 import torch
-
 from ._utils import _device_t, _get_device_index
 from .memory import (
     empty_cache,

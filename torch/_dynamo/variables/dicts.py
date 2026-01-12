@@ -26,7 +26,6 @@ from collections.abc import Iterable, Sequence
 from typing import Any, Literal, Optional, TYPE_CHECKING, Union
 
 from torch.utils._ordered_set import OrderedSet
-
 from .. import graph_break_hints, polyfills, variables
 from ..bytecode_transformation import create_call_function, create_instruction
 from ..exc import raise_observed_exception, unimplemented
@@ -50,7 +49,6 @@ if TYPE_CHECKING:
     from torch._dynamo.codegen import PyCodegen
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._dynamo.variables.builtin import BuiltinVariable
-
     from .functions import UserFunctionVariable
 
 

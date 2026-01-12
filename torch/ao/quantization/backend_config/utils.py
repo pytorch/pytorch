@@ -7,7 +7,6 @@ import torch.nn as nn
 import torch.nn.functional as F
 from torch.ao.quantization.fuser_method_mappings import _reverse2, _reverse3
 from torch.ao.quantization.utils import Pattern
-
 from .backend_config import BackendConfig, BackendPatternConfig, DTypeConfig
 
 

@@ -13,7 +13,6 @@ from torch._logging import trace_structured
 from torch.fx._compatibility import compatibility
 from torch.fx.node import map_arg
 from torch.fx.passes.graph_manipulation import get_size_of_node
-
 from .graph_drawer import FxGraphDrawer
 from .operator_support import get_node_target, OperatorSupportBase
 from .shape_prop import ShapeProp

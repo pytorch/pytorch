@@ -4,7 +4,6 @@ from dataclasses import dataclass, field
 from typing import Any, Optional, TYPE_CHECKING, Union
 
 import torch
-
 from ._dim_entry import _match_levels, DimEntry
 from ._tensor_info import TensorInfo
 

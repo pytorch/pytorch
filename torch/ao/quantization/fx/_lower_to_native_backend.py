@@ -18,7 +18,6 @@ from torch.ao.quantization.quantization_mappings import get_quantized_operator
 from torch.ao.quantization.utils import _parent_name
 from torch.fx import GraphModule, map_arg, Node
 from torch.fx.graph import Graph
-
 from .utils import (
     collect_producer_nodes,
     create_node_from_old_node_preserve_meta,

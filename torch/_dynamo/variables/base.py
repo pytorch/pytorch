@@ -21,7 +21,6 @@ from typing import Any, NoReturn, Optional, TYPE_CHECKING
 
 from torch._guards import Guard
 from torch.fx.proxy import Node
-
 from .. import graph_break_hints, variables
 from ..current_scope_id import current_scope_id
 from ..exc import raise_observed_exception, unimplemented

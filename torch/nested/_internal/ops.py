@@ -8,7 +8,6 @@ import torch
 import torch.nn.functional as F
 from torch.fx.operator_schemas import normalize_function
 from torch.nested._internal.sdpa import jagged_scaled_dot_product_attention
-
 from .nested_tensor import NestedTensor
 
 
@@ -797,7 +796,6 @@ def like_factory_default(func, *args, **kwargs):
             FunctionalTensor,
             mb_unwrap_functional_tensor,
         )
-
         from .nested_tensor import _tensor_symint_registry
 
         ragged_source = inp._offsets if inp._lengths is None else inp._lengths

@@ -7,7 +7,6 @@ import operator
 from typing import TYPE_CHECKING
 
 import torch
-
 from ..utils import node_replace_, nodes_map
 
 

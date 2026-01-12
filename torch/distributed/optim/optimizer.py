@@ -10,7 +10,6 @@ import torch.jit as jit
 import torch.nn as nn
 from torch import Tensor
 from torch.distributed.rpc import RRef
-
 from .utils import functional_optim_map
 
 

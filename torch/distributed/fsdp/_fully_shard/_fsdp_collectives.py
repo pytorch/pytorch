@@ -9,7 +9,6 @@ from torch.distributed.device_mesh import _get_device_handle
 from torch.distributed.distributed_c10d import ReduceOp
 from torch.distributed.fsdp._fully_shard._fsdp_api import AllGather, ReduceScatter
 from torch.distributed.tensor import DTensor
-
 from ._fsdp_api import _ReduceOp
 from ._fsdp_common import (
     _get_dim0_padded_size,

@@ -30,7 +30,6 @@ from torch._dynamo.variables.tensor import TensorVariable
 from torch._guards import Source
 from torch._logging import getArtifactLogger
 from torch.utils._pytree import tree_map_only
-
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,

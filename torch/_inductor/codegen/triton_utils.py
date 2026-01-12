@@ -5,7 +5,6 @@ import sympy
 
 import torch
 from torch.utils._sympy.symbol import symbol_is_type, SymT
-
 from .. import config
 from ..runtime.hints import AttrsDescriptorWrapper
 from ..utils import _type_of, expr_fits_within_32bit, triton_version_uses_attrs_dict

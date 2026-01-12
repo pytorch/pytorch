@@ -4,7 +4,6 @@ from collections.abc import Sequence
 import torch.nn.functional as F
 from torch import Tensor
 from torch.nn.common_types import _size_2_t, _size_4_t, _size_6_t
-
 from .module import Module
 from .utils import _ntuple, _pair, _quadruple
 

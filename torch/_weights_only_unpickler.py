@@ -24,7 +24,6 @@
 
 import functools as _functools
 import warnings
-
 from _codecs import encode
 from collections import Counter, OrderedDict
 from collections.abc import Callable

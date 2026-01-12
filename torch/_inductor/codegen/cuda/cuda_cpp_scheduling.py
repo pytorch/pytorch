@@ -10,7 +10,6 @@ from torch._inductor.codegen.cuda.cutlass_python_evt import (
 )
 from torch._inductor.utils import Placeholder
 from torch.utils._ordered_set import OrderedSet
-
 from ...._dynamo.utils import counters
 from ... import config
 from ...codecache import code_hash, get_path

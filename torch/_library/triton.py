@@ -7,7 +7,6 @@ from collections.abc import Callable, Generator, Iterable
 from typing import Any, Optional, Union
 
 from torch.utils._exposed_in import exposed_in
-
 from .custom_ops import custom_op, CustomOpDef
 from .infer_schema import infer_schema
 

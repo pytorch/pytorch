@@ -15,7 +15,6 @@ from torch.ao.quantization.backend_config.utils import (
 from torch.ao.quantization.utils import NodePattern, Pattern
 from torch.fx import GraphModule, map_arg, Node
 from torch.fx.graph import Graph
-
 from .custom_config import FuseCustomConfig
 from .fuse_handler import _get_fusion_pattern_to_fuse_handler_cls, FuseHandler
 from .match_utils import _is_match, MatchAllNode

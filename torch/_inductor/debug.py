@@ -33,7 +33,6 @@ from torch.fx.passes.tools_common import legalize_graph
 from torch.types import FileLike
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map
-
 from . import config, ir  # noqa: F811, this is needed
 from .ir import ExternKernel
 from .scheduler import (

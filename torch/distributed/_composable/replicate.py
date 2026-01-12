@@ -7,7 +7,6 @@ import torch
 import torch.nn as nn
 from torch.distributed._composable_state import _State
 from torch.nn.parallel import DistributedDataParallel
-
 from .contract import _get_registry, contract
 
 

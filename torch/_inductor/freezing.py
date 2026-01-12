@@ -15,7 +15,6 @@ from torch._inductor.constant_folding import constant_fold, replace_node_with_co
 from torch._inductor.freezing_utils import enter_freezing, record_has_frozen_params
 from torch._inductor.fx_passes.freezing_patterns import freezing_passes
 from torch._inductor.fx_passes.post_grad import view_to_reshape
-
 from . import config
 
 

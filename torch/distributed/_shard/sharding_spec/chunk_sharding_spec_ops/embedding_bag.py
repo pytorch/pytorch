@@ -9,7 +9,6 @@ from torch.distributed._shard.sharded_tensor import ShardedTensor
 from torch.distributed._shard.sharding_spec import ChunkShardingSpec
 from torch.distributed._shard.sharding_spec.api import custom_sharding_spec_op
 from torch.distributed.nn.functional import all_gather, reduce_scatter
-
 from ._common import (
     _all_gather_base_input,
     _handle_col_wise_sharding_base,

@@ -10,7 +10,6 @@ from typing_extensions import ParamSpec
 
 import torch
 from torch.utils._ordered_set import OrderedSet
-
 from . import ir
 from .exc import SubgraphLoweringException
 from .graph import GraphLowering

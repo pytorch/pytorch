@@ -8,7 +8,6 @@ from torch.distributed._shard.sharded_tensor import (
     Shard,
     ShardedTensor,
 )
-
 from ._common import _register_sharded_op_on_local_shards
 
 

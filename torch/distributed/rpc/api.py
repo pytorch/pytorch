@@ -30,7 +30,6 @@ from torch._C._distributed_rpc import (
     WorkerInfo,
 )
 from torch.futures import Future
-
 from ._utils import _group_membership_management, _update_group_membership
 from .constants import DEFAULT_SHUTDOWN_TIMEOUT, UNSET_RPC_TIMEOUT
 from .internal import (

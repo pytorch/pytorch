@@ -5,7 +5,6 @@ import torch
 import torch.nn as nn
 import torch.nn.functional as F
 from torch.nn.common_types import _size_1_t
-
 from .utils import ReferenceQuantizedModule
 
 

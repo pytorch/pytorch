@@ -17,7 +17,6 @@ from typing import Any, Optional, TypeVar
 
 import error_reproduction
 import numpy as np
-
 import onnx
 import onnxruntime as ort
 import onnxruntime.capi.onnxruntime_pybind11_state

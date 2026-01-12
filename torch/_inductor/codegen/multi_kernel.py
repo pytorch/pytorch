@@ -9,7 +9,6 @@ from typing import Any, Optional, Union
 from torch._inductor.ir import MultiTemplateBuffer
 from torch._inductor.metrics import get_metric_table, is_metric_table_enabled
 from torch.utils._ordered_set import OrderedSet
-
 from .. import config
 from ..codecache import code_hash, CodeCacheFuture, get_path, write_atomic
 from ..runtime.benchmarking import benchmarker

@@ -2,7 +2,6 @@ import operator
 
 import torch
 from torch._dynamo.utils import counters
-
 from ..pattern_matcher import CallFunction, KeywordArg, Match, register_graph_pattern
 from .pre_grad import apply_gumbel_max_trick_pass
 

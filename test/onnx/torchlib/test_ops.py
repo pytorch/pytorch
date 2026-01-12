@@ -29,7 +29,6 @@ from typing import Optional, TYPE_CHECKING
 
 import error_reproduction
 import numpy as np
-
 import onnx
 import onnxruntime as ort
 import onnxscript

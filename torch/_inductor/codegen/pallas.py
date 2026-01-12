@@ -11,7 +11,6 @@ import torch  # noqa: TC001
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pallas import has_tpu_pallas
 from torch.utils._sympy.functions import ModularIndexing
-
 from .. import config
 from ..ir import ComputedBuffer
 from ..runtime.runtime_utils import torch_dtype_to_jax

@@ -4,7 +4,6 @@ from typing_extensions import deprecated
 
 from torch import Tensor
 from torch.nn import _reduction as _Reduction, functional as F
-
 from .distance import PairwiseDistance
 from .module import Module
 

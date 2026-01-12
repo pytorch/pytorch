@@ -39,7 +39,6 @@ from torch.fx.experimental.symbolic_shapes import (
 from torch.nn.utils import stateless
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from torch.utils._pytree import TreeSpec
-
 from .. import config
 from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
 from .descriptors import (

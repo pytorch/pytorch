@@ -1,7 +1,6 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 from torch.distributed.checkpoint.metadata import STATE_DICT_TYPE
-
 from . import _version
 from ._traverse import (
     OBJ_PATH,

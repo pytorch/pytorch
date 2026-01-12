@@ -4,7 +4,6 @@ import random
 from dataclasses import dataclass
 
 import torch
-
 from torchfuzz.operators import get_operator, list_operators
 from torchfuzz.tensor_fuzzer import (
     fuzz_tensor_size,

@@ -4,7 +4,6 @@ from typing import Any, Optional
 import torch
 from torch.fx import Graph, GraphModule, Node
 from torch.utils._pytree import tree_flatten
-
 from .common import CantChunk, ChunkingMeta
 
 
@@ -71,7 +70,6 @@ def format_node_with_chunking_meta(
     If include_args is True, also print chuning metadata for Node arguments.
     """
     from torch._inductor.runtime.runtime_utils import green_text
-
     from .core import get_chunking_meta
 
     fake_tensor = get_fake_tensor_from_node_arg(node)

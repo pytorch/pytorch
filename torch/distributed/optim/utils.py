@@ -1,7 +1,6 @@
 # mypy: allow-untyped-defs
 
 from torch import optim
-
 from .functional_adadelta import _FunctionalAdadelta
 from .functional_adagrad import _FunctionalAdagrad
 from .functional_adam import _FunctionalAdam

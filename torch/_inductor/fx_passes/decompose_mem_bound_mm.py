@@ -8,7 +8,6 @@ from torch.fx.experimental.symbolic_shapes import (
     statically_known_false,
     statically_known_true,
 )
-
 from .. import config
 from ..pattern_matcher import Arg, CallFunction, Match, register_graph_pattern
 from .split_cat import construct_pattern_matcher_pass

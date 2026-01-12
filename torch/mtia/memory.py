@@ -5,7 +5,6 @@ r"""This package adds support for device memory management implemented in MTIA."
 from typing import Any
 
 import torch
-
 from . import Device, is_initialized
 from ._utils import _get_device_index
 

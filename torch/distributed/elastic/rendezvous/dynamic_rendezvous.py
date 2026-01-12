@@ -23,7 +23,6 @@ from typing import Any
 import torch.distributed as dist
 from torch.distributed import Store
 from torch.distributed.elastic.events import construct_and_record_rdzv_event, NodeState
-
 from .api import (
     RendezvousClosedError,
     RendezvousError,

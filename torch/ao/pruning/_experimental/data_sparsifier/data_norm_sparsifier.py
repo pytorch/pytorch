@@ -5,7 +5,6 @@ from typing import Any
 
 import torch
 from torch.nn import functional as F
-
 from .base_data_sparsifier import BaseDataSparsifier
 
 

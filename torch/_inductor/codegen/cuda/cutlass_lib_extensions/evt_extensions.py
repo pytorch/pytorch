@@ -9,7 +9,6 @@ from torch._inductor.ir import (
     is_contiguous_strides_for_shape,
 )
 from torch.utils._ordered_set import OrderedSet
-
 from ..cutlass_utils import torch_dtype_to_cutlass_type, try_import_cutlass
 
 

@@ -8,7 +8,6 @@ from torch.ao.quantization.qconfig import QConfigAny
 from torch.ao.quantization.utils import MatchAllNode, Pattern
 from torch.fx.graph import Graph, Node
 from torch.nn.utils.parametrize import type_before_parametrizations
-
 from .graph_module import _is_observed_standalone_module
 from .quantize_handler import QuantizeHandler
 

@@ -7,7 +7,6 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
 import torch  # noqa: TC002
-
 from ._dim_entry import _match_levels, DimEntry, ndim_of_levels
 
 
