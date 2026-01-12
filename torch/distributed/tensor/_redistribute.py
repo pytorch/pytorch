@@ -176,30 +176,40 @@ def _optimize_transform_infos_for_flattened_reductions(
     src_placements: tuple[Placement, ...],
 ) -> list[_TransformInfo | _FlattenedTransformInfo]:
     """
-    Optimize a list of transform infos by grouping same-type reduction
-    operations and replacing them with flattened transforms when a matching
-    flattened DeviceMesh exists.
+    Optimize transform infos by grouping same-type reductions into flattened
+    transforms when a matching flattened DeviceMesh exists.
 
-    IMPORTANT: Reductions can only be merged if there are no Partial placements
-    on the mesh dimensions between them. A Partial placement (even if unchanged)
-    implies a semantic ordering that must be preserved. For example:
-        (Psum, Pmax, Psum) -> the correct order is sum_A, then max_B, then sum_C
-    If we merge the sums: sum_{A,C}(x) then max_B gives a different result.
-
-    However, non-Partial placements (Replicate, Shard) in between are safe to
-    skip because they don't impose ordering constraints.
-
-    Args:
-        transform_infos: List of transform infos to optimize
-        device_mesh: The device mesh being used for redistribution
-        src_placements: The source placements (needed to check skipped dims)
-
-    Returns:
-        List of transform infos (mix of _TransformInfo and _FlattenedTransformInfo)
-        with eligible reductions replaced by flattened versions.
+    Reductions can only be merged if there are no different-type Partial placements
+    on the mesh dimensions between them (different Partials imply ordering constraints).
+    Non-Partial placements (Replicate, Shard) or same-type Partials are safe to skip.
     """
     if not transform_infos:
         return []
+
+    def has_blocking_partial(src: Placement, from_dim: int, to_dim: int) -> bool:
+        """Check if any skipped dim has a different Partial type that blocks merging."""
+        return any(
+            src_placements[d].is_partial() and src_placements[d] != src
+            for d in range(from_dim + 1, to_dim)
+        )
+
+    def try_create_flattened(
+        reductions: list[_TransformInfo],
+    ) -> _FlattenedTransformInfo | None:
+        """Try to create a flattened transform from 2+ reductions."""
+        if len(reductions) < 2:
+            return None
+        mesh_dims = tuple(sorted(r.mesh_dim for r in reductions))
+        flattened_mesh = _get_flattened_mesh_by_layout(device_mesh, mesh_dims)
+        if flattened_mesh is None:
+            return None
+        return _FlattenedTransformInfo(
+            mesh_dim=0,
+            src_dst_placements=reductions[0].src_dst_placements,
+            logical_shape=reductions[0].logical_shape,
+            mesh=flattened_mesh,
+            original_mesh_dims=mesh_dims,
+        )
 
     result: list[_TransformInfo | _FlattenedTransformInfo] = []
     i = 0
@@ -208,83 +218,44 @@ def _optimize_transform_infos_for_flattened_reductions(
         info = transform_infos[i]
         src, dst = info.src_dst_placements
 
-        # Check if this is a Partial -> Replicate reduction
-        if src.is_partial() and dst.is_replicate():
-            # Find same-type reductions, potentially skipping non-Partial dims
-            # Note: We compare the full Partial placement (not just reduce_op) because
-            # subclasses like _NormPartial have the same reduce_op but different semantics
-            same_type_reductions = [(i, info)]
-            skipped_transforms: list[tuple[int, _TransformInfo]] = []
-            j = i + 1
-            last_mesh_dim = info.mesh_dim
-
-            while j < len(transform_infos):
-                next_info = transform_infos[j]
-                next_src, next_dst = next_info.src_dst_placements
-
-                if next_src.is_partial() and next_dst.is_replicate():
-                    if next_src == src:
-                        # Same type partial reduction - check if we can merge
-                        # We need to verify no Partial placements on skipped dims
-                        can_merge = True
-                        for dim in range(last_mesh_dim + 1, next_info.mesh_dim):
-                            if (
-                                src_placements[dim].is_partial()
-                                and src_placements[dim] != src
-                            ):
-                                # There's a Partial of different reduce_op type on a skipped dim - can't merge
-                                can_merge = False
-                                break
-
-                        if can_merge:
-                            same_type_reductions.append((j, next_info))
-                            last_mesh_dim = next_info.mesh_dim
-                            j += 1
-                        else:
-                            # Can't merge due to Partial on skipped dim
-                            break
-                    else:
-                        # Different type partial - must stop (order matters)
-                        break
-                else:
-                    # Non-partial transform (e.g., allgather) - can skip
-                    skipped_transforms.append((j, next_info))
-                    j += 1
-
-            if len(same_type_reductions) >= 2:
-                # Try to flatten the reductions
-                mesh_dims = tuple(
-                    sorted(info.mesh_dim for _, info in same_type_reductions)
-                )
-                flattened_mesh = _get_flattened_mesh_by_layout(device_mesh, mesh_dims)
-
-                if flattened_mesh is not None:
-                    # Create a flattened transform
-                    first_idx, first_info = same_type_reductions[0]
-                    flattened_transform = _FlattenedTransformInfo(
-                        mesh_dim=0,
-                        src_dst_placements=(src, dst),
-                        logical_shape=first_info.logical_shape,
-                        mesh=flattened_mesh,
-                        original_mesh_dims=mesh_dims,
-                    )
-                    result.append(flattened_transform)
-                    # Add the skipped non-partial transforms after
-                    for _, skipped_info in skipped_transforms:
-                        result.append(skipped_info)
-                    i = j
-                    continue
-
-            # No flattening possible, add all in original order
-            all_indices = same_type_reductions + skipped_transforms
-            all_indices.sort(key=lambda x: x[0])
-            for _, transform in all_indices:
-                result.append(transform)
-            i = j
-        else:
-            # Non-reduction transform, add as-is
+        # Non-reduction: add as-is
+        if not (src.is_partial() and dst.is_replicate()):
             result.append(info)
             i += 1
+            continue
+
+        # Collect mergeable same-type reductions and non-reduction transforms
+        # Track original indices to preserve order in fallback case
+        reductions: list[tuple[int, _TransformInfo]] = [(i, info)]
+        others: list[tuple[int, _TransformInfo]] = []
+        j = i + 1
+
+        while j < len(transform_infos):
+            next_info = transform_infos[j]
+            next_src, next_dst = next_info.src_dst_placements
+            is_reduction = next_src.is_partial() and next_dst.is_replicate()
+
+            if not is_reduction:
+                others.append((j, next_info))
+                j += 1
+            elif next_src == src and not has_blocking_partial(
+                src, reductions[-1][1].mesh_dim, next_info.mesh_dim
+            ):
+                reductions.append((j, next_info))
+                j += 1
+            else:
+                break
+
+        # Try to flatten, otherwise preserve original order
+        flattened = try_create_flattened([info for _, info in reductions])
+        if flattened:
+            result.append(flattened)
+            result.extend(info for _, info in others)
+        else:
+            all_transforms = reductions + others
+            all_transforms.sort(key=lambda x: x[0])
+            result.extend(info for _, info in all_transforms)
+        i = j
 
     return result
 
