@@ -32,7 +32,6 @@ import os
 import random
 import re
 import sys
-import traceback
 import types
 import unittest
 from collections import defaultdict
@@ -356,6 +355,7 @@ manual_torch_name_rule_map: dict[
     "torch._dynamo.patch_dynamo_config": UserFunctionVariable,
     "torch._dynamo.error_on_graph_break": UserFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_size_oblivious": TorchInGraphFunctionVariable,
+    "torch.fx.experimental.symbolic_shapes.size_hint": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_or_true": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.guard_or_false": TorchInGraphFunctionVariable,
     "torch.fx.experimental.symbolic_shapes.statically_known_true": TorchInGraphFunctionVariable,
@@ -375,6 +375,7 @@ manual_torch_name_rule_map: dict[
     "torch._C._autograd._unsafe_set_version_counter": TorchInGraphFunctionVariable,
     "torch.xpu.get_rng_state": SkipFunctionVariable,
     "torch.xpu.set_rng_state": SkipFunctionVariable,
+    "torch.library.wrap_triton": TorchInGraphFunctionVariable,
     # avoid skipping user defined modules in distributed unit tests
     "torch/testing/_internal/common_fsdp.py#forward": UserFunctionVariable,
     f"torch/testing/_internal/common_fsdp.py#{TORCH_DYNAMO_RESUME_IN_PREFIX}": UserFunctionVariable,
@@ -3307,7 +3308,6 @@ BUILTIN_SKIPLIST = (
     abc,
     copy,
     random,
-    traceback,
     linecache,
 )
 
@@ -3372,6 +3372,8 @@ LEGACY_MOD_INLINELIST = {
     "torch._export.wrappers",
     "torch._functorch.apis",
     "torch._functorch.deprecated",
+    "torch._library.fake_class_registry",
+    "torch.utils._typing_utils",
     "torch.nn.attention.flex_attention",
     "torch.ao.quantization.stubs",
     "torch.ao.quantization.pt2e.export_utils",

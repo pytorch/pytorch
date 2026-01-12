@@ -72,7 +72,7 @@ class LocalTest(TestCase):
         TP_shard_size = global_shape[0] / TP
         for my_coordinate in itertools.product(range(DP), range(TP)):
             local_shape, global_offset = _compute_local_shape_and_global_offset(
-                global_shape, mesh_shape, list(my_coordinate), placements
+                global_shape, mesh_shape, lambda idx: my_coordinate[idx], placements
             )
             dp_rank, tp_rank = my_coordinate
             expected_shard_size = 18
@@ -96,7 +96,7 @@ class LocalTest(TestCase):
         for my_coordinate in itertools.product(range(DP), range(TP)):
             dp_rank, tp_rank = my_coordinate
             local_shape, global_offset = _compute_local_shape_and_global_offset(
-                global_shape, mesh_shape, list(my_coordinate), placements
+                global_shape, mesh_shape, lambda idx: my_coordinate[idx], placements
             )
 
             dp012_shard_size = 5
@@ -131,7 +131,7 @@ class LocalTest(TestCase):
         for my_coordinate in itertools.product(range(DP), range(TP)):
             dp_rank, tp_rank = my_coordinate
             local_shape, global_offset = _compute_local_shape_and_global_offset(
-                global_shape, mesh_shape, list(my_coordinate), placements
+                global_shape, mesh_shape, lambda idx: my_coordinate[idx], placements
             )
 
             dp012_shard_size = 4
@@ -167,7 +167,7 @@ class LocalTest(TestCase):
         for my_coordinate in itertools.product(range(DP), range(TP)):
             dp_rank, tp_rank = my_coordinate
             local_shape, global_offset = _compute_local_shape_and_global_offset(
-                global_shape, mesh_shape, list(my_coordinate), placements
+                global_shape, mesh_shape, lambda idx: my_coordinate[idx], placements
             )
             expected_shard_size = 3
             expected_shard_offset = (
@@ -191,7 +191,7 @@ class LocalTest(TestCase):
         for my_coordinate in itertools.product(range(DP), range(TP)):
             dp_rank, tp_rank = my_coordinate
             local_shape, global_offset = _compute_local_shape_and_global_offset(
-                global_shape, mesh_shape, list(my_coordinate), placements
+                global_shape, mesh_shape, lambda idx: my_coordinate[idx], placements
             )
             if dp_rank in (0, 1, 2):
                 tp0_shard_size = 8
@@ -224,7 +224,7 @@ class LocalTest(TestCase):
         for my_coordinate in itertools.product(range(DP), range(TP)):
             dp_rank, tp_rank = my_coordinate
             local_shape, global_offset = _compute_local_shape_and_global_offset(
-                global_shape, mesh_shape, list(my_coordinate), placements
+                global_shape, mesh_shape, lambda idx: my_coordinate[idx], placements
             )
             if dp_rank in (0, 1, 2):
                 tp0_shard_size = 3
@@ -257,7 +257,7 @@ class LocalTest(TestCase):
         ):
             mesh0_rank, mesh1_rank, mesh2_rank = my_coordinate
             local_shape, global_offset = _compute_local_shape_and_global_offset(
-                global_shape, mesh_shape, list(my_coordinate), placements
+                global_shape, mesh_shape, lambda idx: my_coordinate[idx], placements
             )
             if mesh0_rank in (0, 1, 2):
                 if mesh1_rank == 0:
@@ -1033,12 +1033,12 @@ class Test_StridedShard_Propagation(LocalDTensorTestBase):
 
             with CommDebugMode() as comm_mode:
                 # `A @ B2` will trigger redistribution on both inputs as below:
-                # A: S(1)[0]S(1)[1]->S(1)R->RR->RS(1)
-                # B2: _S(0, 4)S(0)[0] -> RS(0)
-                # The final output res2's placements will be RP.
+                # A: S(1)[0]S(1)[1]
+                # B2: _S(0, 4)S(0)[0]->RS(0)->RR->S(0)R->S(0)[0]S(0)[1]
+                # The final output res2's placements will be PP.
                 res2 = A @ B2
             self.assertEqual(
-                comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 3
+                comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 2
             )
             assert isinstance(res1, DTensor)
             assert isinstance(res2, DTensor)
@@ -1557,10 +1557,10 @@ class TestExplicitRedistribute(LocalTensorTestBase):
                     )
                     # TODO enable this once fixing the issue that op_info.schema is None in some calls to
                     # redistribute_local_tensor
-                    # self.assertRegex(
-                    #     captured.output[0],
-                    #     r".*aten\.mm\.default.*",
-                    # )
+                    self.assertRegex(
+                        captured.output[0],
+                        r".*aten\.mm\.default.*",
+                    )
 
             # explicit redistribute allows manual redistribute
             with ExplicitRedistributionContext():

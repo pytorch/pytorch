@@ -27,7 +27,7 @@ on:
     - cron: 29 8 * * *  # about 1:29am PDT
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' }}-${{ github.event_name == 'schedule' }}
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}-${{ github.event_name == 'schedule' }}
   cancel-in-progress: true
 
 permissions:
@@ -36,21 +36,12 @@ permissions:
 
 jobs:
   # See job-filter.yml for rules on adding job filter conditions
-  # action is inlined temporarily to avoid issues on the PRs
   job-filter:
     if: github.repository_owner == 'pytorch'
-    runs-on: ubuntu-latest
-    outputs:
-      jobs: ${{ steps.set.outputs.jobs }}
-    steps:
-      - id: set
-        run: |
-          jobs="${{ github.event.inputs.jobs-to-include || '' }}"
-          if [ -n "$jobs" ]; then
-            echo "jobs= ${jobs} " >> "$GITHUB_OUTPUT"
-          else
-            echo "jobs=" >> "$GITHUB_OUTPUT"
-          fi
+    name: job-filter
+    uses: ./.github/workflows/job-filter.yml
+    with:
+      jobs-to-include: ${{ github.event.inputs.jobs-to-include || '' }}
 
   llm-td:
     if: github.repository_owner == 'pytorch'
@@ -175,7 +166,7 @@ jobs:
       - get-label-type
       - job-filter
     with:
-      runner: linux.2xlarge.memory
+      runner: linux.c7i.4xlarge
       runner_prefix: "${{ needs.get-label-type.outputs.label-type }}"
       build-environment: linux-jammy-py3.10-clang18-asan
       docker-image-name: ci-image:pytorch-linux-jammy-py3-clang18-asan

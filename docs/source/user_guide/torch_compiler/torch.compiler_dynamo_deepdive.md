@@ -848,7 +848,7 @@ Below are additional details and references for concepts mentioned in this docum
 
 [^5]: Interestingly enough, it does understand NumPy code! Have a look at
     [this blogpost](https://pytorch.org/blog/compiling-numpy-code/)
-    and [the docs](https://pytorch.org/docs/main/torch.compiler_faq.html#does-numpy-work-with-torch-compile).
+    and [the docs](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_faq.html#does-numpy-work-with-torch-compile).
     Now, this is just possible because we reimplemented NumPy using
     PyTorch. Good luck implementing Django in PyTorch though…
 
