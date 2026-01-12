@@ -45,6 +45,7 @@ from ..runtime.benchmarking import benchmarker
 from ..runtime.hints import (
     AutotuneHint,
     DeviceProperties,
+    ReductionHint,
     TRITON_MAX_BLOCK,
     TRITON_MAX_RSPLIT,
 )
@@ -53,7 +54,6 @@ from ..scheduler import BaseSchedulerNode, FusedSchedulerNode, Scheduler, Schedu
 from ..shape_propagation import get_broadcasted_shape
 from ..utils import (
     cache_on_self,
-    DelayMaybeLine,
     DelayReplaceLine,
     get_bounds_index_expr,
     get_fused_kernel_name,
@@ -125,6 +125,10 @@ perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 schedule_log = torch._logging.getArtifactLogger(__name__, "schedule")
 fusion_log = torch._logging.getArtifactLogger(__name__, "fusion")
 async_compile = AsyncCompile()
+
+# Threshold for detecting inner reductions based on tiling score ratio.
+# If r0_tiling_score / x_tiling_score >= this value, upgrade DEFAULT hint to INNER.
+INNER_REDUCTION_RATIO_THRESHOLD = 8
 
 
 def get_triton_reduction_function(reduction_type):
@@ -212,6 +216,15 @@ def gen_common_triton_imports() -> str:
         from torch._inductor.runtime.hints import AutotuneHint, ReductionHint, TileHint, DeviceProperties
         """
     )
+    if config.triton.proton_profiling:
+        imports.splice(
+            """
+            import triton.profiler as proton
+            import triton.profiler.language as pl
+            pl.enable_semantic('triton')
+            """
+        )
+
     return imports.getvalue()
 
 
@@ -776,13 +789,6 @@ def triton_reshape(
     return f"{value}[{', '.join(expand)}]"
 
 
-def enable_pdl_codegen():
-    if not torch._inductor.config.triton.enable_pdl:
-        return False
-    major, _ = torch.cuda.get_device_capability(torch.cuda.current_device())
-    return major >= 9
-
-
 # NB: Inheriting from PythonPrinter is somewhat dangerous, because there are a
 # number of operators which Triton "implements", but in a way that is
 # inconsistent with Python semantics (and consistent with C semantics).  We
@@ -857,9 +863,6 @@ class TritonPrinter(PythonPrinter):
         return f"libdevice.ceil({self._print(expr.args[0])}).to({V.kernel.index_dtype})"
 
     def _helper_sqrt(self, expr: sympy.Expr) -> str:
-        # work around for https://github.com/pytorch/pytorch/issues/165738
-        if torch.xpu.is_available():
-            return f"libdevice.sqrt(({self._print(expr)}).to(tl.float32))"
         return f"tl.sqrt_rn(({self._print(expr)}).to(tl.float32))"
 
     def _print_FloatPow(self, expr: sympy.Expr) -> str:
@@ -1180,12 +1183,9 @@ class TritonOverrides(OpOverrides):
         triton_val = constant_repr(type_(value))
         triton_type = triton_compute_type(dtype)
 
-        if triton_type == "tl.float32":
-            # Float constants are always f32 in triton
-            return triton_val
-
-        # NOTE: We use a tensor here in order to get the expected type.
-        # Otherwise, e.g. float64 constants would be truncated to float32.
+        # NOTE: We use tl.full here to get the expected type.
+        # Otherwise, subnormal float32 values are treated as fp64
+        # causing fp32 * fp64 promotion and different numerical results.
         if value < 0 and not dtype.is_signed:
             triton_signed_type = f"tl.{triton_type[4:]}"
             return f"tl.full({shape}, {triton_val}, {triton_signed_type}).to({triton_type})"
@@ -1218,12 +1218,6 @@ class TritonOverrides(OpOverrides):
             # we want div_rn to adhere with eager
             out = f"triton.language.div_rn({x}, {y})"
         else:
-            out = f"({x} / {y})"
-
-        # Workaround here since the functionality of div_rn has not ready on XPU.
-        # TODO: remove this workaround after https://github.com/intel/intel-xpu-backend-for-triton/issues/5306
-        # resolved.
-        if torch.xpu.is_available():
             out = f"({x} / {y})"
 
         if low_precision_fp_var(x) or low_precision_fp_var(y):
@@ -1270,9 +1264,6 @@ class TritonOverrides(OpOverrides):
     @staticmethod
     @maybe_upcast_float32()
     def sqrt(x):
-        # work around for https://github.com/pytorch/pytorch/issues/165738
-        if torch.xpu.is_available():
-            return f"libdevice.sqrt({x})"
         return f"tl.sqrt_rn({x})"
 
     @staticmethod
@@ -1610,6 +1601,10 @@ class TritonOverrides(OpOverrides):
     @maybe_upcast_float32()
     def log2(x):
         return f"libdevice.log2({x})"
+
+    @staticmethod
+    def ldexp(x, n):
+        return f"libdevice.ldexp({x}, {n}.to(tl.int32))"
 
     @staticmethod
     @maybe_upcast_float32()
@@ -2376,8 +2371,15 @@ class TMACompatibilityChecker:
             f"{innermost_block_shape} expr must contain a single block type from {TritonSymbols.block_types}"
         )
 
-        # For persistent reductions, the reduction block sizes are fixed at compile time
-        if self.kernel.persistent_reduction and not self.for_store:
+        # For persistent reductions, the reduction block sizes are fixed at compile time.
+        # Only apply this logic when the innermost block is a reduction block;
+        # persistent reductions can still have pointwise-style loads where the innermost block is X/Y/Z,
+        # and in that case we should fall back to the generic analysis below.
+        if (
+            self.kernel.persistent_reduction
+            and not self.for_store
+            and innermost_block_symt in TritonSymbols.reduction_types
+        ):
             # For a discontiguous tensor, a 1D block will be split across several
             # dimensions, e.g. R0_BLOCK:
             # block_shape=[XBLOCK, ((R0_BLOCK + 31)//32), Min(1, ((R0_BLOCK + 31)//32)), Min(32, R0_BLOCK)]
@@ -2386,11 +2388,21 @@ class TMACompatibilityChecker:
             innermost_tree_prefix = prefix_str[innermost_block_symt]
             tree_numel = None
             for t in self.kernel.range_trees:
-                if t.is_reduction:
-                    if t.prefix == innermost_tree_prefix:
-                        tree_numel = t.numel
-                        break
-            assert tree_numel is not None
+                if t.is_reduction and t.prefix == innermost_tree_prefix:
+                    tree_numel = t.numel
+                    break
+            if tree_numel is None:
+                # If we can't map the innermost reduction block type to a reduction range tree,
+                # we cannot determine the persistent RBLOCK value,
+                # so we cannot validate the 16-byte innermost-dimension requirement for TMA.
+                # Treat this as incompatible rather than asserting during compilation, fallback to non-TMA loads.
+                log.debug(
+                    "%s could not find reduction range tree for innermost prefix %s Block shape: %s",
+                    self.failed_debug_prefix,
+                    innermost_tree_prefix,
+                    block_params.block_shape,
+                )
+                return False
             persistent_rblock = self.kernel._get_persistent_RBLOCK(tree_numel)
             innermost_block_bytes = (
                 innermost_block_shape.subs({innermost_block_type: persistent_rblock})
@@ -2537,7 +2549,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         self.tma_min_block_sizes = dict[str, int]()
         self.hint_override = hint_override
         self._load_counts: collections.Counter[str] = collections.Counter()
-        self._load_index = 0
+        self._pdl_load_index = 0
+        self._pdl_has_wait = False
 
         # A set of autotuning hints to pass as part of triton_meta
         self.autotune_hints = OrderedSet[AutotuneHint]()
@@ -3341,26 +3354,84 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         else:
             return self.loads
 
-    def _handle_pdl_before_load(self, wait_buffer):
-        GDC_WAIT = "tl.extra.cuda.gdc_wait()"
-        self._load_index += 1
-        if self.inside_reduction:
+    GDC_WAIT = "tl.extra.cuda.gdc_wait()"
+    GDC_LAUNCH = "tl.extra.cuda.gdc_launch_dependents()"
+
+    def _enable_pdl_codegen(self):
+        if not torch._inductor.config.triton.enable_pdl:
+            return False
+        if isinstance(V.kernel, torch._inductor.select_algorithm.TritonTemplateKernel):
+            return False
+        # PDL uses CUDA-specific intrinsics (gdc_wait/gdc_launch), not available on ROCm
+        if torch.version.hip:
+            return False
+        return (
+            V.graph.get_current_device_or_throw().type == "cuda"
+            and torch.cuda.get_device_capability()[0] >= 9
+        )
+
+    def _handle_pdl_before_access(
+        self, wait_buffer, *dependencies, consider_reads=False
+    ):
+        if not self._enable_pdl_codegen():
+            return
+        current_node = V.kernel.current_node
+        prev_node = (
+            V.graph.scheduler.previous_node if V.graph.scheduler is not None else None
+        )
+
+        def matching_dep(dep):
+            assert prev_node is not None
+            prev_deps = prev_node.read_writes.writes
+            if consider_reads:
+                prev_deps = itertools.chain(prev_deps, prev_node.read_writes.reads)
+            return any(
+                dep == current_node.mutation_renames.get(w.name, w.name)
+                for w in prev_deps
+            )
+
+        assert dependencies
+        need_wait = prev_node is None or any(matching_dep(d) for d in dependencies)
+        if not need_wait:
+            return
+        # hoist before the loop
+        if self.inside_reduction and self.range_trees[-1].is_loop:
             wait_buffer = self.body
-        if enable_pdl_codegen():
-            if self._load_index == 1:
-                wait_buffer.writeline(GDC_WAIT)
+
+        wait_buffer.writeline(self.GDC_WAIT)
 
     def _handle_pdl_after_load(self, launch_buffer, result_var):
-        GDC_LAUNCH = "tl.extra.cuda.gdc_launch_dependents()"
-        if self.inside_reduction:
+        if not self._enable_pdl_codegen():
+            return
+        if result_var.use_count > 1:  # we already went through this
+            return
+        # hoist after the loop
+        if self.inside_reduction and self.range_trees[-1].is_loop:
             launch_buffer = self.post_loop_combine
-        if enable_pdl_codegen():
-            current_load_index = self._load_index
-            launch_if_last_load = DelayMaybeLine(
-                lambda: current_load_index == self._load_index,
-                f"0; {GDC_LAUNCH} # gdc launch for {result_var}",
-            )
-            self.cse.generate(launch_buffer, launch_if_last_load, dtype=torch.int32)
+
+        # the issue is that we need to (a) make sure this happens
+        # but (b) do not know if this is last yet
+        # so we need to remember this (has_wait), which tells use
+        # whether we would have needed it, and check if we are last
+        launch_buffer.writeline(self.GDC_WAIT)
+        launch_buffer.writeline(self.GDC_LAUNCH)
+
+    def _filter_pdl(self, code: IndentedBuffer):
+        new_lines = []
+        has_wait = False
+        previous_launch = None
+        for l in code._lines:
+            if type(l) is str and self.GDC_WAIT in l:
+                if has_wait:
+                    continue
+                else:
+                    has_wait = True
+            if type(l) is str and self.GDC_LAUNCH in l:
+                if previous_launch is not None:
+                    new_lines.pop(previous_launch)
+                previous_launch = len(new_lines)
+            new_lines.append(l)
+        code._lines = new_lines
 
     def partial_accumulate(
         self, name: str, reduction_type, val, extra_meta: dict[str, Any]
@@ -3520,7 +3591,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 dtype = torch.bool
 
         load_buffer = self.get_load_buffer(indexing)
-        self._handle_pdl_before_load(load_buffer)
+        self._handle_pdl_before_access(load_buffer, name)
         result_var = self.cse.generate(
             load_buffer, make_line(line), dtype=dtype, shape=shape
         )
@@ -3639,6 +3710,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         if not self.inside_reduction and self.cooperative_reduction:
             exit_stack.enter_context(self.guard_cooperative_store(name, self.stores))
 
+        self._handle_pdl_before_access(self.stores, name, consider_reads=True)
         self.stores.writeline(DeferredLine(name, line))
 
         if not self.inside_reduction:
@@ -3706,7 +3778,9 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 "Bucketize only supports indexing with int32 and int64"
             )
 
-        self._handle_pdl_before_load(self.compute)
+        self._handle_pdl_before_access(
+            self.compute, boundaries[0], *([sorter[0]] if sorter else [])
+        )
         result = self.cse.generate(
             self.compute,
             f"triton_helpers.bucketize_binary_search({values}, "
@@ -4476,6 +4550,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             exit_stack.enter_context(
                 self.guard_cooperative_store(name, self.post_loop_store)
             )
+
+        self._handle_pdl_before_access(self.post_loop_store, var)
 
         if isinstance(indexing, (BlockPtrOptions, TensorDescriptorOptions)):
             self.post_loop_store.writeline(
@@ -5366,12 +5442,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 # large rblock inhibits xblock size, dont attempt if there is a decent amount of
                 # reads coalesced by xblock
                 r_coalesce_ratio = tiling_scores["r0_"] / max(tiling_scores["x"], 1)
-                contiguous_red = r_coalesce_ratio >= 8.0
+                contiguous_red = r_coalesce_ratio >= INNER_REDUCTION_RATIO_THRESHOLD
             else:
-                from torch._inductor.runtime.hints import ReductionHint
-
                 contiguous_red = (
-                    self.features.get_reduction_hint() == ReductionHint.INNER
+                    self.features.get_reduction_hint(tiling_scores)
+                    == ReductionHint.INNER
                 )
 
             looped_mem = memory_stats.looped.memory.bytes
@@ -5424,8 +5499,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         triton_meta["configs"] = [config_of(signature)]
 
-        if enable_pdl_codegen():
-            triton_meta["launch_pdl"] = True
+        triton_meta["launch_pdl"] = self._enable_pdl_codegen()
 
         # Triton compiler includes equal_to_1 args into constants even
         # when they are not constexpr. otherwise there may be a segfault
@@ -5440,6 +5514,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
         self.codegen_prologue(self.body)
         self.codegen_body()
+        self._filter_pdl(self.body)
 
         for helper in self.helper_functions:
             code.writeline("")
@@ -5456,7 +5531,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 @triton.jit
             """
         elif self.inside_reduction:
-            reduction_hint = self.features.get_reduction_hint()
+            reduction_hint = self.features.get_reduction_hint(self.tiling_scores)
             heuristics_line = f"""
                 @triton_heuristics.{self._get_heuristic()}(
                     size_hints={size_hints!r},
@@ -5487,14 +5562,19 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 @triton.jit
             """
         code.splice(heuristics_line)
+        kernel_name = name or str(Placeholder.KERNEL_NAME)
         code.writeline(
-            f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join(x.full_name() for x in argdefs)}):"
+            f"def {kernel_name}({', '.join(x.full_name() for x in argdefs)}):"
         )
         with code.indent():
+            if config.triton.proton_profiling:
+                code.writeline(f'pl.enter_scope("{kernel_name}")')
             self.codegen_static_numels(code)
             for old, new in self.args.aliases():
                 code.writeline(f"{old} = {new}")
             code.splice(self.body)
+            if config.triton.proton_profiling:
+                code.writeline(f'pl.exit_scope("{kernel_name}")')
 
         if config.benchmark_kernel:
             code.splice(self.codegen_kernel_benchmark(num_gb))
