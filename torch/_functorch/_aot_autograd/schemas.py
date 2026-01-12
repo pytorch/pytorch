@@ -1355,3 +1355,13 @@ class JointWithDescriptors:
     @property
     def fake_mode(self):
         return self._aot_state.fake_mode
+
+    def cache_hash(self) -> str:
+        """
+        Return a hash string suitable for use as a cache key. This method
+        exists to decouple cache key generation from __str__/__repr__, so
+        that display-oriented changes don't accidentally affect caching.
+        """
+        from hashlib import sha256
+
+        return sha256(str(self).encode("utf-8")).hexdigest()
