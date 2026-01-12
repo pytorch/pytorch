@@ -2277,6 +2277,102 @@ class TestLinalg(TestCase):
             run_test(shape)
             run_test(shape, symmetric=True)
 
+
+    @onlyCUDA
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @dtypes(*floating_and_complex_types())
+    def test_eigvals_out_variants(self, device, dtype):
+        from torch.testing._internal.common_utils import random_symmetric_matrix
+
+        def run_test(shape, *, symmetric=False):
+            if not dtype.is_complex and symmetric:
+                # for symmetric real-valued inputs eigenvalues and eigenvectors have imaginary part equal to zero
+                a = random_symmetric_matrix(shape[-1], *shape[:-2], dtype=dtype, device=device)
+            else:
+                a = make_tensor(shape, dtype=dtype, device=device)
+
+            expected = torch.linalg.eigvals(a)
+
+            # check out= variant
+            complex_dtype = dtype
+            if not dtype.is_complex:
+                complex_dtype = torch.complex128 if dtype == torch.float64 else torch.complex64
+            out = torch.empty(0, dtype=complex_dtype, device=device)
+            ans = torch.linalg.eigvals(a, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(expected.to(complex_dtype), out)
+
+            # check non-contiguous out
+            if a.numel() > 0:
+                out = torch.empty(2 * shape[0], *shape[1:-1], dtype=complex_dtype, device=device)[::2]
+                self.assertFalse(out.is_contiguous())
+                ans = torch.linalg.eigvals(a, out=out)
+                self.assertEqual(ans, out)
+                self.assertEqual(expected.to(complex_dtype), out)
+
+        shapes = [(0, 0),  # Empty matrix
+                  (5, 5),  # Single matrix
+                  (0, 0, 0), (0, 5, 5),  # Zero batch dimension tensors
+                  (2, 5, 5),  # 3-dim tensors
+                  (2, 1, 5, 5)]  # 4-dim tensors
+        for shape in shapes:
+            run_test(shape)
+            run_test(shape, symmetric=True)
+
+
+    @onlyCUDA
+    @skipCUDAIfNoMagmaAndNoCusolver
+    @dtypes(*floating_and_complex_types())
+    def test_eig_out_variants(self, device, dtype):
+        from torch.testing._internal.common_utils import random_symmetric_matrix
+
+        def run_test(shape, *, symmetric=False):
+            if not dtype.is_complex and symmetric:
+                # for symmetric real-valued inputs eigenvalues and eigenvectors have imaginary part equal to zero
+                a = random_symmetric_matrix(shape[-1], *shape[:-2], dtype=dtype, device=device)
+            else:
+                a = make_tensor(shape, dtype=dtype, device=device)
+
+            expected = torch.linalg.eig(a)
+
+            # check out= variant
+            complex_dtype = dtype
+            if not dtype.is_complex:
+                complex_dtype = torch.complex128 if dtype == torch.float64 else torch.complex64
+
+            # tuple of (eigenvalues, eigenvectors)
+            out = (
+                torch.empty(0, dtype=complex_dtype, device=device),
+                torch.empty(0, dtype=complex_dtype, device=device),
+            )
+            ans = torch.linalg.eig(a, out=out)
+            self.assertEqual(ans, out)
+            self.assertEqual(expected[0].to(complex_dtype), out[0])
+            self.assertEqual(expected[1].to(complex_dtype), out[1])
+
+            # check non-contiguous out
+            if a.numel() > 0:
+                # tuple of (eigenvalues, eigenvectors)
+                out = (torch.empty(2 * shape[0], *shape[1:-1], dtype=complex_dtype, device=device)[::2],
+                       torch.empty(2 * shape[0], *shape[1:], dtype=complex_dtype, device=device)[::2]
+                       )
+                self.assertFalse(out[0].is_contiguous())
+                self.assertFalse(out[1].is_contiguous())
+                ans = torch.linalg.eig(a, out=out)
+                self.assertEqual(ans, out)
+                self.assertEqual(expected[0].to(complex_dtype), out[0])
+                self.assertEqual(expected[1].to(complex_dtype), out[1])
+
+        shapes = [(0, 0),  # Empty matrix
+                  (5, 5),  # Single matrix
+                  (0, 0, 0), (0, 5, 5),  # Zero batch dimension tensors
+                  (2, 5, 5),  # 3-dim tensors
+                  (2, 1, 5, 5)]  # 4-dim tensors
+        for shape in shapes:
+            run_test(shape)
+            run_test(shape, symmetric=True)
+
+
     @slowTest
     @onlyCUDA
     @skipCUDAIfNoMagma
