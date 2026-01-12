@@ -1943,11 +1943,8 @@ class GuardBuilder(GuardBuilderBase):
     def TYPE_MATCH(self, guard: Guard) -> None:
         # ___check_type_id is same as `id(type(x)) == y`
         value = self.get(guard)
-        if isinstance(value, torch._subclasses.FakeTensor):
-            # For FakeTensors, use pytype if set, otherwise default to
-            # torch.Tensor. This is important for cross-compilation where
-            # we compile with fake tensors but run with real tensors.
-            t = value.pytype if value.pytype else torch.Tensor
+        if isinstance(value, torch._subclasses.FakeTensor) and value.pytype:
+            t = value.pytype
         else:
             t = type(value)
 
@@ -2911,10 +2908,8 @@ class GuardBuilder(GuardBuilderBase):
             pytype = type(value)
             dispatch_keys = torch._C._dispatch_keys(value)
             if isinstance(value, torch._subclasses.FakeTensor):
-                # For FakeTensors, use pytype if set, otherwise default to
-                # torch.Tensor. This is important for cross-compilation where
-                # we compile with fake tensors but run with real tensors.
-                pytype = value.pytype if value.pytype is not None else torch.Tensor
+                if value.pytype is not None:
+                    pytype = value.pytype
                 if value.dispatch_keys is not None:
                     dispatch_keys = value.dispatch_keys
 
@@ -3507,33 +3502,19 @@ class GuardsStatePickler(pickle.Pickler):
                     func, args_tuple = self.reducer_override(inner)
                     inner_data.append((attr, func, args_tuple))
 
-                # For FakeTensors, use pytype if set, otherwise default to
-                # torch.Tensor. This is important for cross-compilation where
-                # we compile with fake tensors but run with real tensors.
-                pytype = type(obj)
-                if isinstance(obj, torch._subclasses.FakeTensor):
-                    pytype = obj.pytype if obj.pytype is not None else torch.Tensor
-
                 return type(self)._unpickle_traceable_wrapper_subclass, (
                     torch.empty_like(obj, device="meta"),
                     obj.device,
-                    pytype,
+                    type(obj),
                     torch._C._dispatch_keys(obj).raw_repr(),
                     ctx,
                     inner_data,
                 )
 
-            # For FakeTensors, use pytype if set, otherwise default to
-            # torch.Tensor. This is important for cross-compilation where
-            # we compile with fake tensors but run with real tensors.
-            pytype = type(obj)
-            if isinstance(obj, torch._subclasses.FakeTensor):
-                pytype = obj.pytype if obj.pytype is not None else torch.Tensor
-
             return type(self)._unpickle_tensor, (
                 torch.empty_like(obj, device="meta", requires_grad=obj.requires_grad),
                 obj.device,
-                pytype,
+                type(obj),
                 torch._C._dispatch_keys(obj).raw_repr(),
                 obj.grad,
             )
@@ -3881,20 +3862,7 @@ class CheckFunctionManager:
         # python -s test/dynamo/test_export.py -k test_export_with_symbool_inputs
         latency = 0.0
 
-        # For cross-compilation with fake tensors, skip guard verification since
-        # the guards are created to expect real tensor types but the compile-time
-        # inputs are fake tensors.
-        has_fake_tensor_inputs = any(
-            isinstance(v, torch._subclasses.FakeTensor)
-            for v in output_graph.local_scope.values()
-            if isinstance(v, torch.Tensor)
-        )
-
-        if (
-            not output_graph.skip_guards_check
-            and not output_graph.export
-            and not has_fake_tensor_inputs
-        ):
+        if not output_graph.skip_guards_check and not output_graph.export:
             if not self.guard_manager.check(output_graph.local_scope):
                 reasons = get_guard_fail_reason_helper(
                     self.guard_manager,

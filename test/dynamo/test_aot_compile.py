@@ -1292,54 +1292,6 @@ from user code:
         actual = compiled_fn(*test_inputs)
         self.assertEqual(expected.x, actual.x)
 
-    @unittest.skipIf(not TEST_CUDA, "requires cuda")
-    def test_cross_aot_compile(self):
-        """Test cross-compilation using fake cuda tensors and backward correctness"""
-        from torch._subclasses.fake_tensor import FakeTensorMode
-
-        def fn(x, y):
-            return x + y
-
-        with FakeTensorMode(allow_non_fake_inputs=True):
-            fake_inputs = (
-                torch.randn(3, 4, device="cuda", requires_grad=True),
-                torch.randn(3, 4, device="cuda", requires_grad=True),
-            )
-        compiled_fn = torch.compile(
-            fn,
-            fullgraph=True,
-        ).aot_compile((fake_inputs, {}))
-
-        compiled_fn.save_compiled_function(self.path())
-        torch._dynamo.reset()
-
-        with open(self.path(), "rb") as f:
-            loaded_fn = torch.compiler.load_compiled_function(f)
-
-        inputs = (
-            torch.randn(3, 4, device="cuda", requires_grad=True),
-            torch.randn(3, 4, device="cuda", requires_grad=True),
-        )
-        expected = fn(*inputs)
-        actual = loaded_fn(*inputs)
-        self.assertEqual(expected, actual)
-
-        # Backward check: compare gradients between eager and loaded compiled function
-        eager_loss = expected.sum()
-        eager_loss.backward()
-        eager_grads = tuple(inp.grad.clone() for inp in inputs)
-
-        # Reset grads for compiled run
-        for inp in inputs:
-            inp.grad = None
-
-        compiled_out = loaded_fn(*inputs)
-        compiled_loss = compiled_out.sum()
-        compiled_loss.backward()
-        compiled_grads = tuple(inp.grad.clone() for inp in inputs)
-
-        for eg, cg in zip(eager_grads, compiled_grads):
-            self.assertEqual(eg, cg)
 
     @unittest.skipIf(not c10d.is_available(), "requires c10d")
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
