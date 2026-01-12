@@ -28,7 +28,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
-          - cuda_version: "12.6"
+          - cuda_version: "12.6.2"
             cuda_short: "126"
             torch_cuda_arch_list: "8.0;8.6;9.0"
             runner: "windows.12xlarge"
