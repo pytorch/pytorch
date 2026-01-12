@@ -48,24 +48,13 @@ if TYPE_CHECKING:
 log = logging.getLogger(__name__)
 
 
-def _eager_wrapper_impl(gm: torch.fx.GraphModule, *args, **kwargs):
-    from torch.utils._debug_mode import DebugInterpreter, get_active_debug_mode
-
-    if (
-        debug_mode := get_active_debug_mode()
-    ) is not None and debug_mode.run_compile_with_interpreter:
-        return DebugInterpreter(gm, backend="eager").run(*args, **kwargs)
-    return gm.forward(*args, **kwargs)
-
-
 @register_backend
 def eager(
     gm: torch.fx.GraphModule, fake_tensor_inputs: list[torch.Tensor], **kwargs: Any
 ) -> Callable[..., Any]:
     if kwargs:
         log.warning("eager backend ignoring extra kwargs %s", kwargs)
-
-    return functools.partial(_eager_wrapper_impl, gm)
+    return gm.forward
 
 
 def make_eager_backend_with_torch_function_mode(

@@ -702,15 +702,18 @@ print(t.is_pinned())
 
         # check default
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ""
-        self.assertTrue(abs(check_workspace_size(a) - default_workspace_size) < 524288)
+        self.assertLess(check_workspace_size(a) - default_workspace_size, 524288)
+        self.assertLess(abs(check_workspace_size(a) - default_workspace_size), 524288)
 
         # check default with bad user config
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = "-1"
-        self.assertTrue(abs(check_workspace_size(a) - default_workspace_size) < 524288)
+        self.assertLess(check_workspace_size(a) - default_workspace_size, 524288)
+        self.assertLess(abs(check_workspace_size(a) - default_workspace_size), 524288)
 
         # check valid config
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":128:8:64:16:32:32"
-        self.assertTrue(abs(check_workspace_size(a) - (3072 * 1024)) < 524288)
+        self.assertLess(check_workspace_size(a) - (3072 * 1024), 524288)
+        self.assertLess(abs(check_workspace_size(a) - (3072 * 1024)), 524288)
 
         torch._C._cuda_clearCublasWorkspaces()
 
@@ -856,6 +859,7 @@ print(t.is_pinned())
             self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "none")
 
     @recover_orig_fp32_precision
+    @serialTest()
     def test_fp32_precision_with_float32_matmul_precision(self):
         torch.set_float32_matmul_precision("highest")
         self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "ieee")
@@ -865,6 +869,7 @@ print(t.is_pinned())
         self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "tf32")
 
     @recover_orig_fp32_precision
+    @serialTest()
     def test_invalid_status_for_legacy_api(self):
         torch.backends.cudnn.conv.fp32_precision = "none"
         torch.backends.cudnn.rnn.fp32_precision = "tf32"
@@ -1417,13 +1422,16 @@ except RuntimeError as e:
         expected_messages = [
             "device-side assert triggered",  # CUDA
             "Assertion",  # CUDA
-            "HSA_STATUS_ERROR_EXCEPTION",  # ROCm
-            "Device-side assertion",  # ROCm
+            "HSA_STATUS_ERROR_EXCEPTION",  # ROCm with TORCH_USE_HIP_DSA
+            "Device-side assertion",  # ROCm with TORCH_USE_HIP_DSA
+            # ROCm without TORCH_USE_HIP_DSA returns a launch failure instead
+            # of a proper device-side assertion, but still catches the error
+            "hipErrorLaunchFailure",
+            "unspecified launch failure",
         ]
         self.assertTrue(any(msg in out or msg in err for msg in expected_messages))
 
     @slowTest
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     def test_multinomial_invalid_probs_cuda(self):
         self._spawn_test_multinomial_invalid_probs_cuda([1.0, -1.0, 1.0])
         self._spawn_test_multinomial_invalid_probs_cuda([1.0, inf, 1.0])
@@ -1439,9 +1447,17 @@ except RuntimeError as e:
         with ctx.Pool(1, initializer=self._mute_init) as pool:
             errors = pool.map(method, [arg])
             for e in errors:
-                if "device-side assert triggered" not in str(e):
+                # CUDA raises cudaErrorAssert (710) with "device-side assert triggered"
+                # ROCm with TORCH_USE_HIP_DSA raises a proper device-side assertion
+                # ROCm without TORCH_USE_HIP_DSA raises hipErrorLaunchFailure (719)
+                # which still catches the error but with less specific messaging
+                is_cuda_assert = "device-side assert triggered" in str(e)
+                is_hip_assert = "hipErrorLaunchFailure" in str(
+                    e
+                ) or "unspecified launch failure" in str(e)
+                if not (is_cuda_assert or is_hip_assert):
                     self.fail(e)
-                if e.error_code != 710:  # cudaErrorAssert == 710
+                if e.error_code not in (710, 719):
                     self.fail(e)
 
     @staticmethod
@@ -1454,7 +1470,6 @@ except RuntimeError as e:
             return err
 
     @slowTest
-    @skipIfRocm
     def test_index_out_of_bounds_exception_cuda(self):
         test_method = TestCuda._test_index_bounds_cuda
         # Test in-bound access works fine
@@ -1823,10 +1838,6 @@ except RuntimeError as e:
             self.assertEqual(stash[0], torch.full_like(a, 6))
             self.assertEqual(stash[1], torch.full_like(a, 6))
 
-    @unittest.skipIf(
-        TEST_WITH_ROCM,
-        "In ROCm, kernel asserts are disabled due to performance overhead",
-    )
     def test_fixed_cuda_assert_async(self):
         with self.assertRaisesRegex(
             RuntimeError, "Boolean value of Tensor with no values is ambiguous"
@@ -1924,7 +1935,6 @@ torch.cuda.synchronize()
     # Test is flaky on Windows (https://github.com/pytorch/pytorch/issues/57401)
     @unittest.skipIf(IS_WINDOWS, "Test is flaky on Windows (see issue 57401)")
     @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
-    @skipIfRocm
     def test_cudnn_multiple_threads_same_device(self):
         # This function is intended to test the lazy creation and reuse of per-thread
         # cudnn handles on each device in aten/src/ATen/cudnn/Handles.cpp.
@@ -2366,7 +2376,7 @@ exit(2)
                 )
 
     @unittest.skipIf(
-        (not TEST_CUDA) or TEST_WITH_ROCM,
+        (not TEST_CUDA),
         "CUDA >= 11.0 required for graphs",
     )
     def test_graph_warn_if_has_zero_nodes(self):
@@ -3085,7 +3095,6 @@ exit(2)
         # dummy allocation triggers process_events, Hopefully successfully processes b's end-of-life event.
         torch.zeros((3,), device="cuda")
 
-    @skipIfRocm
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -3118,7 +3127,6 @@ exit(2)
 
         model(x)
 
-    @skipIfRocm
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -3151,7 +3159,6 @@ exit(2)
 
         self.assertEqual(eager_in_grad, graph_in_grad, rtol=0.0, atol=0.0)
 
-    @skipIfRocm
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -4141,7 +4148,7 @@ class TestCudaMallocAsync(TestCase):
         finally:
             torch.cuda.memory._record_memory_history(None)
 
-    @skipIfRocm
+    @skipIfRocm(msg="ROCTracer does not capture Python stack frames in profiler output")
     def test_memory_profiler_viz(self):
         with torch.profiler.profile(
             with_stack=True, profile_memory=True, record_shapes=True
@@ -4911,7 +4918,6 @@ print(value, end="")
     def test_temperature(self):
         self.assertTrue(0 <= torch.cuda.temperature() <= 150)
 
-    @unittest.skipIf(TEST_WITH_ROCM, "flaky for AMD gpu")
     @unittest.skipIf(not TEST_PYNVML, "pynvml/amdsmi is not available")
     def test_device_memory_used(self):
         """
@@ -5090,7 +5096,10 @@ def reconstruct_from_tensor_metadata(metadata):
     return t
 
 
-@unittest.skipIf(not TEST_CUDA or TEST_CUDAMALLOCASYNC or TEST_WITH_ROCM, "NYI")
+@unittest.skipIf(
+    not TEST_CUDA or TEST_CUDAMALLOCASYNC,
+    "CUDA required, not supported with CUDAMallocAsync",
+)
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestBlockStateAbsorption(TestCase):
     @property
@@ -5575,16 +5584,29 @@ class TestCachingHostAllocatorCudaGraph(TestCase):
                 assert new_data_ptr != old_data_ptr
 
     def test_unpinned_memory_use(self):
-        # It is allowed to call copy_(non_blocking=True) on pageable
-        # host memory. TODO: We should test that a warning is emitted
-        # here, since we have no way to guarantee that pageable host
-        # memory allocated during stream capture stays alive so long
-        # as the graph is alive.
+        # Copying between CPU and CUDA tensors during graph capture
+        # with unpinned CPU memory should raise an error.
         graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph):
-            data = torch.empty(8)
-            data_gpu = torch.randn(8, device="cuda")
-            data_gpu.copy_(data, non_blocking=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Cannot copy between CPU and CUDA tensors during CUDA graph capture",
+        ):
+            with torch.cuda.graph(graph):
+                data = torch.empty(8)
+                data_gpu = torch.randn(8, device="cuda")
+                data_gpu.copy_(data, non_blocking=True)
+
+    def test_unpinned_memory_use_device_to_host(self):
+        # Copying from CUDA to unpinned CPU during graph capture should also error.
+        graph = torch.cuda.CUDAGraph()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Cannot copy between CPU and CUDA tensors during CUDA graph capture",
+        ):
+            with torch.cuda.graph(graph):
+                data_gpu = torch.randn(8, device="cuda")
+                data = torch.empty(8)
+                data.copy_(data_gpu, non_blocking=True)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
@@ -5793,6 +5815,37 @@ class TestMemPool(TestCase):
 
         # called_dummy_free should be 321 if dummy_free was used to deallocate
         # out tensor
+        self.assertEqual(called_dummy_free.value, 321)
+
+    def test_tensor_delete_after_allocator_delete(self):
+        allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
+        pool = torch.cuda.MemPool(allocator.allocator())
+
+        with torch.cuda.use_mem_pool(pool):
+            data = torch.empty(4, device="cuda")
+
+        alloc_lib = ctypes.CDLL(dummy_allocator)
+        called_dummy_alloc = ctypes.c_int.in_dll(alloc_lib, "called_dummy_alloc")
+        called_dummy_free = ctypes.c_int.in_dll(alloc_lib, "called_dummy_free")
+
+        self.assertEqual(called_dummy_alloc.value, 123)
+        self.assertEqual(called_dummy_free.value, 0)
+
+        # Explicitly drop the allocator before releasing the
+        # tensor. CUDACachingAllocator's PrivatePool instance should
+        # keep the allocator live until all tensors die.
+
+        # N.B.: Deleting the pool doesn't actually do anything, since
+        # it doesn't own the allocator object. But we do it anyway
+        # because it is the situation that users are likely to face.
+        del pool
+        del allocator
+
+        self.assertEqual(called_dummy_free.value, 0)
+
+        del data
+        torch.cuda.empty_cache()
+
         self.assertEqual(called_dummy_free.value, 321)
 
     @serialTest()
@@ -6637,7 +6690,7 @@ class TestGreenContext(TestCase):
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestGDS(TestCase):
     def _get_tmp_dir_fs_type(self):
-        my_path = os.path.realpath("/tmp")
+        my_path = os.path.realpath(tempfile.gettempdir())
         root_type = ""
         for part in psutil.disk_partitions():
             if part.mountpoint == "/":
@@ -7358,9 +7411,7 @@ class TestCompileKernel(TestCase):
         # Test error handling with more than supported shared memory size
         if torch.version.hip:
             max_smem = (
-                65536
-                if get_device_properties().gcnArchName not in ["gfx950"]
-                else 160 * 1024
+                65536 if get_device_properties().gcnArchName != "gfx950" else 160 * 1024
             )
         else:
             max_smem = get_device_properties().shared_memory_per_block_optin
