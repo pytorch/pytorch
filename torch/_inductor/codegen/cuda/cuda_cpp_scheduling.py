@@ -4,7 +4,7 @@ import logging
 from collections.abc import Sequence
 from typing import cast
 
-from torch._inductor.codegen.cutlass.python_evt import (
+from torch._inductor.codegen.cuda.cutlass_python_evt import (
     CutlassEVTCodegen,
     MockCutlassHandler,
 )
@@ -257,7 +257,7 @@ size: {cuda_template_buffer.get_size()}"
             )
             return False
         elif (
-            not config.cutlass.cutlass_epilogue_fusion_enabled
+            not config.cuda.cutlass_epilogue_fusion_enabled
             or not config.epilogue_fusion
         ):
             why("cutlass epilogue fusion is not enabled")
@@ -267,7 +267,9 @@ size: {cuda_template_buffer.get_size()}"
             return False
 
         try:
-            from torch._inductor.codegen.cutlass.python_evt import CutlassEVTCodegen
+            from torch._inductor.codegen.cuda.cutlass_python_evt import (
+                CutlassEVTCodegen,
+            )
 
             CutlassEVTCodegen.ir_to_evt_python_code(
                 cuda_template_buffer.get_name(),

@@ -18,12 +18,10 @@ from torch.distributed._symmetric_memory import (
     _fused_all_gather_scaled_matmul_fallback,
     _fused_matmul_reduce_scatter_fallback,
     _test_mode,
-    enable_symm_mem_for_group,
     restride_A_for_fused_matmul_reduce_scatter,
     restride_A_shard_for_fused_all_gather_matmul,
 )
 from torch.testing._internal.common_cuda import (
-    _get_torch_cuda_version,
     SM100OrLater,
     SM89OrLater,
     SM90OrLater,
@@ -45,7 +43,6 @@ from torch.testing._internal.common_utils import (
     requires_cuda,
     requires_cuda_p2p_access,
     run_tests,
-    TEST_WITH_ROCM,
     TestCase,
 )
 
@@ -210,7 +207,7 @@ class SymmetricMemoryTest(MultiProcContinuousTest):
         self.assertEqual(signal_pad.numel(), 64)
 
         # Sanity check that writes to buffer doesn't corrupt signal_pad
-        t = symm_mem.empty(0, device="cuda")
+        t = symm_mem.empty(1, device="cuda")
         symm_mem_hdl = symm_mem.rendezvous(t, group=dist.group.WORLD)
         signal_pad = symm_mem_hdl.get_signal_pad(self.rank)
         signal_pad.fill_(42)
@@ -766,7 +763,6 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
     def test_empty_strided_p2p(self, set_device: bool) -> None:
         self._init_process(set_device)
         group_name = dist.group.WORLD.group_name
-        enable_symm_mem_for_group(group_name)
 
         alloc_args = self._get_test_alloc_args()
 
@@ -788,7 +784,6 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
     def test_empty_strided_p2p_persistent(self, set_device: bool) -> None:
         self._init_process(set_device)
         group_name = dist.group.WORLD.group_name
-        enable_symm_mem_for_group(group_name)
 
         alloc_args = self._get_test_alloc_args()
 
@@ -1221,7 +1216,6 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
 class LoweringTest(MultiProcContinuousTest):
     def _init_process(self) -> None:
         torch.cuda.set_device(self.device)
-        enable_symm_mem_for_group(dist.group.WORLD.group_name)
         torch.manual_seed(42 + self.rank)
         torch._inductor.config._collective.auto_select = True
 
@@ -1286,10 +1280,6 @@ class LoweringTest(MultiProcContinuousTest):
 
 class SymmMemSingleProcTest(TestCase):
     @requires_cuda
-    @skipIf(
-        not TEST_WITH_ROCM and _get_torch_cuda_version() < (12, 0),
-        "stream_write_value32 currently only supports cuda version>=12.0",
-    )
     @skipIf(
         not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
     )
@@ -1363,6 +1353,65 @@ class SymmMemSingleProcTest(TestCase):
 
         _SymmetricMemory.memset32(t, offset=0, val=1, count=64)
         _SymmetricMemory.memset32(t, offset=63, val=1, count=1)
+
+
+@instantiate_parametrized_tests
+@requires_cuda_p2p_access()
+class SymmMemPoolTest(MultiProcContinuousTest):
+    @property
+    def device(self) -> torch.device:
+        return torch.device(device_type, self.rank)
+
+    def _init_process(self):
+        torch.cuda.set_device(self.device)
+        torch.manual_seed(42 + self.rank)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_mempool_tensor_factory(self):
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+
+        dtype = torch.float
+        numel = 1024
+
+        mempool = symm_mem.get_mem_pool(self.device)
+
+        with torch.cuda.use_mem_pool(mempool):
+            tensor = torch.arange(numel, dtype=dtype, device=self.device)
+
+        # Rendezvous should not error out
+        symm_mem.rendezvous(tensor, group=group_name)
+        tensor = torch.ops.symm_mem.one_shot_all_reduce(tensor, "sum", group_name)
+        expected = (
+            torch.arange(numel, dtype=dtype, device=self.device) * self.world_size
+        )
+        self.assertEqual(tensor, expected)
+
+    @skipIf(
+        not PLATFORM_SUPPORTS_SYMM_MEM, "SymmMem is not supported on this ROCm arch"
+    )
+    @skip_if_lt_x_gpu(2)
+    def test_mempool_compute_ops(self):
+        self._init_process()
+        group_name = dist.group.WORLD.group_name
+
+        dtype = torch.float
+        dim = 1024
+        w = torch.ones(dim, dim, dtype=dtype, device=self.device)
+        x = torch.ones(1, dim, dtype=dtype, device=self.device)
+
+        mempool = symm_mem.get_mem_pool(self.device)
+
+        with torch.cuda.use_mem_pool(mempool):
+            y = torch.mm(x, w)
+
+        # One-shot all-reduce should not error out
+        y = torch.ops.symm_mem.one_shot_all_reduce(y, "sum", group_name)
+        expected = torch.mm(x, w) * self.world_size
+        self.assertEqual(y, expected)
 
 
 if __name__ == "__main__":

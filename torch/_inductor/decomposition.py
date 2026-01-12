@@ -124,6 +124,7 @@ decomps_to_exclude: list[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacke
     aten.glu,  # inductor lowers this directly
     aten.select_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
     aten.slice_scatter,  # need to be in the ATen graph in order for it to work with the re-inplacing pass
+    aten.silu,  # inductor uses exact eager decomposition
     aten.split.Tensor,  # inductor lowers this directly
     aten.squeeze,  # inductor lowers this directly
     aten.sum,  # inductor lowers this directly
@@ -199,6 +200,15 @@ def clamp(
     return x
 
 
+# Inductor-specific SiLU decomposition for exact eager matching.
+# The core decomposition uses x * sigmoid(x), but this form
+# x / (1 + exp(-x)) matches eager execution more precisely.
+@register_decomposition([aten.silu])
+@pw_cast_for_opmath
+def silu(x: torch.Tensor) -> torch.Tensor:
+    return x / (1 + x.neg().exp())
+
+
 @register_decomposition([aten.full])
 def full(
     size: list[Union[int, torch.SymInt]],
@@ -240,10 +250,15 @@ def empty_permuted(
     physical_layout: list[int],
     **kwargs: Any,
 ) -> torch.Tensor:
-    perm = [0] * len(size)
-    for p, l in enumerate(physical_layout):
-        perm[l] = p
-    return torch.empty([size[l] for l in physical_layout], **kwargs).permute(perm)
+    is_identity = list(physical_layout) == list(range(len(physical_layout)))
+
+    if is_identity:
+        return torch.empty(size, **kwargs)
+    else:
+        perm = [0] * len(size)
+        for p, l in enumerate(physical_layout):
+            perm[l] = p
+        return torch.empty([size[l] for l in physical_layout], **kwargs).permute(perm)
 
 
 @register_decomposition([aten.convolution_backward])
@@ -599,7 +614,7 @@ def view_copy_dtype(
     self: torch.Tensor,
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    return self.to(dtype).clone()
+    return self.clone().view(dtype)
 
 
 def _get_shape_permutation_like(
@@ -1026,6 +1041,7 @@ def index_reduce(
     ):
         return NotImplemented
 
+    # pyrefly: ignore [missing-attribute]
     repeats = self.shape[dim + 1 :].numel() * self.shape[:dim].numel()
     index_shape = (index.numel(), *self.shape[dim + 1 :], *self.shape[:dim])
     perm = (*range(self.ndim - dim, self.ndim), 0, *range(1, self.ndim - dim))

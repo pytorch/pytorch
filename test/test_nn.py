@@ -2291,8 +2291,30 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         self.assertTrue(gradcheck(lambda x: F.normalize(x, p=1, dim=-1), (inputs,)))
 
     @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
-    # Skip the test for ROCm as per https://github.com/pytorch/pytorch/issues/53190
-    @skipIfRocm
+    def test_data_parallel_with_empty_parameter_shapes(self):
+        class MyModule(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.param_2d = nn.Parameter(torch.zeros(0, 16))
+                self.param_3d = nn.Parameter(torch.zeros(3, 0, 8))
+                self.param_4d = nn.Parameter(torch.zeros(2, 0, 4, 5))
+                self.param_normal = nn.Parameter(torch.ones(2, 3))
+
+            def forward(self, x):
+                return x + self.param_normal.sum()
+
+        model = MyModule()
+        devices = [0, 1]
+        model_parallel = nn.DataParallel(model, device_ids=devices)
+        model_parallel.cuda(devices[0])
+        input_tensor = torch.ones(4, 2, device=f'cuda:{devices[0]}')
+        output = model_parallel(input_tensor)
+        self.assertEqual(model_parallel.module.param_2d.shape, torch.Size([0, 16]))
+        self.assertEqual(model_parallel.module.param_3d.shape, torch.Size([3, 0, 8]))
+        self.assertEqual(model_parallel.module.param_4d.shape, torch.Size([2, 0, 4, 5]))
+        self.assertEqual(model_parallel.module.param_normal.shape, torch.Size([2, 3]))
+
+    @unittest.skipIf(not TEST_MULTIGPU, "multi-GPU not supported")
     def test_broadcast_double_backwards_gpu(self):
         tensors = (torch.randn(4, 4, device='cuda', requires_grad=True, dtype=torch.double),
                    torch.randn(4, 4, device='cuda', requires_grad=True, dtype=torch.double),
@@ -5202,16 +5224,6 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
                 self.skipTest("Failed on CUDA")
 
         if torch.version.hip:
-            if self._testMethodName in ("test_batchnorm_2D_train_NCHW_vs_cpu_mixed_bfloat16",
-                                        "test_batchnorm_3D_train_NCHW_vs_cpu_mixed_bfloat16",
-                                        "test_batchnorm_2D_train_NHWC_vs_NCHW_mixed_bfloat16",
-                                        "test_batchnorm_3D_train_NHWC_vs_NCHW_mixed_bfloat16") \
-                    and _get_torch_rocm_version() < (6, 4):
-                # NCHW bfloat16 path uses native kernels for rocm<=6.3
-                # train failed on rocm<=6.3 due to native accuracy issue
-                # https://github.com/pytorch/pytorch/issues/156513
-                self.skipTest("bfloat16 NHWC train failed on ROCm <= 6.3")
-
             if self._testMethodName in ("test_batchnorm_2D_train_NCHW_vs_native_mixed_bfloat16",
                                         "test_batchnorm_3D_train_NCHW_vs_native_mixed_bfloat16") \
                     and _get_torch_rocm_version() >= (6, 4):
@@ -5713,6 +5725,54 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         out = F.cosine_similarity(a, b)
         self.assertEqual(out, torch.ones(2, dtype=torch.float))
 
+    def test_cosine_similarity_mixed_precision(self):
+        # test that CPU and CUDA behave consistently with various eps values
+
+        # test: Negative eps should raise error on both CPU and CUDA
+        x1 = torch.tensor(-1.6437e+10, dtype=torch.float64)
+        x2 = torch.full((3, 8, 2, 6), float('nan'), dtype=torch.float16)
+        eps_negative = -9.74982e+23
+
+        with self.assertRaisesRegex(RuntimeError, "eps must be non-negative"):
+            F.cosine_similarity(x1, x2, dim=0, eps=eps_negative)
+
+        if torch.cuda.is_available():
+            x1_cuda = x1.cuda()
+            x2_cuda = x2.cuda()
+            with self.assertRaisesRegex(RuntimeError, "eps must be non-negative"):
+                F.cosine_similarity(x1_cuda, x2_cuda, dim=0, eps=eps_negative)
+
+        # test: Large positive eps that overflows dtype - should produce consistent results
+        # CPU and CUDA should both handle overflow consistently (producing inf/nan)
+        eps_large_positive = 9.74982e+23  # Overflows float16
+        result_cpu = F.cosine_similarity(x1, x2, dim=0, eps=eps_large_positive)
+        self.assertTrue(torch.all(torch.isnan(result_cpu)) or torch.all(torch.isinf(result_cpu)))
+
+        if torch.cuda.is_available():
+            result_cuda = F.cosine_similarity(x1_cuda, x2_cuda, dim=0, eps=eps_large_positive)
+            # both should produce NaN or inf consistently
+            self.assertTrue(torch.all(torch.isnan(result_cuda)) or torch.all(torch.isinf(result_cuda)))
+
+        # test: Normal positive eps - should work correctly on both CPU and CUDA
+        x3 = torch.randn(10, 128, dtype=torch.float32)
+        x4 = torch.randn(10, 128, dtype=torch.float32)
+        result_cpu = F.cosine_similarity(x3, x4, dim=1, eps=1e-8)
+        self.assertEqual(result_cpu.shape, torch.Size([10]))
+        self.assertTrue(torch.all(result_cpu >= -1.0) and torch.all(result_cpu <= 1.0))
+
+        if torch.cuda.is_available():
+            x3_cuda = x3.cuda()
+            x4_cuda = x4.cuda()
+            result_cuda = F.cosine_similarity(x3_cuda, x4_cuda, dim=1, eps=1e-8)
+            self.assertTrue(torch.allclose(result_cpu, result_cuda.cpu(), rtol=1e-5, atol=1e-5))
+
+        # test: Float16 inputs with appropriate eps
+        x5 = torch.ones(2, 3, dtype=torch.float16)
+        x6 = torch.ones(2, 3, dtype=torch.float16)
+        result = F.cosine_similarity(x5, x6, dim=1, eps=1e-8)
+        self.assertEqual(result.dtype, torch.float16)
+        self.assertEqual(result.shape, torch.Size([2]))
+        self.assertTrue(torch.all(torch.isclose(result, torch.ones(2, dtype=torch.float16), rtol=1e-3)))
 
     def test_grid_sample_error_checking(self):
         input = torch.empty(1, 1, 2, 2)
@@ -7530,6 +7590,39 @@ tensor(..., device='meta', size=(1,), requires_grad=True)""")
         with warnings.catch_warnings(record=True) as w:
             pickle.loads(pickle.dumps(torch.nn.Linear(10, 10)))
         self.assertEqual(len(w), 0)
+
+    def test_rnn_cell_gate_weights_size(self):
+        def test_rnn_cell(cell_fn, gate_count):
+            input_size = 8
+            hidden_size = 16
+            x = torch.randn(4, input_size)
+            hx = torch.randn(4, hidden_size)
+            cx = torch.randn(4, hidden_size)
+
+            w_ih_invalid = torch.randn((gate_count * hidden_size) + 1, 8)
+            w_ih = torch.randn(gate_count * hidden_size, 8)
+            w_hh_invalid = torch.randn((gate_count * hidden_size) + 1, 16)
+            w_hh = torch.randn(gate_count * hidden_size, 16)
+            b_ih = torch.randn(gate_count * hidden_size)
+            b_hh = torch.randn(gate_count * hidden_size)
+
+            if cell_fn is torch.lstm_cell:
+                state = (hx, cx)
+            else:
+                state = hx
+
+            with self.assertRaisesRegex(RuntimeError, "weight_ih"):
+                cell_fn(x, state, w_ih_invalid, w_hh, b_ih, b_hh)
+
+            with self.assertRaisesRegex(RuntimeError, "weight_hh"):
+                cell_fn(x, state, w_ih, w_hh_invalid, b_ih, b_hh)
+        for cell_fn, gate_count in [
+            (torch.lstm_cell, 4),
+            (torch.gru_cell, 3),
+            (torch.rnn_relu_cell, 1),
+            (torch.rnn_tanh_cell, 1),
+        ]:
+            test_rnn_cell(cell_fn, gate_count)
 
 class TestFusionEval(TestCase):
     @set_default_dtype(torch.double)
@@ -11876,7 +11969,6 @@ class TestNNDeviceType(NNTestCase):
             gradcheck(ctc_after_softmax, [x])
 
     @onlyCUDA
-    @skipCUDAIfRocm(msg="skipped Cudnn test on ROCm")
     def test_ctc_loss_cudnn(self, device):
         batch_size = 16
         input_length = 30
@@ -11895,12 +11987,14 @@ class TestNNDeviceType(NNTestCase):
             grad_native, = torch.autograd.grad(loss_native, log_probs, grad_out)
         loss_cudnn = torch.nn.functional.ctc_loss(log_probs, targets.to('cpu', torch.int32),
                                                   input_lengths, target_lengths, reduction='none')
-        self.assertTrue("Cudnn" in str(loss_cudnn.grad_fn))
+        # ROCm uses MIOpen (MiopenCtcLossBackward), CUDA uses cuDNN (CudnnCtcLossBackward)
+        grad_fn_str = str(loss_cudnn.grad_fn)
+        self.assertTrue("Miopen" in grad_fn_str or "Cudnn" in grad_fn_str,
+                        f"Expected MiopenCtcLossBackward or CudnnCtcLossBackward, got {grad_fn_str}")
         grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
         self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
 
     @onlyCUDA
-    @skipCUDAIfRocm(msg="skipped Cudnn test on ROCm")
     def test_ctc_loss_cudnn_tensor_cuda(self):
         batch_size = 16
         input_length = 30
@@ -11923,12 +12017,14 @@ class TestNNDeviceType(NNTestCase):
                                                   input_lengths.to('cuda', torch.int32),
                                                   target_lengths.to('cuda', torch.int32),
                                                   reduction='none')
-        self.assertTrue("Cudnn" in str(loss_cudnn.grad_fn))
+        # ROCm uses MIOpen (MiopenCtcLossBackward), CUDA uses cuDNN (CudnnCtcLossBackward)
+        grad_fn_str = str(loss_cudnn.grad_fn)
+        self.assertTrue("Miopen" in grad_fn_str or "Cudnn" in grad_fn_str,
+                        f"Expected MiopenCtcLossBackward or CudnnCtcLossBackward, got {grad_fn_str}")
         grad_cudnn, = torch.autograd.grad(loss_cudnn, log_probs, grad_out)
         self.assertEqual(grad_cudnn, grad_native, atol=1e-4, rtol=0)
 
     @onlyCUDA
-    @skipCUDAIfRocm(msg="skipped Cudnn test on ROCm")
     def test_ctc_loss_cudnn_tensor_cpu_length_cuda(self):
         # batch size
         N = 50

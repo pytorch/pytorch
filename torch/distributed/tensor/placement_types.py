@@ -2,15 +2,17 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
 from dataclasses import dataclass, field
-from typing import cast
+from typing import cast, TypeVar
 
 import torch
 import torch._C
 import torch.distributed._functional_collectives as funcol
 from torch._C._distributed import Placement
+from torch.distributed import RankType
 from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._collective_utils import (
+    fill_empty_tensor_to_shards,
     mesh_broadcast,
     mesh_scatter,
     pad_tensor,
@@ -20,7 +22,9 @@ from torch.distributed.tensor._collective_utils import (
 from torch.distributed.tensor._ops._mask_buffer import MaskBuffer
 
 
-__all__ = ["Placement", "Shard", "Replicate", "Partial", "MaskPartial"]
+__all__ = ["Placement", "Shard", "Replicate", "Partial"]
+
+_RankTypeT = TypeVar("_RankTypeT", bound=RankType)
 
 
 # Appease TestPublicBindings.test_correct_module_names
@@ -62,54 +66,100 @@ class Shard(torch._C._distributed.Shard):
             few ranks before calling the collectives (i.e. scatter/all_gather, etc.).
             This is because collectives usually require equal size tensor inputs
         """
-        assert self.dim <= tensor.ndim, (
-            f"Sharding dim {self.dim} greater than tensor ndim {tensor.ndim}"
+        return self._split_tensor_helper(
+            tensor, num_chunks, with_padding, contiguous, self.dim
+        )
+
+    @staticmethod
+    def _split_tensor_helper(
+        tensor: torch.Tensor,
+        num_chunks: int,
+        with_padding: bool,
+        contiguous: bool,
+        dim: int,
+    ) -> tuple[list[torch.Tensor], list[int]]:
+        assert dim <= tensor.ndim, (
+            f"Sharding dim {dim} greater than tensor ndim {tensor.ndim}"
         )
 
         # chunk tensor over dimension `dim` into n slices
-        tensor_list = self._custom_chunk(tensor, num_chunks, dim=self.dim)
+        tensor_list = Shard._custom_chunk(tensor, num_chunks, dim=dim)
 
         # compute the chunk size inline with ``torch.chunk`` to calculate padding
-        full_chunk_size = (tensor.size(self.dim) + num_chunks - 1) // num_chunks
+        full_chunk_size = (tensor.size(dim) + num_chunks - 1) // num_chunks
 
         shard_list: list[torch.Tensor] = []
         pad_sizes: list[int] = []
         for shard in tensor_list:
             if with_padding:
-                pad_size = Shard._get_shard_pad_size(full_chunk_size, shard, self.dim)
-                shard = pad_tensor(shard, self.dim, pad_size)
+                pad_size = Shard._get_shard_pad_size(full_chunk_size, shard, dim)
+                shard = pad_tensor(shard, dim, pad_size)
                 pad_sizes.append(pad_size)
             if contiguous:
                 shard = shard.contiguous()
             shard_list.append(shard)
         return shard_list, pad_sizes
 
+    @maybe_run_for_local_tensor
+    def _select_split_tensor(
+        self,
+        tensor: torch.Tensor,
+        num_chunks: int,
+        index: int,
+        *,
+        with_padding: bool = True,
+        contiguous: bool = True,
+        clone: bool = True,
+    ) -> torch.Tensor:
+        """
+        Like _split_tensor() but only returns a single Tensor
+        """
+        shards, _ = self._split_tensor(
+            tensor, num_chunks, with_padding=with_padding, contiguous=False
+        )
+        result = shards[index]
+        if clone:
+            result = result.clone()
+        elif contiguous:
+            result = result.contiguous()
+        return result
+
+    @staticmethod
     def _custom_chunk(
-        self, tensor: torch.Tensor, num_chunks: int, dim: int
+        tensor: torch.Tensor, num_chunks: int, dim: int
     ) -> list[torch.Tensor]:
         """
-        Dynamic shapes-friendly implementation of chunk that returns pre-determined num_chunks,
-        and accounts for uneven/zero-sharding cases.
+        Returns list of tensor chunks along dim.
+        Uses torch.chunk in eager mode, but torch.narrow under tracing to be unbacked-symint safe.
+        Also handles uneven/zero-sharding cases.
         """
+        from torch.distributed._functional_collectives import _are_we_tracing
+
         assert tensor.dim() > 0
         assert num_chunks > 0
 
-        dim_size = tensor.size(dim)
-        split_size = (dim_size + num_chunks - 1) // num_chunks
-        chunks = []
-        for i in range(num_chunks):
-            start = torch.sym_min(split_size * i, dim_size)
-            end = torch.sym_min(split_size * (i + 1), dim_size)
-            chunks.append(tensor.narrow(dim, start, end - start))
-        return chunks
+        if not _are_we_tracing():
+            tensor_list = list(torch.chunk(tensor, num_chunks, dim=dim))
+            return fill_empty_tensor_to_shards(
+                tensor_list, dim, num_chunks - len(tensor_list)
+            )
+        else:
+            dim_size = tensor.size(dim)
+            split_size = (dim_size + num_chunks - 1) // num_chunks
+            chunks = []
+            for i in range(num_chunks):
+                start = torch.sym_min(split_size * i, dim_size)
+                end = torch.sym_min(split_size * (i + 1), dim_size)
+                chunks.append(tensor.narrow(dim, start, end - start))
+            return chunks
 
     @staticmethod
     @maybe_run_for_local_tensor
     def local_shard_size_and_offset(
         curr_local_size: int,
         num_chunks: int,
-        rank: int,
-    ) -> tuple[int, int]:
+        rank: _RankTypeT,
+    ) -> tuple[int, _RankTypeT]:
         """
         Given the size of the current local tensor (which may already be sharded on some dimensions),
         computes the new local shard size and offset given the desired number of chunks
@@ -127,11 +177,14 @@ class Shard(torch._C._distributed.Shard):
         # Assume uneven sharding as general case for unbacked sizes.
         if guard_or_false(curr_local_size % num_chunks == 0):
             full_chunk_size = curr_local_size // num_chunks
-            return full_chunk_size, full_chunk_size * rank
+            # pyrefly: ignore[bad-assignment] # pyrefly bug?
+            shard_starting_idx: _RankTypeT = full_chunk_size * rank
+            return full_chunk_size, shard_starting_idx
 
         # uneven sharding case
         full_chunk_size = (curr_local_size + num_chunks - 1) // num_chunks
-        shard_starting_idx = full_chunk_size * rank
+        # pyrefly: ignore[bad-assignment] # pyrefly bug?
+        shard_starting_idx: _RankTypeT = full_chunk_size * rank
 
         shard_end_idx = torch.sym_min(
             curr_local_size, shard_starting_idx + full_chunk_size
@@ -143,8 +196,8 @@ class Shard(torch._C._distributed.Shard):
         self,
         curr_local_size: int,
         num_chunks: int,
-        rank: int,
-    ) -> tuple[int, int | None]:
+        rank: RankType,
+    ) -> tuple[int, RankType]:
         return Shard.local_shard_size_and_offset(curr_local_size, num_chunks, rank)
 
     @staticmethod
@@ -172,8 +225,15 @@ class Shard(torch._C._distributed.Shard):
         src_data_rank: int | None = 0,
     ) -> torch.Tensor:
         """
-        shard and scatter a tensor on a mesh dimension (use coordinate
-        0 on the mesh dimension as source of truth)
+        Shard and scatter a tensor on a mesh dimension (use coordinate 0 on the
+        mesh dimension as source of truth).
+
+        Create the local tensor for this rank following the given Shard
+        placement. If src_data_rank is None, perform only local splitting.
+        Otherwise, additionally scatter data from src_data_rank. Unlike
+        ``_split_tensor``, which supports uneven sharding via padding, this
+        method requires the tensor dimension to be evenly divisible by the
+        number of chunks (mesh dimension size).
         """
         my_coordinate = mesh.get_coordinate()
         num_chunks = mesh.size(mesh_dim=mesh_dim)
@@ -187,11 +247,13 @@ class Shard(torch._C._distributed.Shard):
         if src_data_rank is None:
             # src_data_rank specified as None explicitly means to skip the
             # communications, simply split
-            scatter_list, _ = self._split_tensor(
-                tensor, num_chunks, with_padding=False, contiguous=True
+            return self._select_split_tensor(
+                tensor,
+                num_chunks,
+                mesh_dim_local_rank,
+                with_padding=False,
+                contiguous=True,
             )
-
-            return self._select_shard(scatter_list, mesh_dim_local_rank)
 
         scatter_list, pad_sizes = self._split_tensor(
             tensor, num_chunks, with_padding=True, contiguous=True
@@ -264,7 +326,7 @@ class Shard(torch._C._distributed.Shard):
         if is_padded:
             assert pad_sizes is not None
             output = Shard._maybe_unpad_tensor_with_sizes(
-                self.dim, output, pad_sizes, my_coordinate[mesh_dim], False
+                self.dim, output, pad_sizes, mesh._sym_get_coordinate(mesh_dim), False
             )
         return output
 
@@ -337,11 +399,6 @@ class Shard(torch._C._distributed.Shard):
 
         return result
 
-    @staticmethod
-    @maybe_run_for_local_tensor
-    def _select_shard(shards: list[torch.Tensor], shard_index) -> torch.Tensor:
-        return shards[shard_index].clone()
-
     def _replicate_to_shard(
         self,
         local_tensor: torch.Tensor,
@@ -354,14 +411,13 @@ class Shard(torch._C._distributed.Shard):
         the current rank, which would perform a local chunk
         """
         num_chunks = mesh.size(mesh_dim=mesh_dim)
-        shards, _ = self._split_tensor(
+        return self._select_split_tensor(
             local_tensor,
             num_chunks,
+            shard_index,
             with_padding=False,
-            contiguous=False,
+            clone=True,
         )
-
-        return Shard._select_shard(shards, shard_index)
 
     @staticmethod
     @maybe_run_for_local_tensor
@@ -516,19 +572,20 @@ class Shard(torch._C._distributed.Shard):
         return f"S({self.dim})"
 
 
-# Need to inherit from Shard here so that isinstance(some_strided_shard, Shard) will work.
-class _StridedShard(torch._C._distributed.StridedShard, Shard):
+class _StridedShard(torch._C._distributed.StridedShard):
     """
     _StridedShard is only introduced to support 2D FSDP2 + TP sharding where the tensor
     is sharded on the TP mesh dimension first, then sharded on the FSDP mesh dimension.
     We call this right-to-left sharding which is the opposite of the default
-    left-to-right sharding. See the example below:
+    left-to-right sharding. See the example below::
+
         tensor shape: [8, 8]
         mesh: [[0, 1], [2, 3]], names=("dp", "tp")
         placements: [Shard(0), Shard(0)]
 
     The default sharding behavior shards the tensor on "dp" mesh dimension first then
-    "tp" dimension. The sharding result will be:
+    "tp" dimension. The sharding result will be::
+
         Rank    |   Mesh Coordinate |   Shard Index
         ------------------------------------------------
         0       |   (0, 0)          |   0 (row 0-1)
@@ -538,7 +595,8 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
 
     While the FSDP2 + TP sharding behavior does the opposite: it shards the tensor on
     "tp" mesh dim first then "dp" dim. This right-to-left sharding will produce the
-    result:
+    result::
+
         Rank    |   Mesh Coordinate |   Shard Index
         ------------------------------------------------
         0       |   (0, 0)          |   0 (row 0-1)
@@ -552,13 +610,15 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
     this, we use _StridedShard placement to make this right-to-left sharding compatible
     with our left-to-right convention on both tensor distribution and redistribution.
 
-    Now with _StridedShard, the right-to-left sharding above can be represented as:
+    Now with _StridedShard, the right-to-left sharding above can be represented as::
+
         tensor shape: [8, 8]
         mesh: [[0, 1], [2, 3]], names=("dp", "tp")
         placements: [_StridedShard(0, split_factor=2), Shard(0)]
 
     And a left-to-right processing of `placements` will produce the same result, which is
-    different from using the `Shard` placement:
+    different from using the `Shard` placement::
+
         Rank    |   Mesh Coordinate |   Shard Index
         ------------------------------------------------
         0       |   (0, 0)          |   0 (row 0-1)
@@ -588,6 +648,11 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
         """human readable representation of the _StridedShard placement"""
         return f"_S({self.dim}, {self.split_factor})"
 
+    @staticmethod
+    @maybe_run_for_local_tensor
+    def _select_shard(shards: list[torch.Tensor], shard_index) -> torch.Tensor:
+        return shards[shard_index].clone()
+
     @classmethod
     def _make_shard_tensor(
         cls,
@@ -601,6 +666,63 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
         strided_shard_placement = cls(dim=dim, split_factor=split_factor)
         return strided_shard_placement._shard_tensor(
             tensor, mesh, mesh_dim, src_data_rank
+        )
+
+    def _shard_tensor(
+        self,
+        tensor: torch.Tensor,
+        mesh: DeviceMesh,
+        mesh_dim: int,
+        src_data_rank: int | None = 0,
+    ) -> torch.Tensor:
+        """
+        Shard and scatter a tensor on a mesh dimension (use coordinate 0 on the
+        mesh dimension as source of truth).
+
+        Create the local tensor for this rank following the given StridedShard
+        placement. If src_data_rank is None, perform only local splitting.
+        Otherwise, additionally scatter data from src_data_rank. Unlike
+        ``_split_tensor``, which supports uneven sharding via padding, this
+        method requires the tensor dimension to be evenly divisible by the
+        number of chunks (mesh dimension size).
+        """
+        my_coordinate = mesh.get_coordinate()
+        num_chunks = mesh.size(mesh_dim=mesh_dim)
+
+        if my_coordinate is None:
+            # if rank is not part of mesh, we simply return an empty tensor
+            return tensor.new_empty(0, requires_grad=tensor.requires_grad)
+
+        mesh_dim_local_rank = my_coordinate[mesh_dim]
+
+        if src_data_rank is None:
+            # src_data_rank specified as None explicitly means to skip the
+            # communications, simply split
+            scatter_list, _ = self._split_tensor(
+                tensor, num_chunks, with_padding=False, contiguous=True
+            )
+
+            return self._select_shard(scatter_list, mesh_dim_local_rank)
+
+        scatter_list, pad_sizes = self._split_tensor(
+            tensor, num_chunks, with_padding=True, contiguous=True
+        )
+
+        it = iter(scatter_list)
+        first = next(it)
+        # Tensors in the scatter list are expected to have the same shape because
+        # split is requested with padding.
+        assert all(first.shape == v.shape for v in it)
+
+        output = torch.empty_like(first)
+
+        # perform scatter from the src_data_rank as data source when it is not None
+        mesh_scatter(
+            output, scatter_list, mesh, mesh_dim=mesh_dim, group_src=src_data_rank
+        )
+
+        return Shard._maybe_unpad_tensor_with_sizes(
+            self.dim, output, pad_sizes, mesh_dim_local_rank, True
         )
 
     def _split_tensor(
@@ -619,15 +741,21 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
         # reversed order. Here we perform first_split as the virtual "right" sharding,
         # and then second_split as the virtual "left" sharding, and finally assemble
         # results in the transposed left-first order.
-        first_split, _ = super()._split_tensor(
-            tensor, self.split_factor, with_padding=False, contiguous=False
+
+        # First split: chunk into split_factor pieces
+        first_split = list(torch.chunk(tensor, self.split_factor, dim=self.dim))
+        first_split = fill_empty_tensor_to_shards(
+            first_split, self.dim, self.split_factor - len(first_split)
         )
-        second_split = [
-            super(_StridedShard, self)._split_tensor(
-                s, num_chunks=num_chunks, with_padding=False, contiguous=False
-            )[0]
-            for s in first_split
-        ]
+
+        # Second split: chunk each piece into num_chunks pieces
+        second_split = []
+        for s in first_split:
+            chunks = list(torch.chunk(s, num_chunks, dim=self.dim))
+            chunks = fill_empty_tensor_to_shards(
+                chunks, self.dim, num_chunks - len(chunks)
+            )
+            second_split.append(chunks)
 
         shard_list: list[torch.Tensor] = []
         for i in range(num_chunks):
@@ -646,6 +774,30 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
             pad_sizes = [max_chunk_size - shard.size(self.dim) for shard in shard_list]
 
         return shard_list, pad_sizes
+
+    @maybe_run_for_local_tensor
+    def _select_split_tensor(
+        self,
+        tensor: torch.Tensor,
+        num_chunks: int,
+        index: int,
+        *,
+        with_padding: bool = True,
+        contiguous: bool = True,
+        clone: bool = True,
+    ) -> torch.Tensor:
+        """
+        Like _split_tensor() but only returns a single Tensor
+        """
+        shards, _ = self._split_tensor(
+            tensor, num_chunks, with_padding=with_padding, contiguous=False
+        )
+        result = shards[index]
+        if clone:
+            result = result.clone()
+        elif contiguous:
+            result = result.contiguous()
+        return result
 
     def _to_replicate_tensor(
         self,
@@ -710,7 +862,7 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
 
     @staticmethod
     @maybe_run_for_local_tensor
-    def _local_shard_size(sharded_indices: list[torch.Tensor], rank: int) -> int:
+    def _local_shard_size(sharded_indices: list[torch.Tensor], rank: RankType) -> int:
         return len(sharded_indices[rank])
 
     # delete pyre-ignore once separating _StridedShard from Shard
@@ -718,7 +870,7 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
         self,
         curr_local_size: int,
         num_chunks: int,
-        rank: int,
+        rank: RankType,
         return_first_offset: bool = True,
     ) -> tuple[int, int | list[int]]:
         return _StridedShard.local_shard_size_and_offset(
@@ -731,7 +883,7 @@ class _StridedShard(torch._C._distributed.StridedShard, Shard):
         self,
         curr_local_size: int,
         num_chunks: int,
-        rank: int,
+        rank: RankType,
         return_first_offset: bool = True,
     ) -> tuple[int, list[int] | int]:
         """
@@ -856,8 +1008,19 @@ class Partial(torch._C._distributed.Partial):
 
     Args:
         reduce_op (str, optional): The reduction op to be used for the partial DTensor
-            to produce Replicated/Sharded DTensor. Only element-wise reduction operations
-            are supported, including: "sum", "avg", "product", "max", "min", default: "sum".
+            to produce Replicated/Sharded DTensor. Corresponds to the reduce operations
+            supported by ``torch.distributed.ReduceOp``. Default: "sum".
+
+            Supported values:
+
+            * ``"sum"``: Element-wise sum across all ranks.
+            * ``"avg"``: Element-wise average across all ranks.
+            * ``"min"``: Element-wise minimum across all ranks.
+            * ``"max"``: Element-wise maximum across all ranks.
+            * ``"product"``: Element-wise product across all ranks.
+            * ``"band"``: Bitwise AND across all ranks (integer tensors only).
+            * ``"bor"``: Bitwise OR across all ranks (integer tensors only).
+            * ``"bxor"``: Bitwise XOR across all ranks (integer tensors only).
 
     .. note:: The ``Partial`` placement can be generated as a result of the DTensor operators,
         and can only be used by the ``DTensor.from_local`` API.
@@ -887,12 +1050,36 @@ class Partial(torch._C._distributed.Partial):
     def _partition_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
-        # Partial placement contract #3:
-        # _partition_value: partition the value of a replicated tensor on the mesh dimension
+        """
+        Partition a replicated tensor to create partial values for Replicate → Partial.
 
-        # _partition_value is the conjugate operation of _reduce_value, e.g.
-        # - _partition_value on a sum reduce op is just a division operation
-        # - _reduce_value on a sum reduce op would just be a sum(allreduce) operation
+        This is the conjugate operation of _reduce_value. The partition operation
+        must satisfy the invariant that applying _reduce_value to the partitioned
+        values recovers the original replicated value (modulo floating-point error).
+
+        Mathematical analysis by reduce_op:
+
+        * "sum": partition(v) = v / n, then sum([v/n] * n) = v
+          Introduces floating-point error from the division and summation.
+          Error grows with n (the number of ranks).
+
+        * "avg": partition(v) = v, then avg([v] * n) = v
+          Numerically exact (averaging identical values).
+
+        * "min": partition(v) = v, then min([v] * n) = v
+          Numerically exact.
+
+        * "max": partition(v) = v, then max([v] * n) = v
+          Numerically exact.
+
+        * "product": Would need partition(v) = v^(1/n), but n-th root is not exact
+          for general values and undefined for negative values with even n.
+          NOT SUPPORTED.
+
+        * "band"/"bor"/"bxor": Bitwise operations have no well-defined inverse
+          that partitions a value such that reducing recovers the original.
+          NOT SUPPORTED.
+        """
         num_chunks = mesh.size(mesh_dim=mesh_dim)
         if self.reduce_op == "sum":
             return tensor / num_chunks
@@ -924,13 +1111,13 @@ _Partial = Partial
 
 
 @dataclass(frozen=True)
-class MaskPartial(Partial):
+class _MaskPartial(Partial):
     """
     A partial mask placement devised for rowwise sharded embedding op, where we need
     to mask and adjust the indices to the local embedding shard, embedding masking
     is a special type of the Partial placement
 
-    NOTE: the lifecycle of this MaskPartial placement follows the corresponding DTensor
+    NOTE: the lifecycle of this _MaskPartial placement follows the corresponding DTensor
     lifecycle, i.e. the indices_mask would only be alive during the lifetime of the DTensor.
     """
 
@@ -975,20 +1162,19 @@ class MaskPartial(Partial):
     def _partition_value(
         self, tensor: torch.Tensor, mesh: DeviceMesh, mesh_dim: int
     ) -> torch.Tensor:
-        my_coordinate = mesh.get_coordinate()
-        assert my_coordinate is not None, "my_coordinate should not be None"
+        assert mesh._is_current_rank_part_of_mesh(), "rank is not part of mesh"
         # override parent logic to perform partial mask for embedding
         num_chunks = mesh.size(mesh_dim)
         # get local shard size and offset on the embedding_dim
         assert self.offset_shape is not None, (
-            "offset_shape needs to be set for MaskPartial"
+            "offset_shape needs to be set for _MaskPartial"
         )
         local_shard_size, local_offset_on_dim = Shard.local_shard_size_and_offset(
             self.offset_shape[self.offset_dim],
             num_chunks,
-            my_coordinate[mesh_dim],
+            mesh._sym_get_coordinate(mesh_dim),
         )
-        mask, masked_tensor = MaskPartial._mask_tensor(
+        mask, masked_tensor = _MaskPartial._mask_tensor(
             tensor, local_offset_on_dim, local_shard_size
         )
         # materialize the mask buffer to be used for reduction
@@ -1033,18 +1219,14 @@ class MaskPartial(Partial):
         return shard_spec._reduce_shard_tensor(tensor, mesh, self.reduce_op, mesh_dim)
 
     def __eq__(self, other: object) -> bool:
-        if not isinstance(other, MaskPartial):
-            return False
-
-        # if either data is not None, we invalidate the sharding cache, as this indicates
-        # the current MaskPartial placement is still in use and should not be used for cache hit.
-        if self.mask_buffer.data is not None or other.mask_buffer.data is not None:
+        if not isinstance(other, _MaskPartial):
             return False
 
         return (
             self.reduce_op == other.reduce_op
             and self.offset_shape == other.offset_shape
             and self.offset_dim == other.offset_dim
+            and self.mask_buffer is other.mask_buffer
         )
 
     def __hash__(self) -> int:
@@ -1053,17 +1235,18 @@ class MaskPartial(Partial):
                 self.reduce_op,
                 self.offset_shape,
                 self.offset_dim,
+                id(self.mask_buffer),
             )
         )
 
     def __repr__(self) -> str:
         """
-        machine readable representation of the MaskPartial placement
+        machine readable representation of the _MaskPartial placement
         """
-        return f"MaskPartial(reduce_op={self.reduce_op}, offset_shape={self.offset_shape}, offset_dim={self.offset_dim})"
+        return f"_MaskPartial(reduce_op={self.reduce_op}, offset_shape={self.offset_shape}, offset_dim={self.offset_dim})"
 
     def __str__(self) -> str:
         """
-        human readable representation of the MaskPartial placement
+        human readable representation of the _MaskPartial placement
         """
         return f"MaskP({self.reduce_op}, {self.offset_shape}, {self.offset_dim})"
