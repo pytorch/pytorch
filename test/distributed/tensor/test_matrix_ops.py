@@ -90,6 +90,27 @@ class DistMatrixOpsTest(DTensorTestBase):
         self.assertEqual(out.placements, expected_placements)
 
     @with_comms
+    def test_mm_with_shardable_input(self):
+        mesh = self.build_device_mesh()
+        global_inps_viewed = (
+            torch.arange((self.world_size) * self.world_size, device="cuda")
+            .float()
+            .view(self.world_size, self.world_size)
+        )
+        inps_viewed = distribute_tensor(
+            global_inps_viewed,
+            mesh,
+            (Shard(dim=0),),
+        )
+        global_weight = (
+            torch.arange(self.world_size * self.world_size).float().view(self.world_size, self.world_size)
+        )
+        weight = distribute_tensor(global_weight, mesh, (Replicate(),))
+        out = torch.mm(inps_viewed, weight)
+        expected_placements = (Shard(dim=0),)
+        self.assertEqual(out.placements, expected_placements)
+
+    @with_comms
     def test_addmm_empty_operand(self):
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
