@@ -453,8 +453,6 @@ linear_pointwise_ops = {
     aten.mul_.Scalar: 0,
     aten.mul.Tensor: 2,
     aten.mul_.Tensor: 2,
-    aten.copy_.default: 1,
-    prims.copy_to.default: 1,
 }
 
 # Ops that preserve specific Partial types through the operation.
@@ -628,6 +626,16 @@ def single_mesh_dim_common_pointwise_strategy(
     return placements_list
 
 
+def copy_strategy(op_schema: OpSchema) -> StrategyType:
+    """
+    Strategy for copy_ that preserves any Partial placement.
+
+    copy_ simply copies data and should preserve whatever Partial placement
+    the destination has, regardless of the reduce_op type (sum, avg, max, min, etc.).
+    """
+    return pointwise_strategy(op_schema, preserve_partial="all")
+
+
 def common_pointwise_strategy(
     op,
     args_schema: Sequence[object],
@@ -699,7 +707,10 @@ def common_pointwise_strategy(
                     )
 
                 # Check if this partial type should be preserved
-                if preserve_partial is not None and placement.is_partial(
+                # preserve_partial="all" preserves any Partial type (used for copy_)
+                if preserve_partial == "all":
+                    out_placements.append(placement)
+                elif preserve_partial is not None and placement.is_partial(
                     preserve_partial
                 ):
                     out_placements.append(placement)
@@ -835,6 +846,14 @@ for op in partial_preserving_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
         partial_preserving_pointwise_strategy
     )
+
+# Register copy_ with its custom strategy that preserves all Partial types
+register_op_strategy(
+    aten.copy_.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+)(copy_strategy)
+register_op_strategy(
+    prims.copy_to.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+)(copy_strategy)
 
 for op in pointwise_ops:
     register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(

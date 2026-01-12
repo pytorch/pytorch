@@ -707,6 +707,7 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
         # Packaging this just for later use
         aot_config=aot_config,
         stack=stack,
+        fake_mode=fake_mode,
     )
 
 
@@ -906,6 +907,7 @@ def prepare_aot_module_simplified(
     force_non_lazy_backward_lowering: bool = False,
     disable_functionalization: bool = False,
     _record_nn_module_stack: bool = False,
+    _disable_torch_fn_metadata_mode: bool = False,
 ):
     if not flatten:
         assert kwargs is None
@@ -1005,6 +1007,7 @@ def prepare_aot_module_simplified(
         precompile_backend_id=getattr(mod, "_backend_id", None),
         force_non_lazy_backward_lowering=force_non_lazy_backward_lowering,
         disable_functionalization=False,
+        _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
     )
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     # NB: full_args_descs not needed here, fake_flat_args is 1:1 with full_args
@@ -1085,7 +1088,10 @@ def aot_module_simplified(
 
         compiled_fn = None
 
-        if isinstance(fw_compiler, SerializableAOTDispatchCompiler):
+        if (
+            isinstance(fw_compiler, SerializableAOTDispatchCompiler)
+            or torch._functorch.config.force_autograd_cache
+        ):
             local = should_use_local_autograd_cache()
             remote = should_use_remote_autograd_cache()
             if local or remote:
@@ -1185,6 +1191,7 @@ def aot_export_joint_with_descriptors(
     ignore_shape_env=False,
     disable_functionalization=False,
     _record_nn_module_stack=False,
+    _disable_torch_fn_metadata_mode=False,
 ) -> JointWithDescriptors:
     """
     This API captures the joint graph for an nn.Module.  However, unlike
@@ -1276,6 +1283,7 @@ def aot_export_joint_with_descriptors(
         force_non_lazy_backward_lowering=True,
         disable_functionalization=disable_functionalization,
         _record_nn_module_stack=_record_nn_module_stack,
+        _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
     )
 
     # TODO: Maybe this should be in create_aot_state?  Not sure, that would

@@ -535,11 +535,13 @@ class CatchWarningsCtxManagerVariable(ContextWrappingVariable):
         self.set_cleanup_hook(tx, lambda: ctx_val.__exit__(None, None, None))
         return variables.ConstantVariable.create(ctx_val.__enter__())
 
-    def reconstruct(self, cg: "PyCodegen") -> None:
-        cg.add_push_null(lambda: cg.load_import_from("warnings", "catch_warnings"))
-        cg.foreach(self.catch_warnings_args.values())
+    def reconstruct(self, codegen: "PyCodegen") -> None:
+        codegen.add_push_null(
+            lambda: codegen.load_import_from("warnings", "catch_warnings")
+        )
+        codegen.foreach(self.catch_warnings_args.values())
         keys = tuple(self.catch_warnings_args.keys())
-        cg.extend_output(cg.create_call_function_kw(len(keys), keys, False))
+        codegen.extend_output(codegen.create_call_function_kw(len(keys), keys, False))
 
 
 class VmapIncrementNestingCtxManagerVariable(ContextWrappingVariable):
@@ -836,11 +838,11 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
     def set_cleanup_hook(
         self,
         tx: "InstructionTranslator",
-        cleanup_fn: Optional[Callable[..., Any]] = None,
+        fn: Callable[..., Any] | None = None,
     ) -> None:
-        if cleanup_fn is None:
+        if fn is None:
 
-            def cleanup_fn() -> None:
+            def fn() -> None:
                 tx.symbolic_torch_function_state.torch_function_subclass_enabled = (
                     self.initial_torch_function_subclass_enabled
                 )
@@ -849,7 +851,7 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
                         self.initial_torch_function_subclass_enabled
                     )
 
-        self.cleanup_fn = cleanup_fn
+        self.cleanup_fn = fn
         tx.output.add_cleanup_hook(self.cleanup)
 
     def _call_func(self, tx: "InstructionTranslator", values: Sized) -> None:
@@ -865,56 +867,6 @@ class TorchFunctionDisableVariable(ContextWrappingVariable):
         if self.only_subclass:
             return "DisableTorchFunctionSubclass"
         return "DisableTorchFunction"
-
-
-class DeterministicAlgorithmsVariable(ContextWrappingVariable):
-    """represents torch.{are_deterministic_algorithms_enabled,use_deterministic_algorithms}()"""
-
-    _guards_singleton = Guard(
-        GlobalStateSource(),
-        GuardBuilder.DETERMINISTIC_ALGORITHMS,  # type: ignore[arg-type]
-    )
-
-    @staticmethod
-    def create(
-        tx: "InstructionTranslator", target_value: bool, **kwargs: Any
-    ) -> "DeterministicAlgorithmsVariable":
-        var = DeterministicAlgorithmsVariable(
-            target_values=[target_value],
-            initial_values=[torch.are_deterministic_algorithms_enabled()],
-            **kwargs,
-        )
-        var._call_func(tx, [target_value])
-        var.set_cleanup_hook(tx)
-        return var
-
-    def __init__(
-        self,
-        target_values: Sequence[bool],
-        initial_values: Optional[Sequence[bool]] = None,
-        **kwargs: Any,
-    ) -> None:
-        super().__init__(
-            target_values=target_values, initial_values=initial_values, **kwargs
-        )
-        install_guard(self._guards_singleton)
-
-    def enter(self, tx: "InstructionTranslator") -> VariableTracker:
-        return variables.ConstantVariable.create(None)
-
-    def _call_func(self, tx: "InstructionTranslator", values: Sequence[bool]) -> None:
-        assert len(values) == 1
-        value = values[0]
-        tx.output.create_node(
-            "call_function", torch._C._set_deterministic_algorithms, (value,), {}
-        )
-        torch._C._set_deterministic_algorithms(value)
-
-    def module_name(self) -> str:
-        return "torch"
-
-    def fn_name(self) -> str:
-        return "use_deterministic_algorithms"
 
 
 class DisabledSavedTensorsHooksVariable(ContextWrappingVariable):
@@ -1099,7 +1051,7 @@ class ProfilerContextVariable(ContextWrappingVariable):
     def fn_name(self) -> str:
         return "nullcontext"
 
-    def reconstruct(self, cg: "PyCodegen") -> None:
+    def reconstruct(self, codegen: "PyCodegen") -> None:
         unimplemented(
             gb_type="torch.profiler object escaped from compiled region",
             context=str(self),
@@ -1583,7 +1535,7 @@ class WithEnterFunctionVariable(VariableTracker):
         assert not kwargs
         # NOTE: we assume that the instruction immediately after the current CALL instruction
         # is the first instruction of the block.
-        # pyrefly: ignore [bad-argument-type]
+
         return tx.enter_ctx(self.ctx, tx.current_instruction)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:

@@ -94,6 +94,9 @@ torch._dynamo.config.fake_tensor_cache_enabled = True
 torch._dynamo.config.fake_tensor_cache_crosscheck_enabled = True
 
 
+STATIC_LAUNCHER_DEVICES = ("cuda", "xpu")
+
+
 class LogCaptureHandler(logging.Handler):
     def __init__(self, level):
         super().__init__(level)
@@ -297,9 +300,11 @@ class TestFxGraphCache(TestCase):
             and not SM80OrLater
         ):
             raise unittest.SkipTest("requires SM80 or later")
-        if use_static_triton_launcher and not (device == "cuda" and bundle_triton):
+        if use_static_triton_launcher and not (
+            device in STATIC_LAUNCHER_DEVICES and bundle_triton
+        ):
             raise unittest.SkipTest(
-                "Static cuda launcher requires cuda and triton bundling"
+                "Static triton launcher requires cuda/xpu and triton bundling"
             )
         if use_static_triton_launcher and TEST_WITH_ROCM:
             raise unittest.SkipTest("Static cuda launcher doesn't work with ROCM")
@@ -364,7 +369,7 @@ class TestFxGraphCache(TestCase):
                 if use_static_triton_launcher:
                     self.assertEqual(
                         counters["inductor"]["triton_bundler_save_static_autotuner"],
-                        grad_multiplier if device == "cuda" else 0,
+                        grad_multiplier if device in STATIC_LAUNCHER_DEVICES else 0,
                     )
                     self.assertEqual(
                         counters["inductor"]["triton_bundler_load_static_autotuner"], 0
@@ -412,11 +417,11 @@ class TestFxGraphCache(TestCase):
                 if use_static_triton_launcher:
                     self.assertEqual(
                         counters["inductor"]["triton_bundler_save_static_autotuner"],
-                        grad_multiplier if device == "cuda" else 0,
+                        grad_multiplier if device in STATIC_LAUNCHER_DEVICES else 0,
                     )
                     self.assertEqual(
                         counters["inductor"]["triton_bundler_load_static_autotuner"],
-                        grad_multiplier if device == "cuda" else 0,
+                        grad_multiplier if device in STATIC_LAUNCHER_DEVICES else 0,
                     )
 
             self.reset()
@@ -460,11 +465,11 @@ class TestFxGraphCache(TestCase):
                 if use_static_triton_launcher:
                     self.assertEqual(
                         counters["inductor"]["triton_bundler_save_static_autotuner"],
-                        grad_multiplier * 2 if device == "cuda" else 0,
+                        grad_multiplier * 2 if device in STATIC_LAUNCHER_DEVICES else 0,
                     )
                     self.assertEqual(
                         counters["inductor"]["triton_bundler_load_static_autotuner"],
-                        grad_multiplier if device == "cuda" else 0,
+                        grad_multiplier if device in STATIC_LAUNCHER_DEVICES else 0,
                     )
 
     @requires_triton()
@@ -486,7 +491,9 @@ class TestFxGraphCache(TestCase):
             raise unittest.SkipTest(f"requires {GPU_TYPE}")
         if device == "cuda" and dtype == torch.bfloat16 and not SM80OrLater:
             raise unittest.SkipTest("requires SM80 or later")
-        if use_static_triton_launcher and not (device == "cuda" and bundle_triton):
+        if use_static_triton_launcher and not (
+            device in STATIC_LAUNCHER_DEVICES and bundle_triton
+        ):
             raise unittest.SkipTest(
                 "Static cuda launcher requires cuda and triton bundling"
             )
@@ -2030,7 +2037,7 @@ class TestStandaloneCompile(TestCase):
                             file_contents = f.read()
                         if device == GPU_TYPE:
                             file_contents = file_contents.replace(
-                                "tmp1 = 2.0", "tmp1 = 8.0"
+                                "2.0, tl.float32", "8.0, tl.float32"
                             )
                         else:
                             assert device == "cpu"
@@ -3280,6 +3287,196 @@ class TestUtils(TestCase):
             return layer(inp @ weight)
 
         torch.compile(fn)()
+
+
+class TestCompilationEventLogging(TestCase):
+    def reset(self):
+        DynamoCache.clear()
+        PrecompileContext.clear()
+        PyCodeCache.cache_clear(purge=True)
+        torch._dynamo.reset()
+        clear_caches()
+
+    @torch._dynamo.config.patch({"log_compilation_metrics": True})
+    def get_events(self):
+        """
+        Helper to compile the same function twice and return the two compilation events
+        passed to log_compilation_event() (the first event should correspond to a cache
+        miss and the second to a cachd hit).
+        """
+
+        def fn(x, y):
+            return (x * y,)
+
+        a = torch.rand(5, 5)
+        b = torch.rand(5, 5)
+
+        compiled_fn = torch.compile(fn)
+        with PatchCaches():
+            with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+                self.assertEqual(fn(a, b), compiled_fn(a, b))
+                self.assertTrue(len(log_event.call_args_list) == 1)
+                event1 = log_event.call_args_list[0][0][0]
+
+            self.reset()
+
+            with mock.patch("torch._dynamo.utils.log_compilation_event") as log_event:
+                self.assertEqual(fn(a, b), compiled_fn(a, b))
+                self.assertTrue(len(log_event.call_args_list) == 1)
+                event2 = log_event.call_args_list[0][0][0]
+
+        return event1, event2
+
+    def check(
+        self,
+        event,
+        inductor_fx_remote_cache_hit_count=0,
+        inductor_fx_remote_cache_miss_count=0,
+        inductor_fx_local_cache_hit_count=0,
+        inductor_fx_local_cache_miss_count=0,
+        aotautograd_remote_cache_hit_count=0,
+        aotautograd_remote_cache_miss_count=0,
+        aotautograd_local_cache_hit_count=0,
+        aotautograd_local_cache_miss_count=0,
+    ):
+        """
+        Helper to check all cache hit/miss counts of a compilation event.
+        """
+        self.assertEqual(
+            event.inductor_fx_remote_cache_hit_count, inductor_fx_remote_cache_hit_count
+        )
+        self.assertEqual(
+            event.inductor_fx_remote_cache_miss_count,
+            inductor_fx_remote_cache_miss_count,
+        )
+        self.assertEqual(
+            event.inductor_fx_local_cache_hit_count, inductor_fx_local_cache_hit_count
+        )
+        self.assertEqual(
+            event.inductor_fx_local_cache_miss_count, inductor_fx_local_cache_miss_count
+        )
+        self.assertEqual(
+            event.aotautograd_remote_cache_hit_count, aotautograd_remote_cache_hit_count
+        )
+        self.assertEqual(
+            event.aotautograd_remote_cache_miss_count,
+            aotautograd_remote_cache_miss_count,
+        )
+        self.assertEqual(
+            event.aotautograd_local_cache_hit_count, aotautograd_local_cache_hit_count
+        )
+        self.assertEqual(
+            event.aotautograd_local_cache_miss_count, aotautograd_local_cache_miss_count
+        )
+
+    @torch._inductor.config.patch({"fx_graph_cache": True})
+    @torch._inductor.config.patch({"fx_graph_remote_cache": False})
+    @torch._functorch.config.patch({"enable_autograd_cache": False})
+    @torch._functorch.config.patch({"enable_remote_autograd_cache": False})
+    def test_log_event_inductor_local(self):
+        """
+        Only the local FXGraph cache is enabled.
+        """
+        event1, event2 = self.get_events()
+        self.check(event1, inductor_fx_local_cache_miss_count=1)
+        self.check(event2, inductor_fx_local_cache_hit_count=1)
+
+    @torch._inductor.config.patch({"fx_graph_cache": False})
+    @torch._inductor.config.patch({"fx_graph_remote_cache": True})
+    @torch._functorch.config.patch({"enable_autograd_cache": False})
+    @torch._functorch.config.patch({"enable_remote_autograd_cache": False})
+    def test_log_event_inductor_remote(self):
+        """
+        Only the remote FXGraph cache is enabled.
+        """
+        event1, event2 = self.get_events()
+        self.check(event1, inductor_fx_remote_cache_miss_count=1)
+        self.check(event2, inductor_fx_remote_cache_hit_count=1)
+
+    @torch._inductor.config.patch({"fx_graph_cache": True})
+    @torch._inductor.config.patch({"fx_graph_remote_cache": True})
+    @torch._functorch.config.patch({"enable_autograd_cache": False})
+    @torch._functorch.config.patch({"enable_remote_autograd_cache": False})
+    def test_log_event_inductor_both(self):
+        """
+        Both the local and remote FXGraph caches are enabled.
+        """
+        event1, event2 = self.get_events()
+        self.check(
+            event1,
+            inductor_fx_local_cache_miss_count=1,
+            inductor_fx_remote_cache_miss_count=1,
+        )
+        self.check(event2, inductor_fx_local_cache_hit_count=1)
+
+    @torch._inductor.config.patch({"fx_graph_cache": True})
+    @torch._inductor.config.patch({"fx_graph_remote_cache": False})
+    @torch._functorch.config.patch({"enable_autograd_cache": True})
+    @torch._functorch.config.patch({"enable_remote_autograd_cache": False})
+    def test_log_event_autograd_local(self):
+        """
+        Enable the local autograd cache (which requires the FXGraph cache).
+        """
+        event1, event2 = self.get_events()
+        self.check(
+            event1,
+            aotautograd_local_cache_miss_count=1,
+            # AOTAutograd cache leverages the FXGraph cache.
+            inductor_fx_local_cache_miss_count=1,
+        )
+        self.check(
+            event2,
+            aotautograd_local_cache_hit_count=1,
+            # AOTAutograd cache leverages the FXGraph cache.
+            inductor_fx_local_cache_hit_count=1,
+        )
+
+    @torch._inductor.config.patch({"fx_graph_cache": False})
+    @torch._inductor.config.patch({"fx_graph_remote_cache": True})
+    @torch._functorch.config.patch({"enable_autograd_cache": False})
+    @torch._functorch.config.patch({"enable_remote_autograd_cache": True})
+    def test_log_event_autograd_remote(self):
+        """
+        Enable the remote autograd cache (which requires the remote FXGraph cache).
+        """
+        event1, event2 = self.get_events()
+        self.check(
+            event1,
+            aotautograd_remote_cache_miss_count=1,
+            # AOTAutograd cache leverages the FXGraph cache.
+            inductor_fx_remote_cache_miss_count=1,
+        )
+        self.check(
+            event2,
+            aotautograd_remote_cache_hit_count=1,
+            # AOTAutograd cache leverages the FXGraph cache.
+            inductor_fx_remote_cache_hit_count=1,
+            # AOTAutograd cache always leverages the local FXGraph cache. That's
+            # arguably a bug because the local wouldn't be populated if disabled.
+            inductor_fx_local_cache_miss_count=1,
+        )
+
+    @torch._inductor.config.patch({"fx_graph_cache": True})
+    @torch._inductor.config.patch({"fx_graph_remote_cache": True})
+    @torch._functorch.config.patch({"enable_autograd_cache": True})
+    @torch._functorch.config.patch({"enable_remote_autograd_cache": True})
+    def test_log_event_all_caches(self):
+        """
+        Enable all caches.
+        """
+        event1, event2 = self.get_events()
+        self.check(
+            event1,
+            aotautograd_local_cache_miss_count=1,
+            aotautograd_remote_cache_miss_count=1,
+            inductor_fx_local_cache_miss_count=1,
+            inductor_fx_remote_cache_miss_count=1,
+        )
+        self.check(
+            event2,
+            aotautograd_local_cache_hit_count=1,
+            inductor_fx_local_cache_hit_count=1,
+        )
 
 
 if __name__ == "__main__":
