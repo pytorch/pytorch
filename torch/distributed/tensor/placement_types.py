@@ -831,6 +831,40 @@ class _StridedShard(torch._C._distributed.StridedShard):
             )
         ).contiguous()
 
+    def _replicate_to_strided_shard(
+        self,
+        local_tensor: torch.Tensor,
+        mesh: DeviceMesh,
+        mesh_dim: int,
+        shard_index: int,
+    ) -> torch.Tensor:
+        """
+        Transform from replicated tensor to a strided-sharded tensor on the current rank.
+
+        This performs a local chunking operation using the _StridedShard pattern,
+        where the tensor is split according to the strided sharding semantics
+        (interleaved pieces based on split_factor).
+
+        Args:
+            local_tensor: The replicated tensor on this rank.
+            mesh: The device mesh over which the tensor is distributed.
+            mesh_dim: The mesh dimension for the sharding.
+            shard_index: The index of the shard to select (typically the rank's
+                coordinate on the mesh dimension).
+
+        Returns:
+            The local strided shard for this rank.
+        """
+        num_chunks = mesh.size(mesh_dim=mesh_dim)
+        shards, _ = self._split_tensor(
+            local_tensor,
+            num_chunks,
+            with_padding=False,
+            contiguous=False,
+        )
+
+        return _StridedShard._select_shard(shards, shard_index)
+
     def _to_new_shard_dim(
         self,
         local_tensor: torch.Tensor,
