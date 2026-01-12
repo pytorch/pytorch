@@ -1,4 +1,3 @@
-#include "core/ScalarType.h"
 #define TORCH_ASSERT_NO_OPERATORS
 #include <ATen/Dispatch.h>
 #include <ATen/Dispatch_v2.h>
