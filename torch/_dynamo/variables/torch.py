@@ -1608,6 +1608,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             )
 
         @register(torch.autograd.grad)
+        # pyrefly: ignore[implicit-any]
         def handle_autograd_grad(self, tx: "InstructionTranslator", *args, **kwargs):
             """
             Handle torch.autograd.grad() calls within compiled regions.
