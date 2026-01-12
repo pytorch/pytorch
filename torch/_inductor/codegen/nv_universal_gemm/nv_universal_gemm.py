@@ -7,7 +7,6 @@ high-performance GEMM kernels for NVIDIA GPUs.
 """
 
 import itertools
-import random
 from typing import Any, Optional, Union
 
 import torch
@@ -19,6 +18,8 @@ from torch._inductor.autotune_process import (
 )
 from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch
 from torch._inductor.ir import Buffer, ChoiceCaller, Layout, TensorBox
+from torch._inductor.kernel_inputs import MMKernelInputs
+from torch._inductor.template_heuristics.nv_universal_gemm import get_nvgemm_heuristics
 from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch._logging import getArtifactLogger
 
@@ -139,14 +140,16 @@ class NVUniversalGemmCaller(ChoiceCaller):
     def output_node(self) -> TensorBox:
         from torch._inductor.ir import NVUniversalGemmBuffer
 
-        return TensorBox.create(
-            NVUniversalGemmBuffer(
-                layout=self.layout,
-                inputs=self.input_nodes,
-                kernel=self.kernel,
-                accumulator_type=self.accumulator_type,
-            )
+        buffer = NVUniversalGemmBuffer(
+            layout=self.layout,
+            inputs=self.input_nodes,
+            kernel=self.kernel,
+            accumulator_type=self.accumulator_type,
         )
+        # Pass KTC annotation to the buffer for encoding
+        if "ktc" in self.annotations:
+            buffer.annotations["ktc"] = self.annotations["ktc"]
+        return TensorBox.create(buffer)
 
     def call_name(self) -> str:
         return self.name
@@ -182,7 +185,7 @@ def _create_dummy_tensor_from_layout(layout: Layout) -> Optional[torch.Tensor]:
 def add_nv_universal_gemm_choices(
     choices: list[ChoiceCaller],
     layout: Layout,
-    input_nodes: list[Buffer],
+    inputs: MMKernelInputs,
     accumulator_type: Optional[torch.dtype] = None,
 ) -> None:
     """
@@ -199,6 +202,7 @@ def add_nv_universal_gemm_choices(
     if accumulator_type is None:
         accumulator_type = torch.float32
 
+    input_nodes = inputs.nodes()
     a_node, b_node = input_nodes
 
     # Create dummy tensors for cutlass_api's supports() checks
@@ -238,12 +242,10 @@ def add_nv_universal_gemm_choices(
     if not kernels:
         return
 
-    # Limit kernels to profile if configured
-    if config.cuda.nvgemm_max_profiling_configs:
-        kernels = random.sample(
-            kernels,
-            min(len(kernels), config.cuda.nvgemm_max_profiling_configs),
-        )
+    max_configs = config.cuda.nvgemm_max_profiling_configs or len(kernels)
+
+    heuristics = get_nvgemm_heuristics()
+    kernels = heuristics.filter_kernels(kernels, inputs, max_configs, accumulator_type)
 
     num_added = 0
     for kernel in kernels:

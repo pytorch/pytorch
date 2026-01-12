@@ -32,6 +32,8 @@ It consists of
 
 We are continuing to improve coverage in our `torch/csrc/stable` APIs. Please file an issue if you'd like to see support for particular APIs in your custom extension.
 
+For complete API documentation of the stable operators, see the [Torch Stable API cpp documentation](https://docs.pytorch.org/cppdocs/stable.html). <!-- @lint-ignore: URL won't exist till stable.rst cpp docs are published in 2.10 -->
+
 ### Stable C headers
 
 The stable C headers started by AOTInductor form the foundation of the stable ABI. Presently, the available C headers include:
@@ -121,12 +123,12 @@ torch::stable::Tensor add_scalar(const torch::stable::Tensor& input, double scal
 }
 
 // (5) Register the operator using STABLE_TORCH_LIBRARY
-//     Use TORCH_BOX to automatically handle boxing/unboxing
 STABLE_TORCH_LIBRARY(myops, m) {
   m.def("add_scalar(Tensor input, float scalar) -> Tensor");
 }
 
 // (6) Register the implementation using STABLE_TORCH_LIBRARY_IMPL
+//     Use TORCH_BOX to automatically handle boxing/unboxing
 STABLE_TORCH_LIBRARY_IMPL(myops, CompositeExplicitAutograd, m) {
   m.impl("add_scalar", TORCH_BOX(&add_scalar));
 }
@@ -251,3 +253,5 @@ Extensions can select the minimum abi version to be compatible with using:
 before including any stable headers or by passing the equivalent `-D` option to the compiler. Otherwise, the default will be the current `TORCH_ABI_VERSION`.
 
 The above ensures that if a user defines `TORCH_TARGET_VERSION` to be 0x0209000000000000 (2.9) and attempts to use a C shim API `foo` that was introduced in version 2.10, a compilation error will be raised. Similarly, the C++ wrapper APIs in `torch/csrc/stable` are compatible with older libtorch binaries up to the TORCH_ABI_VERSION they are exposed in and forward compatible with newer libtorch binaries.
+
+C++ APIs in ``torch/csrc/stable`` or ``torch/headeronly`` are subject to the same FC/BC policy as the rest of PyTorch (see [policy](https://github.com/pytorch/pytorch/wiki/PyTorch's-Python-Frontend-Backward-and-Forward-Compatibility-Policy)). LibTorch ABI stable C shim APIs are guaranteed to have at least a two year compatibility window.

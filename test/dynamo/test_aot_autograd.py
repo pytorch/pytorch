@@ -759,6 +759,7 @@ class AotAutogradFallbackTests(torch._inductor.test_case.TestCase):
 
     @expectedFailureDynamic  # https://github.com/pytorch/pytorch/issues/103539
     @torch._dynamo.config.patch(automatic_dynamic_shapes=False)
+    @patch("torch._functorch.config.check_custom_op_aliasing", False)
     @patch("torch._functorch.config.debug_assert", True)
     def test_multiple_aot_autograd_calls_dupe_args(self):
         # this is just dealing with the fact that
