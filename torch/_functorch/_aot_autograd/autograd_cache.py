@@ -978,7 +978,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
             counters["aot_autograd"]["autograd_cache_saved"] += 1
         except BypassAOTAutogradCache as e:
             if config.strict_autograd_cache:
-                raise e
+                raise
             counters["aot_autograd"]["autograd_cache_bypass"] += 1
             log.info("Bypassing autograd cache due to: %s", e)  # noqa: G200
             if remote:
