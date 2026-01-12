@@ -2990,6 +2990,7 @@ class TestSDPACudaOnly(NNTestCase):
     @parametrize("dtype", [torch.bfloat16, torch.half])
     def test_cudnn_attention_varlen(self, dtype):
         from typing import Any, Optional
+
         @torch.library.custom_op("torch_attn::_varlen_attn", mutates_args={})
         def _varlen_attn(
             query: torch.Tensor,
@@ -3061,21 +3062,21 @@ class TestSDPACudaOnly(NNTestCase):
             _ = torch.empty(0, device=query.device)
 
             dq, dk, dv = torch.ops.aten._cudnn_attention_backward(
-                grad_out = grad_out,
-                query = query,
-                key = key,
-                value = value,
-                out = out,
-                logsumexp = lse,
-                philox_seed = rng_state,
-                philox_offset = philox_offset,
-                attn_bias = None,
-                cum_seq_q = cu_seq_q,
-                cum_seq_k = cu_seq_k,
-                max_q = max_q,
-                max_k = max_k,
-                dropout_p = 0.0,
-                is_causal = is_causal,
+                grad_out=grad_out,
+                query=query,
+                key=key,
+                value=value,
+                out=out,
+                logsumexp=lse,
+                philox_seed=rng_state,
+                philox_offset=philox_offset,
+                attn_bias=None,
+                cum_seq_q=cu_seq_q,
+                cum_seq_k=cu_seq_k,
+                max_q=max_q,
+                max_k=max_k,
+                dropout_p=0.0,
+                is_causal=is_causal,
             )
 
             return dq, dk, dv, None, None, None, None, None, None
