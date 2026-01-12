@@ -56,7 +56,11 @@ from torch._dynamo.utils import (
 from torch._guards import TracingContext
 from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
-from torch._library.opaque_object import is_opaque_type, is_opaque_value_type
+from torch._library.opaque_object import (
+    is_opaque_reference_type,
+    is_opaque_type,
+    is_opaque_value_type,
+)
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._subclasses.fake_tensor import (
     FakeTensor,
@@ -248,6 +252,7 @@ from .misc import (
     MethodWrapperVariable,
     NumpyDTypeVariable,
     NumpyVariable,
+    ObjectVariable,
     PythonModuleVariable,
     RandomClassVariable,
     RandomVariable,
@@ -524,6 +529,7 @@ class VariableBuilder:
             TensorWithTFOverrideVariable,
             UserDefinedObjectVariable,
             NumpyNdarrayVariable,
+            TorchScriptObjectVariable,
         }
 
     def get_source(self) -> Source:
@@ -1530,20 +1536,13 @@ class VariableBuilder:
                     source=self.source,
                 )
 
-            if is_opaque_type(type(value)):
-                # Check if this is a value-type opaque object (registered as both opaque type and constant)
-                if is_opaque_value_type(type(value)):
-                    # Value-type: guard on equality (will use __eq__)
-                    self.install_guards(GuardBuilder.CONSTANT_MATCH)
-                    return TorchScriptObjectVariable.create(
-                        value,  # type: ignore[arg-type]
-                        value,
-                        source=self.source,
-                    )
-                else:
-                    # Reference-type: guard only on type/identity
-                    self.install_guards(GuardBuilder.TYPE_MATCH)
-
+            if is_opaque_value_type(type(value)):
+                # Value-type: guard on equality (will use __eq__)
+                self.install_guards(GuardBuilder.CONSTANT_MATCH)
+            elif is_opaque_reference_type(type(value)):
+                # Reference-type: guard only on type, and registered guard_fn
+                self.install_guards(GuardBuilder.TYPE_MATCH)
+                self.install_guards(GuardBuilder.OPAQUE_OBJ_GUARD_FN_MATCH)
             elif not hasattr(value, "__obj_flatten__"):
                 # This exists to allow a smoother transition.
                 # The implications are:
@@ -1571,27 +1570,29 @@ class VariableBuilder:
             fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
                 self.tx.output.fake_mode, value
             )
+            if is_opaque_value_type(type(value)):
+                proxy = value
+            else:
+                proxy = self.tx.output.root_tracer.create_graph_input(
+                    re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                    type(value),
+                    fake_script_obj,
+                    source=self.source,
+                )
+                # setting is_unspecialized=False to not insert a as_tensor call in reconstruct by default
+                # setting example to be real value because these example values will be used
+                # as example_inputs for user compiler.
+                proxy.node.meta["grapharg"] = GraphArg(
+                    self.source,
+                    value,  # type: ignore[arg-type]
+                    False,
+                    None,
+                    False,
+                    fake_script_obj,  # type: ignore[arg-type]
+                )
 
-            proxy = self.tx.output.root_tracer.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
-                type(value),
-                fake_script_obj,
-                source=self.source,
-            )
-
-            # setting is_unspecialized=False to not insert a as_tensor call in reconstruct by default
-            # setting example to be real value because these example values will be used
-            # as example_inputs for user compiler.
-            proxy.node.meta["grapharg"] = GraphArg(
-                self.source,
-                value,  # type: ignore[arg-type]
-                False,
-                None,
-                False,
-                fake_script_obj,  # type: ignore[arg-type]
-            )
             return TorchScriptObjectVariable.create(
-                proxy,
+                proxy,  # pyrefly: ignore[bad-argument-type]
                 fake_script_obj,
                 source=self.source,
             )
@@ -1769,6 +1770,9 @@ class VariableBuilder:
                 return self.wrap_symint(value.val, dynamism=DimDynamic.DYNAMIC)
             else:
                 raise RuntimeError(f"Undefined dynamism {value.dynamism}")
+        elif istype(value, object):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return ObjectVariable(value, source=self.source)
         else:
             return self.wrap_user_defined(value)
 
@@ -1947,9 +1951,9 @@ class VariableBuilder:
         # As long as this runs before AOT this is sound
         if value in self.tx.output.side_effects:
             var = self.tx.output.side_effects[value]
-            # type: ignore[attr-defiend]
+            # type: ignore[attr-defined]
             var.proxy.node.meta["tensor_dict"]["_dynamo_static_input_type"] = (
-                # type: ignore[attr-defiend]
+                # type: ignore[attr-defined]
                 value._dynamo_static_input_type
             )
 
@@ -2127,7 +2131,7 @@ class VariableBuilder:
 
             if is_unbacked_source(self.source.name):
                 log.debug("%s marked unbacked via source whitelist", self.source.name)
-                return self.wrap_symint(value, dynamism=DimDynamic.SIZE_LIKE_UNBACKED)
+                return self.wrap_symint(value, dynamism=DimDynamic.UNBACKED)
 
             if not config.specialize_int:
                 # unspecializing int by default, but still
@@ -3462,9 +3466,7 @@ def get_automatic_dynamic_shapes_mark_as() -> DimDynamic:
     if config.automatic_dynamic_shapes_mark_as == "dynamic":
         return DimDynamic.DYNAMIC
     elif config.automatic_dynamic_shapes_mark_as == "unbacked":
-        return DimDynamic.SIZE_LIKE_UNBACKED
-    elif config.automatic_dynamic_shapes_mark_as == "oblivious":
-        return DimDynamic.OBLIVIOUS_SIZE
+        return DimDynamic.UNBACKED
     else:
         raise ValueError(
             f"invalid automatic_dynamic_shapes_mark_as = {config.automatic_dynamic_shapes_mark_as}"
@@ -3813,7 +3815,7 @@ def _automatic_dynamic(
         constraint_strides.append(constraint_stride)
 
         if marked_unbacked or is_unbacked_source(name):
-            dynamic_size = DimDynamic.SIZE_LIKE_UNBACKED
+            dynamic_size = DimDynamic.UNBACKED
         elif (
             constraint_size is not None
             or marked_dynamic
@@ -4068,6 +4070,8 @@ class SourcelessBuilder:
         ):
             proxy = tx.output.bound_symbols[value.node.expr]
             return SymNodeVariable.create(tx, proxy)
+        elif istype(value, object):
+            return ObjectVariable(value)
         unimplemented(
             gb_type="Unexpected type in sourceless builder",
             context=f"{value_type.__module__}.{value_type.__qualname__}",
