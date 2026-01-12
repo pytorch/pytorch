@@ -80,6 +80,9 @@ def _mm_like_strategy(
         raise AssertionError(f"Expected OpStrategy, got {type(mat2_strategy)}")
     # generate all possible strategies for mm
     mm_strategy = gen_einsum_strategies(mm_equation, mesh)
+    import fbvscode
+    fbvscode.set_trace()
+
     # filter out invalid strategies and associate costs
     strategies = mm_strategy.strategies
     filtered_strategies = []

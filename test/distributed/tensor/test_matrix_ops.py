@@ -91,7 +91,7 @@ class DistMatrixOpsTest(DTensorTestBase):
         )
         weight = distribute_tensor(global_weight, mesh, (Replicate(),))
         out = torch.mm(inps_viewed, weight)
-        expected_placements = (Shard(dim=0),)
+        expected_placements = (Replicate(),)
         self.assertEqual(out.placements, expected_placements)
 
     @with_comms

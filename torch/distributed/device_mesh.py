@@ -494,7 +494,9 @@ else:
                     split_ranks=pg_ranks_by_dim.tolist(),
                     group_desc=group_desc,
                 )
-                return dim_group.group_name  # type: ignore[union-attr]
+                if dim_group is None:
+                    return None
+                return dim_group.group_name
 
             # If the subgroup has been already created through `split_group`, we simply loop over `pg_ranks_by_dim`
             # and append the `group_name` to the `dim_group_names` list when the current rank is in the subgroup.
