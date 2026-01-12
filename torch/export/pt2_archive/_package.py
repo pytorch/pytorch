@@ -879,6 +879,10 @@ def _load_state_dict(
                 print(f"tensor_meta: {tensor_meta}")
                 print(f"weight_fqn: {weight_fqn}, {deserialize_storage_offset(tensor_meta.storage_offset)}")
                 assert tensor_meta is not None
+                temp = state_dict_file_map[payload_meta.path_name]
+                print(f"payload_meta.path_name: {payload_meta.path_name}")
+                print(f"temp: {temp}, shape: {temp.shape}, stride: {temp.stride()}, storage_offset: {temp.storage_offset()}")
+                print(f"size: {deserialize_size(tensor_meta.sizes)}, stride: {deserialize_stride(tensor_meta.strides)}, storage_offset: {deserialize_storage_offset(tensor_meta.storage_offset)}")
                 weight_tensor = torch.as_strided(
                     input=state_dict_file_map[payload_meta.path_name],
                     size=deserialize_size(tensor_meta.sizes),
