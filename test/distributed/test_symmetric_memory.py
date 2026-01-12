@@ -18,7 +18,6 @@ from torch.distributed._symmetric_memory import (
     _fused_all_gather_scaled_matmul_fallback,
     _fused_matmul_reduce_scatter_fallback,
     _test_mode,
-    enable_symm_mem_for_group,
     restride_A_for_fused_matmul_reduce_scatter,
     restride_A_shard_for_fused_all_gather_matmul,
 )
@@ -764,7 +763,6 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
     def test_empty_strided_p2p(self, set_device: bool) -> None:
         self._init_process(set_device)
         group_name = dist.group.WORLD.group_name
-        enable_symm_mem_for_group(group_name)
 
         alloc_args = self._get_test_alloc_args()
 
@@ -786,7 +784,6 @@ class SymmMemEmptySetDeviceTest(MultiProcessTestCase):
     def test_empty_strided_p2p_persistent(self, set_device: bool) -> None:
         self._init_process(set_device)
         group_name = dist.group.WORLD.group_name
-        enable_symm_mem_for_group(group_name)
 
         alloc_args = self._get_test_alloc_args()
 
@@ -1219,7 +1216,6 @@ class SymmMemCollectiveTest(MultiProcContinuousTest):
 class LoweringTest(MultiProcContinuousTest):
     def _init_process(self) -> None:
         torch.cuda.set_device(self.device)
-        enable_symm_mem_for_group(dist.group.WORLD.group_name)
         torch.manual_seed(42 + self.rank)
         torch._inductor.config._collective.auto_select = True
 
@@ -1377,7 +1373,6 @@ class SymmMemPoolTest(MultiProcContinuousTest):
     def test_mempool_tensor_factory(self):
         self._init_process()
         group_name = dist.group.WORLD.group_name
-        enable_symm_mem_for_group(group_name)
 
         dtype = torch.float
         numel = 1024
@@ -1402,7 +1397,6 @@ class SymmMemPoolTest(MultiProcContinuousTest):
     def test_mempool_compute_ops(self):
         self._init_process()
         group_name = dist.group.WORLD.group_name
-        enable_symm_mem_for_group(group_name)
 
         dtype = torch.float
         dim = 1024

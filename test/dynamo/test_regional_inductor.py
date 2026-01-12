@@ -75,7 +75,8 @@ def aot_eager_regional_inductor(
     if serialize:
 
         def regional_inductor_pickle(gm, *example_args):
-            result = regional_inductor_fn(gm, *example_args)
+            with torch._functorch.config.patch(force_autograd_cache=True):
+                result = regional_inductor_fn(gm, *example_args)
             serialized = GraphPickler.dumps(result)
 
             fake_mode = detect_fake_mode(example_args)
@@ -1379,7 +1380,10 @@ class TestRegionalOutputCode(torch._inductor.test_case.TestCase):
         y = torch.randn(10, requires_grad=True)
 
         # Compile with regional inductor
-        with torch.fx.traceback.preserve_node_meta(enable=False):
+        with (
+            torch.fx.traceback.preserve_node_meta(enable=False),
+            torch._functorch.config.patch(force_autograd_cache=True),
+        ):
             from torch._subclasses.fake_tensor import FakeTensorMode
             from torch.fx.experimental.proxy_tensor import make_fx
 
@@ -1441,7 +1445,10 @@ class TestRegionalOutputCode(torch._inductor.test_case.TestCase):
             fake_y = fake_mode.from_tensor(y)
 
             # Create forward graph
-            with torch.fx.traceback.preserve_node_meta(enable=False):
+            with (
+                torch.fx.traceback.preserve_node_meta(enable=False),
+                torch._functorch.config.patch(force_autograd_cache=True),
+            ):
                 gm = make_fx(fn)(fake_x, fake_y)
                 fw_code = regional_inductor(gm, fake_x, fake_y)
 
@@ -1483,7 +1490,10 @@ class TestRegionalOutputCode(torch._inductor.test_case.TestCase):
         with fake_mode:
             fake_x = fake_mode.from_tensor(x)
 
-            with torch.fx.traceback.preserve_node_meta(enable=False):
+            with (
+                torch.fx.traceback.preserve_node_meta(enable=False),
+                torch._functorch.config.patch(force_autograd_cache=True),
+            ):
                 gm = make_fx(fn)(fake_x)
                 compiled_gm = regional_inductor(gm, fake_x)
 
