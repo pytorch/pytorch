@@ -2910,6 +2910,8 @@ class GuardBuilder(GuardBuilderBase):
             if isinstance(value, torch._subclasses.FakeTensor):
                 if value.pytype is not None:
                     pytype = value.pytype
+                if value.dispatch_keys is not None:
+                    dispatch_keys = value.dispatch_keys
 
             assert isinstance(value, torch.Tensor)
 
