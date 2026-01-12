@@ -346,8 +346,8 @@ class _ListOfFlatLayouts(Sequence[_FlatLayout]):
         new_axes[start:end] = list(layout.axes)
         return _ListOfFlatLayouts(new_axes)
 
-    def check_not_overlap(self) -> bool:
-        return self.collapse().check_not_overlap()
+    def check_non_overlap(self) -> bool:
+        return self.collapse().check_non_overlap()
 
     def remap_to_tensor(self, rank_map: torch.Tensor) -> torch.Tensor:
         """

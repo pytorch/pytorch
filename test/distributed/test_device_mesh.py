@@ -1709,38 +1709,38 @@ class CuTeLayoutTest(TestCase):
         """Test the check_non_overlap method for various layout configurations."""
         # Test 1: Valid layout - no overlap
         # sizes=(2,3), strides=(6,1) - stride 6 > span 3, so no overlap
-        layout1 = _MeshLayout((_FlatLayout((2, 3), (6, 1)),))
+        layout1 = _FlatLayout((2, 3), (6, 1))
         self.assertTrue(layout1.check_non_overlap())
 
         # Test 2: Invalid layout - overlap due to stride < previous span
         # sizes=(2,3), strides=(2,1) - stride 2 < span 3, causes overlap
-        layout2 = _MeshLayout((_FlatLayout((2, 3), (2, 1)),))
+        layout2 = _FlatLayout((2, 3), (2, 1))
         self.assertFalse(layout2.check_non_overlap())
 
         # Test 3: Invalid layout - duplicate strides
         # sizes=(2,3), strides=(1,1) - same stride, causes overlap
-        layout3 = _MeshLayout((_FlatLayout((2, 3), (1, 1)),))
+        layout3 = _FlatLayout((2, 3), (1, 1))
         self.assertFalse(layout3.check_non_overlap())
 
         # Test 4: Valid layout - single dimension
-        layout4 = _MeshLayout((_FlatLayout((4,), (1,)),))
+        layout4 = _FlatLayout((4,), (1,))
         self.assertTrue(layout4.check_non_overlap())
 
         # Test 5: Valid layout - exact boundary case
         # sizes=(2,3), strides=(3,1) - stride 3 == span 3, valid
-        layout5 = _MeshLayout((_FlatLayout((2, 3), (3, 1)),))
+        layout5 = _FlatLayout((2, 3), (3, 1))
         self.assertTrue(layout5.check_non_overlap())
 
         # Test 6: Valid layout - multi-dimensional with proper spacing
-        layout6 = _MeshLayout((_FlatLayout((2, 2, 2), (8, 4, 1)),))
+        layout6 = _FlatLayout((2, 2, 2), (8, 4, 1))
         self.assertTrue(layout6.check_non_overlap())
 
         # Test 7: Valid layout - stride not ordered
-        layout7 = _MeshLayout((_FlatLayout((2, 2, 2), (4, 1, 2)),))
+        layout7 = _FlatLayout((2, 2, 2), (4, 1, 2))
         self.assertTrue(layout7.check_non_overlap())
 
         # Test 8: Valid layout - Interleaved but no overlap
-        layout8 = _MeshLayout((_FlatLayout((3, 2), (2, 3)),))
+        layout8 = _FlatLayout((3, 2), (2, 3))
         self.assertTrue(layout8.check_non_overlap())
 
     def test_remap_to_tensor(self):
