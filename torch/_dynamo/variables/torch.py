@@ -1393,7 +1393,9 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             else:
                 return None
 
-        @register(torch.fx.experimental.symbolic_shapes.guard_size_oblivious)  # type: ignore[deprecated]
+
+        # pyrefly: ignore [deprecated]
+        @register(torch.fx.experimental.symbolic_shapes.guard_size_oblivious)
         def handle_guard_size_oblivious(
             self, tx: "InstructionTranslator", expr: VariableTracker
         ) -> VariableTracker | None:
@@ -1401,7 +1403,8 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # TODO: this probably should be folded somewhere else but I'm not sure where
                 # TODO: some of the other symbolic_shapes special tools can also get this treatment too
                 return variables.ConstantVariable.create(
-                    torch.fx.experimental.symbolic_shapes.guard_size_oblivious(  # type: ignore[deprecated]
+                    # pyrefly: ignore [deprecated]
+                    torch.fx.experimental.symbolic_shapes.guard_size_oblivious(
                         expr.sym_num
                     )
                 )
