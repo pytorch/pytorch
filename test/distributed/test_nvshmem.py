@@ -3,11 +3,12 @@
 # To run:
 # python test/distributed/test_nvshmem.py
 
-import os
 
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
+from torch._C._autograd import DeviceType
+from torch._C._distributed_c10d import _SymmetricMemory
 from torch.distributed.device_mesh import init_device_mesh
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
@@ -32,11 +33,10 @@ def requires_nvshmem():
 
 
 def requires_nvls():
-    """Skip test if NVLS (NVLink Switch) is not available."""
-    nvls_disabled = os.environ.get("NVSHMEM_DISABLE_NVLS", "0") == "1"
+    """Skip test if NVLS (NVLink SHARP) is not available."""
     return skip_but_pass_in_sandcastle_if(
-        nvls_disabled,
-        "Test requires NVLS which is disabled via NVSHMEM_DISABLE_NVLS=1",
+        not _SymmetricMemory.has_multicast_support(DeviceType.CUDA, 0),
+        "Test requires NVLink SHARP support",
     )
 
 
@@ -229,9 +229,6 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
         """
         Get the multicast pointer
         """
-        from torch._C._autograd import DeviceType
-        from torch._C._distributed_c10d import _SymmetricMemory
-
         self._init_device()
         group_name = dist.group.WORLD.group_name
 
