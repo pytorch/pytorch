@@ -90,7 +90,7 @@ TORCH_API std::ostream& operator<<(std::ostream& /*os*/, const OperatorName& /*o
 namespace std {
 template <>
 struct hash<::c10::OperatorName> {
-  size_t operator()(const ::c10::OperatorName& x) const {
+  size_t operator()(const ::c10::OperatorName& x) const noexcept {
     return std::hash<std::string>()(x.name) ^
         (~std::hash<std::string>()(x.overload_name));
   }
