@@ -96,6 +96,26 @@ static void accumulate_grad_(const Tensor& variable, const Tensor& new_grad) {
   }
 }
 
+TORCH_LIBRARY_FRAGMENT(inductor, m) {
+  m.def(
+      "_mm_plus_mm(Tensor a, Tensor b, Tensor c, Tensor d, Tensor(t!) out) -> Tensor(t!)",
+      dispatch(c10::DispatchKey::CompositeExplicitAutograd, _mm_plus_mm),
+      {at::Tag::pt2_compliant_tag});
+  m.def(
+      "_alloc_from_pool(Tensor self, int offset_bytes, ScalarType dtype, int[] size, int[] stride) -> Tensor",
+      _alloc_from_pool,
+      {at::Tag::pt2_compliant_tag});
+  m.def(
+      "_reinterpret_tensor(Tensor self, int[] size, int[] stride, int offset_increment=0) -> Tensor",
+      dispatch(
+          c10::DispatchKey::CompositeExplicitAutograd, _reinterpret_tensor),
+      {at::Tag::pt2_compliant_tag});
+  m.def(
+      "accumulate_grad_(Tensor variable, Tensor new_grad) -> ()",
+      dispatch(c10::DispatchKey::CompositeExplicitAutograd, accumulate_grad_),
+      {at::Tag::pt2_compliant_tag});
+}
+
 #if defined(USE_CUDA) || defined(USE_ROCM)
 // Reserves RNG state for Inductor with CUDA Graph support.
 //
@@ -112,7 +132,8 @@ static void accumulate_grad_(const Tensor& variable, const Tensor& new_grad) {
 //
 // -param gen The CUDA generator to use.
 // -param increment The number of RNG values to reserve.
-// -return A tuple of (Seed Tensor, Offset Tensor, Intragraph Offset CPU Tensor).
+// -return A tuple of (Seed Tensor, Offset Tensor, Intragraph Offset CPU
+// Tensor).
 static Generator _get_or_default_cuda_generator(
     const c10::optional<Generator>& gen_opt) {
   if (gen_opt.has_value()) {
@@ -130,34 +151,25 @@ static std::tuple<Tensor, Tensor, Tensor> inductor_reserve_rng_state(
 
   const auto dev_opts =
       at::TensorOptions().dtype(at::kLong).device(gen.device());
-  const auto cpu_opts =
-      at::TensorOptions().dtype(at::kLong).device(at::kCPU);
+  const auto cpu_opts =at::TensorOptions().dtype(at::kLong).device(at::kCPU);
 
   const at::PhiloxCudaState st =
       gen_impl->philox_cuda_state(static_cast<uint64_t>(increment));
 
   if (st.captured_) {
     auto seed_t = at::from_blob(
-        static_cast<void*>(st.seed_.ptr),
-        {1},
-        [](void*) {},
-        dev_opts);
+        static_cast<void*>(st.seed_.ptr), {1}, [](void*) {}, dev_opts);
     auto off_t = at::from_blob(
-        static_cast<void*>(st.offset_.ptr),
-        {1},
-        [](void*) {},
-        dev_opts);
+        static_cast<void*>(st.offset_.ptr), {1}, [](void*) {}, dev_opts);
     auto intra_t =
         at::tensor({static_cast<int64_t>(st.offset_intragraph_)}, cpu_opts);
     return {seed_t, off_t, intra_t};
   }
 
-  auto seed_t =
-      at::scalar_tensor(static_cast<int64_t>(st.seed_.val), dev_opts)
-          .unsqueeze(0);
-  auto off_t =
-      at::scalar_tensor(static_cast<int64_t>(st.offset_.val), dev_opts)
-          .unsqueeze(0);
+  auto seed_t =at::scalar_tensor(static_cast<int64_t>(st.seed_.val), dev_opts)
+.unsqueeze(0);
+  auto off_t =at::scalar_tensor(static_cast<int64_t>(st.offset_.val), dev_opts)
+.unsqueeze(0);
   auto intra_t = at::zeros({1}, cpu_opts);
   return {seed_t, off_t, intra_t};
 }
@@ -169,21 +181,15 @@ TORCH_LIBRARY_FRAGMENT(inductor_prims, m) {
 }
 
 TORCH_LIBRARY_IMPL(inductor_prims, BackendSelect, m) {
-  m.impl(
-      "inductor_reserve_rng_state",
-      TORCH_FN(inductor_reserve_rng_state));
+  m.impl("inductor_reserve_rng_state", TORCH_FN(inductor_reserve_rng_state));
 }
 
 TORCH_LIBRARY_IMPL(inductor_prims, CUDA, m) {
-  m.impl(
-      "inductor_reserve_rng_state",
-      TORCH_FN(inductor_reserve_rng_state));
+  m.impl("inductor_reserve_rng_state", TORCH_FN(inductor_reserve_rng_state));
 }
 
 TORCH_LIBRARY_IMPL(inductor_prims, HIP, m) {
-  m.impl(
-      "inductor_reserve_rng_state",
-      TORCH_FN(inductor_reserve_rng_state));
+  m.impl("inductor_reserve_rng_state", TORCH_FN(inductor_reserve_rng_state));
 }
 
 #endif
