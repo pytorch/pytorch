@@ -62,35 +62,6 @@ def _set_env_var(addr="localhost", port="25364", world_size=1, rank=0, local_ran
         os.environ["LOCAL_RANK"] = f"{local_rank}"
 
 
-def global_ranks(layout: _FlatLayout, world_size: int) -> list[list[int]]:
-    """
-    Build global ranks specified by the layout via two-level ranks composition.
-
-    The nested list forms the Cartesian product of all ranks for one layout and offset
-    regarding filling up the world_size with the layout.
-    The final global ranks are the addition of these two. The result is a
-    list of lists: one sublist per layout. This rank list will be used to build
-    the communicator underlying the layout and the given `world_size`.
-
-    Example:
-    world_size = 16
-    self.size = 4
-    self.stride = 1
-    ranks = [0, 1, 2, 3]
-    offsets = [0, 4, 8, 12]
-    result = [
-        [0+0, 0+1, 0+2, 0+3],  # → [0, 1, 2, 3]
-        [4+0, 4+1, 4+2, 4+3],  # → [4, 5, 6, 7]
-        [8+0, 8+1, 8+2, 8+3],  # → [8, 9, 10,11]
-        [12+0, 12+1, 12+2, 12+3],  # → [12,13,14,15]
-    ]
-    """
-    return [
-        [offset + rank for rank in layout.codomain()]
-        for offset in layout.complement(world_size).codomain()
-    ]
-
-
 @unittest.skipIf(TEST_XPU or TEST_HPU, "XPU/HPU does not support gloo backend.")
 class DeviceMeshTestGlooBackend(DTensorTestBase):
     @property
@@ -942,7 +913,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         flatten_mesh_layout = root_mesh._flatten_mapping["dp_cp"]._layout
         self.assertEqual(flatten_mesh_layout, flattened_dp_cp_mesh._layout)
         self.assertEqual(
-            global_ranks(flattened_dp_cp_mesh._layout.collapse(), 8),
+            flattened_dp_cp_mesh._layout.collapse().global_ranks(8),
             [[0, 2, 4, 6], [1, 3, 5, 7]],
         )
 
@@ -962,7 +933,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         flatten_mesh_root_layout = root_mesh._flatten_mapping["dp_tp"]._layout
         self.assertEqual(flatten_mesh_root_layout, flattened_dp_tp_mesh._layout)
         self.assertEqual(
-            global_ranks(flattened_dp_tp_mesh._layout.collapse(), 8),
+            flattened_dp_tp_mesh._layout.collapse().global_ranks(8),
             [[0, 1, 4, 5], [2, 3, 6, 7]],
         )
         with self.assertRaisesRegex(
@@ -1525,12 +1496,12 @@ class CuTeLayoutTest(TestCase):
         outer = pg_layout.complement(world_size=8)
         self.assertEqual(list(outer.sizes_and_strides), [(2, 1)])
         self.assertEqual(
-            pg_layout.codomain(),
+            pg_layout.all_ranks_from_zero(),
             [0, 2, 4, 6],
         )
         groups = [
-            [o + i for i in pg_layout.codomain()]
-            for o in outer.codomain()
+            [o + i for i in pg_layout.all_ranks_from_zero()]
+            for o in outer.all_ranks_from_zero()
         ]
         self.assertEqual(
             groups,
@@ -1540,7 +1511,7 @@ class CuTeLayoutTest(TestCase):
             ],
         )
         self.assertEqual(
-            global_ranks(pg_layout, 8),
+            pg_layout.global_ranks(8),
             [
                 [0, 2, 4, 6],
                 [1, 3, 5, 7],
@@ -1550,11 +1521,11 @@ class CuTeLayoutTest(TestCase):
         outer = pg_layout.complement(world_size=16)
         self.assertEqual(list(outer.sizes_and_strides), [(2, 8), (2, 1)])
         self.assertEqual(
-            outer.codomain(),
+            outer.all_ranks_from_zero(),
             [0, 1, 8, 9],
         )
         self.assertEqual(
-            global_ranks(pg_layout, 16),
+            pg_layout.global_ranks(16),
             [
                 [0, 2, 4, 6],
                 [1, 3, 5, 7],
@@ -1566,17 +1537,17 @@ class CuTeLayoutTest(TestCase):
         # Complement ((2,4), (2,1)) under world_size=16 → complement ((2,8), (2,2))
         pg_layout = _FlatLayout((2, 2), (4, 1))
         self.assertEqual(
-            pg_layout.codomain(),
+            pg_layout.all_ranks_from_zero(),
             [0, 1, 4, 5],
         )
         outer = pg_layout.complement(world_size=16)
         self.assertEqual(list(outer.sizes_and_strides), [(2, 8), (2, 2)])
         self.assertEqual(
-            outer.codomain(),
+            outer.all_ranks_from_zero(),
             [0, 2, 8, 10],
         )
         self.assertEqual(
-            global_ranks(pg_layout, 16),
+            pg_layout.global_ranks(16),
             [
                 [0, 1, 4, 5],
                 [2, 3, 6, 7],
@@ -1585,14 +1556,14 @@ class CuTeLayoutTest(TestCase):
             ],
         )
 
-        # Test layout_to_global_ranks and layout_to_codomain
+        # Test layout_to_global_ranks and layout_to_all_ranks_from_zero
         pg_layout = _FlatLayout((2, 2), (4, 2))
         self.assertEqual(
-            pg_layout.codomain(),
+            pg_layout.all_ranks_from_zero(),
             [0, 2, 4, 6],
         )
         self.assertEqual(
-            global_ranks(pg_layout, 16),
+            pg_layout.global_ranks(16),
             [
                 [0, 2, 4, 6],
                 [1, 3, 5, 7],
@@ -1608,7 +1579,7 @@ class CuTeLayoutTest(TestCase):
         outer = pg_layout_r.complement(world_size=16)
         self.assertEqual(list(outer.sizes_and_strides), [(2, 8), (2, 1)])
         self.assertEqual(
-            global_ranks(pg_layout_r, 16),
+            pg_layout_r.global_ranks(16),
             [
                 [0, 4, 2, 6],
                 [1, 5, 3, 7],
@@ -1617,14 +1588,14 @@ class CuTeLayoutTest(TestCase):
             ],
         )
 
-        # Test just codomain and global_ranks.
+        # Test just all_ranks_from_zero and global_ranks.
         pg_layout = _FlatLayout((4,), (2,))
         self.assertEqual(
-            pg_layout.codomain(),
+            pg_layout.all_ranks_from_zero(),
             [0, 2, 4, 6],
         )
         self.assertEqual(
-            global_ranks(pg_layout, 16),
+            pg_layout.global_ranks(16),
             [
                 [0, 2, 4, 6],
                 [1, 3, 5, 7],
@@ -1640,7 +1611,7 @@ class CuTeLayoutTest(TestCase):
         (composed_layout,) = orig_l.composition(right_l)
         self.assertEqual(list(composed_layout.sizes_and_strides), [(2, 1)])
         self.assertEqual(
-            global_ranks(composed_layout, 8),
+            composed_layout.global_ranks(8),
             [
                 [0, 1],
                 [2, 3],
@@ -1655,7 +1626,7 @@ class CuTeLayoutTest(TestCase):
         (composed_layout,) = orig_l.composition(right_l)
         self.assertEqual(list(composed_layout.sizes_and_strides), [(2, 2)])
         self.assertEqual(
-            global_ranks(composed_layout, 8),
+            composed_layout.global_ranks(8),
             [
                 [0, 2],
                 [1, 3],
@@ -1667,11 +1638,11 @@ class CuTeLayoutTest(TestCase):
         # self = (4,2), l = ((2,2), (2,1))  → self o l = ((2,4), (2,2))
         # This is to mimic the un-flatten from a 2D mesh to a 1D mesh.
         right_l = _MeshLayout.from_sizes_strides((2, 2), (2, 1))
-        composed_layout_0, composed_layout_1 = orig_l.composition(right_l)
-        self.assertEqual(list(composed_layout_0.sizes_and_strides), [(2, 4)])
-        self.assertEqual(list(composed_layout_1.sizes_and_strides), [(2, 2)])
+        composed_layout = orig_l.composition(right_l)
+        self.assertEqual(list(composed_layout[0].sizes_and_strides), [(2, 4)])
+        self.assertEqual(list(composed_layout[1].sizes_and_strides), [(2, 2)])
         self.assertEqual(
-            global_ranks(composed_layout_0, 8),
+            composed_layout[0].global_ranks(8),
             [
                 [0, 4],
                 [1, 5],
@@ -1680,7 +1651,7 @@ class CuTeLayoutTest(TestCase):
             ],
         )
         self.assertEqual(
-            global_ranks(composed_layout_1, 8),
+            composed_layout[1].global_ranks(8),
             [
                 [0, 2],
                 [1, 3],
@@ -1739,42 +1710,42 @@ class CuTeLayoutTest(TestCase):
         """Test the remap_to_tensor method for various scenarios."""
         # Test 1: Consecutive ranks, full world - should return logical groups directly
         original_mesh = torch.tensor([0, 1, 2, 3], dtype=torch.int)
-        layout1 = _MeshLayout((_FlatLayout((2, 2), (2, 1)),))  # row-major 2x2
+        layout1 = _MeshLayout([_FlatLayout((2, 2), (2, 1))])  # row-major 2x2
         result1 = layout1.remap_to_tensor(original_mesh)
         expected1 = torch.tensor([[[0, 1], [2, 3]]], dtype=torch.int)
         self.assertEqual(result1, expected1)
 
         # Test 2: Non-consecutive ranks - should map to actual ranks
         original_mesh = torch.tensor([10, 20, 30, 40], dtype=torch.int)
-        layout2 = _MeshLayout((_FlatLayout((2, 2), (2, 1)),))
+        layout2 = _MeshLayout([_FlatLayout((2, 2), (2, 1))])
         result2 = layout2.remap_to_tensor(original_mesh)
         expected2 = torch.tensor([[[10, 20], [30, 40]]], dtype=torch.int)
         self.assertEqual(result2, expected2)
 
         # Test 4: 1D layout with consecutive ranks
         original_mesh = torch.tensor([0, 1, 2, 3], dtype=torch.int)
-        layout4 = _MeshLayout((_FlatLayout((4,), (1,)),))
+        layout4 = _MeshLayout([_FlatLayout((4,), (1,))])
         result4 = layout4.remap_to_tensor(original_mesh)
         expected4 = torch.tensor([[0, 1, 2, 3]], dtype=torch.int)
         self.assertEqual(result4, expected4)
 
         # Test 5: Complex strided layout with non-consecutive ranks
         original_mesh = torch.tensor([5, 10, 15, 20], dtype=torch.int)
-        layout5 = _MeshLayout((_FlatLayout((2, 2), (2, 1)),))
+        layout5 = _MeshLayout([_FlatLayout((2, 2), (2, 1))])
         result5 = layout5.remap_to_tensor(original_mesh)
         expected5 = torch.tensor([[[5, 10], [15, 20]]], dtype=torch.int)
         self.assertEqual(result5, expected5)
 
         # Test 6: Tensor Cute representation of a 2D mesh
         original_mesh = torch.tensor([0, 2, 1, 3], dtype=torch.int)
-        layout6 = _MeshLayout((_FlatLayout((2, 2), (1, 2)),))  # column-major style
+        layout6 = _MeshLayout([_FlatLayout((2, 2), (1, 2))])  # column-major style
         result6 = layout6.remap_to_tensor(original_mesh)
         expected6 = torch.tensor([[[0, 1], [2, 3]]], dtype=torch.int)
         self.assertEqual(result6, expected6)
 
         # Test 7: Layout with different stride pattern
         original_mesh = torch.tensor([0, 2, 1, 4], dtype=torch.int)
-        layout7 = _MeshLayout((_FlatLayout((2, 2), (1, 2)),))  # column-major style
+        layout7 = _MeshLayout([_FlatLayout((2, 2), (1, 2))])  # column-major style
         result7 = layout7.remap_to_tensor(original_mesh)
         expected7 = torch.tensor([[[0, 1], [2, 4]]], dtype=torch.int)
         self.assertEqual(result7, expected7)

@@ -95,7 +95,7 @@ def _prepare_collective_groups(
     layout = _FlatLayout(shape, strides)
 
     global_pg = _get_default_group()
-    group_offsets = layout.complement(global_pg.size()).codomain()
+    group_offsets = layout.complement(global_pg.size()).all_ranks_from_zero()
 
     return ranks, group_offsets, offset
 
