@@ -22,7 +22,9 @@ from torch.distributed.tensor._op_schema import (
 )
 from torch.distributed.tensor._ops.single_dim_strategy import (
     _ShardingPlaceholder,
+    batch_dim_rules,
     register_single_dim_strategy,
+    replicate_only_rules,
 )
 from torch.distributed.tensor._ops.utils import (
     as_list,
@@ -1421,29 +1423,6 @@ def logsumexp_strategy(op_schema: OpSchema) -> OpStrategy:
 # =============================================================================
 
 
-def _batch_dim_rules(
-    num_batch_dims: int,
-    num_outputs: int,
-    num_inputs: int,
-) -> list[list[Placement | _ShardingPlaceholder]]:
-    """
-    Generate single-mesh-dim sharding rules for batched operations.
-
-    Returns rules for sharding on each batch dimension. The all-replicate
-    rule is automatically added by the framework.
-    """
-    total_specs = num_outputs + num_inputs
-    rules: list[list[Placement | _ShardingPlaceholder]] = []
-
-    for batch_dim in range(num_batch_dims):
-        batch_shard: list[Placement | _ShardingPlaceholder] = [
-            _ShardingPlaceholder(batch_dim)
-        ] * total_specs
-        rules.append(batch_shard)
-
-    return rules
-
-
 # =============================================================================
 # Single-input linalg operators (decompositions, factorizations, eigenvalues)
 # =============================================================================
@@ -1483,7 +1462,7 @@ def single_input_linalg_strategy(
     num_batch_dims = max(0, input_ndim - 2)
     num_outputs = _SINGLE_INPUT_OP_TO_NUM_OUTPUTS[op]
 
-    return _batch_dim_rules(
+    return batch_dim_rules(
         num_batch_dims=num_batch_dims,
         num_outputs=num_outputs,
         num_inputs=1,
@@ -1520,7 +1499,7 @@ def two_input_solve_strategy(
     num_batch_dims = max(0, min(A_ndim - 2, B_ndim - 2))
     num_outputs = _TWO_INPUT_SOLVE_OP_TO_NUM_OUTPUTS[op]
 
-    return _batch_dim_rules(
+    return batch_dim_rules(
         num_batch_dims=num_batch_dims,
         num_outputs=num_outputs,
         num_inputs=2,
@@ -1558,7 +1537,7 @@ def three_input_solve_strategy(
     num_batch_dims = max(0, min(factor_ndim - 2, B_ndim - 2))
     num_outputs = _THREE_INPUT_SOLVE_OP_TO_NUM_OUTPUTS[op]
 
-    return _batch_dim_rules(
+    return batch_dim_rules(
         num_batch_dims=num_batch_dims,
         num_outputs=num_outputs,
         num_inputs=3,
@@ -1589,8 +1568,26 @@ def linalg_householder_product_strategy(
     # tau has 1 fewer trailing dim than input
     num_batch_dims = max(0, min(input_ndim - 2, tau_ndim - 1))
 
-    return _batch_dim_rules(
+    return batch_dim_rules(
         num_batch_dims=num_batch_dims,
         num_outputs=1,
         num_inputs=2,
     )
+
+
+# =============================================================================
+# Linalg error checking operator (no tensor output)
+# =============================================================================
+
+
+@register_single_dim_strategy([aten._linalg_check_errors.default])
+def linalg_check_errors_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """
+    Strategy for _linalg_check_errors, which validates linalg operation results.
+
+    This operator takes an info tensor and checks for errors but returns nothing.
+    The info tensor must be replicated so all ranks can check for errors consistently.
+    """
+    return replicate_only_rules()

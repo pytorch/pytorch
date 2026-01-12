@@ -368,3 +368,78 @@ def register_single_dim_strategy(
         schema_info,
         arg_names_that_require_specializing_cache_strategy,
     )
+
+
+# =============================================================================
+# Common single-dim strategy helper functions
+#
+# These helpers generate common sharding patterns that can be reused across
+# multiple operators. They are designed to work with the single_dim_strategy
+# framework where the all-replicate strategy is automatically added.
+# =============================================================================
+
+
+def batch_dim_rules(
+    num_batch_dims: int,
+    num_outputs: int,
+    num_inputs: int,
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """
+    Generate single-mesh-dim sharding rules for batched operations.
+
+    This helper is useful for operators where computation is independent across
+    batch dimensions (like most linalg operations on batched matrices). It allows
+    sharding on any batch dimension while keeping the non-batch dimensions
+    (typically the last 2 dims for matrices) replicated.
+
+    Args:
+        num_batch_dims: Number of batch dimensions that can be sharded
+        num_outputs: Number of tensor outputs from the operator
+        num_inputs: Number of tensor inputs to the operator
+
+    Returns:
+        A list of sharding rules, one for each batch dimension. Each rule
+        shards all outputs and inputs on the same batch dimension using
+        _ShardingPlaceholder. The all-replicate rule is automatically added
+        by the framework.
+
+    Example:
+        For a batched matrix decomposition with shape (*batch, m, n) -> (*batch, m, k):
+        - num_batch_dims = len(batch)
+        - num_outputs = 1
+        - num_inputs = 1
+        Returns rules allowing sharding on any batch dim.
+    """
+    total_specs = num_outputs + num_inputs
+    rules: list[list[Placement | _ShardingPlaceholder]] = []
+
+    for batch_dim in range(num_batch_dims):
+        batch_shard: list[Placement | _ShardingPlaceholder] = [
+            _ShardingPlaceholder(batch_dim)
+        ] * total_specs
+        rules.append(batch_shard)
+
+    return rules
+
+
+def replicate_only_rules() -> list[list[Placement | _ShardingPlaceholder]]:
+    """
+    Return an empty list indicating only the all-replicate strategy is valid.
+
+    This helper is useful for operators that:
+    - Have no tensor outputs (like error checking functions)
+    - Require all inputs to be replicated for correctness
+    - Don't support any non-trivial sharding patterns
+
+    The single_dim_strategy framework automatically adds the all-replicate
+    strategy, so returning an empty list means only that strategy is available.
+
+    Returns:
+        An empty list, indicating no non-trivial sharding strategies.
+
+    Example:
+        For _linalg_check_errors which validates linalg results:
+        - Takes an info tensor, returns nothing
+        - All ranks must check the same errors, so input must be replicated
+    """
+    return []
