@@ -12,7 +12,6 @@ from typing import (  # type: ignore[attr-defined]
     Any,
     Generic,
     NamedTuple,
-    Optional,
     TypeVar,
 )
 
@@ -87,7 +86,7 @@ class MatchInfo:
     or collective state that caused the mismatch.
     """
 
-    def __init__(self, state: MatchState, culprit: Optional[str] = None) -> None:
+    def __init__(self, state: MatchState, culprit: str | None = None) -> None:
         self._state = state
         self.culprit = culprit
 
@@ -153,11 +152,11 @@ class Collective(NamedTuple):
     expected_ranks: set[int]
     collective_state: str
     collective_frames: list[dict[str, str]]
-    input_numel: Optional[int] = None
-    output_numel: Optional[int] = None
-    missing_ranks: Optional[set[int]] = None
-    mismatch_collectives: Optional[dict[int, "Collective"]] = None
-    type_of_mismatch: Optional[MatchInfo] = None
+    input_numel: int | None = None
+    output_numel: int | None = None
+    missing_ranks: set[int] | None = None
+    mismatch_collectives: dict[int, "Collective"] | None = None
+    type_of_mismatch: MatchInfo | None = None
 
 
 class NCCLCall(NamedTuple):
@@ -260,9 +259,9 @@ class EntryState:
         logger: FlightRecorderLogger,
         logger_msg: str,
         frame_formatter: Any,
-        total_numel: Optional[tuple[int, int]] = None,
-        errors: Optional[set[tuple[int, MatchInfo]]] = None,
-        missing_ranks: Optional[set[int]] = None,
+        total_numel: tuple[int, int] | None = None,
+        errors: set[tuple[int, MatchInfo]] | None = None,
+        missing_ranks: set[int] | None = None,
     ) -> None:
         logger.info(
             logger_msg,
@@ -297,9 +296,9 @@ class EntryState:
     def to_collective(
         self,
         id: int,
-        errors: Optional[set[tuple[int, MatchInfo]]] = None,
-        idx_map: Optional[dict[int, int]] = None,
-        all_entries: Optional[dict[int, list[dict[str, Any]]]] = None,
+        errors: set[tuple[int, MatchInfo]] | None = None,
+        idx_map: dict[int, int] | None = None,
+        all_entries: dict[int, list[dict[str, Any]]] | None = None,
     ) -> Collective:
         if not errors:
             return Collective(
@@ -501,7 +500,7 @@ class Op:
                 and other.input_sizes[0]
             )
             or (
-                self.type not in ["gather"]
+                self.type != "gather"
                 and set(self.output_dtypes) != set(other.output_dtypes)
                 and self.output_sizes[0]
                 and other.output_sizes[0]

@@ -629,7 +629,7 @@ class Optimizer:
                 pre-hooks. (default: False)
 
         Returns:
-            :class:`torch.utils.hooks.RemoveableHandle`:
+            :class:`torch.utils.hooks.RemovableHandle`:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
         """
@@ -663,7 +663,7 @@ class Optimizer:
                 post-hooks. (default: False)
 
         Returns:
-            :class:`torch.utils.hooks.RemoveableHandle`:
+            :class:`torch.utils.hooks.RemovableHandle`:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
         """
@@ -827,7 +827,7 @@ class Optimizer:
                 pre-hooks. (default: False)
 
         Returns:
-            :class:`torch.utils.hooks.RemoveableHandle`:
+            :class:`torch.utils.hooks.RemovableHandle`:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
         """
@@ -861,7 +861,7 @@ class Optimizer:
                 post-hooks. (default: False)
 
         Returns:
-            :class:`torch.utils.hooks.RemoveableHandle`:
+            :class:`torch.utils.hooks.RemovableHandle`:
                 a handle that can be used to remove the added hook by calling
                 ``handle.remove()``
         """
@@ -978,6 +978,7 @@ class Optimizer:
                     for k, v in value.items()
                 }
             elif isinstance(value, Iterable):
+                # pyrefly: ignore [bad-instantiation]
                 return type(value)(
                     # pyrefly: ignore [bad-argument-count]
                     _cast(param, v, param_id=param_id, param_groups=param_groups)

@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional, Union
 
 import torch
 from torch import Tensor
@@ -50,8 +49,8 @@ class Poisson(ExponentialFamily):
 
     def __init__(
         self,
-        rate: Union[Tensor, Number],
-        validate_args: Optional[bool] = None,
+        rate: Tensor | Number,
+        validate_args: bool | None = None,
     ) -> None:
         (self.rate,) = broadcast_all(rate)
         if isinstance(rate, _Number):

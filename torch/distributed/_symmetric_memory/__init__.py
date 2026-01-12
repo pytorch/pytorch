@@ -10,6 +10,7 @@ from datetime import timedelta
 from enum import Enum
 from functools import partial
 from typing import Any, Literal
+from typing_extensions import deprecated
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -21,6 +22,10 @@ from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
 _group_name_to_store: dict[str, c10d.Store] = {}
 
 
+@deprecated(
+    "`enable_symm_mem_for_group` is deprecated. There is no need to call this function anymore.",
+    category=FutureWarning,
+)
 def enable_symm_mem_for_group(group_name: c10d.GroupName) -> None:
     """
     Enables symmetric memory for a process group.
@@ -104,8 +109,6 @@ def get_symm_mem_workspace(
         _SymmetricMemory: the symmetric memory workspace associated with the
         group.
     """
-    enable_symm_mem_for_group(group_name)
-
     tensor = _group_name_to_workspace_tensor.get(group_name)
     size = tensor.numel() * tensor.element_size() if tensor is not None else 0
     if tensor is None or size < min_size:
@@ -1934,7 +1937,7 @@ def empty(  # type: ignore[misc]
 
 
 def rendezvous(
-    tensor: torch.Tensor, group: Union[c10d.GroupName, ProcessGroup]
+    tensor: torch.Tensor, group: c10d.GroupName | ProcessGroup
 ) -> _SymmetricMemory:
     r"""
     rendezvous(tensor, group) -> _SymmetricMemory
@@ -1958,7 +1961,6 @@ def rendezvous(
     else:
         raise TypeError(f"rendezvous: unsupported group type: {type(group)}")
 
-    enable_symm_mem_for_group(group_name)
     return _SymmetricMemory.rendezvous(tensor, group_name)
 
 
@@ -2058,6 +2060,57 @@ def get_signal_pad_size() -> int:
     return _SymmetricMemory.signal_pad_size
 
 
+# An internal map from device to the symmetric memory pool for that device.
+_symm_mem_pools: dict[_device, torch.cuda.MemPool] = {}
+
+
+def get_mem_pool(device: _device) -> torch.cuda.MemPool:
+    """
+    Get the symmetric memory pool for a given device. If not found, create a new
+    pool.
+
+    The tensor allocations with this pool must be symmetric across ranks.  The
+    allocated tensors can be used with symmetric operations, for example,
+    operations defined under `torch.ops.symm_mem`.
+
+    Args:
+        device (`torch.device` or str): the device for which to get the symmetric memory pool.
+
+    Returns:
+        `torch.cuda.MemPool`: the symmetric memory pool for the given device.
+
+    Example::
+
+        >>> # doctest: +SKIP
+        >>> pool = torch.distributed._symmetric_memory.get_mem_pool("cuda:0")
+        >>> with torch.cuda.use_mem_pool(pool):
+        >>>     tensor = torch.randn(1000, device="cuda:0")
+        >>> tensor = torch.ops.symm_mem.one_shot_all_reduce(tensor, "sum", group_name)
+
+    """
+    # This function is a wrapper around the `torch.cuda.MemPool` constructor.
+    # Due to special requirements of SymmetricMemory, we preset certain options for the pool.
+    # - use_on_oom=False: we don't want to lend the space of the pool for
+    # non-symmetric allocations because this could desync the allocation state
+    # across ranks.
+    # - no_split=True: we don't want to split segments, because today a segment
+    # is associated with a signal pad, if two allocated tensors share a segment
+    # and their kernels concurrently use (the same) signal pad, this could cause
+    # undefined behaviors. We could consider relaxing this in the future if we
+    # establish stream tracking and implicit synchronization around an
+    # allocation.
+    if device not in _symm_mem_pools:
+        allocator = get_mempool_allocator(device)
+        # Create a new pool with the given allocator and the preset options.
+        _symm_mem_pools[device] = torch.cuda.MemPool(
+            allocator,
+            use_on_oom=False,
+            no_split=True,
+        )
+
+    return _symm_mem_pools[device]
+
+
 __all__ = [
     "empty",
     "rendezvous",
@@ -2066,4 +2119,5 @@ __all__ = [
     "get_backend",
     "set_signal_pad_size",
     "get_signal_pad_size",
+    "get_mem_pool",
 ]

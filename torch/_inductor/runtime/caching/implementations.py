@@ -1,4 +1,4 @@
-"""Cache implementation classes for PyTorch Inductor runtime caching.
+"""Cache implementation classes
 
 This module provides concrete implementations of caching backends including
 in-memory, on-disk, and remote caching strategies. Each implementation follows
@@ -15,25 +15,32 @@ from io import BufferedReader, BufferedWriter
 from os import PathLike
 from pathlib import Path
 from threading import Lock
-from typing import Any
+from typing import Generic, TypeVar
 from typing_extensions import override
 
-from filelock import FileLock
+from filelock import BaseFileLock, FileLock
 
-from . import locks, utils
+from . import locks
+
+
+# Type variable for cache value types
+_V = TypeVar("_V")
 
 
 @dataclass
-class Hit:
+class Hit(Generic[_V]):
     """Result wrapper for hits on cache get operations.
 
     Allows distinguishing between a cache miss and a cached None value.
 
     Attributes:
-        value: The cached value.
+        value: The cached value. The type depends on the cache implementation:
+              - InMemoryCache: object (any Python object)
+              - OnDiskCache: bytes
+              - RemoteCache: bytes
     """
 
-    value: Any
+    value: _V
 
 
 class Miss:
@@ -48,18 +55,16 @@ class Miss:
 miss = Miss()
 
 
-class _CacheImpl(ABC):
+class _CacheImpl(ABC, Generic[_V]):
     """Abstract base class for cache implementations.
 
     This class defines the interface that all cache implementations must follow.
     It provides thread-safe operations through a locking mechanism and supports
     both get and insert operations.
 
-    Note: We don't use generics here as doing so would require that the interfaces
-    know which k/v types the implementation can work with. Instead, we leave that
-    determination up to the implementation itself and require that the interfaces
-    handle any potential errors from invalid k/v types being passed to the
-    implementation.
+    Type Parameters:
+        _V: The type of values stored in the cache. Each implementation specifies
+           its own value type (e.g., object for in-memory, bytes for on-disk).
     """
 
     def __init__(self) -> None:
@@ -90,11 +95,11 @@ class _CacheImpl(ABC):
         return _lock_with_timeout
 
     @abstractmethod
-    def get(self, key: Any) -> Hit | None:
+    def get(self, key: str) -> Hit[_V] | None:
         """Retrieve a value from the cache.
 
         Args:
-            key: The key to look up in the cache.
+            key: The key to look up in the cache (must be str).
 
         Returns:
             A Hit object on cache hit where Hit.value is the cached value,
@@ -102,11 +107,11 @@ class _CacheImpl(ABC):
         """
 
     @abstractmethod
-    def insert(self, key: Any, value: Any) -> bool:
+    def insert(self, key: str, value: _V) -> bool:
         """Insert a key-value pair into the cache.
 
         Args:
-            key: The key to insert.
+            key: The key to insert (must be str).
             value: The value to associate with the key.
 
         Returns:
@@ -114,55 +119,56 @@ class _CacheImpl(ABC):
         """
 
 
-class _InMemoryCacheImpl(_CacheImpl):
+class _InMemoryCacheImpl(_CacheImpl[_V], Generic[_V]):
     """In-memory cache implementation using a dictionary.
 
     This implementation stores key-value pairs in a Python dictionary,
     with keys being pickled for consistent hashing. It provides fast
     access but is limited by available memory and process lifetime.
+
+    Type Parameters:
+        _V: The type of values stored in the cache.
     """
 
     def __init__(self) -> None:
         """Initialize the in-memory cache with an empty dictionary."""
         super().__init__()
-        self._memory: dict[bytes, Any] = {}
+        self._memory: dict[str, _V] = {}
 
     @override
-    def get(self, key: Any) -> Hit | None:
+    def get(self, key: str) -> Hit[_V] | None:
         """Retrieve a value from the in-memory cache.
 
         Args:
-            key: The key to look up. Will be pickled for storage.
+            key: The key to look up (must be str).
 
         Returns:
             A Hit object on cache hit where Hit.value is the cached value,
             or None on cache miss.
         """
-        pickled_key: bytes = utils._try_pickle_key(key)
-        if (value := self._memory.get(pickled_key, miss)) is not miss:
-            return Hit(value=value)
+        if key in self._memory:
+            return Hit(value=self._memory[key])
         return None
 
     @override
-    def insert(self, key: Any, value: Any) -> bool:
+    def insert(self, key: str, value: _V) -> bool:
         """Insert a key-value pair into the in-memory cache.
 
         Args:
-            key: The key to insert. Will be pickled for storage.
+            key: The key to insert (must be str).
             value: The value to associate with the key.
 
         Returns:
             True if the insertion was successful (key was new),
             False if not inserted (key already existed).
         """
-        pickled_key: bytes = utils._try_pickle_key(key)
-        if pickled_key not in self._memory:
-            self._memory[pickled_key] = value
+        if key not in self._memory:
+            self._memory[key] = value
             return True
         return False
 
 
-class _OnDiskCacheImpl(_CacheImpl):
+class _OnDiskCacheImpl(_CacheImpl[bytes]):
     """On-disk cache implementation using file system storage.
 
     This implementation stores cached data as files on disk, with version
@@ -170,8 +176,10 @@ class _OnDiskCacheImpl(_CacheImpl):
     thread safety across processes and provides persistent storage that
     survives process restarts.
 
+    The value type is 'bytes' since data must be serialized to bytes for disk storage.
+
     Attributes:
-        _version: Version number for cache format compatibility.
+        _version: _Version number for cache format compatibility.
         _version_header_length: Length of the version header in bytes.
     """
 
@@ -186,8 +194,7 @@ class _OnDiskCacheImpl(_CacheImpl):
                     Defaults to empty string if not specified.
         """
         self._cache_dir: Path = self._base_dir / (sub_dir or "")
-        # pyrefly: ignore [bad-assignment]
-        self._flock: FileLock = FileLock(str(self._cache_dir / "dir.lock"))
+        self._flock: BaseFileLock = FileLock(str(self._cache_dir / "dir.lock"))
 
     @property
     def _base_dir(self) -> Path:
@@ -201,17 +208,16 @@ class _OnDiskCacheImpl(_CacheImpl):
 
         return Path(default_cache_dir(), "cache")
 
-    def _fpath_from_key(self, key: Any) -> Path:
+    def _fpath_from_key(self, key: str) -> Path:
         """Generate a file path from a cache key.
 
         Args:
-            key: The cache key to convert to a file path.
+            key: The cache key to convert to a file path (must be str).
 
         Returns:
             A Path object representing the file location for this key.
         """
-        pickled_key: bytes = utils._try_pickle_key(key)
-        return self._cache_dir / sha256(pickled_key).hexdigest()[:32]
+        return self._cache_dir / key
 
     @classmethod
     def _version_header(cls) -> bytes:
@@ -263,14 +269,14 @@ class _OnDiskCacheImpl(_CacheImpl):
         return _lock_with_timeout
 
     @override
-    def get(self, key: Any) -> Hit | None:
+    def get(self, key: str) -> Hit[bytes] | None:
         """Retrieve a value from the on-disk cache.
 
         Args:
-            key: The key to look up in the cache.
+            key: The key to look up in the cache (must be str).
 
         Returns:
-            A Hit object on cache hit where Hit.value is the cached value,
+            A Hit object on cache hit where Hit.value is the cached value (bytes),
             or None on cache miss or version mismatch.
         """
         fpath: Path = self._fpath_from_key(key)
@@ -292,15 +298,15 @@ class _OnDiskCacheImpl(_CacheImpl):
             fpath.unlink()
             return None
 
-        return Hit(value=utils._try_unpickle_value(pickled_value))
+        return Hit(value=pickled_value)
 
     @override
-    def insert(self, key: Any, value: Any) -> bool:
+    def insert(self, key: str, value: bytes) -> bool:
         """Insert a key-value pair into the on-disk cache.
 
         Args:
-            key: The key to insert.
-            value: The value to associate with the key.
+            key: The key to insert (must be str).
+            value: The value to associate with the key (must be bytes).
 
         Returns:
             True if successfully inserted, False if the key already exists
@@ -328,9 +334,8 @@ class _OnDiskCacheImpl(_CacheImpl):
         finally:
             if w_fp:
                 try:
-                    pickled_value: bytes = utils._try_pickle_value(value)
                     self._write_version_header(w_fp)
-                    w_fp.write(pickled_value)
+                    w_fp.write(value)
                     inserted = True
                 finally:
                     w_fp.close()
@@ -342,15 +347,17 @@ try:
     from .fb.implementations import _RemoteCacheImpl
 except ModuleNotFoundError:
 
-    class _RemoteCacheImpl(_CacheImpl):  # type: ignore[no-redef]
+    class _RemoteCacheImpl(_CacheImpl[bytes]):
         """Fallback remote cache implementation for non-Facebook environments.
 
         This is a no-op implementation that always raises NotImplementedError.
         The actual remote cache implementation is provided in the `.fb` module
         for Facebook-specific environments.
 
+        The value type is 'bytes' for consistency with the FB implementation.
+
         Attributes:
-            _version: Version number for cache format compatibility.
+            _version: _Version number for cache format compatibility.
             has_strong_consistency: Whether the remote cache provides strong
                                    consistency guarantees.
         """
@@ -390,11 +397,11 @@ except ModuleNotFoundError:
             return pseudo_lock
 
         @override
-        def get(self, key: Any) -> Hit | None:
+        def get(self, key: str) -> Hit[bytes] | None:
             """Raise NotImplementedError for remote cache get operations.
 
             Args:
-                key: The key to look up (ignored).
+                key: The key to look up (must be str, ignored).
 
             Raises:
                 NotImplementedError: Always raised as this is a fallback implementation.
@@ -402,12 +409,12 @@ except ModuleNotFoundError:
             raise NotImplementedError
 
         @override
-        def insert(self, key: Any, value: Any) -> bool:
+        def insert(self, key: str, value: bytes) -> bool:
             """Raise NotImplementedError for remote cache insert operations.
 
             Args:
-                key: The key to insert (ignored).
-                value: The value to insert (ignored).
+                key: The key to insert (must be str, ignored).
+                value: The value to insert (must be bytes, ignored).
 
             Raises:
                 NotImplementedError: Always raised as this is a fallback implementation.
