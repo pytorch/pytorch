@@ -22,7 +22,6 @@
 #if AT_CUDNN_ENABLED()
 #include <ATen/cudnn/cudnn-wrapper.h>
 #include <cudnn_frontend.h>
-#include <cudnn_frontend_shim.h>
 #endif
 
 #if AT_MAGMA_ENABLED()
@@ -31,6 +30,7 @@
 
 #if defined(USE_ROCM)
 #include <miopen/version.h>
+#include <hipblaslt/hipblaslt-version.h>
 #endif
 
 #ifndef USE_ROCM
@@ -382,6 +382,16 @@ long CUDAHooks::versionMIOpen() const {
 #endif
 }
 
+long CUDAHooks::versionHipBLASLt() const {
+#if AT_ROCM_ENABLED()
+  return HIPBLASLT_VERSION_MAJOR * 10000 +
+         HIPBLASLT_VERSION_MINOR * 100 +
+         HIPBLASLT_VERSION_PATCH;
+#else
+  TORCH_CHECK(false, "Cannot query HipBLASLt version if ATen_cuda is not built with ROCm");
+#endif
+}
+
 long CUDAHooks::versionCUDART() const {
 #ifdef CUDART_VERSION
   return CUDART_VERSION;
@@ -445,9 +455,18 @@ std::string CUDAHooks::showConfig() const {
 
 #if !defined(USE_ROCM)
 #if AT_CUDNN_ENABLED()
+
+
+  auto printCudnnStyleVersion = [&](size_t v) {
+    oss << (v / 1000) << '.' << (v / 100 % 10);
+    if (v % 100 != 0) {
+      oss << '.' << (v % 100);
+    }
+  };
+
   size_t cudnnVersion = cudnnGetVersion();
-  oss << "  - CuDNN runtime version ";
-  oss << cudnn_frontend::detail::convert_version_to_str(cudnnVersion);
+  oss << "  - CuDNN ";
+  printCudnnStyleVersion(cudnnVersion);
   size_t cudnnCudartVersion = cudnnGetCudartVersion();
   if (cudnnCudartVersion != CUDART_VERSION) {
     oss << "  (built against CUDA ";
@@ -456,8 +475,8 @@ std::string CUDAHooks::showConfig() const {
   }
   oss << '\n';
   if (cudnnVersion != CUDNN_VERSION) {
-    oss << "    - Built with CuDNN compile-time version";
-    oss << cudnn_frontend::detail::convert_version_to_str(CUDNN_VERSION);
+    oss << "    - Built with CuDNN ";
+    printCudnnStyleVersion(CUDNN_VERSION);
     oss << '\n';
   }
 #endif
