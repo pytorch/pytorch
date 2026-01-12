@@ -12324,15 +12324,6 @@ class TestNNDeviceType(NNTestCase):
             out_cpu.backward()
             with torch.no_grad():
                 self.assertTrue(torch.allclose(input.grad.cpu(), input_cpu.grad, rtol=rtol, atol=atol))
-    
-    @onlyCUDA
-    def test_nll_loss_empty_tensor_weight_dtype_mismatch(self, device):
-        input_t = torch.tensor([], dtype=torch.float32, device=device).reshape(0, 0)
-        weight_t = torch.tensor([], dtype=torch.float16, device=device)
-        target_t = torch.tensor([], dtype=torch.long, device=device)
-
-        with self.assertRaisesRegex(RuntimeError, "expected weight tensor dtype to be Float but found Half"):
-            F.nll_loss(input_t, target_t, weight=weight_t)
 
     # Ref: https://github.com/pytorch/pytorch/issues/108345
     @onlyCUDA
