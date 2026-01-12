@@ -257,8 +257,8 @@ class TestTensorBoardUtils(BaseTestCase):
             total_frame = s[1]
             V_input = np.swapaxes(V_input, 0, 1)
             for f in range(total_frame):
-                x = np.reshape(V_input[f], newshape=(-1))
-                y = np.reshape(V_after[f], newshape=(-1))
+                x = np.reshape(V_input[f], -1)
+                y = np.reshape(V_after[f], -1)
                 np.testing.assert_array_almost_equal(np.sum(x), np.sum(y))
 
     def test_numpy_vid_uint8(self):
@@ -267,8 +267,8 @@ class TestTensorBoardUtils(BaseTestCase):
         total_frame = V_input.shape[1]
         V_input = np.swapaxes(V_input, 0, 1)
         for f in range(total_frame):
-            x = np.reshape(V_input[f], newshape=(-1))
-            y = np.reshape(V_after[f], newshape=(-1))
+            x = np.reshape(V_input[f], -1)
+            y = np.reshape(V_after[f], -1)
             np.testing.assert_array_almost_equal(np.sum(x), np.sum(y))
 
 

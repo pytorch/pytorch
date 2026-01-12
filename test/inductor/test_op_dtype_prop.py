@@ -204,11 +204,16 @@ class TestCase(InductorTestCase):
 
         # Edge case: torch.round maps to libdevice.nearbyint.
         triton_op_name_overrides = {
-            "round": "nearbyint",
-            # torch.sqrt lowers to tl.sqrt_rn after switching away from libdevice.sqrt
-            "sqrt": "sqrt_rn",
+            "default": {
+                "round": "nearbyint",
+                # torch.sqrt lowers to tl.sqrt_rn after switching away from libdevice.sqrt
+                "sqrt": "sqrt_rn",
+            },
         }
-        override = triton_op_name_overrides.get(op_name)
+        if GPU_TYPE in triton_op_name_overrides:
+            override = triton_op_name_overrides[GPU_TYPE].get(op_name)
+        else:
+            override = triton_op_name_overrides["default"].get(op_name)
         triton_op_name = override if override is not None else torch_op_name
 
         # Get the number of args for the op.
@@ -333,6 +338,36 @@ class TestCase(InductorTestCase):
         # the original dtype.
         num_downcasts = code.count(f".to({triton_type(dtype)})")
         self.assertEqual(num_downcasts, 0 if upcast_to_fp32 else 1)
+
+    @requires_gpu()
+    @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._inductor.config.patch("_use_fp64_for_unbacked_floats", True)
+    def test_unbacked_float_uses_fp64_signature(self):
+        """
+        Test that unbacked float scalars from .item() use fp64 in kernel signature
+        and are cast down to fp32 when used with fp32 tensors.
+
+        This verifies the fix for precision loss when Python floats or unbacked
+        float symbols were hardcoded to fp32 in Triton kernel signatures.
+        """
+
+        def fn(inputs, scalar_tensor):
+            # .item() creates an unbacked float symbol that becomes a kernel arg
+            val = scalar_tensor.item()
+            return torch._foreach_mul(inputs, val)
+
+        inputs = [torch.randn(8, device=GPU_TYPE, dtype=torch.float32)]
+        scalar = torch.tensor(
+            0.333333333333333333, device=GPU_TYPE, dtype=torch.float64
+        )
+
+        compiled = torch.compile(fn, fullgraph=True)
+        code = run_and_get_triton_code(compiled, inputs, scalar)
+
+        # The unbacked float should be passed as fp64 ('ks0': 'fp64' in signature)
+        # and cast down to fp32 for use with the fp32 tensor
+        self.assertIn("'ks0': 'fp64'", code)
+        self.assertIn(".to(tl.float32)", code)
 
 
 instantiate_device_type_tests(

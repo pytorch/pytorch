@@ -146,7 +146,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         # Note: this allows us to intercept the call in call_method
         # in the typical case, we return a UserMethodVariable
         # which will directly inline
-        if name in ("_init_group", "step"):
+        if name in ("_init_group"):
             assert self.source
             return GetAttrVariable(self, name, source=AttrSource(self.source, name))
 
@@ -218,7 +218,7 @@ class OptimizerVariable(UserDefinedObjectVariable):
         """Get python values equivalent to the variable tracker args"""
 
         def map_arg(arg: Any) -> Any:
-            if isinstance(arg, ConstantVariable):
+            if isinstance(arg, VariableTracker) and arg.is_python_constant():
                 return arg.as_python_constant()
             elif isinstance(arg, ListVariable) and not arg.items:
                 return []

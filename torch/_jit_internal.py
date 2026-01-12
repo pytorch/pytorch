@@ -30,6 +30,7 @@ from typing import (  # noqa: UP035, F401  # (Dict, List, Tuple) imported by tor
     get_origin,
     List,
     Optional,
+    Protocol,
     Tuple,
     TypeVar,
     Union,
@@ -47,6 +48,10 @@ from torch._awaits import _Await
 from torch._C import _Await as CAwait, Future as CFuture
 from torch._sources import fake_range, get_source_lines_and_file, parse_def
 from torch.futures import Future
+
+
+class HasGetattr(Protocol):
+    def __getattr__(self, key: str) -> Any: ...
 
 
 _P = ParamSpec("_P")
@@ -147,7 +152,7 @@ def _qualified_name(obj, mangle_name=True) -> str:
 
     # If the module is actually a torchbind module, then we should short circuit
     if module_name == "torch._classes":
-        return obj.qualified_name  # pyrefly: ignore [missing-attribute]
+        return obj.qualified_name
 
     # The Python docs are very clear that `__module__` can be None, but I can't
     # figure out when it actually would be.
@@ -202,7 +207,7 @@ class SourceLoader:
 loader = SourceLoader()
 
 
-def createResolutionCallbackFromEnv(lookup_base):
+def createResolutionCallbackFromEnv(lookup_base: HasGetattr) -> Callable[[str], Any]:
     """
     Creates a resolution callback that will look up qualified names in an
     environment, starting with `lookup_base` for the base of any qualified
@@ -212,7 +217,7 @@ def createResolutionCallbackFromEnv(lookup_base):
     createResolutionCallbackFrom* functions.
     """
 
-    def lookupInModule(qualified_name, module):
+    def lookupInModule(qualified_name: str, module: Any) -> Any:
         if "." in qualified_name:
             base, remaining_pieces = qualified_name.split(".", maxsplit=1)
             module_value = getattr(module, base)
@@ -220,7 +225,7 @@ def createResolutionCallbackFromEnv(lookup_base):
         else:
             return getattr(module, qualified_name)
 
-    def parseNestedExpr(expr, module) -> tuple[Any, int]:
+    def parseNestedExpr(expr: str, module: Any) -> tuple[Any, int]:
         i = 0
         while i < len(expr) and expr[i] not in (",", "[", "]"):
             i += 1
@@ -231,11 +236,13 @@ def createResolutionCallbackFromEnv(lookup_base):
             return (), i
 
         base = lookupInModule(expr[:i].strip(), module)
-        assert base is not None, f"Unresolvable type {expr[:i]}"
+        if base is None:
+            raise AssertionError(f"Unresolvable type {expr[:i]}")
         if i == len(expr) or expr[i] != "[":
             return base, i
 
-        assert expr[i] == "["
+        if expr[i] != "[":
+            raise AssertionError(f"expected '[' at position {i}, got {expr[i]!r}")
         parts = []
         while expr[i] != "]":
             part_len = 0
@@ -248,12 +255,13 @@ def createResolutionCallbackFromEnv(lookup_base):
         else:
             return base[parts[0]], i + 1
 
-    def parseExpr(expr, module):
+    def parseExpr(expr: str, module: Any) -> Any:
         try:
             value, len_parsed = parseNestedExpr(expr, module)
-            assert len_parsed == len(expr), (
-                "whole expression was not parsed, falling back to c++ parser"
-            )
+            if len_parsed != len(expr):
+                raise AssertionError(
+                    "whole expression was not parsed, falling back to c++ parser"
+                )
             return value
         except Exception:
             """
@@ -267,7 +275,7 @@ def createResolutionCallbackFromEnv(lookup_base):
     return lambda expr: parseExpr(expr, lookup_base)
 
 
-def createResolutionCallbackFromFrame(frames_up: int = 0):
+def createResolutionCallbackFromFrame(frames_up: int = 0) -> Callable[[str], Any]:
     """
     Creates a function which, given a string variable name,
     returns the value of the variable in the scope of the caller of
@@ -299,16 +307,18 @@ def createResolutionCallbackFromFrame(frames_up: int = 0):
     frame = inspect.currentframe()
     i = 0
     while i < frames_up + 1:
-        assert frame is not None
+        if frame is None:
+            raise AssertionError(f"frame is None at iteration {i}")
         frame = frame.f_back
         i += 1
 
-    assert frame is not None
+    if frame is None:
+        raise AssertionError("frame is None after traversing frames_up")
     f_locals = frame.f_locals
     f_globals = frame.f_globals
 
     class env:
-        def __getattr__(self, key):
+        def __getattr__(self, key: str) -> Any:
             if key in f_locals:
                 return f_locals[key]
             elif key in f_globals:
@@ -377,7 +387,7 @@ def get_closure(fn):
 # This could be worked around by manually adding it to `global()` dictionary.
 
 
-def createResolutionCallbackFromClosure(fn):
+def createResolutionCallbackFromClosure(fn) -> Callable[[str], Any]:
     """
     Create a resolutionCallback by introspecting the function instead of
     looking up the stack for the enclosing scope
@@ -387,7 +397,7 @@ def createResolutionCallbackFromClosure(fn):
     class closure_lookup:
         # This is a class since `closure` is a dict and it's easier in
         # `env_helper` if everything just works with `getattr` calls
-        def __getattr__(self, key):
+        def __getattr__(self, key: str) -> Any:
             if key in closure:
                 return closure[key]
             elif hasattr(typing, key):
@@ -560,7 +570,7 @@ def get_type_hint_captures(fn):
     return annotation_to_type
 
 
-def createResolutionCallbackForClassMethods(cls):
+def createResolutionCallbackForClassMethods(cls: type) -> Callable[[str], Any]:
     """
     This looks at all the methods defined in a class and pulls their closed-over
     variables into a dictionary and uses that to resolve variables.
@@ -582,7 +592,7 @@ def createResolutionCallbackForClassMethods(cls):
         captures.update(get_closure(fn))
         captures.update(get_type_hint_captures(fn))
 
-    def lookup_in_class(key):
+    def lookup_in_class(key: str) -> Any:
         if key in captures:
             return captures[key]
         else:
@@ -759,7 +769,7 @@ def unused(fn: Callable[_P, _R]) -> Callable[_P, _R]:
                 prop.fset, "_torchscript_modifier", FunctionModifiers.UNUSED
             )
 
-        return prop  # pyrefly: ignore [bad-return]
+        return prop
 
     fn._torchscript_modifier = FunctionModifiers.UNUSED  # type: ignore[attr-defined]
     return fn
@@ -1044,13 +1054,13 @@ def get_class_name_lineno(method) -> tuple[str, int]:
     current_frame = inspect.currentframe()
 
     # one for the get_class_name call, one for _overload_method call
-    for _ in range(2):
-        assert (
-            current_frame is not None
-        )  # assert current frame is not an Optional[FrameType]
+    for i in range(2):
+        if current_frame is None:
+            raise AssertionError(f"current_frame is None at iteration {i}")
         current_frame = current_frame.f_back
 
-    assert current_frame is not None  # same here
+    if current_frame is None:
+        raise AssertionError("current_frame is None after traversing frames")
     class_name = current_frame.f_code.co_name
     line_no = current_frame.f_code.co_firstlineno
     return class_name, line_no
@@ -1242,7 +1252,10 @@ def _get_named_tuple_properties(
     if loc is None:
         loc = fake_range()
 
-    assert issubclass(obj, tuple) and hasattr(obj, "_fields")
+    if not issubclass(obj, tuple) or not hasattr(obj, "_fields"):
+        raise AssertionError(
+            f"expected namedtuple (tuple subclass with _fields), got {obj}"
+        )
     if hasattr(obj, "_field_defaults"):
         defaults = [
             obj._field_defaults[field]
@@ -1447,7 +1460,6 @@ def container_checker(obj, target_type) -> bool:
                 return False
         return True
     elif origin_type is Union or issubclass(
-        # pyrefly: ignore [bad-argument-type]
         origin_type,
         BuiltinUnionType,
     ):  # also handles Optional

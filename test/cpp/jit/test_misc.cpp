@@ -143,7 +143,7 @@ TEST(FromQualStringTest, Basic) {
     try {
       Symbol::fromQualString(input);
       ASSERT_TRUE(0);
-    } catch (const std::exception& c) {
+    } catch (const std::exception&) {
     }
   }
 }
@@ -2395,7 +2395,7 @@ def a(x, y:int=1):
   try {
     compile(text_non_hinted);
     ASSERT_TRUE(0);
-  } catch (const std::exception& c) {
+  } catch (const std::exception&) {
   }
 
   auto cu = compile(text_hinted);
