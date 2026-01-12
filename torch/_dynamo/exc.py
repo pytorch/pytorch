@@ -104,6 +104,13 @@ class SpeculationRestartAnalysis(RestartAnalysis):
     pass
 
 
+class AutogradGradRestartAnalysis(RestartAnalysis):
+    """Raised when autograd.grad consumed grad_fns that are returned.
+
+    On restart, autograd.grad will graph break instead of being traced.
+    """
+
+
 class UnspecializeRestartAnalysis(RestartAnalysis):
     pass
 
