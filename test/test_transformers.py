@@ -2986,6 +2986,7 @@ class TestSDPACudaOnly(NNTestCase):
 
     @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
+    @unittest.skipIf(not torch.backends.cudnn.version() >= 91800, "cuDNN 9.18.0.64 is needed for correct support")
     @parametrize("dtype", [torch.bfloat16, torch.half])
     def test_cudnn_attention_varlen(self, dtype):
         from typing import Any, Optional
