@@ -395,6 +395,7 @@ class _NodePickleData:
         if options.ignore_metadata_fields:
             self.meta = self.meta.copy()
             for k in options.ignore_metadata_fields:
+                self.meta.pop(k, None)
 
     def unpickle(
         self,

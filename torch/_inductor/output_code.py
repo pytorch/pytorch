@@ -50,7 +50,6 @@ from torch._inductor.utils import (
     output_node,
     set_tracing_context_output_strides,
 )
-from torch.autograd.profiler import record_function
 from torch.fx._graph_pickler import _ops_filter_safe
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_in_torch_dispatch_mode
@@ -1064,7 +1063,7 @@ class RegionalOutputCode(OutputCode):
             self._serialized_graph_module = GraphPickler.dumps(
                 graph_module,
                 options=Options(
-                    Options(ops_filter=self._ops_filter),
+                    ops_filter=self._ops_filter,
                     ignore_metadata_fields=(
                         "source_fn_stack",
                         "nn_module_stack",
