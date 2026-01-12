@@ -50,6 +50,8 @@ from torch._inductor.utils import (
     output_node,
     set_tracing_context_output_strides,
 )
+from torch.autograd.profiler import record_function
+from torch.fx._graph_pickler import _ops_filter_safe
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_in_torch_dispatch_mode
 
@@ -945,10 +947,21 @@ class RegionalOutputCode(OutputCode):
         default=None, init=False
     )
 
-    def __init__(self, graph_module: torch.nn.Module):
+    # Optional filter for ops during serialization
+    _ops_filter: Callable[[str], bool] | None = dataclasses.field(
+        default=None, init=False
+    )
+
+    def __init__(
+        self,
+        graph_module: torch.fx.GraphModule,
+        ops_filter: Callable[[str], bool] = _ops_filter_safe,
+    ):
         """
         Args:
             graph_module: The torch.fx.GraphModule returned by regional_inductor
+            ops_filter: Optional filter function for op names during serialization.
+                If provided, only ops whose name passes the filter will be serialized.
         """
         super().__init__()
         self._graph_module = graph_module
@@ -959,6 +972,7 @@ class RegionalOutputCode(OutputCode):
         self._inner_boxed_call = isinstance(
             module.graph._codegen, torch.fx.graph._BoxedCodeGen
         )
+        self._ops_filter = ops_filter
 
     def __call__(self, inputs: Sequence[Any]) -> Any:
         """Execute the regional compiled graph."""
@@ -1050,7 +1064,7 @@ class RegionalOutputCode(OutputCode):
             self._serialized_graph_module = GraphPickler.dumps(
                 graph_module,
                 options=Options(
-                    ops_filter=None,
+                    Options(ops_filter=self._ops_filter),
                     ignore_metadata_fields=(
                         "source_fn_stack",
                         "nn_module_stack",
