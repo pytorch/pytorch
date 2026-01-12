@@ -85,7 +85,7 @@ def global_ranks(layout: _MeshLayout, world_size: int) -> list[list[int]]:
         [12+0, 12+1, 12+2, 12+3],  # → [12,13,14,15]
     ]
     """
-    flat_layout = layout.merge_axes_into_one()
+    flat_layout = layout.collapse()
     return [
         [offset + rank for rank in flat_layout.codomain()]
         for offset in flat_layout.complement(world_size).codomain()

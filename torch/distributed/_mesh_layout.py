@@ -198,6 +198,40 @@ class _FlatLayout:
             for coord in product(*(range(s) for s in self.shape))
         ]
 
+    def check_non_overlap(self) -> bool:
+        """
+        Check if the layout has any overlap between the ranks it generates. If there is overlap,
+        we return False, otherwise True.
+
+        The layout is supposed to be injective i.e, aside from indice 0, indices from each
+        dim of the layout must be non-overlapping.
+
+        Example 1 - Valid (no overlap):
+        Layout: sizes=(2,3), strides=(6,1)
+        - Dim 1: stride=1, span=3*1=3, covers indices [0,1,2]
+        - Dim 0: stride=6, span=2*6=12, covers indices [0,6]
+        → No overlap since 6 > 3
+
+        Example 2 - Invalid (overlap):
+        Layout: sizes=(2,3), strides=(2,1)
+        - Dim 1: stride=1, span=3*1=3, covers indices [0,1,2]
+        - Dim 0: stride=2, span=2*2=4, covers indices [0,2]
+        → Overlap! stride=2 < span=3, so indices [0,2] are duplicated
+
+        Example 3 - Invalid (overlap):
+        Layout: sizes=(4,2), strides=(1,1)
+        - Dim 1: stride=1, span=4, covers indices [0,1,2,3]
+        - Dim 0: stride=1, span=2, covers indices [0,1]
+        → Overlap! stride is same for two dims, so indices [0,2] are duplicated
+
+        Returns:
+            bool: True if no overlap, False if overlap detected
+        """
+        return all(
+            self.stride[i] % (self.stride[i+1] * self.shape[i+1]) == 0
+            for i in range(len(self.stride) - 1)
+        )
+
     def to_pycute(self) -> Layout:
         """Convert to a pycute Layout for compatibility with pycute operations."""
         if not self.shape:
@@ -283,7 +317,7 @@ class _ListOfFlatLayouts(Sequence[_FlatLayout]):
     def cosize(self) -> int:
         return self.to_pycute().cosize()
 
-    def merge_axes_into_one(self) -> _FlatLayout:
+    def collapse(self) -> _FlatLayout:
         """
         Merge all axes into a single _FlatLayout.
 
@@ -312,37 +346,8 @@ class _ListOfFlatLayouts(Sequence[_FlatLayout]):
         new_axes[start:end] = list(layout.axes)
         return _ListOfFlatLayouts(new_axes)
 
-    def check_non_overlap(self) -> bool:
-        """
-        Check if the layout has any overlap between the ranks it generates. If there is overlap,
-        we return False, otherwise True.
-
-        The layout is supposed to be injective i.e, aside from indice 0, indices from each
-        dim of the layout must be non-overlapping.
-
-        Example 1 - Valid (no overlap):
-        Layout: sizes=(2,3), strides=(6,1)
-        - Dim 1: stride=1, span=3*1=3, covers indices [0,1,2]
-        - Dim 0: stride=6, span=2*6=12, covers indices [0,6]
-        → No overlap since 6 > 3
-
-        Example 2 - Invalid (overlap):
-        Layout: sizes=(2,3), strides=(2,1)
-        - Dim 1: stride=1, span=3*1=3, covers indices [0,1,2]
-        - Dim 0: stride=2, span=2*2=4, covers indices [0,2]
-        → Overlap! stride=2 < span=3, so indices [0,2] are duplicated
-
-        Example 3 - Invalid (overlap):
-        Layout: sizes=(4,2), strides=(1,1)
-        - Dim 1: stride=1, span=4, covers indices [0,1,2,3]
-        - Dim 0: stride=1, span=2, covers indices [0,1]
-        → Overlap! stride is same for two dims, so indices [0,2] are duplicated
-
-        Returns:
-            bool: True if no overlap, False if overlap detected
-        """
-        ranks = self.merge_axes_into_one().codomain()
-        return len(ranks) == len(set(ranks))
+    def check_not_overlap(self) -> bool:
+        return self.collapse().check_not_overlap()
 
     def remap_to_tensor(self, rank_map: torch.Tensor) -> torch.Tensor:
         """
@@ -382,7 +387,7 @@ class _ListOfFlatLayouts(Sequence[_FlatLayout]):
         assert rank_map.is_contiguous()
         assert rank_map.numel() >= self.cosize()
 
-        self_layout = self.merge_axes_into_one()
+        self_layout = self.collapse()
         complement_layout = self_layout.complement(rank_map.numel())
 
         return rank_map.as_strided(

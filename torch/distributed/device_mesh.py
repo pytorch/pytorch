@@ -741,7 +741,7 @@ else:
                     f"Please specify another valid mesh_dim_name.",
                 )
 
-            flattened_mesh_layout = _MeshLayout([self._layout.merge_axes_into_one()])
+            flattened_mesh_layout = _MeshLayout([self._layout.collapse()])
             # Quick return if the flatten mesh has been created before.
             if mesh_dim_name in root_mesh._flatten_mapping:
                 if (
@@ -850,7 +850,7 @@ else:
             # This needs to be in ascending order.
             pre_stride = -1
             for axis in reversed(layout_sliced):
-                all_strides = axis.strides
+                all_strides = axis.stride
                 if len(all_strides) == 0:
                     continue
                 # Note that with CuTe layout, we can support slicing flattened non-contiguous mesh dims with no problem.
@@ -871,13 +871,13 @@ else:
             # there is layout overlap.
             # TODO: Eventually we will just directly throw error here because
             # we will deprecate the slicing of flattened dim_name from root mesh.
-            layout_sliced = _MeshLayout(layout_sliced)
-            if not layout_sliced.check_non_overlap():
+            result_layout = _MeshLayout(layout_sliced)
+            if not result_layout.check_non_overlap():
                 raise RuntimeError(
                     f"Slicing overlapping dim_names {mesh_dim_names} is not allowed."
                 )
 
-            return layout_sliced
+            return result_layout
 
         # TODO: to make this use case by other components public API in the future.
         def _get_all_submeshes(self, mesh_dim_name: str) -> list["DeviceMesh"]:
