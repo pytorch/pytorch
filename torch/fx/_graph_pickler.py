@@ -3,7 +3,7 @@ import importlib
 import io
 import pickle
 from abc import abstractmethod
-from collections.abc import Callable, Sequence
+from collections.abc import Callable
 from typing import Any, NewType, Optional, TypeVar, Union
 from typing_extensions import override, Self
 
@@ -44,6 +44,7 @@ class Options:
     # A filter for which ops will cause the pickler to raise a
     # BypassFxGraphCache exception. If None then all ops are allowed.
     ops_filter: Optional[Callable[[str], bool]] = _ops_filter_safe
+
 
 class GraphPickler(pickle.Pickler):
     """

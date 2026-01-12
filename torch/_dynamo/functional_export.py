@@ -675,6 +675,7 @@ def normalize_graph_module(gm: torch.fx.GraphModule) -> None:
 def dynamo_graph_capture_for_export(
     mod: Callable[..., Any],
     constraints: Optional[list[Constraint]] = None,
+    restore_state_dict: bool = False,
 ) -> Callable[..., Any]:
     def inner(*args: Any, **kwargs: Any) -> Any:
         assert not torch._dynamo.config.install_free_tensors
@@ -745,7 +746,7 @@ def dynamo_graph_capture_for_export(
         tracing_context = TracingContext(graph_module.meta["fake_mode"])
         tracing_context.tensor_to_context = out.backend_input.tensor_to_context  # type: ignore[attr-defined]
         graph_module.meta["tracing_context"] = tracing_context
-        if isinstance(mod, torch.nn.Module):
+        if restore_state_dict:
             _restore_state_dict(mod, graph_module)
         return graph_module
 
