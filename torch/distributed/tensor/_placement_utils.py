@@ -4,8 +4,11 @@
 from collections.abc import Callable
 from dataclasses import dataclass, field
 from enum import Enum
+from typing import cast, TypeVar
 
 import torch
+from torch import sym_min
+from torch.distributed import RankType
 from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._collective_utils import (
@@ -13,6 +16,9 @@ from torch.distributed.tensor._collective_utils import (
     pad_tensor,
     unpad_tensor,
 )
+
+
+_RankTypeT = TypeVar("_RankTypeT", bound=RankType)
 
 
 class PadType(Enum):
@@ -67,32 +73,36 @@ def _shard_compute_padding_info(
 def _shard_local_size_and_offset(
     curr_local_size: int,
     num_chunks: int,
-    rank: int,
-) -> tuple[int, int]:
+    rank: _RankTypeT,
+) -> tuple[int, _RankTypeT]:
     """
-    Compute local shard size and offset for a regular Shard placement.
+    Given the size of the current local tensor (which may already be sharded on some dimensions),
+    computes the new local shard size and offset given the desired number of chunks
+    (num_chunks is generally equal to the size of the current sharding dim).
 
-    Args:
-        curr_local_size: The current size of the tensor dimension to be sharded.
-        num_chunks: Number of chunks to split into.
-        rank: The rank index.
+    Note: new local shard offset is relative to the current sharded tensor, not the global tensor.
+    See `_utils.compute_local_shape_and_global_offset` for computing global offset.
 
-    Returns:
-        A tuple of (local_shard_size, offset).
+    Returns (new local shard size, offset)
+
     """
+    # Compute the chunk size inline with ``torch.chunk``
     if curr_local_size % num_chunks == 0:
         full_chunk_size = curr_local_size // num_chunks
-        return full_chunk_size, full_chunk_size * rank
+        # pyrefly: ignore[bad-assignment] # pyrefly bug?
+        shard_starting_idx: _RankTypeT = full_chunk_size * rank
+        return full_chunk_size, shard_starting_idx
 
     # uneven sharding case
     full_chunk_size = (curr_local_size + num_chunks - 1) // num_chunks
-    shard_starting_idx = full_chunk_size * rank
+    # pyrefly: ignore[bad-assignment] # pyrefly bug?
+    shard_starting_idx: _RankTypeT = full_chunk_size * rank
 
     if curr_local_size < shard_starting_idx:
-        return 0, curr_local_size
+        return 0, cast(_RankTypeT, curr_local_size)
     else:
         local_shard_size = (
-            min(curr_local_size, shard_starting_idx + full_chunk_size)
+            sym_min(curr_local_size, shard_starting_idx + full_chunk_size)
             - shard_starting_idx
         )
         return local_shard_size, shard_starting_idx
@@ -381,11 +391,11 @@ def _strided_split_tensor(
 
 @maybe_run_for_local_tensor
 def _strided_local_size_and_offset(
-    shard_dim: int,
-    split_factor: int,
+    shard_dim,
+    split_factor,
     curr_local_size: int,
     num_chunks: int,
-    rank: int,
+    rank: RankType,
     return_first_offset: bool = True,
 ) -> tuple[int, list[int] | int]:
     """
@@ -396,23 +406,26 @@ def _strided_local_size_and_offset(
     This method computes the actual indices that belong to the local shard.
 
     Args:
-        shard_dim: The tensor dimension being sharded.
-        split_factor: The split factor for the _StridedShard placement.
-        curr_local_size: The current size of the tensor dimension to be sharded.
-        num_chunks: Number of chunks to split the dimension into.
-        rank: The rank index to compute the shard for.
-        return_first_offset: If True, return only the first offset as an int.
+        self (_StridedShard): The _StridedShard placement instance.
+        curr_local_size (int): The current size of the tensor dimension to be sharded.
+        num_chunks (int): Number of chunks to split the dimension into (typically the mesh dimension size).
+        rank (int): The rank index to compute the shard for.
+        return_first_offset (bool): If True, return only the first offset as an int. If False,
+            return all offsets as a list. Defaults to True.
 
     Returns:
-        A tuple containing:
-            - local_shard_size: The number of elements in the local shard for this rank.
-            - offset: If return_first_offset is True, returns the first offset
-              as an int (-1 for empty shards). If False, returns a list of all offsets.
+        tuple: A tuple containing:
+            - local_shard_size (int): The number of elements in the local shard for this rank.
+            - offset (int | list[int]): If return_first_offset is True, returns the first offset
+                as an int. If False or if the shard size is 0, returns a list of all offsets
+                (which may be empty for empty shards).
     """
     # indices_tensor is 1D torch.arange(logical_dim_size) unsqueezed
-    # so that we can reuse _strided_split_tensor which splits on shard_dim
+    # so that we can reuse self._split_tensor which splits on self.dim
     shape = [1] * shard_dim + [curr_local_size]
-    indices_tensor = torch.arange(curr_local_size).view(shape)
+    indices_tensor = torch.arange(
+        curr_local_size,
+    ).view(shape)
 
     sharded_indices, _ = _strided_split_tensor(
         indices_tensor,
