@@ -1,4 +1,5 @@
 # mypy: allow-untyped-defs
+import abc
 import dataclasses
 import functools
 import os
@@ -6,15 +7,14 @@ import platform
 import re
 import subprocess
 import sys
-import abc
 import warnings
+
 from collections.abc import Callable
-from typing import Any, Dict, List, Optional, Union, ClassVar
+from typing import Any, ClassVar, Optional, Union
 
 import torch
 from torch._inductor import config
 from torch._inductor.utils import python_subprocess_env
-
 
 _IS_WINDOWS = sys.platform == "win32"
 
@@ -51,27 +51,23 @@ class VecISA(abc.ABC):
     # also needs the logic
     # In fbcode however, we are using the same compiler for pytorch and for inductor codegen,
     # making the runtime check unnecessary.
-    
+
     _bit_width: ClassVar[int]
     _macro: ClassVar[list[str]]
     _arch_flags: ClassVar[str]
     _dtype_nelements: ClassVar[dict[torch.dtype, int]]
-
     _avx_code: ClassVar[str] = """
 #if defined(CPU_CAPABILITY_AVX512) || defined(CPU_CAPABILITY_AVX2) || defined(CPU_CAPABILITY_ZVECTOR) || defined(CPU_CAPABILITY_NEON) || defined(CPU_CAPABILITY_VSX) || defined(CPU_CAPABILITY_SVE)
 #include <ATen/cpu/vec/functional.h>
 #include <ATen/cpu/vec/vec.h>
 #endif
-
 alignas(64) float in_out_ptr0[16] = {0.0};
-
 extern "C" void __avx_chk_kernel() {
     auto tmp0 = at::vec::Vectorized<float>(1);
     auto tmp1 = tmp0.exp();
     tmp1.store(in_out_ptr0);
 }
 """  # noqa: B950
-
     _avx_py_load: ClassVar[str] = """
 import torch
 from ctypes import cdll
@@ -91,7 +87,6 @@ cdll.LoadLibrary("__lib_path__")
         return self._arch_flags
 
     # No manual __hash__ needed: frozen=True generates a safe and correct one.
-
     def check_build(self, code: str) -> bool:
         from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT, write
         from torch._inductor.cpp_builder import (
@@ -125,7 +120,6 @@ cdll.LoadLibrary("__lib_path__")
                 )
                 if not os.path.isfile(output_path):
                     x86_isa_help_builder.build()
-
                 # Check build result
                 subprocess.check_call(
                     [
@@ -139,7 +133,6 @@ cdll.LoadLibrary("__lib_path__")
                 )
             except Exception:
                 return False
-
             return True
 
     def __bool__(self) -> bool:
@@ -149,10 +142,8 @@ cdll.LoadLibrary("__lib_path__")
     def __bool__impl(self, vec_isa_ok: Optional[bool]) -> bool:
         if vec_isa_ok is not None:
             return vec_isa_ok
-
         if config.is_fbcode():
             return True
-
         return self.check_build(self._avx_code)
 
     @abc.abstractmethod
@@ -172,8 +163,6 @@ class VecNEON(VecISA):
             return "neon"
         return "asimd"  # detects the presence of advanced SIMD on armv8-a kernels
 
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
-
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class VecSVE256(VecISA):
@@ -186,15 +175,12 @@ class VecSVE256(VecISA):
         "__ARM_FEATURE_BF16",
     ]
     _arch_flags = "-march=armv8-a+sve+bf16 -msve-vector-bits=256"
-
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
     def __str__(self) -> str:
         if config.is_fbcode():
             return "neon"
         return "asimd"
-
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -212,19 +198,15 @@ class VecAVX512(VecISA):
     def __str__(self) -> str:
         return "avx512"
 
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
-
     _avx512_bf16_code = """
 #include <cstdint>
 #include <immintrin.h>
-
 extern "C" __m512bh __avx512_bf16_chk_kernel(__m512 a, __m512 b) {
     return _mm512_cvtne2ps_pbh(a, b);
 }
 """
 
     @functools.cache  # noqa: B019
-    # pyrefly: ignore [bad-override]
     def __bool__(self) -> bool:
         if super().__bool__():
             if config.is_fbcode():
@@ -233,21 +215,18 @@ extern "C" __m512bh __avx512_bf16_chk_kernel(__m512 a, __m512 b) {
             if torch.cpu._is_avx512_bf16_supported() and not _IS_WINDOWS:
                 # save _arch_flags
                 base_flags = self._arch_flags
-                
-                # --- CHANGE START ---
+
                 # temporarily change _arch_flags for avx512_bf16 check_build
                 # We use object.__setattr__ to bypass frozen=True/slots=True constraints
                 # We use type: ignore[misc] to bypass the ClassVar mutation check
-                object.__setattr__(self, "_arch_flags", base_flags + " -mavx512bf16") # type: ignore[misc]
-                
+                object.__setattr__(self, "_arch_flags", base_flags + " -mavx512bf16")  # type: ignore[misc]
+
                 if self.check_build(self._avx512_bf16_code):
                     # Direct mutation fails on frozen dataclass, use setattr hack
                     object.__setattr__(self, "_is_avx512_bf16_supported", True)
-                
-                # restore _arch_flags
-                object.__setattr__(self, "_arch_flags", base_flags) # type: ignore[misc]
-                # --- CHANGE END ---
 
+                # restore _arch_flags
+                object.__setattr__(self, "_arch_flags", base_flags)  # type: ignore[misc]
             return True
         return False
 
@@ -275,18 +254,15 @@ class VecAVX512VNNI(VecAVX512):
     }
 
     def __str__(self) -> str:
-        return super().__str__() + " avx512_vnni"
-
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
+        # Avoid using super().__str__() to prevent TypeError with frozen dataclasses/slots
+        return "avx512 avx512_vnni"
 
     _avx512_vnni_code = """
 #include <cstdint>
 #include <immintrin.h>
-
 extern "C" __m256i __avx512_vnni_chk_kernel_1(__m256i src, __m256i a, __m256i b) {
     return _mm256_dpbusd_epi32(src, a, b);
 }
-
 extern "C" __m512i __avx512_vnni_chk_kernel_2(__m512i src, __m512i a, __m512i b) {
     return _mm512_dpbusd_epi32(src, a, b);
 }
@@ -317,14 +293,12 @@ class VecAMX(VecAVX512VNNI):
     _is_amx_fp16_supported = False
 
     def __str__(self) -> str:
-        return super().__str__() + " amx_tile"
-
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__
+        # Avoid using super().__str__() to prevent TypeError with frozen dataclasses/slots
+        return "avx512 avx512_vnni amx_tile"
 
     _amx_code = """
 #include <cstdint>
 #include <immintrin.h>
-
 struct amx_tilecfg {
   uint8_t palette_id;
   uint8_t start_row;
@@ -332,7 +306,6 @@ struct amx_tilecfg {
   uint16_t colsb[16];
   uint8_t rows[16];
 };
-
 extern "C" void __amx_chk_kernel() {
   amx_tilecfg cfg = {0};
   _tile_loadconfig(&cfg);
@@ -341,7 +314,6 @@ extern "C" void __amx_chk_kernel() {
   _tile_dpbusd(0, 1, 2);
 }
 """
-
     _amx_fp16_code = _amx_code.replace("_tile_dpbf16ps", "_tile_dpfp16ps")
 
     @functools.cache  # noqa: B019
@@ -354,16 +326,15 @@ extern "C" void __amx_chk_kernel() {
                 if torch.cpu._is_amx_fp16_supported():
                     # save _arch_flags
                     base_flags = self._arch_flags
-                    
+
                     # temporarily change _arch_flags for amx-fp16 check_build
-                    object.__setattr__(self, "_arch_flags", base_flags + " -mamx-fp16") # type: ignore[misc]
-                    
+                    object.__setattr__(self, "_arch_flags", base_flags + " -mamx-fp16")  # type: ignore[misc]
+
                     if self.check_build(VecAMX._amx_fp16_code):
                         object.__setattr__(self, "_is_amx_fp16_supported", True)
-                    
-                    # restore _arch_flags
-                    object.__setattr__(self, "_arch_flags", base_flags) # type: ignore[misc]
 
+                    # restore _arch_flags
+                    object.__setattr__(self, "_arch_flags", base_flags)  # type: ignore[misc]
                 return True
         return False
 
@@ -394,8 +365,6 @@ class VecAVX2(VecISA):
     def __str__(self) -> str:
         return "avx2"
 
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
-
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class VecZVECTOR(VecISA):
@@ -411,8 +380,6 @@ class VecZVECTOR(VecISA):
     def __str__(self) -> str:
         return "zvector"
 
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
-
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class VecVSX(VecISA):
@@ -423,8 +390,6 @@ class VecVSX(VecISA):
 
     def __str__(self) -> str:
         return "vsx"
-
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
 class InvalidVecISA(VecISA):
@@ -438,8 +403,6 @@ class InvalidVecISA(VecISA):
 
     def __bool__(self) -> bool:  # type: ignore[override]
         return False
-
-    __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
 def x86_isa_checker() -> list[str]:
@@ -486,7 +449,7 @@ def get_isa_from_cpu_capability(
     capability: Union[str, None],
     vec_isa_list: list[VecISA],
     invalid_vec_isa: InvalidVecISA,
-):
+) -> VecISA:
     # AMX setting is not supported in eager
     # VecAMX will be prioritized for selection when setting ATEN_CPU_CAPABILITY to avx512
     # TODO add sve256 support
@@ -498,7 +461,6 @@ def get_isa_from_cpu_capability(
         "avx512": "avx512",
     }
     if capability in capability_to_isa_str:
-        # pyrefly: ignore [bad-index, index-error]
         isa_str = capability_to_isa_str[capability]
         if isa_str == "INVALID_VEC_ISA":
             return invalid_vec_isa
@@ -545,7 +507,6 @@ def valid_vec_isa_list() -> list[VecISA]:
             isa_list.append(VecSVE256())
         else:
             isa_list.append(VecNEON())
-
     elif arch in ["x86_64", "AMD64"]:
         """
         arch value is x86_64 on Linux, and the value is AMD64 on Windows.
