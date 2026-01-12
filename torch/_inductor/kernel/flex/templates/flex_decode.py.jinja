@@ -168,6 +168,7 @@
         q, K, V,
         None,  # KV_OFFSETS not used since HAS_OFFSETS=False
         desc_k, desc_v, Q_LEN, KV_LEN,
+        Q_LEN, KV_LEN,  # LOGICAL_Q/KV_LEN = Q/KV_LEN for non-varlen
         # accumulated values
         acc, l_i, m_i,
         # offsets
@@ -208,6 +209,7 @@
             q, K, V,
             None,  # KV_OFFSETS not used since HAS_OFFSETS=False
             desc_k, desc_v, Q_LEN, KV_LEN,
+            Q_LEN, KV_LEN,  # LOGICAL_Q/KV_LEN = Q/KV_LEN for non-varlen
             # accumulated values
             acc, l_i, m_i,
             # offsets
