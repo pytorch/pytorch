@@ -3156,6 +3156,13 @@ class CommonTemplate:
             ),
         )
 
+    def test_view_copy_dtype_change(self):
+        def fn(x, dtype):
+            return torch.ops.aten.view_copy(x, dtype=dtype)
+
+        x = torch.randint(2, 32, (8, 16), dtype=torch.int32, device=self.device)
+        self.common(fn, (x, torch.int64))
+
     def test_torch_device_split(self):
         def fn(x):
             return x.split(2)
@@ -13566,6 +13573,10 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             elements = torch.tensor([1, 2, 3, 4])
             test_elements = 1
             self.common(torch.isin, (elements, test_elements), {"invert": invert})
+
+        elements = torch.tensor(3.0)
+        test_elements = torch.tensor([1.0, 2.0, 3.0, 4.0, 5.0])
+        self.common(torch.isin, (elements, test_elements), {"assume_unique": True})
 
     def test_mul_index_expr(self):
         # Minified repro from https://github.com/pytorch/pytorch/issues/111884

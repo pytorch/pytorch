@@ -1,4 +1,5 @@
 #  Copyright (c) Meta Platforms, Inc. and affiliates
+import functools
 import logging
 from collections.abc import Callable, Sequence
 from typing import Any, cast, Optional, TypeAlias, TypeVar, Union
@@ -59,6 +60,7 @@ def _insert_single_dim_replication_strategy(
     single_dim_strategies_with_placeholders: list[
         list[Placement | _ShardingPlaceholder]
     ],
+    num_outputs: int,
     num_input_tensors: int,
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     """
@@ -67,7 +69,7 @@ def _insert_single_dim_replication_strategy(
     for strategy in single_dim_strategies_with_placeholders:
         assert not all(isinstance(p, Replicate) for p in strategy)
     single_dim_strategies_with_placeholders.append(
-        [Replicate()] * (1 + num_input_tensors)
+        [Replicate()] * (num_outputs + num_input_tensors)
     )
     return single_dim_strategies_with_placeholders
 
@@ -97,9 +99,8 @@ def _fill_single_dim_strategy_placeholders(
         if isinstance(placement, _StridedShard):
             key = f"StridedShard(sf={placement.split_factor})"
             if key not in shard_builders:
-                sf = placement.split_factor
-                shard_builders[key] = lambda tensor_dim: _StridedShard(
-                    tensor_dim, split_factor=sf
+                shard_builders[key] = functools.partial(
+                    _StridedShard, split_factor=placement.split_factor
                 )
         elif isinstance(placement, Shard):
             key = "Shard()"
@@ -180,6 +181,7 @@ def _expand_single_dim_strategy_to_mesh(
     # Note: circular import, failed to untangle with #168221, reverted
     from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 
+    @functools.lru_cache
     def _create_expanded_strategy(
         op_schema: OpSchema,
         output_tensor_meta: TensorMeta | Sequence[TensorMeta | None],
@@ -197,6 +199,12 @@ def _expand_single_dim_strategy_to_mesh(
             unique_input_placements = _get_unique_placements(op_schema)
             num_inputs = _get_num_tensor_inputs(op_schema)
 
+            # Compute num_outputs from output_tensor_meta
+            if isinstance(output_tensor_meta, TensorMeta):
+                num_outputs = 1
+            else:
+                num_outputs = len(output_tensor_meta)
+
             # Note: Trees vs Flat Lists
             # -------------------------
             # op_schema.args_schema may contain a TupleStrategy with child strategies for List[Tensor] inputs.
@@ -210,7 +218,7 @@ def _expand_single_dim_strategy_to_mesh(
                 op, args_schema, kwargs_schema
             )
             strategies_over_one_mesh_dim = _insert_single_dim_replication_strategy(
-                strategies_over_one_mesh_dim, num_inputs
+                strategies_over_one_mesh_dim, num_outputs, num_inputs
             )
             expanded_strategies_over_one_mesh_dim = (
                 _fill_single_dim_strategy_placeholders(
@@ -226,6 +234,7 @@ def _expand_single_dim_strategy_to_mesh(
                 op_schema,
                 cast(list[PlacementList], expanded_strategies_over_one_mesh_dim),
                 output_tensor_meta=output_tensor_meta,
+                input_index=num_outputs,
             )
 
         return expanded_strategy
@@ -299,7 +308,6 @@ def _expand_single_dim_strategy_to_mesh(
                 output_tensor_meta,  # type: ignore[arg-type]
                 tensorlist_i,
             )
-            # TODO: enrich OpSchema._comparison_key so we can lru_cache this (for starters, it doesn't include placements)
             per_index_strategy = _create_expanded_strategy(
                 per_index_schema, per_index_output_meta
             )
