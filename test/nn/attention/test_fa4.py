@@ -5,6 +5,7 @@ import itertools
 import unittest
 from collections import namedtuple
 from contextlib import contextmanager
+from unittest.mock import patch
 
 import torch
 import torch.nn.functional as F
@@ -515,6 +516,62 @@ class TestFlashAttentionFA4(TestCase):
 
         for permute_order in permute_orders:
             test_attention(list(permute_order) + [3])
+
+    @unittest.skipUnless(_fa4_dependencies_available(), "FA4 backend unavailable")
+    @parametrize("deterministic", [False, True])
+    def test_deterministic_flag_passed_to_backward(self, device, deterministic):
+        """Test that deterministic flag is correctly passed through to FA4 backward kernel."""
+        from torch.nn.attention import _fa4
+
+        shape = SdpaShape(2, 4, 512, 128)
+        q = torch.randn(shape, dtype=torch.float16, device=device, requires_grad=True)
+        k = torch.randn(shape, dtype=torch.float16, device=device, requires_grad=True)
+        v = torch.randn(shape, dtype=torch.float16, device=device, requires_grad=True)
+
+        torch.use_deterministic_algorithms(deterministic)
+
+        try:
+            _fa4._fa4_import_module.cache_clear()
+
+            with patch("torch.nn.attention._fa4._fa4_import_module") as mock_import:
+                mock_module = mock_import.return_value
+
+                # FA4 uses BSHD layout internally, so mock returns BSHD
+                q_transposed = q.transpose(1, 2)
+                mock_module._flash_attn_fwd.return_value = (
+                    torch.randn_like(q_transposed),
+                    torch.randn(
+                        q.size(0),
+                        q.size(2),
+                        q.size(1),
+                        dtype=torch.float32,
+                        device=device,
+                    ),
+                )
+                mock_module._flash_attn_bwd.return_value = (
+                    torch.randn_like(q_transposed),
+                    torch.randn_like(q_transposed),
+                    torch.randn_like(q_transposed),
+                )
+
+                with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+                    out = F.scaled_dot_product_attention(
+                        q, k, v, attn_mask=None, dropout_p=0.0, is_causal=False
+                    )
+                    grad_out = torch.randn_like(out)
+                    out.backward(grad_out)
+
+                self.assertTrue(mock_module._flash_attn_bwd.called)
+                call_kwargs = mock_module._flash_attn_bwd.call_args.kwargs
+                self.assertIn("deterministic", call_kwargs)
+                self.assertEqual(
+                    call_kwargs["deterministic"],
+                    deterministic,
+                    f"Expected deterministic={deterministic} but got {call_kwargs['deterministic']}",
+                )
+        finally:
+            torch.use_deterministic_algorithms(False)
+            _fa4._fa4_import_module.cache_clear()
 
 
 instantiate_device_type_tests(TestFlashAttentionFA4, globals(), only_for="cuda")
