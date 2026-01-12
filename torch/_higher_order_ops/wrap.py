@@ -68,8 +68,29 @@ inductor_compiled_code.fallthrough(DispatchKey.AutogradCPU)
 inductor_compiled_code.fallthrough(DispatchKey.AutogradCUDA)
 
 
+class InductorCompiledCallable:
+    """
+    A wrapper class that holds both the Inductor-compiled callable and
+    the pre-compilation FX graph. This allows the inductor_compiled_code
+    HOP to properly handle FakeTensor and FunctionalTensor inputs by
+    running the FX graph instead of the compiled callable.
+    """
+
+    def __init__(self, compiled_callable, fx_graph):
+        self.compiled_callable = compiled_callable
+        self.fx_graph = fx_graph
+        # AOT autograd needs this to know inputs are passed as a list
+        self._boxed_call = True
+
+    def __call__(self, inputs):
+        return self.compiled_callable(inputs)
+
+
 @inductor_compiled_code.py_impl(DispatchKey.CompositeExplicitAutograd)
 def inductor_compiled_code_impl(func, inputs):
+    # func can be either a raw callable or an InductorCompiledCallable
+    if isinstance(func, InductorCompiledCallable):
+        return func.compiled_callable(inputs)
     return func(inputs)
 
 
@@ -80,11 +101,29 @@ redirect_to_mode(inductor_compiled_code, _CachedTorchDispatchMode)
 
 @register_fake(inductor_compiled_code)
 def inductor_compiled_code_fake(func, inputs):
+    # If func is an InductorCompiledCallable with an FX graph, run the graph
+    if isinstance(func, InductorCompiledCallable) and func.fx_graph is not None:
+        from torch.fx import Interpreter
+
+        # The FX graph expects boxed inputs (as a list)
+        return Interpreter(func.fx_graph).boxed_run(inputs)
+
     raise RuntimeError(
         "Inductor compiled code cannot be run with FakeTensor inputs. "
         "This can happen when torch.compile is called inside a FakeTensorMode. "
         "Consider using backend='eager' or backend='aot_eager' instead."
     )
+
+
+@inductor_compiled_code.py_functionalize_impl
+def inductor_compiled_code_functionalize(ctx, func, inputs):
+    # Unwrap the functional tensors to get the underlying tensors
+    unwrapped_inputs = ctx.unwrap_tensors(inputs)
+
+    # Redispatch to the next handler in the dispatch chain
+    with ctx.redispatch_to_next():
+        result = inductor_compiled_code(func, unwrapped_inputs)
+        return ctx.wrap_tensors(result)
 
 
 class WrapWithSetGradEnabled(HigherOrderOperator):

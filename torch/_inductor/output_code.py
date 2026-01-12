@@ -449,6 +449,9 @@ class CompiledFxGraph(OutputCode):
     _boxed_call: Optional[bool] = None
     _triton_bundle: Optional[TritonBundle] = None
     _wrap_compiled_regions: bool = False
+    # Store the pre-Inductor FX graph for fake tensor propagation
+    # This is not serializable so it will be None after cache deserialization
+    _fx_graph: Optional[torch.fx.GraphModule] = None
 
     def __init__(
         self,
@@ -598,6 +601,13 @@ class CompiledFxGraph(OutputCode):
         # This is set at compile time to avoid runtime overhead
         self._wrap_compiled_regions = config.wrap_inductor_compiled_regions
 
+        # Store the FX graph for fake tensor propagation when wrapping is enabled
+        # This is used by InductorCompiledCallable to run the graph with fake tensors
+        if self._wrap_compiled_regions:
+            self._fx_graph = gm
+        else:
+            self._fx_graph = None
+
     def __del__(self) -> None:
         if self.compiled_fn_runner is not None:
             # For torch._inductor.config.graph_partition = True,
@@ -733,11 +743,17 @@ class CompiledFxGraph(OutputCode):
         # Apply inductor_compiled_code HOP wrapper if configured
         # This is done in post_compile to ensure it works with cached artifacts
         if self._wrap_compiled_regions and self.current_callable is not None:
+            from torch._higher_order_ops.wrap import InductorCompiledCallable
+
             original_callable = self.current_callable
+            fx_graph = self._fx_graph
+
+            # Create a wrapper that holds both the compiled callable and FX graph
+            inductor_callable = InductorCompiledCallable(original_callable, fx_graph)
 
             def wrapped_callable(inputs):
                 if is_in_torch_dispatch_mode():
-                    return inductor_compiled_code(original_callable, inputs)
+                    return inductor_compiled_code(inductor_callable, inputs)
                 else:
                     return original_callable(inputs)
 
@@ -754,6 +770,8 @@ class CompiledFxGraph(OutputCode):
         self.current_callable = None
         self.recursively_apply_fns = None
         self.compiled_fn_runner = None
+        # FX graph is not serializable
+        self._fx_graph = None
 
     def write_to_disk(self) -> str:
         from torch._dynamo.utils import counters

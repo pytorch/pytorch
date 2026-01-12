@@ -1064,20 +1064,24 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         torch.testing.assert_close(k.grad, k2.grad, rtol=1e-3, atol=1e-3)
         torch.testing.assert_close(v.grad, v2.grad, rtol=1e-3, atol=1e-3)
 
-    def test_fake_tensor_mode_raises_error(self):
-        """Test that running compiled code inside FakeTensorMode raises a clear error"""
+    def test_fake_tensor_mode_works(self):
+        """Test that running compiled code inside FakeTensorMode works with FX graph fallback"""
         from torch._subclasses.fake_tensor import FakeTensorMode
 
         with FakeTensorMode():
             model = torch.nn.Linear(4, 4)
             inp = torch.rand(4, 4)
 
-            with inductor_config.patch({"wrap_inductor_compiled_regions": True}):
-                with self.assertRaisesRegex(
-                    RuntimeError,
-                    "Inductor compiled code cannot be run with FakeTensor inputs",
-                ):
-                    torch.compile(model)(inp)
+            # Disable FX graph cache to ensure we get the FX graph for fake tensor propagation
+            # In production, caching should be handled separately
+            with inductor_config.patch(
+                {"wrap_inductor_compiled_regions": True, "fx_graph_cache": False}
+            ):
+                # This should now work - the inductor_compiled_code HOP will
+                # use the stored FX graph to propagate fake tensors
+                result = torch.compile(model)(inp)
+                # Verify the result has the expected shape
+                self.assertEqual(result.shape, (4, 4))
 
 
 if __name__ == "__main__":
