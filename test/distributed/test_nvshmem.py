@@ -7,8 +7,6 @@
 import torch
 import torch.distributed as dist
 import torch.distributed._symmetric_memory as symm_mem
-from torch._C._autograd import DeviceType
-from torch._C._distributed_c10d import _SymmetricMemory
 from torch.distributed.device_mesh import init_device_mesh
 from torch.testing._internal.common_distributed import (
     MultiProcContinuousTest,
@@ -32,10 +30,19 @@ def requires_nvshmem():
     )
 
 
+def has_nvls_support():
+    # Set NVSHMEM as SymmMem backend before running the check
+    symm_mem.set_backend("NVSHMEM")
+    from torch._C._autograd import DeviceType
+    from torch._C._distributed_c10d import _SymmetricMemory
+
+    return _SymmetricMemory.has_multicast_support(DeviceType.CUDA, 0)
+
+
 def requires_nvls():
     """Skip test if NVLS (NVLink SHARP) is not available."""
     return skip_but_pass_in_sandcastle_if(
-        not _SymmetricMemory.has_multicast_support(DeviceType.CUDA, 0),
+        not has_nvls_support(),
         "Test requires NVLink SHARP support",
     )
 
@@ -234,7 +241,7 @@ class NVSHMEMSymmetricMemoryTest(MultiProcContinuousTest):
 
         tensor = symm_mem.empty(1, device=self.device)
         handle = symm_mem.rendezvous(tensor, group_name)
-        if _SymmetricMemory.has_multicast_support(DeviceType.CUDA, self.device.index):
+        if has_nvls_support():
             self.assertNotEqual(handle.multicast_ptr, 0)
         else:
             self.assertEqual(handle.multicast_ptr, 0)
