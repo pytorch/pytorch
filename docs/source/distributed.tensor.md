@@ -111,6 +111,59 @@ DTensor supports the following types of {class}`Placement` on each {class}`Devic
   :undoc-members:
 ```
 
+### Partial Ordering Invariant
+
+When a DTensor has multiple {class}`Partial` placements with **different reduce operations**
+(e.g., `Partial("sum")` on one mesh dimension and `Partial("max")` on another), the order in
+which these reductions are applied is semantically significant. This is called the
+**partial ordering invariant**.
+
+**Left-to-Right Evaluation Order**
+
+DTensor evaluates Partial placements in **left-to-right order** (i.e., mesh dimension 0 first,
+then mesh dimension 1, and so on). This means for placements `(Partial("sum"), Partial("max"))`:
+
+1. First, the `Partial("sum")` on mesh dimension 0 is reduced
+2. Then, the `Partial("max")` on mesh dimension 1 is reduced
+
+The result is `max(sum(local_values))`, NOT `sum(max(local_values))`.
+
+**Why Order Matters**
+
+Consider a tensor with placements `(Partial("sum"), Partial("max"))` on a 2D mesh. The full
+tensor value depends on the order of reductions:
+
+- `max(sum(local_values))` (left-to-right) produces a different result than `sum(max(local_values))`
+
+When redistributing such tensors, DTensor respects this invariant by ensuring reductions
+are performed in the correct left-to-right order.
+
+**Redistribution Example**
+
+When redistributing from `(Partial("sum"), Partial("max"))` to `(Partial("sum"), Replicate())`:
+
+1. The redistribute planner first reduces **all** Partial placements to Replicate
+2. Then re-partitions back to the target Partial placements
+
+This ensures the mathematically correct sequence:
+```
+(Psum, Pmax) → (R, Pmax) → (R, R) → (Psum, R)
+```
+
+Rather than incorrectly reducing just the max dimension:
+```
+(Psum, Pmax) → (Psum, R)  # WRONG: violates partial ordering!
+```
+
+**Best Practices**
+
+- When using multiple Partial placements, prefer using the same reduce operation on all
+  mesh dimensions when possible
+- If different reduce operations are needed, be aware that redistribution may require
+  additional collective operations to preserve correctness
+- For complex partial patterns, consider using the graph-based redistribution planner
+  via `use_min_cost_redistribution_plan(enabled=True)`
+
 ```{eval-rst}
 .. autoclass:: Placement
   :members:

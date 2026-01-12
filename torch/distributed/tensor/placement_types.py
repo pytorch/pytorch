@@ -984,6 +984,14 @@ class Partial(torch._C._distributed.Partial):
 
     .. note:: The ``Partial`` placement can be generated as a result of the DTensor operators,
         and can only be used by the ``DTensor.from_local`` API.
+
+    .. note:: **Partial Ordering Invariant**: When a DTensor has multiple ``Partial``
+        placements with different reduce operations on different mesh dimensions
+        (e.g., ``(Partial("sum"), Partial("max"))``), reductions are evaluated in
+        **left-to-right order** (mesh dimension 0 first, then 1, etc.). For example,
+        ``(Partial("sum"), Partial("max"))`` computes ``max(sum(x))``, not ``sum(max(x))``.
+        The redistribute planner respects this invariant by reducing all Partials
+        to Replicate first, then re-partitioning to the target placements.
     """
 
     def _reduce_value(

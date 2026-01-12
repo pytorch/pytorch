@@ -825,6 +825,134 @@ class RedistributeTest(DTensorTestBase):
                 out = dt.redistribute(mesh, dst)
                 self.assertEqual(out.placements, dst)
 
+    @with_comms
+    @parametrize("use_graph_based", [False, True])
+    def test_partial_ordering_across_mesh_dims(self, use_graph_based):
+        """
+        Test that redistributing from multiple Partial placements with different
+        reduce operations respects the partial ordering invariant.
+
+        When we have (Partial("sum"), Partial("max")) and redistribute to
+        (Partial("sum"), Replicate()), the planner should NOT directly reduce
+        the Partial("max") to Replicate, as this would violate partial ordering.
+
+        The correct sequence is:
+        1. Reduce Partial("sum") → Replicate (all-reduce sum on mesh_dim=0)
+        2. Reduce Partial("max") → Replicate (all-reduce max on mesh_dim=1)
+        3. Partition Replicate → Partial("sum") on mesh_dim=0
+
+        This ensures that max(sum(x)) semantics are preserved (left-to-right evaluation),
+        not sum(max(x)).
+
+        This test verifies both the greedy and graph-based redistribution planners.
+        """
+        mesh = init_device_mesh(self.device_type, (2, 2))
+
+        # Create a local tensor where each rank has a distinct value
+        # This makes it easy to verify the reduction order matters
+        local_tensor = torch.full((4, 4), float(self.rank), device=self.device_type)
+
+        # Create DTensor with (Partial("sum"), Partial("max"))
+        src_placements = [Partial("sum"), Partial("max")]
+        dt = DTensor.from_local(local_tensor, mesh, src_placements)
+
+        # Target placements: keep first dim as Partial("sum"), reduce second to Replicate
+        dst_placements = [Partial("sum"), Replicate()]
+
+        # Get the transform infos to verify the planner's strategy
+        from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+        from torch.distributed.tensor._redistribute import (
+            _gen_transform_infos_non_cached,
+            use_min_cost_redistribution_plan,
+        )
+
+        src_spec = DTensorSpec(
+            mesh,
+            tuple(src_placements),
+            tensor_meta=TensorMeta(
+                shape=dt.shape,
+                stride=dt.stride(),
+                dtype=dt.dtype,
+            ),
+        )
+        dst_spec = DTensorSpec(
+            mesh,
+            tuple(dst_placements),
+            tensor_meta=src_spec.tensor_meta,
+        )
+
+        # Test with the specified planner (greedy or graph-based)
+        with use_min_cost_redistribution_plan(enabled=use_graph_based):
+            transform_infos = _gen_transform_infos_non_cached(
+                src_spec, dst_spec, use_graph_based_transform=use_graph_based
+            )
+
+        # The bug: if the planner just does Pmax → Replicate directly on mesh_dim=1,
+        # it produces only 1 transform. The correct solution requires 3 transforms:
+        # 1. (Psum, Pmax) → (R, Pmax) via sum all-reduce on mesh_dim=0
+        # 2. (R, Pmax) → (R, R) via max all-reduce on mesh_dim=1
+        # 3. (R, R) → (Psum, R) via partition on mesh_dim=0
+        #
+        # With the fix, both planners should recognize that going from
+        # (Psum, Pmax) to (Psum, R) requires respecting partial ordering
+        # and generate the correct transform sequence.
+
+        planner_name = "graph-based" if use_graph_based else "greedy"
+
+        # Verify the number of transforms - should be 3 to preserve ordering
+        self.assertGreaterEqual(
+            len(transform_infos),
+            3,
+            f"{planner_name} planner: Expected at least 3 transforms to preserve partial ordering, "
+            f"but got {len(transform_infos)}: {transform_infos}",
+        )
+
+        # Verify the transform sequence respects partial ordering
+        # Transform 0: mesh_dim=0, Psum → Replicate
+        self.assertEqual(
+            transform_infos[0].mesh_dim,
+            0,
+            f"{planner_name} planner: First transform should be on mesh_dim=0",
+        )
+        self.assertTrue(
+            transform_infos[0].src_dst_placements[0].is_partial(),
+            f"{planner_name} planner: First transform source should be Partial",
+        )
+        self.assertTrue(
+            transform_infos[0].src_dst_placements[1].is_replicate(),
+            f"{planner_name} planner: First transform target should be Replicate",
+        )
+
+        # Transform 1: mesh_dim=1, Pmax → Replicate
+        self.assertEqual(
+            transform_infos[1].mesh_dim,
+            1,
+            f"{planner_name} planner: Second transform should be on mesh_dim=1",
+        )
+        self.assertTrue(
+            transform_infos[1].src_dst_placements[0].is_partial(),
+            f"{planner_name} planner: Second transform source should be Partial",
+        )
+        self.assertTrue(
+            transform_infos[1].src_dst_placements[1].is_replicate(),
+            f"{planner_name} planner: Second transform target should be Replicate",
+        )
+
+        # Transform 2: mesh_dim=0, Replicate → Psum
+        self.assertEqual(
+            transform_infos[2].mesh_dim,
+            0,
+            f"{planner_name} planner: Third transform should be on mesh_dim=0",
+        )
+        self.assertTrue(
+            transform_infos[2].src_dst_placements[0].is_replicate(),
+            f"{planner_name} planner: Third transform source should be Replicate",
+        )
+        self.assertTrue(
+            transform_infos[2].src_dst_placements[1].is_partial(),
+            f"{planner_name} planner: Third transform target should be Partial",
+        )
+
 
 instantiate_parametrized_tests(RedistributeTest)
 

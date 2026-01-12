@@ -440,9 +440,42 @@ class DTensorRedistributePlanner:
 
         ######################################################################
         # handle case 3: Partial() -> Replicate()
+        # When there are multiple Partials with different reduce operations,
+        # we must respect the partial ordering invariant (left-to-right order).
+        # A Partial on mesh_dim X can only be reduced if all Partials with
+        # different reduce_ops on mesh_dims < X have already been reduced.
+
+        # First, collect all Partials and their reduce_ops
+        partial_info: dict[int, str] = {}  # mesh_dim -> reduce_op
+        for mesh_dim, placement in enumerate(placements):
+            if isinstance(placement, Partial):
+                partial_info[mesh_dim] = placement.reduce_op
+
+        # Check if we have multiple Partials with different reduce_ops
+        has_mixed_partial_ops = len(set(partial_info.values())) > 1
+
         for src_mesh_dim, placement in enumerate(placements):
             if not isinstance(placement, Partial):
                 continue
+
+            # If we have mixed partial ops, enforce left-to-right ordering:
+            # Only allow reducing this Partial if all Partials with different
+            # reduce_ops on earlier mesh_dims have been reduced (i.e., are no
+            # longer Partial in the current state)
+            if has_mixed_partial_ops:
+                current_reduce_op = placement.reduce_op
+                can_reduce = True
+                for earlier_mesh_dim in range(src_mesh_dim):
+                    if earlier_mesh_dim in partial_info:
+                        earlier_reduce_op = partial_info[earlier_mesh_dim]
+                        if earlier_reduce_op != current_reduce_op:
+                            # There's a Partial with a different reduce_op on
+                            # an earlier mesh_dim that hasn't been reduced yet
+                            can_reduce = False
+                            break
+                if not can_reduce:
+                    continue
+
             new_placements = list(placements)
             new_placements[src_mesh_dim] = Replicate()
             dist_state = self.DistState(
@@ -477,9 +510,24 @@ class DTensorRedistributePlanner:
 
         ######################################################################
         # handle case 5: Partial() -> Shard()
+        # Same partial ordering constraint as Case 3 applies here.
         for mesh_dim, placement in enumerate(placements):
             if not isinstance(placement, Partial):
                 continue
+
+            # If we have mixed partial ops, enforce left-to-right ordering
+            if has_mixed_partial_ops:
+                current_reduce_op = placement.reduce_op
+                can_reduce = True
+                for earlier_mesh_dim in range(mesh_dim):
+                    if earlier_mesh_dim in partial_info:
+                        earlier_reduce_op = partial_info[earlier_mesh_dim]
+                        if earlier_reduce_op != current_reduce_op:
+                            can_reduce = False
+                            break
+                if not can_reduce:
+                    continue
+
             for dst_tensor_dim in range(self.tensor_dimension):
                 # try convert placement[mesh_dim] to Shard(dst_tensor_dim)
                 new_placements = list(placements)
@@ -712,6 +760,68 @@ class DTensorRedistributePlanner:
         # transformations
         current_placements = list(src_spec.placements)
         target_placements = list(dst_spec.placements)
+
+        # Check for partial ordering constraint violation: when we have multiple
+        # Partial placements with different reduce operations in the source, and
+        # some but not all of them need to be reduced, we must reduce ALL partials
+        # first to avoid violating the partial ordering invariant.
+        #
+        # For example, redistributing from (Partial("sum"), Partial("max")) to
+        # (Partial("sum"), Replicate()) cannot be done by directly reducing Partial("max"),
+        # because that would compute max(sum(x)) instead of the correct sum(max(x)).
+        #
+        # The correct sequence is:
+        # 1. Reduce all Partials to Replicate first
+        # 2. Then re-partition back to the target Partial placements
+        src_partial_ops = {}  # mesh_dim -> reduce_op
+        for mesh_dim, placement in enumerate(current_placements):
+            if isinstance(placement, Partial):
+                src_partial_ops[mesh_dim] = placement.reduce_op
+
+        if len(src_partial_ops) > 1:
+            # Check if we have different reduce operations
+            unique_ops = set(src_partial_ops.values())
+            if len(unique_ops) > 1:
+                # We have multiple Partials with different reduce ops
+                # Check if we're keeping some as Partial while reducing others
+                dst_partial_dims = set()
+                for mesh_dim, placement in enumerate(target_placements):
+                    if isinstance(placement, Partial):
+                        dst_partial_dims.add(mesh_dim)
+
+                src_partial_dims = set(src_partial_ops.keys())
+
+                # If some partials are being reduced while others are kept,
+                # we need to reduce ALL partials first, then re-partition
+                if dst_partial_dims and dst_partial_dims != src_partial_dims:
+                    # First, reduce all Partials to Replicate
+                    for mesh_dim in sorted(src_partial_dims):
+                        current = current_placements[mesh_dim]
+                        transform_infos.append(
+                            _TransformInfo(
+                                mesh_dim=mesh_dim,
+                                src_dst_placements=(current, Replicate()),
+                                logical_shape=mesh_dims_to_logical_shape[mesh_dim],
+                            )
+                        )
+                        current_placements[mesh_dim] = Replicate()
+
+                    # Then, re-partition back to the target Partial placements
+                    for mesh_dim in sorted(dst_partial_dims):
+                        target = target_placements[mesh_dim]
+                        if isinstance(target, Partial):
+                            current = current_placements[mesh_dim]
+                            if current != target:
+                                transform_infos.append(
+                                    _TransformInfo(
+                                        mesh_dim=mesh_dim,
+                                        src_dst_placements=(current, target),
+                                        logical_shape=mesh_dims_to_logical_shape[
+                                            mesh_dim
+                                        ],
+                                    )
+                                )
+                                current_placements[mesh_dim] = target
 
         if src_spec.num_shards > 1:
             # If src_spec have sharding, it could potentially have sharding that
