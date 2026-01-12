@@ -353,7 +353,6 @@ keep-runtime-typing = true
 "torch/_higher_order_ops/**" = ["S101"]
 "torch/_inductor/**" = ["S101"]
 "torch/ao/pruning/_experimental/data_sparsifier/lightning/tests/test_callbacks.py" = ["S101"]
-"torch/backends/_nnapi/**" = ["S101"]
 "torch/distributed/**" = ["S101"]
 "torch/export/**" = ["S101"]
 "torch/fx/**" = ["S101"]
