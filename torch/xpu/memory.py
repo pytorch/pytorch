@@ -5,7 +5,7 @@ import sys
 from typing import Any, Literal
 
 import torch
-from torch._utils import _augment_memory_snapshot_stack_traces, _dummy_type, _Snapshot
+from torch._utils import _augment_memory_snapshot_stack_traces, _dummy_type
 from torch.types import Device
 
 from . import _get_device_index, _is_compiled, _lazy_init, is_initialized
@@ -266,7 +266,7 @@ def memory_snapshot(
     return torch._C._xpu_memorySnapshot(mempool_id)["segments"]
 
 
-def _snapshot(device: Device = None, augment_with_fx_traces: bool = False) -> _Snapshot:
+def _snapshot(device: Device = None, augment_with_fx_traces: bool = False):
     """
     Capture a snapshot of the XPU memory state at the time this function is called.
 
@@ -352,7 +352,6 @@ def _snapshot(device: Device = None, augment_with_fx_traces: bool = False) -> _S
     s = torch._C._xpu_memorySnapshot(None)
     if augment_with_fx_traces:
         s = _augment_memory_snapshot_stack_traces(s)  # type: ignore[assignment, arg-type]
-    # pyrefly: ignore [bad-return]
     return s
 
 
