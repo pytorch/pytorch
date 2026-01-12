@@ -212,13 +212,21 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def masked(mask: CSEVariable, body: sympy.Expr, other: CSEVariable) -> str:
         # TODO: Type annotation for other is wrong, it's often float or int
-        with V.kernel.mask_loads(mask, other) as new_mask:
-            result = body()
+        # TODO: Use lambda here rather than allocating variable with default type when on MacOS-15+
+        masked_code = IndentedBuffer()
+        masked_code.writeline(f"if ({mask}) {{")
+        with V.kernel.swap_buffers(masked_code), masked_code.indent():
+            rc = body()
 
-        if result.bounds.is_bool:
-            other = bool(other)  # type: ignore[assignment]
-
-        return ops.where(new_mask, result, other)
+        var = V.kernel.cse.newvar(dtype=rc.dtype)
+        with masked_code.indent():
+            masked_code.writeline(f"{var} = {rc};")
+        masked_code.writeline("}")
+        V.kernel.compute.writeline(
+            f"{DTYPE_TO_METAL[rc.dtype]} {var} = {value_to_metal(other)};"
+        )
+        V.kernel.compute.splice(masked_code)
+        return var
 
     @staticmethod
     def where(a: OpVarT, b: OpVarT, c: OpVarT) -> str:
@@ -1063,14 +1071,18 @@ class MetalKernel(SIMDKernel):
         # TODO(malfet): support asserts
         # See https://github.com/pytorch/pytorch/issues/144634
         expr_str = self.index_to_str(expr)
-        lower_expr = f"{expr_str} < 0" if lower else ""
+        size_str = self.index_to_str(size)
+
         # TODO(malfet): Is upper bound inclusive or exclusive?
-        upper_expr = f"{expr_str} > {self.index_to_str(size)}" if upper else ""
         if lower and upper:
-            line = f"if (({lower_expr}) && ({upper_expr})) return"
+            # Check both lower and upper bounds
+            condition = f"({expr_str} < 0 || {expr_str} >= {size_str})"
+        elif lower:
+            condition = f"{expr_str} < 0"
         else:
-            line = f"if ({lower_expr}{upper_expr}) return"
-        self.cse.generate(self.compute, line, assignment=False)
+            condition = f"{expr_str} >= {size_str}"
+
+        self.cse.generate(self.compute, f"if ({condition}) return", assignment=False)
 
 
 class MetalScheduling(SIMDScheduling):
