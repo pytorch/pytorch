@@ -1393,7 +1393,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             else:
                 return None
 
-
         # pyrefly: ignore [deprecated]
         @register(torch.fx.experimental.symbolic_shapes.guard_size_oblivious)
         def handle_guard_size_oblivious(
