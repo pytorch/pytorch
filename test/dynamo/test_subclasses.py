@@ -3966,6 +3966,25 @@ class GraphModule(torch.nn.Module):
         out_test = torch.compile(fn, backend="aot_eager")()
         self.assertEqual(out_ref, out_test)
 
+    def test_buffer_subclass_input(self):
+        from torch.nn.parameter import Buffer
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def check_buffer_true(x):
+            return isinstance(x, torch.nn.Buffer)
+
+        buf = Buffer(torch.ones(5))
+        self.assertTrue(check_buffer_true(buf))
+
+        torch._dynamo.reset()
+
+        @torch.compile(fullgraph=True, backend="eager")
+        def check_buffer_false_tensor(x):
+            return isinstance(x, torch.nn.Buffer)
+
+        tensor = torch.ones(5)
+        self.assertFalse(check_buffer_false_tensor(tensor))
+
     def _input_view_test(self, nt_view_name):
         nt_view = VIEW_TEST_CASES[nt_view_name]()
 
