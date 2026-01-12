@@ -628,6 +628,7 @@ class TensorVariable(VariableTracker):
         self, tx: "InstructionTranslator", idxes: Sequence[int] | None = None
     ) -> list[VariableTracker]:
         from .builder import wrap_fx_proxy_cls
+        from .torch_function import TensorWithTFOverrideVariable
 
         if self.valid_size():
             size_len = len(self.size)
@@ -659,6 +660,22 @@ class TensorVariable(VariableTracker):
             assert len(idxes) == length, (
                 f"Can't unpack a tensor of {length} rows into a tuple of {len(idxes)} elements."
             )
+
+        # preserve tensor subclass type when unpacking
+        if isinstance(self, TensorWithTFOverrideVariable):
+            base_vars = [
+                wrap_fx_proxy_cls(
+                    target_cls=TensorVariable, tx=tx, proxy=self.as_proxy()[i]
+                )
+                for i in idxes
+            ]
+            return [
+                TensorWithTFOverrideVariable.from_tensor_var(
+                    tx, v, self.class_type, self.source
+                )
+                for v in base_vars
+            ]
+
         return [
             wrap_fx_proxy_cls(target_cls=type(self), tx=tx, proxy=self.as_proxy()[i])
             for i in idxes
