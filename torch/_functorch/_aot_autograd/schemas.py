@@ -8,7 +8,6 @@ from __future__ import annotations
 
 import collections
 import functools
-import itertools
 from dataclasses import dataclass, field
 from enum import Enum
 from typing import Any, NewType, Optional, Protocol, TYPE_CHECKING, TypeVar, Union
@@ -186,13 +185,7 @@ class MemoryFormatMeta:
             or is_traceable_wrapper_subclass(t)
         )
         if not use_memory_format:
-            is_static_shape = True
-            for s in itertools.chain(t.shape, t.stride()):
-                if not isinstance(s, int):
-                    is_static_shape = False
-                    break
-
-            use_memory_format = not is_static_shape
+            use_memory_format = t._has_symbolic_sizes_strides
 
         if use_memory_format:
             return MemoryFormatMeta(
