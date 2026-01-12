@@ -1026,7 +1026,9 @@ def _extract_fwd_bwd_modules(
             SavedForBackwardsNoVcCheckAOTOutput(i)
             if i >= no_vc_check_start_idx and i < len(saved_values)
             else SavedForBackwardsAOTOutput(i)
-            for i in range(len(saved_values) + len(saved_sym_nodes) + len(saved_opaque_nodes))
+            for i in range(
+                len(saved_values) + len(saved_sym_nodes) + len(saved_opaque_nodes)
+            )
         ],
         "forward",
     )
