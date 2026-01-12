@@ -28,6 +28,7 @@ class TritonKernel : public OpKernel {
   std::vector<float> float_attrs_;
   std::vector<int64_t> output_indices_;
   LaunchParams launch_params_;
+  KernelInputParams kernel_input_params_;
 };
 
 } // namespace torch::nativert

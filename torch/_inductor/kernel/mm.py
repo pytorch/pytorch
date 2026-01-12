@@ -14,7 +14,6 @@ from torch._inductor.autoheuristic.autoheuristic_utils import (
 )
 from torch._inductor.codegen.cpp_gemm_template import CppGemmTemplate
 from torch._inductor.remote_gemm_autotune_cache import gen_best_config
-from torch._inductor.runtime.caching import decoders, encoders, memoizers
 from torch._inductor.virtualized import ops, V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn.functional import ScalingType  # type: ignore[attr-defined]
@@ -69,7 +68,6 @@ from .mm_common import (
 try:
     import triton
 
-    # pyre-ignore[16]: triton module may not have __version__ attribute
     triton_version = TorchVersion(triton.__version__)
     has_triton = True
 except ImportError:
@@ -304,11 +302,6 @@ addmm_contiguous_subgraph_template = ContiguousTemplate(
 
 
 @register_lowering(aten.mm, type_promotion_kind=None)
-@memoizers.tuned_mm_memoizer.memoize(
-    custom_params_encoder=encoders.tuned_mm_params_encoder,
-    custom_result_encoder=encoders.tuned_kernel_result_encoder,
-    custom_result_decoder=decoders.tuned_mm_result_decoder,
-)
 def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     """
     Lowering for autotuning aten.mm with different backends (Aten, Triton, CUTLASS, etc.)
@@ -320,7 +313,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
             lambda: "input dtypes must be the same",
         )
         torch._check(
-            (device := mat1.get_device()) and device.type in ("cuda", "xpu"),
+            mat1.get_device().type in ("cuda", "xpu"),
             lambda: "out_dtype is only supported for CUDA or XPU",
         )
         torch._check(
@@ -558,11 +551,6 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
 
 
 @register_lowering(aten._int_mm, type_promotion_kind=None)
-@memoizers.tuned_int_mm_memoizer.memoize(
-    custom_params_encoder=encoders.tuned_int_mm_params_encoder,
-    custom_result_encoder=encoders.tuned_kernel_result_encoder,
-    custom_result_decoder=decoders.tuned_int_mm_result_decoder,
-)
 def tuned_int_mm(mat1, mat2, *, layout=None):
     # TODO(coconutruben): integrate into MMKernelInputs when all callsites use that
     m, n, k, layout, mat1, mat2 = mm_args(
@@ -612,11 +600,6 @@ def tuned_int_mm(mat1, mat2, *, layout=None):
 
 
 @register_lowering(aten.addmm, type_promotion_kind=None)
-@memoizers.tuned_addmm_memoizer.memoize(
-    custom_params_encoder=encoders.tuned_addmm_params_encoder,
-    custom_result_encoder=encoders.tuned_kernel_result_encoder,
-    custom_result_decoder=decoders.tuned_addmm_result_decoder,
-)
 def tuned_addmm(inp, mat1, mat2, *, alpha=1, beta=1, layout=None):
     """
     Lowering for autotuning aten.addmm with different backends (Aten, Triton, CUTLASS, etc.)
@@ -877,11 +860,6 @@ def get_scaling_options(
 
 
 @register_lowering(aten._scaled_mm.default, type_promotion_kind=None)  # type: ignore[misc]
-@memoizers.tuned_scaled_mm_memoizer.memoize(
-    custom_params_encoder=encoders.tuned_scaled_mm_params_encoder,
-    custom_result_encoder=encoders.tuned_kernel_result_encoder,
-    custom_result_decoder=decoders.tuned_scaled_mm_result_decoder,
-)
 def tuned_scaled_mm(
     mat_a,
     mat_b,
@@ -972,9 +950,7 @@ def tuned_scaled_mm(
         # TODO (paulzhan): There is no template that exists for bias and TMA
         # Don't run tma template currently if bias exist
         if use_triton_tma_template(mat_a, mat_b, output_layout=layout) and not bias:
-            # pyre-ignore[6]: scale option values are ints, not bools
             overriders["SCALE_RECIPE_A"] = scale_option_a.value
-            # pyre-ignore[6]: scale option values are ints, not bools
             overriders["SCALE_RECIPE_B"] = scale_option_b.value
 
             if use_triton_scaling_template(
@@ -982,19 +958,17 @@ def tuned_scaled_mm(
             ):
                 templates_to_use.append(scaled_mm_device_tma_epilogue_scaling_template)
                 kwarg_overrides[scaled_mm_device_tma_epilogue_scaling_template.uid] = (
-                    overriders  # pyre-ignore[6]
+                    overriders
                 )
             elif use_triton_scaling_template(
                 scale_option_a, scale_option_b, main_loop_scaling_types
             ):
-                # pyre-ignore[6]: tile size values are ints, not bools
                 overriders["TILE_SIZE_A"] = get_tile_size(scale_option_a)
-                # pyre-ignore[6]: tile size values are ints, not bools
                 overriders["TILE_SIZE_B"] = get_tile_size(scale_option_b)
 
                 templates_to_use.append(scaled_mm_device_tma_main_loop_scaling_template)
                 kwarg_overrides[scaled_mm_device_tma_main_loop_scaling_template.uid] = (
-                    overriders  # pyre-ignore[6]
+                    overriders
                 )
             else:
                 raise AssertionError(
@@ -1008,14 +982,13 @@ def tuned_scaled_mm(
         ):
             templates_to_use.append(blackwell_ws_persistent_device_tma_mm_template)
             kwarg_overrides[blackwell_ws_persistent_device_tma_mm_template.uid] = (
-                overriders  # pyre-ignore[6]
+                overriders
             )
 
         if use_triton_scaling_template(
             scale_option_a, scale_option_b, epilogue_scaling_types
         ):
             templates_to_use.append(mm_template)
-            # pyre-ignore[6]: overriders type is compatible at runtime
             kwarg_overrides[mm_template.uid] = overriders
 
     # Single unified call for all templates

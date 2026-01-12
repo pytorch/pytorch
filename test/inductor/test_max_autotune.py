@@ -2588,6 +2588,8 @@ class TestTemplateConfigPruning(TestCase):
         exceeds_checker = heuristic._get_exceeding_shared_memory_checker(
             **shared_memory_checker_opts
         )
+        if exceeds_checker is None:
+            self.skipTest("Device does not support shared memory size query")
         for c in self.gemm_configs:
             smem_estimation = heuristic.get_shared_memory_estimation(
                 c, dtype_size, **shared_memory_checker_opts

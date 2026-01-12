@@ -59,6 +59,7 @@ PyObject* tensor_to_list(const Tensor& tensor) {
   if (!data.device().is_cpu()) {
     pybind11::gil_scoped_release no_gil;
     data = data.toBackend(Backend::CPU);
+    data = recursive_unwrap(data);
   }
   TORCH_CHECK(
       tensor.numel() == 0 || data.const_data_ptr(),

@@ -593,7 +593,8 @@ class _GraphPickleData:
         nodes: dict[_NodePickleData, torch.fx.Node] = {}
         for nd in self.nodes:
             nodes[nd] = nd.unpickle(graph, nodes, unpickle_state)
-        graph._codegen = self._codegen
+        if hasattr(self, "_codegen"):
+            graph._codegen = self._codegen
 
         return graph
 

@@ -3,6 +3,11 @@ import unittest
 
 import torch
 from torch._inductor import config
+from torch._inductor.template_heuristics.triton import (
+    BlackwellGPUGemmConfig,
+    CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
+    CUDABlackwellPersistentTMATemplateConfigHeuristic,
+)
 from torch._inductor.test_case import run_tests, TestCase
 from torch._inductor.utils import run_and_get_code
 from torch.testing import FileCheck
@@ -302,6 +307,61 @@ class TestMaxAutotuneBlackwell(TestCase):
         ).check_count(write_api, write_count).run(code[0])
 
         torch.testing.assert_close(c_actual, c_expected, atol=1e-2, rtol=1e-2)
+
+
+@instantiate_parametrized_tests
+class TestBlackwellExhaustiveConfigs(TestCase):
+    """Tests for exhaustive config generation for Blackwell templates."""
+
+    # Expected valid values for each parameter based on _generate_exhaustive_configs
+    VALID_BLOCK_SIZES = {32, 64, 128, 256}
+    VALID_GROUP_M = {8}
+    VALID_NUM_STAGES = {2, 3, 4, 5, 6}
+    VALID_NUM_WARPS = {4, 8}
+    VALID_EPILOGUE_SUBTILE = {True, False}
+
+    @parametrize(
+        "heuristic_cls",
+        (
+            CUDABlackwellPersistentTMATemplateConfigHeuristic,
+            CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic,
+        ),
+    )
+    def test_exhaustive_configs_parameter_variety(self, heuristic_cls):
+        """Test that exhaustive configs have variety in all expected parameters."""
+        heuristic = heuristic_cls()
+        configs = heuristic.exhaustive_configs
+
+        # Ensure we have at least 128 configs
+        self.assertGreaterEqual(len(configs), 128)
+
+        # Collect all unique values for each parameter
+        block_m_values = set()
+        block_n_values = set()
+        block_k_values = set()
+        group_m_values = set()
+        num_stages_values = set()
+        num_warps_values = set()
+        epilogue_subtile_values = set()
+
+        for cfg in configs:
+            self.assertIsInstance(cfg, BlackwellGPUGemmConfig)
+            block_m_values.add(cfg.block_m)
+            block_n_values.add(cfg.block_n)
+            block_k_values.add(cfg.block_k)
+            group_m_values.add(cfg.group_m)
+            num_stages_values.add(cfg.num_stages)
+            num_warps_values.add(cfg.num_warps)
+            epilogue_subtile_values.add(cfg.epilogue_subtile)
+
+        # Verify multiple values exist for each parameter via set membership
+        self.assertEqual(block_m_values, self.VALID_BLOCK_SIZES)
+        self.assertEqual(block_n_values, self.VALID_BLOCK_SIZES)
+        self.assertEqual(block_k_values, self.VALID_BLOCK_SIZES)
+        self.assertEqual(group_m_values, self.VALID_GROUP_M)
+        self.assertEqual(num_stages_values, self.VALID_NUM_STAGES)
+        self.assertEqual(num_warps_values, self.VALID_NUM_WARPS)
+        self.assertEqual(epilogue_subtile_values, self.VALID_EPILOGUE_SUBTILE)
 
 
 if __name__ == "__main__":
