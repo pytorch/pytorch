@@ -36,8 +36,7 @@ from torch._inductor.runtime.runtime_utils import cache_dir
 from torch._subclasses.fake_tensor import FakeTensorMode
 from torch.distributed._tensor import DTensor
 from torch.distributed.device_mesh import init_device_mesh
-from torch.distributed.tensor import Partial, Replicate, Shard
-from torch.export import _restore_state_dict
+from torch.distributed.tensor import Partial, Placement, Replicate, Shard
 from torch.fx._graph_pickler import GraphPickler
 from torch.fx.passes.regional_inductor import regional_inductor
 from torch.nn.attention.flex_attention import create_block_mask, flex_attention
@@ -1113,7 +1112,7 @@ from user code:
 
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
     def test_cross_aot_compile(self):
-        """Test cross-compilation using fake cuda tensors"""
+        """Test cross-compilation using fake cuda tensors and backward correctness"""
         from torch._subclasses.fake_tensor import FakeTensorMode
 
         def fn(x, y):
@@ -1121,13 +1120,13 @@ from user code:
 
         with FakeTensorMode(allow_non_fake_inputs=True):
             fake_inputs = (
-                torch.randn(3, 4, device="cuda"),
-                torch.randn(3, 4, device="cuda"),
+                torch.randn(3, 4, device="cuda", requires_grad=True),
+                torch.randn(3, 4, device="cuda", requires_grad=True),
             )
-            compiled_fn = torch.compile(
-                fn,
-                fullgraph=True,
-            ).aot_compile((fake_inputs, {}))
+        compiled_fn = torch.compile(
+            fn,
+            fullgraph=True,
+        ).aot_compile((fake_inputs, {}))
 
         compiled_fn.save_compiled_function(self.path())
         torch._dynamo.reset()
@@ -1135,10 +1134,30 @@ from user code:
         with open(self.path(), "rb") as f:
             loaded_fn = torch.compiler.load_compiled_function(f)
 
-        inputs = (torch.randn(3, 4, device="cuda"), torch.randn(3, 4, device="cuda"))
+        inputs = (
+            torch.randn(3, 4, device="cuda", requires_grad=True),
+            torch.randn(3, 4, device="cuda", requires_grad=True),
+        )
         expected = fn(*inputs)
         actual = loaded_fn(*inputs)
         self.assertEqual(expected, actual)
+
+        # Backward check: compare gradients between eager and loaded compiled function
+        eager_loss = expected.sum()
+        eager_loss.backward()
+        eager_grads = tuple(inp.grad.clone() for inp in inputs)
+
+        # Reset grads for compiled run
+        for inp in inputs:
+            inp.grad = None
+
+        compiled_out = loaded_fn(*inputs)
+        compiled_loss = compiled_out.sum()
+        compiled_loss.backward()
+        compiled_grads = tuple(inp.grad.clone() for inp in inputs)
+
+        for eg, cg in zip(eager_grads, compiled_grads):
+            self.assertEqual(eg, cg)
 
     @unittest.skipIf(not c10d.is_available(), "requires c10d")
     @unittest.skipIf(not TEST_CUDA, "requires cuda")
@@ -1154,8 +1173,8 @@ from user code:
             module: nn.Module,
             device_mesh,
             *,
-            param_placements=None,
-            buffer_placements=None,
+            param_placements: list[Placement] | None = None,
+            buffer_placements: list[Placement] | None = None,
         ) -> None:
             if param_placements is None:
                 param_placements = [Replicate()]
@@ -1206,8 +1225,6 @@ from user code:
         try:
             rank = c10d.get_rank()
             device = torch.device(f"cuda:{rank}")
-            torch.cuda.set_device(device)
-
             vocab_size = 1000
             embed_dim = 256
             num_heads = 8
@@ -1216,7 +1233,6 @@ from user code:
             max_seq_len = 32
             batch_size = 2
             seq_len = 16
-            torch.set_default_device(device)
 
             device_mesh = init_device_mesh(
                 "cuda",
@@ -1258,163 +1274,150 @@ from user code:
 
             gm = dynamo_graph_capture_for_export(model)(input_ids_dt)
 
-            _restore_state_dict(model, gm)
-
             fake_mode = gm.meta["fake_mode"]
 
-            with contextlib.ExitStack() as stack:
-                if fake_mode is not None:
-                    stack.enter_context(tracing(TracingContext(fake_mode)))
-                    stack.enter_context(fake_mode)
+            # Pre-create a temp file path and remove delete=False since we control cleanup
+            with tempfile.NamedTemporaryFile(suffix=".pt") as f:
+                serialization_path = f.name
 
-                with contextlib.ExitStack() as export_stack:
+                with contextlib.ExitStack() as stack:
+                    if fake_mode is not None:
+                        stack.enter_context(tracing(TracingContext(fake_mode)))
+                        stack.enter_context(fake_mode)
+
                     jd = aot_export_joint_with_descriptors(
-                        export_stack,
+                        stack,
                         gm,
                         (input_ids_dt,),
                     )
 
-                    def fwd_compile(gm: torch.fx.GraphModule, example_inputs):
-                        gm = regional_inductor(gm, example_inputs)
-                        from torch._inductor.output_code import RegionalOutputCode
-
-                        return RegionalOutputCode(gm)
-
-                    def bwd_compile(gm: torch.fx.GraphModule, example_inputs):
-                        gm = regional_inductor(gm, example_inputs)
-                        from torch._inductor.output_code import RegionalOutputCode
-
-                        return RegionalOutputCode(gm)
-
                     compiled_wrapper = aot_compile_joint_with_descriptors(
                         jd,
-                        fw_compiler=fwd_compile,
-                        bw_compiler=bwd_compile,
+                        fw_compiler=regional_inductor,
+                        bw_compiler=regional_inductor,
                         serializable=True,
                     )
 
-                with tempfile.NamedTemporaryFile(delete=False, suffix=".pt") as f:
-                    serialization_path = f.name
                     f.write(
                         BundledAOTAutogradSerializableCallable.serialize_compile_artifacts(
                             compiled_wrapper
                         )
                     )
+                    f.flush()
 
-            with open(serialization_path, "rb") as f:
-                loaded_fn = BundledAOTAutogradSerializableCallable.deserialize_compile_artifacts(
-                    f.read()
+                with open(serialization_path, "rb") as f_r:
+                    loaded_fn = BundledAOTAutogradSerializableCallable.deserialize_compile_artifacts(
+                        f_r.read()
+                    )
+
+                # Create compiled model with deterministic initialization
+                local_input_ids = torch.randint(
+                    0, vocab_size, (batch_size, seq_len), device=device
+                )
+                input_ids_dt = DTensor.from_local(
+                    local_input_ids, device_mesh, [Shard(0)]
+                )
+                targets = torch.randint(
+                    0, vocab_size, (batch_size, seq_len), device=device
                 )
 
-            # Create compiled model with deterministic initialization
-            torch.manual_seed(123)
-            torch.cuda.manual_seed(123)
-            local_input_ids = torch.randint(
-                0, vocab_size, (batch_size, seq_len), device=device
-            )
-            input_ids_dt = DTensor.from_local(local_input_ids, device_mesh, [Shard(0)])
-            torch.manual_seed(456)
-            torch.cuda.manual_seed(456)
-            targets = torch.randint(0, vocab_size, (batch_size, seq_len), device=device)
+                compiled_model = Transformer(
+                    vocab_size,
+                    embed_dim,
+                    num_heads,
+                    num_layers,
+                    max_seq_len,
+                    num_kv_heads=num_kv_heads,
+                    device_mesh=device_mesh,
+                )
+                dtensorify_module(
+                    compiled_model,
+                    device_mesh,
+                    param_placements=[Replicate()],
+                    buffer_placements=[Replicate()],
+                )
+                compiled_model.to_empty(device=device)
+                init_weights_deterministic(compiled_model)
 
-            compiled_model = Transformer(
-                vocab_size,
-                embed_dim,
-                num_heads,
-                num_layers,
-                max_seq_len,
-                num_kv_heads=num_kv_heads,
-                device_mesh=device_mesh,
-            )
-            dtensorify_module(
-                compiled_model,
-                device_mesh,
-                param_placements=[Replicate()],
-                buffer_placements=[Replicate()],
-            )
-            compiled_model.to_empty(device=device)
-            init_weights_deterministic(compiled_model, seed=789)
+                eager_model = Transformer(
+                    vocab_size,
+                    embed_dim,
+                    num_heads,
+                    num_layers,
+                    max_seq_len,
+                    num_kv_heads=num_kv_heads,
+                    device_mesh=device_mesh,
+                )
+                dtensorify_module(
+                    eager_model,
+                    device_mesh,
+                    param_placements=[Replicate()],
+                    buffer_placements=[Replicate()],
+                )
+                eager_model.to_empty(device=device)
+                init_weights_deterministic(eager_model)
 
-            eager_model = Transformer(
-                vocab_size,
-                embed_dim,
-                num_heads,
-                num_layers,
-                max_seq_len,
-                num_kv_heads=num_kv_heads,
-                device_mesh=device_mesh,
-            )
-            dtensorify_module(
-                eager_model,
-                device_mesh,
-                param_placements=[Replicate()],
-                buffer_placements=[Replicate()],
-            )
-            eager_model.to_empty(device=device)
-            init_weights_deterministic(eager_model, seed=789)
+                # Run compiled forward pass
+                (compiled_logits_dt,) = loaded_fn(
+                    *compiled_model.parameters(),
+                    *compiled_model.buffers(),
+                    input_ids_dt,
+                )
+                compiled_logits = (
+                    compiled_logits_dt.to_local()
+                    if isinstance(compiled_logits_dt, DTensor)
+                    else compiled_logits_dt
+                )
 
-            # Run compiled forward pass
-            (compiled_logits_dt,) = loaded_fn(
-                *compiled_model.parameters(), *compiled_model.buffers(), input_ids_dt
-            )
-            compiled_logits = (
-                compiled_logits_dt.to_local()
-                if isinstance(compiled_logits_dt, DTensor)
-                else compiled_logits_dt
-            )
+                # Run eager forward pass with same input
+                eager_logits_dt = eager_model(input_ids_dt)
+                eager_logits = (
+                    eager_logits_dt.to_local()
+                    if isinstance(eager_logits_dt, DTensor)
+                    else eager_logits_dt
+                )
 
-            # Run eager forward pass with same input
-            eager_logits_dt = eager_model(input_ids_dt)
-            eager_logits = (
-                eager_logits_dt.to_local()
-                if isinstance(eager_logits_dt, DTensor)
-                else eager_logits_dt
-            )
-
-            # Compare logits for bitwise equivalence
-            self.assertEqual(
-                compiled_logits,
-                eager_logits,
-                msg="Compiled and eager logits should be bitwise equivalent",
-            )
-
-            # Run backward pass on compiled model
-            compiled_loss = F.cross_entropy(
-                compiled_logits.view(-1, vocab_size), targets.view(-1)
-            )
-            compiled_loss.backward()
-            compiled_grads = {
-                name: p.grad.clone() if p.grad is not None else None
-                for name, p in compiled_model.named_parameters()
-            }
-
-            # Run backward pass on eager model
-            eager_loss = F.cross_entropy(
-                eager_logits.view(-1, vocab_size), targets.view(-1)
-            )
-            eager_loss.backward()
-            eager_grads = {
-                name: p.grad.clone() if p.grad is not None else None
-                for name, p in eager_model.named_parameters()
-            }
-
-            # Compare losses for bitwise equivalence
-            self.assertEqual(
-                compiled_loss,
-                eager_loss,
-                msg="Compiled and eager losses should be bitwise equivalent",
-            )
-
-            # Compare gradients for bitwise equivalence
-            for name in compiled_grads:
+                # Compare logits for bitwise equivalence
                 self.assertEqual(
-                    compiled_grads[name],
-                    eager_grads[name],
-                    msg=f"Gradients for {name} should be bitwise equivalent",
+                    compiled_logits,
+                    eager_logits,
+                    msg="Compiled and eager logits should be bitwise equivalent",
                 )
 
-            os.unlink(serialization_path)
+                # Run backward pass on compiled model
+                compiled_loss = F.cross_entropy(
+                    compiled_logits.view(-1, vocab_size), targets.view(-1)
+                )
+                compiled_loss.backward()
+                compiled_grads = {
+                    name: p.grad.clone() if p.grad is not None else None
+                    for name, p in compiled_model.named_parameters()
+                }
 
+                # Run backward pass on eager model
+                eager_loss = F.cross_entropy(
+                    eager_logits.view(-1, vocab_size), targets.view(-1)
+                )
+                eager_loss.backward()
+                eager_grads = {
+                    name: p.grad.clone() if p.grad is not None else None
+                    for name, p in eager_model.named_parameters()
+                }
+
+                # Compare losses for bitwise equivalence
+                self.assertEqual(
+                    compiled_loss,
+                    eager_loss,
+                    msg="Compiled and eager losses should be bitwise equivalent",
+                )
+
+                # Compare gradients for bitwise equivalence
+                for name in compiled_grads:
+                    self.assertEqual(
+                        compiled_grads[name],
+                        eager_grads[name],
+                        msg=f"Gradients for {name} should be bitwise equivalent",
+                    )
         finally:
             c10d.destroy_process_group()
 
