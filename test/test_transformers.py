@@ -3017,7 +3017,7 @@ class TestSDPACudaOnly(NNTestCase):
                 is_causal,
                 False,  # return_debug_mask
             )
-            output, softmax_lse, rng_state, philox_offset = result[0], result[1], result[6], result[7]
+            output, softmax_lse, _, philox_offset = result[0], result[1], result[6], result[7]
 
             rng_state_ = torch.zeros(
                 (2,), dtype=torch.uint64, device=query.device
@@ -3057,7 +3057,7 @@ class TestSDPACudaOnly(NNTestCase):
             rng_state = ctx.rng_state
             philox_offset = ctx.philox_offset
 
-            unused = torch.empty(0, device=query.device)
+            _ = torch.empty(0, device=query.device)
 
             dq, dk, dv = torch.ops.aten._cudnn_attention_backward(
                 grad_out = grad_out,
