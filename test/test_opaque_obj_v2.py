@@ -156,7 +156,7 @@ class SizeStore:
         self.size = size
 
     def __eq__(self, other):
-        return isinstance(other, ValueConfig) and self.size == other.size
+        return isinstance(other, SizeStore) and self.size == other.size
 
     def __hash__(self):
         return hash(self.size)
@@ -243,7 +243,7 @@ register_opaque_type(NestedValueSize, typ="value")
 # object
 class TensorWithCounter(torch.Tensor):
     @staticmethod
-    def __new__(cls, a, b, counter, outer_size=None, outer_stride=None):
+    def __new__(cls, a, b, counter, size_store, outer_size=None, outer_stride=None):
         if outer_size is None:
             outer_size = a.size()
         if outer_stride is None:
@@ -260,22 +260,23 @@ class TensorWithCounter(torch.Tensor):
         out = torch.Tensor._make_wrapper_subclass(cls, outer_size, **kwargs)
         return out
 
-    def __init__(self, a, b, counter, outer_size=None, outer_stride=None):
+    def __init__(self, a, b, counter, size_store, outer_size=None, outer_stride=None):
         self.a = a
         self.b = b
         self._counter = counter
+        self._size_store = size_store
 
     def __repr__(self):
-        return f"TensorWithCounter({self.a}, {self.b}, {self._counter})"
+        return f"TensorWithCounter({self.a}, {self.b}, {self._counter}, {self._size_store})"
 
     def __tensor_flatten__(self):
-        return ["a", "b"], self._counter
+        return ["a", "b"], (self._counter, self._size_store)
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, ctx, outer_size, outer_stride):
         a, b = inner_tensors["a"], inner_tensors["b"]
-        counter = ctx
-        return TensorWithCounter(a, b, counter, outer_size, outer_stride)
+        counter, size_store = ctx
+        return TensorWithCounter(a, b, counter, size_store, outer_size, outer_stride)
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -285,25 +286,37 @@ class TensorWithCounter(torch.Tensor):
         def unwrap(x):
             return x.a if isinstance(x, TensorWithCounter) else x
 
-        def wrap(x, counter):
+        def wrap(x, counter, size_store):
             return (
-                TensorWithCounter(x, x.clone(), counter)
+                TensorWithCounter(x, x.clone(), counter, size_store)
                 if isinstance(x, torch.Tensor)
                 else x
             )
 
         # Get counter from first TensorWithCounter arg
         counter = None
+        size_store = None
         for arg in torch.utils._pytree.tree_leaves(args):
             if isinstance(arg, TensorWithCounter):
                 counter = arg._counter
+                size_store = arg._size_store
                 break
 
         unwrapped_args = torch.utils._pytree.tree_map(unwrap, args)
         unwrapped_kwargs = torch.utils._pytree.tree_map(unwrap, kwargs)
 
         out = func(*unwrapped_args, **unwrapped_kwargs)
-        return torch.utils._pytree.tree_map(lambda x: wrap(x, counter), out)
+        return torch.utils._pytree.tree_map(lambda x: wrap(x, counter, size_store), out)
+
+    @property
+    def size_store(self):
+        return self._size_store
+
+    def get_size_store(self):
+        return self._size_store
+
+    def get_counter(self):
+        return self._counter
 
 
 class TestOpaqueObject(TestCase):
@@ -1396,13 +1409,17 @@ def forward(self, arg0_1):
     def test_tensor_subclass_with_opaque_attr(self):
         def fn(x):
             y = x * 2 + 1
-            counter = y._counter
-            return y * counter.start
+            c1 = y._counter
+            c2 = y.get_counter()
+            s1 = y.size_store
+            s2 = y.get_size_store()
+            return y * c1.start + c2.start + s1.size + s2.size
 
         a = torch.rand(4, 4)
         b = torch.rand(4, 4)
         counter = Counter(start=3, end=10)
-        x = TensorWithCounter(a, b, counter)
+        size = SizeStore(4)
+        x = TensorWithCounter(a, b, counter, size)
 
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
@@ -1423,8 +1440,15 @@ class GraphModule(torch.nn.Module):
 
         getattr_1 = y._counter;  getattr_1 = None
 
+        get_counter = y.get_counter();  get_counter = None
+
+        get_size_store = y.get_size_store();  get_size_store = None
+
         mul_1: "TensorWithCounter(f32[4, 4])" = y * 3;  y = None
-        return (mul_1,)
+        add_1: "TensorWithCounter(f32[4, 4])" = mul_1 + 3;  mul_1 = None
+        add_2: "TensorWithCounter(f32[4, 4])" = add_1 + 4;  add_1 = None
+        add_3: "TensorWithCounter(f32[4, 4])" = add_2 + 4;  add_2 = None
+        return (add_3,)
 """,
         )
         self.assertEqual(cnt.frame_count, 1)
@@ -1432,11 +1456,20 @@ class GraphModule(torch.nn.Module):
         a = torch.rand(4, 4)
         b = torch.rand(4, 4)
         counter = Counter(start=1, end=10)
-        x = TensorWithCounter(a, b, counter)
+        x = TensorWithCounter(a, b, counter, SizeStore(4))
         opt_fn(x)
 
         # Recompile since Counter has changed
         self.assertEqual(cnt.frame_count, 2)
+
+        a = torch.rand(4, 4)
+        b = torch.rand(4, 4)
+        counter = Counter(start=1, end=10)
+        x = TensorWithCounter(a, b, counter, SizeStore(5))
+        opt_fn(x)
+
+        # Recompile since SizeStore has changed
+        self.assertEqual(cnt.frame_count, 3)
 
 
 instantiate_parametrized_tests(TestOpaqueObject)
