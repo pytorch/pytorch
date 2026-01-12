@@ -953,6 +953,83 @@ class RedistributeTest(DTensorTestBase):
             f"{planner_name} planner: Third transform target should be Partial",
         )
 
+    @with_comms
+    def test_replicate_to_partial_has_nonzero_cost(self):
+        """
+        Test that Replicate -> Partial transition has a nonzero cost.
+
+        This test verifies that the cost function assigns a positive cost to
+        R->P transitions, which discourages unnecessary partial tensor creation.
+        If R->P had zero cost, the planner might choose suboptimal paths that
+        create partial tensors unnecessarily.
+        """
+        mesh = init_device_mesh(self.device_type, (2, 2))
+
+        local_tensor = torch.randn(4, 4, device=self.device_type)
+
+        from torch.distributed.tensor._collective_utils import (
+            one_step_redistribute_cost,
+        )
+        from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+
+        tensor_meta = TensorMeta(
+            shape=torch.Size([4, 4]),
+            stride=(4, 1),
+            dtype=torch.float32,
+        )
+
+        # Test R -> P cost on mesh_dim 0
+        replicate_spec = DTensorSpec(
+            mesh,
+            (Replicate(), Replicate()),
+            tensor_meta=tensor_meta,
+        )
+        partial_spec = DTensorSpec(
+            mesh,
+            (Partial(), Replicate()),
+            tensor_meta=tensor_meta,
+        )
+
+        cost = one_step_redistribute_cost(replicate_spec, partial_spec)
+
+        # R->P should have a positive cost (see REPLICATE_TO_PARTIAL_COST constant)
+        self.assertGreater(
+            cost,
+            0.0,
+            "Replicate -> Partial transition should have a nonzero cost to "
+            "discourage unnecessary partial tensor creation",
+        )
+
+        # Also verify that R->S has zero cost (for comparison)
+        shard_spec = DTensorSpec(
+            mesh,
+            (Shard(0), Replicate()),
+            tensor_meta=tensor_meta,
+        )
+        r_to_s_cost = one_step_redistribute_cost(replicate_spec, shard_spec)
+        self.assertEqual(
+            r_to_s_cost,
+            0.0,
+            "Replicate -> Shard transition should have zero cost (local operation)",
+        )
+
+        # Verify P->R has positive cost (all-reduce)
+        p_to_r_cost = one_step_redistribute_cost(partial_spec, replicate_spec)
+        self.assertGreater(
+            p_to_r_cost,
+            0.0,
+            "Partial -> Replicate transition should have positive cost (all-reduce)",
+        )
+
+        # The key invariant: R->P cost should be less than P->R cost
+        # (R->P is just a local division, P->R requires communication)
+        self.assertLess(
+            cost,
+            p_to_r_cost,
+            "R->P cost should be less than P->R cost since R->P is local "
+            "but P->R requires all-reduce communication",
+        )
+
 
 instantiate_parametrized_tests(RedistributeTest)
 

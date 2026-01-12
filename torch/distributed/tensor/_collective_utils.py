@@ -28,6 +28,13 @@ from torch.distributed.distributed_c10d import (
 
 logger = logging.getLogger(__name__)
 
+# Cost constant for Replicate -> Partial transition.
+# This represents the computational cost of local partitioning operations
+# (e.g., dividing tensor values by the number of devices for "sum" reduction).
+# The small positive cost discourages unnecessary creation of partial tensors
+# when alternative redistribution paths exist.
+REPLICATE_TO_PARTIAL_COST = 0.1
+
 
 @torch.library.register_fake("_dtensor::shard_dim_alltoall")
 def _shard_dim_alltoall_meta(input, gather_dim, shard_dim, group_name):
@@ -366,6 +373,11 @@ def _compute_placement_transition_cost(
     elif current_placement.is_replicate() and target_placement.is_shard():
         comm_bytes_gb /= num_devices_on_mesh_dim
         return 0.0, comm_bytes_gb
+    elif current_placement.is_replicate() and target_placement.is_partial():
+        # Replicate -> Partial has a small cost representing the local computation
+        # to partition the tensor (e.g., dividing by num_devices for "sum").
+        # This cost discourages unnecessary R->P transitions when alternatives exist.
+        return REPLICATE_TO_PARTIAL_COST, comm_bytes_gb
 
     return 0.0, comm_bytes_gb
 
