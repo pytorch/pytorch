@@ -1,4 +1,4 @@
-tools/test/docstring_linter_testdata/more_python_code.py.txt:1: No docstring found for function 'a_very_very_long' (8 lines)
+tools/test/docstring_linter_testdata/more_python_code.py.txt:1: No docstring found for function 'a_very_very_long' (6 lines)
     1 | def a_very_very_long():
         ^
     2 |     # Lots of lines!
@@ -6,7 +6,7 @@ tools/test/docstring_linter_testdata/more_python_code.py.txt:1: No docstring fou
     4 |     # Lots of lines!
     5 |     # Lots of lines!
 
-tools/test/docstring_linter_testdata/more_python_code.py.txt:10: No docstring found for class 'LintInit' (6 lines)
+tools/test/docstring_linter_testdata/more_python_code.py.txt:10: No docstring found for class 'LintInit' (5 lines)
     8 |
     9 |
    10 | class LintInit:
@@ -14,7 +14,7 @@ tools/test/docstring_linter_testdata/more_python_code.py.txt:10: No docstring fo
    11 |     def __init__(self) -> None:
    12 |         # Lots of lines!
 
-tools/test/docstring_linter_testdata/python_code.py.txt:17: No docstring found for class 'LongWithoutDocstring' (6 lines)
+tools/test/docstring_linter_testdata/python_code.py.txt:17: No docstring found for class 'LongWithoutDocstring' (5 lines)
    15 |
    16 |
    17 | class LongWithoutDocstring:
@@ -22,7 +22,7 @@ tools/test/docstring_linter_testdata/python_code.py.txt:17: No docstring found f
    18 |     # A comment isn't a docstring
    19 |
 
-tools/test/docstring_linter_testdata/python_code.py.txt:24: docstring found for class 'LongWithShortDocstring' (6 lines) was too short (10 characters, needed 16)
+tools/test/docstring_linter_testdata/python_code.py.txt:24: docstring found for class 'LongWithShortDocstring' (5 lines) was too short (10 characters, needed 16)
    22 |
    23 |
    24 | class LongWithShortDocstring:
@@ -30,7 +30,7 @@ tools/test/docstring_linter_testdata/python_code.py.txt:24: docstring found for 
    25 |     """TODO"""
    26 |
 
-tools/test/docstring_linter_testdata/python_code.py.txt:54: No docstring found for function 'long_without_docstring' (7 lines)
+tools/test/docstring_linter_testdata/python_code.py.txt:54: No docstring found for function 'long_without_docstring' (6 lines)
    52 |
    53 |
    54 | def long_without_docstring():
@@ -38,10 +38,18 @@ tools/test/docstring_linter_testdata/python_code.py.txt:54: No docstring found f
    55 |     #
    56 |     #
 
-tools/test/docstring_linter_testdata/python_code.py.txt:71: No docstring found for function 'needs_docs' (12 lines). If the method overrides a method on a parent class, adding the `@typing_extensions.override` decorator will make this error go away.
+tools/test/docstring_linter_testdata/python_code.py.txt:71: No docstring found for function 'needs_docs' (11 lines). If the method overrides a method on a parent class, adding the `@typing_extensions.override` decorator will make this error go away.
    69 |     """This docstring, while short, is enough"""
    70 |
    71 |     def needs_docs(self):
             ^
    72 |         def not_short():
    73 |             class Long:
+
+tools/test/docstring_linter_testdata/python_code.py.txt:85: No docstring found for class 'NotDocstring' (19 lines)
+   83 |
+   84 | @override  # Won't work!
+   85 | class NotDocstring:
+        ^
+   86 |     def short1(self):
+   87 |         pass

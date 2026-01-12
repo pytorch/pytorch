@@ -10,9 +10,8 @@ from torch.nn.parallel import comm
 class Broadcast(Function):
     @staticmethod
     def forward(ctx, target_gpus, *inputs):
-        assert all(i.device.type != "cpu" for i in inputs), (
-            "Broadcast function not implemented for CPU tensors"
-        )
+        if not all(i.device.type != "cpu" for i in inputs):
+            raise AssertionError("Broadcast function not implemented for CPU tensors")
         target_gpus = [_get_device_index(x, True) for x in target_gpus]
         ctx.target_gpus = target_gpus
         if len(inputs) == 0:
@@ -55,9 +54,8 @@ class ReduceAddCoalesced(Function):
 class Gather(Function):
     @staticmethod
     def forward(ctx, target_device, dim, *inputs):
-        assert all(i.device.type != "cpu" for i in inputs), (
-            "Gather function not implemented for CPU tensors"
-        )
+        if not all(i.device.type != "cpu" for i in inputs):
+            raise AssertionError("Gather function not implemented for CPU tensors")
         if target_device == "cpu":
             ctx.target_device = "cpu"
         else:
@@ -123,7 +121,11 @@ def _get_stream(device: torch.device):
     global _streams
     if device.type == "cpu" or not torch.accelerator.is_available():
         return None
-    assert torch.accelerator.current_accelerator().type == device.type
+    if torch.accelerator.current_accelerator().type != device.type:
+        raise AssertionError(
+            f"Expected current accelerator type {torch.accelerator.current_accelerator().type} "
+            f"to match device type {device.type}"
+        )
     if _streams is None:
         _streams = [None] * torch.accelerator.device_count()
     if _streams[device.index] is None:

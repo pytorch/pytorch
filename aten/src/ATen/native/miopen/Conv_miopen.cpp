@@ -281,8 +281,9 @@ struct Workspace {
     data = c10::hip::HIPCachingAllocator::raw_alloc(size);
   }
   Workspace(const Workspace&) = delete;
-  Workspace(Workspace&&) = default;
-  Workspace& operator=(Workspace&&) = default;
+  Workspace(Workspace&&) = delete;
+  Workspace& operator=(const Workspace&) = delete;
+  Workspace& operator=(Workspace&&) = delete;
   ~Workspace() {
     if (data) {
       c10::hip::HIPCachingAllocator::raw_delete(data);
