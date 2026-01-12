@@ -726,8 +726,9 @@ def from_numpy(a: Any) -> torch.Tensor:
 def uninteresting_files() -> set[str]:
     import torch._dynamo.external_utils
     import torch._dynamo.polyfills
+    import torch.fx.traceback
 
-    mods = [torch._dynamo.external_utils, torch._dynamo.polyfills]
+    mods = [torch._dynamo.external_utils, torch._dynamo.polyfills, torch.fx.traceback]
 
     from torch._dynamo.polyfills.loader import POLYFILLED_MODULES
 
