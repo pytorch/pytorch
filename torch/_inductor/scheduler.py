@@ -1133,6 +1133,9 @@ class BaseSchedulerNode:
         if flops is None:
             return None
 
+        if isinstance(flops, torch.SymInt):
+            flops = flops.node.expr
+
         resolved_flops = V.graph.sizevars.size_hint(flops, fallback=0)
         counters["inductor"]["flop_count"] += resolved_flops
         return resolved_flops

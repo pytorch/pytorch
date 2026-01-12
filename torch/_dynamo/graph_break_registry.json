@@ -253,24 +253,6 @@
       ]
     }
   ],
-  "GB7054": [
-    {
-      "Gb_type": "backward() with non-leaf tensor",
-      "Context": "backward(inputs=[...]) with non-leaf tensor: {var}",
-      "Explanation": "backward(inputs=[...]) with non-leaf tensors is not yet supported.",
-      "Hints": [
-        "Only pass leaf tensors (parameters, graph inputs) to backward(inputs=...)"
-      ]
-    },
-    {
-      "Gb_type": "backward() with non-leaf tensor",
-      "Context": "backward(inputs=[...]) with non-leaf tensor",
-      "Explanation": "backward(inputs=[...]) with non-leaf tensors is not yet supported.",
-      "Hints": [
-        "Only pass leaf tensors (parameters, graph inputs) to backward(inputs=...)"
-      ]
-    }
-  ],
   "GB0026": [
     {
       "Gb_type": "Calling subclass default constructor with more than tensor argument",
@@ -308,7 +290,9 @@
       "Gb_type": "Compilation of intermediate hooks requires compiled autograd",
       "Context": "var_getattr {self} {name}",
       "Explanation": "Dynamo must be in compiled_autograd to register hooks.",
-      "Hints": []
+      "Hints": [
+        "Consider using torch.autograd.Function with a custom backward() method instead of register_hook()."
+      ]
     }
   ],
   "GB0030": [
@@ -693,6 +677,14 @@
         "Avoid calling `TestCase.{name}`. ",
         "Please report an issue to PyTorch."
       ]
+    }
+  ],
+  "GB8656": [
+    {
+      "Gb_type": "Opaque object with custom __getattr__ not supported",
+      "Context": "{value_type.__name__} with custom __getattr__",
+      "Explanation": "Dynamo does not support opaque objects types with custom __getattr__ methods",
+      "Hints": []
     }
   ],
   "GB0061": [
@@ -1397,15 +1389,7 @@
   "GB0123": [
     {
       "Gb_type": "Unsupported Tensor.backward() call",
-      "Context": "call_method {self} backward {gradient} {retain_graph} {create_graph} {inputs}",
-      "Explanation": "Dynamo currently does not support tracing `Tensor.backward()` when trace_autograd_ops is off.",
-      "Hints": [
-        "Set torch._dynamo.trace_autograd_ops=True"
-      ]
-    },
-    {
-      "Gb_type": "Unsupported Tensor.backward() call",
-      "Context": "call_method {self} backward {gradient} {retain_graph} {create_graph} {inputs}",
+      "Context": "call_method {self} backward {args} {kwargs}",
       "Explanation": "Dynamo currently does not support tracing `Tensor.backward()`.",
       "Hints": [
         "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
@@ -2208,16 +2192,6 @@
       ]
     }
   ],
-  "GB1042": [
-    {
-      "Gb_type": "backward() with in-graph created tensor",
-      "Context": "backward(inputs=[...]) with in-graph created tensor: {var}",
-      "Explanation": "backward(inputs=[...]) with tensors created inside the compiled function is not yet supported.",
-      "Hints": [
-        "Only pass tensors that are inputs to the compiled function or captured from outside"
-      ]
-    }
-  ],
   "GB0192": [
     {
       "Gb_type": "input iterator to itertools.cycle has too many items",
@@ -2306,6 +2280,17 @@
       "Context": "",
       "Explanation": "Missing BUILD_SET bytecode handler (for testing purposes).",
       "Hints": []
+    }
+  ],
+  "GB8843": [
+    {
+      "Gb_type": "Opaque object member with method-type USE_REAL returned a reference-type opaque object.",
+      "Context": "Opaque object type: {value_type}. Method name: '{name}'",
+      "Explanation": "To properly guard reference-type opaque objects, we must lift them as inputs to the graph. In order to do this, they must all have a source, meaning they come from a global value or are an attribute of an input.",
+      "Hints": [
+        "Register member '{name}' with MemberType.INLINED in ",
+        "register_opaque_type({value_type}, members=...)."
+      ]
     }
   ],
   "GB0201": [
@@ -3528,6 +3513,24 @@
       ]
     }
   ],
+  "GB2078": [
+    {
+      "Gb_type": "Attempted to access unregistered member on an OpaqueObject",
+      "Context": "value={real_obj}, attr={name}",
+      "Explanation": "Member '{name}' is not registered for this opaque object type.",
+      "Hints": [
+        "Register '{name}' with a MemberType in register_opaque_type(members=...)."
+      ]
+    },
+    {
+      "Gb_type": "Attempted to access unregistered member on an OpaqueObject",
+      "Context": "value={self.value}, attr={name}",
+      "Explanation": "Member '{name}' is not registered for this opaque object type.",
+      "Hints": [
+        "Register '{name}' with a MemberType in register_opaque_type(members=...)."
+      ]
+    }
+  ],
   "GB0310": [
     {
       "Gb_type": "torch.cond: improper predicate",
@@ -3677,14 +3680,6 @@
       "Hints": [
         "This is likely to be a Dynamo bug. Please report an issue to PyTorch."
       ]
-    }
-  ],
-  "GB1501": [
-    {
-      "Gb_type": "sparse_grad_accumulate_grad",
-      "Context": "accumulate_grad_ with sparse gradient",
-      "Explanation": "Sparse gradients are not supported in compiled autograd",
-      "Hints": []
     }
   ],
   "GB0323": [
@@ -3859,6 +3854,14 @@
       "Hints": [
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
       ]
+    }
+  ],
+  "GB2750": [
+    {
+      "Gb_type": "sparse_grad_accumulate_grad",
+      "Context": "accumulate_grad_ with sparse gradient",
+      "Explanation": "Sparse gradients are not supported in compiled autograd",
+      "Hints": []
     }
   ],
   "GB0341": [
@@ -4130,16 +4133,6 @@
       ]
     }
   ],
-  "GB0442": [
-    {
-      "Gb_type": "backward() with empty inputs",
-      "Context": "backward(inputs=[...]) resulted in no valid leaf tensors",
-      "Explanation": "backward(inputs=[...]) requires at least one valid leaf tensor.",
-      "Hints": [
-        "Ensure at least one tensor in inputs is a leaf (requires_grad=True, no grad_fn)"
-      ]
-    }
-  ],
   "GB0367": [
     {
       "Gb_type": "Dynamo cannot determine the equality comparison of an object",
@@ -4253,7 +4246,7 @@
     },
     {
       "Gb_type": "autograd.grad with compiled autograd",
-      "Context": "torch.autograd.grad()",
+      "Context": "",
       "Explanation": "torch.autograd.grad() inside torch.compile is not supported when compiled autograd is enabled. These two features have conflicting requirements for how the autograd graph is traced.",
       "Hints": [
         "Disable compiled autograd by removing the compiled_autograd context manager.",
