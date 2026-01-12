@@ -367,6 +367,90 @@ class RegisterDispatchKey:
 }}
 """
 
+    def gen_func_inplace_wrapper(
+        self, f: NativeFunction, g: NativeFunctionsGroup | None
+    ) -> str | None:
+        if g is None or g.out is None:
+            return None
+        k = f.func.kind()
+        sig = self.wrapper_kernel_sig(f)
+        out_sig = DispatcherSignature.from_schema(g.out.func)
+        out_args_bindings = out_sig.arguments()
+
+        # Separate the bindings into 'non-out' and 'out' for translation
+        # In PyTorch 'out' variants, the out arguments are usually at the end
+        num_out_args = len(g.out.func.arguments.out)
+        out_goal_bindings = (
+            out_args_bindings[:-num_out_args] if num_out_args > 0 else out_args_bindings
+        )
+
+        name = sig.name()
+        # Setup logic for functional vs inplace
+        # Functional: Need to create 'out' tensors
+        # Inplace: 'out' is just 'self'
+        allocation_logic = ""
+        call_args = []
+
+        out_sig = self.wrapper_kernel_sig(g.out)
+        if k is SchemaKind.functional:
+            # For each return, create an empty tensor.
+            # Note: We use at::empty_like or similar based on the first input.
+            # For a more robust structured logic, we'd use meta-functions,
+            # but this follows the 'unstructured' wrapper style.
+            for i, ret in enumerate(f.func.returns):
+                out_name = f"out{i}" if len(f.func.returns) > 1 else "out"
+                # Use the first tensor argument as the template for options
+                template = f.func.arguments.flat_positional[0].name
+                allocation_logic += (
+                    f"  auto {out_name} = at::empty({{0}}, {template}.options());\n"
+                )
+
+            # Translate arguments from functional signature to 'out' signature
+            # We must append the newly created 'out' tensors to the call
+            translated_args = [
+                e.expr for e in translate(sig.arguments(), out_goal_bindings)
+            ]
+            out_names = [
+                f"out{i}" if len(f.func.returns) > 1 else "out"
+                for i in range(len(f.func.returns))
+            ]
+            call_args = translated_args + out_names
+            return_statement = (
+                f"return {out_names[0]};"
+                if len(out_names) == 1
+                else f"return std::make_tuple({', '.join(out_names)});"
+            )
+
+        elif k is SchemaKind.inplace:
+            # Inplace just passes 'self' into the 'out' argument slot
+            call_args = [e.expr for e in translate(sig.arguments(), out_goal_bindings)]
+            # Usually self is the first arg in 'out' variants
+            call_args.append(f.func.arguments.self_arg.argument.name)
+            return_statement = f"return {f.func.arguments.self_arg.argument.name};"
+
+        else:
+            return None
+
+        # Determine the kernel name for the 'out' variant
+        out_meta = self.backend_index.get_kernel(g.out)
+        if out_meta is None:
+            return None
+
+        if self.class_method_name is None:
+            impl_name = f"{out_meta.cpp_namespace}::{out_meta.kernel}"
+        else:
+            impl_name = (
+                f"{out_meta.cpp_namespace}::{self.class_method_name}::{out_meta.kernel}"
+            )
+
+        return f"""\
+{sig.defn()} {{
+{allocation_logic}
+  {impl_name}({", ".join(call_args)});
+  {return_statement}
+}}
+"""
+
     def gen_structured(self, g: NativeFunctionsGroup) -> list[str]:
         metadata = self.backend_index.get_kernel(g)
         if self.backend_index.dispatch_key == DispatchKey.Meta:
@@ -404,6 +488,7 @@ class RegisterDispatchKey:
         with native_function_manager(f):
             inplace_meta = False
             gets_out_inplace_wrapper = False
+            gets_func_inplace_wrapper = False
             if not self.backend_index.has_kernel(f):
                 if (
                     self.backend_index.dispatch_key == DispatchKey.Meta
@@ -423,6 +508,15 @@ class RegisterDispatchKey:
                 ):
                     # We want to generate inplace/out wrappers, that don't have a kernel for the backend.
                     gets_out_inplace_wrapper = True
+                elif (
+                    self.backend_index.dispatch_key == DispatchKey.PrivateUse1
+                    and self.backend_index.use_out_as_primary
+                    and self.backend_index.external
+                    and g is not None
+                    and (f.func.kind() is not SchemaKind.out)
+                    and (self.backend_index.has_kernel(g.out))
+                ):
+                    gets_func_inplace_wrapper = True
                 else:
                     return None
             if f.manual_kernel_registration:
@@ -486,6 +580,8 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                 # short circuit for generated inplace/out wrappers
                 if gets_out_inplace_wrapper:
                     return self.gen_out_inplace_wrapper(f, g)
+                elif gets_func_inplace_wrapper:
+                    return self.gen_func_inplace_wrapper(f, g)
 
                 metadata = self.backend_index.get_kernel(f)
                 if metadata is None:
