@@ -937,19 +937,13 @@ class RegionalOutputCode(OutputCode):
     """
 
     # The serialized graph module as bytes (using GraphPickler)
-    _serialized_graph_module: Optional[bytes] = dataclasses.field(
-        default=None, init=False
-    )
+    _serialized_graph_module: Optional[bytes] = None
 
     # The actual graph module (cleared during serialization)
-    _graph_module: Optional[torch.nn.Module] = dataclasses.field(
-        default=None, init=False
-    )
+    _graph_module: Optional[torch.nn.Module] = None
 
     # Optional filter for ops during serialization
-    _ops_filter: Callable[[str], bool] | None = dataclasses.field(
-        default=None, init=False
-    )
+    _ops_filter: Callable[[str], bool] | None = None
 
     def __init__(
         self,
