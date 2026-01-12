@@ -501,21 +501,7 @@ EXPECTED_FAILURES = {
         "eager_equivalence",
         torch.float32,
     ): "layer_norm has numerical differences",
-    # silu has numerical differences
-    (
-        "cuda",
-        "nn.functional.silu",
-        "aot_eager_decomp_partition",
-        "eager_equivalence",
-        torch.float16,
-    ): "silu has numerical differences",
-    (
-        "cuda",
-        "nn.functional.silu",
-        "aot_eager_decomp_partition",
-        "eager_equivalence",
-        torch.float32,
-    ): "silu has numerical differences",
+    # silu has numerical differences with inductor_default
     (
         "cuda",
         "nn.functional.silu",
@@ -527,20 +513,6 @@ EXPECTED_FAILURES = {
         "cuda",
         "nn.functional.silu",
         "inductor_default",
-        "eager_equivalence",
-        torch.float32,
-    ): "silu has numerical differences",
-    (
-        "cuda",
-        "nn.functional.silu",
-        "inductor_numerics",
-        "eager_equivalence",
-        torch.float16,
-    ): "silu has numerical differences",
-    (
-        "cuda",
-        "nn.functional.silu",
-        "inductor_numerics",
         "eager_equivalence",
         torch.float32,
     ): "silu has numerical differences",
@@ -981,6 +953,36 @@ class TestOpInfoProperties(TestCase):
             samples = list(op.sample_inputs(device, dtype, requires_grad=False))
         return samples
 
+    def _run_with_expected_failure(self, device_type, op_name, backend, test_type, dtype, test_fn):
+        """Run a test with expected failure handling.
+
+        Uses pytest.xfail for clear test output:
+        - If test is expected to fail and does fail: XFAIL (pytest.xfail called)
+        - If test is expected to fail but passes: FAILED (strict xpass behavior)
+        - If test is not expected to fail: runs normally (PASSED or FAILED)
+
+        Args:
+            test_fn: A callable that runs the actual test assertions
+        """
+        expected = is_expected_failure(device_type, op_name, backend, test_type, dtype)
+
+        if expected:
+            reason = get_expected_failure_reason(device_type, op_name, backend, test_type, dtype)
+            try:
+                test_fn()
+            except (AssertionError, RuntimeError):
+                # Test failed as expected - mark as xfail for clear output
+                pytest.xfail(f"Known failure: {reason}")
+            else:
+                # Test was expected to fail but passed - strict xpass behavior
+                self.fail(
+                    f"XPASS (strict): expected test to fail ({reason}), but it passed. "
+                    f"Remove from EXPECTED_FAILURES: {(device_type, op_name, backend, test_type, dtype)}"
+                )
+        else:
+            # Not an expected failure - run normally
+            test_fn()
+
     # =========================================================================
     # Batch Invariance Tests
     # =========================================================================
@@ -1007,52 +1009,53 @@ class TestOpInfoProperties(TestCase):
             self.skipTest(f"No samples for {op.name}")
 
         fn = op.get_op()
-        tested_any = False
 
-        for sample in samples:
-            # Skip if input is not a tensor or is 0-dim
-            if not isinstance(sample.input, torch.Tensor) or sample.input.dim() == 0:
-                continue
+        def run_test():
+            tested_any = False
 
-            # Need at least size 4 in first dimension for meaningful test
-            full_size = sample.input.shape[0]
-            if full_size < 4:
-                continue
+            for sample in samples:
+                # Skip if input is not a tensor or is 0-dim
+                if not isinstance(sample.input, torch.Tensor) or sample.input.dim() == 0:
+                    continue
 
-            # Skip broadcast/expanded tensors (stride 0 in batch dim)
-            # These don't have meaningful batch invariance since all rows are the same
-            if sample.input.stride()[0] == 0:
-                continue
+                # Need at least size 4 in first dimension for meaningful test
+                full_size = sample.input.shape[0]
+                if full_size < 4:
+                    continue
 
-            # Skip samples where the op normalizes/reduces over dim 0 (batch dimension)
-            # because slicing the batch changes the normalization result
-            if sample_operates_on_batch_dim(op.name, sample):
-                continue
+                # Skip broadcast/expanded tensors (stride 0 in batch dim)
+                # These don't have meaningful batch invariance since all rows are the same
+                if sample.input.stride()[0] == 0:
+                    continue
 
-            compiled_fn = compile_fn(fn, backend)
+                # Skip samples where the op normalizes/reduces over dim 0 (batch dimension)
+                # because slicing the batch changes the normalization result
+                if sample_operates_on_batch_dim(op.name, sample):
+                    continue
 
-            # Get reference output at full size
-            full_args = (sample.input,) + tuple(sample.args)
-            full_kwargs = sample.kwargs
-            full_out = compiled_fn(*full_args, **full_kwargs)
+                compiled_fn = compile_fn(fn, backend)
 
-            if not isinstance(full_out, torch.Tensor):
-                continue
+                # Get reference output at full size
+                full_args = (sample.input,) + tuple(sample.args)
+                full_kwargs = sample.kwargs
+                full_out = compiled_fn(*full_args, **full_kwargs)
 
-            # Skip if output is 0-dim (scalar) - can't slice it
-            if full_out.dim() == 0:
-                continue
+                if not isinstance(full_out, torch.Tensor):
+                    continue
 
-            # Skip if output's first dimension doesn't match input's batch size
-            # (e.g., due to broadcasting or reduction)
-            if full_out.shape[0] != full_size:
-                continue
+                # Skip if output is 0-dim (scalar) - can't slice it
+                if full_out.dim() == 0:
+                    continue
 
-            tested_any = True
+                # Skip if output's first dimension doesn't match input's batch size
+                # (e.g., due to broadcasting or reduction)
+                if full_out.shape[0] != full_size:
+                    continue
 
-            # Test with exponentially decreasing sizes: size, size/2, size/4, ...
-            size = full_size
-            try:
+                tested_any = True
+
+                # Test with exponentially decreasing sizes: size, size/2, size/4, ...
+                size = full_size
                 while size >= 1:
                     # Slice all tensor inputs with matching batch dimensions
                     sliced = slice_tensors_to_batch_size(sample, size)
@@ -1067,17 +1070,11 @@ class TestOpInfoProperties(TestCase):
 
                     # Step down exponentially
                     size = size // 2
-            except (AssertionError, RuntimeError):
-                if is_expected_failure(
-                    device_type, op.name, backend, "batch_invariance", dtype
-                ):
-                    pytest.xfail(
-                        f"Known failure: {get_expected_failure_reason(device_type, op.name, backend, 'batch_invariance', dtype)}"
-                    )
-                raise
 
-        if not tested_any:
-            self.skipTest("No suitable samples found for batch invariance test")
+            if not tested_any:
+                self.skipTest("No suitable samples found for batch invariance test")
+
+        self._run_with_expected_failure(device_type, op.name, backend, "batch_invariance", dtype, run_test)
 
     # =========================================================================
     # Run-to-Run Determinism Tests
@@ -1092,7 +1089,7 @@ class TestOpInfoProperties(TestCase):
 
         For enhanced determinism testing, this test:
         1. Resets dynamo and uses fresh inductor cache between compilations
-        2. Performs unrelated GPU work between runs to perturb benchmark timing
+        2. Uses distort_benchmarking_result config to perturb autotuning choices
         3. Tests multiple runs and verifies bitwise identical outputs
         """
         torch._dynamo.reset()
@@ -1104,54 +1101,42 @@ class TestOpInfoProperties(TestCase):
 
         fn = op.get_op()
 
-        def perturb_benchmarks(device):
-            """Run unrelated GPU work to perturb benchmark timing heuristics."""
-            # Vary the sizes to create different memory/compute patterns
-            for size in [64, 256, 1024]:
-                noise = torch.randn(size, size, device=device, dtype=torch.float32)
-                _ = torch.matmul(noise, noise)
-            torch.cuda.synchronize()
+        def run_test():
+            import torch._inductor.config as inductor_config
 
-        for sample in samples:
-            args = (sample.input,) + tuple(sample.args)
-            kwargs = sample.kwargs
+            for sample in samples:
+                args = (sample.input,) + tuple(sample.args)
+                kwargs = sample.kwargs
 
-            # Run 1: Fresh cache
-            torch._dynamo.reset()
-            with fresh_inductor_cache():
-                compiled_fn1 = compile_fn(fn, backend)
-                out1 = compiled_fn1(*args, **kwargs)
+                # Run 1: Fresh cache, normal benchmarking
+                torch._dynamo.reset()
+                with fresh_inductor_cache():
+                    compiled_fn1 = compile_fn(fn, backend)
+                    out1 = compiled_fn1(*args, **kwargs)
 
-            # Perturb benchmarks between runs
-            perturb_benchmarks(device)
+                # Run 2: Fresh cache, inverted benchmark results
+                torch._dynamo.reset()
+                with fresh_inductor_cache():
+                    with inductor_config.patch(
+                        {"test_configs.distort_benchmarking_result": "inverse"}
+                    ):
+                        compiled_fn2 = compile_fn(fn, backend)
+                        out2 = compiled_fn2(*args, **kwargs)
 
-            # Run 2: Fresh cache again
-            torch._dynamo.reset()
-            with fresh_inductor_cache():
-                compiled_fn2 = compile_fn(fn, backend)
-                out2 = compiled_fn2(*args, **kwargs)
+                # Run 3: Fresh cache, random benchmark results
+                torch._dynamo.reset()
+                with fresh_inductor_cache():
+                    with inductor_config.patch(
+                        {"test_configs.distort_benchmarking_result": "random"}
+                    ):
+                        compiled_fn3 = compile_fn(fn, backend)
+                        out3 = compiled_fn3(*args, **kwargs)
 
-            # Perturb benchmarks again
-            perturb_benchmarks(device)
-
-            # Run 3: Fresh cache again
-            torch._dynamo.reset()
-            with fresh_inductor_cache():
-                compiled_fn3 = compile_fn(fn, backend)
-                out3 = compiled_fn3(*args, **kwargs)
-
-            # Bitwise identical
-            try:
+                # Bitwise identical
                 self.assertEqual(out1, out2, rtol=0, atol=0)
                 self.assertEqual(out2, out3, rtol=0, atol=0)
-            except (AssertionError, RuntimeError):
-                if is_expected_failure(
-                    device_type, op.name, backend, "determinism", dtype
-                ):
-                    pytest.xfail(
-                        f"Known failure: {get_expected_failure_reason(device_type, op.name, backend, 'determinism', dtype)}"
-                    )
-                raise
+
+        self._run_with_expected_failure(device_type, op.name, backend, "determinism", dtype, run_test)
 
     # =========================================================================
     # Bitwise Equivalence with Eager Mode Tests
@@ -1172,28 +1157,22 @@ class TestOpInfoProperties(TestCase):
 
         fn = op.get_op()
 
-        for sample in samples:
-            args = (sample.input,) + tuple(sample.args)
-            kwargs = sample.kwargs
+        def run_test():
+            for sample in samples:
+                args = (sample.input,) + tuple(sample.args)
+                kwargs = sample.kwargs
 
-            # Eager reference
-            eager_out = fn(*args, **kwargs)
+                # Eager reference
+                eager_out = fn(*args, **kwargs)
 
-            # Compiled output
-            compiled_fn = compile_fn(fn, backend)
-            compiled_out = compiled_fn(*args, **kwargs)
+                # Compiled output
+                compiled_fn = compile_fn(fn, backend)
+                compiled_out = compiled_fn(*args, **kwargs)
 
-            # Bitwise identical
-            try:
+                # Bitwise identical
                 self.assertEqual(eager_out, compiled_out, rtol=0, atol=0)
-            except (AssertionError, RuntimeError):
-                if is_expected_failure(
-                    device_type, op.name, backend, "eager_equivalence", dtype
-                ):
-                    pytest.xfail(
-                        f"Known failure: {get_expected_failure_reason(device_type, op.name, backend, 'eager_equivalence', dtype)}"
-                    )
-                raise
+
+        self._run_with_expected_failure(device_type, op.name, backend, "eager_equivalence", dtype, run_test)
 
     # =========================================================================
     # Exhaustive/Sampled Unary Ufunc Tests
@@ -1231,17 +1210,11 @@ class TestOpInfoProperties(TestCase):
         compiled_fn = compile_fn(fn, backend)
         compiled_out = compiled_fn(test_values)
 
-        # Bitwise identical
-        try:
+        def run_test():
+            # Bitwise identical
             self.assertEqual(eager_out, compiled_out, rtol=0, atol=0)
-        except (AssertionError, RuntimeError):
-            if is_expected_failure(
-                device_type, op.name, backend, "unary_numerical", dtype
-            ):
-                pytest.xfail(
-                    f"Known failure: {get_expected_failure_reason(device_type, op.name, backend, 'unary_numerical', dtype)}"
-                )
-            raise
+
+        self._run_with_expected_failure(device_type, op.name, backend, "unary_numerical", dtype, run_test)
 
     # =========================================================================
     # Sampled Binary Ufunc Tests
@@ -1274,17 +1247,11 @@ class TestOpInfoProperties(TestCase):
         compiled_fn = compile_fn(fn, backend)
         compiled_out = compiled_fn(x, y)
 
-        # Bitwise identical
-        try:
+        def run_test():
+            # Bitwise identical
             self.assertEqual(eager_out, compiled_out, rtol=0, atol=0)
-        except (AssertionError, RuntimeError):
-            if is_expected_failure(
-                device_type, op.name, backend, "binary_numerical", dtype
-            ):
-                pytest.xfail(
-                    f"Known failure: {get_expected_failure_reason(device_type, op.name, backend, 'binary_numerical', dtype)}"
-                )
-            raise
+
+        self._run_with_expected_failure(device_type, op.name, backend, "binary_numerical", dtype, run_test)
 
 
 instantiate_device_type_tests(TestOpInfoProperties, globals(), except_for=["cpu"])
