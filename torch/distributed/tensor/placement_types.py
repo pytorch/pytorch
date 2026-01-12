@@ -621,7 +621,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
         split_factor: int,
         curr_local_size: int,
         num_chunks: int,
-        rank: int,
+        rank: RankType,
         return_first_offset: bool = True,
     ) -> tuple[int, list[int] | int]:
         """
@@ -681,7 +681,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
         self,
         curr_local_size: int,
         num_chunks: int,
-        rank: int,
+        rank: RankType,
         return_first_offset: bool = True,
     ) -> tuple[int, int | list[int]]:
         return self.local_shard_size_and_offset(
@@ -695,7 +695,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
 
     @staticmethod
     @maybe_run_for_local_tensor
-    def _local_shard_size(sharded_indices: list[torch.Tensor], rank: int) -> int:
+    def _local_shard_size(sharded_indices: list[torch.Tensor], rank: RankType) -> int:
         return len(sharded_indices[rank])
 
     def _shard_tensor(
