@@ -31,6 +31,9 @@ def requires_nvshmem():
 
 
 def has_nvls_support():
+    if not symm_mem.is_nvshmem_available():
+        return False
+
     # Set NVSHMEM as SymmMem backend before running the check
     symm_mem.set_backend("NVSHMEM")
     from torch._C._autograd import DeviceType
