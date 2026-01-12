@@ -475,9 +475,9 @@ def is_constant_class(cls: type[Any]) -> bool:
     return isinstance(cls, type) and cls in CONSTANT_NODES
 
 
-@dataclasses.dataclass(frozen=True)
-class ConstantNode:
-    value: Any
+@dataclasses.dataclass(frozen=True, slots=True)
+class ConstantNode(Generic[T]):
+    value: T
 
 
 def _is_constant_holder(spec: "TreeSpec") -> bool:
@@ -647,7 +647,7 @@ def _private_register_pytree_node(
         SERIALIZED_TYPE_TO_PYTHON_TYPE[serialized_type_name] = cls
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class SequenceKey(Generic[T]):
     idx: int
 
@@ -661,7 +661,7 @@ class SequenceKey(Generic[T]):
 K = TypeVar("K", bound=Hashable)
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class MappingKey(Generic[K, T]):
     key: K
 
@@ -672,7 +672,7 @@ class MappingKey(Generic[K, T]):
         return mapping[self.key]
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class GetAttrKey:
     name: str
 
@@ -1099,7 +1099,7 @@ def _is_leaf(tree: PyTree, is_leaf: Callable[[PyTree], bool] | None = None) -> b
 #   num_leaves: the number of leaves
 #   num_children: the number of children of the root Node (i.e., len(children()))
 #   is_leaf(): whether the root Node is a leaf
-@dataclasses.dataclass(init=False, frozen=True, eq=True, repr=False)
+@dataclasses.dataclass(init=False, frozen=True, eq=True, repr=False, slots=True)
 class TreeSpec:
     type: Any
     _context: Context
@@ -1333,7 +1333,7 @@ PyTreeSpec: TypeAlias = TreeSpec
     "use `isinstance(treespec, TreeSpec) and treespec.is_leaf()` instead.",
     category=FutureWarning,
 )
-@dataclasses.dataclass(init=True, frozen=True, eq=False, repr=False)
+@dataclasses.dataclass(init=True, frozen=True, eq=False, repr=False, slots=True)
 class LeafSpec(TreeSpec):
     type: Any = dataclasses.field(default=None, init=False)
     _context: Context = dataclasses.field(default=None, init=False)

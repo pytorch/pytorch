@@ -52,6 +52,7 @@ struct CUDAHooks : public at::CUDAHooksInterface {
   long versionRuntimeCuDNN() const override;
   long versionCuDNNFrontend() const override;
   long versionMIOpen() const override;
+  long versionHipBLASLt() const override;
   std::string showConfig() const override;
   double batchnormMinEpsilonCuDNN() const override;
   int64_t cuFFTGetPlanCacheMaxSize(DeviceIndex device_index) const override;

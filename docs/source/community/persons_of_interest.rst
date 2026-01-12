@@ -24,10 +24,12 @@ Core Maintainers
 -  Soumith Chintala (`soumith <https://github.com/soumith>`__)
 -  Edward Yang (`ezyang <https://github.com/ezyang>`__)
 -  Greg Chanan (`gchanan <https://github.com/gchanan>`__)
--  Dmytro Dzhulgakov (`dzhulgakov <https://github.com/dzhulgakov>`__)
 -  Nikita Shulga (`malfet <https://github.com/malfet>`__)
 -  Alban Desmaison (`albanD <https://github.com/albanD>`__)
 -  Piotr Bialecki (`ptrblck <https://github.com/ptrblck>`__)
+-  Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
+-  Horace He (`Chillee <https://github.com/Chillee>`__)
+-  (emeritus) Dmytro Dzhulgakov (`dzhulgakov <https://github.com/dzhulgakov>`__)
 
 Module-level maintainers
 ------------------------
