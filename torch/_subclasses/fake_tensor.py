@@ -1,4 +1,3 @@
-# mypy: allow-untyped-decorators
 from __future__ import annotations
 
 import atexit
@@ -142,8 +141,8 @@ class MetadataMismatchError(RuntimeError):
 class FakeTensorTLS(threading.local):
     # Default to None, otherwise it'll be used to override _all_
     # `FakeTensorMode.allow_non_fake_inputs` in this thread.
-    allow_non_fake_inputs_override: Optional[bool]
-    non_strict_export_fake_tensor_tracker: weakref.WeakSet
+    allow_non_fake_inputs_override: bool | None
+    non_strict_export_fake_tensor_tracker: weakref.WeakSet[FakeTensor]
 
     def __init__(self) -> None:
         self.allow_non_fake_inputs_override = None
@@ -158,7 +157,7 @@ def ordered_set(*items: T) -> dict[T, Literal[True]]:
 
 
 @contextlib.contextmanager
-def unset_fake_temporarily() -> Generator[Optional[TorchDispatchMode], None, None]:
+def unset_fake_temporarily() -> Generator[TorchDispatchMode | None, None, None]:
     old = torch._C._unset_dispatch_mode(torch._C._TorchDispatchModeKey.FAKE)
     try:
         yield old
@@ -293,13 +292,13 @@ class FakeTensorConverter:
     @property
     def tensor_memo(
         self,
-    ) -> weakref.WeakValueDictionary:
-        # not valid until py3.10
-        # weakref.WeakValueDictionary["torch._subclasses.meta_utils.MetaTensorId", Optional["FakeTensor"]]
+    ) -> weakref.WeakValueDictionary[
+        torch._subclasses.meta_utils.MetaTensorId, FakeTensor
+    ]:
         return self.meta_converter.tensor_memo
 
-    meta_converter: MetaConverter
-    constant_storage_mapping: dict[StorageWeakRef, list[ReferenceType]]
+    meta_converter: MetaConverter[FakeTensor]
+    constant_storage_mapping: dict[StorageWeakRef, list[ReferenceType[FakeTensor]]]
     export: bool
 
     def __init__(self, *, copy_data: bool = False, export: bool = False) -> None:
@@ -333,6 +332,7 @@ class FakeTensorConverter:
         for weak_tensor_ref in self.constant_storage_mapping[weak_st]:
             ten = weak_tensor_ref()
             if ten is not None:
+                # pyrefly: ignore [missing-attribute]
                 ten._fix_weakref()
                 ten.constant = None
 
@@ -660,10 +660,12 @@ class FakeTensor(Tensor):
     # TODO: Generalize this as needed, e.g., into a trie of memos, if
     # you do something like x[0].item()  (x[0] is fresh each time, so
     # memo mechanism here won't work)
-    nonzero_memo = SymNumberMemoDescriptor()
+    nonzero_memo: SymNumberMemoDescriptor | int | None = SymNumberMemoDescriptor()
     item_memo = SymNumberMemoDescriptor()
-    unique_memo = SymNumberMemoDescriptor()
-    unique_consecutive_memo = SymNumberMemoDescriptor()
+    unique_memo: SymNumberMemoDescriptor | int | None = SymNumberMemoDescriptor()
+    unique_consecutive_memo: SymNumberMemoDescriptor | int | None = (
+        SymNumberMemoDescriptor()
+    )
 
     # We expect nested_int_memo to be None when an offsets is a graph
     # intermediate, or an input that has never been associated with a
@@ -1429,17 +1431,15 @@ class FakeTensorMode(TorchDispatchMode):
 
     def __exit__(
         self,
-        a: Optional[type[BaseException]],
-        b: Optional[BaseException],
-        c: Optional[TracebackType],
+        exc_type: type[BaseException] | None,
+        exc_val: BaseException | None,
+        exc_tb: TracebackType | None,
     ) -> None:
-        (
-            live,
-            maybe_prev_fake_mode,
-            maybe_prev_only_lift_cpu_tensors,
-        ) = self.enter_stack.pop()
+        (live, maybe_prev_fake_mode, maybe_prev_only_lift_cpu_tensors) = (
+            self.enter_stack.pop()
+        )
         if live:
-            super().__exit__(a, b, c)
+            super().__exit__(exc_type, exc_val, exc_tb)
 
             # Re-enable the previous fake mode, if there was one.
             if maybe_prev_fake_mode is not None:
@@ -1506,7 +1506,7 @@ class FakeTensorMode(TorchDispatchMode):
             # Do this dispatch outside the above except handler so if it
             # generates its own exception there won't be a __context__ caused by
             # the caching mechanism.
-            # pyrefly: ignore [bad-argument-type]
+
             return self._dispatch_impl(func, types, args, kwargs)
 
         assert state is not None
@@ -1524,27 +1524,25 @@ class FakeTensorMode(TorchDispatchMode):
                 # This represents a negative cache entry - we already saw that the
                 # output is uncachable. Compute it from first principals.
                 FakeTensorMode.cache_bypasses[entry.reason] += 1
-                # pyrefly: ignore [bad-argument-type]
+
                 return self._dispatch_impl(func, types, args, kwargs)
 
             # We have a cache entry.
-            # pyrefly: ignore [bad-argument-type]
+
             output = self._output_from_cache_entry(state, entry, key, func, args)
             FakeTensorMode.cache_hits += 1
             if self.cache_crosscheck_enabled:
                 # For debugging / testing: Validate that the output synthesized
                 # from the cache matches the output created by normal dispatch.
                 with disable_fake_tensor_cache(self):
-                    # pyrefly: ignore [bad-argument-type]
                     self._crosscheck_cache_output(output, func, types, args, kwargs)
             return output
 
         # We don't have a cache entry.
-        # pyrefly: ignore [bad-argument-type]
+
         output = self._dispatch_impl(func, types, args, kwargs)
 
         try:
-            # pyrefly: ignore [bad-argument-type]
             entry = self._make_cache_entry(state, key, func, args, kwargs, output)
         except _BypassDispatchCache as e:
             # We ran "extra" checks on the cache key and determined that it's no
@@ -1929,7 +1927,6 @@ class FakeTensorMode(TorchDispatchMode):
                 self._validate_output_for_cache_entry(
                     state,
                     key,
-                    # pyrefly: ignore [bad-argument-type]
                     func,
                     args,
                     kwargs,
@@ -1939,7 +1936,6 @@ class FakeTensorMode(TorchDispatchMode):
             self._validate_output_for_cache_entry(
                 state,
                 key,
-                # pyrefly: ignore [bad-argument-type]
                 func,
                 args,
                 kwargs,
@@ -1951,7 +1947,6 @@ class FakeTensorMode(TorchDispatchMode):
                 self._get_output_info_for_cache_entry(
                     state,
                     key,
-                    # pyrefly: ignore [bad-argument-type]
                     func,
                     args,
                     kwargs,
@@ -1969,7 +1964,6 @@ class FakeTensorMode(TorchDispatchMode):
             output_info = self._get_output_info_for_cache_entry(
                 state,
                 key,
-                # pyrefly: ignore [bad-argument-type]
                 func,
                 args,
                 kwargs,
@@ -2023,7 +2017,9 @@ class FakeTensorMode(TorchDispatchMode):
         if metadata.storage_bytes is not None:
             check_value(metadata.storage_bytes, state)
 
-        maybe_suppress: Callable[[], typing.ContextManager] = contextlib.nullcontext
+        maybe_suppress: Callable[[], typing.ContextManager[None]] = (
+            contextlib.nullcontext
+        )
         if self.shape_env is not None:
             maybe_suppress = self.shape_env.suppress_guards
 
@@ -2516,7 +2512,6 @@ class FakeTensorMode(TorchDispatchMode):
             )
 
             with self, maybe_ignore_fresh_unbacked_symbols():
-                # pyrefly: ignore [index-error]
                 return registered_hop_fake_fns[func](*args, **kwargs)
 
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
@@ -2671,7 +2666,6 @@ class FakeTensorMode(TorchDispatchMode):
                 # TODO: Is this really needed?
                 compute_unbacked_bindings(self.shape_env, fake_out, peek=True)
 
-            # pyrefly: ignore [bad-return]
             return fake_out
 
         # Try for fastpath
