@@ -17,7 +17,10 @@ from torch.distributed.tensor._op_schema import (
     TupleStrategy,
 )
 from torch.distributed.tensor._ops._math_ops import _NormPartial
-from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
+from torch.distributed.tensor._ops.single_dim_strategy import (
+    _ShardingPlaceholder,
+    register_single_dim_strategy,
+)
 from torch.distributed.tensor._ops.utils import (
     generate_redistribute_costs,
     infer_broadcast_dims_map,
@@ -531,8 +534,11 @@ def single_mesh_dim_pointwise_strategy(
     args_schema: ArgsType,
     kwargs_schema: KwargsType,
     linearity: int = -1,
+    preserve_partial: Optional[str] = None,
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    return single_mesh_dim_common_pointwise_strategy(args_schema, linearity)
+    return single_mesh_dim_common_pointwise_strategy(
+        op, args_schema, kwargs_schema, linearity, preserve_partial
+    )
 
 
 def single_mesh_dim_linear_pointwise_strategy(
@@ -543,25 +549,72 @@ def single_mesh_dim_linear_pointwise_strategy(
     return functools.partial(single_mesh_dim_pointwise_strategy, linearity=linearity)
 
 
-def single_mesh_dim_common_pointwise_strategy(
+def single_mesh_dim_partial_preserving_pointwise_strategy(
+    op: OpOverload,
     args_schema: ArgsType,
-    linearity: int = -1,
-    scalar_tensor_idx: Optional[int] = None,
+    kwargs_schema: KwargsType,
 ) -> list[list[Placement | _ShardingPlaceholder]]:
-    # TODO rename
-    tensor_arg_strategies: list[TensorMeta] = [
+    """
+    Single-mesh-dim strategy for ops that preserve specific Partial types.
+
+    For example, torch.maximum preserves Partial("max") placements because
+    max(max(a), max(b)) == max(a, b). Similarly, torch.minimum preserves
+    Partial("min") placements.
+    """
+    preserve_partial = partial_preserving_ops.get(op)
+    return single_mesh_dim_common_pointwise_strategy(
+        op, args_schema, kwargs_schema, linearity=-1, preserve_partial=preserve_partial
+    )
+
+
+def single_mesh_dim_common_pointwise_strategy(
+    op: OpOverload,
+    args_schema: ArgsType,
+    kwargs_schema: KwargsType,
+    linearity: int = -1,
+    preserve_partial: Optional[str] = None,
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """
+    Generate single-mesh-dim sharding rules for pointwise operations.
+
+    Args:
+        op: The operator overload
+        args_schema: Input arguments schema containing TensorMeta for tensor args
+        kwargs_schema: Keyword arguments schema (may contain "out" tensor for out variants)
+        linearity: Type of linearity support:
+            -1: No linearity (Partial placements not propagated)
+            0: Unary op linearity (e.g. to_copy, mul.Scalar) - one tensor input
+            1: Add linearity (e.g. add) - requires all inputs Partial, output Partial
+            2: Mul linearity (e.g. mul) - one input Partial, others Replicate, output Partial
+        preserve_partial: If set, Partial placements with this reduce_op will be preserved
+            through the operation (e.g., "max" for torch.maximum, "min" for torch.minimum).
+
+    Returns:
+        List of placement rules, each rule is [output_placement, *input_placements]
+    """
+    # Collect tensor args from both args and kwargs
+    tensor_arg_metas: list[TensorMeta] = [
         arg for arg in args_schema if isinstance(arg, TensorMeta)
     ]
-    common_shape = torch.broadcast_shapes(
-        *[arg.shape for arg in args_schema if isinstance(arg, TensorMeta)]
-    )
+    # Also collect tensor kwargs (like "out" for out-variant ops)
+    tensor_kwarg_metas: list[TensorMeta] = []
+    if kwargs_schema:
+        for v in kwargs_schema.values():
+            if isinstance(v, TensorMeta):
+                tensor_kwarg_metas.append(v)
+
+    all_tensor_metas = tensor_arg_metas + tensor_kwarg_metas
+
+    common_shape = torch.broadcast_shapes(*[arg.shape for arg in all_tensor_metas])
     placements_list: list[list[Placement | _ShardingPlaceholder]] = []
+
+    # Generate sharding rules for each dimension
     for i in range(len(common_shape)):
-        # Shard output dim i, and then shard the corresponding arguments if they have a corresponding (non broadcast) dim
+        # Shard output dim i, and shard corresponding input dims (handle broadcasting)
         shard_placements: list[Placement | _ShardingPlaceholder] = [
             _ShardingPlaceholder(i)
         ]
-        for arg in tensor_arg_strategies:
+        for arg in all_tensor_metas:
             common_dim_to_arg_dim = infer_broadcast_dims_map(common_shape, arg.shape)
             if common_dim_to_arg_dim[i] >= 0:
                 shard_placements.append(_ShardingPlaceholder(common_dim_to_arg_dim[i]))
@@ -570,36 +623,109 @@ def single_mesh_dim_common_pointwise_strategy(
 
         placements_list.append(shard_placements)
 
+    # Generate linearity rules for Partial placements
+    num_args_tensors = len(tensor_arg_metas)
+    num_total_tensors = len(all_tensor_metas)
+
+    # Check for norm_partial_avoidable_redistribute_ops (e.g., mul.Scalar, div.Scalar)
+    # These ops preserve _NormPartial when scalar >= 0
+    is_norm_partial_op = op in norm_partial_avoidable_redistribute_ops
+    scalar_value = args_schema[1] if len(args_schema) > 1 else None
+    preserve_norm_partial = (
+        is_norm_partial_op
+        and isinstance(scalar_value, (int, float))
+        and scalar_value >= 0
+    )
+
     if linearity == 0:
-        # unary op (e.g. to_copy), and also binary ops like mul.scalar
-        # input, output can be partial
-        assert len(tensor_arg_strategies) == 1, (
-            "expected single tensor input for linearity==0 op"
-        )
-        placements_list.append([Partial("sum"), Partial("sum")])
-        # TODO: do i need to check scalar_tensor_index and assign a replicate to that one, or do i omit a placement for it
-        # TODO: can mul.scalar work with avg or only sum? i think only sum works. common_pointwise_strategy seems
-        # to support both.
-        # TODO: also, i'll be replacing 'Partial(sum)' here with some kind of 'PartialPlaceholder', not yet designed
-        placements_list.append([Partial("avg"), Partial("avg")])
+        # Unary op (e.g. to_copy) or binary ops with scalar (e.g. mul.Scalar)
+        # Input and output can both be Partial
+        if num_args_tensors == 1:
+            if preserve_norm_partial or not is_norm_partial_op:
+                # Add Partial rules - the expansion logic will substitute
+                # with the actual Partial subclass (like _NormPartial) from input
+                placements_list.append([Partial("sum")] * (1 + num_total_tensors))
+                if not is_norm_partial_op:
+                    placements_list.append([Partial("avg")] * (1 + num_total_tensors))
+            # For is_norm_partial_op with negative scalar, don't add any Partial rules
+            # This will cause Partial to be converted to Replicate
 
     elif linearity == 1:
-        # binary add ops
-        # (A1 + B1) + (A2 + B2) == (A1 + A2) + (B1 + B2)
-        assert len(tensor_arg_strategies) == 2, (
-            "expected two tensor inputs for linearity==1 op"
-        )
-        placements_list.append([Partial("sum"), Partial("sum"), Partial("sum")])
-    elif linearity == 2:
-        # binary mul ops (2 tensor inputs)
-        # (A * B1) + (A * B2) == A * (B1 + B2)
-        assert len(tensor_arg_strategies) == 2, (
-            "expected two tensor inputs for linearity==2 op"
-        )
-        placements_list.append([Partial("sum"), Partial("sum"), Replicate()])
-        placements_list.append([Partial("sum"), Replicate(), Partial("sum")])
+        # Binary add ops: (A1 + B1) + (A2 + B2) == (A1 + A2) + (B1 + B2)
+        # Both inputs must be Partial, output is Partial
+        # Note: if num_args_tensors == 1, we have tensor + scalar case
+        # For add/sub with scalar, we do NOT propagate partial (per p_sum_scalar_redistribute_ops)
+        if num_args_tensors == 2:
+            placements_list.append([Partial("sum")] * (1 + num_total_tensors))
+            placements_list.append([Partial("avg")] * (1 + num_total_tensors))
+        # For num_args_tensors == 1 (scalar case), don't add Partial rules
 
-    # TODO: handle scalar_tensor_idx
+    elif linearity == 2:
+        # Binary mul ops: (A * B1) + (A * B2) == A * (B1 + B2)
+        # One input Partial, other Replicate, output is Partial
+        if num_args_tensors == 2:
+            # First input Partial, second Replicate
+            rule_sum_1: list[Placement | _ShardingPlaceholder] = [
+                Partial("sum"),
+                Partial("sum"),
+                Replicate(),
+            ]
+            rule_avg_1: list[Placement | _ShardingPlaceholder] = [
+                Partial("avg"),
+                Partial("avg"),
+                Replicate(),
+            ]
+            # First input Replicate, second Partial
+            rule_sum_2: list[Placement | _ShardingPlaceholder] = [
+                Partial("sum"),
+                Replicate(),
+                Partial("sum"),
+            ]
+            rule_avg_2: list[Placement | _ShardingPlaceholder] = [
+                Partial("avg"),
+                Replicate(),
+                Partial("avg"),
+            ]
+            # Add out tensor placements if present
+            for _ in tensor_kwarg_metas:
+                rule_sum_1.append(Partial("sum"))
+                rule_avg_1.append(Partial("avg"))
+                rule_sum_2.append(Partial("sum"))
+                rule_avg_2.append(Partial("avg"))
+            placements_list.append(rule_sum_1)
+            placements_list.append(rule_avg_1)
+            placements_list.append(rule_sum_2)
+            placements_list.append(rule_avg_2)
+        elif num_args_tensors == 1:
+            # tensor * scalar case - treat like linearity==0 (unary)
+            placements_list.append([Partial("sum")] * (1 + num_total_tensors))
+            placements_list.append([Partial("avg")] * (1 + num_total_tensors))
+
+    # Generate rules for partial-preserving ops (e.g., max preserves Partial("max"))
+    if preserve_partial is not None:
+        # All inputs and output have the same Partial type
+        # e.g., max(Partial("max"), Partial("max")) -> Partial("max")
+        partial_placement = Partial(preserve_partial)
+        placements_list.append([partial_placement] * (1 + num_total_tensors))
+
+        # Also generate mixed strategies where some inputs are Replicate
+        # This handles the case where inputs have different Partial types
+        # e.g., max(Partial("max"), Replicate) -> Partial("max")
+        # For each input position, generate a strategy where that input is Replicate
+        for i in range(num_args_tensors):
+            mixed_strategy: list[Placement | _ShardingPlaceholder] = [
+                partial_placement
+            ]  # output
+            for j in range(num_args_tensors):
+                if j == i:
+                    mixed_strategy.append(Replicate())
+                else:
+                    mixed_strategy.append(partial_placement)
+            # Add out tensor placements if present (for out-variant ops)
+            for _ in tensor_kwarg_metas:
+                mixed_strategy.append(partial_placement)
+            placements_list.append(mixed_strategy)
+
     return placements_list
 
 
@@ -810,19 +936,29 @@ norm_partial_avoidable_redistribute_ops = {
 }
 
 for op in linear_pointwise_ops:
+    linearity = linear_pointwise_ops[op]
     if op in norm_partial_avoidable_redistribute_ops:
-        register_op_strategy(
+        # register_op_strategy(
+        #     op, schema_info=RuntimeSchemaInfo(1, static_kwargkey=["out"])
+        # )(linear_pointwise_strategy)
+        register_single_dim_strategy(
             op, schema_info=RuntimeSchemaInfo(1, static_kwargkey=["out"])
-        )(linear_pointwise_strategy)
+        )(single_mesh_dim_linear_pointwise_strategy(linearity))
     else:
-        register_op_strategy(
+        # register_op_strategy(
+        #     op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+        # )(linear_pointwise_strategy)
+        register_single_dim_strategy(
             op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-        )(linear_pointwise_strategy)
+        )(single_mesh_dim_linear_pointwise_strategy(linearity))
 
 for op in partial_preserving_ops:
-    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
-        partial_preserving_pointwise_strategy
-    )
+    # register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
+    #     partial_preserving_pointwise_strategy
+    # )
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(single_mesh_dim_partial_preserving_pointwise_strategy)
 
 # Register copy_ with its custom strategy that preserves all Partial types
 register_op_strategy(
@@ -830,12 +966,12 @@ register_op_strategy(
 )(copy_strategy)
 
 for op in pointwise_ops:
-    register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
-        pointwise_strategy
-    )
-    # register_single_dim_strategy(
-    #     op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
-    # )(single_mesh_dim_pointwise_strategy)
+    # register_op_strategy(op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"]))(
+    #     pointwise_strategy
+    # )
+    register_single_dim_strategy(
+        op, schema_info=RuntimeSchemaInfo(static_kwargkey=["out"])
+    )(single_mesh_dim_pointwise_strategy)
 
 # TODO: add all for_each ops
 for_each_ops = [

@@ -193,6 +193,8 @@ class ShardingPropagator:
         self.op_single_dim_strategy_funcs[op_overload] = strategy_func
         if schema_info is not None:
             self.op_to_schema_info_for_single_dim_strategy[op_overload] = schema_info
+            # Also register in op_to_schema_info for C++ cache key computation
+            self.op_to_schema_info[op_overload] = schema_info
 
     def register_op_strategy(
         self,

@@ -523,9 +523,16 @@ class OpDispatcher:
         create_schema: bool,
     ) -> OpInfo:
         # get runtime schema info to determine whether to use pytree to flatten inputs
+        # Check both regular op_strategy and single_dim_strategy registrations
         runtime_schema_info = self.sharding_propagator.op_to_schema_info.get(
             op_call, None
         )
+        if runtime_schema_info is None:
+            runtime_schema_info = (
+                self.sharding_propagator.op_to_schema_info_for_single_dim_strategy.get(
+                    op_call, None
+                )
+            )
 
         if runtime_schema_info is not None and runtime_schema_info.needs_pytree:
             # flatten args/kwargs when op says necessary

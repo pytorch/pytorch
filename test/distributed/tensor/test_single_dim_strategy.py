@@ -135,8 +135,8 @@ class TestExpandPlaceholder(TestCase):
             )  # no. of list elements
             if linearity == 1:
                 self.assertEqual(
-                    len(strategy.children[0].strategies), 125
-                )  # len([S(0), S(1), S(2), R, P]) ** 3 = 125
+                    len(strategy.children[0].strategies), 216
+                )  # len([S(0), S(1), S(2), R, P_sum, P_avg]) ** 3 = 216
             else:
                 self.assertGreaterAlmostEqual(
                     len(strategy.children[0].strategies), 64
@@ -246,8 +246,9 @@ class TestExpandPlaceholder(TestCase):
             return strategy
 
         # Note: using sizes that are multiples of mesh sizes so every sharding option is valid,
-        # (S0, S1, R, Psum, Pavg) ** 3 = 125
-        expected_num_strategies = (125, 8)
+        # For child[0]: (S0, S1, S2, R, Psum, Pavg) = 6 options, 6^3 = 216
+        # For child[1]: no Shard in inputs, so only (R, Psum, Pavg) = 3 options, 3^3 = 27
+        expected_num_strategies = (216, 27)
         # Test Replicate + Shard gives Shard
         inputs_a = [torch.empty((8, 8, 8))] * 2
         placements_a = [
