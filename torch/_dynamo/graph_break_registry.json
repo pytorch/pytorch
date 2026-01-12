@@ -1828,6 +1828,18 @@
       ]
     }
   ],
+  "GB6210": [
+    {
+      "Gb_type": "leaf_function: nn.Module argument without source",
+      "Context": "module type: {type(arg.value).__name__}",
+      "Explanation": "leaf_function received an nn.Module argument that cannot be traced back to its origin. This typically happens when the module is created dynamically inside the compiled region.",
+      "Hints": [
+        "Ensure the nn.Module is created outside the compiled function ",
+        "and passed as an argument.",
+        "If the module is a class attribute, access it via self.module_name."
+      ]
+    }
+  ],
   "GB0163": [
     {
       "Gb_type": "Unsupported tensor subclass attribute access",
