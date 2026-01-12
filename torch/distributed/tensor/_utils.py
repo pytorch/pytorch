@@ -1,6 +1,6 @@
 import logging
 import threading
-from collections.abc import Sequence
+from collections.abc import Callable, Sequence
 from typing import Any, cast
 
 import torch
@@ -8,6 +8,7 @@ import torch.distributed._functional_collectives as funcol
 import torch.distributed.tensor._api as dtensor
 from torch._logging import LazyString
 from torch._prims_common import ShapeType
+from torch.distributed import RankType
 from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._collective_utils import redistribute_cost
@@ -141,7 +142,7 @@ def compute_local_shape_and_global_offset(
         return ((0,), empty_offset)
 
     return _compute_local_shape_and_global_offset(
-        global_shape, mesh.shape, mesh.get_coordinate(), placements, skip_offset
+        global_shape, mesh.shape, mesh._sym_get_coordinate, placements, skip_offset
     )
 
 
@@ -149,7 +150,7 @@ def compute_local_shape_and_global_offset(
 def _get_shard_size_and_offsets(
     curr_local_size: int,
     mesh_dim_size: int,
-    rank: int,
+    rank: RankType,
     placement: Shard | _StridedShard,
     previous_offsets,
     zero_global_offset: int,
@@ -188,7 +189,7 @@ def _get_first_offset(offsets: torch.Tensor) -> int:
 def _compute_local_shape_and_global_offset(
     global_shape: ShapeType,
     mesh_shape: ShapeType,
-    my_coordinate: list[int] | None,
+    coordinate_lookup: Callable[[int], RankType],
     placements: Sequence[Placement],
     skip_offset: bool = False,
 ) -> tuple[tuple[int, ...], tuple[int, ...]]:
@@ -247,11 +248,10 @@ def _compute_local_shape_and_global_offset(
             f"Sharding dim {shard_dim} greater than tensor ndim {len(local_shape)}"
         )
         previous_offsets = shard_dim_to_global_offsets.get(shard_dim)
-        assert my_coordinate is not None
         shard_size, shard_offsets = _get_shard_size_and_offsets(
             local_shape[shard_dim],
             mesh_shape[mesh_dim],
-            my_coordinate[mesh_dim],
+            coordinate_lookup(mesh_dim),
             placement,
             previous_offsets,
             zero_global_offset,

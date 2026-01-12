@@ -41,10 +41,6 @@ class NCCLSymmetricMemory : public SymmetricMemory {
 
   c10::Device get_device() override;
 
-  const std::vector<int>& get_rank_to_global_rank() override;
-
-  int* get_rank_to_global_rank_dev() override;
-
   ncclWindow_t get_window();
 
   ncclWindow_t get_signal_pad_handle();
