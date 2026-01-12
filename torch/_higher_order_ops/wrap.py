@@ -156,6 +156,30 @@ redirect_to_mode(inductor_compiled_code, _CachingTorchDispatchMode)
 redirect_to_mode(inductor_compiled_code, _CachedTorchDispatchMode)
 
 
+class _FakifyingInterpreter(torch.fx.Interpreter):
+    """
+    An Interpreter subclass that converts tensor constants to FakeTensors.
+
+    When running an FX graph with FakeTensor inputs, tensor constants (e.g.,
+    block_mask tensors from flex_attention) are real tensors stored in the
+    GraphModule. This interpreter converts them to FakeTensors using the
+    active FakeTensorMode.
+    """
+
+    def get_attr(self, target, args, kwargs):
+        attr = self.fetch_attr(target)
+        if isinstance(attr, torch.Tensor) and not isinstance(
+            attr, torch._subclasses.FakeTensor
+        ):
+            # Convert real tensor to FakeTensor
+            from torch._guards import detect_fake_mode
+
+            fake_mode = detect_fake_mode()
+            if fake_mode is not None:
+                attr = fake_mode.from_tensor(attr)
+        return attr
+
+
 @register_fake(inductor_compiled_code)
 def inductor_compiled_code_fake(func, inputs):
     # Resolve func from side table if it's an index
@@ -163,10 +187,8 @@ def inductor_compiled_code_fake(func, inputs):
 
     # If resolved is an InductorCompiledCallable with an FX graph, run the graph
     if isinstance(resolved, InductorCompiledCallable) and resolved.fx_graph is not None:
-        from torch.fx import Interpreter
-
-        # The FX graph expects boxed inputs (as a list)
-        return Interpreter(resolved.fx_graph).boxed_run(inputs)
+        # Use the fakifying interpreter to convert tensor constants
+        return _FakifyingInterpreter(resolved.fx_graph).boxed_run(inputs)
 
     raise RuntimeError(
         "Inductor compiled code cannot be run with FakeTensor inputs. "
@@ -194,11 +216,10 @@ def inductor_compiled_code_proxy(mode, func, inputs):
     # If resolved is an InductorCompiledCallable with an FX graph, run the graph
     # to get example outputs for tracing
     if isinstance(resolved, InductorCompiledCallable) and resolved.fx_graph is not None:
-        from torch.fx import Interpreter
-
         # Run the FX graph to get example outputs
         # Note: boxed_run clears the input list, so we pass a copy
-        example_out = Interpreter(resolved.fx_graph).boxed_run(list(inputs))
+        # Use the fakifying interpreter to handle tensor constants
+        example_out = _FakifyingInterpreter(resolved.fx_graph).boxed_run(list(inputs))
 
         # Add the callable to the side table and get its index
         # This ensures the same callable gets the same index

@@ -1134,6 +1134,53 @@ class TestWrapInductorCompiledRegions(torch._dynamo.test_case.TestCase):
         expected = inp + 1
         torch.testing.assert_close(result, expected)
 
+    def test_fake_tensor_mode_with_tensor_constants(self):
+        """Test that FakeTensorMode works when FX graph has tensor constants"""
+        from torch._higher_order_ops.wrap import (
+            InductorCompiledCallable,
+            inductor_code_side_table,
+            inductor_compiled_code,
+        )
+        from torch._subclasses import FakeTensorMode
+
+        # Reset the side table for a clean test
+        inductor_code_side_table.reset_table()
+
+        # Create a graph that has a tensor constant (similar to flex_attention's block_mask)
+        class ModelWithConstant(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # This will be stored as a tensor constant in the traced graph
+                self.register_buffer("constant", torch.tensor([1.0, 2.0, 3.0]))
+
+            def forward(self, x):
+                return x + self.constant
+
+        model = ModelWithConstant()
+        gm = torch.fx.symbolic_trace(model)
+
+        # Create an InductorCompiledCallable
+        def compiled_with_constant(inputs):
+            return inputs[0] + model.constant
+
+        callable_obj = InductorCompiledCallable(compiled_with_constant, gm)
+
+        # Wrapper that uses the HOP
+        def wrapper(x):
+            return inductor_compiled_code(callable_obj, [x])
+
+        inp = torch.randn(3)
+
+        # Test that running with FakeTensorMode works
+        # This should convert the tensor constant to a FakeTensor
+        with FakeTensorMode() as mode:
+            fake_inp = mode.from_tensor(inp)
+            result = wrapper(fake_inp)
+
+            # Verify the result is a FakeTensor with correct shape
+            self.assertIsInstance(result, torch._subclasses.FakeTensor)
+            self.assertEqual(result.shape, inp.shape)
+
 
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests

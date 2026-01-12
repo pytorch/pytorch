@@ -1901,17 +1901,19 @@ class FakeTensorMode(TorchDispatchMode):
         # For hops, lets look at the output tensor to find any unbacked symints.
         # If there are none, then we rely on the existing checks to validate
         # caching.
-        # NB: Note that the HOPs that sta alive till FakeTensor are functional,
+        # NB: Note that the HOPs that stay alive till FakeTensor are functional,
         # once they support mutations, we will have to revisit this logic.
         if (
             isinstance(func, torch._ops.HigherOrderOperator)
             and func in registered_hop_fake_fns
         ):
-            assert isinstance(output, tuple)
+            # Normalize output to a tuple for checking. HOPs can return tuples,
+            # single tensors, or other structures.
+            outputs_to_check = output if isinstance(output, tuple) else (output,)
             non_cacheable = any(
                 isinstance(o, (torch.Tensor, torch.SymInt))
                 and has_free_unbacked_symbols(o)
-                for o in output
+                for o in outputs_to_check
             )
             if non_cacheable:
                 raise _BypassDispatchCache(f"unbacked symbol in HOP {func} output")
