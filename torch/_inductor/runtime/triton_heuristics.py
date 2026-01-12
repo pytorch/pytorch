@@ -2723,7 +2723,11 @@ def pointwise(
         # ROCm has observed improvement by diverging here
         if (
             not inductor_meta.get("autotune_pointwise", True)
-            or (torch.version.hip is None and tile_hint == TileHint.SQUARE)
+            or (
+                torch.version.hip is None
+                and tile_hint == TileHint.SQUARE
+                and torch.version.xpu is None
+            )
         ) and not (
             inductor_meta.get("max_autotune")
             or inductor_meta.get("max_autotune_pointwise")
@@ -2762,6 +2766,8 @@ def pointwise(
                     [
                         # intel-xpu-backend-for-triton #5198
                         triton_config_with_settings(size_hints, 32, 32, num_warps=8),
+                        # intel-xpu-backend-for-triton #5199
+                        triton_config_with_settings(size_hints, 4, 256),
                     ]
                 )
     if len(size_hints) == 3:
