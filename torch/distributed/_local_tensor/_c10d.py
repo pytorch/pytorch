@@ -7,7 +7,7 @@ from datetime import timedelta
 import torch
 from torch._C import ScriptObject
 from torch._C._distributed_c10d import FakeWork, PythonCallbackWork
-from torch.distributed._mesh_layout import _MeshLayout
+from torch.distributed._mesh_layout import _FlatLayout
 from torch.distributed.distributed_c10d import (
     _check_op,
     _get_default_group,

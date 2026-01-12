@@ -12,7 +12,6 @@ import torch
 from torch.distributed import is_available
 from torch.distributed._mesh_layout import (
     _FlatLayout,
-    _ListOfNormalizedLayouts,
     _MeshLayout,
 )
 from torch.utils._typing_utils import not_none
@@ -71,7 +70,7 @@ else:
             )
 
     BackendConfig = tuple[str | None, C10dBackend.Options | None]
-    torch.serialization.add_safe_globals([_FlatLayout, _ListOfNormalizedLayouts])
+    torch.serialization.add_safe_globals([_FlatLayout, _MeshLayout])
 
     class _MeshEnv(threading.local):
         def __init__(self) -> None:

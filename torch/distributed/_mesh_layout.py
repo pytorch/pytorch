@@ -3,9 +3,10 @@ Definition of CuTe inspired Layouts for DeviceMesh internal bookkeeping and func
 """
 
 import math
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from itertools import product
-from typing import Iterator, NoReturn, Sequence
+from typing import NoReturn
 
 import torch
 from torch.distributed._pycute import (
@@ -13,14 +14,14 @@ from torch.distributed._pycute import (
     coalesce as pycute_coalesce,
     complement as pycute_complement,
     composition as pycute_composition,
-    make_layout,
     flatten,
     IntTuple,
-    Layout,
-    suffix_product,
-    is_tuple,
     is_int,
+    is_tuple,
+    Layout,
+    make_layout,
     match_structure,
+    suffix_product,
 )
 
 
@@ -59,15 +60,13 @@ class _FlatLayout:
         if not is_tuple(stride) and not is_int(stride):
             raise TypeError(f"stride must be a tuple or int, got {type(stride)}")
         if not match_structure(shape, stride):
-            raise ValueError(
-                f"sizes {shape} and strides {stride} don't match"
-            )
+            raise ValueError(f"sizes {shape} and strides {stride} don't match")
 
-        coalesced_layout = pycute_coalesce(Layout(sorted_shape, sorted_stride))
+        coalesced_layout = pycute_coalesce(Layout(shape, stride))
         flat_shape = flatten(coalesced_layout.shape)
         flat_stride = flatten(coalesced_layout.stride)
 
-        assert sorted(strides, reverse=True) == strides, (
+        assert sorted(flat_stride, reverse=True) == flat_stride, (
             "For the time being we don't support transposing mesh dimensions "
             "hence layouts should always remain sorted. If we choose to allow this, "
             "we first need to decide whether we consider [0, 1, 2, 3] and "
@@ -255,7 +254,7 @@ class _ListOfFlatLayouts:
             A new _ListOfFlatLayouts with one axis per dimension
         """
         if strides is None:
-            strides = suffix_product(sizes)
+            strides = flatten(suffix_product(sizes))
         assert len(sizes) == len(strides)
         axes = tuple(_FlatLayout((s,), (d,)) for s, d in zip(sizes, strides))
         return cls(axes)
@@ -295,7 +294,9 @@ class _ListOfFlatLayouts:
         strides = tuple(axis.stride for axis in self.axes)
         return _FlatLayout(shapes, strides)
 
-    def splice(self, start: int, end: int, layout: "_ListOfFlatLayouts") -> "_ListOfFlatLayouts":
+    def splice(
+        self, start: int, end: int, layout: "_ListOfFlatLayouts"
+    ) -> "_ListOfFlatLayouts":
         """
         Replace axes[start:end] with the axes from another layout.
 
@@ -389,9 +390,9 @@ class _ListOfFlatLayouts:
             shapes.extend(axis.shape)
             strides.extend(axis.stride)
 
-        return rank_map.as_strided(
-            tuple(shapes), tuple(strides)
-        ).reshape(-1, *self.top_level_sizes)
+        return rank_map.as_strided(tuple(shapes), tuple(strides)).reshape(
+            -1, *self.top_level_sizes
+        )
 
     def __str__(self) -> str:
         axes_str = ", ".join(str(axis) for axis in self.axes)
