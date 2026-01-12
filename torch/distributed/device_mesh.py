@@ -843,23 +843,23 @@ else:
                     )
                     layout_sliced.append(flatten_name_to_root_layout[name])
 
-            # Collect strides for validation
-            sliced_strides = [axis.stride for axis in layout_sliced]
-
             # The check below is from DeviceMesh's implementation before adopting CuTe layout for internal
             # bookkeeping and it can be removed but we need to define what is the expected behavior.
             # TODO: Remove the below check and define the expected behavior.
             # Validate the order of the slice mesh dim indices.
             # This needs to be in ascending order.
             pre_stride = -1
-            for stride_tuple in reversed(sliced_strides):
+            for axis in reversed(layout_sliced):
+                all_strides = axis.strides
+                if len(all_strides) == 0:
+                    continue
                 # Note that with CuTe layout, we can support slicing flattened non-contiguous mesh dims with no problem.
                 # But we don't see a use case for now so we don't want to support it.
-                if len(stride_tuple) != 1:
+                if len(all_strides) > 1:
                     raise NotImplementedError(
                         "Currently, this only allows slicing out a contiguous flattened dim."
                     )
-                stride = stride_tuple[0]
+                stride = all_strides[0]
                 if stride < pre_stride:
                     raise KeyError(
                         f"Invalid mesh_dim_names {mesh_dim_names} specified. "
@@ -871,13 +871,13 @@ else:
             # there is layout overlap.
             # TODO: Eventually we will just directly throw error here because
             # we will deprecate the slicing of flattened dim_name from root mesh.
-            result_layout = _MeshLayout(layout_sliced)
-            if not result_layout.check_non_overlap():
+            layout_sliced = _MeshLayout(layout_sliced)
+            if not layout_sliced.check_non_overlap():
                 raise RuntimeError(
                     f"Slicing overlapping dim_names {mesh_dim_names} is not allowed."
                 )
 
-            return result_layout
+            return layout_sliced
 
         # TODO: to make this use case by other components public API in the future.
         def _get_all_submeshes(self, mesh_dim_name: str) -> list["DeviceMesh"]:
