@@ -6005,6 +6005,21 @@ scaled_dot_product_attention = _add_docstr(
 
     Note:
 
+        The boolean mask semantics for ``attn_mask`` are the inverse of
+        :class:`~torch.nn.MultiheadAttention`'s ``key_padding_mask``.
+
+        In :func:`scaled_dot_product_attention`, ``True`` indicates values
+        to **participate** in attention.
+
+        In :class:`~torch.nn.MultiheadAttention`, ``True`` indicates values
+        to be **masked out** (padding).
+
+        If migrating from MHA, ensure you invert your boolean mask (e.g.,
+        using ``~mask`` or ``mask.logical_not()``).
+
+
+    Note:
+
         There are currently three supported implementations of scaled dot product attention:
 
             - `FlashAttention-2: Faster Attention with Better Parallelism and Work Partitioning`_

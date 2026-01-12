@@ -252,7 +252,6 @@ def derived_types(
 
 
 def get_supported_param_types():
-    # pyrefly: ignore [bad-assignment]
     data: list[tuple[Union[type, typing._SpecialForm], str, bool, bool, bool]] = [
         # (python type, schema type, type[] variant, type?[] variant, type[]? variant
         (Tensor, "Tensor", True, True, False),
@@ -301,7 +300,7 @@ def parse_return(annotation, error_fn):
                 f"Return has unsupported type {annotation}. "
                 f"The valid types are: {SUPPORTED_RETURN_TYPES}."
             )
-        # pyrefly: ignore [index-error]
+
         return SUPPORTED_RETURN_TYPES[annotation]
 
     args = typing.get_args(annotation)

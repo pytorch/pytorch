@@ -298,7 +298,7 @@ else:
         def _compute_coordinates_from_mesh(
             mesh_tensor: torch.Tensor,
             rank: int,
-        ) -> tuple[int, ...] | None:
+        ) -> Optional[tuple[int, ...]]:
             """
             Compute the coordinates of a rank within a mesh tensor.
 
@@ -1193,6 +1193,11 @@ else:
             return torch.ops.device_mesh._runtime_compute_coordinate_on_dim(
                 full_mesh, index
             )
+
+        def _sym_get_coordinate(self, index: int) -> int:
+            # This is only valid when the current rank is part of the mesh.
+            assert self._coordinate_on_dim
+            return self._coordinate_on_dim[index]
 
         def _flatten(
             self,
