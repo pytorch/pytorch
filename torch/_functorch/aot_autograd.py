@@ -6,7 +6,6 @@ import time
 from collections.abc import Callable
 from contextlib import nullcontext
 from functools import wraps
-from hashlib import sha256
 from typing import Any, Optional
 from unittest.mock import patch
 
@@ -1334,9 +1333,8 @@ def aot_compile_joint_with_descriptors(
             callable by leveraging AOTAutogradCache machinery. This sets up the
             necessary cache_info and patches config options required for serialization.
             When True, this function will always return a BundledAOTAutogradSerializableCallable.
-
-    TODO: Consider if we should allow_in_graph the result by default.
     """
+    # TODO: Consider if we should allow_in_graph the result by default.
     from torch._dynamo.aot_compile_types import (
         BundledAOTAutogradSerializableCallable,
         SerializableCallable,
@@ -1350,7 +1348,7 @@ def aot_compile_joint_with_descriptors(
     cache_ctx = nullcontext()
     if serializable:
         jd._aot_state.aot_config.cache_info = AOTAutogradCacheInfo(
-            sha256(str(jd).encode("utf-8")).hexdigest(),
+            jd.cache_hash(),
             time.time_ns(),
             forward_symints=[],
         )
