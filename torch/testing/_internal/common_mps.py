@@ -29,6 +29,7 @@ if torch.backends.mps.is_available():
             "_unsafe_masked_index_put_accumulate",
             "abs",
             "add",
+            "addbmm",
             "alias_copy",
             "argwhere",
             "atleast_1d",
@@ -41,6 +42,7 @@ if torch.backends.mps.is_available():
             "asinh",
             "acos",
             "atan",
+            "baddbmm",
             "broadcast_tensors",
             "broadcast_to",
             "chalf",
@@ -116,6 +118,7 @@ if torch.backends.mps.is_available():
             "nn.functional.conv_transpose3d",
             "nn.functional.feature_alpha_dropoutwithout_train",
             "nn.functional.padcircular",
+            "nn.functional.softminwith_dtype",
             "nn.functional.softsign",
             "nn.functional.tanhshrink",
             "nn.functional.unfold",
@@ -144,6 +147,7 @@ if torch.backends.mps.is_available():
             "sinc",
             "sinh",
             "slice",
+            "softmaxwith_dtype",
             "special.spherical_bessel_j0",
             "special.entr",
             "special.xlog1py",
@@ -308,7 +312,6 @@ if torch.backends.mps.is_available():
             "put": None,
             "cauchy_": None,
             "cauchy": None,
-            "cholesky_inverse": None,
             "cholesky_solve": None,
             "frexp": None,
             "gcd": None,
@@ -392,12 +395,18 @@ if torch.backends.mps.is_available():
             "log_normal": None,
             "cdouble": None,
             "double": None,
-            "nn.functional.softminwith_dtype": None,
-            "log_softmaxwith_dtype": None,
-            "softmaxwith_dtype": None,
+            "log_softmaxwith_dtype": [
+                torch.uint8,
+                torch.int8,
+                torch.int32,
+                torch.int16,
+                torch.int64,
+                torch.float32,
+            ],
             "float_power": None,
             "linalg.matrix_rankhermitian": None,
             "linalg.pinvhermitian": None,
+            "linalg.pinvsingular": None,  # Missing `aten::linalg_qr.out`.
             "nonzero_static": None,
             # MPS: input sizes must be divisible by output sizes
             "nn.functional.adaptive_avg_pool1d": None,
@@ -423,8 +432,6 @@ if torch.backends.mps.is_available():
                 torch.uint8,
                 torch.int8,
             ],
-            "addbmm": [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
-            "baddbmm": [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
             "mat": [torch.int16, torch.int32, torch.int64, torch.uint8, torch.int8],
             # returned output on CPU is float64
             "bincount": [
@@ -705,7 +712,6 @@ if torch.backends.mps.is_available():
             "special.i1": [torch.float16],  # "i1_backward" not implemented for 'Half'
             "special.i1e": [torch.float16],  # "i1e_backward" not implemented for 'Half'
             # Correctness issues
-            "atanh": [torch.float32],
             # Same issue as `argsort` and `sort` with duplicate elements (undefined behaviour).
             # Forward pass is passing since `msort` doesn't return the indices, just the values, which match the CPU.
             # On the backward pass for `sort` both are used (values and indices), thus resulting in a issmatch between CPU and MPS.
