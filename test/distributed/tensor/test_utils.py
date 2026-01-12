@@ -1615,6 +1615,26 @@ class TestStridedShardReplicate(TestStridedShardCollectiveOpUtils, DTensorTestBa
                     f"{tensor_size=}, placements={src_p}",
                 )
 
+    @with_comms
+    def test_replicate_to_StridedShard(self):
+        mesh = self.build_device_mesh()
+        coordinate = mesh.get_coordinate()
+        for split_factor in range(2, 17):
+            for tensor_size in range(1, 200):
+                a = torch.arange(tensor_size)
+                a_dt_replicate = distribute_tensor(
+                    a, mesh, [Replicate()], src_data_rank=None
+                )
+                p = _StridedShard(0, split_factor=split_factor)
+                a_dt_strided = p._replicate_to_strided_shard(
+                    a_dt_replicate.to_local(), mesh, 0, coordinate[0]
+                )
+                b_dt = distribute_tensor(a, mesh, (p,), src_data_rank=None)
+                self.assertEqual(
+                    a_dt_strided,
+                    b_dt.to_local(),
+                )
+
 
 class TestStridedShardCollective(
     TestStridedShardCollectiveOpUtils, LocalTensorTestBase
