@@ -44,21 +44,24 @@ def _varlen_attn(
     max_k: int,
     is_causal: bool = False,
     scale: float | None = None,
-    window_size_left: int = -1,
-    window_size_right: int = -1,
+    window_size: list[int] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Private custom op for variable-length attention.
 
     This is the internal implementation. Users should use the public varlen_attn function instead.
     """
+    if window_size is None:
+        window_size = [-1, -1]
+    if len(window_size) != 2:
+        raise ValueError(f"window_size must have length 2, got {len(window_size)}")
 
     use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
 
     if use_cudnn:
         log.info("Using cuDNN backend for varlen_attn")
 
-        if window_size_left != -1 or window_size_right != -1:
+        if window_size[0] != -1 or window_size[1] != -1:
             raise RuntimeError(
                 "cuDNN backend does not support window attention. Please use Flash Attention backend."
             )
@@ -93,8 +96,8 @@ def _varlen_attn(
             is_causal,
             return_debug_mask=False,
             scale=scale,
-            window_size_left=window_size_left,
-            window_size_right=window_size_right,
+            window_size_left=window_size[0],
+            window_size_right=window_size[1],
         )
 
     rng_state_ = torch.zeros(
@@ -114,8 +117,7 @@ def _varlen_attn_fake(
     max_k: int,
     is_causal: bool = False,
     scale: float | None = None,
-    window_size_left: int = -1,
-    window_size_right: int = -1,
+    window_size: list[int] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
@@ -124,6 +126,11 @@ def _varlen_attn_fake(
     - query shape: (total, num_heads, head_dim)
     - logsumexp shape: (num_heads, total_q)
     """
+    if window_size is None:
+        window_size = [-1, -1]
+    if len(window_size) != 2:
+        raise ValueError(f"window_size must have length 2, got {len(window_size)}")
+
     # Output has same shape as query
     output = torch.empty_like(query)
 
@@ -234,8 +241,7 @@ def varlen_attn(
         max_k,
         is_causal,
         scale,
-        window_size[0],
-        window_size[1],
+        list(window_size),
     )
     if return_aux is not None and return_aux.lse:
         return out, lse
@@ -253,8 +259,7 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
         max_k,
         is_causal,
         scale,
-        window_size_left,
-        window_size_right,
+        window_size,
     ) = inputs
     out, lse, rng_state = output
 
@@ -264,8 +269,7 @@ def _setup_context(ctx: Any, inputs: tuple[Any, ...], output: Any) -> None:
     ctx.max_k = max_k
     ctx.is_causal = is_causal
     ctx.scale = scale
-    ctx.window_size_left = window_size_left
-    ctx.window_size_right = window_size_right
+    ctx.window_size = window_size
 
 
 @torch.library.custom_op("torch_attn::_varlen_attn_backward", mutates_args={})
@@ -283,15 +287,19 @@ def _varlen_attn_backward(
     is_causal: bool,
     rng_state: torch.Tensor,
     scale: float | None = None,
-    window_size_left: int = -1,
-    window_size_right: int = -1,
+    window_size: list[int] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
+    if window_size is None:
+        window_size = [-1, -1]
+    if len(window_size) != 2:
+        raise ValueError(f"window_size must have length 2, got {len(window_size)}")
+
     unused = torch.empty(0, device=query.device)
 
     use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
     if use_cudnn:
         log.info("Using cuDNN backend for varlen_attn")
-        if window_size_left != -1 or window_size_right != -1:
+        if window_size[0] != -1 or window_size[1] != -1:
             raise RuntimeError(
                 "cuDNN backend does not support window attention. Please use Flash Attention backend."
             )
@@ -330,8 +338,8 @@ def _varlen_attn_backward(
             rng_state,
             unused,
             scale=scale,
-            window_size_left=window_size_left,
-            window_size_right=window_size_right,
+            window_size_left=window_size[0],
+            window_size_right=window_size[1],
         )
     return dq, dk, dv
 
@@ -351,12 +359,15 @@ def _varlen_attn_backward_fake(
     is_causal: bool,
     rng_state: torch.Tensor,
     scale: float | None = None,
-    window_size_left: int = -1,
-    window_size_right: int = -1,
+    window_size: list[int] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
     """
     Fake implementation for meta tensor computation and tracing.
     """
+    if window_size is None:
+        window_size = [-1, -1]
+    if len(window_size) != 2:
+        raise ValueError(f"window_size must have length 2, got {len(window_size)}")
 
     grad_query = torch.empty_like(query)
     grad_key = torch.empty_like(key)
@@ -374,8 +385,7 @@ def _backward(
     max_k = ctx.max_k
     is_causal = ctx.is_causal
     scale = ctx.scale
-    window_size_left = ctx.window_size_left
-    window_size_right = ctx.window_size_right
+    window_size = ctx.window_size
 
     dq, dk, dv = torch.ops.torch_attn._varlen_attn_backward(
         grad_out,
@@ -391,10 +401,9 @@ def _backward(
         is_causal,
         rng_state,
         scale,
-        window_size_left,
-        window_size_right,
+        window_size,
     )
-    return dq, dk, dv, None, None, None, None, None, None, None, None
+    return dq, dk, dv, None, None, None, None, None, None, None
 
 
 _varlen_attn.register_autograd(_backward, setup_context=_setup_context)
