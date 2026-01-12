@@ -54,7 +54,7 @@ jobs:
       MAX_JOBS: 6 # (FA3 is memory hungry!)
       DISTUTILS_USE_SDK: 1 # otherwise distutils will complain on windows about multiple versions of msvc
       SCCACHE_IDLE_TIMEOUT: "0"
-      PY: python3
+      PY: python
       TORCH_CUDA_ARCH_LIST: "8.0+PTX 8.6 9.0a"
 
     steps:
@@ -166,10 +166,15 @@ jobs:
           CUDA_HOME_NORMALIZED="${CUDA_HOME//\\//}"
           export PYTORCH_NVCC="sccache \"${CUDA_HOME_NORMALIZED}/bin/nvcc\""
           cd flash-attention/hopper
+          df -h
           $PY setup.py bdist_wheel -d dist/ -k $PLAT_ARG
+          df -h
         env:
           PLAT_ARG: ''
           # sccache configuration for PyTorch extensions
+          USE_SCCACHE: 1
+          SCCACHE_BUCKET: ossci-compiler-cache
+          SCCACHE_IGNORE_SERVER_IO_ERROR: 1
           SCCACHE_GHA_ENABLED: "true"
           TORCH_EXTENSION_SKIP_NVCC_GEN_DEPENDENCIES: "1"
           FLASH_ATTENTION_FORCE_BUILD: "TRUE"
