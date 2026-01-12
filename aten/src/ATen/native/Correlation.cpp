@@ -138,7 +138,7 @@ Tensor cov(
   if (num_observations == 1 && fweights.has_value() != aweights.has_value()) {
     in.zero_();
     // the in - avg we're replacing below has the side effect of promoting int tensors to float
-    if (at::isIntegralType(in.scalar_type())) {
+    if (at::isIntegralType(in.scalar_type(), false)) {
       in = in.to(kFloat);
     }
   }
