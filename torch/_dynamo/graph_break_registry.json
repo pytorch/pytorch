@@ -290,7 +290,9 @@
       "Gb_type": "Compilation of intermediate hooks requires compiled autograd",
       "Context": "var_getattr {self} {name}",
       "Explanation": "Dynamo must be in compiled_autograd to register hooks.",
-      "Hints": []
+      "Hints": [
+        "Consider using torch.autograd.Function with a custom backward() method instead of register_hook()."
+      ]
     }
   ],
   "GB0030": [
@@ -1086,6 +1088,28 @@
       "Hints": []
     }
   ],
+  "GB5748": [
+    {
+      "Gb_type": "autograd.grad with external GradientEdge",
+      "Context": "context",
+      "Explanation": "torch.autograd.grad() cannot be used with GradientEdge inputs passed from outside the compiled region. The GradientEdge contains a reference to an autograd node that was created before torch.compile started tracing, so Dynamo cannot trace through its computation.",
+      "Hints": [
+        "Move the autograd.grad() call outside the torch.compile region.",
+        "Or use tensor inputs directly instead of GradientEdge objects.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "autograd.grad with external GradientEdge",
+      "Context": "",
+      "Explanation": "torch.autograd.grad() cannot be used with GradientEdge inputs passed from outside the compiled region. The GradientEdge contains an autograd node that was created outside the compiled region boundary.",
+      "Hints": [
+        "Move the autograd.grad() call outside the torch.compile region.",
+        "Or use tensor inputs directly instead of GradientEdge objects.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
   "GB0097": [
     {
       "Gb_type": "Side effect on existing deque with limited maxlen",
@@ -1416,6 +1440,16 @@
       "Context": "call_method {self} resize_as_ {args} {kwargs}",
       "Explanation": "Dynamo currently does not support tracing `Tensor.resize_as_()`.",
       "Hints": []
+    }
+  ],
+  "GB9186": [
+    {
+      "Gb_type": "using `torch.autograd.grad` with `torch._dynamo.config.trace_autograd_ops=False`",
+      "Context": "trace_autograd_ops={config.trace_autograd_ops}",
+      "Explanation": "Attempted to call `torch.autograd.grad` with config `torch._dynamo.config.trace_autograd_ops` set to `False`.",
+      "Hints": [
+        "Change `torch._dynamo.config.trace_autograd_ops` to `True`."
+      ]
     }
   ],
   "GB0128": [
@@ -2925,6 +2959,48 @@
       ]
     }
   ],
+  "GB4927": [
+    {
+      "Gb_type": "autograd.grad consumed returned tensor's grad_fn",
+      "Context": "",
+      "Explanation": "torch.autograd.grad() consumes grad_fns that are needed by tensors returned from this compiled function. This would cause 'backward through graph a second time' errors.",
+      "Hints": [
+        "If you don't need to backward through the returned tensor, ",
+        "call .detach() before returning: `return loss.detach()`",
+        "If you need to backward through the returned tensor, use retain_graph=True in autograd.grad()."
+      ]
+    },
+    {
+      "Gb_type": "autograd.grad consumed returned tensor's grad_fn",
+      "Context": "",
+      "Explanation": "torch.autograd.grad() consumes grad_fns that are needed by tensors returned from this compiled function. This would cause 'backward through graph a second time' errors.",
+      "Hints": [
+        "If you don't need to backward through the returned tensor, call .detach() before returning: `return loss.detach()`",
+        "If you need to backward through the returned tensor, use retain_graph=True in autograd.grad()."
+      ]
+    }
+  ],
+  "GB6663": [
+    {
+      "Gb_type": "autograd.grad with unsupported argument type",
+      "Context": "got {type(var).__name__}",
+      "Explanation": "torch.autograd.grad() received an argument of type {type(var).__name__} which is not supported. Expected tensor or sequence of tensors.",
+      "Hints": [
+        "Ensure outputs and inputs arguments are tensors or sequences of tensors."
+      ]
+    }
+  ],
+  "GB1381": [
+    {
+      "Gb_type": "autograd.grad with already consumed grad_fn",
+      "Context": "double consumed grad_fns: {len(double_consumed)}",
+      "Explanation": "torch.autograd.grad() is trying to consume grad_fns that were already consumed by a previous autograd.grad() call. This would cause 'backward through graph a second time' errors at runtime.",
+      "Hints": [
+        "Use retain_graph=True in the first autograd.grad() call if you ",
+        "need to compute gradients through the same graph multiple times."
+      ]
+    }
+  ],
   "GB0262": [
     {
       "Gb_type": "unsupported contextlib.* API",
@@ -3780,6 +3856,14 @@
       ]
     }
   ],
+  "GB2750": [
+    {
+      "Gb_type": "sparse_grad_accumulate_grad",
+      "Context": "accumulate_grad_ with sparse gradient",
+      "Explanation": "Sparse gradients are not supported in compiled autograd",
+      "Hints": []
+    }
+  ],
   "GB0341": [
     {
       "Gb_type": "torch.associative_scan: improper args",
@@ -4092,6 +4176,85 @@
     }
   ],
   "GB0371": [
+    {
+      "Gb_type": "autograd.grad with output that requires grad",
+      "Context": "context",
+      "Explanation": "The compiled function uses torch.autograd.grad() and returns a tensor that still requires gradients and is connected to the autograd.grad() computation. This would cause aot_autograd to attempt 'backward through graph a second time', which is not supported.",
+      "Hints": [
+        "Call .detach() on the output tensor before returning it from the compiled function.",
+        "For example: `return loss.detach(), grads` instead of `return loss, grads`.",
+        "Or set create_graph=False in autograd.grad() if you don't need higher-order gradients.",
+        "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    },
+    {
+      "Gb_type": "autograd.grad with output that requires grad",
+      "Context": "",
+      "Explanation": "The compiled function uses torch.autograd.grad() and returns a tensor that still requires gradients. This may cause aot_autograd to attempt 'backward through graph a second time', which is not supported.",
+      "Hints": [
+        "Call .detach() on the output tensor before returning it from the compiled function.",
+        "For example: `return loss.detach(), grads` instead of `return loss, grads`.",
+        "Or set create_graph=False in autograd.grad() if you don't need higher-order gradients."
+      ]
+    }
+  ],
+  "GB0372": [
+    {
+      "Gb_type": "autograd.grad with external grad_fn",
+      "Context": "context",
+      "Explanation": "torch.autograd.grad() cannot trace through the autograd graph because it's output depends on a tensor that was created outside the compiled region and has a grad_fn attached. The autograd graph extends beyond the compiled region boundary, which Dynamo cannot trace.",
+      "Hints": [
+        "If you don't need gradients to flow back to the original tensor outside ",
+        "the compiled region, detach the input: `tensor.detach().requires_grad_(True)`.",
+        "Otherwise, move the autograd.grad() call outside the compiled region.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "autograd.grad with external grad_fn",
+      "Context": "context",
+      "Explanation": "torch.autograd.grad() cannot trace through the autograd graph because the '{arg_name}' argument depends on a tensor that was created outside the compiled region and has a grad_fn attached. The autograd graph extends beyond the compiled region boundary, which Dynamo cannot trace.",
+      "Hints": [
+        "Detach the input tensor before passing to the compiled function: ",
+        "`tensor.detach().requires_grad_(True)` to make it a leaf tensor.",
+        "Or call `.detach()` on the tensor before using it in autograd.grad().",
+        "Or move the autograd.grad() call outside the compiled region.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    },
+    {
+      "Gb_type": "autograd.grad with external grad_fn",
+      "Context": "",
+      "Explanation": "torch.autograd.grad() cannot be used when the compiled function receives tensors with grad_fn created outside the compiled region. The autograd graph cannot extend beyond the compiled region boundary.",
+      "Hints": [
+        "Detach the input tensor before passing to the compiled function: `tensor.detach().requires_grad_(True)` to make it a leaf tensor.",
+        "Or move the autograd.grad() call outside the compiled region.",
+        "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB0373": [
+    {
+      "Gb_type": "autograd.grad with compiled autograd",
+      "Context": "compiled_autograd is currently enabled",
+      "Explanation": "torch.autograd.grad() inside torch.compile is not supported when compiled autograd is enabled. These two features have conflicting requirements for how the autograd graph is traced.",
+      "Hints": [
+        "Disable compiled autograd by removing the compiled_autograd context manager.",
+        "Or move the autograd.grad() call outside the torch.compile region.",
+        "Or restructure your code so autograd.grad() and compiled_autograd don't overlap."
+      ]
+    },
+    {
+      "Gb_type": "autograd.grad with compiled autograd",
+      "Context": "",
+      "Explanation": "torch.autograd.grad() inside torch.compile is not supported when compiled autograd is enabled. These two features have conflicting requirements for how the autograd graph is traced.",
+      "Hints": [
+        "Disable compiled autograd by removing the compiled_autograd context manager.",
+        "Or move the autograd.grad() call outside the torch.compile region."
+      ]
+    }
+  ],
+  "GB0374": [
     {
       "Gb_type": "Sparse tensor creation not supported",
       "Context": "function: {fn_name}",
