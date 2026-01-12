@@ -270,12 +270,6 @@ def _vector_str(self, indent, summarize, formatter1, formatter2=None):
         # as the bits, uint1..7 and int1..7 dtypes.
         self = self.view(torch.uint8)
 
-    if self.dtype == torch.float8_e8m0fnu_x4:  # type: ignore[attr-defined]
-        # torch.float8_e8m0fnu_x4 is special and does not support the casts necessary
-        # to print it, we choose to display the uint8 representation here for
-        # convenience of being able to print a tensor.
-        self = self.view(torch.uint32)
-
     if summarize and not PRINT_OPTS.edgeitems:
         # Deal with edge case that negative zero is zero
         data = ["..."]
