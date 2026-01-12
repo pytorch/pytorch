@@ -41,6 +41,7 @@ jobs:
       TORCH_CUDA_ARCH_LIST: ${{ matrix.torch_cuda_arch_list }}
       PYTHON_VERSION: "3.12"
       VC_YEAR: "2022"
+      DISTUTILS_USE_SDK: 1
     steps:
       - name: Enable git long paths and symlinks on Windows
         run: |
