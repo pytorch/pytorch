@@ -60,6 +60,7 @@ def _insert_single_dim_replication_strategy(
     single_dim_strategies_with_placeholders: list[
         list[Placement | _ShardingPlaceholder]
     ],
+    num_outputs: int,
     num_input_tensors: int,
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     """
@@ -68,7 +69,7 @@ def _insert_single_dim_replication_strategy(
     for strategy in single_dim_strategies_with_placeholders:
         assert not all(isinstance(p, Replicate) for p in strategy)
     single_dim_strategies_with_placeholders.append(
-        [Replicate()] * (1 + num_input_tensors)
+        [Replicate()] * (num_outputs + num_input_tensors)
     )
     return single_dim_strategies_with_placeholders
 
@@ -198,6 +199,12 @@ def _expand_single_dim_strategy_to_mesh(
             unique_input_placements = _get_unique_placements(op_schema)
             num_inputs = _get_num_tensor_inputs(op_schema)
 
+            # Compute num_outputs from output_tensor_meta
+            if isinstance(output_tensor_meta, TensorMeta):
+                num_outputs = 1
+            else:
+                num_outputs = len(output_tensor_meta)
+
             # Note: Trees vs Flat Lists
             # -------------------------
             # op_schema.args_schema may contain a TupleStrategy with child strategies for List[Tensor] inputs.
@@ -211,7 +218,7 @@ def _expand_single_dim_strategy_to_mesh(
                 op, args_schema, kwargs_schema
             )
             strategies_over_one_mesh_dim = _insert_single_dim_replication_strategy(
-                strategies_over_one_mesh_dim, num_inputs
+                strategies_over_one_mesh_dim, num_outputs, num_inputs
             )
             expanded_strategies_over_one_mesh_dim = (
                 _fill_single_dim_strategy_placeholders(
@@ -227,6 +234,7 @@ def _expand_single_dim_strategy_to_mesh(
                 op_schema,
                 cast(list[PlacementList], expanded_strategies_over_one_mesh_dim),
                 output_tensor_meta=output_tensor_meta,
+                input_index=num_outputs,
             )
 
         return expanded_strategy
