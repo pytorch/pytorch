@@ -34,7 +34,7 @@ def _get_isa_dry_compile_fingerprint(isa_flags: str) -> str:
     return fingerprint
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class VecISA(abc.ABC):
     # Note [Checking for Vectorized Support in Inductor]
     # TorchInductor CPU vectorization reuses PyTorch vectorization utility functions
@@ -160,7 +160,7 @@ cdll.LoadLibrary("__lib_path__")
         pass
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class VecNEON(VecISA):
     _bit_width = 128  # This is required to leverage the compute implemented in aten/src/ATen/cpu/vec/vec128/vec128_float_neon.h
     _macro = ["CPU_CAPABILITY_NEON", "AT_BUILD_ARM_VEC256_WITH_SLEEF"]
@@ -175,7 +175,7 @@ class VecNEON(VecISA):
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class VecSVE256(VecISA):
     # this function can be repurposed for SVE with variable vec length
     _bit_width = 256
@@ -197,7 +197,7 @@ class VecSVE256(VecISA):
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class VecAVX512(VecISA):
     _bit_width = 512
     _macro = ["CPU_CAPABILITY_AVX512"]
@@ -233,12 +233,20 @@ extern "C" __m512bh __avx512_bf16_chk_kernel(__m512 a, __m512 b) {
             if torch.cpu._is_avx512_bf16_supported() and not _IS_WINDOWS:
                 # save _arch_flags
                 base_flags = self._arch_flags
+                
+                # --- CHANGE START ---
                 # temporarily change _arch_flags for avx512_bf16 check_build
-                self._arch_flags += " -mavx512bf16"
+                # We use object.__setattr__ to bypass frozen=True/slots=True constraints
+                # We use type: ignore[misc] to bypass the ClassVar mutation check
+                object.__setattr__(self, "_arch_flags", base_flags + " -mavx512bf16") # type: ignore[misc]
+                
                 if self.check_build(self._avx512_bf16_code):
-                    self._is_avx512_bf16_supported = True
+                    # Direct mutation fails on frozen dataclass, use setattr hack
+                    object.__setattr__(self, "_is_avx512_bf16_supported", True)
+                
                 # restore _arch_flags
-                self._arch_flags = base_flags
+                object.__setattr__(self, "_arch_flags", base_flags) # type: ignore[misc]
+                # --- CHANGE END ---
 
             return True
         return False
@@ -254,7 +262,7 @@ extern "C" __m512bh __avx512_bf16_chk_kernel(__m512 a, __m512 b) {
             return self._arch_flags
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class VecAVX512VNNI(VecAVX512):
     _bit_width = 512
     _arch_flags = VecAVX512._arch_flags + " -mavx512vnni -mavx512vl"
@@ -301,7 +309,7 @@ extern "C" __m512i __avx512_vnni_chk_kernel_2(__m512i src, __m512i a, __m512i b)
         return self._arch_flags
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class VecAMX(VecAVX512VNNI):
     _arch_flags = VecAVX512VNNI._arch_flags + " -mamx-tile -mamx-bf16 -mamx-int8"
     # check amx_fp16 separately since it is not always supported when amx is supported
@@ -346,12 +354,15 @@ extern "C" void __amx_chk_kernel() {
                 if torch.cpu._is_amx_fp16_supported():
                     # save _arch_flags
                     base_flags = self._arch_flags
+                    
                     # temporarily change _arch_flags for amx-fp16 check_build
-                    self._arch_flags += " -mamx-fp16"
+                    object.__setattr__(self, "_arch_flags", base_flags + " -mamx-fp16") # type: ignore[misc]
+                    
                     if self.check_build(VecAMX._amx_fp16_code):
-                        self._is_amx_fp16_supported = True
+                        object.__setattr__(self, "_is_amx_fp16_supported", True)
+                    
                     # restore _arch_flags
-                    self._arch_flags = base_flags
+                    object.__setattr__(self, "_arch_flags", base_flags) # type: ignore[misc]
 
                 return True
         return False
@@ -371,7 +382,7 @@ extern "C" void __amx_chk_kernel() {
         return self._arch_flags + extra_flags
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class VecAVX2(VecISA):
     _bit_width = 256
     _macro = ["CPU_CAPABILITY_AVX2"]
@@ -386,7 +397,7 @@ class VecAVX2(VecISA):
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class VecZVECTOR(VecISA):
     _bit_width = 256
     _macro = [
@@ -403,7 +414,7 @@ class VecZVECTOR(VecISA):
     __hash__: Callable[[VecISA], Any] = VecISA.__hash__  # type: ignore[assignment]
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class VecVSX(VecISA):
     _bit_width = 256  # VSX simd supports 128 bit_width, but aten is emulating it as 256
     _macro = ["CPU_CAPABILITY_VSX"]
