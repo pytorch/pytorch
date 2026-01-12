@@ -1165,7 +1165,7 @@ def _is_valid_woq_optimization_pattern():
             x.dtype == torch.bfloat16
             and weight.dtype == torch.int8
             and scales.dtype == torch.bfloat16
-            and x.device.type in ("cpu", "cuda")
+            and x.device.type in ("cpu", "cuda", "xpu")
             and x.device == weight.device
             and x.device == scales.device
         )
