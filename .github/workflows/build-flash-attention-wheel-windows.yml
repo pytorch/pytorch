@@ -75,7 +75,7 @@ jobs:
           set -x
           mkdir -p "${FA_FINAL_PACKAGE_DIR}"
 
-          sed -i 's/if bare_metal_version >= Version("12.3")/if not is_offline_build() and bare_metal_version >= Version("12.3")/' \
+          sed -i 's/if bare_metal_version != Version("12.8"):/if not is_offline_build() and bare_metal_version != Version("12.8"):/' \
               third_party/flash-attention/hopper/setup.py
 
           pushd .ci/pytorch
