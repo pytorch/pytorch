@@ -257,9 +257,10 @@ def _gen_ops_cached(arch, version) -> dict[Any, Any]:
         )
         return {}
     arch = _normalize_cuda_arch(arch)
+    gen_arch = "100" if arch == "103" else arch  # CUTLASS SM103 generator only covers NVFB4; fallback to SM100 set
     instantiation_level: str = config.cuda.cutlass_instantiation_level
     args = CUTLASSArgs(
-        architectures=arch,
+        architectures=gen_arch,
         cuda_version=version,
         instantiation_level=instantiation_level,
         operations=CUTLASS_OPERATION_KIND,
@@ -267,17 +268,17 @@ def _gen_ops_cached(arch, version) -> dict[Any, Any]:
     manifest = cutlass_manifest.Manifest(args)
 
     start_time = time.time()
-    if arch == "100":
+    if gen_arch == "100":
         if hasattr(cutlass_generator, "GenerateSM100"):
             cutlass_generator.GenerateSM100(manifest, args.cuda_version)
         cutlass_generator.GenerateSM90(manifest, args.cuda_version)
     else:
         try:
-            func = getattr(cutlass_generator, "GenerateSM" + arch)
+            func = getattr(cutlass_generator, "GenerateSM" + gen_arch)
             func(manifest, args.cuda_version)
         except AttributeError as e:
             raise NotImplementedError(
-                "Arch " + arch + " is not supported by current cutlass lib."
+                "Arch " + gen_arch + " is not supported by current cutlass lib."
             ) from e
 
     log.info(
