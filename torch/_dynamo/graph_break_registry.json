@@ -677,6 +677,14 @@
       ]
     }
   ],
+  "GB8656": [
+    {
+      "Gb_type": "Opaque object with custom __getattr__ not supported",
+      "Context": "{value_type.__name__} with custom __getattr__",
+      "Explanation": "Dynamo does not support opaque objects types with custom __getattr__ methods",
+      "Hints": []
+    }
+  ],
   "GB0061": [
     {
       "Gb_type": "Failed to unpack object for BUILD_LIST_UNPACK",
@@ -2240,6 +2248,17 @@
       "Hints": []
     }
   ],
+  "GB8843": [
+    {
+      "Gb_type": "Opaque object member with method-type USE_REAL returned a reference-type opaque object.",
+      "Context": "Opaque object type: {value_type}. Method name: '{name}'",
+      "Explanation": "To properly guard reference-type opaque objects, we must lift them as inputs to the graph. In order to do this, they must all have a source, meaning they come from a global value or are an attribute of an input.",
+      "Hints": [
+        "Register member '{name}' with MemberType.INLINED in ",
+        "register_opaque_type({value_type}, members=...)."
+      ]
+    }
+  ],
   "GB0201": [
     {
       "Gb_type": "namedtuple construction",
@@ -3192,7 +3211,7 @@
     {
       "Gb_type": "Can't extract message from torch._check()",
       "Context": "str(message_vt)",
-      "Explanation": "The second argument of torch._check() must be a functiondefined within the torch.compile regionthat does not reference a non-local variable.",
+      "Explanation": "The second argument of torch._check() must be a function defined within the torch.compile region that does not reference a non-local variable.",
       "Hints": [
         "Make sure the message function is defined in the torch.compile region.",
         "Remove any closure variables, e.g. ",
@@ -3415,6 +3434,24 @@
       "Explanation": "torch.cond expects 4 positional arguments (got {len(args)}) and no keyword arguments (got {len(kwargs)}) Usage: cond(pred, cond_fn, body_fn, operands)",
       "Hints": [
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
+      ]
+    }
+  ],
+  "GB2078": [
+    {
+      "Gb_type": "Attempted to access unregistered member on an OpaqueObject",
+      "Context": "value={real_obj}, attr={name}",
+      "Explanation": "Member '{name}' is not registered for this opaque object type.",
+      "Hints": [
+        "Register '{name}' with a MemberType in register_opaque_type(members=...)."
+      ]
+    },
+    {
+      "Gb_type": "Attempted to access unregistered member on an OpaqueObject",
+      "Context": "value={self.value}, attr={name}",
+      "Explanation": "Member '{name}' is not registered for this opaque object type.",
+      "Hints": [
+        "Register '{name}' with a MemberType in register_opaque_type(members=...)."
       ]
     }
   ],

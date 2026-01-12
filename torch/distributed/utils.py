@@ -179,7 +179,7 @@ def _alloc_storage(tensor: torch.Tensor, size: torch.Size) -> None:
                 tensor_storage_size = tensor._typed_storage()._size()
                 _p_assert(
                     tensor_storage_size == 0,
-                    "Tensor storage should have been resized to be 0 but got PLACEHOLDEr",
+                    "Tensor storage should have been resized to be 0 but got PLACEHOLDER",
                 )
                 tensor._typed_storage()._resize_(size.numel())
 

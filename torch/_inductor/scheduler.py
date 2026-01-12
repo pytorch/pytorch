@@ -81,7 +81,6 @@ from .utils import (
     is_multi_outputs_template,
     is_output_of_multi_outputs_template,
     is_wait,
-    maybe_log_cudagraph_partition,
     sympy_product,
 )
 from .virtualized import V
@@ -93,6 +92,7 @@ loop_ordering_log = torch._logging.getArtifactLogger(__name__, "loop_ordering")
 compute_dependencies_log = torch._logging.getArtifactLogger(
     __name__, "compute_dependencies"
 )
+cudagraphs_log = torch._logging.getArtifactLogger(__name__, "cudagraphs")
 
 PartitionType: TypeAlias = list["BaseSchedulerNode"]
 _T = TypeVar("_T")
@@ -1167,6 +1167,9 @@ class BaseSchedulerNode:
         if flops is None:
             return None
 
+        if isinstance(flops, torch.SymInt):
+            flops = flops.node.expr
+
         resolved_flops = V.graph.sizevars.size_hint(flops, fallback=0)
         counters["inductor"]["flop_count"] += resolved_flops
         return resolved_flops
@@ -1337,7 +1340,7 @@ def maybe_estimate_runtime_benchmark(snode: BaseSchedulerNode) -> Optional[float
         if mm_fn is None:
             return None
         bench_fn = mm_fn
-        # pyrefly: ignore [unbound-name]
+
         args_kwargs_fn = lambda: snode_args_kwargs(snode)  # noqa: E731
     else:
         return None
@@ -2841,6 +2844,10 @@ def is_template_fusion(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
     return is_epilogue_fusion(node1, node2) or is_prologue_fusion(node1, node2)
 
 
+def template_fusion_pw_node(node1: BaseSchedulerNode, node2: BaseSchedulerNode):
+    return node2 if is_epilogue_fusion(node1, node2) else node1
+
+
 class Scheduler:
     """
     A Scheduler is a graph of BaseSchedulerNodes. It is responsible for
@@ -2867,6 +2874,7 @@ class Scheduler:
             ]
         )
         self.nodes = [self.create_scheduler_node(n) for n in nodes]
+        self.previous_node: Optional[BaseSchedulerNode] = None
         self.current_node: Optional[BaseSchedulerNode] = None
         self.update_zero_dim_cpu_tensor()
         # some new constants could have been created above
@@ -2883,6 +2891,7 @@ class Scheduler:
         self.name_to_node: dict[str, BaseSchedulerNode] = {
             n.get_name(): n for n in self.nodes
         }
+
         self.name_to_buf: dict[str, SchedulerBuffer] = {
             buf.get_name(): buf for node in self.nodes for buf in node.get_outputs()
         }
@@ -4251,7 +4260,7 @@ class Scheduler:
 
         return False
 
-    def evaluate_pending_template_fusions(
+    def _evaluate_pending_template_fusions(
         self,
         template_fusion_candidates: dict[BaseSchedulerNode, list[PendingFusion]],
         fused_nodes: OrderedSet[BaseSchedulerNode],
@@ -4321,6 +4330,131 @@ class Scheduler:
             for f in fusions_to_remove:
                 template_fusion_candidates.pop(f)
 
+    def _try_fusion_pairs(
+        self,
+        possible_fusion_pairs: list[tuple[BaseSchedulerNode, BaseSchedulerNode]],
+        pending_fusions: dict[BaseSchedulerNode, PendingFusion],
+        template_fusion_nodes: dict[BaseSchedulerNode, list[PendingFusion]],
+        fused_nodes: OrderedSet[BaseSchedulerNode],
+        is_reorder_round: bool,
+    ):
+        def resolve_pending_fusions(
+            node1: BaseSchedulerNode,
+            node2: BaseSchedulerNode,
+        ) -> None:
+            while (
+                self.get_fused_node(node1) in pending_fusions
+                or self.get_fused_node(node2) in pending_fusions
+            ):
+                pending_fusion = pending_fusions.get(
+                    self.get_fused_node(node1),
+                    pending_fusions.get(self.get_fused_node(node2)),
+                )
+                assert pending_fusion is not None
+
+                node_key1, node_key2 = pending_fusion.get_fusion_nodes()
+                is_speedup = pending_fusion.callable_fn
+
+                pending_fusions.pop(node_key1, None)
+                pending_fusions.pop(node_key2, None)
+
+                assert self.get_fused_node(node_key1) is node_key1
+                assert self.get_fused_node(node_key2) is node_key2
+
+                if not is_speedup() or self.will_fusion_create_cycle(node1, node2):
+                    continue
+
+                self.fuse_two_nodes(node_key1, node_key2, fused_nodes)
+
+        for node1, node2 in possible_fusion_pairs:
+            # if either node is in a pending fusion, resolve it.
+            # since we iterate on potential fusions based on profitability
+            # the first potential fusion should take precedence.
+            resolve_pending_fusions(node1, node2)
+            node1 = self.get_fused_node(node1)
+            node2 = self.get_fused_node(node2)
+
+            if (
+                is_template_fusion(node1, node2)
+                and (node1, node2) in self.seen_template_fusions
+            ):
+                continue
+
+            if self.can_fuse(
+                node1, node2, is_reorder_round
+            ) and not self.will_fusion_create_cycle(node1, node2):
+                fusion_res = self.speedup_by_fusion(node1, node2)
+                if fusion_res.callable_fn is not None:
+                    pending_fusion = PendingFusion(
+                        callable_fn=fusion_res.callable_fn,
+                        node1=node1,
+                        node2=node2,
+                        future=fusion_res.future,
+                    )
+
+                    if is_template_fusion(node1, node2):
+                        assert (node1, node2) not in self.seen_template_fusions
+                        self.seen_template_fusions.add((node1, node2))
+
+                        template_pw_node = template_fusion_pw_node(node1, node2)
+                        if template_pw_node not in template_fusion_nodes:
+                            template_fusion_nodes[template_pw_node] = []
+                        template_fusion_nodes[template_pw_node].append(pending_fusion)
+                    else:
+                        pending_fusions[node1] = pending_fusion
+                        pending_fusions[node2] = pending_fusion
+
+                    continue
+
+                if not fusion_res.should_fuse:
+                    continue
+
+                self.fuse_two_nodes(node1, node2, fused_nodes)
+
+    def _finish_pending_fusions(
+        self,
+        fused_nodes: OrderedSet[BaseSchedulerNode],
+        pending_fusions: dict[BaseSchedulerNode, PendingFusion],
+    ):
+        seen_pair_speedup_fn: OrderedSet[Callable[[], bool]] = OrderedSet()
+
+        # Resolve pending fusions for non templates in case of benchmark_kernel=True
+        for pending_fusion in pending_fusions.values():
+            node_key1, node_key2 = pending_fusion.get_fusion_nodes()
+            is_speedup_fn = pending_fusion.callable_fn
+
+            if is_speedup_fn in seen_pair_speedup_fn or is_template_fusion(
+                node_key1, node_key2
+            ):
+                continue
+
+            seen_pair_speedup_fn.add(is_speedup_fn)
+
+            assert self.get_fused_node(node_key1) is node_key1
+            assert self.get_fused_node(node_key2) is node_key2
+
+            self.fuse_if_speedup(node_key1, node_key2, is_speedup_fn, fused_nodes)
+
+    def _handle_template_overlap(
+        self,
+        possible_fusions: list[tuple[BaseSchedulerNode, BaseSchedulerNode]],
+        deferred_prologue_fusions: list[tuple[BaseSchedulerNode, BaseSchedulerNode]],
+    ):
+        # Potentially a prologue fusion might have the same template as an epilogue
+        # the prologue fusion therefore has to be evaluated on the potential
+        # fused template + epilogue
+        epilogue_template_nodes = OrderedSet(
+            [n1 for n1, n2 in possible_fusions if is_epilogue_fusion(n1, n2)]
+        )
+        new_possible_fusions = []
+        for n1, n2 in possible_fusions:
+            if is_prologue_fusion(n1, n2) and n1 in epilogue_template_nodes:
+                deferred_prologue_fusions.append((n1, n2))
+            else:
+                new_possible_fusions.append((n1, n2))
+
+        possible_fusions = new_possible_fusions
+
     def fuse_nodes_once(
         self,
         nodes: list[BaseSchedulerNode],
@@ -4349,155 +4483,43 @@ class Scheduler:
             PendingFusion,
         ] = {}
 
-        epilogue_fusion_nodes: dict[BaseSchedulerNode, list[PendingFusion]] = (
-            collections.defaultdict(list)
+        template_fusion_nodes: dict[BaseSchedulerNode, list[PendingFusion]] = {}
+        deferred_prologue_fusions: list[
+            tuple[BaseSchedulerNode, BaseSchedulerNode]
+        ] = []
+
+        possible_fusions = self.get_possible_fusions(
+            nodes,
+            is_reorder_round,
         )
-        prologue_fusion_nodes: dict[BaseSchedulerNode, list[PendingFusion]] = (
-            collections.defaultdict(list)
-        )
 
-        def resolve_pending_fusions(
-            node1: BaseSchedulerNode, node2: BaseSchedulerNode
-        ) -> None:
-            while (
-                self.get_fused_node(node1) in pending_fusions
-                or self.get_fused_node(node2) in pending_fusions
-            ):
-                pending_fusion = pending_fusions.get(
-                    self.get_fused_node(node1),
-                    pending_fusions.get(self.get_fused_node(node2)),
-                )
-                assert pending_fusion is not None
-
-                node_key1, node_key2 = pending_fusion.get_fusion_nodes()
-                is_speedup = pending_fusion.callable_fn
-
-                pending_fusions.pop(node_key1, None)
-                pending_fusions.pop(node_key2, None)
-
-                assert self.get_fused_node(node_key1) is node_key1
-                assert self.get_fused_node(node_key2) is node_key2
-
-                if not is_speedup() or self.will_fusion_create_cycle(node1, node2):
-                    continue
-
-                self.fuse_two_nodes(node_key1, node_key2, fused_nodes)
-
-        def evaluate_lazy_fusions(node1, node2, fusion_res: FusionResult):
-            assert fusion_res.callable_fn is not None
-
-            pending_fusion = PendingFusion(
-                callable_fn=fusion_res.callable_fn,
-                node1=node1,
-                node2=node2,
-                future=fusion_res.future,
-            )
-
-            if is_template_fusion(node1, node2):
-                assert (node1, node2) not in self.seen_template_fusions
-                self.seen_template_fusions.add((node1, node2))
-
-                if is_epilogue_fusion(node1, node2):
-                    epilogue_fusion_nodes[node2].append(pending_fusion)
-                else:
-                    prologue_fusion_nodes[node1].append(pending_fusion)
-            else:
-                pending_fusions[node1] = pending_fusion
-                pending_fusions[node2] = pending_fusion
-
-        def try_possible_fusions(
-            possible_fusions: list[tuple[BaseSchedulerNode, BaseSchedulerNode]],
+        if (
+            (config.max_autotune_gemm or config.max_autotune)
+            and config.prologue_fusion
+            and config.epilogue_fusion
         ):
-            for node1, node2 in possible_fusions:
-                # if either node is in a pending fusion, resolve it.
-                # since we iterate on potential fusions based on profitability
-                # the first potential fusion should take precedence.
-                resolve_pending_fusions(node1, node2)
-                node1 = self.get_fused_node(node1)
-                node2 = self.get_fused_node(node2)
+            self._handle_template_overlap(possible_fusions, deferred_prologue_fusions)
 
-                if (
-                    is_template_fusion(node1, node2)
-                    and (node1, node2) in self.seen_template_fusions
-                ):
-                    continue
+        self._try_fusion_pairs(
+            possible_fusions,
+            pending_fusions,
+            template_fusion_nodes,
+            fused_nodes,
+            is_reorder_round,
+        )
+        self._finish_pending_fusions(fused_nodes, pending_fusions)
+        self._evaluate_pending_template_fusions(template_fusion_nodes, fused_nodes)
 
-                if self.can_fuse(
-                    node1, node2, is_reorder_round
-                ) and not self.will_fusion_create_cycle(node1, node2):
-                    fusion_res = self.speedup_by_fusion(node1, node2)
-                    if fusion_res.callable_fn is not None:
-                        evaluate_lazy_fusions(node1, node2, fusion_res)
-                        continue
-
-                    if not fusion_res.should_fuse:
-                        continue
-
-                    self.fuse_two_nodes(node1, node2, fused_nodes)
-
-        all_possible_fusions = self.get_possible_fusions(nodes, is_reorder_round)
-        possible_fusions = [
-            (node1, node2)
-            for (node1, node2) in all_possible_fusions
-            if not is_template_fusion(node1, node2)
-        ]
-
-        possible_epilogues = []
-        epilogue_template_nodes: OrderedSet[BaseSchedulerNode] = OrderedSet()
-
-        possible_epilogues = [
-            (node1, node2)
-            for (node1, node2) in all_possible_fusions
-            if is_epilogue_fusion(node1, node2)
-        ]
-        possible_fusions.extend(possible_epilogues)
-
-        # For prologues that depend on a template eligible for an epilogue, delay
-        # fusion decision until after epilogue fusion has been evaluated
-        for node1, _ in possible_epilogues:
-            epilogue_template_nodes.add(node1)
-
-        possible_prologues = [
-            (node1, node2)
-            for (node1, node2) in all_possible_fusions
-            if is_prologue_fusion(node1, node2) and node2 not in epilogue_template_nodes
-        ]
-        possible_fusions.extend(possible_prologues)
-
-        try_possible_fusions(possible_fusions)
-        seen_pair_speedup_fn: OrderedSet[Callable[[], bool]] = OrderedSet()
-
-        # Resolve pending fusions for non templates in case of benchmark_kernel=True
-        for pending_fusion in pending_fusions.values():
-            node_key1, node_key2 = pending_fusion.get_fusion_nodes()
-            is_speedup_fn = pending_fusion.callable_fn
-
-            if is_speedup_fn in seen_pair_speedup_fn or is_template_fusion(
-                node_key1, node_key2
-            ):
-                continue
-
-            seen_pair_speedup_fn.add(is_speedup_fn)
-
-            assert self.get_fused_node(node_key1) is node_key1
-            assert self.get_fused_node(node_key2) is node_key2
-
-            self.fuse_if_speedup(node_key1, node_key2, is_speedup_fn, fused_nodes)
-
-        self.evaluate_pending_template_fusions(epilogue_fusion_nodes, fused_nodes)
-
-        self.evaluate_pending_template_fusions(prologue_fusion_nodes, fused_nodes)
-        prologue_fusion_nodes.clear()
-
-        # Now evaluate fusions for prologues which had overlapping templates with
-        # epilogues
-        possible_prologues = [
-            (node1, node2)
-            for (node1, node2) in all_possible_fusions
-            if is_prologue_fusion(node1, node2) and node2 in epilogue_template_nodes
-        ]
-        try_possible_fusions(possible_prologues)
-        self.evaluate_pending_template_fusions(prologue_fusion_nodes, fused_nodes)
+        if deferred_prologue_fusions:
+            template_fusion_nodes.clear()
+            self._try_fusion_pairs(
+                deferred_prologue_fusions,
+                pending_fusions,
+                template_fusion_nodes,
+                fused_nodes,
+                is_reorder_round,
+            )
+            self._evaluate_pending_template_fusions(template_fusion_nodes, fused_nodes)
 
         nodes = sorted(fused_nodes, key=lambda x: x.min_order)
         nodes = self.topological_sort_schedule(nodes)
@@ -4776,7 +4798,7 @@ class Scheduler:
         The current attempt is a quick, possibly hacky, heuristic to prevent the
         fusion of nodes that are far away in the original order.
 
-        A better but difficult to implement heurisitic would be to use live
+        A better but difficult to implement heuristic would be to use live
         intervals of the buffers, find region of peak pressure in the original
         program and prevent fusion that crosses that peak region. We might need
         special care or good approximation in this implementation, as fusion of
@@ -5784,10 +5806,11 @@ class Scheduler:
             and name not in self.mutation_real_name
         )
 
-    def should_partition(
-        self, node: BaseSchedulerNode, should_log: bool = False
-    ) -> bool:
-        """Return True if we should partition the inductor graph on this node"""
+    def should_partition(self, node: BaseSchedulerNode) -> Optional[str]:
+        """
+        Return the reason why we should partition the inductor graph on this node,
+        or None if the node is cudagraphable.
+        """
 
         # Allow users to manually specify if a node should be partitioned
         # Can only do this for FallbackKernels
@@ -5806,7 +5829,7 @@ class Scheduler:
                 or op_overload_name in config.custom_should_partition_ops
             ):
                 assert isinstance(op, torch._ops.OpOverload)
-                return True
+                return f"custom partition op: {op_overload_name}"
 
         # When not using cudagraphs, keep all kernels in the `call` function
         # instead of graph partition functions, since graph partition only brings
@@ -5815,53 +5838,38 @@ class Scheduler:
             not torch._inductor.config.triton.cudagraphs
             and _unstable_customized_partition_wrapper.wrapper is None
         ):
-            return True
-
-        # avoid duplicating logs when should_partition is called multiple times
-        # on the same node
-        def noop_log(msg: str, node: Optional[BaseSchedulerNode]) -> None:
-            return
-
-        # Don't log partition reasons for CPU-only graphs since cudagraph
-        # partitioning is not relevant when there are no GPU devices
-        has_gpu_device = any(is_gpu(device) for device in V.graph.device_types)
-        log_partition_reason = (
-            maybe_log_cudagraph_partition if should_log and has_gpu_device else noop_log
-        )
+            return "partition includes all ops when cudagraphs is disabled"
 
         if isinstance(node, FusedSchedulerNode):
-            return any(self.should_partition(snode) for snode in node.snodes)
+            for snode in node.snodes:
+                reason = self.should_partition(snode)
+                if reason:
+                    return reason
+            return None
 
         assert node.node is not None
 
         if not node.is_gpu():
-            log_partition_reason("non gpu ops", node=node)
-
-            return True
+            return f"{node.get_device()} ops"
 
         if isinstance(node.node, ir.DeviceCopy):
-            log_partition_reason("DeviceCopy ops", node=node)
-            return True
+            return "DeviceCopy ops"
 
         if isinstance(node.node, ir.Conditional):
-            log_partition_reason("Conditional ops", node=node)
-            return True
+            return "Conditional ops"
 
         if getattr(node.node, "unbacked_bindings", None):
-            log_partition_reason("unbacked binding ops", node=node)
-            return True
+            return "unbacked binding ops"
 
         if is_cudagraph_unsafe_op(node.node):
-            log_partition_reason("CUDAGraph-unsafe custom ops", node=node)
-            return True
+            return "CUDAGraph-unsafe custom ops"
 
         # Partition around nodes with dynamic shapes when cudagraph_skip_dynamic_graphs is enabled
         if config.triton.cudagraph_skip_dynamic_graphs:
             if get_scheduler_node_symbol_uses(node):
-                log_partition_reason("dynamic shape ops", node=node)
-                return True
+                return "dynamic shape ops"
 
-        return False
+        return None
 
     def get_name_to_nodes(
         self,
@@ -6122,7 +6130,6 @@ class Scheduler:
             signatures.append(partition_signature)
 
             unmet_output_names = partition_input_names.union(
-                # pyrefly: ignore [unsupported-operation]
                 unmet_output_names - returned_output_names
             )
 
@@ -6282,7 +6289,7 @@ class Scheduler:
             return True
 
         for node in nodes:
-            should_partition = self.should_partition(node)
+            should_partition = self.should_partition(node) is not None
             if should_partition and len(node.unmet_dependencies) == 0:
                 front.append(node)
             elif should_partition and only_output_user(node):
@@ -6304,13 +6311,13 @@ class Scheduler:
         cur_partition: PartitionType = []
         skip_cudagraphs = []
         for node in self.nodes:
-            should_partition = self.should_partition(node, should_log=True)
-            if cur_partition and skip_cudagraph != should_partition:
+            node_should_partition = self.should_partition(node) is not None
+            if cur_partition and skip_cudagraph != node_should_partition:
                 partitions.append(cur_partition)
                 skip_cudagraphs.append(skip_cudagraph)
                 cur_partition = []
 
-            skip_cudagraph = should_partition
+            skip_cudagraph = node_should_partition
             cur_partition.append(node)
 
         if cur_partition:
@@ -6322,7 +6329,69 @@ class Scheduler:
         )
         self.compute_graph_partition_maps(signatures)
 
+        self._log_graph_partitions(partitions, signatures)
+
         return partitions, signatures
+
+    def _log_graph_partitions(
+        self,
+        partitions: list[PartitionType],
+        signatures: list[GraphPartitionSignature],
+    ) -> None:
+        if not cudagraphs_log.isEnabledFor(logging.DEBUG):
+            return
+
+        # Don't log partition reasons for CPU-only graphs since cudagraph
+        # partitioning is not relevant when there are no GPU devices
+        has_gpu_device = any(is_gpu(device) for device in V.graph.device_types)
+        if not has_gpu_device:
+            return
+
+        cudagraphable_count = sum(1 for s in signatures if not s.skip_cudagraph)
+        non_cudagraphable_count = len(signatures) - cudagraphable_count
+        cudagraphs_log.debug(
+            "Created %d graph partitions: %d cudagraphable, %d non-cudagraphable",
+            len(partitions),
+            cudagraphable_count,
+            non_cudagraphable_count,
+        )
+        for i, (partition, signature) in enumerate(zip(partitions, signatures)):
+            cudagraphs_log.debug(
+                "  Partition %d: %d nodes, %s, inputs=%d, outputs=%d",
+                i,
+                len(partition),
+                "non-cudagraphable" if signature.skip_cudagraph else "cudagraphable",
+                len(signature.input_nodes),
+                len(signature.output_nodes),
+            )
+            if signature.skip_cudagraph:
+                # Log details for each non-cudagraphable node
+                for node in partition:
+                    self._log_non_cudagraphable_node(node)
+
+    def _log_non_cudagraphable_node(self, node: BaseSchedulerNode) -> None:
+        """Log details for a non-cudagraphable node."""
+        reason = self.should_partition(node)
+        if not reason:
+            return
+
+        node_name = node.get_name()
+        fx_node = node.node.get_origin_node() if node.node is not None else None
+        parts = [f"reason={reason}"]
+        ir_type = type(node.node).__name__
+        parts.append(f"ir={ir_type}")
+        if fx_node is not None:
+            fx_str = f"{fx_node.target}({', '.join(str(a) for a in fx_node.args)})"
+            parts.append(f"fx={fx_str}")
+
+        cudagraphs_log.debug("    %s: %s", node_name, ", ".join(parts))
+
+        # Log full stack trace if available
+        if fx_node is not None:
+            stack_trace = fx_node.meta.get("stack_trace", None)
+            if stack_trace:
+                for line in stack_trace.strip().split("\n"):
+                    cudagraphs_log.debug("         %s", line)
 
     def codegen(self) -> None:
         with dynamo_timed("Scheduler.codegen"):
@@ -6458,8 +6527,6 @@ class Scheduler:
         partitions, signatures = self.graph_partition()
 
         if len(partitions) > 1:
-            msg = f"cudagraph partition into {len(partitions)} partitions"
-            maybe_log_cudagraph_partition(msg=msg, prefix="")
             counters["inductor"]["cudagraph_partitions"] += len(partitions)
 
         with self.use_default_device_context(partitions, signatures):
@@ -6505,6 +6572,7 @@ class Scheduler:
                 seen.add(key)
 
         self.current_device = self.default_device_context
+        assert self.previous_node is None
 
         # pyrefly: ignore [unbound-name]
         if self.default_device_context and config.triton.autotune_at_compile_time:
@@ -6596,6 +6664,11 @@ class Scheduler:
                 ):
                     self.flush()
 
+            if all(isinstance(n, SchedulerNode) for n in node.get_nodes()):
+                self.previous_node = node
+            else:
+                self.previous_node = None
+
         if self.current_device != self.default_device_context:
             # when default_device_context is not None, we are codegen
             # for graph partitions and all nodes must be on
@@ -6606,6 +6679,7 @@ class Scheduler:
                 # important for nested indentation codegen-ing.
                 V.graph.wrapper_code.codegen_device_guard_exit()
 
+        self.previous_node = None
         self.flush()
 
     def benchmark_combo_kernel(
