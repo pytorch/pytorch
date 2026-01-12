@@ -973,7 +973,9 @@ class TestOpInfoProperties(TestCase):
             samples = list(op.sample_inputs(device, dtype, requires_grad=False))
         return samples
 
-    def _run_with_expected_failure(self, device_type, op_name, backend, test_type, dtype, test_fn):
+    def _run_with_expected_failure(
+        self, device_type, op_name, backend, test_type, dtype, test_fn
+    ):
         """Run a test with expected failure handling.
 
         Uses pytest.xfail for clear test output:
@@ -987,7 +989,9 @@ class TestOpInfoProperties(TestCase):
         expected = is_expected_failure(device_type, op_name, backend, test_type, dtype)
 
         if expected:
-            reason = get_expected_failure_reason(device_type, op_name, backend, test_type, dtype)
+            reason = get_expected_failure_reason(
+                device_type, op_name, backend, test_type, dtype
+            )
             try:
                 test_fn()
             except (AssertionError, RuntimeError):
@@ -1035,7 +1039,10 @@ class TestOpInfoProperties(TestCase):
 
             for sample in samples:
                 # Skip if input is not a tensor or is 0-dim
-                if not isinstance(sample.input, torch.Tensor) or sample.input.dim() == 0:
+                if (
+                    not isinstance(sample.input, torch.Tensor)
+                    or sample.input.dim() == 0
+                ):
                     continue
 
                 # Need at least size 4 in first dimension for meaningful test
@@ -1094,7 +1101,9 @@ class TestOpInfoProperties(TestCase):
             if not tested_any:
                 self.skipTest("No suitable samples found for batch invariance test")
 
-        self._run_with_expected_failure(device_type, op.name, backend, "batch_invariance", dtype, run_test)
+        self._run_with_expected_failure(
+            device_type, op.name, backend, "batch_invariance", dtype, run_test
+        )
 
     # =========================================================================
     # Run-to-Run Determinism Tests
@@ -1156,7 +1165,9 @@ class TestOpInfoProperties(TestCase):
                 self.assertEqual(out1, out2, rtol=0, atol=0)
                 self.assertEqual(out2, out3, rtol=0, atol=0)
 
-        self._run_with_expected_failure(device_type, op.name, backend, "determinism", dtype, run_test)
+        self._run_with_expected_failure(
+            device_type, op.name, backend, "determinism", dtype, run_test
+        )
 
     # =========================================================================
     # Bitwise Equivalence with Eager Mode Tests
@@ -1192,7 +1203,9 @@ class TestOpInfoProperties(TestCase):
                 # Bitwise identical
                 self.assertEqual(eager_out, compiled_out, rtol=0, atol=0)
 
-        self._run_with_expected_failure(device_type, op.name, backend, "eager_equivalence", dtype, run_test)
+        self._run_with_expected_failure(
+            device_type, op.name, backend, "eager_equivalence", dtype, run_test
+        )
 
     # =========================================================================
     # Exhaustive/Sampled Unary Ufunc Tests
@@ -1234,7 +1247,9 @@ class TestOpInfoProperties(TestCase):
             # Bitwise identical
             self.assertEqual(eager_out, compiled_out, rtol=0, atol=0)
 
-        self._run_with_expected_failure(device_type, op.name, backend, "unary_numerical", dtype, run_test)
+        self._run_with_expected_failure(
+            device_type, op.name, backend, "unary_numerical", dtype, run_test
+        )
 
     # =========================================================================
     # Sampled Binary Ufunc Tests
@@ -1271,7 +1286,9 @@ class TestOpInfoProperties(TestCase):
             # Bitwise identical
             self.assertEqual(eager_out, compiled_out, rtol=0, atol=0)
 
-        self._run_with_expected_failure(device_type, op.name, backend, "binary_numerical", dtype, run_test)
+        self._run_with_expected_failure(
+            device_type, op.name, backend, "binary_numerical", dtype, run_test
+        )
 
 
 instantiate_device_type_tests(TestOpInfoProperties, globals(), except_for=["cpu"])
