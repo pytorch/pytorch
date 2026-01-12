@@ -46,7 +46,7 @@ jobs:
           - cuda_version: "12.6"
             arch: "aarch64"
             cuda_short: "126"
-            torch_cuda_arch_list: "8.0;8.6;9.0"
+            torch_cuda_arch_list: "9.0"
             docker_image: "pytorch/manylinuxaarch64-builder:cuda12.6"
             runner: "linux.arm64.r7g.12xlarge.memory"
           - cuda_version: "13.0"

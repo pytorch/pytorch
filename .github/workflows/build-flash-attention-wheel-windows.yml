@@ -69,6 +69,11 @@ jobs:
           submodules: recursive
           path: flash-attention
 
+      - name: Patch Flash-Attention for offline build
+        run: |
+          cd flash-attention
+          git apply ${{ github.workspace }}/.ci/flash-attention/fix-offline-build.patch
+
       - name: Install CUDA
         id: cuda-toolkit
         uses: N-Storm/cuda-toolkit@v0.2.28
@@ -106,9 +111,6 @@ jobs:
         run: |
           set -x
           mkdir -p "${FA_FINAL_PACKAGE_DIR}"
-
-          sed -i 's/if bare_metal_version != Version("12.8"):/if not is_offline_build() and bare_metal_version != Version("12.8"):/' \
-              flash-attention/hopper/setup.py
 
           echo "CUDA_HOME=${CUDA_HOME}"
           nvcc --version
