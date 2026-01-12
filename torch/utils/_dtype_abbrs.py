@@ -12,7 +12,7 @@ dtype_abbrs = {
     torch.float8_e4m3fnuz: "f8e4m3fnuz",
     torch.float8_e5m2fnuz: "f8e5m2fnuz",
     torch.float8_e8m0fnu: "f8e8m0fnu",
-    torch.float8_e8m0fnu_x4: "f8e8m0fnu_x4",
+    torch.float8_e8m0fnu_x4: "f8e8m0fnux4",
     torch.float4_e2m1fn_x2: "f4e2m1fnx2",
     torch.complex32: "c32",
     torch.complex64: "c64",
