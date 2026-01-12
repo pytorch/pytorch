@@ -175,7 +175,6 @@ else:
             >>> mesh = DeviceMesh(device_type="cuda", mesh=[[0, 1, 2, 3],[4, 5, 6, 7]])
         """
 
-        _rank: int
         _device_type: str
         _rank_map: torch.Tensor
         _mesh_dim_names: tuple[str, ...] | None
@@ -286,47 +285,18 @@ else:
                     # pyrefly: ignore [bad-assignment]
                     self._thread_id = threading.get_ident()
 
-                # Now that the process group is initialized, we can get the rank
                 if _rank is None:
-                    self._rank = get_rank()
-                else:
-                    self._rank = _rank
+                    _rank = get_rank()
 
-                self._coordinate_on_dim = self._compute_coordinate_on_dim()
-
-        @staticmethod
-        def _compute_coordinates_from_mesh(
-            mesh_tensor: torch.Tensor,
-            rank: int,
-        ) -> Optional[tuple[int, ...]]:
-            """
-            Compute the coordinates of a rank within a mesh tensor.
-
-            Args:
-                mesh_tensor: The mesh tensor to search in
-                rank: The rank to find coordinates for
-
-            Returns:
-                A tuple of coordinates if the rank is found in the mesh, None otherwise
-
-            Raises:
-                AssertionError: If the rank appears more than once in the mesh
-            """
-            rank_coords = (mesh_tensor == rank).nonzero()
-            if rank_coords.size(0) not in (0, 1):
-                raise AssertionError(
-                    f"rank_coords.size(0) must be 0 or 1, got {rank_coords.size(0)}"
+                # calculate the coordinates of the current global rank on the mesh
+                rank_coords = (self.mesh == _rank).nonzero()
+                if rank_coords.size(0) not in (0, 1):
+                    raise AssertionError(
+                        f"rank_coords.size(0) must be 0 or 1, got {rank_coords.size(0)}"
+                    )
+                self._coordinate_on_dim: list[int] | None = (
+                    rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
                 )
-
-            if rank_coords.size(0) == 0:
-                return None
-
-            coords = rank_coords[0].tolist()
-            return tuple(coords)
-
-        def _compute_coordinate_on_dim(self) -> tuple[int, ...] | None:
-            # calculate the coordinates of the current global rank on the mesh
-            return self._compute_coordinates_from_mesh(self.mesh, self._rank)
 
         @property
         def device_type(self) -> str:
@@ -1096,7 +1066,7 @@ else:
             """
             return self._coordinate_on_dim is not None
 
-        def get_coordinate(self) -> tuple[int, ...] | None:
+        def get_coordinate(self) -> list[int] | None:
             """
             Return the relative indices of this rank relative to all
             dimensions of the mesh. If this rank is not part of the mesh, return None.

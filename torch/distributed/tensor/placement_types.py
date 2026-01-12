@@ -1,16 +1,13 @@
 # mypy: allow-untyped-defs
 # Copyright (c) Meta Platforms, Inc. and affiliates
 
-import typing
 from dataclasses import dataclass, field
-from typing import cast, TypeVar
+from typing import cast
 
 import torch
 import torch._C
 import torch.distributed._functional_collectives as funcol
-from torch import sym_min
 from torch._C._distributed import Placement
-from torch.distributed import RankType
 from torch.distributed._local_tensor import maybe_run_for_local_tensor
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._collective_utils import (
@@ -25,8 +22,6 @@ from torch.distributed.tensor._ops._mask_buffer import MaskBuffer
 
 
 __all__ = ["Placement", "Shard", "Replicate", "Partial"]
-
-_RankTypeT = TypeVar("_RankTypeT", bound=RankType)
 
 
 # Appease TestPublicBindings.test_correct_module_names
@@ -98,8 +93,8 @@ class Shard(torch._C._distributed.Shard):
     def local_shard_size_and_offset(
         curr_local_size: int,
         num_chunks: int,
-        rank: _RankTypeT,
-    ) -> tuple[int, _RankTypeT]:
+        rank: int,
+    ) -> tuple[int, int]:
         """
         Given the size of the current local tensor (which may already be sharded on some dimensions),
         computes the new local shard size and offset given the desired number of chunks
@@ -114,20 +109,17 @@ class Shard(torch._C._distributed.Shard):
         # Compute the chunk size inline with ``torch.chunk``
         if curr_local_size % num_chunks == 0:
             full_chunk_size = curr_local_size // num_chunks
-            # pyrefly: ignore[bad-assignment] # pyrefly bug?
-            shard_starting_idx: _RankTypeT = full_chunk_size * rank
-            return full_chunk_size, shard_starting_idx
+            return full_chunk_size, full_chunk_size * rank
 
         # uneven sharding case
         full_chunk_size = (curr_local_size + num_chunks - 1) // num_chunks
-        # pyrefly: ignore[bad-assignment] # pyrefly bug?
-        shard_starting_idx: _RankTypeT = full_chunk_size * rank
+        shard_starting_idx = full_chunk_size * rank
 
         if curr_local_size < shard_starting_idx:
-            return 0, typing.cast(_RankTypeT, curr_local_size)
+            return 0, curr_local_size
         else:
             local_shard_size = (
-                sym_min(curr_local_size, shard_starting_idx + full_chunk_size)
+                min(curr_local_size, shard_starting_idx + full_chunk_size)
                 - shard_starting_idx
             )
             return local_shard_size, shard_starting_idx
@@ -136,8 +128,8 @@ class Shard(torch._C._distributed.Shard):
         self,
         curr_local_size: int,
         num_chunks: int,
-        rank: RankType,
-    ) -> tuple[int, RankType]:
+        rank: int,
+    ) -> tuple[int, int | None]:
         return Shard.local_shard_size_and_offset(curr_local_size, num_chunks, rank)
 
     @staticmethod
@@ -766,7 +758,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
 
     @staticmethod
     @maybe_run_for_local_tensor
-    def _local_shard_size(sharded_indices: list[torch.Tensor], rank: RankType) -> int:
+    def _local_shard_size(sharded_indices: list[torch.Tensor], rank: int) -> int:
         return len(sharded_indices[rank])
 
     # delete pyre-ignore once separating _StridedShard from Shard
@@ -774,7 +766,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
         self,
         curr_local_size: int,
         num_chunks: int,
-        rank: RankType,
+        rank: int,
         return_first_offset: bool = True,
     ) -> tuple[int, int | list[int]]:
         return _StridedShard.local_shard_size_and_offset(
@@ -787,7 +779,7 @@ class _StridedShard(torch._C._distributed.StridedShard):
         self,
         curr_local_size: int,
         num_chunks: int,
-        rank: RankType,
+        rank: int,
         return_first_offset: bool = True,
     ) -> tuple[int, list[int] | int]:
         """
