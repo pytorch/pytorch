@@ -70,7 +70,7 @@ def any_torch_dispatch_mode_on_stack() -> bool:
 class TorchDispatchMode:
     """
     A ``TorchDispatchMode`` allows you to override the meaning of all
-    ``__torch_dispatch__`` overrideable functions within a dynamic scope,
+    ``__torch_dispatch__`` overridable functions within a dynamic scope,
     without having to actually create a tensor subclass or manually
     monkey-patch functions in the PyTorch API.  Some common situations
     where you should use a mode:
