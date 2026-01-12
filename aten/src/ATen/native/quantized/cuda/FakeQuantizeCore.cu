@@ -40,14 +40,10 @@ void fake_quantize_tensor_cachemask_kernel_cuda(
       gpu_kernel_multiple_outputs(
         iter,
         [=] GPU_LAMBDA (scalar_t input_val) -> thrust::tuple<scalar_t, bool> {
-          // Clamp the float value before casting to avoid undefined behavior with inf/nan
-          const float qval_float = fminf(static_cast<float>(quant_max),
-                                         fmaxf(static_cast<float>(quant_min),
-                                               std::nearbyint(input_val * inv_scale) + zero_point));
-          const auto qval = static_cast<int64_t>(qval_float);
+          const auto qval = static_cast<int64_t>(std::nearbyint(input_val * inv_scale) + zero_point);
           return {
             // fake_quantized value
-            (qval - zero_point) * scale,
+            (fminf(quant_max, fmaxf(quant_min, qval)) - zero_point) * scale,
             // mask for grad
             ((quant_min <= qval) && (qval <= quant_max))
           };
@@ -59,14 +55,10 @@ void fake_quantize_tensor_cachemask_kernel_cuda(
       gpu_kernel_multiple_outputs(
         iter,
         [=] GPU_LAMBDA (scalar_t input_val) -> thrust::tuple<scalar_t, bool> {
-          // Clamp the float value before casting to avoid undefined behavior with inf/nan
-          const float qval_float = fminf(static_cast<float>(quant_max),
-                                         fmaxf(static_cast<float>(quant_min),
-                                               std::nearbyint(input_val * inv_scale) + zero_point));
-          const auto qval = static_cast<int64_t>(qval_float);
+          const auto qval = static_cast<int64_t>(std::nearbyint(input_val * inv_scale) + zero_point);
           return {
             // fake_quantized value
-            (qval - zero_point) * scale,
+            (fminf(quant_max, fmaxf(quant_min, qval)) - zero_point) * scale,
             // mask for grad
             ((quant_min <= qval) && (qval <= quant_max))
           };
