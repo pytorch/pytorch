@@ -30,6 +30,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from ..triton_bundler import TritonBundler
 from ..utils import (
+    GPU_KERNEL_BIN_EXTS,
     prefix_is_reduction,
     tlx_only_cuda_options,
     triton_version_uses_attrs_dict,
@@ -65,7 +66,11 @@ from .runtime_utils import (
     triton_hash_to_path_key,
     validate_triton_config,
 )
-from .static_cuda_launcher import StaticallyLaunchedCudaKernel
+from .static_triton_launcher import (
+    statically_launched_kernel_by_device,
+    StaticallyLaunchedCudaKernel,
+    StaticallyLaunchedXpuKernel,
+)
 from .triton_compat import (
     ASTSource,
     autograd_profiler,
@@ -102,7 +107,9 @@ if TYPE_CHECKING:
 
     LauncherType = Any
 
-_KernelType = Union[CompiledKernel, StaticallyLaunchedCudaKernel]
+_KernelType = Union[
+    CompiledKernel, StaticallyLaunchedCudaKernel, StaticallyLaunchedXpuKernel
+]
 _T = TypeVar("_T", bound=_KernelType)
 
 log = logging.getLogger(__name__)
@@ -1666,7 +1673,7 @@ class CannotStaticallyLaunchKernel(Exception):
     pass
 
 
-class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
+class StaticTritonCompileResult(CompileResult[_T]):
     """
     TritonCompileResult that uses StaticCudaLauncher,
     which vastly simplifies the setup and metadata needed to be kept.
@@ -1678,14 +1685,18 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
         inductor_meta: dict[str, Any],
         triton_meta: dict[str, Any],
         heuristic_type: HeuristicType,
-    ) -> StaticallyLaunchedCudaKernel | None:
+    ) -> _KernelType | None:
         if not torch._inductor.config.use_static_triton_launcher:
             return None
 
-        def check_can_launch() -> StaticallyLaunchedCudaKernel:
-            if triton_meta.get("device_type") != "cuda":
-                # Only cuda kernels
-                raise CannotStaticallyLaunchKernel("Non-cuda device")
+        def check_can_launch() -> _KernelType:
+            if triton_meta.get("device_type") not in ("cuda", "xpu"):
+                raise CannotStaticallyLaunchKernel("Non-cuda/XPU device")
+
+            if triton_meta.get("device_type") == "xpu" and XPU_KERNEL_FORMAT == "spv":
+                raise CannotStaticallyLaunchKernel(
+                    "Static XPU Triton kernel launch does not support SPIR-V kernel."
+                )
 
             if torch._inductor.config.cpp_wrapper:
                 # If we're running with cpp wrapper, it doesn't
@@ -1711,10 +1722,13 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
                     "static launch does not support launch attributes"
                 )
 
+            binary_ext = GPU_KERNEL_BIN_EXTS.get(
+                triton_meta.get("device_type"), ".cubin"
+            )
             cubin_location = os.path.join(
                 triton_cache_dir(triton_meta.get("device", 0)),
                 triton_hash_to_path_key(kernel.hash),
-                f"{kernel.src.fn.__name__}.cubin",
+                f"{kernel.src.fn.__name__}{binary_ext}",
             )
 
             if not os.path.exists(cubin_location):
@@ -1726,7 +1740,9 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
                 kernel._cubin_path = cubin_location
 
             try:
-                static_kernel = StaticallyLaunchedCudaKernel(kernel)
+                static_kernel = statically_launched_kernel_by_device(
+                    kernel, triton_meta.get("device_type")
+                )
             except NotImplementedError as e:
                 raise CannotStaticallyLaunchKernel(f"NotImplemented: {str(e)}") from e
 
@@ -1746,10 +1762,14 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
         When loading from cache on disk, we want to reload cubin
         files from their appropriate location on disc.
         """
+        device_type = (
+            "hip" if torch.version.hip else self.compile_meta.get("device_type", "cuda")
+        )
+        binary_ext = GPU_KERNEL_BIN_EXTS.get(device_type, "cubin")
         cubin_location = os.path.join(
             triton_cache_dir(self.compile_meta.get("device", 0)),
             triton_hash_to_path_key(self.kernel.hash),
-            f"{self.kernel.name}.cubin",
+            f"{self.kernel.name}{binary_ext}",
         )
         if not os.path.exists(cubin_location):
             if self.kernel.cubin_raw is not None:
@@ -1764,7 +1784,7 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
     def make_launcher(self) -> LauncherType:
         # If at least one static make_launcher call occurs,
         # we're sure static cuda launcher was used for this compile
-        set_feature_use("static_cuda_launcher", True)
+        set_feature_use("static_triton_launcher", True)
         # Load the binary on the parent
         if not self.kernel.cubin_path:
             self.reload_cubin_path()
