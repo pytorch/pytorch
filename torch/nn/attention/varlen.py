@@ -155,7 +155,6 @@ def varlen_attn(
     max_q: int,
     max_k: int,
     *,
-    is_causal: bool = False,
     return_aux: AuxRequest | None = None,
     scale: float | None = None,
     window_size: tuple[int, int] = (-1, -1),
@@ -173,10 +172,11 @@ def varlen_attn(
         cu_seq_k (Tensor): Cumulative sequence positions for keys/values; shape :math:`(N+1,)`
         max_q (int): Maximum query sequence length in the batch.
         max_k (int): Maximum key/value sequence length in the batch.
-        is_causal (bool, optional): If set to True, applies causal masking (default: False).
         return_aux (Optional[AuxRequest]): If not None and ``return_aux.lse`` is True, also returns the logsumexp tensor.
         scale (float, optional): Scaling factor for attention scores
-        window_size (tuple[int, int], optional): Window size for sliding window attention. Defaults to (-1, -1)
+        window_size (tuple[int, int], optional): Window size for sliding window attention as (left, right).
+            Use (-1, -1) for full attention (default), (-1, 0) for causal attention,
+            or (W, 0) for causal attention with sliding window of size W.
 
     Returns:
         output (Tensor): Output tensor from attention computation; shape :math:`(T_q, H, D)`.
@@ -221,9 +221,10 @@ def varlen_attn(
         >>>
         >>> # Call varlen_attn
         >>> output = varlen_attn(
-        ...     query, key, value, cu_seq, cu_seq, max_len, max_len, is_causal=False
+        ...     query, key, value, cu_seq, cu_seq, max_len, max_len
         ... )
     """
+    is_causal = window_size[1] == 0
     out, lse, _ = torch.ops.torch_attn._varlen_attn(
         query,
         key,
