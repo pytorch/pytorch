@@ -1915,6 +1915,40 @@ class TestDtypeMismatch(TestCase):
             torch.matmul(a, b)
 
 
+class TestDeviceMismatch(TestCase):
+    """Tests for device mismatch errors in index_add/index_reduce operations.
+
+    These tests verify that device mismatch errors are raised when using FakeTensor
+    (which is important for torch.compile).
+    """
+
+    def test_index_add_device_mismatch(self):
+        """Test that index_add raises error when index device doesn't match self."""
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        with FakeTensorMode():
+            self_tensor = torch.randn(8, 10, device='cuda')
+            index = torch.randint(0, 8, (4,), device='cpu')  # CPU index with CUDA tensors
+            source = torch.randn(4, 10, device='cuda')
+            # Should raise error about device mismatch
+            with self.assertRaisesRegex(RuntimeError, "index.*must be on the same device as self"):
+                torch.index_add(self_tensor, 0, index, source)
+
+    def test_index_reduce_device_mismatch(self):
+        """Test that index_reduce raises error when index device doesn't match self."""
+        if not torch.cuda.is_available():
+            self.skipTest("CUDA not available")
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        with FakeTensorMode():
+            self_tensor = torch.randn(8, 10, device='cuda')
+            index = torch.randint(0, 8, (4,), device='cpu')  # CPU index with CUDA tensors
+            source = torch.randn(4, 10, device='cuda')
+            # Should raise error about device mismatch
+            with self.assertRaisesRegex(RuntimeError, "index.*must be on the same device as self"):
+                torch.index_reduce(self_tensor, 0, index, source, "mean")
+
+
 instantiate_parametrized_tests(TestDtypeMismatch)
 
 def print_op_str_if_not_supported(op_str):
