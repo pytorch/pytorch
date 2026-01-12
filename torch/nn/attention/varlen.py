@@ -176,6 +176,7 @@ def varlen_attn(
         is_causal (bool, optional): If set to True, applies causal masking (default: False).
         return_aux (Optional[AuxRequest]): If not None and ``return_aux.lse`` is True, also returns the logsumexp tensor.
         scale (float, optional): Scaling factor for attention scores
+        window_size (tuple[int, int], optional): Window size for sliding window attention. Defaults to (-1, -1)
 
     Returns:
         output (Tensor): Output tensor from attention computation; shape :math:`(T_q, H, D)`.
