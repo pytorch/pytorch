@@ -1299,8 +1299,21 @@ class LoweringTest(MultiProcContinuousTest):
             b = torch.mm(a, w2)
             # Both `a` and `b` need comm buffers that are live simultaneously
             a = torch.ops.symm_mem.one_shot_all_reduce(a, "sum", "0")
-            b = torch.ops._c10d_functional.all_reduce(b, "sum", "0")
+            b = torch.ops.symm_mem.one_shot_all_reduce(b, "sum", "0")
             return a + b
+
+        def func_no_reuse_eager(x, w1, w2):
+            # we need to allocate the output tensors here
+            # because eager path would not allocate the output tensors as symm_mem tensors automatically
+            mm1_out = symm_mem.empty(N, N, device=self.device)
+            mm2_out = symm_mem.empty(N, N, device=self.device)
+
+            mm1_out = torch.mm(x, w1, out=mm1_out)
+            mm2_out = torch.mm(mm1_out, w2, out=mm2_out)
+            # Both `a` and `b` need comm buffers that are live simultaneously
+            mm1_out = torch.ops.symm_mem.one_shot_all_reduce(mm1_out, "sum", "0")
+            mm2_out = torch.ops.symm_mem.one_shot_all_reduce(mm2_out, "sum", "0")
+            return mm1_out + mm2_out
 
         compiled_no_reuse = torch.compile(func_no_reuse, fullgraph=True)
         code_no_reuse = run_and_get_triton_code(compiled_no_reuse, x, w1, w2)
@@ -1311,7 +1324,7 @@ class LoweringTest(MultiProcContinuousTest):
         )
 
         # Check numerical result for no_reuse path
-        eager_no_reuse = func_no_reuse(x, w1, w2)
+        eager_no_reuse = func_no_reuse_eager(x, w1, w2)
         compiled_output_no_reuse = compiled_no_reuse(x, w1, w2)
         torch.testing.assert_close(
             eager_no_reuse,
@@ -1324,12 +1337,24 @@ class LoweringTest(MultiProcContinuousTest):
         def func_reuse(x, w1, w2, w3):
             a = torch.mm(x, w1)
             # First all_reduce uses a comm buffer
-            a = torch.ops._c10d_functional.all_reduce(a, "sum", "0")
+            a = torch.ops.symm_mem.one_shot_all_reduce(a, "sum", "0")
             b = torch.mm(a, w2)  # `b` is a regular cuda allocation
             # `a` can be freed here, `c` can reuse the freed `a`
             c = torch.mm(b, w3)
             c = torch.ops.symm_mem.one_shot_all_reduce(c, "sum", "0")
             return c
+
+        def func_reuse_eager(x, w1, w2, w3):
+            # we need to allocate the output tensors here
+            # because eager path would not allocate the output tensors as symm_mem tensors automatically
+            mm1_out = symm_mem.empty(N, N, device=self.device)
+
+            torch.mm(x, w1, out=mm1_out)
+            a = torch.ops.symm_mem.one_shot_all_reduce(mm1_out, "sum", "0")
+            b = torch.mm(a, w2)
+            torch.mm(b, w3, out=mm1_out)
+            mm1_out = torch.ops.symm_mem.one_shot_all_reduce(mm1_out, "sum", "0")
+            return mm1_out
 
         compiled_reuse = torch.compile(func_reuse, fullgraph=True)
         code_reuse = run_and_get_triton_code(compiled_reuse, x, w1, w2, w3)
@@ -1347,7 +1372,7 @@ class LoweringTest(MultiProcContinuousTest):
         )
 
         # Check numerical result for reuse path
-        eager_reuse = func_reuse(x, w1, w2, w3)
+        eager_reuse = func_reuse_eager(x, w1, w2, w3)
         compiled_output_reuse = compiled_reuse(x, w1, w2, w3)
         torch.testing.assert_close(
             eager_reuse,
