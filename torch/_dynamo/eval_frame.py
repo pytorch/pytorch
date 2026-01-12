@@ -39,7 +39,7 @@ import types
 import unittest
 import warnings
 import weakref
-from collections.abc import Sized
+from collections.abc import Generator, Sized
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
@@ -67,6 +67,7 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.types import ConvertFrameReturn, FrameAction, FrameExecStrategy
 from torch._export.utils import _compiling_state_context
+from torch._library.opaque_object import is_opaque_type
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import DISABLE_JUSTKNOBS, justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import (
@@ -207,7 +208,7 @@ def get_example_inputs(key: str) -> list[Any]:
 
 
 @contextlib.contextmanager
-def _set_in_optimized_module():
+def _set_in_optimized_module() -> Generator[None, None, None]:
     # Set in dynamo's OptimizedModule forward, to have better coverage than is_compiling().
     # Prevents graph-breaking forward hooks from being registered & traced.
     # TODO(pianpwk): subsume this flag with better is_compiling() coverage
@@ -551,14 +552,14 @@ class OptimizedModule(torch.nn.Module):
             return self._modules["_orig_mod"]
         return getattr(self._orig_mod, name)
 
-    def __setattr__(self, name: str, val: Any) -> None:
+    def __setattr__(self, name: str, value: Any) -> None:
         # Allow patching over class attributes
         if hasattr(type(self), name):
-            return super().__setattr__(name, val)
+            return super().__setattr__(name, value)
 
         if name in OptimizedModule._opt_mod_attributes:
-            return super().__setattr__(name, val)
-        return setattr(self._orig_mod, name, val)
+            return super().__setattr__(name, value)
+        return setattr(self._orig_mod, name, value)
 
     def __delattr__(self, name: str) -> None:
         # This mirrors `__setattr__`
@@ -640,6 +641,15 @@ def make_set_enable_dynamic(enable: bool) -> Any:
         return config._make_closure_patcher(
             automatic_dynamic_shapes=False, assume_static_by_default=True
         )
+
+
+@contextlib.contextmanager
+def set_enable_dynamic(enable: bool) -> Generator[None, None, None]:
+    cleanup = make_set_enable_dynamic(enable)()
+    try:
+        yield
+    finally:
+        cleanup()
 
 
 # A thread local storage that serves to store information as Dynamo traces
@@ -839,6 +849,7 @@ class _TorchDynamoContext:
                 backend=innermost_fn(
                     self.callback, unaltered_fn_attr="_torchdynamo_orig_backend"
                 ),
+                dynamic=self._dynamic,
             )
 
         # add context containing GraphModule to any GraphModule forward functions
@@ -1805,7 +1816,7 @@ def check_user_input_output(flat_values: list[Any], error_type: UserErrorType) -
     ] + list(common_constant_types)
 
     def is_supported_type(val: Any) -> bool:
-        return isinstance(val, tuple(supported_types))
+        return isinstance(val, tuple(supported_types)) or is_opaque_type(type(val))
 
     value_type = "input" if error_type == UserErrorType.INVALID_INPUT else "output"
     # We only check that the outputs are not None. Inputs can be None.

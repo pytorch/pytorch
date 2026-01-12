@@ -1,4 +1,4 @@
-"""Utility functions for caching operations in PyTorch Inductor runtime.
+"""Utility functions
 
 This module provides helper functions for LRU caching decorators used
 throughout the caching system.
@@ -33,9 +33,9 @@ def _lru_cache(fn: Callable[P, R]) -> Callable[P, R]:
     cached_fn = lru_cache(maxsize=64, typed=True)(fn)
 
     @wraps(fn)
-    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:  # type: ignore[type-var]
+    def wrapper(*args: P.args, **kwargs: P.kwargs) -> R:
         try:
-            return cached_fn(*args, **kwargs)  # type: ignore[arg-type]
+            return cached_fn(*args, **kwargs)
         except TypeError:
             return fn(*args, **kwargs)
 

@@ -33,11 +33,12 @@ import itertools
 import random
 import sys
 import threading
+import traceback
 import types
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 from typing_extensions import is_typeddict
 
 import torch._dynamo.config
@@ -460,6 +461,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return ConstDictVariable(
                 {}, collections.OrderedDict, mutation_type=ValueMutationNew()
             )
+        elif (
+            len(args) == 1
+            and isinstance(args[0], variables.GenericContextWrappingVariable)
+            and name == "__enter__"
+        ):
+            return args[0].enter(tx)
         elif name == "__new__" and UserDefinedClassVariable.is_supported_new_method(
             self.value.__new__
         ):
@@ -485,6 +492,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     ) -> VariableTracker:
         from ..side_effects import SideEffects
         from .builder import wrap_fx_proxy
+        from .ctx_manager import GenericContextWrappingVariable
 
         constant_args = check_constant_args(args, kwargs)
 
@@ -583,6 +591,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.lists.DequeVariable(
                 items, maxlen=maxlen, mutation_type=ValueMutationNew()
             )
+        elif (
+            # https://github.com/python/cpython/blob/33efd7178e269cbd04233856261fd0aabbf35447/Lib/contextlib.py#L475-L477
+            self.value is types.MethodType
+            and len(args) == 2
+            and isinstance(args[0], variables.UserFunctionVariable)
+            and isinstance(args[1], GenericContextWrappingVariable)
+            and args[0].get_name() in ("__enter__", "__exit__")
+        ):
+            cm_obj = args[1].cm_obj
+            fn = getattr(cm_obj, args[0].get_name()).__func__
+            return variables.UserMethodVariable(fn, args[1], source=self.source)
         elif self.value is weakref.ref:
             if len(args) > 1:
                 callback = args[1]
@@ -643,8 +662,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 contextlib.closing,
                 contextlib.redirect_stdout,
                 contextlib.redirect_stderr,
-                contextlib.suppress,
-                contextlib.ExitStack,
                 contextlib.AsyncExitStack,
             ):
                 # We are not changing the behavior of Dynamo as these function were
@@ -945,13 +962,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return self.value.__name__
         return super().const_getattr(tx, name)
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> Literal[True]:
         return True
 
-    def get_python_hash(self):
+    def get_python_hash(self) -> int:
         return hash(self.value)
 
-    def is_python_equal(self, other):
+    def is_python_equal(self, other: object) -> bool:
         return (
             isinstance(other, variables.UserDefinedClassVariable)
             and self.value is other.value
@@ -1505,10 +1522,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             getattribute_fn = inspect.getattr_static(
                 type(self.value), "__getattribute__"
             )
-            if self.source:
-                new_source: AttrSource | None = AttrSource(
-                    self.source, "__getattribute__"
-                )
+            new_source: AttrSource | None = (
+                AttrSource(self.source, "__getattribute__") if self.source else None
+            )
 
             try:
                 return variables.UserMethodVariable(
@@ -1834,16 +1850,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             handle_observed_exception(tx)
             return variables.ConstantVariable.create(False)
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> bool:
         raise_on_overridden_hash(self.value, self)
         return True
 
-    def get_python_hash(self):
+    def get_python_hash(self) -> int:
         # default hash
         return hash(self.value)
 
-    def is_python_equal(self, other):
+    def is_python_equal(self, other: object) -> bool:
         # id check
+        if not isinstance(other, UserDefinedVariable):
+            return False
         return self.value is other.value
 
     def call_tree_map_branch(
@@ -2101,14 +2119,16 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> Literal[True]:
         # TODO - Check corner cases like eq=False, hash=False etc
         return True
 
-    def get_python_hash(self):
+    def get_python_hash(self) -> int:
         return hash(tuple(arg.get_python_hash() for arg in self.fields.values()))
 
-    def is_python_equal(self, other):
+    def is_python_equal(self, other: object) -> bool:
+        if not isinstance(other, FrozenDataClassVariable):
+            return False
         is_class_same = self.python_type() is other.python_type()
         is_field_name_same = self.fields.keys() == other.fields.keys()
         is_field_value_same = all(
@@ -2197,11 +2217,11 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
         return self.exc_vt.exc_type
 
     @property
-    def python_stack(self):
+    def python_stack(self) -> traceback.StackSummary | None:
         return self.exc_vt.python_stack
 
     @python_stack.setter
-    def python_stack(self, value):
+    def python_stack(self, value: traceback.StackSummary) -> None:
         self.exc_vt.python_stack = value
 
 
@@ -2256,17 +2276,17 @@ class RemovableHandleVariable(VariableTracker):
     def call_method(
         self,
         tx: "InstructionTranslator",
-        method_name: str,
+        name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if method_name == "remove":
+        if name == "remove":
             if self.idx != self.REMOVED:
                 assert self.idx is not None
                 tx.output.side_effects.remove_hook(self.idx)
                 self.idx = self.REMOVED
             return variables.ConstantVariable.create(None)
-        return super().call_method(tx, method_name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if self.idx == self.REMOVED:
@@ -2364,7 +2384,7 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
     ) -> None:
         return self._dict_vt.install_dict_contains_guard(tx, args)
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> Literal[False]:
         raise_on_overridden_hash(self.value, self)
         return False
 
@@ -2449,14 +2469,14 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
     ) -> None:
         return self._set_vt.install_dict_contains_guard(tx, args)
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> bool:
         raise_on_overridden_hash(self.value, self)
         return self._set_vt.is_python_hashable()
 
-    def get_python_hash(self):
+    def get_python_hash(self) -> int:
         return self._set_vt.get_python_hash()
 
-    def is_python_equal(self, other):
+    def is_python_equal(self, other: object) -> bool:
         return isinstance(
             other, UserDefinedSetVariable
         ) and self._set_vt.is_python_equal(other._set_vt)
@@ -2505,7 +2525,7 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
     def is_underlying_vt_modified(self, side_effects: "SideEffects") -> bool:
         return side_effects.is_modified(self._list_vt)
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> Literal[False]:
         raise_on_overridden_hash(self.value, self)
         return False
 
@@ -2567,14 +2587,14 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             return self._tuple_vt.unpack_var_sequence(tx)
         raise NotImplementedError
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> bool:
         raise_on_overridden_hash(self.value, self)
         return self._tuple_vt.is_python_hashable()
 
-    def get_python_hash(self):
+    def get_python_hash(self) -> int:
         return self._tuple_vt.get_python_hash()
 
-    def is_python_equal(self, other):
+    def is_python_equal(self, other: object) -> bool:
         return isinstance(
             other, UserDefinedTupleVariable
         ) and self._tuple_vt.is_python_equal(other._tuple_vt)
