@@ -197,6 +197,9 @@ skip:
     - stable_diffusion
     - stable_diffusion_text_encoder
     - stable_diffusion_unet
+    # Has never been working correctly
+    # https://github.com/pytorch/pytorch/issues/172015#issuecomment-3730509098
+    - modded_nanogpt
 
   device:
     cpu:

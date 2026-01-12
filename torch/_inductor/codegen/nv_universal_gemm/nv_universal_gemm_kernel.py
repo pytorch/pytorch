@@ -6,7 +6,7 @@ This module generates Python code that calls cutlass_api to execute GEMM operati
 """
 
 import logging
-from typing import Any, Optional
+from typing import Any, Optional, Union
 
 from torch._inductor.codegen.common import IndentedBuffer, Kernel
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import CuteDSLOpOverrides
@@ -156,20 +156,35 @@ class NVUniversalGemmKernel(Kernel):
         """
         wrapper = V.graph.wrapper_code
 
-        call_args = []
-        arg_types = []
+        call_args: list[str] = []
+        arg_types: list[Any] = []
+        raw_args: list[Union[Buffer, ReinterpretView, None]] = []
 
         for _, input_node in self._template_input_args:
             reinterpret_view = self._get_reinterpret_view(input_node)
             if reinterpret_view is not None:
                 call_args.append(reinterpret_view.codegen_reference())
+                # Pass the ReinterpretView as raw_arg so autotune_at_compile_time
+                # can use it to generate example tensors
+                raw_args.append(reinterpret_view)
             else:
                 call_args.append(input_node.get_name())
+                raw_args.append(input_node)
             arg_types.append(V.graph.get_dtype(input_node.get_name()))
 
         output_name = self.output_node.get_name()
         call_args.append(output_name)
         arg_types.append(V.graph.get_dtype(output_name))
+        raw_args.append(None)  # Output buffer is findable by name
 
         # Generate the kernel call using triton=True for Python-based kernels
-        wrapper.generate_kernel_call(name, call_args, triton=True, arg_types=arg_types)
+        # Pass raw_keys as None list to match raw_args length
+        # TODO(nikhilap)  We don't use autotune_args like the Triton path
+        wrapper.generate_kernel_call(
+            name,
+            call_args,
+            triton=True,
+            arg_types=arg_types,
+            raw_args=raw_args,
+            raw_keys=[None] * len(raw_args),
+        )
