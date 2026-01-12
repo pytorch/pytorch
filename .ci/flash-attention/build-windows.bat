@@ -57,6 +57,9 @@ echo installing dependencies...
 python -m pip install einops packaging ninja numpy wheel setuptools
 
 set FLASH_ATTENTION_FORCE_BUILD=TRUE
+:: Skip downloading nvcc/ptxas binaries - Windows not supported by NVIDIA redist URLs
+:: We use the CUDA toolkit already installed on the system
+set FLASH_ATTENTION_OFFLINE_BUILD=1
 set FLASH_ATTENTION_DISABLE_SPLIT=FALSE
 set FLASH_ATTENTION_DISABLE_PAGEDKV=FALSE
 set FLASH_ATTENTION_DISABLE_APPENDKV=FALSE
