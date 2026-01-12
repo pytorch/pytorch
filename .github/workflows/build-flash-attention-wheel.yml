@@ -149,8 +149,8 @@ jobs:
           toolkit_short_version: ${{ matrix.cuda_short }}
           python: "3.10"
 
-      - name: Setup sccache
-        uses: mozilla-actions/sccache-action@v0.0.9
+      # - name: Setup sccache
+      #   uses: mozilla-actions/sccache-action@v0.0.9
 
       - name: Install corresponding PyTorch
         run: |
