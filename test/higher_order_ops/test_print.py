@@ -565,6 +565,7 @@ x = add_1, y = add_2);  getitem = None
         self.assertIn("mul result:", printed)
         self.assertIn("sub result:", printed)
 
+    @skipIfTorchDynamo("Skipped under Dynamo")
     def test_print_aot_autograd_graph(self):
         """Test capturing the AOT Autograd graph for print HOP.
 
