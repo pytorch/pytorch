@@ -217,6 +217,13 @@ def nonstrict_trace(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
     # between inputs themselves, nor between inputs and outputs.
     assert callable(traceable_fn), "nonstrict_trace expects a callable"
 
+    # Check if the function is already marked as leaf_function
+    if trace_rules.is_leaf_function(traceable_fn):
+        raise ValueError(
+            f"Function {traceable_fn} cannot be both marked as @leaf_function and "
+            f"@nonstrict_trace. Please use only one decorator."
+        )
+
     @functools.wraps(traceable_fn)
     def wrapped(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         return traceable_fn(*args, **kwargs)
@@ -239,7 +246,7 @@ def nonstrict_trace(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
     return wrapped
 
 
-def leaf_function(fn: Callable[..., Any]) -> Callable[..., Any]:
+def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     """
     Decorator to mark a function as a leaf function for dynamo.
 
@@ -259,14 +266,24 @@ def leaf_function(fn: Callable[..., Any]) -> Callable[..., Any]:
     1. @leaf_function - uses the decorated function itself as fake_impl. This works
        when the function can run with fake tensors (avoids data-dependent control
        flow, etc.), avoids dangerous patterns, and meets the Restrictions below.
-    2. @<method>.fake_impl - provide an explicit fake_impl, where ``<method>`` is the
-       name of the decorated method (e.g., ``@forward.fake_impl``).
+    2. @<func>.fake_impl - provide an explicit fake_impl, where ``<func>`` is the
+       name of the decorated function (e.g., ``@my_leaf_fn.fake_impl``).
        Required when the annotated function cannot run with fake tensors (e.g., has
        data-dependent control flow like ``if x.sum() > 0:``), or when you don't want
        the annotated function to run multiple times during compilation (e.g., it
        produces side-effects). Output validation against the annotated function is
        disabled by default to avoid runtime overhead; set
        ``torch._dynamo.config.leaf_function_validate_outputs = True`` to enable.
+
+    Note:
+        - Training is supported e.g. you can call ``.backward()`` on outputs and gradients
+        will flow through the leaf function.
+
+        - ``nn.Module`` can be passed as an input argument to leaf functions. The module's
+        parameters and buffers will be properly tracked for autograd.
+
+        - Currently works with ``backend="eager"`` and ``backend="aot_eager"`` only.
+        Inductor backend and ``torch.export`` are not yet supported.
 
     Dangerous patterns (apply to both usage options, may cause silent incorrectness):
         - Side effects: Don't rely on side effects for correctness.
@@ -279,9 +296,9 @@ def leaf_function(fn: Callable[..., Any]) -> Callable[..., Any]:
 
               # Compiled region
               self.counter += 1
-              y = self.leaf_fn(x)  # Don't depend on self.counter inside leaf_fn
+              y = my_leaf_fn(self, x)  # Don't depend on self.counter inside leaf_fn
 
-              y = self.leaf_fn(x)
+              y = my_leaf_fn(self, x)
               result = self.state  # Don't depend on state mutated by leaf_fn
 
         - Aliasing and in-place mutations on inputs: Not tracked across the leaf
@@ -290,50 +307,109 @@ def leaf_function(fn: Callable[..., Any]) -> Callable[..., Any]:
           Bad::
 
               @leaf_function
-              def forward(self, x):
+              def my_leaf_fn(x):
                   x.add_(1)  # In-place mutation on input is dangerous
                   return (x,)
 
-    Restrictions:
-        - (Temporary) Only nn.Module methods supported currently.
-        - Output should be a pytree of primitives (e.g. Tenosr, int, str etc).
+        - Implicit inputs (closures/globals): Tensors or modules captured from enclosing
+          scopes will cause compilation errors by default. Pass them
+          as explicit arguments instead. Non-tensor constants are fine.
 
+          Bad::
+
+              model = MyModel()  # defined at outer scope
+
+
+              @leaf_function
+              def my_leaf_fn(x):
+                  return model(x)  # Fails: model not passed as argument
+
+          Good::
+
+              @leaf_function
+              def my_leaf_fn(model, x):
+                  return model(x)  # model passed as argument
+
+          For inference-only use cases where gradients are not needed, you can set
+          ``torch._dynamo.config.leaf_function_allow_non_fake_inputs = True`` to allow
+          constant tensor closures. However, gradients will NOT flow to captured tensors/modules,
+          so do not use this for training.
+
+    Restrictions:
+        - Return value should be a pytree of tensors.
 
     Example:
         # Simple usage - function itself is used as fake_impl:
+        @leaf_function
+        def my_leaf_fn(model, x):
+            return (model(x),)
+
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10)
 
-            @leaf_function
             def forward(self, x):
-                return (self.linear(x),)
+                return my_leaf_fn(self.linear, x)
 
         # With explicit fake_impl for data-dependent control flow:
+        @leaf_function
+        def my_leaf_fn(model, x):
+            if x.sum() > 0:  # data-dependent branch
+                return (model(x),)
+            return (model(x) + 1,)
+
+        @my_leaf_fn.fake_impl
+        def my_leaf_fn_fake(model, x):
+            return (model(x),)
+
         class MyModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10)
 
-            @leaf_function
             def forward(self, x):
-                if x.sum() > 0:  # data-dependent branch
-                    return (self.linear(x),)
-                return (self.linear(x) + 1,)
+                return my_leaf_fn(self.linear, x)
 
-            @forward.fake_impl
-            def forward(self, x):
-                return (self.linear(x),)
+        # Training example - gradients flow through the leaf function:
+        @leaf_function
+        def train_step_fn(model, x, target):
+            pred = model(x)
+            loss = torch.nn.functional.mse_loss(pred, target)
+            return (loss,)
+
+        class TrainableModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.net = torch.nn.Linear(10, 10)
+
+            def forward(self, x, target):
+                return train_step_fn(self.net, x, target)
+
+        model = TrainableModule()
+        compiled_model = torch.compile(model, backend="aot_eager")
+        x = torch.randn(32, 10)
+        target = torch.randn(32, 10)
+        loss = compiled_model(x, target)[0]
+        loss.backward()  # Gradients propagate through the leaf function
 
     Args:
         fn: The function being decorated.
     """
+    from . import trace_rules
+
+    # Check if the function is already marked as nonstrict_trace
+    if trace_rules.is_nonstrict_trace_callable(fn):
+        raise ValueError(
+            f"Function {fn} cannot be both marked as @leaf_function and "
+            f"@nonstrict_trace. Please use only one decorator."
+        )
+
     # Create state to hold the fake_impl (can be mutated by fake_impl setter)
     state = _LeafFunctionState(fn)
 
     @functools.wraps(fn)
-    def inner(*args: Any, **kwargs: Any) -> Any:
+    def inner(*args: _P.args, **kwargs: _P.kwargs) -> _R:
         return fn(*args, **kwargs)
 
     # Add leaf function attributes

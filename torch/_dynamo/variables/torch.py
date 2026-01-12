@@ -32,7 +32,8 @@ import math
 import re
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import nullcontext
-from typing import Any, NoReturn, Optional, TYPE_CHECKING, TypeVar
+from typing import Any, NoReturn, Optional, TYPE_CHECKING, TypeVar, Union
+from typing_extensions import TypeIs
 
 import torch._C
 import torch._refs
@@ -517,8 +518,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             nonstrict_traceable = is_nonstrict_trace_callable(value)
         if leaf_function is None:
             leaf_function = is_leaf_function(value)
-            # TODO: raise a proper error if a function is
-            # both marked as leaf_function and nonstrict_traceable
 
         self.nonstrict_traceable = nonstrict_traceable
         self.leaf_function = leaf_function
@@ -2039,8 +2038,14 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         self,
         tx: "InstructionTranslator",
         args: Sequence[VariableTracker],
-        kwargs: "dict[str, VariableTracker]",
-    ) -> "VariableTracker":
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        """
+        Handle calls to @nonstrict_trace decorated functions.
+
+        Flattens arguments to graphable types, invokes the function with
+        fake tensors (allowing non-fake inputs), and wraps the outputs.
+        """
         from torch._higher_order_ops.flat_apply import (
             flat_apply,
             func_to_graphable,
@@ -2252,11 +2257,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         self,
         tx: "InstructionTranslator",
         args: Sequence[VariableTracker],
-        kwargs: "dict[str, VariableTracker]",
-    ) -> tuple[
-        "VariableTracker",
-        "VariableTracker",
-    ]:
+        kwargs: dict[str, VariableTracker],
+    ) -> tuple[VariableTracker, VariableTracker]:
         """
         Extract nn.Module states from arguments for leaf function invocation.
 
@@ -2270,7 +2272,9 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         from .higher_order_ops import _make_inlined
         from .nn_module import NNModuleVariable, UnspecializedNNModuleVariable
 
-        def is_module_variable(var: VariableTracker) -> bool:
+        def is_module_variable(
+            var: VariableTracker,
+        ) -> TypeIs[Union["NNModuleVariable", "UnspecializedNNModuleVariable"]]:
             return isinstance(var, (NNModuleVariable, UnspecializedNNModuleVariable))
 
         def convert_modules_to_states(values: Any, module_indices: Any) -> Any:
@@ -2291,14 +2295,29 @@ For now, dynamo will explicitly graph break when it encounters user code with th
             (args, kwargs)
         ).unpack_var_sequence(tx)
 
+        def get_module_index(arg: VariableTracker) -> int | None:
+            if is_module_variable(arg):
+                if arg.source is None:
+                    unimplemented(
+                        gb_type="leaf_function: nn.Module argument without source",
+                        context=f"module type: {type(arg.value).__name__}",
+                        explanation=(
+                            "leaf_function received an nn.Module argument that cannot be "
+                            "traced back to its origin. This typically happens when the "
+                            "module is created dynamically inside the compiled region."
+                        ),
+                        hints=[
+                            "Ensure the nn.Module is created outside the compiled function "
+                            "and passed as an argument.",
+                            "If the module is a class attribute, access it via self.module_name.",
+                        ],
+                    )
+                assert arg.source is not None  # make linter happy
+                return register_user_object(arg.value, arg.source)
+            return None
+
         flat_module_indices = [
-            register_user_object(
-                arg.value,  # pyrefly: ignore [missing-attribute]
-                arg.source,  # pyrefly: ignore [missing-attribute, bad-argument-type]
-            )
-            if is_module_variable(arg)
-            else None
-            for arg in flat_args_var.unpack_var_sequence(tx)
+            get_module_index(arg) for arg in flat_args_var.unpack_var_sequence(tx)
         ]
         flat_module_indices_var = VariableTracker.build(tx, flat_module_indices)
 
@@ -2315,8 +2334,8 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         self,
         tx: "InstructionTranslator",
         args: Sequence[VariableTracker],
-        kwargs: "dict[str, VariableTracker]",
-    ) -> "VariableTracker":
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
         """
         Handle calls to @leaf_function decorated functions.
 
