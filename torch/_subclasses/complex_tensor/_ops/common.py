@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from typing import Any, overload, TypeAlias
-from typing_extensions import ParamSpec, TypeIs, TypeVar
+from typing_extensions import Never, ParamSpec, TypeIs, TypeVar
 
 import torch
 from torch import Tensor
@@ -211,7 +211,7 @@ def register_error(
 ) -> Callable[[Callable[_P, _R]], Callable[_P, _R]] | Callable[..., Any]:
     msg = f"`aten.{_get_op_name(op)}` not implemented for `{ComplexTensor.__name__}`."
 
-    def ordered_impl(*args: Any, **kwargs: Any) -> None:
+    def ordered_impl(*args: Any, **kwargs: Any) -> Never:
         raise exc_type(msg)
 
     func_name = _get_func_name(op)

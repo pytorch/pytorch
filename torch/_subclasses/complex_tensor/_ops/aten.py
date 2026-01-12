@@ -37,7 +37,7 @@ def register_binary_linear(op: OpType) -> Callable[..., Any]:
         lhs: ComplexTensor,
         rhs: ComplexTensor,
         *args: Any,
-        alpha: complex,
+        alpha: int | float | complex,
         **kwargs: Any,
     ) -> ComplexTensor:
         return op(lhs, aten.mul(rhs, alpha, *args, **kwargs), *args, **kwargs)
@@ -161,7 +161,7 @@ fill__impl = register_binary_linear(aten.fill_)
 
 @register_complex(aten.rsub)
 def rsub_impl(
-    lhs: ComplexTensor, rhs: ComplexTensor, alpha: complex | None = None
+    lhs: ComplexTensor, rhs: ComplexTensor, alpha: int | float | complex | None = None
 ) -> ComplexTensor:
     if alpha is None:
         return torch.sub(rhs, lhs)  # type: ignore[bad-return]
@@ -669,8 +669,8 @@ def addmm_impl(
     mat1: ComplexTensor,
     mat2: ComplexTensor,
     out_dtype: torch.dtype | None = None,
-    beta: complex = 1,
-    alpha: complex = 1,
+    beta: int | float | complex = 1,
+    alpha: int | float | complex = 1,
 ) -> ComplexTensor:
     ret = beta * input + alpha * torch.mm(mat1, mat2)
     if not isinstance(ret, ComplexTensor):
@@ -925,7 +925,8 @@ def index_put__impl(
 
 
 @register_complex(aten.tanh_backward)
-def tanh_backward(out_grad: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
+def tanh_backward(out_grad: ComplexTensor, y: ComplexTensor) -> ComplexTensor:
+    # pyrefly: ignore[bad-return]
     return out_grad * (1.0 - y * y).conj_physical()
 
 

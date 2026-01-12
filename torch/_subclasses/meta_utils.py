@@ -1388,6 +1388,7 @@ class MetaConverter(Generic[_TensorT]):
                         with torch.no_grad(), no_dispatch():
                             if not _is_fake_tensor(r):
                                 raise AssertionError("Expected r to be a FakeTensor")
+                            # pyrefly: ignore[bad-assignment]
                             r.real_tensor = _safe_clone(t.data)
                     if not safe_is_leaf(r):
                         raise AssertionError(
@@ -1463,6 +1464,7 @@ class MetaConverter(Generic[_TensorT]):
                         with torch.no_grad(), no_dispatch():
                             if not _is_fake_tensor(r):
                                 raise AssertionError("Expected r to be a FakeTensor")
+                            # pyrefly: ignore[bad-assignment]
                             r.real_tensor = _safe_clone(t.data)
                     if not safe_is_leaf(r):
                         raise AssertionError(
@@ -1511,6 +1513,7 @@ class MetaConverter(Generic[_TensorT]):
                                 )
                             if not _is_fake_tensor(r):
                                 raise AssertionError("Expected r to be a FakeTensor")
+                            # pyrefly: ignore[bad-assignment]
                             r.real_tensor = torch.empty_strided(
                                 t.size, t.stride, dtype=t.dtype, device=t.device
                             )
@@ -1854,6 +1857,7 @@ class MetaConverter(Generic[_TensorT]):
                                     raise AssertionError(
                                         "Expected r to be a FakeTensor"
                                     )
+                                # pyrefly: ignore[bad-assignment]
                                 r.real_tensor = torch.empty_strided(
                                     t.size, t.stride, dtype=t.dtype, device=t.device
                                 )
