@@ -74,6 +74,27 @@ class DistMatrixOpsTest(DTensorTestBase):
         self.assertEqual(dist_res.full_tensor(), local_res)
 
     @with_comms
+    def test_mm_with_unshardable_input(self):
+        mesh = self.build_device_mesh()
+        global_inps_viewed = (
+            torch.arange((self.world_size - 1) * self.world_size, device="cuda")
+            .float()
+            .view(self.world_size - 1, self.world_size)
+        )
+        inps_viewed = distribute_tensor(
+            global_inps_viewed,
+            mesh,
+            (Shard(dim=0),),
+        )
+        global_weight = (
+            torch.arange(self.world_size * self.world_size).float().view(self.world_size, self.world_size)
+        )
+        weight = distribute_tensor(global_weight, mesh, (Replicate(),))
+        out = torch.mm(inps_viewed, weight)
+        expected_placements = (Shard(dim=0),)
+        self.assertEqual(out.placements, expected_placements)
+
+    @with_comms
     def test_mm_with_strided_input(self):
         mesh = self.build_device_mesh()
         batch_size, seq_len, contract_dim, out_dim = 2, 4, 3, 7

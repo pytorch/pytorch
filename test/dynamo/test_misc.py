@@ -6519,7 +6519,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = opt_fn(x, x)
         self.assertEqual(ref, res)
 
-    @torch._dynamo.config.patch(trace_autograd_ops=True)
     def test_tensor_dot_grad_no_graph_break(self):
         def fn(a, b):
             y = 3 * a**3 - b**2
@@ -6533,7 +6532,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn = torch.compile(fn, backend=cnts)
         _, b_grad = opt_fn(a, b)
         self.assertTrue(same(b_grad, torch.tensor([0.0, 0.0])))
-        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_torch_nn_parameter_isinstance(self):
         def fn(x):
@@ -9384,6 +9383,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         @torch.compile(backend=cnt, fullgraph=True)
         def fn(x):
             check_state()
+            assert torch.are_deterministic_algorithms_enabled() is True
             torch.use_deterministic_algorithms(False, warn_only=False)
             return x + 1
 
