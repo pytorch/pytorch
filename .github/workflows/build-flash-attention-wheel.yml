@@ -128,6 +128,11 @@ jobs:
           # Remove any artifacts from the previous checkouts
           git clean -fxd
         working-directory: flash-attention
+      - name: Patch FA3
+        shell: bash -l {0}
+        working-directory: flash-attention
+        run: |
+          git apply ../pytorch/0001-Fix-offline-build-mode.patch
       # - name: Populate binary env
       #   shell: bash
       #   run: |
