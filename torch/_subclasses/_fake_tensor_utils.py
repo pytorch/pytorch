@@ -146,7 +146,10 @@ class _PySymInputStub:
             # We should never see an _InputBackref here - anyone extracting a
             # value should be pulling from the original entry (the one this
             # backref points at).
-            assert not isinstance(self.value, _InputBackref)
+            if isinstance(self.value, _InputBackref):
+                raise AssertionError(
+                    "Cannot extract value from _InputBackref - use the original entry"
+                )
             return self.value
 
     def __str__(self) -> str:
@@ -193,7 +196,13 @@ class _SymIntOutputStub:
             return SymInt(self.value.extract(shape_env))
         else:
             src = key.key[self.value]
-            assert isinstance(src, _PySymInputStub) and isinstance(src.value, SymInt)
+            if not isinstance(src, _PySymInputStub) or not isinstance(
+                src.value, SymInt
+            ):
+                raise AssertionError(
+                    f"Expected _PySymInputStub with SymInt value, got {type(src)} "
+                    f"with {type(src.value) if isinstance(src, _PySymInputStub) else 'N/A'}"
+                )
             return src.value
 
     def __repr__(self) -> str:
