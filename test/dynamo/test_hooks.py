@@ -403,7 +403,6 @@ def forward(self, L_x_ : torch.Tensor):
             def false_fn(t):
                 return t - 1
 
-            # Use y in a cond (higher-order op)
             z = torch.cond(x.sum() > 0, true_fn, false_fn, (y,))
             return z.sum()
 
