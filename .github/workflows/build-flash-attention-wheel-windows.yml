@@ -69,6 +69,27 @@ jobs:
           submodules: recursive
           path: flash-attention
 
+      - name: Install CUDA
+        id: cuda-toolkit
+        uses: N-Storm/cuda-toolkit@v0.2.28
+        with:
+          cuda: ${{ matrix.cuda_version }}
+          method: network
+
+      - name: Set CUDA environment
+        shell: bash
+        run: |
+          echo "Installed CUDA version: ${{ steps.cuda-toolkit.outputs.cuda }}"
+          echo "CUDA install location: ${{ steps.cuda-toolkit.outputs.CUDA_PATH }}"
+          echo "CUDA_HOME=${{ steps.cuda-toolkit.outputs.CUDA_PATH }}" >> ${GITHUB_ENV}
+
+      - name: Setup MSVC
+        uses: ilammy/msvc-dev-cmd@v1
+
+      - name: Remove link.exe conflict
+        shell: bash
+        run: rm -f /usr/bin/link
+
       - name: Setup Windows
         uses: ./.github/actions/setup-win
         with:
@@ -89,9 +110,8 @@ jobs:
           sed -i 's/if bare_metal_version != Version("12.8"):/if not is_offline_build() and bare_metal_version != Version("12.8"):/' \
               flash-attention/hopper/setup.py
 
-          pushd .ci/pytorch
-          cmd //c "call windows\\internal\\cuda_install.bat"
-          popd
+          echo "CUDA_HOME=${CUDA_HOME}"
+          nvcc --version
 
           python -m pip install torch --index-url "https://download.pytorch.org/whl/cu${CUDA_VERSION}"
           python -m pip install einops packaging ninja numpy wheel setuptools
