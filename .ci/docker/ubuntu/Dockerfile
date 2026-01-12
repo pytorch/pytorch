@@ -8,7 +8,7 @@ ENV DEBIAN_FRONTEND noninteractive
 
 ARG CLANG_VERSION
 
-# Important Line: Allow APT to run as root
+# Allow APT to run as root
 RUN echo 'APT::Sandbox::User "root";' | tee -a /etc/apt/apt.conf.d/10sandbox
 
 # Install common dependencies (so that this step can be cached separately)
