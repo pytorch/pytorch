@@ -17,11 +17,6 @@ from torch.distributed.tensor import (
     Shard,
 )
 from torch.distributed.tensor.debug import CommDebugMode
-<<<<<<< HEAD
-=======
-
-from torch.distributed.tensor.placement_types import _StridedShard
->>>>>>> 87b5c847e96 (enable single dim matmul)
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import E4M3_MAX_POS, e4m3_type
 from torch.testing._internal.common_utils import (
