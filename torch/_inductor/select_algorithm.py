@@ -2819,8 +2819,18 @@ class AlgorithmSelectorCache(PersistentCache):
         # TODO - assert that we have not mutating kernels here
 
         if mm_file_name := get_mm_log_filename():
-            M, K = input_nodes[-2].get_size()[:2]
-            N = input_nodes[-1].get_size()[-1]
+            # Fix: resolve symbolic shapes (e.g. s55) to concrete size hints for JSON logging
+            # Old code used raw sympy symbols which broke downstream tooling:
+            # M, K = input_nodes[-2].get_size()[:2]
+            # N = input_nodes[-1].get_size()[-1]
+            M, K = V.graph.sizevars.size_hints(
+                input_nodes[-2].get_size()[:2],
+                fallback=config.unbacked_symint_fallback,
+            )
+            N = V.graph.sizevars.size_hint(
+                input_nodes[-1].get_size()[-1],
+                fallback=config.unbacked_symint_fallback,
+            )
             append_to_log(mm_file_name, {"invoke": str((M, K, N))})
 
         if len(choices) == 0:
@@ -4232,8 +4242,18 @@ class AlgorithmSelectorCache(PersistentCache):
 
         mm_filename = get_mm_log_filename()
         if mm_filename and "mm" in name:
-            M, K = input_nodes[-2].get_size()[:2]
-            N = input_nodes[-1].get_size()[-1]
+            # Fix: resolve symbolic shapes (e.g. s55) to concrete size hints for JSON logging
+            # Old code used raw sympy symbols which broke downstream tooling:
+            # M, K = input_nodes[-2].get_size()[:2]
+            # N = input_nodes[-1].get_size()[-1]
+            M, K = V.graph.sizevars.size_hints(
+                input_nodes[-2].get_size()[:2],
+                fallback=config.unbacked_symint_fallback,
+            )
+            N = V.graph.sizevars.size_hint(
+                input_nodes[-1].get_size()[-1],
+                fallback=config.unbacked_symint_fallback,
+            )
 
             out_dict = {str((M, K, N)): [get_choice_info(choice) for choice in timings]}
 
