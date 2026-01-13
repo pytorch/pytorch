@@ -106,6 +106,7 @@ jobs:
             -e PYTHON_EXECUTABLE="${PYTHON_EXECUTABLE}" \
             -e MAX_JOBS="${{ matrix.arch == 'aarch64' && '8' || '' }}" \
             -e NVCC_THREADS="${{ matrix.arch == 'aarch64' && '4' || '' }}" \
+            -e FLASH_ATTENTION_OFFLINE_BUILD="${{ matrix.arch == 'aarch64' && 'TRUE' || '' }}" \
             "${container_name}" bash -c \
             "bash /pytorch/.ci/flash-attention/build.sh"
 
