@@ -186,7 +186,7 @@ og_module_named_buffers_fn_ptr = torch.nn.Module.named_buffers
 og_module_named_parameters_fn_ptr = torch.nn.Module.named_parameters
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class VariableTrackerCacheKey:
     vt_id: int
     # Two different source can point to the same object. However, Dynamo handles
@@ -195,13 +195,13 @@ class VariableTrackerCacheKey:
     source: Source
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class AliasingInfo:
     has_aliasing: bool
     msg: str
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MutationInfo:
     has_mutation: bool
     msg: str
