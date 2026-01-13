@@ -890,9 +890,12 @@ class PallasKernel(SIMDKernel):
         device = V.graph.get_current_device_or_throw()
         self.is_gpu = device.type == "cuda"
         self.use_masked_ops: bool | None = None
-        # Enable warpgroup padding for GPU to handle non-aligned tensor sizes
-        # Mosaic GPU requires tensor sizes to be multiples of 128 (WARPGROUP_SIZE)
-        self.use_warpgroup_padding = self.is_gpu
+        # Use TMA (Tensor Memory Accelerator) for GPU to handle non-aligned tensor sizes
+        # TMA automatically masks OOB accesses, eliminating the need for explicit
+        # padding to multiples of 128. Uses lax.fori_loop with direct TMA primitives.
+        self.use_emit_pipeline = self.is_gpu  # Enable TMA approach for GPU
+        # Legacy: warpgroup padding (enabled when TMA approach is disabled)
+        self.use_warpgroup_padding = self.is_gpu and not self.use_emit_pipeline
         self.tensor_masks = {}  # Map tensor name to mask variable name
         # Track which output param each store uses: list of (out_ptr_name, store_line)
         self.store_with_output: list[tuple[str, str]] = []
@@ -1394,6 +1397,69 @@ class PallasKernel(SIMDKernel):
                     return None
                 result *= numel
         return result
+
+    def _can_use_tma_approach(self) -> bool:
+        """
+        Check if TMA (Tensor Memory Accelerator) approach can be used.
+        TMA works for simple element-wise ops but not for:
+        - Reductions (need different accumulation patterns)
+          TODO: TMA supports float64 for loading but not for reductions
+        - Broadcasting (inputs have different shapes or output differs)
+        - Non-contiguous tensors (strided, transposed)
+        """
+        # Check for reductions
+        reduction_numel = self._compute_reduction_numel()
+        if reduction_numel is not None and reduction_numel > 1:
+            return False
+
+        # Check all input buffers for contiguity, dtype, and shape consistency
+        input_shapes: list[tuple] = []
+        for name in self.args.input_buffers:
+            buf_obj, buf_size, buf_numel, actual_strides, is_contiguous = (
+                self._get_buffer_info(name)
+            )
+            if not is_contiguous:
+                return False
+
+            # Check for unsupported dtypes
+            # TODO: TMA supports float64 for loading but current JAX Mosaic GPU
+            # implementation doesn't support it yet. Re-enable when JAX adds support.
+            buf_dtype = getattr(buf_obj, "get_dtype", lambda: None)()
+            if buf_dtype is not None:
+                import torch
+
+                if buf_dtype == torch.float64:
+                    return False
+
+            # Collect shape as tuple for comparison
+            shape_tuple = tuple(self._safe_int(s) for s in buf_size)
+            if None in shape_tuple:
+                return False  # Dynamic shapes not supported
+            input_shapes.append(shape_tuple)
+
+        # Check if all input shapes are identical (no broadcasting)
+        if input_shapes and len(OrderedSet(input_shapes)) > 1:
+            return False
+
+        # Check that output numel matches input numel (no broadcasting expansion)
+        if input_shapes:
+            input_numel = 1
+            for s in input_shapes[0]:
+                input_numel *= s
+
+            # Compute output numel from pointwise range trees (non-reduction)
+            output_numel = 1
+            for tree in self.range_trees:
+                if not tree.is_reduction:
+                    numel = self._safe_int(tree.numel)
+                    if numel is None:
+                        return False  # Dynamic shapes not supported
+                    output_numel *= numel
+
+            if output_numel != input_numel:
+                return False
+
+        return True
 
     def _get_buffer_info(self, name: str) -> tuple[Any, Any, Any, list, bool]:
         """Get buffer metadata (buf_obj, buf_size, buf_numel, actual_strides, is_contiguous)."""
@@ -3096,7 +3162,179 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                 kernel_arg = f"{kernel_name}_kernel,"
 
             # Use plgpu.kernel for GPU (Mosaic), pl.pallas_call for CPU/TPU
-            if self.is_gpu:
+            # TMA approach requires: no reductions, all inputs contiguous, same sizes
+            use_tma = (
+                self.is_gpu and self.use_emit_pipeline and self._can_use_tma_approach()
+            )
+            if use_tma:
+                # Use lax.fori_loop with direct TMA for automatic OOB masking
+                # TMA (Tensor Memory Accelerator) automatically handles out-of-bounds
+                # accesses, eliminating the need for explicit padding to multiples of 128
+                code.writeline("# Use lax.fori_loop with TMA for automatic OOB masking")
+                code.writeline("from jax import lax")
+                code.writeline("_tile_size = 128  # Warpgroup size")
+                code.writeline("_orig_out_shapes = out_shapes")
+
+                # Calculate max numel across all inputs/outputs for grid calculation
+                code.writeline("_max_numel = 0")
+                for param in kernel_input_params:
+                    code.writeline(f"_max_numel = max(_max_numel, {param}.size)")
+                code.writeline("for shape in out_shapes:")
+                code.writeline("    _numel = 1")
+                code.writeline("    for s in shape:")
+                code.writeline("        _numel *= s")
+                code.writeline("    _max_numel = max(_max_numel, _numel)")
+
+                code.writeline(
+                    "_num_tiles = (_max_numel + _tile_size - 1) // _tile_size"
+                )
+
+                # Build param names for the kernel
+                gmem_input_params = [f"{p}_gmem" for p in kernel_input_params]
+                gmem_output_params = [f"{p}_gmem" for p in output_params]
+                smem_input_params = [f"{p}_smem" for p in kernel_input_params]
+                smem_output_params = [f"{p}_smem" for p in output_params]
+
+                # Generate the TMA kernel with fori_loop
+                code.writeline("")
+                code.writeline("# Wrapper kernel using lax.fori_loop with direct TMA")
+
+                # Kernel receives: *input_gmem_refs, *output_gmem_refs (from plgpu.kernel)
+                # Plus scratch SMEM buffers for inputs and outputs, and barriers for TMA
+                wrapper_kernel_params = gmem_input_params + gmem_output_params
+                all_smem_params = smem_input_params + smem_output_params
+                # Barrier params for TMA operations
+                barrier_params = [
+                    f"_barrier_{i}" for i in range(len(kernel_input_params))
+                ]
+                scratch_params = ", ".join(all_smem_params + barrier_params)
+
+                code.writeline(
+                    f"def _tma_kernel({', '.join(wrapper_kernel_params)}, *, {scratch_params}):"
+                )
+                with code.indent():
+                    # Define the loop body function
+                    code.writeline("")
+                    code.writeline("def _tile_body(_tile_idx, _):")
+                    with code.indent():
+                        code.writeline("_tile_start = _tile_idx * _tile_size")
+                        code.writeline("")
+
+                        # TMA load inputs from GMEM to SMEM
+                        code.writeline(
+                            "# TMA load inputs from GMEM to SMEM (OOB auto-masked)"
+                        )
+                        for i, (gmem_in, smem_in) in enumerate(
+                            zip(gmem_input_params, smem_input_params)
+                        ):
+                            code.writeline(
+                                f"plgpu.copy_gmem_to_smem({gmem_in}.at[pl.ds(_tile_start, _tile_size)], {smem_in}, _barrier_{i})"
+                            )
+
+                        # Wait for all input loads
+                        code.writeline("")
+                        code.writeline("# Wait for TMA loads to complete")
+                        for i, _ in enumerate(gmem_input_params):
+                            code.writeline(f"plgpu.barrier_wait(_barrier_{i})")
+
+                        # Call the original kernel function with SMEM refs
+                        code.writeline("")
+                        code.writeline("# Compute on SMEM tiles")
+                        kernel_call_args = smem_input_params + smem_output_params
+                        kernel_fn = kernel_arg.rstrip(",").strip()
+                        code.writeline(f"{kernel_fn}({', '.join(kernel_call_args)})")
+
+                        # TMA store outputs from SMEM to GMEM
+                        code.writeline("")
+                        code.writeline(
+                            "# TMA store outputs from SMEM to GMEM (OOB auto-masked)"
+                        )
+                        code.writeline("plgpu.commit_smem()")
+                        for gmem_out, smem_out in zip(
+                            gmem_output_params, smem_output_params
+                        ):
+                            code.writeline(
+                                f"plgpu.copy_smem_to_gmem({smem_out}, {gmem_out}.at[pl.ds(_tile_start, _tile_size)])"
+                            )
+                        code.writeline("plgpu.wait_smem_to_gmem(0)")
+                        code.writeline("")
+                        code.writeline("return None")
+
+                    # Run the loop over all tiles
+                    code.writeline("")
+                    code.writeline("# Iterate over all tiles")
+                    code.writeline("lax.fori_loop(0, _num_tiles, _tile_body, None)")
+
+                # Build scratch_shapes dict for SMEM buffers and TMA barriers
+                code.writeline("")
+                code.writeline(
+                    "# Build SMEM scratch shapes for inputs, outputs, and TMA barriers"
+                )
+                code.writeline("_scratch_shapes = {}")
+                for i, smem_param in enumerate(smem_input_params):
+                    # Get dtype from input param
+                    orig_param = kernel_input_params[i]
+                    code.writeline(
+                        f"_scratch_shapes['{smem_param}'] = plgpu.SMEM((_tile_size,), {orig_param}.dtype)"
+                    )
+                for i, smem_param in enumerate(smem_output_params):
+                    code.writeline(
+                        f"_scratch_shapes['{smem_param}'] = plgpu.SMEM((_tile_size,), out_dtypes[{i}])"
+                    )
+                # Add barriers for TMA GMEM->SMEM operations
+                for barrier_param in barrier_params:
+                    code.writeline(
+                        f"_scratch_shapes['{barrier_param}'] = plgpu.Barrier(num_arrivals=1)"
+                    )
+
+                # Create flattened and aligned output specs for TMA
+                code.writeline("")
+                code.writeline("# Create flattened output specs aligned to tile size")
+                code.writeline("_flat_out_specs = []")
+                code.writeline("for shape, dtype in zip(out_shapes, out_dtypes):")
+                code.writeline("    _numel = 1")
+                code.writeline("    for s in shape:")
+                code.writeline("        _numel *= s")
+                code.writeline(
+                    "    _aligned_numel = ((_numel + _tile_size - 1) // _tile_size) * _tile_size"
+                )
+                code.writeline(
+                    "    _flat_out_specs.append(jax.ShapeDtypeStruct((_aligned_numel,), dtype))"
+                )
+                code.writeline("_flat_out_specs = tuple(_flat_out_specs)")
+
+                # Call plgpu.kernel with the TMA kernel
+                code.writeline("")
+                code.writeline("# Call plgpu.kernel with TMA kernel")
+                code.writeline("_result = plgpu.kernel(")
+                with code.indent():
+                    code.writeline("_tma_kernel,")
+                    code.writeline("out_shape=_flat_out_specs,")
+                    code.writeline("scratch_shapes=_scratch_shapes,")
+                code.writeline(")(")
+                # Pass flattened inputs for 1D tiled processing
+                for param in kernel_input_params:
+                    code.writeline(f"    {param}.flatten(),")
+                code.writeline(")")
+
+                # Reshape outputs to original shapes
+                code.writeline("")
+                code.writeline("# Reshape results to original shapes")
+                code.writeline("if not isinstance(_result, tuple):")
+                code.writeline("    _result = (_result,)")
+                code.writeline("_final_results = []")
+                code.writeline("for _res, _shape in zip(_result, _orig_out_shapes):")
+                code.writeline("    _orig_numel = 1")
+                code.writeline("    for _s in _shape:")
+                code.writeline("        _orig_numel *= _s")
+                code.writeline(
+                    "    _final_results.append(_res[:_orig_numel].reshape(_shape))"
+                )
+                code.writeline(
+                    "return _final_results[0] if len(_final_results) == 1 else tuple(_final_results)"
+                )
+            elif self.is_gpu:
+                # Legacy GPU path with explicit padding (use_emit_pipeline=False)
                 # For GPU, pad inputs to align to WARPGROUP_SIZE (128)
                 # Mosaic GPU requires tensor sizes to be multiples of 128
                 # BUT: only apply padding when all tensors have the same size
