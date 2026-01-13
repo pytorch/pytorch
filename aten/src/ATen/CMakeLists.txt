@@ -322,6 +322,10 @@ IF(USE_FBGEMM_GENAI)
       ${FBGEMM_GENAI_SRCS}/include/          # includes fbgemm_gpu/torch_ops.h
     )
 
+    if(USE_GLOG AND TARGET glog::glog)
+      target_link_libraries(fbgemm_genai PRIVATE glog::glog)
+    endif()
+
     # Add FBGEMM_GENAI include directories for torch_ops.h
     list(APPEND ATen_CUDA_INCLUDE ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/include)
     list(APPEND ATen_CUDA_INCLUDE ${PROJECT_SOURCE_DIR}/third_party/fbgemm/fbgemm_gpu/experimental/gen_ai/src/quantize/common/include)
