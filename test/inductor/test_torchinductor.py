@@ -15111,6 +15111,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @xfail_if_triton_cpu
     @requires_cuda_and_triton
+    @config.patch({"emulate_precision_casts": True})
     def test_addcmul_fma_bitwise_equal(self):
         """Test that addcmul with FMA lowering produces bitwise equal results to eager."""
         self_tensor = torch.randn(64, 64, device=GPU_TYPE)
@@ -15144,6 +15145,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
     @xfail_if_triton_cpu
     @requires_cuda_and_triton
+    @config.patch({"emulate_precision_casts": True})
     def test_addcmul_fma_uses_fma_instruction(self):
         """Test that addcmul generates code using FMA instruction."""
         self_tensor = torch.randn(64, 64, device=GPU_TYPE)
@@ -15161,6 +15163,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         )
 
     @requires_cuda_and_triton
+    @config.patch({"emulate_precision_casts": True})
     def test_addcmul_type_promotion(self):
         """Test that addcmul correctly promotes types when inputs have different dtypes."""
         # Test int + float promotion
