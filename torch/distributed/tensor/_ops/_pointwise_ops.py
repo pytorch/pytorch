@@ -647,6 +647,12 @@ def single_mesh_dim_common_pointwise_strategy(
                 placements_list.append([Partial("sum")] * (1 + num_total_tensors))
                 if not is_norm_partial_op:
                     placements_list.append([Partial("avg")] * (1 + num_total_tensors))
+            # Add _NormPartial rules for common norm types when this op preserves _NormPartial
+            if preserve_norm_partial:
+                for norm_type in (2, 1, float("inf"), float("-inf"), 0):
+                    placements_list.append(
+                        [_NormPartial(norm_type)] * (1 + num_total_tensors)
+                    )
             # For is_norm_partial_op with negative scalar, don't add any Partial rules
             # This will cause Partial to be converted to Replicate
 

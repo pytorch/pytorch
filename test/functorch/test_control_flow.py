@@ -5350,6 +5350,7 @@ class TestControlFlowTraced(TestCase):
         graph = make_fx(f, tracing_mode="symbolic")(x, torch.tensor(False))
         self.assertEqual(graph(x, torch.tensor(True)), f(x, torch.tensor(True)))
 
+    @torch._dynamo.config.patch(trace_autograd_ops=True)
     @skipIfTorchDynamo("Graph is not captured by backend if test with dynamo")
     @skipIfCrossRef  # Arg order changes with crossref
     def test_cond_simple_with_linear_compile_check_graph(self):
@@ -5368,7 +5369,9 @@ class TestControlFlowTraced(TestCase):
 
         backend = EagerAndRecordGraphs()
         torch.compile(f, backend=backend)(torch.tensor(False), x)
-        self.assertEqual(len(backend.graphs), 2)
+        # With autograd.grad tracing support, the entire function is traced
+        # into a single graph instead of breaking into forward + backward graphs
+        self.assertEqual(len(backend.graphs), 1)
         gm = backend.graphs[0]
 
         self.assertExpectedInline(
@@ -5379,52 +5382,12 @@ def forward(self, L_pred_ : torch.Tensor, L_x_ : torch.Tensor):
     l_x_ = L_x_
     cond_true_0 = self.cond_true_0
     cond_false_0 = self.cond_false_0
-    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, (l_x_,));  l_pred_ = cond_true_0 = cond_false_0 = l_x_ = None
+    cond = torch.ops.higher_order.cond(l_pred_, cond_true_0, cond_false_0, (l_x_,));  l_pred_ = cond_true_0 = cond_false_0 = None
     result = cond[0];  cond = None
     grad_out = torch.ones_like(result)
-    return (result, grad_out)""",  # noqa: B950
-        )
-        self.assertExpectedInline(
-            normalize_gm(backend.graphs[1].print_readable(print_output=False)),
-            """\
-class GraphModule(torch.nn.Module):
-    def forward(self, L_ctx_saved_tensors_0_: "f32[4]", L_ctx_pred: "b8[]", L_args_1_: "f32[4]"):
-        l_ctx_saved_tensors_0_ = L_ctx_saved_tensors_0_
-        l_ctx_pred = L_ctx_pred
-        l_args_1_ = L_args_1_
-
-        cond_true_0 = self.cond_true_0
-        cond_false_0 = self.cond_false_0
-        cond = torch.ops.higher_order.cond(l_ctx_pred, cond_true_0, cond_false_0, (l_args_1_, l_ctx_saved_tensors_0_));  l_ctx_pred = cond_true_0 = cond_false_0 = l_args_1_ = l_ctx_saved_tensors_0_ = None
-        getitem: "f32[4]" = cond[0];  cond = None
-        return (getitem,)
-
-    class cond_true_0(torch.nn.Module):
-        def forward(self, l_args_1_: "f32[4]", l_ctx_saved_tensors_0_: "f32[4]"):
-            l_args_1__1 = l_args_1_
-            l_ctx_saved_tensors_0__1 = l_ctx_saved_tensors_0_
-
-            sin: "f32[4]" = torch.ops.aten.sin.default(l_ctx_saved_tensors_0__1);  sin = None
-
-            cos: "f32[4]" = torch.ops.aten.cos.default(l_ctx_saved_tensors_0__1);  l_ctx_saved_tensors_0__1 = None
-
-            mul: "f32[4]" = torch.ops.aten.mul.Tensor(l_args_1__1, cos);  l_args_1__1 = cos = None
-            return (mul,)
-
-    class cond_false_0(torch.nn.Module):
-        def forward(self, l_args_1_: "f32[4]", l_ctx_saved_tensors_0_: "f32[4]"):
-            l_args_1__1 = l_args_1_
-            l_ctx_saved_tensors_0__1 = l_ctx_saved_tensors_0_
-
-            cos: "f32[4]" = torch.ops.aten.cos.default(l_ctx_saved_tensors_0__1);  cos = None
-
-            sin: "f32[4]" = torch.ops.aten.sin.default(l_ctx_saved_tensors_0__1);  l_ctx_saved_tensors_0__1 = None
-
-            neg: "f32[4]" = torch.ops.aten.neg.default(sin);  sin = None
-
-            mul: "f32[4]" = torch.ops.aten.mul.Tensor(l_args_1__1, neg);  l_args_1__1 = neg = None
-            return (mul,)
-""",  # noqa: B950
+    grad = torch.autograd.grad(result, (l_x_,), grad_out);  result = l_x_ = grad_out = None
+    getitem_1 = grad[0];  grad = None
+    return (getitem_1,)""",  # noqa: B950
         )
 
     def test_while_loop_op_mismatch_in_meta(self):

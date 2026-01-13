@@ -456,17 +456,6 @@ def redistribute_cost(
         # make infinite cost if meshes are not same
         # TODO: see if we want to support this once there's cross mesh communication
         return float("inf")
-    if current_spec.is_replicated():
-        # short-cut: comm cost is 0 if current spec is already full replication
-        return 0.0
-
-    # TODO(zpcore): test placements with _StridedShard if we replace shard_order
-    # with _StridedShard.
-    if (
-        current_spec.placements == target_spec.placements
-        and current_spec.shard_order == target_spec.shard_order
-    ):
-        return 0.0
 
     mesh_topo = MeshTopoInfo.build_from_mesh(current_spec.mesh)
     cost = 0.0
