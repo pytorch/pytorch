@@ -157,9 +157,9 @@ class NVUniversalGemmKernel(Kernel):
                     _nv_universal_gemm_compiled_cache[cache_key] = (args, artifact)
                 else:
                     args, artifact = _nv_universal_gemm_compiled_cache[cache_key]
-                    args.A = in_ptr0
-                    args.B = in_ptr1
-                    args.out = out_ptr0
+                    args.A.tensor.runtime_tensor = in_ptr0
+                    args.B.tensor.runtime_tensor = in_ptr1
+                    args.out.tensor.runtime_tensor = out_ptr0
 
                 kernel.run(args, artifact, stream=stream, workspace={workspace_arg}, assume_supported_args=True)
             """
