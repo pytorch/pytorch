@@ -43,7 +43,7 @@ from torch._C import DispatchKeySet
 from torch._dynamo.variables.constant import ConstantVariable
 from torch._dynamo.variables.streams import StreamVariable
 from torch._dynamo.variables.torch_function import TorchFunctionModeVariable
-from torch._guards import Source, TracingContext
+from torch._guards import Guard, Source, TracingContext
 from torch._logging import warning_once
 from torch.autograd.graph import GradientEdge
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass_type
@@ -61,6 +61,7 @@ from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
     CallFunctionNoArgsSource,
+    GlobalStateSource,
     SyntheticLocalSource,
     TorchSource,
 )
@@ -649,7 +650,6 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
 
         from . import (
             ConstantVariable,
-            DeterministicAlgorithmsVariable,
             GradModeVariable,
             StreamContextVariable,
             SymNodeVariable,
@@ -912,13 +912,23 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                         *graph_break_hints.SUPPORTABLE,
                     ],
                 )
-            return DeterministicAlgorithmsVariable.create(tx, mode.as_python_constant())
+
+            value = mode.as_python_constant()
+            tx.output.create_node(
+                "call_function", torch._C._set_deterministic_algorithms, (value,), {}
+            )
+            torch._C._set_deterministic_algorithms(value)
+            return ConstantVariable.create(None)
 
         @register(torch.are_deterministic_algorithms_enabled)
         def handle_are_deterministic_algorithms_enabled(
             self, tx: "InstructionTranslator"
         ) -> ConstantVariable:
-            install_guard(DeterministicAlgorithmsVariable._guards_singleton)
+            guard = Guard(
+                GlobalStateSource(),
+                GuardBuilder.DETERMINISTIC_ALGORITHMS,  # type: ignore[arg-type]
+            )
+            install_guard(guard)
             return ConstantVariable.create(torch.are_deterministic_algorithms_enabled())
 
         @register(torch._C._is_torch_function_enabled)
@@ -1383,6 +1393,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
             else:
                 return None
 
+        # pyrefly: ignore [deprecated]
         @register(torch.fx.experimental.symbolic_shapes.guard_size_oblivious)
         def handle_guard_size_oblivious(
             self, tx: "InstructionTranslator", expr: VariableTracker
@@ -1391,6 +1402,7 @@ class TorchInGraphFunctionVariable(BaseTorchVariable):
                 # TODO: this probably should be folded somewhere else but I'm not sure where
                 # TODO: some of the other symbolic_shapes special tools can also get this treatment too
                 return variables.ConstantVariable.create(
+                    # pyrefly: ignore [deprecated]
                     torch.fx.experimental.symbolic_shapes.guard_size_oblivious(
                         expr.sym_num
                     )
@@ -2788,6 +2800,11 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # grad_enabled. Since this is parameter, we can just override the
         # has_grad_fn field to False to workaround the issue.
         result.has_grad_fn = False  # type: ignore[union-attr]
+
+        # Register this parameter as a leaf tensor for backward() auto-detection.
+        # When backward() is called without inputs, we need to find all leaf tensors,
+        # including those created in-graph like nn.Parameter.
+        tx.output.leaf_var_creation_order.append(result)
 
         # TODO(jansel): if the new param falls out of scope, currently it won't get freed until
         # the end of the graph.  We should fix this.
