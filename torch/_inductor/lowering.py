@@ -931,6 +931,45 @@ def register_pointwise(
     return fn
 
 
+register_op_dtype_propagation_rules(
+    "ldexp",
+    type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
+    override_return_dtype=None,
+)
+
+
+@register_lowering(aten.ldexp, broadcast=True, type_promotion_kind=None)
+def ldexp_lowering(x: TensorBox, n: TensorBox):
+    ldexp_fn = ops_wrapper("ldexp")
+
+    x_dtype = x.get_dtype()
+    n_dtype = n.get_dtype()
+
+    x_is_float = x_dtype.is_floating_point
+    n_is_int = not n_dtype.is_floating_point and n_dtype != torch.bool
+
+    if x_is_float and n_is_int:
+        # Use native ldexp
+        def compute_ldexp(x, n):
+            return ldexp_fn(x, n)
+
+        return make_pointwise(compute_ldexp)(x, n)
+    else:
+        # Fall back to decomposition: x * pow(2, n)
+        out_dtype = torch.float32 if is_integer_type(x) else x_dtype
+
+        def compute_fallback(x, n):
+            n_out_type = ops.to_dtype(n, out_dtype)
+            two = ops.constant(2.0, out_dtype)
+            pow_result = ops.pow(two, n_out_type)
+            return ops.mul(x, pow_result)
+
+        return make_pointwise(
+            compute_fallback,
+            override_return_dtype=out_dtype,
+        )(x, n)
+
+
 def register_frexp():
     """A pointwise function that maps ops.frexp to inputs"""
     name = "frexp"
@@ -2920,7 +2959,7 @@ make_fallback(aten._scaled_dot_product_attention_math_for_mps)  # @malfet
 # 1) Easy
 make_fallback(aten.uniform, warn=False)
 make_fallback(aten.exponential.default, warn=False)  # (fails accuracy on test_torch.py)
-make_fallback(aten._pdist_forward)  # Has decomp. Needs benchmarks
+make_fallback(aten._pdist_forward, require_contiguous)  # Has decomp. Needs benchmarks
 make_fallback(aten.soft_margin_loss_backward, warn=False)  # py_impl?
 make_fallback(aten._fused_rms_norm, warn=False)  # (MPS-only and faster than decomp)
 if torch.xpu.is_available():
@@ -2991,7 +3030,7 @@ make_fallback(aten.upsample_linear1d_backward)
 make_fallback(aten.upsample_bicubic2d_backward, require_contiguous)
 make_fallback(aten.upsample_trilinear3d_backward)
 make_fallback(aten.grid_sampler_2d_backward)
-make_fallback(aten._pdist_backward)
+make_fallback(aten._pdist_backward, require_contiguous)
 
 
 # 5) Impossible (missing triton/CPU features)
@@ -6409,7 +6448,7 @@ fallback_pow_tensor_scalar = fallback_handler(
 
 @register_lowering(aten.pow, broadcast=True)
 def pow(a, b):
-    if isinstance(b, float) and b == int(b):
+    if isinstance(b, float) and b.is_integer():
         return pow(a, int(b))
     elif isinstance(b, float) and b == 0.5:
         return sqrt(a)
