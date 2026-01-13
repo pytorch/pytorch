@@ -54,10 +54,13 @@ def process_inputs(
             if not isinstance(x, torch.Tensor):
                 return x
             if isinstance(x, FakeTensor):
-                if x.fake_mode is fake_mode:
-                    return x
-                # FakeTensor from a different mode (e.g., userland FakeTensorMode).
-                # Refakify it to our mode. Fall through to the from_tensor path.
+                # In the case of cross compilation we will have example inputs
+                # with a different fake mode than our tracing fake mode.
+                # In these cases we want to clone the fake tensor into our
+                # inner fake mode.
+                if x.fake_mode is not fake_mode:
+                    return fake_mode.from_tensor(x)
+                return x
             if is_traceable_wrapper_subclass(x):
                 attrs, _ = x.__tensor_flatten__()
                 if all(isinstance(getattr(x, attr), FakeTensor) for attr in attrs):
