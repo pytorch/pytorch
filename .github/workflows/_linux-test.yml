@@ -383,8 +383,8 @@ jobs:
             export HF_CACHE="${RUNNER_TEMP}/hf_cache"
             mkdir -p "${HF_CACHE}"
 
-            # When there is no cache directory, the job has no way but to reach out to
-            # HF if needed
+            # When there is no cache directory, e.g. benchmark, the job has no
+            # way but to reach out to HF if needed
             export TRANSFORMERS_OFFLINE=0
             export HF_DATASETS_OFFLINE=0
           fi
