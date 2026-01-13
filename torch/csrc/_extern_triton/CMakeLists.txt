@@ -64,6 +64,7 @@ set(EXTERN_TRITON_CLANG_FLAGS
 # Source files to compile to bitcode
 set(EXTERN_TRITON_CUDA_SOURCES
   elementwise_add.cu
+  symm_all_reduce.cu
 )
 
 # Output bitcode files

@@ -15,8 +15,8 @@ CLANG ?= clang++
 CUDA_PATH ?= /usr/local/cuda
 
 # Source and output files
-CUDA_SRC = elementwise_add.cu
-BC_OUTPUT = elementwise_add.bc
+CUDA_SOURCES = elementwise_add.cu symm_all_reduce.cu
+BC_OUTPUTS = $(CUDA_SOURCES:.cu=.bc)
 
 # Clang flags for CUDA to LLVM bitcode compilation
 # Note: -fcuda-flush-denormals-to-zero is required to avoid LLVM module flag
@@ -35,47 +35,54 @@ BUILD_DIR = .
 
 .PHONY: all clean test help
 
-all: $(BUILD_DIR)/$(BC_OUTPUT)
+all: $(addprefix $(BUILD_DIR)/, $(BC_OUTPUTS))
 
-$(BUILD_DIR)/$(BC_OUTPUT): $(CUDA_SRC)
+$(BUILD_DIR)/%.bc: %.cu
 	@mkdir -p $(BUILD_DIR)
 	$(CLANG) $(CLANG_FLAGS) $< -o $@
-	@echo "Built $(BUILD_DIR)/$(BC_OUTPUT) for $(CUDA_ARCH)"
+	@echo "Built $@ for $(CUDA_ARCH)"
+
+# Individual targets
+elementwise_add.bc: $(BUILD_DIR)/elementwise_add.bc
+
+symm_all_reduce.bc: $(BUILD_DIR)/symm_all_reduce.bc
 
 clean:
-	rm -f $(BUILD_DIR)/$(BC_OUTPUT)
+	rm -f $(addprefix $(BUILD_DIR)/, $(BC_OUTPUTS))
 
-test: $(BUILD_DIR)/$(BC_OUTPUT)
-	@echo "Bitcode file created successfully. Run Python tests separately."
+test: $(addprefix $(BUILD_DIR)/, $(BC_OUTPUTS))
+	@echo "Bitcode files created successfully. Run Python tests separately."
 
 # Architecture-specific targets
 sm_70: CUDA_ARCH = sm_70
-sm_70: $(BUILD_DIR)/$(BC_OUTPUT)
+sm_70: $(addprefix $(BUILD_DIR)/, $(BC_OUTPUTS))
 
 sm_75: CUDA_ARCH = sm_75
-sm_75: $(BUILD_DIR)/$(BC_OUTPUT)
+sm_75: $(addprefix $(BUILD_DIR)/, $(BC_OUTPUTS))
 
 sm_80: CUDA_ARCH = sm_80
-sm_80: $(BUILD_DIR)/$(BC_OUTPUT)
+sm_80: $(addprefix $(BUILD_DIR)/, $(BC_OUTPUTS))
 
 sm_86: CUDA_ARCH = sm_86
-sm_86: $(BUILD_DIR)/$(BC_OUTPUT)
+sm_86: $(addprefix $(BUILD_DIR)/, $(BC_OUTPUTS))
 
 sm_89: CUDA_ARCH = sm_89
-sm_89: $(BUILD_DIR)/$(BC_OUTPUT)
+sm_89: $(addprefix $(BUILD_DIR)/, $(BC_OUTPUTS))
 
 sm_90: CUDA_ARCH = sm_90
-sm_90: $(BUILD_DIR)/$(BC_OUTPUT)
+sm_90: $(addprefix $(BUILD_DIR)/, $(BC_OUTPUTS))
 
 # Help target
 help:
 	@echo "PyTorch External Triton Library Build System"
 	@echo ""
 	@echo "Targets:"
-	@echo "  all      - Build bitcode for default architecture ($(CUDA_ARCH))"
-	@echo "  clean    - Remove built files"
-	@echo "  test     - Build and verify bitcode creation"
-	@echo "  sm_XX    - Build for specific CUDA architecture (70,75,80,86,89,90)"
+	@echo "  all                  - Build all bitcode files for default architecture ($(CUDA_ARCH))"
+	@echo "  elementwise_add.bc   - Build elementwise_add bitcode"
+	@echo "  symm_all_reduce.bc   - Build symmetric all-reduce bitcode"
+	@echo "  clean                - Remove built files"
+	@echo "  test                 - Build and verify bitcode creation"
+	@echo "  sm_XX                - Build for specific CUDA architecture (70,75,80,86,89,90)"
 	@echo ""
 	@echo "Variables:"
 	@echo "  CUDA_ARCH - Target GPU architecture (default: sm_80)"
@@ -83,6 +90,7 @@ help:
 	@echo "  CUDA_PATH - CUDA installation path (default: /usr/local/cuda)"
 	@echo ""
 	@echo "Examples:"
-	@echo "  make                    # Build for sm_80 (Ampere)"
-	@echo "  make CUDA_ARCH=sm_90    # Build for sm_90 (Hopper)"
-	@echo "  make sm_70              # Build for sm_70 (Volta)"
+	@echo "  make                    # Build all for sm_80 (Ampere)"
+	@echo "  make CUDA_ARCH=sm_90    # Build all for sm_90 (Hopper)"
+	@echo "  make symm_all_reduce.bc # Build only symm_all_reduce"
+	@echo "  make sm_70              # Build all for sm_70 (Volta)"

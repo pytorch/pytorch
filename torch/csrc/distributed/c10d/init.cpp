@@ -31,6 +31,7 @@
 #endif
 
 #ifdef USE_C10D_NCCL
+#include <torch/csrc/_extern_triton/nccl_symm_comm.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/intra_node_comm.hpp>
@@ -382,8 +383,9 @@ void _register_comm_hook(
     ::c10d::Reducer& reducer,
     py::object state,
     py::object comm_hook) {
-  reducer.register_comm_hook(std::make_unique<::c10d::PythonCommHook>(
-      std::move(state), std::move(comm_hook)));
+  reducer.register_comm_hook(
+      std::make_unique<::c10d::PythonCommHook>(
+          std::move(state), std::move(comm_hook)));
 }
 
 // Called from DDP's Python API to create a c10d C++ comm hook.
@@ -883,37 +885,39 @@ This class does not support ``__members__`` property.)");
           [](const ::c10d::ReduceOp& self, const py::dict& memo) {
             return ::c10d::ReduceOp(self);
           })
-      .def(py::pickle(
-          [](const ::c10d::ReduceOp& r) {
-            // __getstate__
-            if (r.op_ != ::c10d::ReduceOp::RedOpType::PREMUL_SUM) {
-              return py::make_tuple(r.op_, py::none());
-            }
-            TORCH_CHECK(r.supplement_.defined(), "Invalid PREMUL_SUM ReduceOp");
-            const auto* preMulSupplement =
-                reinterpret_cast<::c10d::NCCLPreMulSumSupplement*>(
-                    r.supplement_.get());
-            if (!preMulSupplement->tensor_factor.defined()) {
-              return py::make_tuple(r.op_, preMulSupplement->double_factor);
-            } else {
-              return py::make_tuple(r.op_, preMulSupplement->tensor_factor);
-            }
-          },
-          [](const py::tuple& t) {
-            // __setstate__
-            TORCH_CHECK(t.size() == 2, "Invalid state");
-            const auto op =
-                static_cast<::c10d::ReduceOp::RedOpType>(t[0].cast<uint8_t>());
-            if (op != ::c10d::ReduceOp::RedOpType::PREMUL_SUM) {
-              return ::c10d::ReduceOp(op);
-            }
-            const auto preMulSupplement_factor = t[1];
-            if (py::isinstance<py::float_>(preMulSupplement_factor)) {
-              return ::c10d::makeNCCLPreMulSum(t[1].cast<double>());
-            } else {
-              return ::c10d::makeNCCLPreMulSum(t[1].cast<at::Tensor>());
-            }
-          }));
+      .def(
+          py::pickle(
+              [](const ::c10d::ReduceOp& r) {
+                // __getstate__
+                if (r.op_ != ::c10d::ReduceOp::RedOpType::PREMUL_SUM) {
+                  return py::make_tuple(r.op_, py::none());
+                }
+                TORCH_CHECK(
+                    r.supplement_.defined(), "Invalid PREMUL_SUM ReduceOp");
+                const auto* preMulSupplement =
+                    reinterpret_cast<::c10d::NCCLPreMulSumSupplement*>(
+                        r.supplement_.get());
+                if (!preMulSupplement->tensor_factor.defined()) {
+                  return py::make_tuple(r.op_, preMulSupplement->double_factor);
+                } else {
+                  return py::make_tuple(r.op_, preMulSupplement->tensor_factor);
+                }
+              },
+              [](const py::tuple& t) {
+                // __setstate__
+                TORCH_CHECK(t.size() == 2, "Invalid state");
+                const auto op = static_cast<::c10d::ReduceOp::RedOpType>(
+                    t[0].cast<uint8_t>());
+                if (op != ::c10d::ReduceOp::RedOpType::PREMUL_SUM) {
+                  return ::c10d::ReduceOp(op);
+                }
+                const auto preMulSupplement_factor = t[1];
+                if (py::isinstance<py::float_>(preMulSupplement_factor)) {
+                  return ::c10d::makeNCCLPreMulSum(t[1].cast<double>());
+                } else {
+                  return ::c10d::makeNCCLPreMulSum(t[1].cast<at::Tensor>());
+                }
+              }));
 
   py::enum_<::c10d::ReduceOp::RedOpType>(reduce_op, "RedOpType")
       .value("SUM", ::c10d::ReduceOp::RedOpType::SUM)
@@ -3592,10 +3596,11 @@ Example::
           [](std::optional<bool> includeCollectives,
              std::optional<bool> includeStackTraces,
              std::optional<bool> onlyActive) {
-            return py::bytes(::c10d::dump_xccl_trace(
-                includeCollectives.value_or(true),
-                includeStackTraces.value_or(true),
-                onlyActive.value_or(false)));
+            return py::bytes(
+                ::c10d::dump_xccl_trace(
+                    includeCollectives.value_or(true),
+                    includeStackTraces.value_or(true),
+                    onlyActive.value_or(false)));
           },
           py::arg("includeCollectives") = std::optional<bool>(),
           py::arg("includeStackTraces") = std::optional<bool>(),
@@ -4125,8 +4130,9 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       "_dump_nccl_trace_json",
       [](std::optional<bool> includeCollectives,
          std::optional<bool> onlyActive) {
-        return py::bytes(::c10d::dump_nccl_trace_json(
-            includeCollectives.value_or(true), onlyActive.value_or(false)));
+        return py::bytes(
+            ::c10d::dump_nccl_trace_json(
+                includeCollectives.value_or(true), onlyActive.value_or(false)));
       },
       py::arg("includeCollectives") = std::optional<bool>(),
       py::arg("onlyActive") = std::optional<bool>(),
@@ -4143,10 +4149,11 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       [](std::optional<bool> includeCollectives,
          std::optional<bool> includeStackTraces,
          std::optional<bool> onlyActive) {
-        return py::bytes(::c10d::dump_nccl_trace(
-            includeCollectives.value_or(true),
-            includeStackTraces.value_or(true),
-            onlyActive.value_or(false)));
+        return py::bytes(
+            ::c10d::dump_nccl_trace(
+                includeCollectives.value_or(true),
+                includeStackTraces.value_or(true),
+                onlyActive.value_or(false)));
       },
       py::arg("includeCollectives") = std::optional<bool>(),
       py::arg("includeStackTraces") = std::optional<bool>(),
@@ -4164,14 +4171,89 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       "_reset_fr_recording_nccl",
       []() { ::c10d::reset_nccl_trace(); },
       "API to reset Flight recorder recording when it comes fault tolerance.");
+
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+  // NCCLSymmComm - NCCL symmetric memory communication for Triton kernels
+  py::class_<::c10d::symmetric_memory::NCCLSymmComm>(
+      module,
+      "NCCLSymmComm",
+      R"(
+NCCLSymmComm - Host-side class for NCCL symmetric memory communication.
+
+This class directly manages NCCL resources for symmetric memory operations:
+- Symmetric memory allocation using ncclMemAlloc
+- Window registration using ncclCommWindowRegister
+- Device communicator creation using ncclDevCommCreate
+
+The class creates an NCCLSymmContext that can be passed to Triton kernels
+for device-side collective operations using NCCL's Local Symmetric Access (LSA) API.
+
+Arguments:
+    group_name (str): Name of the process group to use
+    buffer_size (int): Size of the symmetric buffer in bytes
+    device_idx (int): CUDA device index
+
+Example::
+    >>> import torch.distributed as dist
+    >>> from torch._C._distributed_c10d import NCCLSymmComm
+    >>>
+    >>> # After initializing process group
+    >>> comm = NCCLSymmComm("default_pg", 1024*1024, 0)
+    >>> ctx_ptr = comm.get_context_ptr()  # Pass to Triton kernel
+    >>> buffer_ptr = comm.get_buffer_ptr()
+)")
+      .def(
+          py::init<const std::string&, size_t, int>(),
+          py::arg("group_name"),
+          py::arg("buffer_size"),
+          py::arg("device_idx"))
+      .def(
+          "get_context_ptr",
+          &::c10d::symmetric_memory::NCCLSymmComm::get_context_ptr,
+          R"(
+Get pointer to the device-side NCCLSymmContext.
+This pointer can be passed to Triton kernels as an int64 value.
+
+Returns:
+    int: Device pointer to NCCLSymmContext
+)")
+      .def(
+          "get_buffer_ptr",
+          &::c10d::symmetric_memory::NCCLSymmComm::get_buffer_ptr,
+          R"(
+Get pointer to the local symmetric buffer.
+This pointer can be passed to Triton kernels as an int64 value.
+
+Returns:
+    int: Device pointer to the symmetric buffer
+)")
+      .def(
+          "get_buffer_size",
+          &::c10d::symmetric_memory::NCCLSymmComm::get_buffer_size,
+          "Get the buffer size in bytes.")
+      .def(
+          "get_rank",
+          &::c10d::symmetric_memory::NCCLSymmComm::get_rank,
+          "Get the rank of this process.")
+      .def(
+          "get_world_size",
+          &::c10d::symmetric_memory::NCCLSymmComm::get_world_size,
+          "Get the world size (number of processes).")
+      .def(
+          "get_device_idx",
+          &::c10d::symmetric_memory::NCCLSymmComm::get_device_idx,
+          "Get the device index.");
+#endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+
 #endif
 
   module.def(
       "_dump_fr_trace_json",
       [](std::optional<bool> includeCollectives,
          std::optional<bool> onlyActive) {
-        return py::bytes(::c10d::dump_fr_trace_json(
-            includeCollectives.value_or(true), onlyActive.value_or(false)));
+        return py::bytes(
+            ::c10d::dump_fr_trace_json(
+                includeCollectives.value_or(true), onlyActive.value_or(false)));
       },
       py::arg("includeCollectives") = std::optional<bool>(),
       py::arg("onlyActive") = std::optional<bool>(),
@@ -4188,10 +4270,11 @@ such as `dist.all_reduce(tensor, async_op=True)`.
       [](std::optional<bool> includeCollectives,
          std::optional<bool> includeStackTraces,
          std::optional<bool> onlyActive) {
-        return py::bytes(::c10d::dump_fr_trace(
-            includeCollectives.value_or(true),
-            includeStackTraces.value_or(true),
-            onlyActive.value_or(false)));
+        return py::bytes(
+            ::c10d::dump_fr_trace(
+                includeCollectives.value_or(true),
+                includeStackTraces.value_or(true),
+                onlyActive.value_or(false)));
       },
       py::arg("includeCollectives") = std::optional<bool>(),
       py::arg("includeStackTraces") = std::optional<bool>(),
@@ -4298,9 +4381,10 @@ such as `dist.all_reduce(tensor, async_op=True)`.
 } // namespace
 
 // c10d methods on torch._C
-static PyMethodDef methods[] = { // NOLINT
-    {"_c10d_init", c10d_init, METH_NOARGS, nullptr},
-    {nullptr, nullptr, 0, nullptr}};
+static PyMethodDef methods[] =
+    { // NOLINT
+        {"_c10d_init", c10d_init, METH_NOARGS, nullptr},
+        {nullptr, nullptr, 0, nullptr}};
 
 // NOLINTNEXTLINE(misc-use-internal-linkage)
 PyMethodDef* python_functions() {
