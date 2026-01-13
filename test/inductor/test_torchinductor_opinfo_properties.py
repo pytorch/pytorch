@@ -22,14 +22,13 @@ To add a new op:
     depending on which OpInfo database contains the op.
 
 To add an expected failure:
-    Add an entry to the EXPECTED_FAILURES dict with the key:
-        (device_type, op_name, backend, test_type, dtype)
-    where test_type is one of: "batch_invariance", "determinism", "eager_equivalence",
-    "unary_numerical", "binary_numerical". Use dtype=None to match all dtypes.
+    Add to the appropriate *_XFAILS dict (e.g., EAGER_EQUIV_XFAILS):
+        "backend": {"op_name": {dtype1, dtype2, ...}}
+    Use ALL (None) to match all dtypes.
 
 To remove a stale expected failure:
     Run the tests - any expected failure that now passes will fail with
-    "XPASS (strict)" and tell you which entry to remove from EXPECTED_FAILURES.
+    "XPASS" and tell you which entry to remove.
 
 To run a specific test:
     pytest test/inductor/test_torchinductor_opinfo_properties.py -k "silu and eager"
@@ -355,586 +354,123 @@ def sample_operates_on_batch_dim(op_name, sample_input):
 
 
 # Expected failures for bitwise equivalence tests.
-# Maps (device_type, op_name, backend, test_type, dtype) -> reason for expected failure.
-# test_type is one of: "batch_invariance", "determinism", "eager_equivalence",
-#                      "unary_numerical", "binary_numerical"
-# dtype can be None to match all dtypes, or a specific torch.dtype
-#
+# Structure: backend -> op_name -> set of failing dtypes (None means all dtypes)
 # These track known numerical differences between eager and compiled execution.
-# The goal is to eventually fix these and remove entries from this dict.
-EXPECTED_FAILURES = {
-    # =========================================================================
-    # Eager equivalence failures
-    # =========================================================================
-    # div has numerical differences on CUDA due to Triton's division implementation
-    (
-        "cuda",
-        "div",
-        "inductor_default",
-        "eager_equivalence",
-        None,
-    ): "div has numerical differences on CUDA",
-    # reciprocal has numerical differences on CUDA
-    (
-        "cuda",
-        "reciprocal",
-        "inductor_default",
-        "eager_equivalence",
-        None,
-    ): "reciprocal has numerical differences on CUDA",
-    (
-        "cuda",
-        "reciprocal",
-        "inductor_numerics",
-        "eager_equivalence",
-        None,
-    ): "reciprocal has numerical differences on CUDA",
-    # sigmoid has numerical differences on CUDA
-    (
-        "cuda",
-        "sigmoid",
-        "inductor_default",
-        "eager_equivalence",
-        None,
-    ): "sigmoid has numerical differences on CUDA",
-    (
-        "cuda",
-        "sigmoid",
-        "inductor_numerics",
-        "eager_equivalence",
-        None,
-    ): "sigmoid has numerical differences on CUDA",
-    # gelu has numerical differences on CUDA
-    (
-        "cuda",
-        "nn.functional.gelu",
-        "inductor_default",
-        "eager_equivalence",
-        None,
-    ): "gelu has numerical differences on CUDA",
-    (
-        "cuda",
-        "nn.functional.gelu",
-        "inductor_numerics",
-        "eager_equivalence",
-        None,
-    ): "gelu has numerical differences on CUDA",
-    (
-        "cuda",
-        "nn.functional.gelu",
-        "aot_eager_decomp_partition",
-        "eager_equivalence",
-        torch.float32,
-    ): "gelu decomposition has numerical differences",
-    # rms_norm decomposition has numerical differences on CUDA
-    (
-        "cuda",
-        "nn.functional.rms_norm",
-        "aot_eager_decomp_partition",
-        "eager_equivalence",
-        None,
-    ): "rms_norm decomposition has numerical differences",
-    # softmax/log_softmax have numerical differences
-    (
-        "cuda",
-        "softmax",
-        "aot_eager_decomp_partition",
-        "eager_equivalence",
-        torch.float32,
-    ): "softmax has numerical differences",
-    (
-        "cuda",
-        "softmax",
-        "inductor_default",
-        "eager_equivalence",
-        torch.float32,
-    ): "softmax has numerical differences",
-    (
-        "cuda",
-        "softmax",
-        "inductor_numerics",
-        "eager_equivalence",
-        torch.float32,
-    ): "softmax has numerical differences",
-    (
-        "cuda",
-        "log_softmax",
-        "aot_eager_decomp_partition",
-        "eager_equivalence",
-        torch.float32,
-    ): "log_softmax has numerical differences",
-    (
-        "cuda",
-        "log_softmax",
-        "inductor_default",
-        "eager_equivalence",
-        torch.float32,
-    ): "log_softmax has numerical differences",
-    (
-        "cuda",
-        "log_softmax",
-        "inductor_numerics",
-        "eager_equivalence",
-        torch.float32,
-    ): "log_softmax has numerical differences",
-    # matmul has numerical differences due to FP associativity
-    (
-        "cuda",
-        "matmul",
-        "aot_eager_decomp_partition",
-        "eager_equivalence",
-        torch.float32,
-    ): "matmul has numerical differences",
-    (
-        "cuda",
-        "matmul",
-        "inductor_default",
-        "eager_equivalence",
-        torch.float32,
-    ): "matmul has numerical differences",
-    (
-        "cuda",
-        "matmul",
-        "inductor_numerics",
-        "eager_equivalence",
-        torch.float32,
-    ): "matmul has numerical differences",
-    # layer_norm has numerical differences
-    (
-        "cuda",
-        "nn.functional.layer_norm",
-        "aot_eager_decomp_partition",
-        "eager_equivalence",
-        torch.float32,
-    ): "layer_norm has numerical differences",
-    (
-        "cuda",
-        "nn.functional.layer_norm",
-        "inductor_default",
-        "eager_equivalence",
-        torch.float32,
-    ): "layer_norm has numerical differences",
-    (
-        "cuda",
-        "nn.functional.layer_norm",
-        "inductor_numerics",
-        "eager_equivalence",
-        torch.float32,
-    ): "layer_norm has numerical differences",
-    # silu has numerical differences with inductor_default
-    (
-        "cuda",
-        "nn.functional.silu",
-        "inductor_default",
-        "eager_equivalence",
-        torch.float16,
-    ): "silu has numerical differences",
-    (
-        "cuda",
-        "nn.functional.silu",
-        "inductor_default",
-        "eager_equivalence",
-        torch.float32,
-    ): "silu has numerical differences",
-    # pow has numerical differences
-    (
-        "cuda",
-        "pow",
-        "inductor_default",
-        "eager_equivalence",
-        torch.float32,
-    ): "pow has numerical differences",
-    (
-        "cuda",
-        "pow",
-        "inductor_numerics",
-        "eager_equivalence",
-        torch.float32,
-    ): "pow has numerical differences",
-    # =========================================================================
-    # Determinism failures
-    # =========================================================================
-    (
-        "cuda",
-        "matmul",
-        "inductor_default",
-        "determinism",
-        torch.float32,
-    ): "matmul has non-deterministic behavior",
-    # =========================================================================
-    # Batch invariance failures
-    # =========================================================================
-    # matmul is not batch-invariant due to floating-point associativity
-    (
-        "cuda",
-        "matmul",
-        "aot_eager_decomp_partition",
-        "batch_invariance",
-        None,
-    ): "matmul has numerical differences across batch sizes",
-    (
-        "cuda",
-        "matmul",
-        "inductor_default",
-        "batch_invariance",
-        None,
-    ): "matmul has numerical differences across batch sizes",
-    (
-        "cuda",
-        "matmul",
-        "inductor_numerics",
-        "batch_invariance",
-        None,
-    ): "matmul has numerical differences across batch sizes",
-    # bmm is not batch-invariant due to floating-point associativity
-    (
-        "cuda",
-        "bmm",
-        "aot_eager_decomp_partition",
-        "batch_invariance",
-        torch.float32,
-    ): "bmm has numerical differences across batch sizes",
-    (
-        "cuda",
-        "bmm",
-        "inductor_default",
-        "batch_invariance",
-        torch.float32,
-    ): "bmm has numerical differences across batch sizes",
-    (
-        "cuda",
-        "bmm",
-        "inductor_numerics",
-        "batch_invariance",
-        torch.float32,
-    ): "bmm has numerical differences across batch sizes",
-    # nn.functional.linear is not batch-invariant (uses matmul internally)
-    (
-        "cuda",
-        "nn.functional.linear",
-        "aot_eager_decomp_partition",
-        "batch_invariance",
-        None,
-    ): "linear has numerical differences across batch sizes",
-    (
-        "cuda",
-        "nn.functional.linear",
-        "inductor_default",
-        "batch_invariance",
-        None,
-    ): "linear has numerical differences across batch sizes",
-    (
-        "cuda",
-        "nn.functional.linear",
-        "inductor_numerics",
-        "batch_invariance",
-        None,
-    ): "linear has numerical differences across batch sizes",
-    # div has batch invariance issues
-    (
-        "cuda",
-        "div",
-        "inductor_default",
-        "batch_invariance",
-        torch.float32,
-    ): "div has numerical differences across batch sizes",
-    # pow has batch invariance issues
-    (
-        "cuda",
-        "pow",
-        "inductor_default",
-        "batch_invariance",
-        torch.float32,
-    ): "pow has numerical differences across batch sizes",
-    (
-        "cuda",
-        "pow",
-        "inductor_numerics",
-        "batch_invariance",
-        torch.float32,
-    ): "pow has numerical differences across batch sizes",
-    # =========================================================================
-    # Unary numerical (exhaustive/sampled) failures
-    # =========================================================================
-    (
-        "cuda",
-        "exp2",
-        "inductor_default",
-        "unary_numerical",
-        torch.bfloat16,
-    ): "exp2 has numerical differences",
-    (
-        "cuda",
-        "exp2",
-        "inductor_default",
-        "unary_numerical",
-        torch.float32,
-    ): "exp2 has numerical differences",
-    (
-        "cuda",
-        "exp2",
-        "inductor_numerics",
-        "unary_numerical",
-        torch.bfloat16,
-    ): "exp2 has numerical differences",
-    (
-        "cuda",
-        "exp2",
-        "inductor_numerics",
-        "unary_numerical",
-        torch.float32,
-    ): "exp2 has numerical differences",
-    (
-        "cuda",
-        "expm1",
-        "inductor_default",
-        "unary_numerical",
-        torch.bfloat16,
-    ): "expm1 has numerical differences",
-    (
-        "cuda",
-        "expm1",
-        "inductor_default",
-        "unary_numerical",
-        torch.float32,
-    ): "expm1 has numerical differences",
-    (
-        "cuda",
-        "expm1",
-        "inductor_numerics",
-        "unary_numerical",
-        torch.bfloat16,
-    ): "expm1 has numerical differences",
-    (
-        "cuda",
-        "expm1",
-        "inductor_numerics",
-        "unary_numerical",
-        torch.float32,
-    ): "expm1 has numerical differences",
-    (
-        "cuda",
-        "log1p",
-        "inductor_default",
-        "unary_numerical",
-        torch.float32,
-    ): "log1p has numerical differences",
-    (
-        "cuda",
-        "log1p",
-        "inductor_numerics",
-        "unary_numerical",
-        torch.float32,
-    ): "log1p has numerical differences",
-    (
-        "cuda",
-        "reciprocal",
-        "inductor_default",
-        "unary_numerical",
-        torch.float32,
-    ): "reciprocal has numerical differences",
-    (
-        "cuda",
-        "reciprocal",
-        "inductor_numerics",
-        "unary_numerical",
-        torch.float32,
-    ): "reciprocal has numerical differences",
-    (
-        "cuda",
-        "rsqrt",
-        "inductor_default",
-        "unary_numerical",
-        torch.bfloat16,
-    ): "rsqrt has numerical differences",
-    (
-        "cuda",
-        "rsqrt",
-        "inductor_default",
-        "unary_numerical",
-        torch.float32,
-    ): "rsqrt has numerical differences",
-    (
-        "cuda",
-        "rsqrt",
-        "inductor_numerics",
-        "unary_numerical",
-        torch.bfloat16,
-    ): "rsqrt has numerical differences",
-    (
-        "cuda",
-        "rsqrt",
-        "inductor_numerics",
-        "unary_numerical",
-        torch.float32,
-    ): "rsqrt has numerical differences",
-    (
-        "cuda",
-        "sigmoid",
-        "inductor_default",
-        "unary_numerical",
-        torch.float32,
-    ): "sigmoid has numerical differences",
-    (
-        "cuda",
-        "sigmoid",
-        "inductor_numerics",
-        "unary_numerical",
-        torch.float32,
-    ): "sigmoid has numerical differences",
-    (
-        "cuda",
-        "sin",
-        "inductor_default",
-        "unary_numerical",
-        torch.float32,
-    ): "sin has numerical differences",
-    (
-        "cuda",
-        "sin",
-        "inductor_numerics",
-        "unary_numerical",
-        torch.float32,
-    ): "sin has numerical differences",
-    (
-        "cuda",
-        "tan",
-        "inductor_default",
-        "unary_numerical",
-        torch.bfloat16,
-    ): "tan has numerical differences",
-    (
-        "cuda",
-        "tan",
-        "inductor_default",
-        "unary_numerical",
-        torch.float32,
-    ): "tan has numerical differences",
-    (
-        "cuda",
-        "tan",
-        "inductor_numerics",
-        "unary_numerical",
-        torch.bfloat16,
-    ): "tan has numerical differences",
-    (
-        "cuda",
-        "tan",
-        "inductor_numerics",
-        "unary_numerical",
-        torch.float32,
-    ): "tan has numerical differences",
-    (
-        "cuda",
-        "tanh",
-        "inductor_default",
-        "unary_numerical",
-        torch.float32,
-    ): "tanh has numerical differences",
-    (
-        "cuda",
-        "tanh",
-        "inductor_numerics",
-        "unary_numerical",
-        torch.float32,
-    ): "tanh has numerical differences",
-    # =========================================================================
-    # Binary numerical (sampled) failures
-    # =========================================================================
-    (
-        "cuda",
-        "div",
-        "inductor_default",
-        "binary_numerical",
-        torch.float16,
-    ): "div has numerical differences",
-    (
-        "cuda",
-        "div",
-        "inductor_default",
-        "binary_numerical",
-        torch.float32,
-    ): "div has numerical differences",
-    (
-        "cuda",
-        "fmod",
-        "inductor_default",
-        "binary_numerical",
-        torch.bfloat16,
-    ): "fmod has numerical differences",
-    (
-        "cuda",
-        "fmod",
-        "inductor_default",
-        "binary_numerical",
-        torch.float32,
-    ): "fmod has numerical differences",
-    (
-        "cuda",
-        "fmod",
-        "inductor_numerics",
-        "binary_numerical",
-        torch.bfloat16,
-    ): "fmod has numerical differences",
-    (
-        "cuda",
-        "fmod",
-        "inductor_numerics",
-        "binary_numerical",
-        torch.float32,
-    ): "fmod has numerical differences",
-    (
-        "cuda",
-        "pow",
-        "inductor_default",
-        "binary_numerical",
-        None,
-    ): "pow has numerical differences",
-    (
-        "cuda",
-        "pow",
-        "inductor_numerics",
-        "binary_numerical",
-        None,
-    ): "pow has numerical differences",
-    (
-        "cuda",
-        "remainder",
-        "inductor_default",
-        "binary_numerical",
-        None,
-    ): "remainder has numerical differences",
-    (
-        "cuda",
-        "remainder",
-        "inductor_numerics",
-        "binary_numerical",
-        None,
-    ): "remainder has numerical differences",
+# The goal is to eventually fix these and remove entries.
+
+# Dtype shorthands
+fp32, fp16, bf16, ALL = torch.float32, torch.float16, torch.bfloat16, None
+
+EAGER_EQUIV_XFAILS = {
+    "aot_eager_decomp_partition": {
+        "nn.functional.gelu": {fp32},
+        "nn.functional.layer_norm": {fp32},
+        "nn.functional.rms_norm": {ALL},
+        "softmax": {fp32},
+        "log_softmax": {fp32},
+        "matmul": {fp32},
+    },
+    "inductor_default": {
+        "div": {ALL},
+        "reciprocal": {ALL},
+        "sigmoid": {ALL},
+        "nn.functional.gelu": {ALL},
+        "nn.functional.layer_norm": {fp32},
+        "nn.functional.silu": {fp16, fp32},
+        "softmax": {fp32},
+        "log_softmax": {fp32},
+        "matmul": {fp32},
+        "pow": {fp32},
+    },
+    "inductor_numerics": {
+        "reciprocal": {ALL},
+        "sigmoid": {ALL},
+        "nn.functional.gelu": {ALL},
+        "nn.functional.layer_norm": {fp32},
+        "softmax": {fp32},
+        "log_softmax": {fp32},
+        "matmul": {fp32},
+        "pow": {fp32},
+    },
+}
+
+DETERMINISM_XFAILS = {
+    "inductor_default": {"matmul": {fp32}},
+}
+
+BATCH_INVARIANCE_XFAILS = {
+    "aot_eager_decomp_partition": {
+        "matmul": {ALL},
+        "bmm": {fp32},
+        "nn.functional.linear": {ALL},
+    },
+    "inductor_default": {
+        "matmul": {ALL},
+        "bmm": {fp32},
+        "nn.functional.linear": {ALL},
+        "div": {fp32},
+        "pow": {fp32},
+    },
+    "inductor_numerics": {
+        "matmul": {ALL},
+        "bmm": {fp32},
+        "nn.functional.linear": {ALL},
+        "pow": {fp32},
+    },
+}
+
+UNARY_NUMERICAL_XFAILS = {
+    "inductor_default": {
+        "exp2": {bf16, fp32},
+        "expm1": {bf16, fp32},
+        "log1p": {fp32},
+        "reciprocal": {fp32},
+        "rsqrt": {bf16, fp32},
+        "sigmoid": {fp32},
+        "sin": {fp32},
+        "tan": {bf16, fp32},
+        "tanh": {fp32},
+    },
+    "inductor_numerics": {
+        "exp2": {bf16, fp32},
+        "expm1": {bf16, fp32},
+        "log1p": {fp32},
+        "reciprocal": {fp32},
+        "rsqrt": {bf16, fp32},
+        "sigmoid": {fp32},
+        "sin": {fp32},
+        "tan": {bf16, fp32},
+        "tanh": {fp32},
+    },
+}
+
+BINARY_NUMERICAL_XFAILS = {
+    "inductor_default": {
+        "div": {fp16, fp32},
+        "fmod": {bf16, fp32},
+        "pow": {ALL},
+        "remainder": {ALL},
+    },
+    "inductor_numerics": {
+        "fmod": {bf16, fp32},
+        "pow": {ALL},
+        "remainder": {ALL},
+    },
+}
+
+XFAIL_DICTS = {
+    "eager_equivalence": EAGER_EQUIV_XFAILS,
+    "determinism": DETERMINISM_XFAILS,
+    "batch_invariance": BATCH_INVARIANCE_XFAILS,
+    "unary_numerical": UNARY_NUMERICAL_XFAILS,
+    "binary_numerical": BINARY_NUMERICAL_XFAILS,
 }
 
 
 def is_expected_failure(device_type, op_name, backend, test_type, dtype=None):
-    """Check if a test is expected to fail.
-
-    First checks for dtype-specific failure, then falls back to dtype=None (all dtypes).
-    """
-    # Check dtype-specific failure first
-    if (device_type, op_name, backend, test_type, dtype) in EXPECTED_FAILURES:
-        return True
-    # Fall back to dtype=None (matches all dtypes)
-    return (device_type, op_name, backend, test_type, None) in EXPECTED_FAILURES
-
-
-def get_expected_failure_reason(device_type, op_name, backend, test_type, dtype=None):
-    """Get the reason for an expected failure."""
-    # Check dtype-specific failure first
-    key = (device_type, op_name, backend, test_type, dtype)
-    if key in EXPECTED_FAILURES:
-        return EXPECTED_FAILURES[key]
-    # Fall back to dtype=None
-    key = (device_type, op_name, backend, test_type, None)
-    return EXPECTED_FAILURES.get(key, "Unknown")
+    """Check if a test is expected to fail."""
+    xfails = XFAIL_DICTS.get(test_type, {}).get(backend, {}).get(op_name, set())
+    return dtype in xfails or ALL in xfails
 
 
 def compile_fn(fn, backend):
@@ -989,22 +525,15 @@ class TestOpInfoProperties(TestCase):
         expected = is_expected_failure(device_type, op_name, backend, test_type, dtype)
 
         if expected:
-            reason = get_expected_failure_reason(
-                device_type, op_name, backend, test_type, dtype
-            )
             try:
                 test_fn()
             except (AssertionError, RuntimeError):
-                # Test failed as expected - mark as xfail for clear output
-                pytest.xfail(f"Known failure: {reason}")
+                pytest.xfail(f"Known failure: {op_name}/{backend}/{dtype}")
             else:
-                # Test was expected to fail but passed - strict xpass behavior
                 self.fail(
-                    f"XPASS (strict): expected test to fail ({reason}), but it passed. "
-                    f"Remove from EXPECTED_FAILURES: {(device_type, op_name, backend, test_type, dtype)}"
+                    f"XPASS: {op_name}/{backend}/{dtype} - remove from {test_type} xfails"
                 )
         else:
-            # Not an expected failure - run normally
             test_fn()
 
     # =========================================================================
