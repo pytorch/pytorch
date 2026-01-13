@@ -535,17 +535,19 @@ class TestExpandPlaceholder(TestCase):
         # Test Case 2: (_Strided)Shard-only inputs - only (_Strided)Shard expansion
         # Expected: 3 strategies with placeholders filled using (_Strided)Shard + implicit replicate
         expected_shard = [
+            [Replicate(), Replicate(), Replicate()],
             [Partial(), Shard(1), Shard(0)],
             [Shard(0), Shard(0), Replicate()],
             [Shard(1), Replicate(), Shard(1)],
-            [Replicate(), Replicate(), Replicate()],
         ]
 
         expanded_shard = _fill_single_dim_strategy_placeholders(
             {Replicate(), Shard(0), Shard(1)}, single_dim_strategies
         )
+        self.assertEqual(expanded_shard, expected_shard)
 
         expected_strided_shard = [
+            [Replicate(), Replicate(), Replicate()],
             [
                 Partial(),
                 _StridedShard(1, split_factor=2),
@@ -576,7 +578,6 @@ class TestExpandPlaceholder(TestCase):
                 Replicate(),
                 _StridedShard(dim=1, split_factor=4),
             ],
-            [Replicate(), Replicate(), Replicate()],
         ]
         expanded_strided_shard = _fill_single_dim_strategy_placeholders(
             {
@@ -587,11 +588,10 @@ class TestExpandPlaceholder(TestCase):
         )
         self.assertEqual(expanded_strided_shard, expected_strided_shard)
 
-        self.assertEqual(expanded_shard, expected_shard)
-
         # Test Case 3: Mixed Shard and _StridedShard inputs - both types of expansion
         # Expected: 3 strategies * 2 shard types (Shard and _StridedShard) + implicit replicate
         expected_mixed = [
+            [Replicate(), Replicate(), Replicate()],
             [Partial(), Shard(1), Shard(0)],
             [
                 Partial(),
@@ -610,7 +610,6 @@ class TestExpandPlaceholder(TestCase):
                 Replicate(),
                 _StridedShard(1, split_factor=2),
             ],
-            [Replicate(), Replicate(), Replicate()],
         ]
 
         expanded_mixed = _fill_single_dim_strategy_placeholders(
