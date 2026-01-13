@@ -443,6 +443,20 @@ class TensorVariable(VariableTracker):
             torch._C._autograd._get_data_attr  # type: ignore[attr-defined]
         ).call_function(tx, [self], {})
 
+    def method_attr_grad(
+        self, tx: "InstructionTranslator"
+    ) -> VariableTracker | None:
+        from .builder import wrap_fx_proxy
+        from .misc import GetAttrVariable
+
+        grad_value = self.proxy.node.meta["example_value"].grad
+        if grad_value is None:
+            return variables.ConstantVariable(None)
+
+        grad_proxy = GetAttrVariable.create_getattr_proxy(self.as_proxy(), "grad")
+        source = AttrSource(self.source, "grad") if self.source else None
+        return wrap_fx_proxy(tx=tx, proxy=grad_proxy, example_value=grad_value, source=source)
+
     def method_attr_grad_fn(
         self, tx: "InstructionTranslator"
     ) -> ConstantVariable | None:

@@ -12740,6 +12740,20 @@ fn
         self.assertEqual(z, ref_y)
         self.assertEqual(x.grad, ref_x_grad)
 
+    def test_param_grad_in_forward(self):
+        torch._dynamo.config.graph_break_on_nn_param_ctor = False
+
+        def fn(x):
+            w = torch.nn.Parameter(torch.ones(4, 4))
+            if w.grad is None:
+                w.grad = torch.zeros_like(w)
+            return w.grad + x
+
+        x = torch.randn(4, 4)
+        compiled_fn = torch.compile(fn, backend="eager", fullgraph=True)
+        result = compiled_fn(x)
+        self.assertEqual(result.shape, torch.Size([4, 4]))
+
     def test_new_with_int_list(self):
         # Make sure torch.Tensor.new(int argument list) behaves the same on dynamo.
         def fn(x):
