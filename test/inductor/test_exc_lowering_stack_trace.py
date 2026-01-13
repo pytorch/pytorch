@@ -1,23 +1,20 @@
-import os
 import torch
-
-from torch._inductor.exc import LoweringException, InductorError
-from torch._inductor import lowering
+from torch._inductor.exc import InductorError, LoweringException
 from torch._inductor.test_case import TestCase as InductorTestCase
 from torch._inductor.utils import override_lowering
+
 
 class TestLoweringExceptionStackTrace(InductorTestCase):
     """Tests that LoweringException includes user stack traces and remains backward-compatible, with diagnostics."""
 
     def test_lowering_exception_includes_stack_trace(self):
-
         def frame5(x):
             return torch.ops.aten.ceil.default(x)
 
         def frame4(x):
             return frame5(x)
 
-        def frame3(x): 
+        def frame3(x):
             return frame4(x)
 
         def frame2(x):
@@ -34,7 +31,9 @@ class TestLoweringExceptionStackTrace(InductorTestCase):
 
         def failing_lowering(orig_fn, *args, **kwargs):
             invoked["flag"] = True
-            raise RuntimeError("Intentional lowering failure for testing  user stack traces")
+            raise RuntimeError(
+                "Intentional lowering failure for testing  user stack traces"
+            )
 
         ceil_op = torch.ops.aten.ceil.default
 
@@ -61,7 +60,6 @@ class TestLoweringExceptionStackTrace(InductorTestCase):
                 self.assertIn("frame5", error_msg, "Stack trace should include frame5")
                 self.assertIn("frame1", error_msg, "Stack trace should include frame1")
 
-
     def test_lowering_exception_without_stack_trace(self):
         """
         LoweringException works correctly when stack_trace is not present.
@@ -75,7 +73,11 @@ class TestLoweringExceptionStackTrace(InductorTestCase):
         test_kwargs = {}
 
         exc = LoweringException(
-            test_exception, test_target, test_args, test_kwargs, stack_trace=None  # type: ignore[call-arg]
+            test_exception,
+            test_target,
+            test_args,
+            test_kwargs,
+            stack_trace=None,  # type: ignore[call-arg]
         )
         msg = str(exc)
         self.assertIn("RuntimeError: Test exception without stack trace", msg)
