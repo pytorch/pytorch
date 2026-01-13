@@ -296,6 +296,7 @@ class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
 class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
     @cached_property
     def C_impl(self):
+        # pyrefly: ignore [missing-module-attribute]
         from torch._C import _StaticXpuLauncher
 
         return _StaticXpuLauncher
