@@ -916,6 +916,8 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             flattened_dp_cp_mesh._layout.collapse().global_ranks(8),
             [[0, 2, 4, 6], [1, 3, 5, 7]],
         )
+        # This should not raise as they are well separated
+        mesh_3d["dp_cp", "tp"]
 
         ref_pg_count = _world.group_count
         # Calling flatten again should not create a new pg.
@@ -937,9 +939,9 @@ class TestDeviceMeshGetItem(DTensorTestBase):
             [[0, 1, 4, 5], [2, 3, 6, 7]],
         )
         with self.assertRaisesRegex(
-            NotImplementedError,
-            "Mesh dim indices should be in ascending order",
+            KeyError, "Mesh dim indices should be in ascending order"
         ):
+            # dp_tp is partly "above" and partly "below" cp
             mesh_3d["dp_tp", "cp"]
 
         # Test flatten with a flattened mesh_dim_name
