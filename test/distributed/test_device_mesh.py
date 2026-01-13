@@ -1702,43 +1702,43 @@ class CuTeLayoutTest(TestCase):
             right_l = _MeshLayout.from_sizes_strides((2,), (3,))
             orig_l.composition(right_l)
 
-    def test_check_non_overlap(self):
-        """Test the check_non_overlap method for various layout configurations."""
+    def test_check_orthogonal(self):
+        """Test the check_orthogonal method for various layout configurations."""
         # Test 1: Valid layout - no overlap
         # sizes=(2,3), strides=(6,1) - stride 6 > span 3, so no overlap
         layout1 = _FlatLayout((2, 3), (6, 1))
-        self.assertTrue(layout1.check_non_overlap())
+        self.assertTrue(layout1.check_orthogonal())
 
         # Test 2: Invalid layout - overlap due to stride < previous span
         # sizes=(2,3), strides=(2,1) - stride 2 < span 3, causes overlap
         layout2 = _FlatLayout((2, 3), (2, 1))
-        self.assertFalse(layout2.check_non_overlap())
+        self.assertFalse(layout2.check_orthogonal())
 
         # Test 3: Invalid layout - duplicate strides
         # sizes=(2,3), strides=(1,1) - same stride, causes overlap
         layout3 = _FlatLayout((2, 3), (1, 1))
-        self.assertFalse(layout3.check_non_overlap())
+        self.assertFalse(layout3.check_orthogonal())
 
         # Test 4: Valid layout - single dimension
         layout4 = _FlatLayout((4,), (1,))
-        self.assertTrue(layout4.check_non_overlap())
+        self.assertTrue(layout4.check_orthogonal())
 
         # Test 5: Valid layout - exact boundary case
         # sizes=(2,3), strides=(3,1) - stride 3 == span 3, valid
         layout5 = _FlatLayout((2, 3), (3, 1))
-        self.assertTrue(layout5.check_non_overlap())
+        self.assertTrue(layout5.check_orthogonal())
 
         # Test 6: Valid layout - multi-dimensional with proper spacing
         layout6 = _FlatLayout((2, 2, 2), (8, 4, 1))
-        self.assertTrue(layout6.check_non_overlap())
+        self.assertTrue(layout6.check_orthogonal())
 
         # Test 7: Valid layout - stride not ordered
         layout7 = _FlatLayout((2, 2, 2), (4, 1, 2))
-        self.assertTrue(layout7.check_non_overlap())
+        self.assertTrue(layout7.check_orthogonal())
 
         # Test 8: Valid layout - Interleaved but no overlap
         layout8 = _FlatLayout((3, 2), (2, 3))
-        self.assertTrue(layout8.check_non_overlap())
+        self.assertTrue(layout8.check_orthogonal())
 
     def test_remap_to_tensor(self):
         """Test the remap_to_tensor method for various scenarios."""
