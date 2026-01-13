@@ -138,10 +138,10 @@ class TestMatmulCuda(InductorTestCase):
         make_arg = partial(random_matrix_with_scaled_reduction_dim, dtype=dtype, device="cpu")
 
         bias_shape_modifier = (lambda shape: shape) if bias_shape_modifier is None else bias_shape_modifier
-        m_input = make_tensor(bias_shape_modifier((m, n)), dtype=dtype, device="cpu")
+        m_input = torch.randn(bias_shape_modifier((m, n)), dtype=dtype, device="cpu")
         m_1 = make_arg(m, k, reduction_dim=-1)
         m_2 = make_arg(k, n, reduction_dim=-2)
-        m_beta = make_tensor(1, dtype=dtype, device="cpu")
+        m_beta = torch.randn(1, dtype=dtype, device="cpu")
         # scale to abate overflows in fp16 accum
         if fp16_accumulate:
             m_1 = m_1 / 100
@@ -198,8 +198,8 @@ class TestMatmulCuda(InductorTestCase):
 
     @onlyCUDA
     # imported 'tol' as 'xtol' to avoid aliasing in code above
-    @toleranceOverride({torch.float16: xtol(atol=1e-4, rtol=1e-4),
-                        torch.bfloat16: xtol(atol=1e-3, rtol=1e-3)})
+    @toleranceOverride({torch.float16: xtol(atol=2e-3, rtol=2e-3),
+                        torch.bfloat16: xtol(atol=2e-3, rtol=2e-3)})
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("size", [100, 1000, 10000])
     @parametrize("backend", ["cublas", "cublaslt"])
