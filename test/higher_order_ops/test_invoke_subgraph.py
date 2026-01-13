@@ -115,6 +115,36 @@ class TestInvokeSubgraph(TestCase):
 
         self.assertEqual(ref, res)
 
+    def test_make_fx_without_shape_env(self):
+        """Test that make_fx with invoke_subgraph works without a ShapeEnv.
+
+        When using FakeTensorMode without a ShapeEnv (shape_env=None),
+        the invoke_subgraph HOP should not require a shape_env for inserting
+        deferred runtime asserts.
+        """
+        from torch._higher_order_ops.invoke_subgraph import invoke_subgraph
+        from torch._subclasses.fake_tensor import FakeTensorMode
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        def subgraph_fn(x, y):
+            return (x * 2 + y,)
+
+        def outer_fn(x, y):
+            return invoke_subgraph(subgraph_fn, "test_subgraph", x, y)
+
+        x = torch.randn(3, 3)
+        y = torch.randn(3, 3)
+
+        # Trace with make_fx using FakeTensorMode without a ShapeEnv
+        fake_mode = FakeTensorMode()
+        self.assertIsNone(fake_mode.shape_env)
+        with fake_mode:
+            fake_x = fake_mode.from_tensor(x)
+            fake_y = fake_mode.from_tensor(y)
+            traced = make_fx(outer_fn)(fake_x, fake_y)
+
+        self.assertIn("invoke_subgraph", traced.code)
+
 
 @skipIfTorchDynamo("Not a torch._dynamo test")
 class TestInvokeSubgraphCompile(TestCase):
@@ -2340,7 +2370,7 @@ class GraphModule(torch.nn.Module):
         def forward(self, l_x_: "f32[8, 8]"):
             fwd_body_0 = self.fwd_body_0
             bwd_body_0 = self.bwd_body_0
-            autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, non_differentiable_idx = []);  fwd_body_0 = bwd_body_0 = l_x_ = None
+            autograd_function_apply = torch.ops.higher_order.autograd_function_apply(fwd_body_0, bwd_body_0, l_x_, non_differentiable_idx = [], saved_for_backward_idx = [0]);  fwd_body_0 = bwd_body_0 = l_x_ = None
             getitem: "f32[8, 8]" = autograd_function_apply[0];  autograd_function_apply = None
             return (getitem,)
 
