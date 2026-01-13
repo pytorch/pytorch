@@ -2274,6 +2274,7 @@ class TestSparseCSR(TestCase):
                         self.assertEqual(res_out, res_in)
 
     @skipCPUIfNoMklSparse
+    @skipCUDAIfRocm(msg="hipSPARSE sparse_add is flaky on ROCm")
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     def test_sparse_add(self, device, dtype):
         def run_test(m, n, index_dtype):
