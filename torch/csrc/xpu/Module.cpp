@@ -336,6 +336,7 @@ static void registerXpuDeviceProperties(PyObject* module) {
       ._(max_work_group_size)                                    \
       ._(max_num_sub_groups)                                     \
       ._(sub_group_sizes)                                        \
+      ._(local_mem_size)                                         \
       ._(has_fp16)                                               \
       ._(has_fp64)                                               \
       ._(has_atomic64)                                           \

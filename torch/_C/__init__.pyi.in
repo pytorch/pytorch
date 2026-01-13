@@ -2465,6 +2465,7 @@ class _XpuDeviceProperties:
     max_work_group_size: _int
     max_num_sub_groups: _int
     sub_group_sizes: list[_int]
+    local_mem_size: _int
     has_fp16: _bool
     has_fp64: _bool
     has_atomic64: _bool
