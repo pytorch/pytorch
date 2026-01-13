@@ -543,7 +543,7 @@ class LazyConstantVariable(LazyVariableTracker):
         self._ensure_type_guard()
         return hash(self.peek_value())
 
-    def is_python_equal(self, other: VariableTracker) -> bool:
+    def is_python_equal(self, other: object) -> bool:
         """Check equality with proper guard handling.
 
         Same cache (same source) means we can return True without guards.
@@ -580,7 +580,7 @@ class ComputedLazyConstantVariable(LazyVariableTracker):
     _cache: ComputedLazyCache  # pyrefly: ignore[bad-override]
 
     @staticmethod
-    def create(
+    def create(  # pyrefly: ignore[bad-param-name-override]
         op: Callable[..., Any],
         args: list[VariableTracker],
         reconstruct_fn: Callable[[Any, list[VariableTracker]], None],

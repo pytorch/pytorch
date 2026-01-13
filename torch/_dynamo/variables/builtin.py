@@ -1084,14 +1084,18 @@ class BuiltinVariable(VariableTracker):
             if first_arg_is_lazy and not has_kwargs:
                 if fn is isinstance and len(arg_types) == 2:
 
-                    def handle_isinstance(tx, args, kwargs):
+                    def handle_isinstance(
+                        tx: Any, args: Any, kwargs: Any
+                    ) -> VariableTracker | None:
                         return obj.call_isinstance(tx, args[0], args[1])
 
                     return handle_isinstance
 
                 if fn is type and len(arg_types) == 1:
 
-                    def handle_type(tx, args, kwargs):
+                    def handle_type(
+                        tx: Any, args: Any, kwargs: Any
+                    ) -> VariableTracker | None:
                         return obj.call_type(tx, args[0])
 
                     return handle_type
@@ -1127,7 +1131,9 @@ class BuiltinVariable(VariableTracker):
                 # kicks in (making source vars symbolic), ComputedLazyCache.realize()
                 # will detect this and re-apply the operation symbolically.
 
-                def handle_lazy_constant(tx, args, kwargs):
+                def handle_lazy_constant(
+                    tx: Any, args: Any, kwargs: Any
+                ) -> VariableTracker | None:
                     from .. import config
 
                     # Check if any lazy constant might become symbolic due to

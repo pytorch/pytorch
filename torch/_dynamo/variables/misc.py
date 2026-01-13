@@ -1994,7 +1994,7 @@ class StringFormatVariable(VariableTracker):
             if isinstance(arg, (LazyConstantVariable, ComputedLazyConstantVariable)):
                 arg.realize()
 
-    def is_python_equal(self, other: "VariableTracker") -> bool:
+    def is_python_equal(self, other: object) -> bool:
         success, value = self._try_get_format_value()
         if not success:
             return False
@@ -2007,6 +2007,8 @@ class StringFormatVariable(VariableTracker):
                 self._realize_lazy_args()
                 other._realize_lazy_args()
                 return True
+            return False
+        if not isinstance(other, VariableTracker):
             return False
         if other.is_python_constant():
             if value == other.as_python_constant():
