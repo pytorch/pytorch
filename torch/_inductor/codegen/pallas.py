@@ -2045,9 +2045,7 @@ class PallasKernel(SIMDKernel):
         )
 
         # Build the load expression
-        load_expr = self._build_load_expr(
-            buf, name, index, index_str, needs_flatten
-        )
+        load_expr = self._build_load_expr(buf, name, index, index_str, needs_flatten)
 
         # Handle intermediate buffer squeezing for correct broadcasting
         if not needs_flatten and index_str == "...":
