@@ -1120,14 +1120,28 @@ def identify_accessed_tensors(
         # detection, so each top level invocation needs a clean cache
         analyze_kernel_access.reset()
         get_tma_stores.reset()
-
-        return analyze_kernel_access(
+        accesses = analyze_kernel_access(
             functions,
             kernel_name,
             len(ordered_arg_names),
             tuple(ordered_arg_names),
         )
-
+        tensor_writes = OrderedSet(
+            dep
+            for dep in accesses.read_writes.writes
+            if isinstance(kwargs.get(dep.name), (Tensor, TensorBox))
+        )
+        tensor_reads = OrderedSet(
+            dep
+            for dep in accesses.read_writes.reads
+            if isinstance(kwargs.get(dep.name), (Tensor, TensorBox))
+        )
+        return TensorAccesses(
+            ReadWrites(
+                reads=tensor_reads, writes=tensor_writes, index_exprs=OrderedSet()
+            ),
+            can_fuse_epilogue=accesses.can_fuse_epilogue,
+        )
     except Exception:
         log.warning(
             "Encountered an exception in identify_accessed_tensors, assuming every input is mutated",
