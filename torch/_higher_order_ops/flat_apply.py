@@ -7,6 +7,7 @@ from typing_extensions import ParamSpec, TypeIs, TypeVarTuple, Unpack
 import torch
 import torch.fx.node
 import torch.utils._pytree as pytree
+from torch._higher_order_ops.utils import reconstruct_original_args
 from torch._library.opaque_object import is_opaque_type
 from torch._ops import HigherOrderOperator
 
@@ -39,14 +40,6 @@ def to_graphable(stuff: pytree.PyTree) -> tuple[list[object], pytree.TreeSpec]:
                 f"via pytree.register_constant; otherwise, register it as a pytree."
             )
     return flat_args, spec
-
-
-def from_graphable(
-    flat_args: tuple[Unpack[_Ts]], spec: pytree.TreeSpec
-) -> pytree.PyTree:
-    """The inverse of to_graphable."""
-    stuff = pytree.tree_unflatten(flat_args, spec)
-    return stuff
 
 
 def func_to_graphable(
@@ -147,9 +140,9 @@ def impl(
         func = pytree._retrieve_constant(func)
         assert isinstance(func, _ConstantFunction)
 
-    # pyrefly: ignore[bad-argument-type]  # pyrefly bug?
-    args, kwargs = from_graphable(flat_args, in_spec)
-    out = func(*args, **kwargs)
+    # Reconstruct args/kwargs from flat_args and process any LeafModuleState objects
+    with reconstruct_original_args(in_spec, flat_args) as (args, kwargs):
+        out = func(*args, **kwargs)
 
     if checked_output:
         # For "normal" usage all outputs must either be graphable or

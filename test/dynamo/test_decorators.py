@@ -877,6 +877,103 @@ class DecoratorTests(PytreeRegisteringTestCase):
                 "Invalid use of pytree_flatten with nonstrict_trace-ed function", str(e)
             )
 
+    def test_nonstrict_trace_with_module_input(self):
+        """Test nonstrict_trace decorated function with nn.Module as input."""
+
+        @torch._dynamo.nonstrict_trace
+        def traced_forward(helper_mod, x):
+            return helper_mod(x) + x
+
+        class HelperModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class WrapperModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.helper = HelperModule()
+
+            def forward(self, x):
+                return traced_forward(self.helper, x)
+
+        mod = WrapperModule()
+        x = torch.randn(3, 3)
+        opt_mod = torch.compile(mod, fullgraph=True, backend="aot_eager")
+
+        ref = mod(x)
+        res = opt_mod(x)
+        self.assertEqual(ref, res)
+
+    def test_nonstrict_trace_with_module_in_pytree(self):
+        """Test nonstrict_trace with nn.Module inside a pytree (dict)."""
+
+        @torch._dynamo.nonstrict_trace
+        def traced_forward(modules_dict, x):
+            return modules_dict["first"](x) + modules_dict["second"](x)
+
+        class HelperModule(torch.nn.Module):
+            def __init__(self, scale=1.0):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+                self.scale = scale
+
+            def forward(self, x):
+                return self.linear(x) * self.scale
+
+        class WrapperModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.first = HelperModule(scale=2.0)
+                self.second = HelperModule(scale=0.5)
+
+            def forward(self, x):
+                return traced_forward({"first": self.first, "second": self.second}, x)
+
+        mod = WrapperModule()
+        x = torch.randn(3, 3)
+        opt_mod = torch.compile(mod, fullgraph=True, backend="aot_eager")
+
+        ref = mod(x)
+        res = opt_mod(x)
+        self.assertEqual(ref, res)
+
+    def test_nonstrict_trace_with_module_as_kwarg(self):
+        """Test nonstrict_trace with nn.Module passed as keyword argument."""
+
+        @torch._dynamo.nonstrict_trace
+        def traced_forward(x, helper_mod=None):
+            if helper_mod is not None:
+                return helper_mod(x)
+            return x
+
+        class HelperModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        class WrapperModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.helper = HelperModule()
+
+            def forward(self, x):
+                return traced_forward(x, helper_mod=self.helper)
+
+        mod = WrapperModule()
+        x = torch.randn(3, 3)
+        opt_mod = torch.compile(mod, fullgraph=True, backend="aot_eager")
+
+        ref = mod(x)
+        res = opt_mod(x)
+        self.assertEqual(ref, res)
+
     def test_graph_break(self):
         cnts = torch._dynamo.testing.CompileCounter()
 

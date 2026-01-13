@@ -1,57 +1,20 @@
 import contextlib
 import functools
 from collections.abc import Callable, Generator, Sequence
-from typing import Any, NamedTuple
+from typing import Any
 
 import torch
 import torch.utils._pytree as pytree
 from torch._C import DispatchKey, DispatchKeySet
-from torch._higher_order_ops.utils import register_fake
+from torch._higher_order_ops.utils import reconstruct_original_args, register_fake
 from torch._ops import HigherOrderOperator
 from torch.fx.experimental.proxy_tensor import ProxyTorchDispatchMode, track_tensor_tree
-from torch.nn.utils.stateless import _reparametrize_module
 
 from .flat_apply import func_to_graphable
 
 
-class LeafModuleState(NamedTuple):
-    """
-    A pytree representation of an nn.Module for use in invoke_leaf_function.
-
-    In dynamo, nn.Module arguments to leaf functions are converted to this
-    pytree format (index, parameters, buffers). This structure is then
-    flattened to produce the actual inputs to invoke_leaf_function. At
-    runtime, the original module is reconstructed via pytree unflatten and
-    _reparametrize_module.
-
-    Fields:
-    - nn_module_index: Index to retrieve the original nn module at runtime.
-      See register_user_object() and get_external_object_by_index() in
-      graph_bytecode_inputs.py - objects are registered during tracing and
-      retrieved by index during graph execution.
-    - named_parameters: Named parameters of the module, used to reparametrize
-    - named_buffers: Named buffers of the module, used to reparametrize
-    """
-
-    nn_module_index: int
-    named_parameters: dict[str, torch.nn.Parameter]
-    named_buffers: dict[str, torch.Tensor]
-
-
 def unwrap_fn_spec(fn_spec: pytree.TreeSpec) -> Callable:
     return pytree.tree_unflatten((), fn_spec)
-
-
-def _retrieve_module_by_index(nn_module_index: int) -> torch.nn.Module:
-    from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
-
-    mod = get_external_object_by_index(nn_module_index)
-    if not isinstance(mod, torch.nn.Module):
-        raise TypeError(
-            f"Expected nn.Module at index {nn_module_index} for leaf function invocation, "
-            f"but got {type(mod).__name__}. This may indicate the module index is invalid."
-        )
-    return mod
 
 
 def _detach_tensors(tree: Any) -> Any:
@@ -61,43 +24,6 @@ def _detach_tensors(tree: Any) -> Any:
         lambda t: t.detach().requires_grad_(t.requires_grad),
         tree,
     )
-
-
-@contextlib.contextmanager
-def reconstruct_original_args(
-    input_spec: pytree.TreeSpec | None, flat_args: tuple[Any, ...]
-) -> Generator[tuple[list[Any] | tuple[Any, ...], dict[str, Any]], None, None]:
-    """
-    Reconstruct original (args, kwargs) from flattened arguments.
-
-    Handles LeafModuleState by retrieving the original module and reparametrizing
-    it with the parameters/buffers arguments.
-    """
-    if input_spec is None:
-        yield flat_args, {}
-        return
-
-    args, kwargs = pytree.tree_unflatten(flat_args, input_spec)
-
-    with contextlib.ExitStack() as stack:
-
-        def process_module_state(state: LeafModuleState) -> torch.nn.Module:
-            orig_module = _retrieve_module_by_index(state.nn_module_index)
-            stack.enter_context(
-                _reparametrize_module(
-                    orig_module,
-                    {**state.named_parameters, **state.named_buffers},
-                )
-            )
-            return orig_module
-
-        new_args, new_kwargs = pytree.tree_map_only(
-            LeafModuleState,
-            process_module_state,
-            (args, kwargs),
-            is_leaf=lambda x: isinstance(x, LeafModuleState),
-        )
-        yield new_args, new_kwargs
 
 
 def autograd_grad_with_mixed_inputs(

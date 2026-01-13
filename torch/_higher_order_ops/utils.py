@@ -1,10 +1,10 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-from collections.abc import Callable, Iterable, Mapping, Sequence
+from collections.abc import Callable, Generator, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
-from typing import Any, Optional, overload, TypeVar, Union
+from typing import Any, NamedTuple, Optional, overload, TypeVar, Union
 
 import torch
 import torch.fx.traceback as fx_traceback
@@ -1283,3 +1283,94 @@ def filter_with_masks(data: list[Optional[torch.Tensor]], masks: list[bool]):
 def fill_none_with_masks(data: list[Optional[torch.Tensor]], masks: list[bool]):
     data_iter = iter(data)
     return [next(data_iter) if kept else None for kept in masks]
+
+
+class LeafModuleState(NamedTuple):
+    """
+    A pytree representation of an nn.Module for use in higher-order operators.
+
+    In dynamo, nn.Module arguments to leaf functions are converted to this
+    pytree format (index, parameters, buffers). This structure is then
+    flattened to produce the actual inputs to invoke_leaf_function. At
+    runtime, the original module is reconstructed via pytree unflatten and
+    _reparametrize_module.
+
+    Fields:
+    - nn_module_index: Index to retrieve the original nn module at runtime.
+      See register_user_object() and get_external_object_by_index() in
+      graph_bytecode_inputs.py - objects are registered during tracing and
+      retrieved by index during graph execution.
+    - named_parameters: Named parameters of the module, used to reparametrize
+    - named_buffers: Named buffers of the module, used to reparametrize
+    """
+
+    nn_module_index: int
+    named_parameters: dict[str, torch.nn.Parameter]
+    named_buffers: dict[str, torch.Tensor]
+
+
+def _retrieve_module_by_index(nn_module_index: int) -> torch.nn.Module:
+    """
+    This is the runtime counterpart to register_user_object(). During tracing,
+    modules are registered and assigned integer indices. At runtime, this
+    function retrieves the original module instance.
+
+    Raises TypeError if the object at the index is not an nn.Module.
+    """
+    from torch._dynamo.graph_bytecode_inputs import get_external_object_by_index
+
+    mod = get_external_object_by_index(nn_module_index)
+    if not isinstance(mod, torch.nn.Module):
+        raise TypeError(
+            f"Expected nn.Module at index {nn_module_index} for leaf function invocation, "
+            f"but got {type(mod).__name__}. This may indicate the module index is invalid."
+        )
+    return mod
+
+
+@contextmanager
+def reconstruct_original_args(
+    input_spec: Optional[pytree.TreeSpec], flat_args: tuple[Any, ...]
+) -> Generator[tuple[Any, dict[str, Any]], None, None]:
+    """
+    Reconstruct (args, kwargs) from flattened inputs, restoring nn.Module from LeafModuleState.
+
+    This context manager:
+    1. Unflattens flat_args using input_spec to restore (args, kwargs) structure
+    2. Replaces any LeafModuleState with the original nn.Module, reparametrized
+       with the captured parameters/buffers
+
+    MUST be used with 'with' statement - module parameters are temporarily swapped
+    for the duration of the block and restored on exit (even on exception).
+
+    If input_spec is None, yields (flat_args, {}).
+    """
+    from torch.nn.utils.stateless import _reparametrize_module
+
+    if input_spec is None:
+        yield flat_args, {}
+        return
+
+    args, kwargs = pytree.tree_unflatten(flat_args, input_spec)
+
+    with ExitStack() as stack:
+
+        def process_module_state(state: LeafModuleState) -> torch.nn.Module:
+            """Convert LeafModuleState to reparametrized nn.Module."""
+            orig_module = _retrieve_module_by_index(state.nn_module_index)
+            stack.enter_context(
+                _reparametrize_module(
+                    orig_module,
+                    {**state.named_parameters, **state.named_buffers},
+                )
+            )
+            return orig_module
+
+        # Use is_leaf to prevent traversing into LeafModuleState fields
+        new_args, new_kwargs = pytree.tree_map_only(
+            LeafModuleState,
+            process_module_state,
+            (args, kwargs),
+            is_leaf=lambda x: isinstance(x, LeafModuleState),
+        )
+        yield new_args, new_kwargs
