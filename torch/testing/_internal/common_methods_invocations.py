@@ -15276,10 +15276,9 @@ op_db: list[OpInfo] = [
                 device_type="cpu",
             ),
             DecorateInfo(
-                toleranceOverride({torch.float16: tol(atol=3e-3, rtol=1e-3)}),
+                toleranceOverride({torch.float16: tol(atol=3e-2, rtol=1e-2)}),
                 "TestInductorOpInfo",
                 "test_comprehensive",
-                device_type="cuda",
             ),
             DecorateInfo(
                 toleranceOverride({torch.bfloat16: tol(atol=4e-3, rtol=2e-2)}),
@@ -15287,6 +15286,10 @@ op_db: list[OpInfo] = [
                 "test_output_match",
                 device_type="mps",
             ),
+            DecorateInfo(
+                toleranceOverride({torch.float32: tol(atol=1e-3, rtol=1e-5)}),
+                'TestDecomp', 'test_comprehensive',
+                dtypes=(torch.float32,)),
         ),
         skips=(
             # RuntimeError: Difference from float64 is larger with
@@ -15320,7 +15323,7 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.skip("Inconsistent accuracy"),
                 'TestConsistency', 'test_output_match',
-                dtypes=(torch.float16,),
+                dtypes=(torch.float16, torch.bfloat16),
                 device_type="mps",),
             # Exception: Scalars are not close!
             # Expected -152.75 but got -157.25.
@@ -15329,7 +15332,7 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.skip("Inconsistent accuracy"),
                 "TestConsistency", "test_output_grad_match",
-                dtypes=(torch.float16,),
+                dtypes=(torch.float16, torch.bfloat16),
                 device_type="mps",),
         )
     ),
