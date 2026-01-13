@@ -318,7 +318,7 @@ PyTorch,Hardsigmoid,Hardsigmoid_N1_C3_H256_W256_cpu,short,False,62.586455,0.0000
 PyTorch,Hardsigmoid,Hardsigmoid_N4_C3_H256_W256_cpu,short,False,72.778731,0.000000,86.446355
 PyTorch,Hardswish,Hardswish_N1_C3_H256_W256_cpu,short,False,64.990570,0.000000,24.201419
 PyTorch,Hardswish,Hardswish_N4_C3_H256_W256_cpu,short,False,77.094902,0.000000,81.606641
-PyTorch,index_add_,index_add__M8_N32_K1_dim0_cpu_dtypetorch.float32,short,False,311.936155,0.000000,0.007873
+PyTorch,index_add_,index_add__M8_N32_K1_dim0_cpu_dtypetorch.float32,short,False,149.648952,0.000000,0.007873
 PyTorch,index_add_,index_add__M256_N512_K1_dim1_cpu_dtypetorch.float32,short,False,29.777422,0.000000,36.808022
 PyTorch,index_add_,index_add__M512_N512_K1_dim2_cpu_dtypetorch.float32,short,False,126.757590,0.000000,24.816944
 PyTorch,index_select,index_select_M8_N8_K1_dim1_cpu,short,False,1.872278,0.000000,0.286282
