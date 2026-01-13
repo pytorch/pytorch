@@ -41,24 +41,12 @@ from torch.ao.quantization import (
     QuantType,
     QuantWrapper,
 )
-from torch.ao.quantization.backend_config import get_executorch_backend_config
 from torch.ao.quantization.quantization_mappings import (
     get_default_dynamic_quant_module_mappings,
     get_default_qat_module_mappings,
     get_default_qconfig_propagation_list,
 )
-from torch.ao.quantization.quantize_pt2e import (
-    _convert_to_reference_decomposed_fx,
-    convert_pt2e,
-    prepare_pt2e,
-    prepare_qat_pt2e,
-)
-from torch.ao.quantization.quantizer.xnnpack_quantizer import (
-    get_symmetric_quantization_config,
-    XNNPACKQuantizer,
-)
 
-from torch.export import export
 from torch.jit.mobile import _load_for_lite_interpreter
 from torch.testing._internal.common_quantized import override_quantized_engine
 from torch.testing._internal.common_utils import TEST_WITH_ROCM, TestCase
@@ -80,7 +68,6 @@ try:
 except ImportError:
     HAS_FX = False
 
-import contextlib
 import copy
 import functools
 import io
@@ -92,10 +79,6 @@ from collections.abc import Callable
 
 import numpy as np
 import torch._dynamo as torchdynamo
-import torch.ao.quantization.quantizer.x86_inductor_quantizer as xiq
-import torch.ao.quantization.quantizer.xpu_inductor_quantizer as xpuiq
-from torch.ao.quantization.quantizer.x86_inductor_quantizer import X86InductorQuantizer
-from torch.ao.quantization.quantizer.xpu_inductor_quantizer import XPUInductorQuantizer
 from torch.testing import FileCheck
 
 
@@ -536,26 +519,35 @@ def lengths_to_offsets(t, offset_type=np.int64, use_begin_offset=True):
 
 
 def _group_quantize_tensor(w, n_bit=4, q_group_size=16):
-    assert w.dim() == 2
+    if w.dim() != 2:
+        raise AssertionError(f"expected w.dim() == 2, got {w.dim()}")
     w = w.transpose(0, 1).contiguous()
-    assert q_group_size > 1
-    assert w.shape[-1] % q_group_size == 0
+    if q_group_size <= 1:
+        raise AssertionError(f"expected q_group_size > 1, got {q_group_size}")
+    if w.shape[-1] % q_group_size != 0:
+        raise AssertionError(
+            f"expected w.shape[-1] % q_group_size == 0, got w.shape[-1]={w.shape[-1]}, q_group_size={q_group_size}"
+        )
 
     to_quant = w.reshape(-1, q_group_size)
-    assert torch.isnan(to_quant).sum() == 0
+    if torch.isnan(to_quant).sum() != 0:
+        raise AssertionError("to_quant contains NaN values")
 
     max_val = to_quant.amax(dim=1, keepdim=True)
     min_val = to_quant.amin(dim=1, keepdim=True)
     max_int = 2**n_bit - 1
     min_int = 0
     scales = (max_val - min_val).clamp(min=1e-6) / max_int
-    assert torch.isnan(scales).sum() == 0
+    if torch.isnan(scales).sum() != 0:
+        raise AssertionError("scales contains NaN values")
 
     zeros = min_val + scales * (2 ** (n_bit - 1))
-    assert torch.isnan(zeros).sum() == 0
+    if torch.isnan(zeros).sum() != 0:
+        raise AssertionError("zeros contains NaN values")
 
     out = to_quant.sub(min_val).div(scales).round().clamp_(min_int, max_int)
-    assert torch.isnan(out).sum() == 0
+    if torch.isnan(out).sum() != 0:
+        raise AssertionError("out contains NaN values")
 
     out = out.to(dtype=torch.int32).reshape(w.shape)
     if out.device != torch.device("cpu"):
@@ -1474,137 +1466,6 @@ class QuantizationLiteTestCase(QuantizationTestCase):
                     else:
                         continue
                 break
-
-
-class PT2EQuantizationTestCase(QuantizationTestCase):
-    """
-    Base QuantizationTestCase for PT2 with some helper methods.
-    """
-
-    _MAP_TO_FX_TRACED_OPS = {
-        torch.ops.quantized_decomposed.quantize_per_tensor: torch.ops.quantized_decomposed.quantize_per_tensor.default,
-        torch.ops.quantized_decomposed.dequantize_per_tensor: torch.ops.quantized_decomposed.dequantize_per_tensor.default,
-        torch.ops.quantized_decomposed.quantize_per_channel: torch.ops.quantized_decomposed.quantize_per_channel.default,
-        torch.ops.quantized_decomposed.dequantize_per_channel: torch.ops.quantized_decomposed.dequantize_per_channel.default,
-        torch.ops.quantized_decomposed.quantize_per_tensor.tensor: torch.ops.quantized_decomposed.quantize_per_tensor.tensor,
-        torch.ops.quantized_decomposed.dequantize_per_tensor.tensor: torch.ops.quantized_decomposed.dequantize_per_tensor.tensor,
-    }
-
-    def _test_quantizer(
-        self,
-        model,
-        example_inputs,
-        quantizer,
-        expected_node_occurrence,
-        expected_node_list=None,
-        check_against_fx_quant=False,
-        fx_qconfig_mapping=None,
-        export_with_dynamic_shape=False,
-        is_qat=False,
-        is_debug_mode=False,
-        training_ir_node_occurrence=None,
-    ):
-        # resetting dynamo cache
-        torch._dynamo.reset()
-        m_eager = model.eval()
-
-        # program capture
-        m = copy.deepcopy(m_eager)
-        dynamic_shapes = tuple(
-            {0: torch.export.Dim("dim")} if i == 0 else None
-            for i in range(len(example_inputs))
-        )
-        m = export(
-            m,
-            example_inputs,
-            dynamic_shapes=dynamic_shapes if export_with_dynamic_shape else None,
-            strict=True,
-        ).module()
-
-        if is_qat:
-            m = prepare_qat_pt2e(m, quantizer)
-        else:
-            m = prepare_pt2e(m, quantizer)
-        if is_debug_mode:
-            print("prepared model:", m)
-        # Calibrate
-        m(*example_inputs)
-        m = convert_pt2e(m)
-        if is_debug_mode:
-            print("quantized model", m)
-
-        pt2_quant_output = m(*example_inputs)
-        ns = NodeSpec
-        node_occurrence = {
-            ns.call_function(k): v for k, v in expected_node_occurrence.items()
-        }
-        if expected_node_list is None:
-            expected_node_list = []
-        node_list = [ns.call_function(n) for n in expected_node_list]
-        self.checkGraphModuleNodes(
-            m, expected_node_occurrence=node_occurrence, expected_node_list=node_list
-        )
-        if check_against_fx_quant:
-            qconfig_mapping = fx_qconfig_mapping
-            backend_config = get_executorch_backend_config()
-            m_copy = copy.deepcopy(m_eager)
-            m_fx = prepare_fx(
-                m_copy, qconfig_mapping, example_inputs, backend_config=backend_config
-            )
-            m_fx(*example_inputs)
-            m_fx = _convert_to_reference_decomposed_fx(
-                m_fx, backend_config=backend_config
-            )
-            m_fx = export(
-                m_fx,
-                example_inputs,
-                dynamic_shapes=dynamic_shapes if export_with_dynamic_shape else None,
-                strict=True,
-            ).module()
-            node_occurrence = {}
-            for k, v in PT2EQuantizationTestCase._MAP_TO_FX_TRACED_OPS.items():
-                if k in expected_node_occurrence:
-                    node_occurrence[ns.call_function(v)] = expected_node_occurrence[k]
-            if training_ir_node_occurrence is not None:
-                node_occurrence = {
-                    ns.call_function(k): v
-                    for k, v in training_ir_node_occurrence.items()
-                }
-            self.checkGraphModuleNodes(m_fx, expected_node_occurrence=node_occurrence)
-            fx_quant_output = m_fx(*example_inputs)
-            self.assertEqual(fx_quant_output, pt2_quant_output)
-        return m
-
-    def _quantize(self, m, quantizer, example_inputs, is_qat: bool = False):
-        # resetting dynamo cache
-        torch._dynamo.reset()
-
-        m = export(m, example_inputs, strict=True).module()
-        if is_qat:
-            m = prepare_qat_pt2e(m, quantizer)
-        else:
-            m = prepare_pt2e(m, quantizer)
-        m(*example_inputs)
-        m = convert_pt2e(m)
-        return m
-
-    def _get_pt2e_quantized_linear(self, is_per_channel=False) -> torch.fx.GraphModule:
-        class M(torch.nn.Module):
-            def __init__(self) -> None:
-                super().__init__()
-                self.linear = torch.nn.Linear(2, 2)
-
-            def forward(self, x):
-                return self.linear(x)
-
-        quantizer = XNNPACKQuantizer()
-        operator_config = get_symmetric_quantization_config(
-            is_per_channel=is_per_channel
-        )
-        quantizer.set_global(operator_config)
-        example_inputs = (torch.randn(2, 2),)
-        m = M().eval()
-        return self._quantize(m, quantizer, example_inputs)
 
 
 # Below are a series of toy models to use in testing quantization
@@ -3371,45 +3232,3 @@ class TestHelperModules:
         def forward(self, x):
             x = self.relu(self.fc(x))
             return x
-
-
-def _generate_qdq_quantized_model(
-    mod, inputs, is_qat=False, is_dynamic=False, quantizer=None
-):
-    def get_default_quantizer(is_qat, is_dynamic, inputs):
-        has_xpu = any(
-            isinstance(input, torch.Tensor) and input.device.type == "xpu"
-            for input in inputs
-        )
-        if has_xpu:
-            quantizer = XPUInductorQuantizer()
-            assert (not is_qat) and (
-                not is_dynamic
-            ), "QAT and dynamic quantization is not supported at XPU backend currently"
-            quantizer.set_global(xpuiq.get_default_xpu_inductor_quantization_config())
-        else:
-            quantizer = X86InductorQuantizer()
-            quantizer.set_global(
-                xiq.get_default_x86_inductor_quantization_config(
-                    is_qat=is_qat, is_dynamic=is_dynamic
-                )
-            )
-        return quantizer
-
-    maybe_no_grad = contextlib.nullcontext() if is_qat else torch.no_grad()
-    with maybe_no_grad:
-        export_model = export(mod, inputs, strict=True).module(check_guards=False)
-        quantizer = (
-            quantizer
-            if quantizer
-            else get_default_quantizer(is_qat, is_dynamic, inputs)
-        )
-        prepare_model = (
-            prepare_qat_pt2e(export_model, quantizer)
-            if is_qat
-            else prepare_pt2e(export_model, quantizer)
-        )
-        prepare_model(*inputs)
-        torch.ao.quantization.move_exported_model_to_eval(prepare_model)
-        convert_model = convert_pt2e(prepare_model)
-        return convert_model

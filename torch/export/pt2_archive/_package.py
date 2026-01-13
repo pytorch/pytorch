@@ -134,7 +134,8 @@ class PT2ArchiveWriter:
         name: The destination file inside the archive.
         data: The bytes object to write.
         """
-        assert isinstance(data, bytes), f"Expected bytes but got {type(data)}"
+        if not isinstance(data, bytes):
+            raise AssertionError(f"Expected bytes but got {type(data)}")
         self.archive_file.write_record(name, data, len(data))
 
     def write_string(self, name: str, data: str) -> None:
@@ -143,7 +144,8 @@ class PT2ArchiveWriter:
         name: The destination file inside the archive.
         data: The string object to write.
         """
-        assert isinstance(data, str), f"Expected string but got {type(data)}"
+        if not isinstance(data, str):
+            raise AssertionError(f"Expected string but got {type(data)}")
         data_bytes = data.encode()
         self.write_bytes(name, data_bytes)
 
@@ -153,7 +155,8 @@ class PT2ArchiveWriter:
         name: The destination file inside the archive.
         file_path: The source file on disk.
         """
-        assert os.path.isfile(file_path), f"{file_path} is not a valid file path"
+        if not os.path.isfile(file_path):
+            raise AssertionError(f"{file_path} is not a valid file path")
 
         with open(file_path, "rb") as f:
             file_bytes = f.read()
@@ -165,7 +168,8 @@ class PT2ArchiveWriter:
         archive_dir: The destination folder inside the archive.
         folder_dir: The source folder on disk.
         """
-        assert os.path.isdir(folder_dir), f"{folder_dir} is not a valid directory path"
+        if not os.path.isdir(folder_dir):
+            raise AssertionError(f"{folder_dir} is not a valid directory path")
 
         file_paths = filter(
             os.path.isfile, glob.glob(f"{folder_dir}/**", recursive=True)
@@ -193,9 +197,8 @@ class PT2ArchiveReader:
         if isinstance(archive_path_or_buffer, str):
             archive_path_or_buffer = normalize_path_separator(archive_path_or_buffer)
         self.archive_file = torch._C.PyTorchFileReader(archive_path_or_buffer)  # type: ignore[arg-type]
-        assert self.read_string(ARCHIVE_FORMAT_PATH) == ARCHIVE_FORMAT_VALUE, (
-            "Invalid archive format"
-        )
+        if self.read_string(ARCHIVE_FORMAT_PATH) != ARCHIVE_FORMAT_VALUE:
+            raise AssertionError("Invalid archive format")
 
     def __enter__(self) -> "PT2ArchiveReader":
         return self
@@ -255,7 +258,10 @@ def _package_aoti_files(
     if isinstance(aoti_files, list):
         aoti_files = {"model": aoti_files}
 
-    assert isinstance(aoti_files, dict)
+    if not isinstance(aoti_files, dict):
+        raise AssertionError(
+            f"Expected aoti_files to be a dict, but got {type(aoti_files)}"
+        )
 
     all_weights: dict[str, Weights] = {}  # model_name -> weight
     weights_configs: dict[
@@ -444,9 +450,8 @@ def _package_state_dict(
 
     # Categorize weights
     for weight_fqn, weight_tensor in exported_program.state_dict.items():
-        assert isinstance(weight_tensor, torch.Tensor), (
-            "only torch.Tensor is allowed in state_dict"
-        )
+        if not isinstance(weight_tensor, torch.Tensor):
+            raise AssertionError("only torch.Tensor is allowed in state_dict")
         if _should_use_pickle(weight_tensor):
             pickled_weights.append((weight_fqn, weight_tensor))
         else:
@@ -577,7 +582,10 @@ def _package_exported_programs(
     if isinstance(exported_programs, ExportedProgram):
         exported_programs = {"model": exported_programs}
 
-    assert isinstance(exported_programs, dict)
+    if not isinstance(exported_programs, dict):
+        raise AssertionError(
+            f"Expected exported_programs to be a dict, but got {type(exported_programs)}"
+        )
 
     for model_name, ep in exported_programs.items():
         weights_config = _package_state_dict(
@@ -670,12 +678,11 @@ def package_pt2(
          artifacts to save.
 
     """
-    assert not (
-        exported_programs is None and aoti_files is None and extra_files is None
-    ), (
-        "No value passed in for `exported_programs`, `aoti_files`, and "
-        "`extra_files`, implying that you do not plan on saving anything."
-    )
+    if exported_programs is None and aoti_files is None and extra_files is None:
+        raise AssertionError(
+            "No value passed in for `exported_programs`, `aoti_files`, and "
+            "`extra_files`, implying that you do not plan on saving anything."
+        )
 
     if not (
         (isinstance(f, (io.IOBase, IO)) and f.writable() and f.seekable())
@@ -816,7 +823,8 @@ def _build_file_map(
         tensor_bytes = archive_reader.read_bytes(
             os.path.join(base_dir, payload_meta.path_name)
         )
-        assert payload_meta.tensor_meta is not None
+        if payload_meta.tensor_meta is None:
+            raise AssertionError("payload_meta.tensor_meta cannot be None")
         tensor = _create_flat_tensor_from_bytes(tensor_bytes, payload_meta.tensor_meta)
         file_map[payload_meta.path_name] = tensor
 
@@ -850,9 +858,8 @@ def _load_state_dict(
         return archive_reader.read_bytes(legacy_weights_file)
     else:
         weights_config_file = WEIGHTS_CONFIG_FILENAME_FORMAT.format(model_name)
-        assert weights_config_file in archive_reader.get_file_names(), (
-            f"{weights_config_file} not found in PT2 archive"
-        )
+        if weights_config_file not in archive_reader.get_file_names():
+            raise AssertionError(f"{weights_config_file} not found in PT2 archive")
         weights_config = _load_payload_config(archive_reader, weights_config_file)
         # construct the mapping from file name (e.g. weight_0) to flat weight payload
         state_dict_file_map = _build_file_map(
@@ -871,7 +878,10 @@ def _load_state_dict(
                 )
             else:
                 tensor_meta = payload_meta.tensor_meta
-                assert tensor_meta is not None
+                if tensor_meta is None:
+                    raise AssertionError(
+                        "tensor_meta cannot be None for non-pickled weight"
+                    )
                 weight_tensor = torch.as_strided(
                     input=state_dict_file_map[payload_meta.path_name],
                     size=deserialize_size(tensor_meta.sizes),
@@ -904,9 +914,8 @@ def _load_constants(
         return archive_reader.read_bytes(legacy_constants_file)
     else:
         constants_config_file = CONSTANTS_CONFIG_FILENAME_FORMAT.format(model_name)
-        assert constants_config_file in archive_reader.get_file_names(), (
-            f"{constants_config_file} not found in PT2 archive"
-        )
+        if constants_config_file not in archive_reader.get_file_names():
+            raise AssertionError(f"{constants_config_file} not found in PT2 archive")
         constants_config = _load_payload_config(archive_reader, constants_config_file)
         # construct the mapping from file name (e.g. constant_0) to constant payload
         constant_file_map = _build_file_map(
@@ -927,7 +936,10 @@ def _load_constants(
                     )
                 else:
                     tensor_meta = payload_meta.tensor_meta
-                    assert tensor_meta is not None
+                    if tensor_meta is None:
+                        raise AssertionError(
+                            "tensor_meta cannot be None for non-pickled constant"
+                        )
                     constant_tensor = torch.as_strided(
                         input=constant_file_map[path_name],
                         size=deserialize_size(tensor_meta.sizes),

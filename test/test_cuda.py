@@ -702,15 +702,18 @@ print(t.is_pinned())
 
         # check default
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ""
-        self.assertTrue(abs(check_workspace_size(a) - default_workspace_size) < 524288)
+        self.assertLess(check_workspace_size(a) - default_workspace_size, 524288)
+        self.assertLess(abs(check_workspace_size(a) - default_workspace_size), 524288)
 
         # check default with bad user config
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = "-1"
-        self.assertTrue(abs(check_workspace_size(a) - default_workspace_size) < 524288)
+        self.assertLess(check_workspace_size(a) - default_workspace_size, 524288)
+        self.assertLess(abs(check_workspace_size(a) - default_workspace_size), 524288)
 
         # check valid config
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":128:8:64:16:32:32"
-        self.assertTrue(abs(check_workspace_size(a) - (3072 * 1024)) < 524288)
+        self.assertLess(check_workspace_size(a) - (3072 * 1024), 524288)
+        self.assertLess(abs(check_workspace_size(a) - (3072 * 1024)), 524288)
 
         torch._C._cuda_clearCublasWorkspaces()
 
@@ -856,6 +859,7 @@ print(t.is_pinned())
             self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "none")
 
     @recover_orig_fp32_precision
+    @serialTest()
     def test_fp32_precision_with_float32_matmul_precision(self):
         torch.set_float32_matmul_precision("highest")
         self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "ieee")
@@ -865,6 +869,7 @@ print(t.is_pinned())
         self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "tf32")
 
     @recover_orig_fp32_precision
+    @serialTest()
     def test_invalid_status_for_legacy_api(self):
         torch.backends.cudnn.conv.fp32_precision = "none"
         torch.backends.cudnn.rnn.fp32_precision = "tf32"
@@ -1417,13 +1422,16 @@ except RuntimeError as e:
         expected_messages = [
             "device-side assert triggered",  # CUDA
             "Assertion",  # CUDA
-            "HSA_STATUS_ERROR_EXCEPTION",  # ROCm
-            "Device-side assertion",  # ROCm
+            "HSA_STATUS_ERROR_EXCEPTION",  # ROCm with TORCH_USE_HIP_DSA
+            "Device-side assertion",  # ROCm with TORCH_USE_HIP_DSA
+            # ROCm without TORCH_USE_HIP_DSA returns a launch failure instead
+            # of a proper device-side assertion, but still catches the error
+            "hipErrorLaunchFailure",
+            "unspecified launch failure",
         ]
         self.assertTrue(any(msg in out or msg in err for msg in expected_messages))
 
     @slowTest
-    @unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support device side asserts")
     def test_multinomial_invalid_probs_cuda(self):
         self._spawn_test_multinomial_invalid_probs_cuda([1.0, -1.0, 1.0])
         self._spawn_test_multinomial_invalid_probs_cuda([1.0, inf, 1.0])
@@ -1439,9 +1447,17 @@ except RuntimeError as e:
         with ctx.Pool(1, initializer=self._mute_init) as pool:
             errors = pool.map(method, [arg])
             for e in errors:
-                if "device-side assert triggered" not in str(e):
+                # CUDA raises cudaErrorAssert (710) with "device-side assert triggered"
+                # ROCm with TORCH_USE_HIP_DSA raises a proper device-side assertion
+                # ROCm without TORCH_USE_HIP_DSA raises hipErrorLaunchFailure (719)
+                # which still catches the error but with less specific messaging
+                is_cuda_assert = "device-side assert triggered" in str(e)
+                is_hip_assert = "hipErrorLaunchFailure" in str(
+                    e
+                ) or "unspecified launch failure" in str(e)
+                if not (is_cuda_assert or is_hip_assert):
                     self.fail(e)
-                if e.error_code != 710:  # cudaErrorAssert == 710
+                if e.error_code not in (710, 719):
                     self.fail(e)
 
     @staticmethod
@@ -1454,7 +1470,6 @@ except RuntimeError as e:
             return err
 
     @slowTest
-    @skipIfRocm
     def test_index_out_of_bounds_exception_cuda(self):
         test_method = TestCuda._test_index_bounds_cuda
         # Test in-bound access works fine
@@ -3985,6 +4000,7 @@ print(f"{{r1}}, {{r2}}")
         x = torch.cuda.device_count()
         self.assertEqual(f"{x}, 1", r)
 
+    @unittest.skipUnless("CI" in os.environ, "Only run on CI")
     @unittest.skipIf(
         _get_torch_cuda_version() >= (13, 1),
         "This test does not fail on CUDA 13.1 or newer",
@@ -5569,16 +5585,29 @@ class TestCachingHostAllocatorCudaGraph(TestCase):
                 assert new_data_ptr != old_data_ptr
 
     def test_unpinned_memory_use(self):
-        # It is allowed to call copy_(non_blocking=True) on pageable
-        # host memory. TODO: We should test that a warning is emitted
-        # here, since we have no way to guarantee that pageable host
-        # memory allocated during stream capture stays alive so long
-        # as the graph is alive.
+        # Copying between CPU and CUDA tensors during graph capture
+        # with unpinned CPU memory should raise an error.
         graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph):
-            data = torch.empty(8)
-            data_gpu = torch.randn(8, device="cuda")
-            data_gpu.copy_(data, non_blocking=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Cannot copy between CPU and CUDA tensors during CUDA graph capture",
+        ):
+            with torch.cuda.graph(graph):
+                data = torch.empty(8)
+                data_gpu = torch.randn(8, device="cuda")
+                data_gpu.copy_(data, non_blocking=True)
+
+    def test_unpinned_memory_use_device_to_host(self):
+        # Copying from CUDA to unpinned CPU during graph capture should also error.
+        graph = torch.cuda.CUDAGraph()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Cannot copy between CPU and CUDA tensors during CUDA graph capture",
+        ):
+            with torch.cuda.graph(graph):
+                data_gpu = torch.randn(8, device="cuda")
+                data = torch.empty(8)
+                data.copy_(data_gpu, non_blocking=True)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
@@ -5787,6 +5816,37 @@ class TestMemPool(TestCase):
 
         # called_dummy_free should be 321 if dummy_free was used to deallocate
         # out tensor
+        self.assertEqual(called_dummy_free.value, 321)
+
+    def test_tensor_delete_after_allocator_delete(self):
+        allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
+        pool = torch.cuda.MemPool(allocator.allocator())
+
+        with torch.cuda.use_mem_pool(pool):
+            data = torch.empty(4, device="cuda")
+
+        alloc_lib = ctypes.CDLL(dummy_allocator)
+        called_dummy_alloc = ctypes.c_int.in_dll(alloc_lib, "called_dummy_alloc")
+        called_dummy_free = ctypes.c_int.in_dll(alloc_lib, "called_dummy_free")
+
+        self.assertEqual(called_dummy_alloc.value, 123)
+        self.assertEqual(called_dummy_free.value, 0)
+
+        # Explicitly drop the allocator before releasing the
+        # tensor. CUDACachingAllocator's PrivatePool instance should
+        # keep the allocator live until all tensors die.
+
+        # N.B.: Deleting the pool doesn't actually do anything, since
+        # it doesn't own the allocator object. But we do it anyway
+        # because it is the situation that users are likely to face.
+        del pool
+        del allocator
+
+        self.assertEqual(called_dummy_free.value, 0)
+
+        del data
+        torch.cuda.empty_cache()
+
         self.assertEqual(called_dummy_free.value, 321)
 
     @serialTest()
@@ -6631,7 +6691,7 @@ class TestGreenContext(TestCase):
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestGDS(TestCase):
     def _get_tmp_dir_fs_type(self):
-        my_path = os.path.realpath("/tmp")
+        my_path = os.path.realpath(tempfile.gettempdir())
         root_type = ""
         for part in psutil.disk_partitions():
             if part.mountpoint == "/":
@@ -7352,9 +7412,7 @@ class TestCompileKernel(TestCase):
         # Test error handling with more than supported shared memory size
         if torch.version.hip:
             max_smem = (
-                65536
-                if get_device_properties().gcnArchName not in ["gfx950"]
-                else 160 * 1024
+                65536 if get_device_properties().gcnArchName != "gfx950" else 160 * 1024
             )
         else:
             max_smem = get_device_properties().shared_memory_per_block_optin
