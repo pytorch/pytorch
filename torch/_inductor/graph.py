@@ -1675,7 +1675,9 @@ class GraphLowering(torch.fx.Interpreter):
         def mark_use_channels_last_layout(
             result: ir.IRNode, n: torch.fx.Node
         ) -> ir.IRNode:
-            dense = torch._prims_common.is_non_overlapping_and_dense(n.meta["val"])
+            dense = torch._prims_common.is_non_overlapping_and_dense_or_false(
+                n.meta["val"]
+            )
             strides = n.meta["val"].stride()
             unbacked_symbols_in_strides = len(free_unbacked_symbols(strides)) > 0
             if (
