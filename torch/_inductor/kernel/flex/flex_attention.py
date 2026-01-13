@@ -399,7 +399,14 @@ def flex_attention(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        cur_kernel_options.setdefault("USE_TMA", False)
+        USE_TMA_DEFAULT = bool(torch.xpu.is_available())
+        # The shape dtype of tensor desc is i32
+        if V.graph.sizevars.statically_known_true(
+            seq_len_q > 2**31 - 1
+        ) or V.graph.sizevars.statically_known_true(seq_len_kv > 2**31 - 1):
+            USE_TMA_DEFAULT = False
+        cur_kernel_options.setdefault("USE_TMA", USE_TMA_DEFAULT)
+
         if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
             cur_kernel_options["USE_TMA"] = False
 
