@@ -1255,6 +1255,10 @@ void triangular_solve_out_sparse_csr(
               desc_spsv.descriptor()));
         });
   } else {
+    // this macro must exist outside the DISPATCH macro for windows builds
+#ifdef USE_ROCM
+    #define ROCM_EXTRA_ARG ,nullptr
+#endif
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
         X.scalar_type(), "triangular_solve_out_sparse_csr_cuda_impl", [&] {
           scalar_t alpha = 1;
@@ -1306,12 +1310,8 @@ void triangular_solve_out_sparse_csr(
               descX.descriptor(),
               compute_type,
               CUSPARSE_SPSM_ALG_DEFAULT,
-#ifdef USE_ROCM
-              desc_spsm.descriptor(),
-              nullptr
-#else
               desc_spsm.descriptor()
-#endif
+              ROCM_EXTRA_ARG
             ));
         });
   }
