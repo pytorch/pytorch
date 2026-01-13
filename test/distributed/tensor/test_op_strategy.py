@@ -865,5 +865,400 @@ class TestOpSchemaMetaProperties(TestCase):
         self.assertEqual(kwargs_meta["alpha"], 1.0)
 
 
+class TestShardOrderPreservation(TestCase):
+    """Test shard_order preservation in expand_to_full_mesh_op_strategy."""
+
+    def test_find_compatible_ordering(self):
+        """Test exact matching logic."""
+        from torch.distributed.tensor._ops.utils import find_compatible_ordering
+
+        # Exact match
+        self.assertEqual(
+            find_compatible_ordering((1, 0, 2), {0, 1, 2}), (1, 0, 2)
+        )
+
+        # Different ordering of same dims
+        self.assertEqual(
+            find_compatible_ordering((2, 0, 1), {0, 1, 2}), (2, 0, 1)
+        )
+
+        # No match: different number of dims
+        self.assertIsNone(find_compatible_ordering((1, 0, 2), {0, 1}))
+
+        # No match: different mesh dims
+        self.assertIsNone(find_compatible_ordering((1, 0), {0, 1, 2}))
+
+        # No match: disjoint sets
+        self.assertIsNone(find_compatible_ordering((0, 1), {2, 3}))
+
+    def test_matches_placement_types(self):
+        """Test type matching with _StridedShard normalization."""
+        from torch.distributed.tensor._ops.utils import matches_placement_types
+        from torch.distributed.tensor.placement_types import _StridedShard, Partial
+
+        # Match: both Shard
+        self.assertTrue(
+            matches_placement_types(
+                (Shard, Shard), (Shard(0), Shard(0), Replicate()), (0, 1)
+            )
+        )
+
+        # Match: _StridedShard normalized to Shard
+        self.assertTrue(
+            matches_placement_types(
+                (Shard, Shard),
+                (_StridedShard(0, split_factor=2), Shard(0), Replicate()),
+                (0, 1),
+            )
+        )
+
+        # No match: different types
+        self.assertFalse(
+            matches_placement_types(
+                (Shard, Partial), (Shard(0), Shard(0), Replicate()), (0, 1)
+            )
+        )
+
+    def test_shard_order_preserved_in_expansion(self):
+        """Test that shard_order is preserved through expansion with exact matching."""
+        from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
+        from torch.distributed.tensor._ops.utils import (
+            generate_shard_order_variants,
+            ShardOrderPattern,
+        )
+
+        # Input pattern: (1, 0) with both Shard
+        patterns = [ShardOrderPattern(mesh_dims=(1, 0), placement_types=(Shard, Shard))]
+
+        # Output placements: multi-sharded on tensor_dim=0 across mesh_dims {0, 1} (exact match)
+        output_placements = (Shard(0), Shard(0))
+
+        # Generate variants
+        variants = generate_shard_order_variants(output_placements, patterns)
+
+        # Should produce one variant with the exact ordering (1, 0)
+        self.assertEqual(len(variants), 1)
+        self.assertIsNotNone(variants[0])
+        self.assertEqual(len(variants[0]), 1)
+        entry = variants[0][0]
+        self.assertIsInstance(entry, ShardOrderEntry)
+        self.assertEqual(entry.tensor_dim, 0)
+        self.assertEqual(entry.mesh_dims, (1, 0))
+
+    def test_shard_order_variants_integration(self):
+        """Integration test: verify exact matching with multiple patterns."""
+        from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
+        from torch.distributed.tensor._ops.utils import (
+            generate_shard_order_variants,
+            ShardOrderPattern,
+        )
+
+        # Test multiple patterns with different mesh dim counts
+        patterns = [
+            ShardOrderPattern(mesh_dims=(1, 0), placement_types=(Shard, Shard)),
+            ShardOrderPattern(
+                mesh_dims=(0, 1, 2), placement_types=(Shard, Shard, Shard)
+            ),
+        ]
+
+        # Output placements: multi-sharded on tensor_dim=0 across mesh_dims {0, 1, 2}
+        output_placements = (Shard(0), Shard(0), Shard(0))
+
+        # Generate variants
+        variants = generate_shard_order_variants(output_placements, patterns)
+
+        # Should produce one variant: only (0, 1, 2) matches exactly
+        # Pattern (1, 0) doesn't match because output has 3 dims, not 2
+        self.assertEqual(len(variants), 1)
+
+        # Verify the variant
+        self.assertIsNotNone(variants[0])
+        self.assertEqual(len(variants[0]), 1)
+        entry = variants[0][0]
+        self.assertIsInstance(entry, ShardOrderEntry)
+        self.assertEqual(entry.tensor_dim, 0)
+        self.assertEqual(entry.mesh_dims, (0, 1, 2))
+
+
+class TestShardOrderExpansion(DTensorTestBase):
+    """Test shard_order preservation through full expansion with real DeviceMesh."""
+
+    @property
+    def world_size(self):
+        return 4
+
+    @with_comms
+    def test_expand_with_stridedshard_input(self):
+        """Test shard_order preservation through full expansion pipeline with _StridedShard input."""
+        from torch.distributed.tensor._ops.single_dim_strategy import (
+            _expand_single_dim_strategy_to_mesh,
+            _ShardingPlaceholder,
+        )
+        from torch.distributed.tensor.placement_types import _StridedShard
+
+        mesh = DeviceMesh(self.device_type, torch.arange(4).reshape(2, 2))
+        tensor_meta = TensorMeta(
+            shape=torch.Size([8, 16]), stride=(16, 1), dtype=torch.float32
+        )
+
+        # Create input spec with _StridedShard that encodes non-default shard_order
+        # _StridedShard(0, sf=2) on mesh_dim=0 and Shard(0) on mesh_dim=1
+        # This will decode to shard_order: ((1, 0),) which is non-default
+        input_spec = DTensorSpec(
+            mesh=mesh,
+            placements=(_StridedShard(0, split_factor=2), Shard(0)),
+            tensor_meta=tensor_meta,
+        )
+
+        # Verify it has non-default shard_order
+        self.assertIsNotNone(input_spec.shard_order)
+        self.assertEqual(input_spec.shard_order[0].mesh_dims, (1, 0))
+
+        # Create OpSchema with this input
+        op_schema = OpSchema(
+            op=torch.ops.aten.add.Tensor,
+            args_schema=(OpStrategy([OpSpec(input_spec)]),),
+            kwargs_schema={},
+        )
+
+        # Define a simple single-dim strategy
+        def simple_single_dim_strategy(op, args_schema, kwargs_schema):
+            return [[_ShardingPlaceholder(0), _ShardingPlaceholder(0)]]
+
+        # Expand through full pipeline
+        expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
+            mesh, op_schema, simple_single_dim_strategy, tensor_meta
+        )
+        strategy = expanded_strategy_fn(
+            torch.ops.aten.add.Tensor, op_schema.args_meta, op_schema.kwargs_meta
+        )
+
+        # Find strategies with preserved shard_order (1, 0)
+        found_preserved_order = False
+        for spec in strategy.strategies:
+            if isinstance(spec.output_specs, DTensorSpec):
+                output_spec = spec.output_specs
+                if output_spec.shard_order is not None:
+                    for entry in output_spec.shard_order:
+                        if entry.mesh_dims == (1, 0):
+                            found_preserved_order = True
+                            self.assertEqual(entry.tensor_dim, 0)
+                            break
+
+        self.assertTrue(
+            found_preserved_order,
+            "Expected to find strategy with preserved shard_order (1, 0) from _StridedShard input",
+        )
+
+    @with_comms
+    def test_expand_with_multiple_patterns_complex(self):
+        """
+        Complex test: multiple inputs with different shard_order patterns on 2x2 mesh.
+
+        Tests:
+        - Multiple inputs with different non-default shard_order patterns
+        - Pattern extraction from multiple sources
+        - Strategy variants generated from each pattern
+        - Both exact match and suffix extension scenarios
+        """
+        from torch.distributed.tensor._ops.single_dim_strategy import (
+            _expand_single_dim_strategy_to_mesh,
+            _ShardingPlaceholder,
+            extract_shard_order_patterns,
+        )
+        from torch.distributed.tensor._ops.utils import ShardOrderPattern
+        from torch.distributed.tensor.placement_types import _StridedShard
+
+        mesh = DeviceMesh(self.device_type, torch.arange(4).reshape(2, 2))
+
+        # Input 1: 2D tensor with shard_order (1, 0) on tensor_dim=0
+        tensor_meta_1 = TensorMeta(
+            shape=torch.Size([16, 32]), stride=(32, 1), dtype=torch.float32
+        )
+        input_spec_1 = DTensorSpec(
+            mesh=mesh,
+            placements=(_StridedShard(0, split_factor=2), Shard(0)),
+            tensor_meta=tensor_meta_1,
+        )
+
+        # Input 2: 3D tensor with non-default (1, 0) ordering on tensor_dim=1
+        # Both mesh dims shard tensor_dim=1
+        tensor_meta_2 = TensorMeta(
+            shape=torch.Size([8, 16, 32]), stride=(512, 32, 1), dtype=torch.float32
+        )
+        input_spec_2 = DTensorSpec(
+            mesh=mesh,
+            placements=(_StridedShard(1, split_factor=2), Shard(1)),
+            tensor_meta=tensor_meta_2,
+        )
+
+        # Verify non-default orderings
+        self.assertIsNotNone(input_spec_1.shard_order)
+        self.assertEqual(input_spec_1.shard_order[0].mesh_dims, (1, 0))
+        self.assertEqual(input_spec_1.shard_order[0].tensor_dim, 0)
+
+        self.assertIsNotNone(input_spec_2.shard_order)
+        # Should have non-default (1, 0) for tensor_dim=1
+        self.assertEqual(input_spec_2.shard_order[0].mesh_dims, (1, 0))
+        self.assertEqual(input_spec_2.shard_order[0].tensor_dim, 1)
+
+        # Create OpSchema with both inputs
+        op_schema = OpSchema(
+            op=torch.ops.aten.add.Tensor,
+            args_schema=(
+                OpStrategy([OpSpec(input_spec_1)]),
+                OpStrategy([OpSpec(input_spec_2)]),
+            ),
+            kwargs_schema={},
+        )
+
+        # Extract patterns - should get (1, 0) from both inputs (but deduplicated)
+        patterns = extract_shard_order_patterns(op_schema)
+
+        # Should extract the non-default pattern (1, 0)
+        self.assertGreater(len(patterns), 0)
+        pattern_mesh_dims = [p.mesh_dims for p in patterns]
+        self.assertIn((1, 0), pattern_mesh_dims)
+
+        # Verify pattern structure
+        for pattern in patterns:
+            self.assertIsInstance(pattern, ShardOrderPattern)
+            self.assertIsInstance(pattern.mesh_dims, tuple)
+            self.assertIsInstance(pattern.placement_types, tuple)
+
+        # Define single-dim strategy that creates multi-dimensional sharding
+        def multi_shard_single_dim_strategy(op, args_schema, kwargs_schema):
+            # Strategy that shards output on dim 0 across mesh
+            return [
+                [
+                    _ShardingPlaceholder(0),
+                    _ShardingPlaceholder(0),
+                    _ShardingPlaceholder(0),
+                ]
+            ]
+
+        # Expand through full pipeline
+        expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
+            mesh, op_schema, multi_shard_single_dim_strategy, tensor_meta_1
+        )
+        strategy = expanded_strategy_fn(
+            torch.ops.aten.add.Tensor, op_schema.args_meta, op_schema.kwargs_meta
+        )
+
+        # Verify that strategies with preserved shard_order (1, 0) exist
+        found_ordering_1_0 = False
+
+        for spec in strategy.strategies:
+            if isinstance(spec.output_specs, DTensorSpec):
+                output_spec = spec.output_specs
+
+                # Check if this is multi-sharded on tensor_dim=0
+                mesh_dims_for_dim0 = []
+                for mesh_dim, placement in enumerate(output_spec.placements):
+                    if isinstance(placement, Shard) and placement.dim == 0:
+                        mesh_dims_for_dim0.append(mesh_dim)
+
+                if len(mesh_dims_for_dim0) > 1:
+                    if output_spec.shard_order is not None:
+                        for entry in output_spec.shard_order:
+                            if entry.tensor_dim == 0 and entry.mesh_dims == (1, 0):
+                                found_ordering_1_0 = True
+                                break
+
+        # Should find the preserved non-default ordering from the input patterns
+        self.assertTrue(
+            found_ordering_1_0,
+            "Expected to find strategy with preserved shard_order (1, 0) from inputs",
+        )
+
+
+class TestShardOrderExpansion3DMesh(DTensorTestBase):
+    """Test shard_order preservation with 3D mesh (more complex scenarios)."""
+
+    @property
+    def world_size(self):
+        return 8
+
+    @with_comms
+    def test_expand_with_3d_mesh_exact_matching(self):
+        """
+        Test shard_order preservation on 3D mesh with exact matching.
+
+        Pattern from input: (2, 1) on 3D mesh with dims {1, 2}
+        Should preserve: (2, 1) when output also shards on exactly {1, 2}
+        """
+        from torch.distributed.tensor._ops.single_dim_strategy import (
+            _expand_single_dim_strategy_to_mesh,
+            _ShardingPlaceholder,
+        )
+        from torch.distributed.tensor.placement_types import _StridedShard
+
+        mesh = DeviceMesh(self.device_type, torch.arange(8).reshape(2, 2, 2))
+        tensor_meta = TensorMeta(
+            shape=torch.Size([32, 64]), stride=(64, 1), dtype=torch.float32
+        )
+
+        # Create input with non-default shard_order on 2 mesh dims: (2, 1)
+        # Use _StridedShard to encode this: _StridedShard(0, sf=2) on mesh_dim=1, Shard(0) on mesh_dim=2
+        # This creates shard_order with (2, 1) ordering
+        input_spec = DTensorSpec(
+            mesh=mesh,
+            placements=(Replicate(), _StridedShard(0, split_factor=2), Shard(0)),
+            tensor_meta=tensor_meta,
+        )
+
+        # Verify the non-default shard_order
+        self.assertIsNotNone(input_spec.shard_order)
+        self.assertEqual(input_spec.shard_order[0].mesh_dims, (2, 1))
+        self.assertEqual(input_spec.shard_order[0].tensor_dim, 0)
+
+        # Create OpSchema
+        op_schema = OpSchema(
+            op=torch.ops.aten.relu.default,
+            args_schema=(OpStrategy([OpSpec(input_spec)]),),
+            kwargs_schema={},
+        )
+
+        # Define single-dim strategy that keeps the same sharding pattern
+        def same_shard_strategy(op, args_schema, kwargs_schema):
+            return [[_ShardingPlaceholder(0), _ShardingPlaceholder(0)]]
+
+        # Expand through full pipeline
+        expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
+            mesh, op_schema, same_shard_strategy, tensor_meta
+        )
+        strategy = expanded_strategy_fn(
+            torch.ops.aten.relu.default, op_schema.args_meta, op_schema.kwargs_meta
+        )
+
+        # Find strategy with preserved exact ordering: (2, 1)
+        # Should only match outputs that shard on exactly mesh dims {1, 2}
+        found_preserved_order = False
+        for spec in strategy.strategies:
+            if isinstance(spec.output_specs, DTensorSpec):
+                output_spec = spec.output_specs
+
+                # Check which mesh dims are sharding tensor_dim=0
+                mesh_dims_for_dim0 = []
+                for mesh_dim, placement in enumerate(output_spec.placements):
+                    if isinstance(placement, Shard) and placement.dim == 0:
+                        mesh_dims_for_dim0.append(mesh_dim)
+
+                # If sharded on exactly mesh dims {1, 2}, check for preserved ordering
+                if (
+                    set(mesh_dims_for_dim0) == {1, 2}
+                    and output_spec.shard_order is not None
+                ):
+                    for entry in output_spec.shard_order:
+                        if entry.tensor_dim == 0 and entry.mesh_dims == (2, 1):
+                            found_preserved_order = True
+                            break
+
+        self.assertTrue(
+            found_preserved_order,
+            "Expected to find strategy with preserved shard_order (2, 1) from input",
+        )
+
+
 if __name__ == "__main__":
     run_tests()

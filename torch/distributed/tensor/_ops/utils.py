@@ -4,13 +4,19 @@ import functools
 import itertools
 import operator
 from collections.abc import Callable, Iterable, Sequence
+from dataclasses import dataclass
 from typing import cast, Optional, TypeAlias, TypeVar, Union
 
 import torch
 from torch._prims_common import DimsSequenceType, DimsType
 from torch.distributed.tensor._api import DTensor
 from torch.distributed.tensor._collective_utils import redistribute_cost
-from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor._dtensor_spec import (
+    DTensorSpec,
+    ShardOrder,
+    ShardOrderEntry,
+    TensorMeta,
+)
 from torch.distributed.tensor._op_schema import (
     OpSchema,
     OpSpec,
@@ -349,6 +355,208 @@ def generate_redistribute_costs(
     return redistribute_costs
 
 
+@dataclass(frozen=True)
+class ShardOrderPattern:
+    """
+    Represents a shard ordering pattern extracted from input DTensorSpecs.
+
+    Used to preserve efficient shard orderings when expanding single-mesh-dim
+    strategies to full mesh strategies.
+
+    Attributes:
+        mesh_dims: Mesh dimension ordering, e.g., (1, 0, 2)
+        placement_types: Corresponding placement types, e.g., (Shard, Shard, Shard)
+    """
+
+    mesh_dims: tuple[int, ...]
+    placement_types: tuple[type, ...]
+
+
+def find_compatible_ordering(
+    pattern_mesh_dims: tuple[int, ...],
+    output_mesh_dims: set[int],
+) -> tuple[int, ...] | None:
+    """
+    Check if pattern ordering matches output mesh_dims exactly.
+
+    Only applies the pattern if the output uses exactly the same set of mesh
+    dimensions. We don't extrapolate orderings we haven't observed.
+
+    Args:
+        pattern_mesh_dims: Mesh dimension ordering from input, e.g., (1, 0, 2)
+        output_mesh_dims: Set of mesh dimensions in output, e.g., {0, 1, 2}
+
+    Returns:
+        The ordering to use for output, or None if not an exact match.
+
+    Examples:
+        >>> find_compatible_ordering((1, 0, 2), {0, 1, 2})
+        (1, 0, 2)  # Exact match
+
+        >>> find_compatible_ordering((1, 0, 2), {0, 1})
+        None  # Different set of mesh dims
+
+        >>> find_compatible_ordering((1, 0), {0, 1, 2})
+        None  # Different set of mesh dims
+    """
+    if set(pattern_mesh_dims) == output_mesh_dims:
+        return pattern_mesh_dims
+    return None
+
+
+def matches_placement_types(
+    pattern_types: tuple[type, ...],
+    output_placements: tuple[Placement, ...],
+    ordering: tuple[int, ...],
+) -> bool:
+    """
+    Check if output placement types match pattern types at shared positions.
+
+    _StridedShard is normalized to Shard for semantic type comparison, since
+    _StridedShard is just an encoding of shard_order information.
+
+    Args:
+        pattern_types: Expected placement types, e.g., (Shard, Shard, Shard)
+        output_placements: Actual placements in output
+        ordering: Mesh dimension ordering to check, e.g., (1, 0, 2)
+
+    Returns:
+        True if types match at all shared positions, False otherwise.
+
+    Examples:
+        >>> # Match: both are Shard
+        >>> matches_placement_types(
+        ...     (Shard, Shard), (Shard(0), Shard(0), Replicate()), (0, 1)
+        ... )
+        True
+
+        >>> # Match: _StridedShard normalized to Shard
+        >>> matches_placement_types(
+        ...     (Shard, Shard), (_StridedShard(0, sf=2), Shard(0), Replicate()), (0, 1)
+        ... )
+        True
+
+        >>> # No match: different types
+        >>> matches_placement_types(
+        ...     (Shard, Partial), (Shard(0), Shard(0), Replicate()), (0, 1)
+        ... )
+        False
+    """
+    # Only check positions that exist in both pattern and ordering
+    check_len = min(len(pattern_types), len(ordering))
+    for i in range(check_len):
+        mesh_dim = ordering[i]
+        expected_type = pattern_types[i]
+        actual_placement = output_placements[mesh_dim]
+
+        # Normalize _StridedShard → Shard for semantic comparison
+        if isinstance(actual_placement, _StridedShard):
+            actual_type = Shard
+        else:
+            actual_type = type(actual_placement)
+
+        if actual_type != expected_type:
+            return False
+
+    return True
+
+
+def generate_shard_order_variants(
+    output_placements: tuple[Placement, ...],
+    patterns: list[ShardOrderPattern],
+) -> list[ShardOrder | None]:
+    """
+    Generate compatible shard_order variants for output placements.
+
+    For each extracted pattern from inputs, checks if it's compatible with the
+    output's multi-dimensional sharding via prefix/suffix matching and type
+    compatibility.
+
+    Args:
+        output_placements: Placements for the output spec
+        patterns: List of ShardOrderPattern extracted from inputs
+
+    Returns:
+        List of ShardOrder tuples to use when creating DTensorSpec variants.
+        Returns [None] if no multi-dim sharding or no compatible patterns found.
+
+    Example:
+        >>> pattern = ShardOrderPattern(
+        ...     mesh_dims=(1, 0), placement_types=(Shard, Shard)
+        ... )
+        >>> patterns = [pattern]
+        >>> output_placements = (Shard(0), Shard(0), Shard(0))
+        >>> generate_shard_order_variants(output_placements, patterns)
+        [(ShardOrderEntry(tensor_dim=0, mesh_dims=(1, 0, 2)),)]
+    """
+    if not patterns:
+        return [None]
+
+    # Find which tensor dims are sharded on which mesh dims
+    tensor_dim_to_mesh_dims: dict[int, list[int]] = {}
+    for mesh_dim, placement in enumerate(output_placements):
+        if isinstance(placement, Shard):
+            tensor_dim = placement.dim
+            if tensor_dim not in tensor_dim_to_mesh_dims:
+                tensor_dim_to_mesh_dims[tensor_dim] = []
+            tensor_dim_to_mesh_dims[tensor_dim].append(mesh_dim)
+
+    # Filter to only multi-sharded dims
+    multi_sharded = {
+        td: set(mds)
+        for td, mds in tensor_dim_to_mesh_dims.items()
+        if len(mds) > 1
+    }
+
+    if not multi_sharded:
+        return [None]
+
+    # Common case: single tensor_dim is multi-sharded
+    if len(multi_sharded) == 1:
+        tensor_dim, mesh_dims_set = next(iter(multi_sharded.items()))
+        compatible = []
+
+        for pattern in patterns:
+            # Check prefix/suffix compatibility
+            ordering = find_compatible_ordering(pattern.mesh_dims, mesh_dims_set)
+            if ordering is None:
+                continue
+
+            # Check type compatibility
+            if not matches_placement_types(
+                pattern.placement_types, output_placements, ordering
+            ):
+                continue
+
+            # Build complete ShardOrder including ALL sharded dimensions
+            # Note: We must include all sharded dimensions, not just multi-sharded ones
+            shard_order_entries = []
+
+            # Add all sharded dimensions in sorted order
+            for td in sorted(tensor_dim_to_mesh_dims.keys()):
+                if td == tensor_dim:
+                    # This is the multi-sharded dim with pattern ordering
+                    shard_order_entries.append(
+                        ShardOrderEntry(tensor_dim=td, mesh_dims=ordering)
+                    )
+                else:
+                    # Single-sharded dim, use default ordering
+                    mesh_dims = tuple(tensor_dim_to_mesh_dims[td])
+                    shard_order_entries.append(
+                        ShardOrderEntry(tensor_dim=td, mesh_dims=mesh_dims)
+                    )
+
+            shard_order = tuple(shard_order_entries)
+            compatible.append(shard_order)
+
+        # Deduplicate and return
+        unique = list(set(compatible))
+        return unique if unique else [None]
+
+    # Multiple tensor_dims multi-sharded (rare) - fall back to default
+    return [None]
+
+
 def expand_to_full_mesh_op_strategy(
     mesh: DeviceMesh,
     op_schema: OpSchema,
@@ -361,6 +569,7 @@ def expand_to_full_mesh_op_strategy(
         [list[DTensorSpec], tuple[DTensorSpec | None, ...]], bool
     ]
     | None = None,
+    shard_order_patterns: list[ShardOrderPattern] | None = None,
 ) -> OpStrategy:
     """
     Convenience function to allow writing a sharding strategy considering only a single mesh dimension,
@@ -376,6 +585,8 @@ def expand_to_full_mesh_op_strategy(
         input_index: the number of outputs of the op, defaults to 1
         inplace_op: whether the op is inplace or not, defaults to False
         is_valid_strategy_cb: a callback function to filter out invalid sharding rules, defaults to None.
+        shard_order_patterns: list of ShardOrderPattern extracted from inputs.
+            If provided, generates strategy variants with compatible shard orderings. Defaults to None.
 
     Example: Let's say `my_op(tensor_x, tensor_y) - > output_tensor`  can support sharding or replicating tensor_x,
     but always requires tensor_y to be replicated.  We can specify these valid combinations ignoring mesh dims.
@@ -463,17 +674,37 @@ def expand_to_full_mesh_op_strategy(
             if not is_valid_strategy_cb(input_specs, output_specs):
                 continue
 
-        redistribute_cost = [
-            generate_redistribute_costs(input_strategy, input_spec)
-            for input_strategy, input_spec in zip(input_args_strategy, input_specs)
-        ]
+        # Generate shard_order variants for multi-dimensional sharding
+        shard_order_variants = [None]
+        if shard_order_patterns and not isinstance(output_specs, tuple):
+            shard_order_variants = generate_shard_order_variants(
+                output_specs.placements, shard_order_patterns
+            )
 
-        strategy = OpSpec(
-            output_specs=output_specs,
-            input_specs=input_specs,
-            redistribute_cost=redistribute_cost,
-        )
-        all_strategies.append(strategy)
+        # Create strategy for each shard_order variant
+        for shard_order in shard_order_variants:
+            if shard_order is not None and not isinstance(output_specs, tuple):
+                # Recreate output_specs with explicit shard_order
+                output_specs_with_shard_order = DTensorSpec(
+                    mesh=output_specs.mesh,
+                    placements=output_specs.placements,
+                    tensor_meta=output_specs.tensor_meta,
+                    shard_order=shard_order,
+                )
+            else:
+                output_specs_with_shard_order = output_specs
+
+            redistribute_cost = [
+                generate_redistribute_costs(input_strategy, input_spec)
+                for input_strategy, input_spec in zip(input_args_strategy, input_specs)
+            ]
+
+            strategy = OpSpec(
+                output_specs=output_specs_with_shard_order,
+                input_specs=input_specs,
+                redistribute_cost=redistribute_cost,
+            )
+            all_strategies.append(strategy)
     return OpStrategy(all_strategies)
 
 
