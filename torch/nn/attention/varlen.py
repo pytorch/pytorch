@@ -17,6 +17,15 @@ log = logging.getLogger(__name__)
 __all__ = ["varlen_attn", "AuxRequest"]
 
 
+def _normalize_window_size(window_size: list[int] | None) -> list[int]:
+    if window_size is None:
+        window_size = [-1, -1]
+
+    if len(window_size) != 2:
+        raise ValueError(f"window_size must have length 2, got {len(window_size)}")
+    return window_size
+
+
 @lru_cache(maxsize=8)
 def _should_use_cudnn(device_index: int) -> bool:
     """Cache device capability check to avoid repeated CUDA calls."""
@@ -51,10 +60,7 @@ def _varlen_attn(
 
     This is the internal implementation. Users should use the public varlen_attn function instead.
     """
-    if window_size is None:
-        window_size = [-1, -1]
-    if len(window_size) != 2:
-        raise ValueError(f"window_size must have length 2, got {len(window_size)}")
+    window_size = _normalize_window_size(window_size)
 
     use_cudnn = query.is_cuda and _should_use_cudnn(query.device.index)
 
@@ -126,10 +132,7 @@ def _varlen_attn_fake(
     - query shape: (total, num_heads, head_dim)
     - logsumexp shape: (num_heads, total_q)
     """
-    if window_size is None:
-        window_size = [-1, -1]
-    if len(window_size) != 2:
-        raise ValueError(f"window_size must have length 2, got {len(window_size)}")
+    window_size = _normalize_window_size(window_size)
 
     # Output has same shape as query
     output = torch.empty_like(query)
@@ -289,10 +292,7 @@ def _varlen_attn_backward(
     scale: float | None = None,
     window_size: list[int] | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor, torch.Tensor]:
-    if window_size is None:
-        window_size = [-1, -1]
-    if len(window_size) != 2:
-        raise ValueError(f"window_size must have length 2, got {len(window_size)}")
+    window_size = _normalize_window_size(window_size)
 
     unused = torch.empty(0, device=query.device)
 
@@ -364,10 +364,7 @@ def _varlen_attn_backward_fake(
     """
     Fake implementation for meta tensor computation and tracing.
     """
-    if window_size is None:
-        window_size = [-1, -1]
-    if len(window_size) != 2:
-        raise ValueError(f"window_size must have length 2, got {len(window_size)}")
+    window_size = _normalize_window_size(window_size)
 
     grad_query = torch.empty_like(query)
     grad_key = torch.empty_like(key)
