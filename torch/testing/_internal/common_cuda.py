@@ -54,7 +54,7 @@ def evaluate_gfx_arch_within(arch_list):
     return any(arch in effective_arch for arch in arch_list)
 
 def CDNA3OrLater():
-    return evaluate_gfx_arch_within(["gfx940", "gfx941", "gfx942", "gfx950"])
+    return evaluate_gfx_arch_within(["gfx942", "gfx950"])
 
 def CDNA2OrLater():
     return evaluate_gfx_arch_within(["gfx90a", "gfx942"])
