@@ -646,9 +646,7 @@ class VariableBuilder:
                 ],
             )
 
-        def build_key_value(
-            k: Any, v: Any
-        ) -> tuple[VariableTracker, VariableTracker]:
+        def build_key_value(k: Any, v: Any) -> tuple[VariableTracker, VariableTracker]:
             key = ConstantVariable.create(k)
             source_key = k
 
