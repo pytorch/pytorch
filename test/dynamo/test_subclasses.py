@@ -877,6 +877,26 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         out = compiled_fn(x)
         self.assertEqual(out, torch.ones(4, 4) * 2)
 
+    def test_tensor_subclass_unpack(self):
+        class Foo(torch.Tensor):
+            pass
+
+        torch._dynamo.config.traceable_tensor_subclasses.add(Foo)
+        try:
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def fn_list(x):
+                return list(x)
+
+            x = torch.ones(3).as_subclass(Foo)
+            res_list = fn_list(x)
+
+            for elem in res_list:
+                self.assertIsInstance(elem, Foo)
+            self.assertEqual(len(res_list), 3)
+        finally:
+            torch._dynamo.config.traceable_tensor_subclasses.discard(Foo)
+
     def test_torch_function_wrapper_class_with_kwargs(self):
         x = torch.ones(2, 2)
         wrapped = WrapperSubclass(x)
@@ -3945,6 +3965,44 @@ class GraphModule(torch.nn.Module):
         out_ref = fn()
         out_test = torch.compile(fn, backend="aot_eager")()
         self.assertEqual(out_ref, out_test)
+
+    def test_buffer_subclass_isinstance_input(self):
+        from torch.nn.parameter import Buffer
+
+        buf = Buffer(torch.ones(5))
+
+        def fn(b):
+            if isinstance(b, torch.nn.Buffer):
+                return b + 1
+            else:
+                return b + 2
+
+        out_ref = fn(buf)
+        out_test = torch.compile(fn, backend="aot_eager", fullgraph=True)(buf)
+        self.assertEqual(out_ref, out_test)
+
+        torch._dynamo.reset()
+
+        tensor = torch.ones(5)
+        out_ref_tensor = fn(tensor)
+        out_test_tensor = torch.compile(fn, backend="aot_eager", fullgraph=True)(tensor)
+        self.assertEqual(out_ref_tensor, out_test_tensor)
+
+    def test_buffer_subclass_check(self):
+        from torch.nn.parameter import Buffer
+
+        def check_buffer(x):
+            return isinstance(x, torch.nn.Buffer)
+
+        buf = Buffer(torch.ones(5))
+        compiled_fn = torch.compile(check_buffer, fullgraph=True, backend="inductor")
+        self.assertTrue(compiled_fn(buf))
+
+        torch._dynamo.reset()
+
+        tensor = torch.ones(5)
+        compiled_fn = torch.compile(check_buffer, fullgraph=True, backend="inductor")
+        self.assertFalse(compiled_fn(tensor))
 
     def _input_view_test(self, nt_view_name):
         nt_view = VIEW_TEST_CASES[nt_view_name]()
