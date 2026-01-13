@@ -1968,6 +1968,9 @@ class MetaConverter(Generic[_TensorT]):
         if getattr(t, "_is_buffer", False):
             # pyrefly: ignore [missing-attribute]
             r._is_buffer = True
+            if hasattr(t, "persistent"):
+                # pyrefly: ignore [missing-attribute]
+                r.persistent = t.persistent
 
         # TODO: return the description for later
         return r
