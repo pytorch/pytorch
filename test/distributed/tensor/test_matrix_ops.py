@@ -157,7 +157,7 @@ class DistMatrixOpsTest(DTensorTestBase):
         # eg sharding tensor (world_size - 1) over world_size
         device_mesh = self.build_device_mesh()
         global_inps_viewed = (
-            torch.arange((self.world_size - 1) * self.world_size, device="cuda")
+            torch.arange((self.world_size - 1) * self.world_size)
             .float()
             .view(self.world_size - 1, self.world_size)
         )
