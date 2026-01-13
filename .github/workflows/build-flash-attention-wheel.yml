@@ -55,7 +55,7 @@ jobs:
             torch_cuda_arch_list: "9.0;10.0"
             docker_image: "pytorch/manylinuxaarch64-builder:cuda13.0"
             runner: "linux.arm64.r7g.12xlarge.memory"
-    timeout-minutes: 360
+    timeout-minutes: 1440
     env:
       DOCKER_IMAGE: ${{ matrix.docker_image }}
       CUDA_VERSION: ${{ matrix.cuda_version }}
