@@ -69,12 +69,6 @@ def evaluate_platform_supports_flash_attention():
         return not IS_WINDOWS and SM80OrLater
     return False
 
-def evaluate_platform_supports_ck_sdpa():
-    if TEST_WITH_ROCM:
-        return torch.backends.cuda.is_ck_sdpa_available()
-    else:
-        return False
-
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
         arch_list = ["gfx90a", "gfx942", "gfx1100", "gfx1201", "gfx950"]
@@ -112,8 +106,6 @@ PLATFORM_SUPPORTS_BF16: bool = LazyVal(lambda: TEST_CUDA and SM80OrLater)
 
 PLATFORM_SUPPORTS_GREEN_CONTEXT: bool = LazyVal(lambda: evaluate_platform_supports_green_context())
 
-PLATFORM_SUPPORTS_CK_SDPA: bool = LazyVal(lambda: evaluate_platform_supports_ck_sdpa())
-
 def evaluate_platform_supports_fp8():
     if torch.cuda.is_available():
         if torch.version.hip:
@@ -132,7 +124,7 @@ def evaluate_platform_supports_fp8():
 def evaluate_platform_supports_fp8_grouped_gemm():
     if torch.cuda.is_available():
         if torch.version.hip:
-            if "USE_FBGEMM_GENAI" not in torch.__config__.show():
+            if "USE_MSLK" not in torch.__config__.show():
                 return False
             archs = ['gfx942']
             for arch in archs:
@@ -153,8 +145,8 @@ def evaluate_platform_supports_mx_gemm():
 
 def evaluate_platform_supports_mxfp8_grouped_gemm():
     if torch.cuda.is_available() and not torch.version.hip:
-        built_with_fbgemm_genai = "USE_FBGEMM_GENAI" in torch.__config__.show()
-        return built_with_fbgemm_genai and IS_SM100
+        built_with_mslk = "USE_MSLK" in torch.__config__.show()
+        return built_with_mslk and IS_SM100
     return False
 
 PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mx_gemm())
@@ -321,6 +313,22 @@ def _get_torch_rocm_version():
     rocm_version = rocm_version.split("-", maxsplit=1)[0]    # ignore git sha
     return tuple(int(x) for x in rocm_version.split("."))
 
+def _get_torch_hipblaslt_version():
+    if not TEST_WITH_ROCM:
+        return None
+    try:
+        # Access through direct C binding
+        # versionHipBLASLt returns: MAJOR * 10000 + MINOR * 100 + PATCH
+        version_int = torch._C._cuda_getHipblasltVersion()
+        if version_int is None or version_int == 0:
+            return None
+        major = version_int // 10000
+        minor = (version_int % 10000) // 100
+        patch = version_int % 100
+        return (major, minor, patch)
+    except (AttributeError, RuntimeError):
+        return None
+
 def _check_cusparse_generic_available():
     return not TEST_WITH_ROCM
 
@@ -375,6 +383,9 @@ def _create_scaling_case(device="cuda", dtype=torch.float, optimizer_ctor=torch.
 
 def xfailIfSM89(func):
     return func if not IS_SM89 else unittest.expectedFailure(func)
+
+def xfailIfSM90(func):
+    return func if not IS_SM90 else unittest.expectedFailure(func)
 
 def xfailIfSM89PreCUDA13(func):
     """xfail on SM89 only for CUDA < 13. On CUDA 13+, test should pass on all architectures."""

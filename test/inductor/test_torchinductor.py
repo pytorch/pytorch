@@ -165,6 +165,7 @@ aten = torch.ops.aten
 requires_multigpu = functools.partial(
     unittest.skipIf, not HAS_MULTIGPU, f"requires multiple {GPU_TYPE} devices"
 )
+requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 skip_if_x86_mac = functools.partial(
     unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
 )
@@ -3656,6 +3657,8 @@ class CommonTemplate:
         cf(x, 1e-5)
         cf(x, 1e-6)
 
+    # I think Triton CPU doesn't preserve -0.0 sign in tl.full
+    @xfail_if_triton_cpu
     def test_div_by_zero(self):
         def fn(x, runtime_zero, runtime_neg_zero):
             zero = torch.zeros_like(x)
@@ -4667,6 +4670,41 @@ class CommonTemplate:
             return vals, indices, offsets
 
         self.common(fn, (torch.randn(1, 3, *[10] * dim),))
+
+    @skipIfMPS
+    def test_max_unpool_empty_output(self):
+        class Unpool1d(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.unpool = nn.MaxUnpool1d(kernel_size=2, stride=2, padding=1)
+
+            def forward(self, x, indices):
+                return self.unpool(x, indices)
+
+        x1d = torch.randn(1, 1, 1, device=self.device)
+        self.common(Unpool1d().to(self.device), (x1d, x1d.long()))
+
+        class Unpool2d(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.unpool = nn.MaxUnpool2d(kernel_size=2, stride=2, padding=1)
+
+            def forward(self, x, indices):
+                return self.unpool(x, indices)
+
+        x2d = torch.randn(1, 1, 1, 1, device=self.device)
+        self.common(Unpool2d().to(self.device), (x2d, x2d.long()))
+
+        class Unpool3d(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.unpool = nn.MaxUnpool3d(kernel_size=2, stride=2, padding=1)
+
+            def forward(self, x, indices):
+                return self.unpool(x, indices)
+
+        x3d = torch.randn(1, 1, 1, 1, 1, device=self.device)
+        self.common(Unpool3d().to(self.device), (x3d, x3d.long()))
 
     def test_to_dtype(self):
         new_dtype = torch.float64 if self.device != "mps" else torch.bfloat16
@@ -6042,6 +6080,84 @@ class CommonTemplate:
 
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
+
+    def test_complex_zero_dim_scalar(self):
+        # Test that 0-d complex tensors can be compiled without crashing.
+        # This exercises a fix in constant folding where view.dtype on 0-d
+        # complex tensors would fail because view ops pass through unchanged.
+        def fn():
+            out = torch.ops.aten.scalar_tensor(
+                s=2.5,
+                dtype=torch.complex64,
+                layout=torch.strided,
+                device=self.device,
+                pin_memory=False,
+            )
+            out = out + out
+            return out
+
+        expected = fn()
+        compiled = torch.compile(fn, backend="inductor")
+        actual = compiled()
+        self.assertEqual(actual, expected)
+
+    def test_view_dtype_0d_smaller_to_larger_element_size(self):
+        # Test that constant folding handles view.dtype on 0-d tensors when
+        # the input element size is SMALLER than the output dtype itemsize.
+        # This is the opposite case of test_complex_zero_dim_scalar which
+        # tests element_size > itemsize (complex64 -> float32).
+        # This test exercises element_size < itemsize (float32 -> complex64).
+        import torch.fx as fx
+        from torch._inductor.fx_passes.joint_graph import UniformValueConstantFolder
+
+        graph = fx.Graph()
+
+        # scalar_tensor creates a 0-d float32 tensor (4 bytes per element)
+        scalar = graph.call_function(
+            torch.ops.aten.scalar_tensor.default,
+            args=(2.5,),
+            kwargs={
+                "dtype": torch.float32,
+                "layout": torch.strided,
+                "device": self.device,
+                "pin_memory": False,
+            },
+        )
+        scalar.meta["val"] = torch.tensor(2.5, dtype=torch.float32, device=self.device)
+
+        # view.dtype to complex64 (8 bytes): element_size (4) < itemsize (8)
+        view_node = graph.call_function(
+            torch.ops.aten.view.dtype, args=(scalar, torch.complex64)
+        )
+        view_node.meta["val"] = torch.tensor(
+            2.5 + 0j, dtype=torch.complex64, device=self.device
+        )
+
+        graph.output(view_node)
+        gm = fx.GraphModule(torch.nn.Module(), graph)
+
+        # Running constant folder should not crash (it should return
+        # unknown_value since view.dtype fails on 0-d tensors when
+        # element sizes differ)
+        folder = UniformValueConstantFolder(gm)
+        folder.run()
+
+        # The view node should NOT be constant-folded
+        self.assertNotIn(view_node, folder.node_replacements)
+
+    def test_complex_1d_constant_tensor(self):
+        # Test that 1-d complex constant tensors can be compiled without crashing.
+        # This exercises view.dtype on non-0-d tensors during constant folding
+        # where element sizes differ (complex64 -> float32 or vice versa).
+        def fn():
+            out = torch.full([2], 2.5 + 1.0j, dtype=torch.complex64, device=self.device)
+            out = out + out
+            return out
+
+        expected = fn()
+        compiled = torch.compile(fn, backend="inductor")
+        actual = compiled()
+        self.assertEqual(actual, expected)
 
     def test_complex_from_real_imag(self):
         def fn(x, y):
@@ -13752,6 +13868,38 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             with self.assertRaisesRegex(RuntimeError, "Output size is too small"):
                 _ = torch.compile(model)(inputs)
 
+    @skipIfRocm
+    @requires_cuda
+    def test_conv_transpose_zero_size_output(self):
+        # Only CUDA (cuDNN) supports zero-sized spatial outputs for conv_transpose.
+        # ROCm/miopen fails with miopenStatusBadParm, MPS fails with empty placeholder assert.
+        # This test ensures compiled mode matches eager behavior on CUDA.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # ConvTranspose2d: in=3, out=1, kernel=2, stride=2, padding=2
+                # Output size = (input_size - 1) * stride - 2 * padding + kernel_size
+                #             = (2 - 1) * 2 - 2 * 2 + 2 = 0
+                self.conv_transpose = torch.nn.ConvTranspose2d(
+                    3, 1, 2, 2, 2, bias=False
+                )
+
+            def forward(self, x):
+                x = self.conv_transpose(x)
+                x = torch.tanh(x)
+                return x
+
+        func = Model().to(GPU_TYPE)
+        x = torch.randn(1, 3, 2, 2, device=GPU_TYPE)
+
+        with torch.no_grad():
+            eager_out = func(x.clone())
+            compiled_out = torch.compile(func)(x.clone())
+
+        self.assertEqual(eager_out.shape, torch.Size([1, 1, 0, 0]))
+        self.assertEqual(compiled_out.shape, torch.Size([1, 1, 0, 0]))
+        self.assertEqual(eager_out, compiled_out)
+
     @requires_gpu()
     @config.patch(fallback_random=True)
     @unittest.skipIf(
@@ -15106,6 +15254,21 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             .check_not("gdc_launch")
             .check("store")
         ).run(code)
+
+    def test_use_deterministic_algorithms(self):
+        @torch.compile(backend="inductor", fullgraph=True)
+        def fn(src, index, base_tensor):
+            src = src + 10
+            torch.use_deterministic_algorithms(True)
+            base_tensor.scatter_(0, index, src)
+            return base_tensor.clone() + 1
+
+        src = torch.tensor([[100.0], [200.0], [300.0]])
+        index = torch.tensor([[0], [0], [0]])
+        base_tensor = torch.zeros(2, 1)
+        out = fn(src, index, base_tensor)
+        expected = torch.tensor([[311.0], [1.0]])
+        self.assertEqual(out, expected)
 
     # end of class CommonTemplate - add new tests here
 
