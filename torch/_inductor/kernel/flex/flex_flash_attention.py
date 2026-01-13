@@ -342,10 +342,13 @@ def create_flex_flash_attention_kernel(
         stride=[sympy.sympify(s) for s in output.get_stride()],
     )
 
-    # Used to check if we can skip block sparse impl
     mask_graph_is_trivial = is_trivial_mask_graph(mask_graph.graph_module)
+    score_graph_is_trivial = (
+        subgraph is None or is_trivial_score_graph(subgraph.graph_module)
+    )
 
     needs_block_mask = not mask_graph_is_trivial
+    has_score_mod = not score_graph_is_trivial
     has_full_blocks = full_kv_num_blocks is not None
 
     choices: list[Any] = []
@@ -362,14 +365,20 @@ def create_flex_flash_attention_kernel(
             "Flash attention with block mask but without full blocks is not supported yet"
         )
 
+    subgraphs = []
+    if has_score_mod:
+        subgraphs.append(subgraph_buffer)
+    subgraphs.append(mask_graph_buffer)
+
     with patch_fixed_layout_indexer_for_cutedsl():
         error = flash_attention_cutedsl_template.maybe_append_choice(
             choices,
             input_nodes=input_nodes,
             layout=output_layout,
             mutated_inputs=[lse],
-            subgraphs=[subgraph_buffer, mask_graph_buffer],
+            subgraphs=subgraphs,
             SM_SCALE=scale,
+            HAS_SCORE_MOD=has_score_mod,
             NEEDS_BLOCK_MASK=needs_block_mask,
         )
 
