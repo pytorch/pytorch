@@ -2,6 +2,7 @@
     {{ assign_maybe_constexpr(name, expr, prefix="gl") }}
 {%- endmacro %}
 
+{%- set C_IS_2D = A_IS_2D != B_IS_2D -%}
 {%- set M_IS_VARYING = A_IS_2D and not B_IS_2D -%}
 {%- set N_IS_VARYING = not A_IS_2D and B_IS_2D -%}
 {%- set K_IS_VARYING = A_IS_2D and B_IS_2D -%}
@@ -40,10 +41,13 @@ class PartitionArgs:
     a_desc: tma.tensor_descriptor
     b_desc: tma.tensor_descriptor
     c_desc: tma.tensor_descriptor
-{%- if M_IS_VARYING or M_IS_VARYING or K_IS_VARYING %}
+{%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
     offs_ptr: gl.tensor
 {%- endif %}
     c_ptr: gl.tensor
+{%- if not C_IS_2D %}
+    c_stride_g: gl.tensor
+{%- endif %}
     c_stride_m: gl.tensor
     c_stride_n: gl.tensor
     c_layout: gl.constexpr
@@ -71,10 +75,13 @@ class PartitionArgs:
         a_desc,
         b_desc,
         c_desc,
-{%- if M_IS_VARYING or M_IS_VARYING or K_IS_VARYING %}
+{%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
         offs_ptr,
 {%- endif %}
         c_ptr,
+{%- if not C_IS_2D %}
+        c_stride_g,
+{%- endif %}
         c_stride_m,
         c_stride_n,
         c_layout,
@@ -99,10 +106,13 @@ class PartitionArgs:
         self.a_desc = a_desc
         self.b_desc = b_desc
         self.c_desc = c_desc
-{%- if M_IS_VARYING or M_IS_VARYING or K_IS_VARYING %}
+{%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
         self.offs_ptr = offs_ptr
 {%- endif %}
         self.c_ptr = c_ptr
+{%- if not C_IS_2D %}
+        self.c_stride_g = c_stride_g
+{%- endif %}
         self.c_stride_m = c_stride_m
         self.c_stride_n = c_stride_n
         self.c_layout = gl.constexpr(c_layout)
@@ -129,13 +139,15 @@ class PartitionArgs:
 class GroupIterator:
     G: gl.tensor
     g: gl.tensor
-{%- if M_IS_VARYING or N_IS_VARYING %}
+{%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
     offs_ptr: gl.tensor
 {%- endif %}
     m_start_offset: gl.tensor
     m_size: gl.tensor
     n_start_offset: gl.tensor
     n_size: gl.tensor
+    k_start_offset: gl.tensor
+    k_size: gl.tensor
     tiles_processed: gl.tensor
     tile_idx: gl.tensor
     has_started: gl.tensor
@@ -147,23 +159,25 @@ class GroupIterator:
     def __init__(
         self,
         G, g,
-{%- if M_IS_VARYING or N_IS_VARYING %}
+{%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
         offs_ptr,
 {%- endif %}
-        m_start_offset, m_size, n_start_offset, n_size,
+        m_start_offset, m_size, n_start_offset, n_size, k_start_offset, k_size,
         tiles_processed, tile_idx,
         has_started,
         BLOCK_M: gl.constexpr, BLOCK_N: gl.constexpr, NUM_BLOCKS: gl.constexpr
     ):
         self.G = G
         self.g = g
-{%- if M_IS_VARYING or N_IS_VARYING %}
+{%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
         self.offs_ptr = offs_ptr
 {%- endif %}
         self.m_start_offset = m_start_offset
         self.m_size = m_size
         self.n_start_offset = n_start_offset
         self.n_size = n_size
+        self.k_start_offset = k_start_offset
+        self.k_size = k_size
         self.tiles_processed = tiles_processed
         self.tile_idx = tile_idx
         self.has_started = has_started
@@ -173,18 +187,18 @@ class GroupIterator:
 
     @gluon.jit
     def create(
-        G, M, N,
-{%- if M_IS_VARYING or N_IS_VARYING %}
+        G, M, N, K,
+{%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
         offs_ptr,
 {%- endif %}
         BLOCK_M: gl.constexpr, BLOCK_N: gl.constexpr, NUM_BLOCKS: gl.constexpr
     ):
         return GroupIterator(
             G, gl.to_tensor(0),
-{%- if M_IS_VARYING or N_IS_VARYING %}
+{%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
             offs_ptr,
 {%- endif %}
-            gl.to_tensor(0), M, gl.to_tensor(0), N,
+            gl.to_tensor(0), M, gl.to_tensor(0), N, gl.to_tensor(0), K,
             gl.to_tensor(0), gl.program_id(0),
             gl.to_tensor(False),
             BLOCK_M, BLOCK_N, NUM_BLOCKS
@@ -212,6 +226,13 @@ class GroupIterator:
         n_start_offset = self.n_start_offset
         n_size = self.n_size
 {%- endif %}
+{%- if K_IS_VARYING %}
+        k_start_offset = self.k_start_offset + (self.k_size if self.has_started else 0)
+        k_size = gl.load(self.offs_ptr + g) - k_start_offset
+{%- else %}
+        k_start_offset = self.k_start_offset
+        k_size = self.k_size
+{%- endif %}
 
         tiles_processed = self.tiles_processed + (gl.cdiv(self.m_size, self.BLOCK_M) * gl.cdiv(self.n_size, self.BLOCK_N) if self.has_started else 0)
         tile_idx = self.tile_idx + (gl.cdiv(tiles_processed - self.tile_idx, self.NUM_BLOCKS) * self.NUM_BLOCKS if self.has_started else 0)
@@ -220,10 +241,10 @@ class GroupIterator:
 
         return GroupIterator(
             self.G, g,
-{%- if M_IS_VARYING or N_IS_VARYING %}
+{%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
             self.offs_ptr,
 {%- endif %}
-            m_start_offset, m_size, n_start_offset, n_size,
+            m_start_offset, m_size, n_start_offset, n_size, k_start_offset, k_size,
             tiles_processed, tile_idx,
             has_started,
             self.BLOCK_M, self.BLOCK_N, self.NUM_BLOCKS
@@ -370,12 +391,9 @@ def load_partition(pargs: PartitionArgs):
     load_buf_full_bars = pargs.load_buf_full_bars
     state = Counter.create(1, load_buf_empty_bars.shape[0])
 
-    # FIXME: for K_IS_VARYING
-    k_size = K
-
     group_iter = GroupIterator.create(
-        G, M, N,
-{%- if M_IS_VARYING or N_IS_VARYING %}
+        G, M, N, K,
+{%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
         pargs.offs_ptr,
 {%- endif %}
         BLOCK_M, BLOCK_N, NUM_BLOCKS
@@ -387,7 +405,9 @@ def load_partition(pargs: PartitionArgs):
             BLOCK_M, BLOCK_N, NUM_BLOCKS
         )
         while tile_iter.should_process():
-            for k in range(0, k_size, BLOCK_K):
+            for k in range(0, group_iter.k_size, BLOCK_K):
+                k_offset = group_iter.k_start_offset + k
+
                 load_buf_empty_bar = load_buf_empty_bars.index(state.index)
                 load_buf_full_bar = load_buf_full_bars.index(state.index)
                 a_smem = pargs.a_smem_bufs.index(state.index)
@@ -405,20 +425,37 @@ def load_partition(pargs: PartitionArgs):
                 with pl.scope("load_tma_async"):
                     tma.async_copy_global_to_shared(
                         pargs.a_desc,
+{%- if A_IS_2D %}
 {%- if A_IS_K_MAJOR %}
-                        [tile_iter.m_offset, k],
+                        [tile_iter.m_offset, k_offset],
 {%- else %}
-                        [k, tile_iter.m_offset],
+                        [k_offset, tile_iter.m_offset],
+{%- endif %}
+{%- else %}
+{%- if A_IS_K_MAJOR %}
+                        [group_iter.g, tile_iter.m_offset, k_offset],
+{%- else %}
+                        [group_iter.g, k_offset, tile_iter.m_offset],
+
+{%- endif %}
 {%- endif %}
                         load_buf_full_bar,
                         a_smem
                     )
                     tma.async_copy_global_to_shared(
                         pargs.b_desc,
+{%- if B_IS_2D %}
 {%- if B_IS_K_MAJOR %}
-                        [group_iter.g, tile_iter.n_offset, k],
+                        [tile_iter.n_offset, k_offset],
 {%- else %}
-                        [group_iter.g, k, tile_iter.n_offset],
+                        [k_offset, tile_iter.n_offset],
+{%- endif %}
+{%- else %}
+{%- if B_IS_K_MAJOR %}
+                        [group_iter.g, tile_iter.n_offset, k_offset],
+{%- else %}
+                        [group_iter.g, k_offset, tile_iter.n_offset],
+{%- endif %}
 {%- endif %}
                         load_buf_full_bar,
                         b_smem
@@ -454,12 +491,9 @@ def compute_partition(pargs: PartitionArgs):
     acc_buf_full_bars = pargs.acc_buf_full_bars
     acc_state = Counter.create(1, acc_buf_empty_bars.shape[0])
 
-    # FIXME: for K_IS_VARYING
-    k_size = K
-
     group_iter = GroupIterator.create(
-        G, M, N,
-{%- if M_IS_VARYING or N_IS_VARYING %}
+        G, M, N, K,
+{%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
         pargs.offs_ptr,
 {%- endif %}
         BLOCK_M, BLOCK_N, NUM_BLOCKS
@@ -479,7 +513,7 @@ def compute_partition(pargs: PartitionArgs):
             acc = pargs.acc_tmem_bufs.index(acc_state.index)
             use_acc = False
 
-            for k in range(0, k_size, BLOCK_K):
+            for k in range(0, group_iter.k_size, BLOCK_K):
                 load_buf_empty_bar = load_buf_empty_bars.index(load_state.index)
                 load_buf_full_bar = load_buf_full_bars.index(load_state.index)
 
@@ -551,8 +585,8 @@ def store_partition(pargs: PartitionArgs):
     )
 
     group_iter = GroupIterator.create(
-        G, M, N,
-{%- if M_IS_VARYING or N_IS_VARYING %}
+        G, M, N, K,
+{%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
         pargs.offs_ptr,
 {%- endif %}
         BLOCK_M, BLOCK_N, NUM_BLOCKS
@@ -593,7 +627,11 @@ def store_partition(pargs: PartitionArgs):
             with pl.scope("store_fence_and_tma"):
                 fence_async_shared()
 {%- if not USE_RAGGED_TENSOR_DESCRIPTOR %}
+{%- if C_IS_2D %}
                 tma.async_copy_shared_to_global(c_desc, [tile_iter.m_offset, tile_iter.n_offset], c_smem)
+{%- else %}
+                tma.async_copy_shared_to_global(c_desc, [group_iter.g, tile_iter.m_offset, tile_iter.n_offset], c_smem)
+{%- endif %}
 {%- else %}
                 c_smem_4d = c_smem.reshape([1, 1, BLOCK_M, BLOCK_N])
                 store_ragged(c_desc, group_iter.m_start_offset, group_iter.m_size, [tile_iter.m_tile_offset, tile_iter.n_offset], c_smem_4d, ragged_dim=0)
@@ -609,7 +647,7 @@ def store_partition(pargs: PartitionArgs):
     pl.exit_scope("store_partition")
 
 
-{%- if M_IS_VARYING or M_IS_VARYING or K_IS_VARYING %}
+{%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
 {{def_kernel("a_ptr", "b_ptr", "offs_ptr")}}
 {%- else %}
 {{def_kernel("a_ptr", "b_ptr")}}
@@ -659,7 +697,7 @@ def store_partition(pargs: PartitionArgs):
 
 {%- if A_IS_2D %}
 {%- if B_IS_2D %}
-    {{ assign_maybe_constexpr_gluon("G", size("offsets_ptr", 0)) }}
+    {{ assign_maybe_constexpr_gluon("G", size("offs_ptr", 0)) }}
 {%- else %}
     {{ assign_maybe_constexpr_gluon("G", size("b_ptr", 0)) }}
 {%- endif %}
@@ -675,15 +713,18 @@ def store_partition(pargs: PartitionArgs):
     {{ assign_maybe_constexpr_gluon("N", size("b_ptr", -1)) }}
     {{ assign_maybe_constexpr_gluon("K", size("a_ptr", -1)) }}
 
-    {{ assign_maybe_constexpr_gluon("a_stride_m", stride("a_ptr", -2)) }}
-    {{ assign_maybe_constexpr_gluon("a_stride_k", stride("a_ptr", -1)) }}
 {%- if not A_IS_2D %}
     {{ assign_maybe_constexpr_gluon("a_stride_g", stride("a_ptr", 0)) }}
 {%- endif %}
-    {{ assign_maybe_constexpr_gluon("b_stride_n", stride("b_ptr", -1)) }}
-    {{ assign_maybe_constexpr_gluon("b_stride_k", stride("b_ptr", -2)) }}
+    {{ assign_maybe_constexpr_gluon("a_stride_m", stride("a_ptr", -2)) }}
+    {{ assign_maybe_constexpr_gluon("a_stride_k", stride("a_ptr", -1)) }}
 {%- if not B_IS_2D %}
     {{ assign_maybe_constexpr_gluon("b_stride_g", stride("b_ptr", 0)) }}
+{%- endif %}
+    {{ assign_maybe_constexpr_gluon("b_stride_n", stride("b_ptr", -1)) }}
+    {{ assign_maybe_constexpr_gluon("b_stride_k", stride("b_ptr", -2)) }}
+{%- if not C_IS_2D %}
+    {{ assign_maybe_constexpr_gluon("c_stride_g", output_stride(0)) }}
 {%- endif %}
     {{ assign_maybe_constexpr_gluon("c_stride_m", output_stride(-2)) }}
     {{ assign_maybe_constexpr_gluon("c_stride_n", output_stride(-1)) }}
@@ -694,6 +735,7 @@ def store_partition(pargs: PartitionArgs):
     # Create tensor descriptors
     a_desc = tma.make_tensor_descriptor(
         a_ptr,
+{%- if A_IS_2D %}
 {%- if A_IS_K_MAJOR %}
         shape=[M, K],
         strides=[a_stride_m, a_stride_k],
@@ -703,11 +745,33 @@ def store_partition(pargs: PartitionArgs):
         strides=[a_stride_k, a_stride_m],
         block_shape=[BLOCK_K, BLOCK_M],
 {%- endif %}
+{%- else %}
+{%- if A_IS_K_MAJOR %}
+        shape=[G, M, K],
+        strides=[a_stride_g, a_stride_m, a_stride_k],
+        block_shape=[1, BLOCK_M, BLOCK_K],
+{%- else %}
+        shape=[G, K, M],
+        strides=[a_stride_g, a_stride_k, a_stride_m],
+        block_shape=[1, BLOCK_K, BLOCK_M],
+{%- endif %}
+{%- endif %}
         layout=a_layout,
     )
 
     b_desc = tma.make_tensor_descriptor(
         b_ptr,
+{%- if B_IS_2D %}
+{%- if B_IS_K_MAJOR %}
+        shape=[N, K],
+        strides=[b_stride_n, b_stride_k],
+        block_shape=[BLOCK_N, BLOCK_K],
+{%- else %}
+        shape=[K, N],
+        strides=[b_stride_k, b_stride_n],
+        block_shape=[BLOCK_K, BLOCK_N],
+{%- endif %}
+{%- else %}
 {%- if B_IS_K_MAJOR %}
         shape=[G, N, K],
         strides=[b_stride_g, b_stride_n, b_stride_k],
@@ -717,15 +781,22 @@ def store_partition(pargs: PartitionArgs):
         strides=[b_stride_g, b_stride_k, b_stride_n],
         block_shape=[1, BLOCK_K, BLOCK_N],
 {%- endif %}
+{%- endif %}
         layout=b_layout,
     )
 
 {%- if not USE_RAGGED_TENSOR_DESCRIPTOR %}
     c_desc = tma.make_tensor_descriptor(
         c_ptr,
+{%- if C_IS_2D %}
         shape=[M, N],
         strides=[c_stride_m, c_stride_n],
         block_shape=[BLOCK_M, BLOCK_N],
+{%- else %}
+        shape=[G, M, N],
+        strides=[c_stride_g, c_stride_m, c_stride_n],
+        block_shape=[1, BLOCK_M, BLOCK_N],
+{%- endif %}
         layout=c_layout,
     )
 {%- else %}
@@ -791,10 +862,13 @@ def store_partition(pargs: PartitionArgs):
         a_desc,
         b_desc,
         c_desc,
-{%- if M_IS_VARYING or M_IS_VARYING or K_IS_VARYING %}
+{%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
         offs_ptr,
 {%- endif %}
         c_ptr,
+{%- if not C_IS_2D %}
+        gl.to_tensor(c_stride_g),
+{%- endif %}
         gl.to_tensor(c_stride_m),
         gl.to_tensor(c_stride_n),
         c_layout,

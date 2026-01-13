@@ -598,10 +598,6 @@ class TestMatmulCuda(InductorTestCase):
             if major != 10 and minor not in [0, 3]:
                 self.skipTest("Supported only on CC 10.0 and 10.3")
 
-        # FIXME: remove this when Gluon kernel supporting all variants
-        if backend == "GLUON" and op != "2d/3d":
-            self.skipTest("Not implemented yet")
-
         device = "cuda"
         dtype_AB = torch.bfloat16
         dtype_offset = torch.int32

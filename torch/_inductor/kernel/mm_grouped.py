@@ -329,10 +329,10 @@ def can_use_gluon_kernel(
     if bias is not None or scale_result is not None:
         return False
 
-    if len(mat_a.get_size()) == 2 and len(mat_b.get_size()) == 3:
+    if len(mat_a.get_size()) == 2 or len(mat_b.get_size()) == 2:
         return offs is not None
     else:
-        return False
+        return offs is None
 
 
 def create_offsets(offs_box, m1_is_2d, m2_is_2d, m, n, k, alignment):
@@ -516,23 +516,26 @@ def _tuned_grouped_mm_common(
             )
 
     if can_use_gluon_kernel(mat_a, mat_b, offs, bias, scale_result):
-        has_ragged_tma = False
-        try:
-            from triton.experimental.gluon.tools.ragged_tma import (  # noqa: F401
-                create_ragged_descriptor_device_2d,
-                to_ragged_coords,
-            )
+        use_ragged_tensor_descriptor = a_is_2d and not b_is_2d
+        if use_ragged_tensor_descriptor:
+            has_ragged_tma = False
+            try:
+                from triton.experimental.gluon.tools.ragged_tma import (  # noqa: F401
+                    create_ragged_descriptor_device_2d,
+                    to_ragged_coords,
+                )
 
-            has_ragged_tma = True
-        except ImportError:
-            pass
+                has_ragged_tma = True
+            except ImportError:
+                pass
+            use_ragged_tensor_descriptor = has_ragged_tma
 
         kwargs = {
             "A_IS_2D": a_is_2d,
             "B_IS_2D": b_is_2d,
             "A_IS_K_MAJOR": a_is_k_major,
             "B_IS_K_MAJOR": b_is_k_major,
-            "USE_RAGGED_TENSOR_DESCRIPTOR": has_ragged_tma,
+            "USE_RAGGED_TENSOR_DESCRIPTOR": use_ragged_tensor_descriptor,
         }
         for config in gluon_grouped_mm_configs(
             dtype_AB=mat_a.get_dtype(),
