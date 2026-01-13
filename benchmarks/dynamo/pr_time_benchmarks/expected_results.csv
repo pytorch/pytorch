@@ -38,7 +38,7 @@ update_hint_regression,compile_time_instruction_count,1685000000,0.1
 
 
 
-sum_floordiv_regression,compile_time_instruction_count,5176000000,0.1
+sum_floordiv_regression,compile_time_instruction_count,4500834211,0.1
 
 
 

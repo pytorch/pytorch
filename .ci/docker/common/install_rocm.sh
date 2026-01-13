@@ -97,8 +97,8 @@ export PKG_CONFIG_PATH="${ROCM_SYSDEPS_PKGCONFIG}:\${PKG_CONFIG_PATH:-}"
 export LD_LIBRARY_PATH="${ROCM_SYSDEPS}/lib:\${LD_LIBRARY_PATH:-}"
 export LIBRARY_PATH="${ROCM_SYSDEPS}/lib:\${LIBRARY_PATH:-}"
 export MAGMA_HOME="${ROCM_HOME}/magma"
-# Disable FBGEMM_GENAI for theRock nightly (not yet supported)
-export USE_FBGEMM_GENAI=0
+# Disable MSLK for theRock nightly (not yet supported)
+export USE_MSLK=0
 ROCM_ENV
 
       # Append to bash.bashrc so interactive shells get the env vars

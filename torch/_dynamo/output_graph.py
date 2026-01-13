@@ -604,6 +604,10 @@ class OutputGraph(OutputGraphCommon):
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
         self.input_source_to_var: dict[Source, VariableTracker] = {}
+        # List of TensorVariables that are leaf tensors created in-graph
+        # (e.g., nn.Parameter via tracable_create_parameter). These need to be
+        # tracked separately from input_source_to_var for backward() auto-detection.
+        self.leaf_var_creation_order: list[VariableTracker] = []
         self.export = export
         self.export_constraints = export_constraints  # type: ignore[assignment]
         self.frame_state = frame_state
@@ -2846,6 +2850,7 @@ class OutputGraph(OutputGraphCommon):
         self.dynamo_flat_name_to_original_fqn.clear()
         self.tracing_context.clear()
         self.input_source_to_var.clear()
+        self.leaf_var_creation_order.clear()
         self.unspec_variable_map.clear()
         self.backward_state.clear()
 
