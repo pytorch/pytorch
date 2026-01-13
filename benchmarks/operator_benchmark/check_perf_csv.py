@@ -18,7 +18,7 @@ SKIP_TEST_LISTS = [
 
 def get_field(csv, case: str, field: str):
     try:
-        # There could be duplicated entries, so just get the last entry
+        # There could be duplicated entries, so just get the last value
         return csv.loc[csv["Case Name"] == case][field].tail(1).item()
     except Exception:
         return None
