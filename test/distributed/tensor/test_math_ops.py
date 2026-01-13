@@ -691,7 +691,7 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(partial_out.full_tensor(), out)
 
     @with_comms
-    def test_vector_norm_sharded_reduction(self):
+    def test_vector_norm_sum(self):
         """
         Test vector norm when reducing along a sharded dimension.
 
