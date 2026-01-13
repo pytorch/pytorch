@@ -2645,7 +2645,6 @@ class GraphModule(torch.nn.Module):
         return (getitem_5, getitem_2, getitem_3, getitem_4)
 """,  # noqa: B950
         )
-        # self.assertEqual(GLOBAL_TENSOR, torch.tensor([4.0, 5.0, 6.0]))
 
     def test_leaf_function_pytree_inputs(self):
         """Test leaf_function with pytree (dict) inputs."""
@@ -3470,14 +3469,14 @@ class GraphModule(torch.nn.Module):
         from torch._dynamo.decorators import leaf_function
 
         @leaf_function
-        def test_forward(mod, x):
+        def test_forward_fn(linear, x):
             if x.sum() > 0:  # data-dependent control flow
-                return (mod.linear(x),)
-            return (mod.linear(x) + 1,)
+                return (linear(x),)
+            return (linear(x) + 1,)
 
-        @test_forward.fake_impl
-        def test_forward_fake(mod, x):
-            return (mod.linear(x),)
+        @test_forward_fn.fake_impl
+        def test_forward_fn_fake(linear, x):
+            return (linear(x),)
 
         class TestModule(torch.nn.Module):
             def __init__(self):
@@ -3485,34 +3484,26 @@ class GraphModule(torch.nn.Module):
                 self.linear = torch.nn.Linear(10, 10)
 
             def forward(self, x):
-                return test_forward(self, x)
+                return test_forward_fn(self.linear, x)
 
-        class TopLevelMod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.leaf_mod = TestModule()
+        def args_fn():
+            return (torch.randn(10, 10, requires_grad=True),)
 
-            def forward(self, x):
-                return self.leaf_mod(x)
+        def loss_fn(out):
+            return out[0].sum()
 
-        mod = TopLevelMod()
-        opt_mod = torch.compile(mod, fullgraph=True, backend="eager")
-        x = torch.randn(10, 10)
-        result = opt_mod(x)
-        # Should compile successfully with fake_impl
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0].shape, (10, 10))
+        self._test_leaf_function_helper(TestModule, args_fn, loss_fn)
 
     def test_leaf_function_no_fake_impl(self):
         """Test leaf_function without fake_impl setter - uses forward itself as fake."""
         from torch._dynamo.decorators import leaf_function
 
         @leaf_function
-        def test_forward(mod, x):
+        def test_forward_fn(linear, x):
             # No data-dependent control flow, so forward itself can be fake_impl
-            return (mod.linear(x),)
+            return (linear(x),)
 
-        # No @test_forward.fake_impl - uses forward itself
+        # No @test_forward_fn.fake_impl - uses forward itself
 
         class TestModule(torch.nn.Module):
             def __init__(self):
@@ -3520,27 +3511,15 @@ class GraphModule(torch.nn.Module):
                 self.linear = torch.nn.Linear(10, 10)
 
             def forward(self, x):
-                return test_forward(self, x)
+                return test_forward_fn(self.linear, x)
 
-        class TopLevelMod(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.leaf_mod = TestModule()
+        def args_fn():
+            return (torch.randn(10, 10, requires_grad=True),)
 
-            def forward(self, x):
-                return self.leaf_mod(x)
+        def loss_fn(out):
+            return out[0].sum()
 
-        mod = TopLevelMod()
-        opt_mod = torch.compile(mod, fullgraph=True, backend="eager")
-        x = torch.randn(10, 10)
-        result = opt_mod(x)
-        # Should compile successfully without explicit fake_impl
-        self.assertEqual(len(result), 1)
-        self.assertEqual(result[0].shape, (10, 10))
-
-        # Also verify eager execution works
-        eager_result = mod(x)
-        self.assertEqual(result[0], eager_result[0])
+        self._test_leaf_function_helper(TestModule, args_fn, loss_fn)
 
     def test_leaf_function_no_module_inputs(self):
         """Test leaf_function with only tensor inputs (no nn.Module)."""
