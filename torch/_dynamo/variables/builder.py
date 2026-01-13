@@ -648,7 +648,7 @@ class VariableBuilder:
 
         def build_key_value(
             k: Any, v: Any
-        ) -> tuple[VariableTracker, LazyVariableTracker]:
+        ) -> tuple[VariableTracker, VariableTracker]:
             key = ConstantVariable.create(k)
             source_key = k
 
@@ -1622,7 +1622,7 @@ class VariableBuilder:
             # _HashableTracker class in dicts.py
             def build_key_value(
                 i: Any, k: Any, v: Any
-            ) -> tuple[LazyVariableTracker, LazyVariableTracker]:
+            ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 source_key = ConstDictKeySource(base, i)
                 key = LazyVariableTracker.create(k, source_key)
