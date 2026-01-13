@@ -262,8 +262,10 @@ class TestExpandPlaceholder(TestCase):
         ]
         expected_output_placements = [
             (Shard(0), Replicate(), Shard(1)),
-            # P(avg) -> P(sum) is currently not supported, but could be in principle
-            (Partial("sum"), Partial("sum"), Replicate()),
+            # P(avg) -> P(sum) is currently not supported, but could be in principle.
+            # The optimal is (R, P(sum), P(sum)) since reducing the mixed partials
+            # to that placement has lower cost due to partial ordering constraints.
+            (Replicate(), Partial("sum"), Partial("sum")),
         ]
         tuple_strategy = _expand_foreach_add_list(
             inputs_a, inputs_b, placements_a, placements_b
