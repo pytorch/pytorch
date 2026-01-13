@@ -134,6 +134,7 @@
   "test_gradgrad_nn_TransformerEncoder_train_mode_cuda_float64 (__main__.TestModuleCUDA)": 125.24116770426433,
   "test_gradgrad_nn_Transformer_cuda_float64 (__main__.TestModuleCUDA)": 510.77049255371094,
   "test_grid_sampler_2d_cpu_halide (__main__.HalideCpuTests)": 194.58466593424478,
+  "test_index (__main__.DistTensorOpsTest)" : 64.5,
   "test_indirect_device_assert (__main__.TritonCodeGenTests)": 307.21116638183594,
   "test_inductor_no_recursionerror_on_for_loops (__main__.ReproTests)": 65.38683425055609,
   "test_inductor_no_recursionerror_on_for_loops_dynamic_shapes (__main__.DynamicShapesReproTests)": 70.7237786187066,
