@@ -120,6 +120,18 @@ def run_test_plan(
             if is_parallel:
                 step = replace_buildkite_placeholders(step, shard_id, num_shards)
                 logger.info("Running parallel step: %s", step)
+            # Support retry with delay for all pytest commands, pytest-rerunfailures
+            # is already a dependency of vLLM. This is needed as a stop gap to reduce
+            # the number of requests to HF until #172300 can be landed to enable
+            # HF offline mode
+            if step.startswith("pytest"):
+                rerun_count = os.getenv("VLLM_RERUN_FAILURES_COUNT", 3)
+                rerun_delay = os.getenv("VLLM_RERUN_FAILURES_DELAY", 2)
+                step = step.replace(
+                    "pytest",
+                    f"pytest --reruns {rerun_count} --reruns-delay {rerun_delay}",
+                    1,
+                )
             code = run_command(cmd=step, check=False, use_shell=True)
             if code != 0:
                 failures.append(step)
