@@ -138,6 +138,12 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
       arr_size,
       cudaMemcpyDeviceToHost));
 #endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
+    C10D_NCCL_CHECK(
+        ncclGetLsaMultimemDevicePointer(buffer_win_, offset_, &mc_addr_),
+        "Failed to get multicast pointer");
+#endif
   }
 
   // Exact copy is not needed / supported
@@ -159,6 +165,8 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   std::string group_name_;
   ncclWindow_t buffer_win_;
   ncclWindow_t signal_handle_;
+  // Multicast address
+  void* mc_addr_ = nullptr;
 
   friend class NCCLSymmetricMemory;
 };
@@ -195,13 +203,14 @@ size_t NCCLSymmetricMemory::get_buffer_size() {
 }
 
 bool NCCLSymmetricMemory::has_multicast_support() {
-  // TODO
-  return false;
+  return pai_->mc_addr_ != nullptr;
 }
 
 void* NCCLSymmetricMemory::get_multicast_ptr() {
-  // TODO
-  return nullptr;
+  if (!has_multicast_support()) {
+    return nullptr;
+  }
+  return static_cast<char*>(pai_->mc_addr_) + offset_;
 }
 
 void NCCLSymmetricMemory::barrier(int channel, size_t timeout_ms) {
@@ -312,8 +321,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   }
 
   bool has_multicast_support(int device_idx) override {
-    // TODO
-    return false;
+    return device_has_multicast_support(device_idx);
   }
 
   c10::DeviceType supported_device_type() override {

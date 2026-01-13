@@ -242,7 +242,8 @@ def angle_impl(self: ComplexTensor) -> torch.Tensor:
 def acos_impl(self: ComplexTensor) -> ComplexTensor:
     _, y = split_complex_tensor(self)
     acosh_z = torch.acosh(self)
-    assert isinstance(acosh_z, ComplexTensor)
+    if not isinstance(acosh_z, ComplexTensor):
+        raise AssertionError(f"acosh_z must be a ComplexTensor, got {type(acosh_z)}")
     acosh_z_re, acosh_z_im = split_complex_tensor(acosh_z)
     sign_im = 2 * torch.signbit(y) - 1
     return ComplexTensor(torch.abs(acosh_z_im), sign_im * torch.abs(acosh_z_re))
@@ -252,7 +253,8 @@ def acos_impl(self: ComplexTensor) -> ComplexTensor:
 def asin_impl(self: ComplexTensor) -> ComplexTensor:
     x, y = split_complex_tensor(self)
     asinh_iz = torch.asinh(ComplexTensor(-y, x))
-    assert isinstance(asinh_iz, ComplexTensor)
+    if not isinstance(asinh_iz, ComplexTensor):
+        raise AssertionError(f"asinh_iz must be a ComplexTensor, got {type(asinh_iz)}")
     asinh_iz_re, asinh_iz_im = split_complex_tensor(asinh_iz)
     return ComplexTensor(asinh_iz_im, -asinh_iz_re)
 
@@ -261,7 +263,8 @@ def asin_impl(self: ComplexTensor) -> ComplexTensor:
 def atan_impl(self: ComplexTensor) -> ComplexTensor:
     x, y = split_complex_tensor(self)
     tanh_iz = torch.atanh(ComplexTensor(-y, x))
-    assert isinstance(tanh_iz, ComplexTensor)
+    if not isinstance(tanh_iz, ComplexTensor):
+        raise AssertionError(f"tanh_iz must be a ComplexTensor, got {type(tanh_iz)}")
     tanh_iz_re, tanh_iz_im = split_complex_tensor(tanh_iz)
     return ComplexTensor(tanh_iz_im, -tanh_iz_re)
 
@@ -286,7 +289,8 @@ def atanh_impl(self: ComplexTensor) -> ComplexTensor:
     ret = 0.5 * (
         torch.log(ComplexTensor(1 + x, y)) - torch.log(ComplexTensor(1 - x, -y))
     )
-    assert isinstance(ret, ComplexTensor)
+    if not isinstance(ret, ComplexTensor):
+        raise AssertionError(f"ret must be a ComplexTensor, got {type(ret)}")
     ret_re, ret_im = split_complex_tensor(ret)
 
     return ComplexTensor(ret_re.to(out_dt), ret_im.to(out_dt))
@@ -311,7 +315,8 @@ def cosh_impl(self: ComplexTensor) -> ComplexTensor:
 def sin_impl(self: ComplexTensor) -> ComplexTensor:
     x, y = split_complex_tensor(self)
     sinh_iz = torch.sinh(ComplexTensor(-y, x))
-    assert isinstance(sinh_iz, ComplexTensor)
+    if not isinstance(sinh_iz, ComplexTensor):
+        raise AssertionError(f"sinh_iz must be a ComplexTensor, got {type(sinh_iz)}")
     sinh_iz_re, sinh_iz_im = split_complex_tensor(sinh_iz)
     return ComplexTensor(sinh_iz_im, -sinh_iz_re)
 
@@ -329,7 +334,8 @@ def sinh_impl(self: ComplexTensor) -> ComplexTensor:
 def tan_impl(self: ComplexTensor) -> ComplexTensor:
     x, y = split_complex_tensor(self)
     tanh_iz = torch.tanh(ComplexTensor(-y, x))
-    assert isinstance(tanh_iz, ComplexTensor)
+    if not isinstance(tanh_iz, ComplexTensor):
+        raise AssertionError(f"tanh_iz must be a ComplexTensor, got {type(tanh_iz)}")
     tanh_iz_re, tanh_iz_im = split_complex_tensor(tanh_iz)
     return ComplexTensor(tanh_iz_im, -tanh_iz_re)
 
@@ -651,7 +657,8 @@ def addmm_impl(
     alpha: complex = 1,
 ) -> ComplexTensor:
     ret = beta * input + alpha * torch.mm(mat1, mat2)
-    assert isinstance(ret, ComplexTensor)
+    if not isinstance(ret, ComplexTensor):
+        raise AssertionError(f"ret must be a ComplexTensor, got {type(ret)}")
     ret_r, ret_i = split_complex_tensor(ret)
     if out_dtype is not None:
         out_dtype = COMPLEX_TO_REAL[out_dtype]
