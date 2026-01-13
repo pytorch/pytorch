@@ -61,22 +61,15 @@ def _insert_single_dim_replication_strategy(
         list[Placement | _ShardingPlaceholder]
     ],
     num_input_tensors: int,
-    append: bool = True,
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     """
     Inserts the [Replicate(), Replicate(), ...] strategy after asserting that such strategy does not yet exist.
     """
     for strategy in single_dim_strategies_with_placeholders:
         assert not all(isinstance(p, Replicate) for p in strategy)
-
-    replicate_strategy: list[Placement | _ShardingPlaceholder] = [Replicate()] * (
-        1 + num_input_tensors
+    single_dim_strategies_with_placeholders.insert(
+        0, [Replicate()] * (1 + num_input_tensors)
     )
-    if append:
-        single_dim_strategies_with_placeholders.append(replicate_strategy)
-    else:
-        single_dim_strategies_with_placeholders.insert(0, replicate_strategy)
-
     return single_dim_strategies_with_placeholders
 
 
@@ -217,16 +210,9 @@ def _expand_single_dim_strategy_to_mesh(
             strategies_over_one_mesh_dim = single_dim_strategy(
                 op, args_schema, kwargs_schema
             )
-            append_replicate_strategy = True
-            if op_schema.op in [torch.ops.aten.mm.default]:
-                # gen_einsum_strategies inserts replicate strategy first
-                # https://github.com/pytorch/pytorch/blob/74b6a0efa359722def4b585d9d91fbc3a4bfa530/torch/distributed/tensor/_ops/_einsum_strategy.py#L121-L122
-                # _select_min_cost_strategy choose Replicate at equal cost
-                append_replicate_strategy = False
             strategies_over_one_mesh_dim = _insert_single_dim_replication_strategy(
                 strategies_over_one_mesh_dim,
                 num_inputs,
-                append=append_replicate_strategy,
             )
             expanded_strategies_over_one_mesh_dim = (
                 _fill_single_dim_strategy_placeholders(
