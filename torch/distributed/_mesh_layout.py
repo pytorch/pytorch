@@ -30,9 +30,22 @@ class _FlatLayout:
     """
     A canonical CuTe layout for a single dimension of a DeviceMesh
 
+    Utility class for representing an integer layout by borrowing ideas from CuTe Layout Algebra.
+    See https://docs.nvidia.com/cutlass/media/docs/cpp/cute/02_layout_algebra.html for more details.
+
+    Each layout is represented as a list of sizes and strides. We use it as a way for mechanical bookkeeping
+    of the integers such as ranks in a SPMD mesh, and the transformation on top of it.
+
+    Lots of methods of layout like coalesce, composition, complement, etc. are borrowed from pycute.
+    https://github.com/NVIDIA/cutlass/blob/6dd13d42784ee5bfa232d2441e6b9a021c5c6290/python/pycute/layout.py#L137,L257
+
+    Note this is a CuTe-inspired layout, because CuTe uses co-lexicographic way in linearization while PyTorch
+    is using lexicographic. So even though the CuTe documentation can still be referenced, the implementation will be
+    different from that of PyCute's.
+
     This layout is _not_ itself subdivided into multiple dimensions. It might
     internally sometimes use multidimensional tuple to represent "irregular"
-    layout (e.g., flattening non-adjacent dims), but this should be considered
+    layouts (e.g., flattening non-adjacent dims), but this should be considered
     an opaque implementation detail.
 
     This class guarantees that all equivalent layouts are encoded as the same
@@ -46,14 +59,6 @@ class _FlatLayout:
     stride: tuple[int, ...]
 
     def __init__(self, shape: IntTuple, stride: IntTuple | None = None) -> None:
-        """
-        Create a _FlatLayout from shape and optional stride.
-
-        Args:
-            shape: Shape as an IntTuple (can be nested, will be normalized)
-            stride: Stride as an IntTuple (can be nested, will be normalized).
-                    If None, computes contiguous strides using suffix_product.
-        """
         if not is_tuple(shape) and not is_int(shape):
             raise TypeError(f"shape must be a tuple or int, got {type(shape)}")
         stride = stride if stride is not None else suffix_product(shape)
@@ -86,21 +91,23 @@ class _FlatLayout:
             "You should never need to index into the internal representation of a FlatLayout"
         )
 
+    def to_pycute(self) -> Layout:
+        if not self.shape:
+            return Layout(1, 0)
+        return Layout(self.shape, self.stride)
+
     def numel(self) -> int:
         return math.prod(self.shape)
 
-    def composition(self, other: "_ListOfFlatLayouts") -> "_ListOfFlatLayouts":
+    def composition(self, layout: "_ListOfFlatLayouts") -> "_ListOfFlatLayouts":
         """
         By-dimension composition allows one layout to "select from" or "filter through" another layout.
         Think of it as function composition: (self ∘ layout)(input) = self(layout(input))
         between two layouts. This function is a wrapper of pycute's composition.
 
-        The composition preserves the structure of the right operand (other), returning a
-        _ListOfFlatLayouts with the same number of axes.
-
         Mental model about how to understand the composition logic:
         - The LEFT layout (self) defines the "output space" - what indices are possible
-        - The RIGHT layout (other parameter) acts as a "selector" - which specific indices to pick
+        - The RIGHT layout (layout parameter) acts as a "selector" - which specific indices to pick
         - The composition only generates indices that the left layout could originally produce,
           but the right layout determines which indices to be picked.
         - The stride of the composition layout will not be smaller than the stride of the right layout,
@@ -109,16 +116,13 @@ class _FlatLayout:
 
         Example:
           self = (6,2):(2,1)      # sizes=(6,2), strides=(2,1)
-          other = _ListOfFlatLayouts with 2 axes: [(3,):(2,), (2,):(1,)]
-          self o other = _ListOfFlatLayouts with 2 axes preserving structure
-
-        Args:
-            other: A _ListOfFlatLayouts whose structure will be preserved in the result
+          layout = (3:2)          # sizes=(3,), stride=(2,)
+          self o layout = (3:2)
 
         Returns:
-            A _ListOfFlatLayouts with the same number of axes as other
+          Layout being composed.
         """
-        result = composition(self.to_pycute(), other.to_pycute())
+        result = composition(self.to_pycute(), layout.to_pycute())
         result_axes = [
             _FlatLayout(shape, stride)
             for shape, stride in zip(as_tuple(result.shape), as_tuple(result.stride))
@@ -217,6 +221,9 @@ class _FlatLayout:
             for offset in self.complement(world_size).all_ranks_from_zero()
         ]
 
+    def check_sorted(self) -> bool:
+        return tuple(sorted(self.stride, reverse=True)) == self.stride
+
     def check_non_overlap(self) -> bool:
         """
         Check if the layout has any overlap between the ranks it generates. If there is overlap,
@@ -249,61 +256,36 @@ class _FlatLayout:
         ranks = self.all_ranks_from_zero()
         return len(ranks) == len(set(ranks))
 
-    def to_pycute(self) -> Layout:
-        """Convert to a pycute Layout for compatibility with pycute operations."""
-        if not self.shape:
-            return Layout(1, 0)
-        return Layout(self.shape, self.stride)
-
     @property
     def sizes_and_strides(self) -> Iterator[tuple[int, int]]:
         """Iterate over (size, stride) pairs for each dimension."""
         return zip(self.shape, self.stride)
 
-    def __str__(self) -> str:
-        return f"{self.shape}:{self.stride}"
-
 
 @dataclass(frozen=True)
 class _ListOfFlatLayouts(Sequence[_FlatLayout]):
     """
-    A list of normalized layouts, one per mesh dimension.
+    A multi-dimensional structure consisting of a series of dimension-less layouts
 
-    This class represents the layout of a DeviceMesh, containing one _FlatLayout
-    per mesh dimension. It provides operations for manipulating mesh layouts
-    while maintaining the invariant that each axis is always normalized.
+    This class represents the layout of a full DeviceMesh, where the overall
+    top-level ndim and "logical" shape are well defined, but each individual
+    mesh axis is squashed and normalized into a canonical _FlatLayout.
 
-    The structure is always a flat tuple of _FlatLayout objects (one per mesh dimension).
+    It only contains methods that need to make use of this multi-dimensional
+    structure (i.e., which access the ndim or the top-level sizes). Everything
+    else should go on _FlatLayout and accessed by first calling .collapse().
+
     """
 
     axes: tuple[_FlatLayout, ...]
 
     def __init__(self, axes: Sequence[_FlatLayout]) -> None:
-        """
-        Create a _ListOfFlatLayouts from a sequence of _FlatLayout objects.
-
-        Args:
-            axes: Sequence of _FlatLayout, one per mesh dimension
-        """
         object.__setattr__(self, "axes", tuple(axes))
 
     @classmethod
     def from_sizes_strides(
         cls, sizes: tuple[int, ...], strides: tuple[int, ...] | None = None
     ) -> "_ListOfFlatLayouts":
-        """
-        Create a _ListOfFlatLayouts from top-level sizes and optional strides.
-
-        Each size/stride pair becomes a single-element _FlatLayout.
-
-        Args:
-            sizes: Tuple of sizes, one per mesh dimension
-            strides: Tuple of strides, one per mesh dimension.
-                     If None, computes contiguous strides using suffix_product.
-
-        Returns:
-            A new _ListOfFlatLayouts with one axis per dimension
-        """
         if strides is None:
             strides = flatten(suffix_product(sizes))
         assert len(sizes) == len(strides)
@@ -329,7 +311,7 @@ class _ListOfFlatLayouts(Sequence[_FlatLayout]):
         return tuple(axis.numel() for axis in self.axes)
 
     def numel(self) -> int:
-        return math.prod(axis.numel() for axis in self.axes)
+        return math.prod(self.top_level_sizes)
 
     def cosize(self) -> int:
         return self.to_pycute().cosize()
@@ -338,8 +320,8 @@ class _ListOfFlatLayouts(Sequence[_FlatLayout]):
         """
         Merge all axes into a single _FlatLayout.
 
-        Combines all dimensions across all axes into one axis,
-        with flattening and coalescing handled by the _FlatLayout constructor.
+        This is used to "forget" the multi-dimensional structure of this object
+        and recover a "flat" (and coalesced) representation.
         """
         shapes = tuple(axis.shape for axis in self.axes)
         strides = tuple(axis.stride for axis in self.axes)
@@ -349,15 +331,9 @@ class _ListOfFlatLayouts(Sequence[_FlatLayout]):
         self, start: int, end: int, layout: "_ListOfFlatLayouts"
     ) -> "_ListOfFlatLayouts":
         """
-        Replace axes[start:end] with the axes from another layout.
+        Replace (out-of-place) the start:end slice with the given list of layouts
 
-        Args:
-            start: Start index (inclusive)
-            end: End index (exclusive)
-            layout: The _ListOfFlatLayouts whose axes will be inserted
-
-        Returns:
-            A new _ListOfFlatLayouts with the specified axes replaced
+        Returns the concatenation of self[:start] + layout + self[end:].
         """
         new_axes = list(self.axes)
         new_axes[start:end] = list(layout.axes)
@@ -408,10 +384,6 @@ class _ListOfFlatLayouts(Sequence[_FlatLayout]):
             complement_layout.shape + self_layout.shape,
             complement_layout.stride + self_layout.stride,
         ).reshape(-1, *self.top_level_sizes)
-
-    def __str__(self) -> str:
-        axes_str = ", ".join(str(axis) for axis in self.axes)
-        return f"[{axes_str}]"
 
 
 # Alias for backwards compatibility
