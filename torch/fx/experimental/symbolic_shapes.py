@@ -257,17 +257,6 @@ def _nested_int_aware_sort(
     )
 
 
-def size_hint(x: int | torch.SymInt, *, allow_none: bool = False) -> int | None:
-    """Gets a size hint for a given expression from the underlying shapes we had.
-    Does not introduce a guard, so only use this when you can guarantee that
-    your code is still valid for arbitrary shapes (such as optimization decisions)
-    """
-    if isinstance(x, int):
-        return x
-    assert isinstance(x, torch.SymInt)
-    return x.node.shape_env.size_hint(x.node.expr, allow_none=allow_none)
-
-
 # Wrapper on lru_cache that reports statistics at process end
 def lru_cache(
     maxsize: Optional[int],
@@ -374,7 +363,12 @@ def create_contiguous(shape: Sequence[Int]) -> list[Int]:
     return list(reversed(strides))
 
 
+@deprecated("used size_hint instead of hint_int", category=FutureWarning)
 def hint_int(a: Union[torch.SymInt, int], fallback: Optional[int] = None) -> int:
+    return size_hint(a, fallback)
+
+
+def size_hint(a: Union[torch.SymInt, int], fallback: Optional[int] = None) -> int:
     """
     Retrieve the hint for an int (based on the underlying real values as observed
     at runtime).  If no hint is available (e.g., because data dependent shapes),
@@ -3817,6 +3811,9 @@ class ShapeEnv:
         self.unique_ids: set[int] = set()
         # Maps symbolic ints to their original concrete values
         # Currently populated from tensors
+        # when hint is overridden in mark_dynamic, the value stored in
+        # self.var_to_val is the overridden hint.
+        # only used for backed dynamic shapes symbols.
         self.var_to_val: dict[sympy.Symbol, sympy.Integer] = {}
         # Like var_to_val, but only set when propagate_real_tensors is on.
         # Used as last resort to avoid GuardOnDataDependent error
@@ -4703,10 +4700,17 @@ class ShapeEnv:
             # NB: Don't duck size the stride; instead use the expression
             # we computed
             assert stride_expr is not None
+            # self.var_to_val will have the up to date hint value for each symbols
+            # including overridden hints.
+            hint_stride = stride_expr.xreplace(self.var_to_val)
+            if isinstance(hint_stride, (int, sympy.core.numbers.Integer)):
+                hint_stride = int(hint_stride)
+            else:
+                hint_stride = ex_stride[i]
             sym_stride.append(
                 self.create_symintnode(
                     stride_expr,
-                    hint=ex_stride[i],
+                    hint=hint_stride,
                     source=TensorPropertySource(source, TensorProperty.STRIDE, i),
                 )
             )
