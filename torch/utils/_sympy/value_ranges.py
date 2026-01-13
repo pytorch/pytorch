@@ -118,7 +118,7 @@ AllFn = ExprFn | BoolFn
 AllFn2 = ExprFn2 | BoolFn2
 
 
-@dataclasses.dataclass(frozen=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class ValueRanges(Generic[_T]):
     if TYPE_CHECKING:
         # ruff doesn't understand circular references but mypy does
