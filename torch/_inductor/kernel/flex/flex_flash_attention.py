@@ -343,8 +343,8 @@ def create_flex_flash_attention_kernel(
     )
 
     mask_graph_is_trivial = is_trivial_mask_graph(mask_graph.graph_module)
-    score_graph_is_trivial = (
-        subgraph is None or is_trivial_score_graph(subgraph.graph_module)
+    score_graph_is_trivial = subgraph is None or is_trivial_score_graph(
+        subgraph.graph_module
     )
 
     needs_block_mask = not mask_graph_is_trivial
