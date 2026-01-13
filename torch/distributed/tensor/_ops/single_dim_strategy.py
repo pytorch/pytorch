@@ -211,8 +211,7 @@ def _expand_single_dim_strategy_to_mesh(
                 op, args_schema, kwargs_schema
             )
             strategies_over_one_mesh_dim = _insert_single_dim_replication_strategy(
-                strategies_over_one_mesh_dim,
-                num_inputs,
+                strategies_over_one_mesh_dim, num_inputs
             )
             expanded_strategies_over_one_mesh_dim = (
                 _fill_single_dim_strategy_placeholders(
