@@ -495,7 +495,7 @@ def compute_normalized_l2_error(x: torch.Tensor, y: torch.Tensor) -> torch.Tenso
     Return:
         float or tuple of floats
     """
-    # pyrefly: ignore [unsupported-operation]
+
     return torch.sqrt(((x - y) ** 2).sum() / (x**2).sum())
 
 
