@@ -290,7 +290,7 @@ void nll_loss_forward_out_cuda_template(
   if (weight_.defined()) {
   TORCH_CHECK(
       input.scalar_type() == weight_.scalar_type(),
-      "expected weight tensor dtype to be ",
+      "expected scalar type ",
       input.scalar_type(),
       " but found ",
       weight_.scalar_type());

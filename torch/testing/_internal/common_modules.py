@@ -3242,7 +3242,7 @@ def module_error_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_gr
     Error inputs for NLLLoss that test weight dtype must match input dtype.
     Regression test for device parity between CPU and CUDA with empty tensors.
     """
-    input_t = torch.tensor([], device=device, dtype=torch.float32).reshape((0, 0))
+    input_t = torch.tensor([], device=device, dtype=dtype).reshape((0, 0))
     weight_t = torch.tensor([], device=device, dtype=torch.float16)
     target_t = torch.tensor([], device=device, dtype=torch.long)
 
@@ -3254,7 +3254,7 @@ def module_error_inputs_torch_nn_NLLLoss(module_info, device, dtype, requires_gr
             ),
             error_on=ModuleErrorEnum.FORWARD_ERROR,
             error_type=RuntimeError,
-            error_regex="expected weight tensor dtype to be Float but found Half"
+            error_regex=r"expected scalar type \w+ but found Half"
         ),
     ]
 
