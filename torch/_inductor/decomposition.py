@@ -37,6 +37,7 @@ from torch._prims_common import (
 )
 from torch._refs import native_layer_norm as decomp_native_layer_norm
 from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
+from torch.utils._ordered_set import OrderedSet
 
 from . import config, inductor_prims
 from .utils import (
@@ -932,11 +933,13 @@ def select_decomp_table() -> dict[Any, Callable[..., Any]]:
         # The decomposed version uses separate mul+add/div+add ops which don't match
         # eager's FMA rounding behavior.
         # Note: We check against OpOverloadPacket to match all overloads (default, out, etc.)
-        ops_to_skip = {
-            aten.addcmul,
-            aten._foreach_addcmul.Scalar,
-            aten._foreach_addcdiv.Scalar,
-        }
+        ops_to_skip = OrderedSet(
+            [
+                aten.addcmul,
+                aten._foreach_addcmul.Scalar,
+                aten._foreach_addcdiv.Scalar,
+            ]
+        )
 
         def should_skip(op: Any) -> bool:
             # Check if op is directly in the skip set
