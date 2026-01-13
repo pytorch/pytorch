@@ -29,6 +29,7 @@ Core Maintainers
 -  Piotr Bialecki (`ptrblck <https://github.com/ptrblck>`__)
 -  Natalia Gimelshein (`ngimel <https://github.com/ngimel>`__)
 -  Horace He (`Chillee <https://github.com/Chillee>`__)
+-  Joe Spisak (`jspisak <https://github.com/jspisak>`__)
 -  (emeritus) Dmytro Dzhulgakov (`dzhulgakov <https://github.com/dzhulgakov>`__)
 
 Module-level maintainers
