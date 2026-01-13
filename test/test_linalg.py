@@ -10095,6 +10095,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertEqual(C, B.sum().expand(B.shape))
 
     @onlyCUDA
+    @skipCUDAIfRocm(msg="ROCm triu/tril has issues with 64-bit indexing for large matrices")
     @largeTensorTest("40GB")
     def test_triu_tril_large_matrix_64bit(self, device):
         """
