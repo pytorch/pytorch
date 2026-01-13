@@ -5331,6 +5331,20 @@ class Scheduler:
                 read = read.normalize()
                 write = write.normalize()
 
+            # Operations like index_add_, scatter_add_, etc. require global
+            # synchronization - all threads must complete writes before any reads.
+            # These cannot be safely fused into the same kernel.
+            if write.name in self.name_to_buf:
+                defining_op = self.name_to_buf[write.name].defining_op
+                if defining_op and hasattr(defining_op, 'node') and defining_op.node:
+                    # Check for scatter_mode attribute (used by atomic operations)
+                    if (hasattr(defining_op.node, "data") 
+                        and hasattr(defining_op.node.data, "scatter_mode")
+                        and defining_op.node.data.scatter_mode == "atomic_add"):
+                        # This is an atomic/scatter operation
+                        # Don't allow fusion with subsequent reads
+                        return False
+            
             return (
                 read.index == write.index
                 and len(read.size) >= len(write.size)
