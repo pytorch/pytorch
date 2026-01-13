@@ -1075,8 +1075,6 @@ class Test_StridedShard_Propagation(LocalDTensorTestBase):
         view_into_shape: list[int],
         expected_placements_after_view,
     ):
-        import math
-
         assert math.prod(original_full_tensor.shape) == math.prod(view_into_shape)
         # verify user specified `expected_placements_after_view `is correct
         A = distribute_tensor(original_full_tensor, mesh, original_placements)
