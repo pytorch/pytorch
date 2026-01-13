@@ -336,6 +336,12 @@ jobs:
           DASHBOARD_TAG: ${{ inputs.dashboard-tag }}
           VLLM_TEST_HUGGING_FACE_TOKEN: ${{ secrets.VLLM_TEST_HUGGING_FACE_TOKEN }}
           HF_CACHE: /mnt/hf_cache
+          # Use offline mode by default, only enable online mode to refresh the models
+          # from HF when the PR has a special ci-refresh-hf-cache label. This label is
+          # automatically added to the vLLM pinned commit hash update, which effectively
+          # refreshes the cache daily
+          TRANSFORMERS_OFFLINE: ${{ contains(github.event.pull_request.labels.*.name, 'ci-refresh-hf-cache') && '0' || '1' }}
+          HF_DATASETS_OFFLINE: ${{ contains(github.event.pull_request.labels.*.name, 'ci-refresh-hf-cache') && '0' || '1' }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
           SCRIBE_GRAPHQL_ACCESS_TOKEN: ${{ secrets.SCRIBE_GRAPHQL_ACCESS_TOKEN }}
           ARTIFACTS_FILE_SUFFIX: ${{ github.job }}-${{ matrix.config }}-${{ matrix.shard }}-${{ matrix.num_shards }}-${{ matrix.runner }}_${{ steps.get-job-id.outputs.job-id }}
@@ -376,6 +382,11 @@ jobs:
           if [[ ! -d "${HF_CACHE}" ]]; then
             export HF_CACHE="${RUNNER_TEMP}/hf_cache"
             mkdir -p "${HF_CACHE}"
+
+            # When there is no cache directory, the job has no way but to reach out to
+            # HF if needed
+            export TRANSFORMERS_OFFLINE=0
+            export HF_DATASETS_OFFLINE=0
           fi
 
           # detached container should get cleaned up by teardown_ec2_linux
@@ -424,6 +435,8 @@ jobs:
             -e HUGGING_FACE_HUB_TOKEN \
             -e VLLM_TEST_HUGGING_FACE_TOKEN \
             -e HF_CACHE \
+            -e TRANSFORMERS_OFFLINE \
+            -e HF_DATASETS_OFFLINE \
             -e SCRIBE_GRAPHQL_ACCESS_TOKEN \
             -e DASHBOARD_TAG \
             -e ARTIFACTS_FILE_SUFFIX \
