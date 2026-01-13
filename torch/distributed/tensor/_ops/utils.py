@@ -400,12 +400,14 @@ def expand_to_full_mesh_op_strategy(
     all_strategies = []
     for strategy_comb in strategy_combs:
         spec_list: list[DTensorSpec | None] = []
-        # Track how many non-None output specs we've seen (for output_tensor_meta indexing)
+        # Track how many non-None output specs we've seen (for output_tensor_meta indexing).
+        # This is needed because output_tensor_meta may contain only non-None entries,
+        # so we can't use position directly when there are None entries in the output.
         output_spec_count = 0
         # Track input args separately since not all tensor inputs have OpStrategy
         # (e.g., philox_seed/offset in SDPA are scalar tensors without OpStrategy)
         input_strategy_counter = 0
-        for position, specs in enumerate(zip(*strategy_comb)):
+        for position, specs in enumerate(zip(*strategy_comb, strict=True)):
             if specs[0] is not None:
                 # Populate tensor_meta field for both output and input specs,
                 # including for tuple output cases
