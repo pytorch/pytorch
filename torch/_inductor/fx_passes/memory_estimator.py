@@ -14,7 +14,7 @@ from torch.utils._pytree import tree_map_only
 log = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class StorageKey:
     storage: torch.UntypedStorage
     device: torch.device
