@@ -259,7 +259,8 @@ class TestExpandPlaceholder(TestCase):
         ]
         expected_output_placements = [
             (Shard(0), Replicate(), Shard(1)),
-            (Partial("sum"), Partial("sum"), Partial("sum")),
+            # P(avg) -> P(sum) is currently not supported, but could be in principle
+            (Partial("sum"), Partial("sum"), Replicate()),
         ]
         tuple_strategy = _expand_foreach_add_list(
             inputs_a, inputs_b, placements_a, placements_b
@@ -753,6 +754,16 @@ def _dummy_add_fake(x, y):
     return torch.empty_like(x)
 
 
+@torch.library.custom_op("mylib::dummy_check", mutates_args=())
+def dummy_check(x: torch.Tensor) -> None:
+    """A no-output op similar to _linalg_check_errors."""
+
+
+@dummy_check.register_fake
+def _dummy_check_fake(x):
+    return None
+
+
 class TestSingleDimStrategyRegistration(TestCase):
     def setUp(self):
         super().setUp()
@@ -797,6 +808,33 @@ class TestSingleDimStrategyRegistration(TestCase):
 
         # Now the op should run with DTensor
         torch.ops.mylib.dummy_add(x_dt, y_dt)
+
+    @patch(
+        "torch.distributed.tensor._api.DTensor._op_dispatcher.sharding_propagator.op_single_dim_strategy_funcs",
+        {},
+    )
+    def test_register_single_dim_strategy_no_output(self):
+        """Test that single-dim strategy works for ops with no tensor output.
+
+        This tests the fix for operators like _linalg_check_errors that return None.
+        Previously, this would fail with:
+        "_propagate_tensor_meta_non_cached returned None for ..., but tensor_meta is required"
+        """
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
+        x = torch.randn(8, 16)
+        x_dt = distribute_tensor(x, mesh, [Shard(0)])
+
+        # Register a single-dim strategy for the no-output op
+        @register_single_dim_strategy(torch.ops.mylib.dummy_check.default)
+        def dummy_check_single_dim_strategy(op, args_schema, kwargs_schema):
+            # For no-output ops, return empty list (replicate-only)
+            return []
+
+        # This should work without raising "tensor_meta is required" error
+        result = torch.ops.mylib.dummy_check(x_dt)
+
+        # Verify the result is None (no tensor output)
+        self.assertIsNone(result, "No-output op should return None")
 
 
 if __name__ == "__main__":
