@@ -1418,7 +1418,7 @@ def logsumexp_strategy(op_schema: OpSchema) -> OpStrategy:
 # on batch dimensions while keeping the matrix dimensions (last 2 dims)
 # replicated across the mesh.
 #
-# Operators with decompositions (cross, vecdot, vector_norm, vander, pinv,
+# Operators with decompositions (cross, vecdot, vector_norm, vander,
 # matrix_power) are skipped as they can leverage the decomposed ops' strategies.
 # =============================================================================
 
@@ -1430,6 +1430,7 @@ def logsumexp_strategy(op_schema: OpSchema) -> OpStrategy:
 _SINGLE_INPUT_OP_TO_NUM_OUTPUTS: dict[OpOverload, int] = {
     aten.linalg_eigvals.default: 1,
     aten._linalg_eigvals.default: 1,
+    aten.linalg_pinv.atol_rtol_tensor: 1,
     aten.linalg_cholesky_ex.default: 2,
     aten.linalg_inv_ex.default: 2,
     aten.linalg_eig.default: 2,
