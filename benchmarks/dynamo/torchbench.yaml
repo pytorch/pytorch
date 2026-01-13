@@ -78,6 +78,12 @@ tolerance:
     sam: 0.95
     sam_fast: 0.95
 
+  # Number of accuracy check runs for flaky models (default is 1)
+  # Model passes if majority of runs pass
+  accuracy_check_runs:
+    sam: 5
+    sam_fast: 5
+
 require_larger_multiplier_for_smaller_tensor:
   - yolov3
 
