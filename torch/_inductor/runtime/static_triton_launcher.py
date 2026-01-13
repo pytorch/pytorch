@@ -1,13 +1,15 @@
 import functools
 import os
+from functools import cached_property
 from typing import Any
 from typing_extensions import Unpack
 
+from ..utils import is_rocm
 from .triton_compat import ASTSource, CompiledKernel, knobs as triton_knobs
 from .triton_helpers import get_constexprs
 
 
-class StaticallyLaunchedCudaKernel:
+class StaticallyLaunchedTritonKernel:
     """
     Parses the metadata of a CompiledKernel from Triton into a structure that can
     launch the cuda kernel directly. Only works for triton kernels compiled to cubin.
@@ -20,13 +22,13 @@ class StaticallyLaunchedCudaKernel:
     Workflow:
     Compile time:
     1. Compile a kernel with triton and get a CompiledKernel
-    2. Instantiate kernel = StaticallyLaunchedCudaKernel(triton_kernel)
+    2. Instantiate kernel = StaticallyLaunchedTritonKernel(triton_kernel)
     3. Write to a cubin file: kernel.write_cubin_to_file(filepath)
     4. Call kernel.load_kernel() (CUDA should be initialized by this point) to load the cubin
     Runtime:
     5. Call kernel.run(grid, stream, args) to launch the kernel
 
-    Note that after step 3, StaticallyLaunchedCudaKernel is fully pickleable/serializable.
+    Note that after step 3, StaticallyLaunchedTritonKernel is fully pickleable/serializable.
     This allows it to be cached by FXGraphCache/TritonBundler, as well as sent from the worker
     to the parent process in inductor.
 
@@ -34,11 +36,13 @@ class StaticallyLaunchedCudaKernel:
     to how it handles constants in 3.3, so there's some special logic necessary to handle both versions.
     """
 
+    @cached_property
+    def C_impl(self):
+        raise NotImplementedError
+
     def __init__(self, kernel: CompiledKernel) -> None:
         # pyrefly: ignore [missing-attribute]
         self.name = kernel.src.fn.__name__
-        # pyrefly: ignore [missing-attribute]
-        self.cubin_raw = kernel.asm.get("cubin", None)
         # pyrefly: ignore [missing-attribute]
         self.cubin_path = kernel._cubin_path
 
@@ -127,18 +131,16 @@ class StaticallyLaunchedCudaKernel:
             os.makedirs(os.path.dirname(filepath), exist_ok=True)
             with open(filepath, "wb") as f:
                 f.write(self.cubin_raw)
-                self.cubin_path = filepath
+                self.cubin_path = filepath  # pyre-ignore
         return self.cubin_path
 
     def load_kernel(self, device: int) -> None:
-        from torch._C import _StaticCudaLauncher
-
         if self.function is not None:
             return
 
         assert hasattr(self, "cubin_path")
         assert self.cubin_path is not None
-        (self.function, self.n_regs, self.n_spills) = _StaticCudaLauncher._load_kernel(
+        (self.function, self.n_regs, self.n_spills) = self.C_impl._load_kernel(
             self.cubin_path, self.name, self.shared, device
         )
         # Don't need the cubin path anymore now that we've loaded
@@ -178,7 +180,7 @@ class StaticallyLaunchedCudaKernel:
             return "O"
         elif ty == "nvTmaDesc":
             raise NotImplementedError("nvTmaDesc kernels are not yet supported")
-        return StaticallyLaunchedCudaKernel.type_mappings()[ty]
+        return StaticallyLaunchedTritonKernel.type_mappings()[ty]
 
     def arg_ty_from_signature(self, src: ASTSource) -> str:
         def index_key(i: Any) -> int:
@@ -235,7 +237,6 @@ class StaticallyLaunchedCudaKernel:
         *args: Unpack[tuple[object, ...]],
     ) -> None:
         """Actually run the kernel at runtime. This function is the hot codepath."""
-        from torch._C import _StaticCudaLauncher
 
         # Assert load_kernel() has been called and args match
         assert self.function is not None
@@ -245,18 +246,48 @@ class StaticallyLaunchedCudaKernel:
         # thing, it should always match.
         # Get rid of constants before passing to cubin launcher
 
-        # Add a None if triton wants extra parameters for scratch spaces
         arg_tys = self.arg_tys
-        for has_scratch in [self.has_global_scratch, self.has_profile_scratch]:
-            if has_scratch:
-                arg_tys = arg_tys + "O"
-                args = (*args, None)
 
+        if is_rocm():
+            # ROCm/HIP kernel ABI: The Triton HIP backend ALWAYS includes both
+            # global_scratch and profile_scratch parameters in the kernel signature,
+            # even when the kernel doesn't use them (i.e., when has_*_scratch is False).
+            #
+            # This differs fundamentally from CUDA, where these parameters are only
+            # present in the signature if the corresponding has_*_scratch flag is True.
+            #
+            # The flags indicate whether memory will be allocated/used:
+            # - has_global_scratch: Whether global scratch workspace is needed
+            # - has_profile_scratch: Whether profiling instrumentation is enabled
+            #
+            # However, regardless of flag values, we MUST always pass both parameters
+            # to match the HIP kernel ABI. Passing None is safe:
+            #
+            # - If scratch is not needed (has_*_scratch=False or scratch_size=0):
+            #   The None becomes nullptr, which the kernel never dereferences
+            #
+            # - If scratch is needed (has_*_scratch=True and scratch_size>0):
+            #   The None becomes nullptr initially, but the HIP runtime intercepts
+            #   the kernel launch, allocates the required scratch memory based on
+            #   kernel metadata, and replaces the nullptr with a valid pointer before
+            #   the kernel actually executes
+            #
+            # Not passing both parameters causes segmentation faults because the kernel
+            # expects them at specific positions in the argument array.
+            arg_tys = arg_tys + "OO"
+            args = (*args, None, None)
+
+        else:
+            for has_scratch in [self.has_global_scratch, self.has_profile_scratch]:
+                if has_scratch:
+                    arg_tys = arg_tys + "O"
+                    args = (*args, None)
+        # pyrefly: ignore [bad-argument-type]
         assert len(args) == len(arg_tys)
 
         # TODO: can handle grid functions here or in C++, so
         # that we don't need the grid handler above.
-        _StaticCudaLauncher._launch_kernel(
+        self.C_impl._launch_kernel(
             self.function,
             grid_x,
             grid_y,
@@ -267,3 +298,51 @@ class StaticallyLaunchedCudaKernel:
             args,
             stream,
         )
+
+
+class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
+    @cached_property
+    def C_impl(self):
+        from torch._C import _StaticCudaLauncher
+
+        return _StaticCudaLauncher
+
+    def __init__(self, kernel: CompiledKernel) -> None:
+        # pyrefly: ignore [missing-attribute]
+        if "hsaco" in kernel.asm:
+            # pyrefly: ignore [missing-attribute]
+            self.cubin_raw = kernel.asm["hsaco"]
+
+        # pyrefly: ignore [missing-attribute]
+        elif "cubin" in kernel.asm:
+            # pyrefly: ignore [missing-attribute]
+            self.cubin_raw = kernel.asm["cubin"]
+        else:
+            raise RuntimeError(
+                "Expected either 'hsaco' (ROCm) or 'cubin' (CUDA) in kernel.asm"
+            )
+        super().__init__(kernel)
+
+
+class StaticallyLaunchedXpuKernel(StaticallyLaunchedTritonKernel):
+    @cached_property
+    def C_impl(self):
+        from torch._C import _StaticXpuLauncher
+
+        return _StaticXpuLauncher
+
+    def __init__(self, kernel: CompiledKernel) -> None:
+        # pyrefly: ignore [missing-attribute]
+        self.cubin_raw = kernel.asm.get("zebin", None)
+        super().__init__(kernel)
+
+
+def statically_launched_kernel_by_device(
+    kernel: CompiledKernel, device_type: str = "cuda"
+) -> StaticallyLaunchedTritonKernel:
+    if device_type in ("cuda", "hip"):
+        return StaticallyLaunchedCudaKernel(kernel)
+    elif device_type == "xpu":
+        return StaticallyLaunchedXpuKernel(kernel)
+    else:
+        raise NotImplementedError(f"Device type {device_type} not supported")
