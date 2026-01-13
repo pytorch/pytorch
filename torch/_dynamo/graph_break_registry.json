@@ -253,6 +253,24 @@
       ]
     }
   ],
+  "GB7054": [
+    {
+      "Gb_type": "backward() with non-leaf tensor",
+      "Context": "backward(inputs=[...]) with non-leaf tensor: {var}",
+      "Explanation": "backward(inputs=[...]) with non-leaf tensors is not yet supported.",
+      "Hints": [
+        "Only pass leaf tensors (parameters, graph inputs) to backward(inputs=...)"
+      ]
+    },
+    {
+      "Gb_type": "backward() with non-leaf tensor",
+      "Context": "backward(inputs=[...]) with non-leaf tensor",
+      "Explanation": "backward(inputs=[...]) with non-leaf tensors is not yet supported.",
+      "Hints": [
+        "Only pass leaf tensors (parameters, graph inputs) to backward(inputs=...)"
+      ]
+    }
+  ],
   "GB0026": [
     {
       "Gb_type": "Calling subclass default constructor with more than tensor argument",
@@ -1389,7 +1407,15 @@
   "GB0123": [
     {
       "Gb_type": "Unsupported Tensor.backward() call",
-      "Context": "call_method {self} backward {args} {kwargs}",
+      "Context": "call_method {self} backward {gradient} {retain_graph} {create_graph} {inputs}",
+      "Explanation": "Dynamo currently does not support tracing `Tensor.backward()` when trace_autograd_ops is off.",
+      "Hints": [
+        "Set torch._dynamo.trace_autograd_ops=True"
+      ]
+    },
+    {
+      "Gb_type": "Unsupported Tensor.backward() call",
+      "Context": "call_method {self} backward {gradient} {retain_graph} {create_graph} {inputs}",
       "Explanation": "Dynamo currently does not support tracing `Tensor.backward()`.",
       "Hints": [
         "This graph break is fundamental - it is unlikely that Dynamo will ever be able to trace through your code. Consider finding a workaround."
@@ -2189,6 +2215,16 @@
         "Supported args are Tensors, and functions/nn.Modules/user-defined objects ",
         "from outside the compiled region.",
         "It may be possible to write Dynamo tracing rules for this code. Please report an issue to PyTorch if you encounter this graph break often and it is causing performance issues."
+      ]
+    }
+  ],
+  "GB1042": [
+    {
+      "Gb_type": "backward() with in-graph created tensor",
+      "Context": "backward(inputs=[...]) with in-graph created tensor: {var}",
+      "Explanation": "backward(inputs=[...]) with tensors created inside the compiled function is not yet supported.",
+      "Hints": [
+        "Only pass tensors that are inputs to the compiled function or captured from outside"
       ]
     }
   ],
@@ -3682,6 +3718,14 @@
       ]
     }
   ],
+  "GB1501": [
+    {
+      "Gb_type": "sparse_grad_accumulate_grad",
+      "Context": "accumulate_grad_ with sparse gradient",
+      "Explanation": "Sparse gradients are not supported in compiled autograd",
+      "Hints": []
+    }
+  ],
   "GB0323": [
     {
       "Gb_type": "torch.scan: improper additional_inputs",
@@ -3854,14 +3898,6 @@
       "Hints": [
         "Dynamo has detected that tracing the code will result in an error when running in eager. Please double check that your code doesn't contain a similar error when actually running eager/uncompiled."
       ]
-    }
-  ],
-  "GB2750": [
-    {
-      "Gb_type": "sparse_grad_accumulate_grad",
-      "Context": "accumulate_grad_ with sparse gradient",
-      "Explanation": "Sparse gradients are not supported in compiled autograd",
-      "Hints": []
     }
   ],
   "GB0341": [
@@ -4133,6 +4169,16 @@
       ]
     }
   ],
+  "GB0442": [
+    {
+      "Gb_type": "backward() with empty inputs",
+      "Context": "backward(inputs=[...]) resulted in no valid leaf tensors",
+      "Explanation": "backward(inputs=[...]) requires at least one valid leaf tensor.",
+      "Hints": [
+        "Ensure at least one tensor in inputs is a leaf (requires_grad=True, no grad_fn)"
+      ]
+    }
+  ],
   "GB0367": [
     {
       "Gb_type": "Dynamo cannot determine the equality comparison of an object",
@@ -4246,7 +4292,7 @@
     },
     {
       "Gb_type": "autograd.grad with compiled autograd",
-      "Context": "",
+      "Context": "torch.autograd.grad()",
       "Explanation": "torch.autograd.grad() inside torch.compile is not supported when compiled autograd is enabled. These two features have conflicting requirements for how the autograd graph is traced.",
       "Hints": [
         "Disable compiled autograd by removing the compiled_autograd context manager.",
