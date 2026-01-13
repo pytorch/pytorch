@@ -327,10 +327,6 @@ class AOTInductorTestsTemplate:
         )
         self.assertTrue(actual_path == expected_path)
 
-    @unittest.skipIf(
-        config.triton.native_matmul,
-        "different # of input/output/constants in native matmul",
-    )
     def test_empty_constant_folding(self):
         class Model(torch.nn.Module):
             def __init__(self, device):
@@ -2547,10 +2543,6 @@ class AOTInductorTestsTemplate:
 
     # mps doesn't support float64
     @skipIfMPS
-    @unittest.skipIf(
-        config.triton.native_matmul,
-        "FIXME: cannot do get_size on FakeTensor during lowering.",
-    )
     def test_while_loop_with_parameters(self):
         inputs = (
             torch.randn(

@@ -1599,7 +1599,7 @@ class triton:
     # Note: Native matmul does not currently support block pointers or TMA matmul.
     # If both native_matmul and (use_block_ptr or enable_persistent_tma_matmul) are enabled,
     # an error will be thrown.
-    native_matmul: bool = False
+    native_matmul: bool = True
 
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
