@@ -802,6 +802,41 @@ def forward(self, tangents_1, tangents_2, tangents_token):
             self.assertEqual(_get_effect(torch.ops._mylib.foo.default), None)
 
     @skipIfNoDynamoSupport
+    def test_effectful_custom_op_in_backward(self):
+        # test that torch.compile works with effectful custom ops called in backward
+        @torch.library.custom_op("test_effects::log_grad", mutates_args=())
+        def log_grad(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        @log_grad.register_fake
+        def log_grad_fake(x: torch.Tensor) -> torch.Tensor:
+            return x.clone()
+
+        log_grad.register_effect(_EffectType.ORDERED)
+
+        class NoOpWithLoggingBackward(torch.autograd.Function):
+            @staticmethod
+            def forward(ctx, x):
+                return x.clone()
+
+            @staticmethod
+            def backward(ctx, grad_output):
+                logged_grad = torch.ops.test_effects.log_grad(grad_output)
+                return logged_grad
+
+        def fn(x):
+            y = NoOpWithLoggingBackward.apply(x)
+            return y.sum()
+
+        x = torch.randn(3, 4, requires_grad=True)
+
+        compiled_fn = torch.compile(fn, backend="aot_eager")
+        loss = compiled_fn(x)
+        loss.backward()
+
+        self.assertEqual(x.grad.shape, x.shape)
+
+    @skipIfNoDynamoSupport
     def test_regular_effectful_op_only_in_backward(self):
         handle = _register_effectful_op(torch.ops.aten.cos.default, _EffectType.ORDERED)
         try:

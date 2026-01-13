@@ -287,6 +287,8 @@ def _is_primal(node: fx.Node) -> bool:
 
 
 def _is_tangent(node: fx.Node) -> bool:
+    if _is_backward_token(node):
+        return False
     return node.op == "placeholder" and "tangents" in str(node.target)
 
 
@@ -313,6 +315,10 @@ def _is_backward_state(node: fx.Node) -> bool:
     return node.op == "placeholder" and isinstance(node.meta.get("val"), BackwardState)
 
 
+def _is_backward_token(node: fx.Node) -> bool:
+    return node.op == "placeholder" and node.name.startswith("tangents_token")
+
+
 def _has_tag_is_backward(node: fx.Node) -> bool:
     return node.meta.get("partitioner_tag", None) == "is_backward"
 
@@ -329,6 +335,13 @@ def _has_tag_must_be_in_backward(node: fx.Node) -> bool:
     return node.meta.get("partitioner_tag", None) == "must_be_in_backward"
 
 
+def _uses_backward_token(node: fx.Node) -> bool:
+    for arg in pytree.arg_tree_leaves(*node.args, **node.kwargs):
+        if isinstance(arg, fx.Node) and _is_backward_token(arg):
+            return True
+    return False
+
+
 def _must_be_in_forward(node: fx.Node) -> bool:
     if _has_tag_must_be_in_forward(node):
         return True
@@ -336,6 +349,8 @@ def _must_be_in_forward(node: fx.Node) -> bool:
         isinstance(node.target, torch._ops.OpOverload)
         and node.target._schema.is_mutable
     )
+    if is_with_effects(node) and _uses_backward_token(node):
+        return False
     return (
         not _has_tag_is_backward(node)
         and not _has_tag_must_be_in_backward(node)
@@ -908,10 +923,15 @@ def _extract_fwd_bwd_modules(
     fwd_seed_offset_inputs = [*filter(_is_fwd_seed_offset, placeholders)]
     bwd_seed_offset_inputs = [*filter(_is_bwd_seed_offset, placeholders)]
     backward_state_inputs = [*filter(_is_backward_state, placeholders)]
+    backward_token_inputs = [*filter(_is_backward_token, placeholders)]
 
     bwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
-        saved_sym_nodes + saved_values + tangent_inputs + bwd_seed_offset_inputs,
+        saved_sym_nodes
+        + saved_values
+        + tangent_inputs
+        + bwd_seed_offset_inputs
+        + backward_token_inputs,
         bwd_outputs,
         bwd_outputs_descs,
         "backward",
@@ -1028,7 +1048,8 @@ def _extract_fwd_bwd_modules(
         + saved_values
         + tangent_inputs
         + bwd_seed_offset_inputs
-        + backward_state_inputs,
+        + backward_state_inputs
+        + backward_token_inputs,
         bwd_outputs,
         bwd_outputs_descs,
         "backward",
