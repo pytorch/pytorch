@@ -194,13 +194,14 @@ size_t NCCLSymmetricMemory::get_buffer_size() {
   return pai_->buffer_size_;
 }
 
-bool NCCLSymmetricMemory::has_multicast_support() {
-  // TODO
-  return false;
-}
-
 void* NCCLSymmetricMemory::get_multicast_ptr() {
-  // TODO
+  // Starting from NCCL 2.29, we can use `ncclGetLsaMultimemDevicePointer`
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
+  void* mc_addr = nullptr;
+  if (ncclGetLsaMultimemDevicePointer(pai_->buffer_win_, offset_, &mc_addr) == ncclSuccess) {
+    return mc_addr;
+  }
+#endif
   return nullptr;
 }
 
@@ -312,8 +313,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   }
 
   bool has_multicast_support(int device_idx) override {
-    // TODO
-    return false;
+    return device_has_multicast_support(device_idx);
   }
 
   c10::DeviceType supported_device_type() override {
