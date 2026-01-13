@@ -85,9 +85,16 @@ class ConvertFrameReturn:
     guarded_code: Optional[GuardedCode] = None
 
 
-def wrap_guarded_code(guarded_code: GuardedCode) -> ConvertFrameReturn:
+def wrap_guarded_code(guarded_code: GuardedCode, fullgraph: bool) -> ConvertFrameReturn:
+    """
+    Wraps GuardedCode for output from convert_frame.py.
+
+    NOTE: if fullgraph is True, then the recursive action is to SKIP to prevent unintended
+    additional Dynamo invocations. Otherwise, the recursive action is DEFAULT.
+    """
+    recursive_action = FrameAction.SKIP if fullgraph else FrameAction.DEFAULT
     return ConvertFrameReturn(
-        frame_exec_strategy=FrameExecStrategy(FrameAction.DEFAULT, FrameAction.DEFAULT),
+        frame_exec_strategy=FrameExecStrategy(FrameAction.DEFAULT, recursive_action),
         guarded_code=guarded_code,
     )
 

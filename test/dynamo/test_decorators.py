@@ -1033,6 +1033,58 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
         self.assertEqual(torch.compile(fn, backend="eager")(inp), inp - 1)
 
+    def test_fullgraph_skips_nested_frames(self):
+        # Really weird setup where the compiled bytecode can
+        # trigger a Dynamo trace via weakref.finalize
+        import weakref
+
+        class Obj:
+            pass
+
+        # Could possibly be dynamo traced!
+        def finalize(x):
+            x += 4
+
+        lst = []
+
+        def _setup_finalizer(inp):
+            obj = Obj()
+            lst.append(obj)
+            weakref.finalize(obj, finalize, inp)
+
+        def fn(x):
+            x = x + 1
+            if lst:
+                lst.pop()
+            return x + 2
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=False)
+
+        inp = torch.ones(3)
+        dummy = torch.ones(3)
+        _setup_finalizer(dummy)
+        # NOTE: the first call WILL pop lst, but not the second call!
+        self.assertEqual(opt_fn(inp), fn(inp))
+        self.assertEqual(dummy, torch.ones(3) + 4)
+        self.assertEqual(cnts.frame_count, 2)
+
+        cnts.clear()
+        torch.compiler.reset()
+        opt_fn = torch.compile(fn, backend=cnts, fullgraph=True)
+
+        dummy = torch.ones(3)
+        _setup_finalizer(dummy)
+        self.assertEqual(opt_fn(inp), fn(inp))
+        self.assertEqual(dummy, torch.ones(3) + 4)
+        self.assertEqual(cnts.frame_count, 1)
+
+        with torch.compiler.set_stance("fail_on_recompile"):
+            dummy = torch.ones(3)
+            _setup_finalizer(dummy)
+            self.assertEqual(opt_fn(inp), fn(inp))
+            self.assertEqual(dummy, torch.ones(3) + 4)
+
     def test_substitute_in_graph(self):
         counters.clear()
 
