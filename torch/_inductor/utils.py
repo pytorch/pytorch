@@ -2095,10 +2095,11 @@ def use_nv_universal_gemm_template(
         4. The dtype is fp16 or bf16
         5. Max autotune or max autotune gemm is enabled
         6. We are not using dynamic shapes
-        7. A and B base pointers are 16B aligned
-        8. m, n and k are divisible by 16
-        9. Non-innermost strides are divisible by 16 (row-major layout)
-        10. Not in AOT Inductor mode (requires runtime JIT compilation)
+        7. Not in AOT Inductor mode (requires runtime JIT compilation)
+        8. Base pointers are 16-byte aligned
+
+    Note: Shape and stride constraints are handled internally by
+    cutlass_api.get_kernels() which filters incompatible kernels.
     """
     if not ensure_cute_available():
         return False
@@ -2128,38 +2129,10 @@ def use_nv_universal_gemm_template(
     if any(is_dynamic(x) for x in [mat_a, mat_b]):
         return False
 
+    # Base pointer must be 16-byte aligned. cutlass_api can't check this at
+    # compile time because it only sees FakeTensors without real data pointers.
     if any(m.get_name() in V.graph.unaligned_buffers for m in [mat_a, mat_b]):
         return False
-
-    # TODO(nikhilap) There is a bug in cutlass_api, their compatibility check does not catch these failure cases
-    # N and K must be divisible by 16 for all cases
-    if not V.graph.sizevars.statically_known_true(sympy.Eq(n % 16, 0)):
-        return False
-    if not V.graph.sizevars.statically_known_true(sympy.Eq(k % 16, 0)):
-        return False
-
-    a_layout = mat_a.get_layout()
-    b_layout = mat_b.get_layout()
-    a_strides = list(a_layout.stride)
-    b_strides = list(b_layout.stride)
-
-    # For 3D tensors (BMM), additional restrictions apply:
-    # - M must be > 1
-    # - strides[1] must not be 1
-    is_batched = len(a_strides) == 3
-    if is_batched:
-        if not V.graph.sizevars.statically_known_true(sympy.Gt(m, 1)):
-            return False
-        for strides in [a_strides, b_strides]:
-            if strides[1] == 1:
-                return False
-
-    # Check non-unit strides are divisible by 16 (both 2D and 3D)
-    for strides in [a_strides, b_strides]:
-        for stride in strides:
-            if stride != 1:
-                if not V.graph.sizevars.statically_known_true(sympy.Eq(stride % 16, 0)):
-                    return False
 
     return True
 

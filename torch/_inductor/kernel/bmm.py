@@ -220,12 +220,7 @@ def tuned_bmm(mat1, mat2, out_dtype=None, *, layout=None):
     if use_ck_gemm_template(layout, m, n, k):
         CKGemmTemplate.add_ck_gemm_choices(choices, layout, kernel_inputs.nodes())
 
-    if (
-        # TODO(nikhilap) There is a bug in cutlass_api, their compatibility check does not catch this failure cases
-        batch_stride_largest_or_zero
-        and is_nonzero
-        and use_nv_universal_gemm_template(layout, m, n, k, mat1, mat2)
-    ):
+    if is_nonzero and use_nv_universal_gemm_template(layout, m, n, k, mat1, mat2):
         from ..codegen.nv_universal_gemm import add_nv_universal_gemm_choices
 
         add_nv_universal_gemm_choices(choices, layout, kernel_inputs)
