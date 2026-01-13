@@ -78,7 +78,7 @@ class Instruction:
     offset: Optional[int] = None
     starts_line: Optional[int] = None
     is_jump_target: bool = False
-    # pyrefly: ignore[missing-attribute]
+
     positions: Optional["dis.Positions"] = None
     # extra fields to make modification easier:
     target: Optional["Instruction"] = None
