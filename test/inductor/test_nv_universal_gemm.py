@@ -288,6 +288,48 @@ class TestNVUniversalGemm(TestCase):
 
         torch.testing.assert_close(result, expected)
 
+    def test_gemm_args_caching(self):
+        """Test that GemmArguments caching works correctly with multiple calls.
+
+        The NVGEMM kernel caches GemmArguments per (shape, dtype) and updates tensor
+        references on subsequent calls. This test verifies that:
+        1. Multiple calls with different tensors of the same shape produce correct results
+        2. The caching mechanism correctly updates tensor references (results differ)
+        """
+        m, n, k = 512, 512, 512
+        dtype = torch.bfloat16
+        device = "cuda"
+
+        def matmul(a, b):
+            return a @ b
+
+        a1 = torch.randn(m, k, device=device, dtype=dtype)
+        b1 = torch.randn(k, n, device=device, dtype=dtype)
+        a2 = torch.randn(m, k, device=device, dtype=dtype)
+        b2 = torch.randn(k, n, device=device, dtype=dtype)
+
+        expected1 = matmul(a1, b1)
+        expected2 = matmul(a2, b2)
+
+        torch._dynamo.reset()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "NVGEMM",
+                "cuda.nvgemm_max_profiling_configs": 3,
+            }
+        ):
+            compiled_fn = torch.compile(matmul)
+
+            result1 = compiled_fn(a1, b1)
+            torch.testing.assert_close(result1, expected1)
+
+            result2 = compiled_fn(a2, b2)
+            torch.testing.assert_close(result2, expected2)
+
+            self.assertFalse(torch.allclose(result1, result2))
+
 
 class TestNVUniversalGemmHeuristics(TestCase):
     """Unit tests for NVUniversalGemmHeuristics without requiring actual libraries."""

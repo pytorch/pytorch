@@ -121,11 +121,18 @@ class NVUniversalGemmKernel(Kernel):
             import cutlass_api
 
             _NV_UNIVERSAL_GEMM_KERNEL_NAME = "{kernel_name_str}"
+
+            # Caching strategy for NVGEMM kernels:
+            # - kernel_cache: stores cutlass_api kernel object by name
+            # - compiled_cache: stores (GemmArguments, artifact) tuple per (shape, dtype)
+            #   - GemmArguments: tensor wrapper object
+            #   - artifact: compiled GPU binary
+            # On subsequent calls, we reuse cached args and just update tensor pointers (A, B, out).
             _nv_universal_gemm_kernel_cache = {{}}
-            _nv_universal_gemm_artifact_cache = {{}}
+            _nv_universal_gemm_compiled_cache = {{}}
 
             def {self.kernel_name}_main({params_str}):
-                global _nv_universal_gemm_kernel_cache, _nv_universal_gemm_artifact_cache
+                global _nv_universal_gemm_kernel_cache, _nv_universal_gemm_compiled_cache
 
                 if _NV_UNIVERSAL_GEMM_KERNEL_NAME not in _nv_universal_gemm_kernel_cache:
                     kernels = cutlass_api.get_kernels(
@@ -137,18 +144,23 @@ class NVUniversalGemmKernel(Kernel):
 
                 kernel = _nv_universal_gemm_kernel_cache[_NV_UNIVERSAL_GEMM_KERNEL_NAME]
 
-                args = cutlass_api.arguments.GemmArguments(
-                    in_ptr0,
-                    in_ptr1,
-                    out_ptr0,
-                    accumulator_type={acc_dtype_str},
-                )
-
                 cache_key = (in_ptr0.shape, in_ptr0.dtype, in_ptr1.shape, in_ptr1.dtype)
-                if cache_key not in _nv_universal_gemm_artifact_cache:
-                    _nv_universal_gemm_artifact_cache[cache_key] = kernel.compile(args)
 
-                artifact = _nv_universal_gemm_artifact_cache[cache_key]
+                if cache_key not in _nv_universal_gemm_compiled_cache:
+                    args = cutlass_api.arguments.GemmArguments(
+                        in_ptr0,
+                        in_ptr1,
+                        out_ptr0,
+                        accumulator_type={acc_dtype_str},
+                    )
+                    artifact = kernel.compile(args)
+                    _nv_universal_gemm_compiled_cache[cache_key] = (args, artifact)
+                else:
+                    args, artifact = _nv_universal_gemm_compiled_cache[cache_key]
+                    args.A = in_ptr0
+                    args.B = in_ptr1
+                    args.out = out_ptr0
+
                 kernel.run(args, artifact, stream=stream, workspace={workspace_arg}, assume_supported_args=True)
             """
         )
