@@ -133,25 +133,9 @@ _cycles_per_ms = None
 def blas_library_context(backend):
     prev_backend = torch.backends.cuda.preferred_blas_library()
     torch.backends.cuda.preferred_blas_library(backend)
-
-    # See https://github.com/pytorch/pytorch/issues/172231
-    # cublas backend is being ignored unless Lt is explicitly
-    # disabled via an Env Var.
-    disable_lt_var_name = "DISABLE_ADDMM_CUDA_LT"
-    disable_lt_val = os.environ.get(disable_lt_var_name, None)
-    if backend == "cublas":
-        os.environ[disable_lt_var_name] = "1"
-
     try:
         yield
     finally:
-        # See https://github.com/pytorch/pytorch/issues/172231
-        # Not needed once properly resolved
-        if backend == "cublas":
-            if disable_lt_val is None:
-                os.environ.pop(disable_lt_var_name, None)
-            else:
-                os.environ[disable_lt_var_name] = disable_lt_val
         torch.backends.cuda.preferred_blas_library(prev_backend)
 
 
