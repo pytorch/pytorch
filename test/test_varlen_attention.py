@@ -105,8 +105,7 @@ class AttentionBlock(nn.Module):
             batch_size, self.num_heads, seq_len, seq_len
         )
 
-        is_causal = window_size[1] == 0
-        if is_causal:
+        if  window_size == (-1, 0):
             causal_mask = torch.tril(
                 torch.ones(seq_len, seq_len, device=x_padded.device, dtype=torch.bool)
             )
@@ -348,7 +347,7 @@ class TestVarlenAttention(NNTestCase):
     )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("scale", [None, 0.1])
-    @parametrize("window_size", [(-1, -1), (-1, 0), (-1, 4)])
+    @parametrize("window_size", [(-1, -1), (-1, 0), (4, 0), (-1, 4)])
     def test_varlen_vs_sdpa(self, device, dtype, scale, window_size):
         torch.manual_seed(42)
 
