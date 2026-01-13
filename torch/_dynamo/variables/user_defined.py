@@ -33,11 +33,12 @@ import itertools
 import random
 import sys
 import threading
+import traceback
 import types
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, TYPE_CHECKING
+from typing import Any, Literal, TYPE_CHECKING
 from typing_extensions import is_typeddict
 
 import torch._dynamo.config
@@ -460,6 +461,12 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return ConstDictVariable(
                 {}, collections.OrderedDict, mutation_type=ValueMutationNew()
             )
+        elif (
+            len(args) == 1
+            and isinstance(args[0], variables.GenericContextWrappingVariable)
+            and name == "__enter__"
+        ):
+            return args[0].enter(tx)
         elif name == "__new__" and UserDefinedClassVariable.is_supported_new_method(
             self.value.__new__
         ):
@@ -485,6 +492,7 @@ class UserDefinedClassVariable(UserDefinedVariable):
     ) -> VariableTracker:
         from ..side_effects import SideEffects
         from .builder import wrap_fx_proxy
+        from .ctx_manager import GenericContextWrappingVariable
 
         constant_args = check_constant_args(args, kwargs)
 
@@ -583,6 +591,17 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return variables.lists.DequeVariable(
                 items, maxlen=maxlen, mutation_type=ValueMutationNew()
             )
+        elif (
+            # https://github.com/python/cpython/blob/33efd7178e269cbd04233856261fd0aabbf35447/Lib/contextlib.py#L475-L477
+            self.value is types.MethodType
+            and len(args) == 2
+            and isinstance(args[0], variables.UserFunctionVariable)
+            and isinstance(args[1], GenericContextWrappingVariable)
+            and args[0].get_name() in ("__enter__", "__exit__")
+        ):
+            cm_obj = args[1].cm_obj
+            fn = getattr(cm_obj, args[0].get_name()).__func__
+            return variables.UserMethodVariable(fn, args[1], source=self.source)
         elif self.value is weakref.ref:
             if len(args) > 1:
                 callback = args[1]
@@ -643,8 +662,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 contextlib.closing,
                 contextlib.redirect_stdout,
                 contextlib.redirect_stderr,
-                contextlib.suppress,
-                contextlib.ExitStack,
                 contextlib.AsyncExitStack,
             ):
                 # We are not changing the behavior of Dynamo as these function were
@@ -945,13 +962,13 @@ class UserDefinedClassVariable(UserDefinedVariable):
             return self.value.__name__
         return super().const_getattr(tx, name)
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> Literal[True]:
         return True
 
-    def get_python_hash(self):
+    def get_python_hash(self) -> int:
         return hash(self.value)
 
-    def is_python_equal(self, other):
+    def is_python_equal(self, other: object) -> bool:
         return (
             isinstance(other, variables.UserDefinedClassVariable)
             and self.value is other.value
@@ -1249,6 +1266,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 func_var = VariableTracker.build(tx, setter, func_source)
                 args = [desc_var, self, value]
                 return func_var.call_function(tx, args, {})
+
+            # Check for property descriptors with fset.
+            # property.__set__ is a slot wrapper (not a Python function), so
+            # try_get_descritor_and_setter_py_func returns None.
+            # We need to handle properties specially by calling their fset.
+            property_fset = self.try_get_property_fset(name_str)
+            if property_fset is not None:
+                fset_source = None
+                if self.cls_source:
+                    desc_source = self.get_source_by_walking_mro(name_str)
+                    fset_source = AttrSource(desc_source, "fset")
+                fset_vt = VariableTracker.build(tx, property_fset, fset_source)
+                return fset_vt.call_function(tx, [self, value], {})
+
             # NOTE: else we assume the descriptor (if any) has a
             # side-effect-free `__set__` as far as Dynamo tracing is concerned.
 
@@ -1424,6 +1455,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # Skip if `__set__` was traceable (no need to redo the side effect).
             if inspect.isfunction(setter):
                 return True
+            # Skip for property descriptors with fset - we trace fset directly.
+            if isinstance(descriptor, property) and descriptor.fset is not None:
+                return True
             # For untraceable `__set__` we should still skip if the attribute
             # was mutated via instance `__dict__`.
             elif attr_name in self.attrs_directly_modifed_on_dict:
@@ -1437,6 +1471,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         setter = inspect.getattr_static(type(descriptor), "__set__", None)
         if inspect.isfunction(setter):
             return (descriptor, setter)
+        return None
+
+    def try_get_property_fset(self, attr_name: str) -> types.FunctionType | None:
+        """
+        Check if attr_name corresponds to a property descriptor with an fset.
+        Returns the fset function if found, None otherwise.
+
+        This is needed because property.__set__ is a slot wrapper (C function),
+        not a Python function, so try_get_descritor_and_setter_py_func returns None
+        for properties. But property.fset IS a Python function that we can trace.
+        """
+        descriptor = inspect.getattr_static(type(self.value), attr_name, None)
+        if isinstance(descriptor, property) and descriptor.fset is not None:
+            return descriptor.fset
         return None
 
     def has_key_in_generic_dict(self, tx: "InstructionTranslator", key: str) -> bool:
@@ -1505,10 +1553,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             getattribute_fn = inspect.getattr_static(
                 type(self.value), "__getattribute__"
             )
-            if self.source:
-                new_source: AttrSource | None = AttrSource(
-                    self.source, "__getattribute__"
-                )
+            new_source: AttrSource | None = (
+                AttrSource(self.source, "__getattribute__") if self.source else None
+            )
 
             try:
                 return variables.UserMethodVariable(
@@ -1721,9 +1768,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 source = AttrSource(source, "_torchdynamo_inline") if source else None
 
             if isinstance(subobj, types.MethodType):
-                # pyrefly: ignore[missing-attribute]
                 if dynamic_subobj.__self__ is not self.value:
-                    # pyrefly: ignore[missing-attribute]
                     if not isinstance(dynamic_subobj.__func__, types.FunctionType):
                         unimplemented(
                             gb_type="User-defined object method with non-function __func__",
@@ -1746,7 +1791,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                     )
 
                     return variables.UserMethodVariable(
-                        # pyrefly: ignore[bad-argument-type]
                         dynamic_subobj.__func__,
                         object_vt,
                     )
@@ -1837,16 +1881,18 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             handle_observed_exception(tx)
             return variables.ConstantVariable.create(False)
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> bool:
         raise_on_overridden_hash(self.value, self)
         return True
 
-    def get_python_hash(self):
+    def get_python_hash(self) -> int:
         # default hash
         return hash(self.value)
 
-    def is_python_equal(self, other):
+    def is_python_equal(self, other: object) -> bool:
         # id check
+        if not isinstance(other, UserDefinedVariable):
+            return False
         return self.value is other.value
 
     def call_tree_map_branch(
@@ -1873,7 +1919,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # In optree, types can be registered globally (type in registry)
             # or with a namespace ((namespace, type) in registry)
             try:
-                # pyrefly: ignore[missing-import]
                 from optree.registry import _NODETYPE_REGISTRY
 
                 # Check if registered globally
@@ -2105,14 +2150,16 @@ class FrozenDataClassVariable(UserDefinedObjectVariable):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value_type.__name__})"
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> Literal[True]:
         # TODO - Check corner cases like eq=False, hash=False etc
         return True
 
-    def get_python_hash(self):
+    def get_python_hash(self) -> int:
         return hash(tuple(arg.get_python_hash() for arg in self.fields.values()))
 
-    def is_python_equal(self, other):
+    def is_python_equal(self, other: object) -> bool:
+        if not isinstance(other, FrozenDataClassVariable):
+            return False
         is_class_same = self.python_type() is other.python_type()
         is_field_name_same = self.fields.keys() == other.fields.keys()
         is_field_value_same = all(
@@ -2201,11 +2248,11 @@ class UserDefinedExceptionObjectVariable(UserDefinedObjectVariable):
         return self.exc_vt.exc_type
 
     @property
-    def python_stack(self):
+    def python_stack(self) -> traceback.StackSummary | None:
         return self.exc_vt.python_stack
 
     @python_stack.setter
-    def python_stack(self, value):
+    def python_stack(self, value: traceback.StackSummary) -> None:
         self.exc_vt.python_stack = value
 
 
@@ -2260,17 +2307,17 @@ class RemovableHandleVariable(VariableTracker):
     def call_method(
         self,
         tx: "InstructionTranslator",
-        method_name: str,
+        name: str,
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        if method_name == "remove":
+        if name == "remove":
             if self.idx != self.REMOVED:
                 assert self.idx is not None
                 tx.output.side_effects.remove_hook(self.idx)
                 self.idx = self.REMOVED
             return variables.ConstantVariable.create(None)
-        return super().call_method(tx, method_name, args, kwargs)
+        return super().call_method(tx, name, args, kwargs)
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         if self.idx == self.REMOVED:
@@ -2368,7 +2415,7 @@ class UserDefinedDictVariable(UserDefinedObjectVariable):
     ) -> None:
         return self._dict_vt.install_dict_contains_guard(tx, args)
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> Literal[False]:
         raise_on_overridden_hash(self.value, self)
         return False
 
@@ -2453,14 +2500,14 @@ class UserDefinedSetVariable(UserDefinedObjectVariable):
     ) -> None:
         return self._set_vt.install_dict_contains_guard(tx, args)
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> bool:
         raise_on_overridden_hash(self.value, self)
         return self._set_vt.is_python_hashable()
 
-    def get_python_hash(self):
+    def get_python_hash(self) -> int:
         return self._set_vt.get_python_hash()
 
-    def is_python_equal(self, other):
+    def is_python_equal(self, other: object) -> bool:
         return isinstance(
             other, UserDefinedSetVariable
         ) and self._set_vt.is_python_equal(other._set_vt)
@@ -2509,7 +2556,7 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
     def is_underlying_vt_modified(self, side_effects: "SideEffects") -> bool:
         return side_effects.is_modified(self._list_vt)
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> Literal[False]:
         raise_on_overridden_hash(self.value, self)
         return False
 
@@ -2571,14 +2618,14 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
             return self._tuple_vt.unpack_var_sequence(tx)
         raise NotImplementedError
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> bool:
         raise_on_overridden_hash(self.value, self)
         return self._tuple_vt.is_python_hashable()
 
-    def get_python_hash(self):
+    def get_python_hash(self) -> int:
         return self._tuple_vt.get_python_hash()
 
-    def is_python_equal(self, other):
+    def is_python_equal(self, other: object) -> bool:
         return isinstance(
             other, UserDefinedTupleVariable
         ) and self._tuple_vt.is_python_equal(other._tuple_vt)

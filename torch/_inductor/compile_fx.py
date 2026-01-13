@@ -850,7 +850,11 @@ def _compile_fx_inner(
     # may not be valid for use after they are run/autotuned
     torch._inductor.async_compile.CompiledTritonKernels.cache_clear()
 
-    if dynamo_utils.count_calls(gm.graph) == 0 and not aot_mode:
+    if (
+        dynamo_utils.count_calls(gm.graph) == 0
+        and not aot_mode
+        and not torch._functorch.config.bundled_autograd_cache
+    ):
         # trigger the real recompilation for _LazyGraphModule before returning
         # the forward method.
         from torch._dynamo.utils import CompileEventLogLevel
@@ -1150,7 +1154,6 @@ def _compile_fx_inner(
         )
         log.info("-" * 130)
         for row in mm_table_data:
-            # pyrefly: ignore [not-iterable]
             log.info("{:<30} | {:<20} | {:<20} | {:<20} | {:<20} | {:<20}".format(*row))  # noqa: G001
             log.info("-" * 130)
 
@@ -1713,7 +1716,6 @@ class _InProcessFxCompile(FxCompile):
                             )
 
                     return CompiledFxGraph(
-                        # pyrefly: ignore [bad-argument-type]
                         compiled_fn,
                         graph,
                         gm,
