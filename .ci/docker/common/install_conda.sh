@@ -56,11 +56,6 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
              ${SYSROOT_DEP} \
              "icu<78"
 
-
-  # libstdcxx from conda default channels are too old, we need GLIBCXX_3.4.30
-  # which is provided in libstdcxx 12 and up.
-  conda_install libstdcxx-ng=12.3.0 --update-deps -c conda-forge
-
   # Miniforge installer doesn't install sqlite by default
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then
     conda_install sqlite
