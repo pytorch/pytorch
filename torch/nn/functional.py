@@ -5947,19 +5947,23 @@ def _in_projection(
 scaled_dot_product_attention = _add_docstr(
     torch._C._nn.scaled_dot_product_attention,
     r"""scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0,
-        is_causal=False, scale=None, enable_gqa=False) -> Tensor:
+        is_causal=False, scale=None, enable_gqa=False, q_descale=None, k_descale=None, v_descale=None) -> Tensor:
 
     Computes scaled dot product attention on query, key and value tensors, using an optional attention mask if passed,
     and applying dropout if a probability greater than 0.0 is specified. The optional scale argument can only be
-    specified as a keyword argument.
+    specified as a keyword argument. The descale arguments are only used with the Flash Attention 3 backend, and are
+    used for accurate fp8 quantization.
 
     .. code-block:: python
 
         # Efficient implementation equivalent to the following:
         def scaled_dot_product_attention(query, key, value, attn_mask=None, dropout_p=0.0,
-                is_causal=False, scale=None, enable_gqa=False) -> torch.Tensor:
+                is_causal=False, scale=None, enable_gqa=False, q_descale=None, k_descale=None, v_descale=None) -> torch.Tensor:
             L, S = query.size(-2), key.size(-2)
             scale_factor = 1 / math.sqrt(query.size(-1)) if scale is None else scale
+            q_descale = 1 if q_descale is None else q_descale
+            k_descale = 1 if k_descale is None else k_descale
+            v_descale = 1 if v_descale is None else v_descale
             attn_bias = torch.zeros(L, S, dtype=query.dtype, device=query.device)
             if is_causal:
                 assert attn_mask is None
@@ -5976,11 +5980,11 @@ scaled_dot_product_attention = _add_docstr(
                 key = key.repeat_interleave(query.size(-3)//key.size(-3), -3)
                 value = value.repeat_interleave(query.size(-3)//value.size(-3), -3)
 
-            attn_weight = query @ key.transpose(-2, -1) * scale_factor
+            attn_weight = query @ key.transpose(-2, -1) * scale_factor * q_descale * k_descale
             attn_weight += attn_bias
             attn_weight = torch.softmax(attn_weight, dim=-1)
             attn_weight = torch.dropout(attn_weight, dropout_p, train=True)
-            return attn_weight @ value
+            return attn_weight @ value * v_descale
 
     .. warning::
         This function is beta and subject to change.
@@ -6016,6 +6020,8 @@ scaled_dot_product_attention = _add_docstr(
 
         If migrating from MHA, ensure you invert your boolean mask (e.g.,
         using ``~mask`` or ``mask.logical_not()``).
+
+        The descale arguments are only used with the FA3 backend.
 
 
     Note:
@@ -6057,6 +6063,9 @@ scaled_dot_product_attention = _add_docstr(
             - number_of_heads_query % number_of_heads_key_value == 0 and,
             - number_of_heads_key == number_of_heads_value
 
+        The descale arguments are part of the experimental FA3 backend. It currently only works with FA3 backend,
+        which only supports the forward pass.
+
     Note:
 
         {cudnn_reproducibility_note}
@@ -6078,6 +6087,9 @@ scaled_dot_product_attention = _add_docstr(
         scale (optional float, keyword-only): Scaling factor applied prior to softmax. If None, the default value is set
             to :math:`\frac{1}{\sqrt{E}}`.
         enable_gqa (bool): If set to True, Grouped Query Attention (GQA) is enabled, by default it is set to False.
+        q_descale (optional Tensor): Descale tensor for the query (FA3 only), must be shape (N, Hq)
+        k_descale (optional Tensor): Descale tensor for the key (FA3 only), must be shape (N, H)
+        v_descale (optional Tensor): Descale tensor for the value (FA3 only), must be shape (N, H)
 
     Returns:
         output (Tensor): Attention output; shape :math:`(N, ..., Hq, L, Ev)`.

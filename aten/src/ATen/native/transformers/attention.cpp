@@ -723,7 +723,10 @@ Tensor scaled_dot_product_attention(
     double dropout_p,
     bool is_causal,
     std::optional<double> scale,
-    bool enable_gqa) {
+    bool enable_gqa,
+    const std::optional<Tensor>& q_descale,
+    const std::optional<Tensor>& k_descale,
+    const std::optional<Tensor>& v_descale) {
   using sdp::SDPBackend;
   validate_sdpa_input(query_, key, value, attn_mask_, dropout_p, is_causal, scale);
   int64_t choice_int = static_cast<int64_t>(sdp::SDPBackend::math);
@@ -753,7 +756,7 @@ Tensor scaled_dot_product_attention(
         // We need to calculate the scale based off the OG head dim size
         auto og_scale = sdp::calculate_scale(query_, scale);
         auto out_lse_softmax = at::_scaled_dot_product_flash_attention(
-            query_padded, key_padded, value_padded, dropout_p, is_causal, false /*return_debug_mask*/, og_scale.guard_float("attention.cpp", 735));
+            query_padded, key_padded, value_padded, dropout_p, is_causal, false /*return_debug_mask*/, og_scale.guard_float("attention.cpp", 735), q_descale, k_descale, v_descale);
         return post_process_flash_output(std::get<0>(out_lse_softmax), og_size);
       }
       // For the CPU case we do not need to pad the last dim

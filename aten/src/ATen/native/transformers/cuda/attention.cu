@@ -780,7 +780,10 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
-    std::optional<double> scale) {
+    std::optional<double> scale,
+    const std::optional<Tensor>& q_descale,
+    const std::optional<Tensor>& k_descale,
+    const std::optional<Tensor>& v_descale) {
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention");
   // Query (Batch x Num_heads x Q_seq_len  x Dim_per_head)
@@ -819,6 +822,9 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
               is_causal,
               return_debug_mask,
               scale,
+              std::nullopt,
+              std::nullopt,
+              std::nullopt,
               std::nullopt,
               std::nullopt);
   // Reshape output to convert nnz to batch_size and seq_len
@@ -1157,7 +1163,10 @@ _flash_attention_forward(
     std::optional<int64_t> window_size_left,
     std::optional<int64_t> window_size_right,
     const std::optional<Tensor>& _seqused_k,
-    const std::optional<Tensor>& _alibi_slopes
+    const std::optional<Tensor>& _alibi_slopes,
+    const std::optional<Tensor>& q_descale,
+    const std::optional<Tensor>& k_descale,
+    const std::optional<Tensor>& v_descale
     ) {
 #if defined(USE_FLASH_ATTENTION)
   const auto softmax_scale =

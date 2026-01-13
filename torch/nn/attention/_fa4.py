@@ -257,6 +257,9 @@ def _fa4_flash_attention_forward_impl(
     seqused_k: torch.Tensor | None = None,
     alibi_slopes: torch.Tensor | None = None,
     out: torch.Tensor | None = None,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
 ):
     error = _fa4_forward_support_error(
         query,
@@ -308,6 +311,9 @@ def _fa4_flash_attention_backward_impl(
     scale: float | None = None,
     window_size_left: int | None = None,
     window_size_right: int | None = None,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
 ):
     error = _fa4_backward_support_error(
         grad_out,
@@ -349,6 +355,9 @@ def _fa4_scaled_dot_product_flash_attention_forward_impl(
     return_debug_mask: bool = False,
     *,
     scale: float | None = None,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
 ):
     error = _fa4_forward_support_error(
         query,
@@ -385,6 +394,9 @@ def _fa4_scaled_dot_product_flash_attention_forward_impl(
         return_debug_mask,
         scale=scale,
         out=out_bshd,
+        q_descale=None,
+        k_descale=None,
+        v_descale=None,
     )
     max_q = query.size(2)
     max_k = key.size(2)
@@ -418,6 +430,9 @@ def _fa4_scaled_dot_product_flash_attention_backward_impl(
     philox_offset: torch.Tensor,
     *,
     scale: float | None = None,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
 ):
     error = _fa4_backward_support_error(
         grad_out,
@@ -452,6 +467,9 @@ def _fa4_scaled_dot_product_flash_attention_backward_impl(
         philox_seed,
         philox_offset,
         scale=scale,
+        q_descale=None,
+        k_descale=None,
+        v_descale=None,
     )
     dq, dk, dv = _transpose_dense(dq, dk, dv)
     return dq, dk, dv

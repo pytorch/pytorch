@@ -22,7 +22,10 @@ _scaled_dot_product_flash_attention_xpu(
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
-    std::optional<double> scale) {
+    std::optional<double> scale,
+    const std::optional<Tensor>& q_descale,
+    const std::optional<Tensor>& k_descale,
+    const std::optional<Tensor>& v_descale) {
   auto
       [attention,
        logsumexp,

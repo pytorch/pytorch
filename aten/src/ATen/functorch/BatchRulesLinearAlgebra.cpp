@@ -482,7 +482,10 @@ _scaled_dot_product_flash_attention_batch_rule(
   double dropout_p,
   bool is_causal,
   bool return_debug_mask,
-  std::optional<double> scale
+  std::optional<double> scale,
+  const std::optional<Tensor>& q_descale, std::optional<int64_t> q_descale_bdim,
+  const std::optional<Tensor>& k_descale, std::optional<int64_t> k_descale_bdim,
+  const std::optional<Tensor>& v_descale, std::optional<int64_t> v_descale_bdim
 ) {
   if (dropout_p > 0) {
     auto maybe_layer = maybeCurrentDynamicLayer();
@@ -501,8 +504,26 @@ _scaled_dot_product_flash_attention_batch_rule(
   key_ = key_.flatten(0, 1);
   value_ = value_.flatten(0, 1);
 
+  // Handle descale tensors (shape: batch x num_heads_kv)
+  std::optional<Tensor> q_descale_, k_descale_, v_descale_;
+  if (q_descale.has_value() && q_descale->defined()) {
+    auto tmp = moveBatchDimToFront(*q_descale, q_descale_bdim);
+    tmp = ensure_has_bdim(tmp, q_descale_bdim.has_value(), batch_size);
+    q_descale_ = tmp.flatten(0, 1);
+  }
+  if (k_descale.has_value() && k_descale->defined()) {
+    auto tmp = moveBatchDimToFront(*k_descale, k_descale_bdim);
+    tmp = ensure_has_bdim(tmp, k_descale_bdim.has_value(), batch_size);
+    k_descale_ = tmp.flatten(0, 1);
+  }
+  if (v_descale.has_value() && v_descale->defined()) {
+    auto tmp = moveBatchDimToFront(*v_descale, v_descale_bdim);
+    tmp = ensure_has_bdim(tmp, v_descale_bdim.has_value(), batch_size);
+    v_descale_ = tmp.flatten(0, 1);
+  }
+
   auto [res0, res1, res2, res3, res4, res5, res6, res7, res8] = at::_scaled_dot_product_flash_attention(
-      query_, key_, value_, dropout_p, is_causal, return_debug_mask, scale);
+      query_, key_, value_, dropout_p, is_causal, return_debug_mask, scale, q_descale_, k_descale_, v_descale_);
 
   res0 = reshape_dim_outof(0, batch_size, res0);
   res1 = reshape_dim_outof(0, batch_size, res1);

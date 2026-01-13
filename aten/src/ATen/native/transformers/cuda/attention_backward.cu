@@ -84,7 +84,10 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
     const Tensor& philox_offset,
     std::optional<double> scale,
     std::optional<int64_t> window_size_left,
-    std::optional<int64_t> window_size_right) {
+    std::optional<int64_t> window_size_right,
+    const std::optional<Tensor>& q_descale,
+    const std::optional<Tensor>& k_descale,
+    const std::optional<Tensor>& v_descale) {
 #if defined(USE_FLASH_ATTENTION)
   const auto softmax_scale = sdp::calculate_scale(query, scale).expect_float();
   //  CUDA code assumes that dout is contiguous
@@ -986,7 +989,10 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
     bool is_causal,
     const at::Tensor& philox_seed,
     const at::Tensor& philox_offset,
-    std::optional<double> scale){
+    std::optional<double> scale,
+    const std::optional<Tensor>& q_descale,
+    const std::optional<Tensor>& k_descale,
+    const std::optional<Tensor>& v_descale){
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
   }
@@ -1013,7 +1019,10 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
     is_causal,
     philox_seed,
     philox_offset,
-    scale);
+    scale,
+    std::nullopt,
+    std::nullopt,
+    std::nullopt);
 
   grad_q = grad_q.transpose(1,2);
   grad_k = grad_k.transpose(1,2);

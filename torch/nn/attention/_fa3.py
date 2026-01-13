@@ -92,6 +92,9 @@ def _fa3_common_support_error(
     query: torch.Tensor,
     tensors: tuple[torch.Tensor, ...],
     cum_seq_q: torch.Tensor | None,
+    q_descale: torch.Tensor | None,
+    k_descale: torch.Tensor | None,
+    v_descale: torch.Tensor | None,
 ) -> str | None:
     if not all(t.is_cuda for t in tensors):
         return "inputs must be CUDA tensors"
@@ -99,6 +102,21 @@ def _fa3_common_support_error(
         return "inputs must share device"
     if query.dtype != torch.float8_e4m3fn:
         return "query dtype must be float8_e4m3fn"
+    if q_descale is not None:
+        if q_descale.dtype != torch.float32:
+            return "q_descale must be float32"
+        if not q_descale.is_cuda:
+            return "q_descale must be CUDA"
+    if k_descale is not None:
+        if k_descale.dtype != torch.float32:
+            return "k_descale must be float32"
+        if not k_descale.is_cuda:
+            return "k_descale must be CUDA"
+    if v_descale is not None:
+        if v_descale.dtype != torch.float32:
+            return "v_descale must be float32"
+        if not v_descale.is_cuda:
+            return "v_descale must be CUDA"
     if cum_seq_q is None and query.dim() != 4:
         return "dense query must be 4D"
     if cum_seq_q is not None and query.dim() != 3:
@@ -119,6 +137,9 @@ def _fa3_forward_support_error(
     alibi_slopes: torch.Tensor | None,
     seqused_k: torch.Tensor | None,
     cum_seq_q: torch.Tensor | None,
+    q_descale: torch.Tensor | None,
+    k_descale: torch.Tensor | None,
+    v_descale: torch.Tensor | None,
 ) -> str | None:
     if dropout_p != 0.0:
         return "dropout_p must be 0"
@@ -135,6 +156,9 @@ def _fa3_forward_support_error(
         query,
         (query, key, value),
         cum_seq_q,
+        q_descale,
+        k_descale,
+        v_descale,
     )
     if error is not None:
         if error == "inputs must share device":
@@ -167,6 +191,9 @@ def _fa3_run_forward(
     window_size_right: int | None,
     seqused_k: torch.Tensor | None,
     out: torch.Tensor | None = None,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
 ) -> tuple[torch.Tensor, torch.Tensor]:
     """
     Run the FA3 forward pass by calling the C++ kernel directly.
@@ -203,9 +230,9 @@ def _fa3_run_forward(
         None,  # rotary_cos,
         None,  # rotary_sin,
         None,  # seqlens_rotary,
-        None,  # q_descale,
-        None,  # k_descale,
-        None,  # v_descale,
+        q_descale,  # q_descale,
+        k_descale,  # k_descale,
+        v_descale,  # v_descale,
         scale,  # softmax_scale,
         is_causal,  # causal,
         window_size_left if window_size_left is not None else -1,  # window_size_left
@@ -239,6 +266,9 @@ def _fa3_flash_attention_forward_impl(
     seqused_k: torch.Tensor | None = None,
     alibi_slopes: torch.Tensor | None = None,
     out: torch.Tensor | None = None,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
 ):
     error = _fa3_forward_support_error(
         query,
@@ -249,6 +279,9 @@ def _fa3_flash_attention_forward_impl(
         alibi_slopes,
         seqused_k,
         cum_seq_q,
+        q_descale,
+        k_descale,
+        v_descale,
     )
     if error is not None:
         raise RuntimeError(f"FA3 flash_attention forward unsupported: {error}")
@@ -264,6 +297,9 @@ def _fa3_flash_attention_forward_impl(
         window_size_right,
         seqused_k,
         out,
+        q_descale,
+        k_descale,
+        v_descale,
     )
     rng_state = torch.zeros((2,), dtype=torch.uint64, device=query.device)
     philox_offset = torch.zeros((), dtype=torch.uint64, device=query.device)
@@ -290,6 +326,9 @@ def _fa3_flash_attention_backward_impl(
     scale: float | None = None,
     window_size_left: int = -1,
     window_size_right: int = -1,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
 ):
     raise RuntimeError(
         "FA3 does not support backward pass. Either:\n"
@@ -307,6 +346,9 @@ def _fa3_scaled_dot_product_flash_attention_forward_impl(
     return_debug_mask: bool = False,
     *,
     scale: float | None = None,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
 ):
     error = _fa3_forward_support_error(
         query,
@@ -317,6 +359,9 @@ def _fa3_scaled_dot_product_flash_attention_forward_impl(
         None,
         None,
         None,
+        q_descale,
+        k_descale,
+        v_descale,
     )
     if error is not None:
         raise RuntimeError(f"FA3 SDPA forward unsupported: {error}")
@@ -343,6 +388,9 @@ def _fa3_scaled_dot_product_flash_attention_forward_impl(
         return_debug_mask,
         scale=scale,
         out=out_bshd,
+        q_descale=q_descale,
+        k_descale=k_descale,
+        v_descale=v_descale,
     )
     max_q = query.size(2)
     max_k = key.size(2)
@@ -376,6 +424,9 @@ def _fa3_scaled_dot_product_flash_attention_backward_impl(
     philox_offset: torch.Tensor,
     *,
     scale: float | None = None,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
 ):
     raise RuntimeError(
         "FA3 does not support backward pass. Either:\n"
