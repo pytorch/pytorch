@@ -3599,7 +3599,7 @@ def _automatic_dynamic(
     name = source.name
     prior_policy = tx.output.tracing_context.tensor_to_context.get(e, None)
     shape_env_to_source_to_symbol_cache = (
-        prior_policy.shape_env_to_source_to_symbol_cache if prior_policy else None
+        prior_policy.shape_env_to_source_to_symbol_cache if prior_policy else {}
     )
 
     # Get base context if the tensor is a view
@@ -3644,7 +3644,6 @@ def _automatic_dynamic(
             constraint_strides=[None] * e.dim(),
             view_base_context=view_base_context,
             tensor_source=source,
-            # type: ignore[assignment]
             shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
         )
 
@@ -3663,7 +3662,6 @@ def _automatic_dynamic(
             constraint_strides=[None] * e.dim(),
             view_base_context=view_base_context,
             tensor_source=source,
-            # type: ignore[assignment]
             shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
         )
 
@@ -3851,7 +3849,6 @@ def _automatic_dynamic(
         specialize_on=specialize_on,
         view_base_context=view_base_context,
         tensor_source=source,
-        # type: ignore[arg-type]
         shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
     )
 
