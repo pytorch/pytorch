@@ -19,6 +19,7 @@ from torch._higher_order_ops.utils import (
     UnsupportedAliasMutationException,
     validate_subgraph_args_types,
 )
+from torch._functorch._aot_autograd.utils import make_unboxed_func
 from torch._ops import HigherOrderOperator
 from torch._subclasses import FakeTensor
 from torch._subclasses.functional_tensor import FunctionalTensor
@@ -184,10 +185,13 @@ def _math_attention_inner(
     captured_buffers_in_dim = (None,) * len(score_mod_other_buffers)
     from torch.nn.attention.flex_attention import _vmap_for_bhqkv
 
+    # Wrap callables to handle boxed GraphModule calling convention
+    score_mod = make_unboxed_func(score_mod)
+
     # first input is score
     score_mod = _vmap_for_bhqkv(score_mod, prefix=(0,), suffix=captured_buffers_in_dim)
 
-    mask_mod = block_mask[-1]
+    mask_mod = make_unboxed_func(block_mask[-1])
     mask_mod_in_dim_buffers = (None,) * len(mask_mod_other_buffers)
     mask_mod = _vmap_for_bhqkv(mask_mod, prefix=(), suffix=mask_mod_in_dim_buffers)
 
@@ -636,6 +640,9 @@ def create_fw_bw_graph(
     from torch._subclasses.functional_tensor import disable_functional_mode
     from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing
 
+    # Wrap score_mod to handle boxed GraphModule calling convention
+    score_mod = make_unboxed_func(score_mod)
+
     dummy_aot_config = AOTConfig(
         fw_compiler=None,  # type: ignore[arg-type]
         bw_compiler=None,  # type: ignore[arg-type]
@@ -1028,6 +1035,10 @@ def sdpa_dense_backward(
     captured_buffers_in_dim = (None,) * len(score_mod_other_buffers)
     out_dims = [0, None, None, None, None] + [None] * len(score_mod_other_buffers)
     from torch.nn.attention.flex_attention import _vmap_for_bhqkv
+
+    # Wrap callables to handle boxed GraphModule calling convention
+    joint_graph = make_unboxed_func(joint_graph)
+    mask_graph = make_unboxed_func(mask_graph)
 
     # inputs are [score, b, h, q_idx, kv_idx, gradOut, ...]
     # score and gradOut are "fully" batched
