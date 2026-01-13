@@ -1350,6 +1350,13 @@ class BackendMetadata:
     # The namespace for kernels, default value: DEFAULT_KERNEL_NAMESPACE
     cpp_namespace: str
 
+    # For structured kernels, whether or not the meta function should be dispatched
+    # to the backend. By default (False), structured kernels reuse the native ATen
+    # meta logic. When True, the generator declares a 'meta' override in the
+    # backend-specific structured kernel class, allowing the backend to provide
+    # custom shape validation, tiling logic, or memory alignment checks.
+    ext_structured_meta: bool = False
+
     def supports_symint(self) -> bool:
         return "_symint" in self.kernel
 
