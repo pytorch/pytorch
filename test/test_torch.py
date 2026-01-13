@@ -2262,7 +2262,6 @@ class TestTorchDeviceType(TestCase):
                 ref = ref.real
             self.assertEqual(res, ref, atol=1e-04, rtol=1e-03, exact_dtype=False)
 
-    @skipRocmIfTorchInductor()
     @dtypes(torch.int, torch.float, torch.cfloat)
     def test_cov(self, device, dtype):
         def check(t, correction=1, fweights=None, aweights=None):
