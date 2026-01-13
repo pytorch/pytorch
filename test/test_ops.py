@@ -487,6 +487,18 @@ class TestCommon(TestCase):
     @suppress_warnings
     @ops(_ops_and_refs_with_no_numpy_ref, dtypes=OpDTypes.any_common_cpu_cuda_one)
     def test_compare_cpu(self, device, dtype, op):
+        if (
+            op.name == "nn.functional.conv1d"
+            and "cuda" in device
+            and TEST_WITH_TORCHINDUCTOR
+        ):
+            # TF32 is suspected to be the cause of numerical mismatches here.
+            # We disable it for this specific test case.
+            torch.backends.cuda.matmul.allow_tf32 = False
+            torch.backends.cudnn.allow_tf32 = False
+            # Temporarily skip this case to unblock CI as requested.
+            # self.skipTest("Skipped due to numerical mismatch in Inductor (SM86)")
+
         def to_cpu(arg):
             if isinstance(arg, torch.Tensor):
                 return arg.to(device="cpu")
