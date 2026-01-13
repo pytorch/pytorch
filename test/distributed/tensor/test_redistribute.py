@@ -25,12 +25,17 @@ from torch.distributed.tensor._collective_utils import (
     redistribute_cost,
     shard_dim_alltoall,
 )
-from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
+from torch.distributed.tensor._dtensor_spec import (
+    DTensorSpec,
+    ShardOrderEntry,
+    TensorMeta,
+)
 from torch.distributed.tensor._redistribute import (
     _FlattenedTransformInfo,
     _gen_transform_infos,
     _optimize_transform_infos_for_flattened_reductions,
     _TransformInfo,
+    redistribute_local_tensor,
     use_min_cost_redistribution_plan,
 )
 from torch.distributed.tensor.debug import CommDebugMode
@@ -1308,6 +1313,42 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                         make_full_tensor(sharded_dt), make_full_tensor(full_tensor)
                     )
 
+    @with_comms
+    def test_redistribute_partial_to_different_partial_not_supported(self):
+        # Test that redistributing from one Partial type to another raises an error
+        device_mesh = self.build_device_mesh()
+        local_tensor = torch.randn(4, 4, device=self.device_type)
+
+        src_spec = DTensorSpec(
+            device_mesh,
+            (Partial("sum"),),
+            tensor_meta=TensorMeta(
+                local_tensor.size(),
+                local_tensor.stride,
+                local_tensor.dtype,
+            ),
+        )
+        tgt_spec = DTensorSpec(
+            device_mesh,
+            (Partial("avg"),),
+            tensor_meta=TensorMeta(
+                local_tensor.size(),
+                local_tensor.stride,
+                local_tensor.dtype,
+            ),
+        )
+
+        # Attempting to redistribute to Partial("max") should raise an error
+        with self.assertRaisesRegex(
+            AssertionError,
+            r"Redistribution from one partial type.*to another.*is unsupported",
+        ):
+            redistribute_local_tensor(
+                local_tensor,
+                src_spec,
+                tgt_spec,
+            )
+
     @unittest.skip(
         "Temporarily skipping until we support special placement types in "
         "graph based redistribution"
@@ -1363,7 +1404,7 @@ class OptimizeFlattenedReductionsTest(TestCase):
         dist.destroy_process_group()
 
     def test_no_flattened_mesh_returns_original(self):
-        """When no flattened mesh exists, original transforms are returned."""
+        """When no flattened mesh exists, original transforms are returned with a warning."""
         mesh = init_device_mesh("cpu", (2, 2, 2), mesh_dim_names=("A", "B", "C"))
 
         transform_infos = [
@@ -1382,12 +1423,29 @@ class OptimizeFlattenedReductionsTest(TestCase):
         # Source placements match the transforms
         src_placements = (Partial("sum"), Replicate(), Partial("sum"))
 
-        result = _optimize_transform_infos_for_flattened_reductions(
-            transform_infos, mesh, src_placements
-        )
+        import logging
+
+        with self.assertLogs(
+            "torch.distributed.tensor._redistribute", level=logging.WARNING
+        ) as log_context:
+            result = _optimize_transform_infos_for_flattened_reductions(
+                transform_infos, mesh, src_placements
+            )
 
         self.assertEqual(len(result), 2)
         self.assertTrue(all(isinstance(r, _TransformInfo) for r in result))
+
+        # Verify warning message content
+        self.assertEqual(len(log_context.output), 1)
+        warning_msg = log_context.output[0]
+        # Should mention performance benefits
+        self.assertIn("improve performance", warning_msg)
+        # Should mention numerical issues
+        self.assertIn("numerical issues", warning_msg)
+        # Should mention which dims to flatten
+        self.assertIn("(0, 2)", warning_msg)
+        self.assertIn("A", warning_msg)
+        self.assertIn("C", warning_msg)
 
     def test_consecutive_reductions_flattened(self):
         """Consecutive same-type reductions on consecutive mesh dims are flattened."""

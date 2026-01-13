@@ -255,6 +255,15 @@ def _optimize_transform_infos_for_flattened_reductions(
             all_transforms = reductions + others
             all_transforms.sort(key=lambda x: x[0])
             result.extend(info for _, info in all_transforms)
+            # Warn if we have mergeable reductions but no flattened mesh
+            if len(reductions) >= 2:
+                mesh_dims = tuple(sorted(r.mesh_dim for _, r in reductions))
+                logger.warning(
+                    "Could not find a flattened mesh for dimensions %s. "
+                    "Creating a flattened mesh can improve performance by merging multiple allreduce operations "
+                    "into one, and can avoid potential numerical issues from sequential reductions.",
+                    mesh_dims,
+                )
         i = j
 
     return result
@@ -1106,6 +1115,10 @@ def redistribute_local_tensor(
                         f"redistribute from {current} to {target} not supported yet"
                     )
                 else:
+                    if current != target:
+                        raise AssertionError(
+                            f"Redistribution from one partial type ({current}) to another ({target}) is unsupported."
+                        )
                     # partial -> partial no op, should never hit
                     new_local_tensor = local_tensor
 
