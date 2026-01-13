@@ -95,6 +95,14 @@ static inline void cvtfp8e4m3_fp32(const __m128i& a, __m512& o) {
 }
 
 static inline __m128i cvtfp32_fp8e4m3(const __m512& src) {
+#ifdef __AVX10_2__
+  // It takes effect only with compatible compiler and hardware in Inductor CPP backend.
+  // No effect on eager mode.
+  __m256i f16_vec = _mm512_cvt_roundps_ph(
+      src,
+      _MM_FROUND_TO_NEAREST_INT |_MM_FROUND_NO_EXC);
+  return _mm256_cvtph_hf8(_mm256_castsi256_ph(f16_vec));
+#else
   // cvt 16x32 from fp32 to fp8 e4m3
   const __m512i sign_mask = _mm512_set1_epi32(0x80000000);
   const __m512i fp8_max = _mm512_set1_epi32(UINT32_C(1087) << 20);
@@ -156,6 +164,7 @@ static inline __m128i cvtfp32_fp8e4m3(const __m512& src) {
 
   // Narrow 32-bit integers to 8-bit
   return _mm512_cvtepi32_epi8(packed);
+#endif
 }
 
 static inline float fp8e4m3_to_fp32_scalar(uint8_t val) {
