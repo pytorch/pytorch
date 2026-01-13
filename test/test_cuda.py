@@ -2407,6 +2407,7 @@ exit(2)
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    @skipIfRocm(msg="cuBLAS is not available on ROCm")
     @serialTest()
     @setBlasBackendsToDefaultFinally
     def test_repeat_graph_capture_cublas_workspace_memory(self):
