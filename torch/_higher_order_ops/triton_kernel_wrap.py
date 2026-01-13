@@ -330,11 +330,6 @@ def generate_ttir(
                 return True
         return False
 
-    def is_tensor_like_arg(arg: Any) -> bool:
-        if isinstance(arg, Tensor) or is_stable_tensor_descriptor_arg(arg):
-            return True
-        return False
-
     # Note: one would expect that each input to the triton kernel maps to
     # one input parameter in the TTIR. This is _not_ true for TMA descriptors:
     # one TMA descriptor gets converted into:
@@ -343,7 +338,12 @@ def generate_ttir(
     #   * N sizes, for a rank-N tensor
     # To account for this, we inject some fake arg names as placeholders for
     # the stride and size parameters.
-    def get_tensor_names(name: str, arg: Any) -> list[str]:
+    def get_arg_names(name: str, arg: Any) -> list[str]:
+        param_idx = kernel.arg_names.index(name)
+        # Exclude constexpr and None arguments. They don't create MLIR function parameters.
+        if kernel.params[param_idx].is_constexpr or arg is None:
+            return []
+
         if isinstance(arg, Tensor):
             return [name]
         if is_stable_tensor_descriptor_arg(arg):
@@ -358,11 +358,12 @@ def generate_ttir(
             names.extend(name + f" STRIDE PLACEHOLDER {i}" for i in range(tensor_rank))
             names.extend(name + f" SIZE PLACEHOLDER {i}" for i in range(tensor_rank))
             return names
-        return []
+
+        return [name]
 
     ordered_tensor_names = list(
         itertools.chain.from_iterable(
-            get_tensor_names(name, arg) for name, arg in ordered_args.items()
+            get_arg_names(name, arg) for name, arg in ordered_args.items()
         )
     )
 
@@ -452,8 +453,12 @@ def generate_ttir(
             return attrs
 
     specialization = _get_specialization(ordered_args.values())
+    # Triton explicitly interprets ASTSource.constants entries as constexpr
+    # Thus, only None and arguments marked `is_constexpr` should be treated as such.
     constants = {
-        name: arg for name, arg in ordered_args.items() if not is_tensor_like_arg(arg)
+        name: arg
+        for i, (name, arg) in enumerate(ordered_args.items())
+        if kernel.params[i].is_constexpr or arg is None
     }
 
     if (mangle_type := getattr(triton.runtime.jit, "mangle_type", None)) is not None:
@@ -987,6 +992,7 @@ def identify_mutated_tensors(
     2) Parses the TTIR and creates a control flow graph
     3) Analyzes the graph to detect all input tensor mutations
     """
+    from torch._inductor.ir import TensorBox
 
     ttir_module = None
     functions = None
@@ -1018,11 +1024,12 @@ def identify_mutated_tensors(
         )
 
         return [
-            ordered_tensor_names[i] for i, mutated in enumerate(mutations) if mutated
+            ordered_tensor_names[i]
+            for i, mutated in enumerate(mutations)
+            if mutated
+            and isinstance(kwargs[ordered_tensor_names[i]], (Tensor, TensorBox))
         ]
     except Exception:
-        import torch._inductor.ir
-
         log.warning(
             "Encountered an exception in identify_mutated_tensors, assuming every input is mutated",
             exc_info=True,
@@ -1038,7 +1045,7 @@ def identify_mutated_tensors(
         return [
             key
             for key, value in kwargs.items()
-            if isinstance(value, (Tensor, torch._inductor.ir.TensorBox))
+            if isinstance(value, (Tensor, TensorBox))
         ]
 
 
