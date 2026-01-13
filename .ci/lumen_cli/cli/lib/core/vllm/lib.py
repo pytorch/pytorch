@@ -125,8 +125,10 @@ def run_test_plan(
             # the number of requests to HF until #172300 can be landed to enable
             # HF offline mode
             if step.startswith("pytest"):
-                rerun_count = os.getenv("VLLM_RERUN_FAILURES_COUNT", 3)
-                rerun_delay = os.getenv("VLLM_RERUN_FAILURES_DELAY", 2)
+                # Use a low retry count and a high delay value to lower the risk of
+                # having a retry storm and make thing worse
+                rerun_count = os.getenv("VLLM_RERUN_FAILURES_COUNT", 2)
+                rerun_delay = os.getenv("VLLM_RERUN_FAILURES_DELAY", 10)
                 step = step.replace(
                     "pytest",
                     f"pytest --reruns {rerun_count} --reruns-delay {rerun_delay}",
