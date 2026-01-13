@@ -599,6 +599,19 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
     if config.pattern_matcher:
         count += early_patterns.apply(graph.graph)
 
+    # Make sure AutoChunker happens before pad_mm so we don't need
+    # to handle padding when searching for chunking patterns.
+    if config.auto_chunker.enable:
+        from .auto_chunker import CantChunk, chunk
+
+        try:
+            graph = chunk(graph)
+        except CantChunk:
+            auto_chunker_log = torch._logging.getArtifactLogger(
+                __name__, "auto_chunker"
+            )
+            auto_chunker_log.debug("AutoChunker fail.", exc_info=True)
+
     if config.pattern_matcher:
         for i, patterns in enumerate(pass_patterns):
             maybe_count = GraphTransformObserver(
@@ -918,7 +931,7 @@ def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
 
         inp = inp * sign
         max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
-        # pyrefly: ignore [unsupported-operation]
+
         return (inp - max_) * (sign * other)
 
     # pyrefly: ignore [bad-argument-type]
@@ -948,7 +961,7 @@ def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
 
         inp = inp * sign
         max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
-        # pyrefly: ignore [unsupported-operation]
+
         return (inp - max_) / (sign * other)
 
     # pyrefly: ignore [bad-argument-type]

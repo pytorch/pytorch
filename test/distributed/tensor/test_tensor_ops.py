@@ -111,6 +111,22 @@ class DistTensorOpsTest(DTensorTestBase):
             self.assertEqual(dst_dtensor.placements, (Partial(),))
             self.assertEqual(dst_dtensor._local_tensor, dst_tensor)
 
+        # test that copy_ preserves any Partial type, not just sum/avg
+        for reduce_op in ["max", "min"]:
+            src_tensor = torch.randn((64, 1))
+            dst_tensor = torch.zeros(16, 32, 64, 128)
+            partial_placement = Partial(reduce_op)
+            src_dtensor = DTensor.from_local(
+                src_tensor, device_mesh, [partial_placement]
+            )
+            dst_dtensor = DTensor.from_local(
+                dst_tensor, device_mesh, [partial_placement]
+            )
+            dst_dtensor.copy_(src_dtensor)
+            dst_tensor.copy_(src_tensor)
+            self.assertEqual(dst_dtensor.placements, (partial_placement,))
+            self.assertEqual(dst_dtensor._local_tensor, dst_tensor)
+
     @with_comms
     def test_contiguous(self):
         device_mesh = self.build_device_mesh()
@@ -821,6 +837,39 @@ class DistTensorOpsTest(DTensorTestBase):
 
         self.assertEqual(sharded_out.full_tensor(), global_out)
         self.assertEqual(sharded_dtensor.grad.full_tensor(), global_tensor.grad)
+
+    @with_comms
+    def test_slice_full_size_on_sharded_dim(self):
+        """
+        Test for the issue #170427 where slicing with a size that equals or
+        exceeds the full dimension size should work correctly on sharded
+        dimensions.
+
+        So when slicing [:, :N] where N >= dim_size on a tensor sharded on that
+        dimension, the operation may be optimized to use aten.alias.default,
+        which must have a proper sharding strategy registered.
+        """
+        mesh = self.build_device_mesh()
+
+        global_tensor = torch.randn(2, 4)
+        sharded_dtensor = distribute_tensor(global_tensor, mesh, [Shard(1)])
+
+        result1 = sharded_dtensor[:, :2]  # partial slice
+        self.assertEqual(result1.full_tensor(), global_tensor[:, :2])
+
+        result2 = sharded_dtensor[:, 2:]  # partial slice from middle
+        self.assertEqual(result2.full_tensor(), global_tensor[:, 2:])
+
+        # This used to fail with: NotImplementedError: Operator aten.alias.default
+        # does not have a sharding strategy registered
+        result3 = sharded_dtensor[:, :4]  # full dimension slice
+        self.assertEqual(result3.full_tensor(), global_tensor[:, :4])
+
+        result4 = sharded_dtensor[:, :8]  # beyond dimension size
+        self.assertEqual(result4.full_tensor(), global_tensor[:, :8])
+
+        result5 = sharded_dtensor[:2, :]  # full slice on dim 0
+        self.assertEqual(result5.full_tensor(), global_tensor[:2, :])
 
     @with_comms
     def test_split_on_partial(self):

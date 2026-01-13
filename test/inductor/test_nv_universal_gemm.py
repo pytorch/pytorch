@@ -2,12 +2,17 @@
 
 
 import unittest
+from unittest.mock import MagicMock, patch
 
 import torch
 from torch._inductor import config
 from torch._inductor.codegen.cuda.cuda_env import is_datacenter_blackwell_arch
+from torch._inductor.template_heuristics.nv_universal_gemm import (
+    HeuristicConfig,
+    NVUniversalGemmHeuristics,
+)
 from torch._inductor.test_case import run_tests, TestCase
-from torch._inductor.utils import ensure_nv_universal_gemm_available
+from torch._inductor.utils import ensure_nv_universal_gemm_available, run_and_get_code
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
@@ -203,6 +208,145 @@ class TestNVUniversalGemm(TestCase):
             result = compiled_fn(x, weight)
 
         torch.testing.assert_close(result, expected)
+
+    def test_workspace_allocation(self):
+        """Test that workspace allocation works correctly.
+
+        Since no current CUTLASS kernels require a workspace, we mock the
+        kernel.get_workspace_size method to return a non-zero value. This
+        exercises the workspace allocation/deallocation code paths.
+        """
+        m, n, k = 512, 512, 512
+        dtype = torch.bfloat16
+        device = "cuda"
+
+        def matmul(a, b):
+            return a @ b
+
+        a = torch.randn(m, k, device=device, dtype=dtype)
+        b = torch.randn(k, n, device=device, dtype=dtype)
+
+        expected = matmul(a, b)
+
+        torch._dynamo.reset()
+
+        # Patch cutlass_api.Kernel.get_workspace_size to return non-zero
+        import cutlass_api
+
+        def patched_get_workspace_size(self, args):
+            return 1024
+
+        with patch.object(
+            cutlass_api.Kernel,
+            "get_workspace_size",
+            patched_get_workspace_size,
+        ):
+            with config.patch(
+                {
+                    "max_autotune": True,
+                    "max_autotune_gemm_backends": "NVGEMM",
+                    "cuda.nvgemm_max_profiling_configs": 3,
+                }
+            ):
+                result, (code,) = run_and_get_code(
+                    torch.compile(matmul),
+                    a,
+                    b,
+                )
+
+        self.assertIn("workspace=workspace", code)
+
+        torch.testing.assert_close(result, expected)
+
+
+class TestNVUniversalGemmHeuristics(TestCase):
+    """Unit tests for NVUniversalGemmHeuristics without requiring actual libraries."""
+
+    def _create_mock_kernel(self, tile_m, tile_n, tile_k, cluster_m, cluster_n):
+        """Create a mock kernel with the given tile/cluster configuration."""
+        kernel = MagicMock()
+        kernel.metadata.design.tile_shape = (tile_m, tile_n, tile_k)
+        kernel.metadata.design.cluster_shape = (cluster_m, cluster_n)
+        return kernel
+
+    def _create_mock_inputs(self, m=512, n=512, k=512, dtype=torch.float16):
+        """Create a mock MMKernelInputs."""
+        inputs = MagicMock()
+        inputs.mnk_hinted.return_value = (m, n, k)
+        inputs.dtype.return_value = dtype
+        inputs._mat1_idx = 0
+        inputs._mat2_idx = 1
+        inputs.strides_hinted.return_value = ((k, 1), (n, 1))
+        return inputs
+
+    def test_fallback_when_heuristics_unavailable(self):
+        """Test that filter_kernels returns first N kernels when heuristics unavailable."""
+        heuristics = NVUniversalGemmHeuristics()
+
+        kernels = [self._create_mock_kernel(128, 128, 64, 1, 1) for _ in range(10)]
+        inputs = self._create_mock_inputs()
+
+        with patch.object(heuristics, "should_run", return_value=False):
+            result = heuristics.filter_kernels(kernels, inputs, count=3)
+
+        self.assertEqual(len(result), 3)
+        self.assertEqual(result, kernels[:3])
+
+    def test_fallback_when_no_configs_extracted(self):
+        """Test fallback when kernel configs cannot be extracted."""
+        heuristics = NVUniversalGemmHeuristics()
+
+        kernels = []
+        for _ in range(5):
+            kernel = MagicMock()
+            kernel.metadata.design = MagicMock(spec=[])  # No tile_shape attr
+            kernels.append(kernel)
+
+        inputs = self._create_mock_inputs()
+
+        with patch.object(heuristics, "should_run", return_value=True):
+            result = heuristics.filter_kernels(kernels, inputs, count=2)
+
+        self.assertEqual(len(result), 2)
+        self.assertEqual(result, kernels[:2])
+
+    def test_filter_kernels_sorts_by_runtime(self):
+        """Test that filter_kernels returns kernels sorted by estimated runtime and respects count."""
+        heuristics = NVUniversalGemmHeuristics()
+
+        kernel_a = self._create_mock_kernel(128, 128, 64, 1, 1)
+        kernel_b = self._create_mock_kernel(256, 128, 64, 2, 1)
+        kernel_c = self._create_mock_kernel(128, 256, 32, 1, 2)
+        kernels = [kernel_a, kernel_b, kernel_c]
+
+        inputs = self._create_mock_inputs()
+
+        heuristic_configs = [
+            HeuristicConfig(128, 128, 64, 1, 1, 4, 1, 64, 64, 32, 0.003),
+            HeuristicConfig(256, 128, 64, 2, 1, 4, 1, 64, 64, 32, 0.001),
+            HeuristicConfig(128, 256, 32, 1, 2, 4, 1, 64, 64, 32, 0.002),
+        ]
+
+        with patch.object(heuristics, "should_run", return_value=True):
+            with patch.object(
+                heuristics, "_get_heuristic_configs", return_value=heuristic_configs
+            ):
+                # Test sorting with count=3 (all kernels)
+                result = heuristics.filter_kernels(kernels, inputs, count=3)
+                self.assertEqual(len(result), 3)
+                self.assertIs(result[0], kernel_b)
+                self.assertIs(result[1], kernel_c)
+                self.assertIs(result[2], kernel_a)
+
+                # Test count limit with count=2 (should drop slowest)
+                result = heuristics.filter_kernels(kernels, inputs, count=2)
+                self.assertEqual(len(result), 2)
+                self.assertIs(result[0], kernel_b)
+                self.assertIs(result[1], kernel_c)
+
+                # Test count > available kernels (should return all 3)
+                result = heuristics.filter_kernels(kernels, inputs, count=10)
+                self.assertEqual(len(result), 3)
 
 
 if __name__ == "__main__":

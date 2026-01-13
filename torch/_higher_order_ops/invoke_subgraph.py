@@ -742,7 +742,7 @@ def _(ctx, subgraph, identifier, *operands):
 
     with ctx.redispatch_to_next():
         # NB: There is an assumption that subgraph does not mutate inputs and
-        # there is no aliasing. Its Dynamo responsibility to prevent formation
+        # there is no aliasing. It's Dynamo's responsibility to prevent formation
         # of invoke_subgraph ops if input aliasing/mutation is detected.
         functionalized_subgraph = FunctionalizeCtxWrapper(ctx, subgraph)
         out = invoke_subgraph(functionalized_subgraph, identifier, *unwrapped_operands)
@@ -800,14 +800,16 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
         from torch._guards import detect_fake_mode
 
         fake_mode = detect_fake_mode(operands)
-        assert fake_mode is not None and fake_mode.shape_env is not None
-        insert_deferred_runtime_asserts(
-            graph,
-            fake_mode.shape_env,
-            "invoke_subgraph_proxy_torch_dispatch_mode",
-            export=True,
-        )
-        graph.recompile()
+        # Only insert deferred runtime asserts when we have dynamic shapes.
+        # When shape_env is None (static shapes), there are no deferred asserts to insert.
+        if fake_mode is not None and fake_mode.shape_env is not None:
+            insert_deferred_runtime_asserts(
+                graph,
+                fake_mode.shape_env,
+                "invoke_subgraph_proxy_torch_dispatch_mode",
+                export=True,
+            )
+            graph.recompile()
 
         assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
         if invoke_subgraph_cache:
@@ -830,7 +832,7 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
             # exist as a submodule in the new tracer's root. Therefore, we register it as a submodule below.
             #
             # The alternative is to give a new identifier when we re-trace the invoke_subgraph but this will increase
-            # the compilatoin time, which defeats the purpose of caching.
+            # the compilation time, which defeats the purpose of caching.
             registered_before = False
             for (
                 _,

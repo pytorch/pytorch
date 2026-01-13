@@ -1,5 +1,6 @@
 # Owner(s): ["module: mps"]
 # ruff: noqa: F841
+import contextlib
 import io
 import sys
 import math
@@ -6007,6 +6008,47 @@ class TestMPS(TestCaseMPS):
         with self.assertRaisesRegex(RuntimeError, r'leading minor of order 2 is not positive-definite'):
             torch.linalg.cholesky_ex(A, check_errors=True)
 
+    def test_linalg_cholesky_inverse(self):
+        from torch.testing._internal.common_utils import random_hermitian_pd_matrix
+
+        def run_test(size, *batch_dims, upper=False):
+            A_cpu = random_hermitian_pd_matrix(size, *batch_dims, dtype=torch.float32, device="cpu")
+            A_mps = A_cpu.to("mps")
+            L_cpu = torch.linalg.cholesky(A_cpu, upper=upper)
+            L_mps = torch.linalg.cholesky(A_mps, upper=upper)
+            inv_cpu = torch.cholesky_inverse(L_cpu, upper=upper)
+            inv_mps = torch.cholesky_inverse(L_mps, upper=upper)
+            self.assertEqual(inv_cpu, inv_mps)
+
+        # 2D case
+        for size, upper in product([3, 7, 32], [True, False]):
+            run_test(size, upper=upper)
+
+        # 3D case
+        for batch in [1, 4, 7]:
+            run_test(16, batch, upper=False)
+            run_test(16, batch, upper=True)
+
+        # 5D case
+        run_test(5, 2, 3, 2, 2, upper=False)
+        run_test(5, 2, 3, 2, 2, upper=True)
+
+        # Non-contiguous input (column-major / transposed strides)
+        A_cpu = random_hermitian_pd_matrix(16, 4, dtype=torch.float32, device="cpu")
+        A_mps = A_cpu.to("mps")
+        L_mps = torch.linalg.cholesky(A_mps).mT.contiguous().mT
+        self.assertFalse(L_mps.is_contiguous())
+        inv_mps = torch.cholesky_inverse(L_mps)
+        inv_cpu = torch.cholesky_inverse(A_cpu.clone())
+        L_cpu = torch.linalg.cholesky(A_cpu)
+        inv_cpu = torch.cholesky_inverse(L_cpu)
+        self.assertEqual(inv_cpu, inv_mps.cpu())
+
+        # Irregular matrix sizes
+        for size in [0, 1, 13, 127]:
+            run_test(size, upper=False)
+            run_test(size, upper=True)
+
     def test_upsample_nearest2d(self):
         def helper(N, C, H, W, memory_format):
             inputCPU = torch.arange(N * C * H * W, device='cpu', dtype=torch.float,
@@ -11346,6 +11388,18 @@ class TestConvolutionMPS(TestCaseMPS):
                                      msg=f"groundtruth comparison failed for mode={mode}, "
                                      f"padding_mode={padding_mode}")
 
+    def test_grid_sample_non_contig(self):
+        inp = torch.randn((1, 4, 4, 8, 8), device="mps")
+        grid_noncontig = torch.randn((1, 3, 4, 8, 8), device="mps").permute(0, 2, 3, 4, 1)
+        mps_res = F.grid_sample(
+            inp, grid_noncontig, align_corners=False, padding_mode='zeros'
+        )
+        cpu_res = F.grid_sample(
+            inp, grid_noncontig, align_corners=False, padding_mode='zeros'
+        )
+        self.assertEqual(mps_res.cpu(), cpu_res)
+
+
 class TestAdvancedIndexing(TestCaseMPS):
     supported_dtypes = [torch.float32, torch.float16, torch.int64, torch.int32, torch.int16, torch.uint8]
     supported_np_dtypes = [np.float32, np.float16, np.int64, np.int32, np.int16, np.uint8]
@@ -13192,6 +13246,28 @@ class TestMetalLibrary(TestCaseMPS):
         shutil.rmtree(capture_dirname)
         self.assertGreater(len(capture_listdir), 3,
                            f"Capture file {capture_dirname} contains only metadata, i.e. {capture_listdir}")
+
+    def test_metal_lambda_expressions(self):
+        # Lambda expressions require Metal 3.2 (macOS 15+)
+        # Test that shaders with lambda expressions compile on macOS 15+ but fail on macOS 14
+        shader_with_lambda = """
+            kernel void lambda_test(device float* x, uint idx [[thread_position_in_grid]]) {
+                auto f = [](float val) { return val * 2.0; };
+                x[idx] = f(x[idx]);
+            }
+        """
+
+        # Expect compilation error on MacOS 14 / Sonoma
+        ctx = contextlib.nullcontext() if MACOS_VERSION >= 15.0 else self.assertRaises(SyntaxError)
+        with ctx:
+            lib = torch.mps.compile_shader(shader_with_lambda)
+
+        # Run shader on MacOS 15 and above
+        if MACOS_VERSION >= 15.0:
+            x = torch.tensor([1.0, 2.0, 3.0, 4.0], device="mps")
+            lib.lambda_test(x)
+            expected = torch.tensor([2.0, 4.0, 6.0, 8.0], device="mps")
+            self.assertEqual(x, expected)
 
     def test_metal_error_buffer(self):
         # Test that error_buf_idx parameter works correctly
