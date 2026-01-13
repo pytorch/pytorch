@@ -12,6 +12,10 @@ from cli.lib.common.utils import run_command, temp_environ, working_directory
 from jinja2 import Template
 
 
+VLLM_DEFAULT_RERUN_FAILURES_COUNT = 2
+VLLM_DEFAULT_RERUN_FAILURES_DELAY = 10
+
+
 logger = logging.getLogger(__name__)
 
 _VLLM_TEST_LIBRARY_PATH = Path(__file__).parent / "vllm_test_library.yaml"
@@ -127,13 +131,25 @@ def run_test_plan(
             if step.startswith("pytest"):
                 # Use a low retry count and a high delay value to lower the risk of
                 # having a retry storm and make thing worse
-                rerun_count = os.getenv("VLLM_RERUN_FAILURES_COUNT", 2)
-                rerun_delay = os.getenv("VLLM_RERUN_FAILURES_DELAY", 10)
-                step = step.replace(
-                    "pytest",
-                    f"pytest --reruns {rerun_count} --reruns-delay {rerun_delay}",
-                    1,
+                rerun_count = os.getenv(
+                    "VLLM_RERUN_FAILURES_COUNT", VLLM_DEFAULT_RERUN_FAILURES_COUNT
                 )
+                rerun_delay = os.getenv(
+                    "VLLM_RERUN_FAILURES_DELAY", VLLM_DEFAULT_RERUN_FAILURES_DELAY
+                )
+                if rerun_delay:
+                    step = step.replace(
+                        "pytest",
+                        f"pytest --reruns {rerun_count} --reruns-delay {rerun_delay}",
+                        1,
+                    )
+                else:
+                    step = step.replace(
+                        "pytest",
+                        f"pytest --reruns {rerun_count}",
+                        1,
+                    )
+
             code = run_command(cmd=step, check=False, use_shell=True)
             if code != 0:
                 failures.append(step)
