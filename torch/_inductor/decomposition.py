@@ -116,7 +116,6 @@ decomps_to_exclude: list[Union[torch._ops.OpOverload, torch._ops.OpOverloadPacke
     aten._unsafe_masked_index_put_accumulate,
     aten._scaled_dot_product_flash_attention_for_cpu.default,  # See comments in torch/_decomp/decompositions.py
     aten._softmax_backward_data,
-    aten.addcmul,  # inductor lowers this directly using FMA for precision
     aten.clamp_max,
     aten.clamp_min,
     aten.embedding_dense_backward,  # we fall back on xpu
@@ -823,8 +822,19 @@ def grid_sampler_2d(
     return output
 
 
-# _foreach_addcmul.Scalar is not decomposed - we use the native CUDA kernel
-# which preserves FMA semantics for better precision matching with eager
+# _foreach_addcmul.Scalar decomposition - uses mul+add instead of FMA
+# When emulate_precision_casts is enabled, we skip this decomposition
+# and use the inductor lowering which preserves FMA semantics
+@register_decomposition(aten._foreach_addcmul.Scalar)
+def _foreach_addcmul_scalar(
+    self: list[torch.Tensor],
+    left_tensors: list[torch.Tensor],
+    right_tensors: list[torch.Tensor],
+    scalar: float = 1,
+) -> list[torch.Tensor]:
+    return aten._foreach_add.List(
+        self, aten._foreach_mul.List(left_tensors, right_tensors), alpha=scalar
+    )
 
 
 @register_decomposition(aten._foreach_addcdiv.Scalar)
@@ -916,12 +926,28 @@ def select_decomp_table() -> dict[Any, Callable[..., Any]]:
         return decompositions
     result = fast_random_decomps()
     if config.emulate_precision_casts:
-        # When emulating precision casts, skip decomposition of foreach addcdiv
-        # so that we use the native CUDA kernel which preserves FMA semantics.
-        # The decomposed version uses separate div+add ops which don't match
+        # When emulating precision casts, skip decomposition of addcmul ops
+        # so that we use the inductor lowering which preserves FMA semantics.
+        # For _foreach_addcdiv, we use the native CUDA kernel.
+        # The decomposed version uses separate mul+add/div+add ops which don't match
         # eager's FMA rounding behavior.
-        # Note: _foreach_addcmul.Scalar is unconditionally not decomposed.
-        result = {k: v for k, v in result.items() if k != aten._foreach_addcdiv.Scalar}
+        # Note: We check against OpOverloadPacket to match all overloads (default, out, etc.)
+        ops_to_skip = {
+            aten.addcmul,
+            aten._foreach_addcmul.Scalar,
+            aten._foreach_addcdiv.Scalar,
+        }
+
+        def should_skip(op: Any) -> bool:
+            # Check if op is directly in the skip set
+            if op in ops_to_skip:
+                return True
+            # For OpOverload, also check if its OpOverloadPacket is in the skip set
+            if hasattr(op, "overloadpacket"):
+                return op.overloadpacket in ops_to_skip
+            return False
+
+        result = {k: v for k, v in result.items() if not should_skip(k)}
     return result
 
 
