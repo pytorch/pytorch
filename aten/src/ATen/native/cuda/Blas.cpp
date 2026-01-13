@@ -355,7 +355,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   checkAllSameGPU(__func__, targs);
 
   // Handle whether to use the Lt interface {
-  // is used as an ad hoc fix for tests which switch between "cublas"/"cublaslt" backends.
   static bool persistent_disable_addmm_cuda_lt = isGloballyDisabledAddmmCudaLt(self.device());
   // if lt path fails, we recurse back into this function here and force the lt path to off
   // we cannot update variable disable_addmm_cuda_lt from above since it is static and would be permanent
