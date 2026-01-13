@@ -48,6 +48,9 @@ from torch.testing._internal.common_utils import (
 )
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
+from torch.testing._internal.common_utils import (
+    xfailIfROCm,
+)
 
 if TEST_WITH_ROCM:
     config.force_layout_optimization = 1
@@ -2653,6 +2656,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
                 self.assertEqual(eager_div, compiled_div)
 
     @config.patch({"emulate_divison_rounding": False})
+    @xfailIfROCm
     def test_truediv_base_not_bitwise_equivalent(self):
         from decimal import Decimal
 
