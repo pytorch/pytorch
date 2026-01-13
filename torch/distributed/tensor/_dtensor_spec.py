@@ -131,6 +131,20 @@ class DTensorSpec:
 
         Returns a ShardOrder where each ShardOrderEntry maps a tensor dimension
         to the mesh dimensions it's sharded on, in left-to-right order.
+
+        Args:
+            placements: Tuple of Placement objects representing how a tensor is
+                distributed across mesh dimensions.
+            treat_strided_shard_as_shard: If False (default), the presence of any
+                _StridedShard in placements causes the function to return an empty
+                ShardOrder tuple. This is because _StridedShard already encodes a
+                non-default (right-to-left) sharding order via its split_factor,
+                making it incompatible with the left-to-right shard order semantics.
+                If True, _StridedShard is treated as a regular Shard for the purpose
+                of computing shard order. This is useful when the caller only needs
+                to know which tensor dimensions are sharded on which mesh dimensions,
+                without caring about the actual execution order (e.g., for computing
+                local shard sizes and offsets).
         """
         # follow default left-to-right device order if shard_order is not specified
         tensor_dim_to_mesh_dims: defaultdict[int, list[int]] = defaultdict(list)
