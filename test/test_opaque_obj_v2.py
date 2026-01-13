@@ -509,6 +509,72 @@ class TestOpaqueObject(TestCase):
         ) -> torch.Tensor:
             return torch.empty_like(x)
 
+        opaque_multiplier_type = get_opaque_type_name(OpaqueMultiplier)
+
+        torch.library.define(
+            "_TestOpaqueObject::mul_with_scale",
+            f"({opaque_multiplier_type} scale_obj, Tensor x) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        torch.library.define(
+            "_TestOpaqueObject::get_multiplier_tensor",
+            f"({opaque_multiplier_type} scale_obj, Tensor tensor) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::mul_with_scale",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def mul_with_scale_impl(
+            scale_obj: OpaqueMultiplier, x: torch.Tensor
+        ) -> torch.Tensor:
+            return x * scale_obj.multiplier
+
+        @torch.library.register_fake("_TestOpaqueObject::mul_with_scale", lib=self.lib)
+        def mul_with_scale_fake(
+            scale_obj: OpaqueMultiplier, x: torch.Tensor
+        ) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        @torch.library.impl(
+            "_TestOpaqueObject::get_multiplier_tensor",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def get_multiplier_tensor_impl(
+            scale_obj: OpaqueMultiplier, tensor: torch.Tensor
+        ) -> torch.Tensor:
+            return tensor * scale_obj.multiplier
+
+        @torch.library.register_fake(
+            "_TestOpaqueObject::get_multiplier_tensor", lib=self.lib
+        )
+        def get_multiplier_tensor_fake(
+            scale_obj: OpaqueMultiplier, tensor: torch.Tensor
+        ) -> torch.Tensor:
+            return torch.empty_like(tensor)
+
+        def mul_setup_context(ctx, inputs, output):
+            ctx.scale_obj = inputs[0]
+
+        def mul_backward(ctx, grad) -> tuple[torch.Tensor, None]:
+            scale = torch.ops._TestOpaqueObject.get_multiplier_tensor(
+                ctx.scale_obj, grad
+            )
+            return None, scale
+
+        torch.library.register_autograd(
+            "_TestOpaqueObject::mul_with_scale",
+            mul_backward,
+            setup_context=mul_setup_context,
+            lib=self.lib,
+        )
+
         super().setUp()
 
     def tearDown(self):
@@ -1451,72 +1517,6 @@ class GraphModule(torch.nn.Module):
     def test_opaque_obj_saved_for_backward(self):
         """Test that opaque objects are correctly saved and passed to backward."""
         import torch._dynamo.compiled_autograd
-
-        opaque_type = get_opaque_type_name(OpaqueMultiplier)
-
-        torch.library.define(
-            "_TestOpaqueObject::mul_with_scale",
-            f"({opaque_type} scale_obj, Tensor x) -> Tensor",
-            tags=torch.Tag.pt2_compliant_tag,
-            lib=self.lib,
-        )
-
-        torch.library.define(
-            "_TestOpaqueObject::get_multiplier_tensor",
-            f"({opaque_type} scale_obj, Tensor tensor) -> Tensor",
-            tags=torch.Tag.pt2_compliant_tag,
-            lib=self.lib,
-        )
-
-        @torch.library.impl(
-            "_TestOpaqueObject::mul_with_scale",
-            "CompositeExplicitAutograd",
-            lib=self.lib,
-        )
-        def mul_with_scale_impl(
-            scale_obj: OpaqueMultiplier, x: torch.Tensor
-        ) -> torch.Tensor:
-            return x * scale_obj.multiplier
-
-        @torch.library.register_fake("_TestOpaqueObject::mul_with_scale", lib=self.lib)
-        def mul_with_scale_fake(
-            scale_obj: OpaqueMultiplier, x: torch.Tensor
-        ) -> torch.Tensor:
-            return torch.empty_like(x)
-
-        @torch.library.impl(
-            "_TestOpaqueObject::get_multiplier_tensor",
-            "CompositeExplicitAutograd",
-            lib=self.lib,
-        )
-        def get_multiplier_tensor_impl(
-            scale_obj: OpaqueMultiplier, tensor: torch.Tensor
-        ) -> torch.Tensor:
-            return tensor * scale_obj.multiplier
-
-        @torch.library.register_fake(
-            "_TestOpaqueObject::get_multiplier_tensor", lib=self.lib
-        )
-        def get_multiplier_tensor_fake(
-            scale_obj: OpaqueMultiplier, tensor: torch.Tensor
-        ) -> torch.Tensor:
-            return torch.empty_like(tensor)
-
-        def mul_setup_context(ctx, inputs, output):
-            ctx.scale_obj = inputs[0]
-
-        def mul_backward(ctx, grad) -> tuple[torch.Tensor, None]:
-            scale = torch.ops._TestOpaqueObject.get_multiplier_tensor(
-                ctx.scale_obj, grad
-            )
-            return None, scale
-
-        torch.library.register_autograd(
-            "_TestOpaqueObject::mul_with_scale",
-            mul_backward,
-            setup_context=mul_setup_context,
-            lib=self.lib,
-        )
 
         def foo(scale_obj, x):
             result = torch.ops._TestOpaqueObject.mul_with_scale(scale_obj, x)
