@@ -4167,17 +4167,11 @@ module_db: list[ModuleInfo] = [
                ),
     ModuleInfo(torch.nn.LinearCrossEntropyLoss,
                module_inputs_func=module_inputs_torch_nn_LinearCrossEntropyLoss,
-               dtypes=get_all_fp_dtypes(include_half=not True,  # TODO: include half
+               dtypes=get_all_fp_dtypes(include_half=not True,  # TODO: enable include_half
                                         include_bfloat16=False),
                decorators=(
                    # No channels_last support for loss functions.
                    DecorateInfo(unittest.expectedFailure, 'TestModule', 'test_memory_format'),
-                   # DecorateInfo(toleranceOverride({torch.float16: tol(atol=3e-2, rtol=1e-3)}), "TestModule",
-                   #             "test_forward", dtypes=[torch.float16], device_type='cpu'),
-                   # DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity", dtypes=[torch.float16],
-                   #             device_type='cuda'),
-                   # DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity", dtypes=[torch.float16],
-                   #             device_type='xpu'),
                ),
                ),
     ModuleInfo(torch.nn.CTCLoss,

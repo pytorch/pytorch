@@ -2841,11 +2841,13 @@ def cross_entropy_loss_reference(input, target, weight=None, ignore_index=-100, 
 
 def linear_cross_entropy_loss_reference(input, linear_weight, target,
                                         linear_bias=None,
+                                        weight=None,
                                         ignore_index=-100,
                                         reduction='mean',
                                         label_smoothing=0.0):
     logits = F.linear(input, linear_weight, bias=linear_bias)
-    return F.cross_entropy(logits, target, reduction=reduction, ignore_index=ignore_index, label_smoothing=label_smoothing)
+    return F.cross_entropy(logits, target, weight=weight, reduction=reduction, ignore_index=ignore_index,
+                           label_smoothing=label_smoothing)
 
 
 def nllloss_reference(input, target, weight=None, ignore_index=-100,
