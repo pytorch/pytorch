@@ -70,9 +70,9 @@ jobs:
           path: flash-attention
 
       - name: Patch Flash-Attention for offline build
+        working-directory: flash-attention
         run: |
-          cd flash-attention
-          git apply ${{ github.workspace }}/.ci/flash-attention/fix-offline-build.patch
+          git apply ../.ci/flash-attention/fix-offline-build.patch
 
       - name: Install CUDA
         id: cuda-toolkit
