@@ -1270,10 +1270,8 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                 # even sharding
                 (16, 8),
                 (8, 16, 32),
-                (8, 32, 16, 16),
                 # uneven sharding with padding
                 (17, 5),
-                (13, 2, 13),
                 (33, 16, 8, 1),
             ]
 

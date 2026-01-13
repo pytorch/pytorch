@@ -50,6 +50,7 @@ from torch._inductor.utils import (
     output_node,
     set_tracing_context_output_strides,
 )
+from torch.fx._graph_pickler import _ops_filter_safe
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._python_dispatch import is_in_torch_dispatch_mode
 
@@ -936,19 +937,24 @@ class RegionalOutputCode(OutputCode):
     """
 
     # The serialized graph module as bytes (using GraphPickler)
-    _serialized_graph_module: Optional[bytes] = dataclasses.field(
-        default=None, init=False
-    )
+    _serialized_graph_module: Optional[bytes] = None
 
     # The actual graph module (cleared during serialization)
-    _graph_module: Optional[torch.nn.Module] = dataclasses.field(
-        default=None, init=False
-    )
+    _graph_module: Optional[torch.nn.Module] = None
 
-    def __init__(self, graph_module: torch.nn.Module):
+    # Optional filter for ops during serialization
+    _ops_filter: Callable[[str], bool] | None = None
+
+    def __init__(
+        self,
+        graph_module: torch.fx.GraphModule,
+        ops_filter: Callable[[str], bool] = _ops_filter_safe,
+    ):
         """
         Args:
             graph_module: The torch.fx.GraphModule returned by regional_inductor
+            ops_filter: Optional filter function for op names during serialization.
+                If provided, only ops whose name passes the filter will be serialized.
         """
         super().__init__()
         self._graph_module = graph_module
@@ -959,9 +965,18 @@ class RegionalOutputCode(OutputCode):
         self._inner_boxed_call = isinstance(
             module.graph._codegen, torch.fx.graph._BoxedCodeGen
         )
+        self._ops_filter = ops_filter
 
-    def __call__(self, inputs: Sequence[Any]) -> Any:
-        """Execute the regional compiled graph."""
+    def __call__(self, inputs: list[Any]) -> Any:
+        """
+        Execute the regional compiled graph.
+
+        Args:
+            inputs: A mutable list of inputs. Must be a list (not an arbitrary
+                Sequence) because the boxed calling convention allows the callee
+                to mutably clear the list when inputs become dead, enabling early
+                memory deallocation.
+        """
         if self._graph_module is None:
             raise RuntimeError(
                 "RegionalOutputCode has no graph module loaded. "
@@ -1050,12 +1065,7 @@ class RegionalOutputCode(OutputCode):
             self._serialized_graph_module = GraphPickler.dumps(
                 graph_module,
                 options=Options(
-                    ops_filter=None,
-                    ignore_metadata_fields=(
-                        "source_fn_stack",
-                        "nn_module_stack",
-                        "fwd_source_fn_stack",
-                    ),
+                    ops_filter=self._ops_filter,
                 ),
             )
             # Clear the graph module to avoid pickling it with standard pickle

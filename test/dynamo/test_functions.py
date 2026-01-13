@@ -1542,6 +1542,83 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         res = opt_fn(x)
         self.assertEqual(ref, res)
 
+    def test_mutable_mapping_property_setter_nested(self):
+        """Test that property setters work correctly on nested MutableMapping objects.
+
+        This tests the fix for a bug where property setters on newly created
+        MutableMapping objects would fail when accessing nested objects.
+        The issue was that property.__set__ is a slot wrapper (not a Python function),
+        so Dynamo wasn't tracing the property setter (fset), causing the setter code
+        to run on uninitialized example objects.
+
+        See: https://github.com/pytorch/pytorch/issues/172000
+        """
+        from collections.abc import MutableMapping
+
+        class Container(MutableMapping):
+            def __init__(self, data=None, batch_size=None):
+                self._data = data if data is not None else {}
+                self._batch_size = batch_size if batch_size is not None else ()
+                self._names = None
+
+            def __getitem__(self, key):
+                return self._data[key]
+
+            def __setitem__(self, key, value):
+                self._data[key] = value
+
+            def __delitem__(self, key):
+                del self._data[key]
+
+            def __iter__(self):
+                return iter(self._data)
+
+            def __len__(self):
+                return len(self._data)
+
+            @property
+            def batch_size(self):
+                return self._batch_size
+
+            @property
+            def names(self):
+                return self._names
+
+            @names.setter
+            def names(self, value):
+                self._set_names(value)
+
+            def _set_names(self, value):
+                self._names = value
+                for item in self._data.values():
+                    if isinstance(item, Container):
+                        child_size = len(item.batch_size)
+                        item._names = list(value) + [None] * (child_size - len(value))
+
+        # Test that both direct method call and property setter work identically
+        @torch.compile(backend="eager", fullgraph=True)
+        def using_method():
+            nested = Container({"b": torch.tensor(2.0)}, (3,))
+            root = Container({"nested": nested}, (3,))
+            root._set_names(["time"])
+            return root
+
+        @torch.compile(backend="eager", fullgraph=True)
+        def using_property_setter():
+            nested = Container({"b": torch.tensor(2.0)}, (3,))
+            root = Container({"nested": nested}, (3,))
+            root.names = ["time"]
+            return root
+
+        # Both should work without error
+        result_method = using_method()
+        self.assertEqual(result_method._names, ["time"])
+        self.assertEqual(result_method["nested"]._names, ["time"])
+
+        result_property = using_property_setter()
+        self.assertEqual(result_property._names, ["time"])
+        self.assertEqual(result_property["nested"]._names, ["time"])
+
     def _test_default_dict_helper(self, factory):
         dd = collections.defaultdict(factory)
         param = torch.nn.Parameter(torch.ones([2, 2]))
