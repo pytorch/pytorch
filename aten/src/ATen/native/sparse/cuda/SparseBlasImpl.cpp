@@ -1257,7 +1257,9 @@ void triangular_solve_out_sparse_csr(
   } else {
     // this macro must exist outside the DISPATCH macro for windows builds
 #ifdef USE_ROCM
-    #define ROCM_EXTRA_ARG ,nullptr
+#define ROCM_EXTRA_ARG ,nullptr
+#else
+#define ROCM_EXTRA_ARG
 #endif
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES(
         X.scalar_type(), "triangular_solve_out_sparse_csr_cuda_impl", [&] {
