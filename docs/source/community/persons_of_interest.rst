@@ -345,6 +345,7 @@ Docs / Tutorials
 ~~~~~~~~~~~~~~~~
 
 - Svetlana Karslioglu (`svekars <https://github.com/svekars>`__)
+- Ivan Sekyonda (`sekyondaMeta <https://github.com/sekyondaMeta>`__)
 
 Library-level maintainers
 -------------------------
