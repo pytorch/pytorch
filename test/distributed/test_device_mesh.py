@@ -913,7 +913,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         flatten_mesh_layout = root_mesh._flatten_mapping["dp_cp"]._layout
         self.assertEqual(flatten_mesh_layout, flattened_dp_cp_mesh._layout)
         self.assertEqual(
-            flattened_dp_cp_mesh._layout.collapse().global_ranks(8),
+            global_ranks(flattened_dp_cp_mesh._layout.collapse(), 8),
             [[0, 2, 4, 6], [1, 3, 5, 7]],
         )
         # This should not raise as they are well separated
@@ -935,7 +935,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         flatten_mesh_root_layout = root_mesh._flatten_mapping["dp_tp"]._layout
         self.assertEqual(flatten_mesh_root_layout, flattened_dp_tp_mesh._layout)
         self.assertEqual(
-            flattened_dp_tp_mesh._layout.collapse().global_ranks(8),
+            global_ranks(flattened_dp_tp_mesh._layout.collapse(), 8),
             [[0, 1, 4, 5], [2, 3, 6, 7]],
         )
         with self.assertRaisesRegex(
@@ -1473,40 +1473,52 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
             self.assertEqual(received_tensor, torch.ones(3, 3) * self.rank)
 
 
+def global_ranks(layout: _FlatLayout, world_size: int) -> list[list[int]]:
+    return [
+        [offset + rank for rank in layout.codomain()]
+        for offset in layout.complement(world_size).codomain()
+    ]
+
+
 class CuTeLayoutTest(TestCase):
+    def assertSizesAndStrides(
+        self, layout: _FlatLayout, expected: list[tuple[int, int]]
+    ) -> None:
+        self.assertEqual(list(zip(layout.shape, layout.stride)), expected)
+
     def test_coalesce(self):
         # ((3,2),(2,1)) -> (6,1)
         l = _FlatLayout((3, 2), (2, 1))
-        self.assertEqual(list(l.sizes_and_strides), [(6, 1)])
+        self.assertSizesAndStrides(l, [(6, 1)])
 
         # ((2,12),(3,4),(4,1)) -> (24,1)
         l = _FlatLayout((2, 3, 4), (12, 4, 1))
-        self.assertEqual(list(l.sizes_and_strides), [(24, 1)])
+        self.assertSizesAndStrides(l, [(24, 1)])
 
     def test_coalesce_non_coalescible(self):
         # ((3,4),(2,1)) stays as-is (4 ≠ 2*1)
         l = _FlatLayout((3, 2), (4, 1))
-        self.assertEqual(list(l.sizes_and_strides), [(3, 4), (2, 1)])
+        self.assertSizesAndStrides(l, [(3, 4), (2, 1)])
 
     def test_coalesce_singleton_dims(self):
         # Dimensions with size=1 are removed, even if it's all of them
         l = _FlatLayout((1, 3, 1, 5, 1), (0, 10, 17, 2, 1))
-        self.assertEqual(list(l.sizes_and_strides), [(15, 2)])
+        self.assertSizesAndStrides(l, [(15, 2)])
 
         l = _FlatLayout((1, 1, 1), (1, 42, 0))
-        self.assertEqual(list(l.sizes_and_strides), [])
+        self.assertSizesAndStrides(l, [])
 
     def test_flatten(self):
         l = _FlatLayout(((7, (5, 3)), 2), ((900, (36, 4)), 1))
-        self.assertEqual(list(l.sizes_and_strides), [(7, 900), (5, 36), (3, 4), (2, 1)])
+        self.assertSizesAndStrides(l, [(7, 900), (5, 36), (3, 4), (2, 1)])
 
         l = _FlatLayout(((7, (5, 3)), 2), ((30, (6, 2), 1)))
-        self.assertEqual(list(l.sizes_and_strides), [(7 * 5 * 3 * 2, 1)])
+        self.assertSizesAndStrides(l, [(7 * 5 * 3 * 2, 1)])
 
     def test_optional_strides(self):
         l = _FlatLayout((7, 5, 3, 2))
         # Strides default to suffix_product, which means they're coalescible
-        self.assertEqual(list(l.sizes_and_strides), [(7 * 5 * 3 * 2, 1)])
+        self.assertSizesAndStrides(l, [(7 * 5 * 3 * 2, 1)])
 
     def test_mismatch_sizes_strides(self):
         with self.assertRaisesRegex(ValueError, "sizes .* and strides .* don't match"):
@@ -1528,15 +1540,12 @@ class CuTeLayoutTest(TestCase):
             (2,),
         )
         outer = pg_layout.complement(world_size=8)
-        self.assertEqual(list(outer.sizes_and_strides), [(2, 1)])
+        self.assertSizesAndStrides(outer, [(2, 1)])
         self.assertEqual(
-            pg_layout.all_ranks_from_zero(),
+            pg_layout.codomain(),
             [0, 2, 4, 6],
         )
-        groups = [
-            [o + i for i in pg_layout.all_ranks_from_zero()]
-            for o in outer.all_ranks_from_zero()
-        ]
+        groups = [[o + i for i in pg_layout.codomain()] for o in outer.codomain()]
         self.assertEqual(
             groups,
             [
@@ -1545,7 +1554,7 @@ class CuTeLayoutTest(TestCase):
             ],
         )
         self.assertEqual(
-            pg_layout.global_ranks(8),
+            global_ranks(pg_layout, 8),
             [
                 [0, 2, 4, 6],
                 [1, 3, 5, 7],
@@ -1553,13 +1562,13 @@ class CuTeLayoutTest(TestCase):
         )
         # complement((4,2), 16) = ((2,8), (2,1)); together form (16,1)
         outer = pg_layout.complement(world_size=16)
-        self.assertEqual(list(outer.sizes_and_strides), [(2, 8), (2, 1)])
+        self.assertSizesAndStrides(outer, [(2, 8), (2, 1)])
         self.assertEqual(
-            outer.all_ranks_from_zero(),
+            outer.codomain(),
             [0, 1, 8, 9],
         )
         self.assertEqual(
-            pg_layout.global_ranks(16),
+            global_ranks(pg_layout, 16),
             [
                 [0, 2, 4, 6],
                 [1, 3, 5, 7],
@@ -1571,17 +1580,17 @@ class CuTeLayoutTest(TestCase):
         # Complement ((2,4), (2,1)) under world_size=16 → complement ((2,8), (2,2))
         pg_layout = _FlatLayout((2, 2), (4, 1))
         self.assertEqual(
-            pg_layout.all_ranks_from_zero(),
+            pg_layout.codomain(),
             [0, 1, 4, 5],
         )
         outer = pg_layout.complement(world_size=16)
-        self.assertEqual(list(outer.sizes_and_strides), [(2, 8), (2, 2)])
+        self.assertSizesAndStrides(outer, [(2, 8), (2, 2)])
         self.assertEqual(
-            outer.all_ranks_from_zero(),
+            outer.codomain(),
             [0, 2, 8, 10],
         )
         self.assertEqual(
-            pg_layout.global_ranks(16),
+            global_ranks(pg_layout, 16),
             [
                 [0, 1, 4, 5],
                 [2, 3, 6, 7],
@@ -1590,14 +1599,14 @@ class CuTeLayoutTest(TestCase):
             ],
         )
 
-        # Test layout_to_global_ranks and layout_to_all_ranks_from_zero
+        # Test layout_to_global_ranks and layout_to_codomain
         pg_layout = _FlatLayout((2, 2), (4, 2))
         self.assertEqual(
-            pg_layout.all_ranks_from_zero(),
+            pg_layout.codomain(),
             [0, 2, 4, 6],
         )
         self.assertEqual(
-            pg_layout.global_ranks(16),
+            global_ranks(pg_layout, 16),
             [
                 [0, 2, 4, 6],
                 [1, 3, 5, 7],
@@ -1606,14 +1615,14 @@ class CuTeLayoutTest(TestCase):
             ],
         )
         outer = pg_layout.complement(world_size=16)
-        self.assertEqual(list(outer.sizes_and_strides), [(2, 8), (2, 1)])
+        self.assertSizesAndStrides(outer, [(2, 8), (2, 1)])
         # Test when stride is not monotonically decreasing, the complement layout
         # is same as the one sorted its stride.
         pg_layout_r = _FlatLayout((2, 2), (2, 4))
         outer = pg_layout_r.complement(world_size=16)
-        self.assertEqual(list(outer.sizes_and_strides), [(2, 8), (2, 1)])
+        self.assertSizesAndStrides(outer, [(2, 8), (2, 1)])
         self.assertEqual(
-            pg_layout_r.global_ranks(16),
+            global_ranks(pg_layout_r, 16),
             [
                 [0, 4, 2, 6],
                 [1, 5, 3, 7],
@@ -1622,14 +1631,14 @@ class CuTeLayoutTest(TestCase):
             ],
         )
 
-        # Test just all_ranks_from_zero and global_ranks.
+        # Test just codomain and global_ranks.
         pg_layout = _FlatLayout((4,), (2,))
         self.assertEqual(
-            pg_layout.all_ranks_from_zero(),
+            pg_layout.codomain(),
             [0, 2, 4, 6],
         )
         self.assertEqual(
-            pg_layout.global_ranks(16),
+            global_ranks(pg_layout, 16),
             [
                 [0, 2, 4, 6],
                 [1, 3, 5, 7],
@@ -1643,9 +1652,9 @@ class CuTeLayoutTest(TestCase):
         orig_l = _FlatLayout((4, 2), (2, 1))
         right_l = _MeshLayout.from_sizes_strides((2,), (1,))
         (composed_layout,) = orig_l.composition(right_l)
-        self.assertEqual(list(composed_layout.sizes_and_strides), [(2, 1)])
+        self.assertSizesAndStrides(composed_layout, [(2, 1)])
         self.assertEqual(
-            composed_layout.global_ranks(8),
+            global_ranks(composed_layout, 8),
             [
                 [0, 1],
                 [2, 3],
@@ -1658,9 +1667,9 @@ class CuTeLayoutTest(TestCase):
         orig_l = _FlatLayout((4,), (2,))
         right_l = _MeshLayout.from_sizes_strides((2,), (1,))
         (composed_layout,) = orig_l.composition(right_l)
-        self.assertEqual(list(composed_layout.sizes_and_strides), [(2, 2)])
+        self.assertSizesAndStrides(composed_layout, [(2, 2)])
         self.assertEqual(
-            composed_layout.global_ranks(8),
+            global_ranks(composed_layout, 8),
             [
                 [0, 2],
                 [1, 3],
@@ -1673,10 +1682,10 @@ class CuTeLayoutTest(TestCase):
         # This is to mimic the un-flatten from a 2D mesh to a 1D mesh.
         right_l = _MeshLayout.from_sizes_strides((2, 2), (2, 1))
         composed_layout = orig_l.composition(right_l)
-        self.assertEqual(list(composed_layout[0].sizes_and_strides), [(2, 4)])
-        self.assertEqual(list(composed_layout[1].sizes_and_strides), [(2, 2)])
+        self.assertSizesAndStrides(composed_layout[0], [(2, 4)])
+        self.assertSizesAndStrides(composed_layout[1], [(2, 2)])
         self.assertEqual(
-            composed_layout[0].global_ranks(8),
+            global_ranks(composed_layout[0], 8),
             [
                 [0, 4],
                 [1, 5],
@@ -1685,7 +1694,7 @@ class CuTeLayoutTest(TestCase):
             ],
         )
         self.assertEqual(
-            composed_layout[1].global_ranks(8),
+            global_ranks(composed_layout[1], 8),
             [
                 [0, 2],
                 [1, 3],

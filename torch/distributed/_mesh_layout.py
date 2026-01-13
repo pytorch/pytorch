@@ -154,7 +154,7 @@ class _FlatLayout:
         result = complement(self.to_pycute(), world_size)
         return _FlatLayout(result.shape, result.stride)
 
-    def all_ranks_from_zero(self) -> list[int]:
+    def codomain(self) -> list[int]:
         """
         This function computes the all ranks specified by the layout staring from zero.
 
@@ -164,7 +164,7 @@ class _FlatLayout:
             (0,0), (0,1), (0,2), (1,0), (1,1), (1,2)
 
         2. For each coordinate, we compute a linear rank index as:
-            all_ranks_from_zero = sum(coord[i] * strides[i] for i in range(ndim))
+            codomain = sum(coord[i] * strides[i] for i in range(ndim))
 
         Example A:
         sizes = (2, 3)        # 2 rows, 3 cols
@@ -191,34 +191,6 @@ class _FlatLayout:
         return [
             sum(c * s for c, s in zip(coord, self.stride))
             for coord in product(*(range(s) for s in self.shape))
-        ]
-
-    def global_ranks(self, world_size: int) -> list[list[int]]:
-        """
-        Build global ranks specified by the layout via two-level ranks composition.
-
-        The nested list forms the Cartesian product of all ranks for one layout and offset
-        regarding filling up the world_size with the layout.
-        The final global ranks are the addition of these two. The result is a
-        list of lists: one sublist per layout. This rank list will be used to build
-        the communicator underlying the layout and the given `world_size`.
-
-        Example:
-        world_size = 16
-        self.size = 4
-        self.stride = 1
-        ranks = [0, 1, 2, 3]
-        offsets = [0, 4, 8, 12]
-        result = [
-            [0+0, 0+1, 0+2, 0+3],  # → [0, 1, 2, 3]
-            [4+0, 4+1, 4+2, 4+3],  # → [4, 5, 6, 7]
-            [8+0, 8+1, 8+2, 8+3],  # → [8, 9, 10,11]
-            [12+0, 12+1, 12+2, 12+3],  # → [12,13,14,15]
-        ]
-        """
-        return [
-            [offset + rank for rank in self.all_ranks_from_zero()]
-            for offset in self.complement(world_size).all_ranks_from_zero()
         ]
 
     def check_sorted(self) -> bool:
@@ -260,11 +232,6 @@ class _FlatLayout:
             stride[i] % (stride[i + 1] * shape[i + 1]) == 0
             for i in range(len(stride) - 1)
         )
-
-    @property
-    def sizes_and_strides(self) -> Iterator[tuple[int, int]]:
-        """Iterate over (size, stride) pairs for each dimension."""
-        return zip(self.shape, self.stride)
 
 
 @dataclass(frozen=True)
