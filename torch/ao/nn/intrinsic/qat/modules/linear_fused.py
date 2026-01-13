@@ -47,7 +47,8 @@ class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
         qconfig=None,
     ):
         nn.modules.linear.Linear.__init__(self, in_features, out_features, bias)
-        assert qconfig, "qconfig must be provided for QAT module"
+        if not qconfig:
+            raise AssertionError("qconfig must be provided for QAT module")
         self.qconfig = qconfig
         self.freeze_bn = freeze_bn if self.training else True
         self.bn = nn.BatchNorm1d(out_features, eps, momentum, True, True)
@@ -87,7 +88,8 @@ class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
         return self
 
     def forward(self, input):
-        assert self.bn.running_var is not None
+        if self.bn.running_var is None:
+            raise AssertionError("self.bn.running_var must not be None")
 
         # Scale the linear weights by BN's running statistics to reduce
         # weight jitter, see https://arxiv.org/pdf/1806.08342.pdf, page 18
@@ -148,14 +150,17 @@ class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
             mod: A float module, either produced by torch.ao.quantization
                 utilities or directly from the user.
         """
-        assert type(mod) is nni.LinearBn1d, (
-            "qat."
-            + cls.__name__
-            + ".from_float only works for "
-            + nni.LinearBn1d.__name__
-        )
-        assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
-        assert mod.qconfig, "Input float module must have a valid config"
+        if type(mod) is not nni.LinearBn1d:
+            raise AssertionError(
+                "qat."
+                + cls.__name__
+                + ".from_float only works for "
+                + nni.LinearBn1d.__name__
+            )
+        if not hasattr(mod, "qconfig"):
+            raise AssertionError("Input float module must have qconfig defined")
+        if not mod.qconfig:
+            raise AssertionError("Input float module must have a valid config")
         qconfig = mod.qconfig
         linear, bn = mod[0], mod[1]
         qat_linearbn = cls(
@@ -178,7 +183,10 @@ class LinearBn1d(nn.modules.linear.Linear, nni._FusedModule):
 
     def to_float(self):
         linear = torch.nn.Linear(self.in_features, self.out_features)
-        assert self.bn.running_var is not None and self.bn.running_mean is not None
+        if self.bn.running_var is None or self.bn.running_mean is None:
+            raise AssertionError(
+                "self.bn.running_var and self.bn.running_mean must not be None"
+            )
         linear.weight, linear.bias = fuse_linear_bn_weights(
             self.weight,
             self.bias,
