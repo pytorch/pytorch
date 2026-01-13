@@ -1097,23 +1097,14 @@ class _StridedShard(torch._C._distributed.StridedShard):
         Returns:
             The local strided shard for this rank.
         """
-        my_coordinate = mesh.get_coordinate()
         num_chunks = mesh.size(mesh_dim=mesh_dim)
-
-        if my_coordinate is None:
-            # if rank is not part of mesh, we simply return an empty tensor
-            return local_tensor.new_empty(0, requires_grad=local_tensor.requires_grad)
-
-        mesh_dim_local_rank = my_coordinate[mesh_dim]
-        shards, _ = self._select_split_tensor(
+        return self._select_split_tensor(
             local_tensor,
             num_chunks,
-            mesh_dim_local_rank,
+            shard_index,
             with_padding=False,
             clone=True,
         )
-
-        return _StridedShard._select_shard(shards, shard_index)
 
     @staticmethod
     @maybe_run_for_local_tensor
