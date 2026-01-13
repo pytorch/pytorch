@@ -18,7 +18,7 @@ import torch.library
 from torch._inductor.compile_fx import _InProcessFxCompile, FxCompile, FxCompileMode
 from torch._inductor.graph import GraphLowering
 from torch._inductor.test_case import TestCase
-from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, TEST_WITH_ASAN
+from torch.testing._internal.common_utils import IS_CI, IS_WINDOWS, skipIfRocm, TEST_WITH_ASAN
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     IS_BIG_GPU,
@@ -99,6 +99,7 @@ class TestSubprocess(TestCase):
     @unittest.skipIf(
         not IS_BIG_GPU, "Skipping triton backend only since not big GPU (not enough SM)"
     )
+    @skipIfRocm(msg="progressive compile optimization not tuned for ROCm")
     def test_progressive(self):
         from triton.testing import do_bench
 
