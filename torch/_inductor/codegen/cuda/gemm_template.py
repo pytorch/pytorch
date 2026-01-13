@@ -1059,15 +1059,9 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
         else:
             return "cutlass::gemm::GemmUniversalMode::kGemm"
 
-    def _dynamic_cluster_block(
-        self, op: "cutlass_gemm_op.GemmOperation"
-    ) -> str:  # type: ignore[name-defined]  # noqa: F821
+    def _dynamic_cluster_block(self, op: "cutlass_gemm_op.GemmOperation") -> str:  # type: ignore[name-defined]  # noqa: F821
         shape = getattr(getattr(op, "tile_description", None), "cluster_shape", None)
-        if (
-            not shape
-            or len(shape) < 2
-            or (shape[0] > 0 and shape[1] > 0)
-        ):
+        if not shape or len(shape) < 2 or (shape[0] > 0 and shape[1] > 0):
             return ""
 
         preferred = inductor_cuda_config.cutlass_dynamic_cluster_shape

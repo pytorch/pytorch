@@ -257,7 +257,9 @@ def _gen_ops_cached(arch, version) -> dict[Any, Any]:
         )
         return {}
     arch = _normalize_cuda_arch(arch)
-    gen_arch = "100" if arch == "103" else arch  # CUTLASS SM103 generator only covers NVFB4; fallback to SM100 set
+    gen_arch = (
+        "100" if arch == "103" else arch
+    )  # CUTLASS SM103 generator only covers NVFB4; fallback to SM100 set
     instantiation_level: str = config.cuda.cutlass_instantiation_level
     args = CUTLASSArgs(
         architectures=gen_arch,
