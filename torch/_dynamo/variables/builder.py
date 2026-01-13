@@ -56,7 +56,11 @@ from torch._dynamo.utils import (
 from torch._guards import TracingContext
 from torch._higher_order_ops.flat_apply import flat_apply
 from torch._higher_order_ops.torchbind import call_torchbind
-from torch._library.opaque_object import is_opaque_type, is_opaque_value_type
+from torch._library.opaque_object import (
+    is_opaque_reference_type,
+    is_opaque_type,
+    is_opaque_value_type,
+)
 from torch._ops import HigherOrderOperator, OpOverload, OpOverloadPacket
 from torch._subclasses.fake_tensor import (
     FakeTensor,
@@ -248,6 +252,7 @@ from .misc import (
     MethodWrapperVariable,
     NumpyDTypeVariable,
     NumpyVariable,
+    ObjectVariable,
     PythonModuleVariable,
     RandomClassVariable,
     RandomVariable,
@@ -524,6 +529,7 @@ class VariableBuilder:
             TensorWithTFOverrideVariable,
             UserDefinedObjectVariable,
             NumpyNdarrayVariable,
+            TorchScriptObjectVariable,
         }
 
     def get_source(self) -> Source:
@@ -753,18 +759,24 @@ class VariableBuilder:
 
         if is_namedtuple(value):
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
-            output = [
+            output: list[VariableTracker] = [
                 LazyVariableTracker.create(
                     getattr(value, name),
                     source=AttrSource(self.source, name),
                 )
                 for name in namedtuple_fields(type(value))
             ]
+
+            tuple_vt = TupleVariable(
+                output,
+                source=self.source,
+                mutation_type=ValueMutationExisting(),
+            )
             result = NamedTupleVariable(
-                # type: ignore[arg-type]
                 output,
                 tuple_cls=type(value),
                 source=self.source,
+                tuple_vt=tuple_vt,
             )
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
@@ -1530,20 +1542,13 @@ class VariableBuilder:
                     source=self.source,
                 )
 
-            if is_opaque_type(type(value)):
-                # Check if this is a value-type opaque object (registered as both opaque type and constant)
-                if is_opaque_value_type(type(value)):
-                    # Value-type: guard on equality (will use __eq__)
-                    self.install_guards(GuardBuilder.CONSTANT_MATCH)
-                    return TorchScriptObjectVariable.create(
-                        value,  # type: ignore[arg-type]
-                        value,
-                        source=self.source,
-                    )
-                else:
-                    # Reference-type: guard only on type/identity
-                    self.install_guards(GuardBuilder.TYPE_MATCH)
-
+            if is_opaque_value_type(type(value)):
+                # Value-type: guard on equality (will use __eq__)
+                self.install_guards(GuardBuilder.CONSTANT_MATCH)
+            elif is_opaque_reference_type(type(value)):
+                # Reference-type: guard only on type, and registered guard_fn
+                self.install_guards(GuardBuilder.TYPE_MATCH)
+                self.install_guards(GuardBuilder.OPAQUE_OBJ_GUARD_FN_MATCH)
             elif not hasattr(value, "__obj_flatten__"):
                 # This exists to allow a smoother transition.
                 # The implications are:
@@ -1571,27 +1576,29 @@ class VariableBuilder:
             fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
                 self.tx.output.fake_mode, value
             )
+            if is_opaque_value_type(type(value)):
+                proxy = value
+            else:
+                proxy = self.tx.output.root_tracer.create_graph_input(
+                    re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
+                    type(value),
+                    fake_script_obj,
+                    source=self.source,
+                )
+                # setting is_unspecialized=False to not insert a as_tensor call in reconstruct by default
+                # setting example to be real value because these example values will be used
+                # as example_inputs for user compiler.
+                proxy.node.meta["grapharg"] = GraphArg(
+                    self.source,
+                    value,  # type: ignore[arg-type]
+                    False,
+                    None,
+                    False,
+                    fake_script_obj,  # type: ignore[arg-type]
+                )
 
-            proxy = self.tx.output.root_tracer.create_graph_input(
-                re.sub(r"[^a-zA-Z0-9]+", "_", self.name),
-                type(value),
-                fake_script_obj,
-                source=self.source,
-            )
-
-            # setting is_unspecialized=False to not insert a as_tensor call in reconstruct by default
-            # setting example to be real value because these example values will be used
-            # as example_inputs for user compiler.
-            proxy.node.meta["grapharg"] = GraphArg(
-                self.source,
-                value,  # type: ignore[arg-type]
-                False,
-                None,
-                False,
-                fake_script_obj,  # type: ignore[arg-type]
-            )
             return TorchScriptObjectVariable.create(
-                proxy,
+                proxy,  # pyrefly: ignore[bad-argument-type]
                 fake_script_obj,
                 source=self.source,
             )
@@ -1769,6 +1776,9 @@ class VariableBuilder:
                 return self.wrap_symint(value.val, dynamism=DimDynamic.DYNAMIC)
             else:
                 raise RuntimeError(f"Undefined dynamism {value.dynamism}")
+        elif istype(value, object):
+            self.install_guards(GuardBuilder.TYPE_MATCH)
+            return ObjectVariable(value, source=self.source)
         else:
             return self.wrap_user_defined(value)
 
@@ -3255,7 +3265,7 @@ def handle_traced_output(
             ), (
                 f"expected {example_value.__class__.__module__} == torch.return_types or named tuple but got {type(example_value)}"
             )
-            return NamedTupleVariable(unpacked, example_value.__class__, **options)
+            return NamedTupleVariable(unpacked, example_value.__class__, **options)  # type: ignore[arg-type]
     elif example_value is None or proxy.node.target is torch.manual_seed:
         return ConstantVariable.create(None, **options)
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
@@ -3595,7 +3605,7 @@ def _automatic_dynamic(
     name = source.name
     prior_policy = tx.output.tracing_context.tensor_to_context.get(e, None)
     shape_env_to_source_to_symbol_cache = (
-        prior_policy.shape_env_to_source_to_symbol_cache if prior_policy else None
+        prior_policy.shape_env_to_source_to_symbol_cache if prior_policy else {}
     )
 
     # Get base context if the tensor is a view
@@ -3640,7 +3650,6 @@ def _automatic_dynamic(
             constraint_strides=[None] * e.dim(),
             view_base_context=view_base_context,
             tensor_source=source,
-            # type: ignore[assignment]
             shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
         )
 
@@ -3659,7 +3668,6 @@ def _automatic_dynamic(
             constraint_strides=[None] * e.dim(),
             view_base_context=view_base_context,
             tensor_source=source,
-            # type: ignore[assignment]
             shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
         )
 
@@ -3847,7 +3855,6 @@ def _automatic_dynamic(
         specialize_on=specialize_on,
         view_base_context=view_base_context,
         tensor_source=source,
-        # type: ignore[arg-type]
         shape_env_to_source_to_symbol_cache=shape_env_to_source_to_symbol_cache,
     )
 
@@ -4066,6 +4073,8 @@ class SourcelessBuilder:
         ):
             proxy = tx.output.bound_symbols[value.node.expr]
             return SymNodeVariable.create(tx, proxy)
+        elif istype(value, object):
+            return ObjectVariable(value)
         unimplemented(
             gb_type="Unexpected type in sourceless builder",
             context=f"{value_type.__module__}.{value_type.__qualname__}",

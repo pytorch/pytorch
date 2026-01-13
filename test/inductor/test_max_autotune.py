@@ -54,6 +54,8 @@ from torch._inductor.template_heuristics.triton import (
     CUDAPersistentTMATemplateConfigHeuristic,
     GemmConfig,
     get_shared_memory_checker_opts,
+    XPUMMTemplateConfigHeuristic,
+    XPUPersistentTMATemplateConfigHeuristic,
 )
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
@@ -1247,8 +1249,18 @@ class TestMaxAutotune(TestCase):
 
             M, N, K = sizes
 
-            a = torch.randn(M, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
-            b = torch.randn(K, N, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+            atol = 1e-4
+            rtol = 1e-4
+            # K can be huge huge, this is why the data distribution is set to iid N(0, K ** 0.5),
+            # which makes the result of reductions distributed as N(0, 1).
+            a, b = self._make_matrices(
+                M,
+                K,
+                N,
+                dtype=dtype,
+                device=GPU_TYPE,
+                requires_grad=True,
+            )
 
             possible_splits = range(2, min(K // M, K // N) + 1)
 
@@ -1281,7 +1293,7 @@ class TestMaxAutotune(TestCase):
                     "triton_.*_fused_0.run"
                 ).check("decompose_k").run(code[0])
                 check_divisors(code)
-                torch.testing.assert_close(out, a @ b, atol=1e-2, rtol=1e-2)
+                torch.testing.assert_close(out, a @ b, atol=atol, rtol=rtol)
 
             # Test adding epilogue also equivalent to eager
             compiled_func = torch.compile(lambda a, b: (a @ b).relu(), dynamic=dynamic)
@@ -1296,7 +1308,7 @@ class TestMaxAutotune(TestCase):
                 ).check("decompose_k").run(code[0])
                 check_divisors(code)
                 torch.testing.assert_close(
-                    compiled_func(a, b), (a @ b).relu(), atol=1e-2, rtol=1e-2
+                    compiled_func(a, b), (a @ b).relu(), atol=atol, rtol=rtol
                 )
 
             # Test adding reinterpret view before subgraph
@@ -1318,8 +1330,8 @@ class TestMaxAutotune(TestCase):
                 torch.testing.assert_close(
                     compiled_func(a, b),
                     (a.transpose(0, 1) @ b).relu(),
-                    atol=1e-2,
-                    rtol=1e-2,
+                    atol=atol,
+                    rtol=rtol,
                 )
 
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
@@ -2482,6 +2494,7 @@ class TestTemplateConfigPruning(TestCase):
             counters["inductor"]["select_algorithm_num_precompilation_exceptions"], 0
         )
 
+    @skipIfXpu(msg="Missing device_properties shared_memory_per_block on xpu.")
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("mat1_transposed", (False, True))
     @parametrize("mat2_transposed", (False, True))
@@ -2530,6 +2543,7 @@ class TestTemplateConfigPruning(TestCase):
             shared_memory_checker_opts,
         )
 
+    @skipIfXpu(msg="Missing device_properties shared_memory_per_block on xpu.")
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("mat1_transposed", (False, True))
     @parametrize("mat2_transposed", (False, True))
@@ -2578,6 +2592,8 @@ class TestTemplateConfigPruning(TestCase):
         exceeds_checker = heuristic._get_exceeding_shared_memory_checker(
             **shared_memory_checker_opts
         )
+        if exceeds_checker is None:
+            self.skipTest("Device does not support shared memory size query")
         for c in self.gemm_configs:
             smem_estimation = heuristic.get_shared_memory_estimation(
                 c, dtype_size, **shared_memory_checker_opts
@@ -3432,9 +3448,9 @@ class TestPrologueFusion(TestCase):
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
         # check that we do not CSE any variables between prologues, epilogues
-        FileCheck().check("def triton").check_count("= 1.1", 3, exactly=True).check(
-            "tl.store"
-        ).run(code[0])
+        FileCheck().check("def triton").check_count(
+            "tl.full([1], 1.1, tl.float32)", 3, exactly=True
+        ).check("tl.store").run(code[0])
 
     @config.patch(
         {
@@ -3724,8 +3740,12 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         a = torch.randn(512, 1152, device=GPU_TYPE, dtype=torch.bfloat16)
         b = torch.randn(1152, 7680, device=GPU_TYPE, dtype=torch.bfloat16)
 
-        tma_heuristic = CUDAPersistentTMATemplateConfigHeuristic()
-        mm_heuristic = CUDAMMTemplateConfigHeuristic()
+        if GPU_TYPE == "xpu":
+            tma_heuristic = XPUPersistentTMATemplateConfigHeuristic()
+            mm_heuristic = XPUMMTemplateConfigHeuristic()
+        else:
+            tma_heuristic = CUDAPersistentTMATemplateConfigHeuristic()
+            mm_heuristic = CUDAMMTemplateConfigHeuristic()
 
         # Save original configs to restore later
         original_tma_mm_configs = tma_heuristic.mm_configs

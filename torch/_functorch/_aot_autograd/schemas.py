@@ -16,7 +16,7 @@ from typing import Any, NewType, Optional, Protocol, TYPE_CHECKING, TypeVar, Uni
 import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
-from torch._subclasses import FakeTensor
+from torch._subclasses import FakeTensor, FakeTensorMode
 from torch._subclasses.fake_tensor import is_fake
 from torch.fx.experimental._backward_state import BackwardState
 from torch.utils._python_dispatch import is_traceable_wrapper_subclass
@@ -1024,6 +1024,10 @@ class AOTConfig:
     # mutating input with req_grad in export joint tracing.
     export_trace_joint: bool = False
     disable_functionalization: bool = False
+    # If True, disable TorchFunctionMetadataMode during make_fx tracing.
+    # This mode is used to track torch_fn metadata but can interfere with
+    # certain tracing scenarios.
+    _disable_torch_fn_metadata_mode: bool = False
 
     def __post_init__(self):
         if self.pre_dispatch:
@@ -1099,6 +1103,11 @@ class AOTState:
     # TODO: We potentially could offer a resumable context manager, where you
     # can cancel it and reenable it later when you need it.
     stack: contextlib.ExitStack
+
+    # The fake tensor mode used during tracing.  This is useful for later
+    # operations that need to create new fake tensors consistent with the
+    # original trace.
+    fake_mode: FakeTensorMode
 
 
 FxValue = Union[Tensor, int, SymInt, BackwardState]
@@ -1346,3 +1355,17 @@ class JointWithDescriptors:
     @graph_module.setter
     def graph_module(self, value):
         self._aot_graph_capture.graph_module = value
+
+    @property
+    def fake_mode(self):
+        return self._aot_state.fake_mode
+
+    def cache_hash(self) -> str:
+        """
+        Return a hash string suitable for use as a cache key. This method
+        exists to decouple cache key generation from __str__/__repr__, so
+        that display-oriented changes don't accidentally affect caching.
+        """
+        from hashlib import sha256
+
+        return sha256(str(self).encode("utf-8")).hexdigest()
