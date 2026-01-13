@@ -2315,7 +2315,7 @@ class SIMDScheduling(BaseScheduling):
         enable_autotune: bool,
         mixed_sizes: bool,
         only_gen_src_code: bool = False,
-    ) -> list[tuple[str, Any, Any]]:
+    ) -> list[tuple[Optional[str], Any, Any]]:
         """
         Generate kernel code for combo kernel partitions.
 
@@ -2366,16 +2366,23 @@ class SIMDScheduling(BaseScheduling):
                 continue
 
             if len(node_group) == 1:
-                # Single-node: create regular kernel
+                # Single-node partition
                 node_info = node_schedule_map[node_group[0]]
-                kernel = self.kernel_type(
-                    node_info.tiling,
-                    features=node_info.features,
-                )
-                self.process_kernel(kernel, node_info.node_schedule, only_gen_src_code)
-                with V.set_kernel_handler(kernel):
-                    src_code = kernel.codegen_kernel()
-                kernel_code_list.append((src_code, kernel, node_group))
+                if only_gen_src_code:
+                    # Skip code generation - caller has cached benchmark results
+                    kernel_code_list.append((None, None, node_group))
+                else:
+                    # Generate regular kernel
+                    kernel = self.kernel_type(
+                        node_info.tiling,
+                        features=node_info.features,
+                    )
+                    self.process_kernel(
+                        kernel, node_info.node_schedule, only_gen_src_code
+                    )
+                    with V.set_kernel_handler(kernel):
+                        src_code = kernel.codegen_kernel()
+                    kernel_code_list.append((src_code, kernel, node_group))
             else:
                 # Multi-node: create ComboKernel with combo subkernels
                 kernel = ComboKernel(
