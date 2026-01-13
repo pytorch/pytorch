@@ -111,6 +111,25 @@ def make_boxed_func(f):
     return g
 
 
+def make_unboxed_func(f):
+    """
+    If f uses boxed calling convention, wrap it to accept unpacked arguments.
+
+    Boxed callables expect a single list argument: f([arg1, arg2, ...])
+    This wrapper allows calling them with unpacked args: wrapper(arg1, arg2, ...)
+
+    This is the inverse of make_boxed_func.
+    """
+    if getattr(f, "_boxed_call", False):
+
+        @simple_wraps(f)
+        def g(*args):
+            return f(list(args))
+
+        return g
+    return f
+
+
 def make_boxed_compiler(compiler):
     @wraps(compiler)
     def f(fx_g, inps):
