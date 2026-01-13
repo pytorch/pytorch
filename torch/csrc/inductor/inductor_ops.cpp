@@ -12,7 +12,6 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/ops/from_blob.h>
-#include <c10/util/Optional.h>
 #include <tuple>
 #endif
 
@@ -134,24 +133,14 @@ TORCH_LIBRARY_FRAGMENT(inductor, m) {
 // -param increment The number of RNG values to reserve.
 // -return A tuple of (Seed Tensor, Offset Tensor, Intragraph Offset CPU
 // Tensor).
-static Generator _get_or_default_cuda_generator(
-    const c10::optional<Generator>& gen_opt) {
-  if (gen_opt.has_value()) {
-    return *gen_opt;
-  }
-  const int device_index = at::cuda::current_device();
-  return at::cuda::detail::getDefaultCUDAGenerator(device_index);
-}
-
 static std::tuple<Tensor, Tensor, Tensor> inductor_reserve_rng_state(
-    const c10::optional<Generator>& generator,
+    const Generator& generator,
     int64_t increment) {
-  const auto gen = _get_or_default_cuda_generator(generator);
-  auto* gen_impl = at::check_generator<at::CUDAGeneratorImpl>(gen);
+  auto* gen_impl = at::check_generator<at::CUDAGeneratorImpl>(generator);
 
   const auto dev_opts =
-      at::TensorOptions().dtype(at::kLong).device(gen.device());
-  const auto cpu_opts =at::TensorOptions().dtype(at::kLong).device(at::kCPU);
+      at::TensorOptions().dtype(at::kLong).device(generator.device());
+  const auto cpu_opts = at::TensorOptions().dtype(at::kLong).device(at::kCPU);
 
   const at::PhiloxCudaState st =
       gen_impl->philox_cuda_state(static_cast<uint64_t>(increment));
@@ -166,9 +155,9 @@ static std::tuple<Tensor, Tensor, Tensor> inductor_reserve_rng_state(
     return {seed_t, off_t, intra_t};
   }
 
-  auto seed_t =at::scalar_tensor(static_cast<int64_t>(st.seed_.val), dev_opts)
+  auto seed_t = at::scalar_tensor(static_cast<int64_t>(st.seed_.val), dev_opts)
 .unsqueeze(0);
-  auto off_t =at::scalar_tensor(static_cast<int64_t>(st.offset_.val), dev_opts)
+  auto off_t = at::scalar_tensor(static_cast<int64_t>(st.offset_.val), dev_opts)
 .unsqueeze(0);
   auto intra_t = at::zeros({1}, cpu_opts);
   return {seed_t, off_t, intra_t};
@@ -176,7 +165,7 @@ static std::tuple<Tensor, Tensor, Tensor> inductor_reserve_rng_state(
 
 TORCH_LIBRARY_FRAGMENT(inductor_prims, m) {
   m.def(
-      "inductor_reserve_rng_state(Generator? generator, int increment) "
+      "inductor_reserve_rng_state(Generator generator, int increment) "
       "-> (Tensor, Tensor, Tensor)");
 }
 
