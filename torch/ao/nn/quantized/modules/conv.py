@@ -805,13 +805,16 @@ class _ConvTransposeNd(_ConvNd):
             + ".from_float only works for "
             + cls._FLOAT_MODULE.__name__  # type: ignore[attr-defined]
         )
-        assert type(mod) is cls._FLOAT_MODULE, msg
-        assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined."
+        if type(mod) is not cls._FLOAT_MODULE:
+            raise AssertionError(msg)
+        if not hasattr(mod, "qconfig"):
+            raise AssertionError("Input float module must have qconfig defined.")
         weight_post_process = mod.qconfig.weight()  # type: ignore[operator, union-attr]
         weight_post_process(mod.weight)
-        assert weight_post_process.dtype == torch.qint8, (
-            "Weight observer must have a dtype of qint8"
-        )
+        if weight_post_process.dtype != torch.qint8:
+            raise AssertionError(
+                f"Weight observer must have a dtype of qint8, got {weight_post_process.dtype}"
+            )
         qweight = _quantize_weight(mod.weight.float(), weight_post_process)
         # the __init__ call used is the one from derived classes and not the one from _ConvTransposeNd
         # pyrefly: ignore [missing-argument]
