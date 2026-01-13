@@ -213,10 +213,6 @@ class VllmTestRunner(BaseRunner):
             raise ValueError(
                 "missing required TORCH_CUDA_ARCH_LIST, please set TORCH_CUDA_ARCH_LIST env var"
             )
-        if not get_end("HF_HOME"):
-            raise ValueError(
-                "missing required HF_HOME, please set HF_HOME env var"
-            )
 
 
 def preprocess_test_in(
