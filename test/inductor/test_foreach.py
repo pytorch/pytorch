@@ -7,6 +7,7 @@ import unittest.mock as mock
 import torch
 import torch._inductor
 from torch._higher_order_ops import foreach_map
+from torch._inductor import config
 from torch._inductor.test_case import TestCase
 from torch._inductor.utils import run_fw_bw_and_get_code
 from torch.testing._internal.common_utils import (
@@ -1341,6 +1342,7 @@ class ForeachTests(TestCase):
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 5)
 
     @requires_cuda_and_triton
+    @config.patch({"emulate_precision_casts": True})
     def test_foreach_addcmul_fma_bitwise_equal(self):
         """Test that _foreach_addcmul with FMA lowering produces bitwise equal results to eager."""
         self_tensors = [
@@ -1386,6 +1388,7 @@ class ForeachTests(TestCase):
             self.assertEqual(eager, compiled, atol=atol, rtol=rtol)
 
     @requires_cuda_and_triton
+    @config.patch({"emulate_precision_casts": True})
     def test_foreach_addcmul_uses_fma_instruction(self):
         """Test that _foreach_addcmul generates code using FMA instruction."""
         from torch._inductor.utils import run_and_get_code

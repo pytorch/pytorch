@@ -2299,12 +2299,14 @@ def fallback_node_due_to_unsupported_type(node: torch.fx.Node, allow_cpu_inputs=
 
 
 def make_fallback(op, layout_constraint=None, warn=True, override_decomp=False):
-    # When emulate_precision_casts is enabled, we skip decomposing addcdiv
-    # to use the native CUDA kernel which preserves FMA semantics.
-    # Note: _foreach_addcmul.Scalar is unconditionally not decomposed.
-    skip_decomp_for_precision = (
-        config.emulate_precision_casts and op == aten._foreach_addcdiv.Scalar
-    )
+    # When emulate_precision_casts is enabled, we skip decomposing addcmul ops
+    # to use the inductor lowering which preserves FMA semantics.
+    # For _foreach_addcdiv, we use the native CUDA kernel.
+    skip_decomp_for_precision = config.emulate_precision_casts and op in {
+        aten.addcmul,
+        aten._foreach_addcmul.Scalar,
+        aten._foreach_addcdiv.Scalar,
+    }
     assert op not in decompositions or override_decomp or skip_decomp_for_precision, (
         f"both a fallback and a decomp for same op: {op}"
     )
@@ -6962,7 +6964,13 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     to force rounding of the product before the FMA. This prevents Triton's
     compiler from fusing the multiplication with the FMA, matching eager's
     rounding behavior.
+
+    When emulate_precision_casts is False, we return NotImplemented to use the
+    decomposition instead.
     """
+    if not config.emulate_precision_casts:
+        return NotImplemented
+
     dtype = get_promoted_dtype(
         self,
         tensor1,
@@ -7016,7 +7024,13 @@ def _foreach_addcmul_scalar(self, tensor1, tensor2, value=1):
     """
     Foreach version of addcmul with scalar value parameter.
     Uses foreach_group_loop for consistent grouping behavior.
+
+    When emulate_precision_casts is False, we return NotImplemented to use the
+    decomposition instead.
     """
+    if not config.emulate_precision_casts:
+        return NotImplemented
+
     realize_outputs = (
         len(V.graph.current_node.users) == 0
         or V.graph.current_node.target in inplace_foreach_ops
