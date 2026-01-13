@@ -6081,6 +6081,19 @@ class CommonTemplate:
         if self.device != "cpu":
             assertGeneratedKernelCountEqual(self, 1)
 
+    def test_no_redundant_assignment(self):
+        def fn(x):
+            return x + 2
+
+        args = [torch.rand([4]).to(dtype=torch.complex64)]
+        expected = fn(*args)
+        fn = torch.compile(fn, fullgraph=True)
+        result, (source_code,) = run_and_get_code(fn, *args)
+        self.assertEqual(result, expected)
+        if "async_compile.multi_kernel" in source_code:
+            return
+        self.assertEqual(source_code.count("buf1 = buf0"), 0)
+
     def test_complex_from_real_imag(self):
         def fn(x, y):
             return aten.complex.default(x, y)
