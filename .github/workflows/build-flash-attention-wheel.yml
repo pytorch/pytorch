@@ -104,8 +104,8 @@ jobs:
             -e WHEEL_PLAT="${{ matrix.arch }}" \
             -e PYTORCH_ROOT="/pytorch" \
             -e PYTHON_EXECUTABLE="${PYTHON_EXECUTABLE}" \
-            -e MAX_JOBS="${{ matrix.arch == 'aarch64' && '8' || '' }}" \
-            -e NVCC_THREADS="${{ matrix.arch == 'aarch64' && '4' || '' }}" \
+            -e MAX_JOBS="${{ matrix.arch == 'aarch64' && '4' || '' }}" \
+            -e NVCC_THREADS="${{ matrix.arch == 'aarch64' && '2' || '' }}" \
             "${container_name}" bash -c \
             "bash /pytorch/.ci/flash-attention/build.sh"
 
