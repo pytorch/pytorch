@@ -17,6 +17,8 @@ flaky_models = {
     "mobilenetv3_large_100",
     # https://github.com/pytorch/pytorch/issues/163670
     "vision_maskrcnn",
+    # boolean mask outputs are non-deterministic due to thresholding
+    "sam",
 }
 
 
