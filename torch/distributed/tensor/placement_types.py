@@ -767,7 +767,91 @@ class _StridedShard(torch._C._distributed.StridedShard):
         current_logical_shape: list[int],
     ) -> torch.Tensor:
         """
-        replay the replicate-to-shard process to understand how to stitch shards back
+        Replay the replicate-to-shard process to understand how to stitch shards back.
+
+        This method performs all_gather to collect all shards and then reconstructs
+        the original replicated tensor by handling padding, unpadding, and reordering.
+
+        Example:
+            Consider a 1D input tensor [0, 1, 2, 3, 4, 5, 6, 7, 8] with 9 elements.
+            Using _StridedShard(dim=0, split_factor=2) and num_chunks=4:
+
+            Preparation (via _split_tensor, before _to_replicate_tensor is called):
+                _split_tensor produces 4 shards with strided indices:
+                - First split (split_factor=2): [0,1,2,3,4] and [5,6,7,8]
+                - Second split (num_chunks=4) on each piece:
+                    [0,1,2,3,4] (5 elements) -> [[0,1], [2,3], [4], []]
+                    [5,6,7,8]   (4 elements) -> [[5], [6], [7], [8]]
+                - Transpose and concatenate for each chunk:
+                    Chunk 0: [0,1] + [5] = [0,1,5]  (indices)
+                    Chunk 1: [2,3] + [6] = [2,3,6]  (indices)
+                    Chunk 2: [4] + [7]   = [4,7]    (indices)
+                    Chunk 3: [] + [8]    = [8]      (indices)
+
+                So we get shards with values:
+                    Rank 0: [0, 1, 5]  (size=3)
+                    Rank 1: [2, 3, 6]  (size=3)
+                    Rank 2: [4, 7]     (size=2)
+                    Rank 3: [8]        (size=1)
+
+                These shards are the `local_tensor` input to _to_replicate_tensor
+                on each rank. Each rank only has its own shard when this function
+                is called.
+
+            Step 1: Pad all shards to max_chunk_size=3:
+                    Rank 0: [0, 1, 5]     (no padding needed)
+                    Rank 1: [2, 3, 6]     (no padding needed)
+                    Rank 2: [4, 7, P]     (padded with 1 element)
+                    Rank 3: [8, P, P]     (padded with 2 elements)
+
+            Step 2: all_gather produces concatenated padded tensor:
+                [0, 1, 5, | 2, 3, 6, | 4, 7, P, | 8, P, P]
+                 chunk 0    chunk 1    chunk 2    chunk 3
+                (pos 0-2)  (pos 3-5)  (pos 6-8)  (pos 9-11)
+
+            Step 3: Compute select_indices to extract valid elements and reorder:
+                sharded_indices = [[0,1,5], [2,3,6], [4,7], [8]]
+                padded_positions:
+                    chunk 0: base=0 -> [0, 1, 2]  (positions of [0,1,5] in gathered)
+                    chunk 1: base=3 -> [3, 4, 5]  (positions of [2,3,6] in gathered)
+                    chunk 2: base=6 -> [6, 7]     (positions of [4,7] in gathered)
+                    chunk 3: base=9 -> [9]        (position of [8] in gathered)
+
+                permutation = cat(sharded_indices) = [0, 1, 5, 2, 3, 6, 4, 7, 8]
+                select_positions = cat(padded_positions) = [0, 1, 2, 3, 4, 5, 6, 7, 9]
+
+                inv_permutation = argsort(permutation)
+                    permutation[0]=0 -> inv_permutation[0]=0
+                    permutation[1]=1 -> inv_permutation[1]=1
+                    permutation[2]=5 -> inv_permutation[5]=2
+                    permutation[3]=2 -> inv_permutation[2]=3
+                    permutation[4]=3 -> inv_permutation[3]=4
+                    permutation[5]=6 -> inv_permutation[6]=5
+                    permutation[6]=4 -> inv_permutation[4]=6
+                    permutation[7]=7 -> inv_permutation[7]=7
+                    permutation[8]=8 -> inv_permutation[8]=8
+                    => inv_permutation = [0, 1, 3, 4, 6, 2, 5, 7, 8]
+
+                select_indices = select_positions[inv_permutation]
+                               = [0, 1, 2, 3, 4, 5, 6, 7, 9][inv_permutation]
+                    For original position 0: select_indices[0] = select_positions[0] = 0
+                    For original position 1: select_indices[1] = select_positions[1] = 1
+                    For original position 2: select_indices[2] = select_positions[3] = 3
+                    For original position 3: select_indices[3] = select_positions[4] = 4
+                    For original position 4: select_indices[4] = select_positions[6] = 6
+                    For original position 5: select_indices[5] = select_positions[2] = 2
+                    For original position 6: select_indices[6] = select_positions[5] = 5
+                    For original position 7: select_indices[7] = select_positions[7] = 7
+                    For original position 8: select_indices[8] = select_positions[8] = 9
+                    => select_indices = [0, 1, 3, 4, 6, 2, 5, 7, 9]
+
+            Step 4: index_select from gathered tensor using select_indices:
+                gathered = [0, 1, 5, 2, 3, 6, 4, 7, P, 8, P, P]
+                result = gathered[select_indices]
+                       = gathered[[0, 1, 3, 4, 6, 2, 5, 7, 9]]
+                       = [0, 1, 2, 3, 4, 5, 6, 7, 8]
+
+            The result is the original replicated tensor [0, 1, 2, 3, 4, 5, 6, 7, 8].
         """
         num_chunks = mesh.size(mesh_dim=mesh_dim)
         logical_dim_size = current_logical_shape[self.dim]
@@ -788,7 +872,8 @@ class _StridedShard(torch._C._distributed.StridedShard):
         # squeeze back to 1D indices tensor
         sharded_indices = [shard.view(-1) for shard in sharded_indices]
 
-        max_chunk_size = max([len(shard) for shard in sharded_indices])
+        # First chunk should be one of those biggest chunks.
+        max_chunk_size = len(sharded_indices[0])
         local_pad_size = max_chunk_size - local_tensor.size(self.dim)
         local_tensor_padded = pad_tensor(local_tensor, self.dim, local_pad_size)
 
@@ -803,19 +888,32 @@ class _StridedShard(torch._C._distributed.StridedShard):
         if isinstance(replicate_tensor_permuted_padded, funcol.AsyncCollectiveTensor):
             replicate_tensor_permuted_padded = replicate_tensor_permuted_padded.wait()
 
-        if replicate_tensor_permuted_padded.shape[self.dim] > logical_dim_size:
-            replicate_tensor_permuted = unpad_tensor(
-                replicate_tensor_permuted_padded,
-                self.dim,
-                replicate_tensor_permuted_padded.shape[self.dim] - logical_dim_size,
+        # After all_gather, the tensor is [chunk0, chunk1 (may padded), ...].
+        # Each chunk may have padding at the end. Use a single index_select to
+        # both extract non-padding data and reorder to the original positions.
+        #
+        # Build select_indices where select_indices[original_pos] = position in
+        # the padded tensor that holds the element for original_pos.
+        padded_positions = []
+        for i, shard in enumerate(sharded_indices):
+            base_offset = i * max_chunk_size
+            positions = base_offset + torch.arange(
+                len(shard), device=local_tensor.device
             )
-        else:
-            replicate_tensor_permuted = replicate_tensor_permuted_padded
+            padded_positions.append(positions)
 
+        # Permutation ends up containing strided indices because we create it by
+        # chunking over a particular dimension of an N-D shaped arange tensor.
         permutation = torch.cat(sharded_indices)
+        # Choose the position by skipping padding indices from
+        # replicate_tensor_permuted_padded.
+        select_positions = torch.cat(padded_positions)
+
         inv_permutation = torch.argsort(permutation)
+        select_indices = select_positions.index_select(0, inv_permutation)
+
         replicate_tensor = torch.index_select(
-            replicate_tensor_permuted, self.dim, inv_permutation
+            replicate_tensor_permuted_padded, self.dim, select_indices
         )
 
         return replicate_tensor.contiguous()
@@ -825,21 +923,19 @@ class _StridedShard(torch._C._distributed.StridedShard):
     def _local_shard_size(sharded_indices: list[torch.Tensor], rank: RankType) -> int:
         return len(sharded_indices[rank])
 
-    # delete pyre-ignore once separating _StridedShard from Shard
-    def _local_shard_size_and_offset(  # pyre-ignore[bad-override]
+    def _local_shard_size_and_offset(
         self,
         curr_local_size: int,
         num_chunks: int,
         rank: RankType,
         return_first_offset: bool = True,
     ) -> tuple[int, int | list[int]]:
-        return _StridedShard.local_shard_size_and_offset(
-            self, curr_local_size, num_chunks, rank, return_first_offset
+        return self.local_shard_size_and_offset(
+            curr_local_size, num_chunks, rank, return_first_offset
         )
 
-    @staticmethod
     @maybe_run_for_local_tensor
-    def local_shard_size_and_offset(  # pyre-ignore[bad-override]
+    def local_shard_size_and_offset(
         self,
         curr_local_size: int,
         num_chunks: int,
