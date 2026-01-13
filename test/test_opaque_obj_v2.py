@@ -1,5 +1,6 @@
 # Owner(s): ["module: custom-operators"]
 
+import contextlib
 import gc
 import random
 from contextlib import ExitStack
@@ -14,6 +15,7 @@ from torch._dynamo.testing import (
     CompileCounter,
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
+    InductorAndRecordGraphs,
     normalize_gm,
 )
 from torch._dynamo.utils import counters as dynamo_counters
@@ -90,6 +92,13 @@ class RNGState:
 
     def noisy_inject(self, x):
         return torch.ops._TestOpaqueObject.noisy_inject(x, self)
+
+
+class OpaqueMultiplier:
+    """Opaque object that holds a multiplier value for backward tests."""
+
+    def __init__(self, multiplier: float):
+        self.multiplier = multiplier
 
 
 class Counter:
@@ -237,6 +246,7 @@ register_opaque_type(
     members={"size": MemberType.USE_REAL, "increment_size": MemberType.USE_REAL},
 )
 register_opaque_type(NestedValueSize, typ="value")
+register_opaque_type(OpaqueMultiplier, typ="reference")
 
 
 # A tensor subclass (similar to TwoTensor) that also holds an opaque Counter
@@ -1437,6 +1447,181 @@ class GraphModule(torch.nn.Module):
 
         # Recompile since Counter has changed
         self.assertEqual(cnt.frame_count, 2)
+
+    def test_opaque_obj_saved_for_backward(self):
+        """Test that opaque objects are correctly saved and passed to backward."""
+        import torch._dynamo.compiled_autograd
+
+        opaque_type = get_opaque_type_name(OpaqueMultiplier)
+
+        torch.library.define(
+            "_TestOpaqueObject::mul_with_scale",
+            f"({opaque_type} scale_obj, Tensor x) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        torch.library.define(
+            "_TestOpaqueObject::get_multiplier_tensor",
+            f"({opaque_type} scale_obj, Tensor tensor) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::mul_with_scale",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def mul_with_scale_impl(
+            scale_obj: OpaqueMultiplier, x: torch.Tensor
+        ) -> torch.Tensor:
+            return x * scale_obj.multiplier
+
+        @torch.library.register_fake("_TestOpaqueObject::mul_with_scale", lib=self.lib)
+        def mul_with_scale_fake(
+            scale_obj: OpaqueMultiplier, x: torch.Tensor
+        ) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        @torch.library.impl(
+            "_TestOpaqueObject::get_multiplier_tensor",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def get_multiplier_tensor_impl(
+            scale_obj: OpaqueMultiplier, tensor: torch.Tensor
+        ) -> torch.Tensor:
+            return tensor * scale_obj.multiplier
+
+        @torch.library.register_fake(
+            "_TestOpaqueObject::get_multiplier_tensor", lib=self.lib
+        )
+        def get_multiplier_tensor_fake(
+            scale_obj: OpaqueMultiplier, tensor: torch.Tensor
+        ) -> torch.Tensor:
+            return torch.empty_like(tensor)
+
+        def mul_setup_context(ctx, inputs, output):
+            ctx.scale_obj = inputs[0]
+
+        def mul_backward(ctx, grad) -> tuple[torch.Tensor, None]:
+            scale = torch.ops._TestOpaqueObject.get_multiplier_tensor(
+                ctx.scale_obj, grad
+            )
+            return None, scale
+
+        torch.library.register_autograd(
+            "_TestOpaqueObject::mul_with_scale",
+            mul_backward,
+            setup_context=mul_setup_context,
+            lib=self.lib,
+        )
+
+        def foo(scale_obj, x):
+            result = torch.ops._TestOpaqueObject.mul_with_scale(scale_obj, x)
+            result = result * 2
+            return result
+
+        def compile_and_run_with_backend(backend):
+            scale_obj = OpaqueMultiplier(2.5)
+            x = torch.randn(3, 3, requires_grad=True)
+
+            opt_f = torch.compile(foo, fullgraph=True, backend=backend)
+            out = opt_f(scale_obj, x)
+            expected = x * 2.5 * 2
+            self.assertTrue(torch.allclose(out, expected))
+
+            upstream_grad = torch.ones_like(out) * 5
+            out.backward(upstream_grad)
+            self.assertIsNotNone(x.grad)
+            expected_grad = torch.ones_like(x) * 5 * 5
+            self.assertTrue(torch.allclose(x.grad, expected_grad))
+
+        def is_called_from_pytest():
+            import os
+
+            return "PYTEST_VERSION" in os.environ
+
+        # Test graph structure without compiled autograd
+        backend = InductorAndRecordGraphs()
+        compile_and_run_with_backend(backend)
+        self.assertTrue(len(backend.graphs) > 0)
+        fw_graph = backend.graphs[0]
+        self.assertExpectedInline(
+            fw_graph.code.strip(),
+            f"""\
+def forward(self, L_x_ : torch.Tensor, L_scale_obj_ : {"test_opaque_obj_v2" if is_called_from_pytest() else "__main__"}_OpaqueMultiplier):
+    l_x_ = L_x_
+    l_scale_obj_ = L_scale_obj_
+    result = torch.ops._TestOpaqueObject.mul_with_scale(l_scale_obj_, l_x_);  l_scale_obj_ = l_x_ = None
+    result_1 = result * 2;  result = None
+    return (result_1,)""",  # noqa: B950
+        )
+
+        backend = AotEagerAndRecordGraphs()
+        compile_and_run_with_backend(backend)
+        self.assertTrue(len(backend.fw_graphs) > 0)
+        fw_graph = backend.fw_graphs[0]
+        self.assertExpectedInline(
+            fw_graph.code.strip(),
+            """\
+def forward(self, primals_1, primals_2):
+    mul_with_scale = torch.ops._TestOpaqueObject.mul_with_scale.default(primals_2, primals_1);  primals_1 = None
+    mul = torch.ops.aten.mul.Tensor(mul_with_scale, 2);  mul_with_scale = None
+    return (mul, primals_2)""",
+        )
+        self.assertTrue(len(backend.bw_graphs) > 0)
+        bw_graph = backend.bw_graphs[0]
+        self.assertExpectedInline(
+            bw_graph.code.strip(),
+            """\
+def forward(self, primals_2, tangents_1):
+    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, 2);  tangents_1 = None
+    get_multiplier_tensor = torch.ops._TestOpaqueObject.get_multiplier_tensor.default(primals_2, mul_1);  primals_2 = mul_1 = None
+    return (get_multiplier_tensor, None)""",
+        )
+
+        # Test with and without compiled autograd to verify correctness
+        # Also verify opaque objects aren't baked in as constants
+        for use_compiled_autograd in [False, True]:
+            with self.subTest(use_compiled_autograd=use_compiled_autograd):
+                torch._dynamo.reset()
+
+                def run_with_multiplier(multiplier_value: float):
+                    scale_obj = OpaqueMultiplier(multiplier_value)
+                    x = torch.randn(3, 3, requires_grad=True)
+
+                    opt_f = torch.compile(foo, fullgraph=True, backend="aot_eager")
+                    out = opt_f(scale_obj, x)
+                    expected = x * multiplier_value * 2
+                    self.assertTrue(torch.allclose(out, expected))
+
+                    upstream_grad = torch.ones_like(out) * 5
+                    with (
+                        torch._dynamo.compiled_autograd._enable(
+                            torch.compile(backend="eager")
+                        )
+                        if use_compiled_autograd
+                        else contextlib.nullcontext()
+                    ):
+                        out.backward(upstream_grad)
+
+                    self.assertIsNotNone(x.grad)
+                    # gradient = upstream_grad * 2 * multiplier_value
+                    expected_grad = torch.ones_like(x) * 5 * 2 * multiplier_value
+                    self.assertTrue(torch.allclose(x.grad, expected_grad))
+                    return x.grad.clone()
+
+                # Run with different multipliers to ensure opaque objects
+                # are not baked in as constants (would cause wrong results on 2nd run)
+                grad1 = run_with_multiplier(2.5)
+                torch._dynamo.reset()
+
+                grad2 = run_with_multiplier(3.0)
+
+                # Verify gradients are different (proving opaque objects weren't baked in)
+                self.assertFalse(torch.allclose(grad1, grad2))
 
 
 instantiate_parametrized_tests(TestOpaqueObject)
