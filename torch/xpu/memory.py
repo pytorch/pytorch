@@ -263,6 +263,7 @@ def memory_snapshot(
     """
     if not is_initialized():
         return []
+    # pyrefly: ignore [missing-attribute]
     return torch._C._xpu_memorySnapshot(mempool_id)["segments"]
 
 
@@ -457,6 +458,7 @@ def _record_memory_history(
 
             Defaults to ``None`` (record all actions).
     """
+    # pyrefly: ignore [missing-attribute]
     torch._C._xpu_recordMemoryHistory(
         enabled,
         context,
