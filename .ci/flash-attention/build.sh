@@ -61,8 +61,13 @@ pushd "$FLASH_ATTENTION_HOPPER_DIR"
 
 git submodule update --init ../csrc/cutlass
 
-sed -i 's/bare_metal_version != Version("12.8")/bare_metal_version < Version("12.8")/' \
-    "$FLASH_ATTENTION_HOPPER_DIR/setup.py"
+if [[ "$(uname -m)" == "aarch64" ]]; then
+    sed -i 's/bare_metal_version != Version("12.8")/False/' \
+        "$FLASH_ATTENTION_HOPPER_DIR/setup.py"
+else
+    sed -i 's/bare_metal_version != Version("12.8")/bare_metal_version < Version("12.8")/' \
+        "$FLASH_ATTENTION_HOPPER_DIR/setup.py"
+fi
 
 "$PYTHON" setup.py bdist_wheel \
     -d "$FA_FINAL_PACKAGE_DIR" \
