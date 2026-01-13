@@ -85,7 +85,12 @@ GROUP BY
         ')'
     )
 HAVING
-    AVG(time) > 60.0
+    AVG(time) > 60.0 OR CONCAT(
+        name,
+        ' (__main__.',
+        classname,
+        ')'
+        ) = 'test_index (__main__.DistTensorOpsTest)'
 ORDER BY
     test_name
 """
