@@ -3,9 +3,10 @@ Definition of CuTe inspired Layouts for DeviceMesh internal bookkeeping and func
 """
 
 import math
-from collections.abc import Iterator
+from collections.abc import Iterator, Sequence
 from dataclasses import dataclass
 from itertools import product
+from typing import NoReturn
 
 import torch
 from torch.distributed._pycute import (
@@ -18,13 +19,17 @@ from torch.distributed._pycute import (
     is_int,
     is_tuple,
     Layout,
+    make_layout,
     match_structure,
+    suffix_product,
 )
 
 
-@dataclass(frozen=True, init=True)
-class _MeshLayout(Layout):
+@dataclass(frozen=True)
+class _FlatLayout:
     """
+    A canonical CuTe layout for a single dimension of a DeviceMesh
+
     Utility class for representing an integer layout by borrowing ideas from CuTe Layout Algebra.
     See https://docs.nvidia.com/cutlass/media/docs/cpp/cute/02_layout_algebra.html for more details.
 
@@ -37,84 +42,64 @@ class _MeshLayout(Layout):
     Note this is a CuTe-inspired layout, because CuTe uses co-lexicographic way in linearization while PyTorch
     is using lexicographic. So even though the CuTe documentation can still be referenced, the implementation will be
     different from that of PyCute's.
+
+    This layout is _not_ itself subdivided into multiple dimensions. It might
+    internally sometimes use multidimensional tuple to represent "irregular"
+    layouts (e.g., flattening non-adjacent dims), but this should be considered
+    an opaque implementation detail.
+
+    This class guarantees that all equivalent layouts are encoded as the same
+    normalized representation, and thus compare equal. This is achieved by
+    flattening and coalescing compatible adjacent dimensions (which includes
+    removing all dimensions of size 1).
+
     """
 
-    # pyrefly: ignore [bad-override]
-    shape: IntTuple
-    # pyrefly: ignore [bad-override]
-    stride: IntTuple
+    shape: tuple[int, ...]
+    stride: tuple[int, ...]
 
-    def __post_init__(self) -> None:
-        if not is_tuple(self.shape) and not is_int(self.shape):
-            raise TypeError(f"shape must be a tuple or int, got {type(self.shape)}")
-        if not is_tuple(self.stride) and not is_int(self.stride):
-            raise TypeError(f"stride must be a tuple or int, got {type(self.stride)}")
-        if not match_structure(self.shape, self.stride):
-            raise ValueError(
-                f"sizes {self.shape} and strides {self.stride} don't match"
-            )
+    def __init__(self, shape: IntTuple, stride: IntTuple | None = None) -> None:
+        if not is_tuple(shape) and not is_int(shape):
+            raise TypeError(f"shape must be a tuple or int, got {type(shape)}")
+        stride = stride if stride is not None else suffix_product(shape)
+        if not is_tuple(stride) and not is_int(stride):
+            raise TypeError(f"stride must be a tuple or int, got {type(stride)}")
+        if not match_structure(shape, stride):
+            raise ValueError(f"sizes {shape} and strides {stride} don't match")
 
-    @property
-    def sizes(self) -> IntTuple:
-        return self.shape
+        coalesced_layout = coalesce(Layout(shape, stride))
+        flat_shape = flatten(coalesced_layout.shape)
+        flat_stride = flatten(coalesced_layout.stride)
 
-    @property
-    def strides(self) -> IntTuple:
-        return self.stride
+        # pycute will preserve a size=1 dim if it's the only remaining dim, but
+        # we prefer to stick to the Tensor convention and make it 0-dimensional
+        if flat_shape == (1,) and flat_stride == (0,):
+            flat_shape = ()
+            flat_stride = ()
 
-    @property
-    def sizes_and_strides(self) -> Iterator[tuple[int, int]]:
-        return zip(flatten(self.shape), flatten(self.stride))
+        # Set attributes using object.__setattr__ since frozen=True
+        object.__setattr__(self, "shape", flat_shape)
+        object.__setattr__(self, "stride", flat_stride)
 
-    @property
-    def top_level_sizes(self) -> tuple[int, ...]:
-        return tuple(self[i].numel() for i in range(len(self)))
+    def __len__(self) -> NoReturn:
+        raise RuntimeError(
+            "You should never need to know the length of the internal representation of a FlatLayout"
+        )
+
+    def __getitem__(self, i: int) -> NoReturn:
+        raise RuntimeError(
+            "You should never need to index into the internal representation of a FlatLayout"
+        )
+
+    def to_pycute(self) -> Layout:
+        if not self.shape:
+            return Layout(1, 0)
+        return Layout(self.shape, self.stride)
 
     def numel(self) -> int:
-        return math.prod(flatten(self.shape))
+        return math.prod(self.shape)
 
-    # # operator []    (get-i like tuples)
-    def __getitem__(self, i: int) -> "_MeshLayout":
-        if i < -len(self) or i >= len(self):
-            raise IndexError(
-                f"Dim {i} is out of range for layout with {len(self)} dimensions. "
-                f"Expected dim to be in range [{-len(self)}, {len(self) - 1}]."
-            )
-        layout = super().__getitem__(i)
-        return _MeshLayout(layout.shape, layout.stride)
-
-    def nest(self) -> "_MeshLayout":
-        return _MeshLayout((self.shape,), (self.stride,))
-
-    def coalesce(self) -> "_MeshLayout":
-        """
-        A layout is represented by (sizes):(strides), e.g. (3,2):(4,2).
-        Two consecutive dimensions can be "merged" into one if their
-        strides are contiguous/multiplicative (i.e., the inner stride * inner size
-        equals the next stride), we perform this kind of merge inside coalesce.
-
-        Example 1 (simple): (3,2):(2,1)
-        - inner dimension: has stride=1, size=2
-        - outer dimension: stride = inner_stride * inner_size = 2
-        → coalesced = (6:1)    # acts like a flat 1D array of length 6
-
-        Example 2 (non-coalescible): (3,2):(4,1)
-        - inner dimension: stride=1, size=2 → 2*1 = 2
-        - outer dimension: stride=4, mismatch (≠ 2)
-        → cannot merge; result stays (3,2):(4,1)
-        """
-        layout = coalesce(self)
-        # The original PuCute coalesce() will use stride=0 for size=1 for all dimension.
-        # We don't want to do that in device mesh, we will reset them to be 1 to be same as PyTorch.
-        if is_int(layout.stride) and layout.stride == 0:
-            return _MeshLayout(layout.shape, 1)
-        elif is_tuple(layout.stride) and any(s == 0 for s in layout.stride):
-            non_zero_strides = tuple(s if s != 0 else 1 for s in layout.stride)
-            return _MeshLayout(layout.shape, non_zero_strides)
-        else:
-            return _MeshLayout(layout.shape, layout.stride)
-
-    def composition(self, layout: "_MeshLayout") -> "_MeshLayout":
+    def composition(self, layout: "_ListOfFlatLayouts") -> "_ListOfFlatLayouts":
         """
         By-dimension composition allows one layout to "select from" or "filter through" another layout.
         Think of it as function composition: (self ∘ layout)(input) = self(layout(input))
@@ -137,10 +122,14 @@ class _MeshLayout(Layout):
         Returns:
           Layout being composed.
         """
-        result = composition(self, layout)
-        return _MeshLayout(result.shape, result.stride)
+        result = composition(self.to_pycute(), layout.to_pycute())
+        result_axes = [
+            _FlatLayout(shape, stride)
+            for shape, stride in zip(as_tuple(result.shape), as_tuple(result.stride))
+        ]
+        return _ListOfFlatLayouts(result_axes)
 
-    def complement(self, world_size: int) -> "_MeshLayout":
+    def complement(self, world_size: int) -> "_FlatLayout":
         """
         Compute the "complement layout" relative to a given world_size.
         A complement layout fills in the "missing" factor so that: self repeat a layout of complement(self, world_size)
@@ -162,15 +151,8 @@ class _MeshLayout(Layout):
 
         For a visualized explanation, see https://x.com/ezyang/status/1962364978393981433/
         """
-        layout = complement(self, world_size)
-        return _MeshLayout(layout.shape, layout.stride)
-
-    def splice(self, start: int, end: int, layout: "_MeshLayout") -> "_MeshLayout":
-        sizes = list(as_tuple(self.sizes))
-        strides = list(as_tuple(self.strides))
-        sizes[start:end] = list(as_tuple(layout.sizes))
-        strides[start:end] = list(as_tuple(layout.strides))
-        return _MeshLayout(tuple(sizes), tuple(strides))
+        result = complement(self.to_pycute(), world_size)
+        return _FlatLayout(result.shape, result.stride)
 
     def all_ranks_from_zero(self) -> list[int]:
         """
@@ -207,8 +189,8 @@ class _MeshLayout(Layout):
         result = [0, 2, 4, 1, 3, 5]
         """
         return [
-            sum(c * s for c, s in zip(coord, flatten(self.strides)))
-            for coord in product(*(range(s) for s in flatten(self.sizes)))
+            sum(c * s for c, s in zip(coord, self.stride))
+            for coord in product(*(range(s) for s in self.shape))
         ]
 
     def global_ranks(self, world_size: int) -> list[list[int]]:
@@ -238,6 +220,9 @@ class _MeshLayout(Layout):
             [offset + rank for rank in self.all_ranks_from_zero()]
             for offset in self.complement(world_size).all_ranks_from_zero()
         ]
+
+    def check_sorted(self) -> bool:
+        return tuple(sorted(self.stride, reverse=True)) == self.stride
 
     def check_non_overlap(self) -> bool:
         """
@@ -270,6 +255,89 @@ class _MeshLayout(Layout):
         """
         ranks = self.all_ranks_from_zero()
         return len(ranks) == len(set(ranks))
+
+    @property
+    def sizes_and_strides(self) -> Iterator[tuple[int, int]]:
+        """Iterate over (size, stride) pairs for each dimension."""
+        return zip(self.shape, self.stride)
+
+
+@dataclass(frozen=True)
+class _ListOfFlatLayouts(Sequence[_FlatLayout]):
+    """
+    A multi-dimensional structure consisting of a series of dimension-less layouts
+
+    This class represents the layout of a full DeviceMesh, where the overall
+    top-level ndim and "logical" shape are well defined, but each individual
+    mesh axis is squashed and normalized into a canonical _FlatLayout.
+
+    It only contains methods that need to make use of this multi-dimensional
+    structure (i.e., which access the ndim or the top-level sizes). Everything
+    else should go on _FlatLayout and accessed by first calling .collapse().
+
+    """
+
+    axes: tuple[_FlatLayout, ...]
+
+    def __init__(self, axes: Sequence[_FlatLayout]) -> None:
+        object.__setattr__(self, "axes", tuple(axes))
+
+    @classmethod
+    def from_sizes_strides(
+        cls, sizes: tuple[int, ...], strides: tuple[int, ...] | None = None
+    ) -> "_ListOfFlatLayouts":
+        if strides is None:
+            strides = flatten(suffix_product(sizes))
+        assert len(sizes) == len(strides)
+        axes = tuple(_FlatLayout((s,), (d,)) for s, d in zip(sizes, strides))
+        return cls(axes)
+
+    def __len__(self) -> int:
+        return len(self.axes)
+
+    def __getitem__(self, i: int) -> _FlatLayout:
+        return self.axes[i]
+
+    def __iter__(self) -> Iterator[_FlatLayout]:
+        return iter(self.axes)
+
+    def to_pycute(self) -> Layout:
+        if len(self.axes) == 0:
+            return Layout(1, 0)
+        return make_layout(*(axis.to_pycute() for axis in self.axes))
+
+    @property
+    def top_level_sizes(self) -> tuple[int, ...]:
+        return tuple(axis.numel() for axis in self.axes)
+
+    def numel(self) -> int:
+        return math.prod(self.top_level_sizes)
+
+    def cosize(self) -> int:
+        return self.to_pycute().cosize()
+
+    def collapse(self) -> _FlatLayout:
+        """
+        Merge all axes into a single _FlatLayout.
+
+        This is used to "forget" the multi-dimensional structure of this object
+        and recover a "flat" (and coalesced) representation.
+        """
+        shapes = tuple(axis.shape for axis in self.axes)
+        strides = tuple(axis.stride for axis in self.axes)
+        return _FlatLayout(shapes, strides)
+
+    def splice(
+        self, start: int, end: int, layout: "_ListOfFlatLayouts"
+    ) -> "_ListOfFlatLayouts":
+        """
+        Replace (out-of-place) the start:end slice with the given list of layouts
+
+        Returns the concatenation of self[:start] + layout + self[end:].
+        """
+        new_axes = list(self.axes)
+        new_axes[start:end] = list(layout.axes)
+        return _ListOfFlatLayouts(new_axes)
 
     def remap_to_tensor(self, rank_map: torch.Tensor) -> torch.Tensor:
         """
@@ -309,9 +377,14 @@ class _MeshLayout(Layout):
         assert rank_map.is_contiguous()
         assert rank_map.numel() >= self.cosize()
 
-        complement_layout = self.complement(rank_map.numel())
+        self_layout = self.collapse()
+        complement_layout = self_layout.complement(rank_map.numel())
 
         return rank_map.as_strided(
-            flatten(complement_layout.sizes) + flatten(self.sizes),
-            flatten(complement_layout.strides) + flatten(self.strides),
+            complement_layout.shape + self_layout.shape,
+            complement_layout.stride + self_layout.stride,
         ).reshape(-1, *self.top_level_sizes)
+
+
+# Alias for backwards compatibility
+_MeshLayout = _ListOfFlatLayouts
