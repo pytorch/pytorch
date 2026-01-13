@@ -75,7 +75,7 @@ OutputType = Enum(
 
 
 # This class stores info about every user output.
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class OutputAliasInfo:
     # Tells us if this output is:
     # (1) a regular (non-aliased) output
@@ -121,7 +121,7 @@ class MutationType(Enum):
 
 
 # This class tells us info about user inputs.
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class InputAliasInfo:
     is_leaf: bool
     mutates_data: bool
@@ -793,7 +793,7 @@ class SubclassMeta:
 #   We do not want them to participate in the autograd.Function.
 # We do that by wrapping them in an opaque class, so the autograd.Function
 # does not know to treat them as tensors.
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class TensorAlias:
     alias: torch.Tensor
 
