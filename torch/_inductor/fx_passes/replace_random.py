@@ -206,7 +206,6 @@ def replace_random(
         mode == "rand"
         and config.align_random_eager
         and device.type == "cuda"
-        and all(isinstance(s, int) for s in size)
     ):
         # Only enable align_random_eager for fully static shapes.
         # If `size` contains SymInt (dynamic dims), forcing it through _shape_to_offset

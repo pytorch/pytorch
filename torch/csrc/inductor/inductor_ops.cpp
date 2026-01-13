@@ -12,6 +12,7 @@
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/ops/from_blob.h>
+#include <c10/core/SymInt.h>
 #include <tuple>
 #endif
 
@@ -135,15 +136,16 @@ TORCH_LIBRARY_FRAGMENT(inductor, m) {
 // Tensor).
 static std::tuple<Tensor, Tensor, Tensor> inductor_reserve_rng_state(
     const Generator& generator,
-    int64_t increment) {
+    c10::SymInt increment) {
   auto* gen_impl = at::check_generator<at::CUDAGeneratorImpl>(generator);
 
   const auto dev_opts =
       at::TensorOptions().dtype(at::kLong).device(generator.device());
   const auto cpu_opts = at::TensorOptions().dtype(at::kLong).device(at::kCPU);
 
+  int64_t inc = increment.expect_int();
   const at::PhiloxCudaState st =
-      gen_impl->philox_cuda_state(static_cast<uint64_t>(increment));
+      gen_impl->philox_cuda_state(static_cast<uint64_t>(inc));
 
   if (st.captured_) {
     auto seed_t = at::from_blob(

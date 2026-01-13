@@ -119,7 +119,7 @@ def _reserve_rng_state(device: torch.device, used_offset):
 
     gen = torch.cuda.default_generators[dev_index]
     seed_t, off_t, intra_t = torch.ops.inductor_prims.inductor_reserve_rng_state(
-        gen, int(used_offset)
+        gen, used_offset
     )
     # NOTE: for correctness in eager, intra_t should be 0.
     # Keep everything as tensor math to avoid host sync.
