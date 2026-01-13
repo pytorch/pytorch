@@ -165,6 +165,31 @@ class TestExpand(MultiThreadedTestCase):
         self.assertEqual([0, 1, 2, 3], rankset)
         self.assertEqual(4, group_size)
 
+    def test_expand_device_mesh_whole_mesh(self):
+        """Test that _expand_group gets all ranks from the whole mesh directly.
+
+        This test verifies the fix for the TODO: "it should run collective in
+        the whole mesh instead of dim 0". The implementation now uses
+        mesh.flatten().tolist() to get all ranks directly from the mesh.
+        """
+        # test with standard 1D mesh
+        mesh = dt.DeviceMesh("cpu", torch.arange(4))
+        tag, rankset, group_size = ft_c._expand_group(mesh)
+
+        expected_ranks = mesh.mesh.flatten().tolist()
+        self.assertEqual(expected_ranks, rankset)
+        self.assertEqual([0, 1, 2, 3], rankset)
+        self.assertEqual(4, group_size)
+
+        # test with non-zero-based rank range
+        mesh_custom = dt.DeviceMesh("cpu", torch.tensor([4, 5, 6, 7]))
+        tag, rankset, group_size = ft_c._expand_group(mesh_custom)
+
+        expected_ranks = mesh_custom.mesh.flatten().tolist()
+        self.assertEqual(expected_ranks, rankset)
+        self.assertEqual([4, 5, 6, 7], rankset)
+        self.assertEqual(4, group_size)
+
     def test_expand_device_mesh_tuple(self):
         mesh = dt.DeviceMesh("cpu", torch.arange(4).view(2, 2))
         with self.assertRaisesRegex(AssertionError, "Only 1D mesh"):
