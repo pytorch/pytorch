@@ -965,8 +965,6 @@ class RedistributeTest(DTensorTestBase):
         """
         mesh = init_device_mesh(self.device_type, (2, 2))
 
-        local_tensor = torch.randn(4, 4, device=self.device_type)
-
         from torch.distributed.tensor._collective_utils import (
             one_step_redistribute_cost,
         )
