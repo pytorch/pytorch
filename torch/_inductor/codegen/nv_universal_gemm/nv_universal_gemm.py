@@ -251,7 +251,16 @@ def add_nv_universal_gemm_choices(
         return
     cc_int = int(cc)
 
-    kernels = cutlass_api.get_kernels(args=args, cc=cc_int)
+    # EFC kernels support custom epilogue operations but have additional overhead.
+    # Since NVGEMM doesn't support epilogue fusion yet (see nv_universal_gemm_scheduling.py),
+    # we use non-EFC kernels which are equivalent for identity epilogue (out = acc).
+    # TODO(nikhilap): Remove this filter once NVGEMM supports epilogue fusion.
+    def _exclude_efc_kernels(metadata) -> bool:
+        return "EFC" not in metadata.kernel_class.__name__
+
+    kernels = cutlass_api.get_kernels(
+        args=args, cc=cc_int, metadata_filter=_exclude_efc_kernels
+    )
     if not kernels:
         log.debug("No compatible NVIDIA Universal GEMM kernels found")
         return
