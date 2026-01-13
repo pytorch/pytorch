@@ -5850,6 +5850,7 @@ class TestMemPool(TestCase):
         self.assertEqual(called_dummy_free.value, 321)
 
     @serialTest()
+    @skipIfRocm(msg="memory pool limiting not supported on HIP")
     def test_mempool_limited_memory_with_allocator(self):
         allocator, _ = self.get_dummy_allocator(check_vars=False)
         pool_do_not_use = torch.cuda.MemPool(allocator.allocator())
