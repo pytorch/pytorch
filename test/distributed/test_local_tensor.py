@@ -11,6 +11,7 @@ from torch.distributed._local_tensor import (
     LocalRunnerMode,
     LocalTensor,
     LocalTensorMode,
+    maybe_disable_local_tensor_mode,
 )
 from torch.distributed.tensor import (
     DeviceMesh,
@@ -104,7 +105,34 @@ class TestLocalTensorWorld2(LocalTensorTestBase):
         with self.assertRaises(AssertionError):
             LocalTensor(local_tensors)
 
-        # TODO: test flatten/unflatten
+    def test_flatten_unflatten(self):
+        """Test that LocalTensor can be flattened and unflattened correctly."""
+        device = torch.device("cpu")
+        dtype = torch.float32
+        rank = dist.get_rank()
+        # test samples
+        test_cases = [
+            {
+                i: torch.randn(2, 3, dtype=dtype, device=device)
+                for i in range(self.world_size)
+            },
+            {
+                0: torch.randn(2, 3, dtype=dtype, device=device),
+                1: torch.randn(3, 3, dtype=dtype, device=device),
+            },
+        ]
+
+        for local_tensors in test_cases:
+            lt = LocalTensor(local_tensors)
+            attrs, spec = lt.__tensor_flatten__()
+            inner_tensors = {attr: getattr(lt, attr) for attr in attrs}
+            lt_reconstruct = LocalTensor.__tensor_unflatten__(
+                inner_tensors, spec, lt.size(), lt.stride()
+            )
+
+            self.assertEqual(
+                lt._local_tensors[rank], lt_reconstruct._local_tensors[rank]
+            )
 
     def test_basic_arithmetic_operations(self):
         """Test basic arithmetic operations on LocalTensors."""
@@ -533,14 +561,15 @@ class TestLocalRunner(LocalTensorTestBase):
 
     @staticmethod
     def _get_pp_peer(pp_index, mesh, dim, dir):
-        pp_meshes = mesh._get_all_submeshes(dim)
-        pp_ret = {}
-        for pp_mesh in pp_meshes:
-            global_rank = pp_mesh.mesh[pp_index].item()
-            global_peer = pp_mesh.mesh[(pp_index + dir) % pp_mesh.size()].item()
-            pp_ret[global_rank] = global_peer
+        with maybe_disable_local_tensor_mode():
+            pp_meshes = mesh._get_all_submeshes(dim)
+            pp_ret = {}
+            for pp_mesh in pp_meshes:
+                global_rank = pp_mesh.mesh[pp_index].item()
+                global_peer = pp_mesh.mesh[(pp_index + dir) % pp_mesh.size()].item()
+                pp_ret[global_rank] = global_peer
 
-        return torch.SymInt(LocalIntNode(pp_ret))
+            return torch.SymInt(LocalIntNode(pp_ret))
 
     def _run_dp_pp(
         self,

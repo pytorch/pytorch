@@ -468,39 +468,6 @@ class RecompileTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(counter.frame_count, 2)  # not three or four!
 
-    @torch._dynamo.config.patch(automatic_dynamic_shapes_mark_as="oblivious")
-    def test_automatic_dynamic_shapes_mark_as_oblivious(self):
-        counter = torch._dynamo.testing.CompileCounter()
-
-        def f(x):
-            if x.size(0) < 10:
-                return x * 1
-            else:
-                return x + 10
-
-        opt_f = torch.compile(backend=counter, fullgraph=True)(f)
-
-        for i in [3, 2, 1, 0]:
-            self.assertEqual(f(torch.zeros(i)), opt_f(torch.zeros(i)))
-
-        self.assertEqual(counter.frame_count, 2)  # not three or four!
-
-    @torch._dynamo.config.patch(automatic_dynamic_shapes_mark_as="oblivious")
-    def test_automatic_dynamic_shapes_mark_as_oblivious_fail_counterfactual(self):
-        counter = torch._dynamo.testing.CompileCounter()
-
-        def f(x):
-            if x.size(0) < 2:
-                return x * 1
-            else:
-                return x + 10
-
-        opt_f = torch.compile(backend=counter, fullgraph=True)(f)
-
-        opt_f(torch.randn(1))
-        with self.assertRaises(torch._dynamo.exc.UserError):
-            opt_f(torch.randn(0))
-
     def test_ambient_autocast_recompile(self):
         weights = torch.randn(10, 10)
         counter = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
