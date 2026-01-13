@@ -202,15 +202,8 @@ def replace_random(
     device = get_device(device)
     replacement_fn = replacement
 
-    if (
-        mode == "rand"
-        and config.align_random_eager
-        and device.type == "cuda"
-    ):
-        # Only enable align_random_eager for fully static shapes.
-        # If `size` contains SymInt (dynamic dims), forcing it through _shape_to_offset
-        # would specialize those symbolic dimensions to concrete values and violate
-        # ShapeEnv/dynamic-shape constraints, so we fall back to the original replacement.
+    if mode == "rand" and config.align_random_eager and device.type == "cuda":
+        # Only enable when align_random_eager is on.
         def replacement_align(size):
             offset = _shape_to_offset(size, device)
 

@@ -8,11 +8,12 @@
 #include <torch/csrc/inductor/inductor_ops.h>
 #include <torch/library.h>
 
+#include <c10/core/SymInt.h>
+
 #if defined(USE_CUDA) || defined(USE_ROCM)
 #include <ATen/cuda/CUDAContext.h>
 #include <ATen/cuda/CUDAGeneratorImpl.h>
 #include <ATen/ops/from_blob.h>
-#include <c10/core/SymInt.h>
 #include <tuple>
 #endif
 
@@ -116,6 +117,12 @@ TORCH_LIBRARY_FRAGMENT(inductor, m) {
       {at::Tag::pt2_compliant_tag});
 }
 
+TORCH_LIBRARY_FRAGMENT(inductor_prims, m) {
+  m.def(
+      "inductor_reserve_rng_state(Generator generator, SymInt increment) "
+      "-> (Tensor, Tensor, Tensor)");
+}
+
 #if defined(USE_CUDA) || defined(USE_ROCM)
 // Reserves RNG state for Inductor with CUDA Graph support.
 //
@@ -158,17 +165,11 @@ static std::tuple<Tensor, Tensor, Tensor> inductor_reserve_rng_state(
   }
 
   auto seed_t = at::scalar_tensor(static_cast<int64_t>(st.seed_.val), dev_opts)
-.unsqueeze(0);
+                    .unsqueeze(0);
   auto off_t = at::scalar_tensor(static_cast<int64_t>(st.offset_.val), dev_opts)
-.unsqueeze(0);
+                   .unsqueeze(0);
   auto intra_t = at::zeros({1}, cpu_opts);
   return {seed_t, off_t, intra_t};
-}
-
-TORCH_LIBRARY_FRAGMENT(inductor_prims, m) {
-  m.def(
-      "inductor_reserve_rng_state(Generator generator, int increment) "
-      "-> (Tensor, Tensor, Tensor)");
 }
 
 TORCH_LIBRARY_IMPL(inductor_prims, BackendSelect, m) {
@@ -182,7 +183,18 @@ TORCH_LIBRARY_IMPL(inductor_prims, CUDA, m) {
 TORCH_LIBRARY_IMPL(inductor_prims, HIP, m) {
   m.impl("inductor_reserve_rng_state", TORCH_FN(inductor_reserve_rng_state));
 }
-
+#else
+static std::tuple<Tensor, Tensor, Tensor> inductor_reserve_rng_state(
+    const Generator& generator,
+    c10::SymInt increment) {
+  TORCH_CHECK(
+      false,
+      "inductor_reserve_rng_state is only available for CUDA/ROCm builds; "
+      "got generator device = ",
+      generator.device(),
+      ", increment = ",
+      increment);
+}
 #endif
 
 } // namespace torch::inductor
