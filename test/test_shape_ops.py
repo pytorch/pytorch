@@ -294,7 +294,9 @@ class TestShapeOps(TestCase):
             test(shape)
 
     @onlyNativeDeviceTypes
-    @dtypes(torch.float, torch.double)
+    @dtypes(torch.float)
+    @dtypesIfCUDA(torch.float, torch.double)
+    @dtypesIfXPU(torch.float, torch.double)
     def test_trace_backward(self, device, dtype):
         """
         Test that torch.trace backward produces correct gradients for non-square inputs.
@@ -316,7 +318,7 @@ class TestShapeOps(TestCase):
             expected = torch.zeros(shape, dtype=dtype, device=device)
             diag_len = min(n, m)
             for i in range(diag_len):
-                expected[i, i] = 1.0
+                expected[i, i] = 1
 
             self.assertEqual(x.grad, expected)
 
