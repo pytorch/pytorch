@@ -546,7 +546,32 @@ class DTensorRedistributePlanner:
         ######################################################################
         # handle case 7: _StridedShard() -> Shard() on the same dim
         for entry in tensor_mesh_dim_tuple:
-            src_tensore): handle case 7: _StridedShard() -> Shard() on the same dim
+            src_tensor_dim = entry.tensor_dim
+            src_mesh_dim = tensor_mesh_dim_dict[src_tensor_dim][-1]
+            if not isinstance(placements[src_mesh_dim], _StridedShard):
+                continue
+            for dst_tensor_dim in range(self.tensor_dimension):
+                if src_tensor_dim == dst_tensor_dim:
+                    continue
+                # try move the last sharded device dim from
+                # _StridedShard(src_tensor_dim) to Shard(dst_tensor_dim)
+                move_mesh_dim = tensor_mesh_dim_dict[src_tensor_dim].pop()
+                tensor_mesh_dim_dict[dst_tensor_dim].append(move_mesh_dim)
+                new_placements = list(placements)
+                new_placements[move_mesh_dim] = Shard(dst_tensor_dim)
+                dist_state = self.DistState(
+                    self._to_tuple(new_placements),
+                    DTensorRedistributePlanner._dict_to_ShardOrder(
+                        tensor_mesh_dim_dict
+                    ),
+                )
+                all_next_state[dist_state] = self.cost_function(
+                    cur_dist_state,
+                    dist_state,
+                )
+                # reset content for next iteration
+                tensor_mesh_dim_dict[src_tensor_dim].append(move_mesh_dim)
+                tensor_mesh_dim_dict[dst_tensor_dim].pop()
 
         ######################################################################
         # handle case 8: _StridedShard() -> Replicate()
@@ -573,10 +598,59 @@ class DTensorRedistributePlanner:
             return all_next_state
 
         ######################################################################
-        # TODO(zpcore): handle case 9: Shard() -> _StridedShard()
+        # handle case 9: Shard() -> _StridedShard()
+        for entry in tensor_mesh_dim_tuple:
+            src_tensor_dim = entry.tensor_dim
+            src_mesh_dim = tensor_mesh_dim_dict[src_tensor_dim][-1]
+            if not isinstance(placements[src_mesh_dim], Shard):
+                # skip special case like `_StridedShard`
+                continue
+            for strided_shard_obj in self.strided_shard_placements_in_target:
+                dst_tensor_dim = strided_shard_obj.dim
+                if src_tensor_dim == dst_tensor_dim:
+                    continue
+                # try move the last sharded device dim from
+                # Shard(src_tensor_dim) to strided_shard_obj
+                move_mesh_dim = tensor_mesh_dim_dict[src_tensor_dim].pop()
+                tensor_mesh_dim_dict[dst_tensor_dim].append(move_mesh_dim)
+                new_placements = list(placements)
+                new_placements[move_mesh_dim] = strided_shard_obj
+                dist_state = self.DistState(
+                    self._to_tuple(new_placements),
+                    DTensorRedistributePlanner._dict_to_ShardOrder(
+                        tensor_mesh_dim_dict
+                    ),
+                )
+                all_next_state[dist_state] = self.cost_function(
+                    cur_dist_state,
+                    dist_state,
+                )
+                # reset content for next iteration
+                tensor_mesh_dim_dict[src_tensor_dim].append(move_mesh_dim)
+                tensor_mesh_dim_dict[dst_tensor_dim].pop()
 
         ######################################################################
-        # TODO(zpcore): handle case 10: Partial() -> _StridedShard()
+        # handle case 10: Partial() -> _StridedShard()
+        for mesh_dim, placement in enumerate(placements):
+            if not isinstance(placement, Partial):
+                continue
+            for strided_shard_obj in self.strided_shard_placements_in_target:
+                dst_tensor_dim = strided_shard_obj.dim
+                # try convert placement[mesh_dim] to strided_shard_obj
+                new_placements = list(placements)
+                new_placements[mesh_dim] = strided_shard_obj
+                tensor_mesh_dim_dict[dst_tensor_dim].append(mesh_dim)
+                dist_state = self.DistState(
+                    self._to_tuple(new_placements),
+                    DTensorRedistributePlanner._dict_to_ShardOrder(
+                        tensor_mesh_dim_dict
+                    ),
+                )
+                all_next_state[dist_state] = self.cost_function(
+                    cur_dist_state,
+                    dist_state,
+                )
+                tensor_mesh_dim_dict[dst_tensor_dim].pop()
 
         ######################################################################
         # handle case 11: Replicate() -> _StridedShard()
@@ -678,6 +752,8 @@ class DTensorRedistributePlanner:
                     )
                 elif isinstance(placement, _StridedShard):
                     new_size, _ = placement.local_shard_size_and_offset(
+                        placement.dim,
+                        placement.split_factor,
                         new_logical_shape[tensor_dim],
                         self.device_mesh.size(mesh_dim=mdim),
                         self.device_mesh._sym_get_coordinate(mdim),
@@ -1056,8 +1132,12 @@ def redistribute_local_tensor(
                             target_placement.dim,
                         )
                 elif isinstance(current, _StridedShard):
-                    raise NotImplementedError(
-                        "Redistribute from _StridedShard to Shard is not implemented yet"
+                    new_local_tensor = current._to_new_shard_dim(
+                        local_tensor,
+                        device_mesh,
+                        i,
+                        transform_info.logical_shape,
+                        target_placement.dim,
                     )
                 else:
                     raise ValueError(
@@ -1083,8 +1163,9 @@ def redistribute_local_tensor(
             elif isinstance(target, _StridedShard):
                 # Case 4: target is _StridedShard
                 if current.is_partial():
-                    raise NotImplementedError(
-                        "Redistribute from Partial to _StridedShard is not implemented yet"
+                    partial_spec = cast(Partial, current)
+                    new_local_tensor = partial_spec._reduce_shard_value(
+                        local_tensor, device_mesh, i, target
                     )
                 elif current.is_replicate():
                     # split the tensor and return the corresponding local strided shard
@@ -1093,8 +1174,14 @@ def redistribute_local_tensor(
                     )
                 elif current.is_shard():
                     # Shard -> _StridedShard on potentially different dimensions
-                    raise NotImplementedError(
-                        "Redistribute from Shard to _StridedShard is not implemented yet"
+                    shard_spec = cast(Shard, current)
+                    new_local_tensor = shard_spec._to_new_strided_shard_dim(
+                        local_tensor,
+                        device_mesh,
+                        i,
+                        transform_info.logical_shape,
+                        target.dim,
+                        target.split_factor,
                     )
                 elif isinstance(current, _StridedShard):
                     # _StridedShard -> _StridedShard: go through Replicate
