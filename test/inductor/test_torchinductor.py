@@ -165,6 +165,7 @@ aten = torch.ops.aten
 requires_multigpu = functools.partial(
     unittest.skipIf, not HAS_MULTIGPU, f"requires multiple {GPU_TYPE} devices"
 )
+requires_cuda = unittest.skipUnless(torch.cuda.is_available(), "requires cuda")
 skip_if_x86_mac = functools.partial(
     unittest.skipIf, IS_MACOS and IS_X86, "Does not work on x86 Mac"
 )
@@ -4669,6 +4670,41 @@ class CommonTemplate:
             return vals, indices, offsets
 
         self.common(fn, (torch.randn(1, 3, *[10] * dim),))
+
+    @skipIfMPS
+    def test_max_unpool_empty_output(self):
+        class Unpool1d(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.unpool = nn.MaxUnpool1d(kernel_size=2, stride=2, padding=1)
+
+            def forward(self, x, indices):
+                return self.unpool(x, indices)
+
+        x1d = torch.randn(1, 1, 1, device=self.device)
+        self.common(Unpool1d().to(self.device), (x1d, x1d.long()))
+
+        class Unpool2d(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.unpool = nn.MaxUnpool2d(kernel_size=2, stride=2, padding=1)
+
+            def forward(self, x, indices):
+                return self.unpool(x, indices)
+
+        x2d = torch.randn(1, 1, 1, 1, device=self.device)
+        self.common(Unpool2d().to(self.device), (x2d, x2d.long()))
+
+        class Unpool3d(nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.unpool = nn.MaxUnpool3d(kernel_size=2, stride=2, padding=1)
+
+            def forward(self, x, indices):
+                return self.unpool(x, indices)
+
+        x3d = torch.randn(1, 1, 1, 1, 1, device=self.device)
+        self.common(Unpool3d().to(self.device), (x3d, x3d.long()))
 
     def test_to_dtype(self):
         new_dtype = torch.float64 if self.device != "mps" else torch.bfloat16
@@ -13754,6 +13790,38 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             with self.assertRaisesRegex(RuntimeError, "Output size is too small"):
                 _ = torch.compile(model)(inputs)
 
+    @skipIfRocm
+    @requires_cuda
+    def test_conv_transpose_zero_size_output(self):
+        # Only CUDA (cuDNN) supports zero-sized spatial outputs for conv_transpose.
+        # ROCm/miopen fails with miopenStatusBadParm, MPS fails with empty placeholder assert.
+        # This test ensures compiled mode matches eager behavior on CUDA.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                # ConvTranspose2d: in=3, out=1, kernel=2, stride=2, padding=2
+                # Output size = (input_size - 1) * stride - 2 * padding + kernel_size
+                #             = (2 - 1) * 2 - 2 * 2 + 2 = 0
+                self.conv_transpose = torch.nn.ConvTranspose2d(
+                    3, 1, 2, 2, 2, bias=False
+                )
+
+            def forward(self, x):
+                x = self.conv_transpose(x)
+                x = torch.tanh(x)
+                return x
+
+        func = Model().to(GPU_TYPE)
+        x = torch.randn(1, 3, 2, 2, device=GPU_TYPE)
+
+        with torch.no_grad():
+            eager_out = func(x.clone())
+            compiled_out = torch.compile(func)(x.clone())
+
+        self.assertEqual(eager_out.shape, torch.Size([1, 1, 0, 0]))
+        self.assertEqual(compiled_out.shape, torch.Size([1, 1, 0, 0]))
+        self.assertEqual(eager_out, compiled_out)
+
     @requires_gpu()
     @config.patch(fallback_random=True)
     @unittest.skipIf(
@@ -15036,79 +15104,6 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
         FileCheck().check_regex(r"tl\.store\(.*xmask\)").run(code)
 
-    @requires_cuda_and_triton
-    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
-    @config.patch({"triton.enable_pdl": True})
-    def test_pdl_mutation(self):
-        def fn(a, b, c):
-            b.copy_(c)  # second kernel
-            return a**2 + b  # first kernel
-
-        a, b, c = [
-            torch.randn(s, device=GPU_TYPE) for s in [(1024, 1024), (1024,), (1024,)]
-        ]
-        self.common(fn, (a, b, c))
-
-        code = run_and_get_triton_code(torch.compile(fn), a, b, c)
-        (
-            FileCheck()
-            # first kernel
-            .check("'launch_pdl': True")
-            .check("gdc_wait")
-            .check("load")
-            .check("load")
-            .check("gdc_launch")
-            .check("store")
-            # second kernel, no need to wait before load
-            .check("'launch_pdl': True")
-            .check("load")
-            .check("gdc_wait")
-            .check("gdc_launch")
-            .check("store")
-        ).run(code)
-
-    @requires_cuda_and_triton
-    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
-    @config.patch(
-        {
-            "triton.enable_pdl": True,
-            "max_autotune": True,
-            "max_autotune_gemm_backends": "TRITON",
-            "coordinate_descent_tuning": True,
-        }
-    )
-    def test_pdl_template_and_delay(self):
-        def fn(a, b):
-            a = (a / (a**2).sum(-1, keepdim=True)) ** 2  # first kernel
-            b = (b / (b**2).sum(-1, keepdim=True)) ** 2  # second kernel
-            c = a @ b  # fused-epilogue template
-            c = c**2
-            return c
-
-        a, b = [torch.randn(s, device=GPU_TYPE) for s in [(1024, 512), (512, 1024)]]
-        self.common(fn, (a, b))
-        code = run_and_get_triton_code(torch.compile(fn, mode="max-autotune"), a, b)
-        (
-            FileCheck()
-            # first kernel
-            .check("'launch_pdl': True")
-            .check("gdc_wait")
-            .check("load")
-            .check("gdc_launch")
-            .check("store")
-            # second kernel, no need to wait before load
-            .check("'launch_pdl': True")
-            .check("load")
-            .check("gdc_wait")
-            .check("gdc_launch")
-            .check("store")
-            # matmul template
-            .check_not("'launch_pdl': True")
-            .check_not("gdc_wait")
-            .check_not("gdc_launch")
-            .check("store")
-        ).run(code)
-
     @xfail_if_triton_cpu
     @requires_cuda_and_triton
     @config.patch({"emulate_precision_casts": True})
@@ -15244,6 +15239,94 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         compiled_result5 = fn5(self_fp32, tensor1_fp64_scalar, tensor2_fp32)
         self.assertEqual(eager_result5.dtype, compiled_result5.dtype)
         self.assertEqual(eager_result5, compiled_result5)
+
+    @requires_cuda_and_triton
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @config.patch({"triton.enable_pdl": True})
+    def test_pdl_mutation(self):
+        def fn(a, b, c):
+            b.copy_(c)  # second kernel
+            return a**2 + b  # first kernel
+
+        a, b, c = [
+            torch.randn(s, device=GPU_TYPE) for s in [(1024, 1024), (1024,), (1024,)]
+        ]
+        self.common(fn, (a, b, c))
+
+        code = run_and_get_triton_code(torch.compile(fn), a, b, c)
+        (
+            FileCheck()
+            # first kernel
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("load")
+            .check("load")
+            .check("gdc_launch")
+            .check("store")
+            # second kernel, no need to wait before load
+            .check("'launch_pdl': True")
+            .check("load")
+            .check("gdc_wait")
+            .check("gdc_launch")
+            .check("store")
+        ).run(code)
+
+    @requires_cuda_and_triton
+    @skipCUDAIf(not SM90OrLater or TEST_WITH_ROCM, "PDL requires NVIDIA sm90+")
+    @config.patch(
+        {
+            "triton.enable_pdl": True,
+            "max_autotune": True,
+            "max_autotune_gemm_backends": "TRITON",
+            "coordinate_descent_tuning": True,
+        }
+    )
+    def test_pdl_template_and_delay(self):
+        def fn(a, b):
+            a = (a / (a**2).sum(-1, keepdim=True)) ** 2  # first kernel
+            b = (b / (b**2).sum(-1, keepdim=True)) ** 2  # second kernel
+            c = a @ b  # fused-epilogue template
+            c = c**2
+            return c
+
+        a, b = [torch.randn(s, device=GPU_TYPE) for s in [(1024, 512), (512, 1024)]]
+        self.common(fn, (a, b))
+        code = run_and_get_triton_code(torch.compile(fn, mode="max-autotune"), a, b)
+        (
+            FileCheck()
+            # first kernel
+            .check("'launch_pdl': True")
+            .check("gdc_wait")
+            .check("load")
+            .check("gdc_launch")
+            .check("store")
+            # second kernel, no need to wait before load
+            .check("'launch_pdl': True")
+            .check("load")
+            .check("gdc_wait")
+            .check("gdc_launch")
+            .check("store")
+            # matmul template
+            .check_not("'launch_pdl': True")
+            .check_not("gdc_wait")
+            .check_not("gdc_launch")
+            .check("store")
+        ).run(code)
+
+    def test_use_deterministic_algorithms(self):
+        @torch.compile(backend="inductor", fullgraph=True)
+        def fn(src, index, base_tensor):
+            src = src + 10
+            torch.use_deterministic_algorithms(True)
+            base_tensor.scatter_(0, index, src)
+            return base_tensor.clone() + 1
+
+        src = torch.tensor([[100.0], [200.0], [300.0]])
+        index = torch.tensor([[0], [0], [0]])
+        base_tensor = torch.zeros(2, 1)
+        out = fn(src, index, base_tensor)
+        expected = torch.tensor([[311.0], [1.0]])
+        self.assertEqual(out, expected)
 
     # end of class CommonTemplate - add new tests here
 
