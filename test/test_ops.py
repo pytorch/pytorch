@@ -31,6 +31,7 @@ from torch.testing._internal.common_device_type import (
     onlyOn,
     OpDTypes,
     ops,
+    skipCUDAIfNotRocm,
     skipMeta,
     skipXPU,
 )
