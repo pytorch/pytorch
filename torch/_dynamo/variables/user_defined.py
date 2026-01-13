@@ -1266,6 +1266,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 func_var = VariableTracker.build(tx, setter, func_source)
                 args = [desc_var, self, value]
                 return func_var.call_function(tx, args, {})
+
+            # Check for property descriptors with fset.
+            # property.__set__ is a slot wrapper (not a Python function), so
+            # try_get_descritor_and_setter_py_func returns None.
+            # We need to handle properties specially by calling their fset.
+            property_fset = self.try_get_property_fset(name_str)
+            if property_fset is not None:
+                fset_source = None
+                if self.cls_source:
+                    desc_source = self.get_source_by_walking_mro(name_str)
+                    fset_source = AttrSource(desc_source, "fset")
+                fset_vt = VariableTracker.build(tx, property_fset, fset_source)
+                return fset_vt.call_function(tx, [self, value], {})
+
             # NOTE: else we assume the descriptor (if any) has a
             # side-effect-free `__set__` as far as Dynamo tracing is concerned.
 
@@ -1441,6 +1455,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # Skip if `__set__` was traceable (no need to redo the side effect).
             if inspect.isfunction(setter):
                 return True
+            # Skip for property descriptors with fset - we trace fset directly.
+            if isinstance(descriptor, property) and descriptor.fset is not None:
+                return True
             # For untraceable `__set__` we should still skip if the attribute
             # was mutated via instance `__dict__`.
             elif attr_name in self.attrs_directly_modifed_on_dict:
@@ -1454,6 +1471,20 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         setter = inspect.getattr_static(type(descriptor), "__set__", None)
         if inspect.isfunction(setter):
             return (descriptor, setter)
+        return None
+
+    def try_get_property_fset(self, attr_name: str) -> types.FunctionType | None:
+        """
+        Check if attr_name corresponds to a property descriptor with an fset.
+        Returns the fset function if found, None otherwise.
+
+        This is needed because property.__set__ is a slot wrapper (C function),
+        not a Python function, so try_get_descritor_and_setter_py_func returns None
+        for properties. But property.fset IS a Python function that we can trace.
+        """
+        descriptor = inspect.getattr_static(type(self.value), attr_name, None)
+        if isinstance(descriptor, property) and descriptor.fset is not None:
+            return descriptor.fset
         return None
 
     def has_key_in_generic_dict(self, tx: "InstructionTranslator", key: str) -> bool:
@@ -1522,10 +1553,9 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             getattribute_fn = inspect.getattr_static(
                 type(self.value), "__getattribute__"
             )
-            if self.source:
-                new_source: AttrSource | None = AttrSource(
-                    self.source, "__getattribute__"
-                )
+            new_source: AttrSource | None = (
+                AttrSource(self.source, "__getattribute__") if self.source else None
+            )
 
             try:
                 return variables.UserMethodVariable(

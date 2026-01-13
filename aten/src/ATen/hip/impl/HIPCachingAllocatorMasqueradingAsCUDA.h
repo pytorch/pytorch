@@ -148,8 +148,8 @@ inline void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
 inline void createOrIncrefPool(
     c10::DeviceIndex device,
     MempoolId_t mempool_id,
-    HIPCachingAllocator::HIPAllocator* allocator_ptr = nullptr) {
-  get()->createOrIncrefPool(device, mempool_id, allocator_ptr);
+    std::shared_ptr<HIPCachingAllocator::HIPAllocator> allocator_ptr = nullptr) {
+  get()->createOrIncrefPool(device, mempool_id, std::move(allocator_ptr));
 }
 
 inline void setUseOnOOM(c10::DeviceIndex device, MempoolId_t mempool_id, bool use_on_oom) {
