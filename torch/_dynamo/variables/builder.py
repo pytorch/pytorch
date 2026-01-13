@@ -768,18 +768,24 @@ class VariableBuilder:
 
         if is_namedtuple(value):
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
-            output = [
+            output: list[VariableTracker] = [
                 LazyVariableTracker.create(
                     getattr(value, name),
                     source=AttrSource(self.source, name),
                 )
                 for name in namedtuple_fields(type(value))
             ]
+
+            tuple_vt = TupleVariable(
+                output,
+                source=self.source,
+                mutation_type=ValueMutationExisting(),
+            )
             result = NamedTupleVariable(
-                # type: ignore[arg-type]
                 output,
                 tuple_cls=type(value),
                 source=self.source,
+                tuple_vt=tuple_vt,
             )
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
@@ -3318,7 +3324,7 @@ def handle_traced_output(
             ), (
                 f"expected {example_value.__class__.__module__} == torch.return_types or named tuple but got {type(example_value)}"
             )
-            return NamedTupleVariable(unpacked, example_value.__class__, **options)
+            return NamedTupleVariable(unpacked, example_value.__class__, **options)  # type: ignore[arg-type]
     elif example_value is None or proxy.node.target is torch.manual_seed:
         return ConstantVariable.create(None, **options)
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):
