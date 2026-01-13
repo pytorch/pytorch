@@ -56,11 +56,11 @@ void check_names_valid_for(size_t tensor_dim, DimnameList names) {
   TORCH_CHECK(
       tensor_dim <= kMaxNamedTensorDim,
       "Named tensors only support up to ", kMaxNamedTensorDim, " dims: "
-      "Attempted to create a tensor with dim ", tensor_dim, " with names ", names);
+      "Attempted to create a tensor with dim ", tensor_dim, " with names ", names, ".");
   TORCH_CHECK(tensor_dim == names.size(),
       "Number of names (", names.size(), ") and "
       "number of dimensions in tensor (", tensor_dim, ") ",
-      "do not match. Attempted to create a tensor with names ", names);
+      "do not match. Attempted to create a tensor with names ", names, ".");
   check_unique_names(names);
 }
 
