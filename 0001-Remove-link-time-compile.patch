@@ -1,0 +1,24 @@
+From 8abcedd600466d074d80b37c4fd3bb555d044f44 Mon Sep 17 00:00:00 2001
+From: Luca Wehrstedt <lcw@fb.com>
+Date: Tue, 13 Jan 2026 08:42:48 -0800
+Subject: [PATCH] Remove link-time compile
+
+---
+ hopper/setup.py | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/hopper/setup.py b/hopper/setup.py
+index e8f515e..dafb2a1 100644
+--- a/hopper/setup.py
++++ b/hopper/setup.py
+@@ -193,6 +193,7 @@ def _write_ninja_file(path,
+         cuda_post_cflags_sm100 = [s if s != 'arch=compute_90a,code=sm_90a' else 'arch=compute_100a,code=sm_100a' for s in cuda_post_cflags]
+         flags.append(f'cuda_post_cflags_sm100 = {" ".join(cuda_post_cflags_sm100)}')
+     flags.append(f'cuda_dlink_post_cflags = {" ".join(cuda_dlink_post_cflags)}')
++    ldflags.remove("/LTCG")
+     flags.append(f'ldflags = {" ".join(ldflags)}')
+ 
+     # Turn into absolute paths so we can emit them into the ninja build
+-- 
+2.47.3
+

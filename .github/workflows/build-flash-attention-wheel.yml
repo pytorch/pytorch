@@ -133,6 +133,7 @@ jobs:
         working-directory: flash-attention
         run: |
           git apply ../pytorch/0001-Fix-offline-build-mode.patch
+          git apply ../pytorch/0001-Remove-link-time-compile.patch
       # - name: Populate binary env
       #   shell: bash
       #   run: |
