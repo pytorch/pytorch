@@ -255,9 +255,12 @@ class _FlatLayout:
         Returns:
             bool: True if no overlap, False if overlap detected
         """
+        if len(self.shape) < 2:
+            return True
         stride, shape = zip(*sorted(zip(self.stride, self.shape), reverse=True))
         return all(
-            stride[i] % (stride[i+1] * shape[i+1]) == 0 for i in range(len(stride) - 1)
+            stride[i] % (stride[i + 1] * shape[i + 1]) == 0
+            for i in range(len(stride) - 1)
         )
 
     def to_pycute(self) -> Layout:

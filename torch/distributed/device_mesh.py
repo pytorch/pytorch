@@ -10,10 +10,7 @@ from typing import Optional, TYPE_CHECKING, Union
 
 import torch
 from torch.distributed import is_available
-from torch.distributed._mesh_layout import (
-    _FlatLayout,
-    _MeshLayout,
-)
+from torch.distributed._mesh_layout import _FlatLayout, _MeshLayout
 from torch.utils._typing_utils import not_none
 
 
