@@ -6414,11 +6414,11 @@ def multi_head_attention_forward(
     )
 
     if is_causal and attn_mask is None:
-        raise RuntimeError(
-            "Need attn_mask if specifying the is_causal hint. "
-            "You may use the Transformer module method "
-            "`generate_square_subsequent_mask` to create this mask."
-        )
+        if need_weights or key_padding_mask is not None:
+            attn_mask = torch.triu(
+                query.new_ones((tgt_len, src_len), dtype=torch.bool),
+                diagonal=1,
+            )
 
     if is_causal and key_padding_mask is None and not need_weights:
         # when we have a kpm or need weights, we need attn_mask
@@ -6630,8 +6630,6 @@ def multi_head_attention_forward(
         _B, _Nt, E = q.shape
         q_scaled = q * math.sqrt(1.0 / float(E))
 
-        if is_causal and attn_mask is None:
-            raise AssertionError("FIXME: is_causal not implemented for need_weights")
 
         if attn_mask is not None:
             attn_output_weights = torch.baddbmm(
