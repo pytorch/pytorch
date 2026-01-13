@@ -15275,6 +15275,18 @@ op_db: list[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="cpu",
             ),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=3e-3, rtol=1e-3)}),
+                "TestInductorOpInfo",
+                "test_comprehensive",
+                device_type="cuda",
+            ),
+            DecorateInfo(
+                toleranceOverride({torch.bfloat16: tol(atol=4e-3, rtol=2e-2)}),
+                "TestConsistency",
+                "test_output_match",
+                device_type="mps",
+            ),
         ),
         skips=(
             # RuntimeError: Difference from float64 is larger with
@@ -15295,6 +15307,14 @@ op_db: list[OpInfo] = [
             # "torch/csrc/jit/passes/utils/check_alias_annotation.cpp":267
             DecorateInfo(unittest.skip("internal assert failure"), 'TestJit', 'test_variant_consistency_jit',
                          dtypes=(torch.float32,)),
+            # Exception: Tensor-likes are not close!
+            # Mismatched elements: 1 / 8 (12.5%)
+            # Greatest absolute difference: 0.0004601478576660156 at index (5,) (up to 1e-05 allowed)
+            # Greatest relative difference: 0.89208984375 at index (5,) (up to 0.001 allowed)
+            DecorateInfo(unittest.skip("Inconsistent accuracy"), 'TestConsistency', 'test_output_match',
+                         dtypes=(torch.float16,),
+                         device_type="mps",
+                         ),
         )
     ),
     OpInfo('nn.functional.normalize',
