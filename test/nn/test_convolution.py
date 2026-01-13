@@ -44,6 +44,7 @@ from torch.testing._internal.common_device_type import (
     skipCUDAIfRocmHipBlasltVersionLessThan,
     skipMeta,
     skipMPS,
+    skipXPUIf,
 )
 from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and,
@@ -1717,6 +1718,56 @@ class TestConvolutionNNDeviceType(NNTestCase):
                     + str(dilation),
                 )
 
+    def test_conv_aten_invalid_output_mask(self, device):
+        # test low-level aten.convolution_backward ops with output_mask parameter
+        def test_conv_backward_output_mask(output_mask):
+            input = torch.randn(1, 1, 4, 4, device=device)
+            weight = torch.randn(1, 1, 3, 3, device=device)
+            grad_output = torch.randn(1, 1, 2, 2, device=device)
+            grad_input, grad_weight, grad_bias = torch.ops.aten.convolution_backward(
+                grad_output,            # grad_output
+                input,                  # input
+                weight,                 # weight
+                [1],                    # bias_sizes
+                (1, 1),                 # stride
+                (0, 0),                 # padding
+                (1, 1),                 # dilation
+                False,                  # transposed
+                (0, 0),                 # output_padding
+                1,                      # groups
+                output_mask,            # output_mask: (grad_input, grad_weight, grad_bias)
+            )
+            self.assertIsNotNone(grad_input) if output_mask[0] else self.assertIsNone(grad_input)
+            self.assertIsNotNone(grad_weight) if output_mask[1] else self.assertIsNone(grad_weight)
+            self.assertIsNotNone(grad_bias) if output_mask[2] else self.assertIsNone(grad_bias)
+
+        # Convolution Backward(ConvB) propagation must return valid  input, weight, bias gradient
+        output_mask = [True, True, True]
+        test_conv_backward_output_mask(output_mask)
+
+        # ConvB propagation must return input and weight gradient
+        output_mask = [True, True, False]
+        test_conv_backward_output_mask(output_mask)
+
+        # ConvB propagation must return input and bias gradient
+        output_mask = [True, False, True]
+        test_conv_backward_output_mask(output_mask)
+
+        # ConvB propagation must return just input gradient
+        output_mask = [True, False, False]
+        test_conv_backward_output_mask(output_mask)
+
+        # ConvB propagation must return weight and bias gradient
+        output_mask = [False, True, True]
+        test_conv_backward_output_mask(output_mask)
+
+        # ConvB propagation must return just bias gradient
+        output_mask = [False, False, True]
+        test_conv_backward_output_mask(output_mask)
+
+        # ConvB propagation shouldn't return any of gradient
+        output_mask = [False, False, False]
+        test_conv_backward_output_mask(output_mask)
     def test_conv_double_backward_no_bias(self):
         kern = 3
         stride = 2
@@ -2308,6 +2359,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(output.shape, output_size)
 
     @skipMeta
+    @skipXPUIf(True, "https://github.com/intel/torch-xpu-ops/issues/2594")
     @parametrize_test(
         "input_shape,transposed,dilated,groups,layout,backend_expected",
         [
@@ -4283,7 +4335,7 @@ class TestConvolutionNNDeviceType(NNTestCase):
         self.assertEqual(yref, y, atol=5e-3, rtol=1e-4)
 
 
-instantiate_device_type_tests(TestConvolutionNNDeviceType, globals(), allow_mps=True)
+instantiate_device_type_tests(TestConvolutionNNDeviceType, globals(), allow_mps=True, allow_xpu=True)
 instantiate_parametrized_tests(TestConvolutionNN)
 
 if __name__ == "__main__":
