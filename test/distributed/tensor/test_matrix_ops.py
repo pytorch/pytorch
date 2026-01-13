@@ -59,20 +59,74 @@ def scale_for_fp8(
 class DistMatrixOpsTest(DTensorTestBase):
     @with_comms
     def test_addmm(self):
+        """
+        Test addmm with all sharding strategies from addmm_single_dim_strategy.
+
+        The single dim strategy generates these cases for addmm(bias, mat1, mat2):
+        - Contracting dim k: mat1=Shard(1), mat2=Shard(0) -> output=Partial
+        - LHS free dim m: mat1=Shard(0), mat2=Replicate -> output=Shard(0)
+        - RHS free dim n: mat1=Replicate, mat2=Shard(1) -> output=Shard(1)
+
+        The bias placement depends on output placement and broadcast dims.
+        """
         device_mesh = self.build_device_mesh()
-        shard_spec = [Shard(0)]
-        replica_spec = [Replicate()]
+        M, K, N = 12, 8, 4  # mat1: (M, K), mat2: (K, N), output: (M, N)
 
-        tensor_to_shard = torch.randn(12, 8)
-        mat1 = distribute_tensor(tensor_to_shard, device_mesh, shard_spec)
-        tensor_to_replicate = torch.randn(8, 4)
-        mat2 = distribute_tensor(tensor_to_replicate, device_mesh, replica_spec)
-        input_tensor = torch.randn(4)
-        input = distribute_tensor(input_tensor, device_mesh, replica_spec)
+        mat1_tensor = torch.randn(M, K)
+        mat2_tensor = torch.randn(K, N)
+        bias_1d = torch.randn(N)  # 1D bias, broadcasts on M dim
+        bias_2d = torch.randn(M, N)  # 2D bias, no broadcast
 
-        dist_res = torch.addmm(input, mat1, mat2)
-        local_res = torch.addmm(input_tensor, tensor_to_shard, tensor_to_replicate)
-        self.assertEqual(dist_res.full_tensor(), local_res)
+        local_res_1d = torch.addmm(bias_1d, mat1_tensor, mat2_tensor)
+        local_res_2d = torch.addmm(bias_2d, mat1_tensor, mat2_tensor)
+
+        # Case 1: LHS free dim m - mat1=Shard(0), mat2=Replicate -> output=Shard(0)
+        # With 1D bias: bias should be Replicate (broadcast on m dim)
+        mat1_s0 = distribute_tensor(mat1_tensor, device_mesh, [Shard(0)])
+        mat2_r = distribute_tensor(mat2_tensor, device_mesh, [Replicate()])
+        bias_1d_r = distribute_tensor(bias_1d, device_mesh, [Replicate()])
+
+        dist_res = torch.addmm(bias_1d_r, mat1_s0, mat2_r)
+        self.assertEqual(dist_res.full_tensor(), local_res_1d)
+        self.assertEqual(dist_res.placements[0], Shard(0))
+
+        # Case 1b: LHS free dim m with 2D bias - bias should be Shard(0)
+        bias_2d_s0 = distribute_tensor(bias_2d, device_mesh, [Shard(0)])
+        dist_res = torch.addmm(bias_2d_s0, mat1_s0, mat2_r)
+        self.assertEqual(dist_res.full_tensor(), local_res_2d)
+        self.assertEqual(dist_res.placements[0], Shard(0))
+
+        # Case 2: RHS free dim n - mat1=Replicate, mat2=Shard(1) -> output=Shard(1)
+        # With 1D bias: bias should be Shard(0) (its dim 0 corresponds to n)
+        mat1_r = distribute_tensor(mat1_tensor, device_mesh, [Replicate()])
+        mat2_s1 = distribute_tensor(mat2_tensor, device_mesh, [Shard(1)])
+        bias_1d_s0 = distribute_tensor(bias_1d, device_mesh, [Shard(0)])
+
+        dist_res = torch.addmm(bias_1d_s0, mat1_r, mat2_s1)
+        self.assertEqual(dist_res.full_tensor(), local_res_1d)
+        self.assertEqual(dist_res.placements[0], Shard(1))
+
+        # Case 2b: RHS free dim n with 2D bias - bias should be Shard(1)
+        bias_2d_s1 = distribute_tensor(bias_2d, device_mesh, [Shard(1)])
+        dist_res = torch.addmm(bias_2d_s1, mat1_r, mat2_s1)
+        self.assertEqual(dist_res.full_tensor(), local_res_2d)
+        self.assertEqual(dist_res.placements[0], Shard(1))
+
+        # Case 3: Contracting dim k - mat1=Shard(1), mat2=Shard(0) -> output=Partial
+        # bias should be Partial
+        mat1_s1 = distribute_tensor(mat1_tensor, device_mesh, [Shard(1)])
+        mat2_s0 = distribute_tensor(mat2_tensor, device_mesh, [Shard(0)])
+        bias_1d_p = distribute_tensor(bias_1d, device_mesh, [Partial()])
+
+        dist_res = torch.addmm(bias_1d_p, mat1_s1, mat2_s0)
+        self.assertIsInstance(dist_res.placements[0], Partial)
+        self.assertEqual(dist_res.full_tensor(), local_res_1d)
+
+        # Case 3b: Contracting dim k with 2D bias - bias should be Partial
+        bias_2d_p = distribute_tensor(bias_2d, device_mesh, [Partial()])
+        dist_res = torch.addmm(bias_2d_p, mat1_s1, mat2_s0)
+        self.assertIsInstance(dist_res.placements[0], Partial)
+        self.assertEqual(dist_res.full_tensor(), local_res_2d)
 
     @with_comms
     def test_addmm_empty_operand(self):
