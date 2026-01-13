@@ -15287,6 +15287,12 @@ op_db: list[OpInfo] = [
                 "test_output_match",
                 device_type="mps",
             ),
+            DecorateInfo(
+                toleranceOverride({torch.float16: tol(atol=1e-3, rtol=1e-2)}),
+                "TestConsistency",
+                "test_output_grad_match",
+                device_type="mps",
+            ),
         ),
         skips=(
             # RuntimeError: Difference from float64 is larger with
