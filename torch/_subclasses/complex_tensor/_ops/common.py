@@ -243,7 +243,8 @@ def register_simple(op: OpType):
             )
 
         if dtype in COMPLEX_TO_REAL:
-            assert dtype is not None
+            if dtype is None:
+                raise AssertionError("dtype must not be None when in COMPLEX_TO_REAL")
             kwargs["dtype"] = COMPLEX_TO_REAL[dtype]
 
         u = op(x, *args, **kwargs)
@@ -251,7 +252,8 @@ def register_simple(op: OpType):
 
         u_flat, u_spec = tree_flatten(u)
         v_flat, v_spec = tree_flatten(v)
-        assert u_spec == v_spec
+        if u_spec != v_spec:
+            raise AssertionError(f"Tree specs must match: {u_spec} != {v_spec}")
         out_flat = [
             ComplexTensor(ui, vi) for ui, vi in zip(u_flat, v_flat, strict=False)
         ]

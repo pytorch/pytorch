@@ -1024,6 +1024,10 @@ class AOTConfig:
     # mutating input with req_grad in export joint tracing.
     export_trace_joint: bool = False
     disable_functionalization: bool = False
+    # If True, disable TorchFunctionMetadataMode during make_fx tracing.
+    # This mode is used to track torch_fn metadata but can interfere with
+    # certain tracing scenarios.
+    _disable_torch_fn_metadata_mode: bool = False
 
     def __post_init__(self):
         if self.pre_dispatch:
