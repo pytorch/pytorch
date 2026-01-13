@@ -14,7 +14,7 @@ from torch._inductor.kernel.custom_op import (
     register_custom_op_autotuning,
 )
 from torch._inductor.test_case import run_tests, TestCase
-from torch.testing._internal.common_utils import skipIfXpu
+from torch.testing._internal.common_utils import skipIfRocm, skipIfXpu
 from torch.testing._internal.inductor_utils import HAS_GPU
 
 
@@ -232,6 +232,7 @@ class TestCustomOpAutoTune(TestCase):
         )
         return a, b, bias
 
+    @skipIfRocm
     @skipIfXpu
     def test_decompose_k_custom_op_autotune_dynamic_config_for_input_shape(self):
         """Test decompose_k autotuning with with epilogue fusion(matmul+bias+relu+scale) and
