@@ -1950,25 +1950,17 @@ def empty(  # type: ignore[misc]
     else:
         device = torch.device(device)
 
+    stride = torch._prims_common.make_contiguous_strides_for(size)
+
     if _should_use_implicit_mempool() and device.type == "cuda":
         # Allocate tensor from an implicit memory pool
         mempool = get_mem_pool(device)
         # TODO: this path can be made device-agnostic if `use_mem_pool` is
         # elevated from torch.cuda to torch accelerator.
         with torch.cuda.use_mem_pool(mempool):
-            return _SymmetricMemory.empty_strided_p2p(
-                size=size,
-                stride=torch._prims_common.make_contiguous_strides_for(size),
-                dtype=dtype,
-                device=device,
-            )
+            return _SymmetricMemory.empty_strided_p2p(size, stride, dtype, device)
     else:
-        return _SymmetricMemory.empty_strided_p2p(
-            size=size,
-            stride=torch._prims_common.make_contiguous_strides_for(size),
-            dtype=dtype,
-            device=device,
-        )
+        return _SymmetricMemory.empty_strided_p2p(size, stride, dtype, device)
 
 
 def rendezvous(
