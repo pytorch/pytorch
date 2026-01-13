@@ -104,6 +104,7 @@ def gen_empty_impl_names(
         DispatchKey.QuantizedCPU,
         DispatchKey.QuantizedCUDA,
         DispatchKey.XPU,
+        DispatchKey.PrivateUse1,
     ):
         empty_impl = "at::empty"
         empty_strided_impl = "at::empty_strided"
@@ -698,6 +699,7 @@ void set_output_{name}(
             DispatchKey.MPS,
             DispatchKey.XPU,
             DispatchKey.CompositeExplicitAutogradNonFunctional,
+            DispatchKey.PrivateUse1,
         ]:
             maybe_set_guard = """
 auto current_device = guard_.current_device();
@@ -731,6 +733,7 @@ if (C10_UNLIKELY(maybe_proxy.has_value())) {
                 DispatchKey.XPU,
                 DispatchKey.MTIA,
                 DispatchKey.CompositeExplicitAutogradNonFunctional,
+                DispatchKey.PrivateUse1,
             )
             return f"""{maybe_set_guard_line}
 outputs_[output_idx] = create_out(sizes, strides, options);"""
@@ -810,6 +813,8 @@ resize_out(out, sizes, strides, options);
         elif self.backend_index.dispatch_key == DispatchKey.XPU:
             guard_field = "c10::OptionalDeviceGuard guard_;"
         elif self.backend_index.dispatch_key == DispatchKey.MTIA:
+            guard_field = "c10::OptionalDeviceGuard guard_;"
+        elif self.backend_index.dispatch_key == DispatchKey.PrivateUse1:
             guard_field = "c10::OptionalDeviceGuard guard_;"
         else:
             guard_field = ""
@@ -920,6 +925,11 @@ return {sig.name()}({", ".join(e.expr for e in translate(cpp_sig.arguments(), si
                 # TODO: dedup this branch
                 class_name = f"structured_{meta.name(self.g)}_default_backend_{k.name}"
                 parent_class = f"at::meta::structured_{meta.name(self.g)}"
+            elif self.backend_index.external and self.class_method_name is not None:
+                metadata = self.backend_index.get_kernel(self.g)
+                assert metadata is not None
+                class_name = f"structured_{metadata.kernel}_{k.name}"
+                parent_class = f"{metadata.cpp_namespace}::{self.class_method_name}::structured_{metadata.kernel}"
             else:
                 metadata = self.backend_index.get_kernel(self.g)
                 assert metadata is not None
