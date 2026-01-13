@@ -1075,8 +1075,6 @@ class Test_StridedShard_Propagation(LocalDTensorTestBase):
         view_into_shape: list[int],
         expected_placements_after_view,
     ):
-        import math
-
         assert math.prod(original_full_tensor.shape) == math.prod(view_into_shape)
         # verify user specified `expected_placements_after_view `is correct
         A = distribute_tensor(original_full_tensor, mesh, original_placements)
@@ -1502,10 +1500,6 @@ class TestStridedShardCollectiveOpUtils:
     from collections import namedtuple
 
     ShardConfig = namedtuple("ShardConfig", ["mesh_dim", "split_factor"], defaults=(1,))
-
-    def _range_tensor(self, *shape) -> torch.Tensor:
-        """Create a tensor with sequential values reshaped to the given shape."""
-        return torch.arange(math.prod(shape)).view(shape)
 
     def _convert_default_order_placements_to_ShardConfig(
         self, placements: Sequence[Placement]
