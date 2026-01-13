@@ -44,8 +44,8 @@ class PartitionArgs:
     offs_ptr: gl.tensor
 {%- endif %}
     c_ptr: gl.tensor
-    c_stride_m: gl.constexpr
-    c_stride_n: gl.constexpr
+    c_stride_m: gl.tensor
+    c_stride_n: gl.tensor
     c_layout: gl.constexpr
     a_smem_bufs: gl.shared_memory_descriptor
     b_smem_bufs: gl.shared_memory_descriptor
@@ -54,10 +54,10 @@ class PartitionArgs:
     load_buf_full_bars: gl.shared_memory_descriptor
     acc_buf_empty_bars: gl.shared_memory_descriptor
     acc_buf_full_bars: gl.shared_memory_descriptor
-    G: gl.constexpr
-    M: gl.constexpr
-    N: gl.constexpr
-    K: gl.constexpr
+    G: gl.tensor
+    M: gl.tensor
+    N: gl.tensor
+    K: gl.tensor
     BLOCK_M: gl.constexpr
     BLOCK_N: gl.constexpr
     BLOCK_K: gl.constexpr
@@ -103,8 +103,8 @@ class PartitionArgs:
         self.offs_ptr = offs_ptr
 {%- endif %}
         self.c_ptr = c_ptr
-        self.c_stride_m = gl.constexpr(c_stride_m)
-        self.c_stride_n = gl.constexpr(c_stride_n)
+        self.c_stride_m = c_stride_m
+        self.c_stride_n = c_stride_n
         self.c_layout = gl.constexpr(c_layout)
         self.a_smem_bufs = a_smem_bufs
         self.b_smem_bufs = b_smem_bufs
@@ -113,10 +113,10 @@ class PartitionArgs:
         self.load_buf_full_bars = load_buf_full_bars
         self.acc_buf_empty_bars = acc_buf_empty_bars
         self.acc_buf_full_bars = acc_buf_full_bars
-        self.G = gl.constexpr(G)
-        self.M = gl.constexpr(M)
-        self.N = gl.constexpr(N)
-        self.K = gl.constexpr(K)
+        self.G = G
+        self.M = M
+        self.N = N
+        self.K = K
         self.BLOCK_M = gl.constexpr(BLOCK_M)
         self.BLOCK_N = gl.constexpr(BLOCK_N)
         self.BLOCK_K = gl.constexpr(BLOCK_K)
@@ -180,11 +180,11 @@ class GroupIterator:
         BLOCK_M: gl.constexpr, BLOCK_N: gl.constexpr, NUM_BLOCKS: gl.constexpr
     ):
         return GroupIterator(
-            gl.to_tensor(G), gl.to_tensor(0),
+            G, gl.to_tensor(0),
 {%- if M_IS_VARYING or N_IS_VARYING %}
             offs_ptr,
 {%- endif %}
-            gl.to_tensor(0), gl.to_tensor(M), gl.to_tensor(0), gl.to_tensor(N),
+            gl.to_tensor(0), M, gl.to_tensor(0), N,
             gl.to_tensor(0), gl.program_id(0),
             gl.to_tensor(False),
             BLOCK_M, BLOCK_N, NUM_BLOCKS
@@ -357,10 +357,10 @@ def store_ragged(TMA, slice_off, slice_size, coords, data, ragged_dim: gl.conste
 def load_partition(pargs: PartitionArgs):
     pl.enter_scope("load_partition")
 
-    G: gl.constexpr = pargs.G
-    M: gl.constexpr = pargs.M
-    N: gl.constexpr = pargs.N
-    K: gl.constexpr = pargs.K
+    G = pargs.G
+    M = pargs.M
+    N = pargs.N
+    K = pargs.K
     BLOCK_M: gl.constexpr = pargs.BLOCK_M
     BLOCK_N: gl.constexpr = pargs.BLOCK_N
     BLOCK_K: gl.constexpr = pargs.BLOCK_K
@@ -437,10 +437,10 @@ def load_partition(pargs: PartitionArgs):
 def compute_partition(pargs: PartitionArgs):
     pl.enter_scope("compute_partition")
 
-    G: gl.constexpr = pargs.G
-    M: gl.constexpr = pargs.M
-    N: gl.constexpr = pargs.N
-    K: gl.constexpr = pargs.K
+    G = pargs.G
+    M = pargs.M
+    N = pargs.N
+    K = pargs.K
     BLOCK_M: gl.constexpr = pargs.BLOCK_M
     BLOCK_N: gl.constexpr = pargs.BLOCK_N
     BLOCK_K: gl.constexpr = pargs.BLOCK_K
@@ -525,10 +525,10 @@ def store_partition(pargs: PartitionArgs):
 
     c_desc = pargs.c_desc
 
-    G: gl.constexpr = pargs.G
-    M: gl.constexpr = pargs.M
-    N: gl.constexpr = pargs.N
-    K: gl.constexpr = pargs.K
+    G = pargs.G
+    M = pargs.M
+    N = pargs.N
+    K = pargs.K
     BLOCK_M: gl.constexpr = pargs.BLOCK_M
     BLOCK_N: gl.constexpr = pargs.BLOCK_N
     BLOCK_K: gl.constexpr = pargs.BLOCK_K
@@ -795,8 +795,8 @@ def store_partition(pargs: PartitionArgs):
         offs_ptr,
 {%- endif %}
         c_ptr,
-        c_stride_m,
-        c_stride_n,
+        gl.to_tensor(c_stride_m),
+        gl.to_tensor(c_stride_n),
         c_layout,
         a_smem_bufs,
         b_smem_bufs,
@@ -805,10 +805,10 @@ def store_partition(pargs: PartitionArgs):
         load_buf_full_bars,
         acc_buf_empty_bars,
         acc_buf_full_bars,
-        G,
-        M,
-        N,
-        K,
+        gl.to_tensor(G),
+        gl.to_tensor(M),
+        gl.to_tensor(N),
+        gl.to_tensor(K),
         BLOCK_M,
         BLOCK_N,
         BLOCK_K,
