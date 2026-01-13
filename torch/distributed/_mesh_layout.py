@@ -66,15 +66,6 @@ class _FlatLayout:
         flat_shape = flatten(coalesced_layout.shape)
         flat_stride = flatten(coalesced_layout.stride)
 
-        assert tuple(sorted(flat_stride, reverse=True)) == flat_stride, (
-            "For the time being we don't support transposing mesh dimensions "
-            "hence layouts should always remain sorted. If we choose to allow this, "
-            "we first need to decide whether we consider [0, 1, 2, 3] and "
-            "[0, 2, 1, 3] to be the same layout (and thus the same ProcessGroup)."
-        )
-
-        # TODO could we also assert that it's non-overlapping?
-
         # pycute will preserve a size=1 dim if it's the only remaining dim, but
         # we prefer to stick to the Tensor convention and make it 0-dimensional
         if flat_shape == (1,) and flat_stride == (0,):
@@ -255,13 +246,8 @@ class _FlatLayout:
         Returns:
             bool: True if no overlap, False if overlap detected
         """
-        if len(self.shape) < 2:
-            return True
-        stride, shape = zip(*sorted(zip(self.stride, self.shape), reverse=True))
-        return all(
-            stride[i] % (stride[i + 1] * shape[i + 1]) == 0
-            for i in range(len(stride) - 1)
-        )
+        ranks = self.all_ranks_from_zero()
+        return len(ranks) == len(set(ranks))
 
     def to_pycute(self) -> Layout:
         """Convert to a pycute Layout for compatibility with pycute operations."""

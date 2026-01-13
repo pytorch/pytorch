@@ -1473,7 +1473,6 @@ class DeviceMeshCollectiveTest(DTensorTestBase):
 
 class CuTeLayoutTest(TestCase):
     def test_coalesce(self):
-        # _FlatLayout auto-coalesces on construction
         # ((3,2),(2,1)) -> (6,1)
         l = _FlatLayout((3, 2), (2, 1))
         self.assertEqual(list(l.sizes_and_strides), [(6, 1)])
@@ -1486,6 +1485,47 @@ class CuTeLayoutTest(TestCase):
         # ((3,4),(2,1)) stays as-is (4 ≠ 2*1)
         l = _FlatLayout((3, 2), (4, 1))
         self.assertEqual(list(l.sizes_and_strides), [(3, 4), (2, 1)])
+
+    def test_coalesce_singleton_dims(self):
+        # Dimensions with size=1 are removed, even if it's all of them
+        l = _FlatLayout((1, 3, 1, 5, 1), (0, 10, 17, 2, 1))
+        self.assertEqual(list(l.sizes_and_strides), [(15, 2)])
+
+        l = _FlatLayout((1, 1, 1), (1, 42, 0))
+        self.assertEqual(list(l.sizes_and_strides), [])
+
+    def test_flatten(self):
+        l = _FlatLayout(((7, (5, 3)), 2), ((900, (36, 4), 1)))
+        self.assertEqual(list(l.sizes_and_strides), [(7, 900), (5, 36), (3, 4), (2, 1)])
+
+        l = _FlatLayout(((7, (5, 3)), 2), ((30, (6, 2), 1)))
+        self.assertEqual(list(l.sizes_and_strides), [(7 * 5 * 3 * 2, 1)])
+
+    def test_optional_strides(self):
+        l = _FlatLayout((7, 5, 3, 2))
+        # Strides default to suffix_product, which means they're coalescible
+        self.assertEqual(list(l.sizes_and_strides), [(7 * 5 * 3 * 2, 1)])
+
+    def test_mismatch_sizes_strides(self):
+        with self.assertRaisesRegex(
+            ValueError, "sizes .* and strides .* don't match"
+        ):
+            _FlatLayout(42, (1,))
+
+        with self.assertRaisesRegex(
+            ValueError, "sizes .* and strides .* don't match"
+        ):
+            _FlatLayout((3, 2), 1)
+
+        with self.assertRaisesRegex(
+            ValueError, "sizes .* and strides .* don't match"
+        ):
+            _FlatLayout((5, 3, 2), (2, 1))
+
+        with self.assertRaisesRegex(
+            ValueError, "sizes .* and strides .* don't match"
+        ):
+            _FlatLayout((5, (3, 2)), ((5, 3), 2))
 
     def test_complement_n_group_layout(self):
         # complement((4,2), 8) = (2,1); together form (8,1)
