@@ -938,7 +938,7 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         )
         with self.assertRaisesRegex(
             NotImplementedError,
-            "Currently, this only allows slicing out a contiguous flattened dim",
+            "Mesh dim indices should be in ascending order",
         ):
             mesh_3d["dp_tp", "cp"]
 
