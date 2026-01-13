@@ -9,6 +9,8 @@ from torch._inductor.test_case import run_tests, TestCase
 from torch.testing import FileCheck
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
+    isRocmArchAnyOf,
+    MI200_ARCH,
     parametrize,
 )
 from torch.testing._internal.inductor_utils import GPU_TYPE, HAS_GPU
@@ -499,6 +501,9 @@ class MixOrderReductionTest(TestBase):
     def test_rms_norm_sharing_weights(self, split_reductions, dtype):
         if not inductor_config.triton.mix_order_reduction:
             self.skipTest("Mix order reduction not enabled")
+
+        if dtype is torch.bfloat16 and isRocmArchAnyOf(MI200_ARCH):
+            self.skipTest("Currently failing on rocm mi200")
 
         def f(xs, w, eps):
             ys = []

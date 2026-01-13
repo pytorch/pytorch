@@ -10,6 +10,7 @@ from datetime import timedelta
 from enum import Enum
 from functools import partial
 from typing import Any, Literal
+from typing_extensions import deprecated
 
 import torch
 import torch.distributed._functional_collectives as funcol
@@ -21,6 +22,10 @@ from torch._C._distributed_c10d import _SymmetricMemory, Work as _Work
 _group_name_to_store: dict[str, c10d.Store] = {}
 
 
+@deprecated(
+    "`enable_symm_mem_for_group` is deprecated. There is no need to call this function anymore.",
+    category=FutureWarning,
+)
 def enable_symm_mem_for_group(group_name: c10d.GroupName) -> None:
     """
     Enables symmetric memory for a process group.
@@ -104,8 +109,6 @@ def get_symm_mem_workspace(
         _SymmetricMemory: the symmetric memory workspace associated with the
         group.
     """
-    enable_symm_mem_for_group(group_name)
-
     tensor = _group_name_to_workspace_tensor.get(group_name)
     size = tensor.numel() * tensor.element_size() if tensor is not None else 0
     if tensor is None or size < min_size:
@@ -1934,7 +1937,7 @@ def empty(  # type: ignore[misc]
 
 
 def rendezvous(
-    tensor: torch.Tensor, group: Union[c10d.GroupName, ProcessGroup]
+    tensor: torch.Tensor, group: c10d.GroupName | ProcessGroup
 ) -> _SymmetricMemory:
     r"""
     rendezvous(tensor, group) -> _SymmetricMemory
@@ -1958,7 +1961,6 @@ def rendezvous(
     else:
         raise TypeError(f"rendezvous: unsupported group type: {type(group)}")
 
-    enable_symm_mem_for_group(group_name)
     return _SymmetricMemory.rendezvous(tensor, group_name)
 
 

@@ -1,9 +1,13 @@
 # mypy: allow-untyped-defs
 
 import contextlib
+import copy
+import functools
+from collections import defaultdict
+from collections.abc import Callable
 from contextlib import nullcontext
 from dataclasses import dataclass, field
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, Union
 
 import torch
 import torch.utils._pytree as pytree
@@ -12,12 +16,12 @@ from torch._dispatch.python import suspend_functionalization
 from torch._higher_order_ops.utils import (
     _from_fun,
     _maybe_reenter_make_fx,
-    _set_compilation_env,
     clone_outputs_aliasing_inputs,
     FunctionalizeCtxWrapper,
     get_dummy_aot_autograd_config,
     HopInstance,
     prepare_fw_with_masks,
+    redirect_to_mode,
     reenter_make_fx,
     register_fake,
     save_tensors_and_symints_for_backward,
@@ -26,18 +30,13 @@ from torch._higher_order_ops.utils import (
 from torch._ops import HigherOrderOperator
 from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
-    _temp_remove_metadata_torch_function_mode,
-    _temp_remove_pre_dispatch_torch_function_mode,
     disable_proxy_modes_tracing,
     ProxyTorchDispatchMode,
     track_tensor_tree,
 )
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
-
-
-if TYPE_CHECKING:
-    from collections.abc import Callable
+from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
 invoke_subgraph_counter = 0
@@ -51,6 +50,50 @@ class OutputMetadata:
     num_fw_outs: Optional[int] = None
     indexes_with_symint: set[int] = field(default_factory=set)
     indexes_with_no_grad: set[int] = field(default_factory=set)
+
+
+# This config will be stored in invoke_subgraph HOP node.meta["custom"]["nested_region_config"]
+# as well as the subgraph's gm.meta["nested_region_config"].
+@dataclass
+class NestedCompileRegionOptions:
+    # A Callable that takes (gm, example_inputs, decompositions=None, **kwargs) as inputs.
+    # Returns AOTCompiledArtifact
+    fw_compiler: Optional[Callable] = None
+    bw_compiler: Optional[Callable] = None
+
+    # Note: [InvokeSubgraphHOP Partitioner]
+    # If not None, add "partitioner" to HOP node meta.
+    # If Callable, directly assign the callable, but the callable cannot be pickled
+    # If str, the options are "default_partition" and "min_cut_rematerialization_partition".
+    # The HOP joint graph will be partitioned using the corresponding functions in
+    # torch/_functorch/partitioners.py
+    partitioner: Optional[Callable | str] = None
+
+    # If it's None, we'll inherit the parent call's decompositions.
+    # Otherwise, the nested region will use this decompositions.
+    decompositions: Optional[dict[str, Any]] = None
+
+
+def _extract_nested_region_config(fn):
+    """
+    Extract the NestedCompileRegionOptions from the HOP subgraph gm.meta["nested_region_config"]
+    """
+    gm_to_compile = None
+    if isinstance(fn, torch.fx.GraphModule):
+        gm_to_compile = fn
+    elif isinstance(fn, FunctionalizeCtxWrapper):
+        gm_to_compile = fn.subgraph
+
+    if (
+        isinstance(gm_to_compile, torch.fx.GraphModule)
+        and hasattr(gm_to_compile, "meta")
+        and "nested_region_config" in gm_to_compile.meta
+    ):
+        if isinstance(
+            gm_to_compile.meta["nested_region_config"], NestedCompileRegionOptions
+        ):
+            return gm_to_compile.meta["nested_region_config"].decompositions
+    return None
 
 
 class InvokeSubgraphHOP(HigherOrderOperator):
@@ -85,6 +128,7 @@ class InvokeSubgraphHOP(HigherOrderOperator):
             f"invoke_subgraph operands must be a list of tensors/ints/SymInts/Generator {operands}"
         )
 
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(subgraph, identifier, *operands)
 
     # pyrefly: ignore [bad-override]
@@ -95,7 +139,10 @@ class InvokeSubgraphHOP(HigherOrderOperator):
             materialize_as_graph,
         )
 
-        gm: torch.fx.GraphModule = materialize_as_graph(subgraph, operands)
+        subgraph_decomp_table = _extract_nested_region_config(subgraph)
+        gm: torch.fx.GraphModule = materialize_as_graph(
+            subgraph, operands, subgraph_decomp_table=subgraph_decomp_table
+        )
 
         schema_gen = HopSchemaGenerator(self)
         schema_gen.add_arg("subgraph", gm)
@@ -118,6 +165,11 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 invoke_subgraph = InvokeSubgraphHOP()
 
 
+# Registers dispatches for SAC
+redirect_to_mode(invoke_subgraph, _CachingTorchDispatchMode)
+redirect_to_mode(invoke_subgraph, _CachedTorchDispatchMode)
+
+
 def invoke_subgraph_placeholder(func, *args, **kwargs):
     if torch.compiler.is_dynamo_compiling():
         # This is just a placeholder for Dynamo to replace with invoke_subgraph
@@ -125,36 +177,23 @@ def invoke_subgraph_placeholder(func, *args, **kwargs):
 
     if torch.compiler.is_compiling():
         # For non-strict export tracing, we still want to go through Dynamo
-        from torch._dynamo.backends.debugging import (
-            make_eager_backend_with_torch_function_mode,
-        )
 
         def _invoke_subgraph_placeholder_wrapper(func, args):
             return invoke_subgraph_placeholder(func, *args)
 
-        with (
-            _set_compilation_env(),
-            torch._dynamo.utils.disable_cache_limit(),
-            _temp_remove_pre_dispatch_torch_function_mode(),
-        ):
-            with _temp_remove_metadata_torch_function_mode() as metadata_mode:
-                if metadata_mode:
-                    backend: Union[str, Callable[..., Any]] = (
-                        make_eager_backend_with_torch_function_mode(metadata_mode)
-                    )
-                else:
-                    backend = "eager"
+        from torch._higher_order_ops.utils import setup_compilation_env
 
-                return torch.compile(
-                    _invoke_subgraph_placeholder_wrapper,
-                    backend=backend,
-                    fullgraph=True,
-                )(func, args)
+        with setup_compilation_env() as backend:
+            return torch.compile(
+                _invoke_subgraph_placeholder_wrapper,
+                backend=backend,
+                fullgraph=True,
+            )(func, args)
 
     return func(*args, **kwargs)
 
 
-def mark_compile_region(fn=None):
+def mark_compile_region(fn=None, options: Optional[NestedCompileRegionOptions] = None):
     """
     This wrapper instructs torch.compile to compile the wrapped region once and
     reuse the compiled artifact, instead of the usual way of aggressively
@@ -162,6 +201,12 @@ def mark_compile_region(fn=None):
 
     Under the hood, it tells TorchDynamo to use InvokeSubgraph HOP for the
     region. For PyTorch eager, this is a no-op.
+
+    Args:
+        fn: The function to wrap
+        options: Optional config to use for compiling the subgraph.
+            Warning: this is an experimental feature under development and
+            not ready for use yet.
     """
 
     def wrap(func):
@@ -173,6 +218,7 @@ def mark_compile_region(fn=None):
             return invoke_subgraph_placeholder(inner_func, *args, **kwargs)
 
         inner.__marked_compile_region_fn__ = func  # type: ignore[attr-defined]
+        func.__marked_compile_region_config__ = options  # type: ignore[attr-defined]
 
         return inner
 
@@ -442,8 +488,11 @@ def trace_joint_graph_as_bwd(
                 stack.enter_context(
                     torch._C._ForceDispatchKeyGuard(include_key_set, exclude_key_set),
                 )
+                subgraph_decomp_table = _extract_nested_region_config(subgraph)
                 with torch.enable_grad():
-                    return _maybe_reenter_make_fx(joint_fn)(*joint_operands)
+                    return _maybe_reenter_make_fx(
+                        joint_fn, subgraph_decomp_table=subgraph_decomp_table
+                    )(*joint_operands)
 
 
 class InvokeSubgraphAutogradOp(torch.autograd.Function):
@@ -532,6 +581,26 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         for tangent in filtered_grad_outs:
             metadata = extract_tensor_metadata(tangent)
             metadata._flatten_into(tangent_metadata, fake_mode, state)
+
+        # Add aliasing information to tangent_metadata
+        # Two tangents are aliased if they are the same tensor object (using id())
+        # We create a tuple of tuples where each inner tuple contains indices of aliased tensors
+        # e.g. ((0, 1),) would mean there is one aliasing group, and the first and second tangents are aliased
+        # e.g. () would mean there is no aliasing between tangents
+        tensor_to_indices: dict[int, list[int]] = defaultdict(list)
+        for i, tangent in enumerate(filtered_grad_outs):
+            if isinstance(tangent, torch.Tensor):
+                tensor_to_indices[id(tangent)].append(i)
+
+        aliasing_groups = tuple(
+            sorted(
+                tuple(indices)
+                for indices in tensor_to_indices.values()
+                if len(indices) > 1
+            )
+        )
+        tangent_metadata.append(aliasing_groups)
+
         # pyrefly: ignore [bad-assignment]
         tangent_metadata = tuple(tangent_metadata)
 
@@ -563,6 +632,13 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
                     ctx._fw_include_key_set,
                     ctx._fw_exclude_key_set,
                 )
+                if (
+                    hasattr(subgraph, "meta")
+                    and "nested_region_config" in subgraph.meta
+                ):
+                    bw_graph.meta["nested_region_config"] = subgraph.meta[
+                        "nested_region_config"
+                    ]
 
         if invoke_subgraph_cache and not cache_hit:
             suffix = invoke_subgraph_cache.add_lazy_bwd_entry(
@@ -666,7 +742,7 @@ def _(ctx, subgraph, identifier, *operands):
 
     with ctx.redispatch_to_next():
         # NB: There is an assumption that subgraph does not mutate inputs and
-        # there is no aliasing. Its Dynamo responsibility to prevent formation
+        # there is no aliasing. It's Dynamo's responsibility to prevent formation
         # of invoke_subgraph ops if input aliasing/mutation is detected.
         functionalized_subgraph = FunctionalizeCtxWrapper(ctx, subgraph)
         out = invoke_subgraph(functionalized_subgraph, identifier, *unwrapped_operands)
@@ -716,19 +792,24 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
         from torch._dynamo.utils import dynamo_timed
 
         with dynamo_timed("invoke_subgraph_proxy_tensor", log_pt2_compile_event=True):
-            graph = reenter_make_fx(subgraph)(*operands)
+            subgraph_decomp_table = _extract_nested_region_config(subgraph)
+            graph = reenter_make_fx(
+                subgraph, subgraph_decomp_table=subgraph_decomp_table
+            )(*operands)
 
         from torch._guards import detect_fake_mode
 
         fake_mode = detect_fake_mode(operands)
-        assert fake_mode is not None and fake_mode.shape_env is not None
-        insert_deferred_runtime_asserts(
-            graph,
-            fake_mode.shape_env,
-            "invoke_subgraph_proxy_torch_dispatch_mode",
-            export=True,
-        )
-        graph.recompile()
+        # Only insert deferred runtime asserts when we have dynamic shapes.
+        # When shape_env is None (static shapes), there are no deferred asserts to insert.
+        if fake_mode is not None and fake_mode.shape_env is not None:
+            insert_deferred_runtime_asserts(
+                graph,
+                fake_mode.shape_env,
+                "invoke_subgraph_proxy_torch_dispatch_mode",
+                export=True,
+            )
+            graph.recompile()
 
         assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
         if invoke_subgraph_cache:
@@ -751,7 +832,7 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
             # exist as a submodule in the new tracer's root. Therefore, we register it as a submodule below.
             #
             # The alternative is to give a new identifier when we re-trace the invoke_subgraph but this will increase
-            # the compilatoin time, which defeats the purpose of caching.
+            # the compilation time, which defeats the purpose of caching.
             registered_before = False
             for (
                 _,
@@ -773,4 +854,79 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
     example_out = invoke_subgraph(graph, identifier, *operands)
     return track_tensor_tree(
         example_out, out_proxy, constant=None, tracer=proxy_mode.tracer
+    )
+
+
+def invoke_subgraph_inductor_compile(
+    gm, example_inputs, inductor_config_patches=None, **kwargs
+):
+    from torch._functorch._aot_autograd.runtime_wrappers import (
+        SerializableCompiledFunction,
+    )
+    from torch._functorch._aot_autograd.utils import simple_wraps
+    from torch._inductor import config
+    from torch._inductor.compile_fx import compile_fx_inner
+    from torch._inductor.standalone_compile import AOTCompiledArtifact
+
+    # Used for testing only, should only be changed via _testing_capture_invoke_subgraph_inductor_compile_gms()
+    if (
+        torch._dynamo.testing._testing_invoke_subgraph_inductor_compile_captured_gms
+        is not None
+    ):
+        torch._dynamo.testing._testing_invoke_subgraph_inductor_compile_captured_gms.append(
+            copy.deepcopy(gm)
+        )
+
+    if inductor_config_patches is None:
+        inductor_config_patches = {}
+    compile_fn = config.patch(inductor_config_patches)(compile_fx_inner)
+    compiled_fn_inner = compile_fn(gm, example_inputs)
+    assert compiled_fn_inner._boxed_call
+
+    # Follow boxed calling convention
+    @simple_wraps(compiled_fn_inner)
+    def forward(*runtime_args: tuple[Any]):
+        full_args = []
+        full_args.extend(runtime_args)
+        return compiled_fn_inner(full_args)
+
+    # Just for convenience
+    forward.zero_grad = gm.zero_grad  # type: ignore[attr-defined]
+    forward.named_parameters = gm.named_parameters  # type: ignore[attr-defined]
+    forward.named_buffers = gm.named_buffers  # type: ignore[attr-defined]
+
+    # TODO: Do we need the post compile passes in _aot_stage2b_compile_forward_or_inference?
+    # TODO: add a real serialize function for SerializableCompiledFunction like _cache_inference_info
+    forward.serialize = SerializableCompiledFunction(forward, lambda: None)  # type: ignore[attr-defined]
+    return AOTCompiledArtifact(forward)
+
+
+def get_invoke_subgraph_compile_options(
+    inductor_config_patches=None,
+    decompositions=None,
+    partitioner="min_cut_rematerialization_partition",
+):
+    if inductor_config_patches is None:
+        inductor_config_patches = {"triton.autotune_at_compile_time": True}
+    inductor_compile = functools.partial(
+        invoke_subgraph_inductor_compile,
+        inductor_config_patches=inductor_config_patches,
+    )
+
+    if inductor_config_patches:
+        from torch._inductor import config as inductor_config
+
+        # Validate that all config keys exist
+        for key in inductor_config_patches:
+            if not hasattr(inductor_config, key):
+                raise ValueError(
+                    f"Invalid inductor config key '{key}' in get_invoke_subgraph_compile_options. "
+                    f"Available config keys can be found in torch._inductor.config"
+                )
+
+    return NestedCompileRegionOptions(
+        fw_compiler=inductor_compile,
+        bw_compiler=inductor_compile,
+        partitioner=partitioner,
+        decompositions=decompositions,
     )

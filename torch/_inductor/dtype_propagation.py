@@ -58,7 +58,6 @@ def promote_types(
 ):
     dtype_prop_candidates = []
 
-    # pyrefly: ignore [bad-assignment]
     for arg in args:
         assert not isinstance(arg, str)
         if isinstance(arg, OpsValue):
@@ -395,6 +394,6 @@ class DtypePropagationOpsHandler:
 
 
 if TYPE_CHECKING:
-
+    # pyrefly: ignore [inconsistent-inheritance]
     class _typecheck_DtypePropagation(DtypePropagationOpsHandler, OpsHandler[Any]):
         pass  # mypy will error if we got any of the signatures wrong

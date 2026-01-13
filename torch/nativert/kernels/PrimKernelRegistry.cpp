@@ -32,7 +32,7 @@ class OpKernel_prim_listpack : public OpKernel {
     }
   }
 
-  void computeInternal(ExecutionFrame& executionFrame) const override final {
+  void computeInternal(ExecutionFrame& executionFrame) const final {
     RECORD_USER_SCOPE("nativert::OpKernel_prim_listpack");
     c10::List<c10::IValue> list(type_);
     list.reserve(numInputs());
@@ -79,7 +79,7 @@ class OpKernel_variadic_concat : public OpKernel {
         ? constantToIValue(node_->getAttribute("dim").value).toInt()
         : 0;
   }
-  void computeInternal(ExecutionFrame& executionFrame) const override final {
+  void computeInternal(ExecutionFrame& executionFrame) const final {
     {
       const size_t numNodeInps = numInputs();
       auto numCatInps = numNodeInps;
@@ -124,7 +124,7 @@ class OpKernel_variadic_stack : public OpKernel {
         ? constantToIValue(node_->getAttribute("dim").value).toInt()
         : 0;
   }
-  void computeInternal(ExecutionFrame& executionFrame) const override final {
+  void computeInternal(ExecutionFrame& executionFrame) const final {
     {
       const size_t numNodeInps = numInputs();
       auto numStackInps = numNodeInps;

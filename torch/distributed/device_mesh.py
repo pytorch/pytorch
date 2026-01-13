@@ -33,6 +33,7 @@ if not is_available():
         pass
 
     sys.modules["torch.distributed.device_mesh"].DeviceMesh = _DeviceMeshStub  # type: ignore[attr-defined]
+    # pyrefly: ignore [missing-attribute]
     sys.modules[
         "torch.distributed.device_mesh"
     ].init_device_mesh = _init_device_mesh_stub  # type: ignore[attr-defined]
@@ -174,6 +175,7 @@ else:
             >>> mesh = DeviceMesh(device_type="cuda", mesh=[[0, 1, 2, 3],[4, 5, 6, 7]])
         """
 
+        _rank: int
         _device_type: str
         _rank_map: torch.Tensor
         _mesh_dim_names: tuple[str, ...] | None
@@ -284,31 +286,65 @@ else:
                     # pyrefly: ignore [bad-assignment]
                     self._thread_id = threading.get_ident()
 
+                # Now that the process group is initialized, we can get the rank
                 if _rank is None:
-                    _rank = get_rank()
+                    self._rank = get_rank()
+                else:
+                    self._rank = _rank
 
-                # calculate the coordinates of the current global rank on the mesh
-                rank_coords = (self.mesh == _rank).nonzero()
-                if rank_coords.size(0) not in (0, 1):
-                    raise AssertionError(
-                        f"rank_coords.size(0) must be 0 or 1, got {rank_coords.size(0)}"
-                    )
-                self._coordinate_on_dim: list[int] | None = (
-                    rank_coords[0].tolist() if rank_coords.size(0) > 0 else None
+                self._coordinate_on_dim = self._compute_coordinate_on_dim()
+
+        @staticmethod
+        def _compute_coordinates_from_mesh(
+            mesh_tensor: torch.Tensor,
+            rank: int,
+        ) -> Optional[tuple[int, ...]]:
+            """
+            Compute the coordinates of a rank within a mesh tensor.
+
+            Args:
+                mesh_tensor: The mesh tensor to search in
+                rank: The rank to find coordinates for
+
+            Returns:
+                A tuple of coordinates if the rank is found in the mesh, None otherwise
+
+            Raises:
+                AssertionError: If the rank appears more than once in the mesh
+            """
+            rank_coords = (mesh_tensor == rank).nonzero()
+            if rank_coords.size(0) not in (0, 1):
+                raise AssertionError(
+                    f"rank_coords.size(0) must be 0 or 1, got {rank_coords.size(0)}"
                 )
+
+            if rank_coords.size(0) == 0:
+                return None
+
+            coords = rank_coords[0].tolist()
+            return tuple(coords)
+
+        def _compute_coordinate_on_dim(self) -> tuple[int, ...] | None:
+            # calculate the coordinates of the current global rank on the mesh
+            return self._compute_coordinates_from_mesh(self.mesh, self._rank)
 
         @property
         def device_type(self) -> str:
             """Returns the device type of the mesh."""
             return self._device_type
 
-        @property
-        def mesh(self) -> torch.Tensor:
-            """Returns the tensor representing the layout of devices."""
-            full_mesh = self._layout.remap_to_tensor(self._rank_map)
+        @staticmethod
+        def _get_mesh_tensor_from_full_mesh(
+            full_mesh: torch.Tensor,
+            current_rank: int | None = None,
+        ) -> torch.Tensor:
             if full_mesh.size(0) == 1:
                 return full_mesh[0]
-            my_coords = (full_mesh == get_rank()).nonzero()
+
+            if current_rank is None:
+                current_rank = get_rank()
+
+            my_coords = (full_mesh == current_rank).nonzero()
             if my_coords.size(0) > 0:
                 return full_mesh[my_coords[0, 0]]
             raise RuntimeError(
@@ -316,6 +352,12 @@ else:
                 "either have all its original dimensions (e.g., no slicing) "
                 "or it needs to contain the local rank"
             )
+
+        @property
+        def mesh(self) -> torch.Tensor:
+            """Returns the tensor representing the layout of devices."""
+            full_mesh = self._layout.remap_to_tensor(self._rank_map)
+            return self._get_mesh_tensor_from_full_mesh(full_mesh)
 
         @property
         def mesh_dim_names(self) -> tuple[str, ...] | None:
@@ -335,6 +377,14 @@ else:
                     f"Mesh should not be bigger than default world size {world_size}, but found {self._layout.numel()} ranks!"
                 )
 
+            # Skip device setup for fake backend (cross-compilation mode).
+            # The fake backend is used to simulate distributed training on a
+            # single process without actual devices, enabling compilation of
+            # GPU programs on CPU-only machines.
+            backend = get_backend()
+            if backend == "fake":
+                return _get_default_group()
+
             # ONLY set the device if the current device is not initialized, if user already
             # set the device before DeviceMesh init, we respect the user's choice.
             device_handle = _get_device_handle(self._device_type)
@@ -349,6 +399,12 @@ else:
                     )
                     device_handle.set_device(local_rank)
                 else:
+                    # heuristic to set the current cuda/cuda-like device base on num of gpu devices available in each host
+                    # NOTE: This device selection would only work for homogeneous hardware.
+                    num_devices_per_host = device_handle.device_count()
+                    # Skip device setup if no devices are available (cross-compilation mode)
+                    if num_devices_per_host == 0:
+                        return _get_default_group()
                     warnings.warn(
                         "It seems like you did not set/select the default device for the current process before the DeviceMesh "
                         "initialization or use a launcher (i.e. torchrun) which populates `LOCAL_RANK` environment variable. "
@@ -358,9 +414,6 @@ else:
                         "device_id via `global_rank % num_devices_per_host`, assuming homogeneous hardware cluster. ",
                         stacklevel=2,
                     )
-                    # heuristic to set the current cuda/cuda-like device base on num of gpu devices available in each host
-                    # NOTE: This device selection would only work for homogeneous hardware.
-                    num_devices_per_host = device_handle.device_count()
                     if (
                         world_size > num_devices_per_host
                         and world_size % num_devices_per_host != 0
@@ -441,7 +494,9 @@ else:
                     split_ranks=pg_ranks_by_dim.tolist(),
                     group_desc=group_desc,
                 )
-                return dim_group.group_name  # type: ignore[union-attr]
+                if dim_group is None:
+                    return None
+                return dim_group.group_name
 
             # If the subgroup has been already created through `split_group`, we simply loop over `pg_ranks_by_dim`
             # and append the `group_name` to the `dim_group_names` list when the current rank is in the subgroup.
@@ -676,23 +731,30 @@ else:
         ) -> "DeviceMesh":
             root_mesh = self._get_root_mesh()
             slice_dim_group_name = []
-            for name in submesh_dim_names:
-                if name in not_none(self._mesh_dim_names):
-                    slice_dim_group_name.append(
-                        self._dim_group_names[  # type: ignore[has-type]
-                            not_none(self._mesh_dim_names).index(name)
-                        ]
-                    )
-                else:
-                    # If device_mesh is not root_mesh, we already throw error in _get_slice_mesh_layout
-                    # Since we will deprecate the slicing of flattened dim_name from root mesh soon,
-                    # we don't want to optimize the code furthermore.
-                    flatten_mesh = self._flatten_mapping[name]
-                    slice_dim_group_name.append(
-                        flatten_mesh._dim_group_names[  # type: ignore[has-type]
-                            not_none(flatten_mesh._mesh_dim_names).index(name)
-                        ]
-                    )
+            if len(self._dim_group_names) > 0:
+                assert len(self._dim_group_names) == len(
+                    not_none(self._mesh_dim_names)
+                ), (
+                    "The number of dim_group_names and mesh_dim_names "
+                    "should have the same length if the rank is in the mesh."
+                )
+                for name in submesh_dim_names:
+                    if name in not_none(self._mesh_dim_names):
+                        slice_dim_group_name.append(
+                            self._dim_group_names[
+                                not_none(self._mesh_dim_names).index(name)
+                            ]
+                        )
+                    else:
+                        # If device_mesh is not root_mesh, we already throw error in _get_slice_mesh_layout
+                        # Since we will deprecate the slicing of flattened dim_name from root mesh soon,
+                        # we don't want to optimize the code furthermore.
+                        flatten_mesh = self._flatten_mapping[name]
+                        slice_dim_group_name.append(
+                            flatten_mesh._dim_group_names[
+                                not_none(flatten_mesh._mesh_dim_names).index(name)
+                            ]
+                        )
             res_submesh = DeviceMesh(
                 self._device_type,
                 _layout=layout,
@@ -842,11 +904,13 @@ else:
             pre_stride = -1
             for stride in reversed(sliced_strides):
                 # Note that with CuTe layout, we can support slicing flattened non-contiguous mesh dims with no problem.
-                # But this will make this behavior complicated so we decided to not support it for now.
+                # But we don't see a use case for now so we don't want to support it.
                 if not is_int(stride):
                     raise NotImplementedError(
                         "Currently, this only allows slicing out a contiguous flattened dim."
                     )
+                # Note that with CuTe layout, we can support slicing non-ascending order dims with no problem.
+                # But we don't see a use case for now so we don't want to support it.
                 if stride < pre_stride:
                     raise KeyError(
                         f"Invalid mesh_dim_names {mesh_dim_names} specified. "
@@ -1050,20 +1114,31 @@ else:
                 )
             return not_none(get_rank(mesh_dim_group))
 
-        def get_coordinate(self) -> list[int] | None:
+        def _is_current_rank_part_of_mesh(self) -> bool:
+            """
+            Return True if the current rank is part of this mesh.
+            """
+            return self._coordinate_on_dim is not None
+
+        def get_coordinate(self) -> tuple[int, ...] | None:
             """
             Return the relative indices of this rank relative to all
             dimensions of the mesh. If this rank is not part of the mesh, return None.
             """
             return self._coordinate_on_dim if self._coordinate_on_dim else None
 
+        def _sym_get_coordinate(self, index: int) -> int:
+            # This is only valid when the current rank is part of the mesh.
+            assert self._coordinate_on_dim
+            return self._coordinate_on_dim[index]
+
         def _flatten(
             self,
             mesh_dim_name: str | None = None,
-            backend_override: None
-            | str
+            backend_override: str
             | C10dBackend.Options
-            | tuple[str, C10dBackend.Options] = None,
+            | tuple[str, C10dBackend.Options]
+            | None = None,
         ) -> "DeviceMesh":
             """
             Returns a 1D DeviceMesh by flattening the current DeviceMesh.

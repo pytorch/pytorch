@@ -3,9 +3,9 @@ import logging
 import sys
 import traceback
 from collections import namedtuple
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
 from dataclasses import dataclass
-from typing import Any, Optional, TYPE_CHECKING, Union
+from typing import Any, Optional, TYPE_CHECKING, TypeVar, Union
 
 import sympy
 
@@ -16,9 +16,14 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.convert_frame import CaptureOutput, fullgraph_capture, get_traced_fn
 from torch._dynamo.eval_frame import argument_names, check_user_input_output
 from torch._dynamo.exc import UserErrorType
-from torch._dynamo.utils import dynamo_timed, get_metrics_context
+from torch._dynamo.utils import (
+    dynamo_timed,
+    get_metrics_context,
+    set_torch_function_mode_stack,
+)
 from torch._export.utils import _compiling_state_context
 from torch._guards import TracingContext
+from torch.export import _restore_state_dict
 from torch.export.dynamic_shapes import _RelaxedConstraint, Constraint
 from torch.fx import Node
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -29,13 +34,14 @@ from torch.fx.experimental.symbolic_shapes import (
     StatelessSymbolicContext,
 )
 from torch.fx.graph import _ExportCodeGen, _PyTreeCodeGen, _PyTreeInfo
+from torch.fx.node import Argument, Target
 from torch.utils._pytree import TreeSpec
 
 
 if TYPE_CHECKING:
     from torch._subclasses.fake_tensor import FakeTensorMode
 
-
+T = TypeVar("T")
 log = logging.getLogger(__name__)
 
 
@@ -44,7 +50,7 @@ def post_process_error_msg(
     func: Callable[..., Any],
     args: Any,
     kwargs: Any,
-):
+) -> ConstraintViolationError:
     """
     Because we trace a different callable, the sources are all messed up.
     Manually patch them so the error message looks correct.
@@ -76,7 +82,7 @@ def clean_export_root_string(text: str) -> str:
 
 
 def clean_nn_module_stack_and_source_fn(
-    graph_module: torch.fx.GraphModule, is_inline_builtin=False
+    graph_module: torch.fx.GraphModule, is_inline_builtin: bool = False
 ) -> torch.fx.GraphModule:
     """
     Clean up nn_module_stack metadata by removing export_root references.
@@ -103,7 +109,9 @@ def clean_nn_module_stack_and_source_fn(
         The cleaned GraphModule (modified in-place)
     """
 
-    def _process_nn_module_stack(nn_module_stack):
+    def _process_nn_module_stack(
+        nn_module_stack: dict[str, tuple[str, T]],
+    ) -> dict[str, tuple[str, T]]:
         if "L__self____export_root" in nn_module_stack:
             del nn_module_stack["L__self____export_root"]
 
@@ -123,15 +131,17 @@ def clean_nn_module_stack_and_source_fn(
             cleaned_stack[clean_key] = (clean_name, child_class)
         return cleaned_stack
 
-    def _process_source_fn(source_fn_stack):
+    def _process_source_fn(source_fn_stack: Iterable[T]) -> Iterable[T]:
         cleaned_stack = []
         for item in source_fn_stack:
             if isinstance(item, tuple) and len(item) == 2:
                 name, cls = item
                 if isinstance(name, str):
                     clean_name = clean_export_root_string(name)
+                    # pyrefly: ignore[bad-argument-type]
                     cleaned_stack.append((clean_name, cls))
                 else:
+                    # pyrefly: ignore[bad-argument-type]
                     cleaned_stack.append(item)
             else:
                 cleaned_stack.append(item)
@@ -308,7 +318,9 @@ class DynamoGraphTransformer(torch.fx.Transformer):
                 new_placeholder = self.new_input_nodes[user_input_idx]
                 self.old_to_new_mapping[old_placeholder] = new_placeholder
 
-    def placeholder(self, target, args, kwargs) -> Any:
+    def placeholder(
+        self, target: Target, args: tuple[Argument, ...], kwargs: dict[str, Any]
+    ) -> Any:
         """Replace old placeholders with new flattened ones."""
         # Return the corresponding new placeholder
         if self.current_node in self.old_to_new_mapping:
@@ -328,7 +340,9 @@ class DynamoGraphTransformer(torch.fx.Transformer):
             # Shouldn't happen if mapping is correct, but fallback
             return super().placeholder(target, args, kwargs)
 
-    def output(self, target, args, kwargs) -> Any:
+    def output(
+        self, target: Target, args: Sequence[Any], kwargs: dict[str, Any]
+    ) -> Any:
         """Transform output according to graph_output_map."""
         original_outputs = args[0]
 
@@ -347,20 +361,20 @@ class DynamoGraphTransformer(torch.fx.Transformer):
 
         return super().output(target, (tuple(new_outputs),), {})
 
-    def run_node(self, node: Node) -> Any:
+    def run_node(self, n: Node) -> Any:
         """Run node transformation and preserve metadata."""
-        self.current_node = node
-        result = super().run_node(node)
+        self.current_node = n
+        result = super().run_node(n)
 
         # Copy important metadata
-        if hasattr(result, "node") and result.node is not node:
+        if hasattr(result, "node") and result.node is not n:
             for key in ["val", "example_value", "unbacked_bindings"]:
-                if key in node.meta:
-                    result.node.meta[key] = node.meta[key]
+                if key in n.meta:
+                    result.node.meta[key] = n.meta[key]
 
             # Preserve node names (except output)
-            if node.op != "output" and hasattr(node, "name"):
-                result.node._rename(node.name)
+            if n.op != "output" and hasattr(n, "name"):
+                result.node._rename(n.name)
 
         return result
 
@@ -372,16 +386,18 @@ class DynamoGraphTransformer(torch.fx.Transformer):
         if hasattr(self.module, "meta"):
             # pyrefly: ignore [unsupported-operation]
             if "dynamo_flat_name_to_original_fqn" in self.module.meta:
-                # pyrefly: ignore [index-error]
+                # pyrefly: ignore [bad-index]
                 result_gm.meta["dynamo_flat_name_to_original_fqn"] = self.module.meta[
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index, index-error]
+                    # pyrefly: ignore [bad-index, index-error]
                     "dynamo_flat_name_to_original_fqn"
                 ]
             # pyrefly: ignore [unsupported-operation]
             if "dynamo_compile_id" in self.module.meta:
-                # pyrefly: ignore [index-error]
+                # pyrefly: ignore [bad-index]
                 result_gm.meta["dynamo_compile_id"] = self.module.meta[
-                    # pyrefly: ignore [index-error]
+                    # pyrefly: ignore [bad-index, index-error]
+                    # pyrefly: ignore [bad-index, index-error]
                     "dynamo_compile_id"
                 ]
 
@@ -390,13 +406,13 @@ class DynamoGraphTransformer(torch.fx.Transformer):
 
 def _suggest_or_raise_constraint_violation(
     module_to_trace: torch.nn.Module,
-    orig_callable: Callable,  # type: ignore[type-arg]
+    orig_callable: Callable[..., Any],
     fake_mode: Optional["FakeTensorMode"],
     graph_capture_output: CaptureOutput,
     args: Any,
     kwargs: Any,
     dynamic_shapes: Optional[Union[dict[str, Any], tuple[Any], list[Any]]],
-):
+) -> None:
     constraint_violation_error = None
     try:
         # Check if we have any constraint violations
@@ -512,21 +528,25 @@ def pytreeify(
         pass
 
     class InShuffle(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.mod = mod
             self.num_inputs = len(flat_real_args)
             self.gm_inputs = None
 
-        def forward(self, *flat_proxy_args):
+        def forward(self, *flat_proxy_args: Any) -> tuple[Any, ...]:
             args, kwargs = pytree.tree_unflatten(
                 [flat_proxy_args[i] for i in range(self.num_inputs)], in_spec
             )
 
-            def backend_dummy(*example_inputs):
+            def backend_dummy(*example_inputs: Any) -> Any:
+                # pyrefly: ignore [bad-assignment]
                 self.gm_inputs = example_inputs
                 raise Yield
 
+            # Save mode stack before running forward_callable, as the captured
+            # bytecode may include side effects that modify the mode stack.
+            saved_mode_stack = torch.overrides._get_current_function_mode_stack()
             try:
                 out.forward_callable(
                     compiled_fn=backend_dummy, extra_globals=f_globals
@@ -534,40 +554,51 @@ def pytreeify(
             except Yield:
                 assert self.gm_inputs is not None
                 return self.gm_inputs
+            finally:
+                set_torch_function_mode_stack(saved_mode_stack)
             raise RuntimeError
 
     fake_mode = torch._dynamo.utils.detect_fake_mode(flat_real_args)
     if fake_mode and fake_mode.shape_env is None:
         fake_mode.shape_env = ShapeEnv()
     in_shuffle_graph = make_fx(
-        InShuffle(), tracing_mode="symbolic", proxy_module_inputs=True
+        # pyrefly: ignore [bad-argument-type]
+        InShuffle(),
+        tracing_mode="symbolic",
+        proxy_module_inputs=True,
     )(*flat_real_args)
     _normalize_shuffle_graph(in_shuffle_graph)
 
     output_node = next(iter(reversed(backend_input.graph_module.graph.nodes)))
 
     class OutShuffle(torch.nn.Module):
-        def __init__(self):
+        def __init__(self) -> None:
             super().__init__()
             self.num_inputs = len(flat_real_args)
 
             self.num_outputs = len(output_node.args[0])
             self.out_spec: Optional[TreeSpec] = None
 
-        def forward(self, *flat_proxy_args):
+        def forward(self, *flat_proxy_args: Any) -> list[Any]:
             args, kwargs = pytree.tree_unflatten(
                 [flat_proxy_args[i] for i in range(self.num_inputs)], in_spec
             )
 
-            def backend_dummy(*example_inputs):
+            def backend_dummy(*example_inputs: Any) -> Any:
                 return [
                     flat_proxy_args[self.num_inputs + i]
                     for i in range(self.num_outputs)
                 ]
 
-            results = out.forward_callable(
-                compiled_fn=backend_dummy, extra_globals=f_globals
-            )(*args, **kwargs)
+            # Save mode stack before running forward_callable, as the captured
+            # bytecode may include side effects that modify the mode stack.
+            saved_mode_stack = torch.overrides._get_current_function_mode_stack()
+            try:
+                results = out.forward_callable(
+                    compiled_fn=backend_dummy, extra_globals=f_globals
+                )(*args, **kwargs)
+            finally:
+                set_torch_function_mode_stack(saved_mode_stack)
             ret, self.out_spec = pytree.tree_flatten(results)
             return ret
 
@@ -587,7 +618,10 @@ def pytreeify(
         fake_mode.shape_env = ShapeEnv()
     with enable_python_dispatcher():
         out_shuffle_graph = make_fx(
-            out_shuffle, tracing_mode="real", proxy_module_inputs=True
+            # pyrefly: ignore [bad-argument-type]
+            out_shuffle,
+            tracing_mode="real",
+            proxy_module_inputs=True,
         )(*flat_out_shuffle_args)
     _normalize_shuffle_graph(out_shuffle_graph)
 
@@ -603,7 +637,7 @@ def pytreeify(
     )
 
 
-def normalize_graph_module(gm):
+def normalize_graph_module(gm: torch.fx.GraphModule) -> None:
     for node in gm.graph.nodes:
         if node.op == "placeholder":
             node.meta["val"] = node.meta["example_value"]
@@ -612,6 +646,7 @@ def normalize_graph_module(gm):
 def dynamo_graph_capture_for_export(
     mod: Callable[..., Any],
     constraints: Optional[list[Constraint]] = None,
+    restore_state_dict: bool = False,
 ) -> Callable[..., Any]:
     def inner(*args: Any, **kwargs: Any) -> Any:
         assert not torch._dynamo.config.install_free_tensors
@@ -682,6 +717,8 @@ def dynamo_graph_capture_for_export(
         tracing_context = TracingContext(graph_module.meta["fake_mode"])
         tracing_context.tensor_to_context = out.backend_input.tensor_to_context  # type: ignore[attr-defined]
         graph_module.meta["tracing_context"] = tracing_context
+        if restore_state_dict:
+            _restore_state_dict(mod, graph_module)
         return graph_module
 
     return inner

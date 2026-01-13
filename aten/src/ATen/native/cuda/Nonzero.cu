@@ -183,7 +183,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
   auto& allocator = *c10::cuda::CUDACachingAllocator::get();
   auto num_nonzeros = allocator.allocate(sizeof(int) * num_chunks);
   for (int64_t idx = 0; idx < num_chunks; idx++) {
-    int64_t remaining = std::min(chunk_size, self.numel() - idx * chunk_size);
+    int64_t remaining = std::min<int64_t>(chunk_size, self.numel() - idx * chunk_size);
     ATEN_CUB_TRANSFORM_ITERATOR(bool, NonZeroOp<scalar_t>, const scalar_t*) itr(
         self_.const_data_ptr<scalar_t>() + idx * chunk_size,
         NonZeroOp<scalar_t>());
@@ -241,7 +241,7 @@ void nonzero_cuda_out_impl(const Tensor& self, Tensor& out) {
   int64_t curr_nonzeros = 0;
   if (self.dim() > 0) {
     for (int64_t idx = 0; idx < num_chunks; idx++) {
-      int remaining = std::min(chunk_size, self.numel() - idx * chunk_size);
+      int remaining = std::min<int64_t>(chunk_size, self.numel() - idx * chunk_size);
 
       ATEN_CUB_COUNTING_ITERATOR(int64_t) counting_itr(idx * chunk_size);
       ATEN_CUB_TRANSFORM_ITERATOR(bool, NonZeroOp<scalar_t>, const scalar_t*)
@@ -353,7 +353,7 @@ void nonzero_static_cuda_out_impl(
   <<<grid_size, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(
     in_data_ptr, out_data_ptr, (int64_t*)agg_cum.get(), self.numel(), size, iters_per_cta);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-  int64_t out_grid = std::min(num_sms, (size + BLOCK_THREADS - 1)/BLOCK_THREADS);
+  int64_t out_grid = std::min<int64_t>(num_sms, (size + BLOCK_THREADS - 1)/BLOCK_THREADS);
   write_fill_value<<<out_grid, BLOCK_THREADS, 0, at::cuda::getCurrentCUDAStream()>>>(out_data_ptr, (int64_t *)agg_cum.get() + grid_size - 1, fill_value, size);
   if (self.dim() > 1) {
     TensorDims<int64_t> dims;

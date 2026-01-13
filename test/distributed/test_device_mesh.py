@@ -294,6 +294,29 @@ class DeviceMeshTest(DTensorTestBase):
         ).wait()
         self.assertEqual(global_tensor.shape, (self.world_size * 2, 8))
 
+    def test_fake_pg_device_mesh_cuda_on_cpu(self):
+        """
+        Test that DeviceMesh can be initialized with fake backend using 'cuda'
+        device type even on CPU-only machines.
+        """
+        fake_store = FakeStore()
+        init_process_group("fake", store=fake_store, rank=0, world_size=1)
+
+        # This should NOT fail even on CPU-only machines because
+        # the fake backend skips device setup
+        device_mesh = init_device_mesh(
+            "cuda",
+            (1,),
+            mesh_dim_names=("dp",),
+        )
+
+        # Verify mesh is created correctly
+        self.assertEqual(device_mesh.ndim, 1)
+        self.assertEqual(device_mesh.size(), 1)
+        self.assertEqual(device_mesh.mesh_dim_names, ("dp",))
+        backend = device_mesh.get_all_groups()[0]._get_backend(torch.device("cuda"))
+        self.assertIsInstance(backend, torch._C._distributed_c10d.FakeProcessGroup)
+
     @with_comms
     def test_from_group_with_global_pg(self):
         # Simple test: check `from_group` from a mesh pg vs. directly
@@ -975,6 +998,18 @@ class TestDeviceMeshGetItem(DTensorTestBase):
         self.assertEqual(dp_cp_mesh.mesh_dim_names, ("dp_cp",))
         # check flattened mesh dependency
         self.assertEqual(dp_cp_mesh._get_root_mesh(), mesh_4d)
+        mesh_4d[mesh_dim_names[1:3]]._flatten("dp_shard_cp")
+        mesh_4d["dp_replicate", "dp_shard_cp"]._flatten("dp")
+        self.assertEqual(mesh_4d["dp", "tp"].mesh.shape, (8, 1))
+
+        # Corner cases when slicing and flattening a mesh which is smaller than the world size.
+        mesh_4d = init_device_mesh(
+            self.device_type,
+            mesh_shape=(1, 1, 1, 1),
+            mesh_dim_names=("dp_replicate", "dp_shard", "cp", "tp"),
+        )
+        mesh_4d["dp_shard", "cp"]._flatten("dp_cp")
+        self.assertEqual(mesh_4d["dp_replicate", "dp_cp", "tp"].mesh.shape, (1, 1, 1))
 
     @with_comms
     def test_unflatten_mesh_2d(self):

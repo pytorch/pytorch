@@ -4,7 +4,7 @@ from __future__ import annotations
 import gc
 import typing
 from collections.abc import Callable
-from typing import Optional, overload, TYPE_CHECKING, TypeAlias, Union
+from typing import overload, TYPE_CHECKING, TypeAlias, Union
 from typing_extensions import ParamSpec, Self, TypeVar
 
 import torch
@@ -39,11 +39,7 @@ if not hasattr(torch._C, "_CudaStreamBase"):
         "_cuda_isCurrentStreamCapturing"
     )
 
-from torch._C import (  # noqa: F401
-    _cuda_isCurrentStreamCapturing,
-    _CUDAGraph,
-    _graph_pool_handle,
-)
+from torch._C import _cuda_isCurrentStreamCapturing, _CUDAGraph, _graph_pool_handle
 
 
 def is_current_stream_capturing() -> bool:
@@ -67,7 +63,7 @@ def graph_pool_handle() -> _POOL_HANDLE:
 
 
 # Python shim helps Sphinx process docstrings more reliably.
-class CUDAGraph(torch._C._CUDAGraph):
+class CUDAGraph(_CUDAGraph):
     r"""Wrapper around a CUDA graph.
 
     Arguments:
@@ -98,7 +94,7 @@ class CUDAGraph(torch._C._CUDAGraph):
         return super().__new__(cls, keep_graph)
 
     def capture_begin(
-        self, pool: Optional[_POOL_HANDLE] = None, capture_error_mode: str = "global"
+        self, pool: _POOL_HANDLE | None = None, capture_error_mode: str = "global"
     ) -> None:
         r"""Begin capturing CUDA work on the current stream.
 
@@ -213,28 +209,27 @@ class graph:
         https://docs.nvidia.com/cuda/cuda-runtime-api/group__CUDART__STREAM.html#group__CUDART__STREAM_1g9d0535d93a214cbf126835257b16ba85
     """  # noqa: B950
 
-    default_capture_stream: Optional[torch.cuda.Stream] = None
+    default_capture_stream: torch.cuda.Stream | None = None
 
     def __init__(
         self,
         cuda_graph: CUDAGraph,
-        pool: Optional[_POOL_HANDLE] = None,
-        stream: Optional[torch.cuda.Stream] = None,
+        pool: _POOL_HANDLE | None = None,
+        stream: torch.cuda.Stream | None = None,
         capture_error_mode: str = "global",
     ):
         # Lazy-init of default_capture_stream helps avoid circular-import errors.
         # Not thread safe, but graphs already have the general (explicitly documented)
         # restriction that only one capture may be underway at a time in the process.
-        if self.__class__.default_capture_stream is None:
+        if stream is None and self.__class__.default_capture_stream is None:
             self.__class__.default_capture_stream = torch.cuda.Stream()
 
-        self.pool: Union[tuple[()], tuple[_POOL_HANDLE]] = (
-            () if pool is None else (pool,)
-        )
+        self.pool: tuple[()] | tuple[_POOL_HANDLE] = () if pool is None else (pool,)
         self.capture_stream = (
             stream if stream is not None else self.__class__.default_capture_stream
         )
-        assert self.capture_stream is not None
+        if self.capture_stream is None:
+            raise AssertionError("capture_stream must not be None")
         self.stream_ctx = torch.cuda.stream(self.capture_stream)
         self.cuda_graph = cuda_graph
         self.capture_error_mode = capture_error_mode
@@ -252,6 +247,8 @@ class graph:
             gc.collect()
 
         torch.cuda.empty_cache()
+        # pyrefly: ignore [missing-attribute]
+        torch._C._host_emptyCache()
 
         # Stackoverflow seems comfortable with this pattern
         # https://stackoverflow.com/questions/26635684/calling-enter-and-exit-manually#39172487
@@ -279,7 +276,7 @@ def make_graphed_callables(
     sample_args: tuple[Tensor, ...],
     num_warmup_iters: int = 3,
     allow_unused_input: bool = False,
-    pool: Optional[_POOL_HANDLE] = None,
+    pool: _POOL_HANDLE | None = None,
 ) -> _ModuleOrCallable: ...
 
 
@@ -289,17 +286,17 @@ def make_graphed_callables(
     sample_args: tuple[tuple[Tensor, ...], ...],
     num_warmup_iters: int = 3,
     allow_unused_input: bool = False,
-    pool: Optional[_POOL_HANDLE] = None,
+    pool: _POOL_HANDLE | None = None,
 ) -> tuple[_ModuleOrCallable, ...]: ...
 
 
 def make_graphed_callables(
-    callables: Union[_ModuleOrCallable, tuple[_ModuleOrCallable, ...]],
-    sample_args: Union[tuple[Tensor, ...], tuple[tuple[Tensor, ...], ...]],
+    callables: _ModuleOrCallable | tuple[_ModuleOrCallable, ...],
+    sample_args: tuple[Tensor, ...] | tuple[tuple[Tensor, ...], ...],
     num_warmup_iters: int = 3,
     allow_unused_input: bool = False,
-    pool: Optional[_POOL_HANDLE] = None,
-) -> Union[_ModuleOrCallable, tuple[_ModuleOrCallable, ...]]:
+    pool: _POOL_HANDLE | None = None,
+) -> _ModuleOrCallable | tuple[_ModuleOrCallable, ...]:
     r"""Accept callables (functions or :class:`nn.Module<torch.nn.Module>`\ s) and returns graphed versions.
 
     Each graphed callable's forward pass runs its source callable's
@@ -385,25 +382,28 @@ def make_graphed_callables(
 
     for c, args in zip(callables, _sample_args):
         if isinstance(c, torch.nn.Module):
-            assert (
+            if not (
                 len(c._backward_hooks) == 0
                 and len(c._forward_hooks) == 0
                 and len(c._forward_pre_hooks) == 0
-            ), (
-                "Modules must not have hooks registered at the time they are passed. However, registering hooks "
-                + "on modules after passing them through make_graphed_callables is allowed."
-            )
-            assert all(b.requires_grad is False for b in c.buffers()), (
-                "In any :class:`~torch.nn.Module` passed to "
-                + ":func:`~make_graphed_callables`, only parameters may be trainable. All buffers must have "
-                + "``requires_grad=False``."
-            )
+            ):
+                raise AssertionError(
+                    "Modules must not have hooks registered at the time they are passed. However, registering hooks "
+                    + "on modules after passing them through make_graphed_callables is allowed."
+                )
+            if not all(b.requires_grad is False for b in c.buffers()):
+                raise AssertionError(
+                    "In any :class:`~torch.nn.Module` passed to "
+                    + ":func:`~make_graphed_callables`, only parameters may be trainable. All buffers must have "
+                    + "``requires_grad=False``."
+                )
         flatten_arg = torch.utils._pytree.arg_tree_leaves(*args)
         flatten_sample_args.append(tuple(flatten_arg))
-        assert all(isinstance(arg, torch.Tensor) for arg in flatten_arg), (
-            "In the beta API, sample_args "
-            + "for each callable must contain only Tensors. Other types are not allowed."
-        )
+        if not all(isinstance(arg, torch.Tensor) for arg in flatten_arg):
+            raise AssertionError(
+                "In the beta API, sample_args "
+                + "for each callable must contain only Tensors. Other types are not allowed."
+            )
 
     # If a callable is an nn.Module, its graph's full input surface is the args the user explicitly
     # passes to forward (ie, its sample_args) AND the module's parameter attributes.
@@ -521,7 +521,7 @@ def make_graphed_callables(
         output_unflatten_spec: torch.utils._pytree.TreeSpec,
         static_input_surface: tuple[Tensor, ...],
         static_outputs: tuple[Tensor, ...],
-        static_grad_outputs: tuple[Optional[Tensor], ...],
+        static_grad_outputs: tuple[Tensor | None, ...],
         static_grad_inputs: tuple[Tensor, ...],
     ) -> Callable[..., object]:
         class Graphed(torch.autograd.Function):
@@ -533,14 +533,20 @@ def make_graphed_callables(
                     if static_input_surface[i].data_ptr() != inputs[i].data_ptr():
                         static_input_surface[i].copy_(inputs[i])
                 fwd_graph.replay()
-                assert isinstance(static_outputs, tuple)
+                if not isinstance(static_outputs, tuple):
+                    raise AssertionError(
+                        f"static_outputs must be tuple, got {type(static_outputs)}"
+                    )
                 return tuple(o.detach() for o in static_outputs)
 
             @staticmethod
             @torch.autograd.function.once_differentiable
             # pyrefly: ignore [bad-override]
             def backward(ctx: object, *grads: Tensor) -> tuple[Tensor, ...]:
-                assert len(grads) == len(static_grad_outputs)
+                if len(grads) != len(static_grad_outputs):
+                    raise AssertionError(
+                        f"len(grads)={len(grads)} != len(static_grad_outputs)={len(static_grad_outputs)}"
+                    )
                 for g, grad in zip(static_grad_outputs, grads):
                     if g is not None:
                         # don't copy if autograd gods have been kind and the
@@ -550,7 +556,10 @@ def make_graphed_callables(
                 bwd_graph.replay()
 
                 # Input args that didn't require grad expect a None gradient.
-                assert isinstance(static_grad_inputs, tuple)
+                if not isinstance(static_grad_inputs, tuple):
+                    raise AssertionError(
+                        f"static_grad_inputs must be tuple, got {type(static_grad_inputs)}"
+                    )
                 return tuple(
                     # pyrefly: ignore [bad-argument-type]
                     b.detach() if b is not None else b

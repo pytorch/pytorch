@@ -113,7 +113,7 @@ __device__ __forceinline__ c10::complex<T> WARP_SHFL_DOWN(c10::complex<T> value,
  */
 template <typename T>
 __device__ __forceinline__ T doLdg(const T* p) {
-#if __CUDA_ARCH__ >= 350 && !defined(USE_ROCM)
+#if !defined(USE_ROCM)
   return __ldg(p);
 #else
   return *p;

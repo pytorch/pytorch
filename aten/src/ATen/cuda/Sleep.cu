@@ -1,7 +1,6 @@
 #include <ATen/cuda/CUDAContextLight.h>
 #include <ATen/cuda/Sleep.h>
 
-#include <c10/cuda/CUDACachingAllocator.h>
 #include <c10/cuda/CUDAException.h>
 #include <c10/cuda/CUDAStream.h>
 
@@ -25,30 +24,13 @@ __global__ void spin_kernel(int64_t cycles) {
 #endif
   }
 }
-
-thread_local int *flag = nullptr;
-
-} // anonymous namespace
+}
 
 void sleep(int64_t cycles) {
   dim3 grid(1);
   dim3 block(1);
   spin_kernel<<<grid, block, 0, c10::cuda::getCurrentCUDAStream()>>>(cycles);
   C10_CUDA_KERNEL_LAUNCH_CHECK();
-}
-
-void busy_wait_for_flag() {
-  if (!flag) {
-    flag = (int*)c10::cuda::CUDACachingAllocator::raw_alloc(sizeof(int));
-  }
-  CUresult result;
-  result = cuStreamWriteValue32(c10::cuda::getCurrentCUDAStream(), flag, 0, 0);
-  result = cuStreamWaitValue32(c10::cuda::getCurrentCUDAStream(), flag, 1, 0);
-}
-
-void clear_flag() {
-  TORCH_ASSERT(flag != nullptr, "you must call busy_wait_for_flag before clear_flag");
-  CUresult result = cuStreamWriteValue32(c10::cuda::getCurrentCUDAStream(), flag, 1, 0);
 }
 
 #ifdef USE_ROCM

@@ -68,6 +68,11 @@ INPUT                  = ../../../aten/src/ATen/ATen.h \
                          ../../../torch/csrc/jit/serialization/import.h \
                          ../../../torch/csrc/jit/api/module.h \
                          ../../../torch/csrc/stable/library.h \
+                         ../../../torch/csrc/stable/ops.h \
+                         ../../../torch/csrc/stable/tensor_struct.h \
+                         ../../../torch/csrc/stable/device_struct.h \
+                         ../../../torch/csrc/stable/accelerator.h \
+                         ../../../torch/csrc/stable/macros.h \
                          ../../../torch/library.h \
                          ../../../torch/custom_class.h
 # Don't include .cpp files!
@@ -106,6 +111,12 @@ SKIP_FUNCTION_MACROS   = NO
 # Extra defs for to help with building the _right_ version of the docs
 PREDEFINED             = DOXYGEN_DOCUMENTATION_BUILD
 PREDEFINED            += DOXYGEN_SHOULD_SKIP_THIS
+# Use FILTER_PATTERNS to preprocess HIDDEN_NAMESPACE macros only for torch/csrc/stable files.
+# Doxygen's PREDEFINED doesn't work reliably because it finds the actual macro definitions
+# in the included headers. Using sed with capture groups to generically handle any namespace.
+# Also replace TORCH_FEATURE_VERSION conditionals with #if 1 so all functions are documented.
+# Note: 3-arg patterns must come before 2-arg patterns for correct matching.
+FILTER_PATTERNS        = */torch/csrc/stable/*.h="sed -E -e 's/HIDDEN_NAMESPACE_BEGIN\(([^,]+), ([^,]+), ([^)]+)\)/namespace \1 { namespace \2 { namespace \3 {/g' -e 's/HIDDEN_NAMESPACE_END\(([^,]+), ([^,]+), ([^)]+)\)/} } }/g' -e 's/HIDDEN_NAMESPACE_BEGIN\(([^,]+), ([^)]+)\)/namespace \1 { namespace \2 {/g' -e 's/HIDDEN_NAMESPACE_END\(([^,]+), ([^)]+)\)/} }/g' -e 's/#if TORCH_FEATURE_VERSION >= TORCH_VERSION_[0-9_]*/#if 1/g' -e 's/#if TORCH_FEATURE_VERSION < TORCH_VERSION_[0-9_]*/#if 1/g' -e 's/#endif \/\/ TORCH_FEATURE_VERSION.*/#endif/g'"
 # Symbol expansion to follow for #include statements (not input)
 SEARCH_INCLUDES        = YES
 INCLUDE_PATH           = ../../.. \
