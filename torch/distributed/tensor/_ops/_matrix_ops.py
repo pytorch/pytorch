@@ -1134,7 +1134,8 @@ def grouped_mm_strategy(op_schema: OpSchema) -> OpStrategy:
         )
 
     def valid_grouped_mm_strides(
-        input_specs: list[DTensorSpec], output_specs: tuple[DTensorSpec | None, ...]
+        input_specs: list[DTensorSpec],
+        output_specs: DTensorSpec | tuple[DTensorSpec | None, ...],
     ) -> bool:
         # 1. compute the local-tensor shape/strides given this sharding proposal
         # 2. apply the logic from the groped_mm meta function
