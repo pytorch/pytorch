@@ -136,7 +136,10 @@ static bool isGloballyDisabledAddmmCudaLt(const at::Device& device) {
   #endif
 
   // Check whether it is disabled in the env
-  static const auto is_addmm_cuda_lt_disabled = c10::utils::get_env("DISABLE_ADDMM_CUDA_LT");
+  // Temporarily removing `static` as `DISABLE_ADDMM_CUDA_LT`
+  // is used as an ad hoc fix for tests which switch between "cublas"/"cublaslt" backends.
+  // static const auto is_addmm_cuda_lt_disabled = c10::utils::get_env("DISABLE_ADDMM_CUDA_LT");
+  const auto is_addmm_cuda_lt_disabled = c10::utils::get_env("DISABLE_ADDMM_CUDA_LT");
   if (is_addmm_cuda_lt_disabled == "1") {
     return true;
   }
@@ -355,7 +358,11 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
   checkAllSameGPU(__func__, targs);
 
   // Handle whether to use the Lt interface {
-  static bool persistent_disable_addmm_cuda_lt = isGloballyDisabledAddmmCudaLt(self.device());
+  // NOTE: See https://github.com/pytorch/pytorch/issues/172231
+  // Temporarily removing `static` as `DISABLE_ADDMM_CUDA_LT`
+  // is used as an ad hoc fix for tests which switch between "cublas"/"cublaslt" backends.
+  // static bool persistent_disable_addmm_cuda_lt = isGloballyDisabledAddmmCudaLt(self.device());
+  bool persistent_disable_addmm_cuda_lt = isGloballyDisabledAddmmCudaLt(self.device());
   // if lt path fails, we recurse back into this function here and force the lt path to off
   // we cannot update variable disable_addmm_cuda_lt from above since it is static and would be permanent
   bool disable_addmm_cuda_lt = persistent_disable_addmm_cuda_lt || disable_addmm_cuda_lt_override;

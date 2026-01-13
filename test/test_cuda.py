@@ -129,6 +129,32 @@ if TEST_CUDA:
 _cycles_per_ms = None
 
 
+@contextlib.contextmanager
+def blas_library_context(backend):
+    prev_backend = torch.backends.cuda.preferred_blas_library()
+    torch.backends.cuda.preferred_blas_library(backend)
+
+    # See https://github.com/pytorch/pytorch/issues/172231
+    # cublas backend is being ignored unless Lt is explicitly
+    # disabled via an Env Var.
+    disable_lt_var_name = "DISABLE_ADDMM_CUDA_LT"
+    disable_lt_val = os.environ.get(disable_lt_var_name, None)
+    if backend == "cublas":
+        os.environ[disable_lt_var_name] = "1"
+
+    try:
+        yield
+    finally:
+        # See https://github.com/pytorch/pytorch/issues/172231
+        # Not needed once properly resolved
+        if backend == "cublas":
+            if disable_lt_val is None:
+                os.environ.pop(disable_lt_var_name, None)
+            else:
+                os.environ[disable_lt_var_name] = disable_lt_val
+        torch.backends.cuda.preferred_blas_library(prev_backend)
+
+
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 @torch.testing._internal.common_utils.markDynamoStrictTest
 class TestCuda(TestCase):
@@ -674,48 +700,48 @@ print(t.is_pinned())
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
     @setBlasBackendsToDefaultFinally
     def test_cublas_workspace_explicit_allocation(self):
-        torch.backends.cuda.preferred_blas_library("cublas")
-        a = torch.randn(7, 7, device="cuda", requires_grad=False)
-        if torch.version.hip:
-            default_workspace_size = 1024 * 32 * 1024  # :1024:32  32MiB
-            # different size (128 MiB) expected on MI300 GPU
-            gcn_arch = str(
-                torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
-            )
-            if "gfx94" in gcn_arch or "gfx95" in gcn_arch:
-                default_workspace_size = 1024 * 128 * 1024  # :1024:128
-        else:
-            default_workspace_size = (
-                4096 * 2 * 1024 + 16 * 8 * 1024
-            )  # :4096:2:16:8  8MiB
-            # different size (32 MiB) expected on Hopper GPU
-            if torch.cuda.get_device_capability() == (9, 0):
-                default_workspace_size = 4096 * 8 * 1024
+        with blas_library_context("cublas"):
+            a = torch.randn(7, 7, device="cuda", requires_grad=False)
+            if torch.version.hip:
+                default_workspace_size = 1024 * 32 * 1024  # :1024:32  32MiB
+                # different size (128 MiB) expected on MI300 GPU
+                gcn_arch = str(
+                    torch.cuda.get_device_properties(0).gcnArchName.split(":", 1)[0]
+                )
+                if "gfx94" in gcn_arch or "gfx95" in gcn_arch:
+                    default_workspace_size = 1024 * 128 * 1024  # :1024:128
+            else:
+                default_workspace_size = (
+                    4096 * 2 * 1024 + 16 * 8 * 1024
+                )  # :4096:2:16:8  8MiB
+                # different size (32 MiB) expected on Hopper GPU
+                if torch.cuda.get_device_capability() == (9, 0):
+                    default_workspace_size = 4096 * 8 * 1024
 
-        def check_workspace_size(inp):
+            def check_workspace_size(inp):
+                torch._C._cuda_clearCublasWorkspaces()
+                start = torch.cuda.memory_stats()["active_bytes.all.allocated"]
+                with torch.no_grad():
+                    torch.matmul(inp, inp)
+                finish = torch.cuda.memory_stats()["active_bytes.all.allocated"]
+                return finish - start
+
+            # check default
+            os.environ["CUBLAS_WORKSPACE_CONFIG"] = ""
+            self.assertLess(check_workspace_size(a) - default_workspace_size, 524288)
+            self.assertLess(abs(check_workspace_size(a) - default_workspace_size), 524288)
+
+            # check default with bad user config
+            os.environ["CUBLAS_WORKSPACE_CONFIG"] = "-1"
+            self.assertLess(check_workspace_size(a) - default_workspace_size, 524288)
+            self.assertLess(abs(check_workspace_size(a) - default_workspace_size), 524288)
+
+            # check valid config
+            os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":128:8:64:16:32:32"
+            self.assertLess(check_workspace_size(a) - (3072 * 1024), 524288)
+            self.assertLess(abs(check_workspace_size(a) - (3072 * 1024)), 524288)
+
             torch._C._cuda_clearCublasWorkspaces()
-            start = torch.cuda.memory_stats()["active_bytes.all.allocated"]
-            with torch.no_grad():
-                torch.matmul(inp, inp)
-            finish = torch.cuda.memory_stats()["active_bytes.all.allocated"]
-            return finish - start
-
-        # check default
-        os.environ["CUBLAS_WORKSPACE_CONFIG"] = ""
-        self.assertLess(check_workspace_size(a) - default_workspace_size, 524288)
-        self.assertLess(abs(check_workspace_size(a) - default_workspace_size), 524288)
-
-        # check default with bad user config
-        os.environ["CUBLAS_WORKSPACE_CONFIG"] = "-1"
-        self.assertLess(check_workspace_size(a) - default_workspace_size, 524288)
-        self.assertLess(abs(check_workspace_size(a) - default_workspace_size), 524288)
-
-        # check valid config
-        os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":128:8:64:16:32:32"
-        self.assertLess(check_workspace_size(a) - (3072 * 1024), 524288)
-        self.assertLess(abs(check_workspace_size(a) - (3072 * 1024)), 524288)
-
-        torch._C._cuda_clearCublasWorkspaces()
 
     def test_cublas_allow_tf32_get_set(self):
         skip_tf32_cublas = "TORCH_ALLOW_TF32_CUBLAS_OVERRIDE" in os.environ and int(
@@ -2410,27 +2436,27 @@ exit(2)
     @serialTest()
     @setBlasBackendsToDefaultFinally
     def test_repeat_graph_capture_cublas_workspace_memory(self):
-        torch.backends.cuda.preferred_blas_library("cublas")
-        (x, y, z) = 1024, 512, 64
-        a = torch.rand((x, y), device="cuda")
-        b = torch.rand((y, z), device="cuda")
+        with blas_library_context("cublas"):
+            (x, y, z) = 1024, 512, 64
+            a = torch.rand((x, y), device="cuda")
+            b = torch.rand((y, z), device="cuda")
 
-        # warmup
-        torch.mm(a, b)
+            # warmup
+            torch.mm(a, b)
 
-        free_bytes_before, total_bytes = torch.cuda.mem_get_info()
-        used_gb_before = (total_bytes - free_bytes_before) / 1e9
+            free_bytes_before, total_bytes = torch.cuda.mem_get_info()
+            used_gb_before = (total_bytes - free_bytes_before) / 1e9
 
-        for _ in range(100):
-            torch_graph = torch.cuda.CUDAGraph()
-            with torch.cuda.graph(torch_graph):
-                torch.mm(a, b)
-            torch_graph.replay()
+            for _ in range(100):
+                torch_graph = torch.cuda.CUDAGraph()
+                with torch.cuda.graph(torch_graph):
+                    torch.mm(a, b)
+                torch_graph.replay()
 
-        free_bytes_after, _ = torch.cuda.mem_get_info()
-        used_gb_after = (total_bytes - free_bytes_after) / 1e9
+            free_bytes_after, _ = torch.cuda.mem_get_info()
+            used_gb_after = (total_bytes - free_bytes_after) / 1e9
 
-        self.assertFalse(used_gb_before + 0.1 < used_gb_after)
+            self.assertFalse(used_gb_before + 0.1 < used_gb_after)
 
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
