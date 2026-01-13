@@ -1382,6 +1382,28 @@ class LoweringTest(MultiProcContinuousTest):
             msg="Compiled and eager (reuse) outputs do not match",
         )
 
+    @skip_if_rocm_multiprocess  # test requires support for registered buffers
+    @skip_if_lt_x_gpu(2)
+    @fresh_inductor_cache()
+    def test_external_allocation_fallback(self):
+        self._init_process()
+
+        N = 8
+
+        def func_input_direct(x):
+            return torch.ops.symm_mem.one_shot_all_reduce(x, "sum", "0")
+
+        x_input = torch.rand(N, N, device=self.device)
+
+        # Compilation should succeed here even though we do not control allocation
+        # of the input; user is responsible for passing a symmetric memory buffer.
+        compiled_input_direct = torch.compile(func_input_direct, fullgraph=True)
+
+        # At runtime, this should raise an error because the input is not
+        # a symmetric memory buffer as required by the op.
+        with self.assertRaises(RuntimeError):
+            run_and_get_triton_code(compiled_input_direct, x_input)
+
 
 class SymmMemSingleProcTest(TestCase):
     @requires_cuda

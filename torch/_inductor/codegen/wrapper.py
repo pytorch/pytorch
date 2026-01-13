@@ -10,7 +10,6 @@ import inspect
 import logging
 import operator
 import os
-import random
 import re
 import tempfile
 from collections.abc import Callable
@@ -95,6 +94,12 @@ ReuseKey = tuple[torch.device, torch.dtype, str, bool]
 CommBufferReuseKey = tuple[torch.device, torch.dtype, str, "ir.CommBufferType", str]
 BufferLike = Union[ir.Buffer, WorkspaceArg]
 FxConversionFunc = Callable[["WrapperLine"], None]
+
+# Process-wide counter for unique alloc_id in persistent symmetric memory allocations.
+# Each allocation site gets a unique ID that stays constant across iterations,
+# enabling memory reuse via alloc_id_to_dev_ptr cache in SymmetricMemory.cpp.
+# See NOTE [lowering-time collective optimization] in comm_lowering.py.
+_alloc_id_counter = count()
 
 
 def buffer_reuse_key(node: BufferLike) -> ReuseKey:
@@ -837,7 +842,7 @@ class AllocateLine(MemoryPlanningLine):
                 f"{dtype}, "
                 f'torch.device("cuda:{device.index}"), '
                 f'group_name="{group_name}", '
-                f"alloc_id={random.randint(0, 2**64 - 1)})"
+                f"alloc_id={next(_alloc_id_counter)})"
             )
         else:
             raise NotImplementedError(

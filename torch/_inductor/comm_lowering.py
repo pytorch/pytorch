@@ -64,6 +64,11 @@ def can_realize_as_comm_buffer(
     if isinstance(data, ir.Loops):
         return True
 
+    # We cannot realize buffers as comm buffers if we don't control their
+    # allocation.
+    if isinstance(data, ir.Buffer) and not data.should_allocate():
+        return False
+
     layout = data.get_output_spec()
     if isinstance(layout, ir.CommBufferLayout):
         return True
@@ -419,6 +424,11 @@ def register_symm_mem_lowerings():
         """
         if can_realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM):
             realize_as_comm_buffer(inp, ir.CommBufferType.SYMM_MEM, group_name)  # type: ignore[arg-type]
+        else:
+            log.warning(
+                "Failed to realize the input as a symmetric memory buffer for symm_mem operation; "
+                "ensure the input is allocated as a symmetric memory buffer."
+            )
 
     @register_lowering(symm_mem.one_shot_all_reduce)
     def _symm_mem_one_shot_all_reduce(
