@@ -392,12 +392,12 @@ class DTensorRedistributePlanner:
         # Case 11. Replicate() -> _StridedShard(), use chunk, applies to:
         #   R* -> SS(a)[..., x]
         #
-        # NB: Regarding `_StridedShard``, we only allow changing `Partial`, `Replicate`,
-        # `Shard` into `_StridedShard` with the same tensor dim and split_factor that
-        # occurs in the target placement.
+        # NB: Regarding `_StridedShard``, we only allow changing `Replicate` into
+        # `_StridedShard` with the same tensor dim and split_factor that occurs in the
+        # target placement.
         #
-        # NB: Device order in Partial placement doesn't take impact. We should be able
-        # to operate on any Partial mesh dim.
+        # (TODO) Verify device order impact in Partial placement. We may need to handle
+        # device ordering for Partial also.
 
         # list of [DistState, cost]
         all_next_state: dict[DTensorRedistributePlanner.DistState, float] = {}
