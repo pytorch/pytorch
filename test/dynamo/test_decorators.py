@@ -877,6 +877,79 @@ class DecoratorTests(PytreeRegisteringTestCase):
                 "Invalid use of pytree_flatten with nonstrict_trace-ed function", str(e)
             )
 
+    def _test_nonstrict_trace_helper(self, mod_class, args_fn, loss_fn):
+        import torch.utils._pytree as pytree
+
+        mod_eager = mod_class()
+        mod_compile_eager = mod_class()
+        mod_compile_eager.load_state_dict(dict(mod_eager.state_dict()))
+        mod_compile_aot = mod_class()
+        mod_compile_aot.load_state_dict(dict(mod_eager.state_dict()))
+
+        args = args_fn()
+        args_clone = pytree.tree_map(
+            lambda x: x.clone().detach().requires_grad_(x.requires_grad)
+            if isinstance(x, torch.Tensor)
+            else x,
+            args,
+        )
+        args_clone2 = pytree.tree_map(
+            lambda x: x.clone().detach().requires_grad_(x.requires_grad)
+            if isinstance(x, torch.Tensor)
+            else x,
+            args,
+        )
+
+        out_eager = mod_eager(*args)
+        loss_fn(out_eager).backward()
+
+        out_compile_eager = torch.compile(
+            mod_compile_eager, backend="eager", fullgraph=True
+        )(*args_clone)
+        loss_fn(out_compile_eager).backward()
+
+        out_compile_aot = torch.compile(
+            mod_compile_aot, backend="aot_eager", fullgraph=True
+        )(*args_clone2)
+        loss_fn(out_compile_aot).backward()
+
+        self.assertEqual(out_eager, out_compile_eager)
+        self.assertEqual(out_eager, out_compile_aot)
+
+        for (name_eager, param_eager), (_, param_compile_eager), (
+            _,
+            param_compile_aot,
+        ) in zip(
+            mod_eager.named_parameters(),
+            mod_compile_eager.named_parameters(),
+            mod_compile_aot.named_parameters(),
+        ):
+            self.assertEqual(
+                param_eager.grad,
+                param_compile_eager.grad,
+                msg=f"Gradient mismatch for {name_eager} between eager and compile_eager",
+            )
+            self.assertEqual(
+                param_eager.grad,
+                param_compile_aot.grad,
+                msg=f"Gradient mismatch for {name_eager} between eager and compile_aot",
+            )
+
+        pytree.tree_map(
+            lambda x, compile_x: self.assertEqual(x.grad, compile_x.grad)
+            if isinstance(x, torch.Tensor) and x.requires_grad
+            else None,
+            args,
+            args_clone,
+        )
+        pytree.tree_map(
+            lambda x, compile_x: self.assertEqual(x.grad, compile_x.grad)
+            if isinstance(x, torch.Tensor) and x.requires_grad
+            else None,
+            args,
+            args_clone2,
+        )
+
     def test_nonstrict_trace_with_module_input(self):
         """Test nonstrict_trace decorated function with nn.Module as input."""
 
@@ -900,13 +973,13 @@ class DecoratorTests(PytreeRegisteringTestCase):
             def forward(self, x):
                 return traced_forward(self.helper, x)
 
-        mod = WrapperModule()
-        x = torch.randn(3, 3)
-        opt_mod = torch.compile(mod, fullgraph=True, backend="aot_eager")
+        def args_fn():
+            return (torch.randn(3, 3, requires_grad=True),)
 
-        ref = mod(x)
-        res = opt_mod(x)
-        self.assertEqual(ref, res)
+        def loss_fn(out):
+            return out.sum()
+
+        self._test_nonstrict_trace_helper(WrapperModule, args_fn, loss_fn)
 
     def test_nonstrict_trace_with_module_in_pytree(self):
         """Test nonstrict_trace with nn.Module inside a pytree (dict)."""
@@ -933,13 +1006,13 @@ class DecoratorTests(PytreeRegisteringTestCase):
             def forward(self, x):
                 return traced_forward({"first": self.first, "second": self.second}, x)
 
-        mod = WrapperModule()
-        x = torch.randn(3, 3)
-        opt_mod = torch.compile(mod, fullgraph=True, backend="aot_eager")
+        def args_fn():
+            return (torch.randn(3, 3, requires_grad=True),)
 
-        ref = mod(x)
-        res = opt_mod(x)
-        self.assertEqual(ref, res)
+        def loss_fn(out):
+            return out.sum()
+
+        self._test_nonstrict_trace_helper(WrapperModule, args_fn, loss_fn)
 
     def test_nonstrict_trace_with_module_as_kwarg(self):
         """Test nonstrict_trace with nn.Module passed as keyword argument."""
@@ -966,13 +1039,13 @@ class DecoratorTests(PytreeRegisteringTestCase):
             def forward(self, x):
                 return traced_forward(x, helper_mod=self.helper)
 
-        mod = WrapperModule()
-        x = torch.randn(3, 3)
-        opt_mod = torch.compile(mod, fullgraph=True, backend="aot_eager")
+        def args_fn():
+            return (torch.randn(3, 3, requires_grad=True),)
 
-        ref = mod(x)
-        res = opt_mod(x)
-        self.assertEqual(ref, res)
+        def loss_fn(out):
+            return out.sum()
+
+        self._test_nonstrict_trace_helper(WrapperModule, args_fn, loss_fn)
 
     def test_graph_break(self):
         cnts = torch._dynamo.testing.CompileCounter()
