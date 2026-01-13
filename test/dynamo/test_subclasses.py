@@ -3966,6 +3966,44 @@ class GraphModule(torch.nn.Module):
         out_test = torch.compile(fn, backend="aot_eager")()
         self.assertEqual(out_ref, out_test)
 
+    def test_buffer_subclass_isinstance_input(self):
+        from torch.nn.parameter import Buffer
+
+        buf = Buffer(torch.ones(5))
+
+        def fn(b):
+            if isinstance(b, torch.nn.Buffer):
+                return b + 1
+            else:
+                return b + 2
+
+        out_ref = fn(buf)
+        out_test = torch.compile(fn, backend="aot_eager", fullgraph=True)(buf)
+        self.assertEqual(out_ref, out_test)
+
+        torch._dynamo.reset()
+
+        tensor = torch.ones(5)
+        out_ref_tensor = fn(tensor)
+        out_test_tensor = torch.compile(fn, backend="aot_eager", fullgraph=True)(tensor)
+        self.assertEqual(out_ref_tensor, out_test_tensor)
+
+    def test_buffer_subclass_check(self):
+        from torch.nn.parameter import Buffer
+
+        def check_buffer(x):
+            return isinstance(x, torch.nn.Buffer)
+
+        buf = Buffer(torch.ones(5))
+        compiled_fn = torch.compile(check_buffer, fullgraph=True, backend="inductor")
+        self.assertTrue(compiled_fn(buf))
+
+        torch._dynamo.reset()
+
+        tensor = torch.ones(5)
+        compiled_fn = torch.compile(check_buffer, fullgraph=True, backend="inductor")
+        self.assertFalse(compiled_fn(tensor))
+
     def _input_view_test(self, nt_view_name):
         nt_view = VIEW_TEST_CASES[nt_view_name]()
 
