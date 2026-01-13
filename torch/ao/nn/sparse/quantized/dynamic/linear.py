@@ -83,13 +83,15 @@ class Linear(torch.nn.Module):
         error_msgs,
     ):
         op_type = int(state_dict[prefix + "op_type"])
-        assert op_type == "sparse", (
-            f"Cannot load from op_type [{op_type}], expecting [{self._op_type}]"
-        )
+        if op_type != "sparse":
+            raise AssertionError(
+                f"Cannot load from op_type [{op_type}], expecting [{self._op_type}]"
+            )
         state_dict.pop(prefix + "op_type")
 
         version = local_metadata.get("version", None)
-        assert version <= self._version
+        if version is not None and version > self._version:
+            raise AssertionError(f"version {version} > self._version {self._version}")
 
         # Is this code valid? In old quantization it seemed to be used to load
         # older model
@@ -128,7 +130,10 @@ class Linear(torch.nn.Module):
         row_block_size: int | None,
         col_block_size: int | None,
     ) -> None:
-        assert row_block_size is not None and col_block_size is not None
+        if row_block_size is None or col_block_size is None:
+            raise AssertionError(
+                f"row_block_size and col_block_size must not be None, got {row_block_size=}, {col_block_size=}"
+            )
         self.out_features = w.shape[0]
         self.in_features = w.shape[1]
         self._packed_params.set_weight_bias(w, b, row_block_size, col_block_size)
@@ -139,15 +144,17 @@ class Linear(torch.nn.Module):
 
         We only care about the convert at this stage, no need for observers just yet.
         """
-        assert type(mod) is cls._FLOAT_MODULE, (
-            " nnq."
-            + cls.__name__
-            + ".from_float only works for "
-            + cls._FLOAT_MODULE.__name__
-        )
+        if type(mod) is not cls._FLOAT_MODULE:
+            raise AssertionError(
+                " nnq."
+                + cls.__name__
+                + ".from_float only works for "
+                + cls._FLOAT_MODULE.__name__
+            )
         # TODO: Need to add options to qconfig to avoid the calibration.
         # TODO: Add calibration for the sparsity
-        assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
+        if not hasattr(mod, "qconfig"):
+            raise AssertionError("Input float module must have qconfig defined")
         if type(mod) is nni.LinearReLU:
             mod = mod[0]
         # pyrefly: ignore [missing-attribute]
@@ -170,12 +177,17 @@ class Linear(torch.nn.Module):
 
         weight_observer(weight)
         dtype = weight_observer.dtype
-        assert dtype == torch.qint8, "Weight observer must have dtype torch.qint8"
+        if dtype != torch.qint8:
+            raise AssertionError(
+                f"Weight observer must have dtype torch.qint8, got {dtype}"
+            )
         _w_sc, w_zp = weight_observer.calculate_qparams()
         if isinstance(w_zp, torch.Tensor):
-            assert not torch.any(w_zp.bool()), "All weight zero points must map to 0"
+            if torch.any(w_zp.bool()):
+                raise AssertionError("All weight zero points must map to 0")
         else:
-            assert w_zp == 0, "Weight zero point must map to 0"
+            if w_zp != 0:
+                raise AssertionError(f"Weight zero point must map to 0, got {w_zp}")
         qweight = _quantize_weight(weight.float(), weight_observer)
 
         row_block_size, col_block_size = LinearBlockSparsePattern.block_size()

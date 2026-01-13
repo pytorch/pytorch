@@ -1579,7 +1579,7 @@ class TestTilingExtra(InductorTestCase):
                 getitem_3 = rot_inv_freq[(None, slice(None, None, None), None)]
                 float_1 = getitem_3.float()
                 expand = float_1.expand(1, -1, 1)
-                inv_freq_expanded = expand.to(torch.device("cuda", index=0))
+                inv_freq_expanded = expand.to(torch.device(GPU_TYPE, index=0))
 
                 getitem_6 = unsqueeze[
                     (slice(None, None, None), None, slice(None, None, None))
@@ -1982,7 +1982,7 @@ class TestTilingExtra(InductorTestCase):
 
         torch.manual_seed(42)
 
-        device = "cuda"
+        device = GPU_TYPE
         dtype = torch.float16
 
         # Create model and parameters

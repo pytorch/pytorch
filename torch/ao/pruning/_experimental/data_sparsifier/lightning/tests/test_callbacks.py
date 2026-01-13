@@ -103,30 +103,50 @@ class TestPostTrainingCallback(TestCase):
 
         # check sparsifier config
         for key, value in sparsifier_args.items():
-            assert callback.data_sparsifier.defaults[key] == value
+            if callback.data_sparsifier.defaults[key] != value:
+                raise AssertionError(
+                    f"data_sparsifier.defaults[{key!r}] = {callback.data_sparsifier.defaults[key]}, expected {value}"
+                )
 
         # assert that the model is correctly attached to the sparsifier
         for name, param in pl_module.model.named_parameters():
             valid_name = _get_valid_name(name)
             if type(param) not in SUPPORTED_TYPES:
-                assert valid_name not in callback.data_sparsifier.state
-                assert valid_name not in callback.data_sparsifier.data_groups
+                if valid_name in callback.data_sparsifier.state:
+                    raise AssertionError(
+                        f"valid_name {valid_name!r} should not be in data_sparsifier.state"
+                    )
+                if valid_name in callback.data_sparsifier.data_groups:
+                    raise AssertionError(
+                        f"valid_name {valid_name!r} should not be in data_sparsifier.data_groups"
+                    )
                 continue
-            assert valid_name in callback.data_sparsifier.data_groups
-            assert valid_name in callback.data_sparsifier.state
+            if valid_name not in callback.data_sparsifier.data_groups:
+                raise AssertionError(
+                    f"valid_name {valid_name!r} should be in data_sparsifier.data_groups"
+                )
+            if valid_name not in callback.data_sparsifier.state:
+                raise AssertionError(
+                    f"valid_name {valid_name!r} should be in data_sparsifier.state"
+                )
 
             mask = callback.data_sparsifier.get_mask(name=valid_name)
 
             # assert that some level of sparsity is achieved
-            assert (1.0 - mask.float().mean()) > 0.0
+            sparsity = 1.0 - mask.float().mean()
+            if not (sparsity > 0.0):
+                raise AssertionError(f"expected sparsity > 0.0, got {sparsity}")
 
             # make sure that non-zero values in data after squash mask are equal to original values
             sparsified_data = callback.data_sparsifier.get_data(
                 name=valid_name, return_original=False
             )
-            assert torch.all(
+            if not torch.all(
                 sparsified_data[sparsified_data != 0] == param[sparsified_data != 0]
-            )
+            ):
+                raise AssertionError(
+                    "non-zero sparsified_data values do not match original param values"
+                )
 
     @unittest.skipIf(
         not importlib.util.find_spec("pytorch_lightning"), "No pytorch_lightning"
@@ -159,17 +179,28 @@ class TestTrainingAwareCallback(TestCase):
         callback.on_train_start(42, pl_module)  # 42 is a dummy value
 
         # sparsifier and scheduler instantiated
-        assert (
+        if not (
             callback.data_scheduler is not None and callback.data_sparsifier is not None
-        )
+        ):
+            raise AssertionError(
+                f"data_scheduler is {callback.data_scheduler}, "
+                f"data_sparsifier is {callback.data_sparsifier}, both should not be None"
+            )
 
         # data sparsifier args are correct
         for key, value in sparsifier_args.items():
-            assert callback.data_sparsifier.defaults[key] == value
+            if callback.data_sparsifier.defaults[key] != value:
+                raise AssertionError(
+                    f"data_sparsifier.defaults[{key!r}] = {callback.data_sparsifier.defaults[key]}, expected {value}"
+                )
 
         # data scheduler args are correct
         for key, value in scheduler_args.items():
-            assert getattr(callback.data_scheduler, key) == value
+            actual = getattr(callback.data_scheduler, key)
+            if actual != value:
+                raise AssertionError(
+                    f"data_scheduler.{key} = {actual}, expected {value}"
+                )
 
     def _simulate_update_param_model(self, pl_module):
         """This function might not be needed as the model is being copied
@@ -216,27 +247,45 @@ class TestTrainingAwareCallback(TestCase):
         # compare container objects
         container_obj1 = data_sparsifier_state_dict["_container"]
         container_obj2 = callback.data_sparsifier_state_dict["_container"]
-        assert len(container_obj1) == len(container_obj2)
+        if len(container_obj1) != len(container_obj2):
+            raise AssertionError(
+                f"container lengths differ: {len(container_obj1)} vs {len(container_obj2)}"
+            )
         for key, value in container_obj2.items():
-            assert key in container_obj1
-            assert torch.all(value == container_obj1[key])
+            if key not in container_obj1:
+                raise AssertionError(f"key {key!r} not in container_obj1")
+            if not torch.all(value == container_obj1[key]):
+                raise AssertionError(f"container values differ for key {key!r}")
 
         # compare state objects
         state_obj1 = data_sparsifier_state_dict["state"]
         state_obj2 = callback.data_sparsifier_state_dict["state"]
-        assert len(state_obj1) == len(state_obj2)
+        if len(state_obj1) != len(state_obj2):
+            raise AssertionError(
+                f"state lengths differ: {len(state_obj1)} vs {len(state_obj2)}"
+            )
         for key, value in state_obj2.items():
-            assert key in state_obj1
-            assert "mask" in value and "mask" in state_obj1[key]
-            assert torch.all(value["mask"] == state_obj1[key]["mask"])
+            if key not in state_obj1:
+                raise AssertionError(f"key {key!r} not in state_obj1")
+            if not ("mask" in value and "mask" in state_obj1[key]):
+                raise AssertionError(f"'mask' not in value or state_obj1[{key!r}]")
+            if not torch.all(value["mask"] == state_obj1[key]["mask"]):
+                raise AssertionError(f"mask values differ for key {key!r}")
 
         # compare data_groups dict
         data_grp1 = data_sparsifier_state_dict["data_groups"]
         data_grp2 = callback.data_sparsifier_state_dict["data_groups"]
-        assert len(data_grp1) == len(data_grp2)
+        if len(data_grp1) != len(data_grp2):
+            raise AssertionError(
+                f"data_groups lengths differ: {len(data_grp1)} vs {len(data_grp2)}"
+            )
         for key, value in data_grp2.items():
-            assert key in data_grp1
-            assert value == data_grp1[key]
+            if key not in data_grp1:
+                raise AssertionError(f"key {key!r} not in data_grp1")
+            if value != data_grp1[key]:
+                raise AssertionError(
+                    f"data_groups[{key!r}] differ: {value} vs {data_grp1[key]}"
+                )
 
     def _check_on_train_epoch_end(self, pl_module, callback):
         """Checks the following -
@@ -252,7 +301,9 @@ class TestTrainingAwareCallback(TestCase):
             mask = callback.data_sparsifier.get_mask(name=valid_name)
 
             # check sparsity levels
-            assert (1.0 - mask.float().mean()) > 0  # some sparsity level achieved
+            sparsity = 1.0 - mask.float().mean()
+            if not (sparsity > 0):
+                raise AssertionError(f"expected sparsity > 0, got {sparsity}")
 
             last_sl = data_scheduler.get_last_param()
             last_epoch = data_scheduler.last_epoch
@@ -262,7 +313,10 @@ class TestTrainingAwareCallback(TestCase):
             log_actual_sl = math.log(
                 base_sl[valid_name] * (data_scheduler.gamma**last_epoch)
             )
-            assert log_last_sl == log_actual_sl
+            if log_last_sl != log_actual_sl:
+                raise AssertionError(
+                    f"log_last_sl {log_last_sl} != log_actual_sl {log_actual_sl}"
+                )
 
     def _check_on_train_end(self, pl_module, callback):
         """Confirms that the mask is squashed after the training ends
@@ -274,7 +328,10 @@ class TestTrainingAwareCallback(TestCase):
         # check that the masks have been squashed
         for name, _ in pl_module.model.named_parameters():
             valid_name = _get_valid_name(name)
-            assert not is_parametrized(callback.data_sparsifier._continer, valid_name)
+            if is_parametrized(callback.data_sparsifier._continer, valid_name):
+                raise AssertionError(
+                    f"expected {valid_name!r} to not be parametrized after squash"
+                )
 
     @unittest.skipIf(
         not importlib.util.find_spec("pytorch_lightning"), "No pytorch_lightning"
