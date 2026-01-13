@@ -1948,6 +1948,9 @@ class BenchmarkRunner:
     def use_iou_for_bool_accuracy(self, name):
         return False
 
+    def get_iou_threshold(self, name):
+        return 0.99
+
     def iter_models(self, args):
         for model_name in self.iter_model_names(args):
             for device in args.devices:
@@ -2419,6 +2422,7 @@ class BenchmarkRunner:
                     tol=tolerance,
                     force_max_multiplier=force_max_multiplier,
                     use_iou_for_bool=self.use_iou_for_bool_accuracy(name),
+                    iou_threshold=self.get_iou_threshold(name),
                 ):
                     is_same = False
             except Exception:

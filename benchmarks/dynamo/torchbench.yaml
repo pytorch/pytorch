@@ -73,6 +73,11 @@ tolerance:
     - sam_fast
     - vision_maskrcnn
 
+  # Custom IoU thresholds per model (default is 0.99)
+  iou_thresholds:
+    sam: 0.95
+    sam_fast: 0.95
+
 require_larger_multiplier_for_smaller_tensor:
   - yolov3
 

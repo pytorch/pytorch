@@ -3054,6 +3054,7 @@ def same(
     use_larger_multiplier_for_smaller_tensor: bool = False,
     force_max_multiplier: bool = False,
     use_iou_for_bool: bool = False,
+    iou_threshold: float = 0.99,
 ) -> bool:
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
@@ -3082,6 +3083,7 @@ def same(
                 use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
                 force_max_multiplier=force_max_multiplier,
                 use_iou_for_bool=use_iou_for_bool,
+                iou_threshold=iou_threshold,
             )
             for ai, bi, fp64_refi in zip(ref, res, fp64_ref)
         )
@@ -3103,6 +3105,7 @@ def same(
             use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
             force_max_multiplier=force_max_multiplier,
             use_iou_for_bool=use_iou_for_bool,
+            iou_threshold=iou_threshold,
         )
     elif isinstance(ref, dict):
         assert isinstance(res, dict)
@@ -3125,6 +3128,7 @@ def same(
                     use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
                     force_max_multiplier=force_max_multiplier,
                     use_iou_for_bool=use_iou_for_bool,
+                    iou_threshold=iou_threshold,
                 )
             ):
                 log_error("Accuracy failed for key name %s", k)
@@ -3165,12 +3169,16 @@ def same(
                         # Both masks are empty
                         return bool(intersection == 0)
                     iou = (intersection / union).item()
-                    iou_threshold = 0.99
                     if iou < iou_threshold:
                         log_error(
-                            "IoU accuracy failed: %.4f < %.2f",
+                            "IoU accuracy failed: %.4f < %.2f (intersection=%d, union=%d, ref_sum=%d, res_sum=%d, shape=%s)",
                             iou,
                             iou_threshold,
+                            int(intersection.item()),
+                            int(union.item()),
+                            int(ref.sum().item()),
+                            int(res.sum().item()),
+                            list(ref.shape),
                         )
                         return False
                     return True
