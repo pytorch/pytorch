@@ -729,12 +729,16 @@ print(t.is_pinned())
             # check default
             os.environ["CUBLAS_WORKSPACE_CONFIG"] = ""
             self.assertLess(check_workspace_size(a) - default_workspace_size, 524288)
-            self.assertLess(abs(check_workspace_size(a) - default_workspace_size), 524288)
+            self.assertLess(
+                abs(check_workspace_size(a) - default_workspace_size), 524288
+            )
 
             # check default with bad user config
             os.environ["CUBLAS_WORKSPACE_CONFIG"] = "-1"
             self.assertLess(check_workspace_size(a) - default_workspace_size, 524288)
-            self.assertLess(abs(check_workspace_size(a) - default_workspace_size), 524288)
+            self.assertLess(
+                abs(check_workspace_size(a) - default_workspace_size), 524288
+            )
 
             # check valid config
             os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":128:8:64:16:32:32"
