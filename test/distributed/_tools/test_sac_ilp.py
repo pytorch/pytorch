@@ -22,7 +22,6 @@ from torch.testing._internal.common_utils import (
     MI300_ARCH,
     run_tests,
     skipIfRocmArch,
-    skipIfTorchDynamo,
     TestCase,
 )
 from torch.testing._internal.distributed._tensor.common_dtensor import (
@@ -134,7 +133,6 @@ class TestSACILP(TestCase):
             )
         return mod_info
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     @skipIfRocmArch(MI300_ARCH)
     def test_sac_ilp_case1(self):
@@ -177,7 +175,6 @@ class TestSACILP(TestCase):
             (recomputation_time / compute_time) / (6.97 / 97.97), 1, delta=0.25
         )
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_sac_ilp_case2(self):
         """
@@ -193,7 +190,6 @@ class TestSACILP(TestCase):
         self.assertEqual(recomputation_time, 0)
         self.assertGreater(peak_mem, 1)
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_sac_ilp_case3(self):
         """
@@ -236,7 +232,6 @@ class TestOptimalCheckpointingPolicy(TestCase):
             force_store_random=False,
         )
 
-    @skipIfTorchDynamo("https://github.com/pytorch/pytorch/issues/115653")
     @unittest.skipIf(not TEST_CUDA, "CUDA not available")
     def test_get_optimial_checkpointing_policy_per_module(self):
         for memory_budget, optimal_soln in [
