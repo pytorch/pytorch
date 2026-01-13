@@ -1,8 +1,8 @@
 #undef __HIP_NO_HALF_CONVERSIONS__
-#include <ATen/ATen.h>
 #include <ATen/hip/HIPContext.h>
 #include <ATen/Tensor.h>
 #include <ATen/TensorAccessor.h>
+#include <c10/hip/HIPCachingAllocator.h>
 #include <c10/hip/HIPStream.h>
 #include <iostream>
 #include <vector>
@@ -380,10 +380,8 @@ void launch_grouped_bgemm_ck_impl_dispatch(
     size_t arg_buf_size = gemm_instance.GetDeviceKernelArgSize(&argument);
     size_t ws_size = gemm_instance.GetWorkSpaceSize(&argument);
 
-    at::Tensor gemm_arg_tensor = at::empty({static_cast<int64_t>(arg_buf_size)}, at::TensorOptions().dtype(at::kByte).device(at::kCUDA));
-    void* gemm_arg_buf = gemm_arg_tensor.data_ptr();
-    at::Tensor ws_tensor = at::empty({static_cast<int64_t>(ws_size)}, at::TensorOptions().dtype(at::kByte).device(at::kCUDA));
-    void* ws_buf = ws_tensor.data_ptr();
+    void* gemm_arg_buf = c10::hip::HIPCachingAllocator::raw_alloc(arg_buf_size);
+    void* ws_buf = c10::hip::HIPCachingAllocator::raw_alloc(ws_size);
 
     gemm_instance.SetDeviceKernelArgs(&argument, gemm_arg_buf);
     gemm_instance.SetWorkSpacePointer(&argument, ws_buf);
@@ -391,6 +389,8 @@ void launch_grouped_bgemm_ck_impl_dispatch(
     auto invoker = gemm_instance.MakeInvoker();
     hipStream_t stream = c10::hip::getCurrentHIPStream();
     invoker.Run(argument, {stream});
+    c10::hip::HIPCachingAllocator::raw_delete(gemm_arg_buf);
+    c10::hip::HIPCachingAllocator::raw_delete(ws_buf);
 }
 
 void group_gemm_ck(
