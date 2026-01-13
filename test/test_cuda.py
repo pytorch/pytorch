@@ -1160,6 +1160,7 @@ print(t.is_pinned())
                 tmp3 = torch.cuda.FloatTensor(t.size())
                 self.assertEqual(tmp3.data_ptr(), ptr[0], msg="allocation not reused")
 
+    @skipIfRocm(msg="record_stream behavior differs on HIP")
     def test_record_stream_on_shifted_view(self):
         # See issue #27366
 
