@@ -18,6 +18,7 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
+from torch.distributed.tensor._ops._math_ops import _NormPartial
 from torch.distributed.tensor._ops.utils import is_tensor_partial, normalize_dim
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.parallel import (
@@ -688,6 +689,45 @@ class DistMathOpsTest(DTensorTestBase):
         # partial result
         partial_out = torch.ops.aten.linalg_vector_norm(partial_grad, 2)
         self.assertEqual(partial_out.full_tensor(), out)
+
+    @with_comms
+    def test_vector_norm_sum(self):
+        """
+        Test vector norm when reducing along a sharded dimension.
+
+        This tests the _NormPartial reduction path where:
+        - Tensor is sharded along dim=1
+        - Norm is computed along dim=1 (the sharded dim)
+        - Each rank has partial norm contributions
+        - _NormPartial reduction combines them correctly
+
+        Example with 2 ranks:
+            Full tensor: [[3, 4], [5, 12]]
+            Sharded on dim=1:
+                rank 0: [[3], [5]]
+                rank 1: [[4], [12]]
+            After local partial computation:
+                rank 0: [3, 5]
+                rank 1: [4, 12]
+            After _NormPartial(2) reduction:
+                [sqrt(3²+4²), sqrt(5²+12²)] = [5, 13]
+        """
+        device_mesh = self.build_device_mesh()
+
+        # Use Pythagorean triples for easy verification:
+        # [3, 4] -> norm = 5, [5, 12] -> norm = 13
+        tensor = torch.tensor([[3.0, 4.0], [5.0, 12.0]], device=self.device_type)
+
+        # Shard along dim=1
+        sharded_tensor = distribute_tensor(tensor, device_mesh, [Shard(1)])
+
+        # Compute norm along sharded dimension - uses _NormPartial internally
+        norm_partial = torch.linalg.vector_norm(sharded_tensor, ord=2, dim=1)
+
+        self.assertTrue(isinstance(norm_partial.placements[0], _NormPartial))
+        res = torch.sum(norm_partial)
+
+        self.assertEqual(res, 18)
 
     @with_comms
     def test_foreach_norm(self):

@@ -314,9 +314,13 @@ def common_reduction_strategy(
         for p in op_spec.output_spec.placements:
             # when the partial reduction op matches the global reduction op,
             # we can delay redistribution (i.e max, max)
-            if isinstance(p, Partial) and p.reduce_op != reduction_op:
-                reduction_linear = False
-                break
+
+            if isinstance(p, Partial):
+                op_mismatch = p.reduce_op != reduction_op
+                is_norm_sum = isinstance(p, _NormPartial) and p.reduce_op == "sum"
+                if op_mismatch or is_norm_sum:
+                    reduction_linear = False
+                    break
 
         if not reduction_linear:
             # input placements for this strategy should clear out pending sum and sharding
