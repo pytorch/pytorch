@@ -168,30 +168,29 @@ def gluon_grouped_mm_configs(dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=Non
     return configs
 
 
-def get_gluon_grouped_mm_source():
-    from pathlib import Path
-
-    template_path = Path(__file__).parent / "templates" / "gluon_mm_grouped.py.jinja"
-    return template_path.read_text()
-
-
 gluon_grouped_mm_template = GluonTemplate(
     name="gluon_grouped_mm",
     grid=persistent_grouped_mm_grid,
-    source=get_gluon_grouped_mm_source(),
+    source=load_kernel_template(
+        "gluon_mm_grouped", helpers=["helper_assign_maybe_constexpr"]
+    ),
 )
 
 
 triton_grouped_mm_template = TritonTemplate(
     name="grouped_mm",
     grid=persistent_grouped_mm_grid,
-    source=load_kernel_template("triton_mm_grouped"),
+    source=load_kernel_template(
+        "triton_mm_grouped", helpers=["helper_assign_maybe_constexpr"]
+    ),
 )
 
 triton_scaled_grouped_mm_template = TritonTemplate(
     name="scaled_grouped_mm",
     grid=persistent_grouped_mm_grid,
-    source=load_kernel_template("triton_mm_grouped"),
+    source=load_kernel_template(
+        "triton_mm_grouped", helpers=["helper_assign_maybe_constexpr"]
+    ),
 )
 
 cutedsl_grouped_mm_template = CuteDSLTemplate(

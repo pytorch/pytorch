@@ -1,3 +1,11 @@
+{% macro assign_maybe_constexpr_gluon(name, expr) -%}
+    {{ assign_maybe_constexpr(name, expr, prefix="gl") }}
+{%- endmacro %}
+
+{%- set M_IS_VARYING = A_IS_2D and not B_IS_2D -%}
+{%- set N_IS_VARYING = not A_IS_2D and B_IS_2D -%}
+{%- set K_IS_VARYING = A_IS_2D and B_IS_2D -%}
+
 import triton
 
 from triton.language.core import _aggregate as aggregate
@@ -32,7 +40,9 @@ class PartitionArgs:
     a_desc: tma.tensor_descriptor
     b_desc: tma.tensor_descriptor
     c_desc: tma.tensor_descriptor
+{%- if M_IS_VARYING or M_IS_VARYING or K_IS_VARYING %}
     offs_ptr: gl.tensor
+{%- endif %}
     c_ptr: gl.tensor
     c_stride_m: gl.constexpr
     c_stride_n: gl.constexpr
@@ -61,7 +71,9 @@ class PartitionArgs:
         a_desc,
         b_desc,
         c_desc,
+{%- if M_IS_VARYING or M_IS_VARYING or K_IS_VARYING %}
         offs_ptr,
+{%- endif %}
         c_ptr,
         c_stride_m,
         c_stride_n,
@@ -87,7 +99,9 @@ class PartitionArgs:
         self.a_desc = a_desc
         self.b_desc = b_desc
         self.c_desc = c_desc
+{%- if M_IS_VARYING or M_IS_VARYING or K_IS_VARYING %}
         self.offs_ptr = offs_ptr
+{%- endif %}
         self.c_ptr = c_ptr
         self.c_stride_m = gl.constexpr(c_stride_m)
         self.c_stride_n = gl.constexpr(c_stride_n)
@@ -112,80 +126,196 @@ class PartitionArgs:
 
 
 @aggregate
-class GroupTileIterator:
-    tidx: gl.tensor
-    iterated_tiles: gl.tensor
-    num_tiles: gl.tensor
-    num_m_tiles: gl.tensor
-    num_n_tiles: gl.tensor
+class GroupIterator:
+    G: gl.tensor
+    g: gl.tensor
+{%- if M_IS_VARYING or N_IS_VARYING %}
+    offs_ptr: gl.tensor
+{%- endif %}
     m_start_offset: gl.tensor
+    m_size: gl.tensor
     n_start_offset: gl.tensor
-    m_offset: gl.tensor
-    n_offset: gl.tensor
-    m_tile_offset: gl.tensor
-    n_tile_offset: gl.tensor
+    n_size: gl.tensor
+    tiles_processed: gl.tensor
+    tile_idx: gl.tensor
+    has_started: gl.tensor
     BLOCK_M: gl.constexpr
     BLOCK_N: gl.constexpr
     NUM_BLOCKS: gl.constexpr
 
     @gluon.constexpr_function
-    def __init__(self, tidx, iterated_tiles, num_tiles, num_m_tiles, num_n_tiles,
-                 m_start_offset, n_start_offset, m_offset, n_offset, m_tile_offset, n_tile_offset,
-                 BLOCK_M, BLOCK_N, NUM_BLOCKS):
-        self.tidx = tidx
-        self.iterated_tiles = iterated_tiles
-        self.num_tiles = num_tiles
-        self.num_m_tiles = num_m_tiles
-        self.num_n_tiles = num_n_tiles
+    def __init__(
+        self,
+        G, g,
+{%- if M_IS_VARYING or N_IS_VARYING %}
+        offs_ptr,
+{%- endif %}
+        m_start_offset, m_size, n_start_offset, n_size,
+        tiles_processed, tile_idx,
+        has_started,
+        BLOCK_M: gl.constexpr, BLOCK_N: gl.constexpr, NUM_BLOCKS: gl.constexpr
+    ):
+        self.G = G
+        self.g = g
+{%- if M_IS_VARYING or N_IS_VARYING %}
+        self.offs_ptr = offs_ptr
+{%- endif %}
         self.m_start_offset = m_start_offset
+        self.m_size = m_size
         self.n_start_offset = n_start_offset
-        self.m_offset = m_offset
-        self.n_offset = n_offset
-        self.m_tile_offset = m_tile_offset
-        self.n_tile_offset = n_tile_offset
+        self.n_size = n_size
+        self.tiles_processed = tiles_processed
+        self.tile_idx = tile_idx
+        self.has_started = has_started
         self.BLOCK_M = gl.constexpr(BLOCK_M)
         self.BLOCK_N = gl.constexpr(BLOCK_N)
         self.NUM_BLOCKS = gl.constexpr(NUM_BLOCKS)
 
     @gluon.jit
-    def initialize(tidx, iterated_tiles, m_start_offset, m_size, n_start_offset, n_size,
-                   BLOCK_M: gl.constexpr, BLOCK_N: gl.constexpr, NUM_BLOCKS: gl.constexpr):
-        num_m_tiles = gl.cdiv(m_size, BLOCK_M)
-        num_n_tiles = gl.cdiv(n_size, BLOCK_N)
-        num_tiles = num_m_tiles * num_n_tiles
-
-        gidx = tidx - iterated_tiles
-        tile_m_idx = gidx % num_m_tiles
-        tile_n_idx = gidx // num_m_tiles
-        m_tile_offset = tile_m_idx * BLOCK_M
-        n_tile_offset = tile_n_idx * BLOCK_N
-        m_offset = m_start_offset + m_tile_offset
-        n_offset = n_start_offset + n_tile_offset
-
-        return GroupTileIterator(tidx, iterated_tiles, num_tiles, num_m_tiles, num_n_tiles,
-                                m_start_offset, n_start_offset, m_offset, n_offset,
-                                m_tile_offset, n_tile_offset, BLOCK_M, BLOCK_N, NUM_BLOCKS)
+    def create(
+        G, M, N,
+{%- if M_IS_VARYING or N_IS_VARYING %}
+        offs_ptr,
+{%- endif %}
+        BLOCK_M: gl.constexpr, BLOCK_N: gl.constexpr, NUM_BLOCKS: gl.constexpr
+    ):
+        return GroupIterator(
+            gl.to_tensor(G), gl.to_tensor(0),
+{%- if M_IS_VARYING or N_IS_VARYING %}
+            offs_ptr,
+{%- endif %}
+            gl.to_tensor(0), gl.to_tensor(M), gl.to_tensor(0), gl.to_tensor(N),
+            gl.to_tensor(0), gl.program_id(0),
+            gl.to_tensor(False),
+            BLOCK_M, BLOCK_N, NUM_BLOCKS
+        ).next()
 
     @gluon.jit
     def should_process(self):
-        return (self.tidx >= self.iterated_tiles) & (self.tidx < self.iterated_tiles + self.num_tiles)
+        return self.g < self.G
 
     @gluon.must_use_result
     @gluon.jit
     def next(self):
-        new_tidx = self.tidx + self.NUM_BLOCKS
-        gidx = new_tidx - self.iterated_tiles
-        tile_m_idx = gidx % self.num_m_tiles
-        tile_n_idx = gidx // self.num_m_tiles
+        g = (self.g + 1) if self.has_started else 0
+{%- if M_IS_VARYING %}
+        m_start_offset = self.m_start_offset + (self.m_size if self.has_started else 0)
+        m_size = gl.load(self.offs_ptr + g) - m_start_offset
+{%- else %}
+        m_start_offset = self.m_start_offset
+        m_size = self.m_size
+{%- endif %}
+{%- if N_IS_VARYING %}
+        n_start_offset = self.n_start_offset + (self.n_size if self.has_started else 0)
+        n_size = gl.load(self.offs_ptr + g) - n_start_offset
+{%- else %}
+        n_start_offset = self.n_start_offset
+        n_size = self.n_size
+{%- endif %}
+
+        tiles_processed = self.tiles_processed + (gl.cdiv(self.m_size, self.BLOCK_M) * gl.cdiv(self.n_size, self.BLOCK_N) if self.has_started else 0)
+        tile_idx = self.tile_idx + (gl.cdiv(tiles_processed - self.tile_idx, self.NUM_BLOCKS) * self.NUM_BLOCKS if self.has_started else 0)
+
+        has_started = True
+
+        return GroupIterator(
+            self.G, g,
+{%- if M_IS_VARYING or N_IS_VARYING %}
+            self.offs_ptr,
+{%- endif %}
+            m_start_offset, m_size, n_start_offset, n_size,
+            tiles_processed, tile_idx,
+            has_started,
+            self.BLOCK_M, self.BLOCK_N, self.NUM_BLOCKS
+        )
+
+
+@aggregate
+class TileIterator:
+    tile_idx: gl.tensor
+    num_m_tiles: gl.tensor
+    num_n_tiles: gl.tensor
+    num_tiles: gl.tensor
+    m_start_offset: gl.tensor
+    m_size: gl.tensor
+    n_start_offset: gl.tensor
+    n_size: gl.tensor
+    m_offset: gl.tensor
+    n_offset: gl.tensor
+    m_tile_offset: gl.tensor
+    n_tile_offset: gl.tensor
+    has_started: gl.tensor
+    BLOCK_M: gl.constexpr
+    BLOCK_N: gl.constexpr
+    NUM_BLOCKS: gl.constexpr
+
+    @gluon.constexpr_function
+    def __init__(
+        self,
+        tile_idx, num_m_tiles, num_n_tiles, num_tiles,
+        m_start_offset, m_size, n_start_offset, n_size,
+        m_tile_offset, n_tile_offset, m_offset, n_offset,
+        has_started,
+        BLOCK_M: gl.constexpr, BLOCK_N: gl.constexpr, NUM_BLOCKS: gl.constexpr
+    ):
+        self.tile_idx = tile_idx
+        self.num_m_tiles = num_m_tiles
+        self.num_n_tiles = num_n_tiles
+        self.num_tiles = num_tiles
+        self.m_start_offset = m_start_offset
+        self.m_size = m_size
+        self.n_start_offset = n_start_offset
+        self.n_size = n_size
+        self.m_tile_offset = m_tile_offset
+        self.n_tile_offset = n_tile_offset
+        self.m_offset = m_offset
+        self.n_offset = n_offset
+        self.has_started = has_started
+        self.BLOCK_M = gl.constexpr(BLOCK_M)
+        self.BLOCK_N = gl.constexpr(BLOCK_N)
+        self.NUM_BLOCKS = gl.constexpr(NUM_BLOCKS)
+
+    @gluon.jit
+    def create(
+        tile_idx,
+        m_start_offset, m_size, n_start_offset, n_size,
+        BLOCK_M: gl.constexpr, BLOCK_N: gl.constexpr, NUM_BLOCKS: gl.constexpr
+    ):
+        num_m_tiles = gl.cdiv(m_size, BLOCK_M)
+        num_n_tiles = gl.cdiv(n_size, BLOCK_N)
+        num_tiles = num_m_tiles * num_n_tiles
+        return TileIterator(
+            tile_idx, num_m_tiles, num_n_tiles, num_tiles,
+            m_start_offset, m_size, n_start_offset, n_size,
+            gl.to_tensor(0), gl.to_tensor(0), gl.to_tensor(0), gl.to_tensor(0),
+            gl.to_tensor(False),
+            BLOCK_M, BLOCK_N, NUM_BLOCKS
+        ).next()
+
+    @gluon.jit
+    def should_process(self):
+        return self.tile_idx < self.num_tiles
+
+    @gluon.must_use_result
+    @gluon.jit
+    def next(self):
+        tile_idx = self.tile_idx + (self.NUM_BLOCKS if self.has_started else 0)
+        tile_m_idx = tile_idx % self.num_m_tiles
+        tile_n_idx = tile_idx // self.num_m_tiles
         m_tile_offset = tile_m_idx * self.BLOCK_M
         n_tile_offset = tile_n_idx * self.BLOCK_N
         m_offset = self.m_start_offset + m_tile_offset
         n_offset = self.n_start_offset + n_tile_offset
 
-        return GroupTileIterator(new_tidx, self.iterated_tiles, self.num_tiles,
-                                self.num_m_tiles, self.num_n_tiles, self.m_start_offset,
-                                self.n_start_offset, m_offset, n_offset,
-                                m_tile_offset, n_tile_offset, self.BLOCK_M, self.BLOCK_N, self.NUM_BLOCKS)
+        has_started = True
+
+        return TileIterator(
+            tile_idx, self.num_m_tiles, self.num_n_tiles, self.num_tiles,
+            self.m_start_offset, self.m_size, self.n_start_offset, self.n_size,
+            m_tile_offset, n_tile_offset, m_offset, n_offset,
+            has_started,
+            self.BLOCK_M, self.BLOCK_N, self.NUM_BLOCKS
+        )
 
 
 # Counter abstraction for tracking barrier index and phase.
@@ -215,7 +345,7 @@ class Counter:
         return Counter(index, phase, self.num_barriers)
 
 
-{%- if USE_RAGGED_TENSOR_DESCRIPTOR %}
+{% if USE_RAGGED_TENSOR_DESCRIPTOR -%}
 @gluon.jit
 def store_ragged(TMA, slice_off, slice_size, coords, data, ragged_dim: gl.constexpr = 0):
     ragged_coords = to_ragged_coords(slice_off, slice_size, coords, ragged_dim)
@@ -227,8 +357,6 @@ def store_ragged(TMA, slice_off, slice_size, coords, data, ragged_dim: gl.conste
 def load_partition(pargs: PartitionArgs):
     pl.enter_scope("load_partition")
 
-    tidx = gl.program_id(0)
-
     G: gl.constexpr = pargs.G
     M: gl.constexpr = pargs.M
     N: gl.constexpr = pargs.N
@@ -236,26 +364,29 @@ def load_partition(pargs: PartitionArgs):
     BLOCK_M: gl.constexpr = pargs.BLOCK_M
     BLOCK_N: gl.constexpr = pargs.BLOCK_N
     BLOCK_K: gl.constexpr = pargs.BLOCK_K
+    NUM_BLOCKS: gl.constexpr = pargs.NUM_BLOCKS
 
     load_buf_empty_bars = pargs.load_buf_empty_bars
     load_buf_full_bars = pargs.load_buf_full_bars
     state = Counter.create(1, load_buf_empty_bars.shape[0])
 
-    iterated_tiles = 0
+    # FIXME: for K_IS_VARYING
+    k_size = K
 
-    n_start_offset = 0
-    m_end_offset = 0
-    for g in range(G):
-        m_start_offset = m_end_offset
-        m_end_offset = gl.load(pargs.offs_ptr + g)
-        m_size = m_end_offset - m_start_offset
-        n_size = N
-        k_size = K
-
-        iter = GroupTileIterator.initialize(tidx, iterated_tiles, m_start_offset, m_size,
-                                           n_start_offset, n_size, BLOCK_M, BLOCK_N, pargs.NUM_BLOCKS)
-
-        while iter.should_process():
+    group_iter = GroupIterator.create(
+        G, M, N,
+{%- if M_IS_VARYING or N_IS_VARYING %}
+        pargs.offs_ptr,
+{%- endif %}
+        BLOCK_M, BLOCK_N, NUM_BLOCKS
+    )
+    while group_iter.should_process():
+        tile_iter = TileIterator.create(
+            group_iter.tile_idx - group_iter.tiles_processed,
+            group_iter.m_start_offset, group_iter.m_size, group_iter.n_start_offset, group_iter.n_size,
+            BLOCK_M, BLOCK_N, NUM_BLOCKS
+        )
+        while tile_iter.should_process():
             for k in range(0, k_size, BLOCK_K):
                 load_buf_empty_bar = load_buf_empty_bars.index(state.index)
                 load_buf_full_bar = load_buf_full_bars.index(state.index)
@@ -275,9 +406,9 @@ def load_partition(pargs: PartitionArgs):
                     tma.async_copy_global_to_shared(
                         pargs.a_desc,
 {%- if A_IS_K_MAJOR %}
-                        [iter.m_offset, k],
+                        [tile_iter.m_offset, k],
 {%- else %}
-                        [k, iter.m_offset],
+                        [k, tile_iter.m_offset],
 {%- endif %}
                         load_buf_full_bar,
                         a_smem
@@ -285,9 +416,9 @@ def load_partition(pargs: PartitionArgs):
                     tma.async_copy_global_to_shared(
                         pargs.b_desc,
 {%- if B_IS_K_MAJOR %}
-                        [g, iter.n_offset, k],
+                        [group_iter.g, tile_iter.n_offset, k],
 {%- else %}
-                        [g, k, iter.n_offset],
+                        [group_iter.g, k, tile_iter.n_offset],
 {%- endif %}
                         load_buf_full_bar,
                         b_smem
@@ -295,10 +426,9 @@ def load_partition(pargs: PartitionArgs):
 
                 state = state.next()
 
-            iter = iter.next()
+            tile_iter = tile_iter.next()
 
-        tidx = iter.tidx
-        iterated_tiles += iter.num_tiles
+        group_iter = group_iter.next()
 
     pl.exit_scope("load_partition")
 
@@ -307,8 +437,6 @@ def load_partition(pargs: PartitionArgs):
 def compute_partition(pargs: PartitionArgs):
     pl.enter_scope("compute_partition")
 
-    tidx = gl.program_id(0)
-
     G: gl.constexpr = pargs.G
     M: gl.constexpr = pargs.M
     N: gl.constexpr = pargs.N
@@ -316,6 +444,7 @@ def compute_partition(pargs: PartitionArgs):
     BLOCK_M: gl.constexpr = pargs.BLOCK_M
     BLOCK_N: gl.constexpr = pargs.BLOCK_N
     BLOCK_K: gl.constexpr = pargs.BLOCK_K
+    NUM_BLOCKS: gl.constexpr = pargs.NUM_BLOCKS
 
     load_buf_empty_bars = pargs.load_buf_empty_bars
     load_buf_full_bars = pargs.load_buf_full_bars
@@ -325,21 +454,23 @@ def compute_partition(pargs: PartitionArgs):
     acc_buf_full_bars = pargs.acc_buf_full_bars
     acc_state = Counter.create(1, acc_buf_empty_bars.shape[0])
 
-    iterated_tiles = 0
+    # FIXME: for K_IS_VARYING
+    k_size = K
 
-    n_start_offset = 0
-    m_end_offset = 0
-    for g in range(G):
-        m_start_offset = m_end_offset
-        m_end_offset = gl.load(pargs.offs_ptr + g)
-        m_size = m_end_offset - m_start_offset
-        n_size = N
-        k_size = K
-
-        iter = GroupTileIterator.initialize(tidx, iterated_tiles, m_start_offset, m_size,
-                                           n_start_offset, n_size, BLOCK_M, BLOCK_N, pargs.NUM_BLOCKS)
-
-        while iter.should_process():
+    group_iter = GroupIterator.create(
+        G, M, N,
+{%- if M_IS_VARYING or N_IS_VARYING %}
+        pargs.offs_ptr,
+{%- endif %}
+        BLOCK_M, BLOCK_N, NUM_BLOCKS
+    )
+    while group_iter.should_process():
+        tile_iter = TileIterator.create(
+            group_iter.tile_idx - group_iter.tiles_processed,
+            group_iter.m_start_offset, group_iter.m_size, group_iter.n_start_offset, group_iter.n_size,
+            BLOCK_M, BLOCK_N, NUM_BLOCKS
+        )
+        while tile_iter.should_process():
             acc_buf_empty_bar = acc_buf_empty_bars.index(acc_state.index)
 
             with pl.scope("compute_barrier_wait_acc_empty"):
@@ -381,10 +512,9 @@ def compute_partition(pargs: PartitionArgs):
 
             acc_state = acc_state.next()
 
-            iter = iter.next()
+            tile_iter = tile_iter.next()
 
-        tidx = iter.tidx
-        iterated_tiles += iter.num_tiles
+        group_iter = group_iter.next()
 
     pl.exit_scope("compute_partition")
 
@@ -395,8 +525,6 @@ def store_partition(pargs: PartitionArgs):
 
     c_desc = pargs.c_desc
 
-    tidx = gl.program_id(0)
-
     G: gl.constexpr = pargs.G
     M: gl.constexpr = pargs.M
     N: gl.constexpr = pargs.N
@@ -404,6 +532,7 @@ def store_partition(pargs: PartitionArgs):
     BLOCK_M: gl.constexpr = pargs.BLOCK_M
     BLOCK_N: gl.constexpr = pargs.BLOCK_N
     BLOCK_K: gl.constexpr = pargs.BLOCK_K
+    NUM_BLOCKS: gl.constexpr = pargs.NUM_BLOCKS
     NUM_STORE_WARPS: gl.constexpr = pargs.NUM_STORE_WARPS
 
     acc_buf_empty_bars = pargs.acc_buf_empty_bars
@@ -421,22 +550,21 @@ def store_partition(pargs: PartitionArgs):
         pargs.c_desc.dtype, [BLOCK_M, BLOCK_N], pargs.c_layout
     )
 
-    iterated_tiles = 0
-
-    n_start_offset = 0
-    m_end_offset = 0
-    for g in range(G):
-        m_start_offset = m_end_offset
-        m_end_offset = gl.load(pargs.offs_ptr + g)
-        m_size = m_end_offset - m_start_offset
-        n_size = N
-        k_size = K
-
-        iter = GroupTileIterator.initialize(tidx, iterated_tiles, m_start_offset, m_size,
-                                           n_start_offset, n_size, BLOCK_M, BLOCK_N, pargs.NUM_BLOCKS)
-
-        while iter.should_process():
-            # fixme: add epilogue here!
+    group_iter = GroupIterator.create(
+        G, M, N,
+{%- if M_IS_VARYING or N_IS_VARYING %}
+        pargs.offs_ptr,
+{%- endif %}
+        BLOCK_M, BLOCK_N, NUM_BLOCKS
+    )
+    while group_iter.should_process():
+        tile_iter = TileIterator.create(
+            group_iter.tile_idx - group_iter.tiles_processed,
+            group_iter.m_start_offset, group_iter.m_size, group_iter.n_start_offset, group_iter.n_size,
+            BLOCK_M, BLOCK_N, NUM_BLOCKS
+        )
+        while tile_iter.should_process():
+            # FIXME: add epilogue here!
 
             acc_buf_full_bar = acc_buf_full_bars.index(acc_state.index)
 
@@ -465,16 +593,15 @@ def store_partition(pargs: PartitionArgs):
             with pl.scope("store_fence_and_tma"):
                 fence_async_shared()
 {%- if not USE_RAGGED_TENSOR_DESCRIPTOR %}
-                tma.async_copy_shared_to_global(c_desc, [iter.m_offset, iter.n_offset], c_smem)
+                tma.async_copy_shared_to_global(c_desc, [tile_iter.m_offset, tile_iter.n_offset], c_smem)
 {%- else %}
                 c_smem_4d = c_smem.reshape([1, 1, BLOCK_M, BLOCK_N])
-                store_ragged(c_desc, m_start_offset, m_size, [iter.m_tile_offset, iter.n_offset], c_smem_4d, ragged_dim=0)
+                store_ragged(c_desc, group_iter.m_start_offset, group_iter.m_size, [tile_iter.m_tile_offset, tile_iter.n_offset], c_smem_4d, ragged_dim=0)
 {%- endif %}
 
-            iter = iter.next()
+            tile_iter = tile_iter.next()
 
-        tidx = iter.tidx
-        iterated_tiles += iter.num_tiles
+        group_iter = group_iter.next()
 
     with pl.scope("store_final_tma_wait"):
         tma.store_wait(pendings=0)
@@ -482,7 +609,11 @@ def store_partition(pargs: PartitionArgs):
     pl.exit_scope("store_partition")
 
 
+{%- if M_IS_VARYING or M_IS_VARYING or K_IS_VARYING %}
 {{def_kernel("a_ptr", "b_ptr", "offs_ptr")}}
+{%- else %}
+{{def_kernel("a_ptr", "b_ptr")}}
+{%- endif %}
     # Layout objects with computed swizzle widths for the given block dimensions
     a_layout: gl.constexpr = gl.NVMMASharedLayout(
         swizzle_byte_width={{A_LAYOUT_SWIZZLE_BYTE_WIDTH}},
@@ -524,19 +655,39 @@ def store_partition(pargs: PartitionArgs):
         cga_layout=[],
     )
 
-    # Kernel parameters from template variables
     c_ptr = {{get_output()}}
-    M: gl.constexpr = {{size("a_ptr", -2)}}
-    N: gl.constexpr = {{size("b_ptr", -1)}}
-    K: gl.constexpr = {{size("a_ptr", -1)}}
-    G: gl.constexpr = {{size("b_ptr", 0)}}
-    a_stride_m: gl.constexpr = {{stride("a_ptr", -2)}}
-    a_stride_k: gl.constexpr = {{stride("a_ptr", -1)}}
-    b_stride_g: gl.constexpr = {{stride("b_ptr", 0)}}
-    b_stride_n: gl.constexpr = {{stride("b_ptr", -1)}}
-    b_stride_k: gl.constexpr = {{stride("b_ptr", -2)}}
-    c_stride_m: gl.constexpr = {{output_stride(-2)}}
-    c_stride_n: gl.constexpr = {{output_stride(-1)}}
+
+{%- if A_IS_2D %}
+{%- if B_IS_2D %}
+    {{ assign_maybe_constexpr_gluon("G", size("offsets_ptr", 0)) }}
+{%- else %}
+    {{ assign_maybe_constexpr_gluon("G", size("b_ptr", 0)) }}
+{%- endif %}
+{%- else %}
+{%- if B_IS_2D %}
+    {{ assign_maybe_constexpr_gluon("G", size("a_ptr", 0)) }}
+{%- else %}
+    {{ assign_maybe_constexpr_gluon("G", size("a_ptr", 0)) }}
+{%- endif %}
+{%- endif %}
+
+    {{ assign_maybe_constexpr_gluon("M", size("a_ptr", -2)) }}
+    {{ assign_maybe_constexpr_gluon("N", size("b_ptr", -1)) }}
+    {{ assign_maybe_constexpr_gluon("K", size("a_ptr", -1)) }}
+
+    {{ assign_maybe_constexpr_gluon("a_stride_m", stride("a_ptr", -2)) }}
+    {{ assign_maybe_constexpr_gluon("a_stride_k", stride("a_ptr", -1)) }}
+{%- if not A_IS_2D %}
+    {{ assign_maybe_constexpr_gluon("a_stride_g", stride("a_ptr", 0)) }}
+{%- endif %}
+    {{ assign_maybe_constexpr_gluon("b_stride_n", stride("b_ptr", -1)) }}
+    {{ assign_maybe_constexpr_gluon("b_stride_k", stride("b_ptr", -2)) }}
+{%- if not B_IS_2D %}
+    {{ assign_maybe_constexpr_gluon("b_stride_g", stride("b_ptr", 0)) }}
+{%- endif %}
+    {{ assign_maybe_constexpr_gluon("c_stride_m", output_stride(-2)) }}
+    {{ assign_maybe_constexpr_gluon("c_stride_n", output_stride(-1)) }}
+
     NUM_BLOCKS: gl.constexpr = {{NUM_SMS}}
     dtype: gl.constexpr = {{DTYPE}}
 
@@ -640,7 +791,9 @@ def store_partition(pargs: PartitionArgs):
         a_desc,
         b_desc,
         c_desc,
+{%- if M_IS_VARYING or M_IS_VARYING or K_IS_VARYING %}
         offs_ptr,
+{%- endif %}
         c_ptr,
         c_stride_m,
         c_stride_n,

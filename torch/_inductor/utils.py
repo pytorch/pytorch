@@ -144,7 +144,11 @@ XPU_KERNEL_FORMAT = (
     "spv" if _IS_WINDOWS else os.getenv("TORCHINDUCTOR_XPU_KERNEL_FORMAT", "zebin")
 )
 
-GPU_KERNEL_BIN_EXTS = {"cuda": ".cubin", "xpu": f".{XPU_KERNEL_FORMAT}"}
+GPU_KERNEL_BIN_EXTS = {
+    "cuda": ".cubin",
+    "hip": ".hsaco",
+    "xpu": f".{XPU_KERNEL_FORMAT}",
+}
 
 GPU_ALIGN_BYTES = 16
 ALIGNMENT = 16
@@ -4223,10 +4227,21 @@ def is_nonfreeable_buffers(dep: Dep) -> bool:
 
 
 # Make sure to also include your jinja templates within torch_package_data in setup.py, or this function won't be able to find them
-def load_template(name: str, template_dir: Path) -> str:
-    """Load a template file and return its content."""
+def load_template(
+    name: str, template_dir: Path, helpers: list[str] | None = None
+) -> str:
+    """Load a template file and prepend optional helpers."""
+    content_parts = []
+
+    if helpers:
+        for helper_name in helpers:
+            with open(template_dir / f"{helper_name}.py.jinja") as f:
+                content_parts.append(f.read())
+
     with open(template_dir / f"{name}.py.jinja") as f:
-        return f.read()
+        content_parts.append(f.read())
+
+    return "\n".join(content_parts)
 
 
 def should_fallback_by_default(node: torch.fx.Node) -> bool:
