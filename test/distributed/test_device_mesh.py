@@ -1495,7 +1495,7 @@ class CuTeLayoutTest(TestCase):
         self.assertEqual(list(l.sizes_and_strides), [])
 
     def test_flatten(self):
-        l = _FlatLayout(((7, (5, 3)), 2), ((900, (36, 4), 1)))
+        l = _FlatLayout(((7, (5, 3)), 2), ((900, (36, 4)), 1))
         self.assertEqual(list(l.sizes_and_strides), [(7, 900), (5, 36), (3, 4), (2, 1)])
 
         l = _FlatLayout(((7, (5, 3)), 2), ((30, (6, 2), 1)))
@@ -1507,24 +1507,16 @@ class CuTeLayoutTest(TestCase):
         self.assertEqual(list(l.sizes_and_strides), [(7 * 5 * 3 * 2, 1)])
 
     def test_mismatch_sizes_strides(self):
-        with self.assertRaisesRegex(
-            ValueError, "sizes .* and strides .* don't match"
-        ):
+        with self.assertRaisesRegex(ValueError, "sizes .* and strides .* don't match"):
             _FlatLayout(42, (1,))
 
-        with self.assertRaisesRegex(
-            ValueError, "sizes .* and strides .* don't match"
-        ):
+        with self.assertRaisesRegex(ValueError, "sizes .* and strides .* don't match"):
             _FlatLayout((3, 2), 1)
 
-        with self.assertRaisesRegex(
-            ValueError, "sizes .* and strides .* don't match"
-        ):
+        with self.assertRaisesRegex(ValueError, "sizes .* and strides .* don't match"):
             _FlatLayout((5, 3, 2), (2, 1))
 
-        with self.assertRaisesRegex(
-            ValueError, "sizes .* and strides .* don't match"
-        ):
+        with self.assertRaisesRegex(ValueError, "sizes .* and strides .* don't match"):
             _FlatLayout((5, (3, 2)), ((5, 3), 2))
 
     def test_complement_n_group_layout(self):
