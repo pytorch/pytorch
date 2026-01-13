@@ -1,4 +1,5 @@
 #undef __HIP_NO_HALF_CONVERSIONS__
+#include <ATen/ATen.h>
 #include <ATen/hip/HIPContext.h>
 #include <ATen/Tensor.h>
 #include <ATen/TensorAccessor.h>
@@ -379,11 +380,10 @@ void launch_grouped_bgemm_ck_impl_dispatch(
     size_t arg_buf_size = gemm_instance.GetDeviceKernelArgSize(&argument);
     size_t ws_size = gemm_instance.GetWorkSpaceSize(&argument);
 
-    void* gemm_arg_buf = nullptr;
-    void* ws_buf = nullptr;
-
-    hipMalloc(&gemm_arg_buf, arg_buf_size);
-    hipMalloc(&ws_buf, ws_size);
+    at::Tensor gemm_arg_tensor = at::empty({static_cast<int64_t>(arg_buf_size)}, at::TensorOptions().dtype(at::kByte).device(at::kCUDA));
+    void* gemm_arg_buf = gemm_arg_tensor.data_ptr();
+    at::Tensor ws_tensor = at::empty({static_cast<int64_t>(ws_size)}, at::TensorOptions().dtype(at::kByte).device(at::kCUDA));
+    void* ws_buf = ws_tensor.data_ptr();
 
     gemm_instance.SetDeviceKernelArgs(&argument, gemm_arg_buf);
     gemm_instance.SetWorkSpacePointer(&argument, ws_buf);
@@ -391,8 +391,6 @@ void launch_grouped_bgemm_ck_impl_dispatch(
     auto invoker = gemm_instance.MakeInvoker();
     hipStream_t stream = c10::hip::getCurrentHIPStream();
     invoker.Run(argument, {stream});
-    hipFree(gemm_arg_buf);
-    hipFree(ws_buf);
 }
 
 void group_gemm_ck(
