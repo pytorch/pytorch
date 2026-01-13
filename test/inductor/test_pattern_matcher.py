@@ -35,7 +35,7 @@ from torch._inductor.virtualized import V
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import SM80OrLater, xfailIfSM89
-from torch.testing._internal.common_device_type import skipCUDAIf
+from torch.testing._internal.common_device_type import skipCUDAIf, skipCUDAIfRocm
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     IS_LINUX,
@@ -341,6 +341,7 @@ class TestPatternMatcher(TestCase):
         }
     )
     @unittest.skipIf(not IS_BIG_GPU, "templates require big gpu")
+    @skipCUDAIfRocm(msg="mixed_mm pattern matcher not supported on ROCm")
     def test_mixed_mm(self):
         def fn(a, b):
             return torch.mm(a, b.to(a.dtype))
