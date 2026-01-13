@@ -6768,7 +6768,6 @@ def sample_inputs_cross_entropy(op_info, device, dtype, requires_grad, **kwargs)
 
 def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, **kwargs_unused):
     assert dtype.is_floating_point, dtype
-    batch_size, num_classes = shape = (2, 3)
     reductions = ("mean", "sum", "none")
 
     kwargs_list: list[dict[str, Any]] = [
@@ -6793,6 +6792,10 @@ def sample_inputs_linear_cross_entropy(op_info, device, dtype, requires_grad, **
             else:
                 target_shape = (*input_shape[:1], *input_shape[2:])
                 num_classes = input_shape[1]
+
+            if 0 in target_shape:
+                # skip degenerate samples
+                continue
 
             if "weight" in kwargs:
                 kwargs["weight"] = make_tensor((num_classes,), device=device, dtype=dtype)
@@ -15274,24 +15277,24 @@ op_db: list[OpInfo] = [
             ),
         ),
         skips=(
-            # AssertionError: False is not true : Scalars failed to compare as equal! 0 != 1536
-            # test_ops.TestJitCUDA.test_variant_consistency_jit_nn_functional_cross_entropy_cuda_float32 leaked
-            # 1536 bytes CUDA memory on device 0
-            # DecorateInfo(
-            #    unittest.expectedFailure,
-            #    "TestJit",
-            #    "test_variant_consistency_jit",
-            #    device_type="cuda",
-            # ),
-            # DecorateInfo(unittest.skip("FP16 cross_entropy cases have not been enabled on MPS yet"),
-            #             dtypes=(torch.half,), device_type="mps"),
-
             # RuntimeError: Difference from float64 is larger with
             # decomposition nll_loss2d_forward.default than original
             # on output 0. Original max diff: 0.0004882961511611938,
             # Decomp max diff: 0.015136703848838806
             DecorateInfo(unittest.skip("Inconsistent accuracy"), 'TestDecomp', 'test_comprehensive',
                          dtypes=(torch.float16,)),
+            # Exception: While computing batched gradients, got:
+            # Trying to set a forward gradient that has a different
+            # size than that of the original Tensor, this is not
+            # supported. Tensor is of size [4] while the given forward
+            # gradient is of size [1, 4]
+            DecorateInfo(unittest.skip("gradcheck failing when target is scalar"), 'TestFwdGradients', 'test_forward_mode_AD',
+                         dtypes=(torch.float64,)),
+            # RuntimeError: input->type()->kind() ==
+            # TypeKind::OptionalType INTERNAL ASSERT FAILED at
+            # "torch/csrc/jit/passes/utils/check_alias_annotation.cpp":267
+            DecorateInfo(unittest.skip("internal assert failure"), 'TestJit', 'test_variant_consistency_jit',
+                         dtypes=(torch.float32,)),
         )
     ),
     OpInfo('nn.functional.normalize',

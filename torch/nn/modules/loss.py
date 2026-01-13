@@ -1433,7 +1433,7 @@ class LinearCrossEntropyLoss(_WeightedLoss):
 
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """Runs the forward pass."""
-        return F.linear_cross_entropy(
+        return F.linear_cross_entropy(  # pyrefly: ignore [missing-attribute]
             input,
             self.linear_weight,
             target,
