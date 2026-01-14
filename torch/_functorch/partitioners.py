@@ -26,6 +26,7 @@ from torch._functorch._activation_checkpointing.ac_logging_utils import (
     create_structured_trace_for_min_cut_info,
 )
 from torch._inductor import config as inductor_config
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.utils import is_builtin
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import extract_tensor_metadata
@@ -2053,8 +2054,12 @@ def solve_min_cut(
         if is_sym_node(node):
             weight = float(sym_node_size(node))
         elif is_non_tensor_node:
+            # FakeScriptObjects (opaque objects) should have weight 0.0 so they can be
+            # properly partitioned between forward and backward, like BackwardState.
             weight = (
-                0.0 if isinstance(node.meta.get("val"), BackwardState) else math.inf
+                0.0
+                if isinstance(node.meta.get("val"), (BackwardState, FakeScriptObject))
+                else math.inf
             )
         else:
             weight = get_node_weight(node, node_info.static_lifetime_input_nodes)
