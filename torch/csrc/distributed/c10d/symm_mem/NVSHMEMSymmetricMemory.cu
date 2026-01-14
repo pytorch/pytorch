@@ -138,10 +138,6 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
         signal_pads_.data(),
         arr_size,
         cudaMemcpyHostToDevice));
-
-    // Initialize multicast address
-    // On unsupported platforms, this API returns a nullptr.
-    mc_addr_ = nvshmemx_mc_ptr(NVSHMEM_TEAM_WORLD, base_ptr_);
   }
 
  private:
@@ -155,8 +151,6 @@ class NVSHMEMPeerAllocInfo : public c10::intrusive_ptr_target {
   void** signal_pads_dev_;
   // Whether the world is within CUDA P2P only, not network
   bool world_within_cuda_p2p_;
-  // Multicast address
-  void* mc_addr_;
 
   friend class NVSHMEMSymmetricMemory;
 };
@@ -212,15 +206,13 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
   }
 
   bool has_multicast_support() override {
-    // On unsupported platforms, this API returns a nullptr.
-    return pai_->mc_addr_ != nullptr;
+    // TODO
+    return false;
   }
 
   void* get_multicast_ptr() override {
-    if (!has_multicast_support()) {
-      return nullptr;
-    }
-    return static_cast<char*>(pai_->mc_addr_) + offset_;
+    // TODO
+    return nullptr;
   }
 
   size_t get_offset() override {
@@ -440,8 +432,9 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   };
 
   bool has_multicast_support(int device_idx) override {
-    return device_has_multicast_support(device_idx);
-  }
+    // TODO
+    return false;
+  };
 
   c10::DeviceType supported_device_type() override {
     return c10::DeviceType::CUDA;
