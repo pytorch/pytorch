@@ -230,7 +230,7 @@ def get_attr_inference_rule(n: Node, traced):
     """
     The current getattr rule only handles the shape attribute
     Can be extended to other attributes
-    The most representitive type we have is "Dyn" but the system
+    The most representative type we have is "Dyn" but the system
     can be extended with more types, such as a type to represent shapes
     """
     attr_name = n.args[1]

@@ -23,13 +23,13 @@ from .ctx_manager import (
     CatchWarningsCtxManagerVariable,
     ContextWrappingVariable,
     CUDADeviceVariable,
-    DeterministicAlgorithmsVariable,
     DisabledSavedTensorsHooksVariable,
     DualLevelContextManager,
     DynamoConfigPatchVariable,
     ErrorOnGraphBreakVariable,
     FSDPParamGroupUseTrainingStateVariable,
     FxTracebackAnnotateVariable,
+    GenericContextWrappingVariable,
     GradIncrementNestingCtxManagerVariable,
     GradInplaceRequiresGradCtxManagerVariable,
     GradModeVariable,
@@ -91,7 +91,7 @@ from .iter import (
     RepeatIteratorVariable,
     ZipVariable,
 )
-from .lazy import LazyVariableTracker
+from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -113,6 +113,7 @@ from .misc import (
     MethodWrapperVariable,
     NewGlobalVariable,
     NumpyVariable,
+    ObjectVariable,
     PythonModuleVariable,
     RandomClassVariable,
     RandomVariable,
@@ -175,7 +176,6 @@ __all__ = [
     "DataPtrVariable",
     "DefaultDictVariable",
     "DeletedVariable",
-    "DeterministicAlgorithmsVariable",
     "DictKeySetVariable",
     "DynamoConfigPatchVariable",
     "EnumVariable",
@@ -185,6 +185,7 @@ __all__ = [
     "IteratorVariable",
     "ItertoolsVariable",
     "LambdaVariable",
+    "LazyConstantVariable",
     "LazyVariableTracker",
     "ListIteratorVariable",
     "ListVariable",
