@@ -6500,6 +6500,8 @@ class TestCudaOptims(TestCase):
                 for p_control, p_graphed in zip(params_control, params_graphed):
                     self.assertEqual(p_control, p_graphed)
 
+    # This test cases compares autocast scaling on a fused optim vs autocast scaling
+    # on a forloop optim.
     @onlyNativeDeviceTypes
     @optims(
         [optim for optim in optim_db if "fused" in optim.supported_impls],
@@ -6577,7 +6579,12 @@ class TestCudaOptims(TestCase):
                             if k == "step":
                                 actual = actual.squeeze()
                             tracker.add(state_control[k])
-                            tracker.pop_check_set(actual, self)
+                            # Increase the tolerance for exp_avg_sq (dtype is float32)
+                            # fused and forloop are known to be different.
+                            assert_eq_kwargs = {}
+                            if k == "exp_avg_sq":
+                                assert_eq_kwargs = {"atol": 4e-5, "rtol": 2e-5}
+                            tracker.pop_check_set(actual, self, assert_eq_kwargs)
 
     @onlyCUDA
     @parametrize("in_place_unscale", [False, True])
