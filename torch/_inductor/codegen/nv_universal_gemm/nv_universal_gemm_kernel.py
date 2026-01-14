@@ -128,6 +128,8 @@ class NVUniversalGemmKernel(Kernel):
             #   - GemmArguments: tensor wrapper object
             #   - artifact: compiled GPU binary
             # On subsequent calls, we reuse cached args and just update tensor pointers (A, B, out).
+            # After kernel.run(), we clear tensor references to avoid holding them in the cache,
+            # which would interfere with CUDA graph trees memory tracking.
             _nv_universal_gemm_kernel_cache = {{}}
             _nv_universal_gemm_compiled_cache = {{}}
 
@@ -157,11 +159,20 @@ class NVUniversalGemmKernel(Kernel):
                     _nv_universal_gemm_compiled_cache[cache_key] = (args, artifact)
                 else:
                     args, artifact = _nv_universal_gemm_compiled_cache[cache_key]
-                    args.A.tensor.runtime_tensor = in_ptr0
-                    args.B.tensor.runtime_tensor = in_ptr1
-                    args.out.tensor.runtime_tensor = out_ptr0
+
+                # Set tensor pointers (for both cache hit and miss paths)
+                args.A.tensor.runtime_tensor = in_ptr0
+                args.B.tensor.runtime_tensor = in_ptr1
+                args.out.tensor.runtime_tensor = out_ptr0
 
                 kernel.run(args, artifact, stream=stream, workspace={workspace_arg}, assume_supported_args=True)
+
+                # This is required for CUDA graph trees compatibility - cached args must not
+                # hold references to tensors that would be tracked by the memory pool.
+                # The kernel has already captured the GPU memory addresses, so this is safe.
+                args.A.tensor.runtime_tensor = None
+                args.B.tensor.runtime_tensor = None
+                args.out.tensor.runtime_tensor = None
             """
         )
 
