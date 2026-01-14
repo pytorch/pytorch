@@ -35,9 +35,10 @@ class HopArgumentInfoGen:
         kw_only: bool = False,
     ) -> HopArgumentInfo:
         if default_value is not None:
-            assert type(example_value) is type(default_value), (
-                f"example_value type {type(example_value)} doesn't match default_value type: {type(default_value)}"
-            )
+            if type(example_value) is not type(default_value):
+                raise AssertionError(
+                    f"example_value type {type(example_value)} doesn't match default_value type: {type(default_value)}"
+                )
 
         return HopArgumentInfo(
             name=name,
@@ -107,12 +108,13 @@ class HopSchemaGenerator:
         kw_only: bool = False,
     ) -> None:
         if callable(example_value):
-            assert isinstance(
+            if not isinstance(
                 example_value, (torch.fx.GraphModule, torch._ops.OperatorBase)
-            ), (
-                "Expect callable to be a GraphModule or an. Please call materialize_as_graph first "
-                f"to turn callable arguments {example_value} into a GraphModule."
-            )
+            ):
+                raise AssertionError(
+                    "Expect callable to be a GraphModule or an OperatorBase. Please call materialize_as_graph first "
+                    f"to turn callable arguments {example_value} into a GraphModule."
+                )
         _, flat_spec = pytree.tree_flatten(example_value)
         if not flat_spec.is_leaf():
             raise RuntimeError(
@@ -209,12 +211,14 @@ class CFunctionSchemaGen:
             args.append(CArgumentGen.from_hop_argument_info(i, arg_info))
 
         # NOTE: we want the output to always be a single argument with torch._C.TupleType.
-        assert isinstance(out_argument_info.example_value, tuple), (
-            f"expect out_argument_info's example_value to be a tuple but got {out_argument_info.example_value}"
-        )
-        assert not out_argument_info.is_mutated, (
-            "out_argument_info.is_mutated should always be set to False."
-        )
+        if not isinstance(out_argument_info.example_value, tuple):
+            raise AssertionError(
+                f"expect out_argument_info's example_value to be a tuple but got {out_argument_info.example_value}"
+            )
+        if out_argument_info.is_mutated:
+            raise AssertionError(
+                "out_argument_info.is_mutated should always be set to False."
+            )
         rets = None
         if len(out_argument_info.example_value) == 1:
             rets = [CArgumentGen.from_hop_argument_info(0, out_argument_info, True)]
@@ -289,7 +293,10 @@ def find_hop_schema(
 
         def _get_example_value(node: torch.fx.Node) -> Any:
             if node.op == "get_attr":
-                assert isinstance(node.target, str)
+                if not isinstance(node.target, str):
+                    raise AssertionError(
+                        f"expected node.target to be str for get_attr, got {type(node.target)}"
+                    )
                 return getattr(gm, node.target)
             else:
                 return (

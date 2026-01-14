@@ -116,17 +116,19 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         identifier: Optional[str],
         *operands,
     ):
-        assert identifier is None or isinstance(identifier, str), (
-            "identifier must be a None or a string"
-        )
+        if identifier is not None and not isinstance(identifier, str):
+            raise AssertionError(
+                f"identifier must be None or a string, got {type(identifier)}"
+            )
 
-        assert all(
+        if not all(
             isinstance(o, (torch.Tensor, int, torch.SymInt, torch.Generator))
             for o in operands
             if o is not None
-        ), (
-            f"invoke_subgraph operands must be a list of tensors/ints/SymInts/Generator {operands}"
-        )
+        ):
+            raise AssertionError(
+                f"invoke_subgraph operands must be a list of tensors/ints/SymInts/Generator, got {operands}"
+            )
 
         # pyrefly: ignore [missing-attribute]
         return super().__call__(subgraph, identifier, *operands)
@@ -535,7 +537,10 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         # Check that int (coming from symint) is at expected indexes.
         for idx, o in enumerate(out):
             if isinstance(o, int):
-                assert idx in output_metadata.indexes_with_symint
+                if idx not in output_metadata.indexes_with_symint:
+                    raise AssertionError(
+                        f"unexpected int output at index {idx}, not in indexes_with_symint"
+                    )
 
         return out
 
@@ -556,7 +561,10 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         filtered_grad_outs = []
         for idx, o in enumerate(grad_outs):
             if o is None:
-                assert idx in output_metadata.indexes_with_symint
+                if idx not in output_metadata.indexes_with_symint:
+                    raise AssertionError(
+                        f"unexpected None grad_out at index {idx}, not in indexes_with_symint"
+                    )
             elif idx in output_metadata.indexes_with_no_grad:
                 # Deliberately skip over the grad_outs which we know should be
                 # None because the corresponding fwd_out does not require_grad.
@@ -574,7 +582,8 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         from torch._subclasses.fake_tensor import extract_tensor_metadata
 
         fake_mode = detect_fake_mode(primals + filtered_grad_outs)
-        assert fake_mode is not None, "fake_mode should be enabled for HOPs"
+        if fake_mode is None:
+            raise AssertionError("fake_mode should be enabled for HOPs")
         state = _CacheKeyState(fake_mode.shape_env)
 
         tangent_metadata: list[object] = []
@@ -621,7 +630,10 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
             cache_hit = bw_graph is not None
 
         if bw_graph is None:
-            assert suffix is None
+            if suffix is not None:
+                raise AssertionError(
+                    f"suffix should be None when bw_graph is None, got {suffix}"
+                )
             with dynamo_timed(
                 "invoke_subgraph_trace_joint_graph", log_pt2_compile_event=True
             ):
@@ -680,7 +692,8 @@ def _(subgraph, identifier, *operands):
     from torch.utils._python_dispatch import _get_current_dispatch_mode
 
     mode = _get_current_dispatch_mode()
-    assert mode is None, "Mode should never be enabled for CPU/CUDA key"
+    if mode is not None:
+        raise AssertionError("Mode should never be enabled for CPU/CUDA key")
     if getattr(subgraph, "_boxed_call", False):
         return subgraph(list(operands))
     else:
@@ -704,7 +717,10 @@ def _(ctx, subgraph, identifier, *operands):
         effects = invoke_subgraph_cache.get_effects(identifier)
 
     if effects:
-        assert len(effects) == 1, "Multiple effects within a subgraph NYI"
+        if len(effects) != 1:
+            raise AssertionError(
+                f"Multiple effects within a subgraph NYI, got {len(effects)} effects"
+            )
         tokens = ctx.mode._tokens
         effects = next(iter(effects))
         token_input = tokens[effects]
@@ -732,7 +748,10 @@ def _(ctx, subgraph, identifier, *operands):
         # In invoke_subgraph's functionalization key implementation, we create a new
         # identifier because the subgraph is replaced by FunctionWithNoFreeVars in a
         # functional + epilogue form.
-        assert isinstance(identifier, str), identifier
+        if not isinstance(identifier, str):
+            raise AssertionError(
+                f"identifier must be a string for auto_functionalize, got {type(identifier)}"
+            )
         return do_auto_functionalize_v2(
             ctx.mode,
             hop_instance,
@@ -761,9 +780,10 @@ def _(ctx, subgraph, identifier, *operands):
             discovered_effects.add(effect_type)
 
     if discovered_effects:
-        assert ctx.mode._allow_token_discovery, (
-            f"Number of tokens changed by {len(discovered_effects)} when tracing subgraph {subgraph}."
-        )
+        if not ctx.mode._allow_token_discovery:
+            raise AssertionError(
+                f"Number of tokens changed by {len(discovered_effects)} when tracing subgraph {subgraph}."
+            )
         # Store discovered effects in the cache by identifier
         if invoke_subgraph_cache:
             invoke_subgraph_cache.add_effects(identifier, discovered_effects)
@@ -811,7 +831,10 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
             )
             graph.recompile()
 
-        assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
+        if not isinstance(proxy_mode.tracer, torch.fx.Tracer):
+            raise AssertionError(
+                f"expected proxy_mode.tracer to be torch.fx.Tracer, got {type(proxy_mode.tracer)}"
+            )
         if invoke_subgraph_cache:
             invoke_subgraph_cache.add_proxy_dispatch_entry(identifier, graph)
 
@@ -881,7 +904,10 @@ def invoke_subgraph_inductor_compile(
         inductor_config_patches = {}
     compile_fn = config.patch(inductor_config_patches)(compile_fx_inner)
     compiled_fn_inner = compile_fn(gm, example_inputs)
-    assert compiled_fn_inner._boxed_call
+    if not compiled_fn_inner._boxed_call:
+        raise AssertionError(
+            "compiled_fn_inner must have _boxed_call attribute set to True"
+        )
 
     # Follow boxed calling convention
     @simple_wraps(compiled_fn_inner)

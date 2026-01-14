@@ -47,9 +47,10 @@ aten = torch._ops.ops.aten
 def wrap_combine_fn_flat(
     *args, combine_fn, spec_init, spec_xs, num_init_leaves, num_inp_leaves
 ):
-    assert len(args) == (num_init_leaves + num_inp_leaves), (
-        f"combine_fn received wrong number of arguments, expected {num_init_leaves + num_inp_leaves}, but got {len(args)}"
-    )
+    if len(args) != (num_init_leaves + num_inp_leaves):
+        raise AssertionError(
+            f"combine_fn received wrong number of arguments, expected {num_init_leaves + num_inp_leaves}, but got {len(args)}"
+        )
     carry = pytree.tree_unflatten(args[:num_init_leaves], spec_init)
     xs = pytree.tree_unflatten(args[num_init_leaves:], spec_xs)
     return combine_fn(carry, xs)
@@ -230,9 +231,10 @@ class ScanOp(HigherOrderOperator):
         # the additional_inputs being a list. See https://github.com/pytorch/pytorch/issues/145785
         # Once this issue is resolved, the assertion should only allow tuples
         # and the tuple cast should be removed
-        assert isinstance(additional_inputs, (tuple, list)), (
-            "additional_inputs must be a tuple."
-        )
+        if not isinstance(additional_inputs, (tuple, list)):
+            raise AssertionError(
+                f"additional_inputs must be a tuple or list, got {type(additional_inputs)}"
+            )
         additional_inputs = (
             tuple(additional_inputs)
             if isinstance(additional_inputs, list)
@@ -388,11 +390,16 @@ def trace_scan(
     outputs = None
     for node in combine_graph.graph.nodes:
         if node.op == "output":
-            assert outputs is None
-            assert len(node.args) == 1
+            if outputs is not None:
+                raise AssertionError("found multiple output nodes in combine_graph")
+            if len(node.args) != 1:
+                raise AssertionError(
+                    f"expected output node to have 1 arg, got {len(node.args)}"
+                )
             outputs = node.args[0]
 
-    assert outputs is not None
+    if outputs is None:
+        raise AssertionError("no output node found in combine_graph")
 
     carry, output = _extract_carry_and_out(outputs, len(init))
     init_fake_tensors: list[torch.Tensor | torch.SymInt | int] = [
@@ -431,7 +438,8 @@ def trace_scan(
 @scan_op.py_impl(DispatchKey.CompositeExplicitAutograd)
 def scan_op_dense(combine_fn, init, xs, additional_inputs):
     mode = _get_current_dispatch_mode()
-    assert mode is None, "Mode should never be enabled for CPU/CUDA key"
+    if mode is not None:
+        raise AssertionError("Mode should never be enabled for CPU/CUDA key")
     return generic_scan(combine_fn, init, xs, additional_inputs=additional_inputs)
 
 
@@ -570,9 +578,14 @@ class ScanAutogradImpl:
             set(additional_inputs_phs),
         )
 
-        assert len(self.forward_intermediates_handling_policies) == 0
-        assert len(self.saved_fw_xs) == 0
-        assert len(self.saved_fw_additional_inputs) == 0
+        if len(self.forward_intermediates_handling_policies) != 0:
+            raise AssertionError(
+                "forward_intermediates_handling_policies should be empty"
+            )
+        if len(self.saved_fw_xs) != 0:
+            raise AssertionError("saved_fw_xs should be empty")
+        if len(self.saved_fw_additional_inputs) != 0:
+            raise AssertionError("saved_fw_additional_inputs should be empty")
         intermediate_idx_to_ph_idx = {}
         ph_idx = {ph: i for i, ph in enumerate(phs)}
         for i, out in enumerate(fw_intermediates):
@@ -607,14 +620,20 @@ class ScanAutogradImpl:
             if policy == ScanForwardIntermediatesHandlingPolicy.CLONE:
                 new_output_node.append(self._insert_clone(node, fw_output_node))
             elif policy == ScanForwardIntermediatesHandlingPolicy.REMOVE_XS:
-                assert intermediate_idx in intermediate_idx_to_ph_idx
+                if intermediate_idx not in intermediate_idx_to_ph_idx:
+                    raise AssertionError(
+                        f"intermediate_idx {intermediate_idx} not in intermediate_idx_to_ph_idx"
+                    )
                 inp_idx = intermediate_idx_to_ph_idx[intermediate_idx]
                 self.saved_fw_xs.append(real_graph_inputs[inp_idx])
             elif (
                 policy
                 == ScanForwardIntermediatesHandlingPolicy.REMOVE_ADDITIONAL_INPUTS
             ):
-                assert intermediate_idx in intermediate_idx_to_ph_idx
+                if intermediate_idx not in intermediate_idx_to_ph_idx:
+                    raise AssertionError(
+                        f"intermediate_idx {intermediate_idx} not in intermediate_idx_to_ph_idx for REMOVE_ADDITIONAL_INPUTS"
+                    )
                 inp_idx = intermediate_idx_to_ph_idx[intermediate_idx]
                 self.saved_fw_additional_inputs.append(real_graph_inputs[inp_idx])
             else:
@@ -639,7 +658,10 @@ class ScanAutogradImpl:
         saved_intermediates = fw_outputs_and_intermediates[
             self.hop_partitioned_graph.n_fw_outputs :
         ]
-        assert len(self.saved_intermediates) == 0
+        if len(self.saved_intermediates) != 0:
+            raise AssertionError(
+                "saved_intermediates should be empty before call_forward"
+            )
         self.saved_intermediates.extend(saved_intermediates)
         return tuple(fw_outs)
 
@@ -774,7 +796,8 @@ class ScanAutogradImpl:
             [torch.flip(x, (0,)) for x in pytree.tree_flatten(bw_xs)[0]],
             pytree.tree_flatten(bw_additional_inputs)[0],
         )
-        assert grad_spec is not None
+        if grad_spec is None:
+            raise AssertionError("grad_spec must not be None after scan_op")
         grad_init, grad_additional_inputs, grad_xs = pytree.tree_unflatten(
             flat_grads, grad_spec
         )
@@ -920,7 +943,8 @@ def scan_batch_rule(interpreter, combine_fn, init, xs, additional_inputs):
             wrapper, unbatched_init, unbatched_xs, unbatched_additional_inputs
         )
 
-    assert out_dims is not None
+    if out_dims is None:
+        raise AssertionError("out_dims must not be None after scan_op")
     batched_out = wrap_batched(unwrapped_out, out_dims, interpreter.level())
     return batched_out
 

@@ -88,9 +88,14 @@ class WithEffects(HigherOrderOperator):
         *args: tuple[Any, ...],
         **kwargs: dict[str, Any],
     ) -> tuple[Any, ...]:
-        assert isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload))
-        assert not has_aliasing(op), "Ops with aliasing is not supported"
-        assert isinstance(kwargs, dict)
+        if not isinstance(op, (torch._ops.HigherOrderOperator, torch._ops.OpOverload)):
+            raise AssertionError(
+                f"op must be HigherOrderOperator or OpOverload, got {type(op)}"
+            )
+        if has_aliasing(op):
+            raise AssertionError("Ops with aliasing is not supported")
+        if not isinstance(kwargs, dict):
+            raise AssertionError(f"kwargs must be a dict, got {type(kwargs)}")
         # pyrefly: ignore [missing-attribute]
         return super().__call__(token, op, *args, **kwargs)
 
@@ -229,11 +234,13 @@ def handle_effects(
     # this will create an empty tensor during proxy mode tracing if the token
     # doesn't exist. But the tokens should always exist during proxy mode tracing.
     key = _get_effect(op)
-    assert key is not None
+    if key is None:
+        raise AssertionError(f"effect key must not be None for op {op}")
     if key not in tokens:
-        assert allow_token_discovery, (
-            f"Could not find a token for effect {key} which came from the function {op}"
-        )
+        if not allow_token_discovery:
+            raise AssertionError(
+                f"Could not find a token for effect {key} which came from the function {op}"
+            )
         proxy_tensor_mode = torch._C._get_dispatch_mode(
             torch._C._TorchDispatchModeKey.PROXY
         )
@@ -275,18 +282,26 @@ def handle_effects(
 
     schema = _get_schema(op, unwrapped_args, unwrapped_kwargs)
     if len(schema.returns) == 0:
-        assert unwrapped_outs[0] is None
+        if unwrapped_outs[0] is not None:
+            raise AssertionError(f"expected no outputs but got {unwrapped_outs[0]}")
         unwrapped_outs = None  # type: ignore[assignment]
     elif len(schema.returns) == 1:
-        assert len(unwrapped_outs) == 1
+        if len(unwrapped_outs) != 1:
+            raise AssertionError(f"expected 1 output but got {len(unwrapped_outs)}")
         unwrapped_outs = unwrapped_outs[0]
     else:
-        assert len(unwrapped_outs) == len(schema.returns)
+        if len(unwrapped_outs) != len(schema.returns):
+            raise AssertionError(
+                f"expected {len(schema.returns)} outputs but got {len(unwrapped_outs)}"
+            )
 
     # Add the newly created token into the tokens map for a following call to
     # use this token.
     wrapped_token = ctx.wrap_tensors(new_token)
-    assert isinstance(wrapped_token, torch.Tensor)
+    if not isinstance(wrapped_token, torch.Tensor):
+        raise AssertionError(
+            f"expected wrapped_token to be torch.Tensor, got {type(wrapped_token)}"
+        )
     tokens[key] = wrapped_token
 
     # pyrefly: ignore [bad-argument-type]
