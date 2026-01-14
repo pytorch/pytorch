@@ -2094,13 +2094,16 @@ def use_nv_universal_gemm_template(
         3. We are on a NVIDIA GPU
         4. The dtype is fp16 or bf16
         5. Max autotune or max autotune gemm is enabled
-        6. We are not using dynamic shapes
-        7. Not in AOT Inductor mode (requires runtime JIT compilation)
-        8. Base pointers are 16-byte aligned
+        6. Not in AOT Inductor mode (requires runtime JIT compilation)
+        7. Base pointers are 16-byte aligned
+        8. Shape dimensions are not unbacked symbols
 
     Note: Shape and stride constraints are handled internally by
     cutlass_api.get_kernels() which filters incompatible kernels.
+    Dynamic shapes are supported as long as they have hints (from example inputs).
     """
+    from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
+
     if not ensure_cute_available():
         return False
 
@@ -2125,8 +2128,10 @@ def use_nv_universal_gemm_template(
     if not (config.max_autotune or config.max_autotune_gemm):
         return False
 
-    # TODO(nikhilap) Enable dynamic shapes
-    if any(is_dynamic(x) for x in [mat_a, mat_b]):
+    # cutlass_api can't handle unbacked symbols because it needs to evaluate
+    # shape constraints (e.g., stride divisibility by 8, N/K divisibility by 16).
+    # Unbacked symbols have no hint values, causing GuardOnDataDependentSymNode errors.
+    if any(has_free_unbacked_symbols(dim) for dim in [m, n, k]):
         return False
 
     # Base pointer must be 16-byte aligned. cutlass_api can't check this at
