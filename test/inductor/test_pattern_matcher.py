@@ -1264,6 +1264,7 @@ class TestPatternMatcher(TestCase):
 
         with torch._subclasses.FakeTensorMode() as mode:
             for (
+                unique_name,
                 search_fn,
                 example_inputs,
                 trace_fn,
@@ -1280,9 +1281,14 @@ class TestPatternMatcher(TestCase):
 
                 example_inputs = pytree.tree_map(remap_fake_tensor, example_inputs)
 
-                pattern = gen_pattern(
-                    search_fn, example_inputs, trace_fn, scalar_workaround
-                )
+                try:
+                    pattern = gen_pattern(
+                        search_fn, example_inputs, trace_fn, scalar_workaround
+                    )
+                except Exception as e:
+                    raise RuntimeError(
+                        f"Error building pattern for {unique_name}"
+                    ) from e
                 pattern_pp = PatternPrettyPrinter.run(pattern)
 
                 self.assertEqual(
