@@ -130,7 +130,7 @@ def get_worker_info() -> WorkerInfo | None:
 r"""Dummy class used to signal the end of an IterableDataset"""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _IterableDatasetStopIteration:
     worker_id: int
 
@@ -138,7 +138,7 @@ class _IterableDatasetStopIteration:
 r"""Dummy class used to resume the fetching when worker reuse is enabled"""
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _ResumeIteration:
     seed: int | None = None
 
