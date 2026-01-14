@@ -80,7 +80,6 @@ def lower_cpu(
             f"and value.dtype: {value.dtype}."
         )
 
-    output_logsumexp = kernel_options["OUTPUT_LOGSUMEXP"]
     # CPU template doesn't compute logsumexp yet - backward will fall back to eager
     if not check_cpu_supported():
         raise NotImplementedError(

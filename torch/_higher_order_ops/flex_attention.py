@@ -440,10 +440,10 @@ def math_attention(
         Query and Keys are dtype cast up to float64 (if query.dtype is float64) and float32 otherwise.
         Scores and Values are dtype cast to input query.dtype at the end.
     """
-    # Check for varlen mode
-    has_varlen = _has_varlen_offsets(block_mask)
+    # Check for varlen mode - store contraction params if varlen
+    varlen_contraction_params = None
 
-    if has_varlen:
+    if _has_varlen_offsets(block_mask):
         (
             logical_q_len,
             logical_kv_len,
@@ -456,7 +456,6 @@ def math_attention(
         ) = _extract_varlen_params(block_mask)
 
         physical_q_len = query.size(2)
-        physical_kv_len = key.size(2)
 
         # Expand physical tensors to logical size
         query_logical = _expand_physical_to_logical(
@@ -468,11 +467,13 @@ def math_attention(
         value_logical = _expand_physical_to_logical(
             value, kv_offsets, kv_limits, logical_kv_len, KV_BLOCK_SIZE
         )
+
+        # Save params needed for contracting output back to physical size
+        varlen_contraction_params = (q_offsets, q_limits, physical_q_len, Q_BLOCK_SIZE)
     else:
         query_logical = query
         key_logical = key
         value_logical = value
-        physical_q_len = query.size(2)
 
     # broadcast query & key along head dim for GQA
     G = query_logical.size(1) // key_logical.size(1)
@@ -511,8 +512,9 @@ def math_attention(
     # Compute output in logical space
     out_logical = post_mod_scores.to(query.dtype) @ value_logical.to(query.dtype)
 
-    if has_varlen:
+    if varlen_contraction_params is not None:
         # Contract back to physical size
+        q_offsets, q_limits, physical_q_len, Q_BLOCK_SIZE = varlen_contraction_params
         out = _contract_logical_to_physical(
             out_logical, q_offsets, q_limits, physical_q_len, Q_BLOCK_SIZE
         )
@@ -1214,14 +1216,14 @@ def sdpa_dense_backward(
         )
     from torch._dynamo._trace_wrapped_higher_order_op import TransformGetItemToIndex
 
-    # Check for varlen mode
-    has_varlen = _has_varlen_offsets(block_mask)
+    # Check for varlen mode - store contraction params if varlen
+    varlen_contraction_params = None
 
     # Save original physical sizes before any expansion
     Bq_orig, Hq_orig, physical_q_len, qk_head_dim = query.shape
     Bkv_orig, Hkv_orig, physical_kv_len, v_head_dim = value.shape
 
-    if has_varlen:
+    if _has_varlen_offsets(block_mask):
         (
             logical_q_len,
             logical_kv_len,
@@ -1256,20 +1258,20 @@ def sdpa_dense_backward(
             grad_logsumexp, q_offsets, q_limits, logical_q_len, Q_BLOCK_SIZE
         )
 
+        # Save params needed for contracting gradients back to physical size
+        varlen_contraction_params = (
+            q_offsets,
+            kv_offsets,
+            q_limits,
+            kv_limits,
+            physical_q_len,
+            physical_kv_len,
+            Q_BLOCK_SIZE,
+            KV_BLOCK_SIZE,
+        )
+
     Bq, Hq, seq_len_q, _ = query.shape
     Bkv, Hkv, seq_len_kv, _ = value.shape
-
-    # Get outputs before calling repeat interleave and permute to input stride orders
-    # For varlen, we'll create these at physical size at the end
-    if not has_varlen:
-        actual_grad_query = query.new_empty((Bq, Hq, seq_len_q, qk_head_dim))
-        actual_grad_query = _permute_strides(actual_grad_query, query.stride())
-
-        actual_grad_key = key.new_empty((Bq, Hkv, seq_len_kv, qk_head_dim))
-        actual_grad_key = _permute_strides(actual_grad_key, key.stride())
-
-        actual_grad_value = value.new_empty((Bq, Hkv, seq_len_kv, v_head_dim))
-        actual_grad_value = _permute_strides(actual_grad_value, value.stride())
 
     def _maybe_new_buffer(
         buffer: Union[torch.Tensor, torch.SymInt, int],
@@ -1380,8 +1382,18 @@ def sdpa_dense_backward(
     grad_key = torch.sum(grad_key, 2, keepdim=False)
     grad_value = torch.sum(grad_value, 2, keepdim=False)
 
-    if has_varlen:
+    if varlen_contraction_params is not None:
         # Contract gradients back to physical size
+        (
+            q_offsets,
+            kv_offsets,
+            q_limits,
+            kv_limits,
+            physical_q_len,
+            physical_kv_len,
+            Q_BLOCK_SIZE,
+            KV_BLOCK_SIZE,
+        ) = varlen_contraction_params
         actual_grad_query = _contract_logical_to_physical(
             grad_query, q_offsets, q_limits, physical_q_len, Q_BLOCK_SIZE
         )
@@ -1392,9 +1404,17 @@ def sdpa_dense_backward(
             grad_value, kv_offsets, kv_limits, physical_kv_len, KV_BLOCK_SIZE
         )
     else:
-        # Fill to correctly strided outputs
+        # Non-varlen: allocate outputs with correct strides and fill
+        actual_grad_query = query.new_empty((Bq, Hq, seq_len_q, qk_head_dim))
+        actual_grad_query = _permute_strides(actual_grad_query, query.stride())
         actual_grad_query.copy_(grad_query)
+
+        actual_grad_key = key.new_empty((Bq, Hkv, seq_len_kv, qk_head_dim))
+        actual_grad_key = _permute_strides(actual_grad_key, key.stride())
         actual_grad_key.copy_(grad_key)
+
+        actual_grad_value = value.new_empty((Bq, Hkv, seq_len_kv, v_head_dim))
+        actual_grad_value = _permute_strides(actual_grad_value, value.stride())
         actual_grad_value.copy_(grad_value)
 
     if Bq != Bkv:

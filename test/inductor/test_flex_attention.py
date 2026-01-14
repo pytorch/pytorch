@@ -1952,10 +1952,6 @@ class TestFlexAttention(InductorTestCase):
             BLOCK_SIZE=BLOCK_SIZE,
         )
 
-        # Logical iteration space size (padded to block boundaries)
-        logical_q_len = block_mask.seq_lengths[0]
-        logical_kv_len = block_mask.seq_lengths[1]
-
         # Physical tensor size (compact - sum of actual doc lengths)
         physical_q_len = q_seq_lens.sum().item()
         physical_kv_len = kv_seq_lens.sum().item()
@@ -2563,7 +2559,6 @@ class TestFlexAttention(InductorTestCase):
 
         # Use document lengths that create a reasonable test case
         doc_lens = [200, 150, 250]
-        num_docs = len(doc_lens)
 
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
