@@ -2,6 +2,7 @@
 # Owner(s): ["oncall: distributed"]
 
 import itertools
+import math
 import unittest
 from typing import cast, Optional
 
@@ -16,11 +17,8 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed.tensor._ops._matrix_ops import mm_single_dim_strategy
-from torch.distributed.tensor._ops.single_dim_strategy import (
-    register_single_dim_strategy,
-)
 from torch.distributed.tensor.debug import CommDebugMode
+from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
 from torch.testing._internal.common_device_type import E4M3_MAX_POS, e4m3_type
 from torch.testing._internal.common_utils import (
@@ -205,8 +203,64 @@ class DistMatrixOpsTest(DTensorTestBase):
             test_placement_comb([spec[0]], [spec[1]])
 
     @with_comms
+    def test_mm_with_strided_input(self):
+        mesh = self.build_device_mesh()
+        batch_size, seq_len, contract_dim, out_dim = 2, self.world_size, 3, 7
+        global_inps_viewed = (
+            torch.arange(batch_size * seq_len * contract_dim)
+            .float()
+            .view(batch_size * seq_len, contract_dim)
+        )
+        inps_viewed = distribute_tensor(
+            global_inps_viewed,
+            mesh,
+            (_StridedShard(dim=0, split_factor=2),),
+            src_data_rank=None,
+        )
+        global_weight = (
+            torch.arange(contract_dim * out_dim).float().view(contract_dim, out_dim)
+        )
+        weight = distribute_tensor(global_weight, mesh, (Replicate(),))
+        out = torch.mm(inps_viewed, weight)
+        expected_placements = (_StridedShard(dim=0, split_factor=2),)
+        self.assertEqual(out.placements, expected_placements)
+
+        mesh = init_device_mesh(self.device_type, (2, 2))
+        tensor_dims = (4, mesh.size(0) * mesh.size(1), 6, 8)
+        global_inps_viewed = (
+            torch.arange(math.prod(tensor_dims))
+            .float()
+            .view(math.prod(tensor_dims[:3]), 8)
+        )
+        inps_viewed = distribute_tensor(
+            global_inps_viewed,
+            mesh,
+            (
+                _StridedShard(dim=0, split_factor=4),
+                _StridedShard(
+                    dim=0,
+                    split_factor=tensor_dims[0] * (tensor_dims[1] // mesh.size(0)),
+                ),
+            ),
+            src_data_rank=None,
+        )
+        global_weight = (
+            torch.arange(tensor_dims[-1] * tensor_dims[-1])
+            .float()
+            .view(tensor_dims[-1], tensor_dims[-1])
+        )
+        weight = distribute_tensor(global_weight, mesh, (Replicate(), Replicate()))
+        out = torch.mm(inps_viewed, weight)
+        expected_placements = (
+            _StridedShard(dim=0, split_factor=4),
+            _StridedShard(
+                dim=0, split_factor=tensor_dims[0] * (tensor_dims[1] // mesh.size(0))
+            ),
+        )
+        self.assertEqual(out.placements, expected_placements)
+
+    @with_comms
     def test_mm_single_dim_strategy(self):
-        register_single_dim_strategy(torch.ops.aten.mm.default)(mm_single_dim_strategy)
         # unshardable input where some rank have empty _local_tensor
         # eg sharding tensor (world_size - 1) over world_size
         device_mesh = self.build_device_mesh()
