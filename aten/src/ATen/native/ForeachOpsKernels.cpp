@@ -230,6 +230,7 @@ namespace at::native {
     }                                                                  \
   }
 
+// `.item()` in non-cuda code does not prevent cudagraph
 #define FOREACH_BINARY_OP_SCALAR_TENSOR_LIST(OP)                           \
   std::vector<Tensor> foreach_tensor_##OP##_scalar_tensor_list_slow(       \
       TensorList tensors1, TensorList tensors2, TensorList scalars) {      \
