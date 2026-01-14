@@ -52,7 +52,14 @@ class TORCH_API SymmetricMemory : public c10::intrusive_ptr_target {
 
   virtual size_t get_offset() = 0;
 
-  virtual bool has_multicast_support() = 0;
+  virtual bool has_multicast_support() final {
+    TORCH_CHECK(
+        false,
+        "The `has_multicast_support` API is deprecated for SymmetricMemory handles. "
+        "You can check if `get_multicast_ptr` returns a non-null pointer, or use the "
+        "`c10d::symmetric_memory::has_multicast_support` API instead.");
+  }
+
   virtual void* get_multicast_ptr() = 0;
 
   at::Tensor get_buffer(
