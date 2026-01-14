@@ -299,6 +299,62 @@ class TestNVUniversalGemm(TestCase):
 
             self.assertFalse(torch.allclose(result1, result2))
 
+    def test_grouped_gemm(self):
+        """Test grouped GEMM with NVGEMM backend.
+
+        This test runs the same shape twice with different offsets to verify that
+        different offset distributions produce correct results
+        """
+        g, k, n = 4, 256, 256
+        dtype = torch.bfloat16
+        device = "cuda"
+
+        def grouped_mm(a, b, offsets):
+            return torch._grouped_mm(a, b, offs=offsets)
+
+        b = torch.randn(g, k, n, device=device, dtype=dtype)
+
+        m_per_group_1 = [64, 64, 64, 64]
+        total_m_1 = sum(m_per_group_1)
+        offsets_1 = torch.tensor(
+            [sum(m_per_group_1[: i + 1]) for i in range(g)],
+            device=device,
+            dtype=torch.int32,
+        )
+        a_1 = torch.randn(total_m_1, k, device=device, dtype=dtype)
+
+        m_per_group_2 = [32, 96, 48, 80]
+        total_m_2 = sum(m_per_group_2)
+        assert total_m_1 == total_m_2, "Total M must match for cache key test"
+        offsets_2 = torch.tensor(
+            [sum(m_per_group_2[: i + 1]) for i in range(g)],
+            device=device,
+            dtype=torch.int32,
+        )
+        a_2 = torch.randn(total_m_2, k, device=device, dtype=dtype)
+
+        expected_1 = grouped_mm(a_1, b, offsets_1)
+        expected_2 = grouped_mm(a_2, b, offsets_2)
+
+        torch._dynamo.reset()
+
+        with config.patch(
+            {
+                "max_autotune": True,
+                "max_autotune_gemm_backends": "NVGEMM",
+                "autotune_fallback_to_aten": False,
+            }
+        ):
+            compiled_fn = torch.compile(grouped_mm)
+
+            result_1 = compiled_fn(a_1, b, offsets_1)
+            torch.testing.assert_close(result_1, expected_1)
+
+            result_2 = compiled_fn(a_2, b, offsets_2)
+            torch.testing.assert_close(result_2, expected_2)
+
+            self.assertFalse(torch.allclose(result_1, result_2))
+
 
 class TestNVUniversalGemmHeuristics(TestCase):
     """Unit tests for NVUniversalGemmHeuristics without requiring actual libraries."""

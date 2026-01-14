@@ -5446,6 +5446,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         inputs: Sequence[IRNode],
         kernel: Any,
         accumulator_type: Any,
+        variant: Any,  # GemmVariant, use Any to avoid circular import
         workspace_size: int = 0,
     ) -> None:
         # We pass None initially, then override with our method below
@@ -5454,6 +5455,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         self.accumulator_type = accumulator_type
         self.outputs: list[Buffer] = [self]
         self.workspace_size = workspace_size
+        self.variant = variant
         # Store kernel metadata for code generation since kernels aren't serializeable yet
         self.kernel_metadata = {
             "kernel_name": kernel.metadata.kernel_name,
@@ -5502,6 +5504,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             kernel_metadata=self.kernel_metadata,
             accumulator_type=self.accumulator_type,
             workspace_size=self.workspace_size,
+            variant=self.variant,
         )
 
         def render():
