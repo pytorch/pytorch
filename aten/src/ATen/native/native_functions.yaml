@@ -15140,7 +15140,7 @@
     CUDA, NestedTensorCUDA: native_multi_head_attention_cuda
   autogen: _native_multi_head_attention.out
 
-- func: scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, *, float? scale=None, bool enable_gqa=False, Tensor? q_descale=None, Tensor? k_descale=None, Tensor? v_descale=None) -> Tensor
+- func: scaled_dot_product_attention(Tensor query, Tensor key, Tensor value, Tensor? attn_mask=None, float dropout_p=0.0, bool is_causal=False, *, float? scale=None, bool enable_gqa=False) -> Tensor
   python_module: nn
   variants: function
   autogen: scaled_dot_product_attention.out
@@ -15164,11 +15164,16 @@
     MPS: _scaled_dot_product_attention_math_mps
   tags: nondeterministic_seeded
 
-- func: _scaled_dot_product_flash_attention(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None, Tensor? q_descale=None, Tensor? k_descale=None, Tensor? v_descale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor rng_state, Tensor unused, Tensor debug_attn_mask)
+- func: _scaled_dot_product_flash_attention(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor rng_state, Tensor unused, Tensor debug_attn_mask)
   dispatch:
     CUDA: _scaled_dot_product_flash_attention_cuda
     XPU: _scaled_dot_product_flash_attention_xpu
     NestedTensorCUDA: _scaled_dot_product_flash_attention_nestedtensor_cuda
+  tags: nondeterministic_seeded
+
+- func: _scaled_dot_product_flash_attention.low_p(Tensor query, Tensor key, Tensor value, Tensor? q_descale, Tensor? k_descale, Tensor? v_descale, float dropout_p=0.0, bool is_causal=False, bool return_debug_mask=False, *, float? scale=None) -> (Tensor output, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, Tensor rng_state, Tensor unused, Tensor debug_attn_mask)
+  dispatch:
+    CUDA: _scaled_dot_product_flash_attention_cuda_low_p
   tags: nondeterministic_seeded
 
 - func: _scaled_dot_product_flash_attention_for_cpu(Tensor query, Tensor key, Tensor value, float dropout_p=0.0, bool is_causal=False, *, Tensor? attn_mask=None, float? scale=None) -> (Tensor output, Tensor logsumexp)
@@ -15182,13 +15187,19 @@
     XPU: _scaled_dot_product_fused_attention_overrideable_xpu
   tags: nondeterministic_seeded
 
-- func: _scaled_dot_product_flash_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, Tensor philox_seed, Tensor philox_offset, *, float? scale=None, Tensor? q_descale=None, Tensor? k_descale=None, Tensor? v_descale=None) -> (Tensor grad_query, Tensor grad_key, Tensor grad_value)
+- func: _scaled_dot_product_flash_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, Tensor philox_seed, Tensor philox_offset, *, float? scale=None) -> (Tensor grad_query, Tensor grad_key, Tensor grad_value)
   device_check: NoCheck
   variants: function
   dispatch:
     CUDA: _scaled_dot_product_flash_attention_backward_cuda
     XPU: _scaled_dot_product_flash_attention_backward_xpu
     NestedTensorCUDA: _scaled_dot_product_flash_attention_backward_nested
+
+- func: _scaled_dot_product_flash_attention_backward.low_p(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, Tensor philox_seed, Tensor philox_offset, Tensor? q_descale, Tensor? k_descale, Tensor? v_descale, *, float? scale=None) -> (Tensor grad_query, Tensor grad_key, Tensor grad_value)
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CUDA: _scaled_dot_product_flash_attention_backward_cuda_low_p
 
 - func: _scaled_dot_product_flash_attention_for_cpu_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, float dropout_p, bool is_causal, *, Tensor? attn_mask=None, float? scale=None) -> (Tensor grad_query, Tensor grad_key, Tensor grad_value)
   device_check: NoCheck
@@ -15226,17 +15237,29 @@
     NestedTensorCUDA: _scaled_dot_product_cudnn_attention_nestedtensor_backward_cuda
   tags: nondeterministic_seeded
 
-- func: _flash_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cum_seq_q, Tensor? cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, bool return_debug_mask, *, float? scale=None, SymInt? window_size_left=None, SymInt? window_size_right=None, Tensor? seqused_k=None, Tensor? alibi_slopes=None, Tensor? q_descale=None, Tensor? k_descale=None, Tensor? v_descale=None) -> (Tensor output, Tensor softmax_logsumexp, Tensor rng_state, Tensor unused, Tensor debug_attn_mask)
+- func: _flash_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? cum_seq_q, Tensor? cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, bool return_debug_mask, *, float? scale=None, SymInt? window_size_left=None, SymInt? window_size_right=None, Tensor? seqused_k=None, Tensor? alibi_slopes=None) -> (Tensor output, Tensor softmax_logsumexp, Tensor rng_state, Tensor unused, Tensor debug_attn_mask)
   variants: function
   dispatch:
     CUDA: _flash_attention_forward
   tags: nondeterministic_seeded
 
-- func: _flash_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, Tensor rng_state, Tensor unused, *, float? scale=None, SymInt? window_size_left=None, SymInt? window_size_right=None, Tensor? q_descale=None, Tensor? k_descale=None, Tensor? v_descale=None) -> (Tensor, Tensor, Tensor)
+- func: _flash_attention_forward.low_p(Tensor query, Tensor key, Tensor value, Tensor? cum_seq_q, Tensor? cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, bool return_debug_mask, Tensor? q_descale, Tensor? k_descale, Tensor? v_descale, *, float? scale=None, SymInt? window_size_left=None, SymInt? window_size_right=None, Tensor? seqused_k=None, Tensor? alibi_slopes=None) -> (Tensor output, Tensor softmax_logsumexp, Tensor rng_state, Tensor unused, Tensor debug_attn_mask)
+  variants: function
+  dispatch:
+    CUDA: _flash_attention_forward_low_p
+  tags: nondeterministic_seeded
+
+- func: _flash_attention_backward(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, Tensor rng_state, Tensor unused, *, float? scale=None, SymInt? window_size_left=None, SymInt? window_size_right=None) -> (Tensor, Tensor, Tensor)
   device_check: NoCheck
   variants: function
   dispatch:
     CUDA: _flash_attention_backward
+
+- func: _flash_attention_backward.low_p(Tensor grad_out, Tensor query, Tensor key, Tensor value, Tensor out, Tensor logsumexp, Tensor cum_seq_q, Tensor cum_seq_k, SymInt max_q, SymInt max_k, float dropout_p, bool is_causal, Tensor rng_state, Tensor unused, Tensor? q_descale, Tensor? k_descale, Tensor? v_descale, *, float? scale=None, SymInt? window_size_left=None, SymInt? window_size_right=None) -> (Tensor, Tensor, Tensor)
+  device_check: NoCheck
+  variants: function
+  dispatch:
+    CUDA: _flash_attention_backward_low_p
 
 # Returns output, logsumexp if compute_logsumexp
 - func: _efficient_attention_forward(Tensor query, Tensor key, Tensor value, Tensor? bias, Tensor? cu_seqlens_q, Tensor? cu_seqlens_k, SymInt? max_seqlen_q, SymInt? max_seqlen_k, float dropout_p, int custom_mask_type, bool compute_log_sumexp=False, *, float? scale=None, Tensor? seqlen_k=None, int? window_size=None) -> (Tensor output, Tensor logsumexp, Tensor philox_seed, Tensor philox_offset, SymInt max_seqlen_batch_q, SymInt max_seqlen_batch_k)

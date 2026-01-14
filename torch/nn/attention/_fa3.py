@@ -13,6 +13,7 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from functools import cache
 from typing_extensions import TypeVarTuple, Unpack
+import warnings
 
 import torch
 from torch.library import Library
@@ -73,15 +74,19 @@ def _fa3_import_module(module_path: str) -> None:
 
 def _fa3_register_kernels() -> Library:
     lib = Library("aten", "IMPL", "CUDA")  # noqa: TOR901
-    lib.impl("_flash_attention_forward", _fa3_flash_attention_forward_impl, "CUDA")
-    lib.impl("_flash_attention_backward", _fa3_flash_attention_backward_impl, "CUDA")
     lib.impl(
-        "_scaled_dot_product_flash_attention",
+        "_flash_attention_forward.low_p", _fa3_flash_attention_forward_impl, "CUDA"
+    )
+    lib.impl(
+        "_flash_attention_backward.low_p", _fa3_flash_attention_backward_impl, "CUDA"
+    )
+    lib.impl(
+        "_scaled_dot_product_flash_attention.low_p",
         _fa3_scaled_dot_product_flash_attention_forward_impl,
         "CUDA",
     )
     lib.impl(
-        "_scaled_dot_product_flash_attention_backward",
+        "_scaled_dot_product_flash_attention_backward.low_p",
         _fa3_scaled_dot_product_flash_attention_backward_impl,
         "CUDA",
     )
@@ -100,8 +105,16 @@ def _fa3_common_support_error(
         return "inputs must be CUDA tensors"
     if len({t.device for t in tensors}) != 1:
         return "inputs must share device"
-    if query.dtype != torch.float8_e4m3fn:
-        return "query dtype must be float8_e4m3fn"
+    if not all(t.dtype == torch.float8_e4m3fn for t in tensors):
+        return "inputs must be float8_e4m3fn"
+    if q_descale is None or k_descale is None or v_descale is None:
+        warnings.warn(
+            "When using fp8 SDPA, descale tensor should always be used"
+            " for accurate dequantization. Please use "
+            "F.scaled_dot_product_attention_fp8 and "
+            "provide the descale tensors.",
+            UserWarning,
+        )
     if q_descale is not None:
         if q_descale.dtype != torch.float32:
             return "q_descale must be float32"
@@ -259,6 +272,9 @@ def _fa3_flash_attention_forward_impl(
     dropout_p: float,
     is_causal: bool,
     return_debug_mask: bool,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
     *,
     scale: float | None = None,
     window_size_left: int = -1,
@@ -266,9 +282,6 @@ def _fa3_flash_attention_forward_impl(
     seqused_k: torch.Tensor | None = None,
     alibi_slopes: torch.Tensor | None = None,
     out: torch.Tensor | None = None,
-    q_descale: torch.Tensor | None = None,
-    k_descale: torch.Tensor | None = None,
-    v_descale: torch.Tensor | None = None,
 ):
     error = _fa3_forward_support_error(
         query,
@@ -322,13 +335,13 @@ def _fa3_flash_attention_backward_impl(
     is_causal: bool,
     rng_state: torch.Tensor,
     unused: torch.Tensor,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
     *,
     scale: float | None = None,
     window_size_left: int = -1,
     window_size_right: int = -1,
-    q_descale: torch.Tensor | None = None,
-    k_descale: torch.Tensor | None = None,
-    v_descale: torch.Tensor | None = None,
 ):
     raise RuntimeError(
         "FA3 does not support backward pass. Either:\n"
@@ -341,14 +354,14 @@ def _fa3_scaled_dot_product_flash_attention_forward_impl(
     query: torch.Tensor,
     key: torch.Tensor,
     value: torch.Tensor,
+    q_descale: torch.Tensor | None = None,
+    k_descale: torch.Tensor | None = None,
+    v_descale: torch.Tensor | None = None,
     dropout_p: float = 0.0,
     is_causal: bool = False,
     return_debug_mask: bool = False,
     *,
     scale: float | None = None,
-    q_descale: torch.Tensor | None = None,
-    k_descale: torch.Tensor | None = None,
-    v_descale: torch.Tensor | None = None,
 ):
     error = _fa3_forward_support_error(
         query,
@@ -422,11 +435,11 @@ def _fa3_scaled_dot_product_flash_attention_backward_impl(
     is_causal: bool,
     philox_seed: torch.Tensor,
     philox_offset: torch.Tensor,
-    *,
-    scale: float | None = None,
     q_descale: torch.Tensor | None = None,
     k_descale: torch.Tensor | None = None,
     v_descale: torch.Tensor | None = None,
+    *,
+    scale: float | None = None,
 ):
     raise RuntimeError(
         "FA3 does not support backward pass. Either:\n"

@@ -780,10 +780,7 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
-    std::optional<double> scale,
-    const std::optional<Tensor>& q_descale,
-    const std::optional<Tensor>& k_descale,
-    const std::optional<Tensor>& v_descale) {
+    std::optional<double> scale) {
   // Used for tracking usage statistics
   C10_LOG_API_USAGE_ONCE("torch.sdpa.flash_attention");
   // Query (Batch x Num_heads x Q_seq_len  x Dim_per_head)
@@ -823,14 +820,28 @@ std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Ten
               return_debug_mask,
               scale,
               std::nullopt,
-              std::nullopt,
-              std::nullopt,
-              std::nullopt,
               std::nullopt);
   // Reshape output to convert nnz to batch_size and seq_len
   Tensor attention = output.transpose(1,2);
 
   return std::make_tuple(attention, logsumexp, Tensor(), Tensor(), max_seqlen_batch_q, max_seqlen_batch_k, philox_seed, philox_offset, debug_attn_mask);
+}
+
+std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor> _scaled_dot_product_flash_attention_cuda_low_p(
+  const Tensor& query,
+  const Tensor& key,
+  const Tensor& value,
+  const std::optional<Tensor>& q_descale,
+  const std::optional<Tensor>& k_descale,
+  const std::optional<Tensor>& v_descale,
+  double dropout_p,
+  bool is_causal,
+  bool return_debug_mask,
+  std::optional<double> scale) {
+  TORCH_CHECK(false,
+    "Low-precision flash attention SDPA requires FA3. "
+    "Call torch.nn.attention.activate_flash_attention_impl('FA3') first.");
+  return std::make_tuple(Tensor(), Tensor(), Tensor(), Tensor(), c10::SymInt(0), c10::SymInt(0), Tensor(), Tensor(), Tensor());
 }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt, Tensor, Tensor, Tensor> _cudnn_attention_forward(
@@ -1163,10 +1174,7 @@ _flash_attention_forward(
     std::optional<int64_t> window_size_left,
     std::optional<int64_t> window_size_right,
     const std::optional<Tensor>& _seqused_k,
-    const std::optional<Tensor>& _alibi_slopes,
-    const std::optional<Tensor>& q_descale,
-    const std::optional<Tensor>& k_descale,
-    const std::optional<Tensor>& v_descale
+    const std::optional<Tensor>& _alibi_slopes
     ) {
 #if defined(USE_FLASH_ATTENTION)
   const auto softmax_scale =
@@ -1276,6 +1284,32 @@ _flash_attention_forward(
       Tensor(),
       Tensor());
 }
+
+std::tuple<Tensor, Tensor, Tensor, Tensor, Tensor>
+_flash_attention_forward_low_p(
+    const Tensor& query,
+    const Tensor& key,
+    const Tensor& value,
+    const std::optional<Tensor>& cumulative_sequence_length_q,
+    const std::optional<Tensor>& cumulative_sequence_length_k,
+    int64_t max_seqlen_batch_q,
+    int64_t max_seqlen_batch_k,
+    double dropout_p,
+    bool is_causal,
+    bool return_debug_mask,
+    const std::optional<Tensor>& q_descale,
+    const std::optional<Tensor>& k_descale,
+    const std::optional<Tensor>& v_descale,
+    std::optional<double> scale,
+    std::optional<int64_t> window_size_left,
+    std::optional<int64_t> window_size_right,
+    const std::optional<Tensor>& _seqused_k,
+    const std::optional<Tensor>& _alibi_slopes
+  ) {
+    TORCH_CHECK(false, "Low-precision flash attention SDPA requires FA3. "
+    "Call torch.nn.attention.activate_flash_attention_impl('FA3') first.");
+    return std::make_tuple(Tensor(), Tensor(), Tensor(), Tensor(), Tensor());
+  }
 
 std::tuple<Tensor, Tensor, Tensor, Tensor, c10::SymInt, c10::SymInt> _efficient_attention_forward(
     const at::Tensor& query, // [b, seqlen, num_heads, K]

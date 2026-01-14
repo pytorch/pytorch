@@ -21,10 +21,7 @@ _scaled_dot_product_flash_attention_backward_xpu(
     bool is_causal,
     const at::Tensor& philox_seed,
     const at::Tensor& philox_offset,
-    std::optional<double> scale,
-    const std::optional<Tensor>& q_descale,
-    const std::optional<Tensor>& k_descale,
-    const std::optional<Tensor>& v_descale) {
+    std::optional<double> scale) {
   if (!grad_out.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
   }

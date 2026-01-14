@@ -232,10 +232,7 @@ _scaled_dot_product_flash_attention_nestedtensor_cuda(
     double dropout_p,
     bool is_causal,
     bool return_debug_mask,
-    std::optional<double> scale,
-    const std::optional<Tensor>& q_descale,
-    const std::optional<Tensor>& k_descale,
-    const std::optional<Tensor>& v_descale) {
+    std::optional<double> scale) {
   auto [
       query_buffer_reshaped,
       key_buffer_reshaped,
@@ -424,10 +421,7 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
     bool is_causal,
     const at::Tensor& philox_seed,
     const at::Tensor& philox_offset,
-    std::optional<double> scale,
-    const std::optional<Tensor>& q_descale,
-    const std::optional<Tensor>& k_descale,
-    const std::optional<Tensor>& v_descale){
+    std::optional<double> scale){
   if (!grad_out_.defined()) {
     return std::make_tuple(Tensor{}, Tensor{}, Tensor{});
   }

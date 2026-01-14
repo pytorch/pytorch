@@ -482,10 +482,62 @@ _scaled_dot_product_flash_attention_batch_rule(
   double dropout_p,
   bool is_causal,
   bool return_debug_mask,
-  std::optional<double> scale,
+  std::optional<double> scale
+) {
+  if (dropout_p > 0) {
+    auto maybe_layer = maybeCurrentDynamicLayer();
+    // NOLINTNEXTLINE(bugprone-unchecked-optional-access)
+    RandomnessType randomness = maybe_layer->randomness();
+    check_randomness(randomness, query_bdim.has_value() || key_bdim.has_value() || value_bdim.has_value());
+  }
+  auto batch_size = get_bdim_size3(query, query_bdim, key, key_bdim, value, value_bdim);
+  auto query_ = moveBatchDimToFront(query, query_bdim);
+  auto key_ = moveBatchDimToFront(key, key_bdim);
+  auto value_ = moveBatchDimToFront(value, value_bdim);
+  query_ = ensure_has_bdim(query_, query_bdim.has_value(), batch_size);
+  key_ = ensure_has_bdim(key_, key_bdim.has_value(), batch_size);
+  value_ = ensure_has_bdim(value_, value_bdim.has_value(), batch_size);
+  query_ = query_.flatten(0, 1);
+  key_ = key_.flatten(0, 1);
+  value_ = value_.flatten(0, 1);
+
+  auto [res0, res1, res2, res3, res4, res5, res6, res7, res8] = at::_scaled_dot_product_flash_attention(
+      query_, key_, value_, dropout_p, is_causal, return_debug_mask, scale);
+
+  res0 = reshape_dim_outof(0, batch_size, res0);
+  res1 = reshape_dim_outof(0, batch_size, res1);
+  // res2 and res3 (cum_seq_q and cum_seq_k) are always [0] for dense tensors
+  // res4 and res5 (max_q and max_k) are SymInts, so they don't need reshaping
+  // res6 and res7 (philox seed and offset) are always non-batched
+  if (return_debug_mask) {
+    res8 = reshape_dim_outof(0, batch_size, res8);
+  }
+
+  return std::make_tuple(
+    std::move(res0), 0,
+    std::move(res1), 0,
+    std::move(res2), std::nullopt,
+    std::move(res3), std::nullopt,
+    std::move(res4),
+    std::move(res5),
+    std::move(res6), std::nullopt,
+    std::move(res7), std::nullopt,
+    std::move(res8), return_debug_mask ? std::optional<int64_t>(0) : std::nullopt
+  );
+}
+
+std::tuple<Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, SymInt, SymInt, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>, Tensor, std::optional<int64_t>>
+_scaled_dot_product_flash_attention_low_p_batch_rule(
+  const Tensor& query, std::optional<int64_t> query_bdim,
+  const Tensor& key, std::optional<int64_t> key_bdim,
+  const Tensor& value, std::optional<int64_t> value_bdim,
   const std::optional<Tensor>& q_descale, std::optional<int64_t> q_descale_bdim,
   const std::optional<Tensor>& k_descale, std::optional<int64_t> k_descale_bdim,
-  const std::optional<Tensor>& v_descale, std::optional<int64_t> v_descale_bdim
+  const std::optional<Tensor>& v_descale, std::optional<int64_t> v_descale_bdim,
+  double dropout_p,
+  bool is_causal,
+  bool return_debug_mask,
+  std::optional<double> scale
 ) {
   if (dropout_p > 0) {
     auto maybe_layer = maybeCurrentDynamicLayer();
@@ -523,7 +575,7 @@ _scaled_dot_product_flash_attention_batch_rule(
   }
 
   auto [res0, res1, res2, res3, res4, res5, res6, res7, res8] = at::_scaled_dot_product_flash_attention(
-      query_, key_, value_, dropout_p, is_causal, return_debug_mask, scale, q_descale_, k_descale_, v_descale_);
+      query_, key_, value_, q_descale_, k_descale_, v_descale_, dropout_p, is_causal, return_debug_mask, scale);
 
   res0 = reshape_dim_outof(0, batch_size, res0);
   res1 = reshape_dim_outof(0, batch_size, res1);
@@ -783,6 +835,7 @@ TORCH_LIBRARY_IMPL(aten, FuncTorchBatched, m) {
   VMAP_SUPPORT(_scaled_dot_product_efficient_attention, _scaled_dot_product_efficient_attention_batch_rule);
 
   VMAP_SUPPORT(_scaled_dot_product_flash_attention, _scaled_dot_product_flash_attention_batch_rule);
+  VMAP_SUPPORT2(_scaled_dot_product_flash_attention, low_p, _scaled_dot_product_flash_attention_low_p_batch_rule);
   VMAP_SUPPORT(_scaled_dot_product_cudnn_attention, _scaled_dot_product_cudnn_attention_batch_rule);
 
   VMAP_SUPPORT(_linalg_check_errors, _linalg_check_errors_batch_rule);

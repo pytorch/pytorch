@@ -35,12 +35,10 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
     "aten._embedding_bag.default": {},
     "aten._fft_c2c.default": {},
     "aten._fft_r2c.default": {},
-    "aten._flash_attention_backward.default": {
-        "v2": ["q_descale", "k_descale", "v_descale"]
-    },
-    "aten._flash_attention_forward.default": {
-        "v2": ["q_descale", "k_descale", "v_descale"]
-    },
+    "aten._flash_attention_backward.default": {},
+    "aten._flash_attention_backward.low_p": {},
+    "aten._flash_attention_forward.default": {},
+    "aten._flash_attention_forward.low_p": {},
     "aten._fused_moving_avg_obs_fq_helper_functional.default": {},
     "aten._fused_moving_avg_obs_fq_helper.default": {},
     "aten._fused_rms_norm.default": {},
@@ -53,14 +51,12 @@ inductor_fallback_ops: dict[str, dict[str, list[str]]] = {
     "aten._scaled_dot_product_cudnn_attention.default": {},
     "aten._scaled_dot_product_efficient_attention_backward.default": {},
     "aten._scaled_dot_product_efficient_attention.default": {},
-    "aten._scaled_dot_product_flash_attention_backward.default": {
-        "v2": ["q_descale", "k_descale", "v_descale"]
-    },
+    "aten._scaled_dot_product_flash_attention_backward.default": {},
+    "aten._scaled_dot_product_flash_attention_backward.low_p": {},
     "aten._scaled_dot_product_flash_attention_for_cpu_backward.default": {},
     "aten._scaled_dot_product_flash_attention_for_cpu.default": {},
-    "aten._scaled_dot_product_flash_attention.default": {
-        "v2": ["q_descale", "k_descale", "v_descale"]
-    },
+    "aten._scaled_dot_product_flash_attention.default": {},
+    "aten._scaled_dot_product_flash_attention.low_p": {},
     "aten._scaled_dot_product_fused_attention_overrideable_backward.default": {},
     "aten._scaled_dot_product_fused_attention_overrideable.default": {},
     "aten._scaled_mm.default": {},

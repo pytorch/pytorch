@@ -896,6 +896,19 @@ def upsample(
 
 __all__ += ["upsample"]
 
+def scaled_dot_product_attention_fp8(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    is_causal: bool = ...,
+    scale: float | None = ...,
+    q_descale: Tensor | None = ...,
+    k_descale: Tensor | None = ...,
+    v_descale: Tensor | None = ...,
+) -> Tensor: ...
+
+__all__ += ["scaled_dot_product_attention_fp8"]
+
 ${imported_hints}
 
 ${dispatched_hints}
