@@ -35,6 +35,7 @@ AcceleratorAllocatorConfig& AcceleratorAllocatorConfig::instance() {
 }
 
 AcceleratorAllocatorConfig::AcceleratorAllocatorConfig() {
+  max_non_split_rounding_size_ = large_segment_size_.load();
   roundup_power2_divisions_.assign(kRoundUpPowerOfTwoIntervals, 0);
 }
 
@@ -215,6 +216,12 @@ size_t AcceleratorAllocatorConfig::parsePinnedUseBackgroundThreads(
 }
 
 void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
+  // The following option will be reset to its default value if not explicitly
+  // set each time.
+  max_split_size_ = std::numeric_limits<size_t>::max();
+  roundup_power2_divisions_.assign(kRoundUpPowerOfTwoIntervals, 0);
+  garbage_collection_threshold_ = 0;
+
   {
     std::lock_guard<std::mutex> lock(last_allocator_settings_mutex_);
     last_allocator_settings_ = env;
@@ -222,23 +229,15 @@ void AcceleratorAllocatorConfig::parseArgs(const std::string& env) {
 
   ConfigTokenizer tokenizer(env);
 
-  // The following option will be reset to its default value
-  // if not explicitly set each time.
-  {
-    max_split_size_ = std::numeric_limits<size_t>::max();
-    roundup_power2_divisions_.assign(kRoundUpPowerOfTwoIntervals, 0);
-    garbage_collection_threshold_ = 0;
-
-    large_segment_size_ = 20971520; // 20 MB by default
-    for (size_t i = 0; i < tokenizer.size(); ++i) {
-      const auto& key = tokenizer[i];
-      if (key == "large_segment_size_mb") {
-        i = parseLargeSegmentSize(tokenizer, i);
-      }
+  // large_segment_size_mb should be read first because
+  // max_non_split_rounding_size_ must be >= large_segment_size_.
+  for (size_t i = 0; i < tokenizer.size(); ++i) {
+    const auto& key = tokenizer[i];
+    if (key == "large_segment_size_mb") {
+      i = parseLargeSegmentSize(tokenizer, i);
     }
-
-    max_non_split_rounding_size_ = large_segment_size_.load();
   }
+  max_non_split_rounding_size_ = large_segment_size_.load();
 
   for (size_t i = 0; i < tokenizer.size(); i++) {
     const auto& key = tokenizer[i];

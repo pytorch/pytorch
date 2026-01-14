@@ -326,7 +326,7 @@ class C10_API AcceleratorAllocatorConfig {
   /* The following members are specifically used for the device allocator. */
 
   // "large" allocations may be packed in blocks of this size
-  std::atomic<size_t> large_segment_size_;
+  std::atomic<size_t> large_segment_size_{20971520}; // 20 MB by default
   // The maximum block size that is allowed to be split.
   std::atomic<size_t> max_split_size_{std::numeric_limits<size_t>::max()};
   // The maximum allowable extra size of a memory block without requiring
