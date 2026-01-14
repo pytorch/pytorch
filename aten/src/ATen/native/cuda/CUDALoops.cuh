@@ -228,13 +228,11 @@ C10_LAUNCH_BOUNDS_1(num_threads())
 __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
   using traits = function_traits<func_t>;
   constexpr auto io_size = calc_io_size<func_t>();
-#if defined(USE_ROCM) && defined(__gfx942__)
+
   // Similar check in launch_vectorized_kernel() as well. Both should be in sync.
-  constexpr int tws = 16;
-#else
   constexpr int tws = elems_per_thread<io_size>();
-#endif
-  constexpr int bws = tws * num_threads();
+  constexpr int tws_gfx942 = 16;
+  int bws = (__builtin_amdgcn_processor_is("gfx942")? tws_gfx942: tws) * num_threads();
   int remaining = N - bws * blockIdx.x;
 
   if (remaining < bws) { // if this block handles the reminder,
@@ -243,19 +241,37 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
     auto output_calc = TrivialOffsetCalculator<1>();
     auto loader = memory::LoadWithoutCast();
     auto storer = memory::StoreWithoutCast();
-    auto policy = memory::policies::unroll<
-        array_t,
-        decltype(input_calc),
-        decltype(output_calc),
-        memory::LoadWithoutCast,
-        memory::StoreWithoutCast,
-        tws>(
-        data, remaining, input_calc, output_calc, loader, storer);
-    elementwise_kernel_helper(f, policy);
+    if(__builtin_amdgcn_processor_is("gfx942")) {
+        auto policy =
+	  memory::policies::unroll<
+	    array_t,
+	    decltype(input_calc),
+	    decltype(output_calc),
+	    memory::LoadWithoutCast,
+	    memory::StoreWithoutCast,
+	    tws_gfx942>(
+			data, remaining, input_calc, output_calc, loader, storer);
+        elementwise_kernel_helper(f, policy);
+      } else {
+        auto policy =
+	  memory::policies::unroll<
+	    array_t,
+	    decltype(input_calc),
+	    decltype(output_calc),
+	    memory::LoadWithoutCast,
+	    memory::StoreWithoutCast,
+	    tws>(
+		 data, remaining, input_calc, output_calc, loader, storer);
+        elementwise_kernel_helper(f, policy);
+     }
   } else { // if this block has a full `block_work_size` data to handle, use
            // vectorized memory access
     constexpr auto optimal_vec_size = calc_optimal_vec_size<vec_size, io_size>();
-    elementwise_kernel_helper(
+    if(__builtin_amdgcn_processor_is("gfx942"))
+      elementwise_kernel_helper(
+        f, memory::policies::vectorized<optimal_vec_size, array_t, tws_gfx942>(data));
+    else
+      elementwise_kernel_helper(
         f, memory::policies::vectorized<optimal_vec_size, array_t, tws>(data));
   }
 }

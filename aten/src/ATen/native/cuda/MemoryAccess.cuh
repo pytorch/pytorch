@@ -187,7 +187,8 @@ template <int vec_size, typename scalar_t>
 __device__ aligned_vector<scalar_t, vec_size> load_vector(const scalar_t *base_ptr, uint32_t offset) {
   using vec_t = aligned_vector<scalar_t, vec_size>;
   auto *from = reinterpret_cast<const vec_t *>(base_ptr);
-#if defined(USE_ROCM) && defined(__gfx942__)
+#if defined(USE_ROCM)
+  if(__builtin_amdgcn_processor_is("gfx942")) {
   using longx2 = __attribute__((__vector_size__(4*sizeof(int)))) int;
   if constexpr (sizeof(vec_t) == sizeof(int)) {
    union {
@@ -209,6 +210,7 @@ __device__ aligned_vector<scalar_t, vec_size> load_vector(const scalar_t *base_p
      longx2  i;
    } tmpt = { .i = __builtin_nontemporal_load(reinterpret_cast<const longx2 *>(&(from[offset]))) };
    return tmpt.v;
+  }
   }
 #endif
   return from[offset];

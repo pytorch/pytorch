@@ -127,12 +127,6 @@ inline __host__ __device__ uint32_t getAlignmentRoundUp(const void* p) {
   return diff == 0 ? 0 : uint32_t(Align) - diff;
 }
 
-#if defined (__gfx90a__) || defined(__gfx942__) || defined(__gfx950__)
-#define CDNA2_OR_LATER 1
-#else
-#define CDNA2_OR_LATER 0
-#endif
-
 #if defined(USE_ROCM) || (defined(CUDA_VERSION) && (!defined(__CUDA_ARCH__) || (__CUDA_ARCH__ >= 800)))
 
 #if defined(USE_ROCM)
@@ -614,13 +608,17 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
     int32_t kTiles) {
   constexpr int32_t kMTileSize = 16;
 #if defined(USE_ROCM)
+  if(!(__builtin_amdgcn_processor_is("gfx90a") ||
+       __builtin_amdgcn_processor_is("gfx942") ||
+       __builtin_amdgcn_processor_is("gfx950"))) {
+    printf("__builtin_amdgcn_mfma_f32_16x16x16bf16_1k is only supported on AMD gpu arch greater than or equal to CDNA2\n");
+    return;
+  }
   constexpr int32_t kNTileSize = 16;
 #else
   constexpr int32_t kNTileSize = 8;
 #endif
   constexpr int32_t kKTileSize = 16;
-
-#if !defined(USE_ROCM) || CDNA2_OR_LATER
 
   static_assert(
       ALayout::kMTileSize == kMTileSize && ALayout::kNTileSize == kNTileSize &&
@@ -909,9 +907,6 @@ __launch_bounds__(Warps* kWarpSize) void tinygemm_m16n8k16_chunk_kernel(
         laneId,
         sum_f32);
   }
-#else
-    printf("__builtin_amdgcn_mfma_f32_16x16x16bf16_1k is only supported on AMD gpu arch greater than or equal to CDNA2\n");
-#endif
 }
 
 
@@ -1289,9 +1284,6 @@ at::Tensor _convert_weight_to_int4pack_cuda(
   if (!isCDNA2orLater(in.device().index())) {
     TORCH_CHECK(false, "_convert_weight_to_int4pack_cuda is only supported on AMD gpu arch greater than or equal to CDNA2");
   }
-#endif
-
-#if defined(USE_ROCM)
   constexpr int32_t kNTileSize = 16;
 #else
   constexpr int32_t kNTileSize = 8;
