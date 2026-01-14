@@ -8,7 +8,7 @@ import logging
 import math
 import operator
 from collections.abc import Callable
-from typing import Generic, overload, SupportsFloat, TYPE_CHECKING, TypeGuard, TypeVar
+from typing import Generic, overload, SupportsFloat, TypeAlias, TypeGuard, TypeVar
 from typing_extensions import TypeIs
 
 import sympy
@@ -107,27 +107,19 @@ def is_sympy_integer(value) -> TypeIs[sympy.Integer]:
     return isinstance(value, sympy.Integer)
 
 
-ExprIn = int | float | sympy.Expr
-BoolIn = bool | SympyBoolean
-AllIn = ExprIn | BoolIn
-ExprFn = Callable[[sympy.Expr], sympy.Expr]
-ExprFn2 = Callable[[sympy.Expr, sympy.Expr], sympy.Expr]
-BoolFn = Callable[[SympyBoolean], SympyBoolean]
-BoolFn2 = Callable[[SympyBoolean, SympyBoolean], SympyBoolean]
-AllFn = ExprFn | BoolFn
-AllFn2 = ExprFn2 | BoolFn2
+ExprIn: TypeAlias = int | float | sympy.Expr
+BoolIn: TypeAlias = bool | SympyBoolean
+AllIn: TypeAlias = ExprIn | BoolIn
+ExprFn: TypeAlias = Callable[[sympy.Expr], sympy.Expr]
+ExprFn2: TypeAlias = Callable[[sympy.Expr, sympy.Expr], sympy.Expr]
+BoolFn: TypeAlias = Callable[[SympyBoolean], SympyBoolean]
+BoolFn2: TypeAlias = Callable[[SympyBoolean, SympyBoolean], SympyBoolean]
+AllFn: TypeAlias = ExprFn | BoolFn
+AllFn2: TypeAlias = ExprFn2 | BoolFn2
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class ValueRanges(Generic[_T]):
-    if TYPE_CHECKING:
-        # ruff doesn't understand circular references but mypy does
-        # pyrefly: ignore [unbound-name]
-        ExprVR = ValueRanges[sympy.Expr]  # noqa: F821
-        # pyrefly: ignore [unbound-name]
-        BoolVR = ValueRanges[SympyBoolean]  # noqa: F821
-        AllVR = ExprVR | BoolVR
-
     # Although the type signature here suggests you can pass any
     # sympy expression, in practice the analysis here only works
     # with constant sympy expressions
@@ -424,6 +416,12 @@ class ValueRanges(Generic[_T]):
             for a, b in itertools.product([x.lower, x.upper], [y.lower, y.upper])
         ]
         return ValueRanges(min(products), max(products))
+
+
+# Delayed Forward Reference
+ExprVR: TypeAlias = "ValueRanges[sympy.Expr]"
+BoolVR: TypeAlias = "ValueRanges[SympyBoolean]"
+AllVR: TypeAlias = "ExprVR | BoolVR"
 
 
 class SymPyValueRangeAnalysis:
