@@ -480,7 +480,7 @@ class DTensor(torch.Tensor):
         self,
         *,
         grad_placements: Sequence[Placement] | None = None,
-        track_variant_axes: bool = False,
+        track_variant_dims: bool = False,
     ) -> torch.Tensor:
         """
         Get the local tensor of this DTensor on its current rank. For sharding it returns
@@ -497,7 +497,7 @@ class DTensor(torch.Tensor):
                 layout of the returned tensor does not match the original DTensor layout.
                 If not specified, we will assume the gradient layout remains the same
                 as the original DTensor and use that for gradient computation.
-            track_variant_axes (bool, optional): If True, wraps the returned local tensor
+            track_variant_dims (bool, optional): If True, wraps the returned local tensor
                 in an :class:`LTensor` that tracks variance metadata (which mesh axes the
                 tensor varies along). This enables automatic gradient aggregation when
                 invariant inputs are combined with variant tensors during computation.
@@ -521,7 +521,7 @@ class DTensor(torch.Tensor):
             self, grad_placements
         )  # pyre-ignore[16]: autograd func
 
-        if not track_variant_axes:
+        if not track_variant_dims:
             return local_tensor
 
         # wrap output of to_local in LTensor to track variant axes

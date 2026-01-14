@@ -41,7 +41,7 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
 
         result = x + y
 
-        self.assertEqual(result.variant_axes, set())
+        self.assertEqual(result.variant_dims, set())
 
     def test_invariant_with_variant_union(self):
         """Variant + Invariant = Variant (union rule)."""
@@ -55,7 +55,7 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
         y = LTensor(torch.randn(4, 8), set(), mesh)
 
         result = x + y
-        self.assertEqual(result.variant_axes, {"dp"})
+        self.assertEqual(result.variant_dims, {"dp"})
 
     def test_variant_invariant_backward(self):
         """Backward inserts mark_varying for invariant input, aggregating its gradients."""
@@ -79,7 +79,7 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
         )
 
         output = variant_input + invariant_input
-        self.assertEqual(output.variant_axes, {"dp"})
+        self.assertEqual(output.variant_dims, {"dp"})
         output.sum().backward()
 
         self.assertIsNotNone(invariant_input._local_tensor.grad)
@@ -97,10 +97,10 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
         x = LTensor(torch.randn(4, 8), {"dp"}, mesh)
         result = x.sin()
 
-        self.assertEqual(result.variant_axes, {"dp"})
+        self.assertEqual(result.variant_dims, {"dp"})
 
     def test_from_dtensor(self):
-        """Non-Replicate placements become variant_axes."""
+        """Non-Replicate placements become variant_dims."""
         from torch.distributed.tensor import DTensor
 
         mesh = DeviceMesh(
@@ -117,7 +117,7 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
             dtensor._local_tensor, **LTensor.compute_metadata_from_dtensor(dtensor)
         )
 
-        self.assertEqual(ltensor.variant_axes, {"dp"})
+        self.assertEqual(ltensor.variant_dims, {"dp"})
 
     def test_mixed_bias_pattern(self):
         """LTensor @ weight + bias preserves variance."""
@@ -132,10 +132,10 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
         bias = torch.randn(16)
 
         hidden = data @ weight
-        self.assertEqual(hidden.variant_axes, {"dp"})
+        self.assertEqual(hidden.variant_dims, {"dp"})
 
         output = hidden + bias
-        self.assertEqual(output.variant_axes, {"dp"})
+        self.assertEqual(output.variant_dims, {"dp"})
         self.assertIsInstance(output, LTensor)
 
     def test_mixed_meshes_error(self):
@@ -168,14 +168,14 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
         )
 
         x = LTensor(torch.randn(4, 8), {"dp", "tp"}, mesh)
-        self.assertEqual(x.variant_axes, {"dp", "tp"})
+        self.assertEqual(x.variant_dims, {"dp", "tp"})
 
         import torch.distributed._functional_collectives as fcols
 
         result = fcols.all_reduce(x, "sum", mesh.get_group("dp").group_name)
 
         self.assertIsInstance(result, LTensor)
-        self.assertEqual(result.variant_axes, {"tp"})
+        self.assertEqual(result.variant_dims, {"tp"})
 
     def test_tuple_of_ltensors(self):
         """torch.cat with a tuple of LTensors preserves variance and returns LTensor."""
@@ -193,7 +193,7 @@ class TestLTensorVarianceTracking(MultiThreadedTestCase):
 
         self.assertIsInstance(result, LTensor)
         self.assertEqual(result.shape, (12, 8))
-        self.assertEqual(result.variant_axes, {"dp"})
+        self.assertEqual(result.variant_dims, {"dp"})
 
 
 if __name__ == "__main__":

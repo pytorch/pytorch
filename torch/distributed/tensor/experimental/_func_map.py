@@ -58,7 +58,7 @@ def _validate_placements(
     for i, placement in enumerate(placements):
         if not _is_supported_placement(placement):
             raise ValueError(
-                f"local_map with track_variant_axes=True does not support "
+                f"local_map with track_variant_dims=True does not support "
                 f"{type(placement).__name__} in {context}[{i}]. "
                 f"Only Shard, Replicate, and Partial(reduce_op='sum') are supported. "
                 f"Got: {placement}"
@@ -73,7 +73,7 @@ def local_map(
     device_mesh: DeviceMesh | None = None,
     *,
     redistribute_inputs: bool = False,
-    track_variant_axes: bool = False,
+    track_variant_dims: bool = False,
 ):
     """
     :meth:`local_map` is an experimental API that allows users to pass :class:`DTensor` s
@@ -129,7 +129,7 @@ def local_map(
             their placements are different from the required input placements. If this
             value is ``False`` and some :class:`DTensor` input has a different placement,
             an exception will be raised. Default: False.
-        track_variant_axes (bool, optional):
+        track_variant_dims (bool, optional):
             If True, local tensors extracted from DTensors will be wrapped in
             :class:`LTensor` to track variance axes through the computation. This enables
             automatic gradient aggregation for invariant inputs (e.g., replicated weights)
@@ -193,7 +193,7 @@ def local_map(
                 in_grad_placements=in_grad_placements,
                 device_mesh=device_mesh,
                 redistribute_inputs=redistribute_inputs,
-                track_variant_axes=track_variant_axes,
+                track_variant_dims=track_variant_dims,
             )
 
         return decorated
@@ -206,7 +206,7 @@ def local_map(
         in_grad_placements,
         device_mesh,
         redistribute_inputs,
-        track_variant_axes,
+        track_variant_dims,
     )
 
 
@@ -217,7 +217,7 @@ def _local_map_wrapped(
     in_grad_placements: InputPlacements,
     device_mesh: DeviceMesh | None,
     redistribute_inputs: bool,
-    track_variant_axes: bool,
+    track_variant_dims: bool,
     *args,
     **kwargs,
 ):
@@ -230,7 +230,7 @@ def _local_map_wrapped(
         )
 
     # Validate placements when variance tracking is enabled
-    if track_variant_axes:
+    if track_variant_dims:
         if out_placements is not None:
             # out_placements can be a single sequence or tuple of sequences
             out_placements_tuple = (
@@ -262,7 +262,7 @@ def _local_map_wrapped(
             seen_dtensor_arg = True
 
             # Validate input DTensor placements when variance tracking is enabled
-            if track_variant_axes:
+            if track_variant_dims:
                 _validate_placements(arg.placements, f"input[{idx}]")
 
             if in_placements is not None:
@@ -295,10 +295,10 @@ def _local_map_wrapped(
                 if not isinstance(spec, tuple):
                     spec = tuple(spec)
                 local_arg = arg.to_local(
-                    grad_placements=spec, track_variant_axes=track_variant_axes
+                    grad_placements=spec, track_variant_dims=track_variant_dims
                 )
             else:
-                local_arg = arg.to_local(track_variant_axes=track_variant_axes)
+                local_arg = arg.to_local(track_variant_dims=track_variant_dims)
 
             if isinstance(local_arg, AsyncCollectiveTensor):
                 local_arg = local_arg.wait()

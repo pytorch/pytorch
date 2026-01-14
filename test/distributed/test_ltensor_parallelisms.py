@@ -78,7 +78,7 @@ class TestLTensorParallelisms(MultiThreadedTestCase):
             out_placements=[Shard(0)],
             in_placements=[(Shard(0),), (Replicate(),)],
             device_mesh=mesh,
-            track_variant_axes=True,
+            track_variant_dims=True,
         )
         def local_linear(x, weight):
             return x @ weight
@@ -152,7 +152,7 @@ class TestLTensorParallelisms(MultiThreadedTestCase):
             out_placements=[Partial()],
             in_placements=[(Replicate(),), (Shard(1),), (Shard(0),)],
             device_mesh=mesh,
-            track_variant_axes=True,
+            track_variant_dims=True,
         )
         def local_matmul(x, w1, w2):
             h = x @ w1
@@ -299,7 +299,7 @@ class TestLTensorParallelisms(MultiThreadedTestCase):
                 (Shard(0),),  # w2
             ],
             device_mesh=mesh,
-            track_variant_axes=True,
+            track_variant_dims=True,
         )
         def megatron_tp_forward(x, y, wv, wo, w1, w2):
             # === Attention Block ===
@@ -470,7 +470,7 @@ class TestLTensorParallelisms(MultiThreadedTestCase):
                 (Shard(0), Shard(0)),  # w2: FSDP + TP sharded
             ],
             device_mesh=mesh,
-            track_variant_axes=True,
+            track_variant_dims=True,
         )
         def fsdp_tp_forward(x_local, y_local, w1_frag, w2_frag):
             # FSDP: all_gather weights along FSDP axis

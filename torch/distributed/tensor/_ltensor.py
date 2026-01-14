@@ -51,12 +51,12 @@ def _get_axis_name_from_group(mesh: DeviceMesh, group_name: str) -> Optional[str
         torch.ops._c10d_functional.all_reduce,
     ]
 )
-def _invariant_output_strategy(input_variant_axes, *args, **kwargs):
+def _invariant_output_strategy(input_variant_dims, *args, **kwargs):
     """Collectives that make output invariant on the reduced axis (all_reduce, all_gather)."""
     input_tensor, _, group_name = args
 
     if not isinstance(input_tensor, LTensor):
-        return input_variant_axes
+        return input_variant_dims
 
     mesh = input_tensor._mesh
     axis_name = _get_axis_name_from_group(mesh, group_name)
@@ -66,13 +66,13 @@ def _invariant_output_strategy(input_variant_axes, *args, **kwargs):
             f"Available axes: {mesh.mesh_dim_names}"
         )
 
-    return input_variant_axes - {axis_name}
+    return input_variant_dims - {axis_name}
 
 
 @register_variance_strategy([])  # [FIXME]: scatter ops
-def _variant_output_strategy(input_variant_axes, *args, **kwargs):
+def _variant_output_strategy(input_variant_dims, *args, **kwargs):
     """Collectives that make output variant on the scatter axis (reduce_scatter)."""
-    return input_variant_axes
+    return input_variant_dims
 
 
 class LTensor(torch.Tensor):
@@ -95,17 +95,17 @@ class LTensor(torch.Tensor):
     """
 
     _local_tensor: torch.Tensor
-    _variant_axes: set[str]
+    _variant_dims: set[str]
     _mesh: DeviceMesh
 
     def __new__(
         cls,
         local_tensor: torch.Tensor,
-        variant_axes: set[str],
+        variant_dims: set[str],
         mesh: DeviceMesh,
     ):
         r = local_tensor.as_subclass(cls)
-        r._variant_axes = variant_axes
+        r._variant_dims = variant_dims
         r._mesh = mesh
         r._local_tensor = local_tensor
         return r
@@ -121,17 +121,17 @@ class LTensor(torch.Tensor):
                 "LTensor requires named mesh axes for variance tracking."
             )
 
-        variant_axes = set()
+        variant_dims = set()
         for mesh_dim_idx, placement in enumerate(placements):
             if not isinstance(placement, Replicate):
                 mesh_dim_name = mesh.mesh_dim_names[mesh_dim_idx]
-                variant_axes.add(mesh_dim_name)
+                variant_dims.add(mesh_dim_name)
 
-        return {"mesh": dtensor.device_mesh, "variant_axes": variant_axes}
+        return {"mesh": dtensor.device_mesh, "variant_dims": variant_dims}
 
     @property
-    def variant_axes(self) -> set[str]:
-        return self._variant_axes
+    def variant_dims(self) -> set[str]:
+        return self._variant_dims
 
     @property
     def mesh(self) -> DeviceMesh:
@@ -143,12 +143,12 @@ class LTensor(torch.Tensor):
         if kwargs is None:
             kwargs = {}
 
-        out_variant_axes: set[str] = set()
+        out_variant_dims: set[str] = set()
         meshes: set[DeviceMesh] = set()
 
         def _extract_metadata(t):
             if isinstance(t, LTensor):
-                out_variant_axes.update(t._variant_axes)
+                out_variant_dims.update(t._variant_dims)
                 meshes.add(t._mesh)
 
         tree_map(_extract_metadata, args)
@@ -160,8 +160,8 @@ class LTensor(torch.Tensor):
         mesh = meshes.pop()
 
         if func in _CUSTOM_VARIANCE_STRATEGY_MAP:
-            out_variant_axes = _CUSTOM_VARIANCE_STRATEGY_MAP[func](
-                out_variant_axes, *args, **kwargs
+            out_variant_dims = _CUSTOM_VARIANCE_STRATEGY_MAP[func](
+                out_variant_dims, *args, **kwargs
             )
 
         func = _CUSTOM_OPERATOR_HANDLER_MAP.get(func, func)
@@ -175,8 +175,8 @@ class LTensor(torch.Tensor):
                 return t
 
             local_tensor = t._local_tensor
-            src_variant_axes = t._variant_axes
-            missing_axes = out_variant_axes - src_variant_axes
+            src_variant_dims = t._variant_dims
+            missing_axes = out_variant_dims - src_variant_dims
 
             if not missing_axes:
                 return local_tensor
@@ -197,7 +197,7 @@ class LTensor(torch.Tensor):
                 f"AsyncCollectiveTensor: {t=}"
             )
             if isinstance(t, torch.Tensor) and not isinstance(t, LTensor):
-                return LTensor(t, out_variant_axes, mesh)
+                return LTensor(t, out_variant_dims, mesh)
             else:
                 return t
 

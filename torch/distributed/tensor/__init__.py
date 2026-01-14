@@ -80,6 +80,7 @@ if DTensor not in _util_foreach_supported_types:
 
 # Set namespace for exposed private names
 DTensor.__module__ = "torch.distributed.tensor"
+LTensor.__module__ = "torch.distributed.tensor"
 distribute_tensor.__module__ = "torch.distributed.tensor"
 distribute_module.__module__ = "torch.distributed.tensor"
 ones.__module__ = "torch.distributed.tensor"
