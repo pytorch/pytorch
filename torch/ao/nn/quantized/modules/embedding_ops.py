@@ -146,10 +146,12 @@ class Embedding(torch.nn.Module):
                 dtype=torch.quint8,
             )
         else:
-            assert list(_weight.shape) == [
-                num_embeddings,
-                embedding_dim,
-            ], "Shape of weight does not match num_embeddings and embedding_dim"
+            expected_shape = [num_embeddings, embedding_dim]
+            if list(_weight.shape) != expected_shape:
+                raise AssertionError(
+                    f"Shape of weight does not match num_embeddings and embedding_dim: "
+                    f"expected {expected_shape}, got {list(_weight.shape)}"
+                )
             qweight = _weight
 
         self._packed_params = EmbeddingPackedParams(
@@ -196,24 +198,27 @@ class Embedding(torch.nn.Module):
                           utilities or provided by user
         """
         if hasattr(mod, "weight_fake_quant"):
-            assert type(mod) is torch.ao.nn.qat.Embedding, (
-                "nnq."
-                + cls.__name__
-                + ".from_float "
-                + "with fake quant only works for "
-                + torch.ao.nn.qat.Embedding.__name__
-            )
+            if type(mod) is not torch.ao.nn.qat.Embedding:
+                raise AssertionError(
+                    "nnq."
+                    + cls.__name__
+                    + ".from_float "
+                    + "with fake quant only works for "
+                    + torch.ao.nn.qat.Embedding.__name__
+                )
             weight_observer = mod.weight_fake_quant
         else:
-            assert type(mod) is nn.Embedding, (
-                "nnq."
-                + cls.__name__
-                + ".from_float only works for "
-                + nn.Embedding.__name__
-            )
-            assert hasattr(mod, "qconfig"), (
-                "Embedding input float module must have qconfig defined"
-            )
+            if type(mod) is not nn.Embedding:
+                raise AssertionError(
+                    "nnq."
+                    + cls.__name__
+                    + ".from_float only works for "
+                    + nn.Embedding.__name__
+                )
+            if not hasattr(mod, "qconfig"):
+                raise AssertionError(
+                    "Embedding input float module must have qconfig defined"
+                )
             from torch.ao.quantization import float_qparams_weight_only_qconfig
 
             if mod.qconfig is not None and mod.qconfig.weight is not None:  # type: ignore[union-attr]
@@ -225,13 +230,15 @@ class Embedding(torch.nn.Module):
         is_float_qparams_qconfig = (
             weight_observer.qscheme == torch.per_channel_affine_float_qparams
         )
-        assert is_float_qparams_qconfig, (
-            "Embedding quantization is only supported with float_qparams_weight_only_qconfig."
-        )
+        if not is_float_qparams_qconfig:
+            raise AssertionError(
+                "Embedding quantization is only supported with float_qparams_weight_only_qconfig."
+            )
 
-        assert dtype == torch.quint8 or dtype == torch.quint4x2, (
-            f"The only supported dtype for nnq.Embedding is torch.quint8 and torch.quint4x2, got {dtype}"
-        )
+        if dtype != torch.quint8 and dtype != torch.quint4x2:
+            raise AssertionError(
+                f"The only supported dtype for nnq.Embedding is torch.quint8 and torch.quint4x2, got {dtype}"
+            )
 
         # Run the observer to calculate qparams.
         weight_observer(mod.weight)
@@ -349,15 +356,17 @@ class EmbeddingBag(Embedding):
         if hasattr(mod, "weight_fake_quant"):
             weight_observer = mod.weight_fake_quant
         else:
-            assert type(mod) is nn.EmbeddingBag, (
-                "nnq."
-                + cls.__name__
-                + ".from_float only works for "
-                + nn.EmbeddingBag.__name__
-            )
-            assert hasattr(mod, "qconfig"), (
-                "EmbeddingBag input float module must have qconfig defined"
-            )
+            if type(mod) is not nn.EmbeddingBag:
+                raise AssertionError(
+                    "nnq."
+                    + cls.__name__
+                    + ".from_float only works for "
+                    + nn.EmbeddingBag.__name__
+                )
+            if not hasattr(mod, "qconfig"):
+                raise AssertionError(
+                    "EmbeddingBag input float module must have qconfig defined"
+                )
             from torch.ao.quantization.qconfig import float_qparams_weight_only_qconfig
 
             if mod.qconfig is not None and mod.qconfig.weight is not None:  # type: ignore[union-attr]
@@ -369,13 +378,15 @@ class EmbeddingBag(Embedding):
         is_float_qparams_qconfig = (
             weight_observer.qscheme == torch.per_channel_affine_float_qparams
         )
-        assert is_float_qparams_qconfig, (
-            "EmbeddingBag quantization is only supported with float_qparams_weight_only_qconfig."
-        )
+        if not is_float_qparams_qconfig:
+            raise AssertionError(
+                "EmbeddingBag quantization is only supported with float_qparams_weight_only_qconfig."
+            )
 
-        assert dtype == torch.quint8 or dtype == torch.quint4x2, (
-            f"The only supported dtype for nnq.EmbeddingBag is torch.quint8 and torch.quint4x2, got {dtype}"
-        )
+        if dtype != torch.quint8 and dtype != torch.quint4x2:
+            raise AssertionError(
+                f"The only supported dtype for nnq.EmbeddingBag is torch.quint8 and torch.quint4x2, got {dtype}"
+            )
 
         # Run the observer to calculate qparams.
         weight_observer(mod.weight)
