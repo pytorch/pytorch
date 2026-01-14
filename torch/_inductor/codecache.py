@@ -3810,8 +3810,10 @@ def _cuda_compiler() -> str | None:
         return os.path.join(build_paths.sdk_home, "bin", "nvcc")
     if cuda_env.nvcc_exist(os.getenv("CUDACXX")):
         return os.getenv("CUDACXX", "")
-    if cuda_env.nvcc_exist(os.getenv("CUDA_HOME")):
-        return os.path.realpath(os.path.join(os.getenv("CUDA_HOME", ""), "bin/nvcc"))
+    if os.getenv("CUDA_HOME") is not None:
+        path = os.path.realpath(os.path.join(os.getenv("CUDA_HOME", ""), "bin/nvcc"))
+        if cuda_env.nvcc_exist(path):
+            return path
     return "nvcc"
 
 
