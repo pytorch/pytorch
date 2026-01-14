@@ -37,6 +37,7 @@ RUN yum install -y \
   gcc-toolset-${DEVTOOLSET_VERSION}-gcc \
   gcc-toolset-${DEVTOOLSET_VERSION}-gcc-c++ \
   gcc-toolset-${DEVTOOLSET_VERSION}-binutils \
+  gcc-toolset-${DEVTOOLSET_VERSION}-binutils-gold \
   gcc-toolset-${DEVTOOLSET_VERSION}-gcc-gfortran \
   cmake \
   rust \
