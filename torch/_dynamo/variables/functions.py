@@ -1628,7 +1628,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         finally:
             _converting.discard(self_id)
 
-    def is_python_constant(self):
+    def is_python_constant(self) -> bool:
         try:
             self.as_python_constant()
             return True
