@@ -252,19 +252,27 @@ struct BinaryOpScalarListFunctor {
 };
 
 template <
-    int res_arg_index,
-    int r_args_depth,
-    typename Op,
     typename T,
-    typename opmath_t>
+    int depth,
+    int r_args_depth,
+    int res_arg_index,
+    typename opmath_t,
+    typename Op>
 __device__ __forceinline__ void binary_op_list_alpha(
-    T r_args[][kILP],
-    T** args,
-    opmath_t alpha,
-    const int64_t n,
-    const int64_t chunk_size,
-    const bool all_aligned,
-    Op op) {
+    int64_t chunk_size,
+    TensorListMetadata<depth>& tl,
+    Op op,
+    opmath_t alpha) {
+  const int tensor_loc = tl.block_to_tensor[blockIdx.x];
+  const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
+  auto n = tl.numel_for_tensor[tensor_loc];
+
+  T* args[depth];
+  const bool all_aligned =
+      init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc);
+  n -= chunk_idx * chunk_size;
+  T r_args[r_args_depth][kILP];
+
   // to make things simple, we put aligned case in a different code path
   if (n % kILP == 0 && chunk_size % kILP == 0 && all_aligned) {
     for (int64_t i_start = threadIdx.x;
@@ -306,18 +314,8 @@ struct BinaryOpListAlphaFunctor {
       TensorListMetadata<depth>& tl,
       Op op,
       opmath_t alpha) {
-    const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
-    const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
-    auto n = tl.numel_for_tensor[tensor_loc];
-
-    T* args[depth];
-    const bool all_aligned =
-        init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc);
-    n -= chunk_idx * chunk_size;
-    T r_args[r_args_depth][kILP];
-
-    binary_op_list_alpha<res_arg_index, r_args_depth>(
-        r_args, args, alpha, n, chunk_size, all_aligned, op);
+    binary_op_list_alpha<T, depth, r_args_depth, res_arg_index>(
+        chunk_size, tl, op, alpha);
   }
 };
 
@@ -331,24 +329,12 @@ struct BinaryOpListAlphaTensorFunctor {
       int64_t chunk_size,
       TensorListMetadata<depth>& tl,
       Op op,
-      // load a vector of original T type and convert to opmath_t later.
-      // This is different from BinaryOpListAlphaFunctor that converts
-      // a T-type scalar to opmath_t-type before launch the kernel.
       const T* alpha_ptr) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
-    const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
-    auto n = tl.numel_for_tensor[tensor_loc];
-
-    T* args[depth];
-    const bool all_aligned =
-        init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc);
-    n -= chunk_idx * chunk_size;
-    T r_args[r_args_depth][kILP];
     const opmath_t alpha = static_cast<opmath_t>(
         alpha_ptr[tensor_loc + tl.start_tensor_this_launch]);
-
-    binary_op_list_alpha<res_arg_index, r_args_depth>(
-        r_args, args, alpha, n, chunk_size, all_aligned, op);
+    binary_op_list_alpha<T, depth, r_args_depth, res_arg_index>(
+        chunk_size, tl, op, alpha);
   }
 };
 
