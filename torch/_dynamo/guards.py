@@ -88,7 +88,6 @@ from torch._dynamo.source import (
 )
 from torch._dynamo.utils import CompileEventLogger, get_metrics_context
 from torch._guards import (
-    ChainedSource,
     CompileContext,
     CompileId,
     DuplicateInputs,
