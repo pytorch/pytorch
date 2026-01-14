@@ -2329,7 +2329,7 @@ class TestSparseCSR(TestCase):
             run_test(index_dtype)
 
     @skipCPUIfNoMklSparse
-    @skipIfRocmVersionLessThan((6, 2))
+    @skipCUDAIfRocm(msg="needs HIPSPARSE_GENERIC_SPSV or SPSM")
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
