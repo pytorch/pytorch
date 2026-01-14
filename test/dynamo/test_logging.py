@@ -239,27 +239,23 @@ class LoggingTests(LoggingTestCase):
         )
 
     @make_logging_test(recompiles=True)
-    def test_recompiles_closure_variable(self, records):
-        # Test that when a closure variable changes, the recompilation log
-        # uses the variable name in the guard expression
-        n1 = 1
-        n2 = 1
+    def test_recompiles_closure_variable_hint(self, records):
+        def make_cl(n1, n2):
+            def inner(x):
+                return x + n1 + n2
 
-        def cl(x):
-            return x + n1 + n2
+            return inner
 
-        fn_opt = torch.compile(cl, backend="eager")
-        fn_opt(torch.tensor([1.0]))
+        @torch.compile(backend="eager")
+        def fn(cl, x):
+            return cl(x)
 
-        # Change n2 to trigger recompilation
-        n2 = 2
-        fn_opt(torch.tensor([1.0]))
+        fn(make_cl(0, 1), torch.ones(3))
+        fn(make_cl(0, 2), torch.ones(3))
 
         record_str = "\n".join(r.getMessage() for r in records)
-        # The recompilation log should use "n2" in the guard, not
-        # "cl.__closure__[1].cell_contents"
-        self.assertIn("n2 == 1", record_str)
-        self.assertNotIn("cell_contents", record_str)
+        # The recompilation log should include a HINT with "n2"
+        self.assertIn("(HINT: n2)", record_str)
 
     test_dynamo_debug = within_range_record_test(30, 90, dynamo=logging.DEBUG)
     test_dynamo_info = within_range_record_test(2, 10, dynamo=logging.INFO)
