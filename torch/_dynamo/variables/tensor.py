@@ -790,7 +790,9 @@ class TensorVariable(VariableTracker):
             pass
         else:
             try:
-                result = handler_method(tx, *args, **kwargs)
+                # Realize any LazyVariableTracker in kwargs before calling handler.
+                realized_kwargs = {k: v.realize() for k, v in kwargs.items()}
+                result = handler_method(tx, *args, **realized_kwargs)
                 if result:
                     return result
             except TypeError as e:

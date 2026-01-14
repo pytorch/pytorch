@@ -2410,6 +2410,25 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertEqual(actual, expected)
 
+    def test_structseq_repr(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x):
+            result = torch.max(x, dim=0)
+            s = repr(result)
+            return result.values
+
+        x = torch.randn(3, 2)
+
+        # Verify that fullgraph=True fails (confirms graph break occurs)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, fullgraph=True, backend="eager")(x)
+
+        # Verify that it works without fullgraph
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        result = opt_fn(x)
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_range_input(self):
         def fn(a, rng):
             x = a
