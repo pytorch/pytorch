@@ -64,7 +64,8 @@ using at::blas::SwizzleType;
 namespace scaled_blas = at::scaled;
 using scaled_blas::ScaledGemmImplementation;
 using scaled_blas::convert_int_to_enum;
-using scaled_blas::_scaled_mm_allowed_device;
+
+using at::cuda::scaled::_scaled_mm_allowed_device;
 
 namespace at::native {
 
