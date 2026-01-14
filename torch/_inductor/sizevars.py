@@ -20,6 +20,7 @@ from torch.utils._sympy.functions import FloorDiv, ModularIndexing
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, IntInfinity, ValueRanges
 
+from . import config
 from .runtime.runtime_utils import is_power_of_2
 from .utils import (
     has_free_symbols,
@@ -562,7 +563,6 @@ class SizeVarAllocator:
     def symbolic_hint(
         self,
         expr: Union[Expr, int],
-        hint_override: Optional[int] = None,
         # Only flip this flag if you don't plan on guarding/adding runtime
         # asserts based on this value and promise to only use this value
         # in a heuristic nature.
@@ -582,9 +582,6 @@ class SizeVarAllocator:
             except TypeError:
                 return expr  # inf/nan/I
 
-        if hint_override:
-            return hint_override
-
         expr = self.remove_precomputed_replacements(expr)
 
         if use_user_provided_hint_override:
@@ -597,7 +594,6 @@ class SizeVarAllocator:
         expr: Union[Expr, int],
         *,
         fallback: Optional[int] = None,
-        hint_override: Optional[int] = None,
     ) -> int:
         if isinstance(expr, SymInt):
             raise TypeError(
@@ -606,7 +602,6 @@ class SizeVarAllocator:
 
         out = self.symbolic_hint(
             expr,
-            hint_override=hint_override,
             use_user_provided_hint_override=fallback is not None,
         )
         if not isinstance(out, (int, sympy.Integer)) and fallback is not None:
@@ -637,18 +632,45 @@ class SizeVarAllocator:
             log.debug("failed on: %s", out, exc_info=True)
             raise
 
+    def optimization_hint_with_override(
+        self,
+        expr: Union[Expr, int],
+        hint_override: int,
+    ) -> int:
+        """
+        Special function that computes the optimization hint for dynamic dispatch
+        use cases where sometimes we want the function to return hint_override
+        instead of the actual hint.
+        Namely, if expr simplifies to a static int/sympy.Integer, returns that
+        value (hint_override is ignored for static shapes).
+
+        If expr is dynamic:
+          - Returns hint_override if it's not None
+          - Otherwise returns atomically_apply_size_hint with
+          fallback=config.unbacked_symint_fallback
+        """
+        simplified = self.simplify(expr)
+        if isinstance(simplified, int):
+            return simplified
+        if isinstance(simplified, sympy.Integer):
+            return int(simplified)
+        # Dynamic shape: use hint_override if set, else atomically_apply_size_hint
+        if hint_override is not None:
+            return hint_override
+        return self.atomically_apply_size_hint(
+            expr, fallback=config.unbacked_symint_fallback
+        )
+
     def size_hints(
         self,
         exprs: Iterable[Union[Expr, int]],
         *,
         fallback: Optional[int] = None,
-        hint_override: Optional[int] = None,
     ) -> tuple[int, ...]:
         return tuple(
             self.size_hint(
                 x,
                 fallback=fallback,
-                hint_override=hint_override,
             )
             for x in exprs
         )
@@ -914,7 +936,6 @@ class SizeVarAllocator:
         expr: Union[Expr, int],
         *,
         fallback: Optional[int] = None,
-        hint_override: Optional[int] = None,
     ) -> Union[Expr, int]:
         if isinstance(expr, (int, sympy.Integer)):
             return int(expr)
@@ -931,9 +952,7 @@ class SizeVarAllocator:
         assert isinstance(expr, Expr), type(expr)
         free_symbols = expr.free_symbols
         size_dict = {
-            symbol: V.graph.sizevars.size_hint(
-                symbol, fallback=fallback, hint_override=hint_override
-            )
+            symbol: V.graph.sizevars.size_hint(symbol, fallback=fallback)
             for symbol in free_symbols
         }
         return expr.subs(size_dict)
