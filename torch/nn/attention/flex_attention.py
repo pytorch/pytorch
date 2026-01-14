@@ -1389,8 +1389,8 @@ def create_varlen_block_mask(
     kv_physical_doc_offsets[1:] = torch.cumsum(kv_seq_lens, dim=0)
 
     # Total implied sequence lengths and block counts (from precomputed cumsums)
-    total_q_blocks = q_cumsum_blocks[-1].item()
-    total_kv_blocks = kv_cumsum_blocks[-1].item()
+    total_q_blocks = int(q_cumsum_blocks[-1].item())
+    total_kv_blocks = int(kv_cumsum_blocks[-1].item())
     total_q_len = total_q_blocks * Q_BLOCK_SIZE
     total_kv_len = total_kv_blocks * KV_BLOCK_SIZE
 
