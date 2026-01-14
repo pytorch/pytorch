@@ -820,7 +820,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(rnd.device.type, "cuda")
         self.assertEqual(result.device.type, "cuda")
         self.assertEqual(zeros.device.type, "cpu")
-        self.assertEqual(zeros_matched.device.type, "cuda")
+        self.assertEqual(zeros_matched.device.type, rnd.device.type)
 
         torch.set_default_device("cpu")
         (result, rnd, zeros, zeros_matched) = random_func(torch.randn(()))
@@ -829,7 +829,7 @@ class TorchFunctionModeTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(rnd.device.type, "cpu")
         self.assertEqual(result.device.type, "cpu")
         self.assertEqual(zeros.device.type, "cpu")
-        self.assertEqual(zeros_matched.device.type, "cpu")
+        self.assertEqual(zeros_matched.device.type, rnd.device.type)
 
         torch.set_default_device(None)
 
