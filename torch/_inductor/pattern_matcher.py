@@ -1724,13 +1724,69 @@ SERIALIZED_PATTERN_PATH = Path(__file__).parent / "fx_passes" / "serialized_patt
 # to date.
 _known_precompiled_patterns: list[
     tuple[
-        Any,
-        Iterable[Any],
-        Callable[[Callable[..., Any], Iterable[Any]], torch.fx.GraphModule],
-        Any,
+        str,
+        SearchFn,
+        tuple[Any],
+        TraceFn,
+        dict[str, float | int] | None,
         PatternExpr,
     ]
 ] = []
+
+
+def _to_real_tensor(e: T) -> Union[T, torch.Tensor]:
+    if isinstance(e, FakeTensor):
+        out = torch.ones_like(e, device=e.fake_device)
+        if e.is_sparse:
+            out._coalesced_(e.is_coalesced())
+        return out
+    else:
+        return e
+
+
+def _verify_pattern_on_eager(
+    what: str,
+    unique_name: str,
+    f: SearchFn | ReplaceFn,
+    example_inputs: tuple[object, ...],
+    extra: dict[str, float | int] | None,
+) -> object:
+    if extra is None:
+        extra = {}
+    try:
+        return f(*example_inputs, **extra)
+    except Exception as e:
+        raise RuntimeError(f"Unable to run {what}({unique_name}) in eager mode") from e
+
+
+def _verify_equal(unique_name: str, where: str, a: object, b: object) -> None:
+    if type(a) is not type(b):
+        raise RuntimeError(
+            f"Pattern {unique_name} types mismatch at {where} ({type(a)} vs {type(b)})"
+        )
+
+    if isinstance(a, (tuple, list)):
+        assert isinstance(b, (tuple, list))
+        if len(a) != len(b):
+            raise RuntimeError(
+                f"Pattern {unique_name} len({where}) mismatch ({len(a)} vs {len(b)})"
+            )
+
+        for i, (va, vb) in enumerate(zip(a, b)):
+            _verify_equal(unique_name, f"{where}[{i}]", va, vb)
+
+    elif isinstance(a, torch.Tensor):
+        assert isinstance(b, torch.Tensor)
+        if a.size() != b.size():
+            raise RuntimeError(
+                f"Pattern {unique_name} {where}.size() mismatch ({a.size()} vs {b.size()})"
+            )
+
+        if not torch.allclose(a, b, equal_nan=True):
+            raise RuntimeError(f"Pattern {unique_name} {where} not close")
+
+    elif a != b:
+        raise RuntimeError(f"Pattern {unique_name} {where} mismatch value")
 
 
 def gen_register_replacement(
@@ -1745,10 +1801,79 @@ def gen_register_replacement(
     exclusive_arg_names: Sequence[str] = (),
     skip_duplicates: bool = False,
 ) -> None:
+    r"""Register a pattern replacement with optional precompilation and validation.
+
+    This function registers a graph pattern (defined by ``search_fn``) to be replaced
+    with an optimized implementation (defined by ``replace_fn``). When
+    ``PYTORCH_GEN_PATTERNS`` is set, it also validates that both functions produce
+    equivalent outputs and serializes the pattern for faster loading.
+
+    Args:
+        unique_name (str): A unique identifier for this pattern, used for serialization
+            and debugging.
+        search_fn (SearchFn): A function defining the pattern to match. Its traced graph
+            will be matched against subgraphs in the model.
+        replace_fn (ReplaceFn): A function defining the replacement. When a match is
+            found, the matched subgraph is replaced with this function's implementation.
+        example_inputs (Iterable[Any]): Example inputs used to trace the pattern. These
+            define the shapes and types but not necessarily the values.
+        trace_fn (TraceFn): The tracing function to use (e.g., ``fwd_only`` for inference
+            patterns or ``joint_fwd_bwd`` for training patterns).
+        pass_dicts (Union[_PassDictsType, Sequence[_PassDictsType]]): The pass
+            dictionary/dictionaries to register this pattern with.
+        extra_check (Callable[[Match], bool]): An optional function that performs
+            additional validation on a match. Return ``True`` to accept the match,
+            ``False`` to reject it. Default: always returns ``True``.
+        scalar_workaround (dict[str, float | int], optional): A dictionary mapping
+            parameter names to scalar values. Used to recover scalar arguments that
+            may be lost during tracing. Default: ``None``.
+        exclusive_arg_names (Sequence[str]): Names of arguments that must not be
+            shared with other operations in the graph. Default: empty.
+        skip_duplicates (bool): If ``True``, skip registration if an equivalent
+            pattern already exists. Default: ``False``.
+
+    Note:
+        When ``PYTORCH_GEN_PATTERNS=1`` is set in the environment, this function:
+
+        1. Validates that ``search_fn`` and ``replace_fn`` produce equivalent outputs
+           by running them with materialized example inputs
+        2. Serializes the pattern graph to a Python file for faster loading
+
+        During validation, ``dropout_p`` is overridden to 0 to avoid RNG
+        non-determinism between the pattern and replacement implementations.
+    """
     # Make sure the example_inputs is materialized.
     example_inputs = tuple(example_inputs)
 
     if "PYTORCH_GEN_PATTERNS" in os.environ:
+        from torch.utils._mode_utils import no_dispatch
+
+        with no_dispatch():
+            real_example_inputs = tuple(_to_real_tensor(t) for t in example_inputs)
+
+            # Override dropout_p to 0 for validation to avoid RNG non-determinism
+            validation_scalar_workaround = (
+                dict(scalar_workaround) if scalar_workaround else {}
+            )
+            if "dropout_p" in validation_scalar_workaround:
+                validation_scalar_workaround["dropout_p"] = 0.0
+
+            a = _verify_pattern_on_eager(
+                "search_fn",
+                unique_name,
+                search_fn,
+                real_example_inputs,
+                validation_scalar_workaround,
+            )
+            b = _verify_pattern_on_eager(
+                "replace_fn",
+                unique_name,
+                replace_fn,
+                real_example_inputs,
+                validation_scalar_workaround,
+            )
+            _verify_equal(unique_name, "<root>", a, b)
+
         pat = _serialize_pattern(
             unique_name, search_fn, example_inputs, trace_fn, scalar_workaround
         )
@@ -1773,7 +1898,7 @@ def gen_register_replacement(
             arg.constant = None
 
     _known_precompiled_patterns.append(
-        (search_fn, example_inputs, trace_fn, scalar_workaround, pat)
+        (unique_name, search_fn, example_inputs, trace_fn, scalar_workaround, pat)
     )
     register_replacement(
         search_fn,
