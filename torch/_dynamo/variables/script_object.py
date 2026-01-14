@@ -93,7 +93,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
         return False
 
     def is_python_hashable(self) -> bool:
-        return is_opaque_value_type(type(self.value))
+        return is_opaque_value_type(self.value)
 
     def as_proxy(self) -> Any:
         return self.value
@@ -370,3 +370,8 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         ):
             return self.value.real_obj  # pyrefly: ignore[missing-attribute]
         return super().as_python_constant()
+
+    def is_python_hashable(self) -> bool:
+        return is_opaque_value_type(
+            type(self.value.real_obj)  # pyrefly: ignore[missing-attribute]
+        )
