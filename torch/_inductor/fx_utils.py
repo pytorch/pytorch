@@ -310,7 +310,7 @@ class FakeTensorUpdater:
             if node.target is torch.ops.higher_order.map_impl:
                 # map is applied over slices from the first dimension of each value in
                 # args[1].
-                return (args[0],), (*(a[0] for a in args[1]), *args[2:])
+                return (args[0],), (*(a[0] for a in args[1]), *args[2])
             if node.target in (
                 torch.ops.higher_order.while_loop,
                 torch.ops.higher_order.while_loop_stack_output,
@@ -386,7 +386,9 @@ class FakeTensorUpdater:
                     # would make the graph internally inconsistent.
                     if subgraph_args is not None:
                         for p, a in zip(
-                            subgraph.graph.find_nodes(op="placeholder"), subgraph_args
+                            subgraph.graph.find_nodes(op="placeholder"),
+                            subgraph_args,
+                            strict=True,
                         ):
                             # Do an update iff anything except the storage has changed,
                             # since every invocation of the subgraph will use different

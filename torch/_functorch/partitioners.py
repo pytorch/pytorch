@@ -26,6 +26,7 @@ from torch._functorch._activation_checkpointing.ac_logging_utils import (
     create_structured_trace_for_min_cut_info,
 )
 from torch._inductor import config as inductor_config
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.utils import is_builtin
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import extract_tensor_metadata
@@ -35,8 +36,8 @@ from torch.fx.experimental.sym_node import magic_methods, method_to_operator
 from torch.fx.experimental.symbolic_shapes import (
     find_symbol_binding_fx_nodes,
     free_symbols,
-    hint_int,
     is_symbol_binding_fx_node,
+    size_hint,
     statically_known_false,
     statically_known_true,
 )
@@ -1257,7 +1258,7 @@ def _size_of(node: fx.Node) -> int:
     def object_nbytes(x) -> int:
         if not isinstance(x, torch.Tensor):
             return 0
-        return _tensor_nbytes(hint_int(x.numel(), fallback=4096), x.dtype)
+        return _tensor_nbytes(size_hint(x.numel(), fallback=4096), x.dtype)
 
     if "val" in node.meta:
         val = node.meta["val"]
@@ -2053,8 +2054,12 @@ def solve_min_cut(
         if is_sym_node(node):
             weight = float(sym_node_size(node))
         elif is_non_tensor_node:
+            # FakeScriptObjects (opaque objects) should have weight 0.0 so they can be
+            # properly partitioned between forward and backward, like BackwardState.
             weight = (
-                0.0 if isinstance(node.meta.get("val"), BackwardState) else math.inf
+                0.0
+                if isinstance(node.meta.get("val"), (BackwardState, FakeScriptObject))
+                else math.inf
             )
         else:
             weight = get_node_weight(node, node_info.static_lifetime_input_nodes)
@@ -2460,7 +2465,7 @@ def _remove_symbols_without_guarding(x: torch.Tensor, fallback: int) -> torch.Te
     shape = list(x.shape)
 
     def realize_symbol(d):
-        return hint_int(d, fallback=fallback)
+        return size_hint(d, fallback=fallback)
 
     shape = [realize_symbol(s) for s in shape]
     stride = [realize_symbol(s) for s in x.stride()]
@@ -2474,7 +2479,7 @@ def estimate_runtime(node):
         if isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.Tensor):
             return _remove_symbols_without_guarding(x.meta["val"], fallback=4096)
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymInt):
-            return hint_int(x.meta["val"], fallback=4096)
+            return size_hint(x.meta["val"], fallback=4096)
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymFloat):
             return 1.0
         elif isinstance(x, fx.Node) and isinstance(x.meta["val"], torch.SymBool):
@@ -2502,6 +2507,10 @@ def estimate_runtime(node):
             node.target(*args, **kwargs)
         counted_flops = mode.get_total_flops()
         return max(counted_flops, 1)
+
+    elif callable(RUNTIME_MODE):
+        return RUNTIME_MODE(node)
+
     else:
         raise RuntimeError(f"Not aware of runtime estimator: {RUNTIME_MODE}")
 
