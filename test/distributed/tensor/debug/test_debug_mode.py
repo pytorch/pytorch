@@ -197,8 +197,8 @@ class TestDTensorDebugMode(TestCase):
       aten::_to_copy(t: f32[8, 1], dtype=torch.float32, layout=torch.strided, device=cpu)
       redistribute_input(t: f32[8, 8], trace: R->S(0))
         aten::split.Tensor(t: f32[8, 8], 1)
-        aten::detach(t: f32[8, 1])
         aten::clone(t: f32[1, 8])
+        aten::detach(t: f32[8, 1])
       aten::_to_copy(t: f32[1, 8], dtype=torch.float32, layout=torch.strided, device=cpu)
       aten::detach(t: f32[1, 8])""",
         )
