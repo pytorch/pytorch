@@ -1,9 +1,13 @@
 # Owner(s): ["oncall: distributed"]
 """
-Test symmetric all-reduce Triton kernel with NVSHMEM backend.
+Test torch symmetric memory Triton primitives with NVSHMEM backend.
 
-This test file contains multiprocess tests that verify the symm_all_reduce_sum_f32
-Triton extern function works correctly with NVSHMEMSymmComm wrapper objects.
+This test file contains multiprocess tests that verify the torch symmetric
+memory Triton extern functions work correctly with NVSHMEMSymmComm wrapper objects.
+
+Tests both:
+1. Dynamic dispatch (BACKEND_DEFAULT) - runtime dispatch based on SymmContext type
+2. Explicit NVSHMEM dispatch (BACKEND_NVSHMEM) - direct dispatch to NVSHMEM backend
 
 NOTE: NCCL tests are skipped because NCCL does not provide a device bitcode library
 (libnccl_device.bc) that can be linked with Triton kernels. Only NVSHMEM backend
@@ -91,49 +95,79 @@ def requires_nvshmem(func: Callable) -> Callable:
     return wrapper
 
 
-# Define Triton test kernel if Triton is available
+# Define Triton test kernels if Triton is available
 if TRITON_AVAILABLE:
-    from torch._extern_triton._symm_all_reduce_triton import (
-        requires_symm_all_reduce,
+    from torch._extern_triton._torch_symm_triton import (
+        BACKEND_DEFAULT,
+        BACKEND_NVSHMEM,
+        requires_torch_symm,
         symm_all_reduce_sum_f32,
-        SymmAllReduceLibFinder,
+        TorchSymmLibFinder,
     )
 
-    @requires_symm_all_reduce
-    @triton.jit
-    def symm_all_reduce_test_kernel(
-        ctx_ptr,
-        buffer_ptr,
-        num_elements: tl.constexpr,
-    ):
+    def make_symm_all_reduce_test_kernel(backend: int):
         """
-        Test kernel that calls symm_all_reduce_sum_f32.
+        Factory function to create a test kernel with the specified backend hint.
 
-        This kernel performs an all-reduce sum operation on the symmetric buffer.
-        Each rank should have its local buffer initialized with (rank + 1) values,
-        and after the all-reduce, all elements should be the sum across all ranks.
+        This creates a Triton kernel decorated with @requires_torch_symm(backend=X)
+        that calls symm_all_reduce_sum_f32 with the corresponding backend hint.
 
-        The unified symm_all_reduce_sum_f32 function dispatches to the correct
-        backend (NCCL or NVSHMEM) based on the SymmContext type.
+        Args:
+            backend: Backend hint (BACKEND_DEFAULT or BACKEND_NVSHMEM)
+
+        Returns:
+            A decorated Triton kernel function
         """
-        # Call the unified all-reduce function
-        # byte_offset = 0, num_elements from parameter
-        byte_offset: tl.int64 = 0
-        n_elems: tl.int64 = num_elements
-        result = symm_all_reduce_sum_f32(
+
+        @requires_torch_symm(backend=backend)
+        @triton.jit
+        def symm_all_reduce_test_kernel(
             ctx_ptr,
             buffer_ptr,
-            byte_offset,
-            n_elems,
-        )
+            num_elements: tl.constexpr,
+            backend_hint: tl.constexpr,
+        ):
+            """
+            Test kernel that calls symm_all_reduce_sum_f32 with specified backend.
+
+            This kernel performs an all-reduce sum operation on the symmetric buffer.
+            Each rank should have its local buffer initialized with (rank + 1) values,
+            and after the all-reduce, all elements should be the sum across all ranks.
+
+            Args:
+                ctx_ptr: Pointer to SymmContext
+                buffer_ptr: Pointer to symmetric buffer
+                num_elements: Number of float32 elements to reduce
+                backend_hint: Backend hint (0=DEFAULT, 2=NVSHMEM)
+            """
+            byte_offset: tl.int64 = 0
+            n_elems: tl.int64 = num_elements
+            result = symm_all_reduce_sum_f32(
+                ctx_ptr,
+                buffer_ptr,
+                byte_offset,
+                n_elems,
+                backend_hint,
+            )
+
+        return symm_all_reduce_test_kernel
+
+    # Create test kernels for each backend
+    symm_all_reduce_test_kernel_dynamic = make_symm_all_reduce_test_kernel(
+        BACKEND_DEFAULT
+    )
+    symm_all_reduce_test_kernel_nvshmem = make_symm_all_reduce_test_kernel(
+        BACKEND_NVSHMEM
+    )
 
 
-class TestSymmAllReduceTriton(MultiProcessTestCase):
+class TestTorchSymmTriton(MultiProcessTestCase):
     """
-    Multiprocess test case for symmetric all-reduce Triton kernels.
+    Multiprocess test case for torch symmetric memory Triton primitives.
 
-    Tests the NVSHMEM backend with the unified symm_all_reduce_sum_f32
-    Triton extern function.
+    Tests the NVSHMEM backend with the unified torch symmetric memory
+    Triton extern functions using both dynamic dispatch and explicit
+    NVSHMEM dispatch.
 
     NOTE: NCCL tests are skipped because NCCL does not provide a device
     bitcode library that can be linked with Triton kernels.
@@ -170,6 +204,7 @@ class TestSymmAllReduceTriton(MultiProcessTestCase):
         comm_class,
         kernel_func,
         num_elements: int = 128,
+        backend_hint: int = 0,
     ):
         """
         Helper method to run all-reduce test with given communicator class.
@@ -178,6 +213,7 @@ class TestSymmAllReduceTriton(MultiProcessTestCase):
             comm_class: Either NCCLSymmComm or NVSHMEMSymmComm class
             kernel_func: The Triton kernel to use for the test
             num_elements: Number of float32 elements to reduce
+            backend_hint: Backend hint to pass to the kernel (0=DEFAULT, 2=NVSHMEM)
         """
         self._init_process_group()
         try:
@@ -221,12 +257,13 @@ class TestSymmAllReduceTriton(MultiProcessTestCase):
             # Barrier before kernel to ensure all data is ready
             dist.barrier()
 
-            # Launch kernel
+            # Launch kernel with backend hint
             # Use cooperative grid for NVSHMEM barriers to work correctly
             kernel_func[(1,)](
                 ctx_ptr,
                 buffer_ptr,
                 num_elements,
+                backend_hint,
                 launch_cooperative_grid=True,
                 num_ctas=1,
             )
@@ -279,36 +316,69 @@ class TestSymmAllReduceTriton(MultiProcessTestCase):
 
         NOTE: This test is skipped because NCCL does not provide a device
         bitcode library (libnccl_device.bc) that can be linked with Triton
-        kernels. The NCCL backend implementation in symm_all_reduce.cu is
+        kernels. The NCCL backend implementation in torch_symm.cu is
         guarded by NCCL_HAS_DEVICE_BITCODE which is set to 0.
         """
         from torch._C._distributed_c10d import NCCLSymmComm
 
         self._run_all_reduce_test(
-            NCCLSymmComm, symm_all_reduce_test_kernel, num_elements
+            NCCLSymmComm,
+            symm_all_reduce_test_kernel_dynamic,
+            num_elements,
+            backend_hint=BACKEND_DEFAULT,
         )
 
     @skip_if_lt_x_gpu(2)
     @requires_triton
     @requires_nvshmem
     @parametrize("num_elements", [128, 512, 2048])
-    def test_nvshmem_symm_all_reduce(self, num_elements: int):
+    def test_nvshmem_symm_all_reduce_dynamic(self, num_elements: int):
         """
-        Test symmetric all-reduce with NVSHMEM backend.
+        Test symmetric all-reduce with NVSHMEM backend using dynamic dispatch.
 
         Uses NVSHMEMSymmComm to create symmetric memory and NVSHMEMSymmContext,
-        then calls symm_all_reduce_sum_f32 via the unified Triton kernel.
+        then calls symm_all_reduce_sum_f32 with BACKEND_DEFAULT via Triton kernel.
         The unified dispatcher routes to the NVSHMEM backend based on context type.
+
+        This tests the runtime dispatch path where the backend is determined
+        by examining the SymmContext type field.
         """
         from torch._C._distributed_c10d import NVSHMEMSymmComm
 
         self._run_all_reduce_test(
-            NVSHMEMSymmComm, symm_all_reduce_test_kernel, num_elements
+            NVSHMEMSymmComm,
+            symm_all_reduce_test_kernel_dynamic,
+            num_elements,
+            backend_hint=BACKEND_DEFAULT,
+        )
+
+    @skip_if_lt_x_gpu(2)
+    @requires_triton
+    @requires_nvshmem
+    @parametrize("num_elements", [128, 512, 2048])
+    def test_nvshmem_symm_all_reduce_explicit(self, num_elements: int):
+        """
+        Test symmetric all-reduce with explicit NVSHMEM backend dispatch.
+
+        Uses NVSHMEMSymmComm to create symmetric memory and NVSHMEMSymmContext,
+        then calls symm_all_reduce_sum_f32 with BACKEND_NVSHMEM via Triton kernel.
+        This bypasses the runtime dispatch and calls the NVSHMEM backend directly.
+
+        This tests the compile-time dispatch path where BACKEND_NVSHMEM is
+        specified as a constexpr argument, avoiding runtime type checking.
+        """
+        from torch._C._distributed_c10d import NVSHMEMSymmComm
+
+        self._run_all_reduce_test(
+            NVSHMEMSymmComm,
+            symm_all_reduce_test_kernel_nvshmem,
+            num_elements,
+            backend_hint=BACKEND_NVSHMEM,
         )
 
 
-class TestSymmCommAvailability(TestCase):
-    """Unit tests for checking communicator availability."""
+class TestTorchSymmAvailability(TestCase):
+    """Unit tests for checking torch symmetric memory availability."""
 
     def test_nccl_symm_comm_import(self):
         """Test that NCCLSymmComm can be imported when NCCL >= 2.28 is available."""
@@ -334,29 +404,51 @@ class TestSymmCommAvailability(TestCase):
             self.skipTest(f"NVSHMEMSymmComm not available: {e}")
 
     @requires_triton
-    def test_symm_all_reduce_lib_finder(self):
-        """Test that SymmAllReduceLibFinder can find the bitcode library."""
-        from torch._extern_triton._symm_all_reduce_triton import SymmAllReduceLibFinder
+    def test_torch_symm_lib_finder(self):
+        """Test that TorchSymmLibFinder can find the bitcode library."""
+        from torch._extern_triton._torch_symm_triton import TorchSymmLibFinder
 
-        if not SymmAllReduceLibFinder.is_available():
-            self.skipTest("symm_all_reduce.bc not available")
+        if not TorchSymmLibFinder.is_available():
+            self.skipTest("torch_symm.bc not available")
 
-        path = SymmAllReduceLibFinder.find_device_library()
+        path = TorchSymmLibFinder.find_device_library()
         self.assertTrue(os.path.isfile(path), f"Library not found at {path}")
 
     @requires_triton
     def test_nvshmem_device_lib_finder(self):
         """Test that NVSHMEM device library can be found."""
-        from torch._extern_triton._symm_all_reduce_triton import SymmAllReduceLibFinder
+        from torch._extern_triton._torch_symm_triton import TorchSymmLibFinder
 
-        if not SymmAllReduceLibFinder.is_nvshmem_available():
+        if not TorchSymmLibFinder.is_nvshmem_available():
             self.skipTest("libnvshmem_device.bc not available")
 
-        path = SymmAllReduceLibFinder.find_nvshmem_device_library()
+        path = TorchSymmLibFinder.find_nvshmem_device_library()
         self.assertTrue(os.path.isfile(path), f"Library not found at {path}")
 
+    @requires_triton
+    def test_backend_constants(self):
+        """Test that backend constants are correctly defined."""
+        from torch._extern_triton._torch_symm_triton import (
+            BACKEND_DEFAULT,
+            BACKEND_NCCL,
+            BACKEND_NVSHMEM,
+        )
 
-instantiate_parametrized_tests(TestSymmAllReduceTriton)
+        self.assertEqual(BACKEND_DEFAULT, 0)
+        self.assertEqual(BACKEND_NCCL, 1)
+        self.assertEqual(BACKEND_NVSHMEM, 2)
+
+    @requires_triton
+    def test_decorators_exist(self):
+        """Test that decorators are available and can be used with backend argument."""
+        from torch._extern_triton._torch_symm_triton import (
+            requires_torch_symm,
+        )
+
+        self.assertTrue(callable(requires_torch_symm))
+
+
+instantiate_parametrized_tests(TestTorchSymmTriton)
 
 
 if __name__ == "__main__":

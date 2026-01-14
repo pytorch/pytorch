@@ -17,7 +17,7 @@ CUDA_PATH ?= /usr/local/cuda
 NVSHMEM_PATH ?= /usr/local/nvshmem
 
 # Source and output files
-CUDA_SOURCES = elementwise_add.cu symm_all_reduce.cu
+CUDA_SOURCES = elementwise_add.cu torch_symm.cu
 BC_OUTPUTS = $(CUDA_SOURCES:.cu=.bc)
 TEST_SOURCES = test_nvshmem_symm_comm.cu
 TEST_OUTPUTS = $(TEST_SOURCES:.cu=)
@@ -65,7 +65,7 @@ $(BUILD_DIR)/test_nvshmem_symm_comm: test_nvshmem_symm_comm.cu symm_comm.cuh
 # Individual targets
 elementwise_add.bc: $(BUILD_DIR)/elementwise_add.bc
 
-symm_all_reduce.bc: $(BUILD_DIR)/symm_all_reduce.bc
+torch_symm.bc: $(BUILD_DIR)/torch_symm.bc
 
 clean:
 	rm -f $(addprefix $(BUILD_DIR)/, $(BC_OUTPUTS))
@@ -105,7 +105,7 @@ help:
 	@echo "Targets:"
 	@echo "  all                  - Build all bitcode files for default architecture ($(CUDA_ARCH))"
 	@echo "  elementwise_add.bc   - Build elementwise_add bitcode"
-	@echo "  symm_all_reduce.bc   - Build symmetric all-reduce bitcode"
+	@echo "  torch_symm.bc        - Build torch symmetric memory bitcode"
 	@echo "  test_cpp             - Build and run C++ multiprocess test"
 	@echo "  clean                - Remove built files"
 	@echo "  test                 - Build and verify bitcode creation"
@@ -121,6 +121,6 @@ help:
 	@echo "Examples:"
 	@echo "  make                    # Build all for sm_80 (Ampere)"
 	@echo "  make CUDA_ARCH=sm_90    # Build all for sm_90 (Hopper)"
-	@echo "  make symm_all_reduce.bc # Build only symm_all_reduce"
+	@echo "  make torch_symm.bc      # Build only torch_symm"
 	@echo "  make sm_70              # Build all for sm_70 (Volta)"
 	@echo "  make test_cpp           # Build and run C++ test"

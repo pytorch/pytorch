@@ -1,10 +1,10 @@
-// symm_all_reduce.cu
-// Unified CUDA device functions for symmetric memory all-reduce operations
+// torch_symm.cu
+// Unified CUDA device functions for symmetric memory operations
 //
 // This file contains device functions that can be compiled to LLVM bitcode
 // (.bc) and linked with Triton kernels via extern_libs.
 //
-// The implementation provides a unified frontend function that dispatches
+// The implementation provides unified frontend functions that dispatch
 // to either NCCL or NVSHMEM backends based on the SymmContext type.
 //
 // BACKEND SUPPORT:
@@ -14,8 +14,8 @@
 //   The NCCL implementation is included for completeness and future support.
 //
 // Compile to bitcode:
-//   clang++ -x cuda --cuda-device-only -emit-llvm -c symm_all_reduce.cu \
-//           -o symm_all_reduce.bc --cuda-gpu-arch=sm_80 -O3 \
+//   clang++ -x cuda --cuda-device-only -emit-llvm -c torch_symm.cu \
+//           -o torch_symm.bc --cuda-gpu-arch=sm_80 -O3 \
 //           -fcuda-flush-denormals-to-zero
 
 #include <cuda_runtime.h>

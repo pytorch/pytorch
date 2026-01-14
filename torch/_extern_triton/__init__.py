@@ -7,11 +7,17 @@ linked with Triton kernels using the core.extern_elementwise mechanism.
 
 Available libraries:
 - elementwise_add: Simple elementwise tensor addition operations
-- symm_all_reduce: Unified symmetric memory all-reduce with NCCL/NVSHMEM dispatch
+- torch_symm: Unified symmetric memory primitives with NCCL/NVSHMEM dispatch
 
-The unified symm_all_reduce interface provides a single frontend function
-that automatically dispatches to either NCCL or NVSHMEM backend based on
+The unified torch_symm interface provides frontend functions that
+automatically dispatch to either NCCL or NVSHMEM backend based on
 the SymmContext type.
+
+Backend hint support:
+The symm_all_reduce_sum_f32 function accepts a constexpr backend argument:
+- BACKEND_DEFAULT (0): Runtime dispatch based on context type (requires torch_symm.bc)
+- BACKEND_NCCL (1): Direct NCCL dispatch (not functional - no device bitcode)
+- BACKEND_NVSHMEM (2): Direct NVSHMEM dispatch (only needs libnvshmem_device.bc)
 
 Backend support:
 - NVSHMEM: Fully functional (provides libnvshmem_device.bc)
@@ -25,10 +31,15 @@ from torch._extern_triton._elementwise_add_triton import (
     scalar_add_f64,
 )
 
-# Unified symmetric all-reduce with automatic backend dispatch
-from torch._extern_triton._symm_all_reduce_triton import (
+# Unified symmetric primitives with automatic backend dispatch
+from torch._extern_triton._torch_symm_triton import (
+    BACKEND_DEFAULT,
+    BACKEND_NCCL,
+    BACKEND_NVSHMEM,
     SymmAllReduceLibFinder,
+    TorchSymmLibFinder,
     requires_symm_all_reduce,
+    requires_torch_symm,
     symm_all_reduce_sum_f32,
 )
 
@@ -38,8 +49,14 @@ __all__ = [
     "scalar_add_f32",
     "scalar_add_f16",
     "scalar_add_f64",
-    # Unified symmetric all-reduce
-    "SymmAllReduceLibFinder",
-    "requires_symm_all_reduce",
+    # Backend hint constants
+    "BACKEND_DEFAULT",
+    "BACKEND_NCCL",
+    "BACKEND_NVSHMEM",
+    # Torch symmetric memory
+    "TorchSymmLibFinder",
+    "SymmAllReduceLibFinder",  # Backward compatibility alias
+    "requires_torch_symm",
+    "requires_symm_all_reduce",  # Backward compatibility alias
     "symm_all_reduce_sum_f32",
 ]

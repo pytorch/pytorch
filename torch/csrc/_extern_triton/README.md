@@ -12,7 +12,7 @@ The library provides:
 
 ### Core Libraries
 - `elementwise_add.cu` - CUDA device functions for elementwise ops
-- `symm_all_reduce.cu` - Unified symmetric all-reduce with backend dispatch
+- `torch_symm.cu` - Unified symmetric memory primitives with backend dispatch
 - `symm_comm.cuh` - Unified header with SymmContext, NCCLSymmContext, NVSHMEMSymmContext
 
 ### Legacy (backward compatibility)
@@ -32,8 +32,8 @@ make
 make CUDA_ARCH=sm_90  # Hopper
 make CUDA_ARCH=sm_70  # Volta
 
-# Build only symm_all_reduce
-make symm_all_reduce.bc
+# Build only torch_symm
+make torch_symm.bc
 
 # Clean build artifacts
 make clean
@@ -42,8 +42,8 @@ make clean
 ### Manual compilation
 
 ```bash
-clang++ -x cuda --cuda-device-only -emit-llvm -c symm_all_reduce.cu \
-        -o symm_all_reduce.bc --cuda-gpu-arch=sm_80 -O3 -I/usr/local/cuda/include
+clang++ -x cuda --cuda-device-only -emit-llvm -c torch_symm.cu \
+        -o torch_symm.bc --cuda-gpu-arch=sm_80 -O3 -I/usr/local/cuda/include
 ```
 
 ---
@@ -143,7 +143,7 @@ from torch._extern_triton import (
 
 ## Environment Variables
 
-- `SYMM_ALL_REDUCE_LIB_PATH`: Custom path to symm_all_reduce.bc
+- `TORCH_SYMM_LIB_PATH`: Custom path to torch_symm.bc
 - `NVSHMEM_LIB_DIR`: Directory containing libnvshmem_device.bc
 
 ---
@@ -204,7 +204,7 @@ def my_add_kernel(a_ptr, b_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
 cd torch/csrc/_extern_triton && make
 
 # Run tests
-python test/distributed/test_symm_all_reduce_triton.py
+python test/distributed/test_torch_symm_triton.py
 python test/distributed/test_elementwise_add_triton.py
 ```
 
