@@ -10,7 +10,6 @@ import torch
 from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
-from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
@@ -310,10 +309,10 @@ class ShardingPropagator:
     ) -> TensorMeta | Sequence[TensorMeta | None] | None:
         """
         Propagate the tensor metadata, it could either return a TensorMeta
-        or a list/tuple of TensorMetas. Uses the cached version if not
-        actively tracing. Use this method instead of _propagate_tensor_meta_non_cached
+        or a list/tuple of TensorMetas. Uses the cached version if symints
+        are not present. Use this method instead of _propagate_tensor_meta_non_cached
         """
-        if _are_we_tracing():
+        if op_schema.has_symints():
             return self._propagate_tensor_meta_non_cached(op_schema)
         else:
             return self._propagate_tensor_meta_cached(op_schema)
@@ -441,10 +440,9 @@ class ShardingPropagator:
         )
 
         # We cannot use an lru cache if we know that inputs will have dynamic shapes,
-        # because SymInts are not hashable.
-        # This is generally ok because this only happens during tracing in torch.compile,
-        # and tracing does not need to be as fast as eagermode DTensor usages.
-        if _are_we_tracing():
+        # because SymInts are not hashable. Check if the schema contains any symints
+        # directly, which allows caching during torch.compile tracing when shapes are static.
+        if op_info.schema.has_symints():
             output_sharding = self.propagate_op_sharding_non_cached(op_info.schema)
         else:
             output_sharding = cast(

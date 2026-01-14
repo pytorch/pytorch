@@ -559,6 +559,24 @@ class OpSchema:
     def is_view_op(self) -> bool:
         return self.op._schema._is_view_op()
 
+    def has_symints(self) -> bool:
+        """
+        Check if this OpSchema contains any SymInts in the tensor metadata shapes.
+        SymInts are not hashable, so we cannot use LRU cache when they are present.
+        This is used to determine whether to use cached sharding propagation.
+        """
+        for arg in self.args_schema:
+            if isinstance(arg, DTensorSpec) and arg.tensor_meta is not None:
+                for s in arg.tensor_meta.shape:
+                    if isinstance(s, torch.SymInt):
+                        return True
+        for arg in self.kwargs_schema.values():
+            if isinstance(arg, DTensorSpec) and arg.tensor_meta is not None:
+                for s in arg.tensor_meta.shape:
+                    if isinstance(s, torch.SymInt):
+                        return True
+        return False
+
     def _recompute_comparison_key(self) -> None:
         _DTensor_OpSchema_recompute_comparison_key(self)
 
