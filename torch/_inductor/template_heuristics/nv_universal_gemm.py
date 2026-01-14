@@ -52,11 +52,7 @@ def _make_config_key_from_heuristic(cfg: HeuristicConfig) -> ConfigKey:
 
 
 def _make_config_key_from_kernel_design(design) -> ConfigKey | None:
-    """Build config key from cutlass_api kernel metadata.design.
-
-    Note: design can be None (default in KernelMetadata). We use hasattr checks
-    defensively since only BLASDesignMetadata has tile_shape/cluster_shape.
-    """
+    """Build config key from cutlass_api kernel metadata.design."""
     if (
         hasattr(design, "tile_shape")
         and len(design.tile_shape) >= 3
