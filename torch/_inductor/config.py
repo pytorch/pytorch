@@ -1,7 +1,7 @@
 import os
 import sys
 from collections.abc import Callable
-from typing import Any, Literal, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, Literal, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.custom_graph_pass
@@ -2023,6 +2023,26 @@ class cuda:
 
     # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
     cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4, 8]
+
+    cutlass_dynamic_cluster_shape: tuple[int, int, int] = cast(
+        tuple[int, int, int],
+        tuple(
+            int(x)
+            for x in os.environ.get(
+                "TORCHINDUCTOR_CUTLASS_DYNAMIC_CLUSTER_SHAPE", "2,1,1"
+            ).split(",")
+        ),
+    )
+    cutlass_dynamic_cluster_fallback: tuple[int, int, int] = cast(
+        tuple[int, int, int],
+        tuple(
+            int(x)
+            for x in os.environ.get(
+                "TORCHINDUCTOR_CUTLASS_DYNAMIC_CLUSTER_FALLBACK",
+                ",".join(str(v) for v in cutlass_dynamic_cluster_shape),
+            ).split(",")
+        ),
+    )
 
     # Whether to use CUTLASS EVT for epilogue fusion
     cutlass_epilogue_fusion_enabled = (

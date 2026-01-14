@@ -114,6 +114,10 @@ class ItertoolsVariable(VariableTracker):
                 )
 
             def retrieve_const_key(key: VariableTracker) -> Any:
+                from ..utils import specialize_symnode
+
+                # Unwrap LazyVariableTracker to get the underlying variable
+                key = specialize_symnode(key)
                 if isinstance(key, variables.SymNodeVariable):
                     return key.evaluate_expr()
                 elif key.is_python_constant():

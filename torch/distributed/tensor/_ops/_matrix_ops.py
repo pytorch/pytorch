@@ -428,12 +428,6 @@ def addmm_single_dim_strategy(
     return _addmm_like_single_dim_strategy("mk,kn->mn", args_schema, mm_out_shape)
 
 
-# @register_op_strategy(aten.bmm.default)
-# def bmm_strategy(op_schema: OpSchema) -> OpStrategy:
-#     mesh = op_schema.get_mesh_from_args()
-#     return _mm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
-
-
 @register_single_dim_strategy(aten.bmm.default)
 def bmm_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
