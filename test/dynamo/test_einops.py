@@ -103,7 +103,7 @@ class TestEinops(TestCase):
         for size in [16, 32, 64]:
             x = torch.rand([size, size])
             result1 = original(x)
-            result2 = compiled(x.double()).float()
+            result2 = compiled(x)
             self.assertEqual(result1, result2)
 
     @parametrize("version", [einops_version_sanitized])

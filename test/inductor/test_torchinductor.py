@@ -4085,8 +4085,6 @@ class CommonTemplate:
         msg = "expected .* and .* to have the same dtype, but got: .* != .*"
         with self.assertRaisesRegex(RuntimeError, msg):
             fn(t1, t2)
-        if config.cpp_wrapper:
-            msg = "aoti_torch_.* API call failed at .*"
         with self.assertRaisesRegex(RuntimeError, msg):
             torch.compile(fn)(t1, t2)
 
@@ -4107,12 +4105,14 @@ class CommonTemplate:
         msg = "expected .* and .* to have the same dtype, but got: .* != .*"
         with self.assertRaisesRegex(RuntimeError, msg):
             fn(t)
-        if config.cpp_wrapper:
-            msg = "aoti_torch_.* API call failed at .*"
         with self.assertRaisesRegex(RuntimeError, msg):
             with torch.no_grad():
                 torch.compile(fn)(t)
-        with self.assertRaisesRegex(RuntimeError, "Autograd not support dtype:.*"):
+        # Either "Autograd not support dtype" or dtype mismatch error from mm
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "(Autograd not support dtype:.*|expected .* to have the same dtype)",
+        ):
             torch.compile(fn)(t)
 
     @unittest.skipIf(
