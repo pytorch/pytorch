@@ -223,10 +223,6 @@ class TorchSymmLibFinder:
         cls._cached_nvshmem_path = None
 
 
-# Backward compatibility alias
-SymmAllReduceLibFinder = TorchSymmLibFinder
-
-
 # Triton extern function declarations
 if TRITON_AVAILABLE:
     from triton.language import core
@@ -234,17 +230,17 @@ if TRITON_AVAILABLE:
 
     # Pre-compute library paths at module load time
     try:
-        _SYMM_ALL_REDUCE_LIB_PATH: str = SymmAllReduceLibFinder.find_device_library()
+        _TORCH_SYMM_LIB_PATH: str = TorchSymmLibFinder.find_device_library()
     except RuntimeError:
-        _SYMM_ALL_REDUCE_LIB_PATH = ""
+        _TORCH_SYMM_LIB_PATH = ""
 
     try:
-        _NVSHMEM_LIB_PATH: str = SymmAllReduceLibFinder.find_nvshmem_device_library()
+        _NVSHMEM_LIB_PATH: str = TorchSymmLibFinder.find_nvshmem_device_library()
     except RuntimeError:
         _NVSHMEM_LIB_PATH = ""
 
     # Registry to track kernels that need NVSHMEM initialization
-    class SymmAllReduceKernelRegistry:
+    class TorchSymmKernelRegistry:
         """Registry for kernels that require NVSHMEM CUModule initialization."""
 
         _to_init: dict[str, Any] = {}
@@ -257,7 +253,7 @@ if TRITON_AVAILABLE:
         def has(cls, name: str) -> bool:
             return name in cls._to_init
 
-    def _symm_all_reduce_init_hook(*args: Any, **kwargs: Any) -> None:
+    def _torch_symm_init_hook(*args: Any, **kwargs: Any) -> None:
         """Post-compile hook to initialize NVSHMEM CUModule."""
         try:
             from torch._C._distributed_c10d import _nvshmemx_cumodule_init
@@ -267,7 +263,7 @@ if TRITON_AVAILABLE:
         jit_function = kwargs["fn"].jit_function
         fn_name = jit_function.fn.__name__
 
-        if SymmAllReduceKernelRegistry.has(fn_name):
+        if TorchSymmKernelRegistry.has(fn_name):
             key = kwargs["key"]
             device = kwargs["compile"]["device"]
             kernel_cache = jit_function.device_caches[device][0]
@@ -367,10 +363,10 @@ if TRITON_AVAILABLE:
 
             extern_libs = {}
 
-            # Add the unified symm_all_reduce library
+            # Add the unified torch_symm library
             try:
-                bc_path = SymmAllReduceLibFinder.find_device_library()
-                extern_libs["symm_all_reduce"] = bc_path
+                bc_path = TorchSymmLibFinder.find_device_library()
+                extern_libs["torch_symm"] = bc_path
             except RuntimeError:
                 pass  # Library not found, will fail at runtime
 
@@ -378,14 +374,14 @@ if TRITON_AVAILABLE:
             if backend_hint == _BACKEND_DEFAULT:
                 # For default dispatch, NVSHMEM is optional (could use NCCL)
                 try:
-                    nvshmem_path = SymmAllReduceLibFinder.find_nvshmem_device_library()
+                    nvshmem_path = TorchSymmLibFinder.find_nvshmem_device_library()
                     extern_libs["libnvshmem_device"] = nvshmem_path
                 except RuntimeError:
                     pass  # NVSHMEM not available, only NCCL backend will work
             elif backend_hint == _BACKEND_NVSHMEM:
                 # For explicit NVSHMEM, the library is required
                 try:
-                    nvshmem_path = SymmAllReduceLibFinder.find_nvshmem_device_library()
+                    nvshmem_path = TorchSymmLibFinder.find_nvshmem_device_library()
                     extern_libs["libnvshmem_device"] = nvshmem_path
                 except RuntimeError as e:
                     raise RuntimeError(
@@ -393,11 +389,11 @@ if TRITON_AVAILABLE:
                     ) from e
 
             # Register the kernel for NVSHMEM CUModule initialization
-            SymmAllReduceKernelRegistry.register(jit_func.fn.__name__)
+            TorchSymmKernelRegistry.register(jit_func.fn.__name__)
 
             # Register the post-compile hook for NVSHMEM initialization
             # This is a global setting; filtering is done in the hook itself
-            triton.knobs.runtime.jit_post_compile_hook = _symm_all_reduce_init_hook
+            triton.knobs.runtime.jit_post_compile_hook = _torch_symm_init_hook
 
             return GridCallableWithExtern(jit_func, extern_libs)
 
@@ -408,14 +404,14 @@ if TRITON_AVAILABLE:
         # 4. @requires_torch_symm(BACKEND_NVSHMEM) - jit_func_or_backend is int
 
         if jit_func_or_backend is None:
-            # Called with parentheses but no positional arg: @requires_symm_all_reduce()
-            # or @requires_symm_all_reduce(backend=X)
+            # Called with parentheses but no positional arg: @requires_torch_symm()
+            # or @requires_torch_symm(backend=X)
             def decorator(jit_func: JITFunction) -> GridCallableWithExtern:
                 return _apply_decorator(jit_func, backend)
 
             return decorator
         elif isinstance(jit_func_or_backend, int):
-            # Called with backend as positional arg: @requires_symm_all_reduce(BACKEND_NVSHMEM)
+            # Called with backend as positional arg: @requires_torch_symm(BACKEND_NVSHMEM)
             backend_hint = jit_func_or_backend
 
             def decorator(jit_func: JITFunction) -> GridCallableWithExtern:
@@ -423,20 +419,8 @@ if TRITON_AVAILABLE:
 
             return decorator
         else:
-            # Called without parentheses: @requires_symm_all_reduce
+            # Called without parentheses: @requires_torch_symm
             return _apply_decorator(jit_func_or_backend, _BACKEND_DEFAULT)
-
-    # Alias for backward compatibility
-    def requires_symm_all_reduce(
-        jit_func_or_backend: JITFunction | int | None = None,
-        backend: int = _BACKEND_DEFAULT,
-    ) -> GridCallableWithExtern | Any:
-        """
-        Alias for requires_torch_symm.
-
-        Deprecated: Use requires_torch_symm instead.
-        """
-        return requires_torch_symm(jit_func_or_backend, backend)
 
     @core.extern
     def _symm_all_reduce_sum_f32_frontend(
@@ -570,10 +554,6 @@ else:
         """Stub for when Triton is not available."""
         raise ImportError("Triton is required for requires_torch_symm decorator")
 
-    def requires_symm_all_reduce(jit_func):  # type: ignore[misc]
-        """Stub for when Triton is not available (backward compatibility alias)."""
-        raise ImportError("Triton is required for requires_symm_all_reduce decorator")
-
     def symm_all_reduce_sum_f32(*args, **kwargs):  # type: ignore[misc]
         raise ImportError("Triton is required for symm_all_reduce_sum_f32")
 
@@ -584,10 +564,9 @@ __all__ = [
     "BACKEND_NCCL",
     "BACKEND_NVSHMEM",
     # Library finder
-    "SymmAllReduceLibFinder",
+    "TorchSymmLibFinder",
     # Decorators
     "requires_torch_symm",
-    "requires_symm_all_reduce",  # Backward compatibility alias
     # Triton extern function
     "symm_all_reduce_sum_f32",
 ]

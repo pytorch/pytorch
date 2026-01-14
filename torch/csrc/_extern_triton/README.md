@@ -5,13 +5,11 @@ This directory contains CUDA device functions that can be linked with Triton ker
 ## Overview
 
 The library provides:
-- **Elementwise operations**: Simple tensor addition (fp16, fp32, fp64)
-- **Symmetric All-Reduce**: Unified all-reduce with NCCL/NVSHMEM backend dispatch
+- **Symmetric Memory Primitives**: Unified all-reduce and other collective operations with NCCL/NVSHMEM backend dispatch
 
 ## Files
 
 ### Core Libraries
-- `elementwise_add.cu` - CUDA device functions for elementwise ops
 - `torch_symm.cu` - Unified symmetric memory primitives with backend dispatch
 - `symm_comm.cuh` - Unified header with SymmContext, NCCLSymmContext, NVSHMEMSymmContext
 
@@ -48,11 +46,11 @@ clang++ -x cuda --cuda-device-only -emit-llvm -c torch_symm.cu \
 
 ---
 
-# Symmetric All-Reduce Library
+# Symmetric Memory Library
 
 ## Overview
 
-The symmetric all-reduce library provides a unified frontend that automatically dispatches to either NCCL or NVSHMEM backend based on the SymmContext type.
+The symmetric memory library provides a unified frontend that automatically dispatches to either NCCL or NVSHMEM backend based on the SymmContext type.
 
 ### Backend Support
 
@@ -111,78 +109,46 @@ __device__ int32_t symm_all_reduce_sum_f32(
 
 ## Usage in Triton
 
-### 1. Import the unified library
+### Recommended Pattern
+
+Use a factory function to create kernels with a specific backend hint:
 
 ```python
 from torch._extern_triton import (
-    requires_symm_all_reduce,
+    BACKEND_DEFAULT,
+    BACKEND_NVSHMEM,
+    requires_torch_symm,
     symm_all_reduce_sum_f32,
 )
-```
 
-### 2. Decorate your kernel
+def make_my_kernel(backend: int):
+    @requires_torch_symm(backend=backend)
+    @triton.jit
+    def my_kernel(
+        ctx_ptr,
+        buffer_ptr,
+        num_elements: tl.constexpr,
+        backend_hint: tl.constexpr,
+    ):
+        byte_offset: tl.int64 = 0
+        n_elems: tl.int64 = num_elements
+        result = symm_all_reduce_sum_f32(
+            ctx_ptr, buffer_ptr, byte_offset, n_elems, backend_hint
+        )
+    return my_kernel
 
-```python
-@requires_symm_all_reduce
-@triton.jit
-def my_allreduce_kernel(ctx_ptr, buffer_ptr, byte_offset, num_elements):
-    # The frontend dispatches to NCCL or NVSHMEM based on ctx_ptr->type
-    result = symm_all_reduce_sum_f32(ctx_ptr, buffer_ptr, byte_offset, num_elements)
-```
+# Create kernel variants
+my_kernel_dynamic = make_my_kernel(BACKEND_DEFAULT)   # Runtime dispatch
+my_kernel_nvshmem = make_my_kernel(BACKEND_NVSHMEM)   # Direct NVSHMEM
 
-### Backend-Specific Wrappers
-
-If you know the backend at compile time, you can use backend-specific wrappers:
-
-```python
-from torch._extern_triton import (
-    nccl_symm_all_reduce_sum_f32,    # For NCCLSymmContext
-    nvshmem_symm_all_reduce_sum_f32, # For NVSHMEMSymmContext
-)
+# Launch with matching backend hint
+my_kernel_nvshmem[(1,)](ctx_ptr, buf_ptr, n_elems, BACKEND_NVSHMEM)
 ```
 
 ## Environment Variables
 
 - `TORCH_SYMM_LIB_PATH`: Custom path to torch_symm.bc
 - `NVSHMEM_LIB_DIR`: Directory containing libnvshmem_device.bc
-
----
-
-# Elementwise Addition Library
-
-## Overview
-
-Simple elementwise tensor addition operations compiled to LLVM bitcode.
-
-## Available Functions
-
-| Function | Input Types | Description |
-|----------|-------------|-------------|
-| `scalar_add_f32(a, b)` | fp32, fp32 | Float32 addition |
-| `scalar_add_f16(a, b)` | fp16, fp16 | Float16 addition |
-| `scalar_add_f64(a, b)` | fp64, fp64 | Float64 addition |
-
-## Usage
-
-```python
-from torch._extern_triton import requires_elementwise_add_lib, scalar_add_f32
-
-@requires_elementwise_add_lib
-@triton.jit
-def my_add_kernel(a_ptr, b_ptr, out_ptr, n_elements, BLOCK_SIZE: tl.constexpr):
-    pid = tl.program_id(0)
-    offsets = pid * BLOCK_SIZE + tl.arange(0, BLOCK_SIZE)
-    mask = offsets < n_elements
-
-    a = tl.load(a_ptr + offsets, mask=mask)
-    b = tl.load(b_ptr + offsets, mask=mask)
-    result = scalar_add_f32(a, b)
-    tl.store(out_ptr + offsets, result, mask=mask)
-```
-
-## Environment Variables
-
-- `ELEMENTWISE_ADD_LIB_PATH`: Custom path to elementwise_add.bc
 
 ---
 
@@ -205,12 +171,11 @@ cd torch/csrc/_extern_triton && make
 
 # Run tests
 python test/distributed/test_torch_symm_triton.py
-python test/distributed/test_elementwise_add_triton.py
 ```
 
 ## How It Works
 
 1. **CUDA Compilation**: `.cu` files are compiled to LLVM bitcode (`.bc`) using clang
-2. **Library Registration**: Decorators (`@requires_*`) register bitcode with Triton
+2. **Library Registration**: Decorators (`@requires_torch_symm`) register bitcode with Triton
 3. **Extern Linkage**: Triton links against the bitcode during kernel compilation
 4. **Function Dispatch**: `core.extern_elementwise` maps Triton types to CUDA functions

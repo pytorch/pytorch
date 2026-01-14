@@ -1,4 +1,4 @@
-# Makefile for building elementwise_add CUDA library to LLVM bitcode
+# Makefile for building torch_symm CUDA library to LLVM bitcode
 #
 # This Makefile compiles CUDA device functions to LLVM bitcode (.bc files)
 # that can be linked with Triton kernels via extern_libs.
@@ -17,7 +17,7 @@ CUDA_PATH ?= /usr/local/cuda
 NVSHMEM_PATH ?= /usr/local/nvshmem
 
 # Source and output files
-CUDA_SOURCES = elementwise_add.cu torch_symm.cu
+CUDA_SOURCES = torch_symm.cu
 BC_OUTPUTS = $(CUDA_SOURCES:.cu=.bc)
 TEST_SOURCES = test_nvshmem_symm_comm.cu
 TEST_OUTPUTS = $(TEST_SOURCES:.cu=)
@@ -63,8 +63,6 @@ $(BUILD_DIR)/test_nvshmem_symm_comm: test_nvshmem_symm_comm.cu symm_comm.cuh
 	@echo "Built test executable: $@"
 
 # Individual targets
-elementwise_add.bc: $(BUILD_DIR)/elementwise_add.bc
-
 torch_symm.bc: $(BUILD_DIR)/torch_symm.bc
 
 clean:
@@ -104,7 +102,6 @@ help:
 	@echo ""
 	@echo "Targets:"
 	@echo "  all                  - Build all bitcode files for default architecture ($(CUDA_ARCH))"
-	@echo "  elementwise_add.bc   - Build elementwise_add bitcode"
 	@echo "  torch_symm.bc        - Build torch symmetric memory bitcode"
 	@echo "  test_cpp             - Build and run C++ multiprocess test"
 	@echo "  clean                - Remove built files"

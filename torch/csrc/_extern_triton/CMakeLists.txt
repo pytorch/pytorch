@@ -63,7 +63,6 @@ set(EXTERN_TRITON_CLANG_FLAGS
 
 # Source files to compile to bitcode
 set(EXTERN_TRITON_CUDA_SOURCES
-  elementwise_add.cu
   torch_symm.cu
 )
 
