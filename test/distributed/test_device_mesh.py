@@ -294,6 +294,29 @@ class DeviceMeshTest(DTensorTestBase):
         ).wait()
         self.assertEqual(global_tensor.shape, (self.world_size * 2, 8))
 
+    def test_fake_pg_device_mesh_cuda_on_cpu(self):
+        """
+        Test that DeviceMesh can be initialized with fake backend using 'cuda'
+        device type even on CPU-only machines.
+        """
+        fake_store = FakeStore()
+        init_process_group("fake", store=fake_store, rank=0, world_size=1)
+
+        # This should NOT fail even on CPU-only machines because
+        # the fake backend skips device setup
+        device_mesh = init_device_mesh(
+            "cuda",
+            (1,),
+            mesh_dim_names=("dp",),
+        )
+
+        # Verify mesh is created correctly
+        self.assertEqual(device_mesh.ndim, 1)
+        self.assertEqual(device_mesh.size(), 1)
+        self.assertEqual(device_mesh.mesh_dim_names, ("dp",))
+        backend = device_mesh.get_all_groups()[0]._get_backend(torch.device("cuda"))
+        self.assertIsInstance(backend, torch._C._distributed_c10d.FakeProcessGroup)
+
     @with_comms
     def test_from_group_with_global_pg(self):
         # Simple test: check `from_group` from a mesh pg vs. directly
@@ -1500,7 +1523,7 @@ class CuTeLayoutTest(TestCase):
         l = _FlatLayout(((7, (5, 3)), 2), ((900, (36, 4)), 1))
         self.assertEqual(list(l.sizes_and_strides), [(7, 900), (5, 36), (3, 4), (2, 1)])
 
-        l = _FlatLayout(((7, (5, 3)), 2), ((30, (6, 2), 1)))
+        l = _FlatLayout(((7, (5, 3)), 2), ((30, (6, 2)), 1))
         self.assertEqual(list(l.sizes_and_strides), [(7 * 5 * 3 * 2, 1)])
 
     def test_optional_strides(self):
@@ -1736,9 +1759,14 @@ class CuTeLayoutTest(TestCase):
         layout7 = _FlatLayout((2, 2, 2), (4, 1, 2))
         self.assertTrue(layout7.check_orthogonal())
 
-        # Test 8: Valid layout - Interleaved but no overlap
+        # Test 8: Invalid layout - dimensions are not "comparable", neither
+        # can be "stacked" above or below the other.
         layout8 = _FlatLayout((3, 2), (2, 3))
-        self.assertTrue(layout8.check_orthogonal())
+        self.assertFalse(layout8.check_orthogonal())
+
+        # Test 9: Valid layout - dimensions can be dropped, shuffled, coalesced
+        layout9 = _FlatLayout((2, (11, 3), 7), (1, (210, 2), 30))
+        self.assertTrue(layout9.check_orthogonal())
 
     def test_remap_to_tensor(self):
         """Test the remap_to_tensor method for various scenarios."""

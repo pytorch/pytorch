@@ -8,6 +8,9 @@ ENV DEBIAN_FRONTEND noninteractive
 
 ARG CLANG_VERSION
 
+# Allow APT to run as root
+RUN echo 'APT::Sandbox::User "root";' | tee -a /etc/apt/apt.conf.d/10sandbox
+
 # Install common dependencies (so that this step can be cached separately)
 COPY ./common/install_base.sh install_base.sh
 RUN bash ./install_base.sh && rm install_base.sh
