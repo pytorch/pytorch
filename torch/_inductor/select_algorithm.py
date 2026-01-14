@@ -3546,7 +3546,7 @@ class AlgorithmSelectorCache(PersistentCache):
                     )
 
                 # Check if the required storage size exceeds the current storage
-                # to avoid illegal memory access
+                # to avoid illegal memory accessoptimization_hints_with_override
                 needed_size = torch._prims_common.compute_required_storage_length(
                     sizes, strides, cast(int, storage_offset)
                 )
@@ -4340,21 +4340,14 @@ class AlgorithmSelectorCache(PersistentCache):
         return (
             node.get_device().type,
             str(node.get_dtype()),
-            *sizevars.size_hints(
-                node.get_size(),
-                fallback=config.unbacked_symint_fallback,
-            ),
+            *sizevars.optimization_hints(node.get_size()),
             *tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
+                V.graph.sizevars.optimization_hint(
                     stride,
-                    fallback=config.unbacked_symint_fallback,
                 )
                 for stride in node.get_stride()
             ),
-            sizevars.size_hint(
-                node.get_layout().offset,
-                fallback=config.unbacked_symint_fallback,
-            ),
+            sizevars.optimization_hint(node.get_layout().offset),
         )
 
     def add_feedback_saver(self, fn: FeedbackFunction):
@@ -4501,12 +4494,7 @@ def _autotune_metadata(input_nodes):
         # argument, and extracting those out there directly
         "autotune_strides_hinted": ", ".join(
             [
-                str(
-                    V.graph.sizevars.size_hints(
-                        n.get_stride(),
-                        fallback=config.unbacked_symint_fallback,
-                    )
-                )
+                str(V.graph.sizevars.optimization_hints(n.get_stride()))
                 for n in input_nodes
             ]
         ),
@@ -4515,10 +4503,7 @@ def _autotune_metadata(input_nodes):
                 "x".join(
                     map(
                         str,
-                        V.graph.sizevars.size_hints(
-                            n.get_size(),
-                            fallback=config.unbacked_symint_fallback,
-                        ),
+                        V.graph.sizevars.optimization_hints(n.get_size()),
                     )
                 )
                 for n in input_nodes

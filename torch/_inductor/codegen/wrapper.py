@@ -1666,9 +1666,9 @@ class PythonWrapperCodegen(CodeGen):
         dims = desc.dims
         block_dims = desc.block_dims
         if apply_size_hints:
-            dims = tuple(V.graph.sizevars.atomically_apply_size_hint(d) for d in dims)
+            dims = tuple(V.graph.sizevars.optimization_hint(d) for d in dims)
             block_dims = tuple(
-                V.graph.sizevars.atomically_apply_size_hint(d) for d in block_dims
+                V.graph.sizevars.optimization_hint(d) for d in block_dims
             )
 
         ptr = f"{desc.tensor.codegen_reference()}.data_ptr()"
@@ -1688,7 +1688,7 @@ class PythonWrapperCodegen(CodeGen):
         block_shape = desc.block_shape
         if apply_size_hints:
             block_shape = tuple(
-                V.graph.sizevars.atomically_apply_size_hint(d) for d in block_shape
+                V.graph.sizevars.optimization_hint(d) for d in block_shape
             )
 
         prefix = "triton.tools.tensor_descriptor.TensorDescriptor"
@@ -2836,33 +2836,17 @@ class PythonWrapperCodegen(CodeGen):
                 self.kernel_autotune_tmp_arg_idx += 1
 
             assert buf is not None, f"Failed to find a buffer for arg {arg}"
-            size = tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    e,
-                    fallback=config.unbacked_symint_fallback,
-                )
-                for e in buf.get_size()
-            )
+            size = tuple(V.graph.sizevars.optimization_hint(e) for e in buf.get_size())
             allocation_size = tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    e,
-                    fallback=config.unbacked_symint_fallback,
-                )
+                V.graph.sizevars.optimization_hint(e)
                 for e in V.graph.get_allocation_size(buf)
             )
             stride = tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    e,
-                    fallback=config.unbacked_symint_fallback,
-                )
-                for e in buf.get_stride()
+                V.graph.sizevars.optimization_hint(e) for e in buf.get_stride()
             )
             device = buf.get_device()
             dtype = buf.get_dtype()
-            offset = V.graph.sizevars.size_hint(
-                buf.get_layout().offset,
-                fallback=config.unbacked_symint_fallback,
-            )
+            offset = V.graph.sizevars.optimization_hint(buf.get_layout().offset)
             value = f"generate_example_value({size}, {stride}, '{device}', {dtype}, {offset}, {allocation_size})"
             self.kernel_autotune_calls.writeline(f"{buf_name} = {value}")
 
@@ -2890,11 +2874,7 @@ class PythonWrapperCodegen(CodeGen):
             if arg in V.graph.sizevars.inv_precomputed_replacements:
                 arg = V.graph.sizevars.inv_precomputed_replacements[arg]
 
-            return str(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    arg, fallback=config.unbacked_symint_fallback
-                )
-            )
+            return str(V.graph.sizevars.optimization_hint(arg))
 
         elif isinstance(arg, (str, int, float, bool)):
             return str(arg)
