@@ -3,6 +3,7 @@ import io
 from unittest.mock import patch
 
 import torch
+from torch._dynamo.testing import AotEagerAndRecordGraphs, InductorAndRecordGraphs
 from torch._functorch.aot_autograd import aot_export_module
 from torch._inductor.utils import run_and_get_code
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -11,6 +12,7 @@ from torch.testing._internal.common_utils import (
     parametrize,
     run_tests,
     skipIfTorchDynamo,
+    TEST_WITH_CROSSREF,
     TestCase,
 )
 
@@ -562,6 +564,112 @@ x = add_1, y = add_2);  getitem = None
         self.assertTrue(torch.allclose(result_no_print, result_with_print))
         self.assertIn("mul result:", printed)
         self.assertIn("sub result:", printed)
+
+    @skipIfTorchDynamo("Skipped under Dynamo")
+    def test_print_aot_autograd_graph(self):
+        """Test capturing the AOT Autograd graph for print HOP.
+
+        This test captures the AOT Autograd forward graph using AotEagerAndRecordGraphs,
+        which shows how AOT Autograd functionalizes the print HOP with with_effects.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                torch._higher_order_ops.print("moo {x} {y}", x=1, y=2)
+                res = x + x
+                torch._higher_order_ops.print("values {} {}", 3, res)
+                return (res,)
+
+        inputs = (torch.randn(3, requires_grad=True),)
+
+        # Capture AOT Autograd graphs using AotEagerAndRecordGraphs
+        backend = AotEagerAndRecordGraphs()
+        compiled_m = torch.compile(M(), backend=backend, fullgraph=True)
+
+        with patch("sys.stdout", new_callable=io.StringIO):
+            res = compiled_m(*inputs)
+            # Run backward to capture backward graph
+            res[0].sum().backward()
+
+        # Check for Dynamo graph
+        if not TEST_WITH_CROSSREF:
+            self.assertExpectedInline(
+                backend.graphs[0].code.strip(),
+                """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    print_1 = torch.ops.higher_order.print('moo {x} {y}', x = 1, y = 2);  print_1 = None
+    res = l_x_ + l_x_;  l_x_ = None
+    print_2 = torch.ops.higher_order.print('values {} {}', 3, res);  print_2 = None
+    return (res,)""",
+            )
+
+        # Check forward graph - should have with_effects wrapping print
+        self.assertExpectedInline(
+            backend.fw_graphs[0].code.strip(),
+            """\
+def forward(self, primals_1, primals_2):
+    with_effects = torch.ops.higher_order.with_effects(primals_1, torch.ops.higher_order.print, \
+'moo {x} {y}', x = 1, y = 2);  primals_1 = None
+    getitem = with_effects[0];  with_effects = None
+    add = torch.ops.aten.add.Tensor(primals_2, primals_2);  primals_2 = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.print, \
+'values {} {}', 3, add);  getitem = None
+    getitem_2 = with_effects_1[0];  with_effects_1 = None
+    return (getitem_2, add)""",  # noqa: B950
+        )
+
+        # Check backward graph - print HOP doesn't contribute to gradients
+        self.assertExpectedInline(
+            backend.bw_graphs[0].code.strip(),
+            """\
+def forward(self, tangents_1):
+    add_1 = torch.ops.aten.add.Tensor(tangents_1, tangents_1);  tangents_1 = None
+    return (add_1,)""",
+        )
+
+    @skipIfTorchDynamo("Skipped under Dynamo")
+    def test_print_inductor_graph(self):
+        """Test capturing the Inductor graph and generated code for print HOP.
+
+        This test captures:
+        1. The Inductor input FX graph using InductorAndRecordGraphs
+        2. The Inductor output generated code using run_and_get_code
+
+        This shows the full Inductor pipeline for print HOP.
+        """
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                torch._higher_order_ops.print("moo {x} {y}", x=1, y=2)
+                res = x + x
+                torch._higher_order_ops.print("values {} {}", 3, res)
+                return (res,)
+
+        inputs = (torch.randn(3, requires_grad=False),)
+
+        # 1. Capture Inductor INPUT graph using InductorAndRecordGraphs
+        backend = InductorAndRecordGraphs()
+        compiled_m = torch.compile(M(), backend=backend, fullgraph=True)
+
+        with patch("sys.stdout", new_callable=io.StringIO):
+            compiled_m(*inputs)
+
+        # Check inductor INPUT graph - print wrapped with with_effects
+        # Inductor creates/sinks tokens internally rather than passing as args
+        self.assertExpectedInline(
+            backend.inductor_graphs[0].code.strip(),
+            """\
+def forward(self, arg1_1):
+    _make_token_default = torch.ops.prims._make_token.default()
+    with_effects = torch.ops.higher_order.with_effects(_make_token_default, torch.ops.higher_order.print, 'moo {x} {y}', x = 1, y = 2);  _make_token_default = None
+    getitem = with_effects[0];  with_effects = None
+    add = torch.ops.aten.add.Tensor(arg1_1, arg1_1);  arg1_1 = None
+    with_effects_1 = torch.ops.higher_order.with_effects(getitem, torch.ops.higher_order.print, 'values {} {}', 3, add);  getitem = None
+    getitem_2 = with_effects_1[0];  with_effects_1 = None
+    _sink_tokens_default = torch.ops.prims._sink_tokens.default([getitem_2]);  getitem_2 = _sink_tokens_default = None
+    return (add,)""",  # noqa: B950
+        )
 
 
 if __name__ == "__main__":
