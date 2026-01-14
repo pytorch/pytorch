@@ -19,11 +19,9 @@ _Ts = TypeVarTuple("_Ts")
 
 def is_graphable(val: object) -> TypeIs[torch.fx.node.BaseArgumentTypes]:
     """Definition: a graphable type is a type that is an acceptable input/output type to a FX node."""
-    return (
-        isinstance(val, torch.fx.node.base_types)
-        or is_opaque_type(type(val))
-        or isinstance(val, FakeScriptObject)
-    )
+    return isinstance(
+        val, (*torch.fx.node.base_types, FakeScriptObject)
+    ) or is_opaque_type(type(val))
 
 
 def is_graphable_type(typ: type[object]) -> bool:
@@ -68,7 +66,7 @@ def func_to_graphable(
     return pytree.tree_flatten(_ConstantFunction(func))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _ConstantFunction(Generic[_P, _R]):
     func: Callable[_P, _R]
 
