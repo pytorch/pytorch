@@ -186,7 +186,7 @@ og_module_named_buffers_fn_ptr = torch.nn.Module.named_buffers
 og_module_named_parameters_fn_ptr = torch.nn.Module.named_parameters
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class VariableTrackerCacheKey:
     vt_id: int
     # Two different source can point to the same object. However, Dynamo handles
@@ -195,13 +195,13 @@ class VariableTrackerCacheKey:
     source: Source
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class AliasingInfo:
     has_aliasing: bool
     msg: str
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MutationInfo:
     has_mutation: bool
     msg: str
@@ -1420,9 +1420,13 @@ class OutputGraph(OutputGraphCommon):
         # realize any unrealized tensor VTs in case they
         # need to be added to self.nn_modules as attributes
         for i, value in enumerate(tx.stack):
-            variables.LazyVariableTracker.realize_all(value)
+            # Allow lazy constants through for values being returned (top of stack)
+            allow_lazy_constant = len(tx.stack) - i <= stack_pops
+            variables.LazyVariableTracker.realize_all(
+                value, allow_lazy_constant=allow_lazy_constant
+            )
             # ignore top `stack_pops` values on the stack
-            if len(tx.stack) - i <= stack_pops:
+            if allow_lazy_constant:
                 stack_values.append(value)
                 continue
             if isinstance(value, NullVariable):
