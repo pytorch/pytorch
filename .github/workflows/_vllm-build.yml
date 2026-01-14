@@ -99,6 +99,13 @@ jobs:
           mkdir -p dist/vllm
           mv vllm-project/vllm/dist/*.whl dist/vllm
 
+      - name: Build DeepGEMM
+        working-directory: vllm-project/vllm
+        shell: bash
+        run: |
+          set -eux
+          bash tools/install_deepgemm.sh --wheel-dir ../dist/deepgemm
+
       - name: Archive artifacts into zip
         run: |
           zip -1 -r artifacts.zip dist/
