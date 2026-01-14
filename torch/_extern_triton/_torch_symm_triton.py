@@ -371,21 +371,20 @@ if TRITON_AVAILABLE:
                 pass  # Library not found, will fail at runtime
 
             # Add NVSHMEM device library based on backend hint
-            if backend_hint == _BACKEND_DEFAULT:
-                # For default dispatch, NVSHMEM is optional (could use NCCL)
-                try:
-                    nvshmem_path = TorchSymmLibFinder.find_nvshmem_device_library()
-                    extern_libs["libnvshmem_device"] = nvshmem_path
-                except RuntimeError:
-                    pass  # NVSHMEM not available, only NCCL backend will work
-            elif backend_hint == _BACKEND_NVSHMEM:
-                # For explicit NVSHMEM, the library is required
+            # NVSHMEM is required for both DEFAULT and NVSHMEM backends
+            # (NCCL has no device bitcode library)
+            if backend_hint in (_BACKEND_DEFAULT, _BACKEND_NVSHMEM):
                 try:
                     nvshmem_path = TorchSymmLibFinder.find_nvshmem_device_library()
                     extern_libs["libnvshmem_device"] = nvshmem_path
                 except RuntimeError as e:
+                    backend_name = (
+                        "BACKEND_DEFAULT"
+                        if backend_hint == _BACKEND_DEFAULT
+                        else "BACKEND_NVSHMEM"
+                    )
                     raise RuntimeError(
-                        f"NVSHMEM device library required for BACKEND_NVSHMEM: {e}"
+                        f"NVSHMEM device library required for {backend_name}: {e}"
                     ) from e
 
             # Register the kernel for NVSHMEM CUModule initialization

@@ -6,21 +6,17 @@
 # Usage:
 #   make                    # Build for default architecture (sm_80)
 #   make CUDA_ARCH=sm_90    # Build for specific architecture
-#   make test               # Build and run tests
+#   make test               # Build and verify bitcode creation
 #   make clean              # Remove generated files
 
 # Configuration
 CUDA_ARCH ?= sm_80
 CLANG ?= clang++
-NVCC ?= nvcc
 CUDA_PATH ?= /usr/local/cuda
-NVSHMEM_PATH ?= /usr/local/nvshmem
 
 # Source and output files
 CUDA_SOURCES = torch_symm.cu
 BC_OUTPUTS = $(CUDA_SOURCES:.cu=.bc)
-TEST_SOURCES = test_nvshmem_symm_comm.cu
-TEST_OUTPUTS = $(TEST_SOURCES:.cu=)
 
 # Clang flags for CUDA to LLVM bitcode compilation
 # Note: -fcuda-flush-denormals-to-zero is required to avoid LLVM module flag
@@ -34,20 +30,10 @@ CLANG_FLAGS = -x cuda \
               -fcuda-flush-denormals-to-zero \
               -I$(CUDA_PATH)/include
 
-# NVCC flags for test compilation
-NVCC_FLAGS = -x cu \
-             -arch=$(CUDA_ARCH) \
-             -O3 \
-             -I$(CUDA_PATH)/include \
-             -I$(NVSHMEM_PATH)/include \
-             -L$(NVSHMEM_PATH)/lib \
-             -lnvshmem \
-             -lcudart
-
 # Output directory (same as source by default)
 BUILD_DIR = .
 
-.PHONY: all clean test test_cpp help
+.PHONY: all clean test help
 
 all: $(addprefix $(BUILD_DIR)/, $(BC_OUTPUTS))
 
@@ -56,26 +42,14 @@ $(BUILD_DIR)/%.bc: %.cu
 	$(CLANG) $(CLANG_FLAGS) $< -o $@
 	@echo "Built $@ for $(CUDA_ARCH)"
 
-# Build C++ test executable
-$(BUILD_DIR)/test_nvshmem_symm_comm: test_nvshmem_symm_comm.cu symm_comm.cuh
-	@mkdir -p $(BUILD_DIR)
-	$(NVCC) $(NVCC_FLAGS) $< -o $@
-	@echo "Built test executable: $@"
-
 # Individual targets
 torch_symm.bc: $(BUILD_DIR)/torch_symm.bc
 
 clean:
 	rm -f $(addprefix $(BUILD_DIR)/, $(BC_OUTPUTS))
-	rm -f $(addprefix $(BUILD_DIR)/, $(TEST_OUTPUTS))
 
 test: $(addprefix $(BUILD_DIR)/, $(BC_OUTPUTS))
 	@echo "Bitcode files created successfully. Run Python tests separately."
-
-# Build and run the C++ multiprocess test
-test_cpp: $(BUILD_DIR)/test_nvshmem_symm_comm
-	@echo "Running multiprocess C++ test..."
-	./$(BUILD_DIR)/test_nvshmem_symm_comm
 
 # Architecture-specific targets
 sm_70: CUDA_ARCH = sm_70
@@ -103,7 +77,6 @@ help:
 	@echo "Targets:"
 	@echo "  all                  - Build all bitcode files for default architecture ($(CUDA_ARCH))"
 	@echo "  torch_symm.bc        - Build torch symmetric memory bitcode"
-	@echo "  test_cpp             - Build and run C++ multiprocess test"
 	@echo "  clean                - Remove built files"
 	@echo "  test                 - Build and verify bitcode creation"
 	@echo "  sm_XX                - Build for specific CUDA architecture (70,75,80,86,89,90)"
@@ -111,13 +84,10 @@ help:
 	@echo "Variables:"
 	@echo "  CUDA_ARCH    - Target GPU architecture (default: sm_80)"
 	@echo "  CLANG        - Clang compiler path (default: clang++)"
-	@echo "  NVCC         - NVCC compiler path (default: nvcc)"
 	@echo "  CUDA_PATH    - CUDA installation path (default: /usr/local/cuda)"
-	@echo "  NVSHMEM_PATH - NVSHMEM installation path (default: /usr/local/nvshmem)"
 	@echo ""
 	@echo "Examples:"
 	@echo "  make                    # Build all for sm_80 (Ampere)"
 	@echo "  make CUDA_ARCH=sm_90    # Build all for sm_90 (Hopper)"
 	@echo "  make torch_symm.bc      # Build only torch_symm"
 	@echo "  make sm_70              # Build all for sm_70 (Volta)"
-	@echo "  make test_cpp           # Build and run C++ test"
