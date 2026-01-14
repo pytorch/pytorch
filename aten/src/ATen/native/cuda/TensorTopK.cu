@@ -326,13 +326,13 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   T v = (threadIdx.x < inputSliceSize) ? doLdg(&inputSliceStart[threadIdx.x * inputWithinSliceStride]) : static_cast<T>(0);
   for (IndexType i = threadIdx.x; i < numIterations; i += blockDim.x) {
     T v_next = (i + blockDim.x < inputSliceSize) ? doLdg(&inputSliceStart[(i + blockDim.x) * inputWithinSliceStride]) : static_cast<T>(0);
-    
+
     bool hasTopK = false;
     if (i < inputSliceSize) {
       const auto convertedV = at::native::TopKTypeConfig<T>::convert(v);
       hasTopK = (largest) ? (convertedV > topKConverted) : (convertedV < topKConverted);
     }
-    
+
     int start_index, my_offset, warp_count;
     reserveWarpSpace(hasTopK, writeIndexStart, start_index, my_offset, warp_count);
 
