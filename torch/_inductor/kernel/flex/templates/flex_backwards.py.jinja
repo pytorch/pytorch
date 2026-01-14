@@ -563,8 +563,6 @@ def bwd_dkdv_inner(
     offs_k = tl.arange(0, QK_HEAD_DIM_ROUNDED)
     offs_v = tl.arange(0, V_HEAD_DIM_ROUNDED)
 
-    #qT_ptrs = Q + offs_m1[None, :] * stride_qm + offs_k[:, None] * stride_qd
-    #do_ptrs = DO + offs_m1[:, None] * stride_dom + offs_v[None, :] * stride_dod
     # BLOCK_N1 must be a multiple of BLOCK_M1, otherwise the code wouldn't work.
     tl.static_assert(BLOCK_N1 % BLOCK_M1 == 0)
 
