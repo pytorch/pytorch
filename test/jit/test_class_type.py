@@ -187,6 +187,20 @@ class TestClassType(JitTestCase):
 
             fn(2)
 
+    def test_script_module_without_class_annotations(self):
+        class NoClassAnnotations(nn.Module):
+            def __init__(self) -> None:
+                super().__init__()
+                self.linear = nn.Linear(2, 2)
+
+            def forward(self, x):
+                return self.linear(x)
+
+        module = NoClassAnnotations()
+        scripted = torch.jit.script(module)
+        x = torch.randn(1, 2)
+        self.assertEqual(scripted(x), module(x))
+
     def test_conditional_set_attr(self):
         with self.assertRaisesRegexWithHighlight(
             RuntimeError, "assignment cannot be in a control-flow block", ""
