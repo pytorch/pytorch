@@ -2275,25 +2275,14 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         ) -> TypeIs[Union["NNModuleVariable", "UnspecializedNNModuleVariable"]]:
             return isinstance(var, (NNModuleVariable, UnspecializedNNModuleVariable))
 
-        def convert_modules_to_states(values: Any, module_indices: Any) -> Any:
-            # module_to_state must be nested here to avoid being traced as a
-            # skipped function when convert_modules_to_states is inlined
-            def module_to_state(module: Any, module_index: Any) -> Any:
-                if isinstance(module, torch.nn.Module):
-                    return LeafModuleState(
-                        nn_module_index=module_index,
-                        named_parameters=dict(module.named_parameters()),
-                        named_buffers=dict(module.named_buffers()),
-                    )
-                return module
-
-            return pytree.tree_map(module_to_state, values, module_indices)
-
+        # First, flatten args/kwargs to find nn.Module variables and register them
         flat_args_var, tree_spec_var = _make_inlined(tx, pytree.tree_flatten)(
-            (args, kwargs)
+            VariableTracker.build(tx, (args, kwargs))
         ).unpack_var_sequence(tx)
 
-        def get_module_index(arg: VariableTracker) -> int | None:
+        # Build a mapping from module id -> module_index for all nn.Module arguments.
+        module_to_index: dict[int, int] = {}
+        for arg in flat_args_var.unpack_var_sequence(tx):
             if is_module_variable(arg):
                 if arg.source is None:
                     unimplemented(
@@ -2311,20 +2300,35 @@ For now, dynamo will explicitly graph break when it encounters user code with th
                         ],
                     )
                 assert arg.source is not None  # make linter happy
-                return register_user_object(arg.value, arg.source)
-            return None
+                module_to_index[id(arg.value)] = register_user_object(
+                    arg.value, arg.source
+                )
 
-        flat_module_indices = [
-            get_module_index(arg) for arg in flat_args_var.unpack_var_sequence(tx)
-        ]
-        flat_module_indices_var = VariableTracker.build(tx, flat_module_indices)
+        # if no nn.Module arguments, return original args/kwargs unchanged
+        if not module_to_index:
+            args_var = VariableTracker.build(tx, tuple(args))
+            kwargs_var = VariableTracker.build(tx, kwargs)
+            return args_var, kwargs_var
 
-        module_indices_var = _make_inlined(tx, pytree.tree_unflatten)(
-            flat_module_indices_var, tree_spec_var
-        )
+        # transform nn.Modules to LeafModuleState.
+        def convert_modules_to_states(
+            values: Any, module_to_index: dict[int, int]
+        ) -> Any:
+            def module_to_state(val: Any) -> Any:
+                if isinstance(val, torch.nn.Module):
+                    return LeafModuleState(
+                        nn_module_index=module_to_index[id(val)],
+                        named_parameters=dict(val.named_parameters()),
+                        named_buffers=dict(val.named_buffers()),
+                    )
+                return val
+
+            return pytree.tree_map(module_to_state, values)
+
+        module_to_index_var = VariableTracker.build(tx, module_to_index)
 
         result_var = _make_inlined(tx, convert_modules_to_states)(
-            (args, kwargs), module_indices_var
+            VariableTracker.build(tx, (args, kwargs)), module_to_index_var
         )
         return result_var.unpack_var_sequence(tx)  # pyrefly: ignore [bad-return]
 
