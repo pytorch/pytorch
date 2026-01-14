@@ -389,7 +389,9 @@ def _log_collective_benchmarks(
         if has_benchmarks:
             benchmarked_ms = benchmarked_medians[i]
             nccl_diff_pct = (nccl_ms / benchmarked_ms) if benchmarked_ms > 0 else 0
-            inductor_diff_pct = (inductor_ms / benchmarked_ms) if benchmarked_ms > 0 else 0
+            inductor_diff_pct = (
+                (inductor_ms / benchmarked_ms) if benchmarked_ms > 0 else 0
+            )
             rows.append(
                 [
                     key,
