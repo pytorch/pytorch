@@ -247,10 +247,12 @@ class CustomLinearDx(Function):
     def backward(ctx, grad_output):
         input_val, weight, _ = ctx.saved_tensors
         grad_input = grad_output.mm(weight)
-        ctx.module.cached_context[ctx.layer_idx].append(grad_output.clone())
-        ctx.module.cached_context[str(ctx.layer_idx) + "_input"].append(
-            input_val.clone()
-        )
+        # Skip caching for metadata inference (meta device tensors)
+        if grad_output.device.type != "meta":
+            ctx.module.cached_context[ctx.layer_idx].append(grad_output.clone())
+            ctx.module.cached_context[str(ctx.layer_idx) + "_input"].append(
+                input_val.clone()
+            )
         return grad_input, None, None, None, None
 
 

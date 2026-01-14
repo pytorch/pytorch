@@ -2,6 +2,7 @@
 # Copyright (c) Meta Platforms, Inc. and affiliates
 import logging
 import operator
+import warnings
 from collections.abc import Sequence
 from typing import Any
 
@@ -182,6 +183,14 @@ def _split_block_mask(
     return chunk_block_masks
 
 
+def _get_dtensor_placements(tensor: torch.Tensor) -> tuple[Any, ...] | None:
+    spec = getattr(tensor, "_spec", None)
+    placements = getattr(spec, "placements", None)
+    if placements is None:
+        return None
+    return tuple(placements)
+
+
 def _split_tensor(
     tensor: torch.Tensor,
     spec: TensorChunkSpec,
@@ -204,12 +213,38 @@ def _split_tensor(
         )
     chunk_tensors = torch.tensor_split(tensor, num_chunks, spec.split_dim)
 
+    # tensor_split on a leaf tensor produces non-leaf views that won't
+    # accumulate .grad during torch.autograd.backward().  Call retain_grad()
+    # on those views so that stage_backward() can read .grad from them.
+    if tensor.requires_grad and tensor.is_leaf:
+        for chunk in chunk_tensors:
+            if not chunk.is_leaf:
+                chunk.retain_grad()
+
+    original_placements = _get_dtensor_placements(tensor)
+    placement_diffs = []
+
+    if original_placements is not None:
+        for chunk_idx, chunk in enumerate(chunk_tensors):
+            chunk_placements = _get_dtensor_placements(chunk)
+            if chunk_placements is not None and chunk_placements != original_placements:
+                placement_diffs.append(
+                    f"chunk {chunk_idx} placements changed from {original_placements} "
+                    f"to new placements {chunk_placements}"
+                )
+
     if not _debug_mask_minibatches:
+        if placement_diffs:
+            warnings.warn(
+                "DTensor placements changed during microbatch split: "
+                + "; ".join(placement_diffs),
+                UserWarning,
+            )
         return chunk_tensors
 
     expanded_chunks = []
     split_dim_idx = 0
-    for chunk_tensor in chunk_tensors:
+    for chunk_idx, chunk_tensor in enumerate(chunk_tensors):
         new_val = torch.zeros_like(tensor)
         upper_idx = split_dim_idx + chunk_tensor.size(spec.split_dim)
 
@@ -217,9 +252,27 @@ def _split_tensor(
         slice_indices[spec.split_dim] = slice(split_dim_idx, upper_idx)
         new_val[slice_indices] = chunk_tensor
 
+        if original_placements is not None:
+            expanded_placements = _get_dtensor_placements(new_val)
+            if (
+                expanded_placements is not None
+                and expanded_placements != original_placements
+            ):
+                placement_diffs.append(
+                    f"expanded chunk {chunk_idx} placements changed from {original_placements} "
+                    f"to new placements {expanded_placements}"
+                )
+
         expanded_chunks.append(new_val)
 
         split_dim_idx += chunk_tensor.size(spec.split_dim)
+
+    if placement_diffs:
+        warnings.warn(
+            "DTensor placements changed during microbatch split: "
+            + "; ".join(placement_diffs),
+            UserWarning,
+        )
 
     return expanded_chunks
 
