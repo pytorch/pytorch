@@ -7,7 +7,12 @@ from typing import Optional, Union
 import torch
 from torch.distributed._functional_collectives import AsyncCollectiveTensor
 from torch.distributed.tensor import DeviceMesh, DTensor
-from torch.distributed.tensor.placement_types import Placement
+from torch.distributed.tensor.placement_types import (
+    Partial,
+    Placement,
+    Replicate,
+    Shard,
+)
 
 
 try:
@@ -21,6 +26,43 @@ __all__ = ["local_map"]
 PlacementType = Optional[Sequence[Placement]]
 InputPlacements = Optional[tuple[PlacementType, ...]]
 OutputPlacements = Union[PlacementType, tuple[PlacementType, ...]]
+
+
+def _is_supported_placement(placement: Placement) -> bool:
+    """
+    Returns True if the placement is supported in local_map with variance tracking.
+
+    Supported:
+    - Shard(dim)
+    - Replicate
+    - Partial(reduce_op='sum') - only the base Partial class, not subclasses
+    """
+    if isinstance(placement, Shard):
+        return True
+
+    if isinstance(placement, Replicate):
+        return True
+
+    # Only accept base Partial class with reduce_op='sum', not subclasses like _NormPartial
+    if type(placement) is Partial and placement.reduce_op == "sum":
+        return True
+
+    return False
+
+
+def _validate_placements(
+    placements: Sequence[Placement],
+    context: str,
+) -> None:
+    """Raises ValueError if any placement is unsupported for variance tracking."""
+    for i, placement in enumerate(placements):
+        if not _is_supported_placement(placement):
+            raise ValueError(
+                f"local_map with track_variant_axes=True does not support "
+                f"{type(placement).__name__} in {context}[{i}]. "
+                f"Only Shard, Replicate, and Partial(reduce_op='sum') are supported. "
+                f"Got: {placement}"
+            )
 
 
 def local_map(
@@ -187,6 +229,24 @@ def _local_map_wrapped(
             f"of input args {len(flat_args)}!"
         )
 
+    # Validate placements when variance tracking is enabled
+    if track_variant_axes:
+        if out_placements is not None:
+            # out_placements can be a single sequence or tuple of sequences
+            out_placements_tuple = (
+                out_placements
+                if isinstance(out_placements, tuple)
+                else (out_placements,)
+            )
+            for spec in out_placements_tuple:
+                if spec is not None:
+                    _validate_placements(spec, "out_placements")
+
+        if in_placements is not None:
+            for spec in in_placements:
+                if spec is not None:
+                    _validate_placements(spec, "in_placements")
+
     # we assume every DTensor object is placed on the same device mesh
     flat_local_args = []
     seen_dtensor_arg = False
@@ -200,6 +260,10 @@ def _local_map_wrapped(
 
             # this function is applied to at least one DTensor argument
             seen_dtensor_arg = True
+
+            # Validate input DTensor placements when variance tracking is enabled
+            if track_variant_axes:
+                _validate_placements(arg.placements, f"input[{idx}]")
 
             if in_placements is not None:
                 spec = in_placements[idx]
