@@ -6,6 +6,7 @@ import inspect
 import io
 import os
 import pickle
+import threading
 import tokenize
 import unittest
 from collections.abc import Callable
@@ -13,7 +14,6 @@ from dataclasses import dataclass
 from types import FunctionType, ModuleType
 from typing import Any, Generic, NoReturn, Optional, TYPE_CHECKING, TypeVar
 from typing_extensions import deprecated
-from unittest import mock
 
 from torch._utils_internal import justknobs_check
 
@@ -45,6 +45,7 @@ class _Config(Generic[T]):
             everything after this.
             If multiple env variables are given, the precedence order is from
             left to right.
+        tl_override: Thread local override, normally set via config.patch
         user_override: If a user sets a value (i.e. foo.bar=True), that
             has precedence over everything after this.
         env_name_default: If set, this environment variable will override everything
@@ -224,6 +225,7 @@ def install_config_module(module: ModuleType) -> None:
 
     visit(module, module, "")
     module._config = config  # type: ignore[attr-defined]
+    module._tl_overrides = threading.local()  # type: ignore[attr-defined]
     module._compile_ignored_keys = compile_ignored_keys  # type: ignore[attr-defined]
     module.__class__ = ConfigModuleInstance
     module._is_dirty = True  # type: ignore[attr-defined]
@@ -344,6 +346,7 @@ class ConfigModule(ModuleType):
     # would live as "debug" in the key, and torch._inductor.config.triton.cudagraphs
     # maps as "triton.cudagraphs". See discussion on the class for meaning of various sub items
     _config: dict[str, _ConfigEntry]
+    _tl_overrides: threading.local
     _bypass_keys: set[str]
     _compile_ignored_keys: set[str]
     _is_dirty: bool
@@ -355,14 +358,26 @@ class ConfigModule(ModuleType):
         )
 
     def __setattr__(self, name: str, value: object) -> None:
+        self._do_setattr(name, value, False)
+
+    def _do_setattr(self, name: str, value: object, set_tls: bool) -> None:
         if name in self._bypass_keys:
             super().__setattr__(name, value)
         elif name not in self._config:
             raise AttributeError(f"{self.__name__}.{name} does not exist")
         elif self._config[name].alias is not None:
-            self._set_alias_val(self._config[name], value)
+            self._set_alias_val(self._config[name], value, set_tls=set_tls)
         else:
-            self._config[name].user_override = value
+            # Even if set_tls isn't set, we need to update the tl override (if set) to handle the case of a setattr
+            # inside of an active patch.  Note that the update will be lost when the patch exits
+            active_patch = (
+                getattr(self._tl_overrides, name, _UNSET_SENTINEL)
+                is not _UNSET_SENTINEL
+            )
+            if set_tls or active_patch:
+                setattr(self._tl_overrides, name, value)
+            else:
+                self._config[name].user_override = value
             self._is_dirty = True
             self._config[name].hide = False
 
@@ -379,6 +394,10 @@ class ConfigModule(ModuleType):
 
             if config.env_value_force is not _UNSET_SENTINEL:
                 return config.env_value_force
+
+            tl_val = getattr(self._tl_overrides, name, _UNSET_SENTINEL)
+            if tl_val is not _UNSET_SENTINEL:
+                return tl_val
 
             if config.user_override is not _UNSET_SENTINEL:
                 return config.user_override
@@ -407,6 +426,7 @@ class ConfigModule(ModuleType):
         # must support delete because unittest.mock.patch deletes
         # then recreate things
         self._config[name].user_override = _UNSET_SENTINEL
+        setattr(self._tl_overrides, name, _UNSET_SENTINEL)
         self._config[name].hide = True
 
     def _get_alias_module_and_name(
@@ -430,37 +450,43 @@ class ConfigModule(ModuleType):
         constant_value = getattr(module, constant_name)
         return constant_value
 
-    def _set_alias_val(self, entry: _ConfigEntry, val: Any) -> None:
+    def _set_alias_val(
+        self, entry: _ConfigEntry, val: Any, set_tls: bool = False
+    ) -> None:
         data = self._get_alias_module_and_name(entry)
         if data is None:
             raise AssertionError(
                 "alias data should not be None when setting alias value"
             )
         module, constant_name = data
-        setattr(module, constant_name, val)
+        module._do_setattr(constant_name, val, set_tls=set_tls)
 
     def _is_default(self, name: str) -> bool:
         """
         Returns true if the config is at its default value.
         configs overridden by the env are not considered default.
         """
-        config_val = self._config[name]
+        config_entry = self._config[name]
         # The config is not overridden by the user, and the env_value_default
         # is different from the default value (meaning user has set the env to
         # change the default value).
         not_set_env_default = (
-            config_val.env_value_default is _UNSET_SENTINEL
-            or config_val.env_value_default == config_val.default
+            config_entry.env_value_default is _UNSET_SENTINEL
+            or config_entry.env_value_default == config_entry.default
         )
         not_set_env_force = (
-            config_val.env_value_force is _UNSET_SENTINEL
-            or config_val.env_value_force == config_val.default
+            config_entry.env_value_force is _UNSET_SENTINEL
+            or config_entry.env_value_force == config_entry.default
         )
 
-        unset = config_val.user_override is _UNSET_SENTINEL
+        if getattr(self._tl_overrides, name, _UNSET_SENTINEL) is not _UNSET_SENTINEL:
+            config_val = getattr(self._tl_overrides, name)
+        else:
+            config_val = config_entry.user_override
+        unset = config_val is _UNSET_SENTINEL
         # Handle reference types specially to avoid spammy warnings
-        if isinstance(config_val.default, (list, set, dict)):
-            unset = unset or config_val.user_override == config_val.default
+        if isinstance(config_entry.default, (list, set, dict)):
+            unset = unset or config_val == config_entry.default
         return unset and not_set_env_default and not_set_env_force
 
     def _get_dict(
@@ -635,28 +661,48 @@ class ConfigModule(ModuleType):
     def get_serializable_config_copy(self) -> dict[str, Any]:
         return self._get_dict(ignored_keys=getattr(self, "_save_config_ignore", []))
 
-    def patch(
-        self,
-        arg1: str | dict[str, Any] | None = None,
-        arg2: Any = None,
-        **kwargs: dict[str, Any],
+    def _patch(
+        self, changes: dict[str, Any], is_thread_local: bool
     ) -> "ContextDecorator":
-        """
-        Decorator and/or context manager to make temporary changes to a config.
+        prior: dict[str, Any] = {}
+        unset_tls: set[str] = set()
+        config = self
 
-        As a decorator:
+        class ConfigPatch(ContextDecorator):
+            def __init__(self) -> None:
+                self.changes = changes
 
-            @config.patch("name", val)
-            @config.patch(name1=val1, name2=val2)
-            @config.patch({"name1": val1, "name2", val2})
-            def foo(...):
-                ...
+            def __enter__(self) -> None:
+                if prior or unset_tls:
+                    raise AssertionError(
+                        "prior and unset_tls should be empty when entering ConfigPatch"
+                    )
+                for key in self.changes:
+                    # KeyError on invalid entry
+                    prior[key] = config.__getattr__(key)
+                    if (
+                        is_thread_local
+                        and getattr(config._tl_overrides, key, _UNSET_SENTINEL)
+                        is _UNSET_SENTINEL
+                    ):
+                        unset_tls.add(key)
+                for k, v in self.changes.items():
+                    config._do_setattr(k, v, is_thread_local)
 
-        As a context manager:
+            def __exit__(self, exc_type, exc_val, exc_tb):  # type: ignore[no-untyped-def]
+                for k, v in prior.items():
+                    config._do_setattr(k, v, is_thread_local)
+                    if is_thread_local and k in unset_tls:
+                        config._do_setattr(k, _UNSET_SENTINEL, True)
+                prior.clear()
+                unset_tls.clear()
 
-            with config.patch("name", val):
-                ...
-        """
+        return ConfigPatch()
+
+    @staticmethod
+    def _check_patch_args(
+        arg1: str | dict[str, Any] | None, arg2: Any, kwargs: dict[str, Any]
+    ) -> dict[str, Any]:
         changes: dict[str, Any]
         if arg1 is not None:
             if arg2 is not None:
@@ -686,30 +732,46 @@ class ConfigModule(ModuleType):
                 )
         if not isinstance(changes, dict):
             raise AssertionError(f"expected `dict` got {type(changes)}")
-        prior: dict[str, Any] = {}
-        config = self
+        return changes
 
-        class ConfigPatch(ContextDecorator):
-            def __init__(self) -> None:
-                self.changes = changes
+    def global_patch(
+        self,
+        arg1: str | dict[str, Any] | None = None,
+        arg2: Any = None,
+        **kwargs: dict[str, Any],
+    ) -> "ContextDecorator":
+        """
+        Similar to patch, but patches the global config
+        """
+        changes = self._check_patch_args(arg1, arg2, kwargs)
+        return self._patch(changes, False)
 
-            def __enter__(self) -> None:
-                if prior:
-                    raise AssertionError(
-                        "prior should be empty when entering ConfigPatch"
-                    )
-                for key in self.changes:
-                    # KeyError on invalid entry
-                    prior[key] = config.__getattr__(key)
-                for k, v in self.changes.items():
-                    config.__setattr__(k, v)
+    def patch(
+        self,
+        arg1: str | dict[str, Any] | None = None,
+        arg2: Any = None,
+        **kwargs: dict[str, Any],
+    ) -> "ContextDecorator":
+        """
+        Decorator and/or context manager to make temporary changes to a config.
 
-            def __exit__(self, exc_type, exc_val, exc_tb):  # type: ignore[no-untyped-def]
-                for k, v in prior.items():
-                    config.__setattr__(k, v)
-                prior.clear()
+        Patched changes are thread-local.  See global_patch for a global version.
 
-        return ConfigPatch()
+        As a decorator:
+
+            @config.patch("name", val)
+            @config.patch(name1=val1, name2=val2)
+            @config.patch({"name1": val1, "name2", val2})
+            def foo(...):
+                ...
+
+        As a context manager:
+
+            with config.patch("name", val):
+                ...
+        """
+        changes = self._check_patch_args(arg1, arg2, kwargs)
+        return self._patch(changes, True)
 
     def _make_closure_patcher(self, **changes: dict[str, Any]) -> Any:
         """
@@ -734,11 +796,11 @@ class ConfigModule(ModuleType):
         def change() -> Callable[[], None]:
             prior = {k: config[k].user_override for k in changes}
             for k, v in changes.items():
-                self._config[k].user_override = v
+                setattr(self._tl_overrides, k, v)
 
             def revert() -> None:
                 for k, v in prior.items():
-                    self._config[k].user_override = v
+                    setattr(self._tl_overrides, k, v)
 
             return revert
 
@@ -805,15 +867,6 @@ class SubConfigProxy:
 
     def __delattr__(self, name: str) -> None:
         return self._config.__delattr__(self._prefix + name)
-
-
-def patch_object(obj: object, name: str, value: object) -> object:
-    """
-    Workaround `mock.patch.object` issue with ConfigModule
-    """
-    if isinstance(obj, ConfigModule):
-        return obj.patch(name, value)
-    return mock.patch.object(obj, name, value)
 
 
 def get_tristate_env(name: str, default: Any = None) -> bool | None:

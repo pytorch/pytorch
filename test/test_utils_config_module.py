@@ -9,6 +9,7 @@ os.environ["ENV_FALSE"] = "0"
 os.environ["ENV_STR"] = "1234"
 os.environ["ENV_STR_EMPTY"] = ""
 
+import itertools
 from typing import Optional
 
 from torch.testing._internal import (
@@ -16,7 +17,12 @@ from torch.testing._internal import (
     fake_config_module2 as config2,
     fake_config_module3 as config3,
 )
-from torch.testing._internal.common_utils import run_tests, TestCase
+from torch.testing._internal.common_utils import (
+    instantiate_parametrized_tests,
+    parametrize,
+    run_tests,
+    TestCase,
+)
 from torch.utils._config_module import _ConfigEntry, _UNSET_SENTINEL, Config
 
 
@@ -148,6 +154,41 @@ class TestConfigModule(TestCase):
         config.load_config(p)
         self.assertTrue(config.e_bool)
         self.assertFalse(config.e_ignored)
+
+    @parametrize("patch_func", [config.patch, config.global_patch])
+    def test_save_config_with_patch(self, patch_func):
+        self.assertTrue(config.e_bool)
+        with patch_func(e_bool=False):
+            p = config.save_config()
+            self.assertDictEqual(
+                pickle.loads(p),
+                {
+                    "_cache_config_ignore_prefix": ["magic_cache_config"],
+                    "e_bool": False,
+                    "e_dict": {1: 2},
+                    "e_float": 1.0,
+                    "e_int": 1,
+                    "e_list": [1],
+                    "e_none": None,
+                    "e_set": {1},
+                    "e_string": "string",
+                    "e_tuple": (1,),
+                    "nested.e_bool": True,
+                    "_e_ignored": True,
+                    "e_compile_ignored": True,
+                    "magic_cache_config_ignored": True,
+                    "_save_config_ignore": ["e_ignored"],
+                    "e_config": True,
+                    "e_jk": True,
+                    "e_jk_false": False,
+                    "e_env_default": True,
+                    "e_env_default_FALSE": False,
+                    "e_env_default_str": "1234",
+                    "e_env_default_str_empty": "",
+                    "e_env_force": True,
+                    "e_optional": True,
+                },
+            )
 
     def test_save_config_portable(self):
         p = config.save_config_portable()
@@ -347,16 +388,17 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
         self.assertEqual(p2["e_dict"], {1: 2})
         self.assertEqual(p3["e_dict"], {1: 2})
 
-    def test_patch(self):
+    @parametrize("patch_func", [config.patch, config.global_patch])
+    def test_patch(self, patch_func):
         self.assertTrue(config.e_bool)
-        with config.patch("e_bool", False):
+        with patch_func("e_bool", False):
             self.assertFalse(config.e_bool)
         self.assertTrue(config.e_bool)
-        with config.patch(e_bool=False):
+        with patch_func(e_bool=False):
             self.assertFalse(config.e_bool)
         self.assertTrue(config.e_bool)
         with self.assertRaises(AssertionError):
-            with config.patch("does_not_exist"):
+            with patch_func("does_not_exist"):
                 pass
 
     def test_make_closur_patcher(self):
@@ -380,13 +422,19 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
         ):
             _ConfigEntry(Config(default="bad", justknob="fake_knob"))
 
-    def test_alias(self):
+    @parametrize(
+        "patch_func1, patch_func2",
+        itertools.product(
+            [config2.patch, config2.global_patch], [config.patch, config.global_patch]
+        ),
+    )
+    def test_alias(self, patch_func1, patch_func2):
         self.assertFalse(config2.e_aliasing_bool)
         self.assertFalse(config.e_aliased_bool)
-        with config2.patch(e_aliasing_bool=True):
+        with patch_func1(e_aliasing_bool=True):
             self.assertTrue(config2.e_aliasing_bool)
             self.assertTrue(config.e_aliased_bool)
-        with config.patch(e_aliased_bool=True):
+        with patch_func2(e_aliased_bool=True):
             self.assertTrue(config2.e_aliasing_bool)
 
     def test_reference_is_default(self):
@@ -407,6 +455,56 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
                 Config(default=2, env_name_force="FAKE_DISABLE", value_type=float)
             )
 
+    @parametrize("patch_func", [config.patch, config.global_patch])
+    def test_patch_then_global(self, patch_func):
+        self.assertTrue(config.e_bool)
+        with patch_func(e_bool=False):
+            self.assertFalse(config.e_bool)
+
+        config.e_bool = False
+        self.assertFalse(config.e_bool)
+
+    @parametrize("patch_func", [config.patch, config.global_patch])
+    def test_is_default_patch(self, patch_func):
+        self.assertTrue(config.e_bool)
+        with patch_func(e_bool=False):
+            self.assertFalse(config._is_default("e_bool"))
+
+    @parametrize("patch_func", [config.patch, config.global_patch])
+    def test_dict_patch(self, patch_func):
+        self.assertTrue(config.e_bool)
+        with patch_func(e_bool=False):
+            d = config._get_dict()
+            self.assertFalse(d["e_bool"])
+
+    @parametrize("patch_func", [config.patch, config.global_patch])
+    def test_set_in_patch(self, patch_func):
+        self.assertEqual(config.e_int, 1)
+        with patch_func(e_int=2):
+            self.assertEqual(config.e_int, 2)
+            config.e_int = 3
+            self.assertEqual(config.e_int, 3)
+        # Exiting the patch resets e_int to 1, losing the fact that we explicitly set it to 4 - see ConfigModule._do_setattr
+        self.assertEqual(config.e_int, 1)
+
+    @parametrize("patch_func", [config.patch, config.global_patch])
+    def test_nested_patch(self, patch_func):
+        self.assertEqual(config.e_int, 1)
+        self.assertEqual(config.e_string, "string")
+        with patch_func(e_int=2, e_string="inner"):
+            self.assertEqual(config.e_int, 2)
+            self.assertEqual(config.e_string, "inner")
+            with patch_func(e_int=3):
+                self.assertEqual(config.e_int, 3)
+                self.assertEqual(config.e_string, "inner")
+                config.e_int = 4
+                self.assertEqual(config.e_int, 4)
+            self.assertEqual(config.e_int, 2)
+        self.assertEqual(config.e_int, 1)
+        self.assertEqual(config.e_string, "string")
+
+
+instantiate_parametrized_tests(TestConfigModule)
 
 if __name__ == "__main__":
     run_tests()

@@ -108,7 +108,7 @@ def make_test_case(
     func = slowTest(func) if slow else func
     new_test_name = f"{test_name}_separate" if test_build_separate else test_name
 
-    @config.patch(
+    @config.global_patch(
         cpp_wrapper=True,
         cpp_wrapper_build_separate=test_build_separate,
     )
