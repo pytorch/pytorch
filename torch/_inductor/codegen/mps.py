@@ -320,7 +320,7 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def tanh(x: CSEVariable) -> str:
-        return f"metal::tanh({x})"
+        return f"metal::precise::tanh({x})"
 
     @staticmethod
     def atanh(x: CSEVariable) -> str:

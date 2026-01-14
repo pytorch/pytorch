@@ -4,7 +4,6 @@ import gc
 import time
 
 import torch
-
 import torch_openreg  # noqa: F401
 from torch.testing._internal.common_utils import run_tests, skipIfTorchDynamo, TestCase
 

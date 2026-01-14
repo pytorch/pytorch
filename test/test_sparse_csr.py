@@ -16,7 +16,7 @@ from torch.testing._internal.common_utils import \
      IS_FBCODE, IS_REMOTE_GPU, suppress_warnings)
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoSparseGeneric,
-     precisionOverride, skipMeta, skipCUDAIf, skipCUDAIfRocm, skipCPUIfNoMklSparse, largeTensorTest)
+     precisionOverride, skipMeta, skipCUDAIfRocm, skipCPUIfNoMklSparse, largeTensorTest)
 from torch.testing._internal.common_methods_invocations import \
     (op_db, sparse_csr_unary_ufuncs, ReductionOpInfo)
 from torch.testing._internal.common_cuda import TEST_CUDA
@@ -2329,7 +2329,7 @@ class TestSparseCSR(TestCase):
             run_test(index_dtype)
 
     @skipCPUIfNoMklSparse
-    @skipIfRocmVersionLessThan((6, 2))
+    @skipCUDAIfRocm(msg="needs HIPSPARSE_GENERIC_SPSV or SPSM")
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -2484,7 +2484,6 @@ class TestSparseCSR(TestCase):
 
     @skipCUDAIfRocm
     @onlyCUDA
-    @skipCUDAIf(True, "Causes CUDA memory exception, see https://github.com/pytorch/pytorch/issues/72177")
     @dtypes(torch.float32, torch.float64, torch.complex64, torch.complex128)
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-8, torch.complex128: 1e-8})
@@ -2494,7 +2493,8 @@ class TestSparseCSR(TestCase):
             self.assertEqual(actual.shape, c.shape)
 
         for m, n, k in itertools.product([0, 5], repeat=3):
-            c = torch.empty(m, n, dtype=dtype, device=device, layout=torch.sparse_csr)
+            with torch.sparse.check_sparse_tensor_invariants(enable=False):
+                c = torch.empty(m, n, dtype=dtype, device=device, layout=torch.sparse_csr)
             a = make_tensor((m, k), dtype=dtype, device=device)
             b = make_tensor((k, n), dtype=dtype, device=device)
             run_test(c, a, b)
