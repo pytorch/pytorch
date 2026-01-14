@@ -33,6 +33,7 @@ from torch.testing._internal.inductor_utils import (
     _to_fp8_saturated,
     HAS_CPU,
     HAS_CUDA_AND_TRITON,
+    is_big_gpu,
 )
 from torch.utils._triton import has_triton_tma_device
 
@@ -608,7 +609,8 @@ class TestFP8Lowering(TestCase):
     @onlyCUDA
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_tma_device() or not is_big_gpu(),
+        "Need device-side TMA support in Triton and max-autotune",
     )
     @parametrize("dtype", (torch.bfloat16, torch.float32))
     @parametrize("shape", ("16,32,32", "1024,1024,512"))
@@ -768,7 +770,8 @@ class TestFP8Lowering(TestCase):
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_FP8, f8_msg)
     @unittest.skipIf(
-        not has_triton_tma_device(), "Need device-side TMA support in Triton"
+        not has_triton_tma_device() or not is_big_gpu(),
+        "Need device-side TMA support in Triton and max-autotune",
     )
     @onlyCUDA
     @parametrize("shape", ("16,32,32", "1024,1024,512"))
