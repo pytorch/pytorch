@@ -38,6 +38,7 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
+from torch._library.opaque_object import is_opaque_type
 from torch._library.utils import is_builtin
 from torch._logging import getArtifactLogger
 from torch._prims_common import CUDARngStateHelper
@@ -1803,7 +1804,12 @@ def _raise_if_functorch_active():
 
 # NOTE: this function must be torch._dynamo.allow_in_graph-able. Non tensor/symnode inputs must be constants.
 def _backward_prologue_functional(
-    ctx_saved_tensors, ctx_symints, metadata, maybe_subclass_metadata, *flat_args
+    ctx_saved_tensors,
+    ctx_symints,
+    ctx_opaque_objects,
+    metadata,
+    maybe_subclass_metadata,
+    *flat_args,
 ):
     # Calling convention: we expect a grad_out passed to the backward:
     # - for every output of the fw that does *not* alias an input or graph intermediate
@@ -1903,6 +1909,7 @@ def _backward_prologue_functional(
     all_args = [
         *ctx_symints,
         *ctx_saved_tensors,
+        *ctx_opaque_objects,
         *flat_bw_args_with_grads,
         *bw_tokens,
         *rng_args,
@@ -1936,7 +1943,9 @@ def _backward_prologue_functional(
     tangents_start_idx = (
         len(all_args) - num_flat_bw_args_with_grads - len(rng_args) - len(bw_tokens)
     )
-    assert tangents_start_idx == len(ctx_symints) + num_ctx_saved_tensors
+    assert tangents_start_idx == len(ctx_symints) + num_ctx_saved_tensors + len(
+        ctx_opaque_objects
+    )
     tangents_end_idx = len(all_args) - len(rng_args) - len(bw_tokens)
 
     # TODO: figure out how to refactor the backward properly
@@ -2364,31 +2373,51 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 )
                 num_forward_returns = CompiledFunction.metadata.num_forward_returns
 
+                # See Note [Activations with no version counter checks in eager]
                 # Partitioners must put symint arguments at the end separate from tensor arguments
-                tensors_saved_for_backwards = fw_outs[
-                    CompiledFunction.metadata.tensors_saved_for_backwards_slice
+                # Split tensors into those that need VC checks (via save_for_backward)
+                # and those that don't (stashed directly on ctx).
+                # The partitioner sorts tensors so that no-VC-check tensors are at the end.
+                tensors_saved_with_vc_check = fw_outs[
+                    CompiledFunction.metadata.tensors_saved_for_backwards_with_vc_check_slice
+                ]
+                tensors_saved_no_vc_check = fw_outs[
+                    CompiledFunction.metadata.tensors_saved_for_backwards_no_vc_check_slice
                 ]
                 assert all(
-                    isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards
+                    isinstance(x, torch.Tensor) for x in tensors_saved_with_vc_check
                 )
-
-                def mark_dynamic_activations(activations: list[torch.Tensor]):
-                    for (
-                        idx,
-                        dims,
-                    ) in CompiledFunction.metadata.dynamic_saved_tensors_idxs.items():
-                        maybe_mark_dynamic_helper(activations[idx], dims)
-                    return activations
+                assert all(
+                    isinstance(x, torch.Tensor) for x in tensors_saved_no_vc_check
+                )
 
                 # See Note [Detaching saved tensors in AOTAutograd]
-                ctx.save_for_backward(
-                    *mark_dynamic_activations(
-                        [
-                            x.detach() if x._is_view() else x
-                            for x in tensors_saved_for_backwards
-                        ]
-                    )
-                )
+                num_vc_check = len(tensors_saved_with_vc_check)
+                tensors_to_save = [
+                    x.detach() if x._is_view() else x
+                    for x in tensors_saved_with_vc_check
+                ]
+                tensors_no_vc = [
+                    x.detach() if x._is_view() else x for x in tensors_saved_no_vc_check
+                ]
+
+                # dynamic_saved_tensors_idxs has indices relative to all saved tensors
+                # (vc_check + no_vc_check combined). Mark dynamics on the detached tensors.
+                for (
+                    idx,
+                    dims,
+                ) in CompiledFunction.metadata.dynamic_saved_tensors_idxs.items():
+                    if idx < num_vc_check:
+                        maybe_mark_dynamic_helper(tensors_to_save[idx], dims)
+                    else:
+                        maybe_mark_dynamic_helper(
+                            tensors_no_vc[idx - num_vc_check], dims
+                        )
+
+                # Only save tensors that need VC checks via save_for_backward
+                ctx.save_for_backward(*tensors_to_save)
+                ctx._tensors_no_vc_check = tensors_no_vc
+
                 symint_outs = fw_outs[
                     CompiledFunction.metadata.symints_saved_for_backwards_slice
                 ]
@@ -2397,6 +2426,12 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     for x in symint_outs
                 ), str([type(x) for x in symint_outs])
                 ctx.symints = symint_outs
+
+                opaque_object_outs = fw_outs[
+                    CompiledFunction.metadata.opaque_objects_saved_for_backwards_slice
+                ]
+                assert all(is_opaque_type(type(obj)) for obj in opaque_object_outs)
+                ctx.opaque_objects = opaque_object_outs
 
                 raw_returns = fw_outs[0:num_forward_returns]
 
@@ -2474,9 +2509,17 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
             @staticmethod
             def backward(ctx, *flat_args):
+                # Combine tensors from both sources:
+                # 1. ctx.saved_tensors - tensors that went through save_for_backward (with VC check)
+                # 2. ctx._tensors_no_vc_check - tensors stashed directly on ctx (no VC check)
                 all_args = _backward_prologue_functional(
-                    ctx.saved_tensors,
+                    (
+                        list(ctx.saved_tensors) + ctx._tensors_no_vc_check
+                        if len(ctx._tensors_no_vc_check) > 0
+                        else ctx.saved_tensors
+                    ),
                     ctx.symints,
+                    ctx.opaque_objects,
                     CompiledFunction.metadata,
                     CompiledFunction.maybe_subclass_metadata,
                     *flat_args,
