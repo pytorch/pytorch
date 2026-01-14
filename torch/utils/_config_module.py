@@ -377,7 +377,7 @@ class ConfigModule(ModuleType):
             )
             if set_tls or active_patch:
                 setattr(self._tl_overrides, name, value)
-            if not set_tls:
+            else:
                 self._config[name].user_override = value
             self._is_dirty = True
             self._config[name].hide = False
@@ -396,11 +396,9 @@ class ConfigModule(ModuleType):
             if config.env_value_force is not _UNSET_SENTINEL:
                 return config.env_value_force
 
-            if (
-                getattr(self._tl_overrides, name, _UNSET_SENTINEL)
-                is not _UNSET_SENTINEL
-            ):
-                return getattr(self._tl_overrides, name)
+            tl_val = getattr(self._tl_overrides, name, _UNSET_SENTINEL)
+            if tl_val is not _UNSET_SENTINEL:
+                return tl_val
 
             if config.user_override is not _UNSET_SENTINEL:
                 return config.user_override

@@ -702,15 +702,18 @@ print(t.is_pinned())
 
         # check default
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ""
-        self.assertTrue(abs(check_workspace_size(a) - default_workspace_size) < 524288)
+        self.assertLess(check_workspace_size(a) - default_workspace_size, 524288)
+        self.assertLess(abs(check_workspace_size(a) - default_workspace_size), 524288)
 
         # check default with bad user config
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = "-1"
-        self.assertTrue(abs(check_workspace_size(a) - default_workspace_size) < 524288)
+        self.assertLess(check_workspace_size(a) - default_workspace_size, 524288)
+        self.assertLess(abs(check_workspace_size(a) - default_workspace_size), 524288)
 
         # check valid config
         os.environ["CUBLAS_WORKSPACE_CONFIG"] = ":128:8:64:16:32:32"
-        self.assertTrue(abs(check_workspace_size(a) - (3072 * 1024)) < 524288)
+        self.assertLess(check_workspace_size(a) - (3072 * 1024), 524288)
+        self.assertLess(abs(check_workspace_size(a) - (3072 * 1024)), 524288)
 
         torch._C._cuda_clearCublasWorkspaces()
 
@@ -6641,7 +6644,7 @@ class TestGreenContext(TestCase):
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
 class TestGDS(TestCase):
     def _get_tmp_dir_fs_type(self):
-        my_path = os.path.realpath("/tmp")
+        my_path = os.path.realpath(tempfile.gettempdir())
         root_type = ""
         for part in psutil.disk_partitions():
             if part.mountpoint == "/":

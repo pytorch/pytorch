@@ -1598,6 +1598,28 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             expected_ops=20,
         )
 
+    def test_tensor_share_memory(self):
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.hidden_size = 64
+                self.num_layers = 2
+
+            def forward(self, x):
+                batch_size = x.size(0)
+                h = torch.zeros(
+                    self.num_layers, batch_size, self.hidden_size
+                ).share_memory_()
+                c = torch.zeros(self.num_layers, batch_size, self.hidden_size)
+                return x + h.sum() + c.sum()
+
+        model = Model()
+        x = torch.randn(4, 10)
+        expected = model(x)
+        compiled_model = torch.compile(model, fullgraph=False)
+        actual = compiled_model(x)
+        self.assertEqual(expected, actual)
+
     def test_empty_list(self):
         def fn(x, ll):
             if len(ll) == 0 and not ll and ll is not None:
@@ -6574,34 +6596,47 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         test_recompile(foo_graph_break, exp_frame_count=2)
 
     def test_multithread_compile_dynamic(self):
-        @torch.compile(backend="eager", dynamic=False)
         def f(x):
             comptime.assert_static(x.shape[0])
             return x * x
 
-        success = True
+        def _do_test(func):
+            success = True
 
-        def run(offset):
-            for i in range(20):
-                print(f(torch.randn(i * 2 + offset)))
+            def run(offset):
+                for i in range(20):
+                    print(func(torch.randn(i * 2 + offset)))
 
-        t1 = threading.Thread(target=run, args=[0])
-        t2 = threading.Thread(target=run, args=[1])
+            t1 = threading.Thread(target=run, args=[0])
+            t2 = threading.Thread(target=run, args=[1])
 
-        def exc_hook(x):
-            nonlocal success
-            success = False
+            def exc_hook(x):
+                nonlocal success
+                success = False
 
-        try:
-            threading.excepthook = exc_hook
-            t1.start()
-            t2.start()
+            try:
+                threading.excepthook = exc_hook
+                t1.start()
+                t2.start()
 
-            t1.join()
-            t2.join()
-        finally:
-            threading.excepthook = threading.__excepthook__
-        self.assertTrue(success)
+                t1.join()
+                t2.join()
+            finally:
+                threading.excepthook = threading.__excepthook__
+            self.assertTrue(success)
+
+        _do_test(torch.compile(f, backend="eager", dynamic=False))
+        torch._dynamo.reset()
+
+        f_opt = torch.compile(f, backend="eager")
+
+        def g(x):
+            with torch._dynamo.config.global_patch(
+                automatic_dynamic_shapes=False, assume_static_by_default=True
+            ):
+                f_opt(x)
+
+        _do_test(g)
 
     def test_backend_match_guard_multi_threads(self):
         x = torch.randn([3, 4])
@@ -9853,6 +9888,17 @@ def ___make_guard_fn():
         opt_model = torch.compile(MyModule(), backend="eager")
         opt_out = opt_model(x)
         self.assertTrue(same(orig_out, opt_out))
+
+    def test_compile_with_userland_fake_tensor_mode(self):
+        # Test that torch.compile works when called inside a user's FakeTensorMode.
+        # The user's fake tensors should be "refakified" to Dynamo's fake mode.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            model = torch.nn.Linear(4, 4)
+            inp = torch.rand(4, 4)
+            loss = torch.compile(model, backend="aot_eager")(inp).sum()
+            loss.backward()
 
     def test_scalar_tensor_is_equivalent_to_symint_argument(self):
         class GumbelTopKSampler(torch.nn.Module):
@@ -13605,6 +13651,33 @@ fn
         self.assertEqual(ref, res)
 
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
+    def test_builtin_bool_on_tensor(self):
+        def f_all(mask):
+            return bool((mask == 0).all())
+
+        opt_f_all = torch.compile(f_all, backend="eager", fullgraph=True)
+
+        mask_zeros = torch.zeros(2, 3)
+        mask_nonzero = torch.tensor([[0, 1], [0, 0]])
+
+        self.assertEqual(f_all(mask_zeros), opt_f_all(mask_zeros))
+        self.assertEqual(f_all(mask_nonzero), opt_f_all(mask_nonzero))
+
+        def f(x):
+            return bool(x)
+
+        opt_f = torch.compile(f, backend="eager", fullgraph=True)
+
+        for val in [42, 0, 3.14, 0.0]:
+            x = torch.tensor(val)
+            self.assertEqual(f(x), opt_f(x))
+        non_scalar = torch.tensor([1, 2, 3])
+        with self.assertRaises(RuntimeError):
+            f(non_scalar)
+        with self.assertRaises(RuntimeError):
+            opt_f(non_scalar)
+
+    @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_builtin_bool_on_symfloat(self):
         def f(x):
             return bool(x.item())
@@ -13684,6 +13757,69 @@ fn
         x = torch.randn(3)
         f(x)
         self.assertEqual(counter.frame_count, 2)
+
+    def test_debugmode(self):
+        # Test that DebugMode works
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("alias_op(Tensor x) -> (Tensor, Tensor)")
+            lib.impl(
+                "alias_op",
+                lambda x: (x.view_as(x), x.view_as(x)),
+                "CompositeExplicitAutograd",
+            )
+            lib.impl("alias_op", lambda x: (x.view_as(x), x.view_as(x)), "Meta")
+
+            def fn(x):
+                aliased, _ = torch.ops.mylib.alias_op(x)
+                return aliased + 1
+
+            x = torch.randn(10, 10)
+            compiled_fn = torch.compile(fn, fullgraph=True, backend="inductor")
+            with torch._functorch.config.patch(
+                check_custom_op_aliasing=True,
+                error_on_custom_op_aliasing=True,
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "The output of this custom operator \(1\) must not also be an input",
+                ):
+                    _ = compiled_fn(x)
+                # Shouldn't error here because we already invoked once
+                _ = compiled_fn(x)
+
+                compiled_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "The output of this custom operator \(1\) must not also be an input",
+                ):
+                    _ = compiled_fn(x)
+
+    def test_debugmode_warns_outside_ci(self):
+        # Test that DebugMode emits warnings (not errors) when error_on_custom_op_aliasing=False
+        with torch.library._scoped_library("mylib", "FRAGMENT") as lib:
+            lib.define("alias_op2(Tensor x) -> (Tensor, Tensor)")
+            lib.impl(
+                "alias_op2",
+                lambda x: (x.view_as(x), x.view_as(x)),
+                "CompositeExplicitAutograd",
+            )
+            lib.impl("alias_op2", lambda x: (x.view_as(x), x.view_as(x)), "Meta")
+
+            def fn(x):
+                aliased, _ = torch.ops.mylib.alias_op2(x)
+                return aliased + 1
+
+            x = torch.randn(10, 10)
+            compiled_fn = torch.compile(fn, fullgraph=True, backend="inductor")
+            # Use error_on_custom_op_aliasing=False to emit warnings instead of errors
+            with torch._functorch.config.patch(
+                check_custom_op_aliasing=True, error_on_custom_op_aliasing=False
+            ):
+                with self.assertWarnsRegex(
+                    UserWarning,
+                    "The output of this custom operator \(1\) must not also be an input",
+                ):
+                    _ = compiled_fn(x)
 
 
 class MiscTestsPyTree(torch._inductor.test_case.TestCase):
