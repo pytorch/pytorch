@@ -15075,6 +15075,21 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             .check("store")
         ).run(code)
 
+    def test_use_deterministic_algorithms(self):
+        @torch.compile(backend="inductor", fullgraph=True)
+        def fn(src, index, base_tensor):
+            src = src + 10
+            torch.use_deterministic_algorithms(True)
+            base_tensor.scatter_(0, index, src)
+            return base_tensor.clone() + 1
+
+        src = torch.tensor([[100.0], [200.0], [300.0]])
+        index = torch.tensor([[0], [0], [0]])
+        base_tensor = torch.zeros(2, 1)
+        out = fn(src, index, base_tensor)
+        expected = torch.tensor([[311.0], [1.0]])
+        self.assertEqual(out, expected)
+
     # end of class CommonTemplate - add new tests here
 
 
