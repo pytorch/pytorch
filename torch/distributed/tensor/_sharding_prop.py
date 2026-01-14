@@ -8,6 +8,7 @@ from typing import cast, Optional
 
 import torch
 from torch._guards import detect_fake_mode
+from torch._logging import LazyString
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
 from torch.distributed._functional_collectives import _are_we_tracing
@@ -34,6 +35,7 @@ from torch.distributed.tensor._utils import (
     try_find_mesh_from_args,
 )
 from torch.distributed.tensor.placement_types import _StridedShard, Shard
+from torch.utils._pytree import tree_map
 
 
 aten = torch.ops.aten
@@ -61,6 +63,96 @@ class LocalLRUCache(threading.local):
 
     def cache_clear(self):
         return self.cache.cache_clear()
+
+
+def _format_unbacked_hinting_log(
+    op_schema: OpSchema,
+    strategies: list[OpSpec],
+    strategy_index: int,
+    replacements: dict,
+) -> str:
+    """Format log message for unbacked hinting strategy selection (only called if debug logging enabled)."""
+    args_spec = tuple(str(spec) for spec in op_schema.args_schema)
+    strat = strategies[strategy_index]
+    if strat.input_specs is None:
+        placements_in = None
+    else:
+        placements_in = tuple(
+            spec.format_shard_order_str(spec.placements, spec.shard_order)
+            for spec in strat.input_specs
+        )
+    placements_out = tree_map(
+        lambda spec: spec.format_shard_order_str(spec.placements, spec.shard_order),
+        strat.output_specs,
+        is_leaf=lambda x: isinstance(x, DTensorSpec),
+    )
+    return (
+        f"Selected strategy {placements_in} -> {placements_out} "
+        f"for {op_schema.op} with input {args_spec}, using unbacked hints: {replacements}"
+    )
+
+
+def _select_min_redistribute_cost(
+    costs: list[torch.types.FloatLikeType],
+    strategies: list[OpSpec],
+    op_schema: OpSchema | None = None,
+) -> int:
+    """
+    Given a list of costs and corresponding op strategies, selects the minimum cost strategy, returning the index.
+    If unbacked symbols are involved, replaces them with known upper-bound values, falling back to hardcoded values.
+    """
+    from torch.fx.experimental.symbolic_shapes import (
+        free_unbacked_symbols,
+        is_concrete_float,
+    )
+    from torch.utils._sympy.interp import sympy_interp
+    from torch.utils._sympy.numbers import int_oo
+    from torch.utils._sympy.reference import PythonReferenceAnalysis
+
+    int_fallback = 8192
+    free_unbacked = list(set(chain(*[free_unbacked_symbols(cost) for cost in costs])))
+
+    # Easy path: no unbacked shapes involved, choose min cost strategy.
+    # Doing the hard path for backed could also make sense?
+    if all(is_concrete_float(c) for c in costs) or not free_unbacked:
+        return costs.index(min(costs))
+
+    # Figure out heuristic hints for unbacked shapes.
+    # If available, use shape upper bound. If not, fallback to some integer (inductor size-hinting style).
+    shape_env = next(iter(x for x in costs if not is_concrete_float(x))).node.shape_env  # type: ignore[arg-type]
+    replacements = {}
+    for sym in free_unbacked:
+        if (upper := shape_env.bound_sympy(sym).upper) is not int_oo:
+            replacements[sym] = upper
+        else:
+            replacements[sym] = int_fallback
+
+    # Use replacements for redistribute cost hints
+    proxy_costs = [
+        float(cost)
+        if is_concrete_float(cost)
+        else sympy_interp(
+            PythonReferenceAnalysis,
+            replacements,
+            cost.node.expr.xreplace(replacements),  # type: ignore[arg-type]
+        )
+        for cost in costs
+    ]
+    min_cost = min(proxy_costs)
+    strategy_index = proxy_costs.index(min_cost)
+
+    if op_schema:
+        log.debug(
+            "%s",
+            LazyString(
+                _format_unbacked_hinting_log,
+                op_schema,
+                strategies,
+                strategy_index,
+                replacements,
+            ),
+        )
+    return strategy_index
 
 
 def _select_min_cost_strategy(
@@ -124,8 +216,9 @@ def _select_min_cost_strategy(
         selected_strategy_index = zero_cost_index
     else:
         # default to choosing minimal redistribute cost
-        min_cost = min(op_spec_costs)
-        selected_strategy_index = op_spec_costs.index(min_cost)
+        selected_strategy_index = _select_min_redistribute_cost(
+            op_spec_costs, strategy.strategies, op_schema
+        )
 
     return strategy.strategies[selected_strategy_index]
 

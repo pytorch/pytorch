@@ -99,6 +99,24 @@ RANK_TYPES = Union[
 ]
 
 
+def _chunk_or_narrow_cat(
+    tensor: torch.Tensor, num_chunks: int, narrow_dim: int, cat_dim: int = 0
+) -> torch.Tensor:
+    """
+    Splits tensor along narrow_dim into num_chunks and concatenates along cat_dim.
+    Uses torch.chunk in eager mode, but torch.narrow under tracing to be unbacked-symint safe.
+    """
+    if not _are_we_tracing():
+        return torch.cat(torch.chunk(tensor, num_chunks, dim=narrow_dim), dim=cat_dim)
+    else:
+        chunk_size = tensor.size(narrow_dim) // num_chunks
+        chunks = [
+            torch.narrow(tensor, narrow_dim, i * chunk_size, chunk_size)
+            for i in range(num_chunks)
+        ]
+        return torch.cat(chunks, dim=cat_dim)
+
+
 """
 User facing APIs for functional collectives
 -------------------------------------------
@@ -277,8 +295,7 @@ def reduce_scatter_tensor(
             f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size})"
         )
     if scatter_dim != 0:
-        tensor_list = torch.chunk(self, group_size, dim=scatter_dim)
-        self = torch.cat(tensor_list)
+        self = _chunk_or_narrow_cat(self, group_size, narrow_dim=scatter_dim, cat_dim=0)
 
     tensor = torch.ops._c10d_functional.reduce_scatter_tensor(
         self,
@@ -317,8 +334,7 @@ def reduce_scatter_tensor_autograd(
             f"input dimension 0 ({self.size(0)} must be a multiple of group_size {group_size}"
         )
     if scatter_dim != 0:
-        tensor_list = torch.chunk(self, group_size, dim=scatter_dim)
-        self = torch.cat(tensor_list)
+        self = _chunk_or_narrow_cat(self, group_size, narrow_dim=scatter_dim, cat_dim=0)
 
     tensor = torch.ops._c10d_functional_autograd.reduce_scatter_tensor(
         self,
