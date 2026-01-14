@@ -95,6 +95,16 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value})"
 
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        _MISSING = object()  # to prevent none-correctness
+        obj = getattr(self.value, name, _MISSING)
+
+        if obj is _MISSING:
+            return super().var_getattr(tx, name)
+
+        source = AttrSource(self.source, name) if self.source else None
+        return VariableTracker.build(tx, obj, source)
+
     def call_function(
         self,
         tx: "InstructionTranslator",
