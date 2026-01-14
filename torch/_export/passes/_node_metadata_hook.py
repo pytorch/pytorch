@@ -35,9 +35,8 @@ def _node_metadata_hook(
     # pyrefly: ignore [bad-assignment]
     fake_mode = fake_mode or contextlib.nullcontext()
 
-    assert node.op == "call_function" and callable(node.target), (
-        f"node: {node}, target: {node.target}"
-    )
+    if node.op != "call_function" or not callable(node.target):
+        raise AssertionError(f"node: {node}, target: {node.target}")
 
     if (
         isinstance(node.target, torch._ops.OpOverload)
@@ -95,7 +94,8 @@ def _set_node_metadata_hook(gm: torch.fx.GraphModule, f):
     Takes a callable which will be called after we create a new node. The
     callable takes the newly created node as input and returns None.
     """
-    assert callable(f), "node_metadata_hook must be a callable."
+    if not callable(f):
+        raise AssertionError("node_metadata_hook must be a callable.")
 
     # Add the hook to all submodules
     for m in gm.modules():
