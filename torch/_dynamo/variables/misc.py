@@ -486,7 +486,7 @@ class TracebackVariable(VariableTracker):
             return [self.frame_summary]
         return [self.frame_summary] + self.tb_next.extract_tb()
 
-    def has_reference_cycle(self, tb: "TracebackVariable") -> bool:
+    def has_reference_cycle(self, tb: VariableTracker) -> bool:
         # checks if `tb` is in the chain of tb_next starting from `self`
         curr_tb: TracebackVariable | ConstantVariable = self
         while istype(curr_tb, TracebackVariable):
@@ -508,7 +508,7 @@ class TracebackVariable(VariableTracker):
         if name == "tb_next":
             if not self.is_valid_traceback(val):
                 raise_observed_exception(TypeError, tx)
-            assert isinstance(val, TracebackVariable)
+            assert isinstance(val, (TracebackVariable, ConstantVariable))
             if self.has_reference_cycle(val) or (
                 istype(val, TracebackVariable) and val.has_reference_cycle(self)
             ):

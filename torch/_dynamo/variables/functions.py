@@ -1639,7 +1639,12 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             for cell_var in self.closure.items:  # type: ignore[attr-defined]
                 # Get the cell contents from side_effects or pre_existing_contents
                 # load_cell will replay the side-effects
-                cell_contents = tx.output.side_effects.load_cell(cell_var)
+                try:
+                    cell_contents = tx.output.side_effects.load_cell(cell_var)
+                except Unsupported:
+                    raise ClosureConversionError(
+                        "failed to load closure cell contents"
+                    ) from None
 
                 # Check for self-referential closure (function capturing itself for recursion)
                 # For example:
