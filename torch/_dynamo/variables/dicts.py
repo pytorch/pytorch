@@ -43,7 +43,6 @@ from ..utils import (
 )
 from .base import ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
-from .lists import ListIteratorVariable
 
 
 if TYPE_CHECKING:
@@ -791,6 +790,8 @@ class ConstDictVariable(VariableTracker):
             self.call_method(tx, "update", args, kwargs)
             return self
         elif name == "__iter__":
+            from .lists import ListIteratorVariable
+
             if self.source and not is_constant_source(self.source):
                 tx.output.guard_on_key_order.add(self.source)
             return ListIteratorVariable(
@@ -1023,7 +1024,20 @@ class SetVariable(ConstDictVariable):
         items: Iterable[VariableTracker],
         **kwargs: Any,
     ) -> None:
-        items = dict.fromkeys(items, SetVariable._default_value())
+        # Items can be either VariableTrackers or _HashableTrackers (from set ops).
+        # For VariableTrackers, realize them to ensure aliasing guards are installed
+        # when the same object appears multiple times.
+        realized_items = []
+        for item in items:
+            if isinstance(item, ConstDictVariable._HashableTracker):
+                # Already a _HashableTracker from a set operation
+                realized_items.append(item)
+            else:
+                # VariableTracker - realize to install guards
+                realized_items.append(item.realize())
+        # pyrefly: ignore[bad-assignment]
+        items = dict.fromkeys(realized_items, SetVariable._default_value())
+        # pyrefly: ignore[bad-argument-type]
         super().__init__(items, **kwargs)
 
     def debug_repr(self) -> str:
@@ -1575,6 +1589,8 @@ class DictViewVariable(VariableTracker):
         if name == "__len__":
             return self.dv_dict.call_method(tx, name, args, kwargs)
         elif name == "__iter__":
+            from .lists import ListIteratorVariable
+
             return ListIteratorVariable(
                 self.view_items_vt, mutation_type=ValueMutationNew()
             )
