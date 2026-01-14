@@ -487,7 +487,7 @@ class LocalIntNode:
             }
         )
 
-    def sym_sum(self, other: Any) -> "LocalIntNode | ConstantIntNode":
+    def sym_sum(self, other: Sequence[Any]) -> "LocalIntNode | ConstantIntNode":
         t = LocalIntNode(dict.fromkeys(self._local_ints, 0))
         for o in other:
             t = t.add(o)
