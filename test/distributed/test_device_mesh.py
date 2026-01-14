@@ -294,6 +294,29 @@ class DeviceMeshTest(DTensorTestBase):
         ).wait()
         self.assertEqual(global_tensor.shape, (self.world_size * 2, 8))
 
+    def test_fake_pg_device_mesh_cuda_on_cpu(self):
+        """
+        Test that DeviceMesh can be initialized with fake backend using 'cuda'
+        device type even on CPU-only machines.
+        """
+        fake_store = FakeStore()
+        init_process_group("fake", store=fake_store, rank=0, world_size=1)
+
+        # This should NOT fail even on CPU-only machines because
+        # the fake backend skips device setup
+        device_mesh = init_device_mesh(
+            "cuda",
+            (1,),
+            mesh_dim_names=("dp",),
+        )
+
+        # Verify mesh is created correctly
+        self.assertEqual(device_mesh.ndim, 1)
+        self.assertEqual(device_mesh.size(), 1)
+        self.assertEqual(device_mesh.mesh_dim_names, ("dp",))
+        backend = device_mesh.get_all_groups()[0]._get_backend(torch.device("cuda"))
+        self.assertIsInstance(backend, torch._C._distributed_c10d.FakeProcessGroup)
+
     @with_comms
     def test_from_group_with_global_pg(self):
         # Simple test: check `from_group` from a mesh pg vs. directly
@@ -1500,7 +1523,7 @@ class CuTeLayoutTest(TestCase):
         l = _FlatLayout(((7, (5, 3)), 2), ((900, (36, 4)), 1))
         self.assertEqual(list(l.sizes_and_strides), [(7, 900), (5, 36), (3, 4), (2, 1)])
 
-        l = _FlatLayout(((7, (5, 3)), 2), ((30, (6, 2), 1)))
+        l = _FlatLayout(((7, (5, 3)), 2), ((30, (6, 2)), 1))
         self.assertEqual(list(l.sizes_and_strides), [(7 * 5 * 3 * 2, 1)])
 
     def test_optional_strides(self):
