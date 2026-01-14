@@ -189,7 +189,6 @@ def _expand_single_dim_strategy_to_mesh(
     # Note: circular import, failed to untangle with #168221, reverted
     from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 
-    @functools.lru_cache
     def _create_expanded_strategy(
         op_schema: OpSchema,
         output_tensor_meta: TensorMeta | Sequence[TensorMeta | None],
