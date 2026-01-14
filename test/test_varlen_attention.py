@@ -355,7 +355,7 @@ class TestVarlenAttention(NNTestCase):
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("is_causal", [False, True])
     @parametrize("scale", [None, 0.1])
-    @parametrize("window_size", [(-1, 4)])
+    @parametrize("window_size", [(-1, -1), (-1, 0), (4, 0), (-1, 4)])
     def test_varlen_vs_sdpa(self, device, dtype, is_causal, scale, window_size):
         torch.manual_seed(42)
 
