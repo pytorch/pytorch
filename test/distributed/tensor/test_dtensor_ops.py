@@ -208,8 +208,6 @@ dtensor_fails = {
     xfail("linalg.lstsq"),
     xfail("linalg.lstsq", "grad_oriented"),
     xfail("linalg.matrix_power"),
-    xfail("linalg.pinv"),
-    xfail("linalg.pinv", "hermitian"),
     xfail("linalg.tensorsolve"),
     xfail("linalg.vander"),
     xfail("linalg.vecdot"),
