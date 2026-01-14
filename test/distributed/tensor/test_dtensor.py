@@ -818,6 +818,39 @@ class DTensorMeshTest(DTensorTestBase):
         )
 
     @with_comms
+    def test_inplace_op_sub_mesh(self):
+        """Test that inplace ops work correctly on sub-meshes.
+
+        This verifies that non-participating ranks (not in the sub-mesh) can
+        handle redistribute cost calculation gracefully during sharding propagation.
+        """
+        mesh = DeviceMesh(self.device_type, [0, 2])
+        local_tensor = torch.ones(3, 4)
+
+        dtensor = DTensor.from_local(local_tensor, mesh, [Shard(0)])
+
+        # Test inplace mul_ - this exercises the cost calculation code path
+        # for all ranks, including those not in the sub-mesh
+        dtensor.mul_(0.5)
+
+        self.sub_mesh_assert_equal(
+            mesh.mesh,
+            torch.ones(3, 4) * 0.5,
+            torch.tensor([]),
+            dtensor.to_local(),
+        )
+
+        # Test inplace add_
+        dtensor.add_(1.0)
+
+        self.sub_mesh_assert_equal(
+            mesh.mesh,
+            torch.ones(3, 4) * 0.5 + 1.0,
+            torch.tensor([]),
+            dtensor.to_local(),
+        )
+
+    @with_comms
     def test_default_value_sub_mesh(self):
         mesh = DeviceMesh(self.device_type, [0, 2])
 
