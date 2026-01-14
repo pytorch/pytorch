@@ -254,8 +254,9 @@ class LoggingTests(LoggingTestCase):
         fn(make_cl(0, 2), torch.ones(3))
 
         record_str = "\n".join(r.getMessage() for r in records)
-        # The recompilation log should include a HINT with "n2"
-        self.assertIn("(HINT: n2)", record_str)
+        # The recompilation log should include a hint explaining which closure variable
+        # the cell_contents refers to
+        self.assertIn('refers to "n2" in user code', record_str)
 
     test_dynamo_debug = within_range_record_test(30, 90, dynamo=logging.DEBUG)
     test_dynamo_info = within_range_record_test(2, 10, dynamo=logging.INFO)
