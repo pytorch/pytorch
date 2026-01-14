@@ -15334,6 +15334,19 @@ op_db: list[OpInfo] = [
                 "TestConsistency", "test_output_grad_match",
                 dtypes=(torch.float16, torch.bfloat16),
                 device_type="mps",),
+            # torch.allclose(arg, arg_copy, rtol=0, atol=0, equal_nan=True),
+            # -> torch.AcceleratorError: HIP error: unspecified launch failure
+            DecorateInfo(
+                unittest.skip("unspecified launch failure"),
+                "TestCompositeCompliance", "test_cow_input",
+                device_type="cuda",
+                active_if=TEST_WITH_ROCM),
+            # RuntimeError: LLD failed to link hsaco source...
+            DecorateInfo(
+                unittest.skip("link failure"),
+                "TestInductorOpInfo", "test_comprehensive",
+                device_type="cuda",
+                active_if=TEST_WITH_ROCM),
         )
     ),
     OpInfo('nn.functional.normalize',
