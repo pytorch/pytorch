@@ -1628,6 +1628,13 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
         finally:
             _converting.discard(self_id)
 
+    def is_python_constant(self):
+        try:
+            self.as_python_constant()
+            return True
+        except Exception:
+            return False
+
     def _get_function_impl(self, _converting: set[int]) -> types.FunctionType:
         closure_cells = None
         if self.closure:
@@ -1639,12 +1646,7 @@ class NestedUserFunctionVariable(BaseUserFunctionVariable):
             for cell_var in self.closure.items:  # type: ignore[attr-defined]
                 # Get the cell contents from side_effects or pre_existing_contents
                 # load_cell will replay the side-effects
-                try:
-                    cell_contents = tx.output.side_effects.load_cell(cell_var)
-                except Unsupported:
-                    raise ClosureConversionError(
-                        "failed to load closure cell contents"
-                    ) from None
+                cell_contents = tx.output.side_effects.load_cell(cell_var)
 
                 # Check for self-referential closure (function capturing itself for recursion)
                 # For example:
