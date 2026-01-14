@@ -9,7 +9,7 @@ import sympy
 
 import torch
 import torch.utils._pytree as pytree
-from torch.fx.experimental.symbolic_shapes import size_hint
+from torch.fx.experimental.symbolic_shapes import hint_int, size_hint
 from torch.fx.operator_schemas import normalize_function
 
 from . import ir
@@ -465,28 +465,76 @@ def estimate_nccl_collective_runtime_from_fx_node(
         if not backend.supports_time_estimate:
             return None
 
-        flat_args, flat_args_pytree_spec = pytree.tree_flatten((args, kwargs))
+        def _get_real_args_kwargs():
+            def _tensor(size, dtype, device) -> torch.Tensor:  # type: ignore[no-untyped-def]
+                return torch.empty(
+                    size if override_size is None else [override_size],
+                    dtype=dtype,
+                    device=device,
+                )
 
-        def _tensor(size, dtype, device) -> torch.Tensor:  # type: ignore[no-untyped-def]
-            return torch.empty(
-                size if override_size is None else [override_size],
-                dtype=dtype,
-                device=device,
+            def to_real_tensor(e: Any, fallback: int = 4096) -> Any:
+                if isinstance(e, torch.Tensor):
+                    return _tensor(
+                        [get_fx_node_size_numel(e.size(), fallback=fallback)],
+                        e.dtype,
+                        e.device,
+                    )
+                return e
+
+            def to_meta_val(n):
+                if isinstance(n, torch.fx.Node):
+                    return n.meta["val"]
+                return n
+
+            if fx_node.target is torch.ops._c10d_functional.all_to_all_single.default:
+                # Special handling of all_to_all that has input_splits, output_splits List[int] args,
+                # which may contain unbacked symints.
+                # As there is no hint for unbacked, fallback on input tensor with
+                # fallback static shape and uniform splits
+                inp = to_meta_val(kwargs["input"])
+                inp_splits = [to_meta_val(s) for s in kwargs["input_split_sizes"]]
+                out_splits = [to_meta_val(s) for s in kwargs["output_split_sizes"]]
+
+                from torch.fx.experimental.symbolic_shapes import has_hint
+
+                has_unbacked = (
+                    not has_hint(inp.numel())
+                    or any(not has_hint(s) for s in inp_splits)
+                    or any(not has_hint(s) for s in out_splits)
+                )
+
+                # Always convert to real tensors/ints
+                if has_unbacked:
+                    inp_real = to_real_tensor(inp, fallback=32)
+                    numel_int = inp_real.numel()
+                    assert isinstance(numel_int, int)
+                    # Use uniform splits when unbacked
+                    num_splits = len(inp_splits)
+                    inp_splits = [numel_int // num_splits] * num_splits
+                    out_splits = [numel_int // num_splits] * num_splits
+                else:
+                    inp_real = to_real_tensor(inp)
+                    inp_splits = [hint_int(s) for s in inp_splits]
+                    out_splits = [hint_int(s) for s in out_splits]
+
+                real_args = ()
+                real_kwargs = {
+                    "input": inp_real,
+                    "input_split_sizes": inp_splits,
+                    "output_split_sizes": out_splits,
+                    "group_name": group_name,
+                }
+                return real_args, real_kwargs
+
+            flat_args, flat_args_pytree_spec = pytree.tree_flatten((args, kwargs))
+            flat_args = [to_real_tensor(to_meta_val(a)) for a in flat_args]
+            real_args, real_kwargs = pytree.tree_unflatten(
+                flat_args, flat_args_pytree_spec
             )
+            return real_args, real_kwargs
 
-        def try_size_hint(s: sympy.Expr) -> int:
-            return V.graph.sizevars.size_hint(s, fallback=0)
-
-        def to_real_tensor(e: Any) -> Any:
-            if isinstance(e, torch.fx.Node):
-                return to_real_tensor(e.meta["val"])
-            if isinstance(e, torch.Tensor):
-                return _tensor([get_fx_node_size_numel(e.size())], e.dtype, e.device)
-            return e
-
-        flat_args = [to_real_tensor(a) for a in flat_args]
-        real_args, real_kwargs = pytree.tree_unflatten(flat_args, flat_args_pytree_spec)
-
+        real_args, real_kwargs = _get_real_args_kwargs()
         fn = fx_node.target
         assert isinstance(fn, torch._ops.OpOverload)
         with torch.distributed._time_estimator(group=pg) as time_estimator:
