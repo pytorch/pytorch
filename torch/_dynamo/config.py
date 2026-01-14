@@ -39,6 +39,18 @@ verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
 # [@compile_ignored: runtime_behaviour] verify the correctness of optimized backend
 verify_correctness = False
 
+# Override backend for specific graphs (for debugging/bisecting).
+# Format: "filter1:backend1;filter2:backend2;..." where filter can be:
+#   - Individual IDs: "0,5,10"
+#   - Ranges: "10-20" (inclusive)
+#   - Comparisons: ">10", ">=10", "<5", "<=5"
+# Backends can be: "eager", "aot_eager", "inductor", "inductor:reduce-overhead", etc.
+# Examples:
+#   ">10:eager"                    - Run graphs with frame_id > 10 in dynamo eager backend
+#   "<=5:aot_eager;>5:inductor"    - First 6 graphs use aot_eager, rest use inductor
+# [@compile_ignored: debug]
+debug_backend_override: str = os.environ.get("TORCH_COMPILE_OVERRIDE_BACKENDS", "")
+
 # need this many ops to create an FX graph (deprecated: not used)
 minimum_call_count = 1
 

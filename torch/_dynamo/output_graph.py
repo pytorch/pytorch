@@ -103,6 +103,7 @@ from .exc import (
 )
 from .graph_bytecode_inputs import has_user_objects, index_to_bytecode_constructor
 from .graph_deduplication import apply_graph_deduplication
+from .graph_id_filter import get_backend_override_for_compile_id
 from .graph_region_tracker import GraphRegionTracker
 from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
@@ -2515,14 +2516,21 @@ class OutputGraph(OutputGraphCommon):
         gm._param_name_to_source = self.param_name_to_source  # type: ignore[assignment]
         gm._source_to_user_stacks = self.source_to_user_stacks  # type: ignore[assignment]
 
+        # Check for per-graph backend override (for debugging/bisecting)
+        compiler_fn = (
+            get_backend_override_for_compile_id(
+                self.dynamo_compile_id, config.debug_backend_override
+            )
+            or self.compiler_fn
+        )
+
         name = (
-            self.compiler_fn.__name__
-            if hasattr(self.compiler_fn, "__name__")
+            compiler_fn.__name__
+            if hasattr(compiler_fn, "__name__")
             else "<unknown compiler_fn>"
         )
         try:
             _step_logger()(logging.INFO, f"calling compiler function {name}")
-            compiler_fn = self.compiler_fn
             if config.verify_correctness:
                 compiler_fn = WrapperBackend(compiler_fn)
             compiled_fn = compiler_fn(gm, example_inputs)
@@ -2565,7 +2573,7 @@ class OutputGraph(OutputGraphCommon):
             },
         )
 
-        # pyrefly: ignore [unbound-name]
+        # pyrefly: ignore [unbound-name, bad-return]
         return compiled_fn
 
     def dedup_pass(self) -> dict[str, torch.fx.GraphModule]:
