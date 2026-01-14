@@ -4032,7 +4032,7 @@ class TestMaxAutotuneAsyncPipelined(TestMaxAutotune):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
-        cls._async_config = config.patch(
+        cls._async_config = config.global_patch(
             {
                 "pipeline_max_autotune_gemm": True,
                 "epilogue_fusion": False,
