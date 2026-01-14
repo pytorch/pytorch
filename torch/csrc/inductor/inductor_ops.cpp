@@ -117,13 +117,14 @@ TORCH_LIBRARY_FRAGMENT(inductor, m) {
       {at::Tag::pt2_compliant_tag});
 }
 
+#if defined(USE_CUDA) || defined(USE_ROCM)
+
 TORCH_LIBRARY_FRAGMENT(inductor_prims, m) {
   m.def(
       "inductor_reserve_rng_state(Generator generator, SymInt increment) "
       "-> (Tensor, Tensor, Tensor)");
 }
 
-#if defined(USE_CUDA) || defined(USE_ROCM)
 // Reserves RNG state for Inductor with CUDA Graph support.
 //
 // This function allows Inductor to reserve a specific amount of RNG offset
@@ -183,18 +184,7 @@ TORCH_LIBRARY_IMPL(inductor_prims, CUDA, m) {
 TORCH_LIBRARY_IMPL(inductor_prims, HIP, m) {
   m.impl("inductor_reserve_rng_state", TORCH_FN(inductor_reserve_rng_state));
 }
-#else
-static std::tuple<Tensor, Tensor, Tensor> inductor_reserve_rng_state(
-    const Generator& generator,
-    c10::SymInt increment) {
-  TORCH_CHECK(
-      false,
-      "inductor_reserve_rng_state is only available for CUDA/ROCm builds; "
-      "got generator device = ",
-      generator.device(),
-      ", increment = ",
-      increment);
-}
+
 #endif
 
 } // namespace torch::inductor

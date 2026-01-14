@@ -118,9 +118,13 @@ def _reserve_rng_state(device: torch.device, used_offset):
         dev_index = torch.cuda.current_device()
 
     gen = torch.cuda.default_generators[dev_index]
-    seed_t, off_t, intra_t = torch.ops.inductor_prims.inductor_reserve_rng_state(
-        gen, used_offset
-    )
+    try:
+        seed_t, off_t, intra_t = torch.ops.inductor_prims.inductor_reserve_rng_state(
+            gen, used_offset
+        )
+    except Exception as e:
+        # f"[warn] inductor_reserve_rng_state unavailable"
+        return 0, 0
     # NOTE: for correctness in eager, intra_t should be 0.
     # Keep everything as tensor math to avoid host sync.
     if intra_t.device.type != "cuda":
