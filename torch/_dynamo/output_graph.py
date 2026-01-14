@@ -186,7 +186,7 @@ og_module_named_buffers_fn_ptr = torch.nn.Module.named_buffers
 og_module_named_parameters_fn_ptr = torch.nn.Module.named_parameters
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class VariableTrackerCacheKey:
     vt_id: int
     # Two different source can point to the same object. However, Dynamo handles
@@ -195,13 +195,13 @@ class VariableTrackerCacheKey:
     source: Source
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class AliasingInfo:
     has_aliasing: bool
     msg: str
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MutationInfo:
     has_mutation: bool
     msg: str
@@ -604,6 +604,10 @@ class OutputGraph(OutputGraphCommon):
         # Map from graph input's `Source` to its `VariableTracker` to
         # de-duplicate graph inputs by source and reuse the tracker
         self.input_source_to_var: dict[Source, VariableTracker] = {}
+        # List of TensorVariables that are leaf tensors created in-graph
+        # (e.g., nn.Parameter via tracable_create_parameter). These need to be
+        # tracked separately from input_source_to_var for backward() auto-detection.
+        self.leaf_var_creation_order: list[VariableTracker] = []
         self.export = export
         self.export_constraints = export_constraints  # type: ignore[assignment]
         self.frame_state = frame_state
@@ -1416,9 +1420,13 @@ class OutputGraph(OutputGraphCommon):
         # realize any unrealized tensor VTs in case they
         # need to be added to self.nn_modules as attributes
         for i, value in enumerate(tx.stack):
-            variables.LazyVariableTracker.realize_all(value)
+            # Allow lazy constants through for values being returned (top of stack)
+            allow_lazy_constant = len(tx.stack) - i <= stack_pops
+            variables.LazyVariableTracker.realize_all(
+                value, allow_lazy_constant=allow_lazy_constant
+            )
             # ignore top `stack_pops` values on the stack
-            if len(tx.stack) - i <= stack_pops:
+            if allow_lazy_constant:
                 stack_values.append(value)
                 continue
             if isinstance(value, NullVariable):
@@ -2842,6 +2850,7 @@ class OutputGraph(OutputGraphCommon):
         self.dynamo_flat_name_to_original_fqn.clear()
         self.tracing_context.clear()
         self.input_source_to_var.clear()
+        self.leaf_var_creation_order.clear()
         self.unspec_variable_map.clear()
         self.backward_state.clear()
 
