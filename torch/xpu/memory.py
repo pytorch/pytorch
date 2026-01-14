@@ -7,7 +7,6 @@ from typing import Any, Literal
 import torch
 from torch._utils import _augment_memory_snapshot_stack_traces, _dummy_type
 from torch.types import Device
-
 from . import _get_device_index, _is_compiled, _lazy_init, is_initialized
 
 
@@ -350,6 +349,7 @@ def _snapshot(device: Device = None, augment_with_fx_traces: bool = False):
     Returns:
         The Snapshot dictionary object
     """
+    # pyrefly: ignore [missing-attribute]
     s = torch._C._xpu_memorySnapshot(None)
     if augment_with_fx_traces:
         s = _augment_memory_snapshot_stack_traces(s)  # type: ignore[assignment, arg-type]
