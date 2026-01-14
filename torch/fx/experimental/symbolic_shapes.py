@@ -2897,7 +2897,7 @@ class DimConstraints:
     def __init__(
         self,
         symbol_to_source: dict[sympy.Symbol, list[Source]],
-        backed_var_to_val: Mapping[sympy.Symbol, sympy.Integer],
+        var_to_val: Mapping[sympy.Symbol, sympy.Integer],
         marked_dynamic: set[sympy.Symbol],
         source_name_to_debug_name: Mapping[str, str],
     ) -> None:
@@ -2919,9 +2919,7 @@ class DimConstraints:
         # Our inequality solver can handle / but not %. So we need to transform them away.
         # We do so by using the values of variables as hints to evaluate %.
         # For soundness we record additional congruence guards and solve them separately.
-        self._backed_var_to_val: Mapping[sympy.Symbol, sympy.Integer] = (
-            backed_var_to_val
-        )
+        self._var_to_val: Mapping[sympy.Symbol, sympy.Integer] = var_to_val
         self._congruences: defaultdict[sympy.Symbol, set[sympy.Expr]] = defaultdict(set)
 
         # We do not try to (directly) solve inequalities with > 1 free variables.
@@ -2993,8 +2991,8 @@ class DimConstraints:
                 self.rewrite_with_congruences(s, base),
                 self.rewrite_with_congruences(s, divisor),
             )
-            mod_reduced = base.xreplace(self._backed_var_to_val) % divisor.xreplace(
-                self._backed_var_to_val
+            mod_reduced = base.xreplace(self._var_to_val) % divisor.xreplace(
+                self._var_to_val
             )
             congruence = (base - mod_reduced) % divisor
             if congruence != 0:
@@ -3013,8 +3011,8 @@ class DimConstraints:
                 self.rewrite_with_congruences(s, base),
                 self.rewrite_with_congruences(s, divisor),
             )
-            mod_reduced = base.xreplace(self._backed_var_to_val) % divisor.xreplace(
-                self._backed_var_to_val
+            mod_reduced = base.xreplace(self._var_to_val) % divisor.xreplace(
+                self._var_to_val
             )
             congruence = (base - mod_reduced) % divisor
             if congruence != 0:
@@ -3064,7 +3062,7 @@ class DimConstraints:
         if expr == sympy.true:
             return True
         orig_expr = expr
-        orig_reduced = orig_expr.xreplace(self._backed_var_to_val)
+        orig_reduced = orig_expr.xreplace(self._var_to_val)
         # TODO(avik): https://github.com/pytorch/pytorch/issues/101093
         # It is possible that `expr` will fail the consistency check because of
         # precision errors. Specifically, on substituting its free symbols with
@@ -3091,7 +3089,7 @@ class DimConstraints:
             new_n_congruences = len(self._congruences[s])
             if expr == sympy.true:
                 return old_n_congruences == new_n_congruences
-            reduced = expr.xreplace(self._backed_var_to_val)
+            reduced = expr.xreplace(self._var_to_val)
             if reduced == sympy.false:
                 self._inconsistencies.append(
                     f"{expr}, obtained by rewriting {orig_expr} with congruences, "
@@ -3234,7 +3232,7 @@ class DimConstraints:
                         iter(
                             arg
                             for arg in solution.args
-                            if arg.xreplace(self._backed_var_to_val)
+                            if arg.xreplace(self._var_to_val)
                         )
                     )
                 if isinstance(solution, sympy.And):

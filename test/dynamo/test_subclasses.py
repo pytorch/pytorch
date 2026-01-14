@@ -1644,7 +1644,7 @@ class GraphModule(torch.nn.Module):
 
                 return DoubleSizeMaybeAddGeThreeTensor(out_inner)
 
-        curr_backed_var_to_val = None
+        curr_var_to_val = None
         curr_var_to_sources = None
         guards = None
 
@@ -1652,12 +1652,12 @@ class GraphModule(torch.nn.Module):
             context = torch._guards.TracingContext.get()
 
             # Grab info on sources and guards from the shapeenv
-            nonlocal curr_backed_var_to_val
+            nonlocal curr_var_to_val
             nonlocal curr_var_to_sources
             nonlocal guards
 
             guards = [str(g.expr) for g in context.fake_mode.shape_env.guards]
-            curr_backed_var_to_val = {
+            curr_var_to_val = {
                 str(k): v
                 for k, v in context.fake_mode.shape_env.backed_var_to_val.items()
             }
@@ -1681,7 +1681,7 @@ class GraphModule(torch.nn.Module):
         res = fn(x)  # noqa: F841
         # During fakeifying, we end up allocating a separate symint
         # for the outer and inner tensor (in this test, s0 is unused).
-        expected_backed_var_to_val = {
+        expected_var_to_val = {
             "s50": 4,
             "s77": 8,
         }
@@ -1689,7 +1689,7 @@ class GraphModule(torch.nn.Module):
             "s50": "L['x'].inner_elem.size()[0]",
             "s77": "L['x'].size()[0]",
         }
-        self.assertEqual(curr_backed_var_to_val, expected_backed_var_to_val)
+        self.assertEqual(curr_var_to_val, expected_var_to_val)
         self.assertEqual(curr_var_to_sources, expected_var_to_sources)
         self.assertExpectedInline(
             "\n".join(guards),

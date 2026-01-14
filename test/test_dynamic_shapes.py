@@ -2202,10 +2202,10 @@ class TestDimConstraints(TestCase):
             s5: [src5, src8],
             s6: [src6, src9, src10],
         }
-        backed_var_to_val = {s0: 8, s1: 96, s5: 22, s6: 21}
+        var_to_val = {s0: 8, s1: 96, s5: 22, s6: 21}
         marked_dynamic = {s0, s1, s5, s6}
         dim_constraints = DimConstraints(
-            symbol_to_source, backed_var_to_val, marked_dynamic, {}
+            symbol_to_source, var_to_val, marked_dynamic, {}
         )
         dim_constraints.add_equality(src2, s0)
         dim_constraints.add_equality(src3, s0)
