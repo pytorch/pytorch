@@ -48,7 +48,6 @@ class CUDASymmetricMemory : public SymmetricMemory {
   size_t get_buffer_size() override;
   size_t get_offset() override;
 
-  bool has_multicast_support() override;
   void* get_multicast_ptr() override;
 
   void barrier(int channel, size_t timeout_ms) override;
