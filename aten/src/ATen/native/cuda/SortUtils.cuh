@@ -165,15 +165,19 @@ bitonicSortKVInPlace(at::cuda::detail::TensorInfo<K, IndexType> keys,
 
 #if HAS_WARP_MERGE_SORT()
 
+// Note [warp merge sort WARP_SIZE template param]
+// ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
+// warpMergeSortKVInPlace was written assuming C10_WARP_SIZE is a constexpr.
+// In torch/headeronly/macros/Macros.h, C10_WARP_SIZE is 32 for CUDA, and on
+// ROCm it will be 32 or 64 based on the current compile-time gfx target.
+// However, to support amdgcnspirv, C10_WARP_SIZE will default to 64. Ideally,
+// warpSize should be used instead of C10_WARP_SIZE in device code, but
+// C10_WARP_SIZE within this kernel has been used as a template parameter for
+// some device functions. Therefore, a template param for WARP_SIZE was added.
 template <int KeyDims, int ValueDims, int sort_size, int max_block_dim_y,
-          typename K, typename V, typename Comparator, typename IndexType>
-#if !defined(USE_ROCM)
-// On CUDA, use explicit launch bounds for better occupancy
-C10_LAUNCH_BOUNDS_1(C10_WARP_SIZE * max_block_dim_y)
-#endif
-// Note: ROCm doesn't use launch bounds here because C10_WARP_SIZE is not
-// a true compile-time constant in device code (it's a constexpr function).
-// The compiler infers good launch bounds from the kernel code automatically.
+          typename K, typename V, typename Comparator, typename IndexType,
+          int WARP_SIZE>
+C10_LAUNCH_BOUNDS_1(WARP_SIZE * max_block_dim_y)
 __global__ void
 warpMergeSortKVInPlace(
     at::cuda::detail::TensorInfo<K, IndexType> keys,
@@ -207,17 +211,17 @@ warpMergeSortKVInPlace(
 
   namespace cub = ROCM_HIPCUB(at_cuda_detail::cub);
 
-  CUDA_KERNEL_ASSERT(blockDim.x == C10_WARP_SIZE);
+  CUDA_KERNEL_ASSERT(blockDim.x == WARP_SIZE);
   CUDA_KERNEL_ASSERT(blockDim.y <= max_block_dim_y);
-  constexpr int items_per_thread = sort_size / C10_WARP_SIZE;
+  constexpr int items_per_thread = sort_size / WARP_SIZE;
   static_assert(
-      items_per_thread * C10_WARP_SIZE == sort_size,
-      "sort_size must be a multiple of C10_WARP_SIZE");
+      items_per_thread * WARP_SIZE == sort_size,
+      "sort_size must be a multiple of WARP_SIZE template param");
 
 
   using LoadKeys = cub::WarpLoad<K, items_per_thread, cub::WARP_LOAD_TRANSPOSE>;
   using LoadValues = cub::WarpLoad<V, items_per_thread, cub::WARP_LOAD_TRANSPOSE>;
-  using Sort = cub::WarpMergeSort<K, items_per_thread, C10_WARP_SIZE, V>;
+  using Sort = cub::WarpMergeSort<K, items_per_thread, WARP_SIZE, V>;
   using StoreKeys = cub::WarpStore<K, items_per_thread, cub::WARP_STORE_TRANSPOSE>;
   using StoreValues = cub::WarpStore<V, items_per_thread, cub::WARP_STORE_TRANSPOSE>;
 
