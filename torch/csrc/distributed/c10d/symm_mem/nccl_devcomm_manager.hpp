@@ -63,10 +63,16 @@ class NCCLDevCommManager {
     }
     c10::cuda::CUDAGuard guard(device_);
     ncclDevComm devComm;
+
+    // Initializer available from NCCL 2.29
+#ifdef NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER
+    ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
+#else
+    // In 2.28, we can set it to zero
     ncclDevCommRequirements reqs;
-    // See example in
-    // https://docs.nvidia.com/deeplearning/nccl/user-guide/docs/usage/deviceapi.html#simple-lsa-kernel
     memset(&reqs, 0, sizeof(ncclDevCommRequirements));
+#endif
+
     // Specifies the number of memory barriers to allocate.
     reqs.lsaBarrierCount = NCCL_LSA_BARRIER_COUNT;
     // TODO (kwen2501): Add network barrier count.
