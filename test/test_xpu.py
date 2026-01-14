@@ -924,6 +924,10 @@ if __name__ == "__main__":
                 f = self.net2(e)
                 return f
 
+        if self.expandable_segments:
+            self.skipTest(
+                "Requires driver update to fix oneDNN primitive operations when using expandable segments."
+            )
         mod = MLPModule()
         gc.collect()
         torch.xpu.memory.empty_cache()
