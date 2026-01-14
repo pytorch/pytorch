@@ -582,7 +582,7 @@ class ExceptionVariable(VariableTracker):
         # Used to preserve the original exception location when re-raising.
         self.python_stack: traceback.StackSummary | None = None
 
-    def set_context(self, context: "ExceptionVariable") -> None:
+    def set_context(self, context: VariableTracker) -> None:
         self.__context__ = context
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
@@ -621,6 +621,7 @@ class ExceptionVariable(VariableTracker):
         name = name_var.as_python_constant()
         if name == "__context__":
             # Constant can be either an Exceptior or None
+            assert isinstance(val, (ExceptionVariable, ConstantVariable))
             self.set_context(val)
         elif name == "__cause__":
             if val.is_constant_none() or isinstance(
@@ -1927,6 +1928,16 @@ class StringFormatVariable(VariableTracker):
         }
         codegen(variables.ConstDictVariable(kwargs))
         codegen.extend_output(create_call_function_ex(True, False))
+
+
+class ObjectVariable(VariableTracker):
+    # placeholder for unknown / opaque values
+    def __init__(self, value: object, **kwargs: Any) -> None:
+        super().__init__(**kwargs)
+        self.value = value
+
+    def python_type(self) -> type[object]:
+        return object
 
 
 class DebuggingVariable(VariableTracker):
