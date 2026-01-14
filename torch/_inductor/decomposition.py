@@ -72,7 +72,6 @@ inductor_decompositions = get_decompositions(
         aten.clamp_min_,
         aten.dist,
         aten.elu,
-        aten.empty_like,
         aten.flip,
         aten.gelu,
         aten.hardtanh,
@@ -616,6 +615,43 @@ def view_copy_dtype(
     dtype: torch.dtype,
 ) -> torch.Tensor:
     return self.clone().view(dtype)
+
+
+@register_decomposition(aten.empty_like)
+def empty_like(
+    self: torch.Tensor,
+    *,
+    dtype: Optional[torch.dtype] = None,
+    device: Optional[torch.device] = None,
+    layout: Optional[torch.layout] = None,
+    pin_memory: bool = False,
+    requires_grad: bool = False,
+    memory_format: torch.memory_format = torch.preserve_format,
+) -> torch.Tensor:
+    dtype = self.dtype if dtype is None else dtype
+    layout = self.layout if layout is None else layout
+    device = self.device if device is None else device
+
+    if memory_format != torch.preserve_format:
+        return torch.empty(
+            self.shape,
+            dtype=dtype,
+            layout=layout,
+            device=device,
+            pin_memory=pin_memory,
+            requires_grad=requires_grad,
+            memory_format=memory_format,
+        )
+
+    return torch.empty_strided(
+        self.shape,
+        self.stride(),
+        dtype=dtype,
+        layout=layout,
+        device=device,
+        pin_memory=pin_memory,
+        requires_grad=requires_grad,
+    )
 
 
 def _get_shape_permutation_like(
