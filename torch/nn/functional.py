@@ -3644,6 +3644,49 @@ def binary_cross_entropy_with_logits(
     )
 
 
+def linear_cross_entropy(
+    input: Tensor,
+    linear_weight: Tensor,
+    target: Tensor,
+    linear_bias: Optional[Tensor] = None,
+    weight: Optional[Tensor] = None,
+    reduction: str = "mean",
+    ignore_index: int = -100,
+    label_smoothing: float = 0.0,
+    # Optimization parameters:
+    # chunking_strategy: str = "none",
+    # vocab_chunk_size: Optional[int] = None,
+    # batch_chunk_size: Optional[int] = None
+) -> Tensor:
+    """
+    Compute the cross entropy loss between inputs, transformed linearly, and target.
+
+    TBD
+    """
+    if has_torch_function_variadic(input, linear_weight, target, linear_bias, weight):
+        return handle_torch_function(
+            linear_cross_entropy,
+            (input, linear_weight, target, linear_bias, weight),
+            input,
+            linear_weight,
+            target,
+            linear_bias=linear_bias,
+            weight=weight,
+            ignore_index=ignore_index,
+            reduction=reduction,
+            label_smoothing=label_smoothing,
+        )
+    logits = linear(input, linear_weight, bias=linear_bias)
+    return cross_entropy(
+        logits,
+        target,
+        weight=weight,
+        reduction=reduction,
+        ignore_index=ignore_index,
+        label_smoothing=label_smoothing,
+    )
+
+
 def smooth_l1_loss(
     input: Tensor,
     target: Tensor,
