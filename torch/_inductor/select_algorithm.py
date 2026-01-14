@@ -2101,12 +2101,9 @@ class TritonTemplate(KernelTemplate):
         assert result.mod.__file__ is not None
 
         grid = self.grid(
-            *tuple(
-                V.graph.sizevars.optimization_hint_with_override(
-                    e,
-                    hint_override=hint_override,
-                )
-                for e in call_sizes
+            *V.graph.sizevars.optimization_hints_with_override(
+                call_sizes,
+                hint_override=hint_override,
             ),
             kwargs,
         )
@@ -3112,12 +3109,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 "x".join(
                     map(
                         str,
-                        tuple(
-                            sizevars.optimization_hint_with_override(
-                                s,
-                                hint_override=hint_override,
-                            )
-                            for s in node.get_size()
+                        sizevars.optimization_hints_with_override(
+                            node.get_size(),
+                            hint_override=hint_override,
                         ),
                     )
                 )
@@ -3538,19 +3532,13 @@ class AlgorithmSelectorCache(PersistentCache):
                     storage_offset = generated_tensor.storage_offset()
                 else:
                     # Use IR node's shape resolved via size hints
-                    sizes = tuple(
-                        V.graph.sizevars.optimization_hint_with_override(
-                            size,
-                            hint_override=hint_override,
-                        )
-                        for size in input_node.get_size()
+                    sizes = V.graph.sizevars.optimization_hints_with_override(
+                        input_node.get_size(),
+                        hint_override=hint_override,
                     )
-                    strides = tuple(
-                        V.graph.sizevars.optimization_hint_with_override(
-                            stride,
-                            hint_override=hint_override,
-                        )
-                        for stride in input_node.get_stride()
+                    strides = V.graph.sizevars.optimization_hints_with_override(
+                        input_node.get_stride(),
+                        hint_override=hint_override,
                     )
                     storage_offset = V.graph.sizevars.optimization_hint_with_override(
                         input_node.get_layout().offset,
@@ -4189,12 +4177,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 "x".join(
                     map(
                         str,
-                        tuple(
-                            V.graph.sizevars.optimization_hint_with_override(
-                                s,
-                                hint_override=hint_override,
-                            )
-                            for s in n.get_size()
+                        V.graph.sizevars.optimization_hints_with_override(
+                            n.get_size(),
+                            hint_override=hint_override,
                         ),
                     )
                 )
@@ -4301,19 +4286,13 @@ class AlgorithmSelectorCache(PersistentCache):
         # So we need call as_strided in the end to 'view' the tensor with the correct
         # sizes/strides
         return AlgorithmSelectorCache.generate_example_value(
-            tuple(
-                V.graph.sizevars.optimization_hint_with_override(
-                    size,
-                    hint_override=hint_override,
-                )
-                for size in node.get_size()
+            V.graph.sizevars.optimization_hints_with_override(
+                node.get_size(),
+                hint_override=hint_override,
             ),
-            tuple(
-                V.graph.sizevars.optimization_hint_with_override(
-                    stride,
-                    hint_override=hint_override,
-                )
-                for stride in node.get_stride()
+            V.graph.sizevars.optimization_hints_with_override(
+                node.get_stride(),
+                hint_override=hint_override,
             ),
             node.get_device(),
             node.get_dtype(),
@@ -4321,12 +4300,9 @@ class AlgorithmSelectorCache(PersistentCache):
                 node.layout.offset,
                 hint_override=hint_override,
             ),
-            tuple(
-                V.graph.sizevars.optimization_hint_with_override(
-                    size,
-                    hint_override=hint_override,
-                )
-                for size in V.graph.get_allocation_size(node)
+            V.graph.sizevars.optimization_hints_with_override(
+                V.graph.get_allocation_size(node),
+                hint_override=hint_override,
             ),
         )
 

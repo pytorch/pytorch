@@ -637,17 +637,22 @@ class SizeVarAllocator:
         expr: Union[Expr, int],
         hint_override: Optional[int],
     ) -> int:
-        """
-        Special function that computes the optimization hint for dynamic dispatch
-        use cases where sometimes we want the function to return hint_override
-        instead of the actual hint.
-        Namely, if expr simplifies to a static int/sympy.Integer, returns that
-        value (hint_override is ignored for static shapes).
-
-        If expr is dynamic:
-          - Returns hint_override if it's not None
-          - Otherwise returns atomically_apply_size_hint with
-          fallback=config.unbacked_symint_fallback
+        r"""Return a concrete integer hint for an expression, with optional override.
+        This is used in dynamic dispatch scenarios where callers may want to
+        provide a specific hint value rather than computing one from the expression.
+        The resolution order is:
+        1. If ``expr`` simplifies to a static integer, return that value
+           (``hint_override`` is ignored for static shapes).
+        2. If ``expr`` is dynamic and ``hint_override`` is not ``None``,
+           return ``hint_override``.
+        3. Otherwise, compute a hint via :meth:`atomically_apply_size_hint`
+           with ``fallback=config.unbacked_symint_fallback``.
+        Args:
+            expr (Expr or int): The expression to get a hint for.
+            hint_override (int, optional): If provided and ``expr`` is dynamic,
+                this value is returned instead of computing a hint.
+        Returns:
+            int: A concrete integer hint for the expression.
         """
         simplified = self.simplify(expr)
         if isinstance(simplified, int):
@@ -659,6 +664,19 @@ class SizeVarAllocator:
             return hint_override
         return self.atomically_apply_size_hint(
             expr, fallback=config.unbacked_symint_fallback
+        )
+
+    def optimization_hints_with_override(
+        self,
+        exprs: Iterable[Union[Expr, int]],
+        hint_override: Optional[int],
+    ) -> tuple[int, ...]:
+        """
+        Like optimization_hint_with_override but for a sequence of expressions.
+        Returns a tuple of concrete integer hints.
+        """
+        return tuple(
+            self.optimization_hint_with_override(e, hint_override) for e in exprs
         )
 
     def size_hints(
