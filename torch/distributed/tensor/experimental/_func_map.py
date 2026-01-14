@@ -233,6 +233,9 @@ def _local_map_wrapped(
     # we assume every DTensor object is placed on the same device mesh
     flat_local_args: list = []
     seen_dtensor_arg = False
+    # track modules that were modified so we can restore them later
+    modules_to_restore = []
+
     for idx, arg in enumerate(flat_args):
         if isinstance(arg, DTensor):
             # TODO: the current code doesn't consider the uneven sharding case
@@ -297,11 +300,17 @@ def _local_map_wrapped(
                     in_grad_placements[idx] if in_grad_placements is not None else None
                 )
 
+                original_params = {}
+                for name, param in arg.named_parameters(recurse=False):
+                    if isinstance(param, DTensor):
+                        original_params[name] = param
+
                 # convert DTensor parameters to local tensors
-                # note: this modifies the module in-place
+                # note: this modifies the module in-place, but we restore it later
                 local_module = _convert_module_dtensor_to_local(
                     arg, spec, redistribute_inputs, grad_spec
                 )
+                modules_to_restore.append((arg, original_params))
                 flat_local_args.append(local_module)
             else:
                 if in_placements is not None:
@@ -325,7 +334,13 @@ def _local_map_wrapped(
     # pyrefly: ignore [bad-argument-type]
     local_args = pytree.tree_unflatten(flat_local_args, args_spec)
 
-    out = func(*local_args, **kwargs)
+    try:
+        out = func(*local_args, **kwargs)
+    finally:
+        # restore the original DTensor parameters for all modified modules
+        for module, original_params in modules_to_restore:
+            for name, param in original_params.items():
+                module._parameters[name] = param
 
     if seen_dtensor_arg:
         # process output to be DTensor if we've seen DTensor inputs
