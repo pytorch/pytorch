@@ -710,6 +710,20 @@ class OverlapScheduler:
                 world_size,
                 "fx_collectives_node_runtime_estimation",
             )
+        else:
+            # No benchmarking - log analytical estimations for all collectives
+            from torch._inductor.fx_passes.node_runtime_estimation import (
+                _log_collective_benchmarks,
+            )
+
+            all_collective_nodes = [
+                info.start_node for info in self.collective_info.values()
+            ]
+            if all_collective_nodes:
+                _log_collective_benchmarks(
+                    all_collective_nodes,
+                    artifact_name="fx_collectives_analytical_estimation",
+                )
 
         log.info("Overlap scheduling: Runtime estimations aligned")
 
