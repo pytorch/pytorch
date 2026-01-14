@@ -7,7 +7,6 @@ import tempfile
 import unittest
 
 import numpy
-
 import torch
 from torch.serialization import safe_globals
 from torch.testing._internal.common_utils import (
