@@ -258,7 +258,7 @@ __device__ inline void cmtdStore(void* address, T value) {
 }
 #endif
 
-#if (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__))
+#if (defined(__gfx942__) || defined(__gfx950__))
 // This function implements warp-level opportunistic fastatomics
 // To reduce contention on an atomicAdd, this replaces per-thread atomicAdd with a per-warp atomicAdd.
 // We identify all the threads within a warp that will perform an atomicAdd on the same destination
