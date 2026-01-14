@@ -274,9 +274,10 @@ __device__ __forceinline__ void opportunistic_fastAtomicAdd(
     index_t index,
     const index_t numel,
     scalar_t value) {
+#ifdef USE_ROCM
   if(!(__builtin_amdgcn_processor_is("gfx942") || __builtin_amdgcn_processor_is("gfx950")))
     return;
-
+#endif
     scalar_t* dst = self_ptr + index;
 
     //pack coalesced bf16 and fp16

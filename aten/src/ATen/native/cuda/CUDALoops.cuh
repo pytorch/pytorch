@@ -243,25 +243,25 @@ __global__ void vectorized_elementwise_kernel(int N, func_t f, array_t data) {
     auto storer = memory::StoreWithoutCast();
     if(__builtin_amdgcn_processor_is("gfx942")) {
         auto policy =
-	  memory::policies::unroll<
-	    array_t,
-	    decltype(input_calc),
-	    decltype(output_calc),
-	    memory::LoadWithoutCast,
-	    memory::StoreWithoutCast,
-	    tws_gfx942>(
-			data, remaining, input_calc, output_calc, loader, storer);
+      memory::policies::unroll<
+        array_t,
+        decltype(input_calc),
+        decltype(output_calc),
+        memory::LoadWithoutCast,
+        memory::StoreWithoutCast,
+        tws_gfx942>(
+            data, remaining, input_calc, output_calc, loader, storer);
         elementwise_kernel_helper(f, policy);
       } else {
         auto policy =
-	  memory::policies::unroll<
-	    array_t,
-	    decltype(input_calc),
-	    decltype(output_calc),
-	    memory::LoadWithoutCast,
-	    memory::StoreWithoutCast,
-	    tws>(
-		 data, remaining, input_calc, output_calc, loader, storer);
+      memory::policies::unroll<
+        array_t,
+        decltype(input_calc),
+        decltype(output_calc),
+        memory::LoadWithoutCast,
+        memory::StoreWithoutCast,
+        tws>(
+         data, remaining, input_calc, output_calc, loader, storer);
         elementwise_kernel_helper(f, policy);
      }
   } else { // if this block has a full `block_work_size` data to handle, use
