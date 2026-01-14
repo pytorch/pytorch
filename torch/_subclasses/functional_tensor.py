@@ -109,7 +109,8 @@ class FunctionalTensor(torch.Tensor):
     _inference_mode_base: Optional[FunctionalTensor] = None
 
     def __new__(cls, elem: torch.Tensor, mode: FunctionalTensorMode) -> Self:
-        assert torch._is_functional_tensor(elem)
+        if not torch._is_functional_tensor(elem):
+            raise AssertionError("elem must be a functional tensor")
 
         # In general, we'd like our functional tensor subclass to only be in charge of functionalization,
         # and defer to the inner subclass for all other functionality.
@@ -170,7 +171,8 @@ class FunctionalTensor(torch.Tensor):
                 out._inference_mode_base = mode._storage_to_base[
                     out.elem.untyped_storage()
                 ]
-                assert out._inference_mode_base is not None
+                if out._inference_mode_base is None:
+                    raise AssertionError("out._inference_mode_base must not be None")
         return out
 
     def __torch_dispatch__(  # type: ignore[override]
@@ -200,14 +202,17 @@ class FunctionalTensor(torch.Tensor):
             # All metadata accesses should be plumbed to the inner tensor, that way we don't have to worry
             # about the problem of keeping metadata in sync between the wrapper and inner tensor.
             # This also alleviates us from having to manually handle metadata mutations on the wrapper.
-            assert len(kwargs) == 0
+            if len(kwargs) != 0:
+                raise AssertionError("kwargs must be empty for metadata functions")
             if func in [
                 torch.ops.aten.is_strides_like_format.default,
                 torch.ops.aten.is_contiguous.memory_format,
             ]:
-                assert len(args) == 2 and isinstance(args[0], FunctionalTensor)
+                if len(args) != 2 or not isinstance(args[0], FunctionalTensor):
+                    raise AssertionError("Expected 2 args with FunctionalTensor first")
                 return func(torch._from_functional_tensor(args[0].elem), args[1])
-            assert len(args) == 1 and isinstance(args[0], FunctionalTensor)
+            if len(args) != 1 or not isinstance(args[0], FunctionalTensor):
+                raise AssertionError("Expected 1 arg with FunctionalTensor")
 
             return func(torch._from_functional_tensor(args[0].elem))
         # Originally I tried to implement my subclass without giving it a torch_dispatch, but I gave up:
@@ -228,7 +233,8 @@ class FunctionalTensor(torch.Tensor):
     def to_functional(x: torch.Tensor) -> FunctionalTensor:
         # We will do the wrapping for the user.
 
-        assert not torch._is_functional_tensor(x)
+        if torch._is_functional_tensor(x):
+            raise AssertionError("x must not already be a functional tensor")
         # The only autograd metadata we care about on the FunctionalTensor is:
         # - requires_grad (so autograd runs)
         # - is_leaf (so that mutations on graph inputs that are not leaves are allowed by the autograd engine)
@@ -241,7 +247,8 @@ class FunctionalTensor(torch.Tensor):
         # FunctionalTensor.__torch_dispatch__
 
         functional_mode = _detect_infra_mode(torch._C._TorchDispatchModeKey.FUNCTIONAL)
-        assert functional_mode is not None
+        if functional_mode is None:
+            raise AssertionError("functional_mode must not be None")
 
         with functional_mode:
             torch._mirror_autograd_meta_to(x, x_functional)  # type: ignore[attr-defined]
@@ -476,7 +483,8 @@ class FunctionalTensorMode(TorchDispatchMode):
             # Only wrap our outputs in subclasses if the inner functionalization call
             # also wrapped outputs into FunctionalTensorWrappers.
             # When can this happen? e.g. `torch.div(2, 2)`
-            assert not isinstance(x, FunctionalTensor)
+            if isinstance(x, FunctionalTensor):
+                raise AssertionError("x must not be a FunctionalTensor in wrap()")
             if isinstance(x, torch.Tensor) and torch._is_functional_tensor(x):
                 return FunctionalTensor(x, self)
             return x
@@ -511,9 +519,12 @@ class FunctionalTensorMode(TorchDispatchMode):
         from torch._higher_order_ops.effects import handle_effects, has_effects
 
         if has_effects(func):
-            assert not torch._C._dispatch_has_kernel_for_dispatch_key(
+            if torch._C._dispatch_has_kernel_for_dispatch_key(
                 func.name(), torch._C.DispatchKey.Functionalize
-            )
+            ):
+                raise AssertionError(
+                    f"func {func.name()} with effects should not have a kernel for Functionalize dispatch key"
+                )
             return handle_effects(
                 self._allow_token_discovery, self._tokens, func, args, kwargs
             )
@@ -531,7 +542,10 @@ class FunctionalTensorMode(TorchDispatchMode):
         is_excluded = torch._C._dispatch_tls_is_dispatch_key_excluded(
             torch._C.DispatchKey.Functionalize
         )
-        assert is_excluded or not is_included
+        if not is_excluded and is_included:
+            raise AssertionError(
+                "Functionalization should not already be enabled above this mode"
+            )
         include_to_set = (
             torch._C._dispatch_tls_local_include_set()
             | torch._C.DispatchKeySet(torch._C.DispatchKey.Functionalize)
@@ -625,7 +639,10 @@ class FunctionalTensorMode(TorchDispatchMode):
         is_excluded = torch._C._dispatch_tls_is_dispatch_key_excluded(
             torch._C.DispatchKey.Functionalize
         )
-        assert is_excluded or not is_included
+        if not is_excluded and is_included:
+            raise AssertionError(
+                "Functionalization should not already be enabled above this mode after dispatch"
+            )
 
         if (
             # If no outputs are our functional subclass, then don't try to fix up aliasing
@@ -682,9 +699,12 @@ def dispatch_functionalize(
 
     def from_fun(t: object) -> object:
         if not isinstance(t, FunctionalTensor):
-            # quick sanity assert
+            # quick sanity check
             if isinstance(t, torch.Tensor):
-                assert not torch._is_functional_tensor(t)
+                if torch._is_functional_tensor(t):
+                    raise AssertionError(
+                        "Non-FunctionalTensor torch.Tensor should not be a functional tensor"
+                    )
             return t
         torch._sync(t)
         return torch._from_functional_tensor(t.elem)
@@ -771,25 +791,38 @@ class PythonFunctionalizeAPI(BaseFunctionalizeAPI):
         return contextlib.nullcontext()
 
     def replace(self, input_tensor: torch.Tensor, output_tensor: torch.Tensor) -> None:
-        assert isinstance(input_tensor, FunctionalTensor)
-        assert not isinstance(output_tensor, FunctionalTensor)
+        if not isinstance(input_tensor, FunctionalTensor):
+            raise AssertionError(
+                f"input_tensor must be a FunctionalTensor, got {type(input_tensor)}"
+            )
+        if isinstance(output_tensor, FunctionalTensor):
+            raise AssertionError("output_tensor must not be a FunctionalTensor")
         input_tensor.replace_(output_tensor)
 
     def commit_update(self, tensor: torch.Tensor) -> None:
-        assert isinstance(tensor, FunctionalTensor)
+        if not isinstance(tensor, FunctionalTensor):
+            raise AssertionError(
+                f"tensor must be a FunctionalTensor, got {type(tensor)}"
+            )
         tensor.commit_update()
 
     def sync(self, tensor: torch.Tensor) -> None:
-        assert isinstance(tensor, FunctionalTensor)
+        if not isinstance(tensor, FunctionalTensor):
+            raise AssertionError(
+                f"tensor must be a FunctionalTensor, got {type(tensor)}"
+            )
         tensor.sync()
 
     def mark_mutation_hidden_from_autograd(self, tensor: torch.Tensor) -> None:
-        assert isinstance(tensor, FunctionalTensor)
+        if not isinstance(tensor, FunctionalTensor):
+            raise AssertionError(
+                f"tensor must be a FunctionalTensor, got {type(tensor)}"
+            )
         tensor.mark_mutation_hidden_from_autograd()
 
 
 class CppFunctionalizeAPI(BaseFunctionalizeAPI):
-    def wrap_tensors(self, args: tuple[Any]) -> tuple[Any]:
+    def wrap_tensors(self, args: tuple[Any, ...]) -> tuple[Any, ...]:
         from torch._functorch.eager_transforms import _wrap_all_tensors_to_functional
 
         return _wrap_all_tensors_to_functional(args, level=0)
