@@ -354,23 +354,6 @@ keep-runtime-typing = true
 "torch/_dynamo/**" = ["S101"]
 "torch/_export/**" = ["S101"]
 "torch/_functorch/**" = ["S101"]
-"torch/_higher_order_ops/associative_scan.py" = ["S101"]
-"torch/_higher_order_ops/base_hop.py" = ["S101"]
-"torch/_higher_order_ops/cond.py" = ["S101"]
-"torch/_higher_order_ops/effects.py" = ["S101"]
-"torch/_higher_order_ops/executorch_call_delegate.py" = ["S101"]
-"torch/_higher_order_ops/flat_apply.py" = ["S101"]
-"torch/_higher_order_ops/flex_attention.py" = ["S101"]
-"torch/_higher_order_ops/invoke_subgraph.py" = ["S101"]
-"torch/_higher_order_ops/partitioner.py" = ["S101"]
-"torch/_higher_order_ops/print.py" = ["S101"]
-"torch/_higher_order_ops/run_const_graph.py" = ["S101"]
-"torch/_higher_order_ops/scan.py" = ["S101"]
-"torch/_higher_order_ops/schema.py" = ["S101"]
-"torch/_higher_order_ops/strict_mode.py" = ["S101"]
-"torch/_higher_order_ops/torchbind.py" = ["S101"]
-"torch/_higher_order_ops/while_loop.py" = ["S101"]
-"torch/_higher_order_ops/wrap.py" = ["S101"]
 "torch/_inductor/**" = ["S101"]
 "torch/distributed/**" = ["S101"]
 "torch/fx/**" = ["S101"]
@@ -383,8 +366,6 @@ keep-runtime-typing = true
 "functorch/**" = [
     "S101"
 ]
-"android/pytorch_android/generate_test_torchscripts.py" = ["S101"]
-".github/scripts/test_trymerge.py" = ["S101"]
 
 [tool.codespell]
 ignore-words = "tools/linter/dictionary.txt"
