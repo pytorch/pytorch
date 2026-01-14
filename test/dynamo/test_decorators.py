@@ -1047,6 +1047,149 @@ class DecoratorTests(PytreeRegisteringTestCase):
 
         self._test_nonstrict_trace_helper(WrapperModule, args_fn, loss_fn)
 
+    def test_nonstrict_trace_inplace_on_input(self):
+        """Test that in-place mutations on inputs are visible and gradients flow correctly."""
+
+        @torch._dynamo.nonstrict_trace
+        def mutate_input(x):
+            x.add_(1)
+            return x * 2
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return mutate_input(x)
+
+        def args_fn():
+            return (torch.randn(3, 3, requires_grad=True),)
+
+        def loss_fn(out):
+            return out.sum()
+
+        self._test_nonstrict_trace_helper(TestModule, args_fn, loss_fn)
+
+    def test_nonstrict_trace_aliased_inputs(self):
+        """Test aliased inputs with mutation after call and re-calling the function."""
+
+        @torch._dynamo.nonstrict_trace
+        def fn(a, b):
+            return a + b
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                t = self.linear(x)
+                # First call with aliased inputs
+                out1 = fn(t, t)
+                # Mutate t after the call
+                t.add_(1)
+                # Call again with mutated tensor
+                out2 = fn(t, t)
+                return out1 + out2
+
+        def args_fn():
+            return (torch.randn(3, 3, requires_grad=True),)
+
+        def loss_fn(out):
+            return out.sum()
+
+        self._test_nonstrict_trace_helper(TestModule, args_fn, loss_fn)
+
+    def test_nonstrict_trace_implicit_input_no_grad(self):
+        """Test that implicit inputs (closures) are treated as constants with no gradient."""
+
+        # Captured tensor - will be treated as constant
+        captured_tensor = torch.randn(3, 3, requires_grad=True)
+
+        @torch._dynamo.nonstrict_trace
+        def fn_with_closure(x):
+            # captured_tensor is an implicit input
+            return x + captured_tensor
+
+        class TestModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                x = self.linear(x)
+                return fn_with_closure(x)
+
+        mod = TestModule()
+        x = torch.randn(3, 3, requires_grad=True)
+
+        # Compile and run
+        opt_mod = torch.compile(mod, backend="aot_eager", fullgraph=True)
+        out = opt_mod(x)
+        out.sum().backward()
+
+        # Verify input x got gradients
+        self.assertIsNotNone(x.grad)
+
+        # Verify captured_tensor did NOT get gradients (treated as constant)
+        self.assertIsNone(captured_tensor.grad)
+
+    def test_nonstrict_trace_primitive_specialization_per_call_site(self):
+        """Test that primitive values are specialized per call site."""
+
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x, n):
+            torch._dynamo.graph_break()
+            return x + n
+
+        def fn(x):
+            # Two different call sites with different primitive values
+            y1 = trace_me(x, 10)  # call site 1: n=10
+            y2 = trace_me(x, 20)  # call site 2: n=20
+            return y1 + y2
+
+        x = torch.randn(5)
+        opt_fn = torch.compile(fn, fullgraph=True, backend="aot_eager")
+
+        ref = fn(x)
+        res = opt_fn(x)
+        self.assertEqual(ref, res)
+
+    def test_nonstrict_trace_primitive_change_causes_recompile(self):
+        """Test that changing primitive at the same call site causes recompilation."""
+
+        @torch._dynamo.nonstrict_trace
+        def trace_me(x, n):
+            torch._dynamo.graph_break()
+            return x + n
+
+        def fn(x, n):
+            return trace_me(x, n)
+
+        x = torch.randn(5)
+        cnts = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+        opt_fn = torch.compile(fn, fullgraph=True, backend=cnts)
+
+        # First call with n=10
+        ref1 = fn(x, 10)
+        res1 = opt_fn(x, 10)
+        self.assertEqual(ref1, res1)
+        self.assertEqual(cnts.frame_count, 1)
+
+        # Second call with same n=10 - no recompile
+        ref2 = fn(x, 10)
+        res2 = opt_fn(x, 10)
+        self.assertEqual(ref2, res2)
+        self.assertEqual(cnts.frame_count, 1)
+
+        # Third call with different n=20 - should recompile
+        ref3 = fn(x, 20)
+        res3 = opt_fn(x, 20)
+        self.assertEqual(ref3, res3)
+        self.assertEqual(cnts.frame_count, 2)
+
     def test_graph_break(self):
         cnts = torch._dynamo.testing.CompileCounter()
 

@@ -198,23 +198,73 @@ def allow_in_graph(fn):  # type: ignore[no-untyped-def]
 
 
 def nonstrict_trace(traceable_fn: Callable[_P, _R]) -> Callable[_P, _R]:
-    # Like `allow_in_graph`, but with the following enhancements/differences:
-    #
-    # 1. Supports user-defined class as inputs, as long as the class has been
-    #    registered with pytree.
-    # 2. Reads to global/captured tensors forces the underlying graph to treat
-    #    those tensors as constant, and we _assume_ they will not be updated. This
-    #    is similar to FX tracing.
-    # 3. In the resulting Dynamo graph, the call to a `nonstrict_trace`-ed function
-    #    will be represented as a call to `torch._higher_order_ops.flat_apply`,
-    #    which takes in the `nonstrict_trace`-ed function and pytree-flattened
-    #    inputs.
-    # 4. Only the returned function is traceable, and the original function will
-    #    not be. Moreover, `nonstrict_trace` can be used inside a `torch.compile`
-    #    region.
-    #
-    # NOTE: like `allow_in_graph`, aliasing information is neither preserved
-    # between inputs themselves, nor between inputs and outputs.
+    """
+    Decorator to mark a function as nonstrict-traceable for dynamo.
+
+    A nonstrict-traced function appears as an opaque call in the dynamo graph.
+    Dynamo does not trace into the function body (hence the "nonstrict"), but
+    aot_autograd will trace into it.
+
+    This is similar to ``allow_in_graph`` but with enhanced support for:
+    - User-defined classes as inputs (must be registered with pytree)
+    - ``nn.Module`` as input arguments (parameters and buffers are tracked for autograd)
+    - Global/captured tensors treated as constants (assumed not updated during execution)
+
+    Note:
+        - Training is supported: you can call ``.backward()`` on outputs and gradients
+          will flow through the nonstrict-traced function.
+
+        - ``nn.Module`` can be passed as an input argument. The module's parameters
+          and buffers will be properly tracked for autograd.
+
+        - With ``backend="eager"``, the original Python function runs directly.
+          With ``backend="aot_eager"``, the graph traced by aot_autograd runs.
+          With ``backend="inductor"``, the traced graph is compiled.
+
+    Dangerous patterns (may cause silent incorrectness):
+        - Side effects: Don't rely on side effects for correctness. The function
+          should not depend on variables mutated by other code inside the compiled
+          function, and code after the call should not depend on mutations made by it.
+
+        - Implicit inputs (closures/globals): Tensors captured from enclosing scopes
+          are treated as constants. Gradients will NOT flow back to them. Pass tensors
+          as explicit arguments if gradients are needed.
+
+    Restrictions:
+        - Both inputs and outputs must use pytree-compatible types. User-defined classes
+          must be registered via ``register_pytree_node``, ``register_dataclass``, or
+          ``register_constant``. Tensors, Python primitives (int, float, bool, str),
+          symbolic types (SymInt, SymFloat, SymBool), and built-in containers (list,
+          tuple, dict) are already handled by default. Primitive values and container
+          structure are specialized per call site: different call sites can use different
+          values, but each call site expects the same primitives and structure on every
+          execution.
+
+    Example::
+
+        @torch._dynamo.nonstrict_trace
+        def traced_forward(model, x):
+            # Graph breaks are allowed inside during dynamo tracing
+            torch._dynamo.graph_break()
+            return model(x) + x
+
+
+        class MyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.inner = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                return traced_forward(self.inner, x)
+
+
+        # Compile and run
+        model = MyModule()
+        opt_model = torch.compile(model, backend="aot_eager")
+        out = opt_model(torch.randn(10, 10))
+        out.sum().backward()  # Gradients flow through traced_forward
+
+    """
     assert callable(traceable_fn), "nonstrict_trace expects a callable"
 
     # Check if the function is already marked as leaf_function
