@@ -1060,6 +1060,18 @@ class CUTLASSGemmTemplate(CUTLASSTemplate, ABC):
             return "cutlass::gemm::GemmUniversalMode::kGemm"
 
     def _dynamic_cluster_block(self, op: "cutlass_gemm_op.GemmOperation") -> str:  # type: ignore[name-defined]  # noqa: F821
+        """
+        Temporary workaround for CUTLASS GEMMs that encode cluster shape as runtime values.
+
+        For dynamic-cluster kernels, CUTLASS expects `KernelHardwareInfo.cluster_shape` and
+        `KernelHardwareInfo.cluster_shape_fallback` to be populated with valid runtime values.
+        Today we provide a single global preferred/fallback pair (configurable via env),
+        which is sufficient for correctness but is not performance-optimal.
+
+        Note: This is intentionally minimal because this code path is transitional. Cluster-shape
+        selection should ultimately be handled in the CuTe/DSL implementation rather than
+        investing heavily in the legacy CUTLASS template pipeline.
+        """
         shape = getattr(getattr(op, "tile_description", None), "cluster_shape", None)
         if not shape or len(shape) < 2 or (shape[0] > 0 and shape[1] > 0):
             return ""
