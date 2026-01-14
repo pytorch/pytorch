@@ -126,6 +126,67 @@ class DistMatrixOpsTest(DTensorTestBase):
         self.assertIsInstance(dist_res.placements[0], Partial)
         self.assertEqual(dist_res.full_tensor(), local_res_2d)
 
+        # Case 4: All-Replicate case
+        mat1_r = distribute_tensor(mat1_tensor, device_mesh, [Replicate()])
+        mat2_r = distribute_tensor(mat2_tensor, device_mesh, [Replicate()])
+        bias_1d_r = distribute_tensor(bias_1d, device_mesh, [Replicate()])
+        bias_2d_r = distribute_tensor(bias_2d, device_mesh, [Replicate()])
+
+        dist_res = torch.addmm(bias_1d_r, mat1_r, mat2_r)
+        self.assertEqual(dist_res.full_tensor(), local_res_1d)
+        self.assertEqual(dist_res.placements[0], Replicate())
+
+        dist_res = torch.addmm(bias_2d_r, mat1_r, mat2_r)
+        self.assertEqual(dist_res.full_tensor(), local_res_2d)
+        self.assertEqual(dist_res.placements[0], Replicate())
+
+        # Case 5: Scalar bias - broadcasts on all dims
+        bias_scalar = torch.randn(())
+        local_res_scalar = torch.addmm(bias_scalar, mat1_tensor, mat2_tensor)
+
+        # Scalar with all strategies - should always be Replicate
+        bias_scalar_r = distribute_tensor(bias_scalar, device_mesh, [Replicate()])
+
+        dist_res = torch.addmm(bias_scalar_r, mat1_s0, mat2_r)
+        self.assertEqual(dist_res.full_tensor(), local_res_scalar)
+        self.assertEqual(dist_res.placements[0], Shard(0))
+
+        dist_res = torch.addmm(bias_scalar_r, mat1_r, mat2_s1)
+        self.assertEqual(dist_res.full_tensor(), local_res_scalar)
+        self.assertEqual(dist_res.placements[0], Shard(1))
+
+        # Case 6: (1, N) bias - broadcasts on M dim, similar to 1D
+        bias_1n = torch.randn(1, N)
+        local_res_1n = torch.addmm(bias_1n, mat1_tensor, mat2_tensor)
+
+        # With LHS sharding: output=Shard(0), bias broadcasts on M so bias=Replicate
+        bias_1n_r = distribute_tensor(bias_1n, device_mesh, [Replicate()])
+        dist_res = torch.addmm(bias_1n_r, mat1_s0, mat2_r)
+        self.assertEqual(dist_res.full_tensor(), local_res_1n)
+        self.assertEqual(dist_res.placements[0], Shard(0))
+
+        # With RHS sharding: output=Shard(1), bias dim 1 corresponds to N
+        bias_1n_s1 = distribute_tensor(bias_1n, device_mesh, [Shard(1)])
+        dist_res = torch.addmm(bias_1n_s1, mat1_r, mat2_s1)
+        self.assertEqual(dist_res.full_tensor(), local_res_1n)
+        self.assertEqual(dist_res.placements[0], Shard(1))
+
+        # Case 7: (M, 1) bias - broadcasts on N dim
+        bias_m1 = torch.randn(M, 1)
+        local_res_m1 = torch.addmm(bias_m1, mat1_tensor, mat2_tensor)
+
+        # With LHS sharding: output=Shard(0), bias dim 0 corresponds to M
+        bias_m1_s0 = distribute_tensor(bias_m1, device_mesh, [Shard(0)])
+        dist_res = torch.addmm(bias_m1_s0, mat1_s0, mat2_r)
+        self.assertEqual(dist_res.full_tensor(), local_res_m1)
+        self.assertEqual(dist_res.placements[0], Shard(0))
+
+        # With RHS sharding: output=Shard(1), bias broadcasts on N so bias=Replicate
+        bias_m1_r = distribute_tensor(bias_m1, device_mesh, [Replicate()])
+        dist_res = torch.addmm(bias_m1_r, mat1_r, mat2_s1)
+        self.assertEqual(dist_res.full_tensor(), local_res_m1)
+        self.assertEqual(dist_res.placements[0], Shard(1))
+
     @with_comms
     def test_addmm_empty_operand(self):
         device_mesh = self.build_device_mesh()
