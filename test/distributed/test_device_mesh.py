@@ -1767,42 +1767,42 @@ class CuTeLayoutTest(TestCase):
         """Test the remap_to_tensor method for various scenarios."""
         # Test 1: Consecutive ranks, full world - should return logical groups directly
         original_mesh = torch.tensor([0, 1, 2, 3], dtype=torch.int)
-        layout1 = _MeshLayout([_FlatLayout((2, 2), (2, 1))])  # row-major 2x2
+        layout1 = _MeshLayout.from_sizes_strides((2, 2), (2, 1))  # row-major 2x2
         result1 = layout1.remap_to_tensor(original_mesh)
         expected1 = torch.tensor([[[0, 1], [2, 3]]], dtype=torch.int)
         self.assertEqual(result1, expected1)
 
         # Test 2: Non-consecutive ranks - should map to actual ranks
         original_mesh = torch.tensor([10, 20, 30, 40], dtype=torch.int)
-        layout2 = _MeshLayout([_FlatLayout((2, 2), (2, 1))])
+        layout2 = _MeshLayout.from_sizes_strides((2, 2), (2, 1))
         result2 = layout2.remap_to_tensor(original_mesh)
         expected2 = torch.tensor([[[10, 20], [30, 40]]], dtype=torch.int)
         self.assertEqual(result2, expected2)
 
         # Test 4: 1D layout with consecutive ranks
         original_mesh = torch.tensor([0, 1, 2, 3], dtype=torch.int)
-        layout4 = _MeshLayout([_FlatLayout((4,), (1,))])
+        layout4 = _MeshLayout.from_sizes_strides((4,), (1,))
         result4 = layout4.remap_to_tensor(original_mesh)
         expected4 = torch.tensor([[0, 1, 2, 3]], dtype=torch.int)
         self.assertEqual(result4, expected4)
 
         # Test 5: Complex strided layout with non-consecutive ranks
         original_mesh = torch.tensor([5, 10, 15, 20], dtype=torch.int)
-        layout5 = _MeshLayout([_FlatLayout((2, 2), (2, 1))])
+        layout5 = _MeshLayout.from_sizes_strides((2, 2), (2, 1))
         result5 = layout5.remap_to_tensor(original_mesh)
         expected5 = torch.tensor([[[5, 10], [15, 20]]], dtype=torch.int)
         self.assertEqual(result5, expected5)
 
         # Test 6: Tensor Cute representation of a 2D mesh
         original_mesh = torch.tensor([0, 2, 1, 3], dtype=torch.int)
-        layout6 = _MeshLayout([_FlatLayout((2, 2), (1, 2))])  # column-major style
+        layout6 = _MeshLayout.from_sizes_strides((2, 2), (1, 2))  # column-major style
         result6 = layout6.remap_to_tensor(original_mesh)
         expected6 = torch.tensor([[[0, 1], [2, 3]]], dtype=torch.int)
         self.assertEqual(result6, expected6)
 
         # Test 7: Layout with different stride pattern
         original_mesh = torch.tensor([0, 2, 1, 4], dtype=torch.int)
-        layout7 = _MeshLayout([_FlatLayout((2, 2), (1, 2))])  # column-major style
+        layout7 = _MeshLayout.from_sizes_strides((2, 2), (1, 2))  # column-major style
         result7 = layout7.remap_to_tensor(original_mesh)
         expected7 = torch.tensor([[[0, 1], [2, 4]]], dtype=torch.int)
         self.assertEqual(result7, expected7)
