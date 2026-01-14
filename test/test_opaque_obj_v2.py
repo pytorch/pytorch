@@ -1707,15 +1707,20 @@ def forward(self, primals_2, tangents_1):
         expected = x * float(Color.GREEN.value)
         self.assertTrue(torch.allclose(result, expected))
 
+        def is_called_from_pytest():
+            import os
+
+            return "PYTEST_VERSION" in os.environ
+
         graph_code = captured["graph"].code.strip()
         self.assertExpectedInline(
             graph_code,
-            """\
-def forward(self, L_x_ : torch.Tensor, G_Color_GREEN : test_opaque_obj_v2_Color):
+            f"""\
+def forward(self, L_x_ : torch.Tensor, G_Color_GREEN : {"test_opaque_obj_v2" if is_called_from_pytest() else "__main__"}_Color):
     l_x_ = L_x_
     g_color_green = G_Color_GREEN
     apply_color_scale = torch.ops._TestOpaqueObject.apply_color_scale(g_color_green, l_x_);  g_color_green = l_x_ = None
-    return (apply_color_scale,)""",
+    return (apply_color_scale,)""",  # noqa: B950
         )
 
     def test_opaque_class_literal_attribute_inlined(self):
