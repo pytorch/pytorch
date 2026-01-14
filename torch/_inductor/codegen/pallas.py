@@ -878,7 +878,8 @@ class PallasKernel(SIMDKernel):
     - Use async_compile.pallas path to compile and load Python code.
 
     For GPU (Mosaic backend):
-    - Use masked loads/stores with power-of-2 block sizes to handle non-power-of-2 shapes
+    - Use TMA (Tensor Memory Accelerator) for automatic OOB masking
+    - Falls back to legacy padding approach for reductions, broadcasting, non-contiguous tensors
     """
 
     overrides = PallasKernelOverrides  # type: ignore[assignment]
@@ -889,11 +890,12 @@ class PallasKernel(SIMDKernel):
         # Determine device type once at initialization
         device = V.graph.get_current_device_or_throw()
         self.is_gpu = device.type == "cuda"
-        self.use_masked_ops: bool | None = None
-        # Enable warpgroup padding for GPU to handle non-aligned tensor sizes
-        # Mosaic GPU requires tensor sizes to be multiples of 128 (WARPGROUP_SIZE)
-        self.use_warpgroup_padding = self.is_gpu
-        self.tensor_masks = {}  # Map tensor name to mask variable name
+        # Use TMA (Tensor Memory Accelerator) for GPU to handle non-aligned tensor sizes
+        # TMA automatically masks OOB accesses, eliminating the need for explicit
+        # padding to multiples of 128. Uses lax.fori_loop with direct TMA primitives.
+        self.use_emit_pipeline = self.is_gpu  # Enable TMA approach for GPU
+        # Legacy: warpgroup padding (enabled when TMA approach is disabled)
+        self.use_warpgroup_padding = self.is_gpu and not self.use_emit_pipeline
         # Track which output param each store uses: list of (out_ptr_name, store_line)
         self.store_with_output: list[tuple[str, str]] = []
         # Track load index expressions for argmax/argmin axis detection
@@ -1271,100 +1273,6 @@ class PallasKernel(SIMDKernel):
                     needs_flatten = True
             return index_str, needs_flatten
 
-    def _determine_masked_ops_for_kernel(self) -> bool:
-        """
-        Determine if we should use masked ops for this entire kernel.
-
-        Masked ops with pl.ds(block_size) flatten tensors to 1D, which works when:
-        1. We're on GPU (CUDA backend uses Mosaic which requires power-of-2 sizes)
-        2. All tensors are already 1D (so flattening doesn't change dimensionality)
-        3. All tensors have the same size (so broadcasting works correctly)
-
-        With per-tensor masks, each tensor gets its own mask based on its size.
-
-        This should be called once in codegen_kernel() before generating the kernel body.
-        """
-        # Mosaic GPU backend doesn't support jnp.arange inside kernels,
-        # so we can't use masked ops which require creating mask arrays.
-        # CPU doesn't need masked ops either.
-        # TODO: Re-enable masked ops when Mosaic supports the required operations
-        return False
-
-        # Get all buffer sizes
-        # We need ALL buffers - inputs, outputs, and intermediates
-        all_buffer_names = OrderedSet()
-
-        # Get input buffers from args
-        all_buffer_names.update(self.args.input_buffers.keys())
-        # Get output buffers from args
-        all_buffer_names.update(self.args.output_buffers.keys())
-        # Also get any intermediate buffers from the graph
-        all_buffer_names.update(V.graph.name_to_buffer.keys())
-
-        # Get shapes and sizes for all buffers
-        # Use try/except to handle special layouts (MultiOutputLayout, NoneLayout, etc.)
-        # that don't support get_size()
-        buf_info = []
-        for buf_name in all_buffer_names:
-            try:
-                buf = V.graph.get_buffer(buf_name)
-                if buf is None:
-                    continue
-                size = buf.get_size()
-                shape = tuple(self._safe_int(s) or s for s in size)
-                # Calculate flattened size
-                total_size = 1
-                for s in size:
-                    int_s = self._safe_int(s)
-                    total_size *= int_s if int_s is not None else s
-                buf_info.append((buf_name, shape, total_size))
-            except Exception:
-                pass
-
-        # Use masked ops when:
-        # 1. We're on GPU (Mosaic requires power-of-2 sizes)
-        # 2. All buffers have the same flattened size (for correct broadcasting)
-        # 3. Any dimension has non-power-of-2 size
-        #
-        # For multi-D tensors, we flatten to 1D and use masked loads/stores.
-        # The mask handles out-of-bounds elements when padding to power-of-2.
-        if buf_info and len(buf_info) > 0:
-            # Check if all have the same flattened size
-            first_size = buf_info[0][2]
-            all_same_size = all(size == first_size for _, _, size in buf_info)
-            if not all_same_size:
-                return False
-
-            # Check if any dimension is non-power-of-2
-            def is_power_of_2(n):
-                return n > 0 and (n & (n - 1)) == 0
-
-            has_non_pow2 = False
-            for _, shape, _ in buf_info:
-                for dim in shape:
-                    if isinstance(dim, int) and not is_power_of_2(dim):
-                        has_non_pow2 = True
-                        break
-                if has_non_pow2:
-                    break
-
-            # Use masked ops if any dimension is non-power-of-2
-            return has_non_pow2
-
-        return False
-
-    def _get_or_create_mask(self, buf_name: str) -> str:
-        """Get or create a unique mask variable for a buffer."""
-        if buf_name not in self.tensor_masks:
-            mask_var = f"mask_{buf_name}"
-            self.tensor_masks[buf_name] = mask_var
-        return self.tensor_masks[buf_name]
-
-    def _ensure_masked_ops_initialized(self) -> None:
-        """Initialize masked ops strategy on first load/store if not yet determined."""
-        if self.use_masked_ops is None:
-            self.use_masked_ops = self._determine_masked_ops_for_kernel()
-
     @staticmethod
     def _safe_int(val: Any) -> Optional[int]:
         """Convert value to int, returning None on failure."""
@@ -1394,6 +1302,69 @@ class PallasKernel(SIMDKernel):
                     return None
                 result *= numel
         return result
+
+    def _can_use_tma_approach(self) -> bool:
+        """
+        Check if TMA (Tensor Memory Accelerator) approach can be used.
+        TMA works for simple element-wise ops but not for:
+        - Reductions (need different accumulation patterns)
+          TODO: TMA supports float64 for loading but not for reductions
+        - Broadcasting (inputs have different shapes or output differs)
+        - Non-contiguous tensors (strided, transposed)
+        """
+        # Check for reductions
+        reduction_numel = self._compute_reduction_numel()
+        if reduction_numel is not None and reduction_numel > 1:
+            return False
+
+        # Check all input buffers for contiguity, dtype, and shape consistency
+        input_shapes: list[tuple] = []
+        for name in self.args.input_buffers:
+            buf_obj, buf_size, buf_numel, actual_strides, is_contiguous = (
+                self._get_buffer_info(name)
+            )
+            if not is_contiguous:
+                return False
+
+            # Check for unsupported dtypes
+            # TODO: TMA supports float64 for loading but current JAX Mosaic GPU
+            # implementation doesn't support it yet. Re-enable when JAX adds support.
+            buf_dtype = getattr(buf_obj, "get_dtype", lambda: None)()
+            if buf_dtype is not None:
+                import torch
+
+                if buf_dtype == torch.float64:
+                    return False
+
+            # Collect shape as tuple for comparison
+            shape_tuple = tuple(self._safe_int(s) for s in buf_size)
+            if None in shape_tuple:
+                return False  # Dynamic shapes not supported
+            input_shapes.append(shape_tuple)
+
+        # Check if all input shapes are identical (no broadcasting)
+        if input_shapes and len(OrderedSet(input_shapes)) > 1:
+            return False
+
+        # Check that output numel matches input numel (no broadcasting expansion)
+        if input_shapes:
+            input_numel = 1
+            for s in input_shapes[0]:
+                input_numel *= s
+
+            # Compute output numel from pointwise range trees (non-reduction)
+            output_numel = 1
+            for tree in self.range_trees:
+                if not tree.is_reduction:
+                    numel = self._safe_int(tree.numel)
+                    if numel is None:
+                        return False  # Dynamic shapes not supported
+                    output_numel *= numel
+
+            if output_numel != input_numel:
+                return False
+
+        return True
 
     def _get_buffer_info(self, name: str) -> tuple[Any, Any, Any, list, bool]:
         """Get buffer metadata (buf_obj, buf_size, buf_numel, actual_strides, is_contiguous)."""
@@ -1616,25 +1587,15 @@ class PallasKernel(SIMDKernel):
         index: sympy.Expr,
         index_str: str,
         needs_flatten: bool,
-        use_masked: bool,
     ) -> str:
         """
         Build the load expression based on indexing mode.
         """
-        if use_masked:
-            # GPU masked load: flatten tensor and apply per-tensor mask
-            mask_var = self._get_or_create_mask(name)
-            return f"pltriton.load({buf}.at[pl.ds(block_size)], mask={mask_var})"
-        elif needs_flatten:
+        if needs_flatten:
             # Flatten then index for non-contiguous access (gather operation)
-            if self.is_gpu:
-                # GPU: use pltriton.load with explicit offsets
-                return f"pltriton.load({buf}.at[{index_str}])"
-            else:
-                # CPU: use JAX array indexing
-                has_minmax = index.has(sympy.Min) or index.has(sympy.Max)
-                idx = f"({index_str}).astype(jnp.int64)" if has_minmax else index_str
-                return f"{buf}[...].flatten()[{idx}]"
+            has_minmax = index.has(sympy.Min) or index.has(sympy.Max)
+            idx = f"({index_str}).astype(jnp.int64)" if has_minmax else index_str
+            return f"{buf}[...].flatten()[{idx}]"
         else:
             # Direct indexing for contiguous access
             load_expr = f"{buf}[{index_str}]"
@@ -1933,20 +1894,12 @@ class PallasKernel(SIMDKernel):
         value: CSEVariable,
         index_str: str,
         needs_flatten: bool,
-        use_masked: bool,
         mode: Any = None,
     ) -> str:
         """
         Build the store expression based on indexing mode.
         mode can be None (set) or "atomic_add" (accumulate).
         """
-        if use_masked:
-            # GPU masked store: flatten tensor and apply per-tensor mask
-            mask_var = self._get_or_create_mask(name)
-            return (
-                f"pltriton.store({out}.at[pl.ds(block_size)], {value}, mask={mask_var})"
-            )
-
         if index_str == "...":
             # Full array store with shape matching
             needs_transpose = self._check_store_needs_transpose(name)
@@ -1955,13 +1908,10 @@ class PallasKernel(SIMDKernel):
         if needs_flatten:
             # Block variable indexing (e.g., im2col) - use flattened scatter
             scatter_op = "add" if mode == "atomic_add" else "set"
-            if self.is_gpu:
-                return f"pltriton.store({out}.at[{index_str}], jnp.asarray({value}))"
-            else:
-                return (
-                    f"{out}[...] = {out}[...].flatten().at[({index_str}).flatten()].{scatter_op}("
-                    f"jnp.asarray({value}).flatten()).reshape({out}.shape)"
-                )
+            return (
+                f"{out}[...] = {out}[...].flatten().at[({index_str}).flatten()].{scatter_op}("
+                f"jnp.asarray({value}).flatten()).reshape({out}.shape)"
+            )
 
         # Direct indexed assignment
         has_indirect = self._has_indirect_vars(index)
@@ -2081,8 +2031,6 @@ class PallasKernel(SIMDKernel):
         # Track the load index expression for argmax/argmin axis detection
         self.load_index_exprs[name] = index
 
-        self._ensure_masked_ops_initialized()
-
         # Get base index expression
         index_str, needs_flatten = self._get_index_expr(index)
 
@@ -2096,15 +2044,8 @@ class PallasKernel(SIMDKernel):
             name, index, index_str, needs_flatten
         )
 
-        # Determine if masked operations should be used
-        use_masked = (
-            index_str == "..." and not needs_flatten and self.use_masked_ops is True
-        )
-
         # Build the load expression
-        load_expr = self._build_load_expr(
-            buf, name, index, index_str, needs_flatten, use_masked
-        )
+        load_expr = self._build_load_expr(buf, name, index, index_str, needs_flatten)
 
         # Handle intermediate buffer squeezing for correct broadcasting
         if not needs_flatten and index_str == "...":
@@ -2328,8 +2269,6 @@ class PallasKernel(SIMDKernel):
         out = self.args.output(name)
         self.store_buffer_names.add(name)
 
-        self._ensure_masked_ops_initialized()
-
         # Check if this is a scalar output (reduction to scalar)
         buf = V.graph.get_buffer(name)
         is_scalar = buf is not None and len(buf.get_size()) == 0
@@ -2358,16 +2297,9 @@ class PallasKernel(SIMDKernel):
                     index, index_str, needs_flatten
                 )
 
-                # Determine if masked operations should be used
-                use_masked = (
-                    index_str == "..."
-                    and not needs_flatten
-                    and self.use_masked_ops is True
-                )
-
                 # Build the store expression
                 store_expr = self._build_store_expr(
-                    out, name, index, value, index_str, needs_flatten, use_masked, mode
+                    out, name, index, value, index_str, needs_flatten, mode
                 )
 
         self.stores.writeline(store_expr)
@@ -2701,8 +2633,8 @@ class PallasKernel(SIMDKernel):
                 )
         interpret_literal = "True" if interpret_is_cpu else "False"
 
-        # For GPU (Mosaic backend), import plgpu for masked loads/stores
-        # Import math for masked ops and symbolic expressions (e.g., math.floor, math.log2)
+        # For GPU (Mosaic backend), import plgpu for TMA operations
+        # Import math for symbolic expressions (e.g., math.floor, math.log2)
         imports = """
 import functools
 import math
@@ -2787,41 +2719,10 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
         # before generating the kernel signature.
         kernel_body = IndentedBuffer()
         with kernel_body.indent():
-            # For masked ops on GPU, generate per-tensor masks at the start
-            if self.use_masked_ops and self.tensor_masks:
-                # Create a mapping from buffer name to parameter name
-                buf_to_param = {}
-                for outer, inner in self.args.input_buffers.items():
-                    buf_to_param[outer] = inner if isinstance(inner, str) else outer
-                for outer, inner in self.args.output_buffers.items():
-                    buf_to_param[outer] = inner if isinstance(inner, str) else outer
-
-                # Generate a mask for each tensor that was accessed
-                for buf_name, mask_var in sorted(self.tensor_masks.items()):
-                    param_name = buf_to_param.get(buf_name, buf_name)
-                    # Find the corresponding parameter in kernel_params
-                    matching_param = None
-                    for p in kernel_params:
-                        # Check if this parameter corresponds to the buffer
-                        if param_name == p or buf_name in str(p):
-                            matching_param = p
-                            break
-
-                    if matching_param:
-                        # Calculate flattened size for this tensor
-                        kernel_body.writeline(f"# Mask for {buf_name}")
-                        kernel_body.writeline(
-                            f"{mask_var}_size = {matching_param}.size"
-                        )
-                        kernel_body.writeline(
-                            f"{mask_var} = jnp.arange(block_size) < {mask_var}_size"
-                        )
-
             # Generate iteration variables as jnp.arange arrays
             # These are used by index_expr operations like torch.arange
             # Skip on GPU - jnp.arange is not supported by Pallas Mosaic backend
-            # Skip on GPU with masked ops - iteration vars would create non-power-of-2 arrays
-            if self.range_tree_nodes and not self.use_masked_ops and not self.is_gpu:
+            if self.range_tree_nodes and not self.is_gpu:
                 kernel_body.writeline("# Define iteration variables as JAX arrays")
 
                 # Find reshape target: N-D shape whose numel matches an iteration
@@ -2992,12 +2893,7 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
         full_kernel_params = alias_params + kernel_params
 
         # Now emit the kernel function with the correct signature
-        # For GPU with masked ops, add block_size as keyword-only parameter
-        kernel_signature = (
-            f"def {kernel_name}_kernel({', '.join(full_kernel_params)}"
-            + (", *, block_size" if self.use_masked_ops else "")
-            + "):"
-        )
+        kernel_signature = f"def {kernel_name}_kernel({', '.join(full_kernel_params)}):"
         code.writeline(kernel_signature)
 
         with code.indent():
@@ -3046,30 +2942,6 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
             code.writeline("    for shape, dtype in zip(out_shapes, out_dtypes)")
             code.writeline(")")
 
-            # For masked ops, calculate block_size aligned to WARPGROUP_SIZE (128)
-            # Mosaic GPU runs with 128 threads (1 warpgroup), so data sizes should
-            # be at least 128 and aligned to 128 for efficient processing.
-            if self.use_masked_ops:
-                code.writeline(
-                    "# Calculate block_size aligned to warpgroup size (128) for Mosaic GPU"
-                )
-                code.writeline("# Find maximum flattened size across all tensors")
-                code.writeline("max_size = 0")
-                # Calculate size for all input tensors
-                for param in kernel_input_params:
-                    code.writeline(f"max_size = max(max_size, {param}.size)")
-                # Also consider output shapes
-                code.writeline("for shape in out_shapes:")
-                code.writeline(
-                    "    tensor_size = shape[0] if len(shape) == 1 else math.prod(shape)"
-                )
-                code.writeline("    max_size = max(max_size, tensor_size)")
-                # Align to WARPGROUP_SIZE (128) and ensure at least 128
-                code.writeline(
-                    "# Align to warpgroup size (128) for efficient GPU processing"
-                )
-                code.writeline("block_size = max(128, ((max_size + 127) // 128) * 128)")
-
             alias_pairs: list[tuple[int, int]] = []
             for out_idx, name in enumerate(output_params):
                 if name.startswith("out_ptr"):
@@ -3082,13 +2954,10 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                     alias_pairs.append((input_idx, out_idx))
             alias_map_literal = ", ".join(f"{i}: {o}" for (i, o) in alias_pairs)
 
-            # Wrap kernel with functools.partial to pass scalar arguments
-            # (size variables and block_size for masked ops)
+            # Wrap kernel with functools.partial to pass scalar arguments (size variables)
             partial_args = []
             for sv_param in size_var_params:
                 partial_args.append(f"{sv_param}={sv_param}")
-            if self.use_masked_ops:
-                partial_args.append("block_size=block_size")
 
             if partial_args:
                 kernel_arg = f"functools.partial({kernel_name}_kernel, {', '.join(partial_args)}),"
@@ -3096,7 +2965,179 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                 kernel_arg = f"{kernel_name}_kernel,"
 
             # Use plgpu.kernel for GPU (Mosaic), pl.pallas_call for CPU/TPU
-            if self.is_gpu:
+            # TMA approach requires: no reductions, all inputs contiguous, same sizes
+            use_tma = (
+                self.is_gpu and self.use_emit_pipeline and self._can_use_tma_approach()
+            )
+            if use_tma:
+                # Use lax.fori_loop with direct TMA for automatic OOB masking
+                # TMA (Tensor Memory Accelerator) automatically handles out-of-bounds
+                # accesses, eliminating the need for explicit padding to multiples of 128
+                code.writeline("# Use lax.fori_loop with TMA for automatic OOB masking")
+                code.writeline("from jax import lax")
+                code.writeline("_tile_size = 128  # Warpgroup size")
+                code.writeline("_orig_out_shapes = out_shapes")
+
+                # Calculate max numel across all inputs/outputs for grid calculation
+                code.writeline("_max_numel = 0")
+                for param in kernel_input_params:
+                    code.writeline(f"_max_numel = max(_max_numel, {param}.size)")
+                code.writeline("for shape in out_shapes:")
+                code.writeline("    _numel = 1")
+                code.writeline("    for s in shape:")
+                code.writeline("        _numel *= s")
+                code.writeline("    _max_numel = max(_max_numel, _numel)")
+
+                code.writeline(
+                    "_num_tiles = (_max_numel + _tile_size - 1) // _tile_size"
+                )
+
+                # Build param names for the kernel
+                gmem_input_params = [f"{p}_gmem" for p in kernel_input_params]
+                gmem_output_params = [f"{p}_gmem" for p in output_params]
+                smem_input_params = [f"{p}_smem" for p in kernel_input_params]
+                smem_output_params = [f"{p}_smem" for p in output_params]
+
+                # Generate the TMA kernel with fori_loop
+                code.writeline("")
+                code.writeline("# Wrapper kernel using lax.fori_loop with direct TMA")
+
+                # Kernel receives: *input_gmem_refs, *output_gmem_refs (from plgpu.kernel)
+                # Plus scratch SMEM buffers for inputs and outputs, and barriers for TMA
+                wrapper_kernel_params = gmem_input_params + gmem_output_params
+                all_smem_params = smem_input_params + smem_output_params
+                # Barrier params for TMA operations
+                barrier_params = [
+                    f"_barrier_{i}" for i in range(len(kernel_input_params))
+                ]
+                scratch_params = ", ".join(all_smem_params + barrier_params)
+
+                code.writeline(
+                    f"def _tma_kernel({', '.join(wrapper_kernel_params)}, *, {scratch_params}):"
+                )
+                with code.indent():
+                    # Define the loop body function
+                    code.writeline("")
+                    code.writeline("def _tile_body(_tile_idx, _):")
+                    with code.indent():
+                        code.writeline("_tile_start = _tile_idx * _tile_size")
+                        code.writeline("")
+
+                        # TMA load inputs from GMEM to SMEM
+                        code.writeline(
+                            "# TMA load inputs from GMEM to SMEM (OOB auto-masked)"
+                        )
+                        for i, (gmem_in, smem_in) in enumerate(
+                            zip(gmem_input_params, smem_input_params)
+                        ):
+                            code.writeline(
+                                f"plgpu.copy_gmem_to_smem({gmem_in}.at[pl.ds(_tile_start, _tile_size)], {smem_in}, _barrier_{i})"
+                            )
+
+                        # Wait for all input loads
+                        code.writeline("")
+                        code.writeline("# Wait for TMA loads to complete")
+                        for i, _ in enumerate(gmem_input_params):
+                            code.writeline(f"plgpu.barrier_wait(_barrier_{i})")
+
+                        # Call the original kernel function with SMEM refs
+                        code.writeline("")
+                        code.writeline("# Compute on SMEM tiles")
+                        kernel_call_args = smem_input_params + smem_output_params
+                        kernel_fn = kernel_arg.rstrip(",").strip()
+                        code.writeline(f"{kernel_fn}({', '.join(kernel_call_args)})")
+
+                        # TMA store outputs from SMEM to GMEM
+                        code.writeline("")
+                        code.writeline(
+                            "# TMA store outputs from SMEM to GMEM (OOB auto-masked)"
+                        )
+                        code.writeline("plgpu.commit_smem()")
+                        for gmem_out, smem_out in zip(
+                            gmem_output_params, smem_output_params
+                        ):
+                            code.writeline(
+                                f"plgpu.copy_smem_to_gmem({smem_out}, {gmem_out}.at[pl.ds(_tile_start, _tile_size)])"
+                            )
+                        code.writeline("plgpu.wait_smem_to_gmem(0)")
+                        code.writeline("")
+                        code.writeline("return None")
+
+                    # Run the loop over all tiles
+                    code.writeline("")
+                    code.writeline("# Iterate over all tiles")
+                    code.writeline("lax.fori_loop(0, _num_tiles, _tile_body, None)")
+
+                # Build scratch_shapes dict for SMEM buffers and TMA barriers
+                code.writeline("")
+                code.writeline(
+                    "# Build SMEM scratch shapes for inputs, outputs, and TMA barriers"
+                )
+                code.writeline("_scratch_shapes = {}")
+                for i, smem_param in enumerate(smem_input_params):
+                    # Get dtype from input param
+                    orig_param = kernel_input_params[i]
+                    code.writeline(
+                        f"_scratch_shapes['{smem_param}'] = plgpu.SMEM((_tile_size,), {orig_param}.dtype)"
+                    )
+                for i, smem_param in enumerate(smem_output_params):
+                    code.writeline(
+                        f"_scratch_shapes['{smem_param}'] = plgpu.SMEM((_tile_size,), out_dtypes[{i}])"
+                    )
+                # Add barriers for TMA GMEM->SMEM operations
+                for barrier_param in barrier_params:
+                    code.writeline(
+                        f"_scratch_shapes['{barrier_param}'] = plgpu.Barrier(num_arrivals=1)"
+                    )
+
+                # Create flattened and aligned output specs for TMA
+                code.writeline("")
+                code.writeline("# Create flattened output specs aligned to tile size")
+                code.writeline("_flat_out_specs = []")
+                code.writeline("for shape, dtype in zip(out_shapes, out_dtypes):")
+                code.writeline("    _numel = 1")
+                code.writeline("    for s in shape:")
+                code.writeline("        _numel *= s")
+                code.writeline(
+                    "    _aligned_numel = ((_numel + _tile_size - 1) // _tile_size) * _tile_size"
+                )
+                code.writeline(
+                    "    _flat_out_specs.append(jax.ShapeDtypeStruct((_aligned_numel,), dtype))"
+                )
+                code.writeline("_flat_out_specs = tuple(_flat_out_specs)")
+
+                # Call plgpu.kernel with the TMA kernel
+                code.writeline("")
+                code.writeline("# Call plgpu.kernel with TMA kernel")
+                code.writeline("_result = plgpu.kernel(")
+                with code.indent():
+                    code.writeline("_tma_kernel,")
+                    code.writeline("out_shape=_flat_out_specs,")
+                    code.writeline("scratch_shapes=_scratch_shapes,")
+                code.writeline(")(")
+                # Pass flattened inputs for 1D tiled processing
+                for param in kernel_input_params:
+                    code.writeline(f"    {param}.flatten(),")
+                code.writeline(")")
+
+                # Reshape outputs to original shapes
+                code.writeline("")
+                code.writeline("# Reshape results to original shapes")
+                code.writeline("if not isinstance(_result, tuple):")
+                code.writeline("    _result = (_result,)")
+                code.writeline("_final_results = []")
+                code.writeline("for _res, _shape in zip(_result, _orig_out_shapes):")
+                code.writeline("    _orig_numel = 1")
+                code.writeline("    for _s in _shape:")
+                code.writeline("        _orig_numel *= _s")
+                code.writeline(
+                    "    _final_results.append(_res[:_orig_numel].reshape(_shape))"
+                )
+                code.writeline(
+                    "return _final_results[0] if len(_final_results) == 1 else tuple(_final_results)"
+                )
+            elif self.is_gpu:
+                # Legacy GPU path with explicit padding (use_emit_pipeline=False)
                 # For GPU, pad inputs to align to WARPGROUP_SIZE (128)
                 # Mosaic GPU requires tensor sizes to be multiples of 128
                 # BUT: only apply padding when all tensors have the same size
@@ -3355,32 +3396,17 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                         code.writeline(
                             f"{ptr}_jax = jax.device_put({ptr}.cpu().numpy(), device=jax.devices('tpu')[0])"
                         )
-                    elif self.use_masked_ops:
-                        # For masked ops, flatten inputs to 1D for Mosaic compatibility
-                        code.writeline(
-                            f"{ptr}_jax = jax.dlpack.from_dlpack({ptr}.detach().contiguous().flatten())"
-                        )
                     else:
                         code.writeline(
                             f"{ptr}_jax = jax.dlpack.from_dlpack({ptr}.detach().contiguous())"
                         )
 
             code.writeline("# Prepare output metadata from PyTorch tensor")
-            if self.use_masked_ops:
-                # For masked ops, flatten multi-D tensors to 1D for Mosaic compatibility
-                code.writeline(
-                    "out_shapes = ("
-                    + ", ".join(
-                        [f"(math.prod({name}.shape),)" for name in output_params]
-                    )
-                    + ",)"
-                )
-            else:
-                code.writeline(
-                    "out_shapes = ("
-                    + ", ".join([f"tuple({name}.shape)" for name in output_params])
-                    + ",)"
-                )
+            code.writeline(
+                "out_shapes = ("
+                + ", ".join([f"tuple({name}.shape)" for name in output_params])
+                + ",)"
+            )
             code.writeline(
                 "out_dtypes = ("
                 + ", ".join(
@@ -3415,11 +3441,6 @@ def _pallas_partial_reduce(reduce_fn, v, pw_numel, red_numel):
                             f"res_cpu = jax.device_get(result_values[{idx}])"
                         )
                         code.writeline(f"{name}.copy_(torch.from_dlpack(res_cpu))")
-                    elif self.use_masked_ops:
-                        # For masked ops, result is flattened, reshape back to original shape
-                        code.writeline(
-                            f"{name}.copy_(torch.from_dlpack(result_values[{idx}]).reshape({name}.shape))"
-                        )
                     else:
                         code.writeline(
                             f"{name}.copy_(torch.from_dlpack(result_values[{idx}]))"
