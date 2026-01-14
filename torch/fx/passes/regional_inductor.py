@@ -94,7 +94,10 @@ def _compile_submod(gm, prefix):
 
             with inductor_config.patch(inductor_options):
                 compiled_fn = torch._inductor.standalone_compile(
-                    submod, fake_inputs, dynamic_shapes="from_tracing_context", aot=True
+                    submod,
+                    fake_inputs,
+                    dynamic_shapes="from_tracing_context",
+                    aot=True,
                 )
             assert isinstance(compiled_fn, AOTCompiledArtifact)
             # _dummy_wrapper is to make call_function happy
@@ -232,11 +235,15 @@ def regional_inductor(gm, *example_args):
         }
     }):
     """
-    from torch._inductor.output_code import RegionalOutputCode
 
     # fuser utils create new nodes using create_proxy which retains the seq_nr
     # metadata and cause issues
+
     with torch.fx.traceback.preserve_node_meta(enable=False):
         gm = _create_inductor_marked_regions(gm)
         gm = _compile_inductor_marked_regions(gm)
-        return RegionalOutputCode(gm)
+        if torch._functorch.config.force_autograd_cache:
+            from torch._inductor.output_code import RegionalOutputCode
+
+            gm = RegionalOutputCode(gm)
+        return gm
