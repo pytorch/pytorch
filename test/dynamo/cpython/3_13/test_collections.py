@@ -755,7 +755,7 @@ class ABCTestCase(__TestCase):
         # everything should work will all required methods are present
         with torch._dynamo.error_on_graph_break(False):
             C = type('C', (abc,), methodstubs)
-        C()
+            C()
 
         # Dynamo raises a hard error here that we can't easily capture
         # Commenting this part as this would also fail in eager if a user
