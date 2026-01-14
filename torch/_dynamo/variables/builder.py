@@ -36,7 +36,7 @@ import types
 import weakref
 from collections.abc import Callable, MutableMapping
 from types import ModuleType
-from typing import Any, NamedTuple, NoReturn, TYPE_CHECKING, Union
+from typing import Any, NamedTuple, NoReturn, Optional, overload, TYPE_CHECKING, Union
 
 import sympy
 
@@ -224,7 +224,7 @@ from .higher_order_ops import (
     TorchHigherOrderOperatorVariable,
 )
 from .iter import ItertoolsVariable
-from .lazy import LazyVariableTracker
+from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -462,6 +462,7 @@ class VariableBuilder:
         self,
         tx: "InstructionTranslator",
         source: Source,
+        allow_lazy_constant: bool = True,
     ) -> None:
         assert source is not None, (
             "Consider SourcelessBuilder for ephemeral objects, usually objects created locally."
@@ -471,6 +472,10 @@ class VariableBuilder:
         self.tx = tx
         self.source = source
         self.name = source.name
+        # allow_lazy_constant controls whether LazyConstantVariable can be returned
+        # for int/float/bool/str. Set to False when called from LazyCache.realize()
+        # to prevent double-wrapping (LazyVariableTracker containing LazyConstantVariable).
+        self.allow_lazy_constant = allow_lazy_constant
 
     def __call__(self, value: object) -> VariableTracker:
         if value in self.tx.output.side_effects:
@@ -494,7 +499,13 @@ class VariableBuilder:
 
         cached_vt = self.tx.output.variable_tracker_cache.lookup(value, self.source)
         if cached_vt:
-            return cached_vt
+            # If allow_lazy_constant=False but the cached VT is a lazy variable,
+            # we need to rebuild to get a non-lazy version. This happens when
+            # LazyConstantVariable.realize() calls VariableBuilder.
+            if self.allow_lazy_constant or not isinstance(
+                cached_vt, LazyVariableTracker
+            ):
+                return cached_vt
 
         vt = self._wrap(value)
 
@@ -635,9 +646,7 @@ class VariableBuilder:
                 ],
             )
 
-        def build_key_value(
-            k: Any, v: Any
-        ) -> tuple[VariableTracker, LazyVariableTracker]:
+        def build_key_value(k: Any, v: Any) -> tuple[VariableTracker, VariableTracker]:
             key = ConstantVariable.create(k)
             source_key = k
 
@@ -759,18 +768,24 @@ class VariableBuilder:
 
         if is_namedtuple(value):
             self.install_guards(GuardBuilder.SEQUENCE_LENGTH)
-            output = [
+            output: list[VariableTracker] = [
                 LazyVariableTracker.create(
                     getattr(value, name),
                     source=AttrSource(self.source, name),
                 )
                 for name in namedtuple_fields(type(value))
             ]
+
+            tuple_vt = TupleVariable(
+                output,
+                source=self.source,
+                mutation_type=ValueMutationExisting(),
+            )
             result = NamedTupleVariable(
-                # type: ignore[arg-type]
                 output,
                 tuple_cls=type(value),
                 source=self.source,
+                tuple_vt=tuple_vt,
             )
             return self.tx.output.side_effects.track_object_existing(value, result)
         elif istype(value, (dict, collections.defaultdict, collections.OrderedDict)):
@@ -804,7 +819,7 @@ class VariableBuilder:
             # _HashableTracker class in dicts.py
             def build_key_value(
                 i: Any, k: Any, v: Any
-            ) -> tuple[LazyVariableTracker, LazyVariableTracker]:
+            ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 if all_const:
                     key = ConstantVariable.create(k)
@@ -1611,7 +1626,7 @@ class VariableBuilder:
             # _HashableTracker class in dicts.py
             def build_key_value(
                 i: Any, k: Any, v: Any
-            ) -> tuple[LazyVariableTracker, LazyVariableTracker]:
+            ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 source_key = ConstDictKeySource(base, i)
                 key = LazyVariableTracker.create(k, source_key)
@@ -2124,6 +2139,7 @@ class VariableBuilder:
 
     def wrap_literal(self, value: object) -> VariableTracker:
         if type(value) is int:
+            assert isinstance(value, int)
             # allowlist has higher precedence over specialization control.
             if is_dynamic_source(self.source.name):
                 log.debug("%s marked dynamic via source whitelist", self.source.name)
@@ -2167,15 +2183,64 @@ class VariableBuilder:
                     )
                     return ConstantVariable.create(value=value, source=self.source)
 
-            return self.wrap_symint(value)
-        elif not config.specialize_float and type(value) is float:
-            return self.wrap_symfloat(value)
+                return self._wrap_lazy_constant(value, self._wrap_symint_for_lazy)
+
+            return self._wrap_lazy_constant(value)
+        elif type(value) is float:
+            assert isinstance(value, float)
+            if not config.specialize_float:
+                return self._wrap_lazy_constant(value, self._wrap_symfloat_for_lazy)
+
+            return self._wrap_lazy_constant(value)
+        elif type(value) in (bool, str):
+            assert isinstance(value, (bool, str))
+            return self._wrap_lazy_constant(value)
         else:
             self.install_guards(GuardBuilder.CONSTANT_MATCH)
             result = ConstantVariable.create(value=value, source=self.source)
             if isinstance(value, (list, set)):
                 return self.tx.output.side_effects.track_mutable(value, result)
             return result
+
+    def _wrap_symint_for_lazy(self, value: int) -> VariableTracker:
+        return self.wrap_symint(value)
+
+    def _wrap_symfloat_for_lazy(self, value: float) -> VariableTracker:
+        return self.wrap_symfloat(value)
+
+    @overload
+    def _wrap_lazy_constant(
+        self,
+        value: int,
+        wrap_fn: Callable[[int], VariableTracker],
+    ) -> VariableTracker: ...
+
+    @overload
+    def _wrap_lazy_constant(
+        self,
+        value: float,
+        wrap_fn: Callable[[float], VariableTracker],
+    ) -> VariableTracker: ...
+
+    @overload
+    def _wrap_lazy_constant(
+        self,
+        value: Union[int, float, bool, str],
+        wrap_fn: None = None,
+    ) -> VariableTracker: ...
+
+    def _wrap_lazy_constant(
+        self,
+        value: Union[int, float, bool, str],
+        wrap_fn: Optional[Callable[[Any], VariableTracker]] = None,
+    ) -> VariableTracker:
+        """Wrap a primitive constant, deferring guard installation if allowed."""
+        if not self.allow_lazy_constant:
+            if wrap_fn is not None:
+                return wrap_fn(value)
+            self.install_guards(GuardBuilder.CONSTANT_MATCH)
+            return ConstantVariable.create(value=value, source=self.source)
+        return LazyConstantVariable.create(value, source=self.source)
 
     def assert_not_wrapped_by_this_graph(self, value: torch.Tensor) -> None:
         if is_fake(value) and maybe_get_fake_mode(value) is self.tx.fake_mode:
@@ -3259,7 +3324,7 @@ def handle_traced_output(
             ), (
                 f"expected {example_value.__class__.__module__} == torch.return_types or named tuple but got {type(example_value)}"
             )
-            return NamedTupleVariable(unpacked, example_value.__class__, **options)
+            return NamedTupleVariable(unpacked, example_value.__class__, **options)  # type: ignore[arg-type]
     elif example_value is None or proxy.node.target is torch.manual_seed:
         return ConstantVariable.create(None, **options)
     elif isinstance(example_value, (torch.SymInt, torch.SymFloat, torch.SymBool)):

@@ -967,8 +967,16 @@ class RegionalOutputCode(OutputCode):
         )
         self._ops_filter = ops_filter
 
-    def __call__(self, inputs: Sequence[Any]) -> Any:
-        """Execute the regional compiled graph."""
+    def __call__(self, inputs: list[Any]) -> Any:
+        """
+        Execute the regional compiled graph.
+
+        Args:
+            inputs: A mutable list of inputs. Must be a list (not an arbitrary
+                Sequence) because the boxed calling convention allows the callee
+                to mutably clear the list when inputs become dead, enabling early
+                memory deallocation.
+        """
         if self._graph_module is None:
             raise RuntimeError(
                 "RegionalOutputCode has no graph module loaded. "
