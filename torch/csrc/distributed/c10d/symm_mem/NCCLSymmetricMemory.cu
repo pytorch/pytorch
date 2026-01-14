@@ -81,6 +81,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
         group->getBackend(c10::DeviceType::CUDA).get());
     TORCH_CHECK(ncclPg != nullptr, "backend must be a NCCL process group");
     ncclComm_t comm = reinterpret_cast<ncclComm_t>(ncclPg->getCommPtr());
+    comm_ = comm;
 
     C10D_NCCL_CHECK(
       ncclCommWindowRegister(comm, allocation->ptr, buffer_size_, &buffer_win_, NCCL_WIN_COLL_SYMMETRIC),
@@ -167,6 +168,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   ncclWindow_t signal_handle_;
   // Multicast address
   void* mc_addr_ = nullptr;
+  ncclComm_t comm_;
 
   friend class NCCLSymmetricMemory;
 };
@@ -214,15 +216,83 @@ void* NCCLSymmetricMemory::get_multicast_ptr() {
 }
 
 void NCCLSymmetricMemory::barrier(int channel, size_t timeout_ms) {
-  TORCH_CHECK(false, "NYI");
+  c10::cuda::CUDAGuard guard(device_idx_);
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  // barrier: all ranks signal all other ranks
+  // each rank sends signal to all other ranks
+  for (int peer = 0; peer < world_size_; ++peer) {
+    if (peer != rank_) {
+      C10D_NCCL_CHECK(
+          ncclSignal(
+              peer,
+              channel,
+              0,
+              0,
+              pai_->comm_,
+              stream),
+          c10::str("ncclSignal failed for barrier, peer=", peer, ", channel=", channel));
+    }
+  }
+
+  // wait for signals from all other ranks
+  std::vector<ncclWaitSignalDesc_t> signalDescs(world_size_ - 1);
+  int desc_idx = 0;
+  for (int peer = 0; peer < world_size_; ++peer) {
+    if (peer != rank_) {
+      signalDescs[desc_idx].sigIdx = channel;
+      signalDescs[desc_idx].ctx = 0;
+      desc_idx++;
+    }
+  }
+
+  C10D_NCCL_CHECK(
+      ncclWaitSignal(
+          world_size_ - 1,
+          signalDescs.data(),
+          pai_->comm_,
+          stream),
+      c10::str("ncclWaitSignal failed for barrier, channel=", channel));
 }
 
 void NCCLSymmetricMemory::put_signal(int dst_rank, int channel, size_t timeout_ms) {
-  TORCH_CHECK(false, "NYI");
+  c10::cuda::CUDAGuard guard(device_idx_);
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  // ncclPutSignal doesn't send data, just a signal
+  // use nullptr for localbuff since we're just signaling
+  C10D_NCCL_CHECK(
+      ncclPutSignal(
+          nullptr,
+          0,
+          ncclInt8,
+          dst_rank,
+          pai_->signal_handle_,
+          channel * sizeof(uint32_t),
+          channel,
+          0,
+          0,
+          pai_->comm_,
+          stream),
+      c10::str("ncclPutSignal failed for dst_rank=", dst_rank, ", channel=", channel));
 }
 
 void NCCLSymmetricMemory::wait_signal(int src_rank, int channel, size_t timeout_ms) {
-  TORCH_CHECK(false, "NYI");
+  c10::cuda::CUDAGuard guard(device_idx_);
+  auto stream = at::cuda::getCurrentCUDAStream();
+
+  // create signal descriptor for waiting
+  ncclWaitSignalDesc_t signalDesc;
+  signalDesc.sigIdx = channel;
+  signalDesc.ctx = 0;
+
+  C10D_NCCL_CHECK(
+      ncclWaitSignal(
+          1,
+          &signalDesc,
+          pai_->comm_,
+          stream),
+      c10::str("ncclWaitSignal failed for src_rank=", src_rank, ", channel=", channel));
 }
 
 int NCCLSymmetricMemory::get_rank() {
