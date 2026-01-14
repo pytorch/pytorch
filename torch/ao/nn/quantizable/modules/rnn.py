@@ -171,7 +171,8 @@ class LSTMCell(torch.nn.Module):
             wi, wh: Weights for the input and hidden layers
             bi, bh: Biases for the input and hidden layers
         """
-        assert (bi is None) == (bh is None)  # Either both None or both have values
+        if (bi is None) != (bh is None):
+            raise AssertionError("bi and bh must both be None or both have values")
         input_size = wi.shape[1]
         hidden_size = wh.shape[1]
         cell = cls(
@@ -202,8 +203,12 @@ class LSTMCell(torch.nn.Module):
 
     @classmethod
     def from_float(cls, other, use_precomputed_fake_quant=False, split_gates=False):
-        assert type(other) is cls._FLOAT_MODULE
-        assert hasattr(other, "qconfig"), "The float module must have 'qconfig'"
+        if type(other) is not cls._FLOAT_MODULE:
+            raise AssertionError(
+                f"Expected module type {cls._FLOAT_MODULE}, got {type(other)}"
+            )
+        if not hasattr(other, "qconfig"):
+            raise AssertionError("The float module must have 'qconfig'")
         observed = cls.from_params(
             other.weight_ih,
             other.weight_hh,
@@ -358,7 +363,8 @@ class _LSTMLayer(torch.nn.Module):
         mimic the behavior of the `prepare` within the `torch.ao.quantization`
         flow.
         """
-        assert hasattr(other, "qconfig") or (qconfig is not None)
+        if not hasattr(other, "qconfig") and qconfig is None:
+            raise AssertionError("other must have qconfig or qconfig must be provided")
 
         input_size = kwargs.get("input_size", other.input_size)
         hidden_size = kwargs.get("hidden_size", other.hidden_size)
@@ -569,8 +575,12 @@ class LSTM(torch.nn.Module):
 
     @classmethod
     def from_float(cls, other, qconfig=None, split_gates=False):
-        assert isinstance(other, cls._FLOAT_MODULE)
-        assert hasattr(other, "qconfig") or qconfig
+        if not isinstance(other, cls._FLOAT_MODULE):
+            raise AssertionError(
+                f"Expected module type {cls._FLOAT_MODULE}, got {type(other)}"
+            )
+        if not hasattr(other, "qconfig") and not qconfig:
+            raise AssertionError("other must have qconfig or qconfig must be provided")
         observed = cls(
             other.input_size,
             other.hidden_size,
