@@ -132,3 +132,6 @@
 [submodule "third_party/aiter"]
 	path = third_party/aiter
 	url = https://github.com/ROCm/aiter.git
+[submodule "third_party/mslk"]
+	path = third_party/mslk
+	url = https://github.com/meta-pytorch/MSLK.git
