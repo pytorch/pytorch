@@ -990,7 +990,7 @@ def _get_node(fx_g, cond):
     raise AssertionError
 
 def _get_free_symbols(shape_env):
-    vars = tuple(shape_env.var_to_val.keys())
+    vars = tuple(shape_env.backed_var_to_val.keys())
     return len([var for var in vars if var not in shape_env.replacements])
 
 def _trace(f, *args):
@@ -1916,7 +1916,7 @@ L['a'].size()[1] <= 18""")
         self.assertEqual(fx_g(*inp), f(*inp))
 
     def _assert_no_guards(self, fx_g, free_symbols):
-        assert _get_free_symbols(fx_g.shape_env) == free_symbols, fx_g.shape_env.var_to_val
+        assert _get_free_symbols(fx_g.shape_env) == free_symbols, fx_g.shape_env.backed_var_to_val
         assert len(fx_g.shape_env.get_nontrivial_guards()) == 0, fx_g.shape_env.format_guards()
 
     def test_guards_equal(self):

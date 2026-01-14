@@ -11761,7 +11761,7 @@ ShapeEnv not equal: field values don't match:
 ==> var_to_sources: values don't match.
   >  Left: {s44: [TensorPropertySource(base=ConstantSource(source_name='x'), prop=<TensorProperty.SIZE: 0>, idx=1)], s93: [TensorPropertySource(base=ConstantSource(source_name='x'), prop=<TensorProperty.SIZE: 0>, idx=0)]}
   > Right: {}
-==> var_to_val: values don't match.
+==> backed_var_to_val: values don't match.
   >  Left: {s44: 2, s93: 3}
   > Right: {}
 """,

@@ -213,7 +213,7 @@ class SymNode:
                 replacements = {
                     s: fallback
                     if s in unbacked_symbols
-                    else self.shape_env.var_to_val[s]
+                    else self.shape_env.backed_var_to_val[s]
                     for s in self.expr.free_symbols
                 }
                 return int(self.expr.xreplace(replacements))

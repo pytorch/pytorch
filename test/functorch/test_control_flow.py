@@ -9387,7 +9387,7 @@ class TestHopSchema(TestCase):
             symbol = shape_env.create_symbol(
                 val,
                 source=ConstantSource(
-                    f"__testing_hop_schema{len(shape_env.var_to_val)}"
+                    f"__testing_hop_schema{len(shape_env.backed_var_to_val)}"
                 ),
             )
             return cls(SymNode(symbol, shape_env, pytype, hint=val))

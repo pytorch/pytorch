@@ -374,7 +374,7 @@ def tensorify_python_scalars(
     # symfloat and thus we need to deduce specializations have happened
     # via shape_env.replacements. NB: there's an important invariant here
     # that symfloats keep consistent names across restarts.
-    for k, v in shape_env.var_to_val.items():
+    for k, v in shape_env.backed_var_to_val.items():
         if symbol_is_type(k, SymT.FLOAT) and isinstance(v, sympy.core.numbers.Float):
             name = str(k)
             if (

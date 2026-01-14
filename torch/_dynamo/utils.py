@@ -3462,12 +3462,12 @@ def get_concrete_sizes_from_symints(
     pattern = r"\(s(\d+)\)"
     assert fake_mode.shape_env is not None
     shape_env = fake_mode.shape_env
-    var_to_val = shape_env.var_to_val
+    backed_var_to_val = shape_env.backed_var_to_val
 
     def replace_sym(match: Any) -> str:
         sym_name = f"s{match.group(1)}"
         val = next(
-            (v for k, v in var_to_val.items() if k.name == sym_name),
+            (v for k, v in backed_var_to_val.items() if k.name == sym_name),
             None,
         )
         if isinstance(val, (int, Integer)):

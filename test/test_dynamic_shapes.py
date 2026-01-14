@@ -218,7 +218,7 @@ def create_symtype(cls, pytype, shape_env, val, duck=True, **kwargs):
 
     symbol = shape_env.create_symbol(
         val,
-        source=ConstantSource(f"__testing_only{len(shape_env.var_to_val)}"),
+        source=ConstantSource(f"__testing_only{len(shape_env.backed_var_to_val)}"),
         dynamic_dim=DimDynamic.DUCK if duck else DimDynamic.DYNAMIC,
         constraint_dim=None,
         **kwargs,
@@ -714,7 +714,7 @@ def forward(self, x_1):
     def test_data_dependent_guard_propagate_real_tensors(self):
         shape_env = ShapeEnv()
         s0 = shape_env.create_unbacked_symint()
-        shape_env.set_unbacked_var_to_val(s0.node.expr, 0)
+        shape_env.set_real_tensor_prop_unbacked_vals(s0.node.expr, 0)
         self.assertEqual(bool(s0 == 0), True)
 
     def test_expect_true_basic(self):
@@ -2202,10 +2202,10 @@ class TestDimConstraints(TestCase):
             s5: [src5, src8],
             s6: [src6, src9, src10],
         }
-        var_to_val = {s0: 8, s1: 96, s5: 22, s6: 21}
+        backed_var_to_val = {s0: 8, s1: 96, s5: 22, s6: 21}
         marked_dynamic = {s0, s1, s5, s6}
         dim_constraints = DimConstraints(
-            symbol_to_source, var_to_val, marked_dynamic, {}
+            symbol_to_source, backed_var_to_val, marked_dynamic, {}
         )
         dim_constraints.add_equality(src2, s0)
         dim_constraints.add_equality(src3, s0)
