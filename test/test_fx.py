@@ -65,6 +65,7 @@ from torch.fx._compatibility import _BACK_COMPAT_OBJECTS, _MARKED_WITH_COMPATIBI
 from torch.fx._symbolic_trace import PHBase, PHWithMeta
 
 from torch.fx.proxy import TraceError
+from torch.testing._internal.common_cuda import blas_library_context
 from torch.testing._internal.common_utils import (
     find_library_location,
     IS_FBCODE,
@@ -4277,6 +4278,7 @@ def forward(self, args_list: List[torch.Tensor]){maybe_return_annotation}:
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
     @skipIfRocm
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
+    @blas_library_context("cublaslt")
     def test_profiler_stack_trace_augmentation(self):
         """
         Test that map_recorded_events_to_aten_ops_with_stack_trace correctly
