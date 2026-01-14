@@ -257,6 +257,62 @@ def get_static_input_idxs(num_fixed: int) -> list[int]:
     return context.fw_metadata.static_input_indices
 
 
+def _maybe_capture_inductor_output_for_pythonify(
+    compiled_graph: CompiledFxGraph,
+    is_backward: bool = False,
+) -> None:
+    """
+    Capture Inductor compilation output when pythonify is active.
+
+    When torch.compile is called with pythonify=... this function captures
+    the compiled graph's source code, graph representation, and other
+    metadata for inclusion in the generated Python file.
+
+    This hook is called after Inductor compilation completes successfully
+    for BOTH forward and backward graphs. It checks if pythonify is active
+    in the current context and if so, stores the relevant information for
+    later use by the pythonify pipeline.
+
+    For backward pass support, both forward and backward kernel source codes
+    are captured. The pythonify code generator uses these to create a proper
+    torch.autograd.Function class with forward() and backward() methods.
+
+    Args:
+        compiled_graph: The CompiledFxGraph from Inductor compilation
+        is_backward: True if this is the backward graph compilation,
+            False for forward graph compilation
+    """
+    try:
+        from torch._dynamo.pythonify import (
+            add_inductor_output,
+            is_pythonify_active,
+        )
+
+        if not is_pythonify_active():
+            return
+
+        inductor_output = {
+            "source_code": getattr(compiled_graph, "source_code", ""),
+            "graph_str": getattr(compiled_graph, "runnable_graph_str", ""),
+            "cache_key": getattr(compiled_graph, "cache_key", ""),
+            "device_types": list(getattr(compiled_graph, "device_types", [])),
+            "mutated_inputs": list(getattr(compiled_graph, "mutated_inputs", [])),
+            "constants": (
+                list(compiled_graph.constants.keys())
+                if compiled_graph.constants
+                else []
+            ),
+            "guards_expr": getattr(compiled_graph, "guards_expr", None),
+            "is_backward": is_backward,
+        }
+
+        add_inductor_output(inductor_output)
+    except ImportError:
+        pass
+    except Exception:
+        pass
+
+
 def record_original_output_strides(gm: GraphModule) -> None:
     output_node = gm.graph.find_nodes(op="output")[0]
     output_strides = []
@@ -1163,6 +1219,12 @@ def _compile_fx_inner(
         f"{'BACKWARDS' if graph_kwargs['is_backward'] else 'FORWARDS'} "
         f"graph {graph_kwargs['graph_id']}",
     )
+
+    _maybe_capture_inductor_output_for_pythonify(
+        compiled_graph,
+        is_backward=graph_kwargs.get("is_backward", False),
+    )
+
     return compiled_graph
 
 
