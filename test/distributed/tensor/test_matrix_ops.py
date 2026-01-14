@@ -17,10 +17,6 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed.tensor._ops._matrix_ops import mm_single_dim_strategy
-from torch.distributed.tensor._ops.single_dim_strategy import (
-    register_single_dim_strategy,
-)
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
@@ -232,7 +228,7 @@ class DistMatrixOpsTest(DTensorTestBase):
         mesh = init_device_mesh(self.device_type, (2, 2))
         tensor_dims = (4, mesh.size(0) * mesh.size(1), 6, 8)
         global_inps_viewed = (
-            torch.arange(math.prod(tensor_dims), device="cuda")
+            torch.arange(math.prod(tensor_dims))
             .float()
             .view(math.prod(tensor_dims[:3]), 8)
         )
@@ -265,7 +261,6 @@ class DistMatrixOpsTest(DTensorTestBase):
 
     @with_comms
     def test_mm_single_dim_strategy(self):
-        register_single_dim_strategy(torch.ops.aten.mm.default)(mm_single_dim_strategy)
         # unshardable input where some rank have empty _local_tensor
         # eg sharding tensor (world_size - 1) over world_size
         device_mesh = self.build_device_mesh()
