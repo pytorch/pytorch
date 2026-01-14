@@ -59,17 +59,6 @@ class Color:
     def value(self) -> int:
         return self._value
 
-    def __repr__(self) -> str:
-        return f"Color.{self._name}"
-
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, Color):
-            return self._value == other._value
-        return False
-
-    def __hash__(self) -> int:
-        return hash(self._value)
-
     def __float__(self) -> float:
         return float(self._value)
 
@@ -78,6 +67,27 @@ Color.RED = Color("RED", 1)
 Color.GREEN = Color("GREEN", 2)
 Color.BLUE = Color("BLUE", 3)
 Color.DEFAULT_SCALE = 1.5  # Literal class attribute for testing inlining
+
+
+class CustomDescriptor:
+    def __get__(self, obj, objtype=None):
+        return 42
+
+
+# Create a class with an unsupported descriptor
+class ColorWithDescriptor:
+    def __init__(self, name: str, value: int) -> None:
+        self._name = name
+        self._value = value
+
+    def __float__(self) -> float:
+        return float(self._value)
+
+    # This is an unsupported descriptor type
+    custom_prop = CustomDescriptor()
+
+
+ColorWithDescriptor.RED = ColorWithDescriptor("RED", 1)
 
 
 class OpaqueQueue:
@@ -284,6 +294,7 @@ register_opaque_type(
 register_opaque_type(NestedValueSize, typ="value")
 register_opaque_type(OpaqueMultiplier, typ="reference")
 register_opaque_type(Color, typ="reference")
+register_opaque_type(ColorWithDescriptor, typ="reference")
 
 
 # A tensor subclass (similar to TwoTensor) that also holds an opaque Counter
@@ -1707,16 +1718,11 @@ def forward(self, primals_2, tangents_1):
         expected = x * float(Color.GREEN.value)
         self.assertTrue(torch.allclose(result, expected))
 
-        def is_called_from_pytest():
-            import os
-
-            return "PYTEST_VERSION" in os.environ
-
         graph_code = captured["graph"].code.strip()
         self.assertExpectedInline(
             graph_code,
             f"""\
-def forward(self, L_x_ : torch.Tensor, G_Color_GREEN : {"test_opaque_obj_v2" if is_called_from_pytest() else "__main__"}_Color):
+def forward(self, L_x_ : torch.Tensor, G_Color_GREEN : {_illegal_char_regex.sub("_", get_opaque_type_name(Color))}):
     l_x_ = L_x_
     g_color_green = G_Color_GREEN
     apply_color_scale = torch.ops._TestOpaqueObject.apply_color_scale(g_color_green, l_x_);  g_color_green = l_x_ = None
@@ -1755,6 +1761,42 @@ def forward(self, L_x_ : torch.Tensor):
     mul = l_x_ * 1.5;  l_x_ = None
     return (mul,)""",
         )
+
+    def test_opaque_class_missing_attribute_graph_break(self):
+        """Test that accessing a non-existent attribute on an opaque class causes a graph break.
+
+        This tests GB7685: "Attribute not found on opaque class"
+        """
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return x * Color.NONEXISTENT
+
+        x = torch.randn(3, 3)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Attribute not found on opaque class",
+        ):
+            fn(x)
+
+    def test_opaque_class_unsupported_descriptor_graph_break(self):
+        """Test that accessing an unsupported descriptor on an opaque class causes a graph break.
+
+        This tests GB9567: "Unsupported descriptor on opaque class"
+        """
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return x * ColorWithDescriptor.custom_prop
+
+        x = torch.randn(3, 3)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Unsupported descriptor on opaque class",
+        ):
+            fn(x)
 
 
 instantiate_parametrized_tests(TestOpaqueObject)

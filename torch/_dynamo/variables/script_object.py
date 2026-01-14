@@ -86,6 +86,12 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
     def as_python_constant(self) -> Any:
         return self.value
 
+    def is_python_constant(self) -> bool:
+        # prevents constant folding of attribute accesses on
+        # opaque classes. this ensures var_getattr is called,
+        # allowing for proper validation and error handling
+        return False
+
     def is_python_hashable(self) -> bool:
         return is_opaque_value_type(type(self.value))
 
@@ -96,10 +102,10 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
         return f"{self.__class__.__name__}({self.value})"
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        _MISSING = object()
-        obj = inspect.getattr_static(self.value, name, _MISSING)
-
-        if obj is _MISSING:
+        obj = None
+        try:
+            obj = inspect.getattr_static(self.value, name)
+        except AttributeError:
             unimplemented(
                 gb_type="Attribute not found on opaque class",
                 context=f"class={self.value}, attr={name}",
@@ -111,6 +117,8 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
 
         # check for known-safe static property descriptors (like pybind11 enums)
         if hasattr(obj, "__get__"):
+            # we should be able to trust this:
+            # https://github.com/python/mypy/blob/131f9d92da58294bb2f273425e8778bd7d5b861f/mypy/stubgenc.py#L590
             type_name = type(obj).__name__
             if type_name == "pybind11_static_property":
                 obj = obj.__get__(None, self.value)
