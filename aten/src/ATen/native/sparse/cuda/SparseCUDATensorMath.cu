@@ -874,19 +874,15 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
           uint32_t* col_indices_ptr = &col_indices_start_ptr[mat_el_begin_idx];
           scalar_t* values_ptr = &values_start_ptr[mat_el_begin_idx];
 
-          bool needs_aligned_copy = !is_aligned(row_indices_ptr, kRequiredAlignment) ||
-                                   !is_aligned(col_indices_ptr, kRequiredAlignment) ||
-                                   !is_aligned(values_ptr, kRequiredAlignment);
+          if (sparse_nnz > buffer_capacity) {
+            row_indices_buffer = at::empty({sparse_nnz}, indices_dim1.options());
+            col_indices_buffer = at::empty({sparse_nnz}, indices_dim2.options());
+            values_buffer = at::empty({sparse_nnz}, values.options());
+            buffer_capacity = sparse_nnz;
+          }
 
-          if (needs_aligned_copy) {
-            if (sparse_nnz > buffer_capacity) {
-              row_indices_buffer = at::empty({sparse_nnz}, indices_dim1.options());
-              col_indices_buffer = at::empty({sparse_nnz}, indices_dim2.options());
-              values_buffer = at::empty({sparse_nnz}, values.options());
-              buffer_capacity = sparse_nnz;
-            }
-
-            // Copy data to aligned buffers
+          // Check and copy only misaligned tensors
+          if (!is_aligned(row_indices_ptr, kRequiredAlignment)) {
             AT_CUDA_CHECK(cudaMemcpyAsync(
               row_indices_buffer.data_ptr(),
               row_indices_ptr,
@@ -894,6 +890,10 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
               cudaMemcpyDeviceToDevice,
               at::cuda::getCurrentCUDAStream()
             ));
+            row_indices_ptr = reinterpret_cast<uint32_t*>(row_indices_buffer.data_ptr());
+          }
+          
+          if (!is_aligned(col_indices_ptr, kRequiredAlignment)) {
             AT_CUDA_CHECK(cudaMemcpyAsync(
               col_indices_buffer.data_ptr(),
               col_indices_ptr,
@@ -901,6 +901,10 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
               cudaMemcpyDeviceToDevice,
               at::cuda::getCurrentCUDAStream()
             ));
+            col_indices_ptr = reinterpret_cast<uint32_t*>(col_indices_buffer.data_ptr());
+          }
+
+          if (!is_aligned(values_ptr, kRequiredAlignment)) {
             AT_CUDA_CHECK(cudaMemcpyAsync(
               values_buffer.data_ptr(),
               values_ptr,
@@ -908,10 +912,6 @@ Tensor& bmm_out_sparse_cuda(const SparseTensor& self, const Tensor& mat2, Tensor
               cudaMemcpyDeviceToDevice,
               at::cuda::getCurrentCUDAStream()
             ));
-
-            // Use the aligned buffer pointers for cuSPARSE
-            row_indices_ptr = reinterpret_cast<uint32_t*>(row_indices_buffer.data_ptr());
-            col_indices_ptr = reinterpret_cast<uint32_t*>(col_indices_buffer.data_ptr());
             values_ptr = reinterpret_cast<scalar_t*>(values_buffer.data_ptr());
           }
 

@@ -1522,7 +1522,7 @@ class TestSparse(TestSparseBase):
     @dtypes(torch.float32, torch.double)
     @unittest.skipIf(
         IS_WINDOWS,
-        "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 10.1"
+        "bmm sparse-dense CUDA is not yet supported in Windows, at least up to CUDA 12.6"
     )
     def test_bmm_large_sparse_dimensions(self, device, dtype):
         """Test bmm with large sparse dimension to catch memory access issues.
