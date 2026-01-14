@@ -9578,7 +9578,6 @@ class TestNNDeviceType(NNTestCase):
             unfold(inp)
 
     @onlyCUDA
-    @skipIfRocmArch(MI300_ARCH)
     @dtypes(torch.float, torch.double)
     @tf32_on_and_off(0.005)
     def test_rnn_fused(self, device, dtype):
