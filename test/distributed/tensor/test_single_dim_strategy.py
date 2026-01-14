@@ -36,6 +36,7 @@ from torch.distributed.tensor._ops.single_dim_strategy import (
     _ShardingPlaceholder,
     register_single_dim_strategy,
 )
+from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 from torch.distributed.tensor._sharding_prop import _select_min_cost_strategy
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
 from torch.testing._internal.common_utils import run_tests, TestCase
@@ -705,6 +706,115 @@ class TestExpandPlaceholder(TestCase):
         # _get_num_tensor_inputs should count both args and kwargs tensors
         num_inputs = _get_num_tensor_inputs(op_schema)
         self.assertEqual(num_inputs, 3)  # 2 args + 1 out kwarg
+
+    def test_expand_to_full_mesh_filters_out_variant_strategies(self):
+        """Test that expand_to_full_mesh_op_strategy filters strategies for out= variant ops.
+
+        For out-variant ops like torch.mul(..., out=...), the output placement must
+        match the 'out' kwarg's placement. This test verifies that strategies with
+        mismatched output placements are filtered out.
+        """
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4))
+        meta = TensorMeta(torch.Size([8, 8]), (8, 1), torch.float32)
+
+        # Create specs: args have Shard(0), out kwarg has Replicate
+        arg_spec = DTensorSpec(mesh, (Shard(0),), meta)
+        out_spec = DTensorSpec(mesh, (Replicate(),), meta)
+
+        # Create OpSchema for out-variant op (aten.mul.out)
+        op_schema = OpSchema(
+            op=torch.ops.aten.mul.out,
+            args_schema=(
+                OpStrategy([OpSpec(arg_spec)]),
+                OpStrategy([OpSpec(arg_spec)]),
+            ),
+            kwargs_schema={"out": OpStrategy([OpSpec(out_spec)])},
+        )
+
+        # Define strategies: output can be Shard(0) or Replicate
+        # [output, input1, input2, out_kwarg]
+        single_mesh_dim_strategies = [
+            [Shard(0), Shard(0), Shard(0), Shard(0)],  # All sharded
+            [Replicate(), Replicate(), Replicate(), Replicate()],  # All replicated
+        ]
+
+        result = expand_to_full_mesh_op_strategy(
+            mesh,
+            op_schema,
+            single_mesh_dim_strategies,
+            output_tensor_meta=meta,
+        )
+
+        # All strategies in result should have output placement matching out kwarg (Replicate)
+        for strategy in result.strategies:
+            output_spec = strategy.output_spec
+            self.assertEqual(
+                output_spec.placements,
+                (Replicate(),),
+                f"Output placement {output_spec.placements} should match out kwarg placement (Replicate(),)",
+            )
+
+    def test_expand_strategy_handles_symbolic_shapes(self):
+        """Test that _create_expanded_strategy handles symbolic shapes (SymInts).
+
+        When using dynamic shapes with torch.compile, TensorMeta may contain SymInts
+        which are not hashable. This test verifies that the caching logic gracefully
+        falls back to uncached execution instead of raising TypeError.
+        """
+        from torch.fx.experimental.symbolic_shapes import ShapeEnv, SymNode
+
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4))
+
+        # Create a ShapeEnv and symbolic size
+        shape_env = ShapeEnv()
+        from torch._dynamo.source import ConstantSource
+
+        sym_size = 8
+        symbol = shape_env.create_symbol(
+            sym_size, source=ConstantSource("test_sym_size")
+        )
+        sym_int = torch.SymInt(SymNode(symbol, shape_env, int, hint=sym_size))
+
+        # Create TensorMeta with symbolic shape - this contains unhashable SymInts
+        symbolic_shape = torch.Size([sym_int, 4])
+        symbolic_meta = TensorMeta(symbolic_shape, (4, 1), torch.float32)
+
+        # Verify that the symbolic TensorMeta is indeed unhashable
+        with self.assertRaises(TypeError):
+            hash(symbolic_meta)
+
+        # Create a regular (hashable) TensorMeta and spec
+        regular_meta = TensorMeta(torch.Size([8, 4]), (4, 1), torch.float32)
+        regular_spec = DTensorSpec(mesh, (Shard(0),), regular_meta)
+
+        # Create OpSchema with regular (hashable) specs but symbolic output_tensor_meta
+        op_schema = OpSchema(
+            op=torch.ops.aten.mul.Tensor,
+            args_schema=(
+                OpStrategy([OpSpec(regular_spec)]),
+                OpStrategy([OpSpec(regular_spec)]),
+            ),
+            kwargs_schema={},
+        )
+
+        single_mesh_dim_strategies = [
+            [Shard(0), Shard(0), Shard(0)],
+            [Replicate(), Replicate(), Replicate()],
+        ]
+
+        # This should work without raising TypeError because the caching
+        # gracefully falls back to uncached execution when output_tensor_meta
+        # contains unhashable SymInts
+        result = expand_to_full_mesh_op_strategy(
+            mesh,
+            op_schema,
+            single_mesh_dim_strategies,
+            output_tensor_meta=symbolic_meta,
+        )
+
+        # Verify result is valid
+        self.assertIsInstance(result, OpStrategy)
+        self.assertGreater(len(result.strategies), 0)
 
 
 @torch.library.custom_op("mylib::dummy_add", mutates_args=())

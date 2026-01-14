@@ -189,8 +189,7 @@ def _expand_single_dim_strategy_to_mesh(
     # Note: circular import, failed to untangle with #168221, reverted
     from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 
-    @functools.lru_cache
-    def _create_expanded_strategy(
+    def _create_expanded_strategy_impl(
         op_schema: OpSchema,
         output_tensor_meta: TensorMeta | Sequence[TensorMeta | None],
     ) -> Callable[[OpOverload, ArgsType, KwargsType], StrategyType]:
@@ -239,6 +238,23 @@ def _expand_single_dim_strategy_to_mesh(
             )
 
         return expanded_strategy
+
+    # Create a cached version of the impl
+    _cached_create_expanded_strategy = functools.lru_cache(
+        _create_expanded_strategy_impl
+    )
+
+    def _create_expanded_strategy(
+        op_schema: OpSchema,
+        output_tensor_meta: TensorMeta | Sequence[TensorMeta | None],
+    ) -> Callable[[OpOverload, ArgsType, KwargsType], StrategyType]:
+        # Try to use cache, but fall back to uncached version if hashing fails
+        # (e.g., when TensorMeta contains SymInts from dynamic shapes)
+        try:
+            return _cached_create_expanded_strategy(op_schema, output_tensor_meta)
+        except TypeError:
+            # Unhashable types (SymInts), skip caching
+            return _create_expanded_strategy_impl(op_schema, output_tensor_meta)
 
     def _translate_foreach_op_schema(
         op_schema: OpSchema, output_tensor_meta: Sequence[TensorMeta], index: int
