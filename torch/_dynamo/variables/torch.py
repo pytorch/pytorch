@@ -33,7 +33,7 @@ import re
 from collections.abc import Callable, Iterable, Sequence
 from contextlib import nullcontext
 from typing import Any, NoReturn, Optional, TYPE_CHECKING, TypeVar, Union
-from typing_extensions import TypeIs
+from typing_extensions import ParamSpec, TypeIs
 
 import torch._C
 import torch._refs
@@ -111,6 +111,7 @@ if TYPE_CHECKING:
 
 V = TypeVar("V")
 T = TypeVar("T")
+_P = ParamSpec("_P")
 
 log = logging.getLogger(__name__)
 
@@ -2371,8 +2372,10 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         # to reconstruct the pytree structure in dynamo.
         captured_out_spec: pytree.TreeSpec | None = None
 
-        def make_flattening_wrapper(fn: Any) -> Any:
-            def wrapper(*args: Any, **kwargs: Any) -> Any:
+        def make_flattening_wrapper(
+            fn: Callable[_P, Any],
+        ) -> Callable[_P, tuple[Any, ...]]:
+            def wrapper(*args: _P.args, **kwargs: _P.kwargs) -> tuple[Any, ...]:
                 nonlocal captured_out_spec
                 out = fn(*args, **kwargs)
                 flat_out, out_spec = pytree.tree_flatten(out)

@@ -3781,21 +3781,13 @@ class GraphModule(torch.nn.Module):
                 y, n, f = fn_with_primitives(self.linear, x)
                 return y * n + f
 
-        model = PrimitiveOutputModule()
-        x = torch.randn(3, 3, requires_grad=True)
+        def args_fn():
+            return (torch.randn(3, 3, requires_grad=True),)
 
-        # Test eager
-        ref = model(x)
+        def loss_fn(out):
+            return out.sum()
 
-        # Test compiled
-        opt_model = torch.compile(model, backend="aot_eager")
-        res = opt_model(x)
-        self.assertEqual(ref, res)
-
-        # Test backward
-        ref.sum().backward()
-        res.sum().backward()
-        self.assertEqual(x.grad, x.grad)
+        self._test_leaf_function_helper(PrimitiveOutputModule, args_fn, loss_fn)
 
 
 instantiate_parametrized_tests(DecoratorTests)
