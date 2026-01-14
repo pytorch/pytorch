@@ -2072,6 +2072,143 @@ torch.cuda.synchronize()
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
+    def test_graph_rng_concurrent_captures(self):
+        s0 = torch.cuda.Stream()
+        s1 = torch.cuda.Stream()
+        g0 = torch.cuda.CUDAGraph()
+        g1 = torch.cuda.CUDAGraph()
+
+        buf0 = torch.empty(8, device="cuda")
+        buf1 = torch.empty(8, device="cuda")
+
+        first_started = threading.Event()
+        second_started = threading.Event()
+        first_done = threading.Event()
+        errors = []
+
+        def capture0():
+            try:
+                with torch.cuda.stream(s0):
+                    g0.capture_begin(capture_error_mode="thread_local")
+                    buf0.uniform_()
+                    first_started.set()
+                    second_started.wait(30)
+                    g0.capture_end()
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+            finally:
+                first_started.set()
+                first_done.set()
+
+        def capture1():
+            try:
+                first_started.wait(30)
+                with torch.cuda.stream(s1):
+                    g1.capture_begin(capture_error_mode="thread_local")
+                    second_started.set()
+                    first_done.wait(30)
+                    buf1.uniform_()
+                    g1.capture_end()
+            except Exception as exc:  # noqa: BLE001
+                errors.append(exc)
+            finally:
+                second_started.set()
+                first_done.set()
+
+        threads = [threading.Thread(target=capture0), threading.Thread(target=capture1)]
+        for thread in threads:
+            thread.start()
+        for thread in threads:
+            thread.join()
+
+        if errors:
+            raise errors[0] if len(errors) == 1 else RuntimeError(errors)
+
+        # TODO: Make a test case to make sure that the stream
+        # successfully exits stream capture mode if stream capture fails.
+        with torch.cuda.stream(s0):
+            assert not torch.cuda.is_current_stream_capturing()
+        with torch.cuda.stream(s1):
+            assert not torch.cuda.is_current_stream_capturing()
+        assert not torch.cuda.is_current_stream_capturing()
+
+        torch.cuda.current_stream().wait_stream(s0)
+        torch.cuda.current_stream().wait_stream(s1)
+
+        buf0.zero_()
+        buf1.zero_()
+        g0.replay()
+        g1.replay()
+        torch.cuda.synchronize()
+
+        self.assertFalse(torch.allclose(buf0, torch.zeros_like(buf0)))
+        self.assertFalse(torch.allclose(buf1, torch.zeros_like(buf1)))
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_rng_after_failed_capture(self):
+        stream = torch.cuda.Stream()
+        graph = torch.cuda.CUDAGraph()
+        x = torch.ones(1, device="cuda")
+
+        with torch.cuda.stream(stream):
+            graph.capture_begin()
+            with self.assertRaises(RuntimeError):
+                (x + 1).item()
+            with self.assertRaises(RuntimeError):
+                graph.capture_end()
+
+        torch.cuda.current_stream().wait_stream(stream)
+
+        # RNG should remain usable after the failed capture tears down.
+        torch.randn(4, device="cuda")
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
+    def test_graph_rng_shared_pool_replay_matches_eager(self):
+        seed = 1234
+        shape = (8,)
+
+        torch.manual_seed(seed)
+        ref0 = torch.randn(shape, device="cuda")
+        ref1 = torch.randn(shape, device="cuda")
+
+        torch.manual_seed(seed)
+        pool = torch.cuda.graph_pool_handle()
+        g0 = torch.cuda.CUDAGraph()
+        g1 = torch.cuda.CUDAGraph()
+        s0 = torch.cuda.Stream()
+        s1 = torch.cuda.Stream()
+        buf0 = torch.empty(shape, device="cuda")
+        buf1 = torch.empty(shape, device="cuda")
+
+        with torch.cuda.stream(s0):
+            g0.capture_begin(pool=pool)
+            buf0.copy_(torch.randn_like(buf0))
+            g0.capture_end()
+
+        with torch.cuda.stream(s1):
+            g1.capture_begin(pool=pool)
+            buf1.copy_(torch.randn_like(buf1))
+            g1.capture_end()
+
+        torch.cuda.current_stream().wait_stream(s0)
+        torch.cuda.current_stream().wait_stream(s1)
+
+        buf0.zero_()
+        buf1.zero_()
+        g0.replay()
+        g1.replay()
+        torch.cuda.synchronize()
+
+        self.assertEqual(buf0, ref0)
+        self.assertEqual(buf1, ref1)
+
+    @unittest.skipIf(
+        not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
+    )
     def test_graph_capture_simple(self):
         s = torch.cuda.Stream()
 
@@ -2090,6 +2227,9 @@ torch.cuda.synchronize()
 
         self.assertEqual(b.sum().item(), 11000.0)
 
+    # TODO: Make test that calls torch.cuda.graphsafe_set_state and
+    # torch.cuda.graphsafe_get_state before doing the registration.
+
     @unittest.skipIf(
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
@@ -2099,11 +2239,16 @@ torch.cuda.synchronize()
             """Initializes generator states and registers them with a CUDA graph if provided."""
             # Ensure the CUDA generator is initialized
             torch.rand(1, device="cuda")
+            # This is an extremely poor choice of random seed given
+            # that 0 is a very reasonable default...
             generator.manual_seed(0)
 
             # Save the current state of the generator
             old_state = generator.graphsafe_get_state()
             # Create and save a cloned state of the generator
+
+            # TODO: Need to make sure that clone_state() works
+            # correctly with my changes.
             new_state = generator.clone_state()
             # Return the original generator and its two states
             return generator, old_state, new_state
