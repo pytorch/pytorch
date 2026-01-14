@@ -3440,6 +3440,7 @@ def handle_traced_output(
         set_example_value(proxy.node, example_value)
         return ConstantVariable.create(example_value, **options)
     elif is_opaque_type(type(example_value)):
+        # This is for handling opaque objects in custom ops
         if is_opaque_value_type(type(example_value)):
             proxy = example_value  # pyrefly: ignore[bad-assignment]
         fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
@@ -4072,6 +4073,7 @@ class SourcelessBuilder:
             # This is always valid to call, and useful for recursive calls.
             return value
         elif is_opaque_value_type(type(value)):
+            # This is for handling opaque objects in custom ops
             fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
                 tx.output.fake_mode, value
             )
