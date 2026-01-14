@@ -478,6 +478,16 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
             self.assertFalse(d["e_bool"])
 
     @parametrize("patch_func", [config.patch, config.global_patch])
+    def test_set_in_patch(self, patch_func):
+        self.assertEqual(config.e_int, 1)
+        with patch_func(e_int=2):
+            self.assertEqual(config.e_int, 2)
+            config.e_int = 3
+            self.assertEqual(config.e_int, 3)
+        # Exiting the patch resets e_int to 1, losing the fact that we explicitly set it to 4 - see ConfigModule._do_setattr
+        self.assertEqual(config.e_int, 1)
+
+    @parametrize("patch_func", [config.patch, config.global_patch])
     def test_nested_patch(self, patch_func):
         self.assertEqual(config.e_int, 1)
         self.assertEqual(config.e_string, "string")
@@ -489,7 +499,6 @@ torch.testing._internal.fake_config_module3.e_func = _warnings.warn""",
                 self.assertEqual(config.e_string, "inner")
                 config.e_int = 4
                 self.assertEqual(config.e_int, 4)
-            # Exiting the patch resets e_int to 2, losing the fact that we explicitly set it to 4 - see ConfigModule._do_setattr
             self.assertEqual(config.e_int, 2)
         self.assertEqual(config.e_int, 1)
         self.assertEqual(config.e_string, "string")
