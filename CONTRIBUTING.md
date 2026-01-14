@@ -307,7 +307,7 @@ the slow linters are run on the changed files only.
 
 ### Regenerating
 
-Pytorch makes use of a number of code generations, which range from the version
+PyTorch makes use of a number of code generations, which range from the version
 information in `torch/version.py` over type stubs and other linter support to
 github workflows.
 With Spin, we offer a unified interface to these tasks.
