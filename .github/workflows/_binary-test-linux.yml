@@ -246,3 +246,21 @@ jobs:
         uses: ./pytorch/.github/actions/chown-workspace
         with:
           ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}
+
+      - name: Cleanup docker
+        if: always() && inputs.build_environment == 'linux-s390x-binary-manywheel'
+        shell: bash
+        run: |
+          # on s390x stop the container for clean worker stop
+          docker stop -a || true
+          docker kill -a || true
+
+          # If podman build command is interrupted,
+          # it can leave a couple of processes still running.
+          # Order them to stop for clean shutdown.
+          # It looks like sometimes some processes remain
+          # after first cleanup.
+          # Wait a bit and do cleanup again. It looks like it helps.
+          docker system prune --build -f || true
+          sleep 60
+          docker system prune --build -f || true
