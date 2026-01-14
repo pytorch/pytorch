@@ -104,7 +104,7 @@ jobs:
         shell: bash
         run: |
           set -eux
-          bash tools/install_deepgemm.sh --wheel-dir ../dist/deepgemm
+          bash tools/install_deepgemm.sh --wheel-dir ../../dist/deepgemm
 
       - name: Archive artifacts into zip
         run: |
