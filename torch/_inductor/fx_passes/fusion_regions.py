@@ -320,8 +320,10 @@ def expand_fusion_regions(
         # Get the output arg from the subgraph to determine what will replace module_node
         output_arg = torch._inductor.utils.output_node(region.subgraph_module).args[0]
 
-        # Inline the module and get the mapping from subgraph nodes to new nodes
-        subgraph_to_new = _inline_module(gm, subgraph_name)
+        # Inline the module and get the mapping from subgraph nodes to new nodes.
+        # Skip DCE since the graph may have external dependencies (e.g., augmented deps
+        # for overlap scheduling) that DCE is unaware of.
+        subgraph_to_new = _inline_module(gm, subgraph_name, run_dce=False)
 
         # Map module_node to the replacement for the output arg
         # For multi-output (tuple), use the last element (latest in topo order)
