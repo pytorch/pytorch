@@ -711,6 +711,20 @@ class OverlapScheduler:
                 "fx_collectives_node_runtime_estimation",
             )
 
+        # Always log analytical estimations for all collectives
+        from torch._inductor.fx_passes.node_runtime_estimation import (
+            _log_collective_estimations,
+        )
+
+        all_collective_nodes = [
+            info.start_node for info in self.collective_info.values()
+        ]
+        if all_collective_nodes:
+            _log_collective_estimations(
+                all_collective_nodes,
+                "fx_collectives_analytical_estimation",
+            )
+
         log.info("Overlap scheduling: Runtime estimations aligned")
 
     def _get_next_node(self) -> fx.Node:

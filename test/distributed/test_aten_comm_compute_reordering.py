@@ -1706,6 +1706,34 @@ class TestManualOverlapBucketing(TestComputeCommReorderingMultiProc):
                 )
 
 
+class TestNodeRuntimeEstimationFormat(torch._dynamo.test_case.TestCase):
+    """Test the CSV format for node runtime estimation logging."""
+
+    def test_format_csv_parseable(self):
+        """Verify _format_csv produces parseable CSV output."""
+        import csv
+        import io
+
+        from torch._inductor.fx_passes.node_runtime_estimation import _format_csv
+
+        headers = ["Collective Key", "NCCL Est(ms)", "Inductor Est(ms)"]
+        rows = [
+            ["all_reduce group_size:2 input_bytes:256", "0.1234", "0.1456"],
+            ["all_gather group_size:2 input_bytes:512", "0.2345", "0.2567"],
+        ]
+
+        result = _format_csv(headers, rows)
+
+        # Verify it's parseable with csv module
+        reader = csv.reader(io.StringIO(result))
+        parsed_rows = list(reader)
+
+        self.assertEqual(len(parsed_rows), 3)  # header + 2 data rows
+        self.assertEqual(parsed_rows[0], headers)
+        self.assertEqual(parsed_rows[1], rows[0])
+        self.assertEqual(parsed_rows[2], rows[1])
+
+
 if __name__ == "__main__":
     from torch._dynamo.test_case import run_tests
 
