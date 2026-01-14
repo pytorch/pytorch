@@ -108,8 +108,8 @@ def _extract_varlen_params(
          q_limits, kv_limits, Q_BLOCK_SIZE, KV_BLOCK_SIZE)
     """
     return (
-        block_mask[0],   # logical_q_len
-        block_mask[1],   # logical_kv_len
+        block_mask[0],  # logical_q_len
+        block_mask[1],  # logical_kv_len
         block_mask[12],  # q_offsets
         block_mask[10],  # kv_offsets
         block_mask[13],  # q_limits
@@ -177,7 +177,9 @@ def _expand_physical_to_logical(
     physical_positions_clamped = physical_positions.clamp(0, physical_len - 1)
 
     # Gather from physical tensor
-    physical_positions_4d = physical_positions_clamped.unsqueeze(-1).expand(-1, -1, -1, D)
+    physical_positions_4d = physical_positions_clamped.unsqueeze(-1).expand(
+        -1, -1, -1, D
+    )
     gathered_values = torch.gather(physical_tensor, dim=2, index=physical_positions_4d)
 
     # Apply mask
@@ -236,11 +238,17 @@ def _contract_logical_to_physical(
 
     # Only scatter valid positions to avoid overwriting with zeros from padding
     # Use index_put_ which allows us to scatter only valid indices
-    valid_logical_indices = valid_mask.nonzero(as_tuple=True)  # (batch_idx, head_idx, logical_idx)
+    valid_logical_indices = valid_mask.nonzero(
+        as_tuple=True
+    )  # (batch_idx, head_idx, logical_idx)
     valid_physical_indices = physical_positions[valid_logical_indices].long()
 
     # Create the output index tuple: (batch_idx, head_idx, physical_idx)
-    output_indices = (valid_logical_indices[0], valid_logical_indices[1], valid_physical_indices)
+    output_indices = (
+        valid_logical_indices[0],
+        valid_logical_indices[1],
+        valid_physical_indices,
+    )
 
     # Gather valid values and scatter to physical positions
     valid_values = logical_tensor[valid_logical_indices]  # [num_valid, D]

@@ -756,9 +756,12 @@ class BlockMask:
             else i
             for i, n in zip(padded, sizes, strict=True)
         )
+
         def maybe_index(tensor):
-            if tensor is None: return None
+            if tensor is None:
+                return None
             return tensor[index]
+
         new_kv_num_blocks = self.kv_num_blocks[index]
         new_kv_indices = self.kv_indices[index]
         new_kv_offsets = maybe_index(self.kv_offsets)
@@ -819,8 +822,15 @@ class BlockMask:
         new_kv_num_blocks, new_kv_indices = _adjust_num_blocks_and_indices(
             self.kv_num_blocks, self.kv_indices, new_num_rows, new_num_cols
         )
-        if self.kv_offsets is not None or self.kv_limits is not None or self.q_offsets is not None or self.q_limits is not None:
-            raise ValueError("Cannot adjust a BlockMask that has row/columns offsets or limits")
+        if (
+            self.kv_offsets is not None
+            or self.kv_limits is not None
+            or self.q_offsets is not None
+            or self.q_limits is not None
+        ):
+            raise ValueError(
+                "Cannot adjust a BlockMask that has row/columns offsets or limits"
+            )
         if self.full_kv_num_blocks is not None:
             if self.full_kv_indices is None:
                 raise AssertionError("full_kv_indices must not be None")
@@ -1309,9 +1319,13 @@ def create_varlen_block_mask(
         >>> q_seq_lens = torch.tensor([300, 200, 500])  # 3 documents
         >>> kv_seq_lens = torch.tensor([300, 200, 500])
         >>> block_mask = create_varlen_block_mask(
-        ...     causal_mask, B=1, H=1,
-        ...     q_seq_lens=q_seq_lens, kv_seq_lens=kv_seq_lens,
-        ...     device="cuda", BLOCK_SIZE=128
+        ...     causal_mask,
+        ...     B=1,
+        ...     H=1,
+        ...     q_seq_lens=q_seq_lens,
+        ...     kv_seq_lens=kv_seq_lens,
+        ...     device="cuda",
+        ...     BLOCK_SIZE=128,
         ... )
         >>> # Total Q length = ceil(300/128)*128 + ceil(200/128)*128 + ceil(500/128)*128
         >>> # = 384 + 256 + 512 = 1152
@@ -1368,7 +1382,9 @@ def create_varlen_block_mask(
 
     # Physical offsets: cumsum of actual lengths (used for memory access)
     q_physical_doc_offsets = torch.zeros(num_docs + 1, device=device, dtype=torch.int32)
-    kv_physical_doc_offsets = torch.zeros(num_docs + 1, device=device, dtype=torch.int32)
+    kv_physical_doc_offsets = torch.zeros(
+        num_docs + 1, device=device, dtype=torch.int32
+    )
     q_physical_doc_offsets[1:] = torch.cumsum(q_seq_lens, dim=0)
     kv_physical_doc_offsets[1:] = torch.cumsum(kv_seq_lens, dim=0)
 
@@ -1387,8 +1403,12 @@ def create_varlen_block_mask(
     kv_block_indices = torch.arange(total_kv_blocks, device=device, dtype=torch.int32)
 
     # Map each block to its document using searchsorted on precomputed cumsum boundaries
-    q_block_to_doc = torch.searchsorted(q_cumsum_blocks[1:], q_block_indices, right=True)
-    kv_block_to_doc = torch.searchsorted(kv_cumsum_blocks[1:], kv_block_indices, right=True)
+    q_block_to_doc = torch.searchsorted(
+        q_cumsum_blocks[1:], q_block_indices, right=True
+    )
+    kv_block_to_doc = torch.searchsorted(
+        kv_cumsum_blocks[1:], kv_block_indices, right=True
+    )
 
     q_block_idx_in_doc = q_block_indices - q_cumsum_blocks[q_block_to_doc]
     kv_block_idx_in_doc = kv_block_indices - kv_cumsum_blocks[kv_block_to_doc]
@@ -1399,7 +1419,8 @@ def create_varlen_block_mask(
         q_physical_doc_offsets[q_block_to_doc] - q_logical_doc_offsets[q_block_to_doc]
     )
     kv_offsets_1d = (
-        kv_physical_doc_offsets[kv_block_to_doc] - kv_logical_doc_offsets[kv_block_to_doc]
+        kv_physical_doc_offsets[kv_block_to_doc]
+        - kv_logical_doc_offsets[kv_block_to_doc]
     )
 
     # Compute limits: min(BLOCK_SIZE, seq_len - block_idx_in_doc * BLOCK_SIZE)
@@ -1484,7 +1505,9 @@ def create_varlen_block_mask(
 
     partial_bm = _dense_to_ordered(partial_block_mask)
     if full_block_mask is not None:
-        full_bm: tuple[Tensor | None, Tensor | None] = _dense_to_ordered(full_block_mask)
+        full_bm: tuple[Tensor | None, Tensor | None] = _dense_to_ordered(
+            full_block_mask
+        )
     else:
         full_bm = (None, None)
 
@@ -1826,7 +1849,9 @@ def flex_attention(
                 )
             elif (
                 query.size(-2) < block_mask_q_len and key.size(-2) <= block_mask_kv_len
-            ) or (query.size(-2) <= block_mask_q_len and key.size(-2) < block_mask_kv_len):
+            ) or (
+                query.size(-2) <= block_mask_q_len and key.size(-2) < block_mask_kv_len
+            ):
                 raise ValueError(
                     f"block_mask was created for block_mask.shape={block_mask.shape} but got q_len={query.size(-2)} and kv_len={key.size(-2)}. "
                     "As the block mask was created for a larger length than you're using it for, you can either 1. create a new block mask with the correct length, or 2. 'adjust' the existing block mask to the correct length by calling block_mask._adjust(q_len, kv_len). This essentially 'crops' the block mask to the upper left corner, which does not work for all mask_mods!"

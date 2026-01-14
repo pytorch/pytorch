@@ -79,6 +79,9 @@ def assert_batch_invariance(fn, batch_ids_in, batch_ids_out, args, *, rtol=0, at
                     index_at(ref_result, batch_ids_out, selection), batch_result
                 ), f"Batch invariance failed with rtol={rtol}, atol={atol}"
             else:
-                for ref, batch, batch_id in zip(ref_result, batch_result, batch_ids_out):
-                    assert compare_tensors(index_at(ref, batch_id, selection), batch), \
+                for ref, batch, batch_id in zip(
+                    ref_result, batch_result, batch_ids_out
+                ):
+                    assert compare_tensors(index_at(ref, batch_id, selection), batch), (
                         f"Batch invariance failed with rtol={rtol}, atol={atol}"
+                    )

@@ -1816,11 +1816,12 @@ class TestFlexAttention(InductorTestCase):
         # - Doc 2: physical_start=500, logical_start=640, offset = 500 - 640 = -140 (4 blocks)
         expected_offsets = torch.tensor(
             [0, 0, 0, -84, -84, -140, -140, -140, -140],
-            device=device, dtype=torch.int32
+            device=device,
+            dtype=torch.int32,
         )
         self.assertTrue(
             torch.equal(block_mask.q_offsets[0, 0], expected_offsets),
-            f"q_offsets mismatch: {block_mask.q_offsets[0, 0]} vs {expected_offsets}"
+            f"q_offsets mismatch: {block_mask.q_offsets[0, 0]} vs {expected_offsets}",
         )
 
         # Verify limits: last block of each doc has partial limits
@@ -1829,11 +1830,12 @@ class TestFlexAttention(InductorTestCase):
         # Doc 2: 500 tokens -> blocks have 128, 128, 128, 116 valid
         expected_limits = torch.tensor(
             [128, 128, 44, 128, 72, 128, 128, 128, 116],
-            device=device, dtype=torch.int32
+            device=device,
+            dtype=torch.int32,
         )
         self.assertTrue(
             torch.equal(block_mask.q_limits[0, 0], expected_limits),
-            f"q_limits mismatch: {block_mask.q_limits[0, 0]} vs {expected_limits}"
+            f"q_limits mismatch: {block_mask.q_limits[0, 0]} vs {expected_limits}",
         )
 
         # Verify the block-level dense mask has correct shape
@@ -1848,20 +1850,20 @@ class TestFlexAttention(InductorTestCase):
         # Block 0 (doc 0) should not attend to blocks 3+ (doc 1, 2)
         self.assertFalse(
             dense_block_mask[0, 0, 0, 3].item(),
-            "Block 0 (doc 0) should not attend to block 3 (doc 1)"
+            "Block 0 (doc 0) should not attend to block 3 (doc 1)",
         )
         self.assertFalse(
             dense_block_mask[0, 0, 3, 0].item(),
-            "Block 3 (doc 1) should not attend to block 0 (doc 0)"
+            "Block 3 (doc 1) should not attend to block 0 (doc 0)",
         )
         # Block within same doc should attend (causal allows diagonal and below)
         self.assertTrue(
             dense_block_mask[0, 0, 2, 0].item(),
-            "Block 2 (doc 0) should attend to block 0 (doc 0) - causal"
+            "Block 2 (doc 0) should attend to block 0 (doc 0) - causal",
         )
         self.assertTrue(
             dense_block_mask[0, 0, 2, 2].item(),
-            "Block 2 (doc 0) should attend to block 2 (doc 0) - diagonal"
+            "Block 2 (doc 0) should attend to block 2 (doc 0) - diagonal",
         )
 
     @supported_platform
@@ -1898,7 +1900,7 @@ class TestFlexAttention(InductorTestCase):
         expected_limits = torch.tensor([64, 36], device=device, dtype=torch.int32)
         self.assertTrue(
             torch.equal(block_mask.q_limits[0, 0], expected_limits),
-            f"q_limits mismatch: {block_mask.q_limits[0, 0]} vs {expected_limits}"
+            f"q_limits mismatch: {block_mask.q_limits[0, 0]} vs {expected_limits}",
         )
 
         # With full attention mask, all blocks should attend to all blocks
@@ -2021,13 +2023,31 @@ class TestFlexAttention(InductorTestCase):
 
         # Create query, key, value tensors with PHYSICAL (compact) size
         query = torch.randn(
-            1, 2, physical_q_len, HEAD_DIM, device=device, dtype=torch.float16, requires_grad=True
+            1,
+            2,
+            physical_q_len,
+            HEAD_DIM,
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
         )
         key = torch.randn(
-            1, 2, physical_kv_len, HEAD_DIM, device=device, dtype=torch.float16, requires_grad=True
+            1,
+            2,
+            physical_kv_len,
+            HEAD_DIM,
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
         )
         value = torch.randn(
-            1, 2, physical_kv_len, HEAD_DIM, device=device, dtype=torch.float16, requires_grad=True
+            1,
+            2,
+            physical_kv_len,
+            HEAD_DIM,
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
         )
 
         # Run compiled version
@@ -2098,13 +2118,19 @@ class TestFlexAttention(InductorTestCase):
         physical_len = q_seq_lens.sum().item()
 
         # Create packed query, key, value with PHYSICAL size
-        query_packed = torch.randn(1, 1, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
+        query_packed = torch.randn(
+            1, 1, physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
         key_packed = query_packed.clone()  # Use same values for determinism
-        value_packed = torch.randn(1, 1, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
+        value_packed = torch.randn(
+            1, 1, physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
 
         # Run with torch.compile
         compiled_flex = torch.compile(flex_attention)
-        out_packed = compiled_flex(query_packed, key_packed, value_packed, block_mask=block_mask)
+        out_packed = compiled_flex(
+            query_packed, key_packed, value_packed, block_mask=block_mask
+        )
 
         # Output shape matches physical size
         self.assertEqual(out_packed.shape, (1, 1, physical_len, HEAD_DIM))
@@ -2122,11 +2148,11 @@ class TestFlexAttention(InductorTestCase):
             doc_output = out_packed[0, 0, doc_start:doc_end, :]
             self.assertFalse(
                 torch.isnan(doc_output).any(),
-                f"Document {i} output contains NaN values"
+                f"Document {i} output contains NaN values",
             )
             self.assertFalse(
                 torch.isinf(doc_output).any(),
-                f"Document {i} output contains Inf values"
+                f"Document {i} output contains Inf values",
             )
 
     # ============== Comprehensive varlen document masking tests ==============
@@ -2137,7 +2163,9 @@ class TestFlexAttention(InductorTestCase):
     @common_utils.parametrize("num_docs", [1, 2, 4, 8])
     @common_utils.parametrize("head_dim", [64, 128])
     @common_utils.parametrize("num_heads", [1, 4])
-    def test_varlen_batch_invariance_parametrized(self, device, num_docs, head_dim, num_heads):
+    def test_varlen_batch_invariance_parametrized(
+        self, device, num_docs, head_dim, num_heads
+    ):
         """Parametrized test for batch invariance across different configurations.
 
         Uses assert_batch_invariance to verify bitwise identical results when
@@ -2163,9 +2191,15 @@ class TestFlexAttention(InductorTestCase):
 
         # Create full packed tensors
         physical_len = sum(doc_lens)
-        query_full = torch.randn(1, num_heads, physical_len, head_dim, device=device, dtype=torch.float16)
-        key_full = torch.randn(1, num_heads, physical_len, head_dim, device=device, dtype=torch.float16)
-        value_full = torch.randn(1, num_heads, physical_len, head_dim, device=device, dtype=torch.float16)
+        query_full = torch.randn(
+            1, num_heads, physical_len, head_dim, device=device, dtype=torch.float16
+        )
+        key_full = torch.randn(
+            1, num_heads, physical_len, head_dim, device=device, dtype=torch.float16
+        )
+        value_full = torch.randn(
+            1, num_heads, physical_len, head_dim, device=device, dtype=torch.float16
+        )
 
         def fn(seqlens, offsets, q_full, k_full, v_full):
             # seqlens and offsets may be subsetted by assert_batch_invariance
@@ -2173,9 +2207,15 @@ class TestFlexAttention(InductorTestCase):
 
             # Repack tokens for selected documents
             total_tokens = seqlens.sum().item()
-            q_packed = torch.empty(1, num_heads, total_tokens, head_dim, device=device, dtype=q_full.dtype)
-            k_packed = torch.empty(1, num_heads, total_tokens, head_dim, device=device, dtype=k_full.dtype)
-            v_packed = torch.empty(1, num_heads, total_tokens, head_dim, device=device, dtype=v_full.dtype)
+            q_packed = torch.empty(
+                1, num_heads, total_tokens, head_dim, device=device, dtype=q_full.dtype
+            )
+            k_packed = torch.empty(
+                1, num_heads, total_tokens, head_dim, device=device, dtype=k_full.dtype
+            )
+            v_packed = torch.empty(
+                1, num_heads, total_tokens, head_dim, device=device, dtype=v_full.dtype
+            )
 
             dst_offset = 0
             for i in range(n_docs):
@@ -2184,9 +2224,15 @@ class TestFlexAttention(InductorTestCase):
                 src_end = src_start + doc_len
                 dst_end = dst_offset + doc_len
 
-                q_packed[:, :, dst_offset:dst_end, :] = q_full[:, :, src_start:src_end, :]
-                k_packed[:, :, dst_offset:dst_end, :] = k_full[:, :, src_start:src_end, :]
-                v_packed[:, :, dst_offset:dst_end, :] = v_full[:, :, src_start:src_end, :]
+                q_packed[:, :, dst_offset:dst_end, :] = q_full[
+                    :, :, src_start:src_end, :
+                ]
+                k_packed[:, :, dst_offset:dst_end, :] = k_full[
+                    :, :, src_start:src_end, :
+                ]
+                v_packed[:, :, dst_offset:dst_end, :] = v_full[
+                    :, :, src_start:src_end, :
+                ]
 
                 dst_offset = dst_end
 
@@ -2202,14 +2248,23 @@ class TestFlexAttention(InductorTestCase):
             )
 
             # Run attention
-            output = torch.compile(flex_attention)(q_packed, k_packed, v_packed, block_mask=block_mask)
+            output = torch.compile(flex_attention)(
+                q_packed, k_packed, v_packed, block_mask=block_mask
+            )
 
             # Unpack to [n_docs, num_heads, max_doc_len, head_dim]
-            result = torch.zeros(n_docs, num_heads, max_doc_len, head_dim, device=device, dtype=output.dtype)
+            result = torch.zeros(
+                n_docs,
+                num_heads,
+                max_doc_len,
+                head_dim,
+                device=device,
+                dtype=output.dtype,
+            )
             offset = 0
             for i in range(n_docs):
                 doc_len = seqlens[i].item()
-                result[i, :, :doc_len, :] = output[0, :, offset:offset + doc_len, :]
+                result[i, :, :doc_len, :] = output[0, :, offset : offset + doc_len, :]
                 offset += doc_len
 
             return result
@@ -2223,17 +2278,20 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @skip_on_cpu
-    @common_utils.parametrize("doc_lens", [
-        [128],  # Single doc, exact block boundary
-        [127],  # Single doc, just under block boundary
-        [129],  # Single doc, just over block boundary
-        [64, 64],  # Two small docs
-        [128, 128],  # Two docs at exact boundaries
-        [100, 200, 300],  # Three docs, varying sizes
-        [1, 1, 1, 1],  # Four minimal docs (edge case)
-        [256, 1],  # Large and minimal
-        [384, 384],  # Multiple blocks per doc
-    ])
+    @common_utils.parametrize(
+        "doc_lens",
+        [
+            [128],  # Single doc, exact block boundary
+            [127],  # Single doc, just under block boundary
+            [129],  # Single doc, just over block boundary
+            [64, 64],  # Two small docs
+            [128, 128],  # Two docs at exact boundaries
+            [100, 200, 300],  # Three docs, varying sizes
+            [1, 1, 1, 1],  # Four minimal docs (edge case)
+            [256, 1],  # Large and minimal
+            [384, 384],  # Multiple blocks per doc
+        ],
+    )
     def test_varlen_edge_case_doc_lengths(self, device, doc_lens):
         """Test edge cases around block boundaries and minimal document lengths."""
         torch.manual_seed(42)
@@ -2259,9 +2317,15 @@ class TestFlexAttention(InductorTestCase):
 
         total_q_len = block_mask.seq_lengths[0]
 
-        query = torch.randn(1, NUM_HEADS, total_q_len, HEAD_DIM, device=device, dtype=torch.float16)
-        key = torch.randn(1, NUM_HEADS, total_q_len, HEAD_DIM, device=device, dtype=torch.float16)
-        value = torch.randn(1, NUM_HEADS, total_q_len, HEAD_DIM, device=device, dtype=torch.float16)
+        query = torch.randn(
+            1, NUM_HEADS, total_q_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        key = torch.randn(
+            1, NUM_HEADS, total_q_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        value = torch.randn(
+            1, NUM_HEADS, total_q_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
 
         # Run forward pass
         compiled_flex = torch.compile(flex_attention)
@@ -2317,9 +2381,15 @@ class TestFlexAttention(InductorTestCase):
             doc_offsets.append(doc_offsets[-1] + doc_len)
 
         # Create packed tensors with physical size
-        query = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
-        key = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
-        value = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
+        query = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        key = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        value = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
 
         # Run packed version
         compiled_flex = torch.compile(flex_attention)
@@ -2351,16 +2421,19 @@ class TestFlexAttention(InductorTestCase):
             )
 
             # Run individual document
-            out_individual = compiled_flex(q_doc, k_doc, v_doc, block_mask=single_doc_mask)
+            out_individual = compiled_flex(
+                q_doc, k_doc, v_doc, block_mask=single_doc_mask
+            )
 
             # Extract packed output for this document
             out_packed_doc = out_packed[:, :, doc_start:doc_end, :]
 
             # Compare - they should be numerically equivalent
             self.assertEqual(
-                out_packed_doc, out_individual,
+                out_packed_doc,
+                out_individual,
                 msg=f"Document {i} (length={doc_len}) output differs. "
-                    f"This indicates q_limits/kv_limits may not be working correctly."
+                f"This indicates q_limits/kv_limits may not be working correctly.",
             )
 
     @supported_platform
@@ -2409,9 +2482,15 @@ class TestFlexAttention(InductorTestCase):
         kv_physical_len = sum(kv_doc_lens)
 
         # Create packed tensors
-        query = torch.randn(1, NUM_HEADS, q_physical_len, HEAD_DIM, device=device, dtype=torch.float16)
-        key = torch.randn(1, NUM_HEADS, kv_physical_len, HEAD_DIM, device=device, dtype=torch.float16)
-        value = torch.randn(1, NUM_HEADS, kv_physical_len, HEAD_DIM, device=device, dtype=torch.float16)
+        query = torch.randn(
+            1, NUM_HEADS, q_physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        key = torch.randn(
+            1, NUM_HEADS, kv_physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        value = torch.randn(
+            1, NUM_HEADS, kv_physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
 
         # Run packed version
         compiled_flex = torch.compile(flex_attention)
@@ -2451,15 +2530,18 @@ class TestFlexAttention(InductorTestCase):
             )
 
             # Run individual document
-            out_individual = compiled_flex(q_doc, k_doc, v_doc, block_mask=single_doc_mask)
+            out_individual = compiled_flex(
+                q_doc, k_doc, v_doc, block_mask=single_doc_mask
+            )
 
             # Extract packed output for this document
             out_packed_doc = out_packed[:, :, q_start:q_end, :]
 
             # Compare
             self.assertEqual(
-                out_packed_doc, out_individual,
-                msg=f"Document {i} output differs (q_len={q_doc_lens[i]}, kv_len={kv_doc_lens[i]})"
+                out_packed_doc,
+                out_individual,
+                msg=f"Document {i} output differs (q_len={q_doc_lens[i]}, kv_len={kv_doc_lens[i]})",
             )
 
     @supported_platform
@@ -2504,13 +2586,21 @@ class TestFlexAttention(InductorTestCase):
         physical_len = sum(doc_lens)
 
         # Create packed inputs with PHYSICAL (compact) size
-        query_varlen = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
-        key_varlen = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
-        value_varlen = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
+        query_varlen = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        key_varlen = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        value_varlen = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
 
         # Run varlen
         compiled_flex = torch.compile(flex_attention)
-        out_varlen = compiled_flex(query_varlen, key_varlen, value_varlen, block_mask=block_mask_varlen)
+        out_varlen = compiled_flex(
+            query_varlen, key_varlen, value_varlen, block_mask=block_mask_varlen
+        )
 
         # Output shape matches physical size
         self.assertEqual(out_varlen.shape, (1, NUM_HEADS, physical_len, HEAD_DIM))
@@ -2527,9 +2617,9 @@ class TestFlexAttention(InductorTestCase):
             start = doc_offsets[i]
 
             # Extract this document's Q, K, V
-            q_doc = query_varlen[:, :, start:start + doc_len, :].clone()
-            k_doc = key_varlen[:, :, start:start + doc_len, :].clone()
-            v_doc = value_varlen[:, :, start:start + doc_len, :].clone()
+            q_doc = query_varlen[:, :, start : start + doc_len, :].clone()
+            k_doc = key_varlen[:, :, start : start + doc_len, :].clone()
+            v_doc = value_varlen[:, :, start : start + doc_len, :].clone()
 
             # Create causal block mask for this document
             block_mask_doc = create_block_mask(
@@ -2542,14 +2632,16 @@ class TestFlexAttention(InductorTestCase):
         # Compare outputs for each document
         for i, doc_len in enumerate(doc_lens):
             start = doc_offsets[i]
-            out_varlen_doc = out_varlen[:, :, start:start + doc_len, :]
+            out_varlen_doc = out_varlen[:, :, start : start + doc_len, :]
             out_regular_doc = outputs_regular[i]
 
             # Use relaxed tolerance due to different computation paths
             torch.testing.assert_close(
-                out_varlen_doc, out_regular_doc,
-                rtol=1e-2, atol=1e-2,
-                msg=f"Document {i} output mismatch"
+                out_varlen_doc,
+                out_regular_doc,
+                rtol=1e-2,
+                atol=1e-2,
+                msg=f"Document {i} output mismatch",
             )
 
     @supported_platform
@@ -2597,16 +2689,44 @@ class TestFlexAttention(InductorTestCase):
             doc_offsets.append(doc_offsets[-1] + doc_len)
 
         # Create packed inputs with PHYSICAL (compact) size
-        query_varlen = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32, requires_grad=True)
-        key_varlen = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32, requires_grad=True)
-        value_varlen = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32, requires_grad=True)
+        query_varlen = torch.randn(
+            1,
+            NUM_HEADS,
+            physical_len,
+            HEAD_DIM,
+            device=device,
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+        key_varlen = torch.randn(
+            1,
+            NUM_HEADS,
+            physical_len,
+            HEAD_DIM,
+            device=device,
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+        value_varlen = torch.randn(
+            1,
+            NUM_HEADS,
+            physical_len,
+            HEAD_DIM,
+            device=device,
+            dtype=torch.float32,
+            requires_grad=True,
+        )
 
         # Use same grad_out for deterministic comparison
-        grad_out_varlen = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32)
+        grad_out_varlen = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32
+        )
 
         # Run varlen forward and backward
         compiled_flex = torch.compile(flex_attention)
-        out_varlen = compiled_flex(query_varlen, key_varlen, value_varlen, block_mask=block_mask_varlen)
+        out_varlen = compiled_flex(
+            query_varlen, key_varlen, value_varlen, block_mask=block_mask_varlen
+        )
         out_varlen.backward(grad_out_varlen)
 
         # Store varlen gradients
@@ -2624,9 +2744,24 @@ class TestFlexAttention(InductorTestCase):
             start = doc_offsets[i]
 
             # Extract this document's Q, K, V with requires_grad
-            q_doc = query_varlen[:, :, start:start + doc_len, :].detach().clone().requires_grad_(True)
-            k_doc = key_varlen[:, :, start:start + doc_len, :].detach().clone().requires_grad_(True)
-            v_doc = value_varlen[:, :, start:start + doc_len, :].detach().clone().requires_grad_(True)
+            q_doc = (
+                query_varlen[:, :, start : start + doc_len, :]
+                .detach()
+                .clone()
+                .requires_grad_(True)
+            )
+            k_doc = (
+                key_varlen[:, :, start : start + doc_len, :]
+                .detach()
+                .clone()
+                .requires_grad_(True)
+            )
+            v_doc = (
+                value_varlen[:, :, start : start + doc_len, :]
+                .detach()
+                .clone()
+                .requires_grad_(True)
+            )
 
             # Create causal block mask for this document
             block_mask_doc = create_block_mask(
@@ -2635,7 +2770,7 @@ class TestFlexAttention(InductorTestCase):
 
             # Forward + backward for this document
             out_doc = compiled_flex(q_doc, k_doc, v_doc, block_mask=block_mask_doc)
-            grad_out_doc = grad_out_varlen[:, :, start:start + doc_len, :]
+            grad_out_doc = grad_out_varlen[:, :, start : start + doc_len, :]
             out_doc.backward(grad_out_doc)
 
             grad_q_regular_list.append(q_doc.grad)
@@ -2646,24 +2781,30 @@ class TestFlexAttention(InductorTestCase):
         for i, doc_len in enumerate(doc_lens):
             start = doc_offsets[i]
 
-            grad_q_varlen_doc = grad_q_varlen[:, :, start:start + doc_len, :]
-            grad_k_varlen_doc = grad_k_varlen[:, :, start:start + doc_len, :]
-            grad_v_varlen_doc = grad_v_varlen[:, :, start:start + doc_len, :]
+            grad_q_varlen_doc = grad_q_varlen[:, :, start : start + doc_len, :]
+            grad_k_varlen_doc = grad_k_varlen[:, :, start : start + doc_len, :]
+            grad_v_varlen_doc = grad_v_varlen[:, :, start : start + doc_len, :]
 
             torch.testing.assert_close(
-                grad_q_varlen_doc, grad_q_regular_list[i],
-                rtol=1e-2, atol=1e-2,
-                msg=f"Document {i} grad_query mismatch"
+                grad_q_varlen_doc,
+                grad_q_regular_list[i],
+                rtol=1e-2,
+                atol=1e-2,
+                msg=f"Document {i} grad_query mismatch",
             )
             torch.testing.assert_close(
-                grad_k_varlen_doc, grad_k_regular_list[i],
-                rtol=1e-2, atol=1e-2,
-                msg=f"Document {i} grad_key mismatch"
+                grad_k_varlen_doc,
+                grad_k_regular_list[i],
+                rtol=1e-2,
+                atol=1e-2,
+                msg=f"Document {i} grad_key mismatch",
             )
             torch.testing.assert_close(
-                grad_v_varlen_doc, grad_v_regular_list[i],
-                rtol=1e-2, atol=1e-2,
-                msg=f"Document {i} grad_value mismatch"
+                grad_v_varlen_doc,
+                grad_v_regular_list[i],
+                rtol=1e-2,
+                atol=1e-2,
+                msg=f"Document {i} grad_value mismatch",
             )
 
     @supported_platform
@@ -2703,20 +2844,31 @@ class TestFlexAttention(InductorTestCase):
             doc_offsets.append(doc_offsets[-1] + doc_len)
 
         # Create packed inputs
-        query = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32)
-        key = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32)
-        value = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32)
-        grad_out = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32)
+        query = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32
+        )
+        key = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32
+        )
+        value = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32
+        )
+        grad_out = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32
+        )
 
         # ============ Eager mode varlen ============
         import torch.nn.attention.flex_attention as fa
+
         fa._FLEX_ATTENTION_DISABLE_COMPILE_DEBUG = True
 
         q_eager = query.clone().requires_grad_(True)
         k_eager = key.clone().requires_grad_(True)
         v_eager = value.clone().requires_grad_(True)
 
-        out_eager = flex_attention(q_eager, k_eager, v_eager, block_mask=block_mask_varlen)
+        out_eager = flex_attention(
+            q_eager, k_eager, v_eager, block_mask=block_mask_varlen
+        )
         out_eager.backward(grad_out)
 
         grad_q_eager = q_eager.grad.clone()
@@ -2740,7 +2892,9 @@ class TestFlexAttention(InductorTestCase):
             v_doc = value[:, :, start:end, :].clone().requires_grad_(True)
             grad_doc = grad_out[:, :, start:end, :]
 
-            block_mask_doc = create_block_mask(causal_mask, 1, NUM_HEADS, doc_len, doc_len, device=device)
+            block_mask_doc = create_block_mask(
+                causal_mask, 1, NUM_HEADS, doc_len, doc_len, device=device
+            )
             out_doc = flex_attention(q_doc, k_doc, v_doc, block_mask=block_mask_doc)
             out_doc.backward(grad_doc)
 
@@ -2760,20 +2914,23 @@ class TestFlexAttention(InductorTestCase):
             torch.testing.assert_close(
                 grad_q_eager[:, :, start:end, :],
                 grad_q_ref[:, :, start:end, :],
-                rtol=1e-4, atol=1e-5,
-                msg=f"Document {i} grad_query mismatch (eager varlen vs per-doc)"
+                rtol=1e-4,
+                atol=1e-5,
+                msg=f"Document {i} grad_query mismatch (eager varlen vs per-doc)",
             )
             torch.testing.assert_close(
                 grad_k_eager[:, :, start:end, :],
                 grad_k_ref[:, :, start:end, :],
-                rtol=1e-4, atol=1e-5,
-                msg=f"Document {i} grad_key mismatch (eager varlen vs per-doc)"
+                rtol=1e-4,
+                atol=1e-5,
+                msg=f"Document {i} grad_key mismatch (eager varlen vs per-doc)",
             )
             torch.testing.assert_close(
                 grad_v_eager[:, :, start:end, :],
                 grad_v_ref[:, :, start:end, :],
-                rtol=1e-4, atol=1e-5,
-                msg=f"Document {i} grad_value mismatch (eager varlen vs per-doc)"
+                rtol=1e-4,
+                atol=1e-5,
+                msg=f"Document {i} grad_value mismatch (eager varlen vs per-doc)",
             )
 
     @supported_platform
@@ -2816,9 +2973,33 @@ class TestFlexAttention(InductorTestCase):
         doc_offsets = [0, doc_lens[0], sum(doc_lens)]
 
         # Create inputs
-        query = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32, requires_grad=True)
-        key = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32, requires_grad=True)
-        value = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32, requires_grad=True)
+        query = torch.randn(
+            1,
+            NUM_HEADS,
+            physical_len,
+            HEAD_DIM,
+            device=device,
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+        key = torch.randn(
+            1,
+            NUM_HEADS,
+            physical_len,
+            HEAD_DIM,
+            device=device,
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+        value = torch.randn(
+            1,
+            NUM_HEADS,
+            physical_len,
+            HEAD_DIM,
+            device=device,
+            dtype=torch.float32,
+            requires_grad=True,
+        )
 
         # Forward pass
         compiled_flex = torch.compile(flex_attention)
@@ -2826,39 +3007,47 @@ class TestFlexAttention(InductorTestCase):
 
         # Create grad_out that is ONLY non-zero for document 0
         grad_out = torch.zeros_like(out)
-        grad_out[:, :, :doc_lens[0], :] = torch.randn(1, NUM_HEADS, doc_lens[0], HEAD_DIM, device=device, dtype=torch.float32)
+        grad_out[:, :, : doc_lens[0], :] = torch.randn(
+            1, NUM_HEADS, doc_lens[0], HEAD_DIM, device=device, dtype=torch.float32
+        )
 
         # Backward pass
         out.backward(grad_out)
 
         # Gradients for document 1 should be zero since grad_out for doc1 was zero
         # and doc1's output doesn't depend on doc0's Q/K/V
-        grad_q_doc1 = query.grad[:, :, doc_offsets[1]:doc_offsets[2], :]
-        grad_k_doc1 = key.grad[:, :, doc_offsets[1]:doc_offsets[2], :]
-        grad_v_doc1 = value.grad[:, :, doc_offsets[1]:doc_offsets[2], :]
+        grad_q_doc1 = query.grad[:, :, doc_offsets[1] : doc_offsets[2], :]
+        grad_k_doc1 = key.grad[:, :, doc_offsets[1] : doc_offsets[2], :]
+        grad_v_doc1 = value.grad[:, :, doc_offsets[1] : doc_offsets[2], :]
 
         # Check that doc1 gradients are zero (no gradient leakage)
         self.assertTrue(
             torch.allclose(grad_q_doc1, torch.zeros_like(grad_q_doc1), atol=1e-6),
-            f"Gradient leaked to doc1 query: max abs = {grad_q_doc1.abs().max().item()}"
+            f"Gradient leaked to doc1 query: max abs = {grad_q_doc1.abs().max().item()}",
         )
         self.assertTrue(
             torch.allclose(grad_k_doc1, torch.zeros_like(grad_k_doc1), atol=1e-6),
-            f"Gradient leaked to doc1 key: max abs = {grad_k_doc1.abs().max().item()}"
+            f"Gradient leaked to doc1 key: max abs = {grad_k_doc1.abs().max().item()}",
         )
         self.assertTrue(
             torch.allclose(grad_v_doc1, torch.zeros_like(grad_v_doc1), atol=1e-6),
-            f"Gradient leaked to doc1 value: max abs = {grad_v_doc1.abs().max().item()}"
+            f"Gradient leaked to doc1 value: max abs = {grad_v_doc1.abs().max().item()}",
         )
 
         # Conversely, doc0 should have non-zero gradients
-        grad_q_doc0 = query.grad[:, :, :doc_offsets[1], :]
-        grad_k_doc0 = key.grad[:, :, :doc_offsets[1], :]
-        grad_v_doc0 = value.grad[:, :, :doc_offsets[1], :]
+        grad_q_doc0 = query.grad[:, :, : doc_offsets[1], :]
+        grad_k_doc0 = key.grad[:, :, : doc_offsets[1], :]
+        grad_v_doc0 = value.grad[:, :, : doc_offsets[1], :]
 
-        self.assertTrue(grad_q_doc0.abs().sum() > 0, "Doc0 query gradient should be non-zero")
-        self.assertTrue(grad_k_doc0.abs().sum() > 0, "Doc0 key gradient should be non-zero")
-        self.assertTrue(grad_v_doc0.abs().sum() > 0, "Doc0 value gradient should be non-zero")
+        self.assertTrue(
+            grad_q_doc0.abs().sum() > 0, "Doc0 query gradient should be non-zero"
+        )
+        self.assertTrue(
+            grad_k_doc0.abs().sum() > 0, "Doc0 key gradient should be non-zero"
+        )
+        self.assertTrue(
+            grad_v_doc0.abs().sum() > 0, "Doc0 value gradient should be non-zero"
+        )
 
     @supported_platform
     @skip_on_cpu
@@ -2892,9 +3081,33 @@ class TestFlexAttention(InductorTestCase):
 
         total_len = block_mask.seq_lengths[0]
 
-        query = torch.randn(1, NUM_HEADS, total_len, HEAD_DIM, device=device, dtype=torch.float16, requires_grad=True)
-        key = torch.randn(1, NUM_HEADS, total_len, HEAD_DIM, device=device, dtype=torch.float16, requires_grad=True)
-        value = torch.randn(1, NUM_HEADS, total_len, HEAD_DIM, device=device, dtype=torch.float16, requires_grad=True)
+        query = torch.randn(
+            1,
+            NUM_HEADS,
+            total_len,
+            HEAD_DIM,
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+        key = torch.randn(
+            1,
+            NUM_HEADS,
+            total_len,
+            HEAD_DIM,
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
+        )
+        value = torch.randn(
+            1,
+            NUM_HEADS,
+            total_len,
+            HEAD_DIM,
+            device=device,
+            dtype=torch.float16,
+            requires_grad=True,
+        )
 
         compiled_flex = torch.compile(flex_attention)
         out = compiled_flex(query, key, value, block_mask=block_mask)
@@ -2950,9 +3163,15 @@ class TestFlexAttention(InductorTestCase):
 
         total_len = block_mask.seq_lengths[0]
 
-        query = torch.randn(1, NUM_Q_HEADS, total_len, HEAD_DIM, device=device, dtype=torch.float16)
-        key = torch.randn(1, NUM_KV_HEADS, total_len, HEAD_DIM, device=device, dtype=torch.float16)
-        value = torch.randn(1, NUM_KV_HEADS, total_len, HEAD_DIM, device=device, dtype=torch.float16)
+        query = torch.randn(
+            1, NUM_Q_HEADS, total_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        key = torch.randn(
+            1, NUM_KV_HEADS, total_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        value = torch.randn(
+            1, NUM_KV_HEADS, total_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
 
         compiled_flex = torch.compile(flex_attention)
         out = compiled_flex(query, key, value, block_mask=block_mask, enable_gqa=True)
@@ -2991,9 +3210,15 @@ class TestFlexAttention(InductorTestCase):
 
         total_len = block_mask.seq_lengths[0]
 
-        query = torch.randn(1, NUM_HEADS, total_len, HEAD_DIM, device=device, dtype=torch.float16)
-        key = torch.randn(1, NUM_HEADS, total_len, HEAD_DIM, device=device, dtype=torch.float16)
-        value = torch.randn(1, NUM_HEADS, total_len, HEAD_DIM, device=device, dtype=torch.float16)
+        query = torch.randn(
+            1, NUM_HEADS, total_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        key = torch.randn(
+            1, NUM_HEADS, total_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        value = torch.randn(
+            1, NUM_HEADS, total_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
 
         compiled_flex = torch.compile(flex_attention)
         out = compiled_flex(query, key, value, block_mask=block_mask)
@@ -3033,10 +3258,18 @@ class TestFlexAttention(InductorTestCase):
 
         # Create full packed tensors
         physical_len = sum(doc_lens)
-        query_full = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32)
-        key_full = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32)
-        value_full = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32)
-        grad_out_full = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32)
+        query_full = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32
+        )
+        key_full = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32
+        )
+        value_full = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32
+        )
+        grad_out_full = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float32
+        )
 
         def fn(seqlens, offsets, q_full, k_full, v_full, grad_out_full):
             # seqlens and offsets may be subsetted by assert_batch_invariance
@@ -3044,10 +3277,23 @@ class TestFlexAttention(InductorTestCase):
 
             # Repack tokens for selected documents
             total_tokens = seqlens.sum().item()
-            q_packed = torch.empty(1, NUM_HEADS, total_tokens, HEAD_DIM, device=device, dtype=q_full.dtype)
-            k_packed = torch.empty(1, NUM_HEADS, total_tokens, HEAD_DIM, device=device, dtype=k_full.dtype)
-            v_packed = torch.empty(1, NUM_HEADS, total_tokens, HEAD_DIM, device=device, dtype=v_full.dtype)
-            grad_out_packed = torch.empty(1, NUM_HEADS, total_tokens, HEAD_DIM, device=device, dtype=grad_out_full.dtype)
+            q_packed = torch.empty(
+                1, NUM_HEADS, total_tokens, HEAD_DIM, device=device, dtype=q_full.dtype
+            )
+            k_packed = torch.empty(
+                1, NUM_HEADS, total_tokens, HEAD_DIM, device=device, dtype=k_full.dtype
+            )
+            v_packed = torch.empty(
+                1, NUM_HEADS, total_tokens, HEAD_DIM, device=device, dtype=v_full.dtype
+            )
+            grad_out_packed = torch.empty(
+                1,
+                NUM_HEADS,
+                total_tokens,
+                HEAD_DIM,
+                device=device,
+                dtype=grad_out_full.dtype,
+            )
 
             dst_offset = 0
             for i in range(n_docs):
@@ -3056,10 +3302,18 @@ class TestFlexAttention(InductorTestCase):
                 src_end = src_start + doc_len
                 dst_end = dst_offset + doc_len
 
-                q_packed[:, :, dst_offset:dst_end, :] = q_full[:, :, src_start:src_end, :]
-                k_packed[:, :, dst_offset:dst_end, :] = k_full[:, :, src_start:src_end, :]
-                v_packed[:, :, dst_offset:dst_end, :] = v_full[:, :, src_start:src_end, :]
-                grad_out_packed[:, :, dst_offset:dst_end, :] = grad_out_full[:, :, src_start:src_end, :]
+                q_packed[:, :, dst_offset:dst_end, :] = q_full[
+                    :, :, src_start:src_end, :
+                ]
+                k_packed[:, :, dst_offset:dst_end, :] = k_full[
+                    :, :, src_start:src_end, :
+                ]
+                v_packed[:, :, dst_offset:dst_end, :] = v_full[
+                    :, :, src_start:src_end, :
+                ]
+                grad_out_packed[:, :, dst_offset:dst_end, :] = grad_out_full[
+                    :, :, src_start:src_end, :
+                ]
 
                 dst_offset = dst_end
 
@@ -3080,15 +3334,26 @@ class TestFlexAttention(InductorTestCase):
             )
 
             # Run forward and backward
-            output = torch.compile(flex_attention)(q_packed, k_packed, v_packed, block_mask=block_mask)
+            output = torch.compile(flex_attention)(
+                q_packed, k_packed, v_packed, block_mask=block_mask
+            )
             output.backward(grad_out_packed)
 
             # Unpack query gradient to [n_docs, NUM_HEADS, max_doc_len, HEAD_DIM]
-            result = torch.zeros(n_docs, NUM_HEADS, max_doc_len, HEAD_DIM, device=device, dtype=q_packed.grad.dtype)
+            result = torch.zeros(
+                n_docs,
+                NUM_HEADS,
+                max_doc_len,
+                HEAD_DIM,
+                device=device,
+                dtype=q_packed.grad.dtype,
+            )
             offset = 0
             for i in range(n_docs):
                 doc_len = seqlens[i].item()
-                result[i, :, :doc_len, :] = q_packed.grad[0, :, offset:offset + doc_len, :]
+                result[i, :, :doc_len, :] = q_packed.grad[
+                    0, :, offset : offset + doc_len, :
+                ]
                 offset += doc_len
 
             return result
@@ -3100,7 +3365,14 @@ class TestFlexAttention(InductorTestCase):
             fn,
             (0, 0, None, None, None, None),  # seqlens and offsets indexed, others not
             0,  # output batch dim
-            (seqlens_tensor, offset_tensor, query_full, key_full, value_full, grad_out_full),
+            (
+                seqlens_tensor,
+                offset_tensor,
+                query_full,
+                key_full,
+                value_full,
+                grad_out_full,
+            ),
             atol=1e-5,
         )
 
@@ -3122,11 +3394,13 @@ class TestFlexAttention(InductorTestCase):
         if score_mod_type == "none":
             score_mod = None
         elif score_mod_type == "alibi":
+
             def score_mod(score, b, h, q_idx, kv_idx):
                 bias = (q_idx - kv_idx).float() * (-0.5)
                 return score + bias
         elif score_mod_type == "relative_bias":
             rel_bias = torch.randn(512, 512, device=device, dtype=torch.float16)
+
             def score_mod(score, b, h, q_idx, kv_idx):
                 # Clamp indices to avoid out of bounds
                 q_clamped = q_idx.clamp(0, 511)
@@ -3148,16 +3422,30 @@ class TestFlexAttention(InductorTestCase):
 
         total_len = block_mask.seq_lengths[0]
 
-        query = torch.randn(1, NUM_HEADS, total_len, HEAD_DIM, device=device, dtype=torch.float16)
-        key = torch.randn(1, NUM_HEADS, total_len, HEAD_DIM, device=device, dtype=torch.float16)
-        value = torch.randn(1, NUM_HEADS, total_len, HEAD_DIM, device=device, dtype=torch.float16)
+        query = torch.randn(
+            1, NUM_HEADS, total_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        key = torch.randn(
+            1, NUM_HEADS, total_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        value = torch.randn(
+            1, NUM_HEADS, total_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
 
         compiled_flex = torch.compile(flex_attention)
-        out = compiled_flex(query, key, value, block_mask=block_mask, score_mod=score_mod)
+        out = compiled_flex(
+            query, key, value, block_mask=block_mask, score_mod=score_mod
+        )
 
         self.assertEqual(out.shape, (1, NUM_HEADS, total_len, HEAD_DIM))
-        self.assertFalse(torch.isnan(out).any(), f"Output contains NaN with score_mod={score_mod_type}")
-        self.assertFalse(torch.isinf(out).any(), f"Output contains Inf with score_mod={score_mod_type}")
+        self.assertFalse(
+            torch.isnan(out).any(),
+            f"Output contains NaN with score_mod={score_mod_type}",
+        )
+        self.assertFalse(
+            torch.isinf(out).any(),
+            f"Output contains Inf with score_mod={score_mod_type}",
+        )
 
     @supported_platform
     @skip_on_cpu
@@ -3196,35 +3484,41 @@ class TestFlexAttention(InductorTestCase):
         doc_offsets = [0, doc_lens[0], sum(doc_lens)]
 
         # Create inputs where doc0 has positive values, doc1 has negative values
-        query = torch.zeros(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
-        key = torch.zeros(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
-        value = torch.zeros(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
+        query = torch.zeros(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        key = torch.zeros(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        value = torch.zeros(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
 
         # Doc 0: all ones
-        query[:, :, :doc_lens[0], :] = 1.0
-        key[:, :, :doc_lens[0], :] = 1.0
-        value[:, :, :doc_lens[0], :] = 1.0
+        query[:, :, : doc_lens[0], :] = 1.0
+        key[:, :, : doc_lens[0], :] = 1.0
+        value[:, :, : doc_lens[0], :] = 1.0
 
         # Doc 1: all negative ones
-        query[:, :, doc_offsets[1]:doc_offsets[1] + doc_lens[1], :] = -1.0
-        key[:, :, doc_offsets[1]:doc_offsets[1] + doc_lens[1], :] = -1.0
-        value[:, :, doc_offsets[1]:doc_offsets[1] + doc_lens[1], :] = -1.0
+        query[:, :, doc_offsets[1] : doc_offsets[1] + doc_lens[1], :] = -1.0
+        key[:, :, doc_offsets[1] : doc_offsets[1] + doc_lens[1], :] = -1.0
+        value[:, :, doc_offsets[1] : doc_offsets[1] + doc_lens[1], :] = -1.0
 
         compiled_flex = torch.compile(flex_attention)
         out = compiled_flex(query, key, value, block_mask=block_mask)
 
         # Doc 0 output should be positive (attending only to positive values)
-        doc0_out = out[:, :, :doc_lens[0], :]
+        doc0_out = out[:, :, : doc_lens[0], :]
         self.assertTrue(
             (doc0_out > 0).all(),
-            "Document 0 output has non-positive values - possible cross-document leakage"
+            "Document 0 output has non-positive values - possible cross-document leakage",
         )
 
         # Doc 1 output should be negative (attending only to negative values)
-        doc1_out = out[:, :, doc_offsets[1]:doc_offsets[1] + doc_lens[1], :]
+        doc1_out = out[:, :, doc_offsets[1] : doc_offsets[1] + doc_lens[1], :]
         self.assertTrue(
             (doc1_out < 0).all(),
-            "Document 1 output has non-negative values - possible cross-document leakage"
+            "Document 1 output has non-negative values - possible cross-document leakage",
         )
 
     @supported_platform
@@ -3256,13 +3550,21 @@ class TestFlexAttention(InductorTestCase):
 
         physical_len = sum(doc_lens)
 
-        query = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
-        key = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
-        value = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
+        query = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        key = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        value = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
 
         # Run with return_lse=True
         compiled_flex = torch.compile(flex_attention)
-        out, lse = compiled_flex(query, key, value, block_mask=block_mask, return_lse=True)
+        out, lse = compiled_flex(
+            query, key, value, block_mask=block_mask, return_lse=True
+        )
 
         # Verify output shape
         self.assertEqual(out.shape, (1, NUM_HEADS, physical_len, HEAD_DIM))
@@ -3276,12 +3578,15 @@ class TestFlexAttention(InductorTestCase):
 
     @supported_platform
     @skip_on_cpu
-    @common_utils.parametrize("doc_lens", [
-        [1, 200],  # Single token first doc
-        [200, 1],  # Single token last doc
-        [1, 1, 1],  # Multiple single-token docs
-        [32, 32],  # Very small docs (< BLOCK_SIZE)
-    ])
+    @common_utils.parametrize(
+        "doc_lens",
+        [
+            [1, 200],  # Single token first doc
+            [200, 1],  # Single token last doc
+            [1, 1, 1],  # Multiple single-token docs
+            [32, 32],  # Very small docs (< BLOCK_SIZE)
+        ],
+    )
     def test_varlen_edge_case_small_docs(self, device, doc_lens):
         """Test varlen with very small document lengths including single-token docs."""
         torch.manual_seed(42)
@@ -3307,17 +3612,27 @@ class TestFlexAttention(InductorTestCase):
 
         physical_len = sum(doc_lens)
 
-        query = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
-        key = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
-        value = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
+        query = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        key = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        value = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
 
         compiled_flex = torch.compile(flex_attention)
         out = compiled_flex(query, key, value, block_mask=block_mask)
 
         # Verify output shape and validity
         self.assertEqual(out.shape, (1, NUM_HEADS, physical_len, HEAD_DIM))
-        self.assertFalse(torch.isnan(out).any(), f"Output contains NaN for doc_lens={doc_lens}")
-        self.assertFalse(torch.isinf(out).any(), f"Output contains Inf for doc_lens={doc_lens}")
+        self.assertFalse(
+            torch.isnan(out).any(), f"Output contains NaN for doc_lens={doc_lens}"
+        )
+        self.assertFalse(
+            torch.isinf(out).any(), f"Output contains Inf for doc_lens={doc_lens}"
+        )
 
     @supported_platform
     @skip_on_cpu
@@ -3374,9 +3689,15 @@ class TestFlexAttention(InductorTestCase):
         # Physical tensor size (compact)
         physical_len = sum(doc_lens)
 
-        query = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
-        key = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
-        value = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16)
+        query = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        key = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
+        value = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=torch.float16
+        )
 
         # Test forward pass
         compiled_flex = torch.compile(flex_attention)
@@ -3391,7 +3712,9 @@ class TestFlexAttention(InductorTestCase):
         key_grad = key.clone().requires_grad_(True)
         value_grad = value.clone().requires_grad_(True)
 
-        out_grad = compiled_flex(query_grad, key_grad, value_grad, block_mask=block_mask)
+        out_grad = compiled_flex(
+            query_grad, key_grad, value_grad, block_mask=block_mask
+        )
         grad_out = torch.randn_like(out_grad)
         out_grad.backward(grad_out)
 
@@ -3442,13 +3765,20 @@ class TestFlexAttention(InductorTestCase):
 
         # Use float32 for CPU, float16 for CUDA
         dtype = torch.float32 if device_str == "cpu" else torch.float16
-        query = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=test_device, dtype=dtype)
-        key = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=test_device, dtype=dtype)
-        value = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=test_device, dtype=dtype)
+        query = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=test_device, dtype=dtype
+        )
+        key = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=test_device, dtype=dtype
+        )
+        value = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=test_device, dtype=dtype
+        )
 
         # Run in eager mode (without torch.compile)
         # The warning about unfused implementation is expected
         import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             out_eager = flex_attention(query, key, value, block_mask=block_mask)
@@ -3460,7 +3790,11 @@ class TestFlexAttention(InductorTestCase):
 
         # Compute reference per-document
         def causal_mask_mod(score, b, h, q_idx, kv_idx):
-            return torch.where(q_idx >= kv_idx, score, torch.tensor(float("-inf"), device=score.device, dtype=score.dtype))
+            return torch.where(
+                q_idx >= kv_idx,
+                score,
+                torch.tensor(float("-inf"), device=score.device, dtype=score.dtype),
+            )
 
         doc_offsets = [0] + list(torch.cumsum(q_seq_lens, dim=0).tolist())
         for doc_idx, doc_len in enumerate(doc_lens):
@@ -3472,11 +3806,13 @@ class TestFlexAttention(InductorTestCase):
             v_doc = value[:, :, start:end, :]
 
             # Compute attention for this document
-            scale = 1.0 / (HEAD_DIM ** 0.5)
+            scale = 1.0 / (HEAD_DIM**0.5)
             scores = torch.matmul(q_doc, k_doc.transpose(-2, -1)) * scale
 
             # Apply causal mask
-            mask = torch.tril(torch.ones(doc_len, doc_len, device=test_device, dtype=torch.bool))
+            mask = torch.tril(
+                torch.ones(doc_len, doc_len, device=test_device, dtype=torch.bool)
+            )
             scores = scores.masked_fill(~mask, float("-inf"))
 
             attn_weights = torch.softmax(scores, dim=-1)
@@ -3486,8 +3822,13 @@ class TestFlexAttention(InductorTestCase):
             eager_doc = out_eager[:, :, start:end, :]
             atol = 1e-3 if dtype == torch.float16 else 1e-5
             rtol = 1e-2 if dtype == torch.float16 else 1e-4
-            torch.testing.assert_close(eager_doc, ref_out.to(dtype), atol=atol, rtol=rtol,
-                msg=f"Mismatch for doc {doc_idx} (len={doc_len})")
+            torch.testing.assert_close(
+                eager_doc,
+                ref_out.to(dtype),
+                atol=atol,
+                rtol=rtol,
+                msg=f"Mismatch for doc {doc_idx} (len={doc_len})",
+            )
 
     @supported_platform
     def test_varlen_eager_backward(self, device):
@@ -3517,12 +3858,37 @@ class TestFlexAttention(InductorTestCase):
         physical_len = sum(doc_lens)
         dtype = torch.float32 if device == "cpu" else torch.float16
 
-        query = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=dtype, requires_grad=True)
-        key = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=dtype, requires_grad=True)
-        value = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=dtype, requires_grad=True)
+        query = torch.randn(
+            1,
+            NUM_HEADS,
+            physical_len,
+            HEAD_DIM,
+            device=device,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        key = torch.randn(
+            1,
+            NUM_HEADS,
+            physical_len,
+            HEAD_DIM,
+            device=device,
+            dtype=dtype,
+            requires_grad=True,
+        )
+        value = torch.randn(
+            1,
+            NUM_HEADS,
+            physical_len,
+            HEAD_DIM,
+            device=device,
+            dtype=dtype,
+            requires_grad=True,
+        )
 
         # Run in eager mode
         import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             out_eager = flex_attention(query, key, value, block_mask=block_mask)
@@ -3573,9 +3939,15 @@ class TestFlexAttention(InductorTestCase):
         physical_len = sum(doc_lens)
         dtype = torch.float16
 
-        query = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=dtype)
-        key = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=dtype)
-        value = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=dtype)
+        query = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=dtype
+        )
+        key = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=dtype
+        )
+        value = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=device, dtype=dtype
+        )
 
         # Run compiled
         compiled_flex = torch.compile(flex_attention)
@@ -3583,14 +3955,20 @@ class TestFlexAttention(InductorTestCase):
 
         # Run eager
         import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             out_eager = flex_attention(query, key, value, block_mask=block_mask)
 
         # Compare outputs - both should produce the same results
         # Use loose tolerance since eager uses float32 internally while compiled uses optimized kernels
-        torch.testing.assert_close(out_eager, out_compiled, atol=1e-2, rtol=1e-2,
-            msg="Eager and compiled outputs differ significantly")
+        torch.testing.assert_close(
+            out_eager,
+            out_compiled,
+            atol=1e-2,
+            rtol=1e-2,
+            msg="Eager and compiled outputs differ significantly",
+        )
 
     @supported_platform
     def test_varlen_eager_cpu(self, device):
@@ -3620,12 +3998,19 @@ class TestFlexAttention(InductorTestCase):
 
         physical_len = sum(doc_lens)
 
-        query = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=cpu_device, dtype=torch.float32)
-        key = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=cpu_device, dtype=torch.float32)
-        value = torch.randn(1, NUM_HEADS, physical_len, HEAD_DIM, device=cpu_device, dtype=torch.float32)
+        query = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=cpu_device, dtype=torch.float32
+        )
+        key = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=cpu_device, dtype=torch.float32
+        )
+        value = torch.randn(
+            1, NUM_HEADS, physical_len, HEAD_DIM, device=cpu_device, dtype=torch.float32
+        )
 
         # Run in eager mode on CPU
         import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             out = flex_attention(query, key, value, block_mask=block_mask)
@@ -3647,14 +4032,40 @@ class TestFlexAttention(InductorTestCase):
         HEAD_DIM = 64
         SEQ_LEN = 128
 
-        query = torch.randn(1, 1, SEQ_LEN, HEAD_DIM, device=cpu_device, dtype=torch.float32, requires_grad=True)
-        key = torch.randn(1, 1, SEQ_LEN, HEAD_DIM, device=cpu_device, dtype=torch.float32, requires_grad=True)
-        value = torch.randn(1, 1, SEQ_LEN, HEAD_DIM, device=cpu_device, dtype=torch.float32, requires_grad=True)
+        query = torch.randn(
+            1,
+            1,
+            SEQ_LEN,
+            HEAD_DIM,
+            device=cpu_device,
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+        key = torch.randn(
+            1,
+            1,
+            SEQ_LEN,
+            HEAD_DIM,
+            device=cpu_device,
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+        value = torch.randn(
+            1,
+            1,
+            SEQ_LEN,
+            HEAD_DIM,
+            device=cpu_device,
+            dtype=torch.float32,
+            requires_grad=True,
+        )
 
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        block_mask = create_block_mask(causal_mask, 1, 1, SEQ_LEN, SEQ_LEN, device=cpu_device)
+        block_mask = create_block_mask(
+            causal_mask, 1, 1, SEQ_LEN, SEQ_LEN, device=cpu_device
+        )
 
         # Compiled forward should work
         compiled_flex = torch.compile(flex_attention)
@@ -3673,7 +4084,7 @@ class TestFlexAttention(InductorTestCase):
         error_msg = str(context.exception)
         self.assertTrue(
             "CPU" in error_msg or "cpu" in error_msg,
-            f"Error message should mention CPU: {error_msg}"
+            f"Error message should mention CPU: {error_msg}",
         )
 
     @supported_platform
@@ -3686,17 +4097,44 @@ class TestFlexAttention(InductorTestCase):
         HEAD_DIM = 64
         SEQ_LEN = 64
 
-        query = torch.randn(1, 1, SEQ_LEN, HEAD_DIM, device=cpu_device, dtype=torch.float32, requires_grad=True)
-        key = torch.randn(1, 1, SEQ_LEN, HEAD_DIM, device=cpu_device, dtype=torch.float32, requires_grad=True)
-        value = torch.randn(1, 1, SEQ_LEN, HEAD_DIM, device=cpu_device, dtype=torch.float32, requires_grad=True)
+        query = torch.randn(
+            1,
+            1,
+            SEQ_LEN,
+            HEAD_DIM,
+            device=cpu_device,
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+        key = torch.randn(
+            1,
+            1,
+            SEQ_LEN,
+            HEAD_DIM,
+            device=cpu_device,
+            dtype=torch.float32,
+            requires_grad=True,
+        )
+        value = torch.randn(
+            1,
+            1,
+            SEQ_LEN,
+            HEAD_DIM,
+            device=cpu_device,
+            dtype=torch.float32,
+            requires_grad=True,
+        )
 
         def causal_mask(b, h, q_idx, kv_idx):
             return q_idx >= kv_idx
 
-        block_mask = create_block_mask(causal_mask, 1, 1, SEQ_LEN, SEQ_LEN, device=cpu_device)
+        block_mask = create_block_mask(
+            causal_mask, 1, 1, SEQ_LEN, SEQ_LEN, device=cpu_device
+        )
 
         # Run in eager mode (no torch.compile)
         import warnings
+
         with warnings.catch_warnings():
             warnings.simplefilter("ignore")
             out = flex_attention(query, key, value, block_mask=block_mask)
