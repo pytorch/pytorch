@@ -6,7 +6,7 @@ This module provides Triton-compatible extern functions for symmetric memory
 operations with automatic backend dispatch (NCCL or NVSHMEM).
 
 Backend Hint Support:
-The symmetric memory primitives (e.g., `symm_all_reduce_sum_f32`) accept an
+The symmetric memory primitives (e.g., `symm_all_reduce`) accept an
 optional `backend` constexpr argument that controls dispatch:
 - BACKEND_DEFAULT (0): Use runtime dispatch based on SymmContext type
 - BACKEND_NCCL (1): Dispatch directly to NCCL backend (requires libnccl_device.bc)
@@ -24,8 +24,10 @@ Usage Pattern:
     from torch._extern_triton import (
         BACKEND_DEFAULT,
         BACKEND_NVSHMEM,
+        DTYPE_FLOAT32,
+        REDUCE_OP_SUM,
         requires_torch_symm,
-        symm_all_reduce_sum_f32,
+        symm_all_reduce,
     )
 
 
@@ -43,8 +45,9 @@ Usage Pattern:
             byte_offset: tl.int64 = 0
             n_elems: tl.int64 = num_elements
             # Pass backend_hint to primitives for compile-time dispatch
-            result = symm_all_reduce_sum_f32(
-                ctx_ptr, buffer_ptr, byte_offset, n_elems, backend_hint
+            result = symm_all_reduce(
+                ctx_ptr, buffer_ptr, byte_offset, n_elems,
+                REDUCE_OP_SUM, DTYPE_FLOAT32, backend_hint
             )
 
         return my_kernel
@@ -101,6 +104,16 @@ _BACKEND_NVSHMEM = 2  # Dispatch directly to NVSHMEM backend
 BACKEND_DEFAULT = _BACKEND_DEFAULT
 BACKEND_NCCL = _BACKEND_NCCL
 BACKEND_NVSHMEM = _BACKEND_NVSHMEM
+
+# Reduction operation constants (matching CUDA constants)
+_REDUCE_OP_SUM = 0
+
+REDUCE_OP_SUM = _REDUCE_OP_SUM
+
+# Data type constants (matching CUDA constants)
+_DTYPE_FLOAT32 = 0
+
+DTYPE_FLOAT32 = _DTYPE_FLOAT32
 
 
 class TorchSymmLibFinder:
@@ -324,8 +337,9 @@ if TRITON_AVAILABLE:
                 ):
                     byte_offset: tl.int64 = 0
                     n_elems: tl.int64 = num_elements
-                    result = symm_all_reduce_sum_f32(
-                        ctx_ptr, buffer_ptr, byte_offset, n_elems, backend_hint
+                    result = symm_all_reduce(
+                        ctx_ptr, buffer_ptr, byte_offset, n_elems,
+                        REDUCE_OP_SUM, DTYPE_FLOAT32, backend_hint
                     )
 
                 return my_kernel
@@ -422,15 +436,23 @@ if TRITON_AVAILABLE:
             return _apply_decorator(jit_func_or_backend, _BACKEND_DEFAULT)
 
     @core.extern
-    def _symm_all_reduce_sum_f32_frontend(
+    def _symm_all_reduce_frontend(
         ctx_ptr,
         local_ptr,
         byte_offset,
         num_elements,
+        reduce_op,
+        dtype,
         _semantic=None,
     ):
         """
-        Frontend all-reduce sum operation that dispatches based on SymmContext type.
+        Frontend all-reduce operation that dispatches based on SymmContext type.
+
+        DEMONSTRATION ONLY: This kernel implementation is intentionally simple and
+        NOT efficient. It is provided solely to demonstrate the symmetric memory
+        abstraction layer API. This implementation should NOT be used as a reference
+        for production kernels and is NOT part of the proposed set of kernels that
+        constitute the symmetric memory abstraction layer.
 
         This calls the unified frontend function that dynamically dispatches to
         either NCCL or NVSHMEM backend based on the SymmContext type field.
@@ -438,30 +460,40 @@ if TRITON_AVAILABLE:
         return core.extern_elementwise(
             "",  # libname - not used when extern_libs is provided
             "",  # libpath - not used when extern_libs is provided
-            [ctx_ptr, local_ptr, byte_offset, num_elements],
+            [ctx_ptr, local_ptr, byte_offset, num_elements, reduce_op, dtype],
             {
-                # C function signature: (int64, int64, int32, int32) -> int32
+                # C function signature: (int64, int64, int32, int32, int32, int32) -> int32
                 (
                     core.dtype("int64"),  # ctx_ptr
                     core.dtype("int64"),  # local_ptr
                     core.dtype("int32"),  # byte_offset
                     core.dtype("int32"),  # num_elements
-                ): ("symm_all_reduce_sum_f32", core.dtype("int32")),
+                    core.dtype("int32"),  # reduce_op
+                    core.dtype("int32"),  # dtype
+                ): ("symm_all_reduce", core.dtype("int32")),
             },
             is_pure=False,  # Collective operation has side effects
             _semantic=_semantic,
         )
 
     @core.extern
-    def _nvshmem_symm_all_reduce_sum_f32(
+    def _nvshmem_symm_all_reduce(
         ctx_ptr,
         local_ptr,
         byte_offset,
         num_elements,
+        reduce_op,
+        dtype,
         _semantic=None,
     ):
         """
-        NVSHMEM-specific all-reduce sum operation.
+        NVSHMEM-specific all-reduce operation.
+
+        DEMONSTRATION ONLY: This kernel implementation is intentionally simple and
+        NOT efficient. It is provided solely to demonstrate the symmetric memory
+        abstraction layer API. This implementation should NOT be used as a reference
+        for production kernels and is NOT part of the proposed set of kernels that
+        constitute the symmetric memory abstraction layer.
 
         This calls the NVSHMEM backend directly, bypassing runtime dispatch.
         Use this when you know the context is NVSHMEM type.
@@ -469,30 +501,40 @@ if TRITON_AVAILABLE:
         return core.extern_elementwise(
             "",  # libname - not used when extern_libs is provided
             "",  # libpath - not used when extern_libs is provided
-            [ctx_ptr, local_ptr, byte_offset, num_elements],
+            [ctx_ptr, local_ptr, byte_offset, num_elements, reduce_op, dtype],
             {
-                # C function signature: (int64, int64, int32, int32) -> int32
+                # C function signature: (int64, int64, int32, int32, int32, int32) -> int32
                 (
                     core.dtype("int64"),  # ctx_ptr
                     core.dtype("int64"),  # local_ptr
                     core.dtype("int32"),  # byte_offset
                     core.dtype("int32"),  # num_elements
-                ): ("nvshmem_symm_all_reduce_sum_f32", core.dtype("int32")),
+                    core.dtype("int32"),  # reduce_op
+                    core.dtype("int32"),  # dtype
+                ): ("nvshmem_symm_all_reduce", core.dtype("int32")),
             },
             is_pure=False,  # Collective operation has side effects
             _semantic=_semantic,
         )
 
     @triton.jit
-    def symm_all_reduce_sum_f32(
+    def symm_all_reduce(
         ctx_ptr,
         local_ptr,
         byte_offset,
         num_elements,
+        reduce_op: tl.constexpr,
+        dtype: tl.constexpr,
         backend: tl.constexpr = 0,
     ):
         """
-        Perform unified all-reduce sum operation on symmetric memory buffers (float32).
+        Perform unified all-reduce operation on symmetric memory buffers.
+
+        DEMONSTRATION ONLY: This kernel implementation is intentionally simple and
+        NOT efficient. It is provided solely to demonstrate the symmetric memory
+        abstraction layer API. This implementation should NOT be used as a reference
+        for production kernels and is NOT part of the proposed set of kernels that
+        constitute the symmetric memory abstraction layer.
 
         This function dispatches to either the unified frontend (runtime dispatch)
         or a backend-specific implementation based on the backend hint.
@@ -504,7 +546,11 @@ if TRITON_AVAILABLE:
             ctx_ptr: Pointer to SymmContext (NCCLSymmContext or NVSHMEMSymmContext)
             local_ptr: Pointer to local buffer (device pointer as int64)
             byte_offset: Byte offset within symmetric buffer (int32)
-            num_elements: Number of float32 elements to reduce (int32)
+            num_elements: Number of elements to reduce (int32)
+            reduce_op: Reduction operation (constexpr)
+                       - 0 (REDUCE_OP_SUM): Sum reduction (only supported value)
+            dtype: Data type (constexpr)
+                   - 0 (DTYPE_FLOAT32): float32 (only supported value)
             backend: Backend hint (constexpr, default=0 for BACKEND_DEFAULT)
                      - 0 (BACKEND_DEFAULT): Runtime dispatch based on context type
                      - 1 (BACKEND_NCCL): Direct NCCL dispatch (not functional)
@@ -514,28 +560,46 @@ if TRITON_AVAILABLE:
             int32: 0 on success, negative on error
                    -1: null context or invalid context type
                    -2: unknown context type (only for frontend dispatch)
+                   -3: unsupported reduction operation
+                   -4: unsupported data type
 
         Note:
             When using BACKEND_DEFAULT (0), use @requires_torch_symm decorator.
             When using BACKEND_NVSHMEM (2), use @requires_torch_symm(backend=BACKEND_NVSHMEM).
         """
+        # Validate reduce_op at compile time
+        tl.static_assert(
+            reduce_op == 0,  # REDUCE_OP_SUM
+            "Only REDUCE_OP_SUM (0) is supported",
+        )
+
+        # Validate dtype at compile time
+        tl.static_assert(
+            dtype == 0,  # DTYPE_FLOAT32
+            "Only DTYPE_FLOAT32 (0) is supported",
+        )
+
         # Use integer literals for comparison since Triton can't access globals
         # 0 = BACKEND_DEFAULT, 1 = BACKEND_NCCL, 2 = BACKEND_NVSHMEM
         if backend == 0:  # BACKEND_DEFAULT
             # Runtime dispatch based on SymmContext type
-            return _symm_all_reduce_sum_f32_frontend(
+            return _symm_all_reduce_frontend(
                 ctx_ptr,
                 local_ptr,
                 byte_offset,
                 num_elements,
+                reduce_op,
+                dtype,
             )
         elif backend == 2:  # BACKEND_NVSHMEM
             # Direct NVSHMEM dispatch
-            return _nvshmem_symm_all_reduce_sum_f32(
+            return _nvshmem_symm_all_reduce(
                 ctx_ptr,
                 local_ptr,
                 byte_offset,
                 num_elements,
+                reduce_op,
+                dtype,
             )
         else:
             # BACKEND_NCCL (1) or unknown - not supported
@@ -553,8 +617,8 @@ else:
         """Stub for when Triton is not available."""
         raise ImportError("Triton is required for requires_torch_symm decorator")
 
-    def symm_all_reduce_sum_f32(*args, **kwargs):  # type: ignore[misc]
-        raise ImportError("Triton is required for symm_all_reduce_sum_f32")
+    def symm_all_reduce(*args, **kwargs):  # type: ignore[misc]
+        raise ImportError("Triton is required for symm_all_reduce")
 
 
 __all__ = [
@@ -562,10 +626,14 @@ __all__ = [
     "BACKEND_DEFAULT",
     "BACKEND_NCCL",
     "BACKEND_NVSHMEM",
+    # Reduction operation constants
+    "REDUCE_OP_SUM",
+    # Data type constants
+    "DTYPE_FLOAT32",
     # Library finder
     "TorchSymmLibFinder",
     # Decorators
     "requires_torch_symm",
     # Triton extern function
-    "symm_all_reduce_sum_f32",
+    "symm_all_reduce",
 ]

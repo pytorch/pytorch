@@ -52,6 +52,8 @@ clang++ -x cuda --cuda-device-only -emit-llvm -c torch_symm.cu \
 
 The symmetric memory library provides a unified frontend that automatically dispatches to either NCCL or NVSHMEM backend based on the SymmContext type.
 
+**DEMONSTRATION ONLY**: The `symm_all_reduce` kernel implementation is intentionally simple and NOT efficient. It is provided solely to demonstrate the symmetric memory abstraction layer API. This implementation should NOT be used as a reference for production kernels and is NOT part of the proposed set of kernels that constitute the symmetric memory abstraction layer.
+
 ### Backend Support
 
 | Backend | Status | Device Library |
@@ -95,16 +97,32 @@ struct NVSHMEMSymmContext : public SymmContext {
 
 ### Frontend Function
 
-The unified `symm_all_reduce_sum_f32` function dispatches based on context type:
+The unified `symm_all_reduce` function dispatches based on context type:
 
 ```cpp
-__device__ int32_t symm_all_reduce_sum_f32(
+__device__ int32_t symm_all_reduce(
     int64_t ctx_ptr,      // Pointer to SymmContext
     int64_t local_ptr,    // Pointer to local buffer
-    int64_t byte_offset,  // Byte offset within symmetric buffer
-    int64_t num_elements  // Number of float32 elements
+    int32_t byte_offset,  // Byte offset within symmetric buffer
+    int32_t num_elements, // Number of elements
+    int32_t reduce_op,    // Reduction operation (0=SUM, only SUM supported)
+    int32_t dtype         // Data type (0=float32, only float32 supported)
 );
-// Returns: 0 on success, -1 for null context, -2 for unknown type
+// Returns: 0 on success
+//          -1 for null context
+//          -2 for unknown type
+//          -3 for unsupported reduce_op
+//          -4 for unsupported dtype
+```
+
+### Constants
+
+```cpp
+// Reduction operations
+#define REDUCE_OP_SUM 0    // Sum reduction (only supported value)
+
+// Data types
+#define DTYPE_FLOAT32 0    // float32 (only supported value)
 ```
 
 ## Usage in Triton
@@ -117,8 +135,10 @@ Use a factory function to create kernels with a specific backend hint:
 from torch._extern_triton import (
     BACKEND_DEFAULT,
     BACKEND_NVSHMEM,
+    DTYPE_FLOAT32,
+    REDUCE_OP_SUM,
     requires_torch_symm,
-    symm_all_reduce_sum_f32,
+    symm_all_reduce,
 )
 
 def make_my_kernel(backend: int):
@@ -132,8 +152,9 @@ def make_my_kernel(backend: int):
     ):
         byte_offset: tl.int64 = 0
         n_elems: tl.int64 = num_elements
-        result = symm_all_reduce_sum_f32(
-            ctx_ptr, buffer_ptr, byte_offset, n_elems, backend_hint
+        result = symm_all_reduce(
+            ctx_ptr, buffer_ptr, byte_offset, n_elems,
+            REDUCE_OP_SUM, DTYPE_FLOAT32, backend_hint
         )
     return my_kernel
 

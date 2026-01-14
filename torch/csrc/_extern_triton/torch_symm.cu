@@ -28,6 +28,16 @@
 extern "C" {
 
 // =============================================================================
+// REDUCTION OPERATION AND DATA TYPE CONSTANTS
+// =============================================================================
+
+// Reduction operations (matching Triton constexpr values)
+#define REDUCE_OP_SUM 0
+
+// Data types (matching Triton constexpr values)
+#define DTYPE_FLOAT32 0
+
+// =============================================================================
 // NCCL BACKEND IMPLEMENTATION
 // Note: NCCL does not provide a device bitcode library (libnccl_device.bc).
 // This section is compiled only when NCCL_HAS_DEVICE_BITCODE is defined.
@@ -76,18 +86,44 @@ __device__ __forceinline__ void nccl_lsa_barrier(
 }
 
 /**
- * NCCL backend implementation of all-reduce sum (float32).
+ * NCCL backend implementation of all-reduce.
+ *
+ * DEMONSTRATION ONLY: This kernel implementation is intentionally simple and
+ * NOT efficient. It is provided solely to demonstrate the symmetric memory
+ * abstraction layer API. This implementation should NOT be used as a reference
+ * for production kernels and is NOT part of the proposed set of kernels that
+ * constitute the symmetric memory abstraction layer.
  *
  * Algorithm:
  * 1. Barrier to ensure all data is ready
  * 2. Each rank reads from all other ranks and accumulates
  * 3. Barrier to ensure all reads are complete
+ *
+ * @param nccl_ctx Pointer to NCCLSymmContext
+ * @param local_buffer Pointer to local buffer containing input and output
+ * @param byte_offset Byte offset within the symmetric buffer
+ * @param num_elements Number of elements to reduce
+ * @param reduce_op Reduction operation (only REDUCE_OP_SUM supported)
+ * @param dtype Data type (only DTYPE_FLOAT32 supported)
+ * @return 0 on success, negative on error
  */
-__device__ int32_t nccl_all_reduce_sum_f32_impl(
+__device__ int32_t nccl_all_reduce_impl(
     NCCLSymmContext* nccl_ctx,
     float* local_buffer,
     int64_t byte_offset,
-    int64_t num_elements) {
+    int64_t num_elements,
+    int32_t reduce_op,
+    int32_t dtype) {
+  // Only SUM reduction is supported
+  if (reduce_op != REDUCE_OP_SUM) {
+    return -3; // Error: unsupported reduction operation
+  }
+
+  // Only float32 is supported
+  if (dtype != DTYPE_FLOAT32) {
+    return -4; // Error: unsupported data type
+  }
+
   int rank = nccl_ctx->rank;
   int world_size = nccl_ctx->world_size;
 
@@ -144,7 +180,13 @@ __device__ __forceinline__ NVSHMEMSymmContext* cast_to_nvshmem_context(
 }
 
 /**
- * NVSHMEM backend implementation of all-reduce sum (float32).
+ * NVSHMEM backend implementation of all-reduce.
+ *
+ * DEMONSTRATION ONLY: This kernel implementation is intentionally simple and
+ * NOT efficient. It is provided solely to demonstrate the symmetric memory
+ * abstraction layer API. This implementation should NOT be used as a reference
+ * for production kernels and is NOT part of the proposed set of kernels that
+ * constitute the symmetric memory abstraction layer.
  *
  * Algorithm (two-phase to avoid race conditions):
  * 1. Block-level barrier to ensure all PEs have their data ready
@@ -159,12 +201,32 @@ __device__ __forceinline__ NVSHMEMSymmContext* cast_to_nvshmem_context(
  * IMPORTANT: Uses global PE numbers (from context's
  * global_rank/global_world_size), not group-local ranks. NVSHMEM's
  * nvshmem_ptr() expects global PE numbers.
+ *
+ * @param nvshmem_ctx Pointer to NVSHMEMSymmContext
+ * @param local_buffer Pointer to local buffer containing input and output
+ * @param byte_offset Byte offset within the symmetric buffer
+ * @param num_elements Number of elements to reduce
+ * @param reduce_op Reduction operation (only REDUCE_OP_SUM supported)
+ * @param dtype Data type (only DTYPE_FLOAT32 supported)
+ * @return 0 on success, negative on error
  */
-__device__ int32_t nvshmem_all_reduce_sum_f32_impl(
+__device__ int32_t nvshmem_all_reduce_impl(
     NVSHMEMSymmContext* nvshmem_ctx,
     float* local_buffer,
     int32_t byte_offset,
-    int32_t num_elements) {
+    int32_t num_elements,
+    int32_t reduce_op,
+    int32_t dtype) {
+  // Only SUM reduction is supported
+  if (reduce_op != REDUCE_OP_SUM) {
+    return -3; // Error: unsupported reduction operation
+  }
+
+  // Only float32 is supported
+  if (dtype != DTYPE_FLOAT32) {
+    return -4; // Error: unsupported data type
+  }
+
   // Use global PE numbers, not group-local ranks
   int global_rank = nvshmem_ctx->global_rank;
   int global_world_size = nvshmem_ctx->global_world_size;
@@ -224,20 +286,30 @@ __device__ int32_t nvshmem_all_reduce_sum_f32_impl(
 // =============================================================================
 
 /**
- * Unified all-reduce sum implementation that dispatches to the appropriate
+ * Unified all-reduce implementation that dispatches to the appropriate
  * backend based on the context type.
+ *
+ * DEMONSTRATION ONLY: This kernel implementation is intentionally simple and
+ * NOT efficient. It is provided solely to demonstrate the symmetric memory
+ * abstraction layer API. This implementation should NOT be used as a reference
+ * for production kernels and is NOT part of the proposed set of kernels that
+ * constitute the symmetric memory abstraction layer.
  *
  * @param ctx Pointer to SymmContext (either NCCL or NVSHMEM)
  * @param local_buffer Pointer to local buffer containing input and output
  * @param byte_offset Byte offset within the symmetric buffer
- * @param num_elements Number of float32 elements to reduce
+ * @param num_elements Number of elements to reduce
+ * @param reduce_op Reduction operation (only REDUCE_OP_SUM=0 supported)
+ * @param dtype Data type (only DTYPE_FLOAT32=0 supported)
  * @return 0 on success, negative on error
  */
-__device__ int32_t symm_all_reduce_sum_f32_impl(
+__device__ int32_t symm_all_reduce_impl(
     SymmContext* ctx,
     float* local_buffer,
     int32_t byte_offset,
-    int32_t num_elements) {
+    int32_t num_elements,
+    int32_t reduce_op,
+    int32_t dtype) {
   if (ctx == nullptr) {
     return -1; // Error: null context
   }
@@ -246,14 +318,14 @@ __device__ int32_t symm_all_reduce_sum_f32_impl(
 #if NCCL_HAS_DEVICE_BITCODE
     case SymmContext::Type::NCCL: {
       NCCLSymmContext* nccl_ctx = static_cast<NCCLSymmContext*>(ctx);
-      return nccl_all_reduce_sum_f32_impl(
-          nccl_ctx, local_buffer, byte_offset, num_elements);
+      return nccl_all_reduce_impl(
+          nccl_ctx, local_buffer, byte_offset, num_elements, reduce_op, dtype);
     }
 #endif
     case SymmContext::Type::NVSHMEM: {
       NVSHMEMSymmContext* nvshmem_ctx = static_cast<NVSHMEMSymmContext*>(ctx);
-      return nvshmem_all_reduce_sum_f32_impl(
-          nvshmem_ctx, local_buffer, byte_offset, num_elements);
+      return nvshmem_all_reduce_impl(
+          nvshmem_ctx, local_buffer, byte_offset, num_elements, reduce_op, dtype);
     }
     default:
       return -2; // Error: unknown context type (or NCCL without device bitcode)
@@ -266,7 +338,13 @@ __device__ int32_t symm_all_reduce_sum_f32_impl(
 // =============================================================================
 
 /**
- * Unified wrapper for all-reduce sum (float32) for use with Triton.
+ * Unified wrapper for all-reduce for use with Triton.
+ *
+ * DEMONSTRATION ONLY: This kernel implementation is intentionally simple and
+ * NOT efficient. It is provided solely to demonstrate the symmetric memory
+ * abstraction layer API. This implementation should NOT be used as a reference
+ * for production kernels and is NOT part of the proposed set of kernels that
+ * constitute the symmetric memory abstraction layer.
  *
  * This function serves as the single entry point for Triton kernels.
  * It dispatches to either NCCL or NVSHMEM backend based on the context type.
@@ -278,17 +356,21 @@ __device__ int32_t symm_all_reduce_sum_f32_impl(
  * @param local_ptr Pointer to local buffer (as int64 for Triton compatibility)
  * @param byte_offset Byte offset within symmetric buffer (int32 for Triton)
  * @param num_elements Number of elements to reduce (int32 for Triton)
+ * @param reduce_op Reduction operation (int32, only REDUCE_OP_SUM=0 supported)
+ * @param dtype Data type (int32, only DTYPE_FLOAT32=0 supported)
  * @return 0 on success, non-zero on error
  */
-__device__ int32_t symm_all_reduce_sum_f32(
+__device__ int32_t symm_all_reduce(
     int64_t ctx_ptr,
     int64_t local_ptr,
     int32_t byte_offset,
-    int32_t num_elements) {
+    int32_t num_elements,
+    int32_t reduce_op,
+    int32_t dtype) {
   SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
   float* buffer = reinterpret_cast<float*>(local_ptr);
-  return symm_all_reduce_sum_f32_impl(
-      ctx, buffer, (int64_t)byte_offset, (int64_t)num_elements);
+  return symm_all_reduce_impl(
+      ctx, buffer, byte_offset, num_elements, reduce_op, dtype);
 }
 
 // =============================================================================
@@ -297,45 +379,50 @@ __device__ int32_t symm_all_reduce_sum_f32(
 
 #if NCCL_HAS_DEVICE_BITCODE
 /**
- * NCCL-specific wrapper for all-reduce sum (float32).
+ * NCCL-specific wrapper for all-reduce.
  * Use this when you know the context is NCCL type.
+ *
+ * DEMONSTRATION ONLY: See symm_all_reduce for details.
  */
-__device__ int32_t nccl_symm_all_reduce_sum_f32(
+__device__ int32_t nccl_symm_all_reduce(
     int64_t ctx_ptr,
     int64_t local_ptr,
     int64_t byte_offset,
-    int64_t num_elements) {
+    int64_t num_elements,
+    int32_t reduce_op,
+    int32_t dtype) {
   SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
   NCCLSymmContext* nccl_ctx = cast_to_nccl_context(ctx);
   if (nccl_ctx == nullptr) {
     return -1;
   }
   float* buffer = reinterpret_cast<float*>(local_ptr);
-  return nccl_all_reduce_sum_f32_impl(
-      nccl_ctx, buffer, byte_offset, num_elements);
+  return nccl_all_reduce_impl(
+      nccl_ctx, buffer, byte_offset, num_elements, reduce_op, dtype);
 }
 #endif // NCCL_HAS_DEVICE_BITCODE
 
 /**
- * NVSHMEM-specific wrapper for all-reduce sum (float32).
+ * NVSHMEM-specific wrapper for all-reduce.
  * Use this when you know the context is NVSHMEM type.
  *
- * Note: This function is now deprecated in favor of using the unified
- * symm_all_reduce_sum_f32 function. It is kept for backward compatibility.
+ * DEMONSTRATION ONLY: See symm_all_reduce for details.
  */
-__device__ int32_t nvshmem_symm_all_reduce_sum_f32(
+__device__ int32_t nvshmem_symm_all_reduce(
     int64_t ctx_ptr,
     int64_t local_ptr,
     int32_t byte_offset,
-    int32_t num_elements) {
+    int32_t num_elements,
+    int32_t reduce_op,
+    int32_t dtype) {
   SymmContext* ctx = reinterpret_cast<SymmContext*>(ctx_ptr);
   NVSHMEMSymmContext* nvshmem_ctx = cast_to_nvshmem_context(ctx);
   if (nvshmem_ctx == nullptr) {
     return -1;
   }
   float* buffer = reinterpret_cast<float*>(local_ptr);
-  return nvshmem_all_reduce_sum_f32_impl(
-      nvshmem_ctx, buffer, (int64_t)byte_offset, (int64_t)num_elements);
+  return nvshmem_all_reduce_impl(
+      nvshmem_ctx, buffer, byte_offset, num_elements, reduce_op, dtype);
 }
 
 } // extern "C"
