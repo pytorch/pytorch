@@ -443,6 +443,8 @@ class ViewAndMutationMeta:
     # version counter checks at runtime.
     num_tensors_saved_with_no_vc_check: Optional[int] = None
 
+    # Number of opaque objects saved for backward
+    num_opaque_objects_saved_for_bw: Optional[int] = None
     # The grad_enabled mutation that will be emitted in the runtime_wrapper epilogue
     # NOTE: AOTAutograd will assume that the ambient `is_grad_enabled` is the grad mode
     # that is intended to be in effect prior to running the graph, in keeping with
@@ -695,10 +697,11 @@ class ViewAndMutationMeta:
         assert self.num_tensors_saved_with_no_vc_check is not None
         # The tensors with VC check come first, followed by tensors without VC check
         num_no_vc_check = self.num_tensors_saved_with_no_vc_check
+        num_opaque = self.num_opaque_objects_saved_for_bw or 0
         num_symints = self.num_symints_saved_for_bw
-        if num_no_vc_check > 0 or num_symints > 0:
-            end = -(num_no_vc_check + num_symints)
-            return slice(self.num_forward, end if end != 0 else None)
+        num_trailing = num_no_vc_check + num_opaque + num_symints
+        if num_trailing > 0:
+            return slice(self.num_forward, -num_trailing if num_trailing != 0 else None)
         else:
             return slice(self.num_forward, None)
 
@@ -712,13 +715,27 @@ class ViewAndMutationMeta:
         assert self.num_symints_saved_for_bw is not None
         assert self.num_tensors_saved_with_no_vc_check is not None
         num_no_vc_check = self.num_tensors_saved_with_no_vc_check
+        num_opaque = self.num_opaque_objects_saved_for_bw or 0
         num_symints = self.num_symints_saved_for_bw
         if num_no_vc_check == 0:
             return slice(0, 0)  # empty slice
-        if num_symints > 0:
-            return slice(-num_no_vc_check - num_symints, -num_symints)
+        num_trailing = num_opaque + num_symints
+        if num_trailing > 0:
+            return slice(-num_no_vc_check - num_trailing, -num_trailing)
         else:
             return slice(-num_no_vc_check, None)
+
+    @property
+    def opaque_objects_saved_for_backwards_slice(self):
+        num_opaque = self.num_opaque_objects_saved_for_bw or 0
+        num_symints = self.num_symints_saved_for_bw or 0
+        if num_opaque > 0:
+            if num_symints > 0:
+                return slice(-num_opaque - num_symints, -num_symints)
+            else:
+                return slice(-num_opaque, None)
+        else:
+            return slice(0, 0)  # empty slice
 
     @property
     def symints_saved_for_backwards_slice(self):
@@ -1359,3 +1376,13 @@ class JointWithDescriptors:
     @property
     def fake_mode(self):
         return self._aot_state.fake_mode
+
+    def cache_hash(self) -> str:
+        """
+        Return a hash string suitable for use as a cache key. This method
+        exists to decouple cache key generation from __str__/__repr__, so
+        that display-oriented changes don't accidentally affect caching.
+        """
+        from hashlib import sha256
+
+        return sha256(str(self).encode("utf-8")).hexdigest()
