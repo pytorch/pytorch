@@ -2624,10 +2624,6 @@ def specialize_symnode(arg: Any) -> Any:
             source = arg.original_source()
             value = arg.original_value()
 
-            # ComputedLazyConstantVariable has no source, so it can't be a symnode
-            if source is None:
-                return arg
-
             is_symnode_vt = is_torch_sym(value) or (
                 not config.specialize_int
                 and type(value) is int
