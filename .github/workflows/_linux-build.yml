@@ -282,8 +282,7 @@ jobs:
           XLA_CLANG_CACHE_S3_BUCKET_NAME: ossci-compiler-clang-cache-circleci-xla
           PR_LABELS: ${{ toJson(github.event.pull_request.labels.*.name) }}
           TORCH_CUDA_ARCH_LIST: ${{ inputs.cuda-arch-list }}
-          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image }}
-          DOCKER_IMAGE_S390X: ${{ inputs.docker-image-name }}
+          DOCKER_IMAGE: ${{ steps.calculate-docker-image.outputs.docker-image || inputs.docker-image-name }}
           XLA_CUDA: ${{ contains(inputs.build-environment, 'xla') && '0' || '' }}
           OUR_GITHUB_JOB_ID: ${{ steps.get-job-id.outputs.job-id }}
           HUGGING_FACE_HUB_TOKEN: ${{ secrets.HUGGING_FACE_HUB_TOKEN }}
@@ -294,7 +293,6 @@ jobs:
           START_TIME=$(date +%s)
           if [[ ${BUILD_ENVIRONMENT} == *"s390x"* ]]; then
             JENKINS_USER=
-            USED_IMAGE="${DOCKER_IMAGE_S390X}"
             # ensure that docker container cleanly exits in 12 hours
             # if for some reason cleanup action doesn't stop container
             # when job is cancelled
@@ -305,7 +303,6 @@ jobs:
             env | grep '^CI' >> "/tmp/github_env_${GITHUB_RUN_ID}"
           else
             JENKINS_USER="--user jenkins"
-            USED_IMAGE="${DOCKER_IMAGE}"
             DOCKER_SHELL_CMD=
           fi
 
@@ -372,7 +369,7 @@ jobs:
             ${JENKINS_USER} \
             -v "${GITHUB_WORKSPACE}:/var/lib/jenkins/workspace" \
             -w /var/lib/jenkins/workspace \
-            "${USED_IMAGE}" \
+            "${DOCKER_IMAGE}" \
             ${DOCKER_SHELL_CMD}
           )
 
