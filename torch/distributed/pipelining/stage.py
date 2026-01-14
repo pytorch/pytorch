@@ -4,7 +4,8 @@ import logging
 import operator
 from abc import ABC, abstractmethod
 from collections.abc import Callable
-from typing import Any, cast, Union
+from dataclasses import dataclass
+from typing import Any, cast, TYPE_CHECKING, Union
 
 import torch
 import torch.distributed as dist
@@ -17,9 +18,13 @@ from torch.fx.node import Argument, map_aggregate
 from torch.nn.parallel import DistributedDataParallel
 from torch.utils._pytree import tree_map_only
 
+
+if TYPE_CHECKING:
+    from torch.distributed.device_mesh import DeviceMesh
+
 from ._backward import stage_backward, stage_backward_input, stage_backward_weight
 from ._debug import map_debug_info
-from ._utils import flatten_args, PipeInfo, validate_tensors_metadata
+from ._utils import _DTensorMeta, flatten_args, PipeInfo, validate_tensors_metadata
 
 
 __all__ = [
@@ -69,7 +74,13 @@ class _RootArgPlaceholder:
     """
 
     def __init__(self, tensor):
-        self.meta = tensor.to("meta")
+        from torch.distributed.tensor import DTensor
+
+        if isinstance(tensor, DTensor):
+            # For DTensors, store LOCAL shape since that's what's communicated
+            self.meta = tensor.to_local().to("meta")
+        else:
+            self.meta = tensor.to("meta")
 
 
 class _RecvInfo:
@@ -82,6 +93,7 @@ class _RecvInfo:
         input_name: str,
         source: int,
         buffer: torch.Tensor,
+        dtensor_meta: _DTensorMeta | None = None,
     ):
         # Name of this input
         self.input_name = input_name
@@ -89,13 +101,26 @@ class _RecvInfo:
         self.source = source
         # Buffer to receive the input into.
         self.buffer = buffer
+        # DTensor metadata for reconstruction (None for plain tensors)
+        self.dtensor_meta = dtensor_meta
 
     def __repr__(self):
-        return f"_RecvInfo(input={self.input_name}, source={self.source}, shape={self.buffer.size()})"
+        dtensor_info = (
+            f", dtensor={self.dtensor_meta is not None}" if self.dtensor_meta else ""
+        )
+        return f"_RecvInfo(input={self.input_name}, source={self.source}, shape={self.buffer.size()}{dtensor_info})"
 
 
 # An input can be either a received activation or a model input
 InputInfo = Union[_RecvInfo, _RootArgPlaceholder]
+
+
+@dataclass
+class _StageOutputMeta:
+    """Metadata about stage outputs, transmitted during metadata inference."""
+
+    tensor_metas: tuple[torch.Tensor, ...]  # Meta tensors (local shapes)
+    dtensor_metas: tuple[_DTensorMeta | None, ...]  # Per-output DTensor metadata
 
 
 def _make_tensor_from_meta(
@@ -203,6 +228,13 @@ class _PipelineStageBase(ABC):
         self.stage_index_to_group_rank: dict[int, int] = {
             i: i % self.group_size for i in range(self.num_stages)
         }
+
+        # DTensor support: device mesh (will be set by subclass or during inference)
+        self.spmd_mesh: DeviceMesh | None = None
+        # Per-input DTensor metadata (None for plain tensors)
+        self._inputs_dtensor_meta: tuple[_DTensorMeta | None, ...] | None = None
+        # Per-output DTensor metadata (None for plain tensors)
+        self._outputs_dtensor_meta: tuple[_DTensorMeta | None, ...] | None = None
 
     @property
     def has_backward(self) -> bool:
@@ -356,14 +388,17 @@ class _PipelineStageBase(ABC):
         Moves 'prev_stage_outputs' from another stage on the same rank into place as inputs for this stage. Avoids
         copying tensor data or using send/recv op.  Detaches original tensor and sets requires_grad so the
         tensor can serve as a leaf for autograd and gradients can be collected from it during backward.
+        Handles DTensor activations for V-schedule local passing.
         """
+        from torch.distributed.tensor import DTensor
+
         recv_infos: tuple[InputInfo, ...] = self.args_recv_info[mb_index]
 
         # See [Note: pipeline model output type]
         prev_stage_outputs = _normalize_model_output_as_tuple(prev_stage_outputs)
 
         for info, tensor in zip(recv_infos, prev_stage_outputs):
-            if not isinstance(tensor, torch.Tensor):
+            if not isinstance(tensor, (torch.Tensor, DTensor)):
                 raise AssertionError(
                     f"expected tensor values as outputs from prev stage, got {type(tensor)}"
                 )
@@ -372,12 +407,18 @@ class _PipelineStageBase(ABC):
                     "set_local_Fwd_input should only be called on non-first stage, which should always have RecvInfo"
                 )
 
-            # We don't need to do a data copy here, since we can directly pass the activation tensor reference from
-            # one stage to the next.  However, we do need to mark the activation as a leaf tensor since it will serve
-            # as the input tensor for a fresh autograd graph, not part of the previous stage's autograd graph.
-            # TODO: confirm, do we use this activation as the root of the backward call for the previous stage? does
-            # detach have any affect on that?
-            info.buffer = tensor.detach().requires_grad_(True)
+            if isinstance(tensor, DTensor):
+                # For DTensors, we can pass directly (same rank)
+                # Detach to create a new autograd leaf
+                info.buffer = tensor.to_local().detach().requires_grad_(True)
+                # Ensure DTensor metadata is set
+                if info.dtensor_meta is None:
+                    info.dtensor_meta = _DTensorMeta.from_dtensor(tensor)
+            else:
+                # We don't need to do a data copy here, since we can directly pass the activation tensor reference from
+                # one stage to the next.  However, we do need to mark the activation as a leaf tensor since it will serve
+                # as the input tensor for a fresh autograd graph, not part of the previous stage's autograd graph.
+                info.buffer = tensor.detach().requires_grad_(True)
 
     def get_local_bwd_output(self, mb_index):
         """
@@ -399,7 +440,10 @@ class _PipelineStageBase(ABC):
         """
         Moves 'grad input' tensors from the next stage to 'grad_output' on this stage, avoiding a copy or send/recv.
         Does not detach or set '_requires_grad'.
+        Handles DTensor gradients for V-schedule local passing.
         """
+        from torch.distributed.tensor import DTensor
+
         if not isinstance(next_stage_bwd_outputs, tuple):
             raise AssertionError(f"Expected tuple, got {type(next_stage_bwd_outputs)}")
 
@@ -411,13 +455,20 @@ class _PipelineStageBase(ABC):
             raise AssertionError("can't set bwd input if this stage is last")
         recv_infos = self.grad_recv_info[mb_index]
         for info, tensor in zip(recv_infos, next_stage_bwd_outputs):
-            if not isinstance(tensor, torch.Tensor):
+            if tensor is None:
+                continue
+            if not isinstance(tensor, (torch.Tensor, DTensor)):
                 raise AssertionError(
                     f"expected tensor values as outputs from prev stage, got {type(tensor)}"
                 )
             if not isinstance(info, _RecvInfo):
                 raise AssertionError(f"Expected a recv info, got {type(info)}")
-            info.buffer = tensor
+
+            if isinstance(tensor, DTensor):
+                # For DTensor gradients, extract local tensor for the buffer
+                info.buffer = tensor._local_tensor
+            else:
+                info.buffer = tensor
 
     def get_fwd_recv_ops(self, fwd_chunk_id: int) -> list[dist.P2POp]:
         """
@@ -442,7 +493,10 @@ class _PipelineStageBase(ABC):
     def get_fwd_send_ops(self, fwd_chunk_id: int) -> list[dist.P2POp]:
         """
         Get the activation send ops for current stage's forward.
+        Handles DTensor outputs by extracting local tensors.
         """
+        from torch.distributed.tensor import DTensor
+
         output_tuple, _ = self.fwd_cache[fwd_chunk_id]
 
         ops: list[dist.P2POp] = []
@@ -452,11 +506,13 @@ class _PipelineStageBase(ABC):
             for dst in dst_stages:
                 if dst is None:
                     continue
+                # Extract local tensor if DTensor
+                send_tensor = out.to_local() if isinstance(out, DTensor) else out
                 logger.debug(
                     "%s Sending tensor to Stage %s: %s",
                     self.log_prefix,
                     dst,
-                    out.size(),
+                    send_tensor.size(),
                 )
                 peer_rank = self.stage_index_to_group_rank[dst]
                 peer_global_rank = (
@@ -464,14 +520,19 @@ class _PipelineStageBase(ABC):
                     if self.group is None
                     else dist.get_global_rank(self.group, peer_rank)
                 )
-                ops.append(dist.P2POp(dist.isend, out, peer_global_rank, self.group))
+                ops.append(
+                    dist.P2POp(dist.isend, send_tensor, peer_global_rank, self.group)
+                )
 
         return ops
 
     def get_bwd_send_ops(self, bwd_chunk_id: int) -> list[dist.P2POp]:
         """
         Get the gradient send ops for current stage's backward.
+        Handles DTensor gradients by extracting local tensors.
         """
+        from torch.distributed.tensor import DTensor
+
         if not self.has_backward or self.is_first:
             return []
 
@@ -488,11 +549,13 @@ class _PipelineStageBase(ABC):
         grads_input = self.bwd_cache.pop(bwd_chunk_id)
         for grad, grad_recv_stage in zip(grads_input, self.grad_send_info):
             if isinstance(grad, torch.Tensor) and grad_recv_stage is not None:
+                # Extract local tensor if DTensor
+                send_tensor = grad.to_local() if isinstance(grad, DTensor) else grad
                 logger.debug(
                     "%s Sending gradient to Stage %s: %s",
                     self.log_prefix,
                     grad_recv_stage,
-                    grad.size(),
+                    send_tensor.size(),
                 )
                 peer_rank = self.stage_index_to_group_rank[grad_recv_stage]
                 peer_global_rank = (
@@ -500,7 +563,9 @@ class _PipelineStageBase(ABC):
                     if self.group is None
                     else dist.get_global_rank(self.group, peer_rank)
                 )
-                ops.append(dist.P2POp(dist.isend, grad, peer_global_rank, self.group))
+                ops.append(
+                    dist.P2POp(dist.isend, send_tensor, peer_global_rank, self.group)
+                )
             else:
                 if grad is not None or grad_recv_stage is not None:
                     raise RuntimeError(
@@ -548,10 +613,46 @@ class _PipelineStageBase(ABC):
     def _retrieve_recv_activations(self, fwd_chunk_id: int):
         """
         Retrieve the activations received for the current stage during forward.
+        Reconstructs DTensors if the inputs were DTensors.
         """
+        from torch.distributed.tensor import DTensor
+
         recv_infos = self.args_recv_info[fwd_chunk_id]
-        activations = self._map_tensor_from_recv_info(recv_infos)
-        return activations
+
+        activations = []
+        for info in recv_infos:
+            if isinstance(info, _RecvInfo):
+                local_tensor = info.buffer
+
+                if info.dtensor_meta is not None:
+                    # Reconstruct DTensor from local tensor + metadata
+                    if self.spmd_mesh is None:
+                        raise RuntimeError(
+                            f"Stage {self.stage_index} received DTensor input but no device mesh "
+                            "is available for reconstruction. Either:\n"
+                            "1. Pass `spmd_mesh` argument to PipelineStage, or\n"
+                            "2. Specify `input_args` as DTensors to extract the mesh automatically"
+                        )
+                    activation = DTensor.from_local(
+                        local_tensor,
+                        device_mesh=self.spmd_mesh,
+                        placements=info.dtensor_meta.placements,
+                        shape=info.dtensor_meta.global_shape,
+                        stride=info.dtensor_meta.global_stride,
+                        run_check=False,
+                    )
+                    # DTensor.from_local creates a non-leaf tensor (via view_as),
+                    # so we need retain_grad() for backward to populate .grad
+                    if activation.requires_grad:
+                        activation.retain_grad()
+                else:
+                    activation = local_tensor
+
+                activations.append(activation)
+            else:
+                raise AssertionError(f"Expected _RecvInfo but got {type(info)}")
+
+        return tuple(activations)
 
     def _retrieve_recv_grads(
         self,
@@ -559,10 +660,48 @@ class _PipelineStageBase(ABC):
     ):
         """
         Retrieve the gradients received for the current stage during backward.
+        Reconstructs DTensors if the activations were DTensors.
+        Handles None gradients gracefully (for inputs that don't require grad).
         """
+        from torch.distributed.tensor import DTensor
+
         recv_infos = self.grad_recv_info[bwd_chunk_id]
-        grads = self._map_tensor_from_recv_info(recv_infos)
-        return grads
+
+        grads = []
+        for info in recv_infos:
+            if isinstance(info, _RecvInfo):
+                local_tensor = info.buffer
+
+                # Check if buffer is None (shouldn't happen in normal flow, but handle gracefully)
+                if local_tensor is None:
+                    grads.append(None)
+                    continue
+
+                if info.dtensor_meta is not None:
+                    # Reconstruct DTensor gradient from local tensor + metadata
+                    if self.spmd_mesh is None:
+                        raise RuntimeError(
+                            f"Stage {self.stage_index} received DTensor gradient but no device mesh "
+                            "is available for reconstruction. Either:\n"
+                            "1. Pass `spmd_mesh` argument to PipelineStage, or\n"
+                            "2. Specify `input_args` as DTensors to extract the mesh automatically"
+                        )
+                    grad = DTensor.from_local(
+                        local_tensor,
+                        device_mesh=self.spmd_mesh,
+                        placements=info.dtensor_meta.placements,
+                        shape=info.dtensor_meta.global_shape,
+                        stride=info.dtensor_meta.global_stride,
+                        run_check=False,
+                    )
+                else:
+                    grad = local_tensor
+
+                grads.append(grad)
+            else:
+                raise AssertionError(f"Expected _RecvInfo but got {type(info)}")
+
+        return tuple(grads)
 
     def forward_maybe_with_nosync(self, *args, **kwargs):
         # If submod is wrapped with DDP, we use the `no_sync` context manager to
@@ -1348,6 +1487,9 @@ class PipelineStage(_PipelineStageBase):
         group (dist.ProcessGroup, optional): The process group for distributed training. If None, default group.
         dw_builder (Optional[Callable[[], Callable[..., None]]): If provided, dw_builder will build a new dw_runner function
             that will the W action (input weights) for F, I, W (Fwd, Input, Weight) zero bubble schedules.
+        spmd_mesh (DeviceMesh, optional): The device mesh for SPMD (DTensor) operations. Required for non-first stages
+            when inputs are DTensors and not statically specified via input_args. If input_args contains DTensors,
+            the mesh will be extracted from them automatically.
     """
 
     def __init__(
@@ -1360,10 +1502,22 @@ class PipelineStage(_PipelineStageBase):
         output_args: torch.Tensor | tuple[torch.Tensor, ...] | None = None,
         group: dist.ProcessGroup | None = None,
         dw_builder: Callable[[], Callable[..., None]] | None = None,
+        spmd_mesh: "DeviceMesh | None" = None,
     ):
         super().__init__(submodule, stage_index, num_stages, device, group, dw_builder)
         self.inputs: list[torch.Tensor] | None = None
         self.inputs_meta: tuple[torch.Tensor, ...] | None = None
+
+        # DTensor support: device mesh and metadata
+        self.spmd_mesh = spmd_mesh
+        # Per-input DTensor metadata (None for plain tensors)
+        self._inputs_dtensor_meta: tuple[_DTensorMeta | None, ...] | None = None
+        # Per-output DTensor metadata (None for plain tensors)
+        self._outputs_dtensor_meta: tuple[_DTensorMeta | None, ...] | None = None
+
+        # Import DTensor for static specification handling
+        from torch.distributed.tensor import DTensor
+
         # Note: inputs and submod should ideally be on meta device. We decided not to assert this (yet) because it
         # might be breaking for existing users.
         if input_args is None:
@@ -1373,9 +1527,40 @@ class PipelineStage(_PipelineStageBase):
                     "Otherwise, shape inference will be performed at runtime"
                 )
         else:
-            self.inputs_meta = (
-                (input_args,) if isinstance(input_args, torch.Tensor) else input_args
+            # Normalize to tuple
+            input_args_tuple = (
+                (input_args,)
+                if isinstance(input_args, (torch.Tensor, DTensor))
+                else input_args
             )
+
+            # Extract per-input DTensor metadata
+            self._inputs_dtensor_meta = tuple(
+                _DTensorMeta.from_dtensor(a) if isinstance(a, DTensor) else None
+                for a in input_args_tuple
+            )
+
+            # Extract mesh from first DTensor input if available
+            first_dtensor = next(
+                (a for a in input_args_tuple if isinstance(a, DTensor)), None
+            )
+            if first_dtensor is not None:
+                if self.spmd_mesh is not None:
+                    # Validate mesh matches
+                    if self.spmd_mesh != first_dtensor.device_mesh:
+                        raise RuntimeError(
+                            f"Stage {self.stage_index}: provided spmd_mesh does not match "
+                            f"DTensor input_args device mesh"
+                        )
+                else:
+                    self.spmd_mesh = first_dtensor.device_mesh
+
+            # For buffer allocation, use local tensor shapes (extract local for DTensors)
+            self.inputs_meta = tuple(
+                a.to_local().to("meta") if isinstance(a, DTensor) else a.to("meta")
+                for a in input_args_tuple
+            )
+
             if output_args is None:
                 logger.warning(
                     "Deprecation warning: passing input_args and performing init-time shape inference is deprecated. "
@@ -1393,13 +1578,31 @@ class PipelineStage(_PipelineStageBase):
                     raise RuntimeError(
                         "Failed to perform pipeline shape inference- are your inputs on the same device as your module?"
                     ) from e
+
             if output_args is None:
                 raise AssertionError(
                     "If passing input_args, also pass output_args to override shape inference"
                 )
-            self._configure_outputs_meta(
-                (output_args,) if isinstance(output_args, torch.Tensor) else output_args
+
+            # Normalize output_args to tuple
+            output_args_tuple = (
+                (output_args,)
+                if isinstance(output_args, (torch.Tensor, DTensor))
+                else output_args
             )
+
+            # Extract per-output DTensor metadata
+            self._outputs_dtensor_meta = tuple(
+                _DTensorMeta.from_dtensor(a) if isinstance(a, DTensor) else None
+                for a in output_args_tuple
+            )
+
+            # For outputs meta, use local tensor shapes (extract local for DTensors)
+            outputs_meta = tuple(
+                a.to_local().to("meta") if isinstance(a, DTensor) else a.to("meta")
+                for a in output_args_tuple
+            )
+            self._configure_outputs_meta(outputs_meta)
 
         # these are the buffers used in backwards send/recv, they are allocated later
         self.outputs_grad: list[torch.Tensor] = []
@@ -1418,11 +1621,17 @@ class PipelineStage(_PipelineStageBase):
 
         logger.debug(dbg_str)
 
-    def _shape_inference(
+    def _metadata_inference(
         self,
         args: tuple[Any, ...],
         kwargs: dict[str, Any] | None = None,
     ):
+        """
+        Perform runtime inference of input/output metadata.
+        Handles both plain tensors and DTensors.
+        """
+        from torch.distributed.tensor import DTensor
+
         if kwargs is None:
             kwargs = {}
         if args is None:
@@ -1436,18 +1645,52 @@ class PipelineStage(_PipelineStageBase):
             or self.stage_index_to_group_rank[self.stage_index - 1] == self.group_rank
         ):
             logger.debug(
-                "Shape inference: stage %s skipping recv, because shape info passed in via `args`",
+                "Metadata inference: stage %s skipping recv, because shape info passed in via `args`",
                 self.stage_index,
             )
-            args = tree_map_only(torch.Tensor, lambda x: x.to("meta"), args)
+
+            # Check if args is a _StageOutputMeta (from same-rank stage passing)
+            if isinstance(args, _StageOutputMeta):
+                # Extract tensor and DTensor metadata from _StageOutputMeta
+                self._inputs_dtensor_meta = args.dtensor_metas
+                args = args.tensor_metas
+            elif self.is_first:
+                # First stage: args are real tensors/DTensors from user
+                # Extract DTensor metadata from inputs if present
+                self._inputs_dtensor_meta = tuple(
+                    _DTensorMeta.from_dtensor(a) if isinstance(a, DTensor) else None
+                    for a in args
+                )
+                # Extract mesh from first DTensor input if available
+                first_dtensor = next((a for a in args if isinstance(a, DTensor)), None)
+                if first_dtensor is not None:
+                    if self.spmd_mesh is not None:
+                        # Validate mesh matches
+                        if self.spmd_mesh != first_dtensor.device_mesh:
+                            raise RuntimeError(
+                                f"Stage {self.stage_index}: provided spmd_mesh does not match "
+                                f"DTensor input's device mesh"
+                            )
+                    else:
+                        self.spmd_mesh = first_dtensor.device_mesh
+
+                # Convert to meta tensors (extract local for DTensors)
+                args = tuple(
+                    a.to_local().to("meta") if isinstance(a, DTensor) else a.to("meta")
+                    for a in args
+                    if isinstance(a, (torch.Tensor, DTensor))
+                )
+            else:
+                # Same-rank non-first stage with plain tuple: no DTensor metadata
+                self._inputs_dtensor_meta = None
         else:
             if len(args) != 0:
                 raise AssertionError(
-                    "Can't supply input args for shape inference on non-first stage"
+                    "Can't supply input args for metadata inference on non-first stage"
                 )
             objects = [None]
             logger.debug(
-                "Shape inference: stage %s receiving from stage %s",
+                "Metadata inference: stage %s receiving from stage %s",
                 self.stage_index,
                 self.stage_index - 1,
             )
@@ -1461,10 +1704,21 @@ class PipelineStage(_PipelineStageBase):
                 device=self.device,
                 use_batch=True,
             )
-            recv_args = objects[0]
-            if not isinstance(recv_args, tuple):
-                raise AssertionError(f"Expected tuple, got {type(recv_args)}")
-            args = recv_args
+            recv_obj = objects[0]
+            if isinstance(recv_obj, tuple):
+                # Legacy path: plain tensor metadata
+                args = recv_obj
+                self._inputs_dtensor_meta = None
+            elif hasattr(recv_obj, "tensor_metas") and hasattr(
+                recv_obj, "dtensor_metas"
+            ):
+                # New path: _StageOutputMeta with both tensor and DTensor metadata
+                args = recv_obj.tensor_metas
+                self._inputs_dtensor_meta = recv_obj.dtensor_metas
+            else:
+                raise AssertionError(
+                    f"Expected tuple or _StageOutputMeta, got {type(recv_obj)}"
+                )
 
         # cache input shapes for use during recv buffer allocation
         self.inputs_meta = args
@@ -1478,19 +1732,44 @@ class PipelineStage(_PipelineStageBase):
 
         # if single tensor, convert so it is always a list
         if isinstance(outputs, torch.Tensor):
-            outputs = [outputs]
+            outputs = (outputs,)
+        elif isinstance(outputs, list):
+            outputs = tuple(outputs)
 
-        # communicate meta outputs not real outputs for two reasons
-        # 1 - its faster (esp. since obj coll pickles tensor data!)
-        # 2 - avoid activating a cuda context for the src rank when unpickling on the recv end!
-        outputs_meta = tuple(
-            tree_map_only(torch.Tensor, lambda x: x.to("meta"), outputs)
+        # Extract per-output DTensor metadata
+        self._outputs_dtensor_meta = tuple(
+            _DTensorMeta.from_dtensor(o) if isinstance(o, DTensor) else None
+            for o in outputs
         )
+
+        # Track if ANY output is a DTensor (for mesh validation/extraction)
+        has_any_dtensor = any(m is not None for m in self._outputs_dtensor_meta)
+
+        if has_any_dtensor:
+            # Find first DTensor to get/validate mesh
+            first_dtensor = next(o for o in outputs if isinstance(o, DTensor))
+            if self.spmd_mesh is not None:
+                # Validate mesh matches
+                if self.spmd_mesh != first_dtensor.device_mesh:
+                    raise RuntimeError(
+                        f"Stage {self.stage_index}: provided spmd_mesh does not match "
+                        f"DTensor output's device mesh"
+                    )
+            else:
+                self.spmd_mesh = first_dtensor.device_mesh
+
+        # For communication, extract local tensors from DTensors
+        outputs_meta = tuple(
+            o.to_local().to("meta") if isinstance(o, DTensor) else o.to("meta")
+            for o in outputs
+        )
+
         logger.debug(
-            "Shape inference: stage %s inputs %s, outputs %s",
+            "Metadata inference: stage %s inputs %s, outputs %s, has_dtensor=%s",
             self.stage_index,
             self.inputs_meta,
             outputs_meta,
+            has_any_dtensor,
         )
         self._configure_outputs_meta(outputs_meta)
 
@@ -1505,21 +1784,30 @@ class PipelineStage(_PipelineStageBase):
             or self.stage_index_to_group_rank[self.stage_index + 1] == self.group_rank
         ):
             # Case (2) above: pass shape info via return value and caller passes it as args to next stage's
-            # _shape_inference call
+            # _metadata_inference call. Include DTensor metadata so next stage can reconstruct DTensors.
             logger.debug(
-                "Shape inference: stage %s skipping send to next stage",
+                "Metadata inference: stage %s skipping send to next stage",
                 self.stage_index,
             )
-
+            # Return _StageOutputMeta so next stage receives DTensor metadata
+            return _StageOutputMeta(
+                tensor_metas=outputs_meta,
+                dtensor_metas=self._outputs_dtensor_meta,
+            )
         else:
             # Case (1): send shapes via send operation, and ensure not to return it to the caller
             logger.debug(
-                "Shape inference: stage %s sending to stage %s",
+                "Metadata inference: stage %s sending to stage %s",
                 self.stage_index,
                 self.stage_index + 1,
             )
+            # Send both tensor metadata and DTensor metadata
+            send_obj = _StageOutputMeta(
+                tensor_metas=outputs_meta,
+                dtensor_metas=self._outputs_dtensor_meta,
+            )
             dist.send_object_list(
-                [outputs_meta],
+                [send_obj],
                 dst=dist.get_global_rank(
                     self.group or dist.distributed_c10d._get_default_group(),
                     self.stage_index_to_group_rank[self.stage_index + 1],
@@ -1544,7 +1832,7 @@ class PipelineStage(_PipelineStageBase):
 
         outputs: tuple[Any, ...] = tuple()
         if self.inputs_meta is None:
-            outputs = self._shape_inference(args, kwargs)
+            outputs = self._metadata_inference(args, kwargs)
 
         if self.inputs_meta is None:
             raise AssertionError("Expected inputs_meta to be set after shape inference")
@@ -1558,8 +1846,13 @@ class PipelineStage(_PipelineStageBase):
                         f"recv_for_{self.stage_index}_from_{self.stage_index - 1}",
                         self.stage_index - 1,
                         _make_tensor_from_meta(inp, self.device),
+                        dtensor_meta=(
+                            self._inputs_dtensor_meta[idx]
+                            if self._inputs_dtensor_meta is not None
+                            else None
+                        ),
                     )
-                    for inp in self.inputs_meta
+                    for idx, inp in enumerate(self.inputs_meta)
                 )
                 # In case there is backward pass, set requires_grad for receive buffers
                 if self.has_backward:
@@ -1598,6 +1891,11 @@ class PipelineStage(_PipelineStageBase):
                     f"recv_grad_for_{self.stage_index}_from_{dst_list[0]}",
                     dst_list[0],
                     _make_tensor_from_meta(self.get_outputs_meta()[idx], self.device),
+                    dtensor_meta=(
+                        self._outputs_dtensor_meta[idx]
+                        if self._outputs_dtensor_meta is not None
+                        else None
+                    ),
                 )
                 for idx, dst_list in act_send_info.items()
             )
