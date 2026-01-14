@@ -299,8 +299,7 @@ class DTensorRedistributePlanner:
             dtensor_meta: TensorMeta of the DTensor to redistribute
         """
         self.device_mesh = device_mesh
-        self.coordinate = device_mesh.get_coordinate()
-        assert self.coordinate is not None
+        assert device_mesh._is_current_rank_part_of_mesh()
         assert dtensor_meta is not None
         self.dtensor_meta = dtensor_meta
         self.tensor_dimension = len(dtensor_meta.shape)
@@ -574,7 +573,6 @@ class DTensorRedistributePlanner:
         full_tensor_shape: tuple[int, ...],
     ) -> list[int]:
         new_logical_shape = list(full_tensor_shape)
-        assert self.coordinate is not None
         for entry in src_state.tensor_dim_to_mesh_dim:
             tensor_dim = entry.tensor_dim
             mesh_dims = entry.mesh_dims
@@ -585,7 +583,7 @@ class DTensorRedistributePlanner:
                 new_size = Shard.local_shard_size_and_offset(
                     new_logical_shape[tensor_dim],
                     self.device_mesh.size(mesh_dim=mdim),
-                    self.coordinate[mdim],
+                    self.device_mesh._sym_get_coordinate(mdim),
                 )[0]
                 new_logical_shape[tensor_dim] = new_size
         return new_logical_shape
@@ -674,7 +672,6 @@ class DTensorRedistributePlanner:
         """
         # logical shape records the logic tensor shape on the mesh dimension
         # this is useful to ensure uneven sharding gets correct output shape
-        assert self.coordinate is not None
         initial_logical_shape = list(src_spec.shape)
         mesh_dims_to_logical_shape = [initial_logical_shape]
         transform_infos: list[_TransformInfo] = []
@@ -702,7 +699,7 @@ class DTensorRedistributePlanner:
                     local_shard_size, _ = src._local_shard_size_and_offset(
                         current_logical_shape[src.dim],
                         mesh_dim_size,
-                        self.coordinate[i],
+                        self.device_mesh._sym_get_coordinate(i),
                     )
                     new_logical_shape = list(current_logical_shape)
                     new_logical_shape[src.dim] = local_shard_size
@@ -849,9 +846,7 @@ def redistribute_local_tensor(
     new_local_tensor = local_tensor
     device_mesh = current_spec.mesh
 
-    my_coordinate = device_mesh.get_coordinate()
-
-    if my_coordinate is None:
+    if not device_mesh._is_current_rank_part_of_mesh():
         # if rank is not part of mesh, we skip redistribute and simply return local_tensor,
         # which should be an empty tensor
         return local_tensor
@@ -927,7 +922,7 @@ def redistribute_local_tensor(
                 elif current.is_replicate():
                     # split the tensor and return the corresponding cloned local shard
                     new_local_tensor = target_placement._replicate_to_shard(
-                        local_tensor, device_mesh, i, my_coordinate[i]
+                        local_tensor, device_mesh, i, device_mesh._sym_get_coordinate(i)
                     )
                 else:
                     assert current.is_shard(), (
@@ -953,6 +948,10 @@ def redistribute_local_tensor(
                         f"redistribute from {current} to {target} not supported yet"
                     )
                 else:
+                    if current != target:
+                        raise AssertionError(
+                            f"Redistribution from one partial type ({current}) to another ({target}) is unsupported."
+                        )
                     # partial -> partial no op, should never hit
                     new_local_tensor = local_tensor
 
