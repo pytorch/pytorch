@@ -99,7 +99,7 @@ from torch._guards import (
     StorageOverlap,
 )
 from torch._inductor.utils import IndentedBuffer
-from torch._library.opaque_object import is_opaque_value_type
+from torch._library.opaque_object import get_opaque_obj_info, is_opaque_value_type
 from torch._logging import structured
 from torch._utils_internal import justknobs_check
 from torch.fx.experimental.symbolic_shapes import (
@@ -2213,6 +2213,30 @@ class GuardBuilder(GuardBuilderBase):
             guard_fn, get_verbose_code_parts(code, guard), guard.user_stack
         )
 
+    def OPAQUE_OBJ_GUARD_FN_MATCH(self, guard: Guard) -> None:
+        """Guard on the values returned by the opaque object's guard_fn."""
+
+        value = self.get(guard)
+        opaque_info = get_opaque_obj_info(type(value))
+
+        if not opaque_info or not opaque_info.guard_fn:
+            return
+
+        original_values = deepcopy(opaque_info.guard_fn(value))
+
+        def opaque_guard_checker(x: Any) -> bool:
+            current_values = opaque_info.guard_fn(  # pyrefly: ignore[missing-attribute]
+                x
+            )
+            return current_values == original_values
+
+        global_name = f"___check_opaque_guard_fn_{id(opaque_guard_checker)}_c{CompileContext.current_compile_id()}"
+        self.get_guard_manager(guard).add_lambda_guard(
+            opaque_guard_checker,
+            get_verbose_code_parts(global_name, guard),
+            guard.user_stack,
+        )
+
     def EQUALS_MATCH(self, guard: Guard, recompile_hint: Optional[str] = None) -> None:
         ref = self.arg_ref(guard)
         val = self.get(guard)
@@ -3487,10 +3511,17 @@ class GuardsStatePickler(pickle.Pickler):
                     inner_data,
                 )
 
+            # For FakeTensors, use pytype if set, otherwise default to
+            # torch.Tensor. This is important for cross-compilation where
+            # we compile with fake tensors but run with real tensors.
+            pytype = type(obj)
+            if isinstance(obj, torch._subclasses.FakeTensor):
+                pytype = obj.pytype if obj.pytype is not None else torch.Tensor
+
             return type(self)._unpickle_tensor, (
                 torch.empty_like(obj, device="meta", requires_grad=obj.requires_grad),
                 obj.device,
-                type(obj),
+                pytype,
                 torch._C._dispatch_keys(obj).raw_repr(),
                 obj.grad,
             )
@@ -4462,6 +4493,30 @@ def strip_local_scope(s: str) -> str:
     return re.sub(pattern, r"\1", s)
 
 
+def format_user_stack_trace(
+    user_stack: traceback.StackSummary | None,
+) -> str:
+    """
+    Format the user stack trace for display in guard failure messages.
+
+    Returns a formatted string representation of the stack trace,
+    or an empty string if no user stack is available.
+    """
+    if user_stack is None or len(user_stack) == 0:
+        return ""
+
+    lines: list[str] = []
+    for frame in user_stack:
+        filename = frame.filename
+        lineno = frame.lineno
+        name = frame.name
+        source_line = frame.line.strip() if frame.line else ""
+        lines.append(f'  File "{filename}", line {lineno}, in {name}')
+        if source_line:
+            lines.append(f"    {source_line}")
+    return "\n".join(lines)
+
+
 def get_guard_fail_reason_helper(
     guard_manager: GuardManagerWrapper,
     f_locals: dict[str, object],
@@ -4473,6 +4528,7 @@ def get_guard_fail_reason_helper(
     Updates `guard_failures` with the generated reason.
     Only the first failed check of guard_manager is reported.
     """
+
     assert guard_manager.global_scope is not None
     assert guard_manager.closure_vars is not None
     scope = {"L": f_locals, "G": guard_manager.global_scope["G"]}
@@ -4487,6 +4543,8 @@ def get_guard_fail_reason_helper(
 
     verbose_code_parts: list[str] = []
     guard_debug_info = guard_manager.check_verbose(f_locals)
+    user_stack_str = ""
+
     # For test_export_with_map_cond, the check_verbose fail even without the
     # C++ guard manager. We need to fix the issue to remove the comment.
     # assert not guard_debug_info.result
@@ -4505,6 +4563,10 @@ def get_guard_fail_reason_helper(
             else:
                 reasons = verbose_code_parts
                 verbose_code_parts = []
+
+        # Format user stack trace if available and recompile logging is enabled
+        if guard_debug_info.user_stack:
+            user_stack_str = format_user_stack_trace(guard_debug_info.user_stack)
     elif cache_entry_backend != backend:
         # None of the guard entries failed - a backend match issue
         reason = (
@@ -4550,7 +4612,14 @@ def get_guard_fail_reason_helper(
                 if not is_recompiles_verbose_enabled():
                     break
 
-    reason_str = f"{compile_id}: " + "; ".join(reasons)
+    # Build reason string - simple format for normal logging
+    # Use singular "reason" when there's only one, plural "reasons" for multiple
+    if len(reasons) == 1:
+        reason_str = f"{compile_id}: {reasons[0]}"
+    else:
+        reason_str = f"{compile_id}: " + "; ".join(reasons)
+    if user_stack_str:
+        reason_str += f"\nUser stack trace:\n{user_stack_str}"
     return strip_local_scope(reason_str)
 
 
@@ -4645,7 +4714,7 @@ def get_and_maybe_log_recompilation_reasons(
             "name": "recompile_reasons",
             "encoding": "json",
         },
-        payload_fn=lambda: reasons,
+        payload_fn=lambda: reasons[0] if len(reasons) == 1 else reasons,
     )
 
     return reasons
