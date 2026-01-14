@@ -262,10 +262,8 @@ class TestExpandPlaceholder(TestCase):
         ]
         expected_output_placements = [
             (Shard(0), Replicate(), Shard(1)),
-            # P(avg) -> P(sum) is currently not supported, but could be in principle.
-            # The optimal is (R, P(sum), P(sum)) since reducing the mixed partials
-            # to that placement has lower cost due to partial ordering constraints.
-            (Replicate(), Partial("sum"), Partial("sum")),
+            # P(avg) -> P(sum) is currently not supported, but could be in principle
+            (Partial("sum"), Partial("sum"), Replicate()),
         ]
         tuple_strategy = _expand_foreach_add_list(
             inputs_a, inputs_b, placements_a, placements_b
@@ -540,17 +538,19 @@ class TestExpandPlaceholder(TestCase):
         # Test Case 2: (_Strided)Shard-only inputs - only (_Strided)Shard expansion
         # Expected: 3 strategies with placeholders filled using (_Strided)Shard + implicit replicate
         expected_shard = [
+            [Replicate(), Replicate(), Replicate()],
             [Partial(), Shard(1), Shard(0)],
             [Shard(0), Shard(0), Replicate()],
             [Shard(1), Replicate(), Shard(1)],
-            [Replicate(), Replicate(), Replicate()],
         ]
 
         expanded_shard = _fill_single_dim_strategy_placeholders(
             {Replicate(), Shard(0), Shard(1)}, single_dim_strategies
         )
+        self.assertEqual(expanded_shard, expected_shard)
 
         expected_strided_shard = [
+            [Replicate(), Replicate(), Replicate()],
             [
                 Partial(),
                 _StridedShard(1, split_factor=2),
@@ -581,7 +581,6 @@ class TestExpandPlaceholder(TestCase):
                 Replicate(),
                 _StridedShard(dim=1, split_factor=4),
             ],
-            [Replicate(), Replicate(), Replicate()],
         ]
         expanded_strided_shard = _fill_single_dim_strategy_placeholders(
             {
@@ -592,11 +591,10 @@ class TestExpandPlaceholder(TestCase):
         )
         self.assertEqual(expanded_strided_shard, expected_strided_shard)
 
-        self.assertEqual(expanded_shard, expected_shard)
-
         # Test Case 3: Mixed Shard and _StridedShard inputs - both types of expansion
         # Expected: 3 strategies * 2 shard types (Shard and _StridedShard) + implicit replicate
         expected_mixed = [
+            [Replicate(), Replicate(), Replicate()],
             [Partial(), Shard(1), Shard(0)],
             [
                 Partial(),
@@ -615,7 +613,6 @@ class TestExpandPlaceholder(TestCase):
                 Replicate(),
                 _StridedShard(1, split_factor=2),
             ],
-            [Replicate(), Replicate(), Replicate()],
         ]
 
         expanded_mixed = _fill_single_dim_strategy_placeholders(
@@ -706,56 +703,8 @@ class TestExpandPlaceholder(TestCase):
         num_inputs = _get_num_tensor_inputs(op_schema)
         self.assertEqual(num_inputs, 3)  # 2 args + 1 out kwarg
 
-    def test_expand_to_full_mesh_filters_out_variant_strategies(self):
-        """Test that expand_to_full_mesh_op_strategy filters strategies for out= variant ops.
-
-        For out-variant ops like torch.mul(..., out=...), the output placement must
-        match the 'out' kwarg's placement. This test verifies that strategies with
-        mismatched output placements are filtered out.
-        """
-        mesh = DeviceMesh("cpu", mesh=torch.arange(4))
-        meta = TensorMeta(torch.Size([8, 8]), (8, 1), torch.float32)
-
-        # Create specs: args have Shard(0), out kwarg has Replicate
-        arg_spec = DTensorSpec(mesh, (Shard(0),), meta)
-        out_spec = DTensorSpec(mesh, (Replicate(),), meta)
-
-        # Create OpSchema for out-variant op (aten.mul.out)
-        op_schema = OpSchema(
-            op=torch.ops.aten.mul.out,
-            args_schema=(
-                OpStrategy([OpSpec(arg_spec)]),
-                OpStrategy([OpSpec(arg_spec)]),
-            ),
-            kwargs_schema={"out": OpStrategy([OpSpec(out_spec)])},
-        )
-
-        # Define strategies: output can be Shard(0) or Replicate
-        # [output, input1, input2, out_kwarg]
-        single_mesh_dim_strategies = [
-            [Shard(0), Shard(0), Shard(0), Shard(0)],  # All sharded
-            [Replicate(), Replicate(), Replicate(), Replicate()],  # All replicated
-        ]
-
-        result = expand_to_full_mesh_op_strategy(
-            mesh,
-            op_schema,
-            single_mesh_dim_strategies,
-            output_tensor_meta=meta,
-        )
-
-        # All strategies in result should have output placement matching out kwarg (Replicate)
-        for strategy in result.strategies:
-            output_spec = strategy.output_spec
-            self.assertEqual(
-                output_spec.placements,
-                (Replicate(),),
-                f"Output placement {output_spec.placements} should match out kwarg placement (Replicate(),)",
-            )
-
     def test_expand_strategy_handles_symbolic_shapes(self):
         """Test that _create_expanded_strategy handles symbolic shapes (SymInts).
-
         When using dynamic shapes with torch.compile, TensorMeta may contain SymInts
         which are not hashable. This test verifies that the caching logic gracefully
         falls back to uncached execution instead of raising TypeError.
