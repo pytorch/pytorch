@@ -121,6 +121,7 @@ from .source import (
     AttrSource,
     CallFunctionNoArgsSource,
     CallMethodItemSource,
+    CellContentsSource,
     ChainedSource,
     ClosureSource,
     CodeSource,
@@ -813,6 +814,7 @@ def get_verbose_code_parts(
     verbose_code_parts = [
         get_verbose_code_part(code_part, guard) for code_part in code_parts
     ]
+
     if recompile_hint:
         verbose_code_parts = [
             f"{part} (HINT: {recompile_hint})" for part in verbose_code_parts
@@ -1480,7 +1482,9 @@ class GuardBuilder(GuardBuilderBase):
                 example_value=example_value,
                 guard_manager_enum=guard_manager_enum,
             )
-        elif istype(source, (AttrSource, UnspecializedParamBufferSource)):
+        elif istype(
+            source, (AttrSource, CellContentsSource, UnspecializedParamBufferSource)
+        ):
             assert base_guard_manager  # to make mypy happy
             assert isinstance(source, AttrSource)
             if should_optimize_getattr_on_nn_module(base_example_value):
