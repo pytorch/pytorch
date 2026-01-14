@@ -121,6 +121,8 @@ test_failures = {
     ),
     "test_slice_mutation1_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     "test_full_like_sliced_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    "test_embedding_bag_byte_unpack_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
+    "test_cat_dynamic_shapes": TestFailure(("cpu",), is_skip=True),
     # XPU always convert conv1d to conv2d and can not match the expected codegen result.
     "test_conv1d_depthwise_dynamic_shapes": TestFailure(("xpu",), is_skip=True),
     "test_arange1_dynamic_shapes": TestFailure(("cpu",)),
