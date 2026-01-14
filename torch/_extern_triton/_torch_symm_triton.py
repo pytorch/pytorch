@@ -1,16 +1,13 @@
 # Owner(s): ["oncall: distributed"]
 """
-Unified symmetric all-reduce Triton extern library.
+Torch symmetric memory Triton extern library.
 
 This module provides Triton-compatible extern functions for symmetric memory
-all-reduce operations with automatic backend dispatch (NCCL or NVSHMEM).
-
-The unified frontend function `symm_all_reduce_sum_f32` dispatches to the
-appropriate backend based on the SymmContext type passed as the first argument.
+operations with automatic backend dispatch (NCCL or NVSHMEM).
 
 Backend Hint Support:
-The `symm_all_reduce_sum_f32` function accepts an optional `backend` constexpr
-argument that acts as a hint for dispatch:
+The symmetric memory primitives (e.g., `symm_all_reduce_sum_f32`) accept an
+optional `backend` constexpr argument that controls dispatch:
 - BACKEND_DEFAULT (0): Use runtime dispatch based on SymmContext type
 - BACKEND_NCCL (1): Dispatch directly to NCCL backend (requires libnccl_device.bc)
 - BACKEND_NVSHMEM (2): Dispatch directly to NVSHMEM backend
@@ -18,7 +15,12 @@ argument that acts as a hint for dispatch:
 When a specific backend is chosen, only that backend's bitcode library is needed,
 avoiding the need for all backend dependencies.
 
-Usage:
+Usage Pattern:
+    The recommended pattern is to define a single kernel that accepts a backend
+    hint as a constexpr parameter. Both the decorator and the kernel receive the
+    same backend hint, which is then passed down to the torch_symm primitives.
+
+    ```python
     from torch._extern_triton import (
         BACKEND_DEFAULT,
         BACKEND_NVSHMEM,
@@ -26,19 +28,40 @@ Usage:
         symm_all_reduce_sum_f32,
     )
 
-    # Dynamic dispatch (default behavior)
-    @requires_torch_symm
-    @triton.jit
-    def kernel_dynamic(...):
-        result = symm_all_reduce_sum_f32(ctx_ptr, buffer_ptr, offset, num_elements)
 
-    # NVSHMEM-specific dispatch (only needs libnvshmem_device.bc)
-    @requires_torch_symm(backend=BACKEND_NVSHMEM)
-    @triton.jit
-    def kernel_nvshmem(...):
-        result = symm_all_reduce_sum_f32(
-            ctx_ptr, buffer_ptr, offset, num_elements, BACKEND_NVSHMEM
-        )
+    def make_my_kernel(backend: int):
+        '''Factory to create kernel with specific backend hint.'''
+
+        @requires_torch_symm(backend=backend)
+        @triton.jit
+        def my_kernel(
+            ctx_ptr,
+            buffer_ptr,
+            num_elements: tl.constexpr,
+            backend_hint: tl.constexpr,  # Same value as decorator's backend
+        ):
+            byte_offset: tl.int64 = 0
+            n_elems: tl.int64 = num_elements
+            # Pass backend_hint to primitives for compile-time dispatch
+            result = symm_all_reduce_sum_f32(
+                ctx_ptr, buffer_ptr, byte_offset, n_elems, backend_hint
+            )
+
+        return my_kernel
+
+
+    # Create kernel variants for different backends
+    my_kernel_dynamic = make_my_kernel(BACKEND_DEFAULT)  # Runtime dispatch
+    my_kernel_nvshmem = make_my_kernel(BACKEND_NVSHMEM)  # Direct NVSHMEM
+
+    # Launch with matching backend hint
+    my_kernel_nvshmem[(1,)](ctx_ptr, buf_ptr, n_elems, BACKEND_NVSHMEM)
+    ```
+
+    The factory pattern ensures that:
+    1. The decorator links the correct bitcode libraries
+    2. The kernel receives the backend hint as a constexpr
+    3. The primitives dispatch at compile-time (not runtime) when hint != DEFAULT
 
 Prerequisites:
     - For NVSHMEM: libnvshmem_device.bc (fully functional)
@@ -288,22 +311,37 @@ if TRITON_AVAILABLE:
         device state in the CUmodule, which is required for NVSHMEM device
         functions (nvshmem_ptr, nvshmemx_barrier_all_block, etc.) to work.
 
-        Example usage:
-        ```
-            # Default backend (runtime dispatch)
-            @requires_torch_symm
-            @triton.jit
-            def kernel_default(...):
-                result = symm_all_reduce_sum_f32(ctx_ptr, buffer_ptr, offset, n)
+        Recommended Usage Pattern:
+            Use a factory function to create kernels with a specific backend
+            hint. Both the decorator and the kernel should receive the same
+            backend hint, which is passed down to the torch_symm primitives.
 
-            # Explicit NVSHMEM backend
-            @requires_torch_symm(backend=BACKEND_NVSHMEM)
-            @triton.jit
-            def kernel_nvshmem(...):
-                result = symm_all_reduce_sum_f32(
-                    ctx_ptr, buffer_ptr, offset, n, BACKEND_NVSHMEM
-                )
-        ```
+            ```python
+            def make_my_kernel(backend: int):
+                @requires_torch_symm(backend=backend)
+                @triton.jit
+                def my_kernel(
+                    ctx_ptr,
+                    buffer_ptr,
+                    num_elements: tl.constexpr,
+                    backend_hint: tl.constexpr,
+                ):
+                    byte_offset: tl.int64 = 0
+                    n_elems: tl.int64 = num_elements
+                    result = symm_all_reduce_sum_f32(
+                        ctx_ptr, buffer_ptr, byte_offset, n_elems, backend_hint
+                    )
+
+                return my_kernel
+
+
+            # Create variants
+            my_kernel_dynamic = make_my_kernel(BACKEND_DEFAULT)
+            my_kernel_nvshmem = make_my_kernel(BACKEND_NVSHMEM)
+
+            # Launch with matching backend hint
+            my_kernel_nvshmem[(1,)](ctx, buf, n, BACKEND_NVSHMEM)
+            ```
 
         Environment variables for custom library paths:
         - TORCH_SYMM_LIB_PATH: Path to torch_symm.bc
