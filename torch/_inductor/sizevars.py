@@ -687,8 +687,8 @@ class SizeVarAllocator:
         # remove precomputed_replacements
         expr = self.remove_precomputed_replacements(simplified)
 
-        # replace all backed symbols with their values, unbacked with
-        # optimizations hints.
+        # replace all backed symbols with their backed hints,
+        # unbacked with optimizations hints if exists.
         expr = sympy_subs(expr, self.backed_var_to_val)
         expr = sympy_subs(expr, self.var_to_hint_override)
 
@@ -766,6 +766,10 @@ class SizeVarAllocator:
         simplified = self.simplify(expr)
         if isinstance(simplified, (int, sympy.Integer)):
             return int(simplified)
+        if simplified in (int_oo, sympy.oo):
+            return sys.maxsize
+        if simplified in (-int_oo, -sympy.oo):
+            return -sys.maxsize
 
         # Dynamic shape: use hint_override if set,
         # else return optimization_hint
