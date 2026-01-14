@@ -44,8 +44,10 @@ html_theme = "pytorch_sphinx_theme2"
 html_theme_path = [pytorch_sphinx_theme2.get_html_theme_path()]
 
 # Add the source directory to sys.path so that redirects.py can be imported
-sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
-from redirects import redirects  # noqa: F401
+# sys.path.insert(0, os.path.abspath(os.path.dirname(__file__)))
+# from redirects import redirects  # noqa: F401
+
+from .redirects import redirects  # noqa: F401
 
 
 # -- General configuration ------------------------------------------------
