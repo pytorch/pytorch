@@ -193,6 +193,13 @@ def tf32_off():
 
 @contextlib.contextmanager
 def tf32_on(self, tf32_precision=1e-5):
+    # ROCm MI300X tf32 (via hipblaslt) has slightly different numerical
+    # characteristics than CUDA tf32. Apply a relaxed tolerance multiplier
+    # to account for these differences.
+    if TEST_WITH_ROCM:
+        from torch.testing._internal.common_utils import MI300_ARCH
+        if evaluate_gfx_arch_within(MI300_ARCH):
+            tf32_precision = tf32_precision * 4
     old_allow_tf32_matmul = torch.backends.cuda.matmul.allow_tf32
     old_precision = self.precision
     try:
