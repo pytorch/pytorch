@@ -2637,15 +2637,15 @@ def _get_rocm_arch_flags(cflags: list[str] | None = None) -> list[str]:
             if hasattr(device_properties, "gcnArchName"):
                 device_arch = (device_properties.gcnArchName).split(":", 1)[0]
                 arch_set.add(device_arch)
-        
+
         archs = ";".join(arch_set)
 
         logger.warning(
-            f"The environment variable `PYTORCH_ROCM_ARCH` is not set, all archs for visible cards are included for compilation ({archs}).\n"
-            "If this is not desired, please set the environment variable `PYTORCH_ROCM_ARCH` to specific architectures.")
+            "The environment variable `PYTORCH_ROCM_ARCH` is not set, all archs for visible cards are included for compilation (%s).\n"
+            "If this is not desired, please set the environment variable `PYTORCH_ROCM_ARCH` to specific architectures.", archs)
     else:
         archs = _archs.replace(' ', ';')
-    
+
     archs = archs.split(';')
     flags = [f'--offload-arch={arch}' for arch in archs]
     flags += [] if has_gpu_rdc_flag else ['-fno-gpu-rdc']
