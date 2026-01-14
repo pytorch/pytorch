@@ -770,7 +770,7 @@ instantiate_device_type_tests(
     TestMultiThreadedDTensorOps, globals(), only_for=(DEVICE_TYPE,)
 )
 
-# instantiate_device_type_tests(TestLocalDTensorOps, globals(), only_for=(DEVICE_TYPE,))
+instantiate_device_type_tests(TestLocalDTensorOps, globals(), only_for=(DEVICE_TYPE,))
 
 if __name__ == "__main__":
     run_tests()
