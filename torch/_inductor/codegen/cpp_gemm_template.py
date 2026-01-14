@@ -175,9 +175,9 @@ const int64_t nc_block_end = std::min(nc + Nc_blocks, n_block_end);
 GEMM_TEMPLATE_MICROKERNEL_DEF = r"""
 {{template.header().getvalue()}}
 {%- if fuse_epilogue_into_microkernel %}
-{{ kernel.define_buffer("local_acc_buf", ["Mc_blocks*Mr", "Nc_blocks*Nr"], acc_buf_dtype, alloc=False) }}
+{{ kernel.define_buffer("local_acc_buf", ["Mc_blocks*Mr", "Nr"], acc_buf_dtype, alloc=False) }}
 {%- set acc = kernel.local_buffers["local_acc_buf"] %}
-{%- set acc_slice = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]) %}
+{%- set acc_slice = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("0", "Nr")]) %}
 {%- set tile_Y = kernel.slice_nd(Y_2d, [("m_start", "m_end"), ("nci*Nr", "(nci+1)*Nr")]) %}
 {{micro_gemm.codegen_define(
     kernel,
@@ -233,7 +233,11 @@ GEMM_TEMPLATE = r"""
         {{ micro_gemm.codegen_init(kernel) }}
 {%- if use_local_acc %}
     {%- set acc_buf_name = "local_acc_buf" %}
+        {%- if fuse_epilogue_into_microkernel %}
+        {{ kernel.define_buffer(acc_buf_name, ["Mc_blocks*Mr", "Nr"], acc_buf_dtype) }}
+        {%- else %}
         {{ kernel.define_buffer(acc_buf_name, ["Mc_blocks*Mr", "Nc_blocks*Nr"], acc_buf_dtype) }}
+        {%- endif %}
 {%- endif %}
 
         for (int64_t mc_block_id = 0; mc_block_id < num_Mc_blocks_per_thread; mc_block_id++) {
@@ -251,7 +255,11 @@ GEMM_TEMPLATE = r"""
                     int64_t k_end = std::min(std::min(kc + Kc_blocks, k_block_end) * Kr, K);
 {%- set tile_X = kernel.slice_nd(X, [("m_start", "m_end"), ("k_start", "k_end")]) %}
                     for (int64_t nci = nc; nci < nc_block_end; nci++) {
+{%- if fuse_epilogue_into_microkernel %}
+{%- set acc_slice = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("0", "Nr")]) %}
+{%- else %}
 {%- set acc_slice = kernel.slice_nd(acc, [("0", "m_end - m_start"), ("(nci - nc)*Nr", "(nci - nc + 1)*Nr")]) %}
+{%- endif %}
 {%- if template.should_block_weights and not is_woq_int4 %}
 {%- set tile_W_3d = kernel.slice_nd(W, [("nci", "nci + 1"), ("k_start", "k_end"), ()]) %}
 {%- set tile_W = kernel.view(tile_W_3d, ["k_end - k_start", micro_gemm.register_blocking.block_n]) %}

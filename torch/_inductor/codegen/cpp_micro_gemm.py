@@ -1698,7 +1698,7 @@ MICROGEMM_EPILOGUE_AMX_INJECT_TAIL
 
             def declare_pre_ptrs_hook():
                 assert epilogue_nodes is not None
-                res = IndentedBuffer(initial_indent=2)
+                res = IndentedBuffer(initial_indent=1)
                 for node in epilogue_nodes:
                     rws = node.get_read_writes()
                     for rd in rws.reads:
@@ -1905,7 +1905,7 @@ MICROGEMM_EPILOGUE_AMX_INJECT_TAIL
                 # inject amx computing into epilogue computing
                 amx_lines = IndentedBuffer()
                 amx_lines.writeline("int do_amx = (inject == 0);")
-                amx_lines.writeline("inject = do_amx ? inject_period : (inject - 1);")
+                amx_lines.writeline("inject = do_amx ? (inject_period - 1) : (inject - 1);")
                 amx_lines.writeline("if (do_amx) {")
                 amx_lines.writeline("   compute(k);")
                 amx_lines.writeline("    k+=block_k;")
