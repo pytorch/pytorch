@@ -371,6 +371,14 @@ class _GraphModulePickleData:
 
 
 class _NodePickleData:
+    # These often times contain stacks with pointers to unserializable
+    # objects, so we clear them out.
+    _UNSERIALIZABLE_META_KEYS = (
+        "source_fn_stack",
+        "nn_module_stack",
+        "fwd_source_fn_stack",
+    )
+
     def __init__(
         self,
         node: torch.fx.Node,
@@ -391,7 +399,11 @@ class _NodePickleData:
         # self.sort_key = node._sort_key
         # self.repr_fn = node._repr_fn
         # self.meta = node.meta
-        self.meta = node.meta
+        self.meta = {
+            k: v
+            for k, v in node.meta.items()
+            if k not in self._UNSERIALIZABLE_META_KEYS
+        }
 
     def unpickle(
         self,
@@ -570,6 +582,7 @@ class _GraphPickleData:
         for node in graph.nodes:
             nodes[node] = _NodePickleData(node, nodes, options)
         self.nodes = tuple(nodes.values())
+        self._codegen = graph._codegen
 
         # Unpickled variables:
         # self._used_names = graph._used_names
@@ -577,7 +590,6 @@ class _GraphPickleData:
         # self._len = graph._len
         # self._graph_namespace = graph._graph_namespace
         # self._owning_module = graph._owning_module
-        # self._codegen = graph._codegen
         # self._co_fields: Dict[str, Any] = graph._co_fields
         # -- self._find_nodes_lookup_table = _FindNodesLookupTable()
 
@@ -589,6 +601,8 @@ class _GraphPickleData:
         nodes: dict[_NodePickleData, torch.fx.Node] = {}
         for nd in self.nodes:
             nodes[nd] = nd.unpickle(graph, nodes, unpickle_state)
+        if hasattr(self, "_codegen"):
+            graph._codegen = self._codegen
 
         return graph
 

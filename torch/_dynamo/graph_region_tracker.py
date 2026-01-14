@@ -333,7 +333,7 @@ class GraphRegionTracker:
             if len(group) > 1:
                 region_group = []
                 min_rank = math.inf
-                # pyrefly: ignore [bad-assignment]
+
                 for node in group:
                     # some nodes aren't in the topo ranking?
                     if node in topological_ranking:

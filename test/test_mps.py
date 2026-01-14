@@ -1,5 +1,6 @@
 # Owner(s): ["module: mps"]
 # ruff: noqa: F841
+import contextlib
 import io
 import sys
 import math
@@ -11346,6 +11347,18 @@ class TestConvolutionMPS(TestCaseMPS):
                                      msg=f"groundtruth comparison failed for mode={mode}, "
                                      f"padding_mode={padding_mode}")
 
+    def test_grid_sample_non_contig(self):
+        inp = torch.randn((1, 4, 4, 8, 8), device="mps")
+        grid_noncontig = torch.randn((1, 3, 4, 8, 8), device="mps").permute(0, 2, 3, 4, 1)
+        mps_res = F.grid_sample(
+            inp, grid_noncontig, align_corners=False, padding_mode='zeros'
+        )
+        cpu_res = F.grid_sample(
+            inp, grid_noncontig, align_corners=False, padding_mode='zeros'
+        )
+        self.assertEqual(mps_res.cpu(), cpu_res)
+
+
 class TestAdvancedIndexing(TestCaseMPS):
     supported_dtypes = [torch.float32, torch.float16, torch.int64, torch.int32, torch.int16, torch.uint8]
     supported_np_dtypes = [np.float32, np.float16, np.int64, np.int32, np.int16, np.uint8]
@@ -13192,6 +13205,28 @@ class TestMetalLibrary(TestCaseMPS):
         shutil.rmtree(capture_dirname)
         self.assertGreater(len(capture_listdir), 3,
                            f"Capture file {capture_dirname} contains only metadata, i.e. {capture_listdir}")
+
+    def test_metal_lambda_expressions(self):
+        # Lambda expressions require Metal 3.2 (macOS 15+)
+        # Test that shaders with lambda expressions compile on macOS 15+ but fail on macOS 14
+        shader_with_lambda = """
+            kernel void lambda_test(device float* x, uint idx [[thread_position_in_grid]]) {
+                auto f = [](float val) { return val * 2.0; };
+                x[idx] = f(x[idx]);
+            }
+        """
+
+        # Expect compilation error on MacOS 14 / Sonoma
+        ctx = contextlib.nullcontext() if MACOS_VERSION >= 15.0 else self.assertRaises(SyntaxError)
+        with ctx:
+            lib = torch.mps.compile_shader(shader_with_lambda)
+
+        # Run shader on MacOS 15 and above
+        if MACOS_VERSION >= 15.0:
+            x = torch.tensor([1.0, 2.0, 3.0, 4.0], device="mps")
+            lib.lambda_test(x)
+            expected = torch.tensor([2.0, 4.0, 6.0, 8.0], device="mps")
+            self.assertEqual(x, expected)
 
     def test_metal_error_buffer(self):
         # Test that error_buf_idx parameter works correctly

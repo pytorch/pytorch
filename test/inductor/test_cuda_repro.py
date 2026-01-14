@@ -2693,7 +2693,10 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         x = -128.0
         x_ten = torch.tensor([x], dtype=torch.float32, device="cuda")
-        fn = lambda x: 2.0**x
+
+        def fn(x):
+            return 2.0**x
+
         compile_out = torch.compile(fn)(x_ten)
         compile_decimal = Decimal(compile_out.item())
 
