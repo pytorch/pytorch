@@ -7,7 +7,7 @@ from datetime import timedelta
 import torch
 from torch._C import ScriptObject
 from torch._C._distributed_c10d import FakeWork, PythonCallbackWork
-from torch.distributed._mesh_layout import _MeshLayout
+from torch.distributed._mesh_layout import _FlatLayout
 from torch.distributed.distributed_c10d import (
     _check_op,
     _get_default_group,
@@ -92,7 +92,7 @@ def _prepare_collective_groups(
     ranks = [r - offset for r in ranks]
 
     shape, strides = _indices_to_layout(ranks)
-    layout = _MeshLayout(shape, strides)
+    layout = _FlatLayout(shape, strides)
 
     global_pg = _get_default_group()
     group_offsets = layout.complement(global_pg.size()).all_ranks_from_zero()
