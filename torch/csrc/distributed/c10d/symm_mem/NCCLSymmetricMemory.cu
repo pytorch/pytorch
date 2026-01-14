@@ -209,65 +209,23 @@ void* NCCLSymmetricMemory::get_multicast_ptr() {
 }
 
 void NCCLSymmetricMemory::barrier(int channel, size_t timeout_ms) {
-  c10::cuda::CUDAGuard guard(device_idx_);
-  auto stream = at::cuda::getCurrentCUDAStream();
-
-  // barrier: all ranks signal all other ranks
-  // each rank sends signal to all other ranks
-  for (int peer = 0; peer < world_size_; ++peer) {
-    if (peer != rank_) {
-      C10D_NCCL_CHECK(
-          ncclSignal(
-              peer,
-              channel,
-              0,
-              0,
-              pai_->comm_,
-              stream),
-          c10::str("ncclSignal failed for barrier, peer=", peer, ", channel=", channel));
-    }
-  }
-
-  // wait for signals from all other ranks
-  std::vector<ncclWaitSignalDesc_t> signalDescs(world_size_ - 1);
-  int desc_idx = 0;
-  for (int peer = 0; peer < world_size_; ++peer) {
-    if (peer != rank_) {
-      signalDescs[desc_idx].sigIdx = channel;
-      signalDescs[desc_idx].ctx = 0;
-      desc_idx++;
-    }
-  }
-
-  C10D_NCCL_CHECK(
-      ncclWaitSignal(
-          world_size_ - 1,
-          signalDescs.data(),
-          pai_->comm_,
-          stream),
-      c10::str("ncclWaitSignal failed for barrier, channel=", channel));
+  TORCH_CHECK(false, "NYI");
 }
 
 void NCCLSymmetricMemory::put_signal(int dst_rank, int channel, size_t timeout_ms) {
   c10::cuda::CUDAGuard guard(device_idx_);
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  // ncclPutSignal doesn't send data, just a signal
-  // use nullptr for localbuff since we're just signaling
+  // use ncclSignal for pure signaling without data transfer
   C10D_NCCL_CHECK(
-      ncclPutSignal(
-          nullptr,
-          0,
-          ncclInt8,
+      ncclSignal(
           dst_rank,
-          pai_->signal_handle_,
-          channel * sizeof(uint32_t),
           channel,
           0,
           0,
           pai_->comm_,
           stream),
-      c10::str("ncclPutSignal failed for dst_rank=", dst_rank, ", channel=", channel));
+      c10::str("ncclSignal failed for dst_rank=", dst_rank, ", channel=", channel));
 }
 
 void NCCLSymmetricMemory::wait_signal(int src_rank, int channel, size_t timeout_ms) {
@@ -306,6 +264,10 @@ ncclWindow_t NCCLSymmetricMemory::get_window() {
 
 ncclWindow_t NCCLSymmetricMemory::get_signal_pad_handle() {
   return pai_->signal_handle_;
+}
+
+ncclComm_t NCCLSymmetricMemory::get_comm() {
+  return pai_->comm_;
 }
 
 size_t NCCLSymmetricMemory::get_offset() {
