@@ -1538,11 +1538,6 @@ class GraphModule(torch.nn.Module):
             expected_grad = torch.ones_like(x) * 5 * 5
             self.assertTrue(torch.allclose(x.grad, expected_grad))
 
-        def is_called_from_pytest():
-            import os
-
-            return "PYTEST_VERSION" in os.environ
-
         backend = InductorAndRecordGraphs()
         compile_and_run_with_backend(backend)
         self.assertTrue(len(backend.graphs) > 0)
@@ -1550,7 +1545,7 @@ class GraphModule(torch.nn.Module):
         self.assertExpectedInline(
             fw_graph.code.strip(),
             f"""\
-def forward(self, L_x_ : torch.Tensor, L_scale_obj_ : {"test_opaque_obj_v2" if is_called_from_pytest() else "__main__"}_OpaqueMultiplier):
+def forward(self, L_x_ : torch.Tensor, L_scale_obj_ : {_illegal_char_regex.sub("_", get_opaque_type_name(OpaqueMultiplier))}):
     l_x_ = L_x_
     l_scale_obj_ = L_scale_obj_
     result = torch.ops._TestOpaqueObject.mul_with_scale(l_scale_obj_, l_x_);  l_scale_obj_ = l_x_ = None
