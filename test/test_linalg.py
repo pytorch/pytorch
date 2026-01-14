@@ -760,7 +760,6 @@ class TestLinalg(TestCase):
             cholesky_test_helper(3, batchsize, upper)
 
     @precisionOverride({torch.float32: 1e-4, torch.complex64: 1e-4})
-    @skipIfRocmArch(MI300_ARCH)
     @skipCUDAIfNoMagma
     @skipCPUIfNoLapack
     @dtypes(*floating_and_complex_types())
