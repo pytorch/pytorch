@@ -7,6 +7,7 @@ from typing import Any, Literal
 import torch
 from torch._utils import _augment_memory_snapshot_stack_traces, _dummy_type
 from torch.types import Device
+
 from . import _get_device_index, _is_compiled, _lazy_init, is_initialized
 
 
