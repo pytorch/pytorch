@@ -3719,6 +3719,84 @@ class GraphModule(torch.nn.Module):
 
         self._test_leaf_function_helper(NestedOutputModule, args_fn, loss_fn)
 
+    def test_leaf_function_custom_pytree_input(self):
+        """Test leaf_function with custom pytree class input."""
+        from torch._dynamo.decorators import leaf_function
+
+        class Point:
+            x: torch.Tensor
+            y: torch.Tensor
+
+            def __init__(self, x, y):
+                self.x = x
+                self.y = y
+
+        self.register_pytree_node(
+            Point,
+            lambda p: ((p.x, p.y), ()),
+            lambda xy, _: Point(xy[0], xy[1]),
+            serialized_type_name=f"{Point.__module__}.{Point.__qualname__}",
+        )
+
+        @leaf_function
+        def point_fn(linear, p):
+            return (linear(p.x) * p.y,)
+
+        class PointModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, p):
+                return point_fn(self.linear, p)
+
+        def args_fn():
+            return (
+                Point(
+                    torch.randn(3, 3, requires_grad=True),
+                    torch.randn(3, 3, requires_grad=True),
+                ),
+            )
+
+        def loss_fn(out):
+            return out[0].sum()
+
+        self._test_leaf_function_helper(PointModule, args_fn, loss_fn)
+
+    def test_leaf_function_primitive_output(self):
+        """Test leaf_function with primitive type outputs (int, float)."""
+        from torch._dynamo.decorators import leaf_function
+
+        @leaf_function
+        def fn_with_primitives(linear, x):
+            y = linear(x)
+            return (y, len(x.shape), 0.5)
+
+        class PrimitiveOutputModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(3, 3)
+
+            def forward(self, x):
+                y, n, f = fn_with_primitives(self.linear, x)
+                return y * n + f
+
+        model = PrimitiveOutputModule()
+        x = torch.randn(3, 3, requires_grad=True)
+
+        # Test eager
+        ref = model(x)
+
+        # Test compiled
+        opt_model = torch.compile(model, backend="aot_eager")
+        res = opt_model(x)
+        self.assertEqual(ref, res)
+
+        # Test backward
+        ref.sum().backward()
+        res.sum().backward()
+        self.assertEqual(x.grad, x.grad)
+
 
 instantiate_parametrized_tests(DecoratorTests)
 
