@@ -114,7 +114,10 @@ S3_BASE_URL = "https://gha-artifacts.s3.amazonaws.com"
 
 def get_artifacts_urls(results, suites, is_rocm=False):
     urls = {}
-    for r in results:
+    # Sort by time (oldest first) to prefer earlier completed workflow runs
+    # over potentially still-running newer ones
+    sorted_results = sorted(results, key=lambda x: x.get("time", ""))
+    for r in sorted_results:
         if (
             r["workflowName"] in ("inductor", "inductor-periodic")
             and "test" in r["jobName"]
@@ -142,7 +145,9 @@ def get_artifacts_urls(results, suites, is_rocm=False):
             if suite in suites:
                 artifact_filename = f"test-reports-test-{suite}-{shard_id}-{num_shards}-{machine}_{id}.zip"
                 s3_url = f"{S3_BASE_URL}/{repo}/{workflowId}/{runAttempt}/artifact/{artifact_filename}"
-                urls[(suite, int(shard_id))] = s3_url
+                # Prefer the first entry found to avoid incomplete workflow runs overwriting
+                if (suite, int(shard_id)) not in urls:
+                    urls[(suite, int(shard_id))] = s3_url
     return urls
 
 
