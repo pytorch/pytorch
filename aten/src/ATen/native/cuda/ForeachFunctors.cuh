@@ -263,7 +263,7 @@ __device__ __forceinline__ void binary_op_list_alpha(
     TensorListMetadata<depth>& tl,
     Op op,
     opmath_t alpha) {
-  const int tensor_loc = tl.block_to_tensor[blockIdx.x];
+  const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
   const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
   auto n = tl.numel_for_tensor[tensor_loc];
 
