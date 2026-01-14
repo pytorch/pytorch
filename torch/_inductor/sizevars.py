@@ -640,7 +640,8 @@ class SizeVarAllocator:
 
         Returns:
             - Raises ValueError for complex numbers
-            - sys.maxsize for infinity
+            - sys.maxsize for positive infinity
+            - -sys.maxsize for negative infinity
             - fallback for NaN
             - None if no special handling needed
         """
@@ -653,8 +654,10 @@ class SizeVarAllocator:
                     f"optimization_hint received a complex expression: {expr}. "
                     "Tensor dimensions cannot be complex numbers."
                 )
-            if expr in (int_oo, -int_oo, sympy.oo, -sympy.oo):
+            if expr in (int_oo, sympy.oo):
                 return sys.maxsize
+            if expr in (-int_oo, -sympy.oo):
+                return -sys.maxsize
             if expr is sympy.nan or expr.has(sympy.nan):
                 return fallback
 
@@ -705,9 +708,22 @@ class SizeVarAllocator:
         # we want to compute them consistently for a size hint we have chosen.
         # So, recursively compute expressions via size hints of contained symbols.
         # For example: u1 * u2 - 10 ==> fallback * fallback - 10
+
         assert isinstance(expr, Expr), type(expr)
         free_symbols = expr.free_symbols
-        size_dict = dict.fromkeys(free_symbols, fallback)
+
+        # Constrain fallback per-symbol based on var_to_range bounds
+        size_dict = {}
+        for s in free_symbols:
+            sym_fallback = fallback
+            vr = self.shape_env.var_to_range.get(s, None)
+            if vr is not None:
+                if isinstance(vr.lower, (int, sympy.Integer)):
+                    sym_fallback = max(sym_fallback, int(vr.lower))
+                if isinstance(vr.upper, (int, sympy.Integer)):
+                    sym_fallback = min(sym_fallback, int(vr.upper))
+            size_dict[s] = sym_fallback
+
         final_result = expr.subs(size_dict)
 
         result = self._handle_special_expr_values(final_result, fallback)
