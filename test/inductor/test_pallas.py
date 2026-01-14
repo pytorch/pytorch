@@ -1,12 +1,17 @@
 # Owner(s): ["oncall: pt2"]
 import functools
+import math
 import os
 import re
 import sys
 import unittest
 from unittest import mock
 
+from dataclasses import dataclass
+from typing import Optional, Tuple
+
 import torch
+import torch.nn.functional as F
 import torch._dynamo
 import torch._inductor.async_compile  # noqa: F401 required to warm up AsyncCompile pools
 from torch._dynamo.testing import make_test_cls_with_patches
@@ -662,6 +667,319 @@ class PallasTestsMixin:
         # Multi-dim expansion
         x = torch.randn(1, 1, 16, device=self.DEVICE).expand(4, 8, 16)
         self.assertEqual(compiled(x, x), x + x)
+
+    @unittest.skip("expand operations not yet implemented in Pallas CPU backend")
+    def test_expand_clone(self):
+        """Test unsqueeze + expand + clone pattern (e.g. from repeat_kv in GQA).
+
+        This pattern creates a view with stride=0 in the expanded dimension,
+        and clone() needs to copy the data correctly to a contiguous tensor.
+        """
+
+        def fn(x):
+            # unsqueeze + expand pattern from repeat_kv in grouped query attention
+            # x: (2, 16, 2, 16) -> unsqueeze -> (2, 16, 2, 1, 16) -> expand -> (2, 16, 2, 2, 16)
+            return x[:, :, :, None, :].expand(2, 16, 2, 2, 16).contiguous()
+
+        x = torch.randn(2, 16, 2, 16, device=self.DEVICE)
+        expected = fn(x)
+        compiled = self._compile(fn)
+        result = compiled(x)
+        self.assertEqual(result.shape, expected.shape)
+        self.assertEqual(result, expected)
+
+    def test_rope_repeat_kv(self):
+        """Test RoPE (rotary embeddings) + repeat_kv pattern from Llama3.
+
+        This combines the complex number operations from RoPE with the expand
+        pattern from repeat_kv in GQA. The complex ops create intermediate
+        reshapes that can cause issues with the expand broadcast logic.
+        """
+
+        def repeat_kv(x, n_rep):
+            bs, slen, n_kv_heads, head_dim = x.shape
+            return (
+                x[:, :, :, None, :]
+                .expand(bs, slen, n_kv_heads, n_rep, head_dim)
+                .reshape(bs, slen, n_kv_heads * n_rep, head_dim)
+            )
+
+        def apply_rotary_emb(xk, freqs_cis):
+            # Reshape for complex: (bs, seq, heads, dim) -> (bs, seq, heads, dim//2, 2)
+            xk_ = torch.view_as_complex(xk.float().reshape(*xk.shape[:-1], -1, 2))
+            # Complex multiply with freqs
+            xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3)
+            return xk_out.type_as(xk)
+
+        def fn(xk, freqs_cis):
+            # Apply RoPE then repeat_kv
+            xk = apply_rotary_emb(xk, freqs_cis)
+            return repeat_kv(xk, 2)
+
+        batch, seq, n_kv_heads, head_dim = 2, 16, 2, 16
+
+        xk = torch.randn(batch, seq, n_kv_heads, head_dim, device=self.DEVICE)
+
+        # Create freqs_cis (complex tensor for rotary embeddings)
+        theta = 500000.0
+        freqs = 1.0 / (theta ** (torch.arange(0, head_dim, 2)[: (head_dim // 2)].float() / head_dim))
+        t = torch.arange(seq, dtype=torch.float32)
+        freqs = torch.outer(t, freqs)
+        freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
+        freqs_cis = freqs_cis.view(1, seq, 1, head_dim // 2).to(self.DEVICE)
+
+        expected = fn(xk, freqs_cis)
+        compiled = self._compile(fn)
+        result = compiled(xk, freqs_cis)
+        self.assertEqual(result.shape, expected.shape)
+        self.assertEqual(result, expected)
+
+    @unittest.skip("expand operations not yet implemented in Pallas CPU backend")
+    def test_expand_merged_dims(self):
+        """Test expand where input has merged dimensions that don't match target.
+
+        This tests the case where input shape like (64, 1, 16) needs to expand
+        to (2, 16, 2, 2, 16). The input dimensions don't directly match any
+        target dimensions (64 != 2, 16, etc), so the expand helper must find
+        which target dims to set to 1.
+
+        This pattern occurs in Llama3's repeat_kv when combined with RoPE:
+        - RoPE uses complex ops which create extern fallbacks
+        - The kernel then receives flattened input (64, 1, 16) from the extern
+        - repeat_kv wants to expand to (2, 16, 2, 2, 16)
+        """
+        batch, seq, n_kv_heads, head_dim = 2, 16, 2, 16
+        dim = n_kv_heads * head_dim
+        n_rep = 2
+
+        wk = torch.nn.Linear(dim, n_kv_heads * head_dim, bias=False).to(self.DEVICE)
+        wv = torch.nn.Linear(dim, n_kv_heads * head_dim, bias=False).to(self.DEVICE)
+
+        def repeat_kv(x, n_rep):
+            bs, slen, n_kv_heads, head_dim = x.shape
+            return (
+                x[:, :, :, None, :]
+                .expand(bs, slen, n_kv_heads, n_rep, head_dim)
+                .reshape(bs, slen, n_kv_heads * n_rep, head_dim)
+            )
+
+        def fn(x, freqs_cis):
+            xk = wk(x).view(batch, seq, n_kv_heads, head_dim)
+            xv = wv(x).view(batch, seq, n_kv_heads, head_dim)
+
+            # RoPE with complex ops (creates extern fallback)
+            shape = [d if i == 1 or i == xk.ndim - 1 else 1
+                     for i, d in enumerate((batch, seq, n_kv_heads, head_dim // 2))]
+            freqs_cis_reshaped = freqs_cis.view(*shape)
+            xk_ = torch.view_as_complex(xk.float().reshape(*xk.shape[:-1], -1, 2))
+            xk_out = torch.view_as_real(xk_ * freqs_cis_reshaped).flatten(3)
+            xk = xk_out.type_as(xk)
+
+            # repeat_kv creates the problematic expand pattern
+            xk = repeat_kv(xk, n_rep)
+            xv = repeat_kv(xv, n_rep)
+            return xk, xv
+
+        x = torch.randn(batch, seq, dim, device=self.DEVICE)
+
+        # Create freqs_cis
+        theta = 500000.0
+        freqs = 1.0 / (theta ** (torch.arange(0, head_dim, 2)[: (head_dim // 2)].float() / head_dim))
+        t = torch.arange(seq, dtype=torch.float32)
+        freqs = torch.outer(t, freqs)
+        freqs_cis = torch.polar(torch.ones_like(freqs), freqs).to(self.DEVICE)
+
+        with torch.no_grad():
+            expected = fn(x, freqs_cis)
+        compiled = self._compile(fn)
+        with torch.no_grad():
+            result = compiled(x, freqs_cis)
+        for i, (e, r) in enumerate(zip(expected, result)):
+            self.assertEqual(r.shape, e.shape)
+            self.assertEqual(r, e)
+
+    def test_transpose_noncontiguous_input(self):
+        """Test transpose on already non-contiguous input.
+
+        This tests the pattern that occurs in attention:
+        1. Input is already transposed (non-contiguous)
+        2. Another transpose is done inside the compiled function
+        3. The result should match eager execution
+
+        The issue is that when a non-contiguous tensor is passed in and
+        then transposed again, the Pallas backend must correctly handle
+        the complex stride pattern.
+        """
+        if self.DEVICE == "cuda":
+            self.skipTest(
+                "non-contiguous access not supported in Pallas GPU (Mosaic) backend"
+            )
+
+        torch.manual_seed(42)
+        # Create a 4D tensor and transpose it (simulating attention pattern)
+        a = torch.randn(2, 4, 16, 16, device=self.DEVICE)
+        a_t = a.transpose(1, 2)  # (2, 16, 4, 16) with strides (1024, 16, 256, 1)
+
+        # The compiled function does another transpose
+        def fn(x):
+            return x.transpose(-2, -1) * 1.0
+
+        with torch.no_grad():
+            expected = fn(a_t)
+        compiled = self._compile(fn)
+        with torch.no_grad():
+            result = compiled(a_t)
+        self.assertEqual(result, expected)
+
+    def test_rope_transpose_contiguous(self):
+        """Test RoPE followed by transpose and contiguous.
+
+        This is a key pattern from Llama3 attention:
+        1. Apply rotary embeddings (view_as_complex, multiply, view_as_real)
+        2. Transpose dims 1 and 2
+        3. Make contiguous
+
+        The challenge is that view_as_real produces a 5D tensor (e.g., [2, 16, 4, 8, 2])
+        which needs to be reshaped and permuted to [2, 4, 16, 16].
+        """
+        if self.DEVICE == "cuda":
+            self.skipTest(
+                "complex ops not supported in Pallas GPU (Mosaic) backend"
+            )
+
+        torch.manual_seed(42)
+
+        def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
+            freqs = 1.0 / (
+                theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim)
+            )
+            t = torch.arange(end, device=freqs.device, dtype=torch.float32)
+            freqs = torch.outer(t, freqs)
+            freqs_cis = torch.polar(torch.ones_like(freqs), freqs)
+            return freqs_cis
+
+        def reshape_for_broadcast(freqs_cis, x):
+            ndim = x.ndim
+            shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
+            return freqs_cis.view(*shape)
+
+        def apply_rotary_emb_single(xq, freqs_cis):
+            xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))
+            freqs_cis = reshape_for_broadcast(freqs_cis, xq_)
+            xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3)
+            return xq_out.type_as(xq)
+
+        bsz, seqlen = 2, 16
+        dim = 64
+        n_heads = 4
+        head_dim = dim // n_heads
+
+        wq = torch.nn.Linear(dim, n_heads * head_dim, bias=False)
+        freqs_cis = precompute_freqs_cis(head_dim, 64, 500000.0)[:seqlen]
+
+        x = torch.randn(bsz, seqlen, dim, device=self.DEVICE)
+
+        def fn(x):
+            xq = wq(x)
+            xq = xq.view(bsz, seqlen, n_heads, head_dim)
+            xq = apply_rotary_emb_single(xq, freqs_cis)
+            xq = xq.transpose(1, 2)
+            xq = xq.contiguous()
+            return xq
+
+        with torch.no_grad():
+            expected = fn(x)
+        compiled = self._compile(fn)
+        with torch.no_grad():
+            result = compiled(x)
+        self.assertEqual(result, expected)
+
+    def test_rope_repeat_kv_transpose(self):
+        """Test RoPE + repeat_kv (GQA) + transpose pattern from Llama3.
+
+        This tests the full attention preparation pattern:
+        1. Apply rotary embeddings to q and k
+        2. Repeat k and v for grouped query attention
+        3. Transpose all tensors from (batch, seq, heads, dim) to (batch, heads, seq, dim)
+        4. Make contiguous
+        """
+        if self.DEVICE == "cuda":
+            self.skipTest(
+                "complex ops not supported in Pallas GPU (Mosaic) backend"
+            )
+
+        torch.manual_seed(42)
+
+        def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
+            freqs = 1.0 / (
+                theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim)
+            )
+            t = torch.arange(end, device=freqs.device, dtype=torch.float32)
+            freqs = torch.outer(t, freqs)
+            freqs_cis = torch.polar(torch.ones_like(freqs), freqs)
+            return freqs_cis
+
+        def reshape_for_broadcast(freqs_cis, x):
+            ndim = x.ndim
+            shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
+            return freqs_cis.view(*shape)
+
+        def apply_rotary_emb(xq, xk, freqs_cis):
+            xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))
+            xk_ = torch.view_as_complex(xk.float().reshape(*xk.shape[:-1], -1, 2))
+            freqs_cis = reshape_for_broadcast(freqs_cis, xq_)
+            xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3)
+            xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3)
+            return xq_out.type_as(xq), xk_out.type_as(xk)
+
+        def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
+            bs, slen, n_kv_heads, head_dim = x.shape
+            if n_rep == 1:
+                return x
+            return (
+                x[:, :, :, None, :]
+                .expand(bs, slen, n_kv_heads, n_rep, head_dim)
+                .reshape(bs, slen, n_kv_heads * n_rep, head_dim)
+            )
+
+        bsz, seqlen = 2, 16
+        dim = 64
+        n_heads = 4
+        n_kv_heads = 2
+        n_rep = n_heads // n_kv_heads
+        head_dim = dim // n_heads
+
+        wq = torch.nn.Linear(dim, n_heads * head_dim, bias=False)
+        wk = torch.nn.Linear(dim, n_kv_heads * head_dim, bias=False)
+        wv = torch.nn.Linear(dim, n_kv_heads * head_dim, bias=False)
+        freqs_cis = precompute_freqs_cis(head_dim, 64, 500000.0)[:seqlen]
+
+        x = torch.randn(bsz, seqlen, dim, device=self.DEVICE)
+
+        def fn(x):
+            xq, xk, xv = wq(x), wk(x), wv(x)
+            xq = xq.view(bsz, seqlen, n_heads, head_dim)
+            xk = xk.view(bsz, seqlen, n_kv_heads, head_dim)
+            xv = xv.view(bsz, seqlen, n_kv_heads, head_dim)
+            xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
+
+            keys = repeat_kv(xk, n_rep)
+            values = repeat_kv(xv, n_rep)
+
+            xq = xq.transpose(1, 2).contiguous()
+            keys = keys.transpose(1, 2).contiguous()
+            values = values.transpose(1, 2).contiguous()
+
+            return xq, keys, values
+
+        with torch.no_grad():
+            expected = fn(x)
+        compiled = self._compile(fn)
+        with torch.no_grad():
+            result = compiled(x)
+
+        for i, (r, e) in enumerate(zip(result, expected)):
+            self.assertEqual(r, e, msg=f"Output {i} mismatch")
 
     def test_stride_multiple_inputs(self):
         """Test multiple strided inputs and broadcasting."""
@@ -1382,6 +1700,600 @@ class PallasTestsMixin:
         y = torch.randn(32, 8, device=self.DEVICE)
         result = compiled(x, y)
         expected = fn(x, y)
+        self.assertEqual(result, expected)
+
+    @unittest.skip("NanoGPT test requires expand operations not yet implemented in Pallas CPU backend")
+    def test_nanogpt(self):
+        """Test real Karpathy NanoGPT model.
+
+        This is the actual NanoGPT implementation from:
+        https://github.com/karpathy/nanoGPT/blob/master/model.py
+
+        Tests the full transformer architecture including:
+        - Token and position embeddings
+        - Multi-head causal self-attention
+        - MLP with GELU activation
+        - LayerNorm (pre-norm architecture)
+        - Residual connections
+        - Weight tying between embeddings and output
+        """
+        # ============================================================
+        # NanoGPT model from https://github.com/karpathy/nanoGPT
+        # ============================================================
+
+        class LayerNorm(torch.nn.Module):
+            """LayerNorm but with an optional bias."""
+
+            def __init__(self, ndim, bias):
+                super().__init__()
+                self.weight = torch.nn.Parameter(torch.ones(ndim))
+                self.bias = torch.nn.Parameter(torch.zeros(ndim)) if bias else None
+
+            def forward(self, input):
+                return F.layer_norm(input, self.weight.shape, self.weight, self.bias, 1e-5)
+
+        class CausalSelfAttention(torch.nn.Module):
+            def __init__(self, config):
+                super().__init__()
+                assert config.n_embd % config.n_head == 0
+                self.c_attn = torch.nn.Linear(config.n_embd, 3 * config.n_embd, bias=config.bias)
+                self.c_proj = torch.nn.Linear(config.n_embd, config.n_embd, bias=config.bias)
+                self.attn_dropout = torch.nn.Dropout(config.dropout)
+                self.resid_dropout = torch.nn.Dropout(config.dropout)
+                self.n_head = config.n_head
+                self.n_embd = config.n_embd
+                self.dropout = config.dropout
+                self.flash = hasattr(F, 'scaled_dot_product_attention')
+                if not self.flash:
+                    self.register_buffer(
+                        "bias",
+                        torch.tril(torch.ones(config.block_size, config.block_size)).view(
+                            1, 1, config.block_size, config.block_size
+                        ),
+                    )
+
+            def forward(self, x):
+                B, T, C = x.size()
+                q, k, v = self.c_attn(x).split(self.n_embd, dim=2)
+                k = k.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+                q = q.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+                v = v.view(B, T, self.n_head, C // self.n_head).transpose(1, 2)
+
+                if self.flash:
+                    y = F.scaled_dot_product_attention(
+                        q, k, v, attn_mask=None,
+                        dropout_p=self.dropout if self.training else 0,
+                        is_causal=True,
+                    )
+                else:
+                    att = (q @ k.transpose(-2, -1)) * (1.0 / math.sqrt(k.size(-1)))
+                    att = att.masked_fill(self.bias[:, :, :T, :T] == 0, float("-inf"))
+                    att = F.softmax(att, dim=-1)
+                    att = self.attn_dropout(att)
+                    y = att @ v
+                y = y.transpose(1, 2).contiguous().view(B, T, C)
+                y = self.resid_dropout(self.c_proj(y))
+                return y
+
+        class MLP(torch.nn.Module):
+            def __init__(self, config):
+                super().__init__()
+                self.c_fc = torch.nn.Linear(config.n_embd, 4 * config.n_embd, bias=config.bias)
+                self.gelu = torch.nn.GELU()
+                self.c_proj = torch.nn.Linear(4 * config.n_embd, config.n_embd, bias=config.bias)
+                self.dropout = torch.nn.Dropout(config.dropout)
+
+            def forward(self, x):
+                x = self.c_fc(x)
+                x = self.gelu(x)
+                x = self.c_proj(x)
+                x = self.dropout(x)
+                return x
+
+        class Block(torch.nn.Module):
+            def __init__(self, config):
+                super().__init__()
+                self.ln_1 = LayerNorm(config.n_embd, bias=config.bias)
+                self.attn = CausalSelfAttention(config)
+                self.ln_2 = LayerNorm(config.n_embd, bias=config.bias)
+                self.mlp = MLP(config)
+
+            def forward(self, x):
+                x = x + self.attn(self.ln_1(x))
+                x = x + self.mlp(self.ln_2(x))
+                return x
+
+        @dataclass
+        class GPTConfig:
+            block_size: int = 1024
+            vocab_size: int = 50304
+            n_layer: int = 12
+            n_head: int = 12
+            n_embd: int = 768
+            dropout: float = 0.0
+            bias: bool = True
+
+        class GPT(torch.nn.Module):
+            def __init__(self, config):
+                super().__init__()
+                assert config.vocab_size is not None
+                assert config.block_size is not None
+                self.config = config
+
+                self.transformer = torch.nn.ModuleDict(
+                    dict(
+                        wte=torch.nn.Embedding(config.vocab_size, config.n_embd),
+                        wpe=torch.nn.Embedding(config.block_size, config.n_embd),
+                        drop=torch.nn.Dropout(config.dropout),
+                        h=torch.nn.ModuleList([Block(config) for _ in range(config.n_layer)]),
+                        ln_f=LayerNorm(config.n_embd, bias=config.bias),
+                    )
+                )
+                self.lm_head = torch.nn.Linear(config.n_embd, config.vocab_size, bias=False)
+                self.transformer.wte.weight = self.lm_head.weight  # weight tying
+
+            def forward(self, idx, targets=None):
+                device = idx.device
+                b, t = idx.size()
+                assert t <= self.config.block_size
+                pos = torch.arange(0, t, dtype=torch.long, device=device)
+
+                tok_emb = self.transformer.wte(idx)
+                pos_emb = self.transformer.wpe(pos)
+                x = self.transformer.drop(tok_emb + pos_emb)
+                for block in self.transformer.h:
+                    x = block(x)
+                x = self.transformer.ln_f(x)
+
+                if targets is not None:
+                    logits = self.lm_head(x)
+                    loss = F.cross_entropy(
+                        logits.view(-1, logits.size(-1)), targets.view(-1), ignore_index=-1
+                    )
+                else:
+                    logits = self.lm_head(x[:, [-1], :])
+                    loss = None
+
+                return logits, loss
+
+        # Small config for testing
+        gpt_config = GPTConfig(
+            vocab_size=256,
+            block_size=32,
+            n_layer=2,
+            n_head=4,
+            n_embd=64,
+            dropout=0.0,
+            bias=False,
+        )
+
+        model = GPT(gpt_config)
+        model.eval()
+        if self.DEVICE != "cpu":
+            model = model.to(self.DEVICE)
+
+        # Test input
+        x = torch.randint(0, gpt_config.vocab_size, (2, 16), device=self.DEVICE)
+
+        # Run eager
+        with torch.no_grad():
+            expected, _ = model(x)
+
+        # Run compiled
+        compiled_model = self._compile(model)
+        with torch.no_grad():
+            result, _ = compiled_model(x)
+
+        self.assertEqual(result, expected)
+
+    def test_embedding_rmsnorm(self):
+        """Minimal repro for embedding + reduction broadcasting issue.
+
+        Tests embedding lookup followed by RMSNorm which involves:
+        - Embedding: (batch, seq) indices -> (batch, seq, dim) lookup
+        - Reduction: mean over last dim with keepdim=True
+
+        The bug occurs when the Pallas codegen generates flatten indexing
+        for embedding with incompatible shapes:
+        - jnp.arange(dim) has shape (dim,)
+        - indirect var (token indices) has shape (batch, seq)
+        These cannot broadcast: (64,) vs (2, 16)
+        """
+
+        class EmbeddingRMSNorm(torch.nn.Module):
+            def __init__(self, vocab_size: int, dim: int, eps: float = 1e-5):
+                super().__init__()
+                self.embedding = torch.nn.Embedding(vocab_size, dim)
+                self.weight = torch.nn.Parameter(torch.ones(dim))
+                self.eps = eps
+
+            def forward(self, tokens: torch.Tensor):
+                # Embedding lookup: (batch, seq) -> (batch, seq, dim)
+                h = self.embedding(tokens)
+                # RMSNorm: reduction over last dim
+                h_norm = h * torch.rsqrt(h.pow(2).mean(-1, keepdim=True) + self.eps)
+                return h_norm * self.weight
+
+        model = EmbeddingRMSNorm(vocab_size=256, dim=64)
+        model.eval()
+        if self.DEVICE != "cpu":
+            model = model.to(self.DEVICE)
+
+        # Input: (batch=2, seq=16) token indices
+        x = torch.randint(0, 256, (2, 16), device=self.DEVICE)
+
+        with torch.no_grad():
+            expected = model(x)
+
+        compiled_model = self._compile(model)
+        with torch.no_grad():
+            result = compiled_model(x)
+
+        self.assertEqual(result, expected)
+
+    def test_embedding_rmsnorm_residual(self):
+        """Minimal repro for embedding + rmsnorm + residual add issue.
+
+        Tests embedding lookup followed by RMSNorm and residual connection.
+        The issue occurs when an intermediate buffer has flattened shape (32, 64)
+        while embedding output has multi-dim shape (2, 16, 64).
+
+        This pattern appears in transformer models like Llama3 where:
+        - Embedding output: (batch, seq, dim)
+        - Intermediate from previous layer: might be (batch*seq, dim) flattened
+        - These get added together in residual connections
+        """
+
+        class EmbeddingRMSNormResidual(torch.nn.Module):
+            def __init__(self, vocab_size: int, dim: int, eps: float = 1e-5):
+                super().__init__()
+                self.embedding = torch.nn.Embedding(vocab_size, dim)
+                self.weight = torch.nn.Parameter(torch.ones(dim))
+                self.eps = eps
+                # Linear layer that produces intermediate (could flatten internally)
+                self.proj = torch.nn.Linear(dim, dim, bias=False)
+
+            def forward(self, tokens: torch.Tensor):
+                # Embedding lookup: (batch, seq) -> (batch, seq, dim)
+                h = self.embedding(tokens)
+                # RMSNorm: reduction over last dim
+                h_norm = h * torch.rsqrt(h.pow(2).mean(-1, keepdim=True) + self.eps)
+                h_scaled = h_norm * self.weight
+                # Residual add with projection (may trigger shape mismatch)
+                return h + self.proj(h_scaled)
+
+        model = EmbeddingRMSNormResidual(vocab_size=256, dim=64)
+        model.eval()
+        if self.DEVICE != "cpu":
+            model = model.to(self.DEVICE)
+
+        # Input: (batch=2, seq=16) token indices
+        x = torch.randint(0, 256, (2, 16), device=self.DEVICE)
+
+        with torch.no_grad():
+            expected = model(x)
+
+        compiled_model = self._compile(model)
+        with torch.no_grad():
+            result = compiled_model(x)
+
+        self.assertEqual(result, expected)
+
+    def test_transformer_block_minimal(self):
+        """Minimal repro for transformer block broadcasting issue.
+
+        Pattern that fails:
+            h = emb(tokens)
+            h = h + proj(norm(h))   # Residual with linear inside
+            h = final_norm(h)       # This triggers broadcasting error
+
+        The issue is that the intermediate buffer from the linear projection
+        has shape (batch*seq, dim) = (32, 64) while the embedding output has
+        shape (batch, seq, dim) = (2, 16, 64). When the final norm tries to
+        operate on the result, JAX sees incompatible shapes.
+
+        This is the core pattern from Llama3 and other transformers where
+        each transformer block has:
+        - RMSNorm -> Attention/Linear -> Residual
+        - RMSNorm -> FFN -> Residual
+        - Final RMSNorm at the end of the model
+        """
+
+        class RMSNorm(torch.nn.Module):
+            def __init__(self, dim: int, eps: float = 1e-5):
+                super().__init__()
+                self.eps = eps
+                self.weight = torch.nn.Parameter(torch.ones(dim))
+
+            def forward(self, x):
+                output = x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+                return output * self.weight
+
+        class TransformerBlockMinimal(torch.nn.Module):
+            def __init__(self, vocab_size: int = 256, dim: int = 64, eps: float = 1e-5):
+                super().__init__()
+                self.embedding = torch.nn.Embedding(vocab_size, dim)
+                self.norm1 = RMSNorm(dim, eps)
+                self.proj = torch.nn.Linear(dim, dim, bias=False)
+                self.norm2 = RMSNorm(dim, eps)
+
+            def forward(self, tokens: torch.Tensor) -> torch.Tensor:
+                h = self.embedding(tokens)  # (batch, seq, dim)
+                h = h + self.proj(self.norm1(h))  # Residual with linear
+                return self.norm2(h)  # Final norm triggers error
+
+        model = TransformerBlockMinimal()
+        model.eval()
+        if self.DEVICE != "cpu":
+            model = model.to(self.DEVICE)
+
+        x = torch.randint(0, 256, (2, 16), device=self.DEVICE)
+
+        with torch.no_grad():
+            expected = model(x)
+
+        compiled_model = self._compile(model)
+        with torch.no_grad():
+            result = compiled_model(x)
+
+        self.assertEqual(result, expected)
+
+    def test_llama3(self):
+        """Test Llama 3 model architecture.
+
+        This is adapted from the official Meta Llama 3 implementation:
+        https://github.com/meta-llama/llama3/blob/main/llama/model.py
+
+        Tests the Llama 3 architecture including:
+        - RMSNorm (Root Mean Square Layer Normalization)
+        - Rotary Position Embeddings (RoPE)
+        - Grouped Query Attention (GQA)
+        - SwiGLU Feed-Forward Network
+        - Residual connections
+        """
+        # ============================================================
+        # Llama 3 model from https://github.com/meta-llama/llama3
+        # Adapted to use standard PyTorch (no FairScale dependencies)
+        # ============================================================
+
+        @dataclass
+        class ModelArgs:
+            dim: int = 64  # Small for testing (original: 4096)
+            n_layers: int = 2  # Small for testing (original: 32)
+            n_heads: int = 4  # Small for testing (original: 32)
+            n_kv_heads: Optional[int] = 2  # For GQA (original: 8 for 70B)
+            vocab_size: int = 256  # Small for testing
+            multiple_of: int = 64  # Make SwiGLU hidden layer size multiple of this
+            ffn_dim_multiplier: Optional[float] = None
+            norm_eps: float = 1e-5
+            rope_theta: float = 500000.0
+            max_seq_len: int = 32
+
+        class RMSNorm(torch.nn.Module):
+            """Root Mean Square Layer Normalization."""
+
+            def __init__(self, dim: int, eps: float = 1e-6):
+                super().__init__()
+                self.eps = eps
+                self.weight = torch.nn.Parameter(torch.ones(dim))
+
+            def _norm(self, x):
+                return x * torch.rsqrt(x.pow(2).mean(-1, keepdim=True) + self.eps)
+
+            def forward(self, x):
+                output = self._norm(x.float()).type_as(x)
+                return output * self.weight
+
+        def precompute_freqs_cis(dim: int, end: int, theta: float = 10000.0):
+            """Precompute the frequency tensor for rotary embeddings."""
+            freqs = 1.0 / (theta ** (torch.arange(0, dim, 2)[: (dim // 2)].float() / dim))
+            t = torch.arange(end, device=freqs.device, dtype=torch.float32)
+            freqs = torch.outer(t, freqs)
+            freqs_cis = torch.polar(torch.ones_like(freqs), freqs)  # complex64
+            return freqs_cis
+
+        def reshape_for_broadcast(freqs_cis: torch.Tensor, x: torch.Tensor):
+            """Reshape frequency tensor for broadcasting with x."""
+            ndim = x.ndim
+            assert 0 <= 1 < ndim
+            assert freqs_cis.shape == (x.shape[1], x.shape[-1])
+            shape = [d if i == 1 or i == ndim - 1 else 1 for i, d in enumerate(x.shape)]
+            return freqs_cis.view(*shape)
+
+        def apply_rotary_emb(
+            xq: torch.Tensor,
+            xk: torch.Tensor,
+            freqs_cis: torch.Tensor,
+        ) -> Tuple[torch.Tensor, torch.Tensor]:
+            """Apply rotary embeddings to query and key tensors."""
+            xq_ = torch.view_as_complex(xq.float().reshape(*xq.shape[:-1], -1, 2))
+            xk_ = torch.view_as_complex(xk.float().reshape(*xk.shape[:-1], -1, 2))
+            freqs_cis = reshape_for_broadcast(freqs_cis, xq_)
+            xq_out = torch.view_as_real(xq_ * freqs_cis).flatten(3)
+            xk_out = torch.view_as_real(xk_ * freqs_cis).flatten(3)
+            return xq_out.type_as(xq), xk_out.type_as(xk)
+
+        def repeat_kv(x: torch.Tensor, n_rep: int) -> torch.Tensor:
+            """Repeat key/value heads for grouped query attention."""
+            bs, slen, n_kv_heads, head_dim = x.shape
+            if n_rep == 1:
+                return x
+            return (
+                x[:, :, :, None, :]
+                .expand(bs, slen, n_kv_heads, n_rep, head_dim)
+                .reshape(bs, slen, n_kv_heads * n_rep, head_dim)
+            )
+
+        class Attention(torch.nn.Module):
+            """Multi-head attention with Grouped Query Attention (GQA)."""
+
+            def __init__(self, args: ModelArgs):
+                super().__init__()
+                self.n_kv_heads = args.n_heads if args.n_kv_heads is None else args.n_kv_heads
+                self.n_heads = args.n_heads
+                self.n_rep = self.n_heads // self.n_kv_heads
+                self.head_dim = args.dim // args.n_heads
+
+                self.wq = torch.nn.Linear(args.dim, args.n_heads * self.head_dim, bias=False)
+                self.wk = torch.nn.Linear(args.dim, self.n_kv_heads * self.head_dim, bias=False)
+                self.wv = torch.nn.Linear(args.dim, self.n_kv_heads * self.head_dim, bias=False)
+                self.wo = torch.nn.Linear(args.n_heads * self.head_dim, args.dim, bias=False)
+
+            def forward(
+                self,
+                x: torch.Tensor,
+                freqs_cis: torch.Tensor,
+                mask: Optional[torch.Tensor],
+            ):
+                bsz, seqlen, _ = x.shape
+                xq, xk, xv = self.wq(x), self.wk(x), self.wv(x)
+
+                xq = xq.view(bsz, seqlen, self.n_heads, self.head_dim)
+                xk = xk.view(bsz, seqlen, self.n_kv_heads, self.head_dim)
+                xv = xv.view(bsz, seqlen, self.n_kv_heads, self.head_dim)
+
+                xq, xk = apply_rotary_emb(xq, xk, freqs_cis=freqs_cis)
+
+                # Repeat k/v heads if n_kv_heads < n_heads (GQA)
+                keys = repeat_kv(xk, self.n_rep)
+                values = repeat_kv(xv, self.n_rep)
+
+                xq = xq.transpose(1, 2).contiguous()  # (bs, n_heads, seqlen, head_dim)
+                keys = keys.transpose(1, 2).contiguous()
+                values = values.transpose(1, 2).contiguous()
+
+                scores = torch.matmul(xq, keys.transpose(2, 3)) / math.sqrt(self.head_dim)
+                if mask is not None:
+                    scores = scores + mask
+                scores = F.softmax(scores.float(), dim=-1).type_as(xq)
+                output = torch.matmul(scores, values)
+                output = output.transpose(1, 2).contiguous().view(bsz, seqlen, -1)
+                return self.wo(output)
+
+        class FeedForward(torch.nn.Module):
+            """SwiGLU Feed-Forward Network."""
+
+            def __init__(
+                self,
+                dim: int,
+                hidden_dim: int,
+                multiple_of: int,
+                ffn_dim_multiplier: Optional[float],
+            ):
+                super().__init__()
+                hidden_dim = int(2 * hidden_dim / 3)
+                if ffn_dim_multiplier is not None:
+                    hidden_dim = int(ffn_dim_multiplier * hidden_dim)
+                hidden_dim = multiple_of * ((hidden_dim + multiple_of - 1) // multiple_of)
+
+                self.w1 = torch.nn.Linear(dim, hidden_dim, bias=False)
+                self.w2 = torch.nn.Linear(hidden_dim, dim, bias=False)
+                self.w3 = torch.nn.Linear(dim, hidden_dim, bias=False)
+
+            def forward(self, x):
+                return self.w2(F.silu(self.w1(x)) * self.w3(x))
+
+        class TransformerBlock(torch.nn.Module):
+            """Single Transformer block with attention and feed-forward."""
+
+            def __init__(self, layer_id: int, args: ModelArgs):
+                super().__init__()
+                self.n_heads = args.n_heads
+                self.dim = args.dim
+                self.head_dim = args.dim // args.n_heads
+                self.attention = Attention(args)
+                self.feed_forward = FeedForward(
+                    dim=args.dim,
+                    hidden_dim=4 * args.dim,
+                    multiple_of=args.multiple_of,
+                    ffn_dim_multiplier=args.ffn_dim_multiplier,
+                )
+                self.layer_id = layer_id
+                self.attention_norm = RMSNorm(args.dim, eps=args.norm_eps)
+                self.ffn_norm = RMSNorm(args.dim, eps=args.norm_eps)
+
+            def forward(
+                self,
+                x: torch.Tensor,
+                freqs_cis: torch.Tensor,
+                mask: Optional[torch.Tensor],
+            ):
+                h = x + self.attention(self.attention_norm(x), freqs_cis, mask)
+                out = h + self.feed_forward(self.ffn_norm(h))
+                return out
+
+        class Transformer(torch.nn.Module):
+            """Llama 3 Transformer model."""
+
+            def __init__(self, params: ModelArgs):
+                super().__init__()
+                self.params = params
+                self.vocab_size = params.vocab_size
+                self.n_layers = params.n_layers
+
+                self.tok_embeddings = torch.nn.Embedding(params.vocab_size, params.dim)
+                self.layers = torch.nn.ModuleList()
+                for layer_id in range(params.n_layers):
+                    self.layers.append(TransformerBlock(layer_id, params))
+                self.norm = RMSNorm(params.dim, eps=params.norm_eps)
+                self.output = torch.nn.Linear(params.dim, params.vocab_size, bias=False)
+
+                # Precompute rotary embeddings
+                self.freqs_cis = precompute_freqs_cis(
+                    params.dim // params.n_heads,
+                    params.max_seq_len * 2,
+                    params.rope_theta,
+                )
+
+            def forward(self, tokens: torch.Tensor):
+                bsz, seqlen = tokens.shape
+                h = self.tok_embeddings(tokens)
+                self.freqs_cis = self.freqs_cis.to(h.device)
+                freqs_cis = self.freqs_cis[:seqlen]
+
+                # Causal mask
+                mask = None
+                if seqlen > 1:
+                    mask = torch.full((seqlen, seqlen), float("-inf"), device=tokens.device)
+                    mask = torch.triu(mask, diagonal=1)
+                    mask = mask.type_as(h)
+
+                for layer in self.layers:
+                    h = layer(h, freqs_cis, mask)
+                h = self.norm(h)
+                output = self.output(h).float()
+                return output
+
+        # Small config for testing (Llama 3 70B would have much larger dims)
+        args = ModelArgs(
+            dim=64,
+            n_layers=2,
+            n_heads=4,
+            n_kv_heads=2,  # GQA: 2 KV heads shared among 4 query heads
+            vocab_size=256,
+            multiple_of=64,
+            norm_eps=1e-5,
+            rope_theta=500000.0,
+            max_seq_len=32,
+        )
+
+        model = Transformer(args)
+        model.eval()
+        if self.DEVICE != "cpu":
+            model = model.to(self.DEVICE)
+
+        # Test input
+        x = torch.randint(0, args.vocab_size, (2, 16), device=self.DEVICE)
+
+        # Run eager
+        with torch.no_grad():
+            expected = model(x)
+
+        # Run compiled
+        compiled_model = self._compile(model)
+        with torch.no_grad():
+            result = compiled_model(x)
+
         self.assertEqual(result, expected)
 
 
