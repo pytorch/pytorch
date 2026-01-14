@@ -486,7 +486,9 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         for v in self.unpack_var_sequence(tx):
             fn(v)
 
-    def call_obj_hasattr(self, tx: Any, name: str) -> "ConstantVariable":
+    def call_obj_hasattr(
+        self, tx: "InstructionTranslator", name: str
+    ) -> "ConstantVariable":
         unimplemented(
             gb_type="Unsupported hasattr call",
             context=f"call_obj_hasattr {self} {name}",
@@ -717,10 +719,15 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """Create a new VariableTracker from a value and optional Source"""
         if source is None:
             return builder.SourcelessBuilder.create(tx, value)
+        elif type(value) in variables.LazyConstantVariable.supported_types:
+            # Use LazyConstantVariable for primitives to enable deferred
+            # guard installation - constants that are just passed through
+            # won't cause recompilation when their values change.
+            return variables.LazyConstantVariable.create(value, source)
         else:
             return variables.LazyVariableTracker.create(value, source)
 
-    def is_python_hashable(self):
+    def is_python_hashable(self) -> bool:
         """
         Unlike the variable tracker's own __hash__, this method checks whether
         the underlying Python object referenced by this variable tracker is hashable.
@@ -742,7 +749,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
-    def get_python_hash(self):
+    def get_python_hash(self) -> int:
         """
         Unlike the variable tracker’s own __hash__, this method is used by
         ConstDictVariableTracker to compute the hash of the underlying key object.
@@ -759,7 +766,7 @@ class VariableTracker(metaclass=VariableTrackerMeta):
             ],
         )
 
-    def is_python_equal(self, other):
+    def is_python_equal(self, other: object) -> bool:
         """
         NB - Deliberately not overriding the __eq__ method because that can
         disable the __hash__ for the vt itself.

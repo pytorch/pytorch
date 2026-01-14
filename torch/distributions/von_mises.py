@@ -1,6 +1,5 @@
 # mypy: allow-untyped-defs
 import math
-from typing import Optional
 
 import torch
 import torch.jit
@@ -71,7 +70,8 @@ def _log_modified_bessel_fn(x, order=0):
     Returns ``log(I_order(x))`` for ``x > 0``,
     where `order` is either 0 or 1.
     """
-    assert order == 0 or order == 1
+    if order != 0 and order != 1:
+        raise AssertionError(f"order must be 0 or 1, got {order}")
 
     # compute small solution
     y = x / 3.75
@@ -134,7 +134,7 @@ class VonMises(Distribution):
         self,
         loc: Tensor,
         concentration: Tensor,
-        validate_args: Optional[bool] = None,
+        validate_args: bool | None = None,
     ) -> None:
         self.loc, self.concentration = broadcast_all(loc, concentration)
         batch_shape = self.loc.shape

@@ -22,6 +22,7 @@ from ...select_algorithm import (
     SymbolicGridFn,
     TritonTemplate,
 )
+from ...utils import can_use_tma
 from .common import (
     build_subgraph_buffer,
     create_indices_fake,
@@ -42,6 +43,8 @@ from .flex_flash_attention import (
     _use_flex_flash_attention_backward,
     create_flex_flash_attention_backward_kernel,
     create_flex_flash_attention_kernel,
+    is_trivial_mask_graph,
+    is_trivial_score_graph,
 )
 
 
@@ -155,6 +158,24 @@ def flex_attention(
         mask_graph,
     ) = block_mask
 
+    kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
+
+    # Early check for FLASH backend: detect unsupported captured scalars before
+    # building subgraph buffers (which can trigger unbacked_bindings errors)
+    if backend == "FLASH":
+        from .flex_flash_attention import _has_unsupported_captured_scalars
+
+        if _has_unsupported_captured_scalars(
+            score_mod_other_buffers, mask_mod_other_buffers
+        ):
+            raise RuntimeError(
+                "BACKEND='FLASH' but flash attention cannot be used: "
+                "NYI: score_mod or mask_mod captures a dynamic scalar (SymInt/SymFloat). "
+                "The FLASH backend cannot inline symbolic values into the CuteDSL template. "
+                "Workarounds: use BACKEND='TRITON', compile with dynamic=False, or pass the "
+                "value as a tensor on device instead of capturing a Python scalar."
+            )
+
     placeholder_inps = [
         create_placeholder(name, dtype, query.get_device())
         for name, dtype in [
@@ -183,8 +204,6 @@ def flex_attention(
         mask_graph_placeholder_inps + list(mask_mod_other_buffers), mask_graph
     )
     freeze_irnodes(mask_graph_buffer)
-
-    kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
     # Mark symbols in custom kernel options as static shapes and add guards.
     kernel_options = {
         k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
@@ -381,8 +400,9 @@ def flex_attention(
                 "num_buffers_warp_spec", num_buffers_warp_spec
             )
 
-        # USE TMA = false by default
         cur_kernel_options.setdefault("USE_TMA", False)
+        if cur_kernel_options["USE_TMA"] and not can_use_tma(query, key, value):
+            cur_kernel_options["USE_TMA"] = False
 
         cur_kernel_options.setdefault("BLOCK_M", conf.block_m)
         cur_kernel_options.setdefault("BLOCK_N", conf.block_n)
@@ -531,7 +551,7 @@ def validate_joint_graph(joint_graph: torch.fx.Graph):
     return
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class JointOutputResult:
     """Results from processing joint outputs."""
 
@@ -663,6 +683,13 @@ def flex_attention_backward(*args, **kwargs):
     )
 
     kernel_options, backend = _sanitize_kernel_options_for_triton(kernel_options)
+    # Add check for mixed dtypes
+    if query.dtype != key.dtype or query.dtype != value.dtype:
+        raise ValueError(
+            f"Backward pass with mixed query, key, and value dtype is not supported, "
+            f"got query.dtype={query.dtype}, key.dtype={key.dtype}, "
+            f"and value.dtype={value.dtype}"
+        )
     # Mark symbols in custom kernel options as static shapes and add guards.
     kernel_options = {
         k: V.graph.sizevars.guard_int(v) if isinstance(v, sympy.Symbol) else v
@@ -729,9 +756,30 @@ def flex_attention_backward(*args, **kwargs):
         fw_graph,
         mask_graph,
         backend=backend,
+        joint_outputs=joint_outputs,
+        score_mod_other_buffers=score_mod_other_buffers,
     ):
+        needs_block_mask = not is_trivial_mask_graph(mask_graph.graph_module)
+        score_is_trivial = is_trivial_score_graph(fw_graph.graph_module)
         return create_flex_flash_attention_backward_kernel(
-            query, key, value, out, logsumexp, grad_out, scale, kernel_options
+            query,
+            key,
+            value,
+            out,
+            logsumexp,
+            grad_out,
+            scale,
+            kernel_options,
+            fw_subgraph_buffer=None if score_is_trivial else fw_subgraph_buffer,
+            joint_subgraph_buffer=None
+            if score_is_trivial
+            else joint_outputs.grad_input,
+            score_mod_other_buffers=list(score_mod_other_buffers),
+            mask_graph_buffer=mask_graph_buffer if needs_block_mask else None,
+            q_num_blocks=q_num_blocks if needs_block_mask else None,
+            q_indices=q_indices if needs_block_mask else None,
+            full_q_num_blocks=full_q_num_blocks if needs_block_mask else None,
+            full_q_indices=full_q_indices if needs_block_mask else None,
         )
 
     # Construct layout with stride order matching K
@@ -886,7 +934,6 @@ def flex_attention_backward(*args, **kwargs):
             **cur_kernel_options,
         )
     inputs_for_autotuning = (
-        # pyrefly: ignore [unsupported-operation]
         [
             query,
             key,
@@ -957,11 +1004,9 @@ def get_bwd_subgraph_outputs(
     joint_outputs: JointOutputResult,
 ) -> list[Optional[Union[ComputedBuffer, TensorBox]]]:
     subgraph_buffer = (
-        # pyrefly: ignore [bad-assignment]
         subgraph_buffer if isinstance(subgraph_buffer, Sequence) else [subgraph_buffer]
     )
     mask_graph_buffer = (
-        # pyrefly: ignore [bad-assignment]
         mask_graph_buffer
         if isinstance(mask_graph_buffer, Sequence)
         else [mask_graph_buffer]
@@ -973,5 +1018,4 @@ def get_bwd_subgraph_outputs(
         *joint_outputs.mutated_grads,
     ]
 
-    # pyrefly: ignore [not-iterable]
     return [*subgraph_buffer, *mask_graph_buffer, *joint_output_buffers]

@@ -514,7 +514,7 @@ class ModuleDict(Module):
     * the order of insertion, and
 
     * in :meth:`~torch.nn.ModuleDict.update`, the order of the merged
-      ``OrderedDict``, ``dict`` (started from Python 3.6) or another
+      ``OrderedDict``, ``dict`` or another
       :class:`~torch.nn.ModuleDict` (the argument to
       :meth:`~torch.nn.ModuleDict.update`).
 

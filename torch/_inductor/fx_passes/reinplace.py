@@ -38,11 +38,18 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class InplaceableOp:
     inplace_op: Callable[..., Any]
-    mutated_arg: int
+    mutated_arg: int | tuple[int, ...]  # Single index or tuple of indices
     extra_check: Callable[[torch.fx.Node], bool] = lambda node: True
+
+    @property
+    def mutated_args(self) -> tuple[int, ...]:
+        """Return mutated_arg as a tuple for uniform handling."""
+        if isinstance(self.mutated_arg, int):
+            return (self.mutated_arg,)
+        return self.mutated_arg
 
 
 _SCATTER_OP_TO_VIEW = {
@@ -550,6 +557,9 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 node, shared_view_nodes, copy_node=None, mutated_arg=mutated_arg
             )
 
+    def all_can_inplace(node, mutated_args):
+        return all(can_inplace(node, arg) for arg in mutated_args)
+
     def log_inplace_results(
         node_name,
         old_tensors_to_clone,
@@ -669,15 +679,15 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
         return tensors_to_clone
 
     for node in graph.nodes:
-        if (inplaceable_op := inplaceable_ops.get(node.target, None)) is not None:
-            mutated_arg = node.args[inplaceable_op.mutated_arg]
-            if can_inplace(node, mutated_arg) and inplaceable_op.extra_check(node):
-                # TODO(yifu): this doesn't properly remove copy epilogues for
-                # ops that mutate multiple inputs. Need to revise the copy
-                # node tracking logic to support the case.
-                copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
-                if copy_node is not None:
-                    replace_dict[copy_node] = copy_node.args[0]
+        if (inplaceable_op := inplaceable_ops.get(node.target)) is not None:
+            # Check if ALL mutated args can be inplaced
+            # Only convert if we don't need to clone any tensor
+            mutated_args = [node.args[idx] for idx in inplaceable_op.mutated_args]
+            if all_can_inplace(node, mutated_args) and inplaceable_op.extra_check(node):
+                for mutated_arg in mutated_args:
+                    copy_node = copy_args_to_copy_nodes.get((mutated_arg, node))
+                    if copy_node is not None:
+                        replace_dict[copy_node] = copy_node.args[0]
                 node.target = inplaceable_op.inplace_op
         elif node.target is torch.ops.higher_order.auto_functionalized_v2:
             _mutable_op = node.args[0]
@@ -716,6 +726,139 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
             # auto_functionalized into clones + a mutable op; this metadata
             # tells the decomp to only clone the following inputs
             node.meta["only_clone_these_tensors"] = tensors_to_clone
+        elif node.target is torch.ops.higher_order.with_effects:
+            # Handle effectful ops wrapped with with_effects
+            # args[0] is the token, args[1] is the inner op, args[2:] are the op's args
+            inner_op = node.args[1]
+            log.debug(
+                "reinplace: checking with_effects node with inner_op=%s", inner_op
+            )
+            if (inplaceable_op := inplaceable_ops.get(inner_op)) is not None:
+                log.debug("reinplace: found inplaceable_op for %s", inner_op)
+                # Get the mutated arg indices, offset by 2 (token + op)
+                mutated_arg_indices = inplaceable_op.mutated_args
+
+                # Build flat list of tensors for can_inplace check
+                # and a mapping of output index -> replacement tensor(s)
+                mutated_tensors_flat = []
+                output_idx_to_replacement: dict[int, Any] = {}
+
+                for position, idx in enumerate(mutated_arg_indices):
+                    actual_idx = idx + 2  # offset for token and op
+                    assert actual_idx < len(node.args), (
+                        f"mutated arg idx {actual_idx} out of range {len(node.args)}"
+                    )
+                    arg = node.args[actual_idx]
+
+                    # Output index is position + 1 (index 0 is the token)
+                    output_idx = position + 1
+                    output_idx_to_replacement[output_idx] = arg
+
+                    # Flatten for can_inplace check
+                    if isinstance(arg, (list, tuple)):
+                        mutated_tensors_flat.extend(arg)
+                    else:
+                        mutated_tensors_flat.append(arg)
+
+                # Check if all mutated args can be inplaced
+                all_can_inplace = all_can_inplace(node, mutated_tensors_flat)
+
+                log.debug(
+                    "reinplace with_effects: mutated_tensors=%s, all_can_inplace=%s",
+                    [str(a) for a in mutated_tensors_flat],
+                    all_can_inplace,
+                )
+
+                if all_can_inplace and inplaceable_op.extra_check(node):
+                    log.debug(
+                        "reinplace with_effects: converting %s -> %s",
+                        inner_op,
+                        inplaceable_op.inplace_op,
+                    )
+                    # Update the inner op to inplace version
+                    node.update_arg(1, inplaceable_op.inplace_op)
+
+                    # The output structure changes: functional returns (token, tensors),
+                    # inplace returns (token, None). We need to redirect tensor uses
+                    # to the input tensors.
+
+                    def get_index_from_node(n):
+                        """Extract the index from a getitem node."""
+                        if n.target is operator.getitem:
+                            return n.args[1]
+                        return None
+
+                    def is_getitem_node(n, parent):
+                        """Check if node n is a getitem indexing into parent."""
+                        return n.target is operator.getitem and n.args[0] is parent
+
+                    def replace_and_collect(current_node, replacement_tensors):
+                        """
+                        Collect replacements for getitem nodes into replace_dict.
+                        Nodes are added in child-first order so children are erased before parents.
+                        """
+                        # Find all users that are getitem nodes indexing into current_node
+                        getitem_users = [
+                            u
+                            for u in current_node.users
+                            if is_getitem_node(u, current_node)
+                        ]
+
+                        if not getitem_users:
+                            # Leaf node - add to replace_dict with actual replacement
+                            if isinstance(replacement_tensors, (list, tuple)):
+                                if len(replacement_tensors) == 1:
+                                    replace_dict[current_node] = replacement_tensors[0]
+                                    return True
+                                else:
+                                    # Multiple tensors but no indexing - can't replace
+                                    return False
+                            else:
+                                replace_dict[current_node] = replacement_tensors
+                                return True
+
+                        # Process children first (so they're added to replace_dict before parent)
+                        all_children_replaced = True
+                        first_replacement = None
+                        for getitem_user in getitem_users:
+                            idx = get_index_from_node(getitem_user)
+                            if idx is None or not isinstance(idx, int):
+                                all_children_replaced = False
+                                continue
+
+                            if not isinstance(replacement_tensors, (list, tuple)):
+                                all_children_replaced = False
+                                continue
+
+                            if idx >= len(replacement_tensors):
+                                all_children_replaced = False
+                                continue
+
+                            if first_replacement is None:
+                                first_replacement = replacement_tensors[idx]
+
+                            if not replace_and_collect(
+                                getitem_user, replacement_tensors[idx]
+                            ):
+                                all_children_replaced = False
+
+                        # Add this node to replace_dict after children (even if it has non-getitem users)
+                        # Non-getitem users will have their input replaced via replace_all_uses_with
+                        if all_children_replaced and first_replacement is not None:
+                            replace_dict[current_node] = first_replacement
+
+                        return all_children_replaced
+
+                    # Find getitem nodes that extract tensor results
+                    # Use the output_idx_to_replacement mapping built above
+                    for user in list(node.users):
+                        if not is_getitem_node(user, node):
+                            continue
+                        idx = get_index_from_node(user)
+                        if idx is None or idx not in output_idx_to_replacement:
+                            continue
+                        replacement = output_idx_to_replacement[idx]
+                        replace_and_collect(user, replacement)
         elif node.target in inplaceable_triton_ops:
             kernel_idx = node.kwargs["kernel_idx"]
             kernel = kernel_side_table.get_kernel(kernel_idx)
@@ -758,9 +901,7 @@ def reinplace_inplaceable_ops_core(graph: torch.fx.Graph) -> None:
                 new_kwargs["tensors_to_clone"] = immutable_list(tensors_to_clone)
                 new_kwargs = immutable_dict(new_kwargs)
                 node.meta["eager_input_vals"] = (args, new_kwargs)
-        elif (
-            inplaceable_op := inplaceable_foreach_ops.get(node.target, None)
-        ) is not None:
+        elif (inplaceable_op := inplaceable_foreach_ops.get(node.target)) is not None:
             mutated_args = node.args[inplaceable_op.mutated_arg]
 
             if not all((arg, node) in copy_args_to_copy_nodes for arg in mutated_args):

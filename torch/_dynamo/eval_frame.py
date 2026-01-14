@@ -39,7 +39,7 @@ import types
 import unittest
 import warnings
 import weakref
-from collections.abc import Sized
+from collections.abc import Generator, Sized
 from dataclasses import dataclass
 from enum import Enum
 from os.path import dirname, join
@@ -67,6 +67,7 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.types import ConvertFrameReturn, FrameAction, FrameExecStrategy
 from torch._export.utils import _compiling_state_context
+from torch._library.opaque_object import is_opaque_type
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import DISABLE_JUSTKNOBS, justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import (
@@ -98,6 +99,7 @@ from .code_context import code_context
 from .exc import (
     CondOpArgsMismatchError,
     ShortenTraceback,
+    UncapturedHigherOrderOpError,
     Unsupported,
     UserError,
     UserErrorType,
@@ -144,6 +146,8 @@ class Unset(Enum):
 cached_backends: dict[int, CompilerFn] = {}
 
 unset = Unset.token
+
+_in_optimized_module = False
 
 
 if DISABLE_JUSTKNOBS:
@@ -201,6 +205,27 @@ def get_example_inputs(key: str) -> list[Any]:
         _EXAMPLE_INPUTS[key] = []
 
     return _EXAMPLE_INPUTS[key]
+
+
+@contextlib.contextmanager
+def _set_in_optimized_module() -> Generator[None, None, None]:
+    # Set in dynamo's OptimizedModule forward, to have better coverage than is_compiling().
+    # Prevents graph-breaking forward hooks from being registered & traced.
+    # TODO(pianpwk): subsume this flag with better is_compiling() coverage
+    global _in_optimized_module
+    _old_in_optimized_module = (
+        _in_optimized_module  # do we need this? can we just set it to False after
+    )
+    _in_optimized_module = True
+    try:
+        yield
+    finally:
+        _in_optimized_module = _old_in_optimized_module
+
+
+def _is_in_optimized_module() -> bool:
+    global _in_optimized_module
+    return _in_optimized_module
 
 
 def _callback_from_stance(callback: DynamoCallback) -> DynamoCallback:
@@ -414,10 +439,7 @@ class OptimizedModule(torch.nn.Module):
             self.forward = self.dynamo_ctx(self._orig_mod.__call__)
         elif config.wrap_top_frame or (
             isinstance(self._orig_mod.forward, types.MethodType)
-            and (
-                trace_rules.check(self._orig_mod.forward)
-                or getattr(self._orig_mod, "_is_fsdp_managed_module", False)
-            )
+            and (trace_rules.check(self._orig_mod.forward))
         ):
             # This may be a torch.nn.* instance in trace_rules.py which
             # won't trigger a frame evaluation workaround to add an extra
@@ -443,7 +465,8 @@ class OptimizedModule(torch.nn.Module):
                 ", or use the per-module hooks instead",
                 stacklevel=2,
             )
-        return super().__call__(*args, **kwargs)
+        with _set_in_optimized_module():
+            return super().__call__(*args, **kwargs)
 
     def _aot_compile(self, inputs: list[torch._dynamo.aot_compile.ModelInput]) -> None:
         """
@@ -454,7 +477,7 @@ class OptimizedModule(torch.nn.Module):
         assert hooks is not None
         if not config.enable_aot_compile:
             raise RuntimeError(
-                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_config=True"
+                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_compile=True"
             )
         if not self.dynamo_ctx.fullgraph:
             raise RuntimeError(
@@ -474,7 +497,7 @@ class OptimizedModule(torch.nn.Module):
     def _save_aot_compiled_module(self, path: Optional[str] = None) -> bytes:
         if not config.enable_aot_compile:
             raise RuntimeError(
-                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_config=True"
+                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_compile=True"
             )
         from torch._dynamo.aot_compile import AOTCompiledModel
 
@@ -488,7 +511,7 @@ class OptimizedModule(torch.nn.Module):
     def _load_aot_compiled_module(self, data: bytes) -> None:
         if not config.enable_aot_compile:
             raise RuntimeError(
-                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_config=True"
+                "AOT Compile is not enabled, please set torch._dynamo.config.enable_aot_compile=True"
             )
         from torch._dynamo.aot_compile import AOTCompiledModel
 
@@ -529,14 +552,14 @@ class OptimizedModule(torch.nn.Module):
             return self._modules["_orig_mod"]
         return getattr(self._orig_mod, name)
 
-    def __setattr__(self, name: str, val: Any) -> None:
+    def __setattr__(self, name: str, value: Any) -> None:
         # Allow patching over class attributes
         if hasattr(type(self), name):
-            return super().__setattr__(name, val)
+            return super().__setattr__(name, value)
 
         if name in OptimizedModule._opt_mod_attributes:
-            return super().__setattr__(name, val)
-        return setattr(self._orig_mod, name, val)
+            return super().__setattr__(name, value)
+        return setattr(self._orig_mod, name, value)
 
     def __delattr__(self, name: str) -> None:
         # This mirrors `__setattr__`
@@ -618,6 +641,15 @@ def make_set_enable_dynamic(enable: bool) -> Any:
         return config._make_closure_patcher(
             automatic_dynamic_shapes=False, assume_static_by_default=True
         )
+
+
+@contextlib.contextmanager
+def set_enable_dynamic(enable: bool) -> Generator[None, None, None]:
+    cleanup = make_set_enable_dynamic(enable)()
+    try:
+        yield
+    finally:
+        cleanup()
 
 
 # A thread local storage that serves to store information as Dynamo traces
@@ -817,6 +849,7 @@ class _TorchDynamoContext:
                 backend=innermost_fn(
                     self.callback, unaltered_fn_attr="_torchdynamo_orig_backend"
                 ),
+                dynamic=self._dynamic,
             )
 
         # add context containing GraphModule to any GraphModule forward functions
@@ -855,6 +888,17 @@ class _TorchDynamoContext:
             f"A callable function is expected, but {type(fn)} is provided."
         )
 
+        # NOTE [Top-level TorchInGraph functions]
+        # Some callables (e.g. torch.exp) are represented as TorchInGraphFunctionVariable
+        # when traced inside a frame. When such a function is passed directly to
+        # torch.compile, we detect it here so we can force it through wrap_inline.
+        from .variables import TorchInGraphFunctionVariable
+
+        rule = trace_rules.lookup(fn)
+        top_level_in_graph = isinstance(rule, type) and issubclass(
+            rule, TorchInGraphFunctionVariable
+        )
+
         try:
             filename = inspect.getsourcefile(fn)
         except TypeError:
@@ -862,7 +906,7 @@ class _TorchDynamoContext:
         if config.debug_force_nested_calls:
             fn = external_utils.wrap_inline(fn)
         elif config.wrap_top_frame or (
-            (filename is None or trace_rules.check(fn))
+            (filename is None or trace_rules.check(fn) or top_level_in_graph)
             and (
                 getattr(fn, "__name__", "")
                 not in ["_call_impl", "_wrapped_call_impl", "_lazy_forward"]
@@ -893,6 +937,14 @@ class _TorchDynamoContext:
                         and tracing_context.fake_mode.in_kernel_invocation
                     ):
                         return fn(*args, **kwargs)
+                # Skip nested compile during export (but not HOP internal compile)
+                # Only skip if there's an active TracingContext (nested), not for top-level export
+                if torch.compiler.is_exporting():
+                    from torch._higher_order_ops.utils import _in_hop_compile
+
+                    if not _in_hop_compile():
+                        if torch._guards.TracingContext.try_get() is not None:
+                            return fn(*args, **kwargs)
                 # Skip nested compile - just inline the function
                 if is_fx_symbolic_tracing():
                     if config.error_on_nested_fx_trace:
@@ -932,7 +984,7 @@ class _TorchDynamoContext:
 
                 try:
                     return fn(*args, **kwargs)
-                except Unsupported as e:
+                except (Unsupported, UncapturedHigherOrderOpError) as e:
                     if config.verbose:
                         raise
                     # strip internal tracebacks from causes
@@ -940,7 +992,7 @@ class _TorchDynamoContext:
                     while cur_exn.__cause__ is not None:
                         cur_exn.__cause__.with_traceback(None)
                         cur_exn = cur_exn.__cause__
-                    # pyrefly: ignore [invalid-inheritance]
+
                     raise e.with_traceback(None) from e.__cause__  # User compiler error
                 except ShortenTraceback as e:
                     # Failures in the backend likely don't have useful
@@ -1148,14 +1200,21 @@ class DisableContext(_TorchDynamoContext):
             try:
                 _maybe_set_eval_frame(_callback_from_stance(self.callback))
                 try:
-                    if torch.compiler.is_exporting():
+                    fn_name = getattr(fn, "__name__", type(fn).__name__)
+                    # Skip annotation for __torch_dispatch__ to avoid polluting
+                    # node metadata during export. The disable on __torch_dispatch__
+                    # is an internal implementation detail, not user-facing.
+                    # TODO: Ideally we shouldn't need this check because nested
+                    # annotate() calls shouldn't override existing keys.
+                    if (
+                        torch.compiler.is_exporting()
+                        and fn_name != "__torch_dispatch__"
+                    ):
                         with fx_traceback.annotate(
                             {
                                 "_torchdynamo_disable": True,
                                 "_torchdynamo_disable_recursive": True,
-                                "_torchdynamo_disable_method": getattr(
-                                    fn, "__name__", type(fn).__name__
-                                ),
+                                "_torchdynamo_disable_method": fn_name,
                             }
                         ):
                             return fn(*args, **kwargs)
@@ -1393,7 +1452,8 @@ def _optimize(
     error_on_graph_break: Optional[bool] = None,
     guard_export_fn: Optional[Callable[[_guards.GuardsSet], None]] = None,
     guard_fail_fn: Optional[Callable[[GuardFail], None]] = None,
-    guard_filter_fn: Optional[Callable[[list[GuardFilterEntry]], list[bool]]] = None,
+    guard_filter_fn: Callable[[Sequence[GuardFilterEntry]], Sequence[bool]]
+    | None = None,
     disable: bool = False,
     dynamic: Optional[bool] = None,
     package: Optional[CompilePackage] = None,
@@ -1756,7 +1816,7 @@ def check_user_input_output(flat_values: list[Any], error_type: UserErrorType) -
     ] + list(common_constant_types)
 
     def is_supported_type(val: Any) -> bool:
-        return isinstance(val, tuple(supported_types))
+        return isinstance(val, tuple(supported_types)) or is_opaque_type(type(val))
 
     value_type = "input" if error_type == UserErrorType.INVALID_INPUT else "output"
     # We only check that the outputs are not None. Inputs can be None.
