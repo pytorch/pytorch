@@ -21,6 +21,7 @@ from torch.testing._internal.common_utils import (
     TestCase,
     skipIfCrossRef,
     suppress_warnings,
+    TEST_CUDA,
     TEST_WITH_TORCHDYNAMO,
     run_tests,
     parametrize,
@@ -1956,6 +1957,53 @@ class TestDtypeMismatch(TestCase):
             torch.compile(fn_3d)(a, b)
 
 
+class TestDeviceMismatch(TestCase):
+    """Tests for device mismatch errors in index_add/index_reduce operations.
+
+    These tests verify that device mismatch errors are raised in both eager mode
+    and when using FakeTensor (which is important for torch.compile).
+    """
+
+    # All device combinations where self, index, and source are not all on the same device.
+    # Index is checked before source, so index mismatch is reported first when both differ.
+    # Error patterns match both eager ("got index is on") and fake tensor ("index must be on
+    # the same device") error message formats.
+    _device_mismatch_cases = [
+        ("cuda", "cpu", "cuda", "index.*(same device|is on)"),
+        ("cuda", "cuda", "cpu", "source.*(same device|is on)"),
+        ("cuda", "cpu", "cpu", "index.*(same device|is on)"),
+        ("cpu", "cuda", "cpu", "index.*(same device|is on)"),
+        ("cpu", "cpu", "cuda", "source.*(same device|is on)"),
+        ("cpu", "cuda", "cuda", "index.*(same device|is on)"),
+    ]
+
+    @unittest.skipIf(not TEST_CUDA, "CUDA not available")
+    @parametrize("use_fake_tensor", [False, True])
+    @parametrize("op", ["index_add", "index_reduce"])
+    @parametrize(
+        "self_device,index_device,source_device,error_pattern", _device_mismatch_cases
+    )
+    def test_device_mismatch(
+        self, use_fake_tensor, op, self_device, index_device, source_device, error_pattern
+    ):
+        """Test that index_add/index_reduce raise errors when devices don't match."""
+        from contextlib import nullcontext
+
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        ctx = FakeTensorMode() if use_fake_tensor else nullcontext()
+        with ctx:
+            self_tensor = torch.randn(8, 10, device=self_device)
+            index = torch.randint(0, 8, (4,), device=index_device)
+            source = torch.randn(4, 10, device=source_device)
+            with self.assertRaisesRegex(RuntimeError, error_pattern):
+                if op == "index_add":
+                    torch.index_add(self_tensor, 0, index, source)
+                else:
+                    torch.index_reduce(self_tensor, 0, index, source, "mean")
+
+
+instantiate_parametrized_tests(TestDeviceMismatch)
 instantiate_parametrized_tests(TestDtypeMismatch)
 
 def print_op_str_if_not_supported(op_str):
