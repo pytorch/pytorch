@@ -171,7 +171,7 @@ def _sfdp_replacement_7(query, key, value, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
-    v = value.permute(0, 2, 1, 3)
+    v = value.permute(0, 2, 1, 3).to(query.dtype)
     return _scaled_dot_product_attention(
         q,
         k,
@@ -179,7 +179,7 @@ def _sfdp_replacement_7(query, key, value, dropout_p):
         attn_mask=None,  # attn_mask,
         dropout_p=dropout_p,
         is_causal=False,
-    )
+    ).to(torch.float16)
 
 
 def _sfdp_pattern_8(query, key, value):
@@ -198,7 +198,7 @@ def _sfdp_replacement_8(query, key, value):
     counters["inductor"]["fuse_attention"] += 1
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
-    v = value.permute(0, 2, 1, 3)
+    v = value.permute(0, 2, 1, 3).to(query.dtype)
     return _scaled_dot_product_attention(
         q,
         k,
@@ -206,7 +206,7 @@ def _sfdp_replacement_8(query, key, value):
         attn_mask=None,  # attn_mask,
         dropout_p=0.0,
         is_causal=False,
-    )
+    ).to(torch.float16)
 
 
 def _sfdp_pattern_9(query, key, value, dropout_p):
@@ -226,7 +226,7 @@ def _sfdp_replacement_9(query, key, value, dropout_p):
     counters["inductor"]["fuse_attention"] += 1
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
-    v = value.permute(0, 2, 1, 3)
+    v = value.permute(0, 2, 1, 3).to(query.dtype)
     return _scaled_dot_product_attention(
         q,
         k,
@@ -234,7 +234,7 @@ def _sfdp_replacement_9(query, key, value, dropout_p):
         attn_mask=None,  # attn_mask,
         dropout_p=dropout_p,
         is_causal=False,
-    )
+    ).to(torch.float16)
 
 
 def _sfdp_pattern_10(query, key, value):
@@ -254,7 +254,7 @@ def _sfdp_replacement_10(query, key, value):
     counters["inductor"]["fuse_attention"] += 1
     q = query.permute(0, 2, 1, 3)
     k = key.permute(0, 2, 1, 3)
-    v = value.permute(0, 2, 1, 3)
+    v = value.permute(0, 2, 1, 3).to(query.dtype)
     return _scaled_dot_product_attention(
         q,
         k,
@@ -262,7 +262,7 @@ def _sfdp_replacement_10(query, key, value):
         attn_mask=None,  # attn_mask,
         dropout_p=0.0,
         is_causal=False,
-    )
+    ).to(torch.float16)
 
 
 def _sfdp_pattern_11(query, key, value, inv_scale):
@@ -829,6 +829,7 @@ def _get_sfdp_patterns():
     # but will not in float, so we generate a pattern for both
     for dtype in [torch.float, torch.half]:
         g = functools.partial(g_inp, dtype=dtype)
+        g_float16 = functools.partial(g_inp, dtype=torch.float16)
         b = functools.partial(b_inp, dtype=dtype)
         b_float = functools.partial(b_inp, dtype=torch.float)
         b_bool = functools.partial(b_inp, dtype=torch.bool)
@@ -889,28 +890,28 @@ def _get_sfdp_patterns():
             (
                 _sfdp_pattern_7,
                 _sfdp_replacement_7,
-                [g(), g(), g()],
+                [g(), g(), g_float16()],
                 d,
                 _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_8,
                 _sfdp_replacement_8,
-                [g(), g(), g()],
+                [g(), g(), g_float16()],
                 {},
                 _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_9,
                 _sfdp_replacement_9,
-                [g(), g(), g()],
+                [g(), g(), g_float16()],
                 d,
                 _sfdp_params_check,
             ),
             (
                 _sfdp_pattern_10,
                 _sfdp_replacement_10,
-                [g(), g(), g()],
+                [g(), g(), g_float16()],
                 {},
                 _sfdp_params_check,
             ),
@@ -992,7 +993,7 @@ def _get_sfdp_patterns():
             (
                 _sfdp_pattern_19,
                 _sfdp_replacement_19,
-                [g(), g(), g(), b_bool(), b_float()],
+                [g(), g(), g(), b_bool(), b()],
                 d,
                 _sfdp_params_check,
             ),

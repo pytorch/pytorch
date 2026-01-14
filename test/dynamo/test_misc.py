@@ -1660,6 +1660,18 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
             expected_ops_dynamic=ifdynstaticdefault(1, 7),
         )
 
+    def test_min_max_tuple_const(self):
+        # min/max on tuple constants should use ConstantVariable.create
+        # to properly handle the tuple return type
+        def fn():
+            a = min((1, 2), (3, 4))
+            b = max((1, 2), (3, 4))
+            return a, b
+
+        opt_fn = torch.compile(fn, fullgraph=True)
+        result = opt_fn()
+        self.assertEqual(result, ((1, 2), (3, 4)))
+
     @torch._dynamo.config.patch(capture_scalar_outputs=True)
     def test_bound_shape_checks(self):
         def f1(x, y):
@@ -2409,6 +2421,25 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         actual = fn_opt(x, y)
 
         self.assertEqual(actual, expected)
+
+    def test_structseq_repr(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x):
+            result = torch.max(x, dim=0)
+            s = repr(result)
+            return result.values
+
+        x = torch.randn(3, 2)
+
+        # Verify that fullgraph=True fails (confirms graph break occurs)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, fullgraph=True, backend="eager")(x)
+
+        # Verify that it works without fullgraph
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        result = opt_fn(x)
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_range_input(self):
         def fn(a, rng):
@@ -6519,6 +6550,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = opt_fn(x, x)
         self.assertEqual(ref, res)
 
+    @torch._dynamo.config.patch(trace_autograd_ops=True)
     def test_tensor_dot_grad_no_graph_break(self):
         def fn(a, b):
             y = 3 * a**3 - b**2
@@ -6532,7 +6564,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn = torch.compile(fn, backend=cnts)
         _, b_grad = opt_fn(a, b)
         self.assertTrue(same(b_grad, torch.tensor([0.0, 0.0])))
-        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_torch_nn_parameter_isinstance(self):
         def fn(x):
