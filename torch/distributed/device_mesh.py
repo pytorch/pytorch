@@ -222,7 +222,7 @@ else:
                         "The mesh argument is required except for PRIVATE USAGE ONLY!"
                     )
 
-            assert _layout.collapse().check_non_overlap(), (
+            assert _layout.collapse().check_orthogonal(), (
                 "Please use a non-overlapping layout when creating a DeviceMesh."
             )
             assert _rank_map.ndim == 1, "The rank map must be 1-dimensional"
@@ -253,7 +253,7 @@ else:
                     tuple(self.mesh.size()), tuple(self.mesh.stride())
                 )
             )
-            if not self._layout.collapse().check_non_overlap():
+            if not self._layout.collapse().check_orthogonal():
                 raise AssertionError(
                     "Please use a non-overlapping layout when creating a DeviceMesh."
                 )
@@ -910,7 +910,7 @@ else:
             # there is layout overlap.
             # TODO: Eventually we will just directly throw error here because
             # we will deprecate the slicing of flattened dim_name from root mesh.
-            if not result_layout.collapse().check_non_overlap():
+            if not result_layout.collapse().check_orthogonal():
                 raise RuntimeError(
                     f"Slicing overlapping dim_names {mesh_dim_names} is not allowed."
                 )
@@ -1281,7 +1281,7 @@ else:
                         "Cannot concatenate DeviceMeshes derived from different device meshs"
                     )
             concat_mesh_layout = _MeshLayout(concat_axes)
-            if not concat_mesh_layout.collapse().check_non_overlap():
+            if not concat_mesh_layout.collapse().check_orthogonal():
                 raise RuntimeError(
                     f"Cannot concatenate overlapping meshes: {device_mesh_list}"
                 )
