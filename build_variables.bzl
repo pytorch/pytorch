@@ -641,6 +641,7 @@ libtorch_nativert_sources = [
     "torch/nativert/graph/passes/pass_manager/PassManager.cpp",
     "torch/nativert/kernels/KernelHandlerRegistry.cpp",
     "torch/nativert/kernels/TritonKernel.cpp",
+    "torch/nativert/executor/triton/TritonKernelManager.cpp",
     "torch/nativert/executor/triton/CpuTritonKernelManager.cpp",
     "torch/nativert/executor/AOTInductorDelegateExecutor.cpp",
     "torch/nativert/kernels/ETCallDelegateKernel.cpp",
