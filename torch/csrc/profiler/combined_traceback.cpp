@@ -17,13 +17,6 @@ std::shared_ptr<CapturedTraceback> CapturedTraceback::gather(
       r->python_ = p;
       p = p->next_;
     }
-    // Try to gather forward traceback from current autograd node
-    if (r->python_) {
-      auto forward_tb = r->python_->gatherForwardTraceback();
-      if (!forward_tb.empty()) {
-        r->forward_traceback_ = std::move(forward_tb);
-      }
-    }
   }
   if (script) {
     r->script_frames_ = torch::jit::currentCallstack();

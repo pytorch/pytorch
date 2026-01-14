@@ -13,16 +13,15 @@ import contextlib
 import copy
 import functools
 import itertools
+import logging
 import pprint
-from collections.abc import Callable
+import typing
+import warnings
+from collections.abc import Callable, Sequence
 from contextlib import AbstractContextManager, nullcontext
 from dataclasses import dataclass, field
 from functools import wraps
-from typing import Any, Optional, TYPE_CHECKING, Union
-
-
-if TYPE_CHECKING:
-    from collections.abc import Sequence
+from typing import Any, Optional, Union
 
 import torch
 import torch.fx as fx
@@ -39,11 +38,19 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
+from torch._library.opaque_object import is_opaque_type
+from torch._library.utils import is_builtin
+from torch._logging import getArtifactLogger
 from torch._prims_common import CUDARngStateHelper
 from torch._subclasses import FakeTensor
 from torch.fx.experimental._backward_state import BackwardState
+from torch.fx.experimental.proxy_tensor import HANDLED_TYPES
 from torch.multiprocessing.reductions import StorageWeakRef
-from torch.utils._python_dispatch import is_traceable_wrapper_subclass
+from torch.utils._python_dispatch import (
+    is_traceable_wrapper_subclass,
+    TorchDispatchMode,
+)
+from torch.utils._pytree import tree_flatten
 
 from .. import config
 from .collect_metadata_analysis import run_functionalized_fw_and_collect_metadata
@@ -96,6 +103,53 @@ from .utils import (
 
 
 zip = strict_zip
+
+aot_graphs_log = getArtifactLogger(__name__, "aot_graphs")
+
+
+def _describe_arg_for_logging(arg: object) -> str:
+    from torch._library import opaque_object
+
+    try:
+        is_dtensor = isinstance(arg, torch.distributed._tensor.DTensor)
+    except AttributeError:
+        is_dtensor = False
+
+    if is_dtensor:
+        arg = typing.cast(torch.distributed._tensor.DTensor, arg)
+        mesh = arg.device_mesh
+        return (
+            f"DTensor(shape={arg.shape}, dtype={arg.dtype}, "
+            f"device={arg.device}, mesh_shape={mesh.shape}, "
+            f"placements={arg.placements})"
+        )
+    elif isinstance(arg, torch.Tensor):
+        return f"Tensor(shape={arg.shape}, dtype={arg.dtype}, device={arg.device})"
+    elif opaque_object.is_opaque_type(type(arg)):
+        return f"Opaque: {type(arg).__name__}"
+    else:
+        return f"{type(arg).__name__}: {arg}"
+
+
+def _log_input_metadata(runtime_metadata: ViewAndMutationMeta) -> None:
+    aot_graphs_log.debug(
+        "Expected input metadata (count=%s):", len(runtime_metadata.subclass_inp_meta)
+    )
+    for i, meta in enumerate(runtime_metadata.subclass_inp_meta):
+        aot_graphs_log.debug("  [%s] %s", i, meta)
+
+
+def _log_args_list(args: Sequence[object], label: str) -> None:
+    aot_graphs_log.debug("%s (count=%s):", label, len(args))
+    for i, arg in enumerate(args):
+        aot_graphs_log.debug("  [%s] %s", i, _describe_arg_for_logging(arg))
+
+
+def _log_args_maybe_list(arg: object, label: str) -> None:
+    if isinstance(arg, (list, tuple)):
+        _log_args_list(arg, label)
+    else:
+        aot_graphs_log.debug("%s: %s", label, _describe_arg_for_logging(arg))
 
 
 # The wrapper created by this function handles all of the runtime aliasing and mutation "epilogue" logic
@@ -248,6 +302,125 @@ def _should_disable_saved_tensors_hooks():
     return False
 
 
+def _schema_allows_aliasing(func) -> bool:
+    schema = func._schema
+    # View ops have non-write aliases declared in arguments
+    if schema._is_view_op():
+        return True
+    # Handles cases like mkldnn::_convolution_pointwise_.binary
+    # where the schema is Tensor(a!) other -> Tensor(a!) Y
+    for ret in schema.returns:
+        if ret.alias_info is not None:
+            return True
+    return False
+
+
+def _check_custom_op_aliasing(name, args, kwargs, result):
+    """
+    Check if custom op outputs alias inputs or other outputs.
+    If config.error_on_custom_op_aliasing is True, raises RuntimeError.
+    Otherwise, emits a warning.
+    """
+    try:
+        torch._library.utils._c_check_aliasing_constraint(
+            name,
+            args,
+            kwargs,
+            result,
+        )
+    except RuntimeError as e:
+        if config.error_on_custom_op_aliasing:
+            raise
+        else:
+            warnings.warn(str(e), UserWarning, stacklevel=3)
+
+
+@functools.lru_cache(None)
+def _is_fsdp_all_gather_copy_in(func) -> bool:
+    """
+    Check if func is torch.ops.fsdp.all_gather_copy_in.default by comparing
+    namespace and name strings. This avoids accessing torch.ops.fsdp directly,
+    which would fail on platforms where FSDP ops aren't registered (e.g., macOS
+    builds with USE_DISTRIBUTED=0).
+    """
+    return (
+        hasattr(func, "namespace")
+        and func.namespace == "fsdp"
+        and hasattr(func, "__name__")
+        and func.__name__ == "all_gather_copy_in.default"
+    )
+
+
+class _AnalyzeCustomOpInputOutputMode(TorchDispatchMode):
+    """
+    Checks if inp/out of custom ops alias each other.
+    If config.error_on_custom_op_aliasing is True, violations raise errors.
+    Otherwise, violations emit warnings.
+    """
+
+    def __init__(self):
+        super().__init__()
+        self.supports_higher_order_operators = True
+
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        if not kwargs:
+            kwargs = {}
+
+        flat_tensor_args = filter(
+            lambda x: isinstance(x, torch.Tensor), tree_flatten((args, kwargs))[0]
+        )
+
+        # Defer this to subclass torchdispatch modes (probably shouldn't have fake tensor here tho)
+        if not all(type(x) in HANDLED_TYPES for x in flat_tensor_args):
+            return NotImplemented
+
+        res = func(*args, **kwargs)
+        # Only check aliasing for custom ops (non-aten/prim/prims/_c10d_functional/c10d)
+        # that claim to be functional
+        # Skip ops whose schema declares aliasing is allowed
+        if (
+            not isinstance(func, torch._ops.HigherOrderOperator)
+            and not is_builtin(func)
+            # TODO (https://github.com/pytorch/pytorch/issues/170986)
+            and func.namespace not in ("_c10d_functional", "c10d", "onednn")
+            # This op is quite important but has wrong schema, so lets skip for now
+            and not _is_fsdp_all_gather_copy_in(func)
+            and not _schema_allows_aliasing(func)
+        ):
+            _check_custom_op_aliasing(
+                func.name(),
+                args,
+                kwargs,
+                res,
+            )
+        return res
+
+    @classmethod
+    def ignore_compile_internals(cls):
+        return True
+
+
+class _FirstInvocationContext:
+    """
+    Context manager that tracks first invocation and conditionally enables _AnalyzeCustomOpInputOutputMode.
+    This is useful when we have a custom op where we want to analyze its' input
+    and output during cold start.
+    """
+
+    def __init__(self):
+        self._is_first = True
+
+    def __call__(self):
+        """
+        Returns a context manager: _AnalyzeCustomOpInputOutputMode on first invocation, nullcontext thereafter.
+        Automatically updates state after first use.
+        """
+        if self._is_first and config.check_custom_op_aliasing:
+            self._is_first = False
+            return _AnalyzeCustomOpInputOutputMode()
+        return nullcontext()
+
+
 def _create_runtime_wrapper(
     compiled_fn,
     *,
@@ -259,6 +432,11 @@ def _create_runtime_wrapper(
 ):
     if not getattr(compiled_fn, "_boxed_call", False):
         compiled_fn = make_boxed_func(compiled_fn)
+
+    # We only want to run debugmode on custom ops at the first invocation of
+    # runtime wrapper. For all subsequent uses, we should no-op for performance
+    # See: https://github.com/pytorch/pytorch/issues/165349
+    first_invocation_ctx = _FirstInvocationContext()
 
     # Note [Inputs needed in runtime epilogue after list clearing]
     # In Python functions, you can't free the input arguments of a function within the scope of that function. A workaround is to
@@ -325,41 +503,44 @@ def _create_runtime_wrapper(
             )
             torch.autograd.graph.increment_version(mutated_args)
 
-        if trace_joint:
-            args_ = list(args)
-            # See Note [Detaching inputs that never need gradients]
-            for idx in indices_of_inps_to_detach:
-                if isinstance(args_[idx], torch.Tensor):
-                    args_[idx] = args_[idx].detach()
+        # Enable _AnalyzeCustomOpInputOutputMode on first invocation to check aliasing constraints for custom ops
+        with first_invocation_ctx():
+            if trace_joint:
+                args_ = list(args)
+                # See Note [Detaching inputs that never need gradients]
+                for idx in indices_of_inps_to_detach:
+                    if isinstance(args_[idx], torch.Tensor):
+                        args_[idx] = args_[idx].detach()
 
-            # It's possible to have trace_joint inside user specified with no_grad() region,
-            # if there is a nested with enable_grad(), that forces some outputs to require gradients.
-            # Therefore, we unconditionally turn on enable_grad() for compiled_fn execution.
-            with (
-                torch.autograd._force_original_view_tracking(True),
-                torch.enable_grad(),
-            ):
-                record_runtime_wrapper_prologue_exit(cm)
-                all_outs = call_func_at_runtime_with_args(
-                    compiled_fn, args_, disable_amp=disable_amp, steal_args=True
-                )
-        else:
-            # When we have an inference graph, we run with grad disabled.
-            # It's possible to get an inference graph with inputs that require grad,
-            # in which case we want to make sure autograd is disabled
-            # (since e.g., inductor will generate aten.addmm.out calls which autograd will complain on)
-            # NOTE: We use _set_grad_enabled directly to reduce runtime overhead
-            grad_enabled = torch.is_grad_enabled()
-            try:
-                if grad_enabled:
-                    torch._C._set_grad_enabled(False)
-                record_runtime_wrapper_prologue_exit(cm)
-                all_outs = call_func_at_runtime_with_args(
-                    compiled_fn, args, disable_amp=disable_amp, steal_args=True
-                )
-            finally:
-                if grad_enabled:
-                    torch._C._set_grad_enabled(True)
+                # It's possible to have trace_joint inside user specified with no_grad() region,
+                # if there is a nested with enable_grad(), that forces some outputs to require gradients.
+                # Therefore, we unconditionally turn on enable_grad() for compiled_fn execution.
+                with (
+                    torch.autograd._force_original_view_tracking(True),
+                    torch.enable_grad(),
+                ):
+                    record_runtime_wrapper_prologue_exit(cm)
+                    all_outs = call_func_at_runtime_with_args(
+                        compiled_fn, args_, disable_amp=disable_amp, steal_args=True
+                    )
+            else:
+                # When we have an inference graph, we run with grad disabled.
+                # It's possible to get an inference graph with inputs that require grad,
+                # in which case we want to make sure autograd is disabled
+                # (since e.g., inductor will generate aten.addmm.out calls which autograd will complain on)
+                # NOTE: We use _set_grad_enabled directly to reduce runtime overhead
+                grad_enabled = torch.is_grad_enabled()
+                try:
+                    if grad_enabled:
+                        torch._C._set_grad_enabled(False)
+                    record_runtime_wrapper_prologue_exit(cm)
+                    all_outs = call_func_at_runtime_with_args(
+                        compiled_fn, args, disable_amp=disable_amp, steal_args=True
+                    )
+                finally:
+                    if grad_enabled:
+                        torch._C._set_grad_enabled(True)
+
         del args
 
         num_mutated_runtime_inps = runtime_metadata.num_mutated_inp_runtime_indices
@@ -373,10 +554,9 @@ def _create_runtime_wrapper(
         )
 
         # Step 3: After running the compiled fw, apply updates to mutated inputs
-        num_mutations_to_apply = runtime_metadata.num_mutated_inp_runtime_indices
-        if num_mutations_to_apply > 0:
-            updated_inputs = all_outs[:num_mutations_to_apply]
-            fw_outs = all_outs[num_mutations_to_apply:]
+        if num_mutated_runtime_inps > 0:
+            updated_inputs = all_outs[:num_mutated_runtime_inps]
+            fw_outs = all_outs[num_mutated_runtime_inps:]
 
             for i, inpt_idx in enumerate(runtime_metadata.mutated_inp_runtime_indices):
                 meta = runtime_metadata.input_info[inpt_idx]
@@ -685,14 +865,31 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
 
         @wraps(compiled_fn)
         def inner_fn(args: list[Any]):
+            if aot_graphs_log.isEnabledFor(logging.DEBUG):
+                aot_graphs_log.debug(
+                    "=== AOTDispatchSubclassWrapper.inner_fn START ==="
+                )
+                _log_input_metadata(runtime_metadata)
+                _log_args_list(args, "Incoming args")
+
             unwrapped_args = runtime_unwrap_tensor_subclasses(
                 args,
                 subclass_metas=runtime_metadata.subclass_inp_meta,
                 append_symints=True,
             )
+
+            if aot_graphs_log.isEnabledFor(logging.DEBUG):
+                _log_args_list(unwrapped_args, "After unwrapping, unwrapped_args")
+
             args.clear()
             # expectation: runtime_fn is a boxed fn
             unwrapped_outs = compiled_fn(unwrapped_args)
+
+            if aot_graphs_log.isEnabledFor(logging.DEBUG):
+                _log_args_maybe_list(
+                    unwrapped_outs, "After compiled_fn, unwrapped_outs"
+                )
+
             wrapped_outs = wrap_tensor_subclasses(
                 unwrapped_outs,
                 subclass_metas=subclass_metas,
@@ -700,6 +897,11 @@ class AOTDispatchSubclassWrapper(CompilerWrapper):
                 is_runtime=True,
                 included_subclass_symints=True,
             )
+
+            if aot_graphs_log.isEnabledFor(logging.DEBUG):
+                _log_args_maybe_list(wrapped_outs, "After wrapping, wrapped_outs")
+                aot_graphs_log.debug("=== AOTDispatchSubclassWrapper.inner_fn END ===")
+
             return wrapped_outs
 
         # box it
@@ -1602,7 +1804,12 @@ def _raise_if_functorch_active():
 
 # NOTE: this function must be torch._dynamo.allow_in_graph-able. Non tensor/symnode inputs must be constants.
 def _backward_prologue_functional(
-    ctx_saved_tensors, ctx_symints, metadata, maybe_subclass_metadata, *flat_args
+    ctx_saved_tensors,
+    ctx_symints,
+    ctx_opaque_objects,
+    metadata,
+    maybe_subclass_metadata,
+    *flat_args,
 ):
     # Calling convention: we expect a grad_out passed to the backward:
     # - for every output of the fw that does *not* alias an input or graph intermediate
@@ -1702,6 +1909,7 @@ def _backward_prologue_functional(
     all_args = [
         *ctx_symints,
         *ctx_saved_tensors,
+        *ctx_opaque_objects,
         *flat_bw_args_with_grads,
         *bw_tokens,
         *rng_args,
@@ -1735,7 +1943,9 @@ def _backward_prologue_functional(
     tangents_start_idx = (
         len(all_args) - num_flat_bw_args_with_grads - len(rng_args) - len(bw_tokens)
     )
-    assert tangents_start_idx == len(ctx_symints) + num_ctx_saved_tensors
+    assert tangents_start_idx == len(ctx_symints) + num_ctx_saved_tensors + len(
+        ctx_opaque_objects
+    )
     tangents_end_idx = len(all_args) - len(rng_args) - len(bw_tokens)
 
     # TODO: figure out how to refactor the backward properly
@@ -2163,31 +2373,51 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 )
                 num_forward_returns = CompiledFunction.metadata.num_forward_returns
 
+                # See Note [Activations with no version counter checks in eager]
                 # Partitioners must put symint arguments at the end separate from tensor arguments
-                tensors_saved_for_backwards = fw_outs[
-                    CompiledFunction.metadata.tensors_saved_for_backwards_slice
+                # Split tensors into those that need VC checks (via save_for_backward)
+                # and those that don't (stashed directly on ctx).
+                # The partitioner sorts tensors so that no-VC-check tensors are at the end.
+                tensors_saved_with_vc_check = fw_outs[
+                    CompiledFunction.metadata.tensors_saved_for_backwards_with_vc_check_slice
+                ]
+                tensors_saved_no_vc_check = fw_outs[
+                    CompiledFunction.metadata.tensors_saved_for_backwards_no_vc_check_slice
                 ]
                 assert all(
-                    isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards
+                    isinstance(x, torch.Tensor) for x in tensors_saved_with_vc_check
                 )
-
-                def mark_dynamic_activations(activations: list[torch.Tensor]):
-                    for (
-                        idx,
-                        dims,
-                    ) in CompiledFunction.metadata.dynamic_saved_tensors_idxs.items():
-                        maybe_mark_dynamic_helper(activations[idx], dims)
-                    return activations
+                assert all(
+                    isinstance(x, torch.Tensor) for x in tensors_saved_no_vc_check
+                )
 
                 # See Note [Detaching saved tensors in AOTAutograd]
-                ctx.save_for_backward(
-                    *mark_dynamic_activations(
-                        [
-                            x.detach() if x._is_view() else x
-                            for x in tensors_saved_for_backwards
-                        ]
-                    )
-                )
+                num_vc_check = len(tensors_saved_with_vc_check)
+                tensors_to_save = [
+                    x.detach() if x._is_view() else x
+                    for x in tensors_saved_with_vc_check
+                ]
+                tensors_no_vc = [
+                    x.detach() if x._is_view() else x for x in tensors_saved_no_vc_check
+                ]
+
+                # dynamic_saved_tensors_idxs has indices relative to all saved tensors
+                # (vc_check + no_vc_check combined). Mark dynamics on the detached tensors.
+                for (
+                    idx,
+                    dims,
+                ) in CompiledFunction.metadata.dynamic_saved_tensors_idxs.items():
+                    if idx < num_vc_check:
+                        maybe_mark_dynamic_helper(tensors_to_save[idx], dims)
+                    else:
+                        maybe_mark_dynamic_helper(
+                            tensors_no_vc[idx - num_vc_check], dims
+                        )
+
+                # Only save tensors that need VC checks via save_for_backward
+                ctx.save_for_backward(*tensors_to_save)
+                ctx._tensors_no_vc_check = tensors_no_vc
+
                 symint_outs = fw_outs[
                     CompiledFunction.metadata.symints_saved_for_backwards_slice
                 ]
@@ -2196,6 +2426,12 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     for x in symint_outs
                 ), str([type(x) for x in symint_outs])
                 ctx.symints = symint_outs
+
+                opaque_object_outs = fw_outs[
+                    CompiledFunction.metadata.opaque_objects_saved_for_backwards_slice
+                ]
+                assert all(is_opaque_type(type(obj)) for obj in opaque_object_outs)
+                ctx.opaque_objects = opaque_object_outs
 
                 raw_returns = fw_outs[0:num_forward_returns]
 
@@ -2273,9 +2509,17 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
             @staticmethod
             def backward(ctx, *flat_args):
+                # Combine tensors from both sources:
+                # 1. ctx.saved_tensors - tensors that went through save_for_backward (with VC check)
+                # 2. ctx._tensors_no_vc_check - tensors stashed directly on ctx (no VC check)
                 all_args = _backward_prologue_functional(
-                    ctx.saved_tensors,
+                    (
+                        list(ctx.saved_tensors) + ctx._tensors_no_vc_check
+                        if len(ctx._tensors_no_vc_check) > 0
+                        else ctx.saved_tensors
+                    ),
                     ctx.symints,
+                    ctx.opaque_objects,
                     CompiledFunction.metadata,
                     CompiledFunction.maybe_subclass_metadata,
                     *flat_args,

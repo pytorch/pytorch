@@ -82,8 +82,15 @@ def query_job_sha(repo, sha):
     }
     # If you are a Meta employee, go to P1679979893 to get the id and secret.
     # Otherwise, ask a Meta employee give you the id and secret.
-    KEY_ID = os.environ["CH_KEY_ID"]
-    KEY_SECRET = os.environ["CH_KEY_SECRET"]
+    try:
+        KEY_ID = os.environ["CH_KEY_ID"]
+        KEY_SECRET = os.environ["CH_KEY_SECRET"]
+    except KeyError as e:
+        raise RuntimeError(
+            "CH_KEY_ID and CH_KEY_SECRET environment variables must be set. "
+            "If you are a Meta employee, go to P1679979893 to get the id and secret. "
+            "Otherwise, ask a Meta employee to give you the id and secret."
+        ) from e
 
     r = requests.post(
         url=ARTIFACTS_QUERY_URL,
@@ -115,6 +122,12 @@ def get_artifacts_urls(results, suites, is_rocm=False):
             and "runner-determinator" not in r["jobName"]
             and "unit-test" not in r["jobName"]
         ):
+            # Filter out CUDA-13 jobs so it won't override CUDA-12 results.
+            # The result files should be shared between CUDA-12 and CUDA-13, but
+            # CUDA-13 skips more tests at the moment.
+            if "cuda13" in r["jobName"]:
+                continue
+
             # Filter based on whether this is a ROCm or CUDA job
             job_is_rocm = "rocm" in r["jobName"].lower()
             if job_is_rocm != is_rocm:
@@ -168,7 +181,8 @@ def download_artifacts_and_extract_csvs(urls):
                         break
                     except KeyError:
                         continue
-                if not found:
+                if not found and phase == "inference":
+                    # No warning for training, since it's expected to be missing for some tests
                     print(
                         f"Warning: Unable to find {phase}_{subsuite}.csv in artifacts file from {url}, continuing"
                     )

@@ -3,7 +3,7 @@ import math
 import traceback
 from dataclasses import dataclass
 from enum import auto, Enum
-from typing import Any, Optional
+from typing import Any
 
 import torch
 import torch.distributed as dist
@@ -39,8 +39,8 @@ def compiled_autograd_enabled():
 @dataclass
 class DataParallelMeshInfo:
     mesh: DeviceMesh
-    shard_mesh_dim: Optional[int] = None
-    replicate_mesh_dim: Optional[int] = None
+    shard_mesh_dim: int | None = None
+    replicate_mesh_dim: int | None = None
 
     def __post_init__(self):
         if self.shard_mesh_dim is None and self.replicate_mesh_dim is None:
@@ -161,7 +161,7 @@ def _from_local_no_grad(
 
 
 def _to_dtype_if_needed(
-    tensor: torch.Tensor, dtype: Optional[torch.dtype]
+    tensor: torch.Tensor, dtype: torch.dtype | None
 ) -> torch.Tensor:
     if dtype is not None and tensor.dtype != dtype:
         return tensor.to(dtype)

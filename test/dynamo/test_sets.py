@@ -560,7 +560,7 @@ class _SetBase(_FrozensetBase):
         self.assertEqual(p, {"a", "b", "c", "d"})
         self.assertRaises(TypeError, p.add, ["ab"])
         self.assertRaises(TypeError, p.add)
-        set.add(p, "e")
+        self.thetype.add(p, "e")
         self.assertEqual(p, {"a", "b", "c", "d", "e"})
 
     @make_dynamo_test
@@ -682,6 +682,93 @@ class UserDefinedFrozensetTests(_FrozensetBase, _BaseSetTests):
 
     def test_in_frozenset(self):
         super().test_in_frozenset()
+
+
+class OrderedSetTests(_SetBase, _BaseSetTests):
+    from torch.utils._ordered_set import OrderedSet
+
+    thetype = OrderedSet
+
+    def test_in_frozenset(self):
+        # We aren't equal w/ other sets due to ordering
+        pass
+
+    def test_equality(self):
+        super().test_equality()
+
+    @make_dynamo_test
+    def test_maintains_order(self):
+        # Test that OrderedSet maintains insertion order
+        s = self.thetype(["c", "b", "a"])
+        items = list(s)
+        self.assertEqual(items, ["c", "b", "a"])
+
+    @make_dynamo_test
+    def test_intersection_maintains_order(self):
+        # Test that intersection maintains order from first set
+        s1 = self.thetype(["a", "b", "c", "d"])
+        s2 = self.thetype(["d", "c", "b"])
+        result = s1.intersection(s2)
+        self.assertIsInstance(result, self.thetype)
+        self.assertEqual(list(result), ["b", "c", "d"])
+
+    @make_dynamo_test
+    def test_union_maintains_order(self):
+        # Test that union maintains order (first set order, then second set new items)
+        s1 = self.thetype(["a", "b", "c"])
+        s2 = self.thetype(["c", "d", "e"])
+        result = s1.union(s2)
+        self.assertIsInstance(result, self.thetype)
+        self.assertEqual(list(result), ["a", "b", "c", "d", "e"])
+
+    @make_dynamo_test
+    def test_difference_maintains_order(self):
+        # Test that difference maintains order from first set
+        s1 = self.thetype(["a", "b", "c", "d"])
+        s2 = self.thetype(["b", "d"])
+        result = s1.difference(s2)
+        self.assertIsInstance(result, self.thetype)
+        self.assertEqual(list(result), ["a", "c"])
+
+    @make_dynamo_test
+    def test_symmetric_difference_maintains_order(self):
+        # Test that symmetric_difference maintains order
+        s1 = self.thetype(["a", "b", "c"])
+        s2 = self.thetype(["c", "d", "e"])
+        result = s1.symmetric_difference(s2)
+        self.assertIsInstance(result, self.thetype)
+        # Should have items from s1 not in s2, then items from s2 not in s1
+        self.assertEqual(set(result), {"a", "b", "d", "e"})
+
+    @make_dynamo_test
+    def test_copy_preserves_type(self):
+        # Test that copy returns an OrderedSet
+        s = self.thetype(["a", "b", "c"])
+        s_copy = s.copy()
+        self.assertIsInstance(s_copy, self.thetype)
+        self.assertEqual(list(s_copy), ["a", "b", "c"])
+
+    @make_dynamo_test
+    def test_binop_preserves_type(self):
+        # Test that binary operations preserve OrderedSet type
+        s1 = self.thetype(["a", "b", "c"])
+        s2 = self.thetype(["b", "c", "d"])
+
+        # Test |
+        result = s1 | s2
+        self.assertIsInstance(result, self.thetype)
+
+        # Test &
+        result = s1 & s2
+        self.assertIsInstance(result, self.thetype)
+
+        # Test -
+        result = s1 - s2
+        self.assertIsInstance(result, self.thetype)
+
+        # Test ^
+        result = s1 ^ s2
+        self.assertIsInstance(result, self.thetype)
 
 
 if __name__ == "__main__":

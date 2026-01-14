@@ -1,19 +1,16 @@
-#ifdef USE_C10D_NCCL
-#include <nccl.h>
-#include <torch/csrc/cuda/nccl.h>
-
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 27, 1)
-#define NCCL_HAS_SYMMEM_SUPPORT
-#endif
+#include <torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp>
 
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
+
+#include <vector_types.h>
 #include <torch/csrc/distributed/c10d/GroupRegistry.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 #include <torch/csrc/distributed/c10d/ProcessGroupNCCL.hpp>
 #include <torch/csrc/distributed/c10d/cuda/utils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemory-inl.h>
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
-#include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -32,113 +29,217 @@ struct NCCLAllocation {
   void* ptr;
   size_t buffer_size;
   int device_idx;
+  // Map of group name to peer alloc info
+  std::unordered_map<std::string, c10::intrusive_ptr<NCCLPeerAllocInfo>> peer_alloc_infos_;
 
   NCCLAllocation(void* ptr, size_t buffer_size, int device_idx)
       : ptr(ptr), buffer_size(buffer_size), device_idx(device_idx) {}
+
+  ~NCCLAllocation() {
+    // Avoid calling CUDA functions after driver shutting down
+    if (is_finalizing()) {
+      return;
+    }
+    c10::cuda::CUDAGuard guard(device_idx);
+    ncclResult_t res = ncclMemFree(ptr);
+    if (res != ncclSuccess) {
+        LOG(WARNING) << "ncclMemFree failed in NCCLAllocation dtor: "
+                      << ncclGetErrorString(res);
+    }
+  }
 };
 
-class NCCLSymmetricMemory : public SymmetricMemory {
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+static __global__ void build_ptr_dev(
+  ncclWindow_t  handle,
+  size_t  offset,  // byte offset inside the window
+  void**  buffer,  // symmetric memory buffer
+  int  world_size)
+{
+  int tid = blockIdx.x * blockDim.x + threadIdx.x;
+  int stride = blockDim.x * gridDim.x;
+  for (int peer = tid; peer < world_size; peer += stride) {
+      buffer[peer] = ncclGetLsaPointer(handle, offset, peer);
+  }
+}
+#endif
+
+class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
  public:
- NCCLSymmetricMemory(
-      std::shared_ptr<NCCLAllocation> allocation,
-      const std::string& group_name,
-      ncclWindow_t handle,
-      ncclWindow_t signal_handle)
-      : allocation_(allocation),
-        buffer_size_(allocation->buffer_size),
+  NCCLPeerAllocInfo(
+      NCCLAllocation* allocation,
+      std::string group_name)
+      : buffer_size_(allocation->buffer_size),
         device_idx_(allocation->device_idx),
-        group_name_(group_name),
-        handle_(handle),
-        signal_handle_(signal_handle) {
+        group_name_(std::move(group_name))
+  {
     c10::cuda::CUDAGuard guard(device_idx_);
+    auto group = resolve_process_group(group_name_);
+    rank_ = group->getRank();
+    world_size_ = group->getSize();
+    auto* ncclPg = dynamic_cast<c10d::ProcessGroupNCCL*>(
+        group->getBackend(c10::DeviceType::CUDA).get());
+    TORCH_CHECK(ncclPg != nullptr, "backend must be a NCCL process group");
+    ncclComm_t comm = reinterpret_cast<ncclComm_t>(ncclPg->getCommPtr());
 
-    // We need some API like nvshmem_extension::nvshmem_ptr()
-    // put API to get the reference of remote memory.
-    // WIP
+    C10D_NCCL_CHECK(
+      ncclCommWindowRegister(comm, allocation->ptr, buffer_size_, &buffer_win_, NCCL_WIN_COLL_SYMMETRIC),
+      c10::str(
+          "Failed to window register segment with ptr ",
+          allocation->ptr,
+          ", size ",
+          buffer_size_,
+          " on rank ",
+          rank_));
+
+    void* signal_pad_ptr;
+    const size_t signal_pad_size = get_signal_pad_size();
+    C10D_NCCL_CHECK(
+        ncclMemAlloc(&signal_pad_ptr, signal_pad_size), "ncclMemAlloc failed");
+    C10D_NCCL_CHECK(
+    ncclCommWindowRegister(comm, signal_pad_ptr, signal_pad_size, &signal_handle_, NCCL_WIN_COLL_SYMMETRIC),
+    c10::str(
+        "Failed to window register segment with ptr ",
+        signal_pad_ptr,
+        ", size ",
+        signal_pad_size,
+        " on rank ",
+        rank_));
+
+    // Starting from NCCL 2.28, we can use device communicators and get peer pointers
+#ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+    // Create NCCL device communicator if it doesn't exist. Skip if it already exists.
+    auto& mr = NCCLDevCommManager::get(c10::Device(c10::DeviceType::CUDA, device_idx_));
+    mr.try_emplace_devcomm(group_name_, comm);
+
+    const size_t arr_size = sizeof(void*) * world_size_;
+    buffers_dev_ = reinterpret_cast<void**>(
+        c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
+    signal_pads_dev_ = reinterpret_cast<void**>(
+        c10::cuda::CUDACachingAllocator::raw_alloc(arr_size));
+    buffers_.resize(world_size_);
+    signal_pads_.resize(world_size_);
+
+    int threads = std::min(128, world_size_);
+    auto stream = at::cuda::getCurrentCUDAStream();
+    build_ptr_dev<<<1, threads, 0, stream>>>(buffer_win_, 0, buffers_dev_, world_size_);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    build_ptr_dev<<<1, threads, 0, stream>>>(signal_handle_, 0, signal_pads_dev_, world_size_);
+    C10_CUDA_KERNEL_LAUNCH_CHECK();
+    C10_CUDA_CHECK(cudaStreamSynchronize(stream));
+    C10_CUDA_CHECK(cudaMemcpy(
+      buffers_.data(),  // dst (host)
+      buffers_dev_,  // src (device)
+      arr_size,
+      cudaMemcpyDeviceToHost));
+    C10_CUDA_CHECK(cudaMemcpy(
+      signal_pads_.data(),  // dst (host)
+      signal_pads_dev_,  // src (device)
+      arr_size,
+      cudaMemcpyDeviceToHost));
+#endif
   }
 
-  ~NCCLSymmetricMemory() override = default;
-
-  std::vector<void*> get_buffer_ptrs() override {
-    return buffers_;
-  }
-
-  std::vector<void*> get_signal_pad_ptrs() override {
-    return signal_pads_;
-  }
-
-  void** get_buffer_ptrs_dev() override {
-    return buffers_dev_;
-  }
-
-  void** get_signal_pad_ptrs_dev() override {
-    return signal_pads_dev_;
-  }
-
-  size_t get_buffer_size() override {
-    return buffer_size_;
-  }
-
-  bool has_multicast_support() override {
-    // TODO
-    return false;
-  }
-
-  void* get_multicast_ptr() override {
-    // TODO
-    return nullptr;
-  }
-
-  void barrier(int channel, size_t timeout_ms) override {
-    // TODO
-  }
-
-  void put_signal(int dst_rank, int channel, size_t timeout_ms) override {
-    // TODO
-  }
-
-  void wait_signal(int src_rank, int channel, size_t timeout_ms) override {
-    // TODO
-  }
-
-  int get_rank() override {
-    return rank_;
-  }
-
-  int get_world_size() override {
-    return world_size_;
-  }
-
-  c10::Device get_device() override {
-    return c10::Device(c10::DeviceType::CUDA, device_idx_);
-  }
-
-  virtual std::vector<int>& get_rank_to_global_rank() override {
-    return rank_to_global_rank_;
-  };
-
-  int* get_rank_to_global_rank_dev() override {
-    return rank_to_global_rank_dev_;
-  };
+  // Exact copy is not needed / supported
+  NCCLPeerAllocInfo(const NCCLPeerAllocInfo& other) = delete;
+  NCCLPeerAllocInfo& operator=(const NCCLPeerAllocInfo& other) = delete;
+  NCCLPeerAllocInfo(NCCLPeerAllocInfo&& other) = default;
+  NCCLPeerAllocInfo& operator=(NCCLPeerAllocInfo&& other) = default;
+  ~NCCLPeerAllocInfo() = default;
 
  private:
-  std::shared_ptr<NCCLAllocation> allocation_;
   size_t buffer_size_;
-  // TODO: We need to finalize what booking variables we need for nccl backend.
-  std::vector<void*> buffers_;
-  std::vector<void*> signal_pads_;
   int device_idx_;
   int rank_;
   int world_size_;
+  std::vector<void*> buffers_;
+  std::vector<void*> signal_pads_;
   void** buffers_dev_;
   void** signal_pads_dev_;
   std::string group_name_;
-  ncclWindow_t handle_;
+  ncclWindow_t buffer_win_;
   ncclWindow_t signal_handle_;
 
-  std::vector<int> rank_to_global_rank_;
-  int* rank_to_global_rank_dev_;
+  friend class NCCLSymmetricMemory;
 };
+
+NCCLSymmetricMemory::NCCLSymmetricMemory(
+    c10::intrusive_ptr<NCCLPeerAllocInfo> pai,
+    size_t offset)
+    : pai_(std::move(pai)),
+      offset_(offset),
+      rank_(pai_->rank_),
+      world_size_(pai_->world_size_),
+      device_idx_(pai_->device_idx_) {
+  TORCH_INTERNAL_ASSERT(offset_ < pai_->buffer_size_, "offset out of range");
+}
+
+std::vector<void*> NCCLSymmetricMemory::get_buffer_ptrs() {
+  return pai_->buffers_;
+}
+
+std::vector<void*> NCCLSymmetricMemory::get_signal_pad_ptrs() {
+  return pai_->signal_pads_;
+}
+
+void** NCCLSymmetricMemory::get_buffer_ptrs_dev() {
+  return pai_->buffers_dev_;
+}
+
+void** NCCLSymmetricMemory::get_signal_pad_ptrs_dev() {
+  return pai_->signal_pads_dev_;
+}
+
+size_t NCCLSymmetricMemory::get_buffer_size() {
+  return pai_->buffer_size_;
+}
+
+void* NCCLSymmetricMemory::get_multicast_ptr() {
+  // Starting from NCCL 2.29, we can use `ncclGetLsaMultimemDevicePointer`
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
+  void* mc_addr = nullptr;
+  if (ncclGetLsaMultimemDevicePointer(pai_->buffer_win_, offset_, &mc_addr) == ncclSuccess) {
+    return mc_addr;
+  }
+#endif
+  return nullptr;
+}
+
+void NCCLSymmetricMemory::barrier(int channel, size_t timeout_ms) {
+  TORCH_CHECK(false, "NYI");
+}
+
+void NCCLSymmetricMemory::put_signal(int dst_rank, int channel, size_t timeout_ms) {
+  TORCH_CHECK(false, "NYI");
+}
+
+void NCCLSymmetricMemory::wait_signal(int src_rank, int channel, size_t timeout_ms) {
+  TORCH_CHECK(false, "NYI");
+}
+
+int NCCLSymmetricMemory::get_rank() {
+  return rank_;
+}
+
+int NCCLSymmetricMemory::get_world_size() {
+  return world_size_;
+}
+
+c10::Device NCCLSymmetricMemory::get_device() {
+  return c10::Device(c10::DeviceType::CUDA, device_idx_);
+}
+
+ncclWindow_t NCCLSymmetricMemory::get_window() {
+  return pai_->buffer_win_;
+}
+
+ncclWindow_t NCCLSymmetricMemory::get_signal_pad_handle() {
+  return pai_->signal_handle_;
+}
+
+size_t NCCLSymmetricMemory::get_offset() {
+  return offset_;
+}
 
 class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
  public:
@@ -151,104 +252,69 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         "NCCLSymmetricMemoryAllocator::alloc "
         "must not be called with a group_name");
 
-    auto group_info = get_group_info("0");
-    auto store = group_info.store;
     c10::cuda::CUDAGuard guard(device_idx);
     // TODO: we might need to use a roundup or mempool for mem allocation.
     void* ptr;
     C10D_NCCL_CHECK(ncclMemAlloc(&ptr, size), "ncclMemAlloc");
-    auto allocation =
-        std::make_shared<NCCLAllocation>(ptr, size, device_idx);
     // TODO: thread safety
-    allocations_.emplace(ptr, allocation);
+    allocations_.try_emplace(
+        ptr, std::make_unique<NCCLAllocation>(ptr, size, device_idx));
     return ptr;
   }
 
   void free(void* ptr) override {
     // TODO: thread safety
-    ptr_to_symm_mem_.erase(ptr);
     allocations_.erase(ptr);
   };
 
   size_t get_alloc_size(void* ptr) override {
-    auto it = ptr_to_symm_mem_.find(ptr);
-    if (it == ptr_to_symm_mem_.end()) {
+    auto it = allocations_.find(ptr);
+    if (it == allocations_.end()) {
       TORCH_CHECK(
           false, ptr, " is not allocated with NCCLSymmetricMemoryAllocator");
     }
-    return it->second->get_buffer_size();
+    return it->second->buffer_size;
   };
 
   c10::intrusive_ptr<SymmetricMemory> rendezvous(
       void* ptr,
       const std::optional<std::string>& group_name) override {
     TORCH_CHECK(group_name.has_value(), "group_name must be provided");
-    {
-      auto it = symm_mems_.find(std::make_tuple(ptr, *group_name));
-      if (it != symm_mems_.end()) {
-        return it->second;
-      }
+    // Then search allocation covering the ptr, get the base address
+    auto alloc_it = std::find_if(
+        allocations_.begin(), allocations_.end(), [&](const auto& pair) {
+          auto& allocation = pair.second;
+          auto ptr_int = reinterpret_cast<uintptr_t>(ptr);
+          auto base_ptr = reinterpret_cast<uintptr_t>(allocation->ptr);
+          return ptr_int >= base_ptr &&
+              ptr_int < base_ptr + allocation->buffer_size;
+        });
+    TORCH_CHECK(
+        alloc_it != allocations_.end(),
+        "Pointer not within any SymmetricMemory allocation, "
+        "is the tensor allocated from SymmetricMemory?");
+
+    auto& allocation = alloc_it->second;
+
+    // Get or create peer alloc info for the group
+    auto& peer_alloc_infos = allocation->peer_alloc_infos_;
+    auto pai_it = peer_alloc_infos.find(*group_name);
+    if (pai_it == peer_alloc_infos.end()) {
+      // Never rendezvoused with this group before, create a new peer alloc info
+      pai_it = peer_alloc_infos.emplace_hint(
+          pai_it,
+          *group_name,
+          c10::make_intrusive<NCCLPeerAllocInfo>(allocation.get(), *group_name));
     }
-    auto it = allocations_.find(ptr);
-    TORCH_CHECK(it != allocations_.end(), "memory needs to be first allocated before calling rendezvous.");
 
-
-    auto group = resolve_process_group(group_name.value());
-    auto alloc = it->second;
-    c10::cuda::CUDAGuard guard(alloc->device_idx);
-    ncclWindow_t handle;
-    ncclWindow_t signal_handle;
-
-    auto group_info = get_group_info(group_name.value());
-    auto buffer_size_map =
-        storeExchange.all_gather(group_info.store, group_info.rank, group_info.world_size, it->second->buffer_size);
-
-    LOG(INFO) << "[rank " << group_info.rank << ']'
-              << "buffer_size_map: " << buffer_size_map;
-    // NCCL window registration api requires all ranks to have the same buffer size
-    // we have this check to make sure all ranks have the same buffer size.
-    for (auto r = 0; r < group_info.world_size; ++r) {
-      TORCH_CHECK(alloc->buffer_size == buffer_size_map[r], "buffer size mismatch");
-    }
-    auto* ncclPg = dynamic_cast<c10d::ProcessGroupNCCL*>(
-        group->getBackend(c10::DeviceType::CUDA).get());
-    TORCH_CHECK(ncclPg != nullptr, "backend must be a NCCL process group");
-    ncclComm_t comm = reinterpret_cast<ncclComm_t>(ncclPg->getCommPtr());
-    C10D_NCCL_CHECK(
-      ncclCommWindowRegister(comm, ptr, alloc->buffer_size, (ncclWindow_t*)&handle, NCCL_WIN_COLL_SYMMETRIC),
-      c10::str(
-          "Failed to window register segment with ptr ",
-          ptr,
-          ", size ",
-          alloc->buffer_size,
-          " on ncclComm_ ",
-          comm));
-
-    void* signal_pad_ptr;
-    const size_t signal_pad_size = get_signal_pad_size();
-    C10D_NCCL_CHECK(
-        ncclMemAlloc(&signal_pad_ptr, signal_pad_size), "ncclMemAlloc failed");
-    C10D_NCCL_CHECK(
-    ncclCommWindowRegister(comm, signal_pad_ptr, signal_pad_size, (ncclWindow_t*)&signal_handle, NCCL_WIN_COLL_SYMMETRIC),
-    c10::str(
-        "Failed to window register segment with ptr ",
-        signal_pad_ptr,
-        ", size ",
-        signal_pad_size,
-        " on ncclComm_ ",
-        comm));
-
-    auto symm_mem =
-        c10::make_intrusive<NCCLSymmetricMemory>(alloc, *group_name, std::move(handle), std::move(signal_handle));
-
-    symm_mems_[std::make_tuple(ptr, *group_name)] = symm_mem;
-    return symm_mem;
-  };
+    auto& pai = pai_it->second;
+    size_t offset = reinterpret_cast<uintptr_t>(ptr) - reinterpret_cast<uintptr_t>(allocation->ptr);
+    return c10::make_intrusive<NCCLSymmetricMemory>(pai, offset);
+  }
 
   bool has_multicast_support(int device_idx) override {
-    // TODO
-    return false;
-  };
+    return device_has_multicast_support(device_idx);
+  }
 
   c10::DeviceType supported_device_type() override {
     return c10::DeviceType::CUDA;
@@ -259,12 +325,7 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   }
 
  private:
-  std::unordered_map<void*, c10::intrusive_ptr<SymmetricMemory>>
-      ptr_to_symm_mem_;
-
-  std::unordered_map<void*, std::shared_ptr<NCCLAllocation>> allocations_;
-  std::map<std::tuple<void*, std::string>, c10::intrusive_ptr<SymmetricMemory>>
-      symm_mems_;
+  std::unordered_map<void*, std::unique_ptr<NCCLAllocation>> allocations_;
 };
 
 struct RegisterNCCLSymmetricMemoryAllocator {
@@ -288,4 +349,3 @@ static RegisterNCCLSymmetricMemoryAllocator register_allocator_;
 } // namespace symmetric_memory
 } // namespace c10d
 #endif // NCCL_HAS_SYMMEM_SUPPORT
-#endif // USE_C10D_NCCL

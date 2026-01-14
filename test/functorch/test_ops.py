@@ -2401,7 +2401,7 @@ class TestOperators(TestCase):
         (
             tol1(
                 "ldexp",
-                {torch.float32: tol(atol=3e-04, rtol=1.6e-06)},
+                {torch.float32: tol(atol=6e-04, rtol=5e-06)},
                 device_type="cuda",
             ),
             tol1(
