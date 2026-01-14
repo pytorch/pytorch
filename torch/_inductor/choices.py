@@ -428,13 +428,13 @@ class InductorChoices:
         so we will do the reduction in two phases."""
         props = DeviceProperties.create(device)
         num_sm = props.multi_processor_count
-        min_elements_per_thread = 32
+        min_elements_per_thread = props.warp_size
         max_elements_per_thread = 512
-        threads_per_sm = 2048
+        threads_per_sm = props.max_threads_per_multi_processor
         min_elements_per_device = min_elements_per_thread * num_sm * threads_per_sm
         max_elements_per_device = max_elements_per_thread * num_sm * threads_per_sm
         num_warps = 8
-        num_threads = 32 * num_warps
+        num_threads = props.warp_size * num_warps
 
         if inner_reduction:
             # do heuristics that's close to eager mode for split inner reduction
