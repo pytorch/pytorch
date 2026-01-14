@@ -1,0 +1,30 @@
+name: pull
+
+on:
+  pull_request:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number || github.sha }}-${{ github.event_name == 'workflow_dispatch' && github.run_id }}-${{ github.event_name == 'schedule' }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    runs-on: linux.aws.h100.8
+    permissions:
+      id-token: write
+      contents: read
+    strategy:
+      matrix:
+        image:
+          - 'public.ecr.aws/q9t5s3a7/vllm-ci-test-repo:69b8b90f9bf54232f2ab977c46dde94865c3fb6c'
+          - 'nvidia/cuda:13.1.0-runtime-ubuntu24.04'
+          - '308535385114.dkr.ecr.us-east-1.amazonaws.com/pytorch/ci-image:pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks-ab9cb7135559c10335b1d820413eb9e0a3a0041d'
+      fail-fast: false
+    container:
+      image: ${{ matrix.image }}
+      options: --gpus all --ipc=host --tty
+    steps:
+      - name: Testing
+        run: |
+          whoami
+          nvidia-smi
