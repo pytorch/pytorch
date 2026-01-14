@@ -546,19 +546,22 @@ class DTensorRedistributePlanner:
                 tensor_mesh_dim_dict[dst_tensor_dim].pop()
 
         ######################################################################
-        # handle case 6: Replicate() -> Partial(), default to partial(sum)
+        # handle case 6: Replicate() -> Partial()
+        # Generate transitions for both sum and avg reduce_ops since these are
+        # commonly used in DTensor strategies (e.g., pointwise ops, optimizers)
         for mesh_dim, placement in enumerate(placements):
             if not isinstance(placement, Replicate):
                 continue
-            new_placements = list(placements)
-            new_placements[mesh_dim] = Partial()
-            dist_state = self.DistState(
-                self._to_tuple(new_placements), tensor_mesh_dim_tuple
-            )
-            all_next_state[dist_state] = self.cost_function(
-                cur_dist_state,
-                dist_state,
-            )
+            for reduce_op in ("sum", "avg"):
+                new_placements = list(placements)
+                new_placements[mesh_dim] = Partial(reduce_op)
+                dist_state = self.DistState(
+                    self._to_tuple(new_placements), tensor_mesh_dim_tuple
+                )
+                all_next_state[dist_state] = self.cost_function(
+                    cur_dist_state,
+                    dist_state,
+                )
 
         return all_next_state
 
