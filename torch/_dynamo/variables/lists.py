@@ -103,37 +103,6 @@ class BaseListVariable(VariableTracker):
     def as_python_constant(self) -> Any:
         return self.python_type()([x.as_python_constant() for x in self.items])
 
-    def is_python_constant(self) -> bool:
-        """Check if this container is a python constant without realizing lazy constants.
-
-        Uses try_peek_constant() to check each item without realizing lazy constants.
-        Returns False if any item is an unrealized lazy constant - this forces
-        the codegen path to use reconstruct() instead of loading as a constant,
-        which avoids installing guards on the lazy constants.
-        """
-        can_peek, is_unrealized, _value = self.try_peek_constant()
-        # Return False if any item is unrealized to avoid as_python_constant()
-        # being called, which would realize lazy constants and install guards
-        return can_peek and not is_unrealized
-
-    def try_peek_constant(self) -> tuple[bool, bool, Any]:
-        """Peek at the constant value without triggering realization.
-
-        For container types, we recursively peek at all items. If any item
-        cannot be peeked, we return (False, False, None). If any item is
-        unrealized (lazy), we return (True, True, value).
-        """
-        values = []
-        any_unrealized = False
-        for item in self.items:
-            can_peek, is_unrealized, value = item.try_peek_constant()
-            if not can_peek:
-                return (False, False, None)
-            if is_unrealized:
-                any_unrealized = True
-            values.append(value)
-        return (True, any_unrealized, self.python_type()(values))
-
     def as_proxy(self) -> Any:
         assert self.python_type() is not SizeVariable
         return self.python_type()(self._as_proxy())
@@ -521,19 +490,6 @@ class RangeVariable(BaseListVariable):
     def as_python_constant(self) -> range:
         return range(*[x.as_python_constant() for x in self.items])
 
-    def try_peek_constant(self) -> tuple[bool, bool, Any]:
-        """Override to use range(*values) instead of range(values)."""
-        values = []
-        any_unrealized = False
-        for item in self.items:
-            can_peek, is_unrealized, value = item.try_peek_constant()
-            if not can_peek:
-                return (False, False, None)
-            if is_unrealized:
-                any_unrealized = True
-            values.append(value)
-        return (True, any_unrealized, range(*values))
-
     def getitem_const(
         self, tx: "InstructionTranslator", arg: VariableTracker
     ) -> VariableTracker:
@@ -906,6 +862,8 @@ class ListVariable(CommonListMethodsVariable):
         args: list[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        from .tensor import SymNodeVariable
+
         if name == "__setitem__" and self.is_mutable():
             if kwargs or len(args) != 2:
                 raise_args_mismatch(
@@ -941,9 +899,10 @@ class ListVariable(CommonListMethodsVariable):
                         args=list(map(ConstantVariable.create, exc.args)),
                     )
             else:
-                # Use guard_if_dyn to handle SymNodeVariable and LazyVariableTracker
-                # that may realize to SymNodeVariable
-                key = guard_if_dyn(key)
+                if isinstance(key, SymNodeVariable):
+                    key = key.evaluate_expr()
+                else:
+                    key = key.as_python_constant()
 
                 try:
                     # pyrefly: ignore[unsupported-operation]
@@ -1079,27 +1038,6 @@ class DequeVariable(CommonListMethodsVariable):
             [x.as_python_constant() for x in self.items],
             maxlen=self.maxlen.as_python_constant(),
         )
-
-    def try_peek_constant(self) -> tuple[bool, bool, Any]:
-        """Override to include maxlen parameter."""
-        values = []
-        any_unrealized = False
-        for item in self.items:
-            can_peek, is_unrealized, value = item.try_peek_constant()
-            if not can_peek:
-                return (False, False, None)
-            if is_unrealized:
-                any_unrealized = True
-            values.append(value)
-        # Also check maxlen
-        can_peek_maxlen, is_unrealized_maxlen, maxlen_value = (
-            self.maxlen.try_peek_constant()
-        )
-        if not can_peek_maxlen:
-            return (False, False, None)
-        if is_unrealized_maxlen:
-            any_unrealized = True
-        return (True, any_unrealized, self.python_type()(values, maxlen=maxlen_value))
 
     def reconstruct(self, codegen: "PyCodegen") -> None:
         codegen.add_push_null(
@@ -1515,23 +1453,6 @@ class NamedTupleVariable(UserDefinedTupleVariable):
                 setattr(result, attr_name, python_value)
 
         return result
-
-    def try_peek_constant(self) -> tuple[bool, bool, Any]:
-        """Override to handle namedtuple vs structseq constructor differences."""
-        values = []
-        any_unrealized = False
-        for item in self.items:
-            can_peek, is_unrealized, value = item.try_peek_constant()
-            if not can_peek:
-                return (False, False, None)
-            if is_unrealized:
-                any_unrealized = True
-            values.append(value)
-        if self.is_structseq():
-            # StructSequenceType(iterable)
-            return (True, any_unrealized, self.python_type()(values))
-        # NamedTupleType(*iterable)
-        return (True, any_unrealized, self.python_type()(*values))
 
     def as_proxy(self) -> Any:
         if self.is_structseq():
