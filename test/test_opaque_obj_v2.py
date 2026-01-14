@@ -77,6 +77,7 @@ class Color:
 Color.RED = Color("RED", 1)
 Color.GREEN = Color("GREEN", 2)
 Color.BLUE = Color("BLUE", 3)
+Color.DEFAULT_SCALE = 1.5  # Literal class attribute for testing inlining
 
 
 class OpaqueQueue:
@@ -1679,18 +1680,13 @@ def forward(self, primals_2, tangents_1):
         This tests the code path where:
         1. An opaque class (like Color) is accessed via OpaqueObjectClassVariable
         2. Attribute access (Color.RED) goes through var_getattr with static getattr
-        3. The descriptor (if any) is properly invoked to get the actual value
-        4. The opaque object is correctly lifted as a graph input
+        3. The opaque object is correctly lifted as a graph input
         """
         from torch._library.opaque_object import is_opaque_reference_type
 
-        # Verify Color is registered as an opaque reference type
         self.assertTrue(is_opaque_reference_type(Color))
-
-        # Verify Color.RED is also an opaque type (same type as Color)
         self.assertTrue(is_opaque_reference_type(type(Color.RED)))
 
-        # Create a backend that captures the graph for inspection
         captured = {"graph": None, "example_inputs": None}
 
         def capture_backend(gm, example_inputs):
@@ -1705,7 +1701,6 @@ def forward(self, primals_2, tangents_1):
         x = torch.randn(3, 3)
         result = fn(x)
 
-        # Verify the graph was captured
         self.assertIsNotNone(captured["graph"])
         print(captured["graph"].code.strip())
 
@@ -1721,6 +1716,39 @@ def forward(self, L_x_ : torch.Tensor, G_Color_GREEN : test_opaque_obj_v2_Color)
     g_color_green = G_Color_GREEN
     apply_color_scale = torch.ops._TestOpaqueObject.apply_color_scale(g_color_green, l_x_);  g_color_green = l_x_ = None
     return (apply_color_scale,)""",
+        )
+
+    def test_opaque_class_literal_attribute_inlined(self):
+        """Test that literal attributes on opaque classes are inlined without source tracking.
+
+        When accessing a literal class attribute (like Color.DEFAULT_SCALE = 1.5),
+        the value should be constant-folded directly without creating a graph input.
+        """
+        captured = {"graph": None}
+
+        def capture_backend(gm, example_inputs):
+            captured["graph"] = gm
+            return gm
+
+        @torch.compile(fullgraph=True, backend=capture_backend)
+        def fn(x):
+            return x * Color.DEFAULT_SCALE
+
+        x = torch.randn(3, 3)
+        result = fn(x)
+
+        expected = x * 1.5
+        self.assertTrue(torch.allclose(result, expected))
+
+        self.assertIsNotNone(captured["graph"])
+        graph_code = captured["graph"].code.strip()
+        self.assertExpectedInline(
+            graph_code,
+            """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    mul = l_x_ * 1.5;  l_x_ = None
+    return (mul,)""",
         )
 
 

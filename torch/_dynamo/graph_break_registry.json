@@ -3254,6 +3254,27 @@
       ]
     }
   ],
+  "GB7685": [
+    {
+      "Gb_type": "Attribute not found on opaque class",
+      "Context": "class={self.value}, attr={name}",
+      "Explanation": "The attribute '{name}' does not exist on opaque class {self.value}.",
+      "Hints": [
+        "Ensure '{name}' is a valid attribute of {type(self.value)}."
+      ]
+    }
+  ],
+  "GB9567": [
+    {
+      "Gb_type": "Unsupported descriptor on opaque class",
+      "Context": "class={self.value}, attr={name}, descriptor={type_name}",
+      "Explanation": "The attribute '{name}' is a descriptor of type '{type_name}' which is not supported.",
+      "Hints": [
+        "Only static property descriptors (like pybind11_static_property) are supported.",
+        "Consider accessing this attribute outside of the compiled region."
+      ]
+    }
+  ],
   "GB0282": [
     {
       "Gb_type": "Placement with custom __getattr__ not supported",

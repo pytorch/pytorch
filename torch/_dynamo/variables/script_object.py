@@ -96,11 +96,37 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
         return f"{self.__class__.__name__}({self.value})"
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
-        _MISSING = object()  # to prevent none-correctness
-        obj = getattr(self.value, name, _MISSING)
+        _MISSING = object()
+        obj = inspect.getattr_static(self.value, name, _MISSING)
 
         if obj is _MISSING:
-            return super().var_getattr(tx, name)
+            unimplemented(
+                gb_type="Attribute not found on opaque class",
+                context=f"class={self.value}, attr={name}",
+                explanation=f"The attribute '{name}' does not exist on opaque class {self.value}.",
+                hints=[
+                    f"Ensure '{name}' is a valid attribute of {type(self.value)}.",
+                ],
+            )
+
+        # check for known-safe static property descriptors (like pybind11 enums)
+        if hasattr(obj, "__get__"):
+            type_name = type(obj).__name__
+            if type_name == "pybind11_static_property":
+                obj = obj.__get__(None, self.value)
+            else:
+                unimplemented(
+                    gb_type="Unsupported descriptor on opaque class",
+                    context=f"class={self.value}, attr={name}, descriptor={type_name}",
+                    explanation=f"The attribute '{name}' is a descriptor of type '{type_name}' which is not supported.",
+                    hints=[
+                        "Only static property descriptors (like pybind11_static_property) are supported.",
+                        "Consider accessing this attribute outside of the compiled region.",
+                    ],
+                )
+
+        if ConstantVariable.is_literal(obj):
+            return ConstantVariable.create(obj)
 
         source = AttrSource(self.source, name) if self.source else None
         return VariableTracker.build(tx, obj, source)
