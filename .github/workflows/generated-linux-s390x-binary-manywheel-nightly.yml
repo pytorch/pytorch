@@ -59,7 +59,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE: manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
       DESIRED_PYTHON: "3.10"
       runs_on: linux.s390x
@@ -83,7 +83,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE: manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-s390x
@@ -105,7 +105,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE: manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
       DESIRED_PYTHON: "3.10"
       build_name: manywheel-py3_10-cpu-s390x
@@ -127,7 +127,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE: manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
       DESIRED_PYTHON: "3.11"
       runs_on: linux.s390x
@@ -151,7 +151,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE: manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-s390x
@@ -173,7 +173,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE: manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
       DESIRED_PYTHON: "3.11"
       build_name: manywheel-py3_11-cpu-s390x
@@ -195,7 +195,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE: manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
       DESIRED_PYTHON: "3.12"
       runs_on: linux.s390x
@@ -219,7 +219,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE: manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu-s390x
@@ -241,7 +241,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE: manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
       DESIRED_PYTHON: "3.12"
       build_name: manywheel-py3_12-cpu-s390x
@@ -263,7 +263,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE: manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
       DESIRED_PYTHON: "3.13"
       runs_on: linux.s390x
@@ -287,7 +287,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE: manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cpu-s390x
@@ -309,7 +309,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE: manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
       DESIRED_PYTHON: "3.13"
       build_name: manywheel-py3_13-cpu-s390x
@@ -331,7 +331,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE: manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
       DESIRED_PYTHON: "3.13t"
       runs_on: linux.s390x
@@ -355,7 +355,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE: manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cpu-s390x
@@ -377,7 +377,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE: manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
       DESIRED_PYTHON: "3.13t"
       build_name: manywheel-py3_13t-cpu-s390x
@@ -399,7 +399,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE: manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
       DESIRED_PYTHON: "3.14"
       runs_on: linux.s390x
@@ -423,7 +423,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE: manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-cpu-s390x
@@ -445,7 +445,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE: manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
       DESIRED_PYTHON: "3.14"
       build_name: manywheel-py3_14-cpu-s390x
@@ -467,7 +467,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE: manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
       DESIRED_PYTHON: "3.14t"
       runs_on: linux.s390x
@@ -491,7 +491,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE: manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-cpu-s390x
@@ -513,7 +513,7 @@ jobs:
       #       favor of GPU_ARCH_VERSION
       DESIRED_CUDA: cpu
       GPU_ARCH_TYPE: cpu-s390x
-      DOCKER_IMAGE: pytorch/manylinuxs390x-builder
+      DOCKER_IMAGE: manylinuxs390x-builder
       DOCKER_IMAGE_TAG_PREFIX: cpu-s390x
       DESIRED_PYTHON: "3.14t"
       build_name: manywheel-py3_14t-cpu-s390x
