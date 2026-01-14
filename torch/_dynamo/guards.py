@@ -828,7 +828,7 @@ def get_verbose_code_parts(
 
     if recompile_hint:
         verbose_code_parts = [
-            f"{part} [HINT: {recompile_hint}]" for part in verbose_code_parts
+            f"{part} (HINT: {recompile_hint})" for part in verbose_code_parts
         ]
 
     return verbose_code_parts
@@ -852,7 +852,6 @@ def _get_closure_var_hint(source: Optional[Source]) -> Optional[str]:
             #       suffix=".scale"
             path_suffix = full_name[len(current.name) :]
             return f'guard on "{current.freevar_name}"{path_suffix}'
-        # Walk up the chain following the standard pattern
         current = current.base if isinstance(current, ChainedSource) else None
     return None
 

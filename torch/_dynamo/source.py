@@ -311,7 +311,6 @@ class CellContentsSource(AttrSource):
     This allows guard failure messages to show which variable the closure cell refers to.
     """
 
-    # freevar_name is only for display purposes and should not affect hash/equality
     freevar_name: str = dataclasses.field(default="")
 
     def __post_init__(self) -> None:

@@ -256,7 +256,7 @@ class LoggingTests(LoggingTestCase):
         record_str = "\n".join(r.getMessage() for r in records)
         # The recompilation log should include a hint explaining which closure variable
         # the cell_contents refers to
-        self.assertIn('[HINT: guard on "n2"]', record_str)
+        self.assertIn('(HINT: guard on "n2")', record_str)
 
     @make_logging_test(recompiles=True)
     def test_recompiles_nested_closure_variable_hint(self, records):
@@ -291,7 +291,7 @@ class LoggingTests(LoggingTestCase):
 
         record_str = "\n".join(r.getMessage() for r in records)
         # The recompilation log should show the hint for the first closure variable
-        self.assertIn('[HINT: guard on "inner_val"]', record_str)
+        self.assertIn('(HINT: guard on "inner_val")', record_str)
         # Verify it shows the full nested path
         self.assertIn("cell_contents.__closure__", record_str)
 
@@ -322,7 +322,7 @@ class LoggingTests(LoggingTestCase):
 
         record_str = "\n".join(r.getMessage() for r in records)
         # The hint should show the full path from closure var: "transform".scale
-        self.assertIn('[HINT: guard on "transform".scale]', record_str)
+        self.assertIn('(HINT: guard on "transform".scale)', record_str)
 
     test_dynamo_debug = within_range_record_test(30, 90, dynamo=logging.DEBUG)
     test_dynamo_info = within_range_record_test(2, 10, dynamo=logging.INFO)
