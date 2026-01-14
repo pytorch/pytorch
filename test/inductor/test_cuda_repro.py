@@ -45,12 +45,10 @@ from torch.testing._internal.common_utils import (
     skipIfRocmArch,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
+    xfailIfROCm,
 )
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
 
-from torch.testing._internal.common_utils import (
-    xfailIfROCm,
-)
 
 if TEST_WITH_ROCM:
     config.force_layout_optimization = 1
