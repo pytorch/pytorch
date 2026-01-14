@@ -691,7 +691,9 @@ class ThreadBasedRNGTracker(OffsetBasedRNGTracker):
         from torch.distributed.tensor._ops.utils import prod
 
         numel = prod(dtensor_shape)
-        grid_x = min(self.max_grid, (numel + self.block_size - 1) // self.block_size)
+        grid_x = max(
+            min(self.max_grid, (numel + self.block_size - 1) // self.block_size), 1
+        )
         offset_incr = (
             (numel - 1) // (self.block_size * grid_x * self.unroll) + 1
         ) * self.unroll
