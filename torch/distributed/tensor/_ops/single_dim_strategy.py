@@ -67,8 +67,8 @@ def _insert_single_dim_replication_strategy(
     """
     for strategy in single_dim_strategies_with_placeholders:
         assert not all(isinstance(p, Replicate) for p in strategy)
-    single_dim_strategies_with_placeholders.append(
-        [Replicate()] * (1 + num_input_tensors)
+    single_dim_strategies_with_placeholders.insert(
+        0, [Replicate()] * (1 + num_input_tensors)
     )
     return single_dim_strategies_with_placeholders
 
