@@ -211,7 +211,9 @@ def _expand_single_dim_strategy_to_mesh(
     # Manual cache using _get_op_schema_cache_key to avoid hashing SymInt shapes.
     # This replaces @functools.lru_cache which would fail with "unhashable type: non-nested SymInt"
     # during torch.compile with symbolic shapes.
-    _strategy_cache: dict[tuple, Callable[[OpOverload, ArgsType, KwargsType], StrategyType]] = {}
+    _strategy_cache: dict[
+        tuple, Callable[[OpOverload, ArgsType, KwargsType], StrategyType]
+    ] = {}
 
     def _create_expanded_strategy(
         op_schema: OpSchema,
