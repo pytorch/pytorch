@@ -225,7 +225,8 @@ FOREACH_BINARY_OP_LIST_ALPHA(
     std::minus);
 
 // Scalar tensor list variants: alpha is a list of 0-d tensors (cudagraph
-// compatible). Common implementation for both in-place and out-of-place versions
+// compatible). Common implementation for both in-place and out-of-place
+// versions
 template <typename T, template <class> class Op, bool inplace>
 auto foreach_tensor_list_op_scalar_tensor(
     TensorList tensors1,
