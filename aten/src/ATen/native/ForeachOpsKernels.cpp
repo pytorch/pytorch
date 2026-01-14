@@ -230,6 +230,32 @@ namespace at::native {
     }                                                                  \
   }
 
+#define FOREACH_BINARY_OP_SCALAR_TENSOR_LIST(OP)                           \
+  std::vector<Tensor> foreach_tensor_##OP##_scalar_tensor_list_slow(       \
+      TensorList tensors1, TensorList tensors2, TensorList scalars) {      \
+    check_foreach_api_restrictions(tensors1, tensors2);                    \
+    TORCH_CHECK(                                                           \
+        scalars.size() == tensors1.size(),                                 \
+        "scalars must have same length as tensors");                       \
+    std::vector<Tensor> result;                                            \
+    result.reserve(tensors1.size());                                       \
+    for (const auto i : c10::irange(tensors1.size())) {                    \
+      result.emplace_back(tensors1[i].OP(tensors2[i], scalars[i].item())); \
+    }                                                                      \
+    return result;                                                         \
+  }                                                                        \
+                                                                           \
+  void foreach_tensor_##OP##_scalar_tensor_list_slow_(                     \
+      TensorList tensors1, TensorList tensors2, TensorList scalars) {      \
+    check_foreach_api_restrictions(tensors1, tensors2);                    \
+    TORCH_CHECK(                                                           \
+        scalars.size() == tensors1.size(),                                 \
+        "scalars must have same length as tensors");                       \
+    for (const auto i : c10::irange(tensors1.size())) {                    \
+      tensors1[i].OP##_(tensors2[i], scalars[i].item());                   \
+    }                                                                      \
+  }
+
 #define FOREACH_UNARY_OP(OP)                                           \
   std::vector<Tensor> foreach_tensor_##OP##_slow(TensorList tensors) { \
     check_foreach_api_restrictions(tensors);                           \
@@ -335,6 +361,9 @@ namespace at::native {
 FOREACH_BINARY_OP_LIST_ALPHA(add)
 FOREACH_BINARY_OP_LIST_ALPHA(sub)
 FOREACH_BINARY_OP_LIST_ALPHA(lerp)
+
+FOREACH_BINARY_OP_SCALAR_TENSOR_LIST(add)
+FOREACH_BINARY_OP_SCALAR_TENSOR_LIST(sub)
 
 FOREACH_BINARY_OP_TENSOR_ALPHA(add)
 FOREACH_BINARY_OP_TENSOR(mul)

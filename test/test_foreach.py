@@ -1559,6 +1559,157 @@ class TestForeach(TestCase):
                 )
                 self.assertEqual(hook_buffer, list(reversed(range(len(inputs)))))
 
+    @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16, torch.bool))
+    @parametrize("op_name", ["add", "sub"])
+    @parametrize("seed", list(range(20)))
+    def test_scalar_tensor_list_equivalence(self, device, dtype, op_name, seed):
+        """Test that ScalarTensorList variants produce bitwise identical results to List variants with alpha."""
+        # Skip bool for sub (not supported)
+        if dtype == torch.bool and op_name == "sub":
+            return
+
+        torch.manual_seed(seed)
+
+        # Create test tensors with various shapes including edge cases
+        shapes = [(10,), (20, 30), (5, 5, 5), (1,), (100,)]
+        tensors1 = [make_tensor(shape, device=device, dtype=dtype) for shape in shapes]
+        tensors2 = [make_tensor(shape, device=device, dtype=dtype) for shape in shapes]
+
+        # Test with uniform alpha (same scalar for all tensors)
+        if dtype.is_complex:
+            alpha_val = 2.5 + 1.5j
+        elif dtype.is_floating_point:
+            alpha_val = 2.5
+        else:
+            alpha_val = 3
+
+        # Create 0-d tensors for ScalarTensorList variant (all same value)
+        scalar_tensors_uniform = [
+            torch.tensor(alpha_val, device=device, dtype=dtype) for _ in tensors1
+        ]
+
+        # Get the foreach ops
+        if op_name == "add":
+            list_op = torch._foreach_add
+            list_op_ = torch._foreach_add_
+            scalar_tensor_op = torch.ops.aten._foreach_add.ScalarTensorList
+            scalar_tensor_op_ = torch.ops.aten._foreach_add_.ScalarTensorList
+        else:  # sub
+            list_op = torch._foreach_sub
+            list_op_ = torch._foreach_sub_
+            scalar_tensor_op = torch.ops.aten._foreach_sub.ScalarTensorList
+            scalar_tensor_op_ = torch.ops.aten._foreach_sub_.ScalarTensorList
+
+        # Test out-of-place with uniform alpha
+        expected = list_op(
+            [t.clone() for t in tensors1],
+            [t.clone() for t in tensors2],
+            alpha=alpha_val,
+        )
+        actual = scalar_tensor_op(
+            [t.clone() for t in tensors1],
+            [t.clone() for t in tensors2],
+            scalar_tensors_uniform,
+        )
+        self.assertEqual(expected, actual, rtol=0, atol=0)
+
+        # Test in-place with uniform alpha
+        expected_inplace = [t.clone() for t in tensors1]
+        actual_inplace = [t.clone() for t in tensors1]
+        list_op_(expected_inplace, [t.clone() for t in tensors2], alpha=alpha_val)
+        scalar_tensor_op_(
+            actual_inplace, [t.clone() for t in tensors2], scalar_tensors_uniform
+        )
+        self.assertEqual(expected_inplace, actual_inplace, rtol=0, atol=0)
+
+        # Test with per-tensor alpha (different scalar for each tensor)
+        if dtype.is_complex:
+            alpha_vals = [1.0 + 0.5j, 2.0 - 1.0j, 0.5 + 2.0j, 0.0 + 0.0j, 3.0 + 0.0j]
+        elif dtype.is_floating_point:
+            alpha_vals = [1.5, 2.5, 0.5, 0.0, 3.0]
+        else:
+            alpha_vals = [1, 2, 3, 0, 5]
+
+        scalar_tensors_varied = [
+            torch.tensor(alpha_vals[i], device=device, dtype=dtype)
+            for i in range(len(tensors1))
+        ]
+
+        # For per-tensor alpha, compare against element-wise computation (Python for loop)
+        expected_varied = [t.clone() for t in tensors1]
+        for i in range(len(tensors1)):
+            if op_name == "add":
+                expected_varied[i] = (
+                    tensors1[i].clone().add(tensors2[i], alpha=alpha_vals[i])
+                )
+            else:
+                expected_varied[i] = (
+                    tensors1[i].clone().sub(tensors2[i], alpha=alpha_vals[i])
+                )
+
+        actual_varied = scalar_tensor_op(
+            [t.clone() for t in tensors1],
+            [t.clone() for t in tensors2],
+            scalar_tensors_varied,
+        )
+        self.assertEqual(expected_varied, actual_varied, rtol=0, atol=0)
+
+        # Test in-place with per-tensor alpha against Python for loop with torch.add_/sub_
+        expected_varied_inplace = [t.clone() for t in tensors1]
+        actual_varied_inplace = [t.clone() for t in tensors1]
+        for i in range(len(tensors1)):
+            if op_name == "add":
+                expected_varied_inplace[i].add_(tensors2[i], alpha=alpha_vals[i])
+            else:
+                expected_varied_inplace[i].sub_(tensors2[i], alpha=alpha_vals[i])
+        scalar_tensor_op_(
+            actual_varied_inplace, [t.clone() for t in tensors2], scalar_tensors_varied
+        )
+        self.assertEqual(expected_varied_inplace, actual_varied_inplace, rtol=0, atol=0)
+
+    @onlyCUDA
+    @dtypes(torch.float32, torch.float64)
+    @parametrize("op_name", ["add", "sub"])
+    @parametrize("seed", list(range(20)))
+    def test_scalar_tensor_list_noncontiguous(self, device, dtype, op_name, seed):
+        """Test ScalarTensorList with non-contiguous tensors (slow path)."""
+        torch.manual_seed(seed)
+
+        # Create non-contiguous tensors
+        shapes = [(20, 30), (10, 10, 10)]
+        tensors1 = [
+            make_tensor(shape, device=device, dtype=dtype).transpose(0, 1)
+            for shape in shapes
+        ]
+        tensors2 = [
+            make_tensor(shape, device=device, dtype=dtype).transpose(0, 1)
+            for shape in shapes
+        ]
+
+        alpha_vals = [1.5, 2.5]
+        scalar_tensors = [
+            torch.tensor(alpha_vals[i], device=device, dtype=dtype)
+            for i in range(len(tensors1))
+        ]
+
+        if op_name == "add":
+            scalar_tensor_op = torch.ops.aten._foreach_add.ScalarTensorList
+        else:
+            scalar_tensor_op = torch.ops.aten._foreach_sub.ScalarTensorList
+
+        expected = [
+            tensors1[i].clone().add(tensors2[i], alpha=alpha_vals[i])
+            if op_name == "add"
+            else tensors1[i].clone().sub(tensors2[i], alpha=alpha_vals[i])
+            for i in range(len(tensors1))
+        ]
+        actual = scalar_tensor_op(
+            [t.clone() for t in tensors1],
+            [t.clone() for t in tensors2],
+            scalar_tensors,
+        )
+        self.assertEqual(expected, actual, rtol=0, atol=0)
+
 
 # TODO(crcrpar): Hide this inside torch/testing/_internal.
 # would end up adding another layer to `foreach_inputs_sample_func.__call__`

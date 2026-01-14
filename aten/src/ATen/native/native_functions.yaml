@@ -10728,6 +10728,20 @@
     MTIA: foreach_tensor_add_list_kernel_mtia_
   autogen: _foreach_add.List_out
 
+- func: _foreach_add.ScalarTensorList(Tensor[] self, Tensor[] other, Tensor[] scalars) -> Tensor[]
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: foreach_tensor_add_scalar_tensor_list_slow
+    CUDA: foreach_tensor_add_scalar_tensor_list_cuda
+
+- func: _foreach_add_.ScalarTensorList(Tensor(a!)[] self, Tensor[] other, Tensor[] scalars) -> ()
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: foreach_tensor_add_scalar_tensor_list_slow_
+    CUDA: foreach_tensor_add_scalar_tensor_list_cuda_
+
 - func: _foreach_add.ScalarList(Tensor[] self, Scalar[] scalars) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
@@ -10788,6 +10802,20 @@
     CompositeExplicitAutograd: foreach_tensor_sub_list_kernel_slow_
     CUDA: foreach_tensor_sub_list_kernel_cuda_
   autogen: _foreach_sub.List_out
+
+- func: _foreach_sub.ScalarTensorList(Tensor[] self, Tensor[] other, Tensor[] scalars) -> Tensor[]
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: foreach_tensor_sub_scalar_tensor_list_slow
+    CUDA: foreach_tensor_sub_scalar_tensor_list_cuda
+
+- func: _foreach_sub_.ScalarTensorList(Tensor(a!)[] self, Tensor[] other, Tensor[] scalars) -> ()
+  device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
+  variants: function
+  dispatch:
+    CompositeExplicitAutograd: foreach_tensor_sub_scalar_tensor_list_slow_
+    CUDA: foreach_tensor_sub_scalar_tensor_list_cuda_
 
 - func: _foreach_sub.ScalarList(Tensor[] self, Scalar[] scalars) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices

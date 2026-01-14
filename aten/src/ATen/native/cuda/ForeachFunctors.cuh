@@ -251,6 +251,52 @@ struct BinaryOpScalarListFunctor {
   }
 };
 
+template <
+    int res_arg_index,
+    int r_args_depth,
+    typename Op,
+    typename T,
+    typename opmath_t>
+__device__ __forceinline__ void binary_op_list_alpha(
+    T r_args[][kILP],
+    T** args,
+    opmath_t alpha,
+    const int64_t n,
+    const int64_t chunk_size,
+    const bool all_aligned,
+    Op op) {
+  // to make things simple, we put aligned case in a different code path
+  if (n % kILP == 0 && chunk_size % kILP == 0 && all_aligned) {
+    for (int64_t i_start = threadIdx.x;
+         i_start * kILP < n && i_start * kILP < chunk_size;
+         i_start += blockDim.x) {
+      // load
+      load_store(r_args[0], args[0], 0, i_start);
+      load_store(r_args[1], args[1], 0, i_start);
+#pragma unroll
+      for (int ii = 0; ii < kILP; ii++) {
+        r_args[0][ii] = static_cast<T>(
+            op(static_cast<opmath_t>(r_args[0][ii]),
+               alpha * static_cast<opmath_t>(r_args[1][ii])));
+      }
+      // store
+      load_store(args[res_arg_index], r_args[0], i_start, 0);
+    }
+  } else {
+    for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
+         i_start += blockDim.x * kILP) {
+      load_args<r_args_depth>(r_args, args, i_start, chunk_size, n);
+#pragma unroll
+      for (int ii = 0; ii < kILP; ii++) {
+        r_args[0][ii] = static_cast<T>(
+            op(static_cast<opmath_t>(r_args[0][ii]),
+               alpha * static_cast<opmath_t>(r_args[1][ii])));
+      }
+      store_args(args[res_arg_index], r_args[0], i_start, chunk_size, n);
+    }
+  }
+}
+
 template <typename T, int depth, int r_args_depth, int res_arg_index>
 struct BinaryOpListAlphaFunctor {
   using opmath_t = at::opmath_type<T>;
@@ -270,36 +316,39 @@ struct BinaryOpListAlphaFunctor {
     n -= chunk_idx * chunk_size;
     T r_args[r_args_depth][kILP];
 
-    // to make things simple, we put aligned case in a different code path
-    if (n % kILP == 0 && chunk_size % kILP == 0 && all_aligned) {
-      for (int64_t i_start = threadIdx.x;
-           i_start * kILP < n && i_start * kILP < chunk_size;
-           i_start += blockDim.x) {
-        // load
-        load_store(r_args[0], args[0], 0, i_start);
-        load_store(r_args[1], args[1], 0, i_start);
-#pragma unroll
-        for (int ii = 0; ii < kILP; ii++) {
-          r_args[0][ii] = static_cast<T>(
-              op(static_cast<opmath_t>(r_args[0][ii]),
-                 alpha * static_cast<opmath_t>(r_args[1][ii])));
-        }
-        // store
-        load_store(args[res_arg_index], r_args[0], i_start, 0);
-      }
-    } else {
-      for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
-           i_start += blockDim.x * kILP) {
-        load_args<r_args_depth>(r_args, args, i_start, chunk_size, n);
-#pragma unroll
-        for (int ii = 0; ii < kILP; ii++) {
-          r_args[0][ii] = static_cast<T>(
-              op(static_cast<opmath_t>(r_args[0][ii]),
-                 alpha * static_cast<opmath_t>(r_args[1][ii])));
-        }
-        store_args(args[res_arg_index], r_args[0], i_start, chunk_size, n);
-      }
-    }
+    binary_op_list_alpha<res_arg_index, r_args_depth>(
+        r_args, args, alpha, n, chunk_size, all_aligned, op);
+  }
+};
+
+// Functor for binary op with per-tensor alpha from 1-d CUDA tensor (cudagraph
+// compatible)
+template <typename T, int depth, int r_args_depth, int res_arg_index>
+struct BinaryOpListAlphaTensorFunctor {
+  using opmath_t = at::opmath_type<T>;
+  template <typename Op>
+  __device__ __forceinline__ void operator()(
+      int64_t chunk_size,
+      TensorListMetadata<depth>& tl,
+      Op op,
+      // load a vector of original T type and convert to opmath_t later.
+      // This is different from BinaryOpListAlphaFunctor that converts
+      // a T-type scalar to opmath_t-type before launch the kernel.
+      const T* alpha_ptr) {
+    const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
+    const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
+    auto n = tl.numel_for_tensor[tensor_loc];
+
+    T* args[depth];
+    const bool all_aligned =
+        init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc);
+    n -= chunk_idx * chunk_size;
+    T r_args[r_args_depth][kILP];
+    const opmath_t alpha = static_cast<opmath_t>(
+        alpha_ptr[tensor_loc + tl.start_tensor_this_launch]);
+
+    binary_op_list_alpha<res_arg_index, r_args_depth>(
+        r_args, args, alpha, n, chunk_size, all_aligned, op);
   }
 };
 
