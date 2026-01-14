@@ -1009,33 +1009,14 @@ class BuiltinVariable(VariableTracker):
         ],
         VariableTracker | None,
     ]:
-        from .lazy import LazyConstantVariable, LazyVariableTracker
+        from .lazy import LazyVariableTracker
 
         obj = BuiltinVariable(fn)
         handlers: list[_HandlerCallback] = []
 
-        # Check for non-LazyConstantVariable lazy types that need realization.
-        # LazyConstantVariable is mapped to ConstantVariable in call_function's
-        # get_handler_type_for_dispatch, so it won't appear in arg_types here.
-        # But regular LazyVariableTracker still needs to be realized before handling.
-        if any(
-            issubclass(t, LazyVariableTracker)
-            and not issubclass(t, LazyConstantVariable)
-            for t in arg_types
-        ):
-            # Realize lazy args except LazyConstantVariable.
-            # Only realize top-level args, not nested VariableTracker fields.
-            def realize_arg(arg: VariableTracker) -> VariableTracker:
-                if isinstance(arg, LazyVariableTracker) and not isinstance(
-                    arg, LazyConstantVariable
-                ):
-                    return arg.realize()
-                return arg
-
+        if any(issubclass(t, LazyVariableTracker) for t in arg_types):
             return lambda tx, args, kwargs: obj.call_function(
-                tx,
-                [realize_arg(a) for a in args],
-                kwargs,
+                tx, [v.realize() for v in args], kwargs
             )
 
         if inspect.isclass(fn) and (
@@ -1438,20 +1419,17 @@ class BuiltinVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
-        # Get handler types for dispatch. This may install guards for lazy variables.
-        handler_types = [x.get_handler_type_for_dispatch() for x in args]
-
         key: tuple[object, ...]
         if kwargs:
             kwargs = {k: v.realize() for k, v in kwargs.items()}
-            key = (self.fn, *handler_types, True)
+            key = (self.fn, *(type(x) for x in args), True)
         else:
-            key = (self.fn, *handler_types)
+            key = (self.fn, *(type(x) for x in args))
 
         handler = self.call_function_handler_cache.get(key)
         if not handler:
             self.call_function_handler_cache[key] = handler = self._make_handler(  # type: ignore[assignment]
-                self.fn, handler_types, bool(kwargs)
+                self.fn, [type(x) for x in args], bool(kwargs)
             )
         assert handler is not None
         return handler(tx, args, kwargs)  # type: ignore[return-value]
