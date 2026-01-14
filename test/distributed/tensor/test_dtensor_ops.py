@@ -215,7 +215,6 @@ dtensor_fails = {
     xfail("linspace", "tensor_overload"),
     xfail("log_normal"),
     xfail("logcumsumexp"),
-    xfail("logdet"),
     xfail("logspace"),
     xfail("logspace", "tensor_overload"),
     xfail("logsumexp"),
