@@ -134,7 +134,6 @@ from .runtime.runtime_utils import ceildiv as runtime_ceildiv
 _IS_WINDOWS = sys.platform == "win32"
 
 log = logging.getLogger(__name__)
-perf_hint_log = torch._logging.getArtifactLogger(__name__, "perf_hints")
 
 
 _T = TypeVar("_T")
@@ -145,7 +144,11 @@ XPU_KERNEL_FORMAT = (
     "spv" if _IS_WINDOWS else os.getenv("TORCHINDUCTOR_XPU_KERNEL_FORMAT", "zebin")
 )
 
-GPU_KERNEL_BIN_EXTS = {"cuda": ".cubin", "xpu": f".{XPU_KERNEL_FORMAT}"}
+GPU_KERNEL_BIN_EXTS = {
+    "cuda": ".cubin",
+    "hip": ".hsaco",
+    "xpu": f".{XPU_KERNEL_FORMAT}",
+}
 
 GPU_ALIGN_BYTES = 16
 ALIGNMENT = 16
@@ -3140,6 +3143,11 @@ def is_gpu(device: Optional[str]) -> bool:
     return device in GPU_TYPES
 
 
+def is_rocm() -> bool:
+    """Check if we're running on ROCm/HIP platform."""
+    return torch.version.hip is not None
+
+
 def device_need_guard(device: str) -> bool:
     return device != "mps" and is_gpu(device)  # TODO: MPS does not expose streams now
 
@@ -4101,31 +4109,6 @@ def get_free_symbols(x: IterateExprs, unbacked_only: bool) -> OrderedSet[sympy.S
         return free_unbacked_symbols(x)
     else:
         return free_symbols(x)
-
-
-def maybe_log_cudagraph_partition(
-    msg: str,
-    prefix: Optional[str] = "cudagraph partition due to ",
-    node: Optional[BaseSchedulerNode] = None,
-) -> None:
-    """
-    Cudagraph partition may lead to extra memory overhead so we
-    log partition reasons to help users understand the overhead.
-    """
-    if not config.triton.cudagraphs:
-        return
-
-    warning_msg = f"{prefix}{msg}"
-
-    if (
-        node
-        and (ir_node := node.node)
-        and (fx_node := ir_node.get_origin_node())
-        and (stack_trace := fx_node.meta.get("stack_trace", None))
-    ):
-        warning_msg = f"{warning_msg}. Found from : \n {stack_trace}"
-
-    perf_hint_log.warning(warning_msg)
 
 
 def python_subprocess_env() -> dict[str, str]:
