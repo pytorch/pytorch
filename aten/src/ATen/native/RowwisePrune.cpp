@@ -23,7 +23,7 @@ std::tuple<Tensor, Tensor> _rowwise_prune_helper(
       ScalarType compressed_indices_dtype) {
   int num_non_masked_rows = 0;
   auto mask_contig = mask.contiguous();
-  auto mask_data = mask_contig.data_ptr<bool>();
+  const auto mask_data = mask_contig.const_data_ptr<bool>();
   for (const auto i : c10::irange(mask.numel())) {
     num_non_masked_rows += ((mask_data[i] == true) ? 1 : 0);
   }
@@ -36,10 +36,10 @@ std::tuple<Tensor, Tensor> _rowwise_prune_helper(
                              at::ScalarType::BFloat16,
                              weights.scalar_type(),
                             "rowwise_prune_helper", [&]() {
-    auto* pruned_2d_tensor_data = pruned_2d_tensor.data_ptr<scalar_t>();
+    auto* pruned_2d_tensor_data = pruned_2d_tensor.mutable_data_ptr<scalar_t>();
     auto compressed_indices_mapping_data =
-        compressed_indices_mapping.data_ptr<input_t>();
-    auto weights_data = weights.data_ptr<scalar_t>();
+        compressed_indices_mapping.mutable_data_ptr<input_t>();
+    const auto weights_data = weights.const_data_ptr<scalar_t>();
     int last_row_kept = 0;
     for (const auto i : c10::irange(mask.numel())) {
       if (mask_data[i]) {

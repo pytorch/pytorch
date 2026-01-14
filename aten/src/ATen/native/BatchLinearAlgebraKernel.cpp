@@ -44,8 +44,8 @@ void apply_cholesky(const Tensor& input, const Tensor& info, bool upper) {
       "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
   char uplo = upper ? 'U' : 'L';
-  auto input_data = input.data_ptr<scalar_t>();
-  auto info_data = info.data_ptr<int>();
+  auto input_data = input.mutable_data_ptr<scalar_t>();
+  auto info_data = info.mutable_data_ptr<int>();
   auto input_matrix_stride = matrixStride(input);
   auto batch_size = batchCount(input);
   auto n = input.size(-2);
@@ -111,8 +111,8 @@ void apply_cholesky_inverse(Tensor& input, Tensor& infos, bool upper) {
 #else
   char uplo = upper ? 'U' : 'L';
 
-  auto input_data = input.data_ptr<scalar_t>();
-  auto infos_data = infos.data_ptr<int>();
+  auto input_data = input.mutable_data_ptr<scalar_t>();
+  auto infos_data = infos.mutable_data_ptr<int>();
   auto input_matrix_stride = matrixStride(input);
   auto batch_size = batchCount(input);
   auto n = input.size(-2);
@@ -232,10 +232,10 @@ void apply_linalg_eig(Tensor& values, Tensor& vectors, Tensor& input, Tensor& in
   auto batch_size = batchCount(input);
   auto input_matrix_stride = matrixStride(input);
   auto values_stride = values.size(-1);
-  auto input_data = input.data_ptr<scalar_t>();
-  auto values_data = values.data_ptr<scalar_t>();
-  auto infos_data = infos.data_ptr<int>();
-  auto rvectors_data = compute_eigenvectors ? vectors.data_ptr<scalar_t>() : nullptr;
+  auto input_data = input.mutable_data_ptr<scalar_t>();
+  auto values_data = values.mutable_data_ptr<scalar_t>();
+  auto infos_data = infos.mutable_data_ptr<int>();
+  auto rvectors_data = compute_eigenvectors ? vectors.mutable_data_ptr<scalar_t>() : nullptr;
   scalar_t* lvectors_data = nullptr;  // only right eigenvectors are computed
   int64_t ldvr = compute_eigenvectors ? lda : 1;
   int64_t ldvl = 1;
@@ -315,9 +315,9 @@ void apply_lapack_eigh(const Tensor& values, const Tensor& vectors, const Tensor
   auto vectors_stride = matrixStride(vectors);
   auto values_stride = values.size(-1);
 
-  auto vectors_data = vectors.data_ptr<scalar_t>();
-  auto values_data = values.data_ptr<value_t>();
-  auto infos_data = infos.data_ptr<int>();
+  auto vectors_data = vectors.mutable_data_ptr<scalar_t>();
+  auto values_data = values.mutable_data_ptr<value_t>();
+  auto infos_data = infos.mutable_data_ptr<int>();
 
   // Using 'int' instead of int32_t or int64_t is consistent with the current LAPACK interface
   // It really should be changed in the future to something like lapack_int that depends on the specific LAPACK library that is linked
@@ -406,8 +406,8 @@ void apply_geqrf(const Tensor& input, const Tensor& tau) {
       "Calling torch.geqrf on a CPU tensor requires compiling ",
       "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
-  auto input_data = input.data_ptr<scalar_t>();
-  auto tau_data = tau.data_ptr<scalar_t>();
+  auto input_data = input.mutable_data_ptr<scalar_t>();
+  auto tau_data = tau.mutable_data_ptr<scalar_t>();
   auto input_matrix_stride = matrixStride(input);
   auto tau_stride = tau.size(-1);
   auto batch_size = batchCount(input);
@@ -435,7 +435,7 @@ void apply_geqrf(const Tensor& input, const Tensor& tau) {
     scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
 
     // now compute the actual QR and tau
-    lapackGeqrf<scalar_t>(m, n, input_working_ptr, lda, tau_working_ptr, work.data_ptr<scalar_t>(), lwork, &info);
+    lapackGeqrf<scalar_t>(m, n, input_working_ptr, lda, tau_working_ptr, work.mutable_data_ptr<scalar_t>(), lwork, &info);
 
     // info from lapackGeqrf only reports if the i-th parameter is wrong
     // so we don't need to check it all the time
@@ -475,7 +475,7 @@ inline void apply_orgqr(Tensor& self, const Tensor& tau) {
     return;
   }
 
-  auto self_data = self.data_ptr<scalar_t>();
+  auto self_data = self.mutable_data_ptr<scalar_t>();
   auto tau_data = tau.const_data_ptr<scalar_t>();
   auto self_matrix_stride = matrixStride(self);
   auto tau_stride = tau.size(-1);
@@ -506,7 +506,7 @@ inline void apply_orgqr(Tensor& self, const Tensor& tau) {
     const scalar_t* tau_working_ptr = &tau_data[i * tau_stride];
 
     // now compute the actual Q
-    lapackOrgqr<scalar_t>(m, n, k, self_working_ptr, lda, const_cast<scalar_t*>(tau_working_ptr), work.data_ptr<scalar_t>(), lwork, &info);
+    lapackOrgqr<scalar_t>(m, n, k, self_working_ptr, lda, const_cast<scalar_t*>(tau_working_ptr), work.mutable_data_ptr<scalar_t>(), lwork, &info);
 
     // info from lapackOrgqr only reports if the i-th parameter is wrong
     // so we don't need to check it all the time
@@ -563,21 +563,21 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
 
   char trans = 'N';
 
-  auto A_data = A.data_ptr<scalar_t>();
-  auto B_data = B.data_ptr<scalar_t>();
+  auto A_data = A.mutable_data_ptr<scalar_t>();
+  auto B_data = B.mutable_data_ptr<scalar_t>();
   auto m = A.size(-2);
   auto n = A.size(-1);
   auto nrhs = B.size(-1);
   auto lda = std::max<int64_t>(1, m);
   auto ldb = std::max<int64_t>({static_cast<int64_t>(1), m, n});
-  auto infos_data = infos.data_ptr<int>();
+  auto infos_data = infos.mutable_data_ptr<int>();
 
   // only 'gels' driver does not compute the rank
   int rank_32 = 0;
   int64_t* rank_data = nullptr;
   int64_t* rank_working_ptr = nullptr;
   if (driver_t::Gels != driver_type) {
-    rank_data = rank.data_ptr<int64_t>();
+    rank_data = rank.mutable_data_ptr<int64_t>();
     rank_working_ptr = rank_data;
   }
 
@@ -587,7 +587,7 @@ void apply_lstsq(const Tensor& A, Tensor& B, Tensor& rank, Tensor& singular_valu
   value_t* s_working_ptr = nullptr;
   int64_t s_stride = 0;
   if (driver_t::Gelsd == driver_type || driver_t::Gelss == driver_type) {
-    s_data = singular_values.data_ptr<value_t>();
+    s_data = singular_values.mutable_data_ptr<value_t>();
     s_working_ptr = s_data;
     s_stride = singular_values.size(-1);
   }
@@ -724,7 +724,7 @@ void apply_ormqr(const Tensor& input, const Tensor& tau, const Tensor& other, bo
 
   auto input_data = input.const_data_ptr<scalar_t>();
   auto tau_data = tau.const_data_ptr<scalar_t>();
-  auto other_data = other.data_ptr<scalar_t>();
+  auto other_data = other.mutable_data_ptr<scalar_t>();
 
   auto input_matrix_stride = matrixStride(input);
   auto other_matrix_stride = matrixStride(other);
@@ -759,7 +759,7 @@ void apply_ormqr(const Tensor& input, const Tensor& tau, const Tensor& other, bo
         const_cast<scalar_t*>(input_working_ptr), lda,
         const_cast<scalar_t*>(tau_working_ptr),
         other_working_ptr, ldc,
-        work.data_ptr<scalar_t>(), lwork, &info);
+        work.mutable_data_ptr<scalar_t>(), lwork, &info);
 
     // info from lapackOrmqr only reports if the i-th parameter is wrong
     // so we don't need to check it all the time
@@ -799,7 +799,7 @@ void apply_triangular_solve(const Tensor& A, const Tensor& B, bool left, bool up
   const char trans = to_blas(transpose);
 
   auto A_data = A.const_data_ptr<scalar_t>();
-  auto B_data = B.data_ptr<scalar_t>();
+  auto B_data = B.mutable_data_ptr<scalar_t>();
   auto A_mat_stride = matrixStride(A);
   auto B_mat_stride = matrixStride(B);
   auto batch_size = batchCount(A);
@@ -845,9 +845,9 @@ void apply_ldl_factor(
   auto a_stride = A.dim() > 2 ? A.stride(-3) : 0;
   auto pivots_stride = pivots.dim() > 1 ? pivots.stride(-2) : 0;
 
-  auto a_data = A.data_ptr<scalar_t>();
-  auto pivots_data = pivots.data_ptr<int>();
-  auto info_data = info.data_ptr<int>();
+  auto a_data = A.mutable_data_ptr<scalar_t>();
+  auto pivots_data = pivots.mutable_data_ptr<int>();
+  auto info_data = info.mutable_data_ptr<int>();
 
   auto ldl_func =
       hermitian ? lapackLdlHermitian<scalar_t> : lapackLdlSymmetric<scalar_t>;
@@ -915,7 +915,7 @@ void apply_ldl_solve(
   auto pivots_stride = pivots.dim() > 1 ? pivots.stride(-2) : 0;
 
   auto a_data = A.const_data_ptr<scalar_t>();
-  auto b_data = B.data_ptr<scalar_t>();
+  auto b_data = B.mutable_data_ptr<scalar_t>();
   auto pivots_ = pivots.to(kInt);
   auto pivots_data = pivots_.const_data_ptr<int>();
 
@@ -977,9 +977,9 @@ void apply_lu_factor(const Tensor& input, const Tensor& pivots, const Tensor& in
 #else
   TORCH_CHECK(compute_pivots, "linalg.lu_factor: LU without pivoting is not implemented on the CPU");
 
-  auto input_data = input.data_ptr<scalar_t>();
-  auto pivots_data = pivots.data_ptr<int>();
-  auto infos_data = infos.data_ptr<int>();
+  auto input_data = input.mutable_data_ptr<scalar_t>();
+  auto pivots_data = pivots.mutable_data_ptr<int>();
+  auto infos_data = infos.mutable_data_ptr<int>();
   auto input_matrix_stride = matrixStride(input);
   auto pivots_stride = pivots.size(-1);
   auto batch_size = batchCount(input);
@@ -1040,7 +1040,7 @@ void apply_lu_solve(const Tensor& LU, const Tensor& pivots, const Tensor& B, Tra
       "Calling linalg.lu_solve on a CPU tensor requires compiling ",
       "PyTorch with LAPACK. Please use PyTorch built with LAPACK support.");
 #else
-  auto b_data = B.data_ptr<scalar_t>();
+  auto b_data = B.mutable_data_ptr<scalar_t>();
   auto lu_data = LU.const_data_ptr<scalar_t>();
   const auto trans = to_blas(transpose);
   auto pivots_data = pivots.const_data_ptr<int>();
@@ -1106,11 +1106,11 @@ void apply_svd(const Tensor& A,
   TORCH_CHECK(false, "svd: LAPACK library not found in compilation");
 #else
   using value_t = typename c10::scalar_value_type<scalar_t>::type;
-  const auto A_data = A.data_ptr<scalar_t>();
-  const auto U_data = compute_uv ? U.data_ptr<scalar_t>() : nullptr;
-  const auto S_data = S.data_ptr<value_t>();
-  const auto info_data = info.data_ptr<int>();
-  const auto Vh_data = compute_uv ? Vh.data_ptr<scalar_t>() : nullptr;
+  const auto A_data = A.mutable_data_ptr<scalar_t>();
+  const auto U_data = compute_uv ? U.mutable_data_ptr<scalar_t>() : nullptr;
+  const auto S_data = S.mutable_data_ptr<value_t>();
+  const auto info_data = info.mutable_data_ptr<int>();
+  const auto Vh_data = compute_uv ? Vh.mutable_data_ptr<scalar_t>() : nullptr;
   const auto A_stride = matrixStride(A);
   const auto S_stride = S.size(-1);
   const auto U_stride = compute_uv ? matrixStride(U) : 1;

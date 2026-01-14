@@ -123,10 +123,10 @@ index_select_add(
   auto* add_indices_data = add_indices.const_data_ptr<index_t>();
   auto* select_indices_data = select_indices.const_data_ptr<index_t>();
   auto* src_data = src.const_data_ptr<data_t>();
-  auto* output_data = output.data_ptr<data_t>();
+  auto* output_data = output.mutable_data_ptr<data_t>();
   index_t* bag_size_data = nullptr;
   if (bag_size.defined()) {
-    bag_size_data = bag_size.data_ptr<index_t>();
+    bag_size_data = bag_size.mutable_data_ptr<index_t>();
   }
   auto numel = add_indices.numel();
   int64_t ddim = src.size(1);
@@ -201,7 +201,7 @@ index_select_add(
     _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
   int64_t ddim = src.size(1);
   auto* select_indices_data = select_indices.const_data_ptr<index_t>();
-  auto* output_data = output.data_ptr<data_t>();
+  auto* output_data = output.mutable_data_ptr<data_t>();
 
   if (is_fast_path_index_select(src, output, padding_idx)) {
     auto src_contig = src.contiguous();
@@ -262,7 +262,7 @@ index_select_add(
 #else
     // Initialize the intermediate output buffer to be 0.
     Tensor output_fp32 = at::zeros({output_size, ddim}, output.options().dtype(at::kFloat));
-    auto* output_data_fp32 = output_fp32.data_ptr<float>();
+    auto* output_data_fp32 = output_fp32.mutable_data_ptr<float>();
     using bVec = vec::Vectorized<BFloat16>;
     using fVec = vec::Vectorized<float>;
     at::parallel_for(
@@ -312,7 +312,7 @@ index_select_add(
     auto* add_indices_data = add_indices.const_data_ptr<index_t>();
     index_t* bag_size_data = nullptr;
     if (bag_size.defined()) {
-      bag_size_data = bag_size.data_ptr<index_t>();
+      bag_size_data = bag_size.mutable_data_ptr<index_t>();
     }
     auto vocab_size = src.size(0);
     auto src_stride0 = src.strides()[0];
@@ -327,7 +327,7 @@ index_select_add(
     // Initialize the intermediate output buffer to be 0.
     Tensor output_fp32 =
         at::zeros({output.size(0), ddim}, output.options().dtype(at::kFloat));
-    auto* output_data_fp32 = output_fp32.data_ptr<float>();
+    auto* output_data_fp32 = output_fp32.mutable_data_ptr<float>();
 
     for (const auto i : c10::irange(numel)) {
       // We can skip indices equal to padding_idx so they are not included in
@@ -379,7 +379,7 @@ index_select_add(const Tensor &select_indices,
                              _EmbeddingBagKernelCache* fbgemm_kernel_cache) {
   int64_t ddim = src.size(1);
   auto* select_indices_data = select_indices.const_data_ptr<index_t>();
-  auto* output_data = output.data_ptr<float>();
+  auto* output_data = output.mutable_data_ptr<float>();
 
   if (is_fast_path_index_select(src, output, padding_idx)) {
     auto src_contig = src.contiguous();
@@ -457,7 +457,7 @@ index_select_add(const Tensor &select_indices,
     auto* add_indices_data = add_indices.const_data_ptr<index_t>();
     index_t* bag_size_data = nullptr;
     if (bag_size.defined()) {
-      bag_size_data = bag_size.data_ptr<index_t>();
+      bag_size_data = bag_size.mutable_data_ptr<index_t>();
     }
     auto vocab_size = src.size(0);
     auto src_stride0 = src.strides()[0];
@@ -510,10 +510,10 @@ index_select_scale_add(
   auto* add_indices_data = add_indices.const_data_ptr<index_t>();
   auto* select_indices_data = select_indices.const_data_ptr<index_t>();
   auto* src_data = src.const_data_ptr<data_t>();
-  auto* output_data = output.data_ptr<data_t>();
+  auto* output_data = output.mutable_data_ptr<data_t>();
   index_t* bag_size_data = nullptr;
   if (bag_size.defined()) {
-    bag_size_data = bag_size.data_ptr<index_t>();
+    bag_size_data = bag_size.mutable_data_ptr<index_t>();
   }
   auto numel = add_indices.numel();
   int64_t ddim = src.size(1);
@@ -566,7 +566,7 @@ index_select_scale_add(
   int64_t ddim = src.size(1);
   auto* scale_data = scale.const_data_ptr<data_t>();
   auto* select_indices_data = select_indices.const_data_ptr<index_t>();
-  auto* output_data = output.data_ptr<data_t>();
+  auto* output_data = output.mutable_data_ptr<data_t>();
 
   if (is_fast_path_index_select_scale(src, scale, output, padding_idx)) {
     auto src_contig = src.contiguous();
@@ -641,7 +641,7 @@ index_select_scale_add(
     // Initialize the intermediate output buffer to be 0.
     Tensor output_fp32 =
         at::zeros({output_size, ddim}, output.options().dtype(at::kFloat));
-    auto* output_data_fp32 = output_fp32.data_ptr<float>();
+    auto* output_data_fp32 = output_fp32.mutable_data_ptr<float>();
     for (const auto i : c10::irange(scale.numel())) {
       scale_data_fp32[i] = static_cast<float>(scale_data[i]);
     }
@@ -694,7 +694,7 @@ index_select_scale_add(
     auto* add_indices_data = add_indices.const_data_ptr<index_t>();
     index_t* bag_size_data = nullptr;
     if (bag_size.defined()) {
-      bag_size_data = bag_size.data_ptr<index_t>();
+      bag_size_data = bag_size.mutable_data_ptr<index_t>();
     }
     auto vocab_size = src.size(0);
     auto src_stride0 = src.strides()[0];
@@ -707,7 +707,7 @@ index_select_scale_add(
     // Initialize the intermediate output buffer to be 0.
     Tensor output_fp32 =
         at::zeros({output.size(0), ddim}, output.options().dtype(at::kFloat));
-    auto* output_data_fp32 = output_fp32.data_ptr<float>();
+    auto* output_data_fp32 = output_fp32.mutable_data_ptr<float>();
 
     for (const auto i : c10::irange(numel)) {
       // We can skip indices equal to padding_idx so they are not included in
@@ -755,7 +755,7 @@ index_select_scale_add(const Tensor &select_indices,
   int64_t ddim = src.size(1);
   auto* scale_data = scale.const_data_ptr<float>();
   auto* select_indices_data = select_indices.const_data_ptr<index_t>();
-  auto* output_data = output.data_ptr<float>();
+  auto* output_data = output.mutable_data_ptr<float>();
 
   if (is_fast_path_index_select_scale(src, scale, output, padding_idx)) {
     auto src_contig = src.contiguous();
@@ -831,7 +831,7 @@ index_select_scale_add(const Tensor &select_indices,
     auto* add_indices_data = add_indices.const_data_ptr<index_t>();
     index_t* bag_size_data = nullptr;
     if (bag_size.defined()) {
-      bag_size_data = bag_size.data_ptr<index_t>();
+      bag_size_data = bag_size.mutable_data_ptr<index_t>();
     }
     auto vocab_size = src.size(0);
     auto src_stride0 = src.strides()[0];
@@ -1075,7 +1075,7 @@ static void embedding_bag_cpu_max_out(
   int64_t vocab_size = weight.size(0);
   AT_DISPATCH_INDEX_TYPES(indices.scalar_type(), "embedding_bag_cpu_max_out", [&] {
     auto* indices_data = indices.const_data_ptr<index_t>();
-    auto* offset2bag_data = offset2bag.data_ptr<index_t>();
+    const auto* offset2bag_data = offset2bag.const_data_ptr<index_t>();
 
     index_t* max_indices_data = nullptr;
     int64_t max_indices_stride = 0;
@@ -1085,8 +1085,8 @@ static void embedding_bag_cpu_max_out(
     }
 
     auto* weight_data = weight.const_data_ptr<scalar_t>();
-    auto* output_data = output.data_ptr<scalar_t>();
-    auto* bag_size_data = bag_size.data_ptr<index_t>();
+    auto* output_data = output.mutable_data_ptr<scalar_t>();
+    auto* bag_size_data = bag_size.mutable_data_ptr<index_t>();
     auto weight_stride0 = weight.strides()[0];
     auto weight_stride1 = weight.strides()[1];
     auto output_stride = output.strides()[0];
@@ -1576,7 +1576,7 @@ static void _embedding_bag_dense_backward_cpu_sum_mean(
               }
             }
             int64_t ddim = grad.size(1);
-            auto igwd = index_grad_weight.data_ptr<scalar_t>();
+            auto igwd = index_grad_weight.mutable_data_ptr<scalar_t>();
             auto gd = grad.const_data_ptr<scalar_t>();
             at::native::cpublas::axpy<scalar_t>(ddim, (scalar_t)scale, gd + ddim * source, 1,
                         igwd + ddim * index, 1);
@@ -1706,7 +1706,7 @@ static Tensor _embedding_bag_per_sample_weights_backward_cpu_template(
     auto* indices_data = indices.const_data_ptr<index_t>();
 
     // The following are contiguous
-    auto* output_data = output.data_ptr<scalar_t>();
+    auto* output_data = output.mutable_data_ptr<scalar_t>();
     auto* offset2bag_data = offset2bag_.const_data_ptr<index_t>();
 
     // XXX: 64 was arbitrarily chosen. There is probably a sweet spot for this number.

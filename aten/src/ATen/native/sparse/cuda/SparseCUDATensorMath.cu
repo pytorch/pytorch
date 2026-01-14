@@ -65,7 +65,7 @@ namespace {
     Tensor csr = at::empty({dim+1}, CUDA(kInt));
     Tensor rowIndicesInt = at::empty({rowIndices.size(0)}, CUDA(kInt));
     rowIndicesInt.copy_(rowIndices);
-    sparse::cuda::Xcoo2csr(rowIndicesInt.data_ptr<int32_t>(), nnz, dim, csr.data_ptr<int32_t>());
+    sparse::cuda::Xcoo2csr(rowIndicesInt.mutable_data_ptr<int32_t>(), nnz, dim, csr.mutable_data_ptr<int32_t>());
     return csr;
   }
 }
@@ -227,7 +227,7 @@ SparseTensor& hspmm_out_sparse_cuda(
   indices.copy_(dstIndices);
   // Replace destination indices with 0, 1, 2, 3, ... and compute output values
   // tensor with sparse * dense multiplication
-  thrust::device_ptr<int64_t> indicesIter(dstIndices.data_ptr<int64_t>());
+  thrust::device_ptr<int64_t> indicesIter(dstIndices.mutable_data_ptr<int64_t>());
   thrust::sequence(policy, indicesIter, indicesIter + nnz);
 
   std::vector<int64_t> new_size = get_sparse_impl(newSparse)->sizes().vec();
@@ -623,12 +623,12 @@ Tensor _sparse_sum_backward_cuda(const Tensor& grad_, const SparseTensor& input_
 
       auto grad_indices_1D = flatten_indices_by_dims(grad_indices, grad.sizes(), grad_sparse_dim_to_keep_v); // flatten indices on all sparse_dim of grad, output indices is coalesced and sorted
       auto input_indices_1D = flatten_indices_by_dims(input_indices, input_sizes, sparse_dims_to_keep_v);
-      thrust_ptr grad_indices_iter(grad_indices_1D.data_ptr<int64_t>());
-      thrust_ptr input_indices_iter(input_indices_1D.data_ptr<int64_t>());
+      thrust_ptr grad_indices_iter(grad_indices_1D.mutable_data_ptr<int64_t>());
+      thrust_ptr input_indices_iter(input_indices_1D.mutable_data_ptr<int64_t>());
 
       // store lower_bound of input indices at grad indices
       Tensor input_indices_pos = at::empty_like(input_indices_1D, LEGACY_CONTIGUOUS_MEMORY_FORMAT);
-      thrust_ptr input_indices_pos_iter(input_indices_pos.data_ptr<int64_t>());
+      thrust_ptr input_indices_pos_iter(input_indices_pos.mutable_data_ptr<int64_t>());
       thrust::lower_bound(policy,
                           grad_indices_iter, grad_indices_iter + grad_nnz,
                           input_indices_iter, input_indices_iter + input_nnz,

@@ -185,7 +185,7 @@ std::vector<at::Tensor> NestedTensor_unbind(
   auto buffer = self.values();
   std::vector<IntArrayRef> sizes = NestedTensor_get_sizes(self_ptr),
       strides = NestedTensor_get_strides(self_ptr);
-  int64_t *offsets_ptr = self_ptr->get_storage_offsets().data_ptr<int64_t>();
+  int64_t *offsets_ptr = self_ptr->get_storage_offsets().mutable_data_ptr<int64_t>();
   for (const int64_t i: c10::irange(ntensors)){
     result_tensors[i] = buffer.as_strided(sizes[i], strides[i], offsets_ptr[i]);
   }
@@ -212,7 +212,7 @@ Tensor narrow_nested_symint(const at::Tensor& self, int64_t dim, SymInt start, S
   auto nested_sizes = nt_impl->get_nested_sizes();
   auto nested_strides = nt_impl->get_nested_strides();
   auto storage_offsets = nt_impl->get_storage_offsets();
-  auto storage_offsets_ptr = storage_offsets.data_ptr<int64_t>();
+  auto storage_offsets_ptr = storage_offsets.mutable_data_ptr<int64_t>();
 
   auto start_int = start.guard_int(__FILE__, __LINE__);
   auto length_int = length.guard_int(__FILE__, __LINE__);

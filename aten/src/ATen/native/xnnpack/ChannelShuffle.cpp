@@ -90,8 +90,8 @@ Tensor channel_shuffle(
 
   const xnn_status setup_status = xnn_setup_channel_shuffle_nc_x32(
       channel_shuffle_op,                                           // operator
-      input_padded_contig_nhwc.data_ptr<float>(),                   // input
-      output_padded_contig_nhwc.data_ptr<float>());                 // output
+      input_padded_contig_nhwc.const_data_ptr<float>(),             // input
+      output_padded_contig_nhwc.mutable_data_ptr<float>());         // output
 
   TORCH_CHECK(
       xnn_status_success == setup_status,

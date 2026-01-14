@@ -123,8 +123,8 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
   auto& pack_b =
       cpp_custom_type_hack::cast<fbgemm::PackBMatrix<int8_t>>(packed);
 
-  int32_t* col_offsets_data = col_offsets.data_ptr<int32_t>();
-  float* bias_contig_data = bias_contig.data_ptr<float>();
+  const int32_t* col_offsets_data = col_offsets.const_data_ptr<int32_t>();
+  const float* bias_contig_data = bias_contig.const_data_ptr<float>();
 
   const int num_tasks = at::get_num_threads();
   at::parallel_for(0, num_tasks, 1, [&](int64_t begin, int64_t end) {
@@ -170,8 +170,8 @@ Tensor fbgemm_linear_int8_weight_fp32_activation(
       fbgemm::fbgemmPacked(
           /*packA=*/pack_a,
           /*packB=*/pack_b,
-          /*C=*/output.data_ptr<float>(),
-          /*C_buffer=*/buffer.data_ptr<int32_t>(),
+          /*C=*/output.mutable_data_ptr<float>(),
+          /*C_buffer=*/buffer.mutable_data_ptr<int32_t>(),
           /*ldc=*/N,
           /*outProcess=*/output_proc_obj,
           /*thread_id=*/task_id,
@@ -238,7 +238,7 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
   float w_min = std::numeric_limits<float>::quiet_NaN();
   float w_max = std::numeric_limits<float>::quiet_NaN();
   fbgemm::FindMinMax(
-      /*m=*/weight_contig.data_ptr<float>(),
+      /*m=*/weight_contig.const_data_ptr<float>(),
       /*min=*/&w_min,
       /*max=*/&w_max,
       /*len=*/weight_contig.numel());
@@ -265,8 +265,8 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
   // Tensor quantized = at::native::empty_cpu(
   //     weight_contig.sizes(), weight_contig.options().dtype(at::kChar));
   fbgemm::Quantize<int8_t, false /*LEGACY*/>(
-      /*src=*/weight_contig.data_ptr<float>(),
-      /*dst=*/quantized.data_ptr<int8_t>(),
+      /*src=*/weight_contig.const_data_ptr<float>(),
+      /*dst=*/quantized.mutable_data_ptr<int8_t>(),
       /*len=*/weight_contig.numel(),
       /*qparams=*/q_params);
 
@@ -282,9 +282,9 @@ std::tuple<Tensor, Tensor, double, int64_t> fbgemm_linear_quantize_weight(
   CalcColOffsetsTranspose(
       /*K=*/quantized.size(1),
       /*N=*/quantized.size(0),
-      /*Bint8=*/quantized.data_ptr<int8_t>(),
+      /*Bint8=*/quantized.mutable_data_ptr<int8_t>(),
       /*B_zero_point=*/q_params.zero_point,
-      /*col_offsets=*/col_offsets.data_ptr<int32_t>());
+      /*col_offsets=*/col_offsets.mutable_data_ptr<int32_t>());
 
   return std::make_tuple(
       quantized, col_offsets, q_params.scale, q_params.zero_point);
@@ -387,7 +387,7 @@ Tensor fbgemm_pack_gemm_matrix_fp16(const Tensor& weight) {
   const int64_t K = weight.size(1);
   const int64_t N = weight.size(0);
   Tensor weight_contig = weight.contiguous();
-  float* weight_contig_ptr = weight_contig.data_ptr<float>();
+  float* weight_contig_ptr = weight_contig.mutable_data_ptr<float>();
   HandleWeightsSaturation(K * N, weight_contig_ptr);
 
   // TODO(mingzhe09088):
@@ -449,7 +449,7 @@ Tensor fbgemm_linear_fp16_weight_fp32_activation(
       input_ptr,
       packed_weight_fp16,
       0.0f,
-      output.data_ptr<float>());
+      output.mutable_data_ptr<float>());
 
   // Add bias term
   c10::MaybeOwned<Tensor> bias_maybe_owned = at::borrow_from_optional_tensor(bias);

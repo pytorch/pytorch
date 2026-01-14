@@ -134,7 +134,7 @@ bool _use_cudnn_ctc_loss_tensor(
     if (at::cuda::currentStreamCaptureStatus() ==
         at::cuda::CaptureStatus::None) {
       Tensor tlc = target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
-      IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
+      IntArrayRef tl(tlc.const_data_ptr<int64_t>(), tlc.numel());
       for (const auto b : c10::irange(tl.size())) {
         // target length < 256 is documented, but we see illegal memory accesses
         // when target lengths > input lengths for CuDNN
@@ -142,7 +142,7 @@ bool _use_cudnn_ctc_loss_tensor(
         Tensor tlc =
             target_lengths.to(Device(at::kCPU), at::kLong).contiguous();
         IntArrayRef il(ilc.const_data_ptr<int64_t>(), ilc.numel());
-        IntArrayRef tl(tlc.data_ptr<int64_t>(), tlc.numel());
+        IntArrayRef tl(tlc.const_data_ptr<int64_t>(), tlc.numel());
         use_cudnn = use_cudnn && (tl[b] < 256) && (tl[b] <= il[b]);
         if (!use_cudnn) {
           break;
@@ -331,13 +331,13 @@ std::tuple<Tensor, Tensor> _cudnn_ctc_loss_tensor(
       algo,
       ctc_loss_desc.desc(),
       log_probs_desc.desc(),
-      log_probs_t.data_ptr(),
-      targets_t_.data_ptr<int>(),
-      target_lengths_.data_ptr<int>(),
-      input_lengths_.data_ptr<int>(),
+      log_probs_t.const_data_ptr(),
+      targets_t_.const_data_ptr<int>(),
+      target_lengths_.const_data_ptr<int>(),
+      input_lengths_.const_data_ptr<int>(),
       costs.data_ptr(),
       grad_desc.desc(),
-      grad.data_ptr(),
+      grad.mutable_data_ptr(),
       workspace_size,
       workspace.data_ptr()
 

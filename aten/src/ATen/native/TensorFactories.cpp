@@ -668,7 +668,7 @@ Tensor& eye_out_cpu(int64_t n, int64_t m, Tensor& result) {
       result.scalar_type(),
       "eye",
       [&]() -> void {
-        scalar_t* result_data = result.data_ptr<scalar_t>();
+        scalar_t* result_data = result.mutable_data_ptr<scalar_t>();
         at::parallel_for(
             0, sz, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
               for (const auto i : c10::irange(p_begin, p_end))
@@ -1459,7 +1459,7 @@ namespace {
 
 template <typename scalar_t>
 void randperm_cpu(Tensor& result, int64_t n, CPUGeneratorImpl* generator) {
-  scalar_t* r__data = result.data_ptr<scalar_t>();
+  scalar_t* r__data = result.mutable_data_ptr<scalar_t>();
 
   result.resize_({n});
   int64_t r__stride_0 = result.stride(0);
@@ -1629,7 +1629,7 @@ Tensor tril_indices_cpu(
   //    sequentially, and then transpose it.
   AT_DISPATCH_INDEX_TYPES(result.scalar_type(), "tril_indices", [&]() -> void {
     // fill the Tensor with correct values
-    index_t* result_data = result.data_ptr<index_t>();
+    index_t* result_data = result.mutable_data_ptr<index_t>();
     int64_t i = 0;
 
     index_t r = std::max<int64_t>(0, -offset), c = 0;
@@ -1673,7 +1673,7 @@ Tensor triu_indices_cpu(
 
   AT_DISPATCH_INDEX_TYPES(result.scalar_type(), "triu_indices", [&]() -> void {
     // fill the Tensor with correct values
-    index_t* result_data = result.data_ptr<index_t>();
+    index_t* result_data = result.mutable_data_ptr<index_t>();
     int64_t i = 0;
     // not typing std::max with scalar_t as it could be an unsigned type
     // NOTE: no need to check if the returned value of std::max overflows

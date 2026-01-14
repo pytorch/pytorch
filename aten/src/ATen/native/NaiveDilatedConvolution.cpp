@@ -397,7 +397,7 @@ void slow_conv_dilated_all_cpu_template(
         Tensor grad_input_n = grad_input.select(0, elt);
 
         col2hvol<scalar_t, dim>(
-            columns.data_ptr<scalar_t>(),
+            columns.const_data_ptr<scalar_t>(),
             nInputPlane,
             input_size,
             output_size,
@@ -405,7 +405,7 @@ void slow_conv_dilated_all_cpu_template(
             stride_size,
             pad_size,
             dilation_size,
-            grad_input_n.data_ptr<scalar_t>(),
+            grad_input_n.mutable_data_ptr<scalar_t>(),
             is_channels_last);
       }
 

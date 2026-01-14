@@ -947,7 +947,7 @@ struct PackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     std::vector<hidden_type> hiddens;
     int64_t input_offset = 0;
     int64_t num_steps = input.batch_sizes.size(0);
-    int64_t* batch_sizes = input.batch_sizes.data_ptr<int64_t>();
+    const int64_t* batch_sizes = input.batch_sizes.const_data_ptr<int64_t>();
     int64_t last_batch_size = batch_sizes[0];
 
     const Tensor* input_ptr = &input.data;
@@ -1006,7 +1006,7 @@ struct ReversedPackedLayer : Layer<PackedSequence, hidden_type, cell_params> {
     std::vector<at::Tensor> step_outputs;
     int64_t input_offset = input.data.size(0);
     int64_t num_steps = input.batch_sizes.size(0);
-    int64_t* batch_sizes = input.batch_sizes.data_ptr<int64_t>();
+    const int64_t* batch_sizes = input.batch_sizes.const_data_ptr<int64_t>();
     int64_t last_batch_size = batch_sizes[num_steps - 1];
 
     const Tensor* input_ptr = &input.data;

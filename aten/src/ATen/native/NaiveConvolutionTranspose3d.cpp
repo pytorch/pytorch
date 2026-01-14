@@ -346,7 +346,7 @@ void slow_conv_transpose3d_out_cpu_template(
               dilation_depth,
               dilation_height,
               dilation_width,
-              output_n.data_ptr<scalar_t>());
+              output_n.mutable_data_ptr<scalar_t>());
 
           // Do Bias after:
           // M,N,K are dims of matrix A and B

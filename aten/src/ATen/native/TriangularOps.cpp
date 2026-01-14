@@ -94,7 +94,7 @@ void apply_triu_tril(const Tensor& result, const Tensor& self, bool inplace, int
   auto self_row_stride = self.stride(-2);
   auto self_col_stride = self.stride(-1);
 
-  auto result_data = result.data_ptr<scalar_t>();
+  auto result_data = result.mutable_data_ptr<scalar_t>();
   int64_t result_stride = 0, result_row_stride = 0, result_col_stride = 0;
   if (result_data != self_data) {
     result_stride = (result.dim() > 2 && result.stride(-3) > 0) ? result.stride(-3) : 1;

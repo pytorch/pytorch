@@ -101,7 +101,7 @@ class SparseCsrMKLInterface {
  // res(nrows, dense_ncols) = (sparse(nrows * ncols) @ dense(ncols x dense_ncols))
   inline void sparse_mm(
       float* res,
-      float* dense,
+      const float* dense,
       float alpha,
       float beta,
       MKL_INT nrows,
@@ -137,7 +137,7 @@ class SparseCsrMKLInterface {
 
   inline void sparse_mm(
       double* res,
-      double* dense,
+      const double* dense,
       double alpha,
       double beta,
       MKL_INT nrows,
@@ -190,14 +190,14 @@ static inline void sparse_mm_mkl_template(
     IntArrayRef size,
     IntArrayRef dense_size) {
   SparseCsrMKLInterface mkl_impl(
-      col_indices.data_ptr<MKL_INT>(),
-      crow_indices.data_ptr<MKL_INT>(),
-      values.data_ptr<scalar_t>(),
+      col_indices.mutable_data_ptr<MKL_INT>(),
+      crow_indices.mutable_data_ptr<MKL_INT>(),
+      values.mutable_data_ptr<scalar_t>(),
       size[0],
       size[1]);
   mkl_impl.sparse_mm(
-      res.data_ptr<scalar_t>(),
-      dense.data_ptr<scalar_t>(),
+      res.mutable_data_ptr<scalar_t>(),
+      dense.const_data_ptr<scalar_t>(),
       alpha.to<scalar_t>(),
       beta.to<scalar_t>(),
       size[0],

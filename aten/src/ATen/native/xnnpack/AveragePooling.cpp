@@ -123,8 +123,8 @@ Tensor global_average_pool(const Tensor& input) {
       runtime_ptr, &xnn_delete_runtime);
 
   std::array<xnn_external_value, 2> external = {
-    xnn_external_value{input_id, input_padded_contig_nhwc.data_ptr<float>()},
-    xnn_external_value{output_id, output.data_ptr<float>()}};
+    xnn_external_value{input_id, input_padded_contig_nhwc.mutable_data_ptr<float>()},
+    xnn_external_value{output_id, output.mutable_data_ptr<float>()}};
 
   status = xnn_setup_runtime(
     runtime_ptr,

@@ -38,7 +38,7 @@ std::tuple<Tensor, Tensor> _pack_padded_sequence(const Tensor& _input, const Ten
   checkLongTensor(lengths_t);
 
   int64_t batch_size = input.size(1);
-  int64_t * lengths = lengths_t.data_ptr<int64_t>();
+  int64_t * lengths = lengths_t.mutable_data_ptr<int64_t>();
 
   TORCH_CHECK(lengths_t.size(0) == batch_size,
            "Expected `len(lengths)` to be equal to batch_size, but got ", lengths_t.size(0),
@@ -126,7 +126,7 @@ Tensor _pack_padded_sequence_backward_symint(const Tensor& grad, c10::SymIntArra
   // NOTE: this op advertises as CompositeImplicitAutograd, but uses data_ptr().
   // we should fix this.
   auto max_seq_len = batch_sizes_t.size(0);
-  int64_t * batch_sizes = batch_sizes_t.data_ptr<int64_t>();
+  const int64_t * batch_sizes = batch_sizes_t.const_data_ptr<int64_t>();
   for (const auto i : c10::irange(max_seq_len)) {
     grad_input[i].slice(0, 0, batch_sizes[i]).copy_(grad.slice(0, offset, offset + batch_sizes[i]));
     offset += batch_sizes[i];
@@ -144,7 +144,7 @@ std::tuple<Tensor, Tensor> _pad_packed_sequence(const Tensor& data, const Tensor
   checkLongTensor(batch_sizes_t);
   TORCH_CHECK(batch_sizes_t.numel() > 0, "batch_sizes can not be empty");
 
-  int64_t * batch_sizes = batch_sizes_t.data_ptr<int64_t>();
+  const int64_t * batch_sizes = batch_sizes_t.const_data_ptr<int64_t>();
   int64_t max_batch_size = batch_sizes[0];
   int64_t max_real_seq_length = batch_sizes_t.size(0);
   int64_t max_seq_length = max_real_seq_length;

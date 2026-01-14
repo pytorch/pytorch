@@ -31,12 +31,12 @@ Tensor _bincount_cpu_template(
   if (self.dim() == 1 && self.numel() == 0) {
     return at::zeros({minlength}, kLong);
   }
-  if (self.dim() != 1 || *self.min().data_ptr<input_t>() < 0) {
+  if (self.dim() != 1 || *self.min().const_data_ptr<input_t>() < 0) {
     TORCH_CHECK(false, "bincount only supports 1-d non-negative integral inputs.");
   }
 
   // Ensure max_val < 2 ^ 63 - 1 (9223372036854775807)
-  auto max_val = *self.max().data_ptr<input_t>();
+  auto max_val = *self.max().const_data_ptr<input_t>();
   if (max_val >= std::numeric_limits<int64_t>::max()) {
     TORCH_CHECK(false,
         "maximum value of input overflowed, it should be < ",
@@ -64,14 +64,14 @@ Tensor _bincount_cpu_template(
         weights.options().layout_opt(),
         weights.options().device_opt(),
         weights.options().pinned_memory_opt());
-    weights_t* output_p = output.data_ptr<weights_t>();
+    weights_t* output_p = output.mutable_data_ptr<weights_t>();
     const weights_t* weights_p = weights.const_data_ptr<weights_t>();
     for (const auto i : c10::irange(self_size)) {
       output_p[self_p[i]] += weights_p[i];
     }
   } else {
     output = at::zeros({nbins}, kLong);
-    int64_t* output_p = output.data_ptr<int64_t>();
+    int64_t* output_p = output.mutable_data_ptr<int64_t>();
     for (const auto i : c10::irange(self_size)) {
       output_p[self_p[i]] += 1L;
     }

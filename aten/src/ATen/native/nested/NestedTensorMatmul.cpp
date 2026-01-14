@@ -36,7 +36,7 @@ Tensor bmm_nested(const Tensor& self, const Tensor& mat2) {
       get_nested_tensor_impl(self)->get_nested_sizes() : get_nested_tensor_impl(mat2)->get_nested_sizes();
 
   Tensor out_sizemat = self_sizemat.new_empty(self_sizemat.sizes());
-  int64_t* out_sizemat_ptr = out_sizemat.data_ptr<int64_t>();
+  int64_t* out_sizemat_ptr = out_sizemat.mutable_data_ptr<int64_t>();
   for (int64_t i = 0; i < ntensors; i++) {
     const IntArrayRef& self_shape = get_size_for_index(self, i);
     const IntArrayRef& mat2_shape = get_size_for_index(mat2, i);
@@ -79,15 +79,15 @@ static Tensor matmul_with_bmm_nested(const Tensor& self, const Tensor& mat2) {
   // metadata for self
   std::vector<IntArrayRef> self_sizes = NestedTensor_get_sizes(self_ptr);
   std::vector<IntArrayRef> self_strides = NestedTensor_get_strides(self_ptr);
-  int64_t* self_offsets_ptr =
-      self_ptr->get_storage_offsets().data_ptr<int64_t>();
+  const int64_t* self_offsets_ptr =
+      self_ptr->get_storage_offsets().const_data_ptr<int64_t>();
   auto opt = self_ptr->get_nested_sizes().options();
 
   // metadata for mat2
   std::vector<IntArrayRef> mat2_sizes = NestedTensor_get_sizes(mat2_ptr);
   std::vector<IntArrayRef> mat2_strides = NestedTensor_get_strides(mat2_ptr);
   int64_t* mat2_offsets_ptr =
-      mat2_ptr->get_storage_offsets().data_ptr<int64_t>();
+      mat2_ptr->get_storage_offsets().mutable_data_ptr<int64_t>();
   auto opt2 = mat2_ptr->get_nested_sizes().options();
 
   int64_t N = static_cast<int64_t>(self_sizes.size());
@@ -156,8 +156,8 @@ static Tensor matmul_with_bmm_nested(const Tensor& self, const Tensor& mat2) {
   auto out_new_offsets = at::empty({N}, opt);
   int64_t* out_new_offsets_ptr = out_new_offsets.mutable_data_ptr<int64_t>();
 
-  int64_t* out_new_sizes_ptr = out_new_sizes.data_ptr<int64_t>();
-  int64_t* out_new_strides_ptr = out_new_strides.data_ptr<int64_t>();
+  int64_t* out_new_sizes_ptr = out_new_sizes.mutable_data_ptr<int64_t>();
+  int64_t* out_new_strides_ptr = out_new_strides.mutable_data_ptr<int64_t>();
 
   int64_t out_offset = 0;
   for (int64_t i = 0; i < N; i++) {
@@ -195,7 +195,7 @@ static Tensor matmul_nested_with_broadcasted_dense(
   const auto E = other.size(-1);
   const auto component_dim = nt.dim() - 1;
   auto new_sizes = nt_impl->get_nested_sizes().clone();
-  auto new_sizes_ptr = new_sizes.data_ptr<int64_t>();
+  auto new_sizes_ptr = new_sizes.mutable_data_ptr<int64_t>();
   for (const auto i : c10::irange(nt.size(0))) {
     new_sizes_ptr[i * component_dim + 2] = E;
   }

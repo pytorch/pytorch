@@ -461,9 +461,9 @@ static SparseTensor& add_out_sparse_contiguous(SparseTensor& r, const SparseTens
 
     AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND(kBFloat16,
         commonDtype, "cadd_sparse", [&] {
-          scalar_t* t_values_ptr = t_values.data_ptr<scalar_t>();
-          scalar_t* s_values_ptr = s_values.data_ptr<scalar_t>();
-          scalar_t* r_values_ptr = r_values.data_ptr<scalar_t>();
+          scalar_t* t_values_ptr = t_values.mutable_data_ptr<scalar_t>();
+          scalar_t* s_values_ptr = s_values.mutable_data_ptr<scalar_t>();
+          scalar_t* r_values_ptr = r_values.mutable_data_ptr<scalar_t>();
           scalar_t cast_value = value.to<scalar_t>();
           while (t_i < t_nnz || s_i < s_nnz) {
             int64_t cmp;
@@ -597,7 +597,7 @@ static void add_dense_sparse_worker_non_hybrid_cpu(Tensor& r, const Scalar& valu
   auto indices_accessor = indices.accessor<int64_t, 2>();
   auto values_accessor = values.accessor<scalar_t, 1>();
 
-  scalar_t* r_ptr = r.data_ptr<scalar_t>();
+  scalar_t* r_ptr = r.mutable_data_ptr<scalar_t>();
   scalar_t cast_value = value.to<scalar_t>();
   const int64_t sparse_dim = sparse.sparse_dim();
   std::vector<int64_t> result_stride(sparse_dim);
@@ -621,9 +621,9 @@ static inline void add_dense_sparse_worker_hybrid_cpu(Tensor& r, const Scalar& v
   // Get the dense dimension element numbers of hybrid sparse tensor
   int64_t values_dense_size = values.stride(0);
   TORCH_CHECK(values.is_contiguous());
-  scalar_t* v_ptr = values.data_ptr<scalar_t>();
+  scalar_t* v_ptr = values.mutable_data_ptr<scalar_t>();
 
-  scalar_t* r_ptr = r.data_ptr<scalar_t>();
+  scalar_t* r_ptr = r.mutable_data_ptr<scalar_t>();
   TORCH_CHECK(r_ptr != nullptr);
 
   auto indices_accessor = indices.accessor<int64_t, 2>();
@@ -653,10 +653,10 @@ static inline void add_dense_sparse_worker_non_coalesced_cpu(Tensor& r, const Sc
   // Get the dense dimension element numbers of hybrid sparse tensor
   auto values_dense_size = values.stride(0);
   TORCH_CHECK(values.is_contiguous());
-  scalar_t* v_ptr = values.data_ptr<scalar_t>();
+  scalar_t* v_ptr = values.mutable_data_ptr<scalar_t>();
   TORCH_CHECK(v_ptr != nullptr);
 
-  scalar_t* r_ptr = r.data_ptr<scalar_t>();
+  scalar_t* r_ptr = r.mutable_data_ptr<scalar_t>();
   TORCH_CHECK(r_ptr != nullptr);
 
   scalar_t cast_value = value.to<scalar_t>();
@@ -1202,8 +1202,8 @@ static void s_addmm_out_sparse_dense_worker(int64_t nnz, int64_t dim_i, int64_t 
   auto indices_accessor = indices.accessor<int64_t, 2>();
 
   auto values_accessor = values.accessor<scalar_t, 1>();
-  scalar_t* dense_ptr = dense.data_ptr<scalar_t>();
-  scalar_t* r_ptr = r.data_ptr<scalar_t>();
+  scalar_t* dense_ptr = dense.mutable_data_ptr<scalar_t>();
+  scalar_t* r_ptr = r.mutable_data_ptr<scalar_t>();
 
   int64_t dense_stride0 = dense.stride(0);
   int64_t dense_stride1 = dense.stride(1);
@@ -1526,7 +1526,7 @@ SparseTensor& _sspaddmm_out_cpu(
   Tensor indices = sparse._indices().contiguous();
   Tensor values      = sparse._values();
 
-  Tensor csr = coo_to_csr(indices.data_ptr<int64_t>(), dim_i, nnz);
+  Tensor csr = coo_to_csr(indices.const_data_ptr<int64_t>(), dim_i, nnz);
 
   int64_t t_nnz = t._nnz();
   int64_t r_nnz = nnz * dim_k + t_nnz;
@@ -1561,8 +1561,8 @@ SparseTensor& _sspaddmm_out_cpu(
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX(
       values.scalar_type(), "sspmm", [&] {
         auto values_accessor = values.accessor<scalar_t, 1>();
-        scalar_t* dense_ptr = dense.data_ptr<scalar_t>();
-        scalar_t* newv_ptr = newv.data_ptr<scalar_t>();
+        scalar_t* dense_ptr = dense.mutable_data_ptr<scalar_t>();
+        scalar_t* newv_ptr = newv.mutable_data_ptr<scalar_t>();
         scalar_t cast_alpha = alpha.to<scalar_t>();
 
         for (const auto h : c10::irange(dim_i)) {

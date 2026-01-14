@@ -1729,7 +1729,7 @@ static void baddbmm_with_gemm_(const Tensor &result, const Tensor &mat1, const T
         mat2.const_data_ptr<scalar_t>(), lda, mat2_strides[0],
         mat1.const_data_ptr<scalar_t>(), ldb, mat1_strides[0],
         beta,
-        result.data_ptr<scalar_t>(), ldc, result_strides[0]);
+        result.mutable_data_ptr<scalar_t>(), ldc, result_strides[0]);
   });
 }
 

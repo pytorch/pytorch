@@ -370,10 +370,10 @@ api::utils::vec4 extract_texel(const Tensor& input, const ivec3& pos) {
       params.buffer());
 
   vec4 rv = {
-      convert(v_outputs_x).cpu().data_ptr<float>()[0],
-      convert(v_outputs_y).cpu().data_ptr<float>()[0],
-      convert(v_outputs_z).cpu().data_ptr<float>()[0],
-      convert(v_outputs_w).cpu().data_ptr<float>()[0],
+      convert(v_outputs_x).cpu().mutable_data_ptr<float>()[0],
+      convert(v_outputs_y).cpu().mutable_data_ptr<float>()[0],
+      convert(v_outputs_z).cpu().mutable_data_ptr<float>()[0],
+      convert(v_outputs_w).cpu().mutable_data_ptr<float>()[0],
   };
 
   return rv;

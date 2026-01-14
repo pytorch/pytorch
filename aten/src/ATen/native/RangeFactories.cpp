@@ -110,7 +110,7 @@ Tensor& logspace_out(const Scalar& start, const Scalar& end, int64_t steps, doub
       scalar_t scalar_base = static_cast<scalar_t>(base);
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
-      scalar_t *data_ptr = r.data_ptr<scalar_t>();
+      scalar_t *data_ptr = r.mutable_data_ptr<scalar_t>();
       scalar_t step = (scalar_end - scalar_start) / static_cast<scalar_t>(steps - 1);
       const int64_t halfway = steps / 2;
       at::parallel_for(0, steps, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
@@ -129,7 +129,7 @@ Tensor& logspace_out(const Scalar& start, const Scalar& end, int64_t steps, doub
       double scalar_base = static_cast<double>(base); // will be autopromoted anyway
       scalar_t scalar_start = start.to<scalar_t>();
       scalar_t scalar_end = end.to<scalar_t>();
-      scalar_t *data_ptr = r.data_ptr<scalar_t>();
+      scalar_t *data_ptr = r.mutable_data_ptr<scalar_t>();
       double step = static_cast<double>(scalar_end - scalar_start) / (steps - 1);
       const int64_t halfway = steps / 2;
       at::parallel_for(0, steps, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
@@ -169,7 +169,7 @@ Tensor& range_out(const Scalar& start, const Scalar& end, const Scalar& step, Te
     }
 
     Tensor r = result.is_contiguous() ? result : result.contiguous();
-    scalar_t *data_ptr = r.data_ptr<scalar_t>();
+    scalar_t *data_ptr = r.mutable_data_ptr<scalar_t>();
 
     at::parallel_for(0, size, internal::GRAIN_SIZE, [&](int64_t p_begin, int64_t p_end) {
       accscalar_t is = p_begin;

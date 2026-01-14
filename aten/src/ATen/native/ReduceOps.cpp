@@ -1293,9 +1293,9 @@ void inline set_result(Tensor& result, accscalar_t sum)
 {
     if constexpr (std::is_integral_v<accscalar_t>) {
       // all integer types get promoted to kLong
-      *result.data_ptr<int64_t>() = sum;
+      *result.mutable_data_ptr<int64_t>() = sum;
     } else {
-      *result.data_ptr<scalar_t>() = sum;
+      *result.mutable_data_ptr<scalar_t>() = sum;
     }
 }
 }

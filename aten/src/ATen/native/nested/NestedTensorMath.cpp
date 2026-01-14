@@ -233,7 +233,7 @@ Tensor nested_from_padded_generic(
   std::vector<at::Tensor> all_sizes = sizes.unbind();
   for (const auto& size : all_sizes) {
     IntArrayRef sizes_i(
-        size.data_ptr<int64_t>(), size.data_ptr<int64_t>() + size.numel());
+        size.mutable_data_ptr<int64_t>(), size.mutable_data_ptr<int64_t>() + size.numel());
     at::Tensor mask_i = padded_transformed.new_full(
         sizes_i, true, kBool, std::nullopt, std::nullopt, std::nullopt);
     masks.push_back(pad_tensor_to_shape(mask_i, target_size_arr));
@@ -273,7 +273,7 @@ Tensor NestedTensor_to_padded_tensor_generic(
 
   const auto sizes_num_rows = sizes.sizes()[0];
   const auto sizes_num_columns = sizes.sizes()[1];
-  const auto sizes_data_start = sizes.data_ptr<int64_t>();
+  const auto sizes_data_start = sizes.const_data_ptr<int64_t>();
   const auto sizes_data_end = sizes_data_start + sizes.numel();
   std::vector<int64_t> split_sizes;
   split_sizes.reserve(sizes_num_rows);
@@ -405,7 +405,7 @@ Tensor NestedTensor_sum_dim_CPU(
   // (2) the nested tensors are stored contiguously in the buffer
   AT_DISPATCH_ALL_TYPES_AND2(
     ScalarType::Half, ScalarType::BFloat16, buffer.scalar_type(), "nested_sum_dim_cpu", [&]() {
-    auto* output_data = output_buffer.data_ptr<scalar_t>();
+    auto* output_data = output_buffer.mutable_data_ptr<scalar_t>();
     const auto* input_data = buffer.const_data_ptr<scalar_t>();
     int64_t out_idx = 0, in_idx = 0;
     for (const auto i : c10::irange(ntensors)) {
@@ -430,7 +430,7 @@ Tensor select_nested(const Tensor& self, int64_t dim, int64_t index) {
   auto self_ptr = get_nested_tensor_impl(self);
   std::vector<IntArrayRef> sizes = NestedTensor_get_sizes(self_ptr),
                            strides = NestedTensor_get_strides(self_ptr);
-  int64_t *offsets_ptr = self_ptr->get_storage_offsets().data_ptr<int64_t>();
+  int64_t *offsets_ptr = self_ptr->get_storage_offsets().mutable_data_ptr<int64_t>();
   const at::Tensor& buffer = self_ptr->get_unsafe_storage_as_tensor();
   int64_t positive_dim = at::maybe_wrap_dim(dim, self_ptr->dim());
   int64_t ntensors = self_ptr->size(0);
@@ -453,8 +453,8 @@ Tensor select_nested(const Tensor& self, int64_t dim, int64_t index) {
     auto new_strides = at::empty({ntensors, ndims-1}, TensorOptions().dtype(kLong));
     auto new_offsets = at::empty({ntensors}, TensorOptions().dtype(kLong));
     for (int64_t i : c10::irange(ntensors)) {
-      int64_t *size_ptr = new_sizes[i].data_ptr<int64_t>();
-      int64_t *stride_ptr = new_strides[i].data_ptr<int64_t>();
+      int64_t *size_ptr = new_sizes[i].mutable_data_ptr<int64_t>();
+      int64_t *stride_ptr = new_strides[i].mutable_data_ptr<int64_t>();
 
       int64_t dim_idx = 0;
       for (int64_t j : c10::irange(ndims)) {
@@ -599,7 +599,7 @@ Tensor transpose_nested(const Tensor& self, int64_t dim0, int64_t dim1) {
   const Tensor& sizemat = self_ptr->get_nested_sizes(),
       & stridemat = self_ptr->get_nested_strides();
   Tensor column_indices = sizemat.new_empty(ndims);
-  int64_t* column_indices_ptr = column_indices.data_ptr<int64_t>();
+  int64_t* column_indices_ptr = column_indices.mutable_data_ptr<int64_t>();
   std::iota(column_indices_ptr, column_indices_ptr + ndims, 0);
   column_indices_ptr[positive_dim0] = positive_dim1;
   column_indices_ptr[positive_dim1] = positive_dim0;
@@ -649,7 +649,7 @@ Tensor squeeze_dim_nested(const Tensor& self, IntArrayRef dims) {
   "describing your use case.");
   const auto new_ndim = ndim - mask.count();
   auto column_indices = sizemat.new_empty(static_cast<int64_t>(new_ndim) - 1);
-  int64_t* column_indices_ptr = column_indices.data_ptr<int64_t>();
+  int64_t* column_indices_ptr = column_indices.mutable_data_ptr<int64_t>();
   for (const auto d : c10::irange(1, ndim)) {
     if (!mask.test(d)) {
       *column_indices_ptr++ = d - 1;
@@ -994,8 +994,8 @@ static bool can_cat_nested_sizes(const Tensor& nested_sizes1, const Tensor& nest
     return false;
   }
 
-  auto nested_sizes1_ptr = nested_sizes1.data_ptr<int64_t>();
-  auto nested_sizes2_ptr = nested_sizes2.data_ptr<int64_t>();
+  auto nested_sizes1_ptr = nested_sizes1.const_data_ptr<int64_t>();
+  auto nested_sizes2_ptr = nested_sizes2.const_data_ptr<int64_t>();
   const auto num_components = nested_sizes1.size(0);
   const auto num_dims = nested_sizes1.size(1);
   for (auto c : c10::irange(num_components)) {
@@ -1057,7 +1057,7 @@ static Tensor cat_nested_as_jagged(
   const auto component_dim = first_item_dim - 1;
   auto new_dim_size = new_buffer.size(dim - 1);
   auto new_sizes = get_nested_tensor_impl(tensors[0].get())->get_nested_sizes().clone();
-  auto new_sizes_ptr = new_sizes.data_ptr<int64_t>();
+  auto new_sizes_ptr = new_sizes.mutable_data_ptr<int64_t>();
   for (const auto i : c10::irange(first_item_batch_size)) {
     new_sizes_ptr[i * component_dim + (dim - 1)] = new_dim_size;
   }

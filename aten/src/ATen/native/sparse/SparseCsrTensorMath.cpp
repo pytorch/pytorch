@@ -551,8 +551,8 @@ static void addmm_out_sparse_csr_native_cpu(
         auto col_indices_accessor = col_indices.accessor<index_t, 1>();
 
         auto values_accessor = values.accessor<scalar_t, 1>();
-        scalar_t* dense_ptr = dense.data_ptr<scalar_t>();
-        scalar_t* r_ptr = r.data_ptr<scalar_t>();
+        scalar_t* dense_ptr = dense.mutable_data_ptr<scalar_t>();
+        scalar_t* r_ptr = r.mutable_data_ptr<scalar_t>();
 
         int64_t dense_stride0 = dense.stride(0);
         int64_t dense_stride1 = dense.stride(1);
@@ -920,7 +920,7 @@ static void add_out_dense_sparse_compressed_cpu(
               auto batch_count =
                   resultBuffer.dim() > 2 ? resultBuffer.size(-3) : 1;
               auto values_accessor = valuesBuffer.accessor<scalar_t, 2>();
-              scalar_t* out_ptr = resultBuffer.data_ptr<scalar_t>();
+              scalar_t* out_ptr = resultBuffer.mutable_data_ptr<scalar_t>();
               scalar_t cast_value = alpha.to<scalar_t>();
 
               auto compressed_indices_accessor =
@@ -1097,10 +1097,10 @@ Tensor reduce_sparse_csr_dim0_cpu_template(const Tensor& sparse, ReductionOp rop
   Tensor new_values_acc = std::get<1>(acc_buffer);
   new_values_acc.fill_(rop.identity());
 
-  int64_t* columns_map_ptr = columns_map.data_ptr<int64_t>();
-  scalar_t* values_ptr = values.data_ptr<scalar_t>();
+  int64_t* columns_map_ptr = columns_map.mutable_data_ptr<int64_t>();
+  scalar_t* values_ptr = values.mutable_data_ptr<scalar_t>();
   acc_t* new_values_acc_ptr =
-      new_values_acc.data_ptr<acc_t>();
+      new_values_acc.mutable_data_ptr<acc_t>();
 
   // There is no point in parallelizing the following for-loop
   // because about 99.3% of the computation time is spent in the
@@ -1187,8 +1187,8 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop
   AT_DISPATCH_INDEX_TYPES(crow_indices.scalar_type(), "reduce_sparse_csr_dim1_cpu_indices",
                           [&]() {
     index_t* crow_indices_ptr = crow_indices.data_ptr<index_t>();
-    index_t* new_crow_indices_ptr = new_crow_indices.data_ptr<index_t>();
-    index_t* row_map_ptr = row_map.data_ptr<index_t>();
+    index_t* new_crow_indices_ptr = new_crow_indices.mutable_data_ptr<index_t>();
+    index_t* row_map_ptr = row_map.mutable_data_ptr<index_t>();
     int64_t nnz = 0;
     new_crow_indices_ptr[0] = 0;
     for(int64_t i=0; i<nrows; i++) {
@@ -1203,8 +1203,8 @@ Tensor reduce_sparse_csr_dim1_cpu_template(const Tensor& sparse, ReductionOp rop
     new_values.resize_(nnz);
     new_values_acc.resize_(nnz);
 
-    scalar_t* values_ptr = values.data_ptr<scalar_t>();
-    acc_t* new_values_acc_ptr = new_values_acc.data_ptr<acc_t>();
+    scalar_t* values_ptr = values.mutable_data_ptr<scalar_t>();
+    acc_t* new_values_acc_ptr = new_values_acc.mutable_data_ptr<acc_t>();
 
     at::parallel_for(
         0,
@@ -1258,7 +1258,7 @@ In [4]: %timeit torch.sum(t.values())
   // of float should be float in current scenario. In CUDA, float is the accumulate type
   // of float, while in CPU, double is the accumulate type of float.
   using acc_t = at::acc_type<scalar_t, true>;
-  scalar_t* values_ptr = values.data_ptr<scalar_t>();
+  scalar_t* values_ptr = values.mutable_data_ptr<scalar_t>();
   acc_t value = at::parallel_reduce(
                                        0,
                                        numel,
