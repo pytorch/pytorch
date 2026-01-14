@@ -3270,7 +3270,7 @@
       "Context": "class={self.value}, attr={name}, descriptor={type_name}",
       "Explanation": "The attribute '{name}' is a descriptor of type '{type_name}' which is not supported.",
       "Hints": [
-        "Only static property descriptors (like pybind11_static_property) are supported.",
+        "Only staticmethod, property, and pybind11_static_property are supported.",
         "Consider accessing this attribute outside of the compiled region."
       ]
     }

@@ -62,6 +62,10 @@ class Color:
     def __float__(self) -> float:
         return float(self._value)
 
+    @staticmethod
+    def RED_STATIC() -> "Color":
+        return Color.RED
+
 
 Color.RED = Color("RED", 1)
 Color.GREEN = Color("GREEN", 2)
@@ -1797,6 +1801,53 @@ def forward(self, L_x_ : torch.Tensor):
             "Unsupported descriptor on opaque class",
         ):
             fn(x)
+
+    def test_opaque_class_staticmethod(self):
+        """Test that accessing a staticmethod on an opaque class works correctly.
+
+        This verifies that OpaqueObjectClassVariable.var_getattr properly handles
+        staticmethod descriptors (instead of raising 'Unsupported descriptor').
+        """
+        captured = {"graph": None}
+
+        def capture_backend(gm, _):
+            captured["graph"] = gm
+            return gm
+
+        @torch.compile(fullgraph=True, backend=capture_backend)
+        def fn(x):
+            _ = Color.RED_STATIC
+            return x * 2
+
+        x = torch.randn(3, 3)
+        result = fn(x)
+        expected = x * 2
+        self.assertTrue(torch.allclose(result, expected))
+        self.assertIsNotNone(captured["graph"])
+
+    def test_opaque_class_property(self):
+        """Test that accessing a property descriptor on an opaque class works correctly.
+
+        This verifies that OpaqueObjectClassVariable.var_getattr properly handles
+        property descriptors. When accessing a property on the class (not instance),
+        you get the property object back.
+        """
+        captured = {"graph": None}
+
+        def capture_backend(gm, _):
+            captured["graph"] = gm
+            return gm
+
+        @torch.compile(fullgraph=True, backend=capture_backend)
+        def fn(x):
+            _ = Color.name
+            return x * 2
+
+        x = torch.randn(3, 3)
+        result = fn(x)
+        expected = x * 2
+        self.assertTrue(torch.allclose(result, expected))
+        self.assertIsNotNone(captured["graph"])
 
 
 instantiate_parametrized_tests(TestOpaqueObject)

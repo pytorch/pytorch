@@ -115,10 +115,13 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
                 ],
             )
 
-        # check for known-safe static property descriptors (like pybind11 enums)
-        if hasattr(obj, "__get__"):
-            # we should be able to trust this:
-            # https://github.com/python/mypy/blob/131f9d92da58294bb2f273425e8778bd7d5b861f/mypy/stubgenc.py#L590
+        if isinstance(obj, staticmethod):
+            obj = obj.__get__(self.value)
+        elif isinstance(obj, property):
+            obj = obj.__get__(None, self.value)  # pyrefly: ignore[no-matching-overload]
+        elif hasattr(obj, "__get__"):
+            # Check for pybind11 static properties (common in PyTorch C++ bindings)
+            # Reference: https://github.com/python/mypy/blob/131f9d92da58294bb2f273425e8778bd7d5b861f/mypy/stubgenc.py#L590
             type_name = type(obj).__name__
             if type_name == "pybind11_static_property":
                 obj = obj.__get__(None, self.value)
@@ -128,7 +131,7 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
                     context=f"class={self.value}, attr={name}, descriptor={type_name}",
                     explanation=f"The attribute '{name}' is a descriptor of type '{type_name}' which is not supported.",
                     hints=[
-                        "Only static property descriptors (like pybind11_static_property) are supported.",
+                        "Only staticmethod, property, and pybind11_static_property are supported.",
                         "Consider accessing this attribute outside of the compiled region.",
                     ],
                 )
