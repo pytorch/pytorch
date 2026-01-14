@@ -208,25 +208,28 @@ __device__ __forceinline__ void reserveWarpSpace(bool hasTopK,
   auto ballot = WARP_BALLOT(hasTopK); // a bitmask of threads that have hasTopK == true within the warp.
   // count the number of threads that have hasTopK == true within the warp.
   if constexpr (sizeof(decltype(ballot)) == 8) {
-    warp_count = __popcll(ballot); // if ballot is 64 bits, use __popcll
+    warp_count = __popcll(ballot); // use __popcll for 64 bit ballot
   } else {
-    warp_count = __popc(ballot); // if ballot is 32 bits, use __popc
+    warp_count = __popc(ballot); // use __popc for 32 bit ballot
   }
+
+  int lane_id = at::cuda::getLaneId();
 
   // if > 0 threads have hasTopK == true within the warp,
   // reserve space for them by incrementing writeIndexStart atomically + saving the old value  as start index.
-  if (warp_count > 0 && at::cuda::getLaneId() == 0) {
+  if (warp_count > 0 && lane_id == 0) {
     start_index = atomicAdd(&writeIndexStart, warp_count);
   }
   start_index = __shfl(start_index, 0); // broadcast the start index to all threads in the warp.
 
-  // getLaneMaskLe() is a bitmask: [0, 0, 0, ..., 0, 1, 1, 1, ..., 1] with (64-lane_id-1) 0s and (lane_id+1) 1s.
   // to get number of threads that have hasTopK == true to the right of the current lane, we count bits set
-  // for lanes with lane_id <= current lane_id. We put a -1 to exclude the current lane.
+  // for lanes with lane_id < current lane_id
   if constexpr (sizeof(decltype(ballot)) == 8) {
-    my_offset = __popcll(ballot & at::cuda::getLaneMaskLe()) - 1;  // if ballot is 64 bits, use __popcll
+    uint64_t mask = (1ULL << lane_id) - 1; // a bitmask: [0, 0, 0, ..., 0, 1, 1, 1, ..., 1] with (64-lane_id) 0s and (lane_id) 1s
+    my_offset = __popcll(ballot & mask);  // use __popcll for 64 bit ballot
   } else {
-    my_offset = __popc(ballot & at::cuda::getLaneMaskLe()) - 1;  // if ballot is 32 bits, use __popc
+    uint32_t mask = (1U << lane_id) - 1; // a bitmask: [0, 0, 0, ..., 0, 1, 1, 1, ..., 1] with (32-lane_id) 0s and (lane_id) 1s
+    my_offset = __popc(ballot & mask);  // use __popc for 32 bit ballot
   }
 }
 
@@ -318,13 +321,18 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   // All threads within the warp need to participate in the loop, so rounding up to a multiple of the warp size.
   IndexType numIterations = round_up(inputSliceSize, (IndexType) warpSize);
 
+  // phase 1: write actual > `pattern` (or < `pattern`, depending on the sort direction) values to the output.
+  // prefetching data from global memory.
+  T v = (threadIdx.x < inputSliceSize) ? doLdg(&inputSliceStart[threadIdx.x * inputWithinSliceStride]) : static_cast<T>(0);
   for (IndexType i = threadIdx.x; i < numIterations; i += blockDim.x) {
-    bool inRange = (i < inputSliceSize);
-    T v =
-      inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride]) : static_cast<T>(0);
-    const auto convertedV = at::native::TopKTypeConfig<T>::convert(v);
-    bool hasTopK = (largest) ? (inRange && (convertedV > topKConverted)) : (inRange && (convertedV < topKConverted));
-
+    T v_next = (i + blockDim.x < inputSliceSize) ? doLdg(&inputSliceStart[(i + blockDim.x) * inputWithinSliceStride]) : static_cast<T>(0);
+    
+    bool hasTopK = false;
+    if (i < inputSliceSize) {
+      const auto convertedV = at::native::TopKTypeConfig<T>::convert(v);
+      hasTopK = (largest) ? (convertedV > topKConverted) : (convertedV < topKConverted);
+    }
+    
     int start_index, my_offset, warp_count;
     reserveWarpSpace(hasTopK, writeIndexStart, start_index, my_offset, warp_count);
 
@@ -339,6 +347,8 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
         /*value=*/v,
         /*index=*/i);
     }
+
+    v = v_next;
   }
 
   // till this point, actual > `pattern` values were being written.
@@ -351,12 +361,16 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   // in which case we have to choose the first seen set. We do this
   // in a similar warp level compaction fashion as in phase 1.
 
+  // phase 2: write actual == `pattern` values to the output.
+  // prefetching data from global memory.
+  T V = (threadIdx.x < inputSliceSize) ? doLdg(&inputSliceStart[threadIdx.x * inputWithinSliceStride]) : static_cast<T>(0);
   for (IndexType i = threadIdx.x; i < numIterations; i += blockDim.x) {
-    bool inRange = (i < inputSliceSize);
-    T v =
-      inRange ? doLdg(&inputSliceStart[i * inputWithinSliceStride]) : static_cast<T>(0);
-    const auto convertedV = at::native::TopKTypeConfig<T>::convert(v);
-    bool hasTopK = inRange && (convertedV == topKConverted);
+    T V_next = (i + blockDim.x < inputSliceSize) ? doLdg(&inputSliceStart[(i + blockDim.x) * inputWithinSliceStride]) : static_cast<T>(0);
+    bool hasTopK = false;
+    if (i < inputSliceSize) {
+      const auto convertedV = at::native::TopKTypeConfig<T>::convert(V);
+      hasTopK = convertedV == topKConverted;
+    }
 
     int start_index, my_offset, warp_count;
     reserveWarpSpace(hasTopK, writeIndexStart, start_index, my_offset, warp_count);
@@ -374,10 +388,12 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
           indicesWithinSliceStride,
           outputSliceSize,
           /*writeIndex=*/start_index + my_offset,
-          /*value=*/v,
+          /*value=*/V,
           /*index=*/i);
       }
     }
+
+    V = V_next;
   }
 }
 
