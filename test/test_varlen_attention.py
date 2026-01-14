@@ -105,7 +105,7 @@ class AttentionBlock(nn.Module):
             batch_size, self.num_heads, seq_len, seq_len
         )
 
-        if  window_size == (-1, 0):
+        if window_size == (-1, 0):
             causal_mask = torch.tril(
                 torch.ones(seq_len, seq_len, device=x_padded.device, dtype=torch.bool)
             )

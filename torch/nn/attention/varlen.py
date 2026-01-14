@@ -234,7 +234,7 @@ def varlen_attn(
         ...     query, key, value, cu_seq, cu_seq, max_len, max_len
         ... )
     """
-    is_causal = window_size[1] == 0
+    is_causal = window_size == (-1, 0)
     out, lse, _ = torch.ops.torch_attn._varlen_attn(
         query,
         key,
