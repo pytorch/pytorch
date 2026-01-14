@@ -7,7 +7,15 @@ linked with Triton kernels using the core.extern_elementwise mechanism.
 
 Available libraries:
 - elementwise_add: Simple elementwise tensor addition operations
-- symm_all_reduce: Symmetric memory all-reduce operations using NCCL
+- symm_all_reduce: Unified symmetric memory all-reduce with NCCL/NVSHMEM dispatch
+
+The unified symm_all_reduce interface provides a single frontend function
+that automatically dispatches to either NCCL or NVSHMEM backend based on
+the SymmContext type.
+
+Backend support:
+- NVSHMEM: Fully functional (provides libnvshmem_device.bc)
+- NCCL: NOT functional (NCCL does not provide device bitcode library)
 """
 
 from torch._extern_triton._elementwise_add_triton import (
@@ -16,11 +24,13 @@ from torch._extern_triton._elementwise_add_triton import (
     scalar_add_f32,
     scalar_add_f64,
 )
+
+# Unified symmetric all-reduce with automatic backend dispatch
 from torch._extern_triton._symm_all_reduce_triton import (
-    requires_symm_all_reduce_lib,
+    SymmAllReduceLibFinder,
+    requires_symm_all_reduce,
     symm_all_reduce_sum_f32,
 )
-
 
 __all__ = [
     # Elementwise add
@@ -28,7 +38,8 @@ __all__ = [
     "scalar_add_f32",
     "scalar_add_f16",
     "scalar_add_f64",
-    # Symmetric all-reduce
-    "requires_symm_all_reduce_lib",
+    # Unified symmetric all-reduce
+    "SymmAllReduceLibFinder",
+    "requires_symm_all_reduce",
     "symm_all_reduce_sum_f32",
 ]

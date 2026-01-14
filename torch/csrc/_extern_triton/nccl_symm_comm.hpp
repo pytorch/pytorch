@@ -12,7 +12,7 @@
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
 
 #include <torch/csrc/Export.h>
-#include <torch/csrc/_extern_triton/nccl_symm_comm.cuh>
+#include <torch/csrc/_extern_triton/symm_comm.cuh>
 
 #include <memory>
 #include <string>

@@ -53,6 +53,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 
 #ifdef USE_NVSHMEM
+#include <torch/csrc/_extern_triton/nvshmem_symm_comm.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
 #endif
 
@@ -4244,6 +4245,78 @@ Returns:
           &::c10d::symmetric_memory::NCCLSymmComm::get_device_idx,
           "Get the device index.");
 #endif // NCCL_HAS_SYMMEM_DEVICE_SUPPORT
+
+#ifdef USE_NVSHMEM
+  // NVSHMEMSymmComm - NVSHMEM symmetric memory communication for Triton kernels
+  py::class_<::c10d::symmetric_memory::NVSHMEMSymmComm>(
+      module,
+      "NVSHMEMSymmComm",
+      R"(
+NVSHMEMSymmComm - Host-side class for NVSHMEM symmetric memory communication.
+
+This class manages NVSHMEM resources for symmetric memory operations:
+- Symmetric memory allocation using the NVSHMEM backend
+- Context creation for passing to Triton kernels
+
+The class creates an NVSHMEMSymmContext that can be passed to Triton kernels
+for device-side collective operations using NVSHMEM's symmetric memory API.
+
+Arguments:
+    group_name (str): Name of the process group to use
+    buffer_size (int): Size of the symmetric buffer in bytes
+    device_idx (int): CUDA device index
+
+Example::
+    >>> import torch.distributed as dist
+    >>> from torch._C._distributed_c10d import NVSHMEMSymmComm
+    >>>
+    >>> # After initializing process group
+    >>> comm = NVSHMEMSymmComm("default_pg", 1024*1024, 0)
+    >>> ctx_ptr = comm.get_context_ptr()  # Pass to Triton kernel
+    >>> buffer_ptr = comm.get_buffer_ptr()
+)")
+      .def(
+          py::init<const std::string&, size_t, int>(),
+          py::arg("group_name"),
+          py::arg("buffer_size"),
+          py::arg("device_idx"))
+      .def(
+          "get_context_ptr",
+          &::c10d::symmetric_memory::NVSHMEMSymmComm::get_context_ptr,
+          R"(
+Get pointer to the device-side NVSHMEMSymmContext.
+This pointer can be passed to Triton kernels as an int64 value.
+
+Returns:
+    int: Device pointer to NVSHMEMSymmContext
+)")
+      .def(
+          "get_buffer_ptr",
+          &::c10d::symmetric_memory::NVSHMEMSymmComm::get_buffer_ptr,
+          R"(
+Get pointer to the local symmetric buffer.
+This pointer can be passed to Triton kernels as an int64 value.
+
+Returns:
+    int: Device pointer to the symmetric buffer
+)")
+      .def(
+          "get_buffer_size",
+          &::c10d::symmetric_memory::NVSHMEMSymmComm::get_buffer_size,
+          "Get the buffer size in bytes.")
+      .def(
+          "get_rank",
+          &::c10d::symmetric_memory::NVSHMEMSymmComm::get_rank,
+          "Get the rank of this process.")
+      .def(
+          "get_world_size",
+          &::c10d::symmetric_memory::NVSHMEMSymmComm::get_world_size,
+          "Get the world size (number of processes).")
+      .def(
+          "get_device_idx",
+          &::c10d::symmetric_memory::NVSHMEMSymmComm::get_device_idx,
+          "Get the device index.");
+#endif // USE_NVSHMEM
 
 #endif
 
