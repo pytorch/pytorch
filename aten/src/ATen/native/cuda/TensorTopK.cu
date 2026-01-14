@@ -194,6 +194,59 @@ synchronization is necessary because phase 1 assumes it always has space to writ
 smaller) than the k-th element but phase 2 tops off the output as long as there is space available.
 */
 
+// helper function to reserve space for a warp in the output.
+// hasTopK: boolean flag to indicate if the current thread has a value to add to the output.
+// writeIndexStart: atomic variable to track the index to write the result to.
+// start_index: index to write the result to. (output of function)
+// my_offset: offset to write the result to. (output of function)
+// warp_count: number of threads that have values to add to the output. (output of function)
+__device__ __forceinline__ void reserveWarpSpace(bool hasTopK,
+                                                int& writeIndexStart,
+                                                int& start_index,
+                                                int& my_offset,
+                                                int& warp_count) {
+  auto ballot = WARP_BALLOT(hasTopK); // a bitmask of threads that have hasTopK == true within the warp.
+  // count the number of threads that have hasTopK == true within the warp.
+  if constexpr (sizeof(decltype(ballot)) == 8) {
+    warp_count = __popcll(ballot); // if ballot is 64 bits, use __popcll
+  } else {
+    warp_count = __popc(ballot); // if ballot is 32 bits, use __popc
+  }
+
+  // if > 0 threads have hasTopK == true within the warp,
+  // reserve space for them by incrementing writeIndexStart atomically + saving the old value  as start index.
+  if (warp_count > 0 && at::cuda::getLaneId() == 0) {
+    start_index = atomicAdd(&writeIndexStart, warp_count);
+  }
+  start_index = __shfl(start_index, 0); // broadcast the start index to all threads in the warp.
+
+  // getLaneMaskLe() is a bitmask: [0, 0, 0, ..., 0, 1, 1, 1, ..., 1] with (64-lane_id-1) 0s and (lane_id+1) 1s.
+  // to get number of threads that have hasTopK == true to the right of the current lane, we count bits set
+  // for lanes with lane_id <= current lane_id. We put a -1 to exclude the current lane.
+  if constexpr (sizeof(decltype(ballot)) == 8) {
+    my_offset = __popcll(ballot & at::cuda::getLaneMaskLe()) - 1;  // if ballot is 64 bits, use __popcll
+  } else {
+    my_offset = __popc(ballot & at::cuda::getLaneMaskLe()) - 1;  // if ballot is 32 bits, use __popc
+  }
+}
+
+// helper function to write the result to the output.
+template <typename T, typename IndexType>
+__device__ __forceinline__ void writeResult(T* topKSliceStart,
+                                            int64_t* indicesSliceStart,
+                                            IndexType topKWithinSliceStride,
+                                            IndexType indicesWithinSliceStride,
+                                            IndexType outputSliceSize,
+                                            int writeIndex,
+                                            T v,
+                                            IndexType i){
+  CUDA_KERNEL_ASSERT(writeIndex < outputSliceSize); // assert that the write index is within the output slice size.
+  IndexType topKOffset = writeIndex * topKWithinSliceStride; // calculate the offset to the topk value in the output slice.
+  IndexType indexOffset = writeIndex * indicesWithinSliceStride; // calculate the offset to the index in the output slice.
+  topKSliceStart[topKOffset] = v; // write the value to the output slice.
+  indicesSliceStart[indexOffset] = i; // write the index to the output slice.
+}
+
 template <typename T, typename IndexType, int Dim, bool WithKthValues>
 C10_LAUNCH_BOUNDS_1(1024)
 __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> input,
@@ -214,8 +267,6 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   // Indices are limited to integer fp precision, so counts can fit in
   // int32, regardless of IndexType
   __shared__ int smem[64];
-  constexpr int MAX_WARPS = 1024 / 32;  // warpSize >= 32 so MAX_WARPS = 1024 / warpSize <= 1024 / 32 = 32
-  __shared__ int warp_bases[MAX_WARPS]; // variable warp_bases is used for intra-warp communication of write indices.
   __shared__ int writeIndexStart; // index to track where to write results. This is shared by all threads in the block. Increases atomically.
 
   IndexType slice = getLinearBlockId<IndexType>();
@@ -257,11 +308,8 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   // the resulting values.
   // In order to get this, we perform warp level compaction.
   // each warp counts its own number of hasTopk threads and
-  // reserves space for them by incrementing writeIndexStart atomically + saving the old value in warp_bases.
+  // reserves space for them by incrementing writeIndexStart atomically + saving the old value as start index.
 
-  IndexType WARP_BITS = __builtin_ctz(warpSize);
-  int warp_id = threadIdx.x >> WARP_BITS; // = threadIdx.x / warpSize
-  int lane_id = at::cuda::getLaneId(); // = threadIdx.x % warpSize
   // Initialize writeIndexStart to 0 by the first thread in the block.
   if (threadIdx.x == 0) {
     writeIndexStart = 0;
@@ -277,27 +325,19 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
     const auto convertedV = at::native::TopKTypeConfig<T>::convert(v);
     bool hasTopK = (largest) ? (inRange && (convertedV > topKConverted)) : (inRange && (convertedV < topKConverted));
 
-    uint64_t ballot = WARP_BALLOT(hasTopK); // a bitmask of threads that have hasTopK == true within the warp.
-    int warp_count = __popcll(ballot); // count the number of threads that have hasTopK == true within the warp.
-
-    // if > 0 threads have hasTopK == true within the warp,
-    // reserve space for them by incrementing writeIndexStart atomically + saving the old value in warp_bases.
-    if (lane_id == 0 && warp_count > 0) {
-      warp_bases[warp_id] = atomicAdd(&writeIndexStart, warp_count);
-    }
-    __syncwarp();
+    int start_index, my_offset, warp_count;
+    reserveWarpSpace(hasTopK, writeIndexStart, start_index, my_offset, warp_count);
 
     // now warp has reserved space for itself. If hasTopK == true, we need to find the index to write the result to.
     if (hasTopK) {
-      uint64_t warp_mask = (1ULL << lane_id) - 1; // a bitmask: [0, 0, 0, ..., 0, 1, 1, 1, ..., 1] with (64-lane_id) 0s and lane_id 1s.
-      int my_offset = __popcll(ballot & warp_mask); // count the number of threads that have hasTopK == true to the right of the current thread in bitmask.
-      int writeIndex = warp_bases[warp_id] + my_offset; // the index to write the result to.
-      CUDA_KERNEL_ASSERT(writeIndex < outputSliceSize);
-      IndexType topKOffset = writeIndex * topKWithinSliceStride;
-      IndexType indexOffset = writeIndex * indicesWithinSliceStride;
-
-      topKSliceStart[topKOffset] = v;
-      indicesSliceStart[indexOffset] = i;
+      writeResult(topKSliceStart,
+        indicesSliceStart,
+        topKWithinSliceStride,
+        indicesWithinSliceStride,
+        outputSliceSize,
+        /*writeIndex=*/start_index + my_offset,
+        /*value=*/v,
+        /*index=*/i);
     }
   }
 
@@ -306,8 +346,8 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
   __syncthreads();
 
   // We need to fill in the rest with actual == top-K values.
-  // The number that we need is outputSliceSize -
-  // writeIndexStart. There might be more than that number available,
+  // The number that we need is outputSliceSize - writeIndexStart.
+  // There might be more than that number available in input,
   // in which case we have to choose the first seen set. We do this
   // in a similar warp level compaction fashion as in phase 1.
 
@@ -318,33 +358,24 @@ __global__ void gatherTopK(at::cuda::detail::TensorInfo<const T, IndexType> inpu
     const auto convertedV = at::native::TopKTypeConfig<T>::convert(v);
     bool hasTopK = inRange && (convertedV == topKConverted);
 
-    uint64_t ballot = WARP_BALLOT(hasTopK); // a bitmask of threads that have hasTopK == true within the warp.
-    int warp_count = __popcll(ballot); // count the number of threads that have hasTopK == true within the warp.
+    int start_index, my_offset, warp_count;
+    reserveWarpSpace(hasTopK, writeIndexStart, start_index, my_offset, warp_count);
 
-    if (warp_count > 0){ // if > 0 threads have hasTopK == true within the warp,
-      // reserve space for them by incrementing writeIndexStart atomically + saving the old value in warp_bases.
-      if (lane_id == 0){
-        warp_bases[warp_id] = atomicAdd(&writeIndexStart, warp_count);
-      }
-      __syncwarp();
-      // now warp has reserved space for itself.
+    if ((warp_count > 0) && (outputSliceSize <= start_index)){
+      break; // there is no space to add topk values. Break out of the loop.
+    }
 
-      // if warp_bases[warp_id] overshoots outputSliceSize, there is no space to add topk values. Break out of the loop.
-      if (outputSliceSize <= warp_bases[warp_id]){
-        break;
-      }
-      // if hasTopK == true, we need to find the index to write the result to.
-      if (hasTopK){
-        int slots_available = outputSliceSize - warp_bases[warp_id]; // the number of slots available to write the result to.
-        uint64_t warp_mask = (1ULL << lane_id) - 1; // a bitmask: [0, 0, 0, ..., 0, 1, 1, 1, ..., 1] with (64-lane_id) 0s and lane_id 1s.
-        int my_offset = __popcll(ballot & warp_mask); // count the number of threads that have hasTopK == true to the right of the current thread in bitmask.
-        if (my_offset < slots_available){
-          IndexType writeIndex = warp_bases[warp_id] + my_offset; // the index to write the result to.
-          IndexType topKOffset = writeIndex * topKWithinSliceStride;
-          IndexType indexOffset = writeIndex * indicesWithinSliceStride;
-          topKSliceStart[topKOffset] = v;
-          indicesSliceStart[indexOffset] = i;
-        }
+    if (hasTopK){
+      int slots_available = outputSliceSize - start_index;
+      if (my_offset < slots_available){
+        writeResult(topKSliceStart,
+          indicesSliceStart,
+          topKWithinSliceStride,
+          indicesWithinSliceStride,
+          outputSliceSize,
+          /*writeIndex=*/start_index + my_offset,
+          /*value=*/v,
+          /*index=*/i);
       }
     }
   }
