@@ -635,7 +635,7 @@ class SizeVarAllocator:
     def optimization_hint_with_override(
         self,
         expr: Union[Expr, int],
-        hint_override: int,
+        hint_override: Optional[int],
     ) -> int:
         """
         Special function that computes the optimization hint for dynamic dispatch
