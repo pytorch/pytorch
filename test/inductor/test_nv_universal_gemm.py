@@ -397,15 +397,8 @@ class TestNVUniversalGemmHeuristics(TestCase):
 class TestNVUniversalGemmDynamicShapes(TestCase):
     """Test cases for NVIDIA Universal GEMM with dynamic shapes."""
 
-    def test_dynamic_shapes_extreme(self):
-        """Stress test dynamic shapes with extreme variations.
-
-        Tests that a single compiled graph handles:
-        - Large to small transitions (2048 -> 16)
-        - Non-square matrices with varying aspect ratios
-        - Rapid alternation between different shapes
-        - Return to previously seen shapes (cache hits)
-        """
+    def test_dynamic_shapes(self):
+        """Stress test dynamic shapes with extreme variations."""
 
         def matmul(a, b):
             return a @ b
