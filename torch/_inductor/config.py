@@ -1,7 +1,7 @@
 import os
 import sys
 from collections.abc import Callable
-from typing import Any, Literal, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, Literal, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.custom_graph_pass
@@ -1206,6 +1206,10 @@ debug_ir_traceback = False
 # used for debugging to make sure config is properly set
 _raise_error_for_testing = False
 
+# Use fp64 for unbacked float scalars (from .item()) in Triton kernel signatures
+# to preserve precision. When False, uses fp32 (legacy behavior with precision loss).
+_use_fp64_for_unbacked_floats: bool = not is_fbcode()
+
 _profile_var = os.environ.get("TORCHINDUCTOR_PROFILE", "")
 profile_bandwidth = _profile_var != ""
 profile_bandwidth_regex = "" if _profile_var == "1" else _profile_var
@@ -1761,6 +1765,27 @@ class triton:
     # This ensures the last N runs are saved, where N is this value
     max_kernel_dump_occurrences = 3
 
+    proton_profiling: bool = (
+        os.environ.get("TORCHINDUCTOR_TRITON_PROTON_PROFILING", "0") == "1"
+    )
+    # If not specified, proton traces will be saved to the debug directory
+    proton_output_dir: Optional[str] = os.environ.get(
+        "TORCHINDUCTOR_TRITON_PROTON_OUTPUT_DIR"
+    )
+    # Group CTAs by SM in proton trace files.
+    proton_group_by_sm: bool = (
+        os.environ.get("TORCHINDUCTOR_TRITON_PROTON_GROUP_BY_SM", "1") == "1"
+    )
+    # Split proton trace files by kernel invocation.
+    proton_split_invocations: bool = (
+        os.environ.get("TORCHINDUCTOR_TRITON_PROTON_SPLIT_INVOCATIONS", "1") == "1"
+    )
+    # Process warp tracks into CTA tracks (min warp start, max warp end) and
+    # assign CTAs to slots per SM such that CTAs do not overlap.
+    proton_per_cta_occupancy: bool = (
+        os.environ.get("TORCHINDUCTOR_TRITON_PROTON_PER_CTA_OCCUPANCY", "1") == "1"
+    )
+
 
 class aot_inductor:
     """
@@ -1998,6 +2023,26 @@ class cuda:
 
     # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
     cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4, 8]
+
+    cutlass_dynamic_cluster_shape: tuple[int, int, int] = cast(
+        tuple[int, int, int],
+        tuple(
+            int(x)
+            for x in os.environ.get(
+                "TORCHINDUCTOR_CUTLASS_DYNAMIC_CLUSTER_SHAPE", "2,1,1"
+            ).split(",")
+        ),
+    )
+    cutlass_dynamic_cluster_fallback: tuple[int, int, int] = cast(
+        tuple[int, int, int],
+        tuple(
+            int(x)
+            for x in os.environ.get(
+                "TORCHINDUCTOR_CUTLASS_DYNAMIC_CLUSTER_FALLBACK",
+                ",".join(str(v) for v in cutlass_dynamic_cluster_shape),
+            ).split(",")
+        ),
+    )
 
     # Whether to use CUTLASS EVT for epilogue fusion
     cutlass_epilogue_fusion_enabled = (
