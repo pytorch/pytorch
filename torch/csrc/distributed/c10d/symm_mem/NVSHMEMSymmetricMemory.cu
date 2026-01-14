@@ -4,6 +4,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/CUDASymmetricMemoryUtils.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nvshmem_extension.cuh>
+#include <torch/csrc/distributed/c10d/symm_mem/nvshmem_team_manager.hpp>
 
 #include <ATen/ceil_div.h>
 #include <ATen/cuda/CUDAContext.h>
@@ -205,14 +206,10 @@ class NVSHMEMSymmetricMemory : public SymmetricMemory {
     return pai_->buffer_size_;
   }
 
-  bool has_multicast_support() override {
-    // TODO
-    return false;
-  }
-
   void* get_multicast_ptr() override {
-    // TODO
-    return nullptr;
+    auto& team_manager = c10d::nvshmem_extension::TeamManager::get(get_device());
+    auto team = team_manager.get_team(group_name_, get_rank_to_global_rank());
+    return nvshmemx_mc_ptr(team, static_cast<char*>(pai_->base_ptr_) + offset_);
   }
 
   size_t get_offset() override {
@@ -432,9 +429,8 @@ class NVSHMEMSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
   };
 
   bool has_multicast_support(int device_idx) override {
-    // TODO
-    return false;
-  };
+    return device_has_multicast_support(device_idx);
+  }
 
   c10::DeviceType supported_device_type() override {
     return c10::DeviceType::CUDA;
