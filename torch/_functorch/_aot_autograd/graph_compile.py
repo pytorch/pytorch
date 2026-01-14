@@ -21,6 +21,8 @@ from collections.abc import Callable
 from contextlib import nullcontext
 from typing import Any, Optional, TYPE_CHECKING, Union
 
+from torch._library.fake_class_registry import FakeScriptObject
+
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -1194,6 +1196,15 @@ def maybe_inline_graph_saved_tensors_hooks(
         inner_meta.num_symints_saved_for_bw = len(
             [n for n in fw_outs_saved_for_bw if is_sym_node(n)]
         )
+        # Count tensors with no version counter check (used in tensors_saved_for_backwards_slice)
+        inner_meta.num_tensors_saved_with_no_vc_check = len(
+            [
+                n
+                for n in fw_outs_saved_for_bw
+                if isinstance(n, torch.fx.Node)
+                and n.meta.get("saved_tensor_with_no_vc_check", False)
+            ]
+        )
         bw_donated_idxs = collect_bw_donated_buffer_idxs(
             fw_module,
             bw_module,
@@ -1710,26 +1721,52 @@ def _aot_stage2a_partition(
             fw_outs_saved_for_bw = fw_outs[num_inner_fwd_outputs:]
             num_fw_outs_saved_for_bw = len(fw_outs_saved_for_bw)
             symint_outs_saved_for_bw = []
+            opaque_outs_saved_for_bw = []
             for idx, node in enumerate(fw_outs_saved_for_bw):
                 if is_sym_node(node):
                     symint_outs_saved_for_bw.append(node)
-                elif (
-                    isinstance(node, torch.fx.Node)
-                    and "val" in getattr(node, "meta", {})
-                    and isinstance(node.meta["val"], FakeTensor)
+                elif isinstance(node, torch.fx.Node) and "val" in getattr(
+                    node, "meta", {}
                 ):
-                    # record dynamic tensor activations
-                    dynamic_dims: set[int] = {
-                        dim
-                        for dim, size in enumerate(node.meta["val"].shape)
-                        if not isinstance(size, int)
-                    }
-                    if dynamic_dims:
-                        fw_metadata.dynamic_saved_tensors_idxs[idx] = dynamic_dims
+                    if isinstance(node.meta["val"], FakeTensor):
+                        # record dynamic tensor activations
+                        dynamic_dims: set[int] = {
+                            dim
+                            for dim, size in enumerate(node.meta["val"].shape)
+                            if not isinstance(size, int)
+                        }
+                        if dynamic_dims:
+                            fw_metadata.dynamic_saved_tensors_idxs[idx] = dynamic_dims
+                    elif isinstance(node.meta["val"], FakeScriptObject):
+                        opaque_outs_saved_for_bw.append(node)
 
             num_symints_saved_for_bw = len(symint_outs_saved_for_bw)
+            num_opaque_objects_saved_for_bw = len(opaque_outs_saved_for_bw)
             fw_metadata.num_symints_saved_for_bw = num_symints_saved_for_bw
+            fw_metadata.num_opaque_objects_saved_for_bw = (
+                num_opaque_objects_saved_for_bw
+            )
             inner_meta.num_symints_saved_for_bw = num_symints_saved_for_bw
+            inner_meta.num_opaque_objects_saved_for_bw = num_opaque_objects_saved_for_bw
+
+            # See Note [Activations with no version counter checks in eager]
+            # Count tensors saved with no version counter check.
+            # These are tensors that were stashed on ctx (e.g., ctx.x = x) rather than
+            # via save_for_backward in an autograd.Function.
+            # The partitioner sorts these to be at the end of saved_values.
+            num_tensors_saved_with_no_vc_check = 0
+            for node in fw_outs_saved_for_bw:
+                if isinstance(node, torch.fx.Node) and node.meta.get(
+                    "saved_tensor_with_no_vc_check", False
+                ):
+                    num_tensors_saved_with_no_vc_check += 1
+            fw_metadata.num_tensors_saved_with_no_vc_check = (
+                num_tensors_saved_with_no_vc_check
+            )
+            inner_meta.num_tensors_saved_with_no_vc_check = (
+                num_tensors_saved_with_no_vc_check
+            )
+
             if torch._functorch.config.donated_buffer:
                 fw_metadata.bw_donated_idxs = collect_bw_donated_buffer_idxs(
                     fw_module,

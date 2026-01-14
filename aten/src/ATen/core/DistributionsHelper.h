@@ -39,7 +39,7 @@ struct uniform_int_from_to_distribution {
   C10_HOST_DEVICE inline uniform_int_from_to_distribution(uint64_t range, int64_t base) : range_(range), base_(base) {}
 
   template <typename RNG>
-  C10_HOST_DEVICE inline T operator()(RNG generator) {
+  C10_HOST_DEVICE inline T operator()(RNG* generator) const {
 #ifdef FBCODE_CAFFE2
     if ((
       std::is_same_v<T, int64_t> ||
@@ -68,7 +68,7 @@ template <typename T>
 struct uniform_int_full_range_distribution {
 
   template <typename RNG>
-  C10_HOST_DEVICE inline T operator()(RNG generator) {
+  C10_HOST_DEVICE inline T operator()(RNG* generator) const {
     return transformation::uniform_int_full_range<T>(generator->random64());
   }
 
@@ -82,7 +82,7 @@ template <typename T>
 struct uniform_int_distribution {
 
   template <typename RNG>
-  C10_HOST_DEVICE inline T operator()(RNG generator) {
+  C10_HOST_DEVICE inline T operator()(RNG* generator) const {
     if constexpr (std::is_same_v<T, double> || std::is_same_v<T, int64_t>) {
       return transformation::uniform_int<T>(generator->random64());
     } else {
@@ -104,7 +104,7 @@ struct uniform_real_distribution {
   }
 
   template <typename RNG>
-  C10_HOST_DEVICE inline dist_acctype<T> operator()(RNG generator){
+  C10_HOST_DEVICE inline dist_acctype<T> operator()(RNG* generator) const {
     if constexpr (std::is_same_v<T, double>) {
       return transformation::uniform_real<T>(generator->random64(), from_, to_);
     } else {
@@ -192,7 +192,7 @@ struct normal_distribution {
   }
 
   template <typename RNG>
-  C10_HOST_DEVICE inline dist_acctype<T> operator()(RNG generator){
+  C10_HOST_DEVICE inline dist_acctype<T> operator()(RNG* generator) const {
     dist_acctype<T> ret;
     // return cached values if available
     if constexpr (std::is_same_v<T, double>) {
@@ -240,7 +240,7 @@ struct bernoulli_distribution {
   }
 
   template <typename RNG>
-  C10_HOST_DEVICE inline T operator()(RNG generator) {
+  C10_HOST_DEVICE inline T operator()(RNG* generator) const {
     uniform_real_distribution<T> uniform(0.0, 1.0);
     return transformation::bernoulli<T>(uniform(generator), p);
   }
@@ -260,7 +260,7 @@ struct geometric_distribution {
   }
 
   template <typename RNG>
-  C10_HOST_DEVICE inline T operator()(RNG generator) {
+  C10_HOST_DEVICE inline T operator()(RNG* generator) const {
     uniform_real_distribution<T> uniform(0.0, 1.0);
     return transformation::geometric<T>(uniform(generator), p);
   }
@@ -278,7 +278,7 @@ struct exponential_distribution {
   C10_HOST_DEVICE inline exponential_distribution(T lambda_in) : lambda(lambda_in) {}
 
   template <typename RNG>
-  C10_HOST_DEVICE inline T operator()(RNG generator) {
+  C10_HOST_DEVICE inline T operator()(RNG* generator) const {
     uniform_real_distribution<T> uniform(0.0, 1.0);
     return transformation::exponential<T>(uniform(generator), lambda);
   }
@@ -296,7 +296,7 @@ struct cauchy_distribution {
   C10_HOST_DEVICE inline cauchy_distribution(T median_in, T sigma_in) : median(median_in), sigma(sigma_in) {}
 
   template <typename RNG>
-  C10_HOST_DEVICE inline T operator()(RNG generator) {
+  C10_HOST_DEVICE inline T operator()(RNG* generator) const {
     uniform_real_distribution<T> uniform(0.0, 1.0);
     return transformation::cauchy<T>(uniform(generator), median, sigma);
   }
@@ -319,7 +319,7 @@ struct lognormal_distribution {
   }
 
   template<typename RNG>
-  C10_HOST_DEVICE inline T operator()(RNG generator){
+  C10_HOST_DEVICE inline T operator()(RNG* generator) const {
     normal_distribution<T> normal(mean, stdv);
     return transformation::log_normal<T>(normal(generator));
   }

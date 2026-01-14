@@ -38,7 +38,7 @@ log = logging.getLogger(__name__)
 aten = torch.ops.aten
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class InplaceableOp:
     inplace_op: Callable[..., Any]
     mutated_arg: int | tuple[int, ...]  # Single index or tuple of indices

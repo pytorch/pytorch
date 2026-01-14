@@ -270,6 +270,9 @@ class SpeculationLog:
 
     entries: list[SpeculationEntry] = dataclasses.field(default_factory=list)
     index: int = 0
+    # If True, graph break at autograd.grad instead of tracing it.
+    # Set when we detect that autograd.grad consumed grad_fns that are returned.
+    graph_break_on_autograd_grad: bool = False
 
     def restart(self) -> None:
         self.index = 0
@@ -4291,7 +4294,6 @@ class InstructionTranslatorBase(
             )
         else:
             user_stack = get_stack_above_dynamo() + user_stack  # type: ignore[assignment]
-            # pyrefly: ignore [bad-argument-type]
             user_stack = collapse_resume_frames(user_stack)
         user_stack_formatted = "".join(traceback.format_list(user_stack))
 
