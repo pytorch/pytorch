@@ -25,7 +25,6 @@ __all__ = [
     "HuberLoss",
     "SoftMarginLoss",
     "CrossEntropyLoss",
-    "LinearCrossEntropyLoss",
     "MultiLabelSoftMarginLoss",
     "CosineEmbeddingLoss",
     "MarginRankingLoss",
@@ -1395,49 +1394,6 @@ class CrossEntropyLoss(_WeightedLoss):
         return F.cross_entropy(
             input,
             target,
-            weight=self.weight,
-            ignore_index=self.ignore_index,
-            reduction=self.reduction,
-            label_smoothing=self.label_smoothing,
-        )
-
-
-class LinearCrossEntropyLoss(_WeightedLoss):
-    """This criterion computes the cross entropy loss between input,
-    affinely transformed to logits, and target.
-
-    TBD
-    """
-
-    __constants__ = ["ignore_index", "reduction", "label_smoothing"]
-    ignore_index: int
-    label_smoothing: float
-
-    def __init__(
-        self,
-        linear_weight: Tensor,
-        linear_bias: Tensor | None = None,
-        weight: Tensor | None = None,
-        size_average=None,
-        ignore_index: int = -100,
-        reduction: str = "mean",
-        label_smoothing: float = 0.0,
-    ) -> None:
-        super().__init__(weight, size_average, None, reduction)
-        self.ignore_index = ignore_index
-        self.label_smoothing = label_smoothing
-        self.register_buffer("linear_weight", linear_weight)
-        self.register_buffer("linear_bias", linear_bias)
-        self.linear_weight: Tensor
-        self.linear_bias: Tensor | None
-
-    def forward(self, input: Tensor, target: Tensor) -> Tensor:
-        """Runs the forward pass."""
-        return F.linear_cross_entropy(  # pyrefly: ignore [missing-attribute]
-            input,
-            self.linear_weight,
-            target,
-            linear_bias=self.linear_bias,
             weight=self.weight,
             ignore_index=self.ignore_index,
             reduction=self.reduction,
