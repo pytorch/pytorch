@@ -9853,7 +9853,6 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
         self.assertEqual((torch.tensor(1., device=device), torch.tensor(0., device=device)),
                          fn(torch.slogdet, (0, 0)))
 
-    @skipIfRocmArch(MI300_ARCH)
     @tf32_on_and_off(0.005)
     @reduced_f32_on_and_off(0.07, 0.005)
     def test_tensordot(self, device):
