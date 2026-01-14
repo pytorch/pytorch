@@ -1,6 +1,7 @@
 # Owner(s): ["module: cpp"]
 
 import math
+import sysconfig
 import unittest
 from pathlib import Path
 
@@ -18,7 +19,6 @@ from torch.testing._internal.common_utils import (
     install_cpp_extension,
     parametrize,
     run_tests,
-    skipIfFreeThreaded,
     skipIfRocm,
     skipIfTorchDynamo,
     skipIfWindows,
@@ -73,8 +73,9 @@ def skipIfTorchVersionLessThan(major, minor):
     return decorator
 
 
-@skipIfFreeThreaded(
-    "Cpython limited API not available, see https://github.com/python/cpython/issues/111506"
+@unittest.skipIf(
+    sysconfig.get_config_var("Py_GIL_DISABLED") == 1,
+    "Cpython limited API not available, see https://github.com/python/cpython/issues/111506",
 )
 class TestLibtorchAgnostic(TestCase):
     """
