@@ -464,7 +464,7 @@ def expand_to_full_mesh_op_strategy(
 
         # check all inputs are shardable
         if not all(
-            is_tensor_shardable(inp.shape, s)
+            is_tensor_shardable(inp.shape, s, allow_unbacked_sharding=True)
             for inp, s in zip(input_args_strategy, input_specs)
         ):
             continue

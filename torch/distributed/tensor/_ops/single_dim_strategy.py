@@ -151,6 +151,25 @@ def _get_unique_placements(op_schema: OpSchema) -> set[Placement]:
     return unique_placements
 
 
+def _get_op_schema_cache_key(op_schema: OpSchema) -> tuple:
+    """
+    Extract a hashable cache key from OpSchema that excludes SymInt shapes.
+
+    This allows lru_cache to work even when OpSchema contains symbolic shapes
+    from torch.compile. The cache key is based on:
+    - The op type
+    - The unique placements (frozenset for hashability)
+    - The number of tensor inputs
+
+    We exclude shapes because:
+    1. The expanded strategy doesn't depend on exact shapes
+    2. SymInt shapes are not always hashable (non-nested SymInts)
+    """
+    unique_placements = frozenset(_get_unique_placements(op_schema))
+    num_inputs = _get_num_tensor_inputs(op_schema)
+    return (op_schema.op, unique_placements, num_inputs)
+
+
 def _get_num_tensor_inputs(op_schema: OpSchema) -> int:
     num_inputs = 0
     for obj in op_schema.args_schema:
@@ -189,11 +208,22 @@ def _expand_single_dim_strategy_to_mesh(
     # Note: circular import, failed to untangle with #168221, reverted
     from torch.distributed.tensor._ops.utils import expand_to_full_mesh_op_strategy
 
-    @functools.lru_cache
+    # Manual cache using _get_op_schema_cache_key to avoid hashing SymInt shapes.
+    # This replaces @functools.lru_cache which would fail with "unhashable type: non-nested SymInt"
+    # during torch.compile with symbolic shapes.
+    _strategy_cache: dict[
+        tuple, Callable[[OpOverload, ArgsType, KwargsType], StrategyType]
+    ] = {}
+
     def _create_expanded_strategy(
         op_schema: OpSchema,
         output_tensor_meta: TensorMeta | Sequence[TensorMeta | None],
     ) -> Callable[[OpOverload, ArgsType, KwargsType], StrategyType]:
+        # Use a custom cache key that excludes SymInt shapes
+        cache_key = _get_op_schema_cache_key(op_schema)
+        if cache_key in _strategy_cache:
+            return _strategy_cache[cache_key]
+
         def expanded_strategy(
             op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
         ) -> StrategyType:
@@ -238,6 +268,8 @@ def _expand_single_dim_strategy_to_mesh(
                 output_tensor_meta=output_tensor_meta,
             )
 
+        # Store in cache before returning
+        _strategy_cache[cache_key] = expanded_strategy
         return expanded_strategy
 
     def _translate_foreach_op_schema(
