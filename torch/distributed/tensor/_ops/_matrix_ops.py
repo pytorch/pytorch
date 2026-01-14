@@ -2,6 +2,8 @@
 # implement matrix related ops for distributed tensor
 
 
+from typing import cast
+
 import torch
 from torch._ops import OpOverload
 from torch.distributed.device_mesh import DeviceMesh
@@ -357,10 +359,72 @@ def mm_single_dim_strategy(
     return gen_single_dim_einsum_strategies("mk,kn->mn")
 
 
-@register_op_strategy(aten.addmm.default)
-def addmm_strategy(op_schema: OpSchema) -> OpStrategy:
-    mesh = op_schema.get_mesh_from_args()
-    return _addmm_like_strategy("mk,kn->mn", mesh, op_schema)
+def _addmm_like_single_dim_strategy(
+    mm_equation: str,
+    args_schema: ArgsType,
+    mm_out_shape: torch.Size,
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    """
+    Shared helper for addmm-like single dim strategies (addmm, baddbmm).
+
+    Args:
+        mm_equation: The einsum equation for the matmul (e.g., "mk,kn->mn" or "bmk,bkn->bmn")
+        args_schema: The args schema containing bias, mat1, mat2 metadata
+        mm_out_shape: The output shape of the matmul operation
+
+    Returns:
+        List of placement strategies for [output, bias, mat1, mat2]
+    """
+    from torch.distributed.tensor._ops.utils import infer_broadcast_dims_map
+
+    mm_strategies = gen_single_dim_einsum_strategies(mm_equation)
+    self_meta = cast(TensorMeta, args_schema[0])  # bias
+
+    # Compute broadcast dims map from output shape to bias shape
+    broadcast_dims_map = infer_broadcast_dims_map(mm_out_shape, self_meta.shape)
+
+    # Add bias placement to each strategy
+    addmm_like_strategies: list[list[Placement | _ShardingPlaceholder]] = []
+    for strategy in mm_strategies:
+        output_placement = strategy[0]
+        mat1_placement = strategy[1]
+        mat2_placement = strategy[2]
+
+        # Derive bias placement from output placement
+        self_placement: Placement | _ShardingPlaceholder
+        if isinstance(output_placement, Partial):
+            self_placement = Partial()
+        elif isinstance(output_placement, Replicate):
+            self_placement = Replicate()
+        elif isinstance(output_placement, _ShardingPlaceholder):
+            output_dim = output_placement.dim
+            self_dim = broadcast_dims_map[output_dim]
+            if self_dim == -1:
+                # Dim doesn't exist in bias (broadcast), replicate
+                self_placement = Replicate()
+            else:
+                self_placement = _ShardingPlaceholder(self_dim)
+        else:
+            self_placement = Replicate()
+
+        addmm_like_strategies.append(
+            [output_placement, self_placement, mat1_placement, mat2_placement]
+        )
+
+    return addmm_like_strategies
+
+
+@register_single_dim_strategy(aten.addmm.default)
+def addmm_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    mat1_meta = cast(TensorMeta, args_schema[1])
+    mat2_meta = cast(TensorMeta, args_schema[2])
+
+    # Compute output shape: [M, N] from mat1=[M, K] and mat2=[K, N]
+    mm_out_shape = torch.Size([mat1_meta.shape[0], mat2_meta.shape[1]])
+
+    return _addmm_like_single_dim_strategy("mk,kn->mn", args_schema, mm_out_shape)
 
 
 @register_op_strategy(aten.bmm.default)
@@ -369,10 +433,19 @@ def bmm_strategy(op_schema: OpSchema) -> OpStrategy:
     return _mm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
 
 
-@register_op_strategy(aten.baddbmm.default)
-def baddbmm_strategy(op_schema: OpSchema) -> OpStrategy:
-    mesh = op_schema.get_mesh_from_args()
-    return _addmm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
+@register_single_dim_strategy(aten.baddbmm.default)
+def baddbmm_single_dim_strategy(
+    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
+) -> list[list[Placement | _ShardingPlaceholder]]:
+    batch1_meta = cast(TensorMeta, args_schema[1])
+    batch2_meta = cast(TensorMeta, args_schema[2])
+
+    # Compute output shape: [B, M, N] from batch1=[B, M, K] and batch2=[B, K, N]
+    mm_out_shape = torch.Size(
+        [batch1_meta.shape[0], batch1_meta.shape[1], batch2_meta.shape[2]]
+    )
+
+    return _addmm_like_single_dim_strategy("bmk,bkn->bmn", args_schema, mm_out_shape)
 
 
 @register_op_strategy(aten._scaled_mm.default)
