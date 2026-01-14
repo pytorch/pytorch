@@ -319,15 +319,15 @@ def mark_nodes_dislike_padding(
             cur.meta["dislike_padding"] = True
 
 
-def is_mkldnn_conv(note: Node) -> bool:
+def is_mkldnn_conv(node: Node) -> bool:
     # When mkldnn_fusion is enabled, conv will be replaced by the lowering pattern function.
     # See _register_unary_fusion_lowering in torch/_inductor/fx_passes/mkldnn_fusion.py.
     if (
-        isinstance(note.target, functools.partial)
-        and len(note.target.args) > 0
-        and hasattr(note.target.args[0], "targets")
+        isinstance(node.target, functools.partial)
+        and len(node.target.args) > 0
+        and hasattr(node.target.args[0], "targets")
     ):
-        for target in note.target.args[0].targets:
+        for target in node.target.args[0].targets:
             if target.fns[0] in [
                 torch.ops.mkldnn._convolution_pointwise.default,
                 torch.ops.mkldnn._convolution_pointwise.binary,
@@ -1672,7 +1672,10 @@ class GraphLowering(torch.fx.Interpreter):
         def debug(msg: str) -> None:
             log.debug("lowering %s %s", LazyString(n.format_node), msg)  # type: ignore[arg-type]
 
-        def mark_use_channels_last_layout(
+        # Use channels-last stride order for certain
+        # dense 4D intermediates when layout optimization determines a
+        # downstream consumer (typically conv) prefers channels-last.
+        def maybe_apply_channels_last_stride_order(
             result: ir.IRNode, n: torch.fx.Node
         ) -> ir.IRNode:
             dense = torch._prims_common.is_non_overlapping_and_dense_or_false(
@@ -1956,7 +1959,7 @@ class GraphLowering(torch.fx.Interpreter):
                 if isinstance(data, StorageBox) and data.should_realize_on_reuse(
                     len(n.users)
                 ):
-                    result = mark_use_channels_last_layout(result, n)
+                    result = maybe_apply_channels_last_stride_order(result, n)
 
                 # TODO(jansel): introduce a store vs inline choice
                 result.mark_reuse(len(n.users))
@@ -1966,7 +1969,7 @@ class GraphLowering(torch.fx.Interpreter):
                 # Prevent excessive accumulation in a computed buffer, when
                 # there are multiple branches each with small number of memory
                 # reads, but they converge to a user.
-                result = mark_use_channels_last_layout(result, n)
+                result = maybe_apply_channels_last_stride_order(result, n)
                 result.realize_hint()
 
             # Realize if a Pointwise has too much stuff to be inlined.
