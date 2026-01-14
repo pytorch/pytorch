@@ -511,7 +511,12 @@ class ShardingPropagator:
 
             op_strategy = None
             if DecompShardingStrategy.has_decomp(op_schema.op):
-                op_strategy = DecompShardingStrategy.propagate_strategy(op_schema, self)
+                try:
+                    op_strategy = DecompShardingStrategy.propagate_strategy(
+                        op_schema, self
+                    )
+                except Exception:
+                    pass  # when we report no sharding strategy, should we say we tried the decomp?
 
         if op_strategy is not None:
             if isinstance(op_strategy, OpStrategy):

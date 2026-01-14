@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 
 import itertools
+import threading
 
 import torch
 from torch._decomp import decomposition_table
@@ -25,14 +26,17 @@ from torch.fx.experimental.proxy_tensor import get_isolated_graphmodule
 from torch.utils._pytree import tree_any, tree_flatten, tree_map_only, tree_unflatten
 
 
-# figure out how to properly cache
+# Lock for serializing tracing operations
+_make_fx_lock = threading.Lock()
+
+
 def _trace_decomposition(op_schema: OpSchema) -> torch.fx.GraphModule:
     from torch._guards import detect_fake_mode
     from torch._subclasses.fake_tensor import FakeTensorMode
 
     decomp_fn = decomposition_table[op_schema.op]
     fake_mode = detect_fake_mode() or FakeTensorMode()
-    with fake_mode:
+    with _make_fx_lock, fake_mode:
         args = op_schema.gen_fake_args()
         kwargs = op_schema.gen_fake_kwargs()
         return get_isolated_graphmodule(decomp_fn, args, kwargs)
@@ -53,7 +57,10 @@ class DecompShardingInterpreter(torch.fx.Interpreter):
         self.sharding_prop = sharding_prop
 
         # Build single mesh dim strategies using fake 1d mesh
-        self.mesh = DeviceMesh(mesh_device, torch.arange(2))
+        import torch.distributed as dist
+
+        world_size = dist.get_world_size() if dist.is_initialized() else 2
+        self.mesh = DeviceMesh(mesh_device, torch.arange(world_size))
 
     def call_function(self, target, args, kwargs):
         if not isinstance(target, OpOverload):
