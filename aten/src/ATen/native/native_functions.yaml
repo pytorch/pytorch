@@ -10741,6 +10741,7 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_add_scalar_tensor_list_slow_
     CUDA: foreach_tensor_add_scalar_tensor_list_cuda_
+  autogen: _foreach_add.ScalarTensorList_out
 
 - func: _foreach_add.ScalarList(Tensor[] self, Scalar[] scalars) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
@@ -10816,6 +10817,7 @@
   dispatch:
     CompositeExplicitAutograd: foreach_tensor_sub_scalar_tensor_list_slow_
     CUDA: foreach_tensor_sub_scalar_tensor_list_cuda_
+  autogen: _foreach_sub.ScalarTensorList_out
 
 - func: _foreach_sub.ScalarList(Tensor[] self, Scalar[] scalars) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
