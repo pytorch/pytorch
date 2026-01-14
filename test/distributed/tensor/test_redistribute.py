@@ -1268,7 +1268,7 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                 (8, 16, 32),
                 # uneven sharding with padding
                 (17, 5),
-                (33, 16, 8, 1),
+                (13, 2, 13),
             ]
             placement_choice = [
                 Shard(0),
