@@ -11,8 +11,8 @@ dict for O(1) lookup (~0.1 μs).
 """
 
 import logging
-from typing import Any, Optional
 from collections.abc import Callable
+from typing import Any, Optional
 
 
 log = logging.getLogger(__name__)
