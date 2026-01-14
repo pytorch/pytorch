@@ -215,6 +215,10 @@ def add_nv_universal_gemm_choices(
     """
     if ensure_nv_universal_gemm_available():
         import cutlass_api
+
+        from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
+            get_compatible_kernels,
+        )
     else:
         log.debug("cutlass_api not available, skipping NVIDIA Universal GEMM choices")
         return
@@ -258,9 +262,7 @@ def add_nv_universal_gemm_choices(
     def _exclude_efc_kernels(metadata) -> bool:
         return "EFC" not in metadata.kernel_class.__name__
 
-    kernels = cutlass_api.get_kernels(
-        args=args, cc=cc_int, metadata_filter=_exclude_efc_kernels
-    )
+    kernels = get_compatible_kernels(args, cc_int, metadata_filter=_exclude_efc_kernels)
     if not kernels:
         log.debug("No compatible NVIDIA Universal GEMM kernels found")
         return
