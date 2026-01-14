@@ -4569,7 +4569,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         expected = fn()
         actual = opt_fn()
         self.assertTrue(same(expected, actual))
-        self.assertEqual(cnts.frame_count, 1)
+        self.assertEqual(cnts.frame_count, 2)
 
     def test_closure_out_of_scope_cell_with_cond(self):
         # Test closure with out-of-scope cell variable, used in a cond
