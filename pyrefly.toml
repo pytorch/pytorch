@@ -23,7 +23,6 @@ project-includes = [
 project-excludes = [
   # ==== below will be enabled directory by directory ====
   # ==== to test Pyrefly on a specific directory, simply comment it out ====
-  "tools/code_analyzer/gen_operators_yaml.py",
   "torch/_inductor/runtime/triton_heuristics.py",
   "torch/_inductor/runtime/triton_helpers.py",
   "torch/_inductor/runtime/halide_helpers.py",
@@ -150,3 +149,16 @@ implicit-any = true
 # unannotated-attribute=true
 # unannotated-parameter=true
 # unannotated-return=true
+
+[[sub-config]]
+matches = "torch/_dispatch/**"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true
+
+
+[[sub-config]]
+matches = "torch/_subclasses/**"
+[sub-config.errors]
+implicit-import = false
+implicit-any = true

@@ -5,12 +5,14 @@
 #include <c10/xpu/XPUFunctions.h>
 #include <torch/csrc/Module.h>
 #include <torch/csrc/THP.h>
+#include <torch/csrc/profiler/python/combined_traceback.h>
 #include <torch/csrc/utils/device_lazy_init.h>
 #include <torch/csrc/utils/pycfunction_helpers.h>
 #include <torch/csrc/utils/python_numbers.h>
 #include <torch/csrc/utils/python_strings.h>
 #include <torch/csrc/xpu/Module.h>
 #include <torch/csrc/xpu/XPUPluggableAllocator.h>
+#include <torch/csrc/xpu/memory_snapshot.h>
 
 using namespace torch;
 
@@ -446,6 +448,168 @@ static void initXpuMethodBindings(PyObject* module) {
   m.def("_xpu_setMemoryFraction", [](double fraction, c10::DeviceIndex device) {
     c10::xpu::XPUCachingAllocator::setMemoryFraction(fraction, device);
   });
+  m.def("_xpu_memorySnapshot", [](std::optional<c10::MempoolId_t> mempool_id) {
+    using c10::xpu::XPUCachingAllocator::BlockInfo;
+    using c10::xpu::XPUCachingAllocator::SegmentInfo;
+
+    py::str device_s = "device";
+    py::str address_s = "address";
+    py::str total_size_s = "total_size";
+    py::str allocated_size_s = "allocated_size";
+    py::str active_size_s = "active_size";
+    py::str requested_size_s = "requested_size";
+    py::str stream_s = "stream";
+    py::str segment_type_s = "segment_type";
+    py::str segment_pool_id = "segment_pool_id";
+    py::str large_s = "large";
+    py::str small_s = "small";
+    py::str size_s = "size";
+    py::str state_s = "state";
+    py::str active_allocated_s = "active_allocated";
+    py::str active_pending_free_s = "active_pending_free";
+    py::str inactive_s = "inactive";
+    py::str addr_s = "addr";
+    py::str blocks_s = "blocks";
+    py::str is_expandable_s = "is_expandable";
+    py::str frames_s = "frames";
+    py::str time_us_s = "time_us";
+
+    py::list empty_frames;
+    std::vector<CapturedTraceback*> to_gather_frames;
+    std::vector<py::dict> to_gather_dest;
+
+    auto add_frame_key = [&](const py::dict& d,
+                             const std::shared_ptr<c10::GatheredContext>& ctx) {
+      if (ctx) {
+        auto sc = getCapturedTracebackFromContext(ctx);
+        to_gather_frames.emplace_back(sc);
+        to_gather_dest.emplace_back(d);
+      } else {
+        d[frames_s] = empty_frames;
+      }
+    };
+
+    const auto segmentInfoToDict = [&](const SegmentInfo& segmentInfo) {
+      py::dict segmentDict;
+      segmentDict[device_s] = segmentInfo.device;
+      segmentDict[address_s] = segmentInfo.address;
+      segmentDict[total_size_s] = segmentInfo.total_size;
+      segmentDict[allocated_size_s] = segmentInfo.allocated_size;
+      segmentDict[active_size_s] = segmentInfo.active_size;
+      segmentDict[requested_size_s] = segmentInfo.requested_size;
+      // To ensure Python objects can be easily pickled, we represent the stream
+      // as an integer rather than as a Stream object.
+      segmentDict[stream_s] = reinterpret_cast<uint64_t>(segmentInfo.queue);
+      segmentDict[segment_type_s] = (segmentInfo.is_large ? large_s : small_s);
+      segmentDict[segment_pool_id] = segmentInfo.owner_private_pool_id;
+      segmentDict[is_expandable_s] = segmentInfo.is_expandable;
+      add_frame_key(segmentDict, segmentInfo.context_when_allocated);
+
+      auto address = segmentInfo.address;
+      py::list blocks;
+      for (const auto& blockInfo : segmentInfo.blocks) {
+        py::dict blockDict;
+        blockDict[address_s] = address;
+        blockDict[size_s] = blockInfo.size;
+        blockDict[requested_size_s] = blockInfo.requested_size;
+        blockDict[state_s] =
+            (blockInfo.allocated
+                 ? active_allocated_s
+                 : (blockInfo.active ? active_pending_free_s : inactive_s));
+        add_frame_key(blockDict, blockInfo.context_when_allocated);
+        blocks.append(blockDict);
+        address += blockInfo.size;
+      }
+      segmentDict[blocks_s] = blocks;
+
+      return segmentDict;
+    };
+
+    auto snapshot = c10::xpu::XPUCachingAllocator::snapshot(
+        mempool_id.value_or(std::make_pair(0, 0)));
+
+    py::list segments;
+
+    for (const auto& segmentInfo : snapshot.segments) {
+      segments.append(segmentInfoToDict(segmentInfo));
+    }
+
+    py::list traces;
+    py::str action_s = "action";
+    py::str alloc_s = "alloc";
+    py::str free_requested_s = "free_requested";
+    py::str free_completed_s = "free_completed";
+    py::str segment_alloc_s = "segment_alloc";
+    py::str segment_free_s = "segment_free";
+    py::str segment_map_s = "segment_map";
+    py::str segment_unmap_s = "segment_unmap";
+    py::str snapshot_s = "snapshot";
+    py::str oom_s = "oom";
+    py::str device_free_s = "device_free";
+
+    using namespace c10::xpu::XPUCachingAllocator;
+
+    const std::unordered_map<TraceEntry::Action, py::str> action_str_map = {
+        {TraceEntry::ALLOC, alloc_s},
+        {TraceEntry::FREE_REQUESTED, free_requested_s},
+        {TraceEntry::FREE_COMPLETED, free_completed_s},
+        {TraceEntry::SEGMENT_ALLOC, segment_alloc_s},
+        {TraceEntry::SEGMENT_FREE, segment_free_s},
+        {TraceEntry::SEGMENT_MAP, segment_map_s},
+        {TraceEntry::SEGMENT_UNMAP, segment_unmap_s},
+        {TraceEntry::SNAPSHOT, snapshot_s},
+        {TraceEntry::OOM, oom_s},
+    };
+
+    auto action_to_str = [&](TraceEntry::Action action) {
+      auto it = action_str_map.find(action);
+      TORCH_INTERNAL_ASSERT(
+          it != action_str_map.end(), "Unknown action type in TraceEntry");
+      return it->second;
+    };
+
+    for (const auto& traceInfo : snapshot.device_traces) {
+      py::list trace;
+      for (const auto& te : traceInfo) {
+        py::dict trace_entry;
+        if (te.context_) {
+          auto sc = getCapturedTracebackFromContext(te.context_);
+          to_gather_frames.emplace_back(sc);
+          to_gather_dest.emplace_back(trace_entry);
+        }
+        trace_entry[action_s] = action_to_str(te.action_);
+        trace_entry[TraceEntry::OOM == te.action_ ? device_free_s : addr_s] =
+            te.addr_;
+        trace_entry[size_s] = te.size_;
+        trace_entry[stream_s] = reinterpret_cast<uint64_t>(te.queue_);
+        trace_entry[time_us_s] = te.time_.t_;
+        trace.append(trace_entry);
+      }
+      traces.append(trace);
+    }
+
+    py::dict allocator_settings;
+    py::str last_allocator_settings_s = "PYTORCH_ALLOC_CONF";
+    py::str expandable_segments_s = "expandable_segments";
+
+    allocator_settings[last_allocator_settings_s] =
+        snapshot.config_metadata.last_allocator_settings;
+    allocator_settings[expandable_segments_s] =
+        snapshot.config_metadata.expandable_segments;
+
+    py::dict result;
+    result["segments"] = segments;
+    result["device_traces"] = traces;
+    result["allocator_settings"] = allocator_settings;
+
+    auto frames = py_symbolize(to_gather_frames);
+    for (const auto i : c10::irange(frames.size())) {
+      to_gather_dest.at(i)[frames_s] = frames.at(i);
+    }
+
+    return result;
+  });
+  m.def("_xpu_recordMemoryHistory", &torch::xpu::_record_memory_history);
 }
 
 // Callback for python part. Used for additional initialization of python
