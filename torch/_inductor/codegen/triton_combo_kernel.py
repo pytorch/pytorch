@@ -618,6 +618,9 @@ class ComboKernel(Kernel):
             "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             "constants": {},
         }
+        triton_meta[
+            "enable_fp_fusion"
+        ] = not config.emulate_precision_casts  # pyrefly: ignore[unsupported-operation]
 
         for arg_num in equal_1_arg_indices(signature):
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
@@ -763,6 +766,7 @@ class ComboKernel(Kernel):
         return extra_args
 
     def codegen_kernel(self, name: Optional[str] = None) -> str:
+        """Generate the triton code for a combo kernel that fuses multiple sub-kernels."""
         # TODO: is it correct to use the first sub kernel's heuristics?
         heuristics_list, size_hints_list = [], []
         for subkernel in self.sub_kernels:
@@ -809,11 +813,14 @@ class ComboKernel(Kernel):
                 argdefs=argdefs,
             )
         )
+        kernel_name = name or str(Placeholder.KERNEL_NAME)
         code.writeline(
-            f"def {name or str(Placeholder.KERNEL_NAME)}({', '.join(x.full_name() for x in argdefs)}):"
+            f"def {kernel_name}({', '.join(x.full_name() for x in argdefs)}):"
         )
 
         with code.indent():
+            if config.triton.proton_profiling:
+                code.writeline(f'pl.enter_scope("{kernel_name}")')
             code.splice("pid = tl.program_id(0)")
             if not self.enable_autotune:
                 self.codegen_blocks(code)
@@ -834,6 +841,8 @@ class ComboKernel(Kernel):
             code.splice("else:")
             with code.indent():
                 code.splice("pass")
+            if config.triton.proton_profiling:
+                code.writeline(f'pl.exit_scope("{kernel_name}")')
 
         if config.benchmark_combo_kernel:
             code.splice(self.codegen_kernel_benchmark(num_gb=0))

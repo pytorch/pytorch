@@ -270,6 +270,9 @@ class SpeculationLog:
 
     entries: list[SpeculationEntry] = dataclasses.field(default_factory=list)
     index: int = 0
+    # If True, graph break at autograd.grad instead of tracing it.
+    # Set when we detect that autograd.grad consumed grad_fns that are returned.
+    graph_break_on_autograd_grad: bool = False
 
     def restart(self) -> None:
         self.index = 0
@@ -3556,20 +3559,29 @@ class InstructionTranslatorBase(
         return value
 
     def _format_value(self, fmt_spec: VariableTracker, flags: int) -> None:
-        value = self.pop()
-        if isinstance(value, SymNodeVariable):
-            from torch._dynamo.variables.lazy import (
-                LazySymNodeFormatString,
-                LazyVariableTracker,
-            )
+        from torch._dynamo.variables.lazy import (
+            ComputedLazyConstantVariable,
+            LazyConstantVariable,
+            LazySymNodeFormatString,
+            LazyVariableTracker,
+        )
 
+        value = self.pop()
+
+        # Check for SymNodeVariable using type() instead of isinstance() to avoid
+        # triggering realization of lazy constants
+        if type(value) is SymNodeVariable:
             value = LazyVariableTracker.create(
                 LazySymNodeFormatString(value, fmt_spec), source=value.source
             )
             self.push(value)
             return
 
-        value = self._convert_value(value, flags & 0x03)
+        # For lazy constants, we want to keep them unrealized.
+        # Skip _convert_value as it may realize the value.
+        # The conversion will be handled by str.format at runtime.
+        if not isinstance(value, (LazyConstantVariable, ComputedLazyConstantVariable)):
+            value = self._convert_value(value, flags & 0x03)
 
         fmt_var = ConstantVariable.create("{:" + fmt_spec.as_python_constant() + "}")
 
@@ -4291,7 +4303,6 @@ class InstructionTranslatorBase(
             )
         else:
             user_stack = get_stack_above_dynamo() + user_stack  # type: ignore[assignment]
-            # pyrefly: ignore [bad-argument-type]
             user_stack = collapse_resume_frames(user_stack)
         user_stack_formatted = "".join(traceback.format_list(user_stack))
 
@@ -4787,12 +4798,14 @@ class InstructionTranslator(InstructionTranslatorBase):
 
 
 if sys.version_info >= (3, 11):
+    from .bytecode_transformation import _NB_OP_NAMES
+
     _binary_op_lookup = [
         getattr(
             InstructionTranslator,
             opname[3:] if "INPLACE" in opname else f"BINARY_{opname[3:]}",
         )
-        for opname, _ in dis._nb_ops  # type: ignore[attr-defined]
+        for opname in _NB_OP_NAMES
     ]
 
 

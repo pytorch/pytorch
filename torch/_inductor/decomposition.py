@@ -37,6 +37,7 @@ from torch._prims_common import (
 )
 from torch._refs import native_layer_norm as decomp_native_layer_norm
 from torch.fx.experimental.symbolic_shapes import guard_or_false, statically_known_true
+from torch.utils._ordered_set import OrderedSet
 
 from . import config, inductor_prims
 from .utils import (
@@ -614,7 +615,7 @@ def view_copy_dtype(
     self: torch.Tensor,
     dtype: torch.dtype,
 ) -> torch.Tensor:
-    return self.to(dtype).clone()
+    return self.clone().view(dtype)
 
 
 def _get_shape_permutation_like(
@@ -822,6 +823,9 @@ def grid_sampler_2d(
     return output
 
 
+# _foreach_addcmul.Scalar decomposition - uses mul+add instead of FMA
+# When emulate_precision_casts is enabled, we skip this decomposition
+# and use the inductor lowering which preserves FMA semantics
 @register_decomposition(aten._foreach_addcmul.Scalar)
 def _foreach_addcmul_scalar(
     self: list[torch.Tensor],
@@ -921,7 +925,33 @@ def select_decomp_table() -> dict[Any, Callable[..., Any]]:
         # remove q_embedding_bag_byte_unpack_decomp from decompositions
         decompositions.pop(torch.ops.quantized.embedding_bag_byte_unpack.default, None)
         return decompositions
-    return fast_random_decomps()
+    result = fast_random_decomps()
+    if config.emulate_precision_casts:
+        # When emulating precision casts, skip decomposition of addcmul ops
+        # so that we use the inductor lowering which preserves FMA semantics.
+        # For _foreach_addcdiv, we use the native CUDA kernel.
+        # The decomposed version uses separate mul+add/div+add ops which don't match
+        # eager's FMA rounding behavior.
+        # Note: We check against OpOverloadPacket to match all overloads (default, out, etc.)
+        ops_to_skip = OrderedSet(
+            [
+                aten.addcmul,
+                aten._foreach_addcmul.Scalar,
+                aten._foreach_addcdiv.Scalar,
+            ]
+        )
+
+        def should_skip(op: Any) -> bool:
+            # Check if op is directly in the skip set
+            if op in ops_to_skip:
+                return True
+            # For OpOverload, also check if its OpOverloadPacket is in the skip set
+            if hasattr(op, "overloadpacket"):
+                return op.overloadpacket in ops_to_skip
+            return False
+
+        result = {k: v for k, v in result.items() if not should_skip(k)}
+    return result
 
 
 @register_decomposition(aten.masked_scatter)

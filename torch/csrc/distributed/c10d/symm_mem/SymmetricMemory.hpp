@@ -50,11 +50,16 @@ class TORCH_API SymmetricMemory : public c10::intrusive_ptr_target {
   virtual size_t get_buffer_size() = 0;
   size_t get_signal_pad_size();
 
-  virtual size_t get_offset() {
-    TORCH_CHECK(false, "NYI");
+  virtual size_t get_offset() = 0;
+
+  virtual bool has_multicast_support() final {
+    TORCH_CHECK(
+        false,
+        "The `has_multicast_support` API is deprecated for SymmetricMemory handles. "
+        "You can check if `get_multicast_ptr` returns a non-null pointer, or use the "
+        "`c10d::symmetric_memory::has_multicast_support` API instead.");
   }
 
-  virtual bool has_multicast_support() = 0;
   virtual void* get_multicast_ptr() = 0;
 
   at::Tensor get_buffer(
@@ -147,10 +152,6 @@ struct GroupInfo {
   int rank;
   int world_size;
   c10::intrusive_ptr<c10d::Store> store;
-  // Note this field is not automatically populated by set_group_info().  If a
-  // SymmetricMemory implementation needs to use it, it must be populated by a
-  // call to exchange_global_ranks() first.
-  std::vector<int> rank_to_global_rank;
 };
 
 C10_EXPORT GroupInfo& get_group_info(const std::string& group_name);
