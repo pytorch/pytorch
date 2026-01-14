@@ -18,10 +18,7 @@ from torch.distributed.tensor._op_schema import (
     RuntimeSchemaInfo,
 )
 from torch.distributed.tensor._ops._einsum_strategy import gen_einsum_strategies
-from torch.distributed.tensor._ops.single_dim_strategy import (
-    _ShardingPlaceholder,
-    register_single_dim_strategy,
-)
+from torch.distributed.tensor._ops.single_dim_strategy import _ShardingPlaceholder
 from torch.distributed.tensor._ops.utils import (
     expand_to_full_mesh_op_strategy,
     generate_redistribute_costs,
@@ -256,6 +253,12 @@ def dot_strategy(op_schema: OpSchema) -> OpStrategy:
     return _mm_like_strategy("i,i->", mesh, op_schema)
 
 
+@register_op_strategy(aten.mm.default)
+def mm_strategy(op_schema: OpSchema) -> OpStrategy:
+    mesh = op_schema.get_mesh_from_args()
+    return _mm_like_strategy("mk,kn->mn", mesh, op_schema)
+
+
 from ._einsum_strategy import EinsumDims
 
 
@@ -347,7 +350,9 @@ def gen_single_dim_einsum_strategies(
     return strategies_over_one_mesh_dim
 
 
-@register_single_dim_strategy(aten.mm.default)
+# TODO enable in a separate PR along with more extensive validation.
+# currently just used in test_single_dim_strategy.py to help validate the single-dim expansion infra
+# @register_single_dim_strategy(aten.mm.default)
 def mm_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
@@ -409,12 +414,6 @@ def _addmm_like_single_dim_strategy(
     return addmm_like_strategies
 
 
-# @register_op_strategy(aten.addmm.default)
-# def addmm_strategy(op_schema: OpSchema) -> OpStrategy:
-#     mesh = op_schema.get_mesh_from_args()
-#     return _addmm_like_strategy("mk,kn->mn", mesh, op_schema)
-
-
 @register_single_dim_strategy(aten.addmm.default)
 def addmm_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
@@ -428,17 +427,10 @@ def addmm_single_dim_strategy(
     return _addmm_like_single_dim_strategy("mk,kn->mn", args_schema, mm_out_shape)
 
 
-@register_single_dim_strategy(aten.bmm.default)
-def bmm_single_dim_strategy(
-    op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
-) -> list[list[Placement | _ShardingPlaceholder]]:
-    return gen_single_dim_einsum_strategies("bmk,bkn->bmn")
-
-
-# @register_op_strategy(aten.baddbmm.default)
-# def baddbmm_strategy(op_schema: OpSchema) -> OpStrategy:
-#     mesh = op_schema.get_mesh_from_args()
-#     return _addmm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
+@register_op_strategy(aten.bmm.default)
+def bmm_strategy(op_schema: OpSchema) -> OpStrategy:
+    mesh = op_schema.get_mesh_from_args()
+    return _mm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
 
 
 @register_single_dim_strategy(aten.baddbmm.default)
