@@ -25,6 +25,7 @@ from torch.testing._internal.common_utils import (
     run_tests,
     parametrize,
     xfailIfTorchDynamo,
+    instantiate_parametrized_tests,
 )
 from torch.testing._internal.common_device_type import (
     ops,
@@ -1868,6 +1869,94 @@ class TestMeta(TestCase):
             self.assertEqual(out_dtype, [in_dtype,])
 
 instantiate_device_type_tests(TestMeta, globals())
+
+# Device lists for TestDtypeMismatch - check CUDA availability once
+_DEVICES = ["cpu", "cuda"] if torch.cuda.is_available() else ["cpu"]
+_DEVICES_AND_META = _DEVICES + ["meta"]
+
+
+class TestDtypeMismatch(TestCase):
+    """Tests for dtype mismatch errors in mm/bmm/matmul operations.
+
+    These tests verify that dtype mismatch errors are raised on all device types,
+    including meta tensors (which is important for torch.compile).
+    """
+
+    @parametrize("device", _DEVICES_AND_META)
+    def test_mm_dtype_mismatch(self, device):
+        """Test that mm raises an error when input dtypes don't match."""
+        a = torch.rand((2, 3), dtype=torch.float16, device=device)
+        b = torch.rand((3, 4), dtype=torch.float32, device=device)
+        with self.assertRaisesRegex(RuntimeError, "expected .* (to have the same dtype|but found)"):
+            torch.mm(a, b)
+
+    @parametrize("device", _DEVICES_AND_META)
+    def test_bmm_dtype_mismatch(self, device):
+        """Test that bmm raises an error when input dtypes don't match."""
+        a = torch.rand((2, 3, 4), dtype=torch.float16, device=device)
+        b = torch.rand((2, 4, 5), dtype=torch.float32, device=device)
+        with self.assertRaisesRegex(RuntimeError, "expected .* (to have the same dtype|but found)"):
+            torch.bmm(a, b)
+
+    @parametrize("device", _DEVICES_AND_META)
+    def test_matmul_dtype_mismatch(self, device):
+        """Test that matmul raises an error when input dtypes don't match."""
+        # Test 2D @ 2D (uses mm)
+        a = torch.rand((2, 3), dtype=torch.float16, device=device)
+        b = torch.rand((3, 4), dtype=torch.float32, device=device)
+        with self.assertRaisesRegex(RuntimeError, "expected .* (to have the same dtype|but found)"):
+            torch.matmul(a, b)
+        # Test 3D @ 3D (uses bmm)
+        a = torch.rand((2, 3, 4), dtype=torch.float16, device=device)
+        b = torch.rand((2, 4, 5), dtype=torch.float32, device=device)
+        with self.assertRaisesRegex(RuntimeError, "expected .* (to have the same dtype|but found)"):
+            torch.matmul(a, b)
+
+    @parametrize("device", _DEVICES)
+    def test_mm_dtype_mismatch_compile(self, device):
+        """Test that torch.compile raises an error for mm with mismatched dtypes."""
+        def fn(a, b):
+            return torch.mm(a, b)
+
+        a = torch.rand((2, 3), dtype=torch.float16, device=device)
+        b = torch.rand((3, 4), dtype=torch.float32, device=device)
+        with self.assertRaisesRegex(RuntimeError, "expected .* to have the same dtype"):
+            torch.compile(fn)(a, b)
+
+    @parametrize("device", _DEVICES)
+    def test_bmm_dtype_mismatch_compile(self, device):
+        """Test that torch.compile raises an error for bmm with mismatched dtypes."""
+        def fn(a, b):
+            return torch.bmm(a, b)
+
+        a = torch.rand((2, 3, 4), dtype=torch.float16, device=device)
+        b = torch.rand((2, 4, 5), dtype=torch.float32, device=device)
+        with self.assertRaisesRegex(RuntimeError, "expected .* to have the same dtype"):
+            torch.compile(fn)(a, b)
+
+    @parametrize("device", _DEVICES)
+    def test_matmul_dtype_mismatch_compile(self, device):
+        """Test that torch.compile raises an error for matmul with mismatched dtypes."""
+        def fn_2d(a, b):
+            return torch.matmul(a, b)
+
+        def fn_3d(a, b):
+            return torch.matmul(a, b)
+
+        # Test 2D @ 2D (uses mm)
+        a = torch.rand((2, 3), dtype=torch.float16, device=device)
+        b = torch.rand((3, 4), dtype=torch.float32, device=device)
+        with self.assertRaisesRegex(RuntimeError, "expected .* to have the same dtype"):
+            torch.compile(fn_2d)(a, b)
+
+        # Test 3D @ 3D (uses bmm)
+        a = torch.rand((2, 3, 4), dtype=torch.float16, device=device)
+        b = torch.rand((2, 4, 5), dtype=torch.float32, device=device)
+        with self.assertRaisesRegex(RuntimeError, "expected .* to have the same dtype"):
+            torch.compile(fn_3d)(a, b)
+
+
+instantiate_parametrized_tests(TestDtypeMismatch)
 
 def print_op_str_if_not_supported(op_str):
     op = OperatorName.parse(op_str)
