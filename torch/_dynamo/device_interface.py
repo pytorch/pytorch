@@ -23,6 +23,7 @@ from dataclasses import dataclass
 from typing import Any, Literal, Optional, Union
 
 import torch
+from torch.types import Device
 
 
 get_cuda_stream: Optional[Callable[[int], int]]
@@ -169,6 +170,10 @@ class DeviceInterface:
         if not cls.is_triton_capable():
             raise RuntimeError("This device is not capable of supporting Triton")
 
+    @staticmethod
+    def get_device_name(device: Device = None) -> str:
+        raise NotImplementedError
+
 
 class DeviceGuard:
     """
@@ -252,6 +257,7 @@ class CudaInterface(DeviceInterface):
     maybe_exchange_device = staticmethod(torch.cuda._maybe_exchange_device)  # type: ignore[arg-type, has-type]
     memory_allocated = staticmethod(torch.cuda.memory_allocated)
     is_bf16_supported = staticmethod(torch.cuda.is_bf16_supported)  # type: ignore[arg-type]
+    get_device_name = staticmethod(torch.cuda.get_device_name)
 
     # Can be mock patched by @patch decorator.
     @staticmethod
@@ -431,6 +437,7 @@ class XpuInterface(DeviceInterface):
     exchange_device = staticmethod(torch.xpu._exchange_device)  # type: ignore[arg-type, has-type]
     maybe_exchange_device = staticmethod(torch.xpu._maybe_exchange_device)  # type: ignore[arg-type, has-type]
     memory_allocated = staticmethod(torch.xpu.memory_allocated)
+    get_device_name = staticmethod(torch.xpu.get_device_name)
 
     # Can be mock patched by @patch decorator.
     @staticmethod
