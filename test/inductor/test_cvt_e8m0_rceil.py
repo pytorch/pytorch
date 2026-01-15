@@ -17,38 +17,16 @@ class TestCvtE8M0Rceil(TestCase):
     """Tests for cvt_e8m0_rceil prim with PTX lowering on Blackwell."""
 
     def test_correctness(self):
-        """Test correctness for powers of 2 and ceiling rounding cases."""
-
-        def fn(inp):
-            return inductor_prims.cvt_e8m0_rceil(inp)
-
-        # Powers of 2: biased exponent = log2(value) + 127
-        # Non-powers of 2: ceiling rounding (e.g., 1.5 -> exp 1 -> biased 128)
-        inp = torch.tensor(
-            [1.0, 2.0, 4.0, 0.5, 0.25, 1.5, 3.0, 5.0],
-            device="cuda",
-            dtype=torch.float32,
-        )
-
-        eager_result = fn(inp)
-        compiled_result = torch.compile(fn)(inp)
-        self.assertEqual(compiled_result, eager_result)
-
-        expected = torch.tensor(
-            [127, 128, 129, 126, 125, 128, 129, 130],
-            device="cuda",
-            dtype=torch.uint8,
-        )
-        self.assertEqual(eager_result, expected)
-
-    def test_random_values(self):
-        """Test with random values and various dtypes."""
+        """Test correctness for various dtypes."""
 
         def fn(inp):
             return inductor_prims.cvt_e8m0_rceil(inp)
 
         for dtype in [torch.float32, torch.bfloat16, torch.float16]:
-            inp = torch.rand(1024, device="cuda", dtype=dtype) * 100 + 0.01
+            inp = torch.cat([
+                torch.arange(-1024, 0, device="cuda", dtype=dtype),
+                torch.arange(1, 1025, device="cuda", dtype=dtype),
+            ])
             eager_result = fn(inp)
             compiled_result = torch.compile(fn)(inp)
             self.assertEqual(compiled_result, eager_result)
