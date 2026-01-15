@@ -380,6 +380,7 @@ if torch.backends.mps.is_available():
             "special.laguerre_polynomial_l": None,
             "special.legendre_polynomial_p": None,
             "special.log_ndtr": None,
+            "special.modified_bessel_i1": [torch.float16, torch.bfloat16],
             "special.ndtri": None,
             "svd_lowrank": None,
             "symeig": None,
