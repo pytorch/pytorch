@@ -23,10 +23,15 @@ from torch._inductor.virtualized import V
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
-    TEST_WITH_ROCM,
 )
 from torch.testing._internal.inductor_utils import HAS_CPU, HAS_CUDA_AND_TRITON, HAS_GPU
 from torch.utils._triton import has_triton_stable_tma_api, has_triton_tma_device
+
+
+# Conditional patch for decompose_k tests - override to 10 on ROCm, no-op elsewhere
+_DECOMPOSE_K_PATCH_ROCM = (
+    {"triton.num_decompose_k_splits": 10} if torch.version.hip else {}
+)
 
 
 class MockTensorNode:
@@ -833,7 +838,6 @@ class BaseE2ELookupTableTest(BaseLookupTableTest):
         ]
 
 
-@unittest.skipIf(TEST_WITH_ROCM, "ROCm doesn't support lookup table")
 @unittest.skipIf(not HAS_CUDA_AND_TRITON, "CUDA not available")
 @instantiate_parametrized_tests
 class TestLookupTableE2E(BaseE2ELookupTableTest):
@@ -928,21 +932,26 @@ class TestLookupTableE2E(BaseE2ELookupTableTest):
             operation, tensors, {"triton.enable_persistent_tma_matmul": True}
         )
 
+    # Enable decompose_k for this test (disabled by default on ROCm)
     @fresh_cache()
     def test_decompose_k_lookup_table_entry(self):
         """Test decompose_k template entry"""
-        tensors = self.create_tensors("mm", m=32, n=32, k=32 * 32)
-        config = self.create_basic_config(
-            torch._inductor.kernel.mm.decompose_k_subgraph_template.uid
-        )
-
-        self.setup_lookup_table("mm", tensors, [config])
-        add_preprocessing_fn(
-            partial(
-                verify_choice_names, pattern="decompose_k|bmm_dtype", expected_count=1
+        with inductor_config.patch(_DECOMPOSE_K_PATCH_ROCM):
+            tensors = self.create_tensors("mm", m=32, n=32, k=32 * 32)
+            config = self.create_basic_config(
+                torch._inductor.kernel.mm.decompose_k_subgraph_template.uid
             )
-        )
-        self.run_model("mm", tensors)
+
+            self.setup_lookup_table("mm", tensors, [config])
+            add_preprocessing_fn(
+                partial(
+                    verify_choice_names,
+                    pattern="decompose_k|bmm_dtype",
+                    expected_count=1,
+                )
+            )
+
+            self.run_model("mm", tensors)
 
     @fresh_cache()
     def test_bias_addmm_lookup_table_entry(self):

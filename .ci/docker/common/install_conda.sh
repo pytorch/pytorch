@@ -53,11 +53,8 @@ if [ -n "$ANACONDA_PYTHON_VERSION" ]; then
   # Also ensure sysroot is using a modern GLIBC to match system compilers
   as_jenkins conda create -n py_$ANACONDA_PYTHON_VERSION -y\
              python="$ANACONDA_PYTHON_VERSION" \
-             ${SYSROOT_DEP}
-
-  # libstdcxx from conda default channels are too old, we need GLIBCXX_3.4.30
-  # which is provided in libstdcxx 12 and up.
-  conda_install libstdcxx-ng=12.3.0 --update-deps -c conda-forge
+             ${SYSROOT_DEP} \
+             "icu<78"
 
   # Miniforge installer doesn't install sqlite by default
   if [[ "$BUILD_ENVIRONMENT" == *rocm* ]]; then

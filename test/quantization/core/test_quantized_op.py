@@ -33,7 +33,6 @@ from torch.testing._internal.common_cuda import (
     SM80OrLater,
     TEST_CUDA,
     TEST_CUDNN,
-    TEST_CUDNN_VERSION,
 )
 from torch.testing._internal.common_quantization import (
     skipIfNoFBGEMM,
@@ -1448,7 +1447,6 @@ class TestQuantizedOps(TestCase):
            padding=st.integers(0, 2),
            ceil_mode=st.booleans())
     @unittest.skipIf(not TEST_CUDNN, "cudnn is not enabled.")
-    @unittest.skipIf(TEST_CUDNN_VERSION <= 90100, "cuDNN maxpool2d mishandles -128 before v90100")
     @unittest.skipIf(TEST_ROCM, "not supported on rocm.")
     def test_max_pool2d_cudnn(self, X, kernel, stride, dilation, padding, ceil_mode):
         X, (scale, zero_point, torch_type) = X

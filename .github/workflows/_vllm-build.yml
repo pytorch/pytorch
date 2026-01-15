@@ -1,0 +1,113 @@
+name: vllm-build
+
+on:
+  workflow_call:
+    inputs:
+      runner:
+        required: true
+        type: string
+        description: The runner to use.
+      docker_image:
+        required: true
+        type: string
+        description: The name of the base docker image to use.
+      build_environment:
+        required: true
+        type: string
+        description: The build environment name, e.g. linux-jammy-cuda12.9-py3.12-gcc11
+      pytorch_branch:
+        required: false
+        type: string
+        description: The PyTorch branch to checkout. Default to the current checkout.
+      pytorch_commit:
+        required: false
+        type: string
+        description: The PyTorch commit to checkout. Default to the current checkout.
+      torch_cuda_arch_list:
+        required: true
+        type: string
+        description: The list of CUDA archs to build.
+
+jobs:
+  build:
+    runs-on: ${{ inputs.runner }}
+    container:
+      image: ${{ inputs.docker_image }}
+      options: --ipc=host --tty
+      # The env inside and outside the container are different
+      env:
+        SKIP_SCCACHE_INITIALIZATION: 1
+        SCCACHE_BUCKET: ossci-compiler-cache-circleci-v2
+        SCCACHE_REGION: us-east-1
+        TORCH_CUDA_ARCH_LIST: ${{ inputs.torch_cuda_arch_list }}
+        BUILD_ENVIRONMENT: ${{ inputs.build_environment }}
+        RUNNER: ${{ inputs.runner }}
+    steps:
+      - name: Install system dependencies
+        run: |
+          set -eux
+          sudo apt-get update
+          sudo apt-get install -y git zip
+
+      - name: Checkout PyTorch
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          ref: ${{ inputs.pytorch_commit || inputs.pytorch_branch }}
+          submodules: recursive
+          show-progress: false
+
+      - name: Get vLLM pinned commit
+        id: vllm-pinned-commit
+        run: |
+          VLLM_PINNED_COMMIT=$(cat .github/ci_commit_pins/vllm.txt)
+          echo "commit=${VLLM_PINNED_COMMIT}" >> "${GITHUB_OUTPUT}"
+
+      - name: Build PyTorch
+        shell: bash
+        env:
+          BUILD_ADDITIONAL_PACKAGES: 'vision audio'
+        run: |
+          set -eux
+          bash .ci/pytorch/build.sh
+
+      - name: Checkout vLLM
+        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+        with:
+          repository: vllm-project/vllm
+          path: vllm-project/vllm
+          ref: ${{ steps.vllm-pinned-commit.outputs.commit }}
+          submodules: recursive
+          show-progress: false
+
+      # TODO (huydhn): Lumen CLI won't work inside the container, need to revisit
+      # the approach later. So, this is the bare minimum to build vLLM wheel
+      - name: Build vLLM
+        working-directory: vllm-project/vllm
+        shell: bash
+        run: |
+          set -eux
+
+          python use_existing_torch.py
+          pip install -r requirements/build.txt
+
+          sccache --show-stats
+          python setup.py bdist_wheel --dist-dir=dist --py-limited-api=cp38
+          sccache --show-stats
+
+      - name: Copy vLLM wheel
+        run: |
+          mkdir -p dist/vllm
+          mv vllm-project/vllm/dist/*.whl dist/vllm
+
+      - name: Archive artifacts into zip
+        run: |
+          zip -1 -r artifacts.zip dist/
+
+      - name: Store the build artifacts on S3
+        uses: seemethere/upload-artifact-s3@baba72d0712b404f646cebe0730933554ebce96a # v5.1.0
+        with:
+          name: ${{ inputs.build_environment }}
+          retention-days: 14
+          if-no-files-found: error
+          path: artifacts.zip
+          s3-bucket: gha-artifacts

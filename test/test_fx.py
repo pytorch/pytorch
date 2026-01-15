@@ -796,6 +796,21 @@ class TestFX(JitTestCase):
             self.assertTrue(node.stack_trace is not None)
             assert "test_fx.py" in node.stack_trace
 
+    def test_node_pickle_type_preservation(self):
+        g = Graph()
+        n = g.placeholder("x")
+        n.type = torch.Tensor
+
+        dumped_node = pickle.dumps(n)
+        restored_node = pickle.loads(dumped_node)
+        self.assertEqual(restored_node.type, torch.Tensor)
+        self.assertNotEqual(restored_node.type, restored_node.target)
+
+        dumped_graph = pickle.dumps(g)
+        restored_graph = pickle.loads(dumped_graph)
+        restored_n = next(iter(restored_graph.nodes))
+        self.assertEqual(restored_n.type, torch.Tensor)
+
     def test_lineno_map(self):
         class M(torch.nn.Module):
             def forward(self, a, b):
@@ -1914,7 +1929,7 @@ class TestFX(JitTestCase):
             # NB: the implementation of conv may not preserve the memory format,
             # unfortunately. The best we can do is just check that the placeholder
             # node is channels-last
-            if node.op in {"placeholder"}:
+            if node.op == "placeholder":
                 self.assertEqual(
                     node.meta["tensor_meta"].memory_format, torch.channels_last
                 )
@@ -1975,7 +1990,7 @@ class TestFX(JitTestCase):
             # NB: the implementation of conv may not preserve the memory format,
             # unfortunately. The best we can do is just check that the placeholder
             # node is channels-last
-            if node.op in {"placeholder"}:
+            if node.op == "placeholder":
                 self.assertEqual(
                     node.meta["tensor_meta"].memory_format, torch.channels_last_3d
                 )
@@ -4316,7 +4331,6 @@ event=cudaLaunchKernel node=addmm_1 stack_trace=x = self.linear2(x)"""
             )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    @skipIfRocm
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     def test_profiler_multiple_modules(self):
         """
@@ -4352,15 +4366,15 @@ event=cudaLaunchKernel node=addmm_1 stack_trace=x = self.linear2(x)"""
             result_b = compiled_b(torch.randn(1, 3, 8, 8, device="cuda"))
 
         actual_traces = _enrich_profiler_traces(prof)
-        self.assertExpectedInline(actual_traces, """\
+        kernel_event = "hipLaunchKernel" if torch.version.hip else "cudaLaunchKernel"
+        self.assertExpectedInline(actual_traces, f"""\
 event=aten::add node=add stack_trace=return x + 1
-event=cudaLaunchKernel node=add stack_trace=return x + 1
+event={kernel_event} node=add stack_trace=return x + 1
 event=aten::sub node=sub stack_trace=return x - 1
-event=cudaLaunchKernel node=sub stack_trace=return x - 1"""
+event={kernel_event} node=sub stack_trace=return x - 1"""
             )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    @skipIfRocm
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     def test_profiler_nested_graph_modules(self):
         """
@@ -4397,13 +4411,14 @@ event=cudaLaunchKernel node=sub stack_trace=return x - 1"""
             result = compiled_model(torch.randn(10, 10, device="cuda"), torch.randn(10, 10, device="cuda"))
 
         actual_traces = _enrich_profiler_traces(prof)
-        self.assertExpectedInline(actual_traces, """\
+        kernel_event = "hipLaunchKernel" if torch.version.hip else "cudaLaunchKernel"
+        self.assertExpectedInline(actual_traces, f"""\
 event=aten::mul node=mul stack_trace=m = torch.mul(x, y)
-event=cudaLaunchKernel node=mul stack_trace=m = torch.mul(x, y)
+event={kernel_event} node=mul stack_trace=m = torch.mul(x, y)
 event=aten::sin node=sin stack_trace=s = m.sin()
-event=cudaLaunchKernel node=sin stack_trace=s = m.sin()
+event={kernel_event} node=sin stack_trace=s = m.sin()
 event=aten::add node=add stack_trace=a = s + self.c
-event=cudaLaunchKernel node=add stack_trace=a = s + self.c"""
+event={kernel_event} node=add stack_trace=a = s + self.c"""
             )
 
 
@@ -4626,7 +4641,7 @@ class TestFXAPIBackwardCompatibility(JitTestCase):
 
         if origin in {tuple, tuple}:
             return f"Tuple{contained_type_str}"
-        if origin in {typing.Union}:
+        if origin == typing.Union:
             # Annoying hack to detect Optional
             if len(contained) == 2 and (contained[0] is type(None)) ^ (
                 contained[1] is type(None)
@@ -5175,7 +5190,7 @@ class TestVisionTracing(JitTestCase):
             test_name = "test_torchvision_models_" + k
             x = (
                 torch.rand(1, 3, 299, 299)
-                if k in ["inception_v3"]
+                if k == "inception_v3"
                 else torch.rand(1, 3, 224, 224)
             )
             kwargs = dict(num_classes=50)
