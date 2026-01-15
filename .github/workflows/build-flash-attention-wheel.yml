@@ -102,15 +102,15 @@ jobs:
           if [[ "${{ matrix.arch }}" == "aarch64" ]]; then
             docker exec -t "${container_name}" bash -c "
               set -ex
-              mkdir -p /opt/glibc-2.29/lib
+              mkdir -p /opt/glibc-2.31/lib
               cd /tmp
-              curl -LO http://ports.ubuntu.com/pool/main/g/glibc/libc6_2.29-0ubuntu2_arm64.deb
-              ar x libc6_2.29-0ubuntu2_arm64.deb
+              curl -LO http://ports.ubuntu.com/pool/main/g/glibc/libc6_2.31-0ubuntu9_arm64.deb
+              ar x libc6_2.31-0ubuntu9_arm64.deb
               tar xf data.tar.xz
-              cp -a lib/aarch64-linux-gnu/* /opt/glibc-2.29/lib/ 2>/dev/null || true
-              cp -a usr/lib/aarch64-linux-gnu/* /opt/glibc-2.29/lib/ 2>/dev/null || true
+              cp -a lib/aarch64-linux-gnu/* /opt/glibc-2.31/lib/ 2>/dev/null || true
+              cp -a usr/lib/aarch64-linux-gnu/* /opt/glibc-2.31/lib/ 2>/dev/null || true
             "
-            GLIBC_ENV="-e LD_LIBRARY_PATH=/opt/glibc-2.29/lib:\${LD_LIBRARY_PATH}"
+            GLIBC_ENV="-e LD_LIBRARY_PATH=/opt/glibc-2.31/lib:\${LD_LIBRARY_PATH}"
           fi
 
           docker exec -t \
