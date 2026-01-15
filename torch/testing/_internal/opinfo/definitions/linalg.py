@@ -2456,6 +2456,25 @@ op_db: list[OpInfo] = [
                 "test_variant_consistency_jit",
                 dtypes=[torch.complex64, torch.float32],
             ),
+            # NotImplementedError: The operator 'aten::_linalg_svd.U' is not currently implemented for the MPS device
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out_warning",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_variant_consistency_eager",
+                device_type="mps",
+            ),
         ),
     ),
     OpInfo(
@@ -2480,6 +2499,25 @@ op_db: list[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="mps",
                 dtypes=[torch.float32],
+            ),
+            # NotImplementedError: The operator 'aten::_linalg_eigh.eigenvalues' is not currently implemented for the MPS device
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out_warning",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_variant_consistency_eager",
+                device_type="mps",
             ),
         ),
     ),
@@ -2595,6 +2633,31 @@ op_db: list[OpInfo] = [
                 "test_fn_fwgrad_bwgrad",
                 device_type="cuda",
             ),
+            # NotImplementedError: The operator 'aten::_linalg_eigh.eigenvalues' is not currently implemented for the MPS device
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out_requires_grad_error",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out_warning",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_variant_consistency_eager",
+                device_type="mps",
+            ),
         ),
     ),
     OpInfo(
@@ -2650,6 +2713,24 @@ op_db: list[OpInfo] = [
                 device_type="cuda",
                 dtypes=[torch.float32],
                 active_if=TEST_WITH_ROCM,
+            ),
+            # MPS: AssertionError: The values for attribute 'shape' do not match: torch.Size([0, 0]) != torch.Size([0, 1]).
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out_warning",
+                device_type="mps",
+            ),
+            # MPS: RuntimeError: svd_backward: The singular vectors in the
+            # complex case are specified up to multiplication by e^{i phi}. The
+            # specified loss function depends on this phase term, making it
+            # ill-defined.
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="mps",
+                dtypes=(torch.complex64,),
             ),
         ),
     ),
