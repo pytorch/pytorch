@@ -1,5 +1,6 @@
 #include <c10/core/AllocatorConfig.h>
 #include <c10/util/env.h>
+#include <array>
 
 namespace c10::CachingAllocator {
 
