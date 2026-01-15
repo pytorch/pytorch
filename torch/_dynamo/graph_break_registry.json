@@ -3132,6 +3132,14 @@
     {
       "Gb_type": "Forced graph break on leaf function",
       "Context": "",
+      "Explanation": "Forced graph break on non-inlining function for nested graph break testing purposes",
+      "Hints": [
+        "Set torch._dynamo.config.debug_force_graph_break_on_leaf_return = False"
+      ]
+    },
+    {
+      "Gb_type": "Forced graph break on leaf function",
+      "Context": "",
       "Explanation": "Forced graph break for nested graph break testing purposes",
       "Hints": [
         "Set torch._dynamo.config.debug_force_graph_break_on_leaf_return = False"
