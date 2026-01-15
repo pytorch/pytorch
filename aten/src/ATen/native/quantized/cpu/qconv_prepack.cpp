@@ -539,7 +539,11 @@ at::Tensor _qconv_prepack_onednn(
     dilation = quant_utils::MakeArgForConv1d(dilation, 1);
     kSpatialDim += 1;
   }
+#if IDEEP_PREREQ(3, 9, 0, 0)
+  if (is_fp8 && !cpuinfo_has_x86_amx_fp16()) {
+#else
   if (is_fp8) {
+#endif
     // The current version of oneDNN does not support fp8 conv
     // TODO(weiwen) Remove this when oneDNN supports fp8 conv
     // FP8 convolution is not supported by oneDNN until v3.9
