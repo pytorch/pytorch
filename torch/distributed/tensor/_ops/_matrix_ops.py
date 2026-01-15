@@ -420,6 +420,12 @@ def mm_single_dim_strategy(
     return gen_single_dim_einsum_strategies("mk,kn->mn")
 
 
+@register_op_strategy(aten.addmm.default)
+def addmm_strategy(op_schema: OpSchema) -> OpStrategy:
+    mesh = op_schema.get_mesh_from_args()
+    return _addmm_like_strategy("mk,kn->mn", mesh, op_schema)
+
+
 @register_single_dim_strategy(aten.addmm.default)
 def addmm_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
@@ -433,6 +439,12 @@ def addmm_single_dim_strategy(
 def bmm_strategy(op_schema: OpSchema) -> OpStrategy:
     mesh = op_schema.get_mesh_from_args()
     return _mm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
+
+
+@register_op_strategy(aten.baddbmm.default)
+def baddbmm_strategy(op_schema: OpSchema) -> OpStrategy:
+    mesh = op_schema.get_mesh_from_args()
+    return _addmm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
 
 
 @register_single_dim_strategy(aten.baddbmm.default)
