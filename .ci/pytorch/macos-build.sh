@@ -33,6 +33,15 @@ if which sccache > /dev/null; then
   export PATH="${tmp_dir}:$PATH"
 fi
 
+
+# NS: Ugly hack to be remove by Feb 15 2026
+# Mac runners reuse previos checkouts, and actions/checkout does not clean untracked submodules
+# Which results in build failures, when we validate all the included lincenses, which reference some
+# no longer used opentelementry submodules
+if [[ -d third_party/opentelementry-cpp ]]; then
+  rm -rf third_party/opentelementry-cpp
+fi
+
 if [[ ${BUILD_ENVIRONMENT} == *"distributed"* ]]; then
   # Needed for inductor benchmarks, as lots of HF networks make `torch.distribtued` calls
   USE_DISTRIBUTED=1 USE_OPENMP=1 WERROR=1 python -m build --wheel --no-isolation
