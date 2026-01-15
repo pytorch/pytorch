@@ -645,7 +645,7 @@ class SizeVarAllocator:
             - fallback for NaN
             - None if no special handling needed
         """
-        if isinstance(expr, (int, sympy.Integer)):
+        if isinstance(expr, (int, sympy.Integer, float, sympy.Float, sympy.Rational)):
             return int(expr)
 
         if isinstance(expr, Expr):
