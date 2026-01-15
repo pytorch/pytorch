@@ -2524,7 +2524,13 @@ class FakeTensorMode(TorchDispatchMode):
         if (
             isinstance(func, torch._ops.OpOverload)
             and torch.Tag.nondeterministic_seeded not in func.tags
-            and torch.Tag.inplace_view not in func.tags
+            # detach_ is a view-like operation that doesn't modify tensor data,
+            # it just detaches from the autograd graph. We should preserve constants
+            # for detach_ since the underlying data is unchanged.
+            and (
+                torch.Tag.inplace_view not in func.tags
+                or func is not aten.detach_.default
+            )
             and all_constant
             and len(flat_arg_fake_tensors) != 0
             and not has_symbolic_sizes
