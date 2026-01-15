@@ -86,14 +86,61 @@ class OpaqueObjectClassVariable(UserDefinedVariable):
     def as_python_constant(self) -> Any:
         return self.value
 
+    def is_python_constant(self) -> bool:
+        # prevents constant folding of attribute accesses on
+        # opaque classes. this ensures var_getattr is called,
+        # allowing for proper validation and error handling
+        return False
+
     def is_python_hashable(self) -> bool:
-        return is_opaque_value_type(type(self.value))
+        return is_opaque_value_type(self.value)
 
     def as_proxy(self) -> Any:
         return self.value
 
     def __repr__(self) -> str:
         return f"{self.__class__.__name__}({self.value})"
+
+    def var_getattr(self, tx: "InstructionTranslator", name: str) -> VariableTracker:
+        obj = None
+        try:
+            obj = inspect.getattr_static(self.value, name)
+        except AttributeError:
+            unimplemented(
+                gb_type="Attribute not found on opaque class",
+                context=f"class={self.value}, attr={name}",
+                explanation=f"The attribute '{name}' does not exist on opaque class {self.value}.",
+                hints=[
+                    f"Ensure '{name}' is a valid attribute of {type(self.value)}.",
+                ],
+            )
+
+        if isinstance(obj, staticmethod):
+            obj = obj.__get__(self.value)
+        elif isinstance(obj, property):
+            obj = obj.__get__(None, self.value)  # pyrefly: ignore[no-matching-overload]
+        elif hasattr(obj, "__get__"):
+            # Check for pybind11 static properties (common in PyTorch C++ bindings)
+            # Reference: https://github.com/python/mypy/blob/131f9d92da58294bb2f273425e8778bd7d5b861f/mypy/stubgenc.py#L590
+            type_name = type(obj).__name__
+            if type_name == "pybind11_static_property":
+                obj = obj.__get__(None, self.value)
+            else:
+                unimplemented(
+                    gb_type="Unsupported descriptor on opaque class",
+                    context=f"class={self.value}, attr={name}, descriptor={type_name}",
+                    explanation=f"The attribute '{name}' is a descriptor of type '{type_name}' which is not supported.",
+                    hints=[
+                        "Only staticmethod, property, and pybind11_static_property are supported.",
+                        "Consider accessing this attribute outside of the compiled region.",
+                    ],
+                )
+
+        if ConstantVariable.is_literal(obj):
+            return ConstantVariable.create(obj)
+
+        source = AttrSource(self.source, name) if self.source else None
+        return VariableTracker.build(tx, obj, source)
 
     def call_function(
         self,
@@ -323,3 +370,8 @@ class TorchScriptObjectVariable(UserDefinedObjectVariable):
         ):
             return self.value.real_obj  # pyrefly: ignore[missing-attribute]
         return super().as_python_constant()
+
+    def is_python_hashable(self) -> bool:
+        return is_opaque_value_type(
+            type(self.value.real_obj)  # pyrefly: ignore[missing-attribute]
+        )
