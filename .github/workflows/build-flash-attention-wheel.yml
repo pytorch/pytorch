@@ -102,14 +102,13 @@ jobs:
           if [[ "${{ matrix.arch }}" == "aarch64" ]]; then
             docker exec -t "${container_name}" bash -c "
               set -ex
+              mkdir -p /opt/glibc-2.29/lib
               cd /tmp
-              curl -LO https://ftp.gnu.org/gnu/glibc/glibc-2.29.tar.gz
-              tar xzf glibc-2.29.tar.gz
-              mkdir glibc-2.29-build && cd glibc-2.29-build
-              # Disable -Werror to work around newer GCC warnings
-              ../glibc-2.29/configure --prefix=/opt/glibc-2.29 --disable-werror
-              make -j\$(nproc)
-              make install
+              curl -LO http://ports.ubuntu.com/pool/main/g/glibc/libc6_2.29-0ubuntu2_arm64.deb
+              ar x libc6_2.29-0ubuntu2_arm64.deb
+              tar xf data.tar.xz
+              cp -a lib/aarch64-linux-gnu/* /opt/glibc-2.29/lib/ 2>/dev/null || true
+              cp -a usr/lib/aarch64-linux-gnu/* /opt/glibc-2.29/lib/ 2>/dev/null || true
             "
             GLIBC_ENV="-e LD_LIBRARY_PATH=/opt/glibc-2.29/lib:\${LD_LIBRARY_PATH}"
           fi
