@@ -4005,6 +4005,15 @@ class GridExpr:
             return items[0]
         return " + ".join(map(str, items))
 
+    def product(self, seq: list[int | str]) -> int | str:
+        """Codegen for product function with constant folding, constants are represented as int"""
+        import math
+
+        items = self._constant_fold(math.prod, seq)
+        if len(items) <= 1:
+            return items[0]
+        return " * ".join(map(str, items))
+
     def _constant_fold(
         self, fn: Callable[[list[int]], int], seq: list[int | str]
     ) -> list[int | str]:
@@ -4131,63 +4140,53 @@ class PrecomputedGrid(GridExpr):
 
 
 class ComboKernelGrid(GridExpr):
+    """
+    Base class for combo kernel grid calculation.
+    Subclasses must override generate() to compute x_grid, y_grid, z_grid.
+    """
+
     def generate(self, meta: dict[str, int]):
-        combo_meta = self.inductor_meta["combo_grid_meta"]
-        if combo_meta["default_config"]:
-            meta = {**combo_meta["default_config"], **meta}
-        no_x_dims = []
-        xnumels = []
-        ynumels = []
-        znumels = []
-        for num in range(combo_meta["num_kernels"]):
-            assert (
-                combo_meta[f"xnumel_{num}"] is None or combo_meta[f"xnumel_{num}"] > 0
-            )
-            no_x_dims.append(combo_meta[f"no_x_dim_{num}"])
-            xnumels.append(combo_meta[f"xnumel_{num}"] or f"xnumel_{num}")
-            if f"ynumel_{num}" in combo_meta:
-                ynumels.append((combo_meta[f"ynumel_{num}"] or f"ynumel_{num}", num))
-            if f"znumel_{num}" in combo_meta:
-                znumels.append((combo_meta[f"znumel_{num}"] or f"znumel_{num}", num))
-
-        self.x_grid = self.combo_x_grid(xnumels, no_x_dims, meta)
-        if combo_meta["min_blocks"]:
-            self.x_grid = self.maximum([self.x_grid, combo_meta["min_blocks"]])
-        if ynumels:
-            self.y_grid = self.maximum(
-                [
-                    self.ceildiv(ynumel, meta.get(f"YBLOCK_{num}"))
-                    for ynumel, num in ynumels
-                ]
-            )
-        if znumels:
-            self.z_grid = self.maximum(
-                [
-                    self.ceildiv(znumel, meta.get(f"ZBLOCK_{num}"))
-                    for znumel, num in znumels
-                ]
-            )
-
-    def combo_x_grid(
-        self,
-        xnumels: list[int | str],
-        no_x_dims: list[bool],
-        meta: dict[str, int],
-    ) -> str | int:
-        raise NotImplementedError
+        raise NotImplementedError("Subclasses must implement generate()")
 
 
 class SequentialComboKernelGrid(ComboKernelGrid):
-    def combo_x_grid(
-        self,
-        xnumels: list[int | str],
-        no_x_dims: list[bool],
-        meta: dict[str, int],
-    ) -> str | int:
-        assert len(xnumels) == len(no_x_dims)
-        return self.summation(
-            [
-                self.ceildiv(x, 1 if no_x_dim else meta.get(f"XBLOCK_{i}"))
-                for i, (x, no_x_dim) in enumerate(zip(xnumels, no_x_dims))
-            ]
-        )
+    def generate(self, meta: dict[str, int]):
+        """
+        Flattened grid: (sum of x*y*z blocks for all sub-kernels, 1, 1)
+        """
+        combo_meta = self.inductor_meta["combo_grid_meta"]
+        if combo_meta["default_config"]:
+            meta = {**combo_meta["default_config"], **meta}
+
+        total_blocks_list = []
+        for num in range(combo_meta["num_kernels"]):
+            xnumel = combo_meta[f"xnumel_{num}"]
+            assert xnumel is None or xnumel > 0
+            xnumel = xnumel or f"xnumel_{num}"
+            x_blocks = self.ceildiv(
+                xnumel,
+                1 if combo_meta[f"no_x_dim_{num}"] else meta.get(f"XBLOCK_{num}"),
+            )
+            y_blocks = (
+                self.ceildiv(
+                    combo_meta[f"ynumel_{num}"] or f"ynumel_{num}",
+                    meta.get(f"YBLOCK_{num}"),
+                )
+                if f"ynumel_{num}" in combo_meta
+                else 1
+            )
+            z_blocks = (
+                self.ceildiv(
+                    combo_meta[f"znumel_{num}"] or f"znumel_{num}",
+                    meta.get(f"ZBLOCK_{num}"),
+                )
+                if f"znumel_{num}" in combo_meta
+                else 1
+            )
+            total_blocks_list.append(self.product([x_blocks, y_blocks, z_blocks]))
+
+        self.x_grid = self.summation(total_blocks_list)
+        if combo_meta["min_blocks"]:
+            self.x_grid = self.maximum([self.x_grid, combo_meta["min_blocks"]])
+        self.y_grid = 1
+        self.z_grid = 1
