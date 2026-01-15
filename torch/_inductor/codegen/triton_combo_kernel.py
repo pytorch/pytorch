@@ -599,6 +599,8 @@ class ComboKernel(Kernel):
         argdefs: list[ArgName],
         pointwise_with_reduce: bool = False,
     ) -> str:
+        """Write the @triton_heuristics.<heuristics> decorator line for the combo kernel."""
+
         can_use_32bit = all(k.index_dtype == "tl.int32" for k in self.sub_kernels)
         size_dtype = "tl.int32" if can_use_32bit else "tl.int64"
         for i, sub in enumerate(self.sub_kernels):
