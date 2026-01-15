@@ -240,6 +240,7 @@ class ComboKernelTests(TestCase):
                 "'grid_type': 'Grid1D'"
             ).check_not("combo_grid_meta").run(code[0])
 
+    @requires_gpu_and_triton
     def test_combo_kernel_per_config_subkernel_poi(self):
         def fn(a, b):
             o1 = a * 2.0
@@ -298,6 +299,7 @@ class ComboKernelTests(TestCase):
             "XBLOCK_1 : tl.constexpr, R0_BLOCK_1 : tl.constexpr"
         ).run(code[0])
 
+    @requires_gpu_and_triton
     def test_combo_kernel_per_config_subkernel_red(self):
         def fn(a, b):
             r1 = a.sum(dim=(0, 2))
@@ -365,7 +367,57 @@ class ComboKernelTests(TestCase):
         self.assertEqual(out_eager, out_compiled)
         self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
         FileCheck().check("ZBLOCK_0").check("YBLOCK_0").check("XBLOCK_0").run(code[0])
+        FileCheck().check("x_pid_offset = local_pid % x_blocks_0").check(
+            "y_pid_offset = (local_pid // x_blocks_0) % y_blocks_0"
+        ).check("z_pid_offset = local_pid // (x_blocks_0 * y_blocks_0)").run(code[0])
 
+    @requires_gpu_and_triton
+    def test_combo_kernel_per_config_subkernel_flatten_dispatch(self):
+        def fn(t0, t1, t2, t3, t4, t5, t6, t7):
+            o0 = t0.contiguous(
+                memory_format=torch.channels_last
+            )  # ynumel=12,    xnumel=50176
+            o1 = t1.contiguous(
+                memory_format=torch.channels_last
+            )  # ynumel=192,   xnumel=9
+            o2 = t2.contiguous(
+                memory_format=torch.channels_last
+            )  # ynumel=4096,  xnumel=9
+            o3 = t3.contiguous(
+                memory_format=torch.channels_last
+            )  # ynumel=8192,  xnumel=9
+            o4 = t4.contiguous(
+                memory_format=torch.channels_last
+            )  # ynumel=16384, xnumel=9
+            o5 = t5.contiguous(
+                memory_format=torch.channels_last
+            )  # ynumel=32768, xnumel=9
+            o6 = t6.contiguous(
+                memory_format=torch.channels_last
+            )  # ynumel=65536, xnumel=9
+            o7 = t7.contiguous(
+                memory_format=torch.channels_last
+            )  # ynumel=65536, xnumel=9
+            return o0, o1, o2, o3, o4, o5, o6, o7
+
+        inps = [
+            torch.randn(4, 3, 224, 224, device="cuda"),
+            torch.randn(64, 3, 3, 3, device="cuda"),
+            torch.randn(64, 64, 3, 3, device="cuda"),
+            torch.randn(128, 64, 3, 3, device="cuda"),
+            torch.randn(128, 128, 3, 3, device="cuda"),
+            torch.randn(256, 128, 3, 3, device="cuda"),
+            torch.randn(256, 256, 3, 3, device="cuda"),
+            torch.randn(256, 256, 3, 3, device="cuda"),
+        ]
+        out_eager = fn(*inps)
+        fn_c = torch.compile(fn)
+        out_compiled, code = run_and_get_code(fn_c, *inps)
+        self.assertEqual(out_eager, out_compiled)
+        self.assertEqual(torch._inductor.metrics.generated_kernel_count, 1)
+        FileCheck().check("x_pid_offset = local_pid % x_blocks_0").check(
+            "y_pid_offset = local_pid // x_blocks_0"
+        ).run(code[0])
 
 @instantiate_parametrized_tests
 class ComboKernelBenchmarkTests(TestCase):

@@ -4000,6 +4000,7 @@ print(f"{{r1}}, {{r2}}")
         x = torch.cuda.device_count()
         self.assertEqual(f"{x}, 1", r)
 
+    @unittest.skipUnless("CI" in os.environ, "Only run on CI")
     @unittest.skipIf(
         _get_torch_cuda_version() >= (13, 1),
         "This test does not fail on CUDA 13.1 or newer",

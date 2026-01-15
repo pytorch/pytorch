@@ -1096,7 +1096,7 @@ def find_symbol_binding_fx_nodes(
     return r
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Specialization:
     """
     This class is used in multi-graph compilation contexts where we generate
@@ -1111,7 +1111,7 @@ class Specialization:
 
 
 # Analogous to ConvertIntSource
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ConvertIntKey:
     def __str__(self) -> str:
         return ".cast_symbool_to_symint_guardless()"
@@ -1121,7 +1121,7 @@ class ConvertIntKey:
         return cast_symbool_to_symint_guardless(b)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class CallMethodKey:
     name: str
 
@@ -1133,7 +1133,7 @@ class CallMethodKey:
         return getattr(o, self.name)()
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class InnerTensorKey:
     inner_name: str
 
@@ -1145,7 +1145,7 @@ class InnerTensorKey:
         return getattr(o, self.inner_name)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class DivideByKey:
     divisor: IntLikeType
 
@@ -1906,12 +1906,12 @@ class DimDynamic(Enum):
 # eager code with StrictMinMaxConstraint will keep working in the future!
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class Constraint:
     warn_only: bool
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class StrictMinMaxConstraint(Constraint):
     """
     For clients: the size at this dimension must be within 'vr' (which
@@ -1940,7 +1940,7 @@ class StrictMinMaxConstraint(Constraint):
         return f"{self.vr.lower} <= {source.name} <= {self.vr.upper}"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RelaxedUnspecConstraint(Constraint):
     """
     For clients: no explicit constraint; constraint is whatever is implicitly
@@ -1971,7 +1971,7 @@ class RelaxedUnspecConstraint(Constraint):
 DimConstraint = Union[StrictMinMaxConstraint, RelaxedUnspecConstraint, None]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class EqualityConstraint(Constraint):
     """
     Represent and decide various kinds of equality constraints between input sources.
@@ -2088,7 +2088,9 @@ def _assert_symbol_context(symbolic_context: object) -> TypeGuard[SymbolicContex
     return True
 
 
-def _is_supported_equivalence(expr: sympy.Expr) -> bool:
+def _is_supported_equivalence(
+    expr: sympy.Expr,
+) -> TypeGuard[sympy.Add | sympy.Mul | sympy.Symbol]:
     # Currently supported Dim ops are linear expressions with integer coefficients.
     # So check that expr only contains +, *, ints, and a single occurrence of a symbol.
     # (See also documentation of dynamic_shapes._DerivedDim.)
@@ -2113,7 +2115,7 @@ def _has_uninterpretable_sympy_function(expr: sympy.Basic) -> bool:
     )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SymbolicContext:
     """
     Data structure specifying how we should create symbols in
@@ -2126,7 +2128,7 @@ class SymbolicContext:
     """
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SymIntSymbolicContext(SymbolicContext):
     """
     Data structure specifying any constraints on a SymInt input
@@ -2139,7 +2141,7 @@ _P1 = ParamSpec("_P1")
 _T1 = TypeVar("_T1")
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class StatelessSymbolicContext(SymbolicContext, Generic[_P1, _T1]):
     """
     Create symbols in ``create_symbolic_sizes_strides_storage_offset`` via
@@ -2207,7 +2209,7 @@ class StatelessSymbolicContext(SymbolicContext, Generic[_P1, _T1]):
 # created with new fake modes should produce the same exact symbols as the original, providing the same shape_env
 # is used.
 # TODO(voz): Shape env validation
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True, kw_only=True)
 class StatefulSymbolicContext(StatelessSymbolicContext):
     """
     Create symbols in ``create_symbolic_sizes_strides_storage_offset`` via
@@ -2222,7 +2224,7 @@ class StatefulSymbolicContext(StatelessSymbolicContext):
     with respect to different shape_envs, clearing, etc.
     """
 
-    tensor_source: Source = None  # type: ignore[assignment]
+    tensor_source: Source
     # Why is this keyed on int first?
     # That integer is actually the id of the shape_env. This cache short-circuits symbol
     # creation, and we must store it per shape env. Now, while tracing invariants are a single
@@ -2232,17 +2234,12 @@ class StatefulSymbolicContext(StatelessSymbolicContext):
     # cause it to fail with unknown symbols, as the symbols cached here will skip creation, and never
     # get recorded in var_to_val, etc.
     # TODO(voz): consider a weakref to the shape_env here
-    shape_env_to_source_to_symbol_cache: dict[int, dict[str, sympy.Expr]] = None  # type: ignore[assignment]
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        # The None default is annoying, but required because of dataclass limitations
-        assert self.tensor_source is not None
-        if not self.shape_env_to_source_to_symbol_cache:
-            object.__setattr__(self, "shape_env_to_source_to_symbol_cache", {})
+    shape_env_to_source_to_symbol_cache: dict[int, dict[str, sympy.Expr]] = field(
+        default_factory=dict
+    )
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class SubclassSymbolicContext(StatefulSymbolicContext):
     """
     The correct symbolic context for a given inner tensor of a traceable tensor subclass
@@ -2250,16 +2247,10 @@ class SubclassSymbolicContext(StatefulSymbolicContext):
     flexibility, with inner symbolic contexts mapped via attr -> symbolic context.
     """
 
-    inner_contexts: dict[str, SymbolicContext] = None  # type: ignore[assignment]
-
-    def __post_init__(self) -> None:
-        super().__post_init__()
-        if self.inner_contexts is None:
-            # pyrefly: ignore [bad-assignment]
-            self.inner_contexts = {}
+    inner_contexts: dict[str, SymbolicContext] = field(default_factory=dict)
 
 
-@dataclass
+@dataclass(slots=True)
 class TrackedFake:
     """
     Tracks the sources of all fake tensors we wrap in Dynamo.
@@ -2652,7 +2643,7 @@ def _lru_cache(
     return wrapper  # type: ignore[return-value]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RuntimeAssert:
     """
     This is pretty similar to ShapeGuard but it also comes with a message,
@@ -2855,13 +2846,13 @@ class _ShapeGuardCppPrinter(_ShapeGuardPrinter, CppPrinter):
 
 
 # A dataclass for storing shape guards
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _ShapeGuardsHelper:
     exprs: list[str]
 
 
 # A dataclass for storing C++ expressions and helper variables
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _CppShapeGuardsHelper(_ShapeGuardsHelper):
     source_to_symbol: dict[Source, sympy.Symbol]
 
@@ -3633,7 +3624,7 @@ class DimConstraints:
 TLS = threading.local()
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ShapeEnvSettings:
     """
     Encapsulates all shape env settings that could potentially affect
@@ -3649,7 +3640,7 @@ class ShapeEnvSettings:
     trace_asserts: bool
 
 
-@dataclass
+@dataclass(slots=True)
 class ValueRangesSLoc:
     """
     Locations of the guards that triggered lower and upper bound.
@@ -3668,7 +3659,7 @@ def _suppress_guards(shape_env: ShapeEnv) -> Iterator[None]:
         shape_env._suppress_guards_exit()
 
 
-@dataclass
+@dataclass(slots=True)
 class _FrameLocalResult:
     loc: Optional[str] = None
     locals: dict[str, Any] = field(default_factory=dict)
@@ -7887,7 +7878,7 @@ class ShapeEnv:
             )
 
 
-def _is_int(expr: object) -> bool:
+def _is_int(expr: object) -> TypeGuard[SymInt]:
     return isinstance(expr, SymInt) and expr.node.expr.is_number
 
 
