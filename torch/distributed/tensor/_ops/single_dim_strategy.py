@@ -227,9 +227,11 @@ def _expand_single_dim_strategy_to_mesh(
                 )
             )
 
-            # Note: does not support `allow_unbacked_sharding` which is needed by matmul rules for some compile test
-            # currently, we should probably change that test though, since it seems wrong to me to allow sharding unbacked
-            # dims
+            # Note: expand_to_full_mesh_op_strategy uses allow_unbacked_sharding=True
+            # to include strategies as candidates even when tensor shapes are symbolic.
+            # This is correct for strategy enumeration: we optimistically include
+            # strategies that might be valid, and let runtime handle edge cases
+            # (e.g., zero-size shards when actual shape < num_shards).
             return expand_to_full_mesh_op_strategy(
                 mesh,
                 op_schema,

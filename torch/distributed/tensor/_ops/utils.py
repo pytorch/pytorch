@@ -463,8 +463,11 @@ def expand_to_full_mesh_op_strategy(
                 raise RuntimeError("output spec is None")
 
         # check all inputs are shardable
+        # allow_unbacked_sharding=True for consistency with other strategy selection
+        # code paths (e.g., _mm_like_strategy, _addmm_like_strategy) that optimistically
+        # include strategies when shapes are symbolic, letting runtime handle edge cases.
         if not all(
-            is_tensor_shardable(inp.shape, s)
+            is_tensor_shardable(inp.shape, s, allow_unbacked_sharding=True)
             for inp, s in zip(input_args_strategy, input_specs)
         ):
             continue
