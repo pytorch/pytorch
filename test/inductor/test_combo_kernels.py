@@ -330,7 +330,6 @@ class ComboKernelTests(TestCase):
         def fn(a, b):
             return a.sum(dim=(1, 2)), b.sum(dim=(1, 2))
 
-        # Discontiguous via permute triggers 2D reduction tiling
         inps = [
             torch.randn(32, 16, 64, device=GPU_TYPE).permute(1, 0, 2),
             torch.randn(32, 16, 64, device=GPU_TYPE).permute(1, 0, 2),
