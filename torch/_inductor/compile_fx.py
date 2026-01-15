@@ -291,6 +291,23 @@ def _maybe_capture_inductor_output_for_pythonify(
         if not is_pythonify_active():
             return
 
+        # Capture CUDA graph configuration for pythonify.
+        # The config.triton.cudagraphs flag indicates whether CUDA graphs
+        # are enabled, and we also capture related configuration options.
+        cuda_graphs_enabled = config.triton.cudagraphs
+        cuda_graph_config = {}
+        if cuda_graphs_enabled:
+            cuda_graph_config = {
+                "graph_id": f"cuda_graph_{id(compiled_graph) % 10000}",
+                "warmup_runs": 1,
+                "capture_mode": "thread_local",
+                "stream_name": "default",
+                "pool_id": None,
+                "static_inputs": True,
+                "static_input_indices": [],
+                "skip_dynamic_graphs": config.triton.cudagraph_skip_dynamic_graphs,
+            }
+
         inductor_output = {
             "source_code": getattr(compiled_graph, "source_code", ""),
             "graph_str": getattr(compiled_graph, "runnable_graph_str", ""),
@@ -304,6 +321,8 @@ def _maybe_capture_inductor_output_for_pythonify(
             ),
             "guards_expr": getattr(compiled_graph, "guards_expr", None),
             "is_backward": is_backward,
+            "cuda_graphs_enabled": cuda_graphs_enabled,
+            "cuda_graph_config": cuda_graph_config,
         }
 
         add_inductor_output(inductor_output)

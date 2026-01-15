@@ -107,6 +107,7 @@ from .ir import (
     CallableInvocationNode,
     CodeGenVisitor,
     CompiledRegionNode,
+    CUDAGraphPhase,
     CUDAGraphSetupNode,
     GuardCheckNode,
     GuardType,
@@ -312,6 +313,7 @@ class PythonCodeGenVisitor(CodeGenVisitor):
         expose_result_in_locals: bool = True,
         expose_result_in_globals: bool = False,
         model_source: ModelSource = ModelSource.CLOSURE,
+        emit_debug_prints: bool = False,
     ) -> None:
         """
         Initialize the visitor with variable name configuration.
@@ -334,6 +336,14 @@ class PythonCodeGenVisitor(CodeGenVisitor):
                   (for when model is a local variable in the calling function)
                 - ModelSource.F_GLOBALS: Model is in f_globals["model"]
                   (for when model is a global/module-level variable)
+            emit_debug_prints: If True, emit debug print statements at key points
+                in the generated code. This helps trace execution flow, debug
+                argument values, and diagnose issues like the "not enough values
+                to unpack" error. Debug prints are emitted at:
+                - Argument extraction (shows each extracted value)
+                - AOT Autograd forward/backward entry/exit
+                - Compiled function invocation (shows args and result)
+                - Result exposure (shows final output)
         """
         self._emitter = CodeEmitter()
         self._model_var_name = model_var_name
@@ -343,6 +353,7 @@ class PythonCodeGenVisitor(CodeGenVisitor):
         self._expose_result_in_locals = expose_result_in_locals
         self._expose_result_in_globals = expose_result_in_globals
         self._model_source = model_source
+        self._emit_debug_prints = emit_debug_prints
         self._argument_names: list[str] = []
         self._has_emitted_arg_section = False
         self._has_emitted_guard_section = False
@@ -357,6 +368,66 @@ class PythonCodeGenVisitor(CodeGenVisitor):
         self._has_inductor_backward_kernel = False
         self._inductor_uses_list_args = True
         self._inductor_returns_tuple = True
+        self._cuda_graph_replay_fn: Optional[str] = None
+        self._cuda_graph_static_outputs_var: Optional[str] = None
+        self._forward_cuda_graph_node: Optional[CUDAGraphSetupNode] = None
+        self._backward_cuda_graph_node: Optional[CUDAGraphSetupNode] = None
+        self._inference_cuda_graph_node: Optional[CUDAGraphSetupNode] = None
+
+    @property
+    def cuda_graphs_enabled(self) -> bool:
+        """
+        Check if CUDA graphs are enabled in the IR being processed.
+
+        This property returns True if any CUDAGraphSetupNode was detected during
+        prescan_ir(). This allows code generation logic to make decisions based
+        on whether CUDA graphs will be used, such as choosing between direct
+        callable invocation vs. graph replay.
+
+        The property checks for CUDA graph nodes in all phases:
+        - INFERENCE: Single graph for inference-only computation
+        - FORWARD: Forward pass graph for training mode
+        - BACKWARD: Backward pass graph for training mode
+
+        Returns:
+            True if CUDA graphs are enabled, False otherwise
+        """
+        return (
+            self._inference_cuda_graph_node is not None
+            or self._forward_cuda_graph_node is not None
+            or self._backward_cuda_graph_node is not None
+        )
+
+    def get_cuda_graph_node(
+        self, phase: Optional["CUDAGraphPhase"] = None
+    ) -> Optional[CUDAGraphSetupNode]:
+        """
+        Get the CUDAGraphSetupNode for a specific phase, or any phase.
+
+        This method retrieves the CUDA graph node detected during prescan_ir().
+        It's useful for code generation logic that needs to access CUDA graph
+        configuration when deciding how to emit code.
+
+        Args:
+            phase: The specific CUDAGraphPhase to retrieve. If None, returns
+                the inference node if present, otherwise the forward node if
+                present, otherwise the backward node if present.
+
+        Returns:
+            The CUDAGraphSetupNode for the requested phase, or None if not found.
+        """
+        if phase == CUDAGraphPhase.INFERENCE:
+            return self._inference_cuda_graph_node
+        elif phase == CUDAGraphPhase.FORWARD:
+            return self._forward_cuda_graph_node
+        elif phase == CUDAGraphPhase.BACKWARD:
+            return self._backward_cuda_graph_node
+        else:
+            return (
+                self._inference_cuda_graph_node
+                or self._forward_cuda_graph_node
+                or self._backward_cuda_graph_node
+            )
 
     def get_code(self) -> str:
         """
@@ -376,6 +447,36 @@ class PythonCodeGenVisitor(CodeGenVisitor):
         """
         return self._emitter
 
+    def _emit_debug_print(self, message: str, *values: str) -> None:
+        """
+        Emit a debug print statement if debug mode is enabled.
+
+        This method generates print() calls that help trace execution flow
+        through the generated code. The prints show key values at each stage
+        of execution, making it easier to diagnose issues like the "not enough
+        values to unpack" error.
+
+        Args:
+            message: A descriptive message for the debug output
+            *values: Optional variable names whose values should be printed.
+                These are formatted as f-string expressions in the generated code.
+
+        Example:
+            _emit_debug_print("Extracted arg1", "arg1", "arg1.shape")
+            # Generates: print("[DEBUG] Extracted arg1: arg1=", arg1, "arg1.shape=", arg1.shape)
+        """
+        if not self._emit_debug_prints:
+            return
+
+        if values:
+            parts = []
+            for val in values:
+                parts.append(f'"{val}=", {val}')
+            values_str = ", ".join(parts)
+            self._emitter.emit_line(f'print("[DEBUG] {message}:", {values_str})')
+        else:
+            self._emitter.emit_line(f'print("[DEBUG] {message}")')
+
     def prescan_ir(self, ir: "RuntimeWrapperIR") -> None:
         """
         Pre-scan the IR to detect features that affect code generation.
@@ -387,6 +488,19 @@ class PythonCodeGenVisitor(CodeGenVisitor):
 
         Detects both forward and backward Inductor kernels for proper autograd
         function generation.
+
+        Detects CUDAGraphSetupNodes in all phases:
+        - INFERENCE: Single graph for inference-only computation. Tracked in
+          _inference_cuda_graph_node for use when generating code that needs
+          to know whether CUDA graphs are enabled.
+        - FORWARD: Forward pass graph for training mode. Tracked in
+          _forward_cuda_graph_node for AOT Autograd wrapper integration.
+        - BACKWARD: Backward pass graph for training mode. Tracked in
+          _backward_cuda_graph_node for AOT Autograd wrapper integration.
+
+        After calling prescan_ir(), use the cuda_graphs_enabled property to
+        check if any CUDA graph nodes were found, or get_cuda_graph_node() to
+        retrieve a specific node.
 
         Call this method before calling ir.accept_all(visitor).
 
@@ -403,6 +517,13 @@ class PythonCodeGenVisitor(CodeGenVisitor):
                             self._has_inductor_backward_kernel = True
                         else:
                             self._has_inductor_kernel = True
+            elif isinstance(node, CUDAGraphSetupNode):
+                if node.phase == CUDAGraphPhase.INFERENCE:
+                    self._inference_cuda_graph_node = node
+                elif node.phase == CUDAGraphPhase.FORWARD:
+                    self._forward_cuda_graph_node = node
+                elif node.phase == CUDAGraphPhase.BACKWARD:
+                    self._backward_cuda_graph_node = node
 
     def requires_model_access(self, ir: "RuntimeWrapperIR") -> bool:
         """
@@ -459,6 +580,9 @@ class PythonCodeGenVisitor(CodeGenVisitor):
         access_code = self._generate_access_code(node)
         line = f"{node.name} = {access_code}"
         self._emitter.emit_line(line)
+        self._emit_debug_print(
+            f"Extracted {node.name}", node.name, f"{node.name}.shape"
+        )
         self._argument_names.append(node.name)
         return line
 
@@ -721,6 +845,11 @@ class PythonCodeGenVisitor(CodeGenVisitor):
         5. Compiled callables provided: Generate code that references external
            compiled callables (compiled_forward, compiled_backward).
 
+        When CUDA graphs are enabled for training (forward/backward phases), the
+        generated class uses CUDA graph capture and replay in both forward() and
+        backward() methods. Module-level variables are used to store the graph
+        state, static buffers, and captured flags.
+
         Args:
             node: The AOTAutogradWrapperNode to process
 
@@ -749,6 +878,12 @@ class PythonCodeGenVisitor(CodeGenVisitor):
             return comment
 
         self._emitter.add_import("import torch")
+
+        if self._forward_cuda_graph_node is not None:
+            self._emit_cuda_graph_state_variables(self._forward_cuda_graph_node)
+
+        if self._backward_cuda_graph_node is not None:
+            self._emit_cuda_graph_state_variables(self._backward_cuda_graph_node)
 
         forward_code = self._get_forward_code(node)
         backward_code = self._get_backward_code(node)
@@ -876,6 +1011,11 @@ class PythonCodeGenVisitor(CodeGenVisitor):
         self._emitter.emit_line("def forward(ctx, *args):")
         self._emitter.indent()
 
+        # Add debug print at function entry
+        if self._emit_debug_prints:
+            self._emitter.emit_line('print("[DEBUG] CompiledFunction.forward() called with:", "len(args)=", len(args))')
+            self._emitter.emit_line('print("[DEBUG] Args shapes:", [tuple(a.shape) if hasattr(a, "shape") else type(a) for a in args])')
+
         if node.saved_tensors_indices:
             indices_repr = repr(node.saved_tensors_indices)
             self._emitter.emit_comment(f"Save tensors at indices: {indices_repr}")
@@ -890,7 +1030,10 @@ class PythonCodeGenVisitor(CodeGenVisitor):
         )
         self._emitter.emit_line(f"ctx.num_inputs = {node.num_inputs}")
 
-        if forward_code:
+        if self._forward_cuda_graph_node is not None:
+            self._emitter.emit_blank_line()
+            self._emit_forward_cuda_graph_logic(self._forward_cuda_graph_node, node)
+        elif forward_code:
             self._emitter.emit_blank_line()
             self._emitter.emit_comment("Forward computation (from compiled graph):")
             for line in forward_code.strip().split("\n"):
@@ -912,9 +1055,13 @@ class PythonCodeGenVisitor(CodeGenVisitor):
                 self._emitter.emit_comment(
                     "saved_tensors are needed for backward. We save them here."
                 )
+                if self._emit_debug_prints:
+                    self._emitter.emit_line('print("[DEBUG] Calling compiled_fn with list(args), len=", len(args))')
                 self._emitter.emit_line(
                     f"_inductor_result = {self._compiled_fn_var_name}(list(args))"
                 )
+                if self._emit_debug_prints:
+                    self._emitter.emit_line('print("[DEBUG] compiled_fn returned _inductor_result, type=", type(_inductor_result), "len=", len(_inductor_result) if hasattr(_inductor_result, "__len__") else "N/A")')
                 self._emitter.emit_blank_line()
 
                 self._emitter.emit_comment(
@@ -995,6 +1142,10 @@ class PythonCodeGenVisitor(CodeGenVisitor):
         self._emitter.emit_line("def backward(ctx, *grad_outputs):")
         self._emitter.indent()
 
+        # Add debug print at backward entry
+        if self._emit_debug_prints:
+            self._emitter.emit_line('print("[DEBUG] CompiledFunction.backward() called with:", "len(grad_outputs)=", len(grad_outputs))')
+
         # If no backward kernel is available, emit a clear error message
         if not has_backward:
             self._emitter.emit_comment(
@@ -1026,7 +1177,9 @@ class PythonCodeGenVisitor(CodeGenVisitor):
         self._emitter.emit_line("num_inputs = ctx.num_inputs")
         self._emitter.emit_blank_line()
 
-        if self._has_inductor_backward_kernel:
+        if self._backward_cuda_graph_node is not None:
+            self._emit_backward_cuda_graph_logic(self._backward_cuda_graph_node, node)
+        elif self._has_inductor_backward_kernel:
             self._emitter.emit_comment(
                 "Backward computation via Inductor-compiled backward kernel."
             )
@@ -1042,12 +1195,16 @@ class PythonCodeGenVisitor(CodeGenVisitor):
                 "Prepare backward inputs: saved tensors followed by grad_outputs."
             )
             self._emitter.emit_line("backward_inputs = list(saved) + list(grad_outputs)")
+            if self._emit_debug_prints:
+                self._emitter.emit_line('print("[DEBUG] Calling compiled_fn_backward with backward_inputs, len=", len(backward_inputs))')
             self._emitter.emit_blank_line()
 
             self._emitter.emit_comment(
                 "Call the Inductor-compiled backward kernel."
             )
             self._emitter.emit_line("_bw_result = compiled_fn_backward(backward_inputs)")
+            if self._emit_debug_prints:
+                self._emitter.emit_line('print("[DEBUG] compiled_fn_backward returned, type=", type(_bw_result))')
             self._emitter.emit_blank_line()
 
             self._emitter.emit_comment(
@@ -1091,48 +1248,992 @@ class PythonCodeGenVisitor(CodeGenVisitor):
 
         self._emitter.dedent()
 
+    def _emit_cuda_graph_state_variables(
+        self,
+        cuda_node: CUDAGraphSetupNode,
+    ) -> None:
+        """
+        Emit module-level state variables for CUDA graph capture/replay.
+
+        When CUDA graphs are used with the AOT Autograd wrapper, we need
+        module-level variables to store the graph state, static buffers,
+        and a flag indicating whether the graph has been captured.
+
+        These variables are accessed via nonlocal declarations in the forward
+        and backward methods, allowing the graph state to persist across calls.
+
+        For forward graphs in training mode, we also emit a static saved tensors
+        variable that holds references to the saved_tensors at stable memory
+        addresses. This is critical because the backward graph needs to access
+        these tensors at the same addresses across replays.
+
+        The generated code structure:
+            # CUDA graph state for forward pass
+            _forward_graph = None
+            _forward_stream = None
+            _static_inputs_forward = None
+            _static_outputs_forward = None
+            _forward_captured = False
+            _static_saved_tensors_forward = None  # Only for forward in training
+
+        Args:
+            cuda_node: The CUDAGraphSetupNode containing the graph configuration
+        """
+        graph_id = cuda_node.graph_id
+        graph_var = f"_{graph_id}_graph"
+        stream_var = f"_{graph_id}_stream"
+        static_inputs_var = f"_static_inputs_{graph_id}"
+        static_outputs_var = f"_static_outputs_{graph_id}"
+        captured_flag_var = f"_{graph_id}_captured"
+
+        phase_name = "forward" if cuda_node.phase == CUDAGraphPhase.FORWARD else (
+            "backward" if cuda_node.phase == CUDAGraphPhase.BACKWARD else "inference"
+        )
+
+        self._emitter.emit_comment(
+            f"CUDA graph state variables for {phase_name} pass."
+        )
+        self._emitter.emit_comment(
+            "These are accessed via nonlocal in the forward/backward methods."
+        )
+        self._emitter.emit_line(f"{graph_var} = None")
+        self._emitter.emit_line(f"{stream_var} = None")
+        self._emitter.emit_line(f"{static_inputs_var} = None")
+        self._emitter.emit_line(f"{static_outputs_var} = None")
+        self._emitter.emit_line(f"{captured_flag_var} = False")
+
+        if cuda_node.phase == CUDAGraphPhase.FORWARD:
+            static_saved_tensors_var = f"_static_saved_tensors_{graph_id}"
+            self._emitter.emit_comment(
+                "Static saved tensors buffer for forward-backward communication."
+            )
+            self._emitter.emit_comment(
+                "The backward graph uses these instead of ctx.saved_tensors to"
+            )
+            self._emitter.emit_comment(
+                "ensure stable memory addresses across graph replays."
+            )
+            self._emitter.emit_line(f"{static_saved_tensors_var} = None")
+
+        self._emitter.emit_blank_line()
+
+    def _emit_static_buffer_allocation(
+        self,
+        num_inputs: int,
+        static_input_indices: list[int],
+        graph_id: str,
+    ) -> None:
+        """
+        Emit code to allocate static input buffers for CUDA graph capture.
+
+        CUDA graphs require that input tensors have stable memory addresses across
+        replays. This method generates code that:
+
+        1. Creates a list to hold static input buffers (_static_inputs)
+        2. Documents which indices are static (parameters/buffers) vs dynamic
+        3. The actual tensor allocation happens during warmup when we see real
+           tensor shapes and dtypes
+
+        Static inputs (parameters/buffers) are inputs whose memory addresses don't
+        change between calls. These don't need to be copied before replay because
+        they're already at stable addresses.
+
+        Dynamic inputs (user inputs like x) need to be copied into pre-allocated
+        static buffers before each graph replay, because the user may pass
+        different tensor objects with different memory addresses.
+
+        The generated code structure:
+            # Static buffer allocation for CUDA graph
+            _static_inputs_{graph_id} = [None] * {num_inputs}
+            _static_outputs_{graph_id} = None
+
+            # Static input indices (no copy needed): [0, 2]
+            # Dynamic input indices (copy before replay): [1, 3]
+
+        Args:
+            num_inputs: Total number of inputs to the compiled function
+            static_input_indices: List of indices for static inputs (parameters/buffers)
+            graph_id: Unique identifier for this CUDA graph (used in variable names)
+        """
+        static_inputs_var = f"_static_inputs_{graph_id}"
+        static_outputs_var = f"_static_outputs_{graph_id}"
+
+        dynamic_indices = [i for i in range(num_inputs) if i not in static_input_indices]
+
+        self._emitter.emit_comment("Static buffer allocation for CUDA graph capture.")
+        self._emitter.emit_comment(
+            "These buffers hold tensors with stable memory addresses for graph replay."
+        )
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_line(f"{static_inputs_var} = [None] * {num_inputs}")
+        self._emitter.emit_line(f"{static_outputs_var} = None")
+        self._emitter.emit_blank_line()
+
+        if static_input_indices:
+            self._emitter.emit_comment(
+                f"Static input indices (params/buffers, no copy needed): {static_input_indices}"
+            )
+        if dynamic_indices:
+            self._emitter.emit_comment(
+                f"Dynamic input indices (user inputs, copy before replay): {dynamic_indices}"
+            )
+
+        self._emitter.emit_blank_line()
+
+    def _emit_input_copy_logic(
+        self,
+        num_inputs: int,
+        static_input_indices: list[int],
+        graph_id: str,
+        inputs_var: str = "inputs",
+    ) -> None:
+        """
+        Emit code to copy dynamic inputs into static buffers before graph replay.
+
+        CUDA graphs require that input tensors have stable memory addresses across
+        replays. Static inputs (parameters/buffers) already have stable addresses,
+        but dynamic inputs (user-provided tensors like x) may have different memory
+        addresses on each call.
+
+        This method generates code that:
+        1. Iterates over dynamic input indices (not in static_input_indices)
+        2. Copies each dynamic input's data into the pre-allocated static buffer
+           using `.copy_()` which is an in-place operation that preserves the
+           destination tensor's memory address
+
+        The generated code structure:
+            # Copy dynamic inputs into static buffers for CUDA graph replay
+            _static_inputs_{graph_id}[1].copy_(inputs[1])
+            _static_inputs_{graph_id}[3].copy_(inputs[3])
+
+        Or for all dynamic inputs:
+            for _idx in [1, 3]:
+                _static_inputs_{graph_id}[_idx].copy_(inputs[_idx])
+
+        Args:
+            num_inputs: Total number of inputs to the compiled function
+            static_input_indices: List of indices for static inputs (parameters/buffers)
+                that don't need to be copied
+            graph_id: Unique identifier for this CUDA graph (used in variable names)
+            inputs_var: Name of the variable containing the input list/tuple
+        """
+        static_inputs_var = f"_static_inputs_{graph_id}"
+        dynamic_indices = [i for i in range(num_inputs) if i not in static_input_indices]
+
+        if not dynamic_indices:
+            self._emitter.emit_comment(
+                "No dynamic inputs to copy (all inputs are static parameters/buffers)."
+            )
+            return
+
+        self._emitter.emit_comment(
+            "Copy dynamic inputs into static buffers for CUDA graph replay."
+        )
+        self._emitter.emit_comment(
+            "Static inputs (parameters/buffers) retain stable memory addresses,"
+        )
+        self._emitter.emit_comment(
+            "but dynamic inputs must be copied to preserve graph correctness."
+        )
+        self._emitter.emit_blank_line()
+
+        if len(dynamic_indices) <= 3:
+            for idx in dynamic_indices:
+                self._emitter.emit_line(
+                    f"{static_inputs_var}[{idx}].copy_({inputs_var}[{idx}])"
+                )
+        else:
+            self._emitter.emit_line(f"for _idx in {dynamic_indices}:")
+            self._emitter.indent()
+            self._emitter.emit_line(
+                f"{static_inputs_var}[_idx].copy_({inputs_var}[_idx])"
+            )
+            self._emitter.dedent()
+
+        self._emitter.emit_blank_line()
+
+    def _emit_forward_cuda_graph_logic(
+        self,
+        cuda_node: CUDAGraphSetupNode,
+        aot_node: AOTAutogradWrapperNode,
+    ) -> None:
+        """
+        Emit CUDA graph capture and replay logic for the forward method.
+
+        When CUDA graphs are enabled for training mode, the forward method needs to:
+        1. Check if the graph has been captured (using a class-level flag)
+        2. On first call: allocate static buffers, run warmup, capture the graph
+        3. On subsequent calls: copy dynamic inputs and replay the graph
+        4. Handle saved_tensors by storing them in static buffers that persist
+           between forward and backward
+
+        This generates code that manages the graph capture state using a nonlocal
+        variable that persists across method calls. The static buffers for inputs
+        and outputs are stored at module level so they can be accessed by both
+        forward and backward methods.
+
+        For training with backward pass, the saved tensors are stored in a static
+        buffer (_static_saved_tensors_{graph_id}) that the backward graph uses
+        instead of ctx.saved_tensors. This ensures stable memory addresses across
+        graph replays.
+
+        Args:
+            cuda_node: The CUDAGraphSetupNode for the forward pass
+            aot_node: The AOTAutogradWrapperNode for context
+        """
+        graph_id = cuda_node.graph_id
+        graph_var = f"_{graph_id}_graph"
+        stream_var = f"_{graph_id}_stream"
+        static_inputs_var = f"_static_inputs_{graph_id}"
+        static_outputs_var = f"_static_outputs_{graph_id}"
+        captured_flag_var = f"_{graph_id}_captured"
+        static_saved_tensors_var = f"_static_saved_tensors_{graph_id}"
+
+        self._emitter.emit_comment(
+            "CUDA graph forward pass with capture/replay optimization."
+        )
+        self._emitter.emit_comment(
+            "On first call: warmup, capture. On subsequent calls: replay."
+        )
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_comment(
+            "Declare global references to module-level graph state."
+        )
+        self._emitter.emit_comment(
+            "These variables persist across method calls to enable graph replay."
+        )
+        nonlocal_vars = f"{graph_var}, {stream_var}, {static_inputs_var}, {static_outputs_var}, {captured_flag_var}"
+        if self._has_inductor_backward_kernel:
+            nonlocal_vars += f", {static_saved_tensors_var}"
+        self._emitter.emit_line(f"global {nonlocal_vars}")
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_line(f"if not {captured_flag_var}:")
+        self._emitter.indent()
+
+        self._emitter.emit_comment(
+            "First call: Initialize graph, run warmup, then capture."
+        )
+        self._emitter.emit_line(f"{graph_var} = torch.cuda.CUDAGraph()")
+        self._emitter.emit_line(f"{stream_var} = torch.cuda.Stream()")
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_comment(
+            "Allocate static input buffers by cloning current inputs."
+        )
+        self._emitter.emit_line(
+            f"{static_inputs_var} = [t.clone() if isinstance(t, torch.Tensor) else t for t in args]"
+        )
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_comment(
+            "Warmup run on a separate stream to populate buffers."
+        )
+        self._emitter.emit_line(f"with torch.cuda.stream({stream_var}):")
+        self._emitter.indent()
+        self._emitter.emit_line(f"for _warmup_iter in range({cuda_node.warmup_runs}):")
+        self._emitter.indent()
+
+        if self._has_inductor_kernel:
+            self._emitter.emit_line(
+                f"_warmup_result = {self._compiled_fn_var_name}(list({static_inputs_var}))"
+            )
+        else:
+            self._emitter.emit_line(
+                f"_warmup_result = {self._compiled_fn_var_name}(*{static_inputs_var})"
+            )
+        self._emitter.dedent()
+        self._emitter.dedent()
+
+        self._emitter.emit_line(f"torch.cuda.current_stream().wait_stream({stream_var})")
+        self._emitter.emit_blank_line()
+
+        pool_arg = ""
+        if cuda_node.pool_id is not None:
+            pool_var = f"_{graph_id}_pool"
+            self._emitter.emit_line(f"{pool_var} = torch.cuda.graph_pool_handle()")
+            pool_arg = f", pool={pool_var}"
+
+        self._emitter.emit_comment("Capture the forward graph.")
+        self._emitter.emit_line(
+            f"with torch.cuda.graph({graph_var}, stream={stream_var}{pool_arg}):"
+        )
+        self._emitter.indent()
+
+        if self._has_inductor_kernel:
+            self._emitter.emit_line(
+                f"{static_outputs_var} = {self._compiled_fn_var_name}(list({static_inputs_var}))"
+            )
+        else:
+            self._emitter.emit_line(
+                f"{static_outputs_var} = {self._compiled_fn_var_name}(*{static_inputs_var})"
+            )
+
+        self._emitter.dedent()
+        self._emitter.emit_line(f"{captured_flag_var} = True")
+
+        if self._has_inductor_backward_kernel:
+            self._emitter.emit_blank_line()
+            self._emitter.emit_comment(
+                "Store saved tensors in static buffer for backward graph."
+            )
+            self._emitter.emit_comment(
+                "The backward graph will use these static references instead of"
+            )
+            self._emitter.emit_comment(
+                "ctx.saved_tensors to ensure stable memory addresses on replay."
+            )
+            self._emitter.emit_line(f"if isinstance({static_outputs_var}, (tuple, list)) and len({static_outputs_var}) > 1:")
+            self._emitter.indent()
+            self._emitter.emit_line(f"{static_saved_tensors_var} = list({static_outputs_var}[1:])")
+            self._emitter.dedent()
+            self._emitter.emit_line("else:")
+            self._emitter.indent()
+            self._emitter.emit_line(f"{static_saved_tensors_var} = []")
+            self._emitter.dedent()
+
+        self._emitter.dedent()  # End if not captured
+
+        self._emitter.emit_line("else:")
+        self._emitter.indent()
+        self._emitter.emit_comment("Graph already captured - copy dynamic inputs and replay.")
+
+        dynamic_indices = [
+            i for i in range(aot_node.num_inputs)
+            if i not in cuda_node.static_input_indices
+        ]
+
+        if dynamic_indices:
+            if len(dynamic_indices) <= 3:
+                for idx in dynamic_indices:
+                    self._emitter.emit_line(
+                        f"{static_inputs_var}[{idx}].copy_(args[{idx}])"
+                    )
+            else:
+                self._emitter.emit_line(f"for _idx in {dynamic_indices}:")
+                self._emitter.indent()
+                self._emitter.emit_line(
+                    f"{static_inputs_var}[_idx].copy_(args[_idx])"
+                )
+                self._emitter.dedent()
+        else:
+            self._emitter.emit_comment("No dynamic inputs to copy.")
+
+        self._emitter.emit_blank_line()
+        self._emitter.emit_line(f"{graph_var}.replay()")
+        if cuda_node.force_cudagraph_sync:
+            self._emitter.emit_line("torch.cuda.synchronize()")
+        self._emitter.dedent()  # End else
+
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_comment(
+            "Extract output from static_outputs and handle saved tensors."
+        )
+        if self._has_inductor_backward_kernel:
+            self._emitter.emit_comment(
+                "For training: also call save_for_backward with static saved tensors."
+            )
+            self._emitter.emit_comment(
+                "This allows ctx.saved_tensors to work, but backward graph uses"
+            )
+            self._emitter.emit_comment(
+                "the static buffer directly for stable memory addresses."
+            )
+            self._emitter.emit_line(f"if {static_saved_tensors_var}:")
+            self._emitter.indent()
+            self._emitter.emit_line(f"ctx.save_for_backward(*{static_saved_tensors_var})")
+            self._emitter.dedent()
+            self._emitter.emit_line(f"return {static_outputs_var}[0]")
+        else:
+            if self._inductor_returns_tuple and self._has_inductor_kernel:
+                self._emitter.emit_line(f"return {static_outputs_var}[0]")
+            else:
+                self._emitter.emit_line(f"return {static_outputs_var}")
+
+    def _emit_backward_cuda_graph_logic(
+        self,
+        cuda_node: CUDAGraphSetupNode,
+        aot_node: AOTAutogradWrapperNode,
+    ) -> None:
+        """
+        Emit CUDA graph capture and replay logic for the backward method.
+
+        Similar to forward, but operates on saved tensors and grad_outputs.
+        The backward graph is captured separately from forward and uses its
+        own static buffers for inputs (saved_tensors + grad_outputs) and
+        outputs (gradients).
+
+        For proper CUDA graph integration with saved_tensors:
+        1. The saved tensors are accessed from the forward graph's static
+           saved tensors buffer (_static_saved_tensors_forward), not from
+           ctx.saved_tensors. This ensures stable memory addresses.
+        2. On first call: allocate static buffers for grad_outputs only
+           (saved tensors are already static from forward)
+        3. On replay: only copy grad_outputs into static buffers, not saved
+           tensors (they're already at stable addresses from forward graph)
+
+        Args:
+            cuda_node: The CUDAGraphSetupNode for the backward pass
+            aot_node: The AOTAutogradWrapperNode for context
+        """
+        graph_id = cuda_node.graph_id
+        graph_var = f"_{graph_id}_graph"
+        stream_var = f"_{graph_id}_stream"
+        static_inputs_var = f"_static_inputs_{graph_id}"
+        static_outputs_var = f"_static_outputs_{graph_id}"
+        captured_flag_var = f"_{graph_id}_captured"
+
+        forward_graph_id = self._forward_cuda_graph_node.graph_id if self._forward_cuda_graph_node else "forward"
+        static_saved_tensors_var = f"_static_saved_tensors_{forward_graph_id}"
+
+        self._emitter.emit_comment(
+            "CUDA graph backward pass with capture/replay optimization."
+        )
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_comment(
+            "Declare global references to module-level graph state."
+        )
+        self._emitter.emit_comment(
+            "Note: We also reference the forward's static_saved_tensors for"
+        )
+        self._emitter.emit_comment(
+            "stable memory addresses between forward and backward graphs."
+        )
+        self._emitter.emit_line(f"global {graph_var}, {stream_var}, {static_inputs_var}, {static_outputs_var}, {captured_flag_var}, {static_saved_tensors_var}")
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_comment(
+            "Prepare backward inputs using STATIC saved tensors from forward."
+        )
+        self._emitter.emit_comment(
+            "Using static saved tensors ensures stable memory addresses across"
+        )
+        self._emitter.emit_comment(
+            "graph replays. ctx.saved_tensors would give different addresses."
+        )
+        self._emitter.emit_line(f"_static_saved = {static_saved_tensors_var} if {static_saved_tensors_var} else list(saved)")
+        self._emitter.emit_line("backward_inputs = list(_static_saved) + list(grad_outputs)")
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_line(f"if not {captured_flag_var}:")
+        self._emitter.indent()
+
+        self._emitter.emit_comment(
+            "First backward call: Initialize graph, warmup, and capture."
+        )
+        self._emitter.emit_line(f"{graph_var} = torch.cuda.CUDAGraph()")
+        self._emitter.emit_line(f"{stream_var} = torch.cuda.Stream()")
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_comment(
+            "Allocate static input buffers for backward."
+        )
+        self._emitter.emit_comment(
+            "For saved tensors, we use the static references directly."
+        )
+        self._emitter.emit_comment(
+            "For grad_outputs, we clone to create static buffers."
+        )
+        self._emitter.emit_line(
+            f"{static_inputs_var} = list(_static_saved) + [t.clone() if isinstance(t, torch.Tensor) else t for t in grad_outputs]"
+        )
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_comment("Warmup run for backward graph.")
+        self._emitter.emit_line(f"with torch.cuda.stream({stream_var}):")
+        self._emitter.indent()
+        self._emitter.emit_line(f"for _warmup_iter in range({cuda_node.warmup_runs}):")
+        self._emitter.indent()
+        self._emitter.emit_line(
+            f"_bw_warmup = compiled_fn_backward({static_inputs_var})"
+        )
+        self._emitter.dedent()
+        self._emitter.dedent()
+
+        self._emitter.emit_line(f"torch.cuda.current_stream().wait_stream({stream_var})")
+        self._emitter.emit_blank_line()
+
+        pool_arg = ""
+        if cuda_node.pool_id is not None:
+            pool_var = f"_{graph_id}_pool"
+            self._emitter.emit_line(f"{pool_var} = torch.cuda.graph_pool_handle()")
+            pool_arg = f", pool={pool_var}"
+
+        self._emitter.emit_comment("Capture the backward graph.")
+        self._emitter.emit_line(
+            f"with torch.cuda.graph({graph_var}, stream={stream_var}{pool_arg}):"
+        )
+        self._emitter.indent()
+        self._emitter.emit_line(
+            f"{static_outputs_var} = compiled_fn_backward({static_inputs_var})"
+        )
+        self._emitter.dedent()
+        self._emitter.emit_line(f"{captured_flag_var} = True")
+        self._emitter.dedent()  # End if not captured
+
+        self._emitter.emit_line("else:")
+        self._emitter.indent()
+        self._emitter.emit_comment(
+            "Graph already captured - copy only grad_outputs and replay."
+        )
+        self._emitter.emit_comment(
+            "Saved tensors are already at static addresses from forward graph,"
+        )
+        self._emitter.emit_comment(
+            "so we only need to copy the grad_outputs into static buffers."
+        )
+
+        self._emitter.emit_line(f"_num_saved = len(_static_saved)")
+        self._emitter.emit_line("for _idx, _grad in enumerate(grad_outputs):")
+        self._emitter.indent()
+        self._emitter.emit_line(
+            f"if isinstance(_grad, torch.Tensor):"
+        )
+        self._emitter.indent()
+        self._emitter.emit_line(
+            f"{static_inputs_var}[_num_saved + _idx].copy_(_grad)"
+        )
+        self._emitter.dedent()
+        self._emitter.dedent()
+
+        self._emitter.emit_blank_line()
+        self._emitter.emit_line(f"{graph_var}.replay()")
+        if cuda_node.force_cudagraph_sync:
+            self._emitter.emit_line("torch.cuda.synchronize()")
+        self._emitter.dedent()  # End else
+
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_comment(
+            "Return gradients from static outputs."
+        )
+        self._emitter.emit_line("if isinstance({}, (tuple, list)) and len({}) > 0:".format(
+            static_outputs_var, static_outputs_var
+        ))
+        self._emitter.indent()
+        self._emitter.emit_line("if isinstance({}[0], (tuple, list)):".format(static_outputs_var))
+        self._emitter.indent()
+        self._emitter.emit_line(f"return {static_outputs_var}[0]")
+        self._emitter.dedent()
+        self._emitter.emit_line(f"return {static_outputs_var}")
+        self._emitter.dedent()
+        self._emitter.emit_line(f"return {static_outputs_var}")
+
+    def _emit_replay_wrapper_function(
+        self,
+        node: CUDAGraphSetupNode,
+        replay_fn_name: str,
+        graph_var: str,
+        static_inputs_var: str,
+        static_outputs_var: str,
+    ) -> None:
+        """
+        Emit a replay wrapper function that replays the captured CUDA graph.
+
+        The generated function:
+        1. Copies dynamic inputs into pre-allocated static buffers (parameters/
+           buffers with stable addresses don't need copying)
+        2. Replays the captured CUDA graph
+        3. Returns the static output tensors
+
+        When skip_dynamic_graphs is True, the function also:
+        4. Checks if input shapes match the shapes seen during graph capture
+        5. Falls back to direct function call if shapes differ
+
+        This replay function becomes the callable that should be used instead of
+        the original compiled function when CUDA graphs are enabled. The graph
+        replay is much faster than re-executing the operations because the GPU
+        command stream is pre-recorded.
+
+        Generated code structure:
+            def _replay_{graph_id}(inputs):
+                # [If skip_dynamic_graphs=True] Check shapes match expected
+                # Copy dynamic inputs into static buffers for CUDA graph replay.
+                # Static inputs (parameters/buffers) retain stable memory addresses,
+                # but dynamic inputs must be copied to preserve graph correctness.
+
+                _static_inputs_{graph_id}[1].copy_(inputs[1])
+
+                # Replay the captured CUDA graph. This executes all the GPU
+                # operations that were recorded during graph capture, using
+                # the static buffers for inputs and outputs.
+                _{graph_id}_graph.replay()
+
+                return _static_outputs_{graph_id}
+
+        Args:
+            node: The CUDAGraphSetupNode being processed
+            replay_fn_name: Name for the generated replay function
+            graph_var: Variable name holding the CUDAGraph object
+            static_inputs_var: Variable name for static inputs list
+            static_outputs_var: Variable name for static outputs
+        """
+        num_inputs = len(self._argument_names) if self._argument_names else 0
+
+        expected_shapes_var = f"_expected_shapes_{node.graph_id}"
+        if node.skip_dynamic_graphs:
+            self._emitter.emit_comment(
+                "Record expected input shapes for dynamic shape checking."
+            )
+            self._emitter.emit_comment(
+                "CUDA graphs require fixed tensor shapes, so we record the shapes"
+            )
+            self._emitter.emit_comment(
+                "seen during capture and fall back to direct execution if they differ."
+            )
+            self._emitter.emit_line(
+                f"{expected_shapes_var} = [t.shape if hasattr(t, 'shape') else None "
+                f"for t in {static_inputs_var}]"
+            )
+            self._emitter.emit_blank_line()
+
+        self._emitter.emit_comment(
+            "Define the replay function that will be called instead of the"
+        )
+        self._emitter.emit_comment(
+            "original compiled function. Graph replay is much faster because"
+        )
+        self._emitter.emit_comment(
+            "the GPU command stream is pre-recorded."
+        )
+
+        self._emitter.emit_line(f"def {replay_fn_name}(inputs):")
+        self._emitter.indent()
+
+        if node.skip_dynamic_graphs:
+            self._emitter.emit_comment(
+                "Check if input shapes match the shapes seen during graph capture."
+            )
+            self._emitter.emit_comment(
+                "CUDA graphs require fixed tensor shapes, so we fall back to"
+            )
+            self._emitter.emit_comment(
+                "direct function execution if any shapes differ."
+            )
+            self._emitter.emit_line(
+                f"_shapes_match = all("
+            )
+            self._emitter.indent()
+            self._emitter.emit_line(
+                f"(not hasattr(inputs[i], 'shape') and {expected_shapes_var}[i] is None) or "
+            )
+            self._emitter.emit_line(
+                f"(hasattr(inputs[i], 'shape') and inputs[i].shape == {expected_shapes_var}[i])"
+            )
+            self._emitter.dedent()
+            self._emitter.emit_line(
+                f"for i in range(len(inputs))"
+            )
+            self._emitter.emit_line(")")
+            self._emitter.emit_blank_line()
+            self._emitter.emit_line("if not _shapes_match:")
+            self._emitter.indent()
+            self._emitter.emit_comment(
+                "Shapes differ from graph capture - fall back to direct execution."
+            )
+            self._emitter.emit_comment(
+                "This is slower but handles dynamic shapes correctly."
+            )
+            self._emitter.emit_line(
+                f"return {self._compiled_fn_var_name}(inputs)"
+            )
+            self._emitter.dedent()
+            self._emitter.emit_blank_line()
+
+        dynamic_indices = [
+            i for i in range(num_inputs)
+            if i not in node.static_input_indices
+        ]
+
+        if dynamic_indices:
+            self._emitter.emit_comment(
+                "Copy dynamic inputs into static buffers for CUDA graph replay."
+            )
+            self._emitter.emit_comment(
+                "Static inputs (parameters/buffers) retain stable memory addresses,"
+            )
+            self._emitter.emit_comment(
+                "but dynamic inputs must be copied to preserve graph correctness."
+            )
+            self._emitter.emit_blank_line()
+
+            if len(dynamic_indices) <= 3:
+                for idx in dynamic_indices:
+                    self._emitter.emit_line(
+                        f"{static_inputs_var}[{idx}].copy_(inputs[{idx}])"
+                    )
+            else:
+                self._emitter.emit_line(f"for _idx in {dynamic_indices}:")
+                self._emitter.indent()
+                self._emitter.emit_line(
+                    f"{static_inputs_var}[_idx].copy_(inputs[_idx])"
+                )
+                self._emitter.dedent()
+
+            self._emitter.emit_blank_line()
+        else:
+            self._emitter.emit_comment(
+                "No dynamic inputs to copy (all inputs are static parameters/buffers)."
+            )
+            self._emitter.emit_blank_line()
+
+        self._emitter.emit_comment(
+            "Replay the captured CUDA graph. This executes all the GPU"
+        )
+        self._emitter.emit_comment(
+            "operations that were recorded during graph capture, using"
+        )
+        self._emitter.emit_comment(
+            "the static buffers for inputs and outputs."
+        )
+        self._emitter.emit_line(f"{graph_var}.replay()")
+
+        if node.force_cudagraph_sync:
+            self._emitter.emit_blank_line()
+            self._emitter.emit_comment(
+                "Force synchronization after graph replay for debugging."
+            )
+            self._emitter.emit_comment(
+                "This ensures all GPU operations complete before returning,"
+            )
+            self._emitter.emit_comment(
+                "which is useful for timing, profiling, or debugging scenarios."
+            )
+            self._emitter.emit_line("torch.cuda.synchronize()")
+
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_line(f"return {static_outputs_var}")
+        self._emitter.dedent()
+
+        self._emitter.emit_blank_line()
+
     def visit_cuda_graph_setup(self, node: CUDAGraphSetupNode) -> str:
         """
         Generate code for CUDA graph capture and replay setup.
+
+        This method generates executable Python code that:
+        1. Creates a CUDA graph object and optional stream
+        2. Allocates static input/output buffers
+        3. Performs warmup runs to populate buffers with realistic values
+        4. Captures GPU operations into the CUDA graph
+
+        The generated warmup code runs on a dedicated CUDA stream to ensure
+        isolation from any concurrent GPU work. The warmup runs execute the
+        compiled function to populate static buffers before graph capture.
+
+        Note: FORWARD and BACKWARD phase nodes are handled by the AOT Autograd
+        wrapper (visit_aot_autograd_wrapper) and should not be processed here.
+        These nodes integrate CUDA graph capture/replay into the forward() and
+        backward() methods of the generated CompiledFunction class.
 
         Args:
             node: The CUDAGraphSetupNode to process
 
         Returns:
-            The generated CUDA graph setup code
+            The generated CUDA graph setup code, or empty string for
+            FORWARD/BACKWARD nodes which are handled by AOT wrapper
         """
+        # FORWARD and BACKWARD phase nodes are processed by visit_aot_autograd_wrapper,
+        # not here. These nodes represent training CUDA graphs that need to be
+        # integrated into the CompiledFunction's forward/backward methods.
+        if node.phase in (CUDAGraphPhase.FORWARD, CUDAGraphPhase.BACKWARD):
+            return ""
+
         if not self._has_emitted_cuda_section:
             self._emitter.emit_section_header("CUDA Graphs Setup")
             self._has_emitted_cuda_section = True
 
         self._emitter.add_import("import torch")
 
-        lines = []
+        graph_var = f"_{node.graph_id}_graph"
+        stream_var = f"_{node.graph_id}_stream"
+        static_inputs_var = f"_static_inputs_{node.graph_id}"
+        static_outputs_var = f"_static_outputs_{node.graph_id}"
 
-        self._emitter.emit_line(f"# CUDA Graph ID: {node.graph_id}")
-        self._emitter.emit_line(f"# Warmup runs: {node.warmup_runs}")
-        self._emitter.emit_line(f"# Capture mode: {node.capture_mode}")
+        self._emitter.emit_comment(f"CUDA Graph ID: {node.graph_id}")
+        self._emitter.emit_comment(f"Warmup runs: {node.warmup_runs}")
+        self._emitter.emit_comment(f"Capture mode: {node.capture_mode}")
+        self._emitter.emit_blank_line()
 
-        graph_var = f"{node.graph_id}_graph"
+        if node.device_index is not None:
+            self._emitter.emit_comment(
+                "Set the CUDA device for multi-GPU scenarios."
+            )
+            self._emitter.emit_comment(
+                "CUDA graph capture and replay must occur on the same device."
+            )
+            self._emitter.emit_comment(
+                f"This ensures all operations are captured on device {node.device_index}."
+            )
+            self._emitter.emit_line(f"torch.cuda.set_device({node.device_index})")
+            self._emitter.emit_blank_line()
+
+        self._emitter.emit_comment(
+            "Create CUDA graph object that will hold the captured operations."
+        )
         self._emitter.emit_line(f"{graph_var} = torch.cuda.CUDAGraph()")
-
-        if node.stream_name != "default":
-            stream_var = f"{node.graph_id}_stream"
-            self._emitter.emit_line(f"{stream_var} = torch.cuda.Stream()")
-
         self._emitter.emit_blank_line()
-        self._emitter.emit_line(f"# Warmup runs for {node.graph_id}")
-        self._emitter.emit_line(f"for _ in range({node.warmup_runs}):")
+
+        self._emitter.emit_comment(
+            "Create a dedicated stream for warmup and capture."
+        )
+        self._emitter.emit_comment(
+            "Using a separate stream ensures isolation from concurrent GPU work."
+        )
+        self._emitter.emit_line(f"{stream_var} = torch.cuda.Stream()")
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_comment(
+            "Static buffer allocation for CUDA graph capture."
+        )
+        self._emitter.emit_comment(
+            "These buffers hold tensors with stable memory addresses for graph replay."
+        )
+        self._emitter.emit_comment(
+            "During warmup, we'll populate these with actual tensor allocations."
+        )
+        self._emitter.emit_line(f"{static_inputs_var} = None")
+        self._emitter.emit_line(f"{static_outputs_var} = None")
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_comment(
+            "Warmup runs: Execute the compiled function to populate static buffers."
+        )
+        self._emitter.emit_comment(
+            "Warmup is necessary because CUDA graphs capture memory operations,"
+        )
+        self._emitter.emit_comment(
+            "so we need buffers to be allocated before capture."
+        )
+        self._emitter.emit_comment(
+            "Use no_grad() since Inductor kernels use out= ops that don't support autograd."
+        )
+        self._emitter.emit_line("with torch.no_grad():")
         self._emitter.indent()
-        self._emitter.emit_line("pass  # Warmup would invoke compiled function here")
+        self._emitter.emit_line(f"with torch.cuda.stream({stream_var}):")
+        self._emitter.indent()
+
+        self._emitter.emit_line(f"for _warmup_iter in range({node.warmup_runs}):")
+        self._emitter.indent()
+
+        self._emitter.emit_comment(
+            "On first warmup iteration, allocate static input buffers"
+        )
+        self._emitter.emit_comment(
+            "by cloning the original inputs. This ensures buffers have"
+        )
+        self._emitter.emit_comment(
+            "the correct shape, dtype, and device."
+        )
+        self._emitter.emit_line(f"if {static_inputs_var} is None:")
+        self._emitter.indent()
+
+        args_list = ", ".join(self._argument_names) if self._argument_names else ""
+        if args_list:
+            self._emitter.emit_line(
+                f"{static_inputs_var} = [t.clone() if isinstance(t, torch.Tensor) else t "
+                f"for t in [{args_list}]]"
+            )
+        else:
+            self._emitter.emit_comment(
+                "No arguments captured - static_inputs will be set by caller"
+            )
+            self._emitter.emit_line(f"{static_inputs_var} = []")
+
         self._emitter.dedent()
 
         self._emitter.emit_blank_line()
-        self._emitter.emit_line("# Capture the CUDA graph")
-        self._emitter.emit_line(f"with torch.cuda.graph({graph_var}):")
-        self._emitter.indent()
-        self._emitter.emit_line("pass  # Graph capture would happen here")
+        self._emitter.emit_comment("Execute compiled function during warmup")
+        # NOTE: compiled_fn mutates (clears) its input list. Make a shallow copy so
+        # _static_inputs_* retains the original Tensor references across warmup and
+        # capture.
+        self._emitter.emit_line(
+            f"{static_outputs_var} = {self._compiled_fn_var_name}(list({static_inputs_var}))"
+        )
+
         self._emitter.dedent()
+        self._emitter.dedent()
+        self._emitter.dedent()
+
+        self._emitter.emit_blank_line()
+        self._emitter.emit_comment("Synchronize to ensure warmup is complete before capture")
+        self._emitter.emit_line("torch.cuda.current_stream().wait_stream(" + stream_var + ")")
+
+        self._emitter.emit_blank_line()
+
+        pool_var = None
+        if node.pool_id is not None:
+            pool_var = f"_{node.graph_id}_pool"
+            self._emitter.emit_comment(
+                "Get a memory pool handle for deterministic graph memory allocation."
+            )
+            self._emitter.emit_comment(
+                "Using a pool ensures consistent memory addresses across graph replays"
+            )
+            self._emitter.emit_comment(
+                "and enables memory sharing between graphs using the same pool."
+            )
+            self._emitter.emit_line(f"{pool_var} = torch.cuda.graph_pool_handle()")
+            self._emitter.emit_blank_line()
+
+        self._emitter.emit_comment(
+            "Capture the CUDA graph. All GPU operations inside this context"
+        )
+        self._emitter.emit_comment(
+            "are recorded into the graph rather than executed immediately."
+        )
+        self._emitter.emit_comment(
+            "The captured graph can then be replayed efficiently."
+        )
+        self._emitter.emit_comment(
+            "Use no_grad() since Inductor kernels use out= ops that don't support autograd."
+        )
+        self._emitter.emit_line("with torch.no_grad():")
+        self._emitter.indent()
+        if pool_var is not None:
+            self._emitter.emit_line(
+                f"with torch.cuda.graph({graph_var}, stream={stream_var}, pool={pool_var}):"
+            )
+        else:
+            self._emitter.emit_line(f"with torch.cuda.graph({graph_var}, stream={stream_var}):")
+        self._emitter.indent()
+
+        self._emitter.emit_comment(
+            "Execute the compiled function to capture its GPU operations."
+        )
+        self._emitter.emit_comment(
+            "The static_outputs will hold references to the output tensors"
+        )
+        self._emitter.emit_comment(
+            "whose memory addresses are stable across replays."
+        )
+        # NOTE: compiled_fn mutates (clears) its input list. Make a shallow copy so
+        # _static_inputs_* retains the original Tensor references for replay.
+        self._emitter.emit_line(
+            f"{static_outputs_var} = {self._compiled_fn_var_name}(list({static_inputs_var}))"
+        )
+
+        self._emitter.dedent()
+        self._emitter.dedent()
+
+        self._emitter.emit_blank_line()
+
+        replay_fn_name = f"_replay_{node.graph_id}"
+        self._emit_replay_wrapper_function(
+            node=node,
+            replay_fn_name=replay_fn_name,
+            graph_var=graph_var,
+            static_inputs_var=static_inputs_var,
+            static_outputs_var=static_outputs_var,
+        )
+
+        self._cuda_graph_replay_fn = replay_fn_name
+        self._cuda_graph_static_outputs_var = static_outputs_var
 
         return f"CUDA Graph: {node.graph_id}"
 
@@ -1147,6 +2248,10 @@ class PythonCodeGenVisitor(CodeGenVisitor):
         or:
             _raw_result = compiled_fn([arg1, arg2])
             result = _raw_result[0]
+
+        When CUDA graphs are enabled (indicated by _cuda_graph_replay_fn being set),
+        the invocation is replaced with a call to the replay function:
+            result = _replay_graph_id([arg1, arg2, arg3])
 
         If node.args_as_list is True, arguments are wrapped in a list.
         This is needed for Inductor's call() function which takes a
@@ -1167,6 +2272,47 @@ class PythonCodeGenVisitor(CodeGenVisitor):
 
         args_str = ", ".join(node.argument_names)
 
+        if self._cuda_graph_replay_fn is not None:
+            args_call = f"[{args_str}]"
+            self._emitter.emit_comment(
+                "CUDA graphs are enabled - use the replay function instead of"
+            )
+            self._emitter.emit_comment(
+                "calling the compiled function directly. The replay function copies"
+            )
+            self._emitter.emit_comment(
+                "dynamic inputs into static buffers and replays the captured graph."
+            )
+            needs_extract = node.extract_first_output or (
+                self._has_inductor_kernel and self._inductor_returns_tuple
+            )
+
+            raw_result_name = node.result_name
+            if needs_extract:
+                raw_result_name = "_raw_result"
+
+            if self._emit_debug_prints:
+                self._emitter.emit_line(
+                    f'print("[DEBUG] Invoking CUDA graph replay: '
+                    f'{self._cuda_graph_replay_fn}({args_call})")'
+                )
+            line = f"{raw_result_name} = {self._cuda_graph_replay_fn}({args_call})"
+            self._emitter.emit_line(line)
+
+            if needs_extract:
+                self._emitter.emit_comment(
+                    "Inductor returns (output, saved_tensors...), extract output"
+                )
+                extract_line = f"{node.result_name} = {raw_result_name}[0]"
+                self._emitter.emit_line(extract_line)
+            if self._emit_debug_prints:
+                self._emitter.emit_line(
+                    f'print("[DEBUG] {node.result_name}=", '
+                    f'{node.result_name}.shape if hasattr({node.result_name}, "shape") '
+                    f"else type({node.result_name}))"
+                )
+            return line
+
         if node.is_autograd_function:
             callable_name = "callable"
         else:
@@ -1179,17 +2325,27 @@ class PythonCodeGenVisitor(CodeGenVisitor):
 
         if node.extract_first_output:
             raw_result_name = "_raw_result"
+            if self._emit_debug_prints:
+                self._emitter.emit_line(f'print("[DEBUG] Invoking {callable_name}({args_call})")')
             line = f"{raw_result_name} = {callable_name}({args_call})"
             self._emitter.emit_line(line)
+            if self._emit_debug_prints:
+                self._emitter.emit_line(f'print("[DEBUG] {raw_result_name}=", type({raw_result_name}), "len=", len({raw_result_name}) if hasattr({raw_result_name}, "__len__") else "N/A")')
             self._emitter.emit_comment(
                 "Inductor returns (output, saved_tensors...), extract output"
             )
             extract_line = f"{node.result_name} = {raw_result_name}[0]"
             self._emitter.emit_line(extract_line)
+            if self._emit_debug_prints:
+                self._emitter.emit_line(f'print("[DEBUG] {node.result_name}=", {node.result_name}.shape if hasattr({node.result_name}, "shape") else type({node.result_name}))')
             return extract_line
         else:
+            if self._emit_debug_prints:
+                self._emitter.emit_line(f'print("[DEBUG] Invoking {callable_name}({args_call})")')
             line = f"{node.result_name} = {callable_name}({args_call})"
             self._emitter.emit_line(line)
+            if self._emit_debug_prints:
+                self._emitter.emit_line(f'print("[DEBUG] {node.result_name}=", {node.result_name}.shape if hasattr({node.result_name}, "shape") else type({node.result_name}))')
             return line
 
     def visit_kernel_load(self, node: KernelLoadNode) -> str:
@@ -1753,6 +2909,12 @@ class PythonCodeGenVisitor(CodeGenVisitor):
             line = f"# Result is already available as '{node.expose_as}'"
             self._emitter.emit_line(line)
 
+        self._emit_debug_print(
+            f"Final result {node.expose_as}",
+            node.expose_as,
+            f"{node.expose_as}.shape if hasattr({node.expose_as}, 'shape') else type({node.expose_as})",
+        )
+
         if self._expose_result_in_locals:
             self._emitter.emit_comment(
                 "Write result to f_locals for exec() compatibility."
@@ -2007,6 +3169,7 @@ def generate_python_code(
     expose_result_in_locals: bool = True,
     expose_result_in_globals: bool = False,
     model_source: ModelSource = ModelSource.CLOSURE,
+    emit_debug_prints: bool = False,
 ) -> str:
     """
     Generate Python source code from a RuntimeWrapperIR.
@@ -2048,6 +3211,8 @@ def generate_python_code(
             - ModelSource.CLOSURE: Model is directly in scope (passed to exec globals)
             - ModelSource.F_LOCALS: Model is in f_locals["model"] (local variable)
             - ModelSource.F_GLOBALS: Model is in f_globals["model"] (global variable)
+        emit_debug_prints: If True, emit debug print statements at key points
+            in the generated code for tracing execution flow.
 
     Returns:
         Generated Python source code as a string
@@ -2075,6 +3240,7 @@ def generate_python_code(
         expose_result_in_locals=expose_result_in_locals,
         expose_result_in_globals=expose_result_in_globals,
         model_source=model_source,
+        emit_debug_prints=emit_debug_prints,
     )
 
     emitter = visitor.get_emitter()
@@ -2085,6 +3251,35 @@ def generate_python_code(
     if include_header:
         emitter.emit_comment("Generated by torch.compile(pythonify=...)")
         emitter.emit_comment("This file contains the runtime machinery for the compiled model.")
+        emitter.emit_comment("")
+        emitter.emit_comment("=" * 72)
+        emitter.emit_comment("WARNING: PROCESS-LOCAL FILE - DO NOT SAVE OR REUSE")
+        emitter.emit_comment("=" * 72)
+        emitter.emit_comment("")
+        emitter.emit_comment("This file uses object IDs (memory addresses) to retrieve model")
+        emitter.emit_comment("parameters and buffers. These IDs have CRITICAL LIMITATIONS:")
+        emitter.emit_comment("")
+        emitter.emit_comment("1. SAME-PROCESS ONLY: Object IDs are memory addresses that are")
+        emitter.emit_comment("   only valid within the SAME Python process. This file CANNOT")
+        emitter.emit_comment("   be used in a different process or after interpreter restart.")
+        emitter.emit_comment("")
+        emitter.emit_comment("2. KEEP MODEL ALIVE: The original model and its tensors MUST")
+        emitter.emit_comment("   stay alive in memory. If the model is deleted or garbage")
+        emitter.emit_comment("   collected, the object IDs become dangling references.")
+        emitter.emit_comment("")
+        emitter.emit_comment("3. NOT PERSISTABLE: Do NOT save this file for later use. It is")
+        emitter.emit_comment("   designed ONLY for immediate execution in the same session.")
+        emitter.emit_comment("   For serializable models, use torch.export() instead.")
+        emitter.emit_comment("")
+        emitter.emit_comment("4. CRASH RISK: Using invalid object IDs will crash the Python")
+        emitter.emit_comment("   interpreter or cause memory corruption. Never manually edit")
+        emitter.emit_comment("   object IDs in this file.")
+        emitter.emit_comment("")
+        emitter.emit_comment("TL;DR: Execute this file immediately via exec() in the same")
+        emitter.emit_comment("       process where torch.compile was called. Do NOT save it.")
+        emitter.emit_comment("       For a persistable format, use torch.export() instead.")
+        emitter.emit_comment("")
+        emitter.emit_comment("=" * 72)
         emitter.emit_comment("")
         emitter.emit_comment("Variables expected in scope:")
         if needs_model:

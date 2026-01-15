@@ -129,6 +129,28 @@ class GuardType(Enum):
     TYPE = auto()
 
 
+class CUDAGraphPhase(Enum):
+    """
+    Indicates which phase of computation a CUDA graph is capturing.
+
+    Training with CUDA graphs requires capturing forward and backward passes
+    as separate graphs. The saved_tensors from forward must be managed
+    carefully to be accessible during backward graph replay.
+
+    INFERENCE: Single graph for inference-only computation (no backward pass).
+        The entire forward pass is captured as one graph.
+    FORWARD: Forward pass graph for training. Captures forward computation and
+        establishes static buffers for saved_tensors that will be used by
+        the backward graph.
+    BACKWARD: Backward pass graph for training. Operates on saved_tensors from
+        the forward graph and produces gradients.
+    """
+
+    INFERENCE = auto()
+    FORWARD = auto()
+    BACKWARD = auto()
+
+
 class IRNode(abc.ABC):
     """
     Abstract base class for all RuntimeWrapper IR nodes.
@@ -295,6 +317,15 @@ class CUDAGraphSetupNode(IRNode):
     When CUDA graphs are enabled, this node represents the code that
     sets up graph capture, manages streams, and handles memory allocation.
 
+    For training mode, CUDA graphs are captured separately for forward and
+    backward passes. The forward graph produces saved_tensors that must be
+    stored in static buffers for the backward graph to access. This node
+    can represent either:
+    1. A single inference graph (phase=INFERENCE)
+    2. A forward training graph (phase=FORWARD)
+    3. A backward training graph (phase=BACKWARD)
+    4. A paired forward+backward setup (when backward_graph_id is set)
+
     Attributes:
         graph_id: Unique identifier for this CUDA graph
         warmup_runs: Number of warmup runs before capture
@@ -302,6 +333,32 @@ class CUDAGraphSetupNode(IRNode):
         stream_name: Name of the CUDA stream to use
         pool_id: Memory pool identifier for graph allocation
         static_inputs: Whether inputs are static (reused across calls)
+        static_input_indices: List of indices for inputs that are static
+            (parameters/buffers). Static inputs do not need to be copied
+            before graph replay as their memory addresses are stable.
+            Non-static (dynamic) inputs need to be copied into pre-allocated
+            buffers before each replay.
+        phase: Indicates whether this graph is for inference, forward, or
+            backward pass. Training requires separate graphs.
+        backward_graph_id: For forward graphs in training mode, the ID of the
+            paired backward graph. When set, indicates this is a training setup
+            with separate forward/backward graphs.
+        saved_tensor_indices: For forward graphs, indices of outputs that are
+            saved_tensors needed by the backward pass. For backward graphs,
+            indices of inputs that are the saved_tensors from forward.
+        num_forward_outputs: For forward graphs, the number of actual outputs
+            (excluding saved_tensors). The forward graph may produce additional
+            tensors that are saved for backward but not returned to the user.
+        device_index: CUDA device index for graph capture in multi-GPU scenarios.
+            When set, the generated code will set the device before capture.
+        force_cudagraph_sync: Whether to synchronize after graph replay.
+            Useful for debugging or when downstream operations require sync.
+        skip_dynamic_graphs: Whether to skip CUDA graph capture for dynamic shapes.
+            When True, the generated code will check if any input shapes differ
+            from the shapes seen during graph capture and fall back to direct
+            function execution instead of graph replay. CUDA graphs require
+            fixed tensor shapes, so this provides graceful degradation for
+            models with dynamic input dimensions.
     """
 
     graph_id: str
@@ -310,6 +367,42 @@ class CUDAGraphSetupNode(IRNode):
     stream_name: str = "default"
     pool_id: Optional[str] = None
     static_inputs: bool = False
+    static_input_indices: list[int] = field(default_factory=list)
+    phase: "CUDAGraphPhase" = None  # type: ignore[assignment]
+    backward_graph_id: Optional[str] = None
+    saved_tensor_indices: list[int] = field(default_factory=list)
+    num_forward_outputs: Optional[int] = None
+    device_index: Optional[int] = None
+    force_cudagraph_sync: bool = False
+    skip_dynamic_graphs: bool = False
+
+    def __post_init__(self) -> None:
+        """Set default phase to INFERENCE if not specified."""
+        if self.phase is None:
+            from .ir import CUDAGraphPhase
+            self.phase = CUDAGraphPhase.INFERENCE
+
+    def is_training_setup(self) -> bool:
+        """
+        Check if this node represents a training setup with forward/backward.
+
+        Returns:
+            True if this is a forward graph with a paired backward graph,
+            or if this is a backward graph.
+        """
+        return (
+            self.backward_graph_id is not None
+            or self.phase == CUDAGraphPhase.FORWARD
+            or self.phase == CUDAGraphPhase.BACKWARD
+        )
+
+    def is_forward_graph(self) -> bool:
+        """Check if this is a forward pass graph for training."""
+        return self.phase == CUDAGraphPhase.FORWARD
+
+    def is_backward_graph(self) -> bool:
+        """Check if this is a backward pass graph for training."""
+        return self.phase == CUDAGraphPhase.BACKWARD
 
     def accept(self, visitor: "CodeGenVisitor") -> Any:
         return visitor.visit_cuda_graph_setup(self)

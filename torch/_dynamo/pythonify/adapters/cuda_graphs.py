@@ -24,7 +24,7 @@ from dataclasses import dataclass, field
 from enum import Enum, auto
 from typing import Any, Optional, Sequence, TYPE_CHECKING
 
-from ..ir import CUDAGraphSetupNode
+from ..ir import CUDAGraphPhase, CUDAGraphSetupNode
 
 
 if TYPE_CHECKING:
@@ -100,6 +100,11 @@ class CUDAGraphInfo:
     This dataclass captures all the essential configuration for CUDA graph
     capture that is needed to generate the CUDAGraphSetupNode IR.
 
+    For training mode, separate CUDAGraphInfo objects are created for forward
+    and backward passes. The forward graph info includes saved_tensor_indices
+    and num_forward_outputs to manage the saved_tensors buffer that connects
+    forward and backward graphs.
+
     Attributes:
         enabled: Whether CUDA graphs are enabled for this compilation
         graph_id: Unique identifier for this CUDA graph
@@ -115,6 +120,10 @@ class CUDAGraphInfo:
         force_cudagraph_sync: Whether to synchronize after graph replay
         skip_warmup: Whether to skip the warmup phase
         device_index: CUDA device index for graph capture
+        is_backward: Whether this is a backward pass graph (training mode)
+        backward_graph_id: For forward graphs, the ID of the paired backward graph
+        saved_tensor_indices: Indices of tensors to save for backward pass
+        num_forward_outputs: Number of actual forward outputs (excluding saved)
     """
 
     enabled: bool = False
@@ -131,6 +140,10 @@ class CUDAGraphInfo:
     force_cudagraph_sync: bool = False
     skip_warmup: bool = False
     device_index: Optional[int] = None
+    is_backward: bool = False
+    backward_graph_id: Optional[str] = None
+    saved_tensor_indices: list[int] = field(default_factory=list)
+    num_forward_outputs: Optional[int] = None
 
 
 class CUDAGraphAdapter:
@@ -180,7 +193,9 @@ class CUDAGraphAdapter:
         Translate a CUDAGraphInfo object to a CUDAGraphSetupNode.
 
         This is the primary entry point for translating CUDA graph configuration
-        into the pythonify IR.
+        into the pythonify IR. For training mode, this method determines the
+        appropriate CUDAGraphPhase based on the is_backward flag and
+        backward_graph_id.
 
         Args:
             info: CUDAGraphInfo with CUDA graph configuration
@@ -191,6 +206,13 @@ class CUDAGraphAdapter:
         if not info.enabled:
             return None
 
+        if info.is_backward:
+            phase = CUDAGraphPhase.BACKWARD
+        elif info.backward_graph_id is not None:
+            phase = CUDAGraphPhase.FORWARD
+        else:
+            phase = CUDAGraphPhase.INFERENCE
+
         return CUDAGraphSetupNode(
             graph_id=info.graph_id,
             warmup_runs=info.warmup_runs,
@@ -198,6 +220,13 @@ class CUDAGraphAdapter:
             stream_name=info.stream_name,
             pool_id=info.pool_id,
             static_inputs=len(info.static_input_indices) > 0,
+            static_input_indices=list(info.static_input_indices),
+            phase=phase,
+            backward_graph_id=info.backward_graph_id,
+            saved_tensor_indices=list(info.saved_tensor_indices),
+            num_forward_outputs=info.num_forward_outputs,
+            device_index=info.device_index,
+            force_cudagraph_sync=info.force_cudagraph_sync,
         )
 
     def translate_config_dict(
@@ -365,6 +394,10 @@ class CUDAGraphAdapter:
             force_cudagraph_sync=config.get("force_cudagraph_sync", False),
             skip_warmup=config.get("skip_warmup", False),
             device_index=config.get("device_index"),
+            is_backward=config.get("is_backward", False),
+            backward_graph_id=config.get("backward_graph_id"),
+            saved_tensor_indices=list(config.get("saved_tensor_indices", [])),
+            num_forward_outputs=config.get("num_forward_outputs"),
         )
 
 

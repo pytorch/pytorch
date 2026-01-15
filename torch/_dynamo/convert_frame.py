@@ -2836,11 +2836,18 @@ def _build_pythonify_artifacts(
     if input_sources_info:
         metadata["input_sources_info"] = input_sources_info
 
+    # Extract CUDA graph configuration from inductor output.
+    # The inductor output contains cuda_graphs_enabled and cuda_graph_config
+    # when pythonify is active and mode='reduce-overhead' is used.
+    cuda_graphs_enabled = False
+    cuda_graph_config: dict[str, Any] = {}
     if inductor_output is not None:
         metadata["inductor_cache_key"] = inductor_output.get("cache_key")
         metadata["inductor_device_types"] = inductor_output.get("device_types")
         metadata["inductor_mutated_inputs"] = inductor_output.get("mutated_inputs")
         metadata["inductor_constants"] = inductor_output.get("constants")
+        cuda_graphs_enabled = inductor_output.get("cuda_graphs_enabled", False)
+        cuda_graph_config = inductor_output.get("cuda_graph_config", {})
 
     return CompilationArtifacts(
         fx_graph=fx_graph,
@@ -2859,6 +2866,8 @@ def _build_pythonify_artifacts(
         backward_inductor_graph_str=backward_inductor_graph_str,
         parameter_tensors=parameter_tensors,
         buffer_tensors=buffer_tensors,
+        cuda_graphs_enabled=cuda_graphs_enabled,
+        cuda_graph_config=cuda_graph_config,
     )
 
 

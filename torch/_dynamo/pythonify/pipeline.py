@@ -263,17 +263,6 @@ class RuntimeWrapperPipeline:
             ) from e
 
         try:
-            self._build_cuda_graph_setup_node()
-        except PythonifyError:
-            raise
-        except Exception as e:
-            raise create_pythonify_error(
-                PythonifyStage.CUDA_GRAPH_SETUP,
-                e,
-                context={"cuda_graphs_enabled": self.artifacts.cuda_graphs_enabled},
-            ) from e
-
-        try:
             self._build_kernel_load_node()
         except PythonifyError:
             raise
@@ -282,6 +271,17 @@ class RuntimeWrapperPipeline:
                 PythonifyStage.KERNEL_SERIALIZATION,
                 e,
                 context={"has_inductor_source": self.artifacts.inductor_source_code is not None},
+            ) from e
+
+        try:
+            self._build_cuda_graph_setup_node()
+        except PythonifyError:
+            raise
+        except Exception as e:
+            raise create_pythonify_error(
+                PythonifyStage.CUDA_GRAPH_SETUP,
+                e,
+                context={"cuda_graphs_enabled": self.artifacts.cuda_graphs_enabled},
             ) from e
 
         try:
@@ -665,13 +665,18 @@ class RuntimeWrapperPipeline:
             return
 
         config = self.artifacts.cuda_graph_config
+        static_input_indices = list(config.get("static_input_indices", []))
         node = CUDAGraphSetupNode(
             graph_id=config.get("graph_id", "cuda_graph_0"),
             warmup_runs=config.get("warmup_runs", 1),
             capture_mode=config.get("capture_mode", "thread_local"),
             stream_name=config.get("stream_name", "default"),
             pool_id=config.get("pool_id"),
-            static_inputs=config.get("static_inputs", False),
+            static_inputs=config.get("static_inputs", False) or len(static_input_indices) > 0,
+            static_input_indices=static_input_indices,
+            skip_dynamic_graphs=config.get("skip_dynamic_graphs", False),
+            device_index=config.get("device_index"),
+            force_cudagraph_sync=config.get("force_cudagraph_sync", False),
         )
         self._ir.add_node(node)
 
