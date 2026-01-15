@@ -401,7 +401,6 @@ DETERMINISM_XFAILS = {
 BATCH_INVARIANCE_XFAILS = {
     "aot_eager_decomp_partition": {
         "matmul": {ALL},
-        "bmm": {fp32},
         "nn.functional.linear": {ALL},
     },
     "inductor_default": {
