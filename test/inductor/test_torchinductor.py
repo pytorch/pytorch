@@ -9253,15 +9253,26 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         self.common(fn, [], assert_equal=False)
 
+    def test_empty_pin_memory(self):
+        if self.device != "cpu":
+            raise unittest.SkipTest("pin_memory is not supported on non-CPU devices")
+
+        def fn():
+            return aten.empty([1, 128, 128], pin_memory=True, device=self.device)
+
+        result = torch.compile(fn, backend="inductor")()
+        self.assertTrue(result.is_pinned())
+        self.assertEqual(result.shape, [1, 128, 128])
+
     def test_new_empty(self):
         def fn(a):
             return aten.new_empty(a, [1, 128, 128])
 
-        self.common(fn, [torch.randn(55)], assert_equal=False)
+        self.common(fn, [torch.randn(55, device=self.device)], assert_equal=False)
 
     def test_empty_strided(self):
         def fn():
-            return aten.empty_strided([1, 128, 128], [16384, 128, 1])
+            return aten.empty_strided([1, 128, 128], [16384, 128, 1], device=self.device)
 
         self.common(fn, [], assert_equal=False)
 
@@ -9269,7 +9280,7 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         def fn(a):
             return aten.new_empty_strided(a, [1, 128, 128], [16384, 128, 1])
 
-        self.common(fn, [torch.randn(55)], assert_equal=False)
+        self.common(fn, [torch.randn(55, device=self.device)], assert_equal=False)
 
     def test_dropout_trivial_0(self):
         def fn1(a):

@@ -3701,7 +3701,7 @@ class Layout(OutputSpec):
         self._offset = offset
         self.is_pinned = is_pinned
         # is_pinned implies cpu
-        assert (not self.is_pinned) or (self.device.type == "cpu")
+        assert (not self.is_pinned) or (self.device.type == "cpu"), "Only CPU tensors can be pinned"
 
     @property
     def size(self) -> Sequence[Expr]:
