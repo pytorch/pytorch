@@ -47,7 +47,7 @@ jobs:
             arch: "aarch64"
             cuda_short: "126"
             torch_cuda_arch_list: "9.0"
-            docker_image: "pytorch/manylinuxaarch64-builder:cuda12.6"
+            docker_image: "quay.io/pypa/manylinux_2_34_aarch64"
             runner: "linux.arm64.r7g.12xlarge.memory"
           - cuda_version: "13.0"
             arch: "aarch64"
@@ -98,23 +98,7 @@ jobs:
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" -m pip install \
             torch --index-url "https://download.pytorch.org/whl/cu${CUDA_SHORT}"
 
-          GLIBC_ENV=""
-          if [[ "${{ matrix.arch }}" == "aarch64" ]]; then
-            docker exec -t "${container_name}" bash -c "
-              set -ex
-              mkdir -p /opt/glibc-2.31/lib
-              cd /tmp
-              curl -LO http://ports.ubuntu.com/pool/main/g/glibc/libc6_2.31-0ubuntu9_arm64.deb
-              ar x libc6_2.31-0ubuntu9_arm64.deb
-              tar xf data.tar.xz
-              cp -a lib/aarch64-linux-gnu/* /opt/glibc-2.31/lib/ 2>/dev/null || true
-              cp -a usr/lib/aarch64-linux-gnu/* /opt/glibc-2.31/lib/ 2>/dev/null || true
-            "
-            GLIBC_ENV="-e LD_LIBRARY_PATH=/opt/glibc-2.31/lib:\${LD_LIBRARY_PATH}"
-          fi
-
           docker exec -t \
-            ${GLIBC_ENV} \
             -e TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" \
             -e FA_FINAL_PACKAGE_DIR="/artifacts" \
             -e WHEEL_PLAT="${{ matrix.arch }}" \
