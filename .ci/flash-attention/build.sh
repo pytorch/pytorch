@@ -23,6 +23,33 @@ fi
 
 PYTHON="${PYTHON_EXECUTABLE:-python}"
 
+if [[ ! -d "/usr/local/cuda" ]]; then
+    echo "CUDA not found, setting up minimal CUDA environment for Flash Attention build"
+
+    if command -v dnf &> /dev/null; then
+        dnf install -y gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ || true
+        if [[ -d "/opt/rh/gcc-toolset-13" ]]; then
+            export PATH=/opt/rh/gcc-toolset-13/root/usr/bin:$PATH
+            export LD_LIBRARY_PATH=/opt/rh/gcc-toolset-13/root/usr/lib64:/opt/rh/gcc-toolset-13/root/usr/lib:${LD_LIBRARY_PATH:-}
+        fi
+    fi
+
+    mkdir -p /usr/local/cuda
+    CUDA_NVCC_VERSION="12.6.85"
+    if [[ "$(uname -m)" == "aarch64" ]]; then
+        NVCC_ARCH="sbsa"
+    else
+        NVCC_ARCH="x86_64"
+    fi
+    NVCC_URL="https://developer.download.nvidia.com/compute/cuda/redist/cuda_nvcc/linux-${NVCC_ARCH}/cuda_nvcc-linux-${NVCC_ARCH}-${CUDA_NVCC_VERSION}-archive.tar.xz"
+    echo "Downloading minimal nvcc from ${NVCC_URL}"
+    curl -sL "${NVCC_URL}" | tar -xJ -C /usr/local/cuda --strip-components=1
+
+    export CUDA_HOME=/usr/local/cuda
+    export PATH=/usr/local/cuda/bin:$PATH
+    echo "Installed nvcc version: $(nvcc --version | grep release)"
+fi
+
 echo "installing dependencies"
 "$PYTHON" -m pip install einops packaging ninja numpy wheel setuptools
 
