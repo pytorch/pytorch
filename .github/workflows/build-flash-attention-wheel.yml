@@ -106,7 +106,8 @@ jobs:
               curl -LO https://ftp.gnu.org/gnu/glibc/glibc-2.29.tar.gz
               tar xzf glibc-2.29.tar.gz
               mkdir glibc-2.29-build && cd glibc-2.29-build
-              ../glibc-2.29/configure --prefix=/opt/glibc-2.29
+              # Disable -Werror to work around newer GCC warnings
+              ../glibc-2.29/configure --prefix=/opt/glibc-2.29 --disable-werror
               make -j\$(nproc)
               make install
             "
