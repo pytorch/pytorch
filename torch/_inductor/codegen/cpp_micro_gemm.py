@@ -2137,8 +2137,11 @@ def create_micro_gemm(
 
     assert isinstance(n, int) or n.is_number, n
     assert isinstance(k, int) or k.is_number, k
+    from ..utils import has_free_symbols
 
+    dynamic_M = has_free_symbols((m,))
     m = V.graph.sizevars.optimization_hint(m, fallback=1)
+    assert isinstance(m, int) or m.is_number, m
     if output_dtype is None:
         output_dtype = input_dtype
     if compute_dtype is None:
