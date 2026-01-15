@@ -319,7 +319,6 @@ class ComboKernel(Kernel):
             """
             Calculate total blocks for each subkernel (x_blocks * y_blocks * z_blocks)
             and cumulative block counts for dispatch boundaries.
-            Uses kernel.y_tree_list and kernel.z_tree_list populated by get_block_args().
             """
             for i, sub_kernel in enumerate(kernel.sub_kernels):
                 xnumel, no_x_dim = (
