@@ -188,32 +188,6 @@ std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward(
   return std::make_tuple(Tensor(), Tensor(), Tensor());
 }
 
-std::tuple<Tensor, Tensor, Tensor> _flash_attention_backward_low_p(
-  const Tensor& grad_out,
-  const Tensor& query,
-  const Tensor& key,
-  const Tensor& value,
-  const Tensor& out,
-  const Tensor& logsumexp,
-  const Tensor& cumulative_sequence_length_q,
-  const Tensor& cumulative_sequence_length_k,
-  int64_t max_seqlen_batch_q,
-  int64_t max_seqlen_batch_k,
-  double dropout_p,
-  bool is_causal,
-  const Tensor& philox_seed,
-  const Tensor& philox_offset,
-  const std::optional<Tensor>& q_descale,
-  const std::optional<Tensor>& k_descale,
-  const std::optional<Tensor>& v_descale,
-  std::optional<double> scale,
-  std::optional<int64_t> window_size_left,
-  std::optional<int64_t> window_size_right) {
-    TORCH_CHECK(false, "Low-precision flash attention SDPA requires FA3. "
-    "Call torch.nn.attention.activate_flash_attention_impl('FA3') first.");
-  return std::make_tuple(Tensor(), Tensor(), Tensor());
-}
-
 std::tuple<Tensor, Tensor, Tensor> _cudnn_attention_backward(
     const Tensor& grad_out,
     const Tensor& query,
@@ -1047,30 +1021,6 @@ std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attenti
 
   return std::make_tuple(std::move(grad_q), std::move(grad_k), std::move(grad_v));
 }
-
-std::tuple<at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_flash_attention_backward_cuda_low_p(
-  const at::Tensor& grad_out_,
-  const at::Tensor& query,
-  const at::Tensor& key,
-  const at::Tensor& value,
-  const at::Tensor& out,
-  const at::Tensor& logsumexp,
-  const Tensor& cumulative_sequence_length_q,
-  const Tensor& cumulative_sequence_length_k,
-  const int64_t max_seqlen_batch_q,
-  const int64_t max_seqlen_batch_k,
-  double dropout_p,
-  bool is_causal,
-  const at::Tensor& philox_seed,
-  const at::Tensor& philox_offset,
-  const std::optional<Tensor>& q_descale,
-  const std::optional<Tensor>& k_descale,
-  const std::optional<Tensor>& v_descale,
-  std::optional<double> scale){
-    TORCH_CHECK(false, "Low-precision flash attention SDPA requires FA3. "
-    "Call torch.nn.attention.activate_flash_attention_impl('FA3') first.");
-  return std::make_tuple(Tensor(), Tensor(), Tensor());
-  }
 
 
 std::tuple<at::Tensor, at::Tensor, at::Tensor, at::Tensor> _scaled_dot_product_efficient_attention_backward_cuda(

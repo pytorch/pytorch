@@ -6119,7 +6119,7 @@ scaled_dot_product_attention = _add_docstr(
 )
 
 
-def scaled_dot_product_attention_fp8(
+def _scaled_dot_product_attention_fp8(
     query: Tensor,
     key: Tensor,
     value: Tensor,
@@ -6156,13 +6156,13 @@ def scaled_dot_product_attention_fp8(
         >>> from torch.nn.attention import activate_flash_attention_impl, sdpa_kernel, SDPBackend
         >>> activate_flash_attention_impl("FA3")
         >>> with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
-        ...     out = F.scaled_dot_product_attention_fp8(q, k, v, descale_q=dq, descale_k=dk, descale_v=dv)
+        ...     out = F._scaled_dot_product_attention_fp8(q, k, v, descale_q=dq, descale_k=dk, descale_v=dv)
     """
     if torch.is_grad_enabled() and (
         query.requires_grad or key.requires_grad or value.requires_grad
     ):
         warnings.warn(
-            "scaled_dot_product_attention_fp8 does not support backward pass. "
+            "_scaled_dot_product_attention_fp8 does not support backward pass. "
             "Gradients will not be computed for query, key, or value.",
             UserWarning,
         )

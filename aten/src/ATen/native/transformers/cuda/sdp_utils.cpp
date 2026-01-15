@@ -682,7 +682,7 @@ bool check_dtypes_flash_attention(sdp_params const& params, bool debug) {
   auto dprop = at::cuda::getCurrentDeviceProperties();
   if (dprop->major >= 9 and at::globalContext().userEnabledFA3SDP()) {
     constexpr auto fa3_dtypes =
-        c10::array_of<at::ScalarType>(at::kFloat8_e4m3fn);
+        c10::array_of<at::ScalarType>(at::kFloat8_e4m3fn, at::kHalf, at::kBFloat16);
     return check_tensor_dtype(params, fa3_dtypes, debug);
   } else {
     return check_dtypes_low_precision(params, debug);
