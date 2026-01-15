@@ -2528,8 +2528,7 @@ class FakeTensorMode(TorchDispatchMode):
             # it just detaches from the autograd graph. We should preserve constants
             # for detach_ since the underlying data is unchanged.
             and (
-                torch.Tag.inplace_view not in func.tags
-                or func is aten.detach_.default
+                torch.Tag.inplace_view not in func.tags or func is aten.detach_.default
             )
             and all_constant
             and len(flat_arg_fake_tensors) != 0
