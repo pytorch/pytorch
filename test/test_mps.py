@@ -12846,7 +12846,6 @@ class TestConsistency(TestCaseMPS):
             self.assertEqual(op(x, y[0]), op(x.to("mps"), y.to("mps")[0]).cpu())
 
 
-
 class TestErrorInputs(TestCase):
     _ignore_not_implemented_error = True
 
@@ -12858,16 +12857,10 @@ class TestErrorInputs(TestCase):
     )
     def test_error_inputs(self, device, op):
         self.assertEqual(device, "mps:0")
-
-
-        # TODO: Enable per-sample seed setting and tweak tolerances / fix xfails
-        for mps_sample in op.error_inputs(device, set_seed=False):
-            mps_sample_input = mps_sample.sample_input
-            error_type = mps_sample.error_type
-            error_regex = mps_sample.error_regex
-
-            with self.assertRaisesRegex(error_type, error_regex):
-                op(mps_sample.input, *mps_sample.args, **mps_sample.kwargs)
+        for sample in op.error_inputs(device, set_seed=True):
+            sample_input = sample.sample_input
+            with self.assertRaisesRegex(sample.error_type, sample.error_regex):
+                op(sample_input.input, *sample_input.args, **sample_input.kwargs)
 
     def test_index_put_out_of_bounds(self, device):
         x = torch.rand(10, 1, 10, device=device)
