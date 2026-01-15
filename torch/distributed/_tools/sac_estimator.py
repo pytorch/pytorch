@@ -3,7 +3,7 @@ import os
 import sys
 from collections import OrderedDict
 from dataclasses import astuple, dataclass
-from typing import Any, NamedTuple, Optional
+from typing import Any, NamedTuple
 from typing_extensions import Self
 
 import torch
@@ -777,9 +777,9 @@ class SACEstimator(TorchDispatchMode):
         def append_row(
             op_indices: set[int],
             func_names: set[str],
-            msps: Optional[float] = None,
-            stored: Optional[bool] = False,
-            recomputed: Optional[bool] = False,
+            msps: float | None = None,
+            stored: bool | None = False,
+            recomputed: bool | None = False,
         ) -> None:
             row = [
                 str(op_indices),

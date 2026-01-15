@@ -1,7 +1,7 @@
 # mypy: allow-untyped-defs
 import contextlib
 import functools
-from collections.abc import Callable, Iterable, Sequence
+from collections.abc import Callable, Iterable, Mapping, Sequence
 from contextlib import AbstractContextManager, contextmanager, ExitStack, nullcontext
 from dataclasses import dataclass
 from typing import Any, Optional, overload, TypeVar, Union
@@ -102,27 +102,34 @@ def _maybe_compile_and_run_fn(fn, *args):
         return fn(*args)
 
 
-def reenter_make_fx(fn):
+def reenter_make_fx(fn, subgraph_decomp_table=None):
     from torch.fx.experimental.proxy_tensor import _CURRENT_MAKE_FX_TRACER
 
     @functools.wraps(fn)
     def wrapped(*args):
-        assert _CURRENT_MAKE_FX_TRACER is not None, (
-            "Cannot reenter make_fx when we're not under a make_fx tracing session"
-        )
-        gm = _CURRENT_MAKE_FX_TRACER.trace_subgraph(
-            _maybe_run_with_interpreter(fn), *args
-        )
+        if _CURRENT_MAKE_FX_TRACER is None:
+            raise AssertionError(
+                "Cannot reenter make_fx when we're not under a make_fx tracing session"
+            )
+        if subgraph_decomp_table is None:
+            gm = _CURRENT_MAKE_FX_TRACER.trace_subgraph(
+                _maybe_run_with_interpreter(fn), *args
+            )
+        else:
+            gm = _CURRENT_MAKE_FX_TRACER.trace_subgraph_custom_decomp(
+                _maybe_run_with_interpreter(fn), subgraph_decomp_table, *args
+            )
+
         return gm
 
     return wrapped
 
 
-def _maybe_reenter_make_fx(fn):
+def _maybe_reenter_make_fx(fn, subgraph_decomp_table=None):
     from torch.fx.experimental.proxy_tensor import _CURRENT_MAKE_FX_TRACER
 
     if _CURRENT_MAKE_FX_TRACER is not None:
-        return reenter_make_fx(fn)
+        return reenter_make_fx(fn, subgraph_decomp_table=subgraph_decomp_table)
     else:
 
         def _maybe_make_fx_with_fake_mode(fn):
@@ -134,9 +141,13 @@ def _maybe_reenter_make_fx(fn):
                 if fake_mode is None:
                     # we creaeta a fake_mode here to make sure we could
                     # trace the graph with data-dependent calls e.g. .item()
-                    return make_fx(fn, tracing_mode="fake")(*args)
+                    return make_fx(
+                        fn,
+                        tracing_mode="fake",
+                        decomposition_table=subgraph_decomp_table,
+                    )(*args)
                 # Tracing with real if all inputs have been fakfied
-                return make_fx(fn)(*args)
+                return make_fx(fn, decomposition_table=subgraph_decomp_table)(*args)
 
             return wrapped
 
@@ -225,6 +236,17 @@ def check_meta_consistency(
         )
 
 
+# Thread-local flag to indicate we're inside HOP internal compilation
+import threading
+
+
+_hop_compile_tls = threading.local()
+
+
+def _in_hop_compile() -> bool:
+    return getattr(_hop_compile_tls, "in_hop_compile", False)
+
+
 @contextmanager
 def setup_compilation_env():
     """
@@ -234,23 +256,29 @@ def setup_compilation_env():
     from torch._dynamo.backends.debugging import (
         make_eager_backend_with_torch_function_modes,
     )
+    from torch._dynamo.backends.registry import lookup_backend
     from torch.fx.experimental.proxy_tensor import (
         _temp_remove_pre_dispatch_torch_function_mode,
     )
 
-    with (
-        _set_compilation_env(),
-        torch._dynamo.utils.disable_cache_limit(),
-        _temp_remove_pre_dispatch_torch_function_mode() as pre_dispatch_mode,
-        _temp_remove_metadata_torch_function_mode() as metadata_mode,
-    ):
-        modes = [
-            mode for mode in (pre_dispatch_mode, metadata_mode) if mode is not None
-        ]
-        if modes:
-            yield make_eager_backend_with_torch_function_modes(modes)
-        else:
-            yield "eager"
+    old_in_hop_compile = getattr(_hop_compile_tls, "in_hop_compile", False)
+    _hop_compile_tls.in_hop_compile = True
+    try:
+        with (
+            _set_compilation_env(),
+            torch._dynamo.utils.disable_cache_limit(),
+            _temp_remove_pre_dispatch_torch_function_mode() as pre_dispatch_mode,
+            _temp_remove_metadata_torch_function_mode() as metadata_mode,
+        ):
+            modes = [
+                mode for mode in (pre_dispatch_mode, metadata_mode) if mode is not None
+            ]
+            if modes:
+                yield make_eager_backend_with_torch_function_modes(modes)
+            else:
+                yield lookup_backend("eager")
+    finally:
+        _hop_compile_tls.in_hop_compile = old_in_hop_compile
 
 
 @contextmanager
@@ -400,19 +428,27 @@ def _collect_fake_inputs(inputs):
                             val
                         ) or torch._C._functorch.is_functionaltensor(val):
                             val = torch._C._functorch.get_unwrapped(val)
-                        assert isinstance(val, FakeTensor)
+                        if not isinstance(val, FakeTensor):
+                            raise AssertionError(
+                                f"Expected FakeTensor after unwrapping, got {type(val)}"
+                            )
                         inputs_fake.append(val)
                     else:
                         # This is the standard case of a TensorVariable
-                        assert isinstance(val, FakeTensor)
+                        if not isinstance(val, FakeTensor):
+                            raise AssertionError(
+                                f"Expected FakeTensor, got {type(val)}"
+                            )
                         inputs_fake.append(val)
                 else:
                     # This case is for SymInts and other non-Tensor elements
-                    assert not isinstance(val, torch.Tensor)
+                    if isinstance(val, torch.Tensor):
+                        raise AssertionError(f"Expected non-Tensor, got {type(val)}")
                     inputs_fake.append(val)
         else:
             # This case is for ints
-            assert isinstance(inp, int)
+            if not isinstance(inp, int):
+                raise AssertionError(f"Expected int, got {type(inp)}")
             inputs_fake.append(inp)
 
     return inputs_fake
@@ -539,9 +575,10 @@ def prepare_fw_with_masks_all_requires_grad(fn):
 # replaced with an all-zero tensor for better optimization
 def unmask_none_gradients(grads, operands):
     allowed_types = (torch.Tensor, int, torch.SymInt)
-    assert all(isinstance(o, allowed_types) for o in operands), (
-        f"operands can only be of {allowed_types} but got {[type(o) for o in operands]}"
-    )
+    if not all(isinstance(o, allowed_types) for o in operands):
+        raise AssertionError(
+            f"operands can only be of {allowed_types} but got {[type(o) for o in operands]}"
+        )
 
     unmasked_grads = []
     for g, o in zip(grads, operands):
@@ -680,7 +717,8 @@ def _stack_pytree(pytrees):
     for pt in pytrees:
         flat_pt, out_spec = pytree.tree_flatten(pt)
         flat_out.append(flat_pt)
-    assert out_spec is not None
+    if out_spec is None:
+        raise AssertionError("out_spec cannot be None")
     b = zip(*flat_out)
     stacked_out = []
     for leaves in b:
@@ -711,9 +749,10 @@ def _stack_pytree(pytrees):
 # iterating over the pos list and pop one item from the front of partitioned_args[pos[i]].
 # We use t_idx and s_idx to keep track of the next index of the item we are going to pop for the two lists.
 def save_tensors_and_symints_for_backward(ctx, args):
-    assert all(
+    if not all(
         isinstance(arg, (torch.Tensor, torch.SymInt, int, type(None))) for arg in args
-    ), args
+    ):
+        raise AssertionError(f"Invalid arg types in {args}")
     partitioned_args: list[Any] = [[], []]
     pos = []
     for arg in args:
@@ -721,8 +760,10 @@ def save_tensors_and_symints_for_backward(ctx, args):
         partitioned_args[idx].append(arg)
         pos.append(idx)
 
-    assert not hasattr(ctx, "sym_int_args"), "ctx already has sym_int_args attribute."
-    assert not hasattr(ctx, "pos"), "ctx already has pos attribute."
+    if hasattr(ctx, "sym_int_args"):
+        raise AssertionError("ctx already has sym_int_args attribute.")
+    if hasattr(ctx, "pos"):
+        raise AssertionError("ctx already has pos attribute.")
     ctx.save_for_backward(*partitioned_args[0])
     ctx.sym_int_args = partitioned_args[1]
     ctx.pos = pos
@@ -740,14 +781,18 @@ def saved_tensors_and_symints(ctx):
         else:
             args.append(ctx.sym_int_args[s_idx])
             s_idx += 1
-    assert t_idx + s_idx == len(ctx.pos)
+    if t_idx + s_idx != len(ctx.pos):
+        raise AssertionError(
+            f"t_idx ({t_idx}) + s_idx ({s_idx}) != len(ctx.pos) ({len(ctx.pos)})"
+        )
     return tuple(args)
 
 
 def split_into_chunks(iterable: Sequence[Any], chunk_sizes: list[int]) -> list[Any]:
-    assert sum(chunk_sizes) == len(iterable), (
-        "the sum of all chunks needs to match the length of the iterable."
-    )
+    if sum(chunk_sizes) != len(iterable):
+        raise AssertionError(
+            f"the sum of all chunks ({sum(chunk_sizes)}) needs to match the length of the iterable ({len(iterable)})."
+        )
     elements = []
     idx = 0
     for size in chunk_sizes:
@@ -820,7 +865,10 @@ def create_bw_fn(
         primals = args_and_grad_outs[:n_primals]
         tangents = args_and_grad_outs[n_primals:]
         fw_outs, grad_args = bw_fn(primals, tangents)
-        assert len(args) == len(grad_args)
+        if len(args) != len(grad_args):
+            raise AssertionError(
+                f"Expected {len(args)} grad_args, got {len(grad_args)}"
+            )
 
         # For tensors whose grad is None, create zero tensors as gradients
         # This invariant is useful for cudagraph.
@@ -870,13 +918,15 @@ def mask_list(
     # If other is None, then the elements of the `inp` list where the mask is False are removed
     # If other is not None, then the elements of the `inp` list where the mask is False are
     # replaced with the elements of the `other` list
-    assert len(mask) == len(inp), (
-        "The length of the mask needs to be identical to the length of the input"
-    )
-    if other is not None:
-        assert len(inp) == len(other), (
-            "If an input and an other list is provided, they need to have the same length"
+    if len(mask) != len(inp):
+        raise AssertionError(
+            f"The length of the mask ({len(mask)}) needs to be identical to the length of the input ({len(inp)})"
         )
+    if other is not None:
+        if len(inp) != len(other):
+            raise AssertionError(
+                f"If an input and an other list is provided, they need to have the same length ({len(inp)} != {len(other)})"
+            )
         return [i if m else o for m, i, o in zip(mask, inp, other)]
     else:
         return [i for m, i in zip(mask, inp) if m]
@@ -924,11 +974,12 @@ def diff_tensor_meta(
 #      However, CompositeExplicitAutograd won't receive SymInt inputs because it only accepts real tensor inputs.
 def validate_subgraph_args_types(lifted_args: Union[tuple[Any, ...], list[Any]]):
     allowed_types = (torch.Tensor, int, torch.SymInt)
-    assert all(
+    if not all(
         isinstance(arg, (torch.Tensor, int, torch.SymInt)) for arg in lifted_args
-    ), (
-        f"{lifted_args} can only be of {allowed_types} but got {tuple(type(arg) for arg in lifted_args)}"
-    )
+    ):
+        raise AssertionError(
+            f"{lifted_args} can only be of {allowed_types} but got {tuple(type(arg) for arg in lifted_args)}"
+        )
 
 
 # TODO: Return a more detailed information as to which node
@@ -1011,7 +1062,10 @@ def check_input_alias_and_mutation_return_outputs(
             for arg_node, arg_schema in zip(node.args, node.target._schema.arguments):
                 if arg_schema.is_write:
                     arg_val = _get_example_value(arg_node)
-                    assert isinstance(arg_val, torch.Tensor)
+                    if not isinstance(arg_val, torch.Tensor):
+                        raise AssertionError(
+                            f"Expected arg_val to be a Tensor, got {type(arg_val)}"
+                        )
                     if _tensor_storage(arg_val) in inp_storage_map:
                         mutated_inputs.append(inp_storage_map[_tensor_storage(arg_val)])
 
@@ -1044,7 +1098,8 @@ def register_fake(hop, fn=None):
     register_fake utility for the custom ops. The registered function is called
     inside the fake_tensor _dispatch_impl.
     """
-    assert hop not in registered_hop_fake_fns
+    if hop in registered_hop_fake_fns:
+        raise AssertionError(f"hop {hop} already registered in registered_hop_fake_fns")
 
     def register(func: F) -> F:
         from torch._subclasses.fake_tensor import FakeTensorMode
@@ -1097,7 +1152,8 @@ class FunctionalizeCtxWrapper:
 # A wrapper over HigherOrderOperator that also carries its schema
 class HopInstance:
     def __init__(self, op: HigherOrderOperator, schema: HopSchema):
-        assert isinstance(op, HigherOrderOperator), op
+        if not isinstance(op, HigherOrderOperator):
+            raise AssertionError(f"Expected HigherOrderOperator, got {type(op)}")
         self._op = op
         # Using "_" to be consistent with how we access _schema of OpOverload
         self._schema = schema
@@ -1117,12 +1173,14 @@ def call_op(op: Union[OpOverload, HopInstance], args, kwargs):
     if isinstance(op, OpOverload):
         return op(*args, **kwargs)
 
-    assert isinstance(op, HopInstance), op
+    if not isinstance(op, HopInstance):
+        raise AssertionError(f"Expected HopInstance, got {type(op)}")
     schema = op._schema
     bound_args = list(args)
     bound_kwargs = {}
     for arg in schema.arguments[len(bound_args) :]:
-        assert arg.name in kwargs, (arg.name, kwargs)
+        if arg.name not in kwargs:
+            raise AssertionError(f"arg {arg.name} not in kwargs: {kwargs}")
         val = kwargs[arg.name]
         if not arg.kwarg_only:
             bound_args.append(val)
@@ -1130,11 +1188,19 @@ def call_op(op: Union[OpOverload, HopInstance], args, kwargs):
             bound_kwargs[arg.name] = val
 
     if schema.tree_spec is not None:
-        assert len(bound_args) == len(schema.arguments) and len(bound_kwargs) == 0
+        if len(bound_args) != len(schema.arguments) or len(bound_kwargs) != 0:
+            raise AssertionError(
+                f"Expected {len(schema.arguments)} bound_args and 0 bound_kwargs, "
+                f"got {len(bound_args)} and {len(bound_kwargs)}"
+            )
         args, kwargs = pytree.tree_unflatten(bound_args, schema.tree_spec)
         return op(*args, **kwargs)
     else:
-        assert len(bound_args) + len(bound_kwargs) == len(schema.arguments)
+        if len(bound_args) + len(bound_kwargs) != len(schema.arguments):
+            raise AssertionError(
+                f"Expected {len(schema.arguments)} total args, "
+                f"got {len(bound_args)} + {len(bound_kwargs)}"
+            )
         return op(*bound_args, **bound_kwargs)
 
 
@@ -1144,6 +1210,7 @@ def materialize_as_graph(
     include_key_set: Optional[torch._C.DispatchKeySet] = None,
     exclude_key_set: Optional[torch._C.DispatchKeySet] = None,
     force_enable_grad=False,
+    subgraph_decomp_table: Optional[Mapping[OpOverload, Callable]] = None,
 ) -> torch.fx.GraphModule:
     if include_key_set is None:
         include_key_set = torch._C._dispatch_tls_local_include_set()
@@ -1171,10 +1238,13 @@ def materialize_as_graph(
                 # make sure the fake mode when tracing subgraph is consistent.
                 if fake_mode := detect_fake_mode(unfunc_t):
                     stack.enter_context(fake_mode)
-                return _maybe_reenter_make_fx(fn)(*unfunc_t)
+                return _maybe_reenter_make_fx(
+                    fn, subgraph_decomp_table=subgraph_decomp_table
+                )(*unfunc_t)
 
     gm = _materialize_as_graph_inner()
-    assert gm is not None
+    if gm is None:
+        raise AssertionError("materialize_as_graph returned None")
     return gm
 
 
@@ -1191,9 +1261,12 @@ def materialize_callable_in_args(op: HopInstance, args, kwargs):
     gm = reenter_make_fx(wrapped_fn)(*flat_args)
     hop_node = gm.graph.find_nodes(op="call_function", target=hop)[0]
     arg_proxies = pytree.tree_leaves((hop_node.args, hop_node.kwargs))
-    assert isinstance(schema, torch._C.FunctionSchema) and len(arg_proxies) == len(
+    if not isinstance(schema, torch._C.FunctionSchema) or len(arg_proxies) != len(
         schema.arguments
-    )
+    ):
+        raise AssertionError(
+            f"Expected FunctionSchema with {len(arg_proxies)} arguments"
+        )
 
     # call_op preserves ordering of proxies via schema
     materialized_args = []
@@ -1203,7 +1276,10 @@ def materialize_callable_in_args(op: HopInstance, args, kwargs):
             and proxy.op == "get_attr"
             and isinstance(getattr(gm, proxy.target), torch.fx.GraphModule)  # type: ignore[arg-type]
         ):
-            assert callable(flat_args[i]), (schema, args, kwargs)
+            if not callable(flat_args[i]):
+                raise AssertionError(
+                    f"Expected flat_args[{i}] to be callable for {schema}"
+                )
             materialized_args.append(getattr(gm, proxy.target))  # type: ignore[arg-type]
         else:
             materialized_args.append(flat_args[i])
@@ -1246,7 +1322,10 @@ def _has_gen_schema(op: HigherOrderOperator):
 
 
 def filter_with_masks(data: list[Optional[torch.Tensor]], masks: list[bool]):
-    assert len(data) == len(masks)
+    if len(data) != len(masks):
+        raise AssertionError(
+            f"data length ({len(data)}) != masks length ({len(masks)})"
+        )
     return [item for item, keep in zip(data, masks) if keep]
 
 

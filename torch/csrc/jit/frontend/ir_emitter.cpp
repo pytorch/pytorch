@@ -2,10 +2,8 @@
 #include <torch/csrc/jit/frontend/tree_views.h>
 
 #include <c10/util/Exception.h>
-#include <c10/util/StringUtil.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
-#include <caffe2/serialize/versions.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/frontend/canonicalize_modified_loop.h>
 #include <torch/csrc/jit/frontend/convert_to_ssa.h>
@@ -18,7 +16,6 @@
 #include <torch/csrc/jit/passes/canonicalize.h>
 #include <torch/csrc/jit/passes/constant_pooling.h>
 #include <torch/csrc/jit/passes/constant_propagation.h>
-#include <torch/csrc/jit/passes/dead_code_elimination.h>
 #include <torch/csrc/jit/passes/inline_forked_closures.h>
 #include <torch/csrc/jit/passes/inliner.h>
 #include <torch/csrc/jit/passes/lift_closures.h>
@@ -29,7 +26,6 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 #include <torch/csrc/jit/runtime/operator.h>
 #include <torch/csrc/jit/runtime/slice_indices_adjust.h>
-#include <torch/csrc/jit/testing/hooks_for_testing.h>
 
 #include <torch/csrc/jit/ir/constants.h>
 
@@ -39,7 +35,6 @@
 #include <ATen/core/interned_strings.h>
 #include <ATen/core/jit_type.h>
 #include <torch/csrc/jit/frontend/error_report.h>
-#include <climits>
 #include <set>
 #include <stack>
 
@@ -421,7 +416,7 @@ struct Environment {
                    "of another type (torch.jit.annotate(List[T, []]) where T "
                    "is the type of elements in the list for Python 2)";
         }
-        error << "\n" << why_not.str();
+        error << '\n' << why_not.str();
         throw ErrorReport(error);
       }
     }
@@ -842,7 +837,7 @@ struct to_ir {
       throw(
           ErrorReport(def.decl().params().range())
           << "Number of type annotations for"
-          << " function parameters (" << schema.arguments().size() << ")"
+          << " function parameters (" << schema.arguments().size() << ')'
           << " does not match the number of parameters on the function ("
           << expected_annotation_size << ")!");
     }
@@ -3452,7 +3447,7 @@ struct to_ir {
           throw(
               ErrorReport(apply.inputs())
               << "expected an expression of type " << type->repr_str()
-              << " but found " << expr->type()->repr_str() << "\n"
+              << " but found " << expr->type()->repr_str() << '\n'
               << why_not.str());
         }
 
@@ -3828,13 +3823,13 @@ struct to_ir {
       if (!is_key_subtype) {
         err << "Generated key type " << key_type->repr_str()
             << " did not match the annotated key type, which was "
-            << annotated_k_type->repr_str() << "\n";
+            << annotated_k_type->repr_str() << '\n';
       }
 
       if (!is_value_subtype) {
         err << "Generated value type " << value_type->repr_str()
             << " did not match the annotated value type, which was "
-            << annotated_v_type->repr_str() << "\n"
+            << annotated_v_type->repr_str() << '\n'
             << ss.str();
       }
 

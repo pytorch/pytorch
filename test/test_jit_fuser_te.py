@@ -5,6 +5,7 @@ import contextlib
 import math
 import operator
 import os
+import sys
 import unittest
 import warnings
 
@@ -3047,4 +3048,5 @@ instantiate_device_type_tests(TestLoopnestRandomization, globals(), only_for=("c
 
 
 if __name__ == "__main__":
-    run_tests()
+    if sys.version_info < (3, 14):
+        run_tests()

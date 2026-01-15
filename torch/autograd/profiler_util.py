@@ -24,7 +24,73 @@ __all__ = [
 
 
 class EventList(list):
-    """A list of Events (for pretty printing)."""
+    """A list of profiling events with helper methods for analysis and visualization.
+
+    EventList extends the standard Python list to provide specialized methods for
+    working with profiling events (FunctionEvent or FunctionEventAvg objects).
+    It includes utilities for aggregating statistics, formatting output tables,
+    and exporting profiling data.
+
+    This class is typically returned by profiler methods and should not be
+    instantiated directly by users.
+
+    Args:
+        *args: Standard list arguments.
+        use_device (str, optional): Device type for profiling ("cuda", "xpu", etc.).
+        profile_memory (bool, optional): Whether memory profiling was enabled. Default: False.
+        with_flops (bool, optional): Whether to include FLOP counts. Default: False.
+
+    Attributes:
+        _use_device (str): Device type being profiled.
+        _profile_memory (bool): Whether memory profiling is enabled.
+        _with_flops (bool): Whether FLOP counting is enabled.
+        _tree_built (bool): Whether the event tree structure has been built.
+
+    Key Methods:
+        table(...): Format events as a table string for display.
+        export_chrome_trace(path): Export to Chrome tracing format.
+        export_stacks(path, metric): Export stack traces with metrics.
+        key_averages(...): Compute averaged statistics grouped by operation name.
+        total_average(): Compute aggregate totals across all events (sums, not averages).
+
+    Properties:
+        self_cpu_time_total: Sum of self CPU time across all events.
+
+    Example::
+
+        import torch
+        from torch.profiler import profile, ProfilerActivity
+
+        with profile(activities=[ProfilerActivity.CPU]) as prof:
+            x = torch.randn(100, 100)
+            y = torch.matmul(x, x)
+
+        # EventList is returned by prof.events()
+        events = prof.events()
+
+        # Display as formatted table
+        print(
+            events.table(
+                sort_by="cpu_time_total", row_limit=20, top_level_events_only=False
+            )
+        )
+
+        # Export to Chrome tracing format
+        events.export_chrome_trace("trace.json")
+
+        # Get averaged statistics
+        avg_events = events.key_averages()
+        print(avg_events.table())
+
+        # Export stack traces
+        events.export_stacks("stacks.txt", "self_cpu_time_total")
+
+    See Also:
+        - :class:`FunctionEvent`: Individual profiling event
+        - :class:`FunctionEventAvg`: Averaged profiling statistics
+        - :meth:`table`: Format events as a readable table
+        - :meth:`key_averages`: Aggregate events by operation name
+    """
 
     def __init__(self, *args, **kwargs):
         use_device = kwargs.pop("use_device", None)
@@ -373,10 +439,23 @@ class EventList(list):
         return avg_list
 
     def total_average(self):
-        """Averages all events.
+        """Compute aggregate statistics across all events.
+
+        Accumulates statistics from all events into a single FunctionEventAvg object.
+        This is primarily useful for computing total metrics (total CPU time, total
+        memory usage, etc.) across the entire profiling session, regardless of
+        operation type.
+
+        Note:
+            This sums up times and counts across ALL different operations, so the
+            "average" metrics (like cpu_time) represent the average time per operation
+            call across the entire session, mixing all operation types together.
+            For per-operation averages, use :meth:`key_averages` instead.
 
         Returns:
-            A FunctionEventAvg object.
+            FunctionEventAvg: A single aggregate object with key="Total" containing
+                accumulated statistics.
+
         """
         total_stat = FunctionEventAvg()
         for evt in self:
@@ -471,7 +550,64 @@ Kernel = namedtuple("Kernel", ["name", "device", "duration"])
 
 
 class FunctionEvent(FormattedTimesMixin):
-    """Profiling information about a single function."""
+    """Profiling information about a single function.
+
+    FunctionEvent records the execution of a single operation during profiling.
+    These events are obtained from the profiler/kineto and contain detailed
+    timing and memory usage information.
+
+    .. note::
+        FunctionEvent objects are typically created by the profiler/kineto and should not
+        be instantiated directly by users. Access them through the profiler's output.
+
+    Attributes:
+        id (int): Unique identifier for this event.
+        node_id (int): Node identifier for distributed profiling (-1 if not applicable).
+        name (str): Name of the profiled function/operator.
+        overload_name (str): Overload name for the operator (requires _ExperimentalConfig(capture_overload_names=True) set).
+        trace_name (str): Same as name, just changes ProfilerStep* to ProfilerStep#
+        time_range (Interval): Time interval containing start and end timestamps in microseconds.
+        thread (int): Thread ID where the operation started.
+        fwd_thread (int): Thread ID of the corresponding forward operation.
+        kernels (List[Kernel]): List of device kernels launched by this operation.
+        count (int): Number of times this event was called (usually 1).
+        cpu_children (List[FunctionEvent]): Direct CPU child operations.
+        cpu_parent (FunctionEvent): Direct CPU parent operation.
+        input_shapes (Tuple[int, ...]): Shapes of input tensors (requires record_shapes=true).
+        concrete_inputs (List[Any]): Concrete input values (requires record_shapes=true).
+        kwinputs (Dict[str, Any]): Keyword arguments (requires record_shapes=true).
+        stack (List[str]): Python stack trace where the operation was called (requires with_stack=true).
+        scope (int): at::RecordScope identifier (0=forward, 1=backward, etc.).
+        use_device (str): Device type being profiled ("cuda", "xpu", etc.).
+        cpu_memory_usage (int): CPU memory allocated in bytes.
+        device_memory_usage (int): Device memory allocated in bytes.
+        is_async (bool): Whether this is an asynchronous operation.
+        is_remote (bool): Whether this operation occurred on a remote node.
+        sequence_nr (int): Sequence number for autograd operations.
+        device_type (DeviceType): Type of device (CPU, CUDA, XPU, PrivateUse1, etc.).
+        device_index (int): Index of the device (e.g., GPU 0, 1, 2).
+        device_resource_id (int): Resource ID on the device (ie. stream ID).
+        is_legacy (bool): Whether this is from the legacy profiler.
+        flops (int): Estimated floating point operations.
+        is_user_annotation (bool): Whether this is a user-annotated region.
+        metadata_json (str): Additional metadata in JSON format.
+
+    Properties:
+        cpu_time_total (float): Total CPU time in microseconds.
+        device_time_total (float): Total device (CUDA/XPU/etc) time in microseconds.
+        self_cpu_time_total (float): CPU time excluding child operations.
+        self_device_time_total (float): Device time excluding child operations.
+        self_cpu_memory_usage (int): CPU memory usage excluding child operations.
+        self_device_memory_usage (int): Device memory usage excluding child operations.
+        cpu_time (float): Average CPU time per call.
+        device_time (float): Average device time per call.
+        key (str): Key used for grouping events (usually same as name).
+
+    See Also:
+        - :class:`torch.profiler.profile`: Context manager for profiling
+        - :class:`EventList`: List container for FunctionEvent objects with helper methods
+        - :class:`FunctionEventAvg`: Averaged statistics over multiple FunctionEvent objects
+    """
 
     def __init__(
         self,
@@ -701,7 +837,50 @@ class FunctionEvent(FormattedTimesMixin):
 
 
 class FunctionEventAvg(FormattedTimesMixin):
-    """Used to average stats over multiple FunctionEvent objects."""
+    """Averaged profiling statistics over multiple FunctionEvent objects.
+
+    FunctionEventAvg aggregates statistics from multiple FunctionEvent objects
+    with the same key (typically same operation name). This is useful for getting
+    average performance metrics across multiple invocations of the same operation.
+
+    This class is typically created by calling :meth:`EventList.key_averages()` on
+    a profiler's event list.
+
+    Attributes:
+        key (str): Grouping key for the events (typically operation name).
+        count (int): Total number of events aggregated.
+        node_id (int): Node identifier for distributed profiling (-1 if not applicable).
+        is_async (bool): Whether the operations are asynchronous.
+        is_remote (bool): Whether the operations occurred on a remote node.
+        use_device (str): Device type being profiled ("cuda", "xpu", etc.).
+        cpu_time_total (int): Accumulated total CPU time in microseconds.
+        device_time_total (int): Accumulated total device time in microseconds.
+        self_cpu_time_total (int): Accumulated self CPU time (excluding children) in microseconds.
+        self_device_time_total (int): Accumulated self device time (excluding children) in microseconds.
+        input_shapes (List[List[int]]): Input tensor shapes (requires record_shapes=true).
+        overload_name (str): Operator overload name (requires _ExperimentalConfig(capture_overload_names=True) set).
+        stack (List[str]): Python stack trace where the operation was called (requires with_stack=true).
+        scope (int): at::RecordScope identifier (0=forward, 1=backward, etc.).
+        cpu_memory_usage (int): Accumulated CPU memory usage in bytes.
+        device_memory_usage (int): Accumulated device memory usage in bytes.
+        self_cpu_memory_usage (int): Accumulated self CPU memory usage in bytes.
+        self_device_memory_usage (int): Accumulated self device memory usage in bytes.
+        cpu_children (List[FunctionEvent]): CPU child events.
+        cpu_parent (FunctionEvent): CPU parent event.
+        device_type (DeviceType): Type of device (CPU, CUDA, XPU, PrivateUse1, etc.).
+        is_legacy (bool): Whether from legacy profiler.
+        flops (int): Total floating point operations.
+        is_user_annotation (bool): Whether this is a user-annotated region.
+
+    Properties:
+        cpu_time (float): Average CPU time per invocation.
+        device_time (float): Average device time per invocation.
+
+    See Also:
+        - :class:`EventList.key_averages`: Method that creates FunctionEventAvg objects
+        - :class:`FunctionEvent`: Individual profiling event
+        - :class:`EventList`: Container for profiling events
+    """
 
     def __init__(self) -> None:
         self.key: Optional[str] = None

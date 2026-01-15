@@ -77,6 +77,9 @@ jobs:
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
 
+      - name: Login to ECR
+        uses: ./.github/actions/ecr-login
+
       - name: Get latest PyTorch nightly
         shell: bash
         run: |

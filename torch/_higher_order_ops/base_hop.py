@@ -84,6 +84,7 @@ class BaseHOP(HigherOrderOperator, abc.ABC):
                 f"we require that the subgraph be a torch.fx.GraphModule (or "
                 f"a function we know doesn't have free variables)."
             )
+        # pyrefly: ignore [missing-attribute]
         return super().__call__(subgraph, *operands, **kwargs)
 
     def _call_Autograd(self, subgraph, *operands, **kwargs):

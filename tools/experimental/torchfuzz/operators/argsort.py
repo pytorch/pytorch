@@ -1,7 +1,6 @@
 """Argsort operator implementation."""
 
 import random
-from typing import Optional
 
 import torch
 
@@ -17,7 +16,7 @@ class ArgsortOperator(Operator):
         super().__init__("argsort")
 
     @property
-    def torch_op_name(self) -> Optional[str]:
+    def torch_op_name(self) -> str | None:
         """Return the torch operation name."""
         return "torch.argsort"
 

@@ -11,9 +11,14 @@ import torch._inductor.test_case
 import torch._inductor.utils
 from torch import _dynamo as torchdynamo
 from torch._inductor import config
-from torch.profiler import ProfilerActivity
-from torch.testing._internal.common_utils import TemporaryFileName
-from torch.testing._internal.inductor_utils import HAS_CUDA_AND_TRITON, IS_BIG_GPU
+from torch.profiler import ProfilerActivity, record_function
+from torch.testing._internal.common_utils import skipIfXpu, TemporaryFileName
+from torch.testing._internal.inductor_utils import (
+    GPU_TYPE,
+    HAS_GPU_AND_TRITON,
+    IS_BIG_GPU,
+)
+from torch.testing._internal.logging_utils import logs_to_string
 from torch.torch_version import TorchVersion
 from torch.utils._triton import has_triton
 
@@ -22,6 +27,10 @@ HAS_TRITON = has_triton()
 
 
 class DynamoProfilerTests(torch._inductor.test_case.TestCase):
+    @skipIfXpu(
+        msg="AssertionError: False is not true, "
+        "https://github.com/intel/torch-xpu-ops/issues/2335"
+    )
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
     def test_inductor_profiling_triton_launch(self):
         # Verify that we get some sort of CPU-side indication of triton kernel launches
@@ -31,7 +40,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         def fn(x, y):
             return (x + y).sin().cos()
 
-        x, y = (torch.rand((4, 4), device="cuda") for _ in range(2))
+        x, y = (torch.rand((4, 4), device=GPU_TYPE) for _ in range(2))
 
         with torch.profiler.profile() as prof:
             fn(x, y)
@@ -95,7 +104,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         def fn(x, y):
             return (x + y).sin().cos()
 
-        args = [torch.rand((4, 4), device="cuda") for _ in range(2)]
+        args = [torch.rand((4, 4), device=GPU_TYPE) for _ in range(2)]
 
         events = self._test_profiling_kernel_names(fn, args, "sin")
         event_found = False
@@ -120,7 +129,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             def fn(x, y):
                 return x @ y
 
-            args = [torch.rand((4, 4), device="cuda") for _ in range(2)]
+            args = [torch.rand((4, 4), device=GPU_TYPE) for _ in range(2)]
 
             def check_fn():
                 # test_profiling_kernel_names will check this before asserting mm is in the trace.
@@ -153,8 +162,8 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             def fn(x, y):
                 return torch._foreach_add(x, y)
 
-            x = [torch.rand((4, 4), device="cuda") for _ in range(3)]
-            y = [torch.rand((4, 4), device="cuda") for _ in range(3)]
+            x = [torch.rand((4, 4), device=GPU_TYPE) for _ in range(3)]
+            y = [torch.rand((4, 4), device=GPU_TYPE) for _ in range(3)]
 
             args = (x, y)
 
@@ -206,8 +215,8 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         def fn(x, y):
             return torch._foreach_add(x, y)
 
-        x = [torch.rand((4, 4), device="cuda") for _ in range(3)]
-        y = [torch.rand((4, 4), device="cuda") for _ in range(3)]
+        x = [torch.rand((4, 4), device=GPU_TYPE) for _ in range(3)]
+        y = [torch.rand((4, 4), device=GPU_TYPE) for _ in range(3)]
 
         args = (x, y)
         fn_opt = torch.compile(fn)
@@ -216,11 +225,14 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         self.assertTrue(hooks_called["enter"])
         self.assertTrue(hooks_called["exit"])
 
+    @skipIfXpu(
+        msg="TypeError: list indices must be integers or slices, not str, https://github.com/intel/torch-xpu-ops/issues/2335"
+    )
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
     def test_pt2_triton_attributes(self):
         from torch._inductor.codecache import code_hash
 
-        device = "cuda"
+        device = GPU_TYPE
         debug = False  # set to True to get output file
 
         @torchdynamo.optimize("inductor")
@@ -235,7 +247,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         with config.patch(compile_threads=1):
             fn(*inputs)
 
-        fp = tempfile.NamedTemporaryFile("w+t", suffix=".json", delete=not debug)
+        fp = tempfile.NamedTemporaryFile("w+t", suffix=".json", delete=not debug)  # noqa: SIM115
         fp.close()
 
         with torch.profiler.profile(
@@ -258,7 +270,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
             triton_events = [
                 event
                 for event in trace_json["traceEvents"]
-                if "kernel_backend" in event.get("args", {}).keys()
+                if "kernel_backend" in event.get("args", {})
             ]
 
         print(triton_events)
@@ -295,7 +307,7 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
 
     @unittest.skipIf(not HAS_TRITON, "requires cuda & triton")
     def test_cupti_lazy_reinit(self):
-        x, y = (torch.randn(4, 4, device="cuda") for _ in range(2))
+        x, y = (torch.randn(4, 4, device=GPU_TYPE) for _ in range(2))
 
         def fn(x, y):
             return (x + y).sin()
@@ -310,9 +322,42 @@ class DynamoProfilerTests(torch._inductor.test_case.TestCase):
         else:
             self.assertEqual("1", os.environ.get("DISABLE_CUPTI_LAZY_REINIT", "0"))
 
+    @torch._dynamo.config.patch("capture_profiler_record_function", True)
+    def test_inductor_remove_profiler_ops(self):
+        """
+        Test that inductor post_grad graph doesn't have profiler ops even when
+        dynamo produce those ops.
+        """
+
+        def fn(x):
+            with record_function("my_net1"):
+                a = x.sin()
+            with record_function("my_cos"):
+                b = a.cos()
+            with record_function("my_net2"):
+                c = b + 2
+            return c
+
+        log_stream, ctx = logs_to_string(
+            "torch._inductor.compile_fx", "post_grad_graphs"
+        )
+        with ctx():
+            torch.compile(fn, fullgraph=True)(torch.randn(10))
+        aot_graphs = "\n".join(log_stream.getvalue().strip().split("\n")[4:]).strip()
+        self.assertExpectedInline(
+            aot_graphs,
+            """\
+        sin: "f32[10][1]cpu" = torch.ops.aten.sin.default(arg0_1);  arg0_1 = None
+        cos: "f32[10][1]cpu" = torch.ops.aten.cos.default(sin);  sin = None
+        add: "f32[10][1]cpu" = torch.ops.aten.add.Tensor(cos, 2);  cos = None
+        return (add,)""",  # noqa: B950
+            ignore_comments=True,
+            ignore_empty_lines=True,
+        )
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
 
-    if HAS_CUDA_AND_TRITON:
+    if HAS_GPU_AND_TRITON:
         run_tests()

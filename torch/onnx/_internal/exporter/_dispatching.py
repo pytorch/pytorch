@@ -86,7 +86,7 @@ def _param_type_compatible_with_arg(
     assigned_types: dict[str, ir.TypeProtocol],
 ) -> bool:
     # Handle Python types first
-    if isinstance(value, bool):  # noqa: SIM102
+    if isinstance(value, bool):
         if param.type_constraint.allowed_types & {ir.TensorType(ir.DataType.BOOL)}:
             return True
     if isinstance(value, int) and param.type_constraint.allowed_types & {
@@ -124,7 +124,7 @@ def _param_type_compatible_with_arg(
         ir.TensorType(ir.DataType.COMPLEX128),
     }:
         return True
-    if isinstance(value, str):  # noqa: SIM102
+    if isinstance(value, str):
         if param.type_constraint.allowed_types & {ir.TensorType(ir.DataType.STRING)}:
             return True
     if isinstance(value, (list, tuple)):

@@ -59,7 +59,7 @@ static GridSamplerOffsets find_grid_sampler_offsets(
   return offsets;
 }
 
-// Mod function which gives postive output when `a` is negative
+// Mod function which gives positive output when `a` is negative
 static int32_t mod(int32_t a, int32_t b) {
   auto r = a % b;
   return r + (r < 0 ? b : 0);
@@ -184,6 +184,7 @@ void grid_sampler_single_element(
     int32_t dims,
     constant int32_t* input_sizes,
     constant int32_t* input_strides,
+    int32_t coord_stride,
     GridSamplerInterpolation interpolation_mode,
     GridSamplerPadding padding_mode,
     bool align_corners) {
@@ -191,9 +192,9 @@ void grid_sampler_single_element(
   int32_t right_indices[3];
   opmath_t<T> scales[3];
 
-  // For each dimension, find the pair of indices in the cooresponding dimension
+  // For each dimension, find the pair of indices in the corresponding dimension
   // of `input` which surround the grid coordinate in that dimension. We'll do
-  // this by mapping different coordiante spaces onto each other. There are
+  // this by mapping different coordinate spaces onto each other. There are
   // basically three different coordinate spaces to keep in mind:
   //
   //  * aligned grid space
@@ -221,7 +222,7 @@ void grid_sampler_single_element(
   for (auto coord_dim = 0; coord_dim < dims; coord_dim++) {
     auto input_dim = dims - coord_dim - 1;
     auto input_size = input_sizes[input_dim];
-    auto coord = static_cast<opmath_t<T>>(coords[coord_dim]);
+    auto coord = static_cast<opmath_t<T>>(coords[coord_dim * coord_stride]);
 
     if (!align_corners) {
       // Map unaligned grid space to aligned grid space
@@ -290,6 +291,7 @@ kernel void grid_sampler(
 
   input_sizes += 2;
   input_strides += 2;
+  auto coord_stride = grid_strides[sampler_dims + 1];
 
   auto interpolation_mode = params.interpolation_mode;
   auto padding_mode = params.padding_mode;
@@ -302,6 +304,7 @@ kernel void grid_sampler(
       sampler_dims,
       input_sizes,
       input_strides,
+      coord_stride,
       interpolation_mode,
       padding_mode,
       align_corners);

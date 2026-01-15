@@ -299,6 +299,56 @@ class TestProcessGroupInitInfo(DTensorTestBase):
             pg_init_info = _ProcessGroupInitInfo()
             self.assertFalse(pg_init_info.use_prefix_store)
 
+    @with_comms
+    def test_process_group_init_info_gc_env_vars(self) -> None:
+        """Test that ProcessGroupInitInfo correctly reads GC-related environment variables."""
+
+        # Test with both GC env vars enabled
+        with patch.dict(
+            os.environ,
+            {
+                "DCP_DISABLE_AUTOMATIC_GC": "1",
+                "DCP_DISABLE_MANUAL_GC": "1",
+            },
+        ):
+            pg_init_info = _ProcessGroupInitInfo()
+            self.assertTrue(pg_init_info.disable_automatic_gc)
+            self.assertTrue(pg_init_info.disable_manual_gc)
+
+        # Test with automatic GC disabled, manual GC enabled
+        with patch.dict(
+            os.environ,
+            {
+                "DCP_DISABLE_AUTOMATIC_GC": "1",
+            },
+        ):
+            pg_init_info = _ProcessGroupInitInfo()
+            self.assertTrue(pg_init_info.disable_automatic_gc)
+            self.assertFalse(pg_init_info.disable_manual_gc)
+
+        # Test with automatic GC enabled, manual GC disabled
+        with patch.dict(
+            os.environ,
+            {
+                "DCP_DISABLE_MANUAL_GC": "1",
+            },
+        ):
+            pg_init_info = _ProcessGroupInitInfo()
+            self.assertFalse(pg_init_info.disable_automatic_gc)
+            self.assertTrue(pg_init_info.disable_manual_gc)
+
+        # Test with both GC env vars disabled
+        with patch.dict(
+            os.environ,
+            {
+                "DCP_DISABLE_AUTOMATIC_GC": "0",
+                "DCP_DISABLE_MANUAL_GC": "0",
+            },
+        ):
+            pg_init_info = _ProcessGroupInitInfo()
+            self.assertFalse(pg_init_info.disable_automatic_gc)
+            self.assertFalse(pg_init_info.disable_manual_gc)
+
 
 if __name__ == "__main__":
     run_tests()

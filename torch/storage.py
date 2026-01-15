@@ -8,7 +8,7 @@ import functools
 import io
 import threading
 import warnings
-from typing import Any, cast, Optional as _Optional, TYPE_CHECKING, TypeVar, Union
+from typing import Any, cast, TYPE_CHECKING, TypeVar
 from typing_extensions import Self
 
 import torch
@@ -35,7 +35,7 @@ except ModuleNotFoundError:
 _share_memory_lock = threading.Lock()
 _share_memory_map: dict[int, threading.RLock] = {}
 
-T = TypeVar("T", bound="Union[_StorageBase, TypedStorage]")
+T = TypeVar("T", bound="_StorageBase | TypedStorage")
 
 
 class _StorageBase:
@@ -46,9 +46,9 @@ class _StorageBase:
     # Used when
     # (1) stashing FakeTensor device onto storage in torch.serialization.skip_data
     # (2) stashing device onto storage to propagate to FakeTensor when torch.load under FakeTensorMode
-    _fake_device: _Optional[torch.device] = None
+    _fake_device: torch.device | None = None
     # Used when loading with FakeTensorMode to give information about offset of storage in torch.saved-file
-    _checkpoint_offset: _Optional[int] = None
+    _checkpoint_offset: int | None = None
 
     def __init__(self, *args, **kwargs):
         pass
@@ -62,10 +62,10 @@ class _StorageBase:
     def __setitem__(self, *args, **kwargs):
         raise NotImplementedError
 
-    def copy_(self, source: T, non_blocking: _Optional[_bool] = None) -> T:
+    def copy_(self, source: T, non_blocking: _bool | None = None) -> T:
         raise NotImplementedError
 
-    def new(self) -> Union[_StorageBase, TypedStorage]:
+    def new(self) -> _StorageBase | TypedStorage:
         raise NotImplementedError
 
     def nbytes(self) -> _int:
@@ -75,13 +75,11 @@ class _StorageBase:
         return self.nbytes()
 
     def type(
-        self, dtype: _Optional[str] = None, non_blocking: _bool = False
-    ) -> Union[_StorageBase, TypedStorage]:
+        self, dtype: str | None = None, non_blocking: _bool = False
+    ) -> _StorageBase | TypedStorage:
         return _type(self, dtype, non_blocking)
 
-    def cuda(
-        self, device=None, non_blocking=False
-    ) -> Union[_StorageBase, TypedStorage]:
+    def cuda(self, device=None, non_blocking=False) -> _StorageBase | TypedStorage:
         """Returns a copy of this object in CUDA memory.
 
         If this object is already in CUDA memory and on the correct device, then
@@ -96,7 +94,7 @@ class _StorageBase:
         device2 = torch.device("cuda", device) if device else torch.device("cuda")
         return self.to(device=device2, non_blocking=non_blocking)
 
-    def hpu(self, device=None, non_blocking=False) -> Union[_StorageBase, TypedStorage]:
+    def hpu(self, device=None, non_blocking=False) -> _StorageBase | TypedStorage:
         """Returns a copy of this object in HPU memory.
 
         If this object is already in HPU memory and on the correct device, then
@@ -166,7 +164,7 @@ class _StorageBase:
     def _new_with_weak_ptr(cls, *args, **kwargs) -> Self:
         raise NotImplementedError
 
-    def _shared_decref(self) -> Union[_StorageBase, TypedStorage]:
+    def _shared_decref(self) -> _StorageBase | TypedStorage:
         raise NotImplementedError
 
     def _write_file(self, *args, **kwargs):
@@ -175,7 +173,7 @@ class _StorageBase:
     def resize_(self, size: _int):
         raise NotImplementedError
 
-    def _weak_ref(self, *args, **kwargs) -> Union[_StorageBase, TypedStorage]:
+    def _weak_ref(self, *args, **kwargs) -> _StorageBase | TypedStorage:
         raise NotImplementedError
 
     def _set_from_file(self, *args, **kwargs):
@@ -210,17 +208,17 @@ class _StorageBase:
         raise NotImplementedError
 
     @classmethod
-    def from_file(cls, filename, shared, nbytes) -> Union[_StorageBase, TypedStorage]:
+    def from_file(cls, filename, shared, nbytes) -> _StorageBase | TypedStorage:
         raise NotImplementedError
 
     @classmethod
-    def _expired(cls, *args, **kwargs) -> Union[_StorageBase, TypedStorage]:
+    def _expired(cls, *args, **kwargs) -> _StorageBase | TypedStorage:
         raise NotImplementedError
 
     def _byteswap(self, *args, **kwargs):
         raise NotImplementedError
 
-    def _get_filename(self, *args, **kwargs) -> _Optional[str]:
+    def _get_filename(self, *args, **kwargs) -> str | None:
         raise NotImplementedError
 
     def __repr__(self):
@@ -354,7 +352,7 @@ class _StorageBase:
         """Casts this storage to float8_e4m3fnuz type"""
         return self._to(torch.float8_e4m3fnuz)
 
-    def is_pinned(self, device: Union[str, torch.device] = "cuda"):
+    def is_pinned(self, device: str | torch.device = "cuda"):
         r"""Determine whether the CPU storage is already pinned on device.
 
         Args:
@@ -370,7 +368,7 @@ class _StorageBase:
             .is_pinned(device)
         )
 
-    def pin_memory(self, device: Union[str, torch.device] = "cuda"):
+    def pin_memory(self, device: str | torch.device = "cuda"):
         r"""Copy the CPU storage to pinned memory, if it's not already pinned.
 
         Args:
@@ -455,7 +453,10 @@ def _share_memory_lock_protected(fn):
             if to_free is not None:
                 # Ensure that the cdata from the storage didn't change and only
                 # the data_ptr did.
-                assert self._cdata == to_free
+                if self._cdata != to_free:
+                    raise AssertionError(
+                        f"storage cdata changed unexpectedly: expected {to_free}, got {self._cdata}"
+                    )
                 with _share_memory_lock:
                     _share_memory_map[to_free].release()
                     del _share_memory_map[to_free]
@@ -478,7 +479,7 @@ class UntypedStorage(torch._C.StorageBase, _StorageBase):
         return self.device.type == "hpu"
 
     @property
-    def filename(self) -> _Optional[str]:
+    def filename(self) -> str | None:
         """Returns the file name associated with this storage.
 
         The file name will be a string if the storage is on CPU and was created via
@@ -632,7 +633,10 @@ def _get_always_warn_typed_storage_removal():
 
 def _set_always_warn_typed_storage_removal(always_warn):
     global _always_warn_typed_storage_removal
-    assert isinstance(always_warn, bool)
+    if not isinstance(always_warn, bool):
+        raise AssertionError(
+            f"always_warn must be bool, got {type(always_warn).__name__}"
+        )
     _always_warn_typed_storage_removal = always_warn
 
 
@@ -671,7 +675,7 @@ def _get_device_from_module(module: str):
 class TypedStorage:
     is_sparse: _bool = False
     # Used when stashing FakeTensor device onto storage in torch.save(metadata_only=True)
-    _fake_device: _Optional[torch.device] = None
+    _fake_device: torch.device | None = None
 
     dtype: torch.dtype
 
@@ -680,7 +684,7 @@ class TypedStorage:
         return self.dtype
 
     @property
-    def filename(self) -> _Optional[str]:
+    def filename(self) -> str | None:
         """Returns the file name associated with this storage if the storage was memory mapped from a file.
         or ``None`` if the storage was not created by memory mapping a file."""
         return self._untyped_storage.filename
@@ -889,7 +893,10 @@ class TypedStorage:
         return self._untyped_storage
 
     def _new_wrapped_storage(self, untyped_storage) -> Self:
-        assert type(untyped_storage) is torch.UntypedStorage
+        if type(untyped_storage) is not torch.UntypedStorage:
+            raise AssertionError(
+                f"expected UntypedStorage, got {type(untyped_storage).__name__}"
+            )
 
         if type(self) is TypedStorage:
             return cast(
@@ -1018,7 +1025,7 @@ class TypedStorage:
             ).set_(self)
             return tmp_tensor[idx_wrapped].item()
 
-    def copy_(self, source: T, non_blocking: _Optional[bool] = None):
+    def copy_(self, source: T, non_blocking: bool | None = None):
         _warn_typed_storage_removal()
         if isinstance(source, TypedStorage):
             self._untyped_storage.copy_(source._untyped_storage, non_blocking)
@@ -1036,9 +1043,9 @@ class TypedStorage:
 
     def type(
         self,
-        dtype: _Optional[str] = None,
+        dtype: str | None = None,
         non_blocking: bool = False,
-    ) -> Union[_StorageBase, TypedStorage, str]:
+    ) -> _StorageBase | TypedStorage | str:
         _warn_typed_storage_removal()
         if dtype is None:
             legacy_class = self._get_legacy_storage_class()
@@ -1157,7 +1164,7 @@ class TypedStorage:
         _warn_typed_storage_removal()
         return self._new_wrapped_storage(self._untyped_storage.cpu())
 
-    def is_pinned(self, device: Union[str, torch.device] = "cuda"):
+    def is_pinned(self, device: str | torch.device = "cuda"):
         r"""Determine whether the CPU TypedStorage is already pinned on device.
 
         Args:
@@ -1170,7 +1177,7 @@ class TypedStorage:
         _warn_typed_storage_removal()
         return self._untyped_storage.is_pinned(device)
 
-    def pin_memory(self, device: Union[str, torch.device] = "cuda"):
+    def pin_memory(self, device: str | torch.device = "cuda"):
         r"""Copy the CPU TypedStorage to pinned memory, if it's not already pinned.
 
         Args:
