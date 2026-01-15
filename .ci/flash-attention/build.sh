@@ -61,7 +61,7 @@ pushd "$FLASH_ATTENTION_HOPPER_DIR"
 
 git submodule update --init ../csrc/cutlass
 
-if [[ "$(uname -m)" != "aarch64" ]];
+if [[ "$(uname -m)" != "aarch64" ]]; then
     sed -i 's/bare_metal_version != Version("12.8")/bare_metal_version < Version("12.8")/' \
         "$FLASH_ATTENTION_HOPPER_DIR/setup.py"
 fi
