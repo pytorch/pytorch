@@ -19,6 +19,7 @@ from torch.export import export
 from torch.export.experimental import _export_forward_backward, _sticky_export
 from torch.export.graph_signature import OutputKind
 from torch.testing import FileCheck
+from torch.testing._internal.two_tensor import TwoTensor
 from torch.testing._internal.common_utils import TEST_CUDA
 from torch.utils import _pytree as pytree
 
@@ -403,6 +404,18 @@ def forward(self, p_linear_weight, p_linear_bias, c_lifted_tensor_0, x):
             "nested function with non-constructible closure in output",
         ):
             _dynamo_graph_capture_for_export(module)(x)
+    
+    def test_export_subclass_inp(self) -> None:
+        
+        inp = TwoTensor(torch.randn(4, 4), torch.randn(4, 4))
+
+        class M(torch.nn.Module):
+            def forward(self, x):
+                return x.a.sum() 
+        
+        #gm  = dynamo_graph_capture_for_export(M())(inp)
+        print(_dynamo_graph_capture_for_export(M())(inp))
+        ep = torch.export.export(M(), (inp,)).graph
 
     def test_joint_dynamic(self) -> None:
         from torch.export import Dim
