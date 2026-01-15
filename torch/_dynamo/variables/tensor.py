@@ -21,8 +21,9 @@ import operator
 import textwrap
 import traceback
 import types
-from collections.abc import Sequence
+from collections.abc import Iterable, Sequence
 from contextlib import nullcontext
+from itertools import chain
 from types import NoneType
 from typing import Any, NoReturn, Optional, TYPE_CHECKING
 
@@ -32,6 +33,7 @@ import torch._numpy as tnp
 import torch.fx
 import torch.random
 from torch._dynamo import compiled_autograd
+from torch._library.opaque_object import is_opaque_reference_type
 from torch._subclasses.meta_utils import is_sparse_any
 from torch.fx.experimental.symbolic_shapes import (
     guard_scalar,
@@ -45,6 +47,7 @@ from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 from .. import config, graph_break_hints, variables
 from .._trace_wrapped_higher_order_op import trace_wrapped
 from ..exc import (
+    TorchRuntimeError,
     unimplemented,
     UnknownPropertiesDuringBackwardTrace,
     UserError,
@@ -69,6 +72,7 @@ from ..utils import (
 from .base import AttributeMutationNew, ValueMutationNew, VariableTracker
 from .constant import ConstantVariable
 from .lists import ListIteratorVariable, SizeVariable
+from .script_object import TorchScriptObjectVariable
 from .user_defined import UserDefinedClassVariable
 
 
@@ -308,6 +312,11 @@ class TensorVariable(VariableTracker):
                 from .builder import wrap_fx_proxy
 
                 return wrap_fx_proxy(tx=tx, proxy=proxy, example_value=example_value)
+            elif is_opaque_reference_type(type(example_value)):
+                fake_script_obj = torch._library.fake_class_registry.maybe_to_fake_obj(
+                    tx.output.fake_mode, example_value
+                )
+                return TorchScriptObjectVariable.create(proxy, fake_script_obj)
             # any other attributes on the subclass (that are not methods)
             # are assumed to be constant metadata.
             elif not callable(example_value):
@@ -621,6 +630,7 @@ class TensorVariable(VariableTracker):
         self, tx: "InstructionTranslator", idxes: Sequence[int] | None = None
     ) -> list[VariableTracker]:
         from .builder import wrap_fx_proxy_cls
+        from .torch_function import TensorWithTFOverrideVariable
 
         if self.valid_size():
             size_len = len(self.size)
@@ -652,6 +662,22 @@ class TensorVariable(VariableTracker):
             assert len(idxes) == length, (
                 f"Can't unpack a tensor of {length} rows into a tuple of {len(idxes)} elements."
             )
+
+        # preserve tensor subclass type when unpacking
+        if isinstance(self, TensorWithTFOverrideVariable):
+            base_vars = [
+                wrap_fx_proxy_cls(
+                    target_cls=TensorVariable, tx=tx, proxy=self.as_proxy()[i]
+                )
+                for i in idxes
+            ]
+            return [
+                TensorWithTFOverrideVariable.from_tensor_var(
+                    tx, v, self.class_type, self.source
+                )
+                for v in base_vars
+            ]
+
         return [
             wrap_fx_proxy_cls(target_cls=type(self), tx=tx, proxy=self.as_proxy()[i])
             for i in idxes
@@ -764,7 +790,9 @@ class TensorVariable(VariableTracker):
             pass
         else:
             try:
-                result = handler_method(tx, *args, **kwargs)
+                # Realize any LazyVariableTracker in kwargs before calling handler.
+                realized_kwargs = {k: v.realize() for k, v in kwargs.items()}
+                result = handler_method(tx, *args, **realized_kwargs)
                 if result:
                     return result
             except TypeError as e:
@@ -1072,18 +1100,177 @@ class TensorVariable(VariableTracker):
         out = tolist(tensor, self.as_proxy())
         return VariableTracker.build(tx, out)
 
+    def _collect_backward_inputs(
+        self, vars_iter: Iterable[VariableTracker], error_on_non_leaf: bool = False
+    ) -> Optional[list[VariableTracker]]:
+        """
+        Collect unique leaf tensors from vars_iter for backward.
+
+        Only collects leaf tensors (no grad_fn). Non-leaf tensors are skipped
+        (or error if error_on_non_leaf=True) because when auto-detecting inputs,
+        we must not stop gradients at non-leafs - they are intermediates, and the
+        real leaf tensors (parameters) are further up the autograd graph.
+
+        Deduplicates by proxy.node.
+        Returns list of unique leaf tensor variables.
+        """
+        from ..source import SyntheticLocalSource
+
+        result = []
+        seen_nodes: set[torch.fx.Node] = set()
+        for var in vars_iter:
+            if isinstance(var, TensorVariable) and var.requires_grad:
+                # Non-leaf tensors (has_grad_fn=True) must be skipped because:
+                # 1. Semantically: they're intermediates, not the leaves we want gradients for
+                # 2. Implementation: accumulate_grad polyfill can't handle .grad on non-leafs
+                #    (Dynamo creates GetAttrVariable instead of TensorVariable)
+                #
+                # In-graph created tensors without proper source also can't be handled
+                # because subguards_allowed() returns False for SyntheticLocalSource.
+                if var.has_grad_fn:
+                    if error_on_non_leaf:
+                        unimplemented(
+                            gb_type="backward() with non-leaf tensor",
+                            context=f"backward(inputs=[...]) with non-leaf tensor: {var}",
+                            explanation="backward(inputs=[...]) with non-leaf tensors is not yet supported.",
+                            hints=[
+                                "Only pass leaf tensors (parameters, graph inputs) to backward(inputs=...)",
+                            ],
+                        )
+                elif not var.source or isinstance(var.source, SyntheticLocalSource):
+                    if error_on_non_leaf:
+                        unimplemented(
+                            gb_type="backward() with in-graph created tensor",
+                            context=f"backward(inputs=[...]) with in-graph created tensor: {var}",
+                            explanation="backward(inputs=[...]) with tensors created inside the "
+                            "compiled function is not yet supported.",
+                            hints=[
+                                "Only pass tensors that are inputs to the compiled function or captured from outside",
+                            ],
+                        )
+                else:
+                    node = var.proxy.node
+                    if node not in seen_nodes:
+                        seen_nodes.add(node)
+                        result.append(var)
+        return result
+
     def method_backward(
         self,
         tx: "InstructionTranslator",
-        *args: VariableTracker,
-        **kwargs: VariableTracker,
-    ) -> NoReturn:
-        unimplemented(
-            gb_type="Unsupported Tensor.backward() call",
-            context=f"call_method {self} backward {args} {kwargs}",
-            explanation="Dynamo currently does not support tracing `Tensor.backward()`.",
-            hints=[*graph_break_hints.FUNDAMENTAL],
+        gradient: Optional[VariableTracker] = None,
+        retain_graph: Optional[VariableTracker] = None,
+        create_graph: Optional[VariableTracker] = None,
+        inputs: Optional[VariableTracker] = None,
+    ) -> Optional[VariableTracker]:
+        """
+        Trace tensor.backward() by rewriting as autograd.grad() + accumulate_grad.
+
+        Implementation:
+        1. Collect leaf tensors to compute gradients for
+        2. Call autograd.grad(loss, inputs) to compute gradients
+        3. For each leaf tensor, call accumulate_grad to update .grad
+
+        Non-leaf tensor handling:
+        - Auto-detect (inputs=None): Non-leaf tensors are silently skipped.
+          This matches eager where only leaves get .grad.
+        - User-provided (inputs=[...]): Errors if any non-leaf tensor is found.
+          While eager backward(inputs=[non_leaf]) works, Dynamo cannot trace it
+          because the accumulate_grad polyfill accesses .grad, and Dynamo creates
+          a generic GetAttrVariable for .grad on non-leaf tensors (instead of a
+          TensorVariable), which cannot be used in tensor operations.
+
+        TODO: Support non-leaf tensors by fixing .grad access on non-leaf in Dynamo.
+        """
+        if not config.trace_autograd_ops:
+            unimplemented(
+                gb_type="Unsupported Tensor.backward() call",
+                context=f"call_method {self} backward {gradient} {retain_graph} {create_graph} {inputs}",
+                explanation="Dynamo currently does not support tracing `Tensor.backward()` when trace_autograd_ops is off.",
+                hints=["Set torch._dynamo.trace_autograd_ops=True"],
+            )
+
+        if not self.requires_grad and not self.has_grad_fn:
+            raise TorchRuntimeError(
+                "tensor does not require grad and does not have a grad_fn"
+            )
+
+        # Step 1: Collect leaf tensors to compute gradients for
+        #
+        # Note: We rely on the autograd.grad handler to validate that the generated
+        # autograd.grad call is legal (i.e., doesn't traverse external grad_fns).
+        # If the loss depends on leaves we don't know about, the autograd.grad
+        # handler will catch it via the external_grad_fns check.
+        auto_detect = inputs is None
+        if auto_detect:
+            # Sources can be either user inputs (params are included here)
+            # or parameters that are created in forward.
+            all_vars = chain(
+                tx.output.leaf_var_creation_order,
+                tx.output.input_source_to_var.values(),
+            )
+            input_vars = self._collect_backward_inputs(all_vars)
+            if not input_vars:
+                # No leaf tensors found - nothing to accumulate gradients into.
+                # This matches eager behavior where backward() is a no-op if there
+                # are no leaves requiring grad.
+                return ConstantVariable.create(None)
+        else:
+            provided_vars = (
+                inputs.items
+                if isinstance(inputs, variables.BaseListVariable)
+                else [inputs]
+            )
+            input_vars = self._collect_backward_inputs(
+                provided_vars, error_on_non_leaf=True
+            )
+            if not input_vars:
+                # User explicitly provided inputs but none were valid leaf tensors.
+                # This would cause "grad requires non-empty inputs" error at runtime.
+                unimplemented(
+                    gb_type="backward() with empty inputs",
+                    context="backward(inputs=[...]) resulted in no valid leaf tensors",
+                    explanation="backward(inputs=[...]) requires at least one valid leaf tensor.",
+                    hints=[
+                        "Ensure at least one tensor in inputs is a leaf (requires_grad=True, no grad_fn)",
+                    ],
+                )
+
+        # Build autograd.grad call
+        grad_kwargs = {"allow_unused": VariableTracker.build(tx, auto_detect)}
+        if retain_graph is not None:
+            grad_kwargs["retain_graph"] = retain_graph
+        if create_graph is not None:
+            grad_kwargs["create_graph"] = create_graph
+
+        inputs_var = VariableTracker.build(tx, input_vars)
+        grad_args = [self, inputs_var]
+        if gradient is not None:
+            grad_args.append(gradient)
+
+        autograd_grad_fn = VariableTracker.build(tx, torch.autograd.grad)
+        grads_var = autograd_grad_fn.call_function(tx, grad_args, grad_kwargs)
+
+        # Accumulate gradients for unique leaf tensors under no_grad context
+        # to replicate eager autograd engine.
+        from .ctx_manager import GradModeVariable
+
+        grad_mode_var = GradModeVariable.create(tx, False, initialized=True)
+        grad_mode_var.enter(tx)
+
+        accumulate_grad_fn = VariableTracker.build(
+            tx, torch.ops.inductor.accumulate_grad_.default
         )
+        assert input_vars is not None
+        for idx, input_var in enumerate(input_vars):
+            grad_i = grads_var.call_method(
+                tx, "__getitem__", [VariableTracker.build(tx, idx)], {}
+            )
+            accumulate_grad_fn.call_function(tx, [input_var, grad_i], {})
+
+        grad_mode_var.exit(tx)
+
+        return VariableTracker.build(tx, None)
 
     def method_data_ptr(
         self,
@@ -1474,7 +1661,9 @@ class TensorVariable(VariableTracker):
                     gb_type="Compilation of intermediate hooks requires compiled autograd",
                     context=f"var_getattr {self} {name}",
                     explanation="Dynamo must be in compiled_autograd to register hooks.",
-                    hints=[],
+                    hints=[
+                        "Consider using torch.autograd.Function with a custom backward() method instead of register_hook()."
+                    ],
                 )
 
             hook_name, bw_state_proxy = tx.output.add_backward_state_hook(hook)

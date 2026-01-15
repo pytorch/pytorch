@@ -33,7 +33,13 @@ from .graph_capture_wrappers import (
     handle_effect_tokens_fn,
 )
 from .schemas import AOTConfig, FxValue, SubclassMeta, TraceFn, ViewAndMutationMeta
-from .streams import assign_backward_streams, insert_backward_syncs, sync_deallocations
+from .streams import (
+    assign_backward_streams,
+    assign_epilogue_copy_streams,
+    insert_backward_syncs,
+    populate_fw_metadata_with_stream_indices,
+    sync_deallocations,
+)
 from .utils import (
     call_and_expect_output_descs,
     copy_fwd_metadata_to_bw_nodes,
@@ -91,6 +97,7 @@ def _create_graph(
             decomposition_table=aot_config.decompositions,
             record_module_stack=True,
             pre_dispatch=aot_config.pre_dispatch,
+            _disable_torch_fn_metadata_mode=aot_config._disable_torch_fn_metadata_mode,
         )(*args)
 
         if args_descs is not None:
@@ -283,6 +290,9 @@ def aot_dispatch_base_graph(
     # there should be *NO* mutating ops in the graph at this point.
     if not aot_config.disable_functionalization:
         copy_count = assert_functional_graph(fw_module.graph)
+        assign_epilogue_copy_streams(fw_module)
+        # Populate fw_metadata with stream indices from the compiled graph
+        populate_fw_metadata_with_stream_indices(fw_module, fw_metadata)
         fw_module.graph.eliminate_dead_code()
         fw_module.recompile()
         copy_count2 = assert_functional_graph(fw_module.graph)
@@ -480,12 +490,18 @@ def aot_dispatch_autograd_graph(
     # After copying metadata, assign streams to gradient accumulation nodes
     assign_backward_streams(fx_g)
 
+    assign_epilogue_copy_streams(fx_g)
+
     # Insert syncs for newly assigned backward streams
     insert_backward_syncs(fx_g)
 
     # Sync deallocations for tensors where the stream w/ their last usage
-    # is distinct from their allocation strea
+    # is distinct from their allocation stream
     sync_deallocations(fx_g)
+
+    # Populate fw_metadata with stream indices from the compiled graph
+    # NB: This needs to be done after the above stream assignments
+    populate_fw_metadata_with_stream_indices(fx_g, fw_metadata)
 
     fx_g.graph.eliminate_dead_code()
     if not aot_config.disable_functionalization:

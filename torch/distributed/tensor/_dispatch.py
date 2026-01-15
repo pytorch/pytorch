@@ -13,8 +13,11 @@ from torch._library.utils import fill_defaults
 from torch._logging import LazyString
 from torch.distributed._functional_collectives import _are_we_tracing
 from torch.distributed.device_mesh import DeviceMesh
-from torch.distributed.tensor._argmin_argmax import argmin_argmax_handler
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor._nonlinear_redux import (
+    argminmax_handler,
+    minmax_dim_handler,
+)
 from torch.distributed.tensor._op_schema import (
     OpInfo,
     OpSchema,
@@ -156,8 +159,10 @@ class OpDispatcher:
             aten.convolution_backward.default: convolution_backward_handler,
             aten._amp_foreach_non_finite_check_and_unscale_.default: found_inf_reduce_handler,
             aten.as_strided.default: as_strided_handler,
-            aten.argmin.default: argmin_argmax_handler,
-            aten.argmax.default: argmin_argmax_handler,
+            aten.argmin.default: argminmax_handler,
+            aten.argmax.default: argminmax_handler,
+            aten.max.dim: minmax_dim_handler,
+            aten.min.dim: minmax_dim_handler,
         }
 
     # ********************************************************************************************
@@ -250,7 +255,7 @@ class OpDispatcher:
         assert op_info is not None, "op_info should never be None"
 
         mesh = op_info.compute_mesh
-        participating = mesh.get_coordinate() is not None
+        participating = mesh._is_current_rank_part_of_mesh()
         local_results = None
         if participating:
             # computation that happens in the current rank of the mesh, normal case
