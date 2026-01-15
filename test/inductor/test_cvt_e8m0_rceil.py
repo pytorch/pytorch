@@ -23,10 +23,12 @@ class TestCvtE8M0Rceil(TestCase):
             return inductor_prims.cvt_e8m0_rceil(inp)
 
         for dtype in [torch.float32, torch.bfloat16, torch.float16]:
-            inp = torch.cat([
-                torch.arange(-1024, 0, device="cuda", dtype=dtype),
-                torch.arange(1, 1025, device="cuda", dtype=dtype),
-            ])
+            inp = torch.cat(
+                [
+                    torch.arange(-1024, 0, device="cuda", dtype=dtype),
+                    torch.arange(1, 1025, device="cuda", dtype=dtype),
+                ]
+            )
             eager_result = fn(inp)
             compiled_result = torch.compile(fn)(inp)
             self.assertEqual(compiled_result, eager_result)
