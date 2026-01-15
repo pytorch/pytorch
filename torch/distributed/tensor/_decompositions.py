@@ -173,11 +173,17 @@ class DecompShardingStrategy:
                 return meta
             return x
 
-        args_meta = tree_map(to_meta, op_schema.args_schema)
-        kwargs_meta = tree_map(to_meta, op_schema.kwargs_schema)
+        # Disable LocalTensorMode during decomposition tracing to prevent
+        # interference with meta tensor operations
+        from torch.distributed._local_tensor import maybe_disable_local_tensor_mode
 
-        with PlacementTrackingMode(sharding_prop, mesh):
-            output = decomp_fn(*args_meta, **kwargs_meta)
+        with maybe_disable_local_tensor_mode():
+            # Create meta tensors and run decomposition outside LocalTensorMode
+            args_meta = tree_map(to_meta, op_schema.args_schema)
+            kwargs_meta = tree_map(to_meta, op_schema.kwargs_schema)
+
+            with PlacementTrackingMode(sharding_prop, mesh):
+                output = decomp_fn(*args_meta, **kwargs_meta)
 
         def get_placement(t):
             if isinstance(t, torch.Tensor):
