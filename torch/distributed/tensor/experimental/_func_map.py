@@ -51,18 +51,20 @@ def _is_supported_placement(placement: Placement) -> bool:
 
 
 def _validate_placements(
-    placements: Sequence[Placement],
+    placements: tuple[PlacementType, ...],
     context: str,
 ) -> None:
     """Raises ValueError if any placement is unsupported for variance tracking."""
-    for i, placement in enumerate(placements):
-        if not _is_supported_placement(placement):
-            raise ValueError(
-                f"local_map with track_variant_dims=True does not support "
-                f"{type(placement).__name__} in {context}[{i}]. "
-                f"Only Shard, Replicate, and Partial(reduce_op='sum') are supported. "
-                f"Got: {placement}"
-            )
+    for spec in placements:
+        if spec is not None:
+            for i, placement in enumerate(spec):
+                if not _is_supported_placement(placement):
+                    raise ValueError(
+                        f"local_map with track_variant_dims=True does not support "
+                        f"{type(placement).__name__} in {context}[{i}]. "
+                        f"Only Shard, Replicate, and Partial(reduce_op='sum') are supported. "
+                        f"Got: {placement}"
+                    )
 
 
 def local_map(
@@ -231,20 +233,15 @@ def _local_map_wrapped(
 
     # Validate placements when variance tracking is enabled
     if track_variant_dims:
+        if in_placements is not None:
+            _validate_placements(in_placements, "in_placements")
         if out_placements is not None:
-            out_placements_tuple: tuple[PlacementType, ...] = (
+            out_placements_tuple = (
                 out_placements
                 if isinstance(out_placements, tuple)
                 else (out_placements,)
             )
-            for spec in out_placements_tuple:
-                if spec is not None:
-                    _validate_placements(spec, "out_placements")
-
-        if in_placements is not None:
-            for spec in in_placements:
-                if spec is not None:
-                    _validate_placements(spec, "in_placements")
+            _validate_placements(out_placements_tuple, "out_placements")
 
     # we assume every DTensor object is placed on the same device mesh
     flat_local_args = []
@@ -262,7 +259,7 @@ def _local_map_wrapped(
 
             # Validate input DTensor placements when variance tracking is enabled
             if track_variant_dims:
-                _validate_placements(arg.placements, f"input[{idx}]")
+                _validate_placements((arg.placements,), f"input[{idx}]")
 
             if in_placements is not None:
                 spec = in_placements[idx]
@@ -324,7 +321,7 @@ def _local_map_wrapped(
         flat_out, out_spec = pytree.tree_flatten(out)
 
         flat_dist_out = []
-        out_placements_tuple = (
+        out_placements_tuple: tuple[PlacementType, ...] = (  # type: ignore[assignment]
             out_placements if isinstance(out_placements, tuple) else (out_placements,)
         )
         assert len(flat_out) == len(out_placements_tuple), (
