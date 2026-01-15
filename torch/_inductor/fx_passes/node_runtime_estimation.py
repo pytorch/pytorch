@@ -386,7 +386,7 @@ def _log_collective_benchmarks(
         key = collective_keys[i] if collective_keys else _get_collective_key(coll_node)
         nccl_ms, inductor_ms = _get_collective_estimations(coll_node)
 
-        if has_benchmarks:
+        if benchmarked_medians is not None:
             benchmarked_ms = benchmarked_medians[i]
             nccl_diff_pct = (nccl_ms / benchmarked_ms) if benchmarked_ms > 0 else 0
             inductor_diff_pct = (
