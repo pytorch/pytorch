@@ -61,7 +61,7 @@ class TestDecompSharding(TestCase):
         op1 decomps -> op2, which decomps -> matmul
 
         def op1(x, y):
-            return op2(x, y) + 1.0
+            return op2(x, y) * 1.0
 
         def op2(x, y):
             return x @ y
@@ -79,7 +79,7 @@ class TestDecompSharding(TestCase):
 
             @torch.library.impl(my_lib, "op1", "CPU")
             def op1_impl(x, y):
-                return x @ y + 1.0
+                return x @ y * 1.0
 
             @torch.library.impl(my_lib, "op2", "CPU")
             def op2_impl(x, y):
@@ -87,7 +87,7 @@ class TestDecompSharding(TestCase):
 
             @register_decomposition(torch.ops.sharding_decomps.op1.default)
             def op1_decomp(x, y):
-                return torch.ops.sharding_decomps.op2(x, y) + 1.0
+                return torch.ops.sharding_decomps.op2(x, y) * 1.0
 
             @register_decomposition(torch.ops.sharding_decomps.op2.default)
             def op2_decomp(x, y):
