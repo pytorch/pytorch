@@ -554,7 +554,7 @@ class GraphLowering(torch.fx.Interpreter):
             # create_symbolic_sizes_strides_storage_offset but we hope we can
             # just delete this entirely
             source = ConstantSource(
-                f"__inductor_unknown_tensor_{len(self._shape_env.var_to_val)}"
+                f"__inductor_unknown_tensor_{len(self._shape_env.backed_var_to_val)}"
             )
             (
                 size,
@@ -1467,6 +1467,7 @@ class GraphLowering(torch.fx.Interpreter):
                     int,
                     ir.EffectfulKernel,
                     ir.ShapeAsConstantBuffer,
+                    TorchBindObject,
                 ),
             )
             for x in result
@@ -1780,7 +1781,7 @@ class GraphLowering(torch.fx.Interpreter):
                     allow_padding = (
                         config.pad_outputs or not is_user_visible
                     ) and not is_input_for_as_strided
-                    dense = torch._prims_common.is_non_overlapping_and_dense(
+                    dense = torch._prims_common.is_non_overlapping_and_dense_or_false(
                         n.meta["val"]
                     )
                     unbacked_symbols_in_strides = (
@@ -1802,7 +1803,6 @@ class GraphLowering(torch.fx.Interpreter):
                         # require_exact_strides to handle views. But ultimately it's better to require
                         # the right strides at the tensor definition.
                         if n.meta["val"]._is_view() or isinstance(
-                            # pyrefly: ignore [missing-attribute]
                             result.data,
                             ir.BaseView,
                         ):
