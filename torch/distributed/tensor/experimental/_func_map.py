@@ -232,8 +232,7 @@ def _local_map_wrapped(
     # Validate placements when variance tracking is enabled
     if track_variant_dims:
         if out_placements is not None:
-            # out_placements can be a single sequence or tuple of sequences
-            out_placements_tuple = (
+            out_placements_tuple: tuple[PlacementType, ...] = (
                 out_placements
                 if isinstance(out_placements, tuple)
                 else (out_placements,)

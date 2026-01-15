@@ -48,7 +48,6 @@ from torch.fx.passes.shape_prop import _extract_tensor_metadata
 from torch.fx.proxy import Proxy
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils import _pytree as pytree
-
 from .. import graph_break_hints, variables
 from ..exc import (
     ObservedException,
@@ -5281,6 +5280,7 @@ class LocalMapWrappedHigherOrderVariable(WrapHigherOrderVariable):
             in_grad_placements,
             device_mesh,
             redistribute_inputs,
+            track_variant_dims,
             *user_args,
         ) = args
 
