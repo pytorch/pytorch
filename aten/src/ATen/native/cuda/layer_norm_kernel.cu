@@ -637,7 +637,7 @@ __global__ void GammaBetaBackwardSimpleCUDAKernel(
                 }
                 db[j] = static_cast<T>(sum2);
             }
-        } else if (rms_norm) {
+        } else if constexpr (rms_norm) {
             for (int64_t i = 0; i < M; ++i) {
                 const int64_t index = i * N + j;
                 sum1 += static_cast<T_ACC>(dY[index]) *
