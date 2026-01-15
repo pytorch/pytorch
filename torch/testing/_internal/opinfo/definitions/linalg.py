@@ -1690,6 +1690,29 @@ op_db: list[OpInfo] = [
                 "test_output_grad_match",
                 device_type="mps",
             ),
+            # RuntimeError: linalg_inv: not supported for complex types yet!
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_variant_consistency_eager",
+                device_type="mps",
+                dtypes=(torch.complex64,),
+            ),
+            # AssertionError: Tensor-likes are not close!
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out",
+                device_type="mps",
+                dtypes=(torch.float32,),
+            ),
         ),
         sample_inputs_func=sample_inputs_linalg_matrix_power,
     ),
