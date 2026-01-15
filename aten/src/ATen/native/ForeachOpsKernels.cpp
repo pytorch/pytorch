@@ -234,10 +234,7 @@ namespace at::native {
 #define FOREACH_BINARY_OP_SCALAR_TENSOR_LIST(OP)                           \
   std::vector<Tensor> foreach_tensor_##OP##_scalar_tensor_list_slow(       \
       TensorList tensors1, TensorList tensors2, TensorList scalars) {      \
-    check_foreach_api_restrictions(tensors1, tensors2);                    \
-    TORCH_CHECK(                                                           \
-        scalars.size() == tensors1.size(),                                 \
-        "scalars must have same length as tensors");                       \
+    check_foreach_api_restrictions(tensors1, tensors2, scalars);           \
     std::vector<Tensor> result;                                            \
     result.reserve(tensors1.size());                                       \
     for (const auto i : c10::irange(tensors1.size())) {                    \
@@ -248,10 +245,7 @@ namespace at::native {
                                                                            \
   void foreach_tensor_##OP##_scalar_tensor_list_slow_(                     \
       TensorList tensors1, TensorList tensors2, TensorList scalars) {      \
-    check_foreach_api_restrictions(tensors1, tensors2);                    \
-    TORCH_CHECK(                                                           \
-        scalars.size() == tensors1.size(),                                 \
-        "scalars must have same length as tensors");                       \
+    check_foreach_api_restrictions(tensors1, tensors2, scalars);           \
     for (const auto i : c10::irange(tensors1.size())) {                    \
       tensors1[i].OP##_(tensors2[i], scalars[i].item());                   \
     }                                                                      \

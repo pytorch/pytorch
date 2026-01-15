@@ -7721,6 +7721,29 @@ but got grad_output_size({i}) = {grad_output.size(i)}""",
     )
 
 
+# From aten/src/ATen/native/ForeachOpsKernels.cpp
+# The slow path calls scalars[i].item() which fails with FakeTensors.
+# This meta registration provides shape/dtype info without running the slow path.
+@register_meta(
+    [
+        aten._foreach_add.ScalarTensorList,
+        aten._foreach_sub.ScalarTensorList,
+    ]
+)
+def _foreach_binop_scalar_tensor_list(self, other, scalars):
+    return [torch.empty_like(t) for t in self]
+
+
+@register_meta(
+    [
+        aten._foreach_add_.ScalarTensorList,
+        aten._foreach_sub_.ScalarTensorList,
+    ]
+)
+def _foreach_binop_scalar_tensor_list_(self, other, scalars):
+    pass
+
+
 # From aten/src/ATen/native/cuda/AmpKernels.cu
 @register_meta(aten._amp_foreach_non_finite_check_and_unscale_.default)
 def _amp_foreach_non_finite_check_and_unscale_(self, found_inf, inv_scale):

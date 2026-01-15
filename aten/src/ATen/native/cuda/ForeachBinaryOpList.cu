@@ -8,6 +8,7 @@
 #include <type_traits>
 
 #ifndef AT_PER_OPERATOR_HEADERS
+#include <ATen/Functions.h>
 #include <ATen/NativeFunctions.h>
 #else
 #include <ATen/ops/_foreach_add_native.h>
