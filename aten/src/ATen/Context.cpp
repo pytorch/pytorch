@@ -481,8 +481,8 @@ at::BlasBackend Context::blasPreferredBackend() {
 #if ROCM_VERSION >= 60402
           "gfx1150", "gfx1151",
 #endif
-#if ROCM_VERSION >= 70000
-          "gfx950", "gfx1150", "gfx1151"
+#if ROCM_VERSION >= 60500
+          "gfx950",
 #endif
       };
       for (auto index: c10::irange(detail::getCUDAHooks().deviceCount())) {
