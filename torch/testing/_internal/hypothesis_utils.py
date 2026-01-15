@@ -351,7 +351,11 @@ def tensor_conv(
 # We set the deadline in the currently loaded profile.
 # Creating (and loading) a separate profile overrides any settings the user
 # already specified.
-hypothesis_version = tuple(map(int, version("hypothesis").split(".")[:3]))
+try:
+    hypothesis_version_str = hypothesis.__version__
+    hypothesis_version = tuple(map(int, hypothesis_version_str.split(".")[:3]))
+except (AttributeError, ValueError):
+    hypothesis_version = (0, 0, 0)
 
 if (3, 16, 0) <= hypothesis_version < (3, 27, 0):
     # Hypothesis 3.16 → 3.26: use `timeout` instead of `deadline`
