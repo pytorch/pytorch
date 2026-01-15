@@ -24,8 +24,8 @@ from torch._higher_order_ops.utils import (
     redirect_to_mode,
     reenter_make_fx,
     register_fake,
-    save_tensors_and_objects_for_backward,
-    saved_tensors_and_objects,
+    save_values_for_backward,
+    saved_values,
 )
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_type
@@ -38,6 +38,7 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
+from torch.utils._debug_mode import DebugMode
 from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
@@ -528,7 +529,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
 
-        save_tensors_and_objects_for_backward(ctx, operands)
+        save_values_for_backward(ctx, operands)
 
         with torch._C._AutoDispatchBelowAutograd():
             out = invoke_subgraph(
@@ -554,7 +555,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         subgraph = ctx._subgraph
         identifier = ctx._identifier
         output_metadata = ctx._output_metadata
-        primals = saved_tensors_and_objects(ctx)
+        primals = saved_values(ctx)
 
         # Filter out grads that are None or do not require_grad. This was
         # the assumption we made during the tracing of joint_graph.
@@ -680,12 +681,42 @@ def _(subgraph, identifier, *operands):
     return autograd_fn_callable(*operands)
 
 
+@invoke_subgraph.py_impl(DebugMode)
+def _(debug_mode, subgraph, identifier, *operands):
+    # record HOP call
+    call = torch.utils._debug_mode._OpCall(
+        invoke_subgraph,
+        (identifier, *operands),
+        kwargs={},
+        call_depth=debug_mode.call_depth + 1,
+        stack=debug_mode.record_stack_trace,
+    )
+    debug_mode._record_call(call)
+
+    debug_mode.call_depth += 1
+    debug_mode._handle_annotate(f"[enter InvokeSubgraph HOP] {identifier}")
+
+    # If the HOP is dispatched from DebugMode, we should enable debug_mode
+    # for the subgraph call.
+    with debug_mode:
+        if getattr(subgraph, "_boxed_call", False):
+            result = subgraph(list(operands))
+        else:
+            result = subgraph(*operands)
+    debug_mode._handle_annotate(f"[exit InvokeSubgraph HOP] {identifier}")
+    debug_mode.call_depth -= 1
+    # record output of HOP
+    debug_mode._record_call_output(call, result)
+    return result
+
+
 @invoke_subgraph.py_impl(DispatchKey.CompositeExplicitAutograd)
 def _(subgraph, identifier, *operands):
     from torch.utils._python_dispatch import _get_current_dispatch_mode
 
     mode = _get_current_dispatch_mode()
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
+
     if getattr(subgraph, "_boxed_call", False):
         return subgraph(list(operands))
     else:

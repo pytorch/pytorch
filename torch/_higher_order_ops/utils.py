@@ -740,17 +740,17 @@ def _stack_pytree(pytrees):
 # can be used to save symints as direct attributes of ctx in autograd.Function.
 #
 # For example, if args = (x, y, s0, z, s1),
-# save_tensors_and_objects_for_backward will partition the args into two lists, and a bookkeeping list pos:
+# save_values_for_backward will partition the args into two lists, and a bookkeeping list pos:
 #   partitioned_args[0] = (x, y, z)
 #   partitioned_args[1] = (s0, s1)
 #   pos = (0, 0, 1, 0, 1)
 # pos list keeps track of which partition the args
-# is partitioned into in order to recover it in saved_tensors_and_objects.
+# is partitioned into in order to recover it in saved_values.
 #
-# In saved_tensors_and_objects, we can recover the original args by:
+# In saved_values, we can recover the original args by:
 # iterating over the pos list and pop one item from the front of partitioned_args[pos[i]].
 # We use t_idx and s_idx to keep track of the next index of the item we are going to pop for the two lists.
-def save_tensors_and_objects_for_backward(ctx, args):
+def save_values_for_backward(ctx, args):
     if not all(
         isinstance(arg, (torch.Tensor, torch.SymInt, int, type(None), FakeScriptObject))
         or is_opaque_type(type(arg))
@@ -773,7 +773,7 @@ def save_tensors_and_objects_for_backward(ctx, args):
     ctx.pos = pos
 
 
-def saved_tensors_and_objects(ctx):
+def saved_values(ctx):
     args = []
     t_idx = 0
     s_idx = 0

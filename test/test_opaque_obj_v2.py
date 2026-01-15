@@ -28,6 +28,7 @@ from torch._library.effects import EffectType
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import (
     _OPAQUE_TYPES,
+    _OPAQUE_TYPES_BY_NAME,
     get_opaque_type_name,
     is_opaque_type,
     is_opaque_value_type,
@@ -42,6 +43,56 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+
+
+class Color:
+    """Simulates a pybind11-style enum where class attributes are instances of the class."""
+
+    def __init__(self, name: str, value: int) -> None:
+        self._name = name
+        self._value = value
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def value(self) -> int:
+        return self._value
+
+    def __float__(self) -> float:
+        return float(self._value)
+
+    @staticmethod
+    def RED_STATIC() -> "Color":
+        return Color.RED
+
+
+Color.RED = Color("RED", 1)
+Color.GREEN = Color("GREEN", 2)
+Color.BLUE = Color("BLUE", 3)
+Color.DEFAULT_SCALE = 1.5  # Literal class attribute for testing inlining
+
+
+class CustomDescriptor:
+    def __get__(self, obj, objtype=None):
+        return 42
+
+
+# Create a class with an unsupported descriptor
+class ColorWithDescriptor:
+    def __init__(self, name: str, value: int) -> None:
+        self._name = name
+        self._value = value
+
+    def __float__(self) -> float:
+        return float(self._value)
+
+    # This is an unsupported descriptor type
+    custom_prop = CustomDescriptor()
+
+
+ColorWithDescriptor.RED = ColorWithDescriptor("RED", 1)
 
 
 class OpaqueQueue:
@@ -165,7 +216,7 @@ class SizeStore:
         self.size = size
 
     def __eq__(self, other):
-        return isinstance(other, ValueConfig) and self.size == other.size
+        return isinstance(other, SizeStore) and self.size == other.size
 
     def __hash__(self):
         return hash(self.size)
@@ -247,13 +298,15 @@ register_opaque_type(
 )
 register_opaque_type(NestedValueSize, typ="value")
 register_opaque_type(OpaqueMultiplier, typ="reference")
+register_opaque_type(Color, typ="reference")
+register_opaque_type(ColorWithDescriptor, typ="reference")
 
 
 # A tensor subclass (similar to TwoTensor) that also holds an opaque Counter
 # object
 class TensorWithCounter(torch.Tensor):
     @staticmethod
-    def __new__(cls, a, b, counter, outer_size=None, outer_stride=None):
+    def __new__(cls, a, b, counter, size_store, outer_size=None, outer_stride=None):
         if outer_size is None:
             outer_size = a.size()
         if outer_stride is None:
@@ -270,22 +323,23 @@ class TensorWithCounter(torch.Tensor):
         out = torch.Tensor._make_wrapper_subclass(cls, outer_size, **kwargs)
         return out
 
-    def __init__(self, a, b, counter, outer_size=None, outer_stride=None):
+    def __init__(self, a, b, counter, size_store, outer_size=None, outer_stride=None):
         self.a = a
         self.b = b
         self._counter = counter
+        self._size_store = size_store
 
     def __repr__(self):
-        return f"TensorWithCounter({self.a}, {self.b}, {self._counter})"
+        return f"TensorWithCounter({self.a}, {self.b}, {self._counter}, {self._size_store})"
 
     def __tensor_flatten__(self):
-        return ["a", "b"], self._counter
+        return ["a", "b"], (self._counter, self._size_store)
 
     @staticmethod
     def __tensor_unflatten__(inner_tensors, ctx, outer_size, outer_stride):
         a, b = inner_tensors["a"], inner_tensors["b"]
-        counter = ctx
-        return TensorWithCounter(a, b, counter, outer_size, outer_stride)
+        counter, size_store = ctx
+        return TensorWithCounter(a, b, counter, size_store, outer_size, outer_stride)
 
     @classmethod
     def __torch_dispatch__(cls, func, types, args, kwargs):
@@ -295,30 +349,43 @@ class TensorWithCounter(torch.Tensor):
         def unwrap(x):
             return x.a if isinstance(x, TensorWithCounter) else x
 
-        def wrap(x, counter):
+        def wrap(x, counter, size_store):
             return (
-                TensorWithCounter(x, x.clone(), counter)
+                TensorWithCounter(x, x.clone(), counter, size_store)
                 if isinstance(x, torch.Tensor)
                 else x
             )
 
         # Get counter from first TensorWithCounter arg
         counter = None
+        size_store = None
         for arg in torch.utils._pytree.tree_leaves(args):
             if isinstance(arg, TensorWithCounter):
                 counter = arg._counter
+                size_store = arg._size_store
                 break
 
         unwrapped_args = torch.utils._pytree.tree_map(unwrap, args)
         unwrapped_kwargs = torch.utils._pytree.tree_map(unwrap, kwargs)
 
         out = func(*unwrapped_args, **unwrapped_kwargs)
-        return torch.utils._pytree.tree_map(lambda x: wrap(x, counter), out)
+        return torch.utils._pytree.tree_map(lambda x: wrap(x, counter, size_store), out)
+
+    @property
+    def size_store(self):
+        return self._size_store
+
+    def get_size_store(self):
+        return self._size_store
+
+    def get_counter(self):
+        return self._counter
 
 
 class TestOpaqueObject(TestCase):
     def setUp(self):
         self.lib = torch.library.Library("_TestOpaqueObject", "FRAGMENT")  # noqa: TOR901
+        self._opaque_types_before_test = set(_OPAQUE_TYPES_BY_NAME.keys())
 
         torch.library.define(
             "_TestOpaqueObject::queue_push",
@@ -510,6 +577,28 @@ class TestOpaqueObject(TestCase):
             return torch.empty_like(x)
 
         opaque_multiplier_type = get_opaque_type_name(OpaqueMultiplier)
+        color_type = get_opaque_type_name(Color)
+
+        torch.library.define(
+            "_TestOpaqueObject::apply_color_scale",
+            f"({color_type} color, Tensor x) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::apply_color_scale",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def apply_color_scale_impl(color: Color, x: torch.Tensor) -> torch.Tensor:
+            return x * float(color)
+
+        @torch.library.register_fake(
+            "_TestOpaqueObject::apply_color_scale", lib=self.lib
+        )
+        def apply_color_scale_fake(color: Color, x: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
 
         torch.library.define(
             "_TestOpaqueObject::mul_with_scale",
@@ -579,6 +668,14 @@ class TestOpaqueObject(TestCase):
 
     def tearDown(self):
         self.lib._destroy()
+
+        # Clean up any opaque types registered during the test
+        types_to_remove = (
+            set(_OPAQUE_TYPES_BY_NAME.keys()) - self._opaque_types_before_test
+        )
+        for name in types_to_remove:
+            torch._C._unregister_opaque_type(name)
+            _OPAQUE_TYPES_BY_NAME.pop(name, None)
 
         super().tearDown()
 
@@ -1472,13 +1569,17 @@ def forward(self, arg0_1):
     def test_tensor_subclass_with_opaque_attr(self):
         def fn(x):
             y = x * 2 + 1
-            counter = y._counter
-            return y * counter.start
+            c1 = y._counter
+            c2 = y.get_counter()
+            s1 = y.size_store
+            s2 = y.get_size_store()
+            return y * c1.start + c2.start + s1.size + s2.size
 
         a = torch.rand(4, 4)
         b = torch.rand(4, 4)
         counter = Counter(start=3, end=10)
-        x = TensorWithCounter(a, b, counter)
+        size = SizeStore(4)
+        x = TensorWithCounter(a, b, counter, size)
 
         backend = EagerAndRecordGraphs()
         cnt = CompileCounterWithBackend(backend)
@@ -1499,8 +1600,15 @@ class GraphModule(torch.nn.Module):
 
         getattr_1 = y._counter;  getattr_1 = None
 
+        get_counter = y.get_counter();  get_counter = None
+
+        get_size_store = y.get_size_store();  get_size_store = None
+
         mul_1: "TensorWithCounter(f32[4, 4])" = y * 3;  y = None
-        return (mul_1,)
+        add_1: "TensorWithCounter(f32[4, 4])" = mul_1 + 3;  mul_1 = None
+        add_2: "TensorWithCounter(f32[4, 4])" = add_1 + 4;  add_1 = None
+        add_3: "TensorWithCounter(f32[4, 4])" = add_2 + 4;  add_2 = None
+        return (add_3,)
 """,
         )
         self.assertEqual(cnt.frame_count, 1)
@@ -1508,11 +1616,20 @@ class GraphModule(torch.nn.Module):
         a = torch.rand(4, 4)
         b = torch.rand(4, 4)
         counter = Counter(start=1, end=10)
-        x = TensorWithCounter(a, b, counter)
+        x = TensorWithCounter(a, b, counter, SizeStore(4))
         opt_fn(x)
 
         # Recompile since Counter has changed
         self.assertEqual(cnt.frame_count, 2)
+
+        a = torch.rand(4, 4)
+        b = torch.rand(4, 4)
+        counter = Counter(start=1, end=10)
+        x = TensorWithCounter(a, b, counter, SizeStore(5))
+        opt_fn(x)
+
+        # Recompile since SizeStore has changed
+        self.assertEqual(cnt.frame_count, 3)
 
     def test_opaque_obj_saved_for_backward(self):
         """Test that opaque objects are correctly saved and passed to backward."""
@@ -1538,11 +1655,6 @@ class GraphModule(torch.nn.Module):
             expected_grad = torch.ones_like(x) * 5 * 5
             self.assertTrue(torch.allclose(x.grad, expected_grad))
 
-        def is_called_from_pytest():
-            import os
-
-            return "PYTEST_VERSION" in os.environ
-
         backend = InductorAndRecordGraphs()
         compile_and_run_with_backend(backend)
         self.assertTrue(len(backend.graphs) > 0)
@@ -1550,7 +1662,7 @@ class GraphModule(torch.nn.Module):
         self.assertExpectedInline(
             fw_graph.code.strip(),
             f"""\
-def forward(self, L_x_ : torch.Tensor, L_scale_obj_ : {"test_opaque_obj_v2" if is_called_from_pytest() else "__main__"}_OpaqueMultiplier):
+def forward(self, L_x_ : torch.Tensor, L_scale_obj_ : {_illegal_char_regex.sub("_", get_opaque_type_name(OpaqueMultiplier))}):
     l_x_ = L_x_
     l_scale_obj_ = L_scale_obj_
     result = torch.ops._TestOpaqueObject.mul_with_scale(l_scale_obj_, l_x_);  l_scale_obj_ = l_x_ = None
@@ -1614,6 +1726,166 @@ def forward(self, primals_2, tangents_1):
                 torch._dynamo.reset()
                 grad2 = run_with_multiplier(3.0)
                 self.assertFalse(torch.allclose(grad1, grad2))
+
+    def test_subgraph_tracer_create_arg_with_fake_script_object(self):
+        """Test that opaque class attribute access works correctly.
+
+        This tests the code path where:
+        1. An opaque class (like Color) is accessed via OpaqueObjectClassVariable
+        2. Attribute access (Color.RED) goes through var_getattr with static getattr
+        3. The opaque object is correctly lifted as a graph input
+        """
+        from torch._library.opaque_object import is_opaque_reference_type
+
+        self.assertTrue(is_opaque_reference_type(Color))
+        self.assertTrue(is_opaque_reference_type(type(Color.RED)))
+
+        captured = {"graph": None, "example_inputs": None}
+
+        def capture_backend(gm, example_inputs):
+            captured["graph"] = gm
+            captured["example_inputs"] = example_inputs
+            return gm
+
+        @torch.compile(fullgraph=True, backend=capture_backend)
+        def fn(x):
+            return torch.ops._TestOpaqueObject.apply_color_scale(Color.GREEN, x)
+
+        x = torch.randn(3, 3)
+        result = fn(x)
+
+        self.assertIsNotNone(captured["graph"])
+        print(captured["graph"].code.strip())
+
+        expected = x * float(Color.GREEN.value)
+        self.assertTrue(torch.allclose(result, expected))
+
+        graph_code = captured["graph"].code.strip()
+        self.assertExpectedInline(
+            graph_code,
+            f"""\
+def forward(self, L_x_ : torch.Tensor, G_Color_GREEN : {_illegal_char_regex.sub("_", get_opaque_type_name(Color))}):
+    l_x_ = L_x_
+    g_color_green = G_Color_GREEN
+    apply_color_scale = torch.ops._TestOpaqueObject.apply_color_scale(g_color_green, l_x_);  g_color_green = l_x_ = None
+    return (apply_color_scale,)""",  # noqa: B950
+        )
+
+    def test_opaque_class_literal_attribute_inlined(self):
+        """Test that literal attributes on opaque classes are inlined without source tracking.
+
+        When accessing a literal class attribute (like Color.DEFAULT_SCALE = 1.5),
+        the value should be constant-folded directly without creating a graph input.
+        """
+        captured = {"graph": None}
+
+        def capture_backend(gm, example_inputs):
+            captured["graph"] = gm
+            return gm
+
+        @torch.compile(fullgraph=True, backend=capture_backend)
+        def fn(x):
+            return x * Color.DEFAULT_SCALE
+
+        x = torch.randn(3, 3)
+        result = fn(x)
+
+        expected = x * 1.5
+        self.assertTrue(torch.allclose(result, expected))
+
+        self.assertIsNotNone(captured["graph"])
+        graph_code = captured["graph"].code.strip()
+        self.assertExpectedInline(
+            graph_code,
+            """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    mul = l_x_ * 1.5;  l_x_ = None
+    return (mul,)""",
+        )
+
+    def test_opaque_class_missing_attribute_graph_break(self):
+        """Test that accessing a non-existent attribute on an opaque class causes a graph break.
+
+        This tests GB7685: "Attribute not found on opaque class"
+        """
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return x * Color.NONEXISTENT
+
+        x = torch.randn(3, 3)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Attribute not found on opaque class",
+        ):
+            fn(x)
+
+    def test_opaque_class_unsupported_descriptor_graph_break(self):
+        """Test that accessing an unsupported descriptor on an opaque class causes a graph break.
+
+        This tests GB9567: "Unsupported descriptor on opaque class"
+        """
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return x * ColorWithDescriptor.custom_prop
+
+        x = torch.randn(3, 3)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Unsupported descriptor on opaque class",
+        ):
+            fn(x)
+
+    def test_opaque_class_staticmethod(self):
+        """Test that accessing a staticmethod on an opaque class works correctly.
+
+        This verifies that OpaqueObjectClassVariable.var_getattr properly handles
+        staticmethod descriptors (instead of raising 'Unsupported descriptor').
+        """
+        captured = {"graph": None}
+
+        def capture_backend(gm, _):
+            captured["graph"] = gm
+            return gm
+
+        @torch.compile(fullgraph=True, backend=capture_backend)
+        def fn(x):
+            _ = Color.RED_STATIC
+            return x * 2
+
+        x = torch.randn(3, 3)
+        result = fn(x)
+        expected = x * 2
+        self.assertTrue(torch.allclose(result, expected))
+        self.assertIsNotNone(captured["graph"])
+
+    def test_opaque_class_property(self):
+        """Test that accessing a property descriptor on an opaque class works correctly.
+
+        This verifies that OpaqueObjectClassVariable.var_getattr properly handles
+        property descriptors. When accessing a property on the class (not instance),
+        you get the property object back.
+        """
+        captured = {"graph": None}
+
+        def capture_backend(gm, _):
+            captured["graph"] = gm
+            return gm
+
+        @torch.compile(fullgraph=True, backend=capture_backend)
+        def fn(x):
+            _ = Color.name
+            return x * 2
+
+        x = torch.randn(3, 3)
+        result = fn(x)
+        expected = x * 2
+        self.assertTrue(torch.allclose(result, expected))
+        self.assertIsNotNone(captured["graph"])
 
     def test_invoke_subgraph(self):
         @torch.compiler.nested_compile_region
