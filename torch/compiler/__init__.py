@@ -701,7 +701,7 @@ def nested_compile_region(
 
         if not dynamo_config.enable_invoke_subgraph_regional_compile:
             raise RuntimeError(
-                "nested_compile_region config is an experiemntal feature for testing only."
+                "nested_compile_region config is an experimental feature for testing only."
             )
 
     from torch._higher_order_ops.invoke_subgraph import (

@@ -126,7 +126,7 @@ Following requirements need to be met prior to cutting a release branch:
 * Validate that all new workflows have been created in the PyTorch and domain libraries included in the release. Validate it against all dimensions of release matrix, including operating systems (Linux, MacOS, Windows), Python versions as well as CPU architectures (x86 and arm) and accelerator versions (CUDA, ROCm, XPU).
 * All [viable/strict](.github/workflows/update-viablestrict.yml) jobs are green, which requires the following jobs to pass: `pull`, `trunk`, `lint`, `linux-aarch64`
 * All the nightly jobs for pytorch and domain libraries should be green. Validate this using the following HUD links:
-  * [Pytorch](https://hud.pytorch.org/hud/pytorch/pytorch/nightly)
+  * [PyTorch](https://hud.pytorch.org/hud/pytorch/pytorch/nightly)
   * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/nightly)
   * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/nightly)
 
@@ -153,7 +153,7 @@ This script should create 2 branches:
 ### PyTorch ecosystem libraries
 
 *Note*:  Release branches for individual ecosystem libraries should be created after first release candidate build of PyTorch is available in staging channels (which happens about a week after PyTorch release branch has been created). This is absolutely required to allow sufficient testing time for each of the domain library. Domain libraries branch cut is performed by Ecosystem Library POC.
-Test-Infra branch cut should be performed at the same time as Pytorch core branch cut. Convenience script can also be used for domains.
+Test-Infra branch cut should be performed at the same time as PyTorch core branch cut. Convenience script can also be used for domains.
 
 > NOTE: RELEASE_VERSION only needs to be specified if version.txt is not available in root directory
 
@@ -184,7 +184,7 @@ These are examples of changes that should be made to the *default* branch after 
 ### Making release branch specific changes for ecosystem libraries
 
 Ecosystem libraries branch cut is done a few days after branch cut for the `pytorch/pytorch`. The branch cut is performed by the Ecosystem Library POC.
-After the branch cut is performed, the Pytorch Dev Infra member should be informed of the branch cut and Domain Library specific change is required before Drafting RC for this domain library.
+After the branch cut is performed, the PyTorch Dev Infra member should be informed of the branch cut and Domain Library specific change is required before Drafting RC for this domain library.
 
 Follow these examples of PR that updates the version and sets RC Candidate upload channel:
 * torchvision : [Update version.txt](https://github.com/pytorch/vision/pull/8968) and [change workflow branch references](https://github.com/pytorch/vision/pull/8969)
@@ -249,7 +249,7 @@ Backups are stored in a non-public S3 bucket at [`s3://pytorch-backup`](https://
 ### Release Candidate health validation
 
 Validate that the release jobs for pytorch and domain libraries are green. Validate this using the following HUD links:
-  * [Pytorch](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F1.12)
+  * [PyTorch](https://hud.pytorch.org/hud/pytorch/pytorch/release%2F1.12)
   * [TorchVision](https://hud.pytorch.org/hud/pytorch/vision/release%2F1.12)
   * [TorchAudio](https://hud.pytorch.org/hud/pytorch/audio/release%2F1.12)
 
