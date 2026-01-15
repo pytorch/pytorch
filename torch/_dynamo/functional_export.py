@@ -16,9 +16,14 @@ from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.convert_frame import CaptureOutput, fullgraph_capture, get_traced_fn
 from torch._dynamo.eval_frame import argument_names, check_user_input_output
 from torch._dynamo.exc import UserErrorType
-from torch._dynamo.utils import dynamo_timed, get_metrics_context
+from torch._dynamo.utils import (
+    dynamo_timed,
+    get_metrics_context,
+    set_torch_function_mode_stack,
+)
 from torch._export.utils import _compiling_state_context
 from torch._guards import TracingContext
+from torch.export import _restore_state_dict
 from torch.export.dynamic_shapes import _RelaxedConstraint, Constraint
 from torch.fx import Node
 from torch.fx.experimental.proxy_tensor import make_fx
@@ -539,6 +544,9 @@ def pytreeify(
                 self.gm_inputs = example_inputs
                 raise Yield
 
+            # Save mode stack before running forward_callable, as the captured
+            # bytecode may include side effects that modify the mode stack.
+            saved_mode_stack = torch.overrides._get_current_function_mode_stack()
             try:
                 out.forward_callable(
                     compiled_fn=backend_dummy, extra_globals=f_globals
@@ -546,6 +554,8 @@ def pytreeify(
             except Yield:
                 assert self.gm_inputs is not None
                 return self.gm_inputs
+            finally:
+                set_torch_function_mode_stack(saved_mode_stack)
             raise RuntimeError
 
     fake_mode = torch._dynamo.utils.detect_fake_mode(flat_real_args)
@@ -580,9 +590,15 @@ def pytreeify(
                     for i in range(self.num_outputs)
                 ]
 
-            results = out.forward_callable(
-                compiled_fn=backend_dummy, extra_globals=f_globals
-            )(*args, **kwargs)
+            # Save mode stack before running forward_callable, as the captured
+            # bytecode may include side effects that modify the mode stack.
+            saved_mode_stack = torch.overrides._get_current_function_mode_stack()
+            try:
+                results = out.forward_callable(
+                    compiled_fn=backend_dummy, extra_globals=f_globals
+                )(*args, **kwargs)
+            finally:
+                set_torch_function_mode_stack(saved_mode_stack)
             ret, self.out_spec = pytree.tree_flatten(results)
             return ret
 
@@ -630,6 +646,7 @@ def normalize_graph_module(gm: torch.fx.GraphModule) -> None:
 def dynamo_graph_capture_for_export(
     mod: Callable[..., Any],
     constraints: Optional[list[Constraint]] = None,
+    restore_state_dict: bool = False,
 ) -> Callable[..., Any]:
     def inner(*args: Any, **kwargs: Any) -> Any:
         assert not torch._dynamo.config.install_free_tensors
@@ -700,6 +717,8 @@ def dynamo_graph_capture_for_export(
         tracing_context = TracingContext(graph_module.meta["fake_mode"])
         tracing_context.tensor_to_context = out.backend_input.tensor_to_context  # type: ignore[attr-defined]
         graph_module.meta["tracing_context"] = tracing_context
+        if restore_state_dict:
+            _restore_state_dict(mod, graph_module)
         return graph_module
 
     return inner
@@ -829,7 +848,7 @@ def _dynamo_graph_capture_for_export(
             graph_input_order: dict[int, int] = {}
             for inp in graph_inputs:
                 source = graph_inputs[inp]
-                assert isinstance(source, torch._dynamo.source.GetItemSource)
+                assert isinstance(source, torch._dynamo.source.GetItemSource), source
                 graph_input_order[source.index] = len(graph_input_order)
 
             for real_idx, graph_idx in graph_input_order.items():

@@ -100,12 +100,11 @@ class TypeExemplars:
         """
         Return an example of a class.
         """
-        # pyrefly: ignore [bad-argument-type, bad-argument-count]
+
         return TypeExemplars.TYPE_EXEMPLARS.get(t.__name__, None)
 
     @staticmethod
     def contains(t: type[T]) -> bool:
-        # pyrefly: ignore [bad-argument-type, bad-argument-count]
         return t.__name__ in TypeExemplars.TYPE_EXEMPLARS
 
 
