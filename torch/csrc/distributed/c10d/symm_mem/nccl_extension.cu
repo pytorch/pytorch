@@ -1,6 +1,6 @@
 #include <c10/cuda/CUDAGuard.h>
 #include <ATen/native/cuda/MemoryAccess.cuh>
-
+#include <torch/csrc/distributed/c10d/symm_mem/nccl_dev_cap.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 

@@ -26,6 +26,7 @@
 #include <thrust/device_vector.h>
 #include <thrust/gather.h>
 #include <thrust/generate.h>
+#include <thrust/pair.h>
 #include <thrust/scan.h>
 #include <thrust/sequence.h>
 #include <thrust/sort.h>

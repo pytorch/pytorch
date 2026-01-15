@@ -429,6 +429,7 @@ DEFINE_DISPATCH(shifted_chebyshev_polynomial_t_stub);
 DEFINE_DISPATCH(shifted_chebyshev_polynomial_u_stub);
 DEFINE_DISPATCH(shifted_chebyshev_polynomial_v_stub);
 DEFINE_DISPATCH(shifted_chebyshev_polynomial_w_stub);
+DEFINE_DISPATCH(ldexp_stub);
 
 TORCH_IMPL_FUNC(sub_out) (
   const Tensor& self, const Tensor& other, const Scalar& alpha, const Tensor& result
@@ -1568,12 +1569,39 @@ static inline Tensor _pow2(const Tensor& self, const Tensor& other) {
   return at::full({}, 2.0, self.options()).pow(other);
 }
 
+// This function is used to dispatch to kernels that use std::ldexp on CPU and the global namespaces ::ldexp on CUDA
+// Both of these require floating types for 'self' and integer types for 'other'.
+static inline Tensor& _ldexp_int_exponent(const Tensor& self, const Tensor& other, Tensor& result) {
+  auto iter = TensorIteratorConfig()
+    .check_all_same_dtype(false)
+    .add_output(result)
+    .add_input(self)
+    .add_input(other)
+    .build();
+
+  ldexp_stub(iter.device_type(), iter);
+  return result;
+}
+
 Tensor& ldexp_out(const Tensor& self, const Tensor& other, Tensor& result) {
+  TORCH_CHECK(!isIntegralType(result.scalar_type(), /*includeBool=*/true),
+              "ldexp can't be cast to the desired output type ", result.scalar_type());
+
+  if (isIntegralType(other.scalar_type(), /*includeBool=*/true) &&
+      isFloatingType(self.scalar_type())) {
+    return _ldexp_int_exponent(self, other, result);
+  }
+
   return at::mul_out(result, self, _pow2(self, other));
 }
 
-
 Tensor ldexp(const Tensor& self, const Tensor& other) {
+  if (isIntegralType(other.scalar_type(), /*includeBool=*/true) &&
+      isFloatingType(self.scalar_type())) {
+    Tensor result = at::empty_like(self);
+    return _ldexp_int_exponent(self, other, result);
+  }
+
   return at::mul(self, _pow2(self, other));
 }
 

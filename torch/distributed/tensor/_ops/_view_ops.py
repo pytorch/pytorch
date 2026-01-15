@@ -15,12 +15,12 @@ from torch.distributed.tensor._op_schema import (
     RuntimeSchemaInfo,
     StrategyType,
 )
-from torch.distributed.tensor._ops.registration import register_op_strategy
 from torch.distributed.tensor._ops.utils import (
     generate_redistribute_costs,
     normalize_dim,
     normalize_dims,
     prod,
+    register_op_strategy,
 )
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
