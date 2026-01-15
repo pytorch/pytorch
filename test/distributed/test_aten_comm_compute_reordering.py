@@ -56,6 +56,7 @@ def apply_reordering_and_get_graph(graph, out_li) -> None:
         "custom_runtime_estimation",
         "insert_overlap_deps",
         "collective_estimator",
+        "bucket_exposed_first",
     )
     for key in config_keys:
         if (val := getattr(dist_opts, key)) is not None:
@@ -508,6 +509,7 @@ def get_bucket_patches(compute_multiplier=1.0):
     return {
         "aten_distributed_optimizations.custom_runtime_estimation": estimate_aten_runtime_part,
         "aten_distributed_optimizations.collective_bucketing": True,
+        "aten_distributed_optimizations.bucket_exposed_first": False,
         "reorder_for_locality": False,
         "triton.native_matmul": False,
         "reorder_for_compute_comm_overlap_passes": [],

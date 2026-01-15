@@ -282,7 +282,10 @@ class Hardtanh(Module):
         self.min_val = min_val
         self.max_val = max_val
         self.inplace = inplace
-        assert self.max_val > self.min_val
+        if self.max_val <= self.min_val:
+            raise AssertionError(
+                f"max_val ({self.max_val}) must be greater than min_val ({self.min_val})"
+            )
 
     def forward(self, input: Tensor) -> Tensor:
         """
@@ -1188,9 +1191,8 @@ class MultiheadAttention(Module):
         self.dropout = dropout
         self.batch_first = batch_first
         self.head_dim = embed_dim // num_heads
-        assert self.head_dim * num_heads == self.embed_dim, (
-            "embed_dim must be divisible by num_heads"
-        )
+        if self.head_dim * num_heads != self.embed_dim:
+            raise AssertionError("embed_dim must be divisible by num_heads")
 
         if not self._qkv_same_embed_dim:
             self.q_proj_weight = Parameter(
@@ -1445,10 +1447,11 @@ class MultiheadAttention(Module):
                     )
 
         any_nested = query.is_nested or key.is_nested or value.is_nested
-        assert not any_nested, (
-            "MultiheadAttention does not support NestedTensor outside of its fast path. "
-            + f"The fast path was not hit because {why_not_fast_path}"
-        )
+        if any_nested:
+            raise AssertionError(
+                "MultiheadAttention does not support NestedTensor outside of its fast path. "
+                + f"The fast path was not hit because {why_not_fast_path}"
+            )
 
         if self.batch_first and is_batched:
             # make sure that the transpose op does not affect the "is" property

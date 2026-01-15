@@ -3,8 +3,6 @@ PYTEST_DONT_REWRITE (prevents pytest from rewriting assertions, which interferes
 with test_functionalization_with_native_python_assertion)
 """
 
-import copy
-
 # Owner(s): ["oncall: export"]
 import math
 import operator
@@ -48,7 +46,6 @@ from torch.fx.experimental.symbolic_shapes import ShapeEnv
 from torch.fx.passes.infra.partitioner import Partition
 from torch.fx.passes.operator_support import OperatorSupport
 from torch.library import _scoped_library, impl
-from torch.testing import FileCheck
 from torch.testing._internal.common_cuda import TEST_CUDA
 from torch.testing._internal.common_utils import (
     IS_WINDOWS,
@@ -70,12 +67,12 @@ def count_call_function(graph: torch.fx.Graph, target: torch.ops.OpOverload) -> 
 
 class _AddOperatorSupport(OperatorSupport):
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
-        return node.op == "call_function" and node.target in {operator.add}
+        return node.op == "call_function" and node.target == operator.add
 
 
 class _AtenAddOperatorSupport(OperatorSupport):
     def is_node_supported(self, submodules, node: torch.fx.Node) -> bool:
-        return node.op == "call_function" and node.target in {torch.ops.aten.add.Tensor}
+        return node.op == "call_function" and node.target == torch.ops.aten.add.Tensor
 
 
 def _to_partition_names(partitions: list[Partition]) -> list[set[str]]:
@@ -1436,97 +1433,6 @@ def forward(self, arg0_1):
         self.assertEqual(ep_cuda.example_inputs[0][0].device, torch.device("cuda:0"))
         self.assertEqual(ep_cuda.example_inputs[0][1].device, torch.device("cuda:0"))
         self.assertEqual(ep_cuda.example_inputs[1]["z"].device, torch.device("cuda:0"))
-
-    def test_constant_folding_pass(self):
-        from torch.ao.quantization.observer import MappingType, PerGroup, PerToken
-        from torch.ao.quantization.pt2e._affine_quantization import (
-            AffineQuantizedMinMaxObserver,
-        )
-        from torch.ao.quantization.quantize_pt2e import convert_pt2e, prepare_pt2e
-        from torch.ao.quantization.quantizer import (
-            QuantizationAnnotation,
-            QuantizationSpec,
-            Quantizer,
-        )
-
-        class BackendAQuantizer(Quantizer):
-            def annotate(self, model: torch.fx.GraphModule) -> torch.fx.GraphModule:
-                for node in model.graph.nodes:
-                    if (
-                        node.op == "call_function"
-                        and node.target == torch.ops.aten.linear.default
-                    ):
-                        input_act = node.args[0]
-                        assert isinstance(input_act, torch.fx.Node)
-                        weight = node.args[1]
-                        assert isinstance(weight, torch.fx.Node)
-
-                        act_qspec = QuantizationSpec(
-                            dtype=torch.uint8,
-                            quant_min=0,
-                            quant_max=255,
-                            qscheme=None,
-                            is_dynamic=False,
-                            observer_or_fake_quant_ctr=AffineQuantizedMinMaxObserver.with_args(
-                                # TODO: maybe align the arg name here
-                                target_dtype=torch.uint8,
-                                mapping_type=MappingType.SYMMETRIC,
-                                granularity=PerToken(),
-                            ),
-                        )
-
-                        weight_qspec = QuantizationSpec(
-                            dtype=torch.uint8,
-                            quant_min=0,
-                            quant_max=255,
-                            qscheme=None,
-                            is_dynamic=False,
-                            observer_or_fake_quant_ctr=AffineQuantizedMinMaxObserver.with_args(
-                                target_dtype=torch.uint8,
-                                mapping_type=MappingType.SYMMETRIC,
-                                granularity=PerGroup(group_size=128),
-                            ),
-                        )
-                        node.meta["quantization_annotation"] = QuantizationAnnotation(
-                            input_qspec_map={
-                                input_act: act_qspec,
-                                weight: weight_qspec,
-                            },
-                            _annotated=True,
-                        )
-
-            def validate(self, model: torch.fx.GraphModule) -> None:
-                pass
-
-        class M(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(128, 20)
-
-            def forward(self, x):
-                return self.linear(x)
-
-        example_inputs = (torch.randn(5, 128),)
-        model = M()
-        quantizer = BackendAQuantizer()
-        m = torch.export.export(model.eval(), example_inputs, strict=True).module()
-        m = prepare_pt2e(m, quantizer)
-        # Calibration
-        m(*example_inputs)
-        # Get the quantized model
-        m_fold = copy.deepcopy(m)
-        m_fold = convert_pt2e(m_fold, fold_quantize=True)
-
-        # If fold, check the graph only contains frozed params and no linear_weight
-        FileCheck().check("_frozen_param0").check_not("linear_weight").run(m_fold.code)
-
-        m_not_fold = copy.deepcopy(m)
-        m_not_fold = convert_pt2e(m_not_fold, fold_quantize=False)
-
-        # If not fold, check the graph doesn't contain frozed params and contain linear_weight
-        FileCheck().check_not("_frozen_param0").check("linear_weight").run(
-            m_not_fold.code
-        )
 
 
 if __name__ == "__main__":

@@ -12,7 +12,7 @@
     v_transposed = V.transpose(1, 2)
 
     @cute.jit
-    def score_mod(tSrS_ssa, b_idx, h_idx, q_idx, kv_idx, aux_tensors):
+    def score_mod(tSrS_ssa, b_idx, h_idx, q_idx, kv_idx, seqlen_info, aux_tensors):
         {{unpack_buffers("aux_tensors", indent_width=8)}}
         {{ modification(
             subgraph_number=0,

@@ -54,15 +54,17 @@ def process_inputs(
             if not isinstance(x, torch.Tensor):
                 return x
             if isinstance(x, FakeTensor):
-                assert x.fake_mode is fake_mode
-                return x
+                if x.fake_mode is fake_mode:
+                    return x
+                # FakeTensor from a different mode (e.g., userland FakeTensorMode).
+                # Refakify it to our mode. Fall through to the from_tensor path.
             if is_traceable_wrapper_subclass(x):
                 attrs, _ = x.__tensor_flatten__()
                 if all(isinstance(getattr(x, attr), FakeTensor) for attr in attrs):
-                    assert all(
-                        getattr(x, attr).fake_mode is fake_mode for attr in attrs
-                    )
-                    return x
+                    if all(getattr(x, attr).fake_mode is fake_mode for attr in attrs):
+                        return x
+                    # FakeTensor subclass from a different mode.
+                    # Fall through to refakify.
 
             # see note [Tensor Fakification and Symbol Caching]
             symbolic_context = None

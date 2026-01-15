@@ -660,10 +660,12 @@ class FakeTensor(Tensor):
     # TODO: Generalize this as needed, e.g., into a trie of memos, if
     # you do something like x[0].item()  (x[0] is fresh each time, so
     # memo mechanism here won't work)
-    nonzero_memo = SymNumberMemoDescriptor()
+    nonzero_memo: SymNumberMemoDescriptor | int | None = SymNumberMemoDescriptor()
     item_memo = SymNumberMemoDescriptor()
-    unique_memo = SymNumberMemoDescriptor()
-    unique_consecutive_memo = SymNumberMemoDescriptor()
+    unique_memo: SymNumberMemoDescriptor | int | None = SymNumberMemoDescriptor()
+    unique_consecutive_memo: SymNumberMemoDescriptor | int | None = (
+        SymNumberMemoDescriptor()
+    )
 
     # We expect nested_int_memo to be None when an offsets is a graph
     # intermediate, or an input that has never been associated with a
@@ -1506,7 +1508,7 @@ class FakeTensorMode(TorchDispatchMode):
             # Do this dispatch outside the above except handler so if it
             # generates its own exception there won't be a __context__ caused by
             # the caching mechanism.
-            # pyrefly: ignore [bad-argument-type]
+
             return self._dispatch_impl(func, types, args, kwargs)
 
         assert state is not None
@@ -1524,27 +1526,25 @@ class FakeTensorMode(TorchDispatchMode):
                 # This represents a negative cache entry - we already saw that the
                 # output is uncachable. Compute it from first principals.
                 FakeTensorMode.cache_bypasses[entry.reason] += 1
-                # pyrefly: ignore [bad-argument-type]
+
                 return self._dispatch_impl(func, types, args, kwargs)
 
             # We have a cache entry.
-            # pyrefly: ignore [bad-argument-type]
+
             output = self._output_from_cache_entry(state, entry, key, func, args)
             FakeTensorMode.cache_hits += 1
             if self.cache_crosscheck_enabled:
                 # For debugging / testing: Validate that the output synthesized
                 # from the cache matches the output created by normal dispatch.
                 with disable_fake_tensor_cache(self):
-                    # pyrefly: ignore [bad-argument-type]
                     self._crosscheck_cache_output(output, func, types, args, kwargs)
             return output
 
         # We don't have a cache entry.
-        # pyrefly: ignore [bad-argument-type]
+
         output = self._dispatch_impl(func, types, args, kwargs)
 
         try:
-            # pyrefly: ignore [bad-argument-type]
             entry = self._make_cache_entry(state, key, func, args, kwargs, output)
         except _BypassDispatchCache as e:
             # We ran "extra" checks on the cache key and determined that it's no
@@ -1929,7 +1929,6 @@ class FakeTensorMode(TorchDispatchMode):
                 self._validate_output_for_cache_entry(
                     state,
                     key,
-                    # pyrefly: ignore [bad-argument-type]
                     func,
                     args,
                     kwargs,
@@ -1939,7 +1938,6 @@ class FakeTensorMode(TorchDispatchMode):
             self._validate_output_for_cache_entry(
                 state,
                 key,
-                # pyrefly: ignore [bad-argument-type]
                 func,
                 args,
                 kwargs,
@@ -1951,7 +1949,6 @@ class FakeTensorMode(TorchDispatchMode):
                 self._get_output_info_for_cache_entry(
                     state,
                     key,
-                    # pyrefly: ignore [bad-argument-type]
                     func,
                     args,
                     kwargs,
@@ -1969,7 +1966,6 @@ class FakeTensorMode(TorchDispatchMode):
             output_info = self._get_output_info_for_cache_entry(
                 state,
                 key,
-                # pyrefly: ignore [bad-argument-type]
                 func,
                 args,
                 kwargs,
@@ -2516,7 +2512,6 @@ class FakeTensorMode(TorchDispatchMode):
             )
 
             with self, maybe_ignore_fresh_unbacked_symbols():
-                # pyrefly: ignore [index-error]
                 return registered_hop_fake_fns[func](*args, **kwargs)
 
         self.invalidate_written_to_constants(func, flat_arg_fake_tensors, args, kwargs)
@@ -2671,7 +2666,6 @@ class FakeTensorMode(TorchDispatchMode):
                 # TODO: Is this really needed?
                 compute_unbacked_bindings(self.shape_env, fake_out, peek=True)
 
-            # pyrefly: ignore [bad-return]
             return fake_out
 
         # Try for fastpath

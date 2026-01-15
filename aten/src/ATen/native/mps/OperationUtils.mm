@@ -1079,7 +1079,9 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   const auto cast_needed = input.scalar_type() != other.scalar_type();
   const auto suffix = iter.is_contiguous() ? "dense" : "strided";
   bool use_broadcast_kernel = false;
+  bool use_scalar_kernel = false;
   bool broadcast_on_lhs = false;
+  bool scalar_on_lhs = false;
   int64_t broadcast_numel = 0;
 
   const bool input_is_full = input.numel() == out.numel();
@@ -1088,20 +1090,44 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
   const bool other_is_bc = is_dense_broadcastable(other, out) && !other_is_full;
 
   if (input_is_bc && other_is_full && other.is_contiguous() && out.is_contiguous()) {
-    use_broadcast_kernel = true;
-    broadcast_on_lhs = true;
     broadcast_numel = input.numel();
+    if (broadcast_numel == 1) {
+      use_scalar_kernel = true;
+      scalar_on_lhs = true;
+    } else {
+      use_broadcast_kernel = true;
+      broadcast_on_lhs = true;
+    }
   } else if (other_is_bc && input_is_full && input.is_contiguous() && out.is_contiguous()) {
-    use_broadcast_kernel = true;
-    broadcast_on_lhs = false;
     broadcast_numel = other.numel();
+    if (broadcast_numel == 1) {
+      use_scalar_kernel = true;
+      scalar_on_lhs = false;
+    } else {
+      use_broadcast_kernel = true;
+      broadcast_on_lhs = false;
+    }
   }
 
   const auto alpha_type = scalar_arg_type.has_value() ? scalar_arg_type.value() : iter.common_dtype();
   const auto alpha_suffix = alpha.has_value() ? fmt::format("_{}", scalarToMetalTypeString(alpha_type)) : "";
 
   std::string kernel_name;
-  if (use_broadcast_kernel) {
+  if (use_scalar_kernel) {
+    const auto& tensor_operand = scalar_on_lhs ? other : input;
+    const auto lhs_suffix = scalar_on_lhs ? "_lhs" : "";
+    if (cast_needed) {
+      kernel_name =
+          fmt::format("{}_dense_scalar{}_cast_{}{}", name, lhs_suffix, scalarToMetalTypeString(out), alpha_suffix);
+    } else {
+      kernel_name = fmt::format("{}_dense_scalar{}_{}_{}{}",
+                                name,
+                                lhs_suffix,
+                                scalarToMetalTypeString(out),
+                                scalarToMetalTypeString(tensor_operand),
+                                alpha_suffix);
+    }
+  } else if (use_broadcast_kernel) {
     const auto& tensor_operand = broadcast_on_lhs ? other : input;
     if (cast_needed) {
       kernel_name = fmt::format("{}_dense_broadcast{}_cast_{}{}",
@@ -1135,7 +1161,21 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
       getMPSProfiler().beginProfileKernel(binaryPSO, kernel_name, {input, other});
       [computeEncoder setComputePipelineState:binaryPSO];
       bind_iter_tensors(computeEncoder, iter);
-      if (use_broadcast_kernel) {
+      if (use_scalar_kernel) {
+        if (cast_needed) {
+          std::array<uint32_t, 4> sizes_types = {static_cast<uint32_t>(c10::elementSize(input.scalar_type())),
+                                                 static_cast<uint32_t>(c10::elementSize(other.scalar_type())),
+                                                 static_cast<uint32_t>(input.scalar_type()),
+                                                 static_cast<uint32_t>(other.scalar_type())};
+          if (alpha) {
+            mtl_setArgs<3>(computeEncoder, getMPSScalar(*alpha, alpha_type), sizes_types);
+          } else {
+            mtl_setArgs<3>(computeEncoder, sizes_types);
+          }
+        } else if (alpha) {
+          mtl_setArgs<3>(computeEncoder, getMPSScalar(*alpha, alpha_type));
+        }
+      } else if (use_broadcast_kernel) {
         mtl_setArgs<3>(computeEncoder, broadcast_numel);
         if (cast_needed) {
           std::array<uint32_t, 4> sizes_types = {static_cast<uint32_t>(c10::elementSize(input.scalar_type())),
@@ -1151,10 +1191,6 @@ void MetalShaderLibrary::exec_binary_kernel(TensorIteratorBase& iter,
           mtl_setArgs<4>(computeEncoder, getMPSScalar(*alpha, alpha_type));
         }
       } else {
-        // Set input and output tensors
-        bind_iter_tensors(computeEncoder, iter);
-        // Iterator is contiguous if all of its elements are dense in storage,
-        // i.e. it's true for both row-first and column-first tensors
         if (iter.is_contiguous()) {
           if (alpha) {
             mtl_setBytes(computeEncoder, getMPSScalar(*alpha, alpha_type), 3);

@@ -1177,6 +1177,23 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         self.assertEqual(res, ref)
         self.assertEqual(res[0].bar, ref[0].bar)
 
+    def test_subclass_method_override(self):
+        class MyTensor(torch.Tensor):
+            def sum(self, dim=None, keepdim=False):
+                return super().sum(dim=dim, keepdim=keepdim).as_subclass(MyTensor)
+
+        def fn(x):
+            y = x.as_subclass(MyTensor)
+            return y.sum(dim=1)
+
+        x = torch.randn(4, 10)
+        fn_opt = torch.compile(fn, backend="eager", fullgraph=False)
+
+        res_exp = fn(x)
+        res_act = fn_opt(x)
+        self.assertEqual(res_exp, res_act)
+        self.assertIsInstance(res_act, MyTensor)
+
     def test_tensor_subclass_attr_codegen_tos(self):
         # This repros a very subtle interaction between
         # `TensorWithTFOverrideVariable` attribute mutation codegen and

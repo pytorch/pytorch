@@ -423,7 +423,7 @@ static inline bool checksize(const Tensor& mat1, const Tensor& mat2){
   } else if (mat1.dim() == 2 && mat2.dim() == 1) {
     // aten::mv
     return mat1.size(0) * mat1.size(1) > mkldnn_gemm_min_size;
-  } else if (mat2.dim() == 2 && mat2.dim() == 2) {
+  } else if (mat1.dim() == 2 && mat2.dim() == 2) {
     // aten::addmm
     return mat1.size(0) * mat1.size(1) * mat2.size(1) > mkldnn_gemm_min_size;
   } else {

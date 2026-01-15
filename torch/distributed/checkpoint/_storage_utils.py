@@ -8,7 +8,7 @@ def _storage_setup(
     storage: StorageReader | StorageWriter | None,
     checkpoint_id: str | os.PathLike | None,
     reader: bool = False,
-) -> None | StorageReader | StorageWriter:
+) -> StorageReader | StorageWriter | None:
     if storage:
         if checkpoint_id is not None:
             storage.reset(checkpoint_id)

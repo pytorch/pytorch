@@ -216,9 +216,6 @@ function install_torchrec_and_fbgemm() {
     pip_build_and_install "git+https://github.com/pytorch/torchrec.git@${torchrec_commit}" dist/torchrec
     pip_uninstall fbgemm-gpu-nightly
 
-    # Set ROCM_HOME isn't available, use ROCM_PATH if set or /opt/rocm
-    ROCM_HOME="${ROCM_HOME:-${ROCM_PATH:-/opt/rocm}}"
-
     # Find rocm_version.h header file for ROCm version extract
     rocm_version_h="${ROCM_HOME}/include/rocm-core/rocm_version.h"
     if [ ! -f "$rocm_version_h" ]; then
@@ -330,6 +327,52 @@ function install_flash_attn_cute() {
   # remove the local repo
   rm -rf flash-attention-build
   echo "FlashAttention CuTe installation complete."
+}
+
+function install_cutlass_dsl() {
+  # cutlass-dsl requires Python >= 3.12
+  local py_version
+  py_version=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+  if [[ "$(echo -e "3.12\n$py_version" | sort -V | head -n1)" != "3.12" ]]; then
+    echo "Skipping CUTLASS DSL install: requires Python >= 3.12, have $py_version"
+    return 0
+  fi
+
+  echo "Installing NVIDIA CUTLASS DSL from PyPI..."
+  pip_install nvidia-cutlass-dsl
+  echo "NVIDIA CUTLASS DSL installation complete."
+}
+
+function install_cutlass_api() {
+  # cutlass-api requires Python >= 3.12
+  local py_version
+  py_version=$(python3 -c "import sys; print(f'{sys.version_info.major}.{sys.version_info.minor}')")
+  if [[ "$(echo -e "3.12\n$py_version" | sort -V | head -n1)" != "3.12" ]]; then
+    echo "Skipping CUTLASS API install: requires Python >= 3.12, have $py_version"
+    return 0
+  fi
+
+  echo "Installing CUTLASS API from Github..."
+
+  # Install CuTeDSL dependency first
+  install_cutlass_dsl
+
+  # Grab latest til we have a pinned commit
+  local cutlass_commit
+  cutlass_commit=$(git ls-remote https://github.com/NVIDIA/cutlass.git refs/heads/cutlass_api | cut -f1)
+
+  rm -rf cutlass-build
+  git clone --depth 1 -b cutlass_api https://github.com/NVIDIA/cutlass.git cutlass-build
+
+  pushd cutlass-build
+  git checkout "${cutlass_commit}"
+
+  # Install cutlass_api with torch extras
+  pip_install -e "python/cutlass_api[torch]"
+  popd
+
+  rm -rf cutlass-build
+  echo "CUTLASS API installation complete."
 }
 
 function print_sccache_stats() {

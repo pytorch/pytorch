@@ -269,7 +269,7 @@ class FunctionalTensor(torch.Tensor):
                 device=self.device,
                 layout=self.layout,
             )
-        # pyrefly: ignore [not-iterable]
+
         return super().to(*args, **kwargs)
 
     def cuda(self, device=None, *args, **kwargs):

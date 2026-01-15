@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-import warnings
 from abc import ABC, abstractmethod
 from collections.abc import Callable, Iterator
 from enum import auto, Enum
@@ -227,15 +226,6 @@ def checkpoint_wrapper(
         (nn.Module):
             Wrapped module
     """
-
-    if checkpoint_impl == CheckpointImpl.REENTRANT:
-        warnings.warn(
-            f"Please specify {CheckpointImpl.NO_REENTRANT} as "
-            f"{CheckpointImpl.REENTRANT} will soon be removed as "
-            "the default and eventually deprecated.",
-            FutureWarning,
-            stacklevel=2,
-        )
     return CheckpointWrapper(
         module,
         checkpoint_impl,

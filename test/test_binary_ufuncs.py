@@ -3501,6 +3501,14 @@ class TestBinaryUfuncs(TestCase):
         exponents = torch.randint(-5, 5, (64,), device=device)
         self.assertEqual(torch.ldexp(mantissas, exponents).dtype, torch.half)
 
+        # test half dtype bound ends (very small and very large exponents)
+        mantissas = torch.tensor([-2, 2**-10], device=device, dtype=torch.half)
+        exponents = torch.tensor([-25, 20], device=device)
+        self.assertEqual(
+            torch.ldexp(mantissas, exponents),
+            torch.tensor([-(2**-24), 2**10], dtype=torch.half),
+        )
+
         # test float64 computation
         mantissas = torch.tensor([1], dtype=torch.float64, device=device)
         exponents = torch.tensor([128], dtype=torch.int64, device=device)

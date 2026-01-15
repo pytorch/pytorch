@@ -68,13 +68,15 @@ RUN apt-get update && DEBIAN_FRONTEND=noninteractive apt-get install -y --no-ins
         libpng-dev \
         python-is-python3 \
         python3 \
+        python3-dev \
         python3-pip \
         && rm -rf /var/lib/apt/lists/*
 # Copy Python packages from pytorch-installs stage
 COPY --from=pytorch-installs /usr/local/lib/python3.12 /usr/local/lib/python3.12
 COPY --from=pytorch-installs /usr/local/bin /usr/local/bin
-RUN if test -n "${TRITON_VERSION}" -a "${TARGETPLATFORM}" != "linux/arm64"; then \
-        DEBIAN_FRONTEND=noninteractive apt install -y --no-install-recommends gcc; \
+RUN if test -n "${CUDA_VERSION}" -a "${TARGETPLATFORM}" != "linux/arm64"; then \
+        apt-get update -qq && \
+        DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends gcc && \
         rm -rf /var/lib/apt/lists/*; \
     fi
 ENV NVIDIA_VISIBLE_DEVICES all

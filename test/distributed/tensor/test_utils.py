@@ -1033,12 +1033,12 @@ class Test_StridedShard_Propagation(LocalDTensorTestBase):
 
             with CommDebugMode() as comm_mode:
                 # `A @ B2` will trigger redistribution on both inputs as below:
-                # A: S(1)[0]S(1)[1]->S(1)R->RR->RS(1)
-                # B2: _S(0, 4)S(0)[0] -> RS(0)
-                # The final output res2's placements will be RP.
+                # A: S(1)[0]S(1)[1]
+                # B2: _S(0, 4)S(0)[0]->RS(0)->RR->S(0)R->S(0)[0]S(0)[1]
+                # The final output res2's placements will be PP.
                 res2 = A @ B2
             self.assertEqual(
-                comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 3
+                comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 2
             )
             assert isinstance(res1, DTensor)
             assert isinstance(res2, DTensor)
@@ -1557,10 +1557,10 @@ class TestExplicitRedistribute(LocalTensorTestBase):
                     )
                     # TODO enable this once fixing the issue that op_info.schema is None in some calls to
                     # redistribute_local_tensor
-                    # self.assertRegex(
-                    #     captured.output[0],
-                    #     r".*aten\.mm\.default.*",
-                    # )
+                    self.assertRegex(
+                        captured.output[0],
+                        r".*aten\.mm\.default.*",
+                    )
 
             # explicit redistribute allows manual redistribute
             with ExplicitRedistributionContext():

@@ -306,6 +306,11 @@ def mark_step_begin() -> None:
 def reset_cudagraph_trees() -> None:
     "Clear all cudagraph trees"
     # see shutdown below for why this is necessary
+    # Note: get_obj may fail if called from a thread that wasn't spawned by
+    # autograd (e.g., test threads). In that case, there's nothing to reset.
+    if not torch._C._is_key_in_tls("tree_manager_containers"):
+        # TLS not set up for this thread, nothing to reset
+        return
     container_dict = get_obj(local, "tree_manager_containers")
     locks_dict = get_obj(local, "tree_manager_locks")
     for device, lock in locks_dict.items():
@@ -409,7 +414,7 @@ def cudagraphify_impl(
         fn = align_inputs_from_check_idxs(
             fn, inputs_to_check=check_input_idxs, mutated_input_idxs=mutated_input_idxs
         )
-        # pyrefly: ignore [unsupported-operation]
+
         fn_cache[int_key] = fn
 
         return out
@@ -930,7 +935,6 @@ class CUDAGraphNode:
             return None
 
         self.static_input_data_ptrs: InputList[Optional[int]] = [
-            # pyrefly: ignore [bad-argument-type]
             maybe_get_static_data_ptr(i, inputs, self.static_input_idxs)
             for i in range(len(inputs))
         ]
@@ -977,10 +981,10 @@ class CUDAGraphNode:
             self.expected_dead_indices_before_graph = different_indices
 
         rng_states = [inp for inp in inputs if isinstance(inp, torch.Generator)]
-        # pyrefly: ignore [bad-argument-type]
+
         recording_inputs = self._allocate_and_copy_recording_inputs(inputs)
         # recording inputs will copy over memory, so we can free non recording inputs
-        # pyrefly: ignore [missing-attribute]
+
         inputs.clear()
         del inputs
 
@@ -1334,7 +1338,7 @@ class CUDAGraphNode:
             )
 
             ref = static_input_persistent_storage_ptrs.get(
-                o.untyped_storage().data_ptr(), None
+                o.untyped_storage().data_ptr()
             )
             # also treat empty storages as static outputs because we do not need to manage their lifetime
             # and they should not participate in checkpointing
@@ -1698,7 +1702,7 @@ class CUDAGraphNode:
             for i, inp in enumerate(inputs):
                 if not isinstance(inp, torch.Tensor):
                     assert isinstance(inp, (int, torch.Generator))
-                    # pyrefly: ignore [bad-argument-type]
+
                     recording_inputs.append(inp)
                 elif i not in self.static_input_idxs:
                     # static_input does an allocation!

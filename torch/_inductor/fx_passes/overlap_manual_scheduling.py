@@ -164,7 +164,7 @@ class ManualOverlapScheduler(OverlapScheduler):
         gm: fx.GraphModule,
         module_bucket_plans: list[list[str] | str],
         insert_overlap_deps: bool,
-        module_stack_fn: None | Callable[[fx.Node], list[tuple[str, type[Any]]]] = None,
+        module_stack_fn: Callable[[fx.Node], list[tuple[str, type[Any]]]] | None = None,
     ):
         super().__init__(
             gm,
@@ -358,7 +358,7 @@ def manual_overlap_bucketing(
     gm: torch.fx.GraphModule,
     module_bucket_plans: list[list[str] | str],
     insert_overlap_deps: bool = False,
-    module_stack_fn: None | Callable[[fx.Node], list[tuple[str, type[Any]]]] = None,
+    module_stack_fn: Callable[[fx.Node], list[tuple[str, type[Any]]]] | None = None,
 ) -> torch.fx.GraphModule:
     """Schedule nodes based on user specifications in module_bucket_plans
     The manual overlapping consists of two steps:

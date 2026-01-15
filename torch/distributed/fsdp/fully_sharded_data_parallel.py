@@ -410,8 +410,8 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
         limit_all_gathers: bool = True,
         use_orig_params: bool = False,
         ignored_states: Iterable[torch.nn.Parameter]
-        | None
-        | Iterable[torch.nn.Module] = None,
+        | Iterable[torch.nn.Module]
+        | None = None,
         device_mesh: DeviceMesh | None = None,
     ):
         torch._C._log_api_usage_once("torch.distributed.fsdp")
@@ -2059,7 +2059,7 @@ class FullyShardedDataParallel(nn.Module, _FSDPState):
                 )
                 self._unshard_event = self._unshard_stream.record_event()
             self._handle._prefetched = True
-        unshard_handle = UnshardHandle(self._handle, self._unshard_stream)
+        unshard_handle = UnshardHandle(self._handle, self._unshard_event)
         if async_op:
             return unshard_handle
         unshard_handle.wait()

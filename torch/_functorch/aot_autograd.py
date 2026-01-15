@@ -707,6 +707,7 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
         # Packaging this just for later use
         aot_config=aot_config,
         stack=stack,
+        fake_mode=fake_mode,
     )
 
 
@@ -1085,7 +1086,10 @@ def aot_module_simplified(
 
         compiled_fn = None
 
-        if isinstance(fw_compiler, SerializableAOTDispatchCompiler):
+        if (
+            isinstance(fw_compiler, SerializableAOTDispatchCompiler)
+            or torch._functorch.config.force_autograd_cache
+        ):
             local = should_use_local_autograd_cache()
             remote = should_use_remote_autograd_cache()
             if local or remote:
