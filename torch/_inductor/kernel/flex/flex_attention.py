@@ -551,7 +551,7 @@ def validate_joint_graph(joint_graph: torch.fx.Graph):
     return
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class JointOutputResult:
     """Results from processing joint outputs."""
 
