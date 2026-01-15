@@ -236,7 +236,6 @@ class GenericCompiledBackward(InductorOutput[TOut]):
     # Used by AOTDispatchAutograd.post_compile
     backward_state_indices: list[int]
     num_symints_saved_for_bw_: int
-    num_opaque_objects_saved_for_bw_: int
 
 
 @dataclass
@@ -540,7 +539,6 @@ class GenericAOTAutogradResult(Generic[TForward, TBackward]):
                 aot_config,
                 fw_metadata=self.runtime_metadata,
                 try_save_cache_entry=None,
-                num_opaque_objects_saved_for_bw_=self.compiled_bw.num_opaque_objects_saved_for_bw_,
             )
 
         else:

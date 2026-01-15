@@ -435,7 +435,6 @@ class ViewAndMutationMeta:
     traced_tangent_metas: Optional[list[Any]] = None
 
     num_symints_saved_for_bw: Optional[int] = None
-    num_opaque_objects_saved_for_bw: Optional[int] = None
 
     # See Note [Activations with no version counter checks in eager]
     # Number of tensors saved for backward that were stashed on ctx (e.g., ctx.x = x)
@@ -682,13 +681,6 @@ class ViewAndMutationMeta:
     @property
     def tensors_saved_for_backwards_slice(self):
         assert self.num_symints_saved_for_bw is not None
-        assert self.num_opaque_objects_saved_for_bw is not None
-        # Based on the order in partitioners.py/_extract_fwd_bwd_modules, symints and opaque objects are saved after tensors
-        num_non_tensors = (
-            self.num_symints_saved_for_bw + self.num_opaque_objects_saved_for_bw
-        )
-        if num_non_tensors > 0:
-            return slice(self.num_forward, -num_non_tensors)
         assert self.num_tensors_saved_with_no_vc_check is not None
         # Fast-path: if no tensors without VC check, just return the VC check slice
         if self.num_tensors_saved_with_no_vc_check == 0:
@@ -710,7 +702,6 @@ class ViewAndMutationMeta:
         # See Note [Activations with no version counter checks in eager]
         assert self.num_symints_saved_for_bw is not None
         assert self.num_tensors_saved_with_no_vc_check is not None
-        assert self.num_opaque_objects_saved_for_bw is not None
         # The tensors with VC check come first, followed by tensors without VC check
         num_no_vc_check = self.num_tensors_saved_with_no_vc_check
         num_opaque = self.num_opaque_objects_saved_for_bw or 0
@@ -756,22 +747,8 @@ class ViewAndMutationMeta:
     @property
     def symints_saved_for_backwards_slice(self):
         assert self.num_symints_saved_for_bw is not None
-        assert self.num_opaque_objects_saved_for_bw is not None
-        # Based on the order in partitioners.py/_extract_fwd_bwd_modules, opaque objects are saved after symints
         if self.num_symints_saved_for_bw > 0:
-            num_opaque = self.num_opaque_objects_saved_for_bw
-            if num_opaque > 0:
-                return slice(-self.num_symints_saved_for_bw - num_opaque, -num_opaque)
-            else:
-                return slice(-self.num_symints_saved_for_bw, None)
-        else:
-            return slice(0, 0)  # empty slice
-
-    @property
-    def opaque_objects_saved_for_backwards_slice(self):
-        assert self.num_opaque_objects_saved_for_bw is not None
-        if self.num_opaque_objects_saved_for_bw > 0:
-            return slice(-self.num_opaque_objects_saved_for_bw, None)
+            return slice(-self.num_symints_saved_for_bw, None)
         else:
             return slice(0, 0)  # empty slice
 

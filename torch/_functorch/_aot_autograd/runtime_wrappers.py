@@ -1917,7 +1917,6 @@ def _backward_prologue_functional(
     # Every dereference of ctx.saved_tensors incurs saved_tensors_hooks calls
     # There are tests that count these calls, saving to var.
     num_ctx_saved_tensors = len(ctx_saved_tensors)
-    num_opaque = len(ctx_saved_opaque) if ctx_saved_opaque else 0
     all_args = [
         *ctx_symints,
         *ctx_saved_tensors,
@@ -2293,7 +2292,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
         *,
         fw_metadata: ViewAndMutationMeta,  # runtime metadata
         try_save_cache_entry: Optional[Callable],  # Serialization function
-        num_opaque_objects_saved_for_bw_: int,
     ):
         # For additional context see Note [CUDA Graph Safe RNG Functionalization]
         # Each pair forward, backward rng states must be equal prior to its invocation on any
@@ -2329,7 +2327,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
             metadata: ViewAndMutationMeta = fw_metadata  # type: ignore[assignment]
             maybe_subclass_metadata: Optional[SubclassMeta] = maybe_subclass_meta
             num_symints_saved_for_bw = num_symints_saved_for_bw_
-            num_opaque_objects_saved_for_bw = num_opaque_objects_saved_for_bw_
             _aot_id = aot_config.aot_id
             _lazy_backward_info = lazy_backward_info
 
@@ -2398,7 +2395,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 tensors_saved_no_vc_check = fw_outs[
                     CompiledFunction.metadata.tensors_saved_for_backwards_no_vc_check_slice
                 ]
-
                 assert all(
                     isinstance(x, torch.Tensor) for x in tensors_saved_with_vc_check
                 )
@@ -2538,7 +2534,6 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                     CompiledFunction.metadata,
                     CompiledFunction.maybe_subclass_metadata,
                     *flat_args,
-                    ctx_saved_opaque=getattr(ctx, "saved_opaque_objects", None),
                 )
 
                 if num_rng:

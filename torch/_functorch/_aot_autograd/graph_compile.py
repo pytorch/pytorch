@@ -41,7 +41,6 @@ from torch._dynamo.utils import (
     lazy_format_graph_code,
 )
 from torch._guards import CompileContext, TracingContext
-from torch._library.fake_class_registry import FakeScriptObject
 from torch._logging import getArtifactLogger, trace_structured
 from torch._subclasses import FakeTensor
 from torch._subclasses.meta_utils import is_sparse_any
@@ -499,7 +498,6 @@ def _cache_inference_info(
             guards_expr=guards_expr,
             backward_state_indices=None,
             num_symints_saved_for_bw=None,
-            num_opaque_objects_saved_for_bw=None,
             serialized_bw_module=None,
         )
         AOTAutogradCache.save(
@@ -562,7 +560,6 @@ def collect_fw_donated_buffer_idxs(
         t = saved_tensors[i]
         if (
             t is not None
-            and isinstance(t, FakeTensor)  # Ensure it's actually a tensor
             and not is_sparse_any(t)
             and StorageWeakRef(t.untyped_storage()) not in storage_refs
         ):
@@ -1198,14 +1195,6 @@ def maybe_inline_graph_saved_tensors_hooks(
         # collect_bw_donated_buffer_idxs requires inner_meta to have num_symints_saved_for_bw
         inner_meta.num_symints_saved_for_bw = len(
             [n for n in fw_outs_saved_for_bw if is_sym_node(n)]
-        )
-        inner_meta.num_opaque_objects_saved_for_bw = len(
-            [
-                n
-                for n in fw_outs_saved_for_bw
-                if isinstance(n, torch.fx.Node)
-                and isinstance(n.meta.get("val"), FakeScriptObject)
-            ]
         )
         # Count tensors with no version counter check (used in tensors_saved_for_backwards_slice)
         inner_meta.num_tensors_saved_with_no_vc_check = len(
@@ -2191,7 +2180,6 @@ def _aot_stage2c_make_autograd_function(
         aot_config,
         fw_metadata=fw_metadata,
         try_save_cache_entry=try_save_cache_entry,
-        num_opaque_objects_saved_for_bw_=fw_metadata.num_opaque_objects_saved_for_bw,
     )
 
     if entry is not None:
@@ -2277,11 +2265,6 @@ def _cache_autograd_info(
                 aot_joint_graph_str: Optional[str] = joint_graph_str
                 guards_expr = AOTAutogradCache.generate_guards_expression(cache_info)
 
-                # Get num_opaque_objects_saved_for_bw from metadata
-                num_opaque_objects_saved_for_bw = (
-                    fw_metadata.num_opaque_objects_saved_for_bw
-                )
-
                 entry = AOTAutogradCache.make_entry(
                     compiled_fw_func,  # type: ignore[arg-type]
                     compiled_bw_func,  # type: ignore[arg-type]
@@ -2299,7 +2282,6 @@ def _cache_autograd_info(
                     guards_expr=guards_expr,
                     backward_state_indices=backward_state_indices,
                     num_symints_saved_for_bw=num_symints_saved_for_bw,
-                    num_opaque_objects_saved_for_bw=num_opaque_objects_saved_for_bw,
                     serialized_bw_module=serialize_graph_module(bw_module),
                 )
                 AOTAutogradCache.save(
