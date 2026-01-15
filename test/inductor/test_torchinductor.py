@@ -7825,11 +7825,15 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
 
         def fn_4d(theta):
             size = [theta.size(0), 1, 8, 8]
-            return torch.nn.functional.affine_grid(theta, size, align_corners=align_corners)
+            return torch.nn.functional.affine_grid(
+                theta, size, align_corners=align_corners
+            )
 
         def fn_5d(theta):
             size = [theta.size(0), 1, 8, 8, 8]
-            return torch.nn.functional.affine_grid(theta, size, align_corners=align_corners)
+            return torch.nn.functional.affine_grid(
+                theta, size, align_corners=align_corners
+            )
 
         # 4D case
         theta_4d = torch.randn([3, 2, 3], dtype=dtype, device=self.device)
