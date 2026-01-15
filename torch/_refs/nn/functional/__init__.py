@@ -142,11 +142,10 @@ def _inplace_wrapper(fn: Callable[_P, _T]) -> Callable[_P, _T]:
     # nb. We use the name of the first argument used in the unary references
     @wraps(fn)
     def _fn(*args: _P.args, **kwargs: _P.kwargs) -> _T:
-        # pyrefly: ignore [unsupported-operation]
         a = args[0]
         if "inplace" not in kwargs:
             kwargs["inplace"] = False
-        # pyrefly: ignore [unsupported-operation]
+
         if kwargs["inplace"]:
             torch._check(
                 "out" not in kwargs,
@@ -627,7 +626,7 @@ def smooth_l1_loss(
         )
     else:
         loss = torch.abs(input - target)
-        # pyrefly: ignore [unsupported-operation]
+
         loss = torch.where(loss < beta, 0.5 * loss**2 / beta, loss - 0.5 * beta)
         return _apply_loss_reduction(loss, reduction)
 

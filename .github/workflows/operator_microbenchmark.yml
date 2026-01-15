@@ -107,7 +107,8 @@ jobs:
     uses: ./.github/workflows/_rocm-test.yml
     needs: opmicrobenchmark-build-rocm
     with:
-      timeout-minutes: 500
+      # TODO (huydo): Need to implement sharding for ops micro benchmark
+      timeout-minutes: 720
       build-environment: ${{ needs.opmicrobenchmark-build-rocm.outputs.build-environment }}
       docker-image: ${{ needs.opmicrobenchmark-build-rocm.outputs.docker-image }}
       test-matrix: ${{ needs.opmicrobenchmark-build-rocm.outputs.test-matrix }}
