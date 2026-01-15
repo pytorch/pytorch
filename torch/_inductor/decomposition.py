@@ -494,11 +494,10 @@ def add(
         return NotImplemented
 
     def _requires_fallback(tensor: torch.Tensor) -> bool:
-        if  tensor.ndim == 0:
+        if tensor.ndim == 0 and tensor.is_complex():
             return True
         # Viewing complex tensors as their real dtype requires the last stride to be 1.
         return tensor.stride()[-1] != 1
-
 
     z = y
     if alpha is not None:
@@ -534,7 +533,6 @@ def add(
     x_reshaped = reshape_tensor_complex(x.view(x.real.dtype))
     z_reshaped = reshape_tensor_complex(z.view(y.real.dtype))
     result = torch.flatten(x_reshaped + z_reshaped, start_dim=-2).view(complex_type)
-
 
     return result
 

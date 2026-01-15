@@ -450,6 +450,18 @@ if HAS_CPU:
                 is_cpp_code=torch._inductor.config.cpu_backend == "cpp",
             )
 
+        def test_add_complex_scalar_dynamic_shapes(self):
+            def model():
+                x = torch.ops.aten.scalar_tensor(
+                    s=2.5,
+                    dtype=torch.complex64,
+                    device=self.device,
+                )
+                return x + x
+
+            out = torch.compile(model, backend="inductor")()
+            self.assertEqual(out, torch.tensor(5 + 0j))
+
     copy_tests(
         DynamicShapesCodegenCommonTemplate,
         DynamicShapesCodegenCpuTests,
