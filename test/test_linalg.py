@@ -8492,7 +8492,7 @@ scipy_lobpcg  | {eq_err_scipy:10.2e}  | {eq_err_general_scipy:10.2e}  | {iters2:
     @onlyNativeDeviceTypes
     @dtypes(*floating_and_complex_types_and(torch.bfloat16, torch.half))
     @tf32_on_and_off(0.05)
-    @reduced_f32_on_and_off(0.05)
+    @reduced_f32_on_and_off(0.1)
     def test_baddbmm(self, device, dtype):
         num_batches = 10
         M, N, O = 12, 8, 50

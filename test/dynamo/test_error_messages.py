@@ -2134,6 +2134,10 @@ from user code:
         outer(torch.ones(3))
 
         def post_munge(s):
+            # Remove user stack trace section that appears in recompile limit messages
+            s = re.sub(
+                r"\nUser stack trace:.*?(?=\nTo log all)", "", s, flags=re.DOTALL
+            )
             return re.sub(
                 r"# \S+/test_error_messages\.py", "# test_error_messages.py", s
             )
