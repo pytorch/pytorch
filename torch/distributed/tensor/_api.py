@@ -157,7 +157,7 @@ class _FromTorchTensor(torch.autograd.Function):
                 "Please pass both shape and stride at the same time.",
             )
 
-        if device_mesh.get_coordinate() is None:
+        if not device_mesh._is_current_rank_part_of_mesh():
             # if the global rank is not participating in the device mesh, we
             # simply set the local tensor to an empty tensor
             input = input.new_empty(0, requires_grad=input.requires_grad)
@@ -1109,7 +1109,7 @@ def _dtensor_init_helper(  # type: ignore[no-untyped-def]
         # this tensor meta is not used except `shape`
         dtype = kwargs.get("dtype", torch.get_default_dtype())
 
-        tensor_meta = TensorMeta(size, (0,), dtype)
+        tensor_meta = TensorMeta(size, torch_stride, dtype)
         spec = DTensorSpec(device_mesh, tuple(placements), tensor_meta=tensor_meta)
 
         if random.is_rng_supported_mesh(device_mesh) and not random._rng_tracker:
