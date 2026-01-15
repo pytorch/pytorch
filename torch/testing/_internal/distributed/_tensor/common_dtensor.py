@@ -29,6 +29,7 @@ from torch.distributed.tensor import (
     distribute_tensor,
     DTensor,
     init_device_mesh,
+    Partial,
     Placement,
     Replicate,
     Shard,
@@ -642,6 +643,9 @@ class DTensorConverter:
                 for i, s in enumerate(arg.shape)
                 if s > 1 and s % mesh_size == 0
             ]
+            # include Partial(sum)
+            if arg.dtype.is_floating_point:
+                sharding_choices.append(Partial("sum"))
         # TODO: add multi mesh choices
         # all_choices = itertools.product(
         #     *(self.mesh.ndim * [sharding_choices])
