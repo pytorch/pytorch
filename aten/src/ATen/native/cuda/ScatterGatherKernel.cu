@@ -32,11 +32,15 @@ class ReduceAdd {
  public:
   template <typename scalar_t>
   constexpr C10_DEVICE void operator() (scalar_t* self_data_start, int64_t index, int64_t numel, const scalar_t * src_data) const {
+#if defined(USE_ROCM)
     if (__builtin_amdgcn_processor_is("gfx942") || __builtin_amdgcn_processor_is("gfx950"))
       opportunistic_fastAtomicAdd(self_data_start, index, numel, *src_data);
     else
       fastAtomicAdd(self_data_start, index, numel, *src_data, true);
   }
+  #else
+    fastAtomicAdd(self_data_start, index, numel, *src_data, true);
+  #endif
 };
 
 static ReduceAdd reduce_add;
