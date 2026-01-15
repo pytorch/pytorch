@@ -26,7 +26,7 @@ from torch._functorch.aot_autograd import (
     aot_export_module,
 )
 from torch._library.effects import EffectType
-from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.fake_class_registry import FakeScriptObject, maybe_to_fake_obj
 from torch._library.opaque_object import (
     _OPAQUE_TYPES,
     _OPAQUE_TYPES_BY_NAME,
@@ -691,6 +691,27 @@ class TestOpaqueObject(TestCase):
         self.assertEqual(popped, torch.ones(3) + 1)
         size = torch.ops._TestOpaqueObject.queue_size(queue)
         self.assertEqual(size, 0)
+
+    def test_fake_script_object_isinstance_per_type(self):
+        queue = OpaqueQueue([], torch.zeros(3))
+        rng = RNGState(42)
+
+        fake_mode = FakeTensorMode(shape_env=ShapeEnv())
+        with fake_mode:
+            fake_queue = maybe_to_fake_obj(fake_mode, queue)
+            fake_rng = maybe_to_fake_obj(fake_mode, rng)
+
+        self.assertIsInstance(fake_queue, OpaqueQueue)
+        self.assertIsInstance(fake_rng, RNGState)
+
+        self.assertNotIsInstance(fake_queue, RNGState)
+        self.assertNotIsInstance(fake_rng, OpaqueQueue)
+
+        self.assertIsInstance(fake_queue, FakeScriptObject)
+        self.assertIsInstance(fake_rng, FakeScriptObject)
+
+        self.assertEqual(type(fake_queue).__name__, "FakeScriptObject_OpaqueQueue")
+        self.assertEqual(type(fake_rng).__name__, "FakeScriptObject_RNGState")
 
     @parametrize("make_fx_tracing_mode", ["fake", "symbolic"])
     def test_make_fx(self, make_fx_tracing_mode):
