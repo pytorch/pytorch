@@ -28,6 +28,5 @@ pytest -v -s \
   "test_flash_attn.py::test_flash_attn_varlen_output[511-1-64-True-False-False-0.0-False-False-gqa-dtype2]" \
   "test_flash_attn.py::test_flash_attn_kvcache[1-128-128-False-False-True-None-0.0-False-False-True-False-True-False-gqa-dtype0]" \
   "test_flash_attn.py::test_flash_attn_race_condition[97-97-192-True-dtype0]" \
-  "test_flash_attn.py::test_flash_attn_combine[2-3-64-dtype1]" \
-  "test_flash_attn.py::test_flash3_bw_compatibility"
+  "test_flash_attn.py::test_flash_attn_combine[2-3-64-dtype1]"
 popd

@@ -638,7 +638,7 @@ def store_partition(pargs: PartitionArgs):
                     c_desc,
                     group_iter.m_start_offset,
                     group_iter.m_size,
-                    [tile_iter.m_tile_offset, tile_iter.n_tile_offset],
+                    [tile_iter.m_tile_offset, tile_iter.n_offset],
                     c_smem_4d,
                     ragged_dim=0
                 )
