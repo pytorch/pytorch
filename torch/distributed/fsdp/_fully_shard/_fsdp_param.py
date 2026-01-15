@@ -4,7 +4,7 @@ import itertools
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass, field
 from enum import auto, Enum
-from typing import Any, cast
+from typing import Any, cast, Optional
 
 import torch
 import torch.nn as nn
@@ -14,6 +14,10 @@ from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.fsdp._fully_shard._fsdp_common import DDPMeshInfo
 from torch.distributed.tensor import DTensor, Replicate, Shard
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor._memory_sharded import (
+    BlockStorageShardingSpec,
+    MemoryShardedDTensor,
+)
 from torch.distributed.tensor.placement_types import _StridedShard, Placement
 
 from ._fsdp_api import CPUOffloadPolicy, MixedPrecisionPolicy, OffloadPolicy
@@ -205,13 +209,11 @@ class FSDPParam:
     padded_sharded_param_size: torch.Size  # ND
     sharded_post_forward_size: torch.Size  # ND
     contiguous_sharded_post_forward_stride: tuple[int, ...]
-    _sharded_param_data: torch.Tensor  # 1D
     sharded_param: nn.Parameter  # ND
     _sharded_post_forward_param_data: torch.Tensor | None  # 1D
     _sharded_post_forward_param: nn.Parameter | None  # ND
     _unsharded_param: nn.Parameter  # ND
     unsharded_accumulated_grad: torch.Tensor | None  # ND
-    _sharding_spec: DTensorSpec
     # DTensor attributes (only defined for DTensor `param`):
     _tp_spec: DTensorSpec
     all_gather_outputs: list[torch.Tensor]  # 1D
@@ -330,11 +332,6 @@ class FSDPParam:
             else:  # FSDP or DDP
                 self._spmd_placements = dp_shard_tp_placement
 
-            self._sharding_spec = DTensorSpec(
-                self._spmd_mesh,
-                self._spmd_placements,
-                tensor_meta=self._tp_spec.tensor_meta,
-            )
             param_data = cast(DTensor, param)._local_tensor
         else:
             self._spmd_mesh = self.mesh_info.mesh
@@ -344,11 +341,6 @@ class FSDPParam:
                 self._spmd_placements = (fsdp_placement,)
             elif isinstance(self.mesh_info, DDPMeshInfo):  # DDP
                 self._spmd_placements = (Replicate(),)
-            self._sharding_spec = DTensorSpec(
-                self._spmd_mesh,
-                self._spmd_placements,
-                tensor_meta=TensorMeta(param.size(), param.stride(), param.dtype),
-            )
             param_data = param
         if not param_data.is_contiguous():
             raise AssertionError(
@@ -395,7 +387,8 @@ class FSDPParam:
             padded_sharded_param = padded_sharded_param.cpu()
             if self.pin_memory:
                 padded_sharded_param = padded_sharded_param.pin_memory()
-        self._sharded_param_data = padded_sharded_param.view(-1)
+        # Create 1D padded tensor for MemoryShardedDTensor
+        padded_local = padded_sharded_param.view(-1)
         length = sharded_param.size(shard_dim) if sharded_param.numel() > 0 else 0
         sharded_param = padded_sharded_param.narrow(
             dim=shard_dim, start=0, length=length
@@ -404,7 +397,17 @@ class FSDPParam:
             raise AssertionError(
                 f"Expected contiguous tensor with {self.fsdp_placement=}"
             )
-        self.sharded_param = nn.Parameter(self.to_sharded_dtensor(sharded_param))
+        # Both TP and non-TP cases use the same SPMD mesh and placements
+        self.sharded_param = nn.Parameter(
+            self._to_memory_sharded_dtensor(
+                sharded_param,
+                self._orig_size,
+                shard_dim,
+                spmd_mesh=self._spmd_mesh,
+                spmd_placements=self._spmd_placements,
+                padded_local=padded_local,
+            )
+        )
         self.sharded_param.requires_grad_(param.requires_grad)
         # Let `param_data` be freed normally when its ref count reaches 0 when
         # the `fully_shard` call returns to allow provided parameters to alias
@@ -634,18 +637,105 @@ class FSDPParam:
         ):
             unsafe_setattr_param(shared_module, shared_param_name, param)
 
-    def to_sharded_dtensor(self, tensor: torch.Tensor) -> DTensor:
+    def _to_memory_sharded_dtensor(
+        self,
+        local_shard: torch.Tensor,
+        full_size: torch.Size,
+        shard_dim: int,
+        *,
+        spmd_mesh: Optional[DeviceMesh] = None,
+        spmd_placements: Optional[tuple] = None,
+        padded_local: Optional[torch.Tensor] = None,
+    ) -> MemoryShardedDTensor:
         """
-        Converts a local tensor representing either the sharded parameter or
-        sharded gradient to DTensor.
+        Creates a MemoryShardedDTensor from a local shard.
+
+        This method wraps the sharded parameter in a MemoryShardedDTensor, which
+        provides memory-efficient storage sharding with integrated padding support.
+
+        For non-TP case (is_dtensor=False):
+            Uses the FSDP mesh with all-Replicate placements.
+
+        For TP case (is_dtensor=True):
+            Uses the combined SPMD mesh (_spmd_mesh) with combined placements
+            (_spmd_placements) that include both FSDP Shard and TP placements.
+
+        Args:
+            local_shard: The local shard tensor on this rank (unpadded).
+            full_size: The original (full) size of the parameter before sharding.
+            shard_dim: The dimension along which the parameter is sharded.
+            spmd_mesh: Optional combined SPMD mesh for TP case.
+            spmd_placements: Optional combined SPMD placements for TP case.
+            padded_local: Optional pre-computed 1D padded tensor for all-gather.
+
+        Returns:
+            A MemoryShardedDTensor wrapping the local shard.
         """
-        if tensor.shape != self.sharded_size:
-            _raise_assert_with_print(
-                f"Expects size {self.sharded_size} but got {tensor.shape}"
+        # Determine mesh and mesh dimension for sharding
+        if self.is_dtensor:
+            # TP case: use combined SPMD mesh
+            mesh = spmd_mesh if spmd_mesh is not None else self._spmd_mesh
+            # For TP+FSDP, the FSDP shard dimension is the first mesh dimension
+            # (after DeviceMesh._concatenate([dp_mesh, tp_mesh]))
+            if isinstance(self.mesh_info, HSDPMeshInfo):
+                # HSDP+TP: [replicate, shard, tp_dims...]
+                mesh_dim = 1
+            else:
+                # FSDP+TP: [shard, tp_dims...]
+                mesh_dim = 0
+            # For TP case, use the global tensor metadata from the TP spec
+            global_tensor_meta = self._tp_spec.tensor_meta
+        else:
+            # Non-TP case: use FSDP mesh
+            mesh = spmd_mesh if spmd_mesh is not None else self.mesh_info.mesh
+            # For FSDP, we shard on the last dimension of the mesh
+            # For HSDP, we shard on dimension 1 (after the replicate dimension)
+            if isinstance(self.mesh_info, HSDPMeshInfo):
+                mesh_dim = 1  # HSDP: [replicate, shard]
+            else:
+                mesh_dim = mesh.ndim - 1 if mesh.ndim > 1 else 0
+            # For non-TP case, use the original param size as the global shape
+            global_tensor_meta = TensorMeta(
+                full_size,
+                make_contiguous_strides_for(full_size),
+                local_shard.dtype,
             )
-        return _from_local_no_grad(
-            tensor,
-            self._sharding_spec,
+
+        return MemoryShardedDTensor.from_local_shard(
+            local_shard=local_shard,
+            full_shape=full_size,
+            shard_dim=shard_dim,
+            device_mesh=mesh,
+            mesh_dim=mesh_dim,
+            requires_grad=False,
+            placements=spmd_placements,
+            padded_local=padded_local,
+            global_tensor_meta=global_tensor_meta,
+        )
+
+    def to_memory_sharded_dtensor_grad(
+        self, local_shard: torch.Tensor
+    ) -> MemoryShardedDTensor:
+        """
+        Creates a MemoryShardedDTensor gradient from the reduce-scatter output.
+
+        This method is used after reduce-scatter to wrap the sharded gradient
+        in a MemoryShardedDTensor, maintaining semantic consistency with the
+        sharded parameter type.
+
+        Args:
+            local_shard: The local gradient shard from reduce-scatter.
+
+        Returns:
+            A MemoryShardedDTensor wrapping the gradient shard.
+        """
+        # Both TP and non-TP cases use the same SPMD mesh and placements
+        return self._to_memory_sharded_dtensor(
+            local_shard,
+            self._orig_size,
+            self.fsdp_placement.dim,
+            spmd_mesh=self._spmd_mesh,
+            spmd_placements=self._spmd_placements,
         )
 
     def to_sharded_post_forward_dtensor(self, tensor: torch.Tensor) -> DTensor:
@@ -659,10 +749,17 @@ class FSDPParam:
             )
         # TODO: Prefer this DTensor to be read-only and generalize the
         # placement once we support TP.
+        # Derive full tensor's metadata from storage_spec (non-TP case only)
+        storage_spec = self.sharded_param._storage_spec
+        full_tensor_meta = TensorMeta(
+            storage_spec.orig_size,
+            storage_spec.orig_stride,
+            self.orig_dtype,
+        )
         post_forward_sharding_spec = DTensorSpec(
             self.post_forward_mesh_info.mesh,
             (Replicate(), Shard(0)),
-            tensor_meta=self._sharding_spec.tensor_meta,
+            tensor_meta=full_tensor_meta,
         )
         return _from_local_no_grad(tensor, post_forward_sharding_spec)
 
@@ -778,12 +875,20 @@ class FSDPParam:
                     t.size() for t in all_gather_inputs
                 ]
                 return [t.view(-1) for t in all_gather_inputs]
-            sharded_param_data = self._sharded_param_data
-            if self.offload_to_cpu:
-                sharded_param_data = sharded_param_data.to(
-                    self.device, non_blocking=True
-                )
-            return [_to_dtype_if_needed(sharded_param_data, self.param_dtype)]
+            # Handle MemoryShardedDTensor case (both TP and non-TP)
+            if isinstance(self.sharded_param, MemoryShardedDTensor):
+                if self.offload_to_cpu:
+                    # For CPU offload: get all-gather input, move to device, then dtype convert
+                    all_gather_input = self.sharded_param.get_all_gather_input()
+                    all_gather_input = all_gather_input.to(
+                        self.device, non_blocking=True
+                    )
+                    return [_to_dtype_if_needed(all_gather_input, self.param_dtype)]
+                return [self.sharded_param.get_all_gather_input(self.param_dtype)]
+            # This branch should not be reached - all FSDP params are MemoryShardedDTensor
+            raise AssertionError(
+                f"Expected MemoryShardedDTensor, got {type(self.sharded_param)}"
+            )
         elif self.sharded_state == ShardedState.SHARDED_POST_FORWARD:
             if not compiled_autograd_enabled() and hasattr(
                 self._sharded_local_tensor, "fsdp_pre_all_gather"
@@ -889,13 +994,13 @@ class FSDPParam:
         # this makes it possible for trainer to call `sd = model.state_dict()` before the training loop
         # and use `sd` without calling .state_dict() per iteration
         same_local_tensor = False
-        # TODO: need to support tensor subclass
-        if type(self._sharded_param_data) is torch.Tensor:
+        if isinstance(self.sharded_param, MemoryShardedDTensor):
+            padded_local = self.sharded_param._padded_local
             same_local_tensor = (
                 # when sharding param with shape (1, ...) over 2 ranks
                 # local_tensor on rank 1 can be size 0, data_ptr() can be 0
-                self._sharded_param_data.untyped_storage().data_ptr() > 0
-                and self._sharded_param_data.untyped_storage().data_ptr()
+                padded_local.untyped_storage().data_ptr() > 0
+                and padded_local.untyped_storage().data_ptr()
                 == local_tensor.untyped_storage().data_ptr()
             )
         padded_sharded_size = self.padded_sharded_param_size
@@ -915,8 +1020,6 @@ class FSDPParam:
         if self.pin_memory and not local_tensor.is_pinned():
             local_tensor = local_tensor.cpu().pin_memory()
             updated_local_tensor = True
-        if not same_local_tensor:
-            self._sharded_param_data = local_tensor.view(-1)
         if not isinstance(self.sharded_param, DTensor):
             raise AssertionError(f"Expected DTensor, got {type(self.sharded_param)}")
         if updated_local_tensor:
@@ -928,7 +1031,21 @@ class FSDPParam:
                 raise AssertionError(
                     "Expected sharded_param._local_tensor to be contiguous"
                 )
-        self._sharding_spec = self.sharded_param._spec
+            # Update MemoryShardedDTensor's _padded_local and _storage_spec
+            if isinstance(self.sharded_param, MemoryShardedDTensor):
+                self.sharded_param._padded_local = local_tensor.view(-1)
+                old_spec = self.sharded_param._storage_spec
+                if old_spec.actual_shard_sizes[0] != length:
+                    new_spec = BlockStorageShardingSpec(
+                        orig_size=old_spec.orig_size,
+                        orig_stride=old_spec.orig_stride,
+                        shard_dims=old_spec.shard_dims,
+                        mesh_dims=old_spec.mesh_dims,
+                        padded_shard_sizes=old_spec.padded_shard_sizes,
+                        actual_shard_sizes=(length,),
+                        mesh_dim_indices=old_spec.mesh_dim_indices,
+                    )
+                    self.sharded_param._storage_spec = new_spec
 
     def __repr__(self):
         return f"FSDPParam(fqn={self._param_fqn}, orig_size={self._orig_size})"

@@ -14,6 +14,9 @@ from torch.distributed.tensor._api import (
     randn,
     zeros,
 )
+from torch.distributed.tensor._memory_sharded import (
+    MemoryShardedDTensor as _MemoryShardedDTensor,
+)
 from torch.distributed.tensor.placement_types import (
     Partial,
     Placement,
@@ -74,6 +77,13 @@ if DTensor not in _optim_foreach_supported_types:
 
 if DTensor not in _util_foreach_supported_types:
     _util_foreach_supported_types.append(DTensor)  # type: ignore[arg-type]
+
+# Also register MemoryShardedDTensor for optimizer foreach operations
+if _MemoryShardedDTensor not in _optim_foreach_supported_types:
+    _optim_foreach_supported_types.append(_MemoryShardedDTensor)
+
+if _MemoryShardedDTensor not in _util_foreach_supported_types:
+    _util_foreach_supported_types.append(_MemoryShardedDTensor)  # type: ignore[arg-type]
 
 
 # Set namespace for exposed private names

@@ -318,7 +318,7 @@ def _get_param_all_gather_inputs(
         if use_foreach_copy(fsdp_param):
             foreach_copy_indices.append(i)
             all_gather_input = (
-                fsdp_param._sharded_param_data
+                fsdp_param.sharded_param._padded_local
                 if fsdp_param.sharded_state == ShardedState.SHARDED
                 else cast(torch.Tensor, fsdp_param._sharded_post_forward_param_data)
             )
@@ -631,13 +631,15 @@ def foreach_reduce(
                     # ensure that the D2H copy finishes before the optimizer
                     fsdp_param.grad_offload_event = post_reduce_stream.record_event()
             if to_accumulate_grad:
+                # Gradients are MemoryShardedDTensor (consistent with params).
+                # Both MemoryShardedDTensor and DTensor have _local_tensor attribute.
                 if not isinstance(fsdp_param.sharded_param.grad, DTensor):
                     raise AssertionError(
                         f"Expected fsdp_param.sharded_param.grad to be DTensor, got {type(fsdp_param.sharded_param.grad)}"
                     )
                 fsdp_param.sharded_param.grad._local_tensor += new_sharded_grad
             else:
-                new_sharded_dtensor_grad = fsdp_param.to_sharded_dtensor(
+                new_sharded_dtensor_grad = fsdp_param.to_memory_sharded_dtensor_grad(
                     new_sharded_grad
                 )
                 fsdp_param.sharded_param.grad = new_sharded_dtensor_grad
