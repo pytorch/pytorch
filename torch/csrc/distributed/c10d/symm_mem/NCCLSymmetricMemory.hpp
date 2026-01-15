@@ -25,8 +25,6 @@ class NCCLSymmetricMemory : public SymmetricMemory {
 
   size_t get_buffer_size() override;
 
-  bool has_multicast_support() override;
-
   void* get_multicast_ptr() override;
 
   void barrier(int channel, size_t timeout_ms) override;
@@ -40,10 +38,6 @@ class NCCLSymmetricMemory : public SymmetricMemory {
   int get_world_size() override;
 
   c10::Device get_device() override;
-
-  const std::vector<int>& get_rank_to_global_rank() override;
-
-  int* get_rank_to_global_rank_dev() override;
 
   ncclWindow_t get_window();
 

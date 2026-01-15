@@ -1183,12 +1183,9 @@ class TritonOverrides(OpOverrides):
         triton_val = constant_repr(type_(value))
         triton_type = triton_compute_type(dtype)
 
-        if triton_type == "tl.float32":
-            # Float constants are always f32 in triton
-            return triton_val
-
-        # NOTE: We use a tensor here in order to get the expected type.
-        # Otherwise, e.g. float64 constants would be truncated to float32.
+        # NOTE: We use tl.full here to get the expected type.
+        # Otherwise, subnormal float32 values are treated as fp64
+        # causing fp32 * fp64 promotion and different numerical results.
         if value < 0 and not dtype.is_signed:
             triton_signed_type = f"tl.{triton_type[4:]}"
             return f"tl.full({shape}, {triton_val}, {triton_signed_type}).to({triton_type})"
@@ -2364,8 +2361,15 @@ class TMACompatibilityChecker:
             f"{innermost_block_shape} expr must contain a single block type from {TritonSymbols.block_types}"
         )
 
-        # For persistent reductions, the reduction block sizes are fixed at compile time
-        if self.kernel.persistent_reduction and not self.for_store:
+        # For persistent reductions, the reduction block sizes are fixed at compile time.
+        # Only apply this logic when the innermost block is a reduction block;
+        # persistent reductions can still have pointwise-style loads where the innermost block is X/Y/Z,
+        # and in that case we should fall back to the generic analysis below.
+        if (
+            self.kernel.persistent_reduction
+            and not self.for_store
+            and innermost_block_symt in TritonSymbols.reduction_types
+        ):
             # For a discontiguous tensor, a 1D block will be split across several
             # dimensions, e.g. R0_BLOCK:
             # block_shape=[XBLOCK, ((R0_BLOCK + 31)//32), Min(1, ((R0_BLOCK + 31)//32)), Min(32, R0_BLOCK)]
@@ -2374,11 +2378,21 @@ class TMACompatibilityChecker:
             innermost_tree_prefix = prefix_str[innermost_block_symt]
             tree_numel = None
             for t in self.kernel.range_trees:
-                if t.is_reduction:
-                    if t.prefix == innermost_tree_prefix:
-                        tree_numel = t.numel
-                        break
-            assert tree_numel is not None
+                if t.is_reduction and t.prefix == innermost_tree_prefix:
+                    tree_numel = t.numel
+                    break
+            if tree_numel is None:
+                # If we can't map the innermost reduction block type to a reduction range tree,
+                # we cannot determine the persistent RBLOCK value,
+                # so we cannot validate the 16-byte innermost-dimension requirement for TMA.
+                # Treat this as incompatible rather than asserting during compilation, fallback to non-TMA loads.
+                log.debug(
+                    "%s could not find reduction range tree for innermost prefix %s Block shape: %s",
+                    self.failed_debug_prefix,
+                    innermost_tree_prefix,
+                    block_params.block_shape,
+                )
+                return False
             persistent_rblock = self.kernel._get_persistent_RBLOCK(tree_numel)
             innermost_block_bytes = (
                 innermost_block_shape.subs({innermost_block_type: persistent_rblock})
