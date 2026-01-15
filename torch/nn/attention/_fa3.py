@@ -10,7 +10,12 @@ from __future__ import annotations
 
 import importlib
 import warnings
-from collections.abc import Callable
+from typing import TYPE_CHECKING
+
+
+if TYPE_CHECKING:
+    from collections.abc import Callable
+
 from dataclasses import dataclass
 from functools import cache
 from typing_extensions import TypeVarTuple, Unpack
