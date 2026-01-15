@@ -15240,14 +15240,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
             .check("'launch_pdl': True")
             .check("gdc_wait")
             .check("load")
-            .check("gdc_launch")
-            .check("store")
+            .check_dag("gdc_launch")
+            .check_dag("store")
             # second kernel, no need to wait before load
             .check("'launch_pdl': True")
             .check("load")
             .check("gdc_wait")
-            .check("gdc_launch")
-            .check("store")
+            .check_dag("gdc_launch")
+            .check_dag("store")
             # matmul template
             .check_not("'launch_pdl': True")
             .check_not("gdc_wait")
