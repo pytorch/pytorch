@@ -5448,8 +5448,10 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         accumulator_type: Any,
         variant: Any,  # GemmVariant, use Any to avoid circular import
         workspace_size: int = 0,
-        scale_block_size_a: Optional[int] = None,
-        scale_block_size_b: Optional[int] = None,
+        scale_type_a: Optional[Any] = None,
+        scale_type_b: Optional[Any] = None,
+        swizzle_type_a: Optional[Any] = None,
+        swizzle_type_b: Optional[Any] = None,
     ) -> None:
         # We pass None initially, then override with our method below
         super().__init__(layout, inputs, make_kernel_render=None)
@@ -5458,8 +5460,10 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         self.outputs: list[Buffer] = [self]
         self.workspace_size = workspace_size
         self.variant = variant
-        self.scale_block_size_a = scale_block_size_a
-        self.scale_block_size_b = scale_block_size_b
+        self.scale_type_a = scale_type_a
+        self.scale_type_b = scale_type_b
+        self.swizzle_type_a = swizzle_type_a
+        self.swizzle_type_b = swizzle_type_b
         # Store kernel metadata for code generation since kernels aren't serializeable yet
         self.kernel_metadata = {
             "kernel_name": kernel.metadata.kernel_name,
@@ -5509,8 +5513,10 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             accumulator_type=self.accumulator_type,
             workspace_size=self.workspace_size,
             variant=self.variant,
-            scale_block_size_a=self.scale_block_size_a,
-            scale_block_size_b=self.scale_block_size_b,
+            scale_type_a=self.scale_type_a,
+            scale_type_b=self.scale_type_b,
+            swizzle_type_a=self.swizzle_type_a,
+            swizzle_type_b=self.swizzle_type_b,
         )
 
         def render():

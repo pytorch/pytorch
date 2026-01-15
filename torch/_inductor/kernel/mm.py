@@ -43,7 +43,6 @@ from ..select_algorithm import (
 from ..utils import (
     _use_cutlass_for_op,
     ceildiv,
-    infer_scale_swizzle_ir,
     use_aten_gemm_kernels,
     use_ck_gemm_template,
     use_ck_tile_gemm_template,
@@ -1035,42 +1034,16 @@ def tuned_scaled_mm(
         )
     )
 
-    # MX variants use float8_e8m0fnu scale factors (MXFP8 format)
-    # Regular scaled_mm uses float32 scale factors
-    is_mx_variant = scale_a.dtype == torch.float8_e8m0fnu
-    if is_mx_variant:
-        # Add NVGEMM scaled GEMM choices for FP8 with block scaling
-        use_nvgemm = use_nv_universal_gemm_template(layout, m, n, k, mat_a, mat_b)
-        if is_nonzero and use_nvgemm:
-            # Use unified infer_scale_swizzle_ir to determine scaling type and swizzle mode
-            scale_type_a, swizzle_type_a = infer_scale_swizzle_ir(mat_a, scale_a_real)
-            scale_type_b, swizzle_type_b = infer_scale_swizzle_ir(
-                mat_b, scale_b_real, transpose=True
-            )
+    # Add NVGEMM scaled GEMM choices for FP8 with block scaling
+    # get_kernels() will return empty if the scaling mode/dtype is unsupported
+    if is_nonzero and use_nv_universal_gemm_template(layout, m, n, k, mat_a, mat_b):
+        from ..codegen.nv_universal_gemm import add_nv_universal_scaled_gemm_choices
 
-            # If scaling types were inferred, add NVGEMM choices
-            # get_kernels() will return empty if the scaling mode is unsupported
-            if scale_type_a is not None and scale_type_b is not None:
-                from ..codegen.nv_universal_gemm import (
-                    add_nv_universal_scaled_gemm_choices,
-                )
-
-                log.debug(
-                    "NVGEMM scaled_mm: scale_a=%s swizzle=%s, scale_b=%s swizzle=%s",
-                    scale_type_a,
-                    swizzle_type_a,
-                    scale_type_b,
-                    swizzle_type_b,
-                )
-                add_nv_universal_scaled_gemm_choices(
-                    choices,
-                    layout,
-                    input_nodes,
-                    accumulator_type=torch.float32,
-                    scale_block_size_a=get_tile_size(scale_type_a),
-                    scale_block_size_b=get_tile_size(scale_type_b),
-                )
-        return autotune_select_algorithm(name, choices, input_nodes, layout)
+        add_nv_universal_scaled_gemm_choices(
+            choices,
+            layout,
+            input_nodes,
+        )
 
     if (
         is_nonzero

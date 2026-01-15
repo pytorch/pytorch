@@ -28,34 +28,6 @@ from torch._logging import getArtifactLogger
 log = getArtifactLogger(__name__, "output_code")
 
 
-def _get_scale_mode(scale_block_size: int):
-    """
-    Get the cutlass_api ScaleMode for a given scale block size.
-
-    Args:
-        scale_block_size: The block size for scaling (e.g., 32)
-
-    Returns:
-        Tuple of (ScaleMode, ScaleSwizzleMode) from cutlass_api.library
-
-    Note:
-        Currently only Blockwise1x32 has kernels available in cutlass_api.
-        Blockwise1x16 is defined but has no kernels yet.
-    """
-    from cutlass_api.library import ScaleMode, ScaleSwizzleMode
-
-    if scale_block_size == 32:
-        return ScaleMode.Blockwise1x32, ScaleSwizzleMode.Swizzle32x4x4
-    elif scale_block_size == 16:
-        # Blockwise1x16 is defined but no kernels exist yet
-        return ScaleMode.Blockwise1x16, ScaleSwizzleMode.Swizzle32x4x4
-    else:
-        raise ValueError(
-            f"Unsupported scale block size: {scale_block_size}. "
-            "Supported sizes: 32 (16 defined but no kernels yet)"
-        )
-
-
 class GemmVariant(Enum):
     """
     Enum for different GEMM operation types supported by NVIDIA Universal GEMM.
@@ -96,8 +68,10 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         accumulator_type: torch.dtype,
         variant: GemmVariant,
         workspace_size: int = 0,
-        scale_block_size_a: Optional[int] = None,
-        scale_block_size_b: Optional[int] = None,
+        scale_type_a: Optional[Any] = None,
+        scale_type_b: Optional[Any] = None,
+        swizzle_type_a: Optional[Any] = None,
+        swizzle_type_b: Optional[Any] = None,
     ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, ())
         self.kernel = kernel
@@ -106,8 +80,10 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         self._workspace: Optional[torch.Tensor] = None
         self.workspace_size = workspace_size
         self.variant = variant
-        self.scale_block_size_a = scale_block_size_a
-        self.scale_block_size_b = scale_block_size_b
+        self.scale_type_a = scale_type_a
+        self.scale_type_b = scale_type_b
+        self.swizzle_type_a = swizzle_type_a
+        self.swizzle_type_b = swizzle_type_b
 
     def benchmark(
         self,
@@ -180,14 +156,16 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         elif self.variant == GemmVariant.SCALED_GEMM:
             from cutlass_api.arguments import ScaledTensor
 
-            assert self.scale_block_size_a is not None, (
-                "scale_block_size_a required for SCALED_GEMM"
+            from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
+                to_cutlass_scale_mode,
             )
-            assert self.scale_block_size_b is not None, (
-                "scale_block_size_b required for SCALED_GEMM"
+
+            scale_mode_a, swizzle_mode_a = to_cutlass_scale_mode(
+                self.scale_type_a, self.swizzle_type_a
             )
-            scale_mode_a, swizzle_mode_a = _get_scale_mode(self.scale_block_size_a)
-            scale_mode_b, swizzle_mode_b = _get_scale_mode(self.scale_block_size_b)
+            scale_mode_b, swizzle_mode_b = to_cutlass_scale_mode(
+                self.scale_type_b, self.swizzle_type_b
+            )
 
             a, b, scale_a, scale_b = input_tensors
             scaled_a = ScaledTensor(a, scale_a, scale_mode_a, swizzle_mode_a)
@@ -229,8 +207,10 @@ class NVUniversalGemmCaller(ChoiceCaller):
         accumulator_type: torch.dtype,
         variant: GemmVariant,
         workspace_size: int = 0,
-        scale_block_size_a: Optional[int] = None,
-        scale_block_size_b: Optional[int] = None,
+        scale_type_a: Optional[Any] = None,
+        scale_type_b: Optional[Any] = None,
+        swizzle_type_a: Optional[Any] = None,
+        swizzle_type_b: Optional[Any] = None,
     ) -> None:
         super().__init__(
             name=name,
@@ -242,8 +222,10 @@ class NVUniversalGemmCaller(ChoiceCaller):
         self.accumulator_type = accumulator_type
         self.workspace_size = workspace_size
         self.variant = variant
-        self.scale_block_size_a = scale_block_size_a
-        self.scale_block_size_b = scale_block_size_b
+        self.scale_type_a = scale_type_a
+        self.scale_type_b = scale_type_b
+        self.swizzle_type_a = swizzle_type_a
+        self.swizzle_type_b = swizzle_type_b
 
         output_buffer = Buffer(name=f"{variant.op_name}_out", layout=layout)
 
@@ -255,8 +237,10 @@ class NVUniversalGemmCaller(ChoiceCaller):
             accumulator_type=accumulator_type,
             workspace_size=workspace_size,
             variant=variant,
-            scale_block_size_a=scale_block_size_a,
-            scale_block_size_b=scale_block_size_b,
+            scale_type_a=scale_type_a,
+            scale_type_b=scale_type_b,
+            swizzle_type_a=swizzle_type_a,
+            swizzle_type_b=swizzle_type_b,
         )
 
     def __str__(self) -> str:
@@ -275,8 +259,10 @@ class NVUniversalGemmCaller(ChoiceCaller):
             accumulator_type=self.accumulator_type,
             workspace_size=self.workspace_size,
             variant=self.variant,
-            scale_block_size_a=self.scale_block_size_a,
-            scale_block_size_b=self.scale_block_size_b,
+            scale_type_a=self.scale_type_a,
+            scale_type_b=self.scale_type_b,
+            swizzle_type_a=self.swizzle_type_a,
+            swizzle_type_b=self.swizzle_type_b,
         )
         # Pass KTC annotation to the buffer for encoding
         if "ktc" in self.annotations:
@@ -333,12 +319,13 @@ def _add_nv_gemm_choices_impl(
     variant: GemmVariant,
     accumulator_type: torch.dtype,
     mm_inputs: Optional[MMKernelInputs] = None,
-    scale_block_size_a: Optional[int] = None,
-    scale_block_size_b: Optional[int] = None,
+    scale_type_a: Optional[Any] = None,
+    scale_type_b: Optional[Any] = None,
+    swizzle_type_a: Optional[Any] = None,
+    swizzle_type_b: Optional[Any] = None,
 ) -> None:
     """
     Unified implementation for adding NVIDIA Universal GEMM choices.
-
 
     Args:
         choices: List to append ChoiceCaller objects to
@@ -347,8 +334,10 @@ def _add_nv_gemm_choices_impl(
         variant: The GEMM variant (determines behavior)
         accumulator_type: Accumulator dtype
         mm_inputs: Optional MMKernelInputs for heuristics
-        scale_block_size_a: Block size for A scaling (required for SCALED_GEMM)
-        scale_block_size_b: Block size for B scaling (required for SCALED_GEMM)
+        scale_type_a: ScalingType for A (required for SCALED_GEMM)
+        scale_type_b: ScalingType for B (required for SCALED_GEMM)
+        swizzle_type_a: SwizzleType for A (required for SCALED_GEMM)
+        swizzle_type_b: SwizzleType for B (required for SCALED_GEMM)
     """
     import cutlass_api
 
@@ -363,7 +352,6 @@ def _add_nv_gemm_choices_impl(
     out_tensor = _create_dummy_tensor_from_layout(layout)
 
     if any(t is None for t in dummy_tensors) or out_tensor is None:
-        log.debug("Failed to create dummy tensors for %s", variant.op_name)
         return
 
     if variant == GemmVariant.GROUPED_GEMM:
@@ -380,14 +368,18 @@ def _add_nv_gemm_choices_impl(
     elif variant == GemmVariant.SCALED_GEMM:
         from cutlass_api.arguments import ScaledTensor
 
-        assert scale_block_size_a is not None, (
-            "scale_block_size_a required for SCALED_GEMM"
+        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
+            to_cutlass_scale_mode,
         )
-        assert scale_block_size_b is not None, (
-            "scale_block_size_b required for SCALED_GEMM"
+
+        scale_mode_a, swizzle_mode_a = to_cutlass_scale_mode(
+            scale_type_a, swizzle_type_a
         )
-        scale_mode_a, swizzle_mode_a = _get_scale_mode(scale_block_size_a)
-        scale_mode_b, swizzle_mode_b = _get_scale_mode(scale_block_size_b)
+        scale_mode_b, swizzle_mode_b = to_cutlass_scale_mode(
+            scale_type_b, swizzle_type_b
+        )
+        if scale_mode_a is None or scale_mode_b is None:
+            return
 
         a_tensor, b_tensor, scale_a_tensor, scale_b_tensor = dummy_tensors
         scaled_a = ScaledTensor(
@@ -453,15 +445,15 @@ def _add_nv_gemm_choices_impl(
                 accumulator_type=accumulator_type,
                 workspace_size=workspace_size,
                 variant=variant,
-                scale_block_size_a=scale_block_size_a,
-                scale_block_size_b=scale_block_size_b,
+                scale_type_a=scale_type_a,
+                scale_type_b=scale_type_b,
+                swizzle_type_a=swizzle_type_a,
+                swizzle_type_b=swizzle_type_b,
             )
             choices.append(caller)
             num_added += 1
         except Exception:
-            log.debug("Failed to create %s choice", variant.op_name, exc_info=True)
-
-    log.debug("Added %d %s choices", num_added, variant.op_name)
+            pass
 
 
 def add_nv_universal_gemm_choices(
@@ -526,33 +518,30 @@ def add_nv_universal_scaled_gemm_choices(
     layout: Layout,
     input_nodes: list[Buffer],
     accumulator_type: Optional[torch.dtype] = None,
-    scale_block_size_a: int = 32,
-    scale_block_size_b: int = 32,
 ) -> None:
     """
     Add NVIDIA Universal Scaled GEMM (FP8) kernels to the autotune choices.
 
-    Thin wrapper around _add_nv_gemm_choices_impl for FP8 block-scaled GEMM.
-
-    For scaled GEMM (FP8 with MXFP8 scales):
-    - A is (M, K) with dtype float8_e4m3fn
-    - B is (K, N) with dtype float8_e4m3fn (transposed from N x K)
-    - scale_a is (M, ceil_div(K, block_size_a)) with dtype float8_e8m0fnu
-    - scale_b is (ceil_div(K, block_size_b), N) with dtype float8_e8m0fnu
-    - Output is (M, N)
-
-    Args:
-        choices: List to append ChoiceCaller objects to
-        layout: Output layout
-        input_nodes: Input tensor nodes [mat_a, mat_b, scale_a, scale_b]
-        accumulator_type: Accumulator dtype (default: float32)
-        scale_block_size_a: Block size for A scaling (default: 32)
-        scale_block_size_b: Block size for B scaling (default: 32)
+    The scaling type is inferred from the input shapes/dtypes.
+    If the scaling mode is unsupported by NVGEMM, this function returns without
+    adding any choices.
     """
     if not ensure_nv_universal_gemm_available():
-        log.debug(
-            "cutlass_api not available, skipping NVIDIA Universal Scaled GEMM choices"
-        )
+        return
+
+    from torch._inductor.utils import infer_scale_swizzle_ir
+
+    if len(input_nodes) < 4:
+        return
+
+    mat_a, mat_b, scale_a, scale_b = input_nodes[:4]
+
+    scale_type_a, swizzle_type_a = infer_scale_swizzle_ir(mat_a, scale_a)
+    scale_type_b, swizzle_type_b = infer_scale_swizzle_ir(
+        mat_b, scale_b, transpose=True
+    )
+
+    if scale_type_a is None or scale_type_b is None:
         return
 
     _add_nv_gemm_choices_impl(
@@ -561,6 +550,8 @@ def add_nv_universal_scaled_gemm_choices(
         input_nodes=input_nodes,
         variant=GemmVariant.SCALED_GEMM,
         accumulator_type=accumulator_type or torch.float32,
-        scale_block_size_a=scale_block_size_a,
-        scale_block_size_b=scale_block_size_b,
+        scale_type_a=scale_type_a,
+        scale_type_b=scale_type_b,
+        swizzle_type_a=swizzle_type_a,
+        swizzle_type_b=swizzle_type_b,
     )

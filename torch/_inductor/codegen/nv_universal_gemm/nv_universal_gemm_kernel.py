@@ -65,8 +65,10 @@ class NVUniversalGemmKernel(Kernel):
         accumulator_type: Any,
         variant: GemmVariant,
         workspace_size: int = 0,
-        scale_block_size_a: Optional[int] = None,
-        scale_block_size_b: Optional[int] = None,
+        scale_type_a: Optional[Any] = None,
+        scale_type_b: Optional[Any] = None,
+        swizzle_type_a: Optional[Any] = None,
+        swizzle_type_b: Optional[Any] = None,
     ) -> None:
         super().__init__()
         self.kernel_name = kernel_name
@@ -76,8 +78,10 @@ class NVUniversalGemmKernel(Kernel):
         self.accumulator_type = accumulator_type
         self.workspace_size = workspace_size
         self.variant = variant
-        self.scale_block_size_a = scale_block_size_a
-        self.scale_block_size_b = scale_block_size_b
+        self.scale_type_a = scale_type_a
+        self.scale_type_b = scale_type_b
+        self.swizzle_type_a = swizzle_type_a
+        self.swizzle_type_b = swizzle_type_b
 
         self._template_input_args: list[tuple[str, Buffer]] = []
         self._seen_input_args: OrderedSet[str] = OrderedSet()
@@ -167,29 +171,27 @@ class NVUniversalGemmKernel(Kernel):
         elif is_scaled:
             # SCALED_GEMM: FP8 with block-scaled inputs (MXFP8)
             # Input order: in_ptr0=A, in_ptr1=B, in_ptr2=scale_a, in_ptr3=scale_b
-            #
-            # ScaleSwizzleMode.Swizzle32x4x4 is hardcoded because:
-            # - MXFP8 scale tensors (float8_e8m0fnu) must be in swizzled 32x4x4 layout
-            #   per cuBLAS documentation (see aten/src/ATen/native/cuda/ScaledBlas.cpp)
-            # - Users pre-swizzle their scale tensors using to_blocked() before calling
-            #   torch._scaled_mm, so inductor receives already-swizzled tensors
-            # - This is the only layout supported by NVIDIA hardware for MXFP8; AMD uses
-            #   a different (non-swizzled) format but NVGEMM is NVIDIA-only via cutlass_api
-            assert self.scale_block_size_a is not None, (
-                "scale_block_size_a required for SCALED_GEMM"
+            from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
+                to_cutlass_scale_mode,
             )
-            assert self.scale_block_size_b is not None, (
-                "scale_block_size_b required for SCALED_GEMM"
+
+            scale_mode_a, swizzle_mode_a = to_cutlass_scale_mode(
+                self.scale_type_a, self.swizzle_type_a
             )
-            scale_mode_a_str = f"Blockwise1x{self.scale_block_size_a}"
-            scale_mode_b_str = f"Blockwise1x{self.scale_block_size_b}"
+            scale_mode_b, swizzle_mode_b = to_cutlass_scale_mode(
+                self.scale_type_b, self.swizzle_type_b
+            )
+            scale_mode_a_str = scale_mode_a.name if scale_mode_a else ""
+            scale_mode_b_str = scale_mode_b.name if scale_mode_b else ""
+            swizzle_mode_a_str = swizzle_mode_a.name if swizzle_mode_a else ""
+            swizzle_mode_b_str = swizzle_mode_b.name if swizzle_mode_b else ""
             preprocess_inputs = ""
             cache_key_code = "(in_ptr0.shape, in_ptr0.dtype, in_ptr1.shape, in_ptr1.dtype, in_ptr2.shape, in_ptr3.shape)"
             create_args_code = f"""scaled_a = ScaledTensor(
-                        in_ptr0, in_ptr2, ScaleMode.{scale_mode_a_str}, ScaleSwizzleMode.Swizzle32x4x4
+                        in_ptr0, in_ptr2, ScaleMode.{scale_mode_a_str}, ScaleSwizzleMode.{swizzle_mode_a_str}
                     )
                     scaled_b = ScaledTensor(
-                        in_ptr1, in_ptr3, ScaleMode.{scale_mode_b_str}, ScaleSwizzleMode.Swizzle32x4x4
+                        in_ptr1, in_ptr3, ScaleMode.{scale_mode_b_str}, ScaleSwizzleMode.{swizzle_mode_b_str}
                     )
                     args = cutlass_api.arguments.GemmArguments(
                         scaled_a,
