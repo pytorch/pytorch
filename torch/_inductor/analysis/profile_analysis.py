@@ -369,7 +369,7 @@ _dtype_map = {
 }
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class KernelStats:
     flops: int
     bw: float
