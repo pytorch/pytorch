@@ -664,10 +664,11 @@ class TestOpaqueObject(TestCase):
             lib=self.lib,
         )
 
+        rng_state_type = get_opaque_type_name(RNGState)
         # Define forward custom op that takes two opaque objects
         torch.library.define(
             "_TestOpaqueObject::multi_rng",
-            f"(Tensor x, {get_opaque_type_name(RNGState)} rng1, {get_opaque_type_name(RNGState)} rng2) -> Tensor",
+            f"(Tensor x, {rng_state_type} rng1, {rng_state_type} rng2) -> Tensor",
             tags=torch.Tag.pt2_compliant_tag,
             lib=self.lib,
         )
@@ -677,19 +678,23 @@ class TestOpaqueObject(TestCase):
             "CompositeExplicitAutograd",
             lib=self.lib,
         )
-        def multi_rng_impl(x: torch.Tensor, rng1: RNGState, rng2: RNGState) -> torch.Tensor:
+        def multi_rng_impl(
+            x: torch.Tensor, rng1: RNGState, rng2: RNGState
+        ) -> torch.Tensor:
             val1 = rng1.rng.random()
             val2 = rng2.rng.random()
             return x + val1 + val2
 
         @torch.library.register_fake("_TestOpaqueObject::multi_rng", lib=self.lib)
-        def multi_rng_fake(x: torch.Tensor, rng1: RNGState, rng2: RNGState) -> torch.Tensor:
+        def multi_rng_fake(
+            x: torch.Tensor, rng1: RNGState, rng2: RNGState
+        ) -> torch.Tensor:
             return torch.zeros_like(x)
 
         # Define backward custom op that also takes two opaque objects
         torch.library.define(
             "_TestOpaqueObject::multi_rng_backward",
-            f"(Tensor grad_output, Tensor saved, {get_opaque_type_name(RNGState)} rng1, {get_opaque_type_name(RNGState)} rng2) -> Tensor",
+            f"(Tensor grad_output, Tensor saved, {rng_state_type} rng1, {rng_state_type} rng2) -> Tensor",
             tags=torch.Tag.pt2_compliant_tag,
             lib=self.lib,
         )
