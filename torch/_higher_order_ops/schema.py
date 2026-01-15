@@ -11,7 +11,7 @@ from torch.fx.node import Target
 # This is helpful for generating FunctionSchema for HigherOrderOperator, where
 # we don't have a function to inspect and each call of the higher order operator
 # would have different schema.
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class HopArgumentInfo:
     # Could give a name to the operand by default it's empty string.
     name: str
