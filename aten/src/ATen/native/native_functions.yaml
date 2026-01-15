@@ -9042,6 +9042,7 @@
   variants: method
   dispatch:
     CPU, CUDA: log_normal_
+    MPS: log_normal_mps_
   autogen: log_normal, log_normal.out
 
 - func: exponential_(Tensor(a!) self, float lambd=1, *, Generator? generator=None) -> Tensor(a!)
