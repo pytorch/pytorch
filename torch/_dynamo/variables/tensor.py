@@ -25,7 +25,7 @@ from collections.abc import Iterable, Sequence
 from contextlib import nullcontext
 from itertools import chain
 from types import NoneType
-from typing import Any, NoReturn, TYPE_CHECKING
+from typing import Any, NoReturn, Optional, TYPE_CHECKING
 
 import sympy
 
@@ -1102,7 +1102,7 @@ class TensorVariable(VariableTracker):
 
     def _collect_backward_inputs(
         self, vars_iter: Iterable[VariableTracker], error_on_non_leaf: bool = False
-    ) -> list[VariableTracker] | None:
+    ) -> Optional[list[VariableTracker]]:
         """
         Collect unique leaf tensors from vars_iter for backward.
 
@@ -1158,11 +1158,11 @@ class TensorVariable(VariableTracker):
     def method_backward(
         self,
         tx: "InstructionTranslator",
-        gradient: VariableTracker | None = None,
-        retain_graph: VariableTracker | None = None,
-        create_graph: VariableTracker | None = None,
-        inputs: VariableTracker | None = None,
-    ) -> VariableTracker | None:
+        gradient: Optional[VariableTracker] = None,
+        retain_graph: Optional[VariableTracker] = None,
+        create_graph: Optional[VariableTracker] = None,
+        inputs: Optional[VariableTracker] = None,
+    ) -> Optional[VariableTracker]:
         """
         Trace tensor.backward() by rewriting as autograd.grad() + accumulate_grad.
 
@@ -1848,7 +1848,7 @@ class SymNodeVariable(VariableTracker):
         return self._tensor_var
 
     def evaluate_expr(
-        self, output_graph: "OutputGraph | None" = None
+        self, output_graph: Optional["OutputGraph"] = None
     ) -> bool | int | float:
         try:
             return guard_scalar(self.sym_num)
@@ -1861,15 +1861,6 @@ class SymNodeVariable(VariableTracker):
                 f"Consider annotating your code using torch._check*(). {str(e)}",
                 case_name="constrain_as_size_example",
             )
-
-    def try_peek_constant(self) -> tuple[bool, bool, Any]:
-        """SymNodeVariable is not a constant - it represents a symbolic value.
-
-        Operations on SymNodeVariable should go through the graph, not be
-        constant-folded. Returning (False, ...) ensures we don't try to
-        constant-fold through symbolic values.
-        """
-        return (False, False, None)
 
     def call_method(
         self,
