@@ -347,7 +347,22 @@ class TestVarlenAttention(NNTestCase):
     )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("scale", [None, 0.1])
-    @parametrize("window_size", [(-1, -1), (-1, 0), (4, 0), (-1, 4)])
+    @parametrize(
+        "window_size",
+        [
+            (-1, -1),
+            (-1, 0),
+            (4, 0),
+            (-1, 4),
+            (0, 0),
+            (1, 0),
+            (0, 1),
+            (0, -1),
+            (4, 4),
+            (8, 2),
+            (1025, 1025),
+        ],
+    )
     def test_varlen_vs_sdpa(self, device, dtype, scale, window_size):
         torch.manual_seed(42)
 
@@ -468,7 +483,22 @@ class TestVarlenAttention(NNTestCase):
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
-    @parametrize("window_size", [(-1, -1), (-1, 0)])
+    @parametrize(
+        "window_size",
+        [
+            (-1, -1),
+            (-1, 0),
+            (4, 0),
+            (-1, 4),
+            (0, 0),
+            (1, 0),
+            (0, 1),
+            (0, -1),
+            (4, 4),
+            (8, 2),
+            (1025, 1025),
+        ],
+    )
     @parametrize("num_perms", [1, 3, 5])
     def test_batch_invariance(self, device, dtype, window_size, num_perms):
         torch.manual_seed(42)
