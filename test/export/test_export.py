@@ -1272,6 +1272,33 @@ graph():
                     MyModel(), (torch.randn(1, 3, 5),), strict=False
                 )
 
+    def test_buffer_hook_cleanup_after_failed_export(self):
+        class ModelWithBufferMutation(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 20)
+                self.register_buffer("step", torch.tensor(0, dtype=torch.int64))
+                self.register_buffer("flag", torch.tensor(True, dtype=torch.bool))
+
+            def forward(self, x):
+                self.step += 1
+                x = self.linear(x)
+                if self.flag.item():
+                    x = x + 1
+                return x
+
+        model = ModelWithBufferMutation()
+        input_data = torch.randn(1, 10)
+
+        output_before = model(input_data)
+        self.assertEqual(model.step.item(), 1)
+
+        with self.assertRaises(Exception):
+            export(model, (input_data,), strict=False)
+
+        output_after = model(input_data)
+        self.assertEqual(model.step.item(), 2)  # Buffer mutation should work
+
     def test_inline_script_class_method(self):
         class M(torch.nn.Module):
             @staticmethod
