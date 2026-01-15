@@ -514,6 +514,20 @@ class TestNNInit(TestCase):
                         rtol=0,
                     )
 
+    def test_sinusoidal(self):
+        # Linear-like
+        t = torch.empty(64, 128)
+        init.sinusoidal_(t)
+        assert torch.isfinite(t).all()
+        assert abs(t.mean()) < 1e-2
+        assert abs(t.std() - math.sqrt(2.0 / (64 + 128))) < 0.1
+
+        # Conv-like
+        t2 = torch.empty(32, 3, 3, 3)
+        init.sinusoidal_(t2)
+        assert torch.isfinite(t2).all()
+        assert t2.shape == (32, 3, 3, 3)
+
     def test_deprecation(self):
         x = torch.randn(3, 3)
 
