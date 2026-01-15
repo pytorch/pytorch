@@ -293,6 +293,42 @@ class DistTensorRandomInitTest(DTensorTestBase):
 
         compute_rankwise_if_local_tensor(weight_local, weight_gather.wait(), self.rank)
 
+    @with_comms
+    @skip_if_lt_x_gpu(2)
+    def test_dtensor_init_helper_tensor_meta_strides(self):
+        """Test that DTensorSpec.tensor_meta has correct strides in _distribute_region."""
+        import torch.distributed.tensor._random as random_module
+
+        device_mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        captured_specs = []
+
+        class SpecCapturingTracker:
+            """Wrapper to intercept _distribute_region and capture DTensorSpec."""
+
+            def __init__(self, tracker):
+                self._tracker = tracker
+
+            def _distribute_region(self, spec):
+                captured_specs.append(spec.tensor_meta)
+                return self._tracker._distribute_region(spec)
+
+        # Initialize the RNG tracker
+        torch.manual_seed(42)
+        torch.distributed.tensor.randn(
+            (8, 8), device_mesh=device_mesh, placements=[Shard(0)]
+        )
+
+        # Wrap tracker to capture specs
+        random_module._rng_tracker = SpecCapturingTracker(random_module._rng_tracker)
+
+        torch.distributed.tensor.randn(
+            (8, 8), device_mesh=device_mesh, placements=[Shard(0)]
+        )
+
+        self.assertEqual(len(captured_specs), 1)
+        self.assertEqual(captured_specs[0].shape, torch.Size([8, 8]))
+        self.assertEqual(captured_specs[0].stride, (8, 1))
+
 
 class DistTensorRandomOpTest(DTensorTestBase):
     @with_comms
@@ -304,7 +340,7 @@ class DistTensorRandomOpTest(DTensorTestBase):
             + torch.initial_seed()
         )
         torch.distributed.broadcast(seed_local, src=0)
-        # if localtensor, it should automaticall reconcile after the broadcast
+        # if local tensor, it should automatically reconcile after the broadcast
         # since all virtual ranks should have rank 0's initial_seed()
         seed_from_rank_0 = seed_local
 
@@ -633,6 +669,25 @@ class DistTensorRandomOpTest(DTensorTestBase):
                         self.assertNotEqual(full_tensor[tuple(slice_idx)], local_tensor)
 
             blockwise_iter_if_localtensor(local_tensor, local_shard_offset)
+
+    def test_philox_state_seed_roundtrip(self):
+        """
+        Test that _PhiloxState seed can be read and re-set without error.
+
+        This test addresses the issue where reading a seed value from the state
+        (which uses uint64 view) and then re-setting it would fail with:
+        OverflowError: can't convert negative int to unsigned
+
+        The fix ensures the seed getter uses uint64 view, preventing negative
+        values from appearing when the high bit is set.
+        """
+        from torch.distributed.tensor._random import _PhiloxState
+
+        state = torch.zeros(16, dtype=torch.uint8, device="cpu")
+        philox = _PhiloxState(state)
+        test_seed = 2**63 + 42  # This has the sign bit set when viewed as int64
+        philox.seed = test_seed
+        philox.seed = philox.seed
 
 
 class DistTensorRandomOpsTest3D(DTensorTestBase):

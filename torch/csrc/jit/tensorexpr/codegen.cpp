@@ -320,7 +320,7 @@ void CodeGen::allocIntermediateBufs() {
     set_stmt(stmt_new);
   }
 
-  GRAPH_DEBUG("\nMemory Allocation:\n\n", *stmt(), "\n");
+  GRAPH_DEBUG("\nMemory Allocation:\n\n", *stmt(), '\n');
 }
 
 } // namespace torch::jit::tensorexpr

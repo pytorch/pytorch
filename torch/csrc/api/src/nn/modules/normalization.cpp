@@ -1,8 +1,6 @@
 #include <torch/nn/modules/normalization.h>
 
-#include <torch/cuda.h>
 #include <torch/nn/init.h>
-#include <torch/utils.h>
 
 #include <ostream>
 #include <utility>

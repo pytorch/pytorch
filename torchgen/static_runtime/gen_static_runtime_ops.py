@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import itertools
 import os
-from typing import TYPE_CHECKING, TypeVar, Union
+from typing import TYPE_CHECKING, TypeVar
 
 from libfb.py.log import set_simple_logging  # type: ignore[import]
 
@@ -23,7 +23,7 @@ if TYPE_CHECKING:
 
 NativeGroupT = TypeVar(
     "NativeGroupT",
-    bound=Union[NativeFunctionsGroup, NativeFunctionsViewGroup],
+    bound=NativeFunctionsGroup | NativeFunctionsViewGroup,
 )
 
 

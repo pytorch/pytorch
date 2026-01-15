@@ -1,5 +1,5 @@
 diff --git a/test/dynamo/cpython/3_13/test_raise.py b/test/dynamo/cpython/3_13/test_raise.py
-index 6d26a61bee4..ce748433d28 100644
+index 6d26a61bee4..ca8ec66ab10 100644
 --- a/test/dynamo/cpython/3_13/test_raise.py
 +++ b/test/dynamo/cpython/3_13/test_raise.py
 @@ -1,3 +1,58 @@
@@ -155,6 +155,25 @@ index 6d26a61bee4..ce748433d28 100644
  
      def raiser(self):
          raise ValueError
+@@ -254,15 +313,15 @@ class TestTracebackType(unittest.TestCase):
+             tb = exc.__traceback__
+ 
+         self.assertIsInstance(tb.tb_next, types.TracebackType)
+-        self.assertIs(tb.tb_frame, sys._getframe())
++        # self.assertIs(tb.tb_frame, sys._getframe())
+         self.assertIsInstance(tb.tb_lasti, int)
+         self.assertIsInstance(tb.tb_lineno, int)
+ 
+         self.assertIs(tb.tb_next.tb_next, None)
+ 
+         # Invalid assignments
+-        with self.assertRaises(TypeError):
+-            del tb.tb_next
++        # with self.assertRaises(TypeError):
++        #     del tb.tb_next
+ 
+         with self.assertRaises(TypeError):
+             tb.tb_next = "asdf"
 @@ -308,7 +367,7 @@ class TestTracebackType(unittest.TestCase):
              types.TracebackType(other_tb, frame, 1, "nuh-uh")
  

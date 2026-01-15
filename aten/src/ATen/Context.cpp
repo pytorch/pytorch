@@ -3,12 +3,10 @@
 #include <ATen/Context.h>
 
 #include <c10/core/CPUAllocator.h>
-#include <c10/util/Logging.h>
 
 #include <algorithm>
 #include <array>
 #include <cctype>
-#include <stdexcept>
 #include <string>
 
 #include <ATen/cpu/FlushDenormal.h>
@@ -86,6 +84,10 @@ std::string precision2str(Float32Precision prec) {
   }
   TORCH_CHECK(false, "Invalid enum Float32Precision(", static_cast<int>(prec), ")");
 }
+
+#ifdef USE_ROCM
+static constexpr const auto rocm_allow_group_gemm_ck = "ROCM_ALLOW_GROUP_GEMM_CK";
+#endif
 
 Context::Context() = default;
 
@@ -229,6 +231,13 @@ bool Context::allowTF32OneDNN() const {
   TORCH_WARN("TF32 acceleration on top of oneDNN is available for Intel GPUs. The current Torch version does not have Intel GPU Support.");
   #endif
 }
+
+#ifdef USE_ROCM
+bool Context::rocmAllowGroupGemmCk() const {
+    const auto allow_group_gemm_ck = c10::utils::check_env(rocm_allow_group_gemm_ck) == true;
+    return allow_group_gemm_ck;
+}
+#endif
 
 bool Context::userEnabledFlashSDP() const {
   return enabled_flashSDP;
@@ -464,7 +473,7 @@ at::BlasBackend Context::blasPreferredBackend() {
       static const std::vector<std::string> archs = {
           "gfx90a", "gfx942",
 #if ROCM_VERSION >= 60300
-          "gfx1100", "gfx1101", "gfx1200", "gfx1201", "gfx908",
+          "gfx1100", "gfx1101", "gfx1103", "gfx1200", "gfx1201", "gfx908",
 #endif
 #if ROCM_VERSION >= 70000
           "gfx950", "gfx1150", "gfx1151"

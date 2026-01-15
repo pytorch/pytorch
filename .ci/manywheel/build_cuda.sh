@@ -29,6 +29,35 @@ if [[ -z "$EXTRA_CAFFE2_CMAKE_FLAGS" ]]; then
     EXTRA_CAFFE2_CMAKE_FLAGS=()
 fi
 
+# Detect architecture
+ARCH=$(uname -m)
+echo "Building for architecture: $ARCH"
+
+# Detect and configure NVPL for BLAS/LAPACK and ARM Compute Library for CUDA aarch64
+if [[ "$ARCH" == "aarch64" ]]; then
+    # Use NVPL (NVIDIA Performance Libraries) for ARM
+    # NVPL provides optimized BLAS and LAPACK for better cpu performance on NVIDIA platforms
+    if [[ ! -f "/usr/local/lib/libnvpl_blas_lp64_gomp.so.0" ]]; then
+        echo "ERROR: NVPL not found at /usr/local/lib/"
+        echo "NVPL (BLAS/LAPACK) is required for CUDA aarch64 builds"
+        exit 1
+    fi
+    echo "Using NVPL BLAS/LAPACK for CUDA aarch64"
+    export BLAS=NVPL
+
+    # ACL is required for aarch64 builds
+    if [[ ! -d "/acl" ]]; then
+        echo "ERROR: ARM Compute Library not found at /acl"
+        echo "ACL is required for aarch64 builds. Check Docker image setup."
+        exit 1
+    fi
+
+    export USE_MKLDNN=1
+    export USE_MKLDNN_ACL=1
+    export ACL_ROOT_DIR=/acl
+    echo "ARM Compute Library enabled for MKLDNN: ACL_ROOT_DIR=/acl"
+fi
+
 # Determine CUDA version and architectures to build for
 #
 # NOTE: We should first check `DESIRED_CUDA` when determining `CUDA_VERSION`,
@@ -53,33 +82,59 @@ fi
 cuda_version_nodot=$(echo $CUDA_VERSION | tr -d '.')
 EXTRA_CAFFE2_CMAKE_FLAGS+=("-DATEN_NO_TEST=ON")
 
+# Function to remove architectures from a list
+remove_archs() {
+    local result="$1"
+    shift
+    for arch in "$@"; do
+        result="${result//${arch};/}"
+    done
+    echo "$result"
+}
+
+# Function to filter CUDA architectures for aarch64
+# aarch64 ARM GPUs only support certain compute capabilities
+# Keep: 8.0 (A100), 9.0+ (Hopper, Grace Hopper, newer)
+# Remove: < 8.0 (no ARM GPUs), 8.6 (x86_64 RTX 3090/A6000 only)
+filter_aarch64_archs() {
+    local arch_list="$1"
+    # Explicitly remove architectures not needed on aarch64
+    arch_list=$(remove_archs "$arch_list" "5.0" "6.0" "7.0" "7.5" "8.6")
+    echo "$arch_list"
+}
+
+# Base: Common architectures across all modern CUDA versions
+TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0"
+
 case ${CUDA_VERSION} in
-    #removing sm_50-sm_60 as these architectures are deprecated in CUDA 12.8/9 and will be removed in future releases
-    #however we would like to keep sm_70 architecture see: https://github.com/pytorch/pytorch/issues/157517
-    12.8)
-        TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0;10.0;12.0"
-        ;;
-    12.9)
-        TORCH_CUDA_ARCH_LIST="7.0;7.5;8.0;8.6;9.0;10.0;12.0+PTX"
-        # WAR to resolve the ld error in libtorch build with CUDA 12.9
+    12.6) TORCH_CUDA_ARCH_LIST="5.0;6.0;${TORCH_CUDA_ARCH_LIST}" ;;  # Only 12.6 includes Legacy Maxwell/Pascal that will be removed in future releases
+    12.8) TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};10.0;12.0" ;;  # +Hopper/Blackwell support
+    12.9) TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST};10.0;12.0+PTX" # +Hopper/Blackwell support + PTX for forward compatibility
         if [[ "$PACKAGE_TYPE" == "libtorch" ]]; then
-            TORCH_CUDA_ARCH_LIST="7.5;8.0;9.0;10.0;12.0+PTX"
+            TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST//7.0;/}"  # Remove 7.0 to resolve the ld error
+            TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST//8.6;/}"  # Remove 8.6 for libtorch
         fi
         ;;
     13.0)
-        TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;12.0+PTX"
+        TORCH_CUDA_ARCH_LIST="7.5;8.0;8.6;9.0;10.0;$([[ "$ARCH" == "aarch64" ]] && echo "11.0;" || echo "")12.0+PTX"
+        export TORCH_NVCC_FLAGS="-compress-mode=size"
+        export BUILD_BUNDLE_PTXAS=1
         ;;
-    12.6)
-        TORCH_CUDA_ARCH_LIST="5.0;6.0;7.0;7.5;8.0;8.6;9.0"
-        ;;
-    *)
-        echo "unknown cuda version $CUDA_VERSION"
-        exit 1
-        ;;
+    *) echo "unknown cuda version $CUDA_VERSION"; exit 1 ;;
 esac
 
+# Filter for aarch64: Remove < 8.0 and 8.6
+[[ "$ARCH" == "aarch64" ]] && TORCH_CUDA_ARCH_LIST=$(filter_aarch64_archs "$TORCH_CUDA_ARCH_LIST")
+
+echo "TORCH_CUDA_ARCH_LIST set to: $TORCH_CUDA_ARCH_LIST"
 export TORCH_CUDA_ARCH_LIST=${TORCH_CUDA_ARCH_LIST}
 echo "${TORCH_CUDA_ARCH_LIST}"
+
+# Disable MAGMA for aarch64 as pre-built libraries are x86-64 only
+if [[ "$ARCH" == "aarch64" ]]; then
+    echo "Disabling MAGMA for aarch64 architecture"
+    export USE_MAGMA=0
+fi
 
 # Package directories
 WHEELHOUSE_DIR="wheelhouse$cuda_version_nodot"
@@ -244,6 +299,51 @@ else
     exit 1
 fi
 
+# Add ARM-specific library dependencies
+if [[ "$ARCH" == "aarch64" ]]; then
+    echo "Adding ARM-specific library dependencies"
+
+    # ARM Compute Library (if available)
+    if [[ -d "/acl/build" ]]; then
+        echo "Adding ARM Compute Library"
+        DEPS_LIST+=(
+            "/acl/build/libarm_compute.so"
+            "/acl/build/libarm_compute_graph.so"
+        )
+        DEPS_SONAME+=(
+            "libarm_compute.so"
+            "libarm_compute_graph.so"
+        )
+    fi
+
+    # ARM system libraries
+    DEPS_LIST+=(
+        "/lib64/libgomp.so.1"
+        "/usr/lib64/libgfortran.so.5"
+    )
+    DEPS_SONAME+=(
+        "libgomp.so.1"
+        "libgfortran.so.5"
+    )
+
+    # NVPL libraries (ARM optimized BLAS/LAPACK)
+    if [[ -d "/usr/local/lib" && -f "/usr/local/lib/libnvpl_blas_lp64_gomp.so.0" ]]; then
+        echo "Adding NVPL libraries for ARM"
+        DEPS_LIST+=(
+            "/usr/local/lib/libnvpl_lapack_lp64_gomp.so.0"
+            "/usr/local/lib/libnvpl_blas_lp64_gomp.so.0"
+            "/usr/local/lib/libnvpl_lapack_core.so.0"
+            "/usr/local/lib/libnvpl_blas_core.so.0"
+        )
+        DEPS_SONAME+=(
+            "libnvpl_lapack_lp64_gomp.so.0"
+            "libnvpl_blas_lp64_gomp.so.0"
+            "libnvpl_lapack_core.so.0"
+            "libnvpl_blas_core.so.0"
+        )
+    fi
+fi
+
 # run_tests.sh requires DESIRED_CUDA to know what tests to exclude
 export DESIRED_CUDA="$cuda_version_nodot"
 
@@ -251,9 +351,11 @@ export DESIRED_CUDA="$cuda_version_nodot"
 rm -rf /usr/local/cuda || true
 ln -s "/usr/local/cuda-${CUDA_VERSION}" /usr/local/cuda
 
-# Switch `/usr/local/magma` to the desired CUDA version
-rm -rf /usr/local/magma || true
-ln -s /usr/local/cuda-${CUDA_VERSION}/magma /usr/local/magma
+# Switch `/usr/local/magma` to the desired CUDA version (skip for aarch64)
+if [[ "$ARCH" != "aarch64" ]]; then
+    rm -rf /usr/local/magma || true
+    ln -s /usr/local/cuda-${CUDA_VERSION}/magma /usr/local/magma
+fi
 
 export CUDA_VERSION=$(ls /usr/local/cuda/lib64/libcudart.so.*|sort|tac | head -1 | rev | cut -d"." -f -3 | rev) # 10.0.130
 export CUDA_VERSION_SHORT=$(ls /usr/local/cuda/lib64/libcudart.so.*|sort|tac | head -1 | rev | cut -d"." -f -3 | rev | cut -f1,2 -d".") # 10.0

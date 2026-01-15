@@ -1,7 +1,5 @@
 #include <torch/csrc/jit/frontend/error_report.h>
 
-#include <torch/csrc/jit/frontend/tree.h>
-
 namespace torch::jit {
 
 // Avoid storing objects with destructor in thread_local for mobile build.

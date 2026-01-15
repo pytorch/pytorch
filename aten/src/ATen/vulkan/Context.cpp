@@ -1,6 +1,5 @@
 #include <atomic>
 
-#include <ATen/Tensor.h>
 #include <ATen/vulkan/Context.h>
 
 #ifdef USE_VULKAN_API

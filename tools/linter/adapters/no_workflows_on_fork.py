@@ -22,7 +22,7 @@ import os
 import re
 from enum import Enum
 from pathlib import Path
-from typing import Any, NamedTuple, Optional, TYPE_CHECKING
+from typing import Any, NamedTuple, TYPE_CHECKING
 
 from yaml import load
 
@@ -63,10 +63,10 @@ def load_yaml(path: Path) -> Any:
 
 
 def gen_lint_message(
-    filename: Optional[str] = None,
-    original: Optional[str] = None,
-    replacement: Optional[str] = None,
-    description: Optional[str] = None,
+    filename: str | None = None,
+    original: str | None = None,
+    replacement: str | None = None,
+    description: str | None = None,
 ) -> LintMessage:
     return LintMessage(
         path=filename,
@@ -85,7 +85,7 @@ def check_file(filename: str) -> list[LintMessage]:
     logging.debug("Checking file %s", filename)
 
     workflow = load_yaml(Path(filename))
-    bad_jobs: dict[str, Optional[str]] = {}
+    bad_jobs: dict[str, str | None] = {}
     if type(workflow) is not dict:
         return []
 

@@ -6,7 +6,6 @@
 
 #include <ATen/functorch/BatchedFallback.h>
 #include <ATen/functorch/LegacyVmapTransforms.h>
-#include <ATen/functorch/TensorWrapper.h>
 #include <ATen/functorch/DynamicLayer.h>
 #include <ATen/functorch/PlumbingHelper.h>
 

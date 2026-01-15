@@ -1,17 +1,10 @@
 #include <torch/csrc/jit/runtime/interpreter.h>
 
-#include <ATen/Parallel.h>
 #include <ATen/core/ivalue.h>
 #include <ATen/record_function.h>
-#include <c10/core/thread_pool.h>
 #include <c10/macros/Macros.h>
 #include <c10/util/Exception.h>
 #include <c10/util/irange.h>
-#include <torch/csrc/autograd/edge.h>
-#include <torch/csrc/autograd/grad_mode.h>
-#include <torch/csrc/autograd/profiler.h>
-#include <torch/csrc/autograd/variable.h>
-#include <torch/csrc/jit/api/compilation_unit.h>
 #include <torch/csrc/jit/api/function_impl.h>
 #include <torch/csrc/jit/ir/constants.h>
 #include <torch/csrc/jit/ir/ir.h>
@@ -40,7 +33,6 @@ using torch::distributed::autograd::DistAutogradContainer;
 #include <mutex>
 #include <ostream>
 #include <stdexcept>
-#include <typeinfo>
 #include <unordered_map>
 #include <unordered_set>
 #include <utility>

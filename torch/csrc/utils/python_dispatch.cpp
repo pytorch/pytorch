@@ -1,14 +1,11 @@
 #include <torch/csrc/jit/frontend/function_schema_parser.h>
 #include <torch/csrc/utils/python_dispatch.h>
 
-#include <ATen/ATen.h>
 #include <ATen/DTensorState.h>
-#include <ATen/FuncTorchTLS.h>
 #include <ATen/FunctionalTensorWrapper.h>
 #include <ATen/TensorSubclassLikeUtils.h>
 #include <ATen/autocast_mode.h>
 #include <ATen/core/NestedIntSymNodeImpl.h>
-#include <ATen/core/PythonOpRegistrationTrampoline.h>
 #include <ATen/core/dispatch/Dispatcher.h>
 
 #include <ATen/functorch/BatchedTensorImpl.h>
@@ -22,14 +19,9 @@
 #include <torch/csrc/utils/tensor_new.h>
 
 #include <c10/util/flat_hash_map.h>
-#include <pybind11/operators.h>
-#include <pybind11/stl.h>
 #include <torch/csrc/inductor/aoti_eager/kernel_holder.h>
-#include <torch/csrc/utils/pybind.h>
 #include <torch/csrc/utils/python_raii.h>
 
-#include <cstdlib>
-#include <cstring>
 #include <iostream>
 #include <utility>
 
@@ -940,7 +932,7 @@ void initDispatchBindings(PyObject* module) {
       [](const char* dispatch_key) -> std::optional<c10::DispatchKey> {
         try {
           return c10::parseDispatchKey(dispatch_key);
-        } catch (const c10::Error& err) {
+        } catch (const c10::Error&) {
           return std::nullopt;
         }
       });
