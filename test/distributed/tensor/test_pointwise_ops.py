@@ -688,7 +688,9 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
         z = torch.neg(d_input)
         self.assertEqual(z.placements, (Replicate(),))
-        self.assertEqual(z.to_local(), torch.full((8, 8), -2.0, device=self.device_type))
+        self.assertEqual(
+            z.to_local(), torch.full((8, 8), -2.0, device=self.device_type)
+        )
 
     @with_comms
     def test_maximum_mixed_partials_redistribution(self):
