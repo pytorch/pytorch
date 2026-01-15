@@ -7,6 +7,7 @@ import tempfile
 import types
 import unittest
 import weakref
+from abc import ABC
 from collections.abc import Iterator
 from typing import NamedTuple
 from unittest.mock import patch
@@ -288,7 +289,7 @@ class SubclassWithSubclassInnerTensor(torch.Tensor):
 
 
 # defines a custom __eq__() / __hash__() to be registered as a pytree constant type
-class CustomConstantType:
+class CustomConstantType(ABC):  # noqa: B024
     def __init__(self, a, b):
         self.a = a
         self.b = b

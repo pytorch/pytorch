@@ -85,6 +85,9 @@ class _OpaqueTypeInfo:
         [Any], list[Any]
     ]  # Callable that takes the object and returns list of values to guard on
     members: dict[str, MemberType]  # Maps member name to how it should be handled
+    fake_script_object_class: (
+        type  # Type-specific FakeScriptObject subclass for isinstance checks
+    )
 
 
 # Mapping of type -> (string name, reference/value type)
@@ -168,12 +171,18 @@ def register_opaque_type(
             "inherit from ABC."
         )
 
-    # Register FakeScriptObject as a virtual subclass of `cls` so that when
-    # tracing, if we do isinstance(x, OpaqueType) where x is a FakeScriptObject,
-    # this will pass
+    # Create a type-specific FakeScriptObject subclass for this opaque type.
+    # This allows isinstance(fake_obj, OpaqueType) to return True only for
+    # fake objects of that specific type, not all opaque types.
     from torch._library.fake_class_registry import FakeScriptObject
 
-    cls.register(FakeScriptObject)
+    subclass_name = f"FakeScriptObject_{cls.__name__}"
+    fake_script_object_subclass = type(subclass_name, (FakeScriptObject,), {})
+
+    # Register the subclass as a virtual subclass of `cls` so that when
+    # tracing, if we do isinstance(x, OpaqueType) where x is this specific
+    # FakeScriptObject subclass, this will pass
+    cls.register(fake_script_object_subclass)
 
     if typ not in ["reference", "value"]:
         raise AssertionError(
@@ -218,7 +227,9 @@ def register_opaque_type(
     # Generate a fully qualified name by combining module and qualname
     name = f"{cls.__module__}.{cls.__qualname__}"
 
-    type_info = _OpaqueTypeInfo(name, typ, guard_fn, members or {})
+    type_info = _OpaqueTypeInfo(
+        name, typ, guard_fn, members or {}, fake_script_object_subclass
+    )
     _OPAQUE_TYPES[cls] = type_info
     _OPAQUE_TYPES_BY_NAME[name] = type_info
 
@@ -330,3 +341,24 @@ def get_member_type(cls: Any, member_name: str) -> Optional[MemberType]:
     if info is None:
         return None
     return info.members.get(member_name)
+
+
+def get_fake_script_object_class(cls: type) -> type:
+    """
+    Get the type-specific FakeScriptObject subclass for an opaque type.
+
+    Args:
+        cls: The opaque type class
+
+    Returns:
+        The FakeScriptObject subclass registered for this opaque type
+
+    Raises:
+        ValueError: If the class is not registered as an opaque type
+    """
+    if cls not in _OPAQUE_TYPES:
+        raise ValueError(
+            f"Class {cls} is not registered as an opaque type. "
+            f"Call register_opaque_type({cls.__name__}) first."
+        )
+    return _OPAQUE_TYPES[cls].fake_script_object_class
