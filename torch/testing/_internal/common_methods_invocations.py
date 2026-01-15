@@ -19217,6 +19217,7 @@ op_db: list[OpInfo] = [
            )),
     BinaryUfuncInfo('polar',
                     dtypes=floating_types(),
+                    dtypesIfMPS=floating_types_and(torch.float16),
                     # this function is undefined if 'abs' values are <0
                     supports_forward_ad=True,
                     lhs_make_tensor_kwargs=dict(low=0),

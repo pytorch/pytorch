@@ -12528,7 +12528,7 @@ class TestNoRegression(TestCase):
 MPS_GRAD_DTYPES = [torch.float32, torch.float16]
 
 
-def transform_opinfo_sample_to_cpu(sample):
+def transform_opinfo_sample_to_cpu(sample, dtype = None):
     """Transforms opinfo.core.SampleInput from MPS to CPU"""
     def transform_sample(x):
         if not isinstance(x, torch.Tensor):
@@ -12536,6 +12536,8 @@ def transform_opinfo_sample_to_cpu(sample):
         requires_grad = x.requires_grad
         conjugated = x.is_conj()
         rc = x.detach()
+        if dtype:
+            rc = rc.to(dtype=dtype)
         rc = rc.cpu() if not conjugated else x.conj().cpu().conj()
         return rc.requires_grad_(x.requires_grad)
 
@@ -12674,8 +12676,19 @@ class TestConsistency(TestCaseMPS):
 
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=UserWarning)
-                cpu_out = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
                 mps_out = op(mps_sample.input, *mps_sample.args, **mps_sample.kwargs)
+                try:
+                    cpu_out = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
+                except NotImplementedError:
+                    if not isinstance(mps_out, torch.Tensor):
+                        raise
+
+                    if mps_sample.input.dtype in [torch.float16, torch.bfloat16]:
+                        # Often CPU ops are not implemented for low precision dtypes
+                        # In that case, upcast to higher precision and try again
+                        cpu_sample = transform_opinfo_sample_to_cpu(mps_sample, dtype=torch.float32)
+                        cpu_out = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
+                        cpu_out = cpu_out.to(dtype=mps_out.dtype)
 
             atol, rtol = self._compute_tolerances(op, dtype)
             if (op.name == "nn.functional.interpolate" and dtype == torch.uint8 and
