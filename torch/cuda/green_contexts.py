@@ -41,3 +41,7 @@ class GreenContext(_GreenContext):
         context stack and restore the previous context.
         """
         return super().pop_context()  # type: ignore[misc]
+
+    def Stream(self) -> torch.Stream:
+        r"""Return the CUDA Stream used by the green context."""
+        return super().Stream()

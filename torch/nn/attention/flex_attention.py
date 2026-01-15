@@ -1470,7 +1470,7 @@ def flex_attention(
 
     """
     # Some basic input validation
-    _validate_sdpa_input(query, key, value)
+    _validate_sdpa_input(query, key, value, allow_lowp_kv=True)
     _validate_embed_dim(query, key, value)
     _validate_device(query, key, value)
     query, key, value = _enforce_mem_layouts(query, key, value)
