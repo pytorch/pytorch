@@ -58,7 +58,6 @@ def promote_types(
 ):
     dtype_prop_candidates = []
 
-    # pyrefly: ignore [bad-assignment]
     for arg in args:
         assert not isinstance(arg, str)
         if isinstance(arg, OpsValue):

@@ -119,7 +119,7 @@ class _ConvNd(nn.modules.conv._ConvNd):
                 )
             relu = cls._FLOAT_RELU_MODULE()
             modules.append(relu)
-            # pyrefly: ignore [missing-attribute]
+
             fused = cls._FLOAT_MODULE(*modules)
             fused.train(self.training)
             return fused

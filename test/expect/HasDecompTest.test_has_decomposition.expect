@@ -652,6 +652,8 @@ aten::_upsample_nearest_exact3d_backward
 aten::_upsample_nearest_exact3d_backward.grad_input
 aten::_use_cudnn_ctc_loss
 aten::_use_cudnn_ctc_loss.Tensor
+aten::_use_miopen_ctc_loss
+aten::_use_miopen_ctc_loss.Tensor
 aten::_validate_compressed_sparse_indices
 aten::_values
 aten::_values_copy
@@ -968,6 +970,9 @@ aten::miopen_convolution_add_relu
 aten::miopen_convolution_relu
 aten::miopen_convolution_transpose
 aten::miopen_convolution_transpose.out
+aten::miopen_ctc_loss
+aten::miopen_ctc_loss.Tensor
+aten::miopen_ctc_loss.out
 aten::miopen_depthwise_convolution
 aten::miopen_depthwise_convolution.out
 aten::miopen_rnn
