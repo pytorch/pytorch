@@ -16,7 +16,10 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed.tensor._ops._matrix_ops import mm_single_dim_strategy
+from torch.distributed.tensor._ops._matrix_ops import (
+    gen_single_dim_einsum_strategies,
+    mm_single_dim_strategy,
+)
 from torch.distributed.tensor._ops.single_dim_strategy import (
     register_single_dim_strategy,
 )
@@ -234,6 +237,41 @@ class DistMatrixOpsTest(DTensorTestBase):
         local_res.sum().backward()
         self.assertIsNotNone(mat2.grad)
         self.assertEqual(mat2.grad.full_tensor(), tensor_to_shard0.grad)
+
+    def test_gen_single_dim_einsum_strategies_bias_reduce_op(self):
+        """Test that bias Partial placements preserve reduce_op from output Partial."""
+        # Test addmm strategy: "mk,kn->mn" with bias
+        # For contracting dim k: output=Partial, bias should also be Partial with same reduce_op
+        bias_shape_1d = torch.Size([4])  # 1D bias
+        bias_shape_2d = torch.Size([12, 4])  # 2D bias
+
+        strategies_1d = gen_single_dim_einsum_strategies(
+            "mk,kn->mn", bias_shape=bias_shape_1d
+        )
+        strategies_2d = gen_single_dim_einsum_strategies(
+            "mk,kn->mn", bias_shape=bias_shape_2d
+        )
+
+        # Find strategies where output is Partial (contracting dim case)
+        # Strategy format: [output, bias, mat1, mat2]
+        for strategies, bias_shape in [
+            (strategies_1d, bias_shape_1d),
+            (strategies_2d, bias_shape_2d),
+        ]:
+            for strategy in strategies:
+                output_placement = strategy[0]
+                bias_placement = strategy[1]
+
+                if isinstance(output_placement, Partial):
+                    # Bug: _derive_bias_placement was returning Partial() without
+                    # preserving reduce_op from output_placement
+                    self.assertIsInstance(bias_placement, Partial)
+                    self.assertEqual(
+                        bias_placement.reduce_op,
+                        output_placement.reduce_op,
+                        f"Bias Partial should have same reduce_op as output Partial. "
+                        f"Got bias={bias_placement.reduce_op}, output={output_placement.reduce_op}",
+                    )
 
     @with_comms
     def test_mm(self):
