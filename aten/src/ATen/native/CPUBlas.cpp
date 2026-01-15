@@ -1451,7 +1451,6 @@ void brgemm(
     "F8 Brgemm is only supported on X64 when oneDNN ukernel is enabled and `amx` is supported");
 }
 
-
 void brgemm_release(bool is_vnni) {
 #if defined(ONEDNN_UKERNEL_ENABLED)
   if (is_vnni) {
