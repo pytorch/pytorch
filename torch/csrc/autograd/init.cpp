@@ -1104,7 +1104,7 @@ static PyObject* any_output_is_alias_to_input_or_output(
   PyObject* outs = PyTuple_GET_ITEM(args, 2);
   std::unordered_set<void*> s;
   visit_tensors<false>(inps, inps_kwargs, [&s](at::Tensor& t) {
-    if (!t.storage()) {
+    if (!t.has_storage()) {
       return false;
     }
     auto* cp = t.storage().unsafeGetStorageImpl();
@@ -1115,7 +1115,7 @@ static PyObject* any_output_is_alias_to_input_or_output(
   });
   bool ret = false;
   visit_tensors<false>(outs, nullptr, [&s, &ret](at::Tensor& t) {
-    if (!t.storage()) {
+    if (!t.has_storage()) {
       return false;
     }
     auto* cp = t.storage().unsafeGetStorageImpl();
