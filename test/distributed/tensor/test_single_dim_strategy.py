@@ -30,6 +30,8 @@ from torch.distributed.tensor._ops._tensor_ops import cat_single_dim_strategy
 from torch.distributed.tensor._ops.single_dim_strategy import (
     _expand_single_dim_strategy_to_mesh,
     _fill_single_dim_strategy_placeholders,
+    _get_num_tensor_inputs,
+    _get_unique_placements,
     _insert_single_dim_replication_strategy,
     _ShardingPlaceholder,
     register_single_dim_strategy,
@@ -259,7 +261,8 @@ class TestExpandPlaceholder(TestCase):
         ]
         expected_output_placements = [
             (Shard(0), Replicate(), Shard(1)),
-            (Partial("sum"), Partial("sum"), Partial("sum")),
+            # P(avg) -> P(sum) is currently not supported, but could be in principle
+            (Partial("sum"), Partial("sum"), Replicate()),
         ]
         tuple_strategy = _expand_foreach_add_list(
             inputs_a, inputs_b, placements_a, placements_b
@@ -531,8 +534,8 @@ class TestExpandPlaceholder(TestCase):
 
         self.assertEqual(expanded_replicate, expected_replicate)
 
-        # Test Case 2: Shard-only inputs - only Shard expansion
-        # Expected: 3 strategies with placeholders filled using Shard + implicit replicate
+        # Test Case 2: (_Strided)Shard-only inputs - only (_Strided)Shard expansion
+        # Expected: 3 strategies with placeholders filled using (_Strided)Shard + implicit replicate
         expected_shard = [
             [Partial(), Shard(1), Shard(0)],
             [Shard(0), Shard(0), Replicate()],
@@ -543,6 +546,48 @@ class TestExpandPlaceholder(TestCase):
         expanded_shard = _fill_single_dim_strategy_placeholders(
             {Replicate(), Shard(0), Shard(1)}, single_dim_strategies
         )
+
+        expected_strided_shard = [
+            [
+                Partial(),
+                _StridedShard(1, split_factor=2),
+                _StridedShard(0, split_factor=2),
+            ],
+            [
+                Partial(),
+                _StridedShard(1, split_factor=4),
+                _StridedShard(0, split_factor=4),
+            ],
+            [
+                _StridedShard(dim=0, split_factor=2),
+                _StridedShard(dim=0, split_factor=2),
+                Replicate(),
+            ],
+            [
+                _StridedShard(dim=0, split_factor=4),
+                _StridedShard(dim=0, split_factor=4),
+                Replicate(),
+            ],
+            [
+                _StridedShard(dim=1, split_factor=2),
+                Replicate(),
+                _StridedShard(dim=1, split_factor=2),
+            ],
+            [
+                _StridedShard(dim=1, split_factor=4),
+                Replicate(),
+                _StridedShard(dim=1, split_factor=4),
+            ],
+            [Replicate(), Replicate(), Replicate()],
+        ]
+        expanded_strided_shard = _fill_single_dim_strategy_placeholders(
+            {
+                _StridedShard(0, split_factor=2),
+                _StridedShard(0, split_factor=4),
+            },
+            single_dim_strategies,
+        )
+        self.assertEqual(expanded_strided_shard, expected_strided_shard)
 
         self.assertEqual(expanded_shard, expected_shard)
 
@@ -605,6 +650,58 @@ class TestExpandPlaceholder(TestCase):
             torch.ops.aten.add.Tensor, (OpStrategy([OpSpec(spec3)]),), {}
         )
         self.assertNotEqual(hash(schema1), hash(schema3))
+
+    def test_get_unique_placements_includes_kwargs(self):
+        """Test that _get_unique_placements includes placements from kwargs (e.g., out tensor).
+
+        This is a regression test for the fix where out-variant ops like torch.mul(..., out=...)
+        were failing because the 'out' kwarg tensor placements weren't being counted.
+        """
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4))
+        meta = TensorMeta(torch.Size([8, 8]), (8, 1), torch.float32)
+
+        # Create specs with different placements for args and kwargs
+        arg_spec = DTensorSpec(mesh, (Shard(0),), meta)
+        kwarg_spec = DTensorSpec(mesh, (Shard(1),), meta)
+
+        # Create OpSchema with both args and kwargs tensors
+        op_schema = OpSchema(
+            op=torch.ops.aten.mul.out,
+            args_schema=(
+                OpStrategy([OpSpec(arg_spec)]),
+                OpStrategy([OpSpec(arg_spec)]),
+            ),
+            kwargs_schema={"out": OpStrategy([OpSpec(kwarg_spec)])},
+        )
+
+        # _get_unique_placements should include both arg and kwarg placements
+        unique_placements = _get_unique_placements(op_schema)
+        self.assertIn(Shard(0), unique_placements)
+        self.assertIn(Shard(1), unique_placements)
+
+    def test_get_num_tensor_inputs_includes_kwargs(self):
+        """Test that _get_num_tensor_inputs counts tensor kwargs (e.g., out tensor).
+
+        This is a regression test for the fix where out-variant ops like torch.mul(..., out=...)
+        were failing with 'input_specs(N) != strategies(M)' because the 'out' kwarg wasn't counted.
+        """
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4))
+        meta = TensorMeta(torch.Size([8, 8]), (8, 1), torch.float32)
+        spec = DTensorSpec(mesh, (Shard(0),), meta)
+
+        # Create OpSchema with 2 arg tensors and 1 kwarg tensor
+        op_schema = OpSchema(
+            op=torch.ops.aten.mul.out,
+            args_schema=(
+                OpStrategy([OpSpec(spec)]),
+                OpStrategy([OpSpec(spec)]),
+            ),
+            kwargs_schema={"out": OpStrategy([OpSpec(spec)])},
+        )
+
+        # _get_num_tensor_inputs should count both args and kwargs tensors
+        num_inputs = _get_num_tensor_inputs(op_schema)
+        self.assertEqual(num_inputs, 3)  # 2 args + 1 out kwarg
 
 
 @torch.library.custom_op("mylib::dummy_add", mutates_args=())
