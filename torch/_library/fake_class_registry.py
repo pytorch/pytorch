@@ -21,7 +21,7 @@ class FakeScriptObject:
         try:
             with _disable_current_modes():
                 real_obj = copy.deepcopy(x)
-        except RuntimeError as e:
+        except (RuntimeError, TypeError) as e:
             log.warning(  # noqa: G200
                 "Unable to deepcopy the custom object %s due to %s. "
                 "Defaulting to the user given object. This might be "
@@ -142,10 +142,10 @@ def tracing_with_real(x: torch.ScriptObject) -> bool:
     if not hasattr(x, "tracing_mode"):
         return False
 
-    assert x.tracing_mode() in [
-        "real",
-        "fake",
-    ], f"tracing_mode can be either real or fake but got {x.tracing_mode()}"
+    if x.tracing_mode() not in ["real", "fake"]:
+        raise AssertionError(
+            f"tracing_mode can be either real or fake but got {x.tracing_mode()}"
+        )
     return x.tracing_mode() == "real"
 
 
@@ -165,22 +165,22 @@ def maybe_to_fake_obj(
         FakeOpaqueObject,
         get_opaque_obj_info,
         get_opaque_type_name,
-        is_opaque_reference_type,
         is_opaque_type,
         OpaqueTypeStr,
     )
+    from torch._subclasses.fake_tensor import unset_fake_temporarily
 
     x_type = type(x)
     if is_opaque_type(x_type):
         type_name = OpaqueTypeStr if x is None else get_opaque_type_name(x_type)
         fake_x_wrapped = FakeScriptObject(FakeOpaqueObject(), type_name, x)
 
-        # Reference types with pure methods should also keep the real object
-        # so that those methods can be called during tracing
-        if is_opaque_reference_type(x_type):
-            opaque_info = get_opaque_obj_info(x_type)
-            assert opaque_info is not None
-            for attr_name in opaque_info.members:
+        # Set specified members onto the fake object
+        opaque_info = get_opaque_obj_info(x_type)
+        if opaque_info is None:
+            raise AssertionError(f"opaque_info for type {x_type} must not be None")
+        for attr_name in opaque_info.members:
+            with unset_fake_temporarily():
                 if not hasattr(x, attr_name):
                     raise TypeError(
                         f"Opaque object of type '{type_name}' was specified to have member "
@@ -391,7 +391,8 @@ def _is_script_object(obj: Any) -> bool:
 # Return the namespace and class name from fully qualified name.
 def _ns_and_class_name(full_qualname: str) -> tuple[str, str]:
     splits = full_qualname.split(".")
-    assert len(splits) == 5, f"Could not split {full_qualname=}"
+    if len(splits) != 5:
+        raise AssertionError(f"Could not split {full_qualname=}, expected 5 parts")
     _torch, _torch_ns, _classes, ns, class_name = splits
     return ns, class_name
 

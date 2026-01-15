@@ -142,18 +142,6 @@ def register_opaque_type(
             - MemberType.USE_REAL: Evaluates with the real object at compile time and
               bakes the result as a constant
             - MemberType.INLINED: Inlines the method call into the trace
-
-    Examples:
-        >>> register_opaque_type(
-        >>>     MyClass,
-        >>>     typ="reference",
-        >>>     guard_fn=lambda obj: [obj.x, obj.y],  # Guard on x and y values
-        >>>     members={
-        >>>         "x": MemberType.USE_REAL,     # Bake x as constant
-        >>>         "y": MemberType.USE_REAL,     # Bake y as constant
-        >>>         "compute": MemberType.INLINED,   # Inline compute method
-        >>>     },
-        >>> )
     """
     import torch.utils._pytree as pytree
 
@@ -170,9 +158,10 @@ def register_opaque_type(
             "registered as a pytree. Opaque objects must be pytree leaves."
         )
 
-    assert typ in ["reference", "value"], (
-        "Opaque type must be either 'reference' or 'value'"
-    )
+    if typ not in ["reference", "value"]:
+        raise AssertionError(
+            f"Opaque type must be either 'reference' or 'value', got {typ!r}"
+        )
 
     if typ == "value":
         if cls.__eq__ is object.__eq__:  # type: ignore[comparison-overlap]
@@ -200,13 +189,6 @@ def register_opaque_type(
                 "implementation as we will use this to reconstruct "
                 "the object in the FX codegen. __fx_repr__ should return "
                 "a tuple of (repr_string, set_of_types)."
-            )
-
-        if members is not None:
-            raise TypeError(
-                "No need to specify `members` for "
-                f"value-type opaque class {cls} as it will inline all methods "
-                "by default and be guarded based on `__eq__`."
             )
 
         if guard_fn is not None:
