@@ -776,6 +776,52 @@ class TestExpandPlaceholder(TestCase):
         self.assertIsInstance(result, OpStrategy)
         self.assertGreater(len(result.strategies), 0)
 
+    def test_expand_to_full_mesh_filters_out_variant_strategies(self):
+        """Test that expand_to_full_mesh_op_strategy filters strategies for out= variant ops.
+        For out-variant ops like torch.mul(..., out=...), the output placement must
+        match the 'out' kwarg's placement. This test verifies that strategies with
+        mismatched output placements are filtered out.
+        """
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4))
+        meta = TensorMeta(torch.Size([8, 8]), (8, 1), torch.float32)
+
+        # Create specs: args have Shard(0), out kwarg has Replicate
+        arg_spec = DTensorSpec(mesh, (Shard(0),), meta)
+        out_spec = DTensorSpec(mesh, (Replicate(),), meta)
+
+        # Create OpSchema for out-variant op (aten.mul.out)
+        op_schema = OpSchema(
+            op=torch.ops.aten.mul.out,
+            args_schema=(
+                OpStrategy([OpSpec(arg_spec)]),
+                OpStrategy([OpSpec(arg_spec)]),
+            ),
+            kwargs_schema={"out": OpStrategy([OpSpec(out_spec)])},
+        )
+
+        # Define strategies: output can be Shard(0) or Replicate
+        # [output, input1, input2, out_kwarg]
+        single_mesh_dim_strategies = [
+            [Shard(0), Shard(0), Shard(0), Shard(0)],  # All sharded
+            [Replicate(), Replicate(), Replicate(), Replicate()],  # All replicated
+        ]
+
+        result = expand_to_full_mesh_op_strategy(
+            mesh,
+            op_schema,
+            single_mesh_dim_strategies,
+            output_tensor_meta=meta,
+        )
+
+        # All strategies in result should have output placement matching out kwarg (Replicate)
+        for strategy in result.strategies:
+            output_spec = strategy.output_spec
+            self.assertEqual(
+                output_spec.placements,
+                (Replicate(),),
+                f"Output placement {output_spec.placements} should match out kwarg placement (Replicate(),)",
+            )
+
 
 @torch.library.custom_op("mylib::dummy_add", mutates_args=())
 def dummy_add(x: torch.Tensor, y: torch.Tensor) -> torch.Tensor:
