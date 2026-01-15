@@ -877,6 +877,26 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
         out = compiled_fn(x)
         self.assertEqual(out, torch.ones(4, 4) * 2)
 
+    def test_tensor_subclass_unpack(self):
+        class Foo(torch.Tensor):
+            pass
+
+        torch._dynamo.config.traceable_tensor_subclasses.add(Foo)
+        try:
+
+            @torch.compile(backend="eager", fullgraph=True)
+            def fn_list(x):
+                return list(x)
+
+            x = torch.ones(3).as_subclass(Foo)
+            res_list = fn_list(x)
+
+            for elem in res_list:
+                self.assertIsInstance(elem, Foo)
+            self.assertEqual(len(res_list), 3)
+        finally:
+            torch._dynamo.config.traceable_tensor_subclasses.discard(Foo)
+
     def test_torch_function_wrapper_class_with_kwargs(self):
         x = torch.ones(2, 2)
         wrapped = WrapperSubclass(x)
@@ -1176,6 +1196,23 @@ class SubclassTests(torch._dynamo.test_case.TestCase):
 
         self.assertEqual(res, ref)
         self.assertEqual(res[0].bar, ref[0].bar)
+
+    def test_subclass_method_override(self):
+        class MyTensor(torch.Tensor):
+            def sum(self, dim=None, keepdim=False):
+                return super().sum(dim=dim, keepdim=keepdim).as_subclass(MyTensor)
+
+        def fn(x):
+            y = x.as_subclass(MyTensor)
+            return y.sum(dim=1)
+
+        x = torch.randn(4, 10)
+        fn_opt = torch.compile(fn, backend="eager", fullgraph=False)
+
+        res_exp = fn(x)
+        res_act = fn_opt(x)
+        self.assertEqual(res_exp, res_act)
+        self.assertIsInstance(res_act, MyTensor)
 
     def test_tensor_subclass_attr_codegen_tos(self):
         # This repros a very subtle interaction between

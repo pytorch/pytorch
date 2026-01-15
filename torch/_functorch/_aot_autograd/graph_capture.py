@@ -97,6 +97,7 @@ def _create_graph(
             decomposition_table=aot_config.decompositions,
             record_module_stack=True,
             pre_dispatch=aot_config.pre_dispatch,
+            _disable_torch_fn_metadata_mode=aot_config._disable_torch_fn_metadata_mode,
         )(*args)
 
         if args_descs is not None:
@@ -321,6 +322,9 @@ def aot_dispatch_base_graph(
                 include_stride=True,
                 include_device=True,
                 colored=True,
+                # For more expanded output (but can't default to this because it
+                # affects tests):
+                # expanded_def=True
             ),
         )
 

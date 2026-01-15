@@ -203,7 +203,8 @@ lib.define(
 def split_with_sizes_copy(
     all_gather_output: torch.Tensor,
     all_gather_input_split_sizes: list[int],
-    dim: int,
+    dim: int = 0,
+    *,
     out: list[torch.Tensor],
 ) -> None:
     torch.split_with_sizes_copy(

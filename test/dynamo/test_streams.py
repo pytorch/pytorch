@@ -917,63 +917,11 @@ class <lambda>(torch.nn.Module):
 
         x = torch.ones(2, 2, requires_grad=True, device="cuda:0")
         inp = (x.clone(),)
-        (
-            actual,
-            _,
-            fw_graphs,
-            bw_graphs,
-        ) = extract_graph(fn, *inp)
-
-        actual.sum().backward()
-        self.assertExpectedInline(
-            print_graph(fw_graphs[0]),
-            """\
-class GraphModule(torch.nn.Module):
-    def forward(self, primals_1: "f32[2, 2]"):
-        # No stacktrace found for following nodes
-        clone: "f32[2, 2]" = torch.ops.aten.clone.default(primals_1);  primals_1 = None
-
-        # Annotation: {'stream': 0}
-        mul: "f32[2, 2]" = torch.ops.aten.mul.Tensor(clone, 3);  clone = None
-
-        #
-        sin: "f32[2, 2]" = torch.ops.aten.sin.default(mul)
-        return (mul, sin, mul)
-""",
-        )
-
-        self.assertExpectedInline(
-            print_graph(bw_graphs[0]),
-            """\
-class GraphModule(torch.nn.Module):
-    def forward(self, mul: "f32[2, 2]", tangents_1: "f32[2, 2]", tangents_2: "f32[2, 2]"):
-        #
-        cos: "f32[2, 2]" = torch.ops.aten.cos.default(mul);  mul = None
-        mul_1: "f32[2, 2]" = torch.ops.aten.mul.Tensor(tangents_2, cos);  tangents_2 = cos = None
-
-        # No stacktrace found for following nodes
-        record_event_default = torch.ops.streams.record_event.default(1, 2);  record_event_default = None
-        wait_event_default = torch.ops.streams.wait_event.default(1, 0);  wait_event_default = None
-
-        # Annotation: {'stream': 0}
-        add: "f32[2, 2]" = torch.ops.aten.add.Tensor(tangents_1, mul_1);  tangents_1 = None
-
-        # No stacktrace found for following nodes
-        record_event_default_1 = torch.ops.streams.record_event.default(3, 0);  record_event_default_1 = None
-        sync_dealloc_default = torch.ops.streams.sync_dealloc.default(3, 4, mul_1);  mul_1 = sync_dealloc_default = None
-
-        # Annotation: {'stream': 0}
-        mul_2: "f32[2, 2]" = torch.ops.aten.mul.Tensor(add, 3);  add = None
-        return (mul_2,)
-""",
-        )
-
-        self.assertExpectedInline(
-            str(
-                torch._functorch._aot_autograd.runtime_wrappers.side_stream_epilogue_copies
-            ),
-            """1""",
-        )
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Mutations on inputs with user-specified streams are not yet supported",
+        ):
+            extract_graph(fn, *inp)
 
     @requires_cuda
     def test_epilogue_copy_stream_tracking(self):

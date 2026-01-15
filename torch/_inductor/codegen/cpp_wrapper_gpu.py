@@ -210,12 +210,12 @@ class DeferredTritonCallWrapper:
             self.arg_types,
             params["def_args"],
         )
-        arg_type_loookup = dict(zip(params["def_args"], self.arg_types))
+        arg_type_lookup = dict(zip(params["def_args"], self.arg_types))
         # difference between Python and C++ wrapper: C++ wrapper strips out equal_to_1 constants
         call_args = [
             name for name in params["call_args"] if name not in triton_meta["constants"]
         ]
-        arg_types = [arg_type_loookup[name] for name in call_args]
+        arg_types = [arg_type_lookup[name] for name in call_args]
         arg_signatures = [triton_meta["signature"][name] for name in call_args]
         scratch_spaces = {
             name: params[name]

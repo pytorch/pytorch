@@ -209,10 +209,6 @@ class TestCase(InductorTestCase):
                 # torch.sqrt lowers to tl.sqrt_rn after switching away from libdevice.sqrt
                 "sqrt": "sqrt_rn",
             },
-            "xpu": {
-                "round": "nearbyint",
-                "sqrt": "sqrt",
-            },
         }
         if GPU_TYPE in triton_op_name_overrides:
             override = triton_op_name_overrides[GPU_TYPE].get(op_name)
@@ -345,6 +341,7 @@ class TestCase(InductorTestCase):
 
     @requires_gpu()
     @torch._dynamo.config.patch("capture_scalar_outputs", True)
+    @torch._inductor.config.patch("_use_fp64_for_unbacked_floats", True)
     def test_unbacked_float_uses_fp64_signature(self):
         """
         Test that unbacked float scalars from .item() use fp64 in kernel signature

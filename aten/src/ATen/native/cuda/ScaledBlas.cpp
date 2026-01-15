@@ -24,8 +24,8 @@
 #include <ATen/native/cuda/cuBlasCommonArgs.h>
 #include <ATen/ceil_div.h>
 
-#ifdef USE_FBGEMM_GENAI
-#include <fbgemm_gpu/torch_ops.h>
+#ifdef USE_MSLK
+#include <mslk/gemm/gemm_torch.h>
 #endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -372,8 +372,10 @@ _scaled_gemm(
           const std::optional<Tensor>& alpha = std::nullopt) {
   cublasCommonArgs args(mat1, mat2, out, scale_a, scale_b, std::nullopt, scaling_choice_a, scaling_choice_b);
   const auto out_dtype_ = args.result->scalar_type();
-  TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
-
+  // H100 only supports row-major x column-major, but all permutaitons are supported on Blackwells
+  if (_scaled_mm_allowed_device(true, false)) {
+    TORCH_CHECK(args.transa == 't' && args.transb == 'n', "Only multiplication of row-major and column-major matrices is supported by cuBLASLt");
+  }
 // ROCM enables the TunableOp path only
 // but can fallback to at::cuda::blas::scaled_gemm
 #ifdef USE_ROCM
@@ -1104,7 +1106,7 @@ _scaled_mxfp4_mxfp4(
           const std::optional<Tensor>& bias,
           const c10::ScalarType out_dtype,
           Tensor& out) {
-#if defined(_WIN32) || (!defined(USE_ROCM) && !defined(USE_FBGEMM_GENAI))
+#if defined(_WIN32) || (!defined(USE_ROCM) && !defined(USE_MSLK))
   TORCH_CHECK_NOT_IMPLEMENTED(false, "MXFP4 scaling supported on ROCM and CUDA+FBGEMM_GENAI only");
 #else
   _check_mxfp4_support();
@@ -1165,7 +1167,7 @@ _scaled_mxfp4_mxfp4(
   return _scaled_gemm(mat_a, mat_b, scale_a, scale_b, scaling_choice_a, scaling_choice_b, bias, false /* use_fast_accum */, out);
 #else
   // NVIDIA
-  fbgemm_gpu::f4f4bf16(
+  mslk::gemm::f4f4bf16(
       mat_a,
       mat_b.transpose(-2, -1),
       scale_a,
