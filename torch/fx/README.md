@@ -103,7 +103,7 @@ During the call to `symbolic_trace`, the parameter `x` is transformed into a Pro
 
 If you're doing graph transforms, you can wrap your own Proxy method around a raw Node so that you can use the overloaded operators to add additional things to a Graph.
 
-## [TorchDynamo](https://pytorch.org/docs/main/torch.compiler_dynamo_deepdive.html) ##
+## [TorchDynamo](https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_dynamo_deepdive.html) ##
 
 Tracing has limitations in that it can't deal with dynamic control flow and is limited to outputting a single graph at a time, so a better alternative is the new `torch.compile()` infrastructure where you can output multiple subgraphs in either an aten or torch IR using `torch.fx`. [This tutorial](https://colab.research.google.com/drive/1Zh-Uo3TcTH8yYJF-LLo5rjlHVMtqvMdf) gives more context on how this works.
 

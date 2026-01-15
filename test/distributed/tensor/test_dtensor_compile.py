@@ -176,18 +176,14 @@ def _apply_sharding(mod: nn.Module, shard_dim: int, device_mesh: DeviceMesh):
 
 class TestDTensorCompile(torch._dynamo.test_case.TestCase):
     def setUp(self):
-        super(
-            type(self), self
-        ).setUp()  # use explicit params for compiled autograd test wrapping
+        super().setUp()
         fake_store = FakeStore()
         dist.init_process_group(
             "fake", store=fake_store, rank=0, world_size=self.world_size
         )
 
     def tearDown(self):
-        super(
-            type(self), self
-        ).tearDown()  # use explicit params for compiled autograd test wrapping
+        super().tearDown()
         dist.destroy_process_group()
 
     @property
@@ -380,6 +376,35 @@ def forward(self, b_parametrizations_buffer_original0, x):
         res = opt_fn(x)
         self.assertEqual(res, ref)
 
+    def test_dtensor_input_mutations(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        # test passing in DTensor as inputs/outputs and run some tensor computation
+        def fn(x, y):
+            out = x.sin()
+            y.add_(2)
+            return out
+
+        opt_fn = torch.compile(fn, backend="aot_eager", fullgraph=True)
+
+        x_ref = DTensor.from_local(
+            torch.randn(4), mesh, [Shard(0)], run_check=False
+        ).requires_grad_(True)
+        y_ref = DTensor.from_local(
+            torch.randn(4), mesh, [Shard(0)], run_check=False
+        ).requires_grad_(False)
+
+        x = x_ref.clone().detach().requires_grad_(True)
+        y = y_ref.clone().detach().requires_grad_(False)
+
+        ref = fn(x_ref.clone(), y_ref)
+        res = opt_fn(x.clone(), y)
+        self.assertEqual(res, ref)
+
+        ref.sum().backward()
+        res.sum().backward()
+        self.assertEqual(x.grad, x_ref.grad)
+
     @skipIfHpu
     def test_dtensor_dynamic(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
@@ -403,9 +428,6 @@ def forward(self, b_parametrizations_buffer_original0, x):
         self.assertEqual(res, ref)
 
     @skipIfHpu
-    @unittest.skip(
-        "DTensor + dynamic fails - s77 + 8 is not tracked with proxy .. proxy_tensor.PythonKeyTracer"
-    )
     def test_dtensor_dynamic_slice(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -448,9 +470,6 @@ def forward(self, b_parametrizations_buffer_original0, x):
             res = opt_fn(x)
         self.assertEqual(res, ref)
 
-    @unittest.skip(
-        "DTensor + dynamic fails - s77 + 8 is not tracked with proxy .. proxy_tensor.PythonKeyTracer"
-    )
     def test_dtensor_dynamic_cat(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -515,6 +534,74 @@ def forward(self, b_parametrizations_buffer_original0, x):
         self.assertEqual(cnt.frame_count, 1)
         run(g, 64, 8)
         self.assertEqual(cnt.frame_count, 2)
+
+    @unittest.skipIf(not HAS_GPU, "requires GPU for RNG support")
+    def test_dtensor_unbacked_matmuls(self):
+        from torch.distributed.tensor import randn as d_randn
+
+        # use 2x2 mesh for testing
+        dist.destroy_process_group()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
+        device_mesh = init_device_mesh(self.device_type, (2, 2))
+
+        def test_placements(x_placements, y_placements, out_placements):
+            # create DTensors with unbacked outer/inner sizes
+            x_dt = d_randn(64, 64, device_mesh=device_mesh, placements=x_placements)
+            y_dt = d_randn(64, 64, device_mesh=device_mesh, placements=y_placements)
+            for i in range(2):
+                torch._dynamo.decorators.mark_unbacked(x_dt, i)
+                torch._dynamo.decorators.mark_unbacked(y_dt, i)
+
+            # full-graph capture
+            torch._dynamo.reset()
+            fn = torch.compile(torch.mm, backend="aot_eager", fullgraph=True)
+            out = fn(x_dt, y_dt)
+
+            # check output placements
+            self.assertEqual(out.placements, out_placements)
+
+        test_placements(
+            (Replicate(), Replicate()),
+            (Replicate(), Replicate()),
+            (Replicate(), Replicate()),
+        )
+        test_placements(
+            (Replicate(), Shard(1)), (Replicate(), Shard(0)), (Replicate(), Partial())
+        )
+        test_placements(
+            (Replicate(), Shard(0)), (Replicate(), Replicate()), (Replicate(), Shard(0))
+        )
+
+    @unittest.skipIf(not HAS_GPU, "requires GPU for RNG support")
+    def test_dtensor_matmul_zero_size_shards(self):
+        from torch.distributed.tensor import randn as d_randn
+
+        cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
+
+        dist.destroy_process_group()
+        dist.init_process_group("fake", store=FakeStore(), rank=0, world_size=4)
+        device_mesh = init_device_mesh(self.device_type, (2, 2))
+
+        # create DTensors with unbacked outer/inner sizes
+        px, py = (Replicate(), Shard(1)), (Replicate(), Shard(0))
+        x_dt = d_randn(64, 64, device_mesh=device_mesh, placements=px)
+        y_dt = d_randn(64, 64, device_mesh=device_mesh, placements=py)
+        for i in range(2):
+            torch._dynamo.decorators.mark_unbacked(x_dt, i)
+            torch._dynamo.decorators.mark_unbacked(y_dt, i)
+
+        # full-graph capture
+        fn = torch.compile(torch.mm, backend=cnt, fullgraph=True)
+        fn(x_dt, y_dt)
+
+        # check zero-size shards
+        for m in [3, 0]:  # n, k = 0 cause recompiles on strides
+            dx = d_randn(m, 1, device_mesh=device_mesh, placements=px)
+            dy = d_randn(1, 1, device_mesh=device_mesh, placements=py)
+            c_out, eager_out = fn(dx, dy), torch.mm(dx, dy)
+            self.assertEqual(tuple(c_out.shape), (m, 1))
+            self.assertEqual(cnt.frame_count, 1)
+            self.assertEqual(c_out.shape, eager_out.shape)
 
     def test_dtensor_requires_grad_recompile(self):
         cnt = torch._dynamo.testing.CompileCounterWithBackend("aot_eager")
@@ -844,6 +931,48 @@ def forward(self, b_parametrizations_buffer_original0, x):
 
         out_ref = fn(dt)
         out_test = fn_opt(dt)
+        self.assertEqual(out_ref, out_test)
+
+    def test_dynamo_from_local_grad_placements_sequence_intermediate(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        placements = PytreeTuple(Shard(0))
+
+        def fn(x):
+            dt = DTensor.from_local(
+                x,
+                mesh,
+                placements=placements,
+                run_check=False,
+            )
+            return dt.to_local() + 2
+
+        fn_opt = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x = torch.ones(4)
+
+        out_ref = fn(x)
+        out_test = fn_opt(x)
+        self.assertEqual(out_ref, out_test)
+
+    def test_dynamo_from_local_grad_placements_sequence_intermediate_as_args(self):
+        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+
+        placements = PytreeTuple(Shard(0))
+
+        def fn(x):
+            dt = DTensor.from_local(
+                x,
+                mesh,
+                placements,
+                run_check=False,
+            )
+            return dt.to_local() + 2
+
+        fn_opt = torch.compile(fn, backend="aot_eager", fullgraph=True)
+        x = torch.ones(4)
+
+        out_ref = fn(x)
+        out_test = fn_opt(x)
         self.assertEqual(out_ref, out_test)
 
     def test_dynamo_to_local_kwargs(self):
@@ -1424,6 +1553,32 @@ class TestDTensorCompileE2E(DTensorTestBase):
         replicated_inp = DTensor.from_local(inp, mesh, [Replicate()], run_check=False)
         output = sharded_net(replicated_inp)
         self.assertEqual(output.full_tensor(), ref_out)
+
+    @with_comms
+    def test_split_with_symint_split_size(self):
+        """
+        Test that split works with symbolic integer split_size when using
+        torch.compile with dynamic=True.
+        """
+        mesh = self.build_device_mesh()
+        placements = [Replicate()]
+
+        global_tensor = torch.randn(8, 8, device=self.device_type)
+        input_dt = distribute_tensor(global_tensor, mesh, placements)
+
+        def split_fn(x, split_size):
+            return torch.split(x, split_size, dim=0)
+
+        compiled_split_fn = torch.compile(split_fn, dynamic=True)
+
+        # Test with different split sizes: evenly divisible and not evenly divisible
+        for split_size in [2, 3, 4]:
+            expected = split_fn(global_tensor, split_size)
+            result = compiled_split_fn(input_dt, split_size)
+
+            self.assertEqual(len(result), len(expected))
+            for dt_chunk, tensor_chunk in zip(result, expected):
+                self.assertEqual(dt_chunk.full_tensor(), tensor_chunk)
 
 
 if __name__ == "__main__":

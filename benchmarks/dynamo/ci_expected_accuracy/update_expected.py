@@ -82,8 +82,15 @@ def query_job_sha(repo, sha):
     }
     # If you are a Meta employee, go to P1679979893 to get the id and secret.
     # Otherwise, ask a Meta employee give you the id and secret.
-    KEY_ID = os.environ["CH_KEY_ID"]
-    KEY_SECRET = os.environ["CH_KEY_SECRET"]
+    try:
+        KEY_ID = os.environ["CH_KEY_ID"]
+        KEY_SECRET = os.environ["CH_KEY_SECRET"]
+    except KeyError as e:
+        raise RuntimeError(
+            "CH_KEY_ID and CH_KEY_SECRET environment variables must be set. "
+            "If you are a Meta employee, go to P1679979893 to get the id and secret. "
+            "Otherwise, ask a Meta employee to give you the id and secret."
+        ) from e
 
     r = requests.post(
         url=ARTIFACTS_QUERY_URL,
@@ -105,7 +112,7 @@ def parse_test_str(test_str):
 S3_BASE_URL = "https://gha-artifacts.s3.amazonaws.com"
 
 
-def get_artifacts_urls(results, suites):
+def get_artifacts_urls(results, suites, is_rocm=False):
     urls = {}
     for r in results:
         if (
@@ -115,6 +122,17 @@ def get_artifacts_urls(results, suites):
             and "runner-determinator" not in r["jobName"]
             and "unit-test" not in r["jobName"]
         ):
+            # Filter out CUDA-13 jobs so it won't override CUDA-12 results.
+            # The result files should be shared between CUDA-12 and CUDA-13, but
+            # CUDA-13 skips more tests at the moment.
+            if "cuda13" in r["jobName"]:
+                continue
+
+            # Filter based on whether this is a ROCm or CUDA job
+            job_is_rocm = "rocm" in r["jobName"].lower()
+            if job_is_rocm != is_rocm:
+                continue
+
             *_, test_str = parse_job_name(r["jobName"])
             suite, shard_id, num_shards, machine, *_ = parse_test_str(test_str)
             workflowId = r["workflowId"]
@@ -125,7 +143,6 @@ def get_artifacts_urls(results, suites):
                 artifact_filename = f"test-reports-test-{suite}-{shard_id}-{num_shards}-{machine}_{id}.zip"
                 s3_url = f"{S3_BASE_URL}/{repo}/{workflowId}/{runAttempt}/artifact/{artifact_filename}"
                 urls[(suite, int(shard_id))] = s3_url
-                print(f"{suite} {shard_id}, {num_shards}: {s3_url}")
     return urls
 
 
@@ -146,17 +163,28 @@ def download_artifacts_and_extract_csvs(urls):
             subsuite = normalize_suite_filename(suite)
             artifact = ZipFile(BytesIO(resp.read()))
             for phase in ("training", "inference"):
-                name = f"test/test-reports/{phase}_{subsuite}.csv"
-                try:
-                    df = pd.read_csv(artifact.open(name))
-                    df["graph_breaks"] = df["graph_breaks"].fillna(0).astype(int)
-                    prev_df = dataframes.get((suite, phase), None)
-                    dataframes[(suite, phase)] = (
-                        pd.concat([prev_df, df]) if prev_df is not None else df
-                    )
-                except KeyError:
+                # Try both paths - CUDA uses test/test-reports/, ROCm uses test-reports/
+                possible_names = [
+                    f"test/test-reports/{phase}_{subsuite}.csv",
+                    f"test-reports/{phase}_{subsuite}.csv",
+                ]
+                found = False
+                for name in possible_names:
+                    try:
+                        df = pd.read_csv(artifact.open(name))
+                        df["graph_breaks"] = df["graph_breaks"].fillna(0).astype(int)
+                        prev_df = dataframes.get((suite, phase), None)
+                        dataframes[(suite, phase)] = (
+                            pd.concat([prev_df, df]) if prev_df is not None else df
+                        )
+                        found = True
+                        break
+                    except KeyError:
+                        continue
+                if not found and phase == "inference":
+                    # No warning for training, since it's expected to be missing for some tests
                     print(
-                        f"Warning: Unable to find {name} in artifacts file from {url}, continuing"
+                        f"Warning: Unable to find {phase}_{subsuite}.csv in artifacts file from {url}, continuing"
                     )
         except urllib.error.HTTPError:
             print(f"Unable to download {url}, perhaps the CI job isn't finished?")
@@ -167,6 +195,7 @@ def download_artifacts_and_extract_csvs(urls):
 def write_filtered_csvs(root_path, dataframes):
     for (suite, phase), df in dataframes.items():
         out_fn = os.path.join(root_path, f"{suite}_{phase}.csv")
+        df = df.sort_values(by="name")
         df.to_csv(out_fn, index=False, columns=["name", "accuracy", "graph_breaks"])
         apply_lints(out_fn)
 
@@ -217,9 +246,19 @@ if __name__ == "__main__":
 
     root_path = "benchmarks/dynamo/ci_expected_accuracy/"
     assert os.path.exists(root_path), f"cd <pytorch root> and ensure {root_path} exists"
+    rocm_path = "benchmarks/dynamo/ci_expected_accuracy/rocm/"
+    assert os.path.exists(rocm_path), f"cd <pytorch root> and ensure {rocm_path} exists"
 
     results = query_job_sha(repo, args.sha)
-    urls = get_artifacts_urls(results, suites)
-    dataframes = download_artifacts_and_extract_csvs(urls)
-    write_filtered_csvs(root_path, dataframes)
+
+    print("Processing CUDA jobs...")
+    cuda_urls = get_artifacts_urls(results, suites, is_rocm=False)
+    cuda_dataframes = download_artifacts_and_extract_csvs(cuda_urls)
+    write_filtered_csvs(root_path, cuda_dataframes)
+
+    print("Processing ROCm jobs...")
+    rocm_urls = get_artifacts_urls(results, suites, is_rocm=True)
+    rocm_dataframes = download_artifacts_and_extract_csvs(rocm_urls)
+    write_filtered_csvs(rocm_path, rocm_dataframes)
+
     print("Success. Now, confirm the changes to .csvs and `git add` them if satisfied.")

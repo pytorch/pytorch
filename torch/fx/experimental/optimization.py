@@ -193,7 +193,7 @@ def modules_to_mkldnn(nodes: list[fx.Node], modules: dict[str, nn.Module]):
             assert isinstance(node.target, str)
             cur_module = modules[node.target]
             if type(cur_module) in mkldnn_map:
-                # pyrefly: ignore [index-error]
+                # pyrefly: ignore [bad-index, index-error]
                 new_module = mkldnn_map[type(cur_module)](cur_module, torch.float)
                 assert isinstance(new_module, nn.Module)
                 old_modules[new_module] = copy.deepcopy(cur_module)

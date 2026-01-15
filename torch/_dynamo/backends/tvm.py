@@ -79,7 +79,7 @@ def tvm(
     opt_level = options.get("opt_level", 3)
 
     if scheduler == "auto_scheduler":
-        # pyrefly: ignore [import-error]
+        # pyrefly: ignore [import-error, missing-import]
         from tvm import auto_scheduler
 
         with (
@@ -91,7 +91,7 @@ def tvm(
         ):
             lib = relay.build(mod, target=target, params=params)
     elif scheduler == "meta_schedule":
-        # pyrefly: ignore [import-error]
+        # pyrefly: ignore [import-error, missing-import]
         from tvm import meta_schedule as ms
 
         with tempfile.TemporaryDirectory() as work_dir:

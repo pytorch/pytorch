@@ -43,6 +43,7 @@ class CaptureControl:
 
 class DataFrameTracedOps(DFIterDataPipe):
     def __init__(self, source_datapipe, output_var) -> None:
+        super().__init__()
         self.source_datapipe = source_datapipe
         self.output_var = output_var
 
@@ -191,6 +192,7 @@ class Capture:
 
 class CaptureF(Capture):
     def __init__(self, ctx=None, **kwargs) -> None:
+        super().__init__()
         if ctx is None:
             self.ctx = {"operations": [], "variables": []}
         else:
@@ -228,6 +230,7 @@ class CaptureLikeMock:
 
 class CaptureCall(Capture):
     def __init__(self, callable, ctx=None, **kwargs) -> None:
+        super().__init__()
         if ctx is None:
             self.ctx = {"operations": [], "variables": []}
         else:
@@ -267,6 +270,7 @@ class CaptureVariable(Capture):
     names_idx = 0
 
     def __init__(self, value, ctx) -> None:
+        super().__init__()
         if CaptureControl.disabled:
             raise RuntimeError("Attempting to create capture variable with capture off")
         self.ctx = ctx
@@ -293,6 +297,7 @@ class CaptureVariable(Capture):
 
 class CaptureGetItem(Capture):
     def __init__(self, left, key, ctx) -> None:
+        super().__init__()
         self.ctx = ctx
         self.left = left
         self.key = key
@@ -307,6 +312,7 @@ class CaptureGetItem(Capture):
 
 class CaptureSetItem(Capture):
     def __init__(self, left, key, value, ctx) -> None:
+        super().__init__()
         self.ctx = ctx
         self.left = left
         self.key = key
@@ -323,6 +329,7 @@ class CaptureSetItem(Capture):
 
 class CaptureAdd(Capture):
     def __init__(self, left, right, ctx) -> None:
+        super().__init__()
         self.ctx = ctx
         self.left = left
         self.right = right
@@ -336,6 +343,7 @@ class CaptureAdd(Capture):
 
 class CaptureMul(Capture):
     def __init__(self, left, right, ctx) -> None:
+        super().__init__()
         self.ctx = ctx
         self.left = left
         self.right = right
@@ -349,6 +357,7 @@ class CaptureMul(Capture):
 
 class CaptureSub(Capture):
     def __init__(self, left, right, ctx) -> None:
+        super().__init__()
         self.ctx = ctx
         self.left = left
         self.right = right
@@ -362,6 +371,7 @@ class CaptureSub(Capture):
 
 class CaptureGetAttr(Capture):
     def __init__(self, src, name, ctx) -> None:
+        super().__init__()
         self.ctx = ctx
         self.src = src
         self.name = name
