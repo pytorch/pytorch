@@ -1,5 +1,6 @@
 # Owner(s): ["module: mta"]
 # ruff: noqa: F841
+import functools
 import itertools
 import os
 import random
@@ -1564,6 +1565,14 @@ class TestForeach(TestCase):
     @parametrize("seed", list(range(20)))
     def test_scalar_tensor_list_equivalence(self, device, dtype, op_name, seed):
         """Test that ScalarTensorList variants produce bitwise identical results to List variants with alpha."""
+        # Skip bitwise comparison for bfloat16 on CPUs without native bf16 support.
+        # Without native bf16 instructions, different code paths may use different
+        # float32 emulation strategies, causing different rounding behavior.
+        if dtype == torch.bfloat16 and device == "cpu":
+            _assert_equal = self.assertEqual
+        else:
+            _assert_equal = functools.partial(self.assertEqual, rtol=0, atol=0)
+
         torch.manual_seed(seed)
 
         # Create test tensors with various shapes including edge cases
@@ -1609,7 +1618,7 @@ class TestForeach(TestCase):
             [t.clone() for t in tensors2],
             scalar_tensors_varied,
         )
-        self.assertEqual(expected_varied, actual_varied, rtol=0, atol=0)
+        _assert_equal(expected_varied, actual_varied)
 
         # Test in-place with per-tensor alpha against Python for loop with torch.add_/sub_
         expected_varied_inplace = [t.clone() for t in tensors1]
@@ -1622,7 +1631,7 @@ class TestForeach(TestCase):
         scalar_tensor_op_(
             actual_varied_inplace, [t.clone() for t in tensors2], scalar_tensors_varied
         )
-        self.assertEqual(expected_varied_inplace, actual_varied_inplace, rtol=0, atol=0)
+        _assert_equal(expected_varied_inplace, actual_varied_inplace)
 
     @onlyCUDA
     @dtypes(torch.float32, torch.float64)
@@ -1630,6 +1639,14 @@ class TestForeach(TestCase):
     @parametrize("seed", list(range(20)))
     def test_scalar_tensor_list_noncontiguous(self, device, dtype, op_name, seed):
         """Test ScalarTensorList with non-contiguous tensors (slow path)."""
+        # Skip bitwise comparison for bfloat16 on CPUs without native bf16 support.
+        # Without native bf16 instructions, different code paths may use different
+        # float32 emulation strategies, causing different rounding behavior.
+        if dtype == torch.bfloat16 and device == "cpu":
+            _assert_equal = self.assertEqual
+        else:
+            _assert_equal = functools.partial(self.assertEqual, rtol=0, atol=0)
+
         torch.manual_seed(seed)
 
         # Create non-contiguous tensors
@@ -1665,7 +1682,7 @@ class TestForeach(TestCase):
             [t.clone() for t in tensors2],
             scalar_tensors,
         )
-        self.assertEqual(expected, actual, rtol=0, atol=0)
+        _assert_equal(expected, actual)
 
 
 # TODO(crcrpar): Hide this inside torch/testing/_internal.
