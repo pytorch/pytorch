@@ -286,7 +286,7 @@ class _PyTreeInfo(NamedTuple):
     out_spec: Optional[pytree.TreeSpec]
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _ParsedStackTrace:
     """
     Represents the top-most frame of a parsed stack trace
