@@ -69,14 +69,12 @@ def register_binary_linear_inplace(op: OpType, out_of_place_impl: Callable):
 
 @register_complex(aten.real)
 def real_impl(self: ComplexTensor) -> torch.Tensor:
-    re, _ = split_complex_tensor(self)
-    return re
+    return self.re
 
 
 @register_complex(aten.imag)
 def imag_impl(self: ComplexTensor) -> torch.Tensor:
-    _, im = split_complex_tensor(self)
-    return im
+    return self.im
 
 
 @register_complex(aten.is_pinned)
@@ -721,7 +719,7 @@ def logical_not_impl(self: ComplexTensor, *args: Any, **kwargs: Any) -> torch.Te
 
 @register_complex(aten.view_as_real)
 def view_as_real_impl(self: ComplexTensor) -> torch.Tensor:
-    return self._data
+    return aten.alias(self._data)
 
 
 @register_complex(aten.linalg_vector_norm)
@@ -795,14 +793,14 @@ def conj_physical_impl(self: ComplexTensor) -> ComplexTensor:
 @register_complex(aten._conj)
 def _conj_impl(self: ComplexTensor) -> ComplexTensor:
     return ComplexTensor(
-        self._data, neg_flag=self.is_neg(), conj_flag=not self.is_conj()
+        aten.alias(self._data), neg_flag=self.is_neg(), conj_flag=not self.is_conj()
     )
 
 
 @register_complex(aten._neg_view)
 def _neg_impl(self: ComplexTensor) -> ComplexTensor:
     return ComplexTensor(
-        self._data, neg_flag=not self.is_neg(), conj_flag=self.is_conj()
+        aten.alias(self._data), neg_flag=not self.is_neg(), conj_flag=self.is_conj()
     )
 
 
