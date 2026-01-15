@@ -409,6 +409,11 @@ def register_symm_mem_lowerings():
     """
     try:
         symm_mem = torch.ops.symm_mem
+        # Check for an actual operation, not just the namespace.
+        # torch.ops.symm_mem is a lazy namespace that always exists,
+        # but the operations may not exist on non-CUDA platforms or
+        # when USE_DISTRIBUTED is disabled.
+        symm_mem.one_shot_all_reduce
     except AttributeError:
         log.info("symm_mem ops not available, skipping symm_mem lowerings")
         return
