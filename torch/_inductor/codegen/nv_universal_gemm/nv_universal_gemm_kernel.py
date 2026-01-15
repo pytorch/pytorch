@@ -143,12 +143,10 @@ class NVUniversalGemmKernel(Kernel):
             extra_imports = """from cutlass_api.arguments import ScaledTensor
             from cutlass_api.library import ScaleMode, ScaleSwizzleMode"""
 
-        # Variant-specific code generation with canonical hook points:
-        # - preprocess_inputs: input transformations before cache check
+        # Variant-specific code generation:
+        # - preprocess_inputs: input transformations before args creation
         # - cache_key_code: expression for cache key
         # - create_args_code: code to create Arguments object
-        # - populate_args: code to update all runtime tensor references
-        # - clear_args: code to clear all runtime tensor references
         if is_grouped:
             preprocess_inputs = """# Transpose B from K-major to N-major for CUTLASS compatibility
                 in_ptr1_transposed = in_ptr1.permute(0, 2, 1).contiguous().permute(0, 2, 1)"""
@@ -160,14 +158,6 @@ class NVUniversalGemmKernel(Kernel):
                         accumulator_type={acc_dtype_str},
                         offsets=in_ptr2,
                     )"""
-            populate_args = """args.A.tensor.runtime_tensor = in_ptr0
-                args.B.tensor.runtime_tensor = in_ptr1_transposed
-                args.out.tensor.runtime_tensor = out_ptr0
-                args.offsets.tensor.runtime_tensor = in_ptr2"""
-            clear_args = """args.A.tensor.runtime_tensor = None
-                args.B.tensor.runtime_tensor = None
-                args.out.tensor.runtime_tensor = None
-                args.offsets.tensor.runtime_tensor = None"""
         elif is_scaled:
             # SCALED_GEMM: FP8 with block-scaled inputs (MXFP8)
             # Input order: in_ptr0=A, in_ptr1=B, in_ptr2=scale_a, in_ptr3=scale_b
@@ -188,27 +178,17 @@ class NVUniversalGemmKernel(Kernel):
             preprocess_inputs = ""
             cache_key_code = "(in_ptr0.shape, in_ptr0.dtype, in_ptr1.shape, in_ptr1.dtype, in_ptr2.shape, in_ptr3.shape)"
             create_args_code = f"""scaled_a = ScaledTensor(
-                        in_ptr0, in_ptr2, ScaleMode.{scale_mode_a_str}, ScaleSwizzleMode.{swizzle_mode_a_str}
-                    )
-                    scaled_b = ScaledTensor(
-                        in_ptr1, in_ptr3, ScaleMode.{scale_mode_b_str}, ScaleSwizzleMode.{swizzle_mode_b_str}
-                    )
-                    args = cutlass_api.arguments.GemmArguments(
-                        scaled_a,
-                        scaled_b,
-                        out_ptr0,
-                        accumulator_type={acc_dtype_str},
-                    )"""
-            populate_args = """args.A.tensor.runtime_tensor = in_ptr0
-                args.A.scale.runtime_tensor = in_ptr2
-                args.B.tensor.runtime_tensor = in_ptr1
-                args.B.scale.runtime_tensor = in_ptr3
-                args.out.tensor.runtime_tensor = out_ptr0"""
-            clear_args = """args.A.tensor.runtime_tensor = None
-                args.A.scale.runtime_tensor = None
-                args.B.tensor.runtime_tensor = None
-                args.B.scale.runtime_tensor = None
-                args.out.tensor.runtime_tensor = None"""
+                    in_ptr0, in_ptr2, ScaleMode.{scale_mode_a_str}, ScaleSwizzleMode.{swizzle_mode_a_str}
+                )
+                scaled_b = ScaledTensor(
+                    in_ptr1, in_ptr3, ScaleMode.{scale_mode_b_str}, ScaleSwizzleMode.{swizzle_mode_b_str}
+                )
+                args = cutlass_api.arguments.GemmArguments(
+                    scaled_a,
+                    scaled_b,
+                    out_ptr0,
+                    accumulator_type={acc_dtype_str},
+                )"""
         else:
             preprocess_inputs = ""
             cache_key_code = (
@@ -220,12 +200,6 @@ class NVUniversalGemmKernel(Kernel):
                         out_ptr0,
                         accumulator_type={acc_dtype_str},
                     )"""
-            populate_args = """args.A.tensor.runtime_tensor = in_ptr0
-                args.B.tensor.runtime_tensor = in_ptr1
-                args.out.tensor.runtime_tensor = out_ptr0"""
-            clear_args = """args.A.tensor.runtime_tensor = None
-                args.B.tensor.runtime_tensor = None
-                args.out.tensor.runtime_tensor = None"""
 
         code = IndentedBuffer()
         code.splice(
@@ -236,16 +210,6 @@ class NVUniversalGemmKernel(Kernel):
             {extra_imports}
 
             {kernel_name_var} = "{kernel_name_str}"
-
-            # Caching strategy for NVGEMM kernels:
-            # - Global kernel cache (in kernel_cache.py): kernel_name -> kernel object
-            #   Built lazily on first access, shared across all NVGEMM kernels
-            # - compiled_cache: stores (Arguments, artifact) tuple per (shape, dtype)
-            #   - Arguments: tensor wrapper object
-            #   - artifact: compiled GPU binary
-            # On subsequent calls, we reuse cached args and just update tensor pointers (A, B, out).
-            # After kernel.run(), we clear tensor references to avoid holding them in the cache,
-            # which would interfere with CUDA graph trees memory tracking.
             {cache_var} = {{}}
 
             def {self.kernel_name}_main({params_str}):
@@ -257,20 +221,14 @@ class NVUniversalGemmKernel(Kernel):
 
                 {preprocess_inputs}
 
+                {create_args_code}
+
                 cache_key = {cache_key_code}
-
                 if cache_key not in {cache_var}:
-                    {create_args_code}
-                    artifact = kernel.compile(args)
-                    {cache_var}[cache_key] = (args, artifact)
-                else:
-                    args, artifact = {cache_var}[cache_key]
+                    {cache_var}[cache_key] = kernel.compile(args)
 
-                {populate_args}
-
+                artifact = {cache_var}[cache_key]
                 kernel.run(args, artifact, stream=stream, workspace={workspace_arg}, assume_supported_args=True)
-
-                {clear_args}
             """
         )
 
