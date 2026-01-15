@@ -13,12 +13,14 @@ namespace {
 static constexpr int64_t kILP = 4;
 static constexpr int64_t kChunkSize = 65536;
 static constexpr int64_t kBlockSize = 512;
+static constexpr dim3 kBlockSizeDim = dim3(32, 16);
 
 // TODO(crcrpar): Add `n>5` for `low prec params & their higher prec copy`
 // TensorListMetadata has to be < 4KB - the limit for kernel launch argument
-static constexpr int dim_depth_to_max_blocks[5] = {2048, 2048, 2048, 2048, 2048};
 static constexpr int depth_to_max_tensors[5] = {110, 64, 48, 36, 30};
 static constexpr int depth_to_max_blocks[5] = {320, 320, 320, 320, 320};
+static constexpr int depth_to_max_blocks_dim[5] = {490, 490, 490, 490, 490};
+static constexpr int depth_to_max_tensors_dim[5] = {50, 40, 34, 29, 25};
 static constexpr int depth_to_max_tensors_scalarlist[5] = {96, 64, 48, 36, 30};
 static constexpr int depth_to_max_tensors_scalarlist_of_complex_double[2] = {
     72,
@@ -50,14 +52,14 @@ struct TensorListMetadata {
 
 template <int n>
 struct TensorListDimMetadata {
-  const void* addresses[n][depth_to_max_tensors[n - 1]];
-  int64_t num_rows[depth_to_max_tensors[n - 1]];      // rows per tensor
-  int64_t num_cols[depth_to_max_tensors[n - 1]];      // cols per tensor  
-  int64_t row_stride[depth_to_max_tensors[n - 1]];    // stride between rows
-  unsigned char block_to_tensor[dim_depth_to_max_blocks[n - 1]];
-  int block_to_row_or_col[dim_depth_to_max_blocks[n - 1]]; // which row/col this block handles
-  int start_tensor_this_launch;
-  int reduce_dim;  // 0 = reduce across rows (output per col), 1 = reduce across cols (output per row)
+  const void* addresses[n][depth_to_max_tensors_dim[n - 1]];  // 8nT bytes
+  int64_t num_rows[depth_to_max_tensors_dim[n - 1]];      // rows per tensor, 8T bytes
+  int64_t num_cols[depth_to_max_tensors_dim[n - 1]];      // cols per tensor, 8T bytes  
+  int64_t row_stride[depth_to_max_tensors_dim[n - 1]];    // stride between rows, 8T bytes
+  unsigned char block_to_tensor[depth_to_max_blocks_dim[n - 1]];  // B bytes
+  int block_to_chunk[depth_to_max_blocks_dim[n - 1]]; // which row/col this block handles, // 4B bytes
+  int start_tensor_this_launch;  // 4 bytes
+  int reduce_dim;  // 0 = reduce across rows (col-wise norm), 1 = reduce across cols (row-wise norm), // 4 bytes
 };
 
 template <typename scalar_vals_t, int n>
@@ -427,29 +429,29 @@ void multi_tensor_apply_dim(
     }
     loc_tensor_info++;
 
-    // Map blocks to rows or columns
-    const int64_t num_outputs = reduce_dim == 1 ? tensor.size(0) : tensor.size(1);
-    for (int64_t idx = 0; idx < num_outputs; idx++) {
+    int outer_dim_size = reduce_dim == 1 ? tensor.size(0) : tensor.size(1);
+    const int64_t num_chunks_per_tensor = (outer_dim_size + 15) / 16;  // 16 rows per chunk. 
+    for (int64_t idx = 0; idx < num_chunks_per_tensor; idx++) {
       tensorListMeta.block_to_tensor[loc_block_info] = loc_tensor_info - 1;
-      tensorListMeta.block_to_row_or_col[loc_block_info] = idx;
+      tensorListMeta.block_to_chunk[loc_block_info] = idx;
       loc_block_info++;
 
       const bool tensors_full =
-          (loc_tensor_info == depth_to_max_tensors[depth - 1] &&
-           idx == num_outputs - 1);
+          (loc_tensor_info == depth_to_max_tensors_dim[depth - 1] &&
+           idx == num_chunks_per_tensor - 1);
       const bool blocks_full =
-          (loc_block_info == dim_depth_to_max_blocks[depth - 1]);
+          (loc_block_info == depth_to_max_blocks_dim[depth - 1]);
 
       if (tensors_full || blocks_full) {
         multi_tensor_apply_kernel<<<
-            loc_block_info, kBlockSize, 0,
+            loc_block_info, kBlockSizeDim, 0,
             at::cuda::getCurrentCUDAStream()>>>(
             tensorListMeta, callable, args...);
         C10_CUDA_KERNEL_LAUNCH_CHECK();
 
         // Reset logic similar to existing multi_tensor_apply
         loc_block_info = 0;
-        if (idx == num_outputs - 1) {
+        if (idx == num_chunks_per_tensor - 1) {
           loc_tensor_info = 0;
           tensorListMeta.start_tensor_this_launch = processed;
         } else {
@@ -470,7 +472,7 @@ void multi_tensor_apply_dim(
   // Launch remaining work
   if (loc_block_info != 0) {
     multi_tensor_apply_kernel<<<
-        loc_block_info, kBlockSize, 0,
+        loc_block_info, kBlockSizeDim, 0,
         at::cuda::getCurrentCUDAStream()>>>(tensorListMeta, callable, args...);
     C10_CUDA_KERNEL_LAUNCH_CHECK();
   }
