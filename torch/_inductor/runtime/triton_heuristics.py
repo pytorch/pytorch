@@ -4007,8 +4007,6 @@ class GridExpr:
 
     def product(self, seq: list[int | str]) -> int | str:
         """Codegen for product function with constant folding, constants are represented as int"""
-        import math
-
         items = self._constant_fold(math.prod, seq)
         if len(items) <= 1:
             return items[0]
