@@ -39,9 +39,6 @@ verbose = os.environ.get("TORCHDYNAMO_VERBOSE", "0") == "1"
 # [@compile_ignored: runtime_behaviour] verify the correctness of optimized backend
 verify_correctness = False
 
-# need this many ops to create an FX graph (deprecated: not used)
-minimum_call_count = 1
-
 # turn on/off DCE pass (deprecated: always true)
 dead_code_elimination = True
 
