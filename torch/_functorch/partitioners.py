@@ -1029,7 +1029,7 @@ def _extract_fwd_bwd_modules(
             for i in range(len(saved_values))
         ]
         + [
-            SavedForBackwardsAOTOutput(i)
+            SavedForBackwardsAOTOutput(len(saved_values) + i)
             for i in range(len(saved_opaque_objects) + len(saved_sym_nodes))
         ],
         "forward",
