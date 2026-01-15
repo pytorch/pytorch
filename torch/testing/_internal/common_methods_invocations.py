@@ -6978,6 +6978,8 @@ def skips_mvlgamma(skip_redundant=False):
         DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                      'test_reference_numerics_small',
                      dtypes=(torch.int8,)),
+        # NotImplementedError: The operator 'aten::mvlgamma.out' is not currently implemented for the MPS device
+        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
     )
     if skip_redundant:
         # Redundant tests
@@ -14258,6 +14260,10 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes'),
                # Strides are not the same!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
+               # NotImplementedError: The operator 'aten::geqrf' is not currently implemented for the MPS device
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
            )),
     BinaryUfuncInfo('gt',
                     ref=np.greater,
@@ -14846,12 +14852,18 @@ op_db: list[OpInfo] = [
     OpInfo('var_mean',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
+           dtypesIfMPS=floating_and_complex_types_and(
+               torch.half, torch.bfloat16, torch.int32, torch.uint8, torch.bool, torch.int8, torch.int16
+           ),
            sample_inputs_func=sample_inputs_std_var,
            # TODO: some signatures of var_mean do support out
            supports_out=False,
            supports_forward_ad=True,
            check_batched_forward_grad=False,
            supports_fwgrad_bwgrad=True,
+           skips=(
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values', device_type='mps'),
+           ),
            decorators=(
                DecorateInfo(toleranceOverride({torch.float64: tol(atol=2e-7, rtol=2e-7)}),
                             "TestDecomp", "test_comprehensive", device_type="cuda"),
@@ -14862,6 +14874,9 @@ op_db: list[OpInfo] = [
            variant_test_name='unbiased',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
+           dtypesIfMPS=floating_and_complex_types_and(
+               torch.half, torch.bfloat16, torch.int32, torch.uint8, torch.bool, torch.int8, torch.int16
+           ),
            sample_inputs_func=sample_inputs_std_var_unbiased,
            # TODO: some signatures of var_mean do support out
            supports_out=False,
@@ -16406,6 +16421,9 @@ op_db: list[OpInfo] = [
                # Compiler issue on ROCm. Regression started in ROCm 6.4.
                DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_non_standard_bool_values',
                             dtypes=[torch.bool], active_if=TEST_WITH_ROCM),
+               # RuntimeError: Failed to create function state object for: col2im_kernel_float2
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
            )),
     OpInfo('nn.functional.interpolate',
            aten_name="interpolate",
@@ -17965,15 +17983,30 @@ op_db: list[OpInfo] = [
            sample_inputs_func=sample_inputs_mode,),
     make_mvlgamma_opinfo(variant_test_name='mvlgamma_p_1',
                          domain=(1, None),
-                         skips=skips_mvlgamma(),
+                         skips=skips_mvlgamma() + (
+                             # NotImplementedError: The operator 'aten::mvlgamma.out' is not currently
+                             # implemented for the MPS device
+                             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
+                             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
+                         ),
                          sample_kwargs=lambda device, dtype, input: ({'p': 1}, {'d': 1})),
     make_mvlgamma_opinfo(variant_test_name='mvlgamma_p_3',
                          domain=(2, None),
-                         skips=skips_mvlgamma(),
+                         skips=skips_mvlgamma() + (
+                             # NotImplementedError: The operator 'aten::mvlgamma.out' is not currently
+                             # implemented for the MPS device
+                             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
+                             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
+                         ),
                          sample_kwargs=lambda device, dtype, input: ({'p': 3}, {'d': 3})),
     make_mvlgamma_opinfo(variant_test_name='mvlgamma_p_5',
                          domain=(3, None),
-                         skips=skips_mvlgamma(),
+                         skips=skips_mvlgamma() + (
+                             # NotImplementedError: The operator 'aten::mvlgamma.out' is not currently
+                             # implemented for the MPS device
+                             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
+                             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
+                         ),
                          sample_kwargs=lambda device, dtype, input: ({'p': 5}, {'d': 5})),
     BinaryUfuncInfo('ne',
                     ref=np.not_equal,
@@ -18896,6 +18929,14 @@ op_db: list[OpInfo] = [
                             device_type='mps', dtypes=[torch.float32]),
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             device_type='mps', dtypes=[torch.float32]),
+               # RuntimeError: linalg.solve.triangular(); Only float is supported!
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
+               # AssertionError: Tensor-likes are not close!
+               DecorateInfo(
+                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
+                   device_type='mps', dtypes=(torch.float32,)
+               ),
            )),
     UnaryUfuncInfo('trunc',
                    aliases=('fix', ),
@@ -20744,6 +20785,8 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, "TestNormalizeOperators", "test_normalize_operator_exhaustive"),
                # Skip operator schema test because this is a functional and not an operator
                DecorateInfo(unittest.expectedFailure, 'TestOperatorSignatures', 'test_get_torch_func_signature_exhaustive'),
+               # RuntimeError: Failed to create function state object for: unfold_backward_float2
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
            ),
            sample_inputs_func=sample_inputs_unfold),
     OpInfo('unfold_copy',
@@ -20757,6 +20800,17 @@ op_db: list[OpInfo] = [
            check_batched_gradgrad=False,
            # See https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
+           skips=(
+               # RuntimeError: Failed to create function state object for: unfold_backward_float2
+               DecorateInfo(
+                   unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
+                   device_type='mps', dtypes=(torch.complex64,)
+               ),
+               DecorateInfo(
+                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
+                   device_type='mps', dtypes=(torch.complex64,)
+               ),
+           ),
            sample_inputs_func=sample_inputs_unfold),
     OpInfo('msort',
            dtypes=all_types_and(torch.bool, torch.float16, torch.bfloat16),
@@ -22521,6 +22575,19 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_duplicate_values'),
             # NumPy is giving NaN for this
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_ref_large_input'),
+            # RuntimeError: var does not support automatic differentiation for outputs with complex dtype.
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
+                device_type='mps', dtypes=(torch.complex64,)
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
+                device_type='mps', dtypes=(torch.complex64,)
+            ),
+            # NotImplementedError: The operator 'aten::var.correction_out' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
         ),
     ),
     ReductionOpInfo(
@@ -22541,6 +22608,9 @@ op_db: list[OpInfo] = [
             # FIXME: dim=[] reduces all dimensions
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            # RuntimeError: var does not support automatic differentiation for outputs with complex dtype.
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
         ),
     ),
     ReductionOpInfo(
@@ -24052,13 +24122,33 @@ python_ref_db = [
         "_refs.special.multigammaln",
         torch_opinfo_name="mvlgamma",
         torch_opinfo_variant_name="mvlgamma_p_3",
-        skips=skips_mvlgamma(),
+        skips=skips_mvlgamma() + (
+            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                device_type='mps', dtypes=(torch.bfloat16, torch.float16)
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                device_type='mps', dtypes=(torch.bfloat16, torch.float16)
+            ),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.multigammaln",
         torch_opinfo_name="mvlgamma",
         torch_opinfo_variant_name="mvlgamma_p_5",
-        skips=skips_mvlgamma(),
+        skips=skips_mvlgamma() + (
+            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                device_type='mps', dtypes=(torch.bfloat16, torch.float16)
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                device_type='mps', dtypes=(torch.bfloat16, torch.float16)
+            ),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.log",
@@ -26177,12 +26267,42 @@ python_ref_db = [
             # FIXME: improve precision
             DecorateInfo(
                 unittest.skip("Skipped!"), 'TestReductions', 'test_ref_small_input'),
+            # torch._subclasses.fake_tensor.MetadataMismatchError: Dtypes torch.float32 and torch.complex64 are not equal!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(torch.complex64,)),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                device_type='mps', dtypes=(torch.complex64,)
+            ),
         ),
     ),
     PythonRefInfo(
         "_refs.var_mean",
         torch_opinfo_name="var_mean",
         validate_view_consistency=False,
+        skips=(
+            # torch._subclasses.fake_tensor.MetadataMismatchError: Dtypes torch.float32 and torch.complex64 are not equal!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(torch.complex64,)),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                device_type='mps', dtypes=(torch.complex64,)
+            ),
+            # RuntimeError: mean(): could not infer output dtype. Input dtype must be either a floating point or complex dtype
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps',
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps',
+                dtypes=(torch.uint8, torch.int8, torch.int32, torch.int16, torch.bool)
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type='mps',
+                dtypes=(torch.uint8, torch.int8, torch.int32, torch.int16, torch.bool)
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps',
+                dtypes=(torch.uint8, torch.int8, torch.int32, torch.int16, torch.bool)
+            ),
+        ),
     ),
     #
     # Linear Algebra Operators

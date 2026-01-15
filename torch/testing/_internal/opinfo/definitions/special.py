@@ -340,6 +340,8 @@ op_db: list[OpInfo] = [
                 "TestUnaryUfuncs",
                 "test_reference_numerics_large",
             ),
+            # NotImplementedError: The operator 'aten::special_airy_ai.out' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
         supports_autograd=False,
     ),
