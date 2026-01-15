@@ -16,12 +16,7 @@ from torch.testing._internal.common_device_type import (
     instantiate_device_type_tests,
     skipCUDAIf,
 )
-from torch.testing._internal.common_utils import (
-    parametrize,
-    run_tests,
-    skipIfXpu,
-    TestCase,
-)
+from torch.testing._internal.common_utils import parametrize, run_tests, TestCase
 from torch.testing._internal.inductor_utils import IS_BIG_GPU
 from torch.utils._ordered_set import OrderedSet
 
@@ -96,10 +91,6 @@ class TestScheduler(TestCase):
             metrics.reset()
         torch._logging.set_logs()
 
-    @skipIfXpu(
-        msg="InvalidModule: Invalid SPIR-V module, "
-        "https://github.com/intel/torch-xpu-ops/issues/2329"
-    )
     @dtypes(torch.float, torch.float16)
     @skipCUDAIf(not SM70OrLater, "GPU capability is < SM70")
     @parametrize(
