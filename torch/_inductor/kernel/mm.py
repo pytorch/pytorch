@@ -1045,6 +1045,10 @@ def tuned_scaled_mm(
             input_nodes,
         )
 
+    # Early return for MX variants
+    if scale_a.dtype != torch.float32:
+        return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+
     if (
         is_nonzero
         and use_cutlass_template(layout, m, n, k)
