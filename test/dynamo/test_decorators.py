@@ -4,6 +4,7 @@ import operator
 import os
 import re
 import unittest.mock as mock
+from abc import ABC
 from unittest.mock import patch
 
 import torch
@@ -486,7 +487,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
         self.assertEqual(ref, res)
 
     def test_nonstrict_trace_pre_existing_register_constant_type_guard(self):
-        class State:
+        class State(ABC):  # noqa: B024
             def __init__(self, n):
                 self.n = n
 
@@ -787,7 +788,7 @@ class DecoratorTests(PytreeRegisteringTestCase):
             )
 
     def test_nonstrict_newly_constructed_trace_register_constant_type_error(self):
-        class State:
+        class State(ABC):  # noqa: B024
             def __init__(self, n):
                 self.n = n
 
