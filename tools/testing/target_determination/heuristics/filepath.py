@@ -11,7 +11,6 @@ from tools.testing.target_determination.heuristics.interface import (
     TestPrioritizations,
 )
 from tools.testing.target_determination.heuristics.utils import (
-    is_docs_only_change,
     normalize_ratings,
     query_changed_files,
 )
@@ -121,13 +120,6 @@ class Filepath(HeuristicInterface):
         except Exception as e:
             warn(f"Can't query changed test files due to {e}")
             changed_files = []
-
-        # If only documentation files (.rst, .md) were modified, skip all tests
-        if is_docs_only_change(changed_files):
-            print("Only documentation files changed, skipping all tests")
-            # Return negative scores to indicate all tests should be skipped
-            skip_scores = {TestRun(test): -1.0 for test in tests}
-            return TestPrioritizations(tests, skip_scores)
 
         test_ratings = get_freq_dict(tests, changed_files)
         test_ratings = {
