@@ -241,14 +241,14 @@ void nccl_put_with_signal(at::Tensor& tensor, int64_t signal, int64_t peer) {
   auto* nccl_symm_mem = dynamic_cast<c10d::symmetric_memory::NCCLSymmetricMemory*>(symm_mem.get());
   TORCH_CHECK(nccl_symm_mem != nullptr, "Expected NCCLSymmetricMemory for NCCL one-sided API");
 
-  ncclDataType_t datatype = getNcclDataType(tensor.scalar_type());
   size_t offset = nccl_symm_mem->get_offset();
+  size_t nbytes = tensor.numel() * c10::elementSize(tensor.scalar_type());
 
   C10D_NCCL_CHECK(
       ncclPutSignal(
           tensor.data_ptr(),
-          tensor.numel(),
-          datatype,
+          nbytes,
+          ncclChar,
           peer,
           nccl_symm_mem->get_window(),
           offset,
