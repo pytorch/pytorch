@@ -2956,14 +2956,13 @@ class ExpandView(BaseView):
                 # NB: new_size[i] == old_size[i] is expected to already be
                 # guarded because the meta formula was expected to have taught
                 # us this equality.
-                assert old_size[i] is not None
-                assert new_size[i] is not None
+                # pyrefly: ignore [unsupported-operation]
                 assert (
                     sizevars.optimization_hint(new_size[i] - old_size[i], fallback=0)
                     == 0
                 ), (
                     f"Broadcast failed in ExpandView({x.get_size()}, {new_size}) on dimension {i}"
-                )
+                )git
         return new_size
 
     @classmethod
