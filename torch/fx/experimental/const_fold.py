@@ -150,6 +150,7 @@ def _inline_module(
                 assert isinstance(idx, int)
                 user.replace_all_uses_with(output_replacements[idx])
                 gm.graph.erase_node(user)
+                replacement_mapping[user] = output_replacements[idx]
 
             continue
 
