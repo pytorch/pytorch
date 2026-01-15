@@ -3487,7 +3487,10 @@ class GuardManager {
       num_guards_executed++;
       if (!debug_info.result) {
         return GuardDebugInfo(
-            false, debug_info.verbose_code_parts, num_guards_executed);
+            false,
+            debug_info.verbose_code_parts,
+            num_guards_executed,
+            debug_info.user_stack);
       }
     }
 
@@ -3504,7 +3507,10 @@ class GuardManager {
       num_guards_executed += debug_info.num_guards_executed;
       if (!debug_info.result) {
         return GuardDebugInfo(
-            false, debug_info.verbose_code_parts, num_guards_executed);
+            false,
+            debug_info.verbose_code_parts,
+            num_guards_executed,
+            debug_info.user_stack);
       }
     }
 
@@ -3815,7 +3821,10 @@ class RootGuardManager : public GuardManager {
         at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
         _reset_relational_guard_state();
         return GuardDebugInfo(
-            false, tmp_debug_info.verbose_code_parts, num_guards_executed);
+            false,
+            tmp_debug_info.verbose_code_parts,
+            num_guards_executed,
+            tmp_debug_info.user_stack);
       }
     }
     at::impl::PythonTorchFunctionTLS::set_disabled_state(old_state);
@@ -4132,7 +4141,10 @@ class DictGuardManager : public GuardManager {
           num_guards_executed += debug_info.num_guards_executed;
           if (!debug_info.result) {
             return GuardDebugInfo(
-                false, debug_info.verbose_code_parts, num_guards_executed);
+                false,
+                debug_info.verbose_code_parts,
+                num_guards_executed,
+                debug_info.user_stack);
           }
         }
         std::unique_ptr<GuardManager>& value_manager = key_value_manager.second;
@@ -4142,7 +4154,10 @@ class DictGuardManager : public GuardManager {
           num_guards_executed += debug_info.num_guards_executed;
           if (!debug_info.result) {
             return GuardDebugInfo(
-                false, debug_info.verbose_code_parts, num_guards_executed);
+                false,
+                debug_info.verbose_code_parts,
+                num_guards_executed,
+                debug_info.user_stack);
           }
         }
       }
