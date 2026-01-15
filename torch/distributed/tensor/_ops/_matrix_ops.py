@@ -412,6 +412,12 @@ def mm_single_dim_strategy(
     return gen_single_dim_einsum_strategies("mk,kn->mn")
 
 
+@register_op_strategy(aten.addmm.default)
+def addmm_strategy(op_schema: OpSchema) -> OpStrategy:
+    mesh = op_schema.get_mesh_from_args()
+    return _addmm_like_strategy("mk,kn->mn", mesh, op_schema)
+
+
 @register_single_dim_strategy(aten.addmm.default)
 def addmm_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
@@ -426,6 +432,12 @@ def bmm_single_dim_strategy(
     op: OpOverload, args_schema: ArgsType, kwargs_schema: KwargsType
 ) -> list[list[Placement | _ShardingPlaceholder]]:
     return gen_single_dim_einsum_strategies("bmk,bkn->bmn")
+
+
+@register_op_strategy(aten.baddbmm.default)
+def baddbmm_strategy(op_schema: OpSchema) -> OpStrategy:
+    mesh = op_schema.get_mesh_from_args()
+    return _addmm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
 
 
 @register_single_dim_strategy(aten.baddbmm.default)
