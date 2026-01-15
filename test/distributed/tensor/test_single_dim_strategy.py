@@ -134,7 +134,17 @@ class TestExpandPlaceholder(TestCase):
             self.assertEqual(
                 len(strategy.children), len(args[0])
             )  # no. of list elements
-            if linearity == 1:
+
+            # Detect inplace ops: base name ends with '_' (e.g., _foreach_add_.List)
+            op_name = op.name()
+            base_name = op_name.split("::")[1].split(".")[0]
+            is_inplace = base_name.endswith("_")
+
+            if is_inplace:
+                # For inplace ops, the only valid strategy is the one that matches
+                # the self input's placement
+                self.assertEqual(len(strategy.children[0].strategies), 1)
+            elif linearity == 1:
                 self.assertEqual(
                     len(strategy.children[0].strategies), 125
                 )  # len([S(0), S(1), S(2), R, P]) ** 3 = 125
@@ -262,8 +272,10 @@ class TestExpandPlaceholder(TestCase):
         ]
         expected_output_placements = [
             (Shard(0), Replicate(), Shard(1)),
-            # P(avg) -> P(sum) is currently not supported, but could be in principle
-            (Partial("sum"), Partial("sum"), Replicate()),
+            # P(avg) -> P(sum) is currently not supported, but could be in principle.
+            # The optimal is (R, P(sum), P(sum)) since reducing the mixed partials
+            # to that placement has lower cost due to partial ordering constraints.
+            (Replicate(), Partial("sum"), Partial("sum")),
         ]
         tuple_strategy = _expand_foreach_add_list(
             inputs_a, inputs_b, placements_a, placements_b
