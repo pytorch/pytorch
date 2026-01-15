@@ -21,3 +21,16 @@ struct UnpackPivotsParams {
   uint32_t pivots_batch_stride;
   uint32_t dim_size;
 };
+
+template <unsigned N = c10::metal::max_ndim>
+struct QrParams {
+  int32_t num_batch_dims;
+
+  uint32_t m;
+  uint32_t n;
+  uint32_t reduced_mode;
+
+  ::c10::metal::array<uint32_t, N> A_strides;
+  ::c10::metal::array<uint32_t, N> Q_strides;
+  ::c10::metal::array<uint32_t, N> R_strides;
+};

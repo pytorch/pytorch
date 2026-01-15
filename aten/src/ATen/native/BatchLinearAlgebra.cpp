@@ -718,7 +718,8 @@ TORCH_META_FUNC(linalg_qr)(const Tensor& A,
   if (compute_q) {
     auto Q_shape = A_shape;
     Q_shape.end()[-1] = reduced_mode ? k : m;
-    auto Q_strides = at::native::batched_matrix_contiguous_strides(Q_shape, /*f-contig*=*/true);
+    // row-major for MPS
+    auto Q_strides = at::native::batched_matrix_contiguous_strides(Q_shape, /*f-contig*=*/A.device().type() != at::kMPS);
     set_output_strided(0, Q_shape, Q_strides, A.options(), {});
   } else {
     set_output_raw_strided(0, {0}, {}, A.options(), {});
@@ -727,7 +728,8 @@ TORCH_META_FUNC(linalg_qr)(const Tensor& A,
   // For readability
   auto R_shape = std::move(A_shape);
   R_shape.end()[-2] = (reduced_mode || !compute_q) ? k : m;
-  auto R_strides = at::native::batched_matrix_contiguous_strides(R_shape, /*f-contig*=*/true);
+  // row-major for MPS
+  auto R_strides = at::native::batched_matrix_contiguous_strides(R_shape, /*f-contig*=*/A.device().type() != at::kMPS);
   set_output_strided(1, R_shape, R_strides, A.options(), {});
 }
 

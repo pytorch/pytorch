@@ -14685,6 +14685,7 @@
   structured: True
   dispatch:
     CPU, CUDA: linalg_qr_out
+    MPS: linalg_qr_out_mps
 
 - func: linalg_matrix_power(Tensor self, int n) -> Tensor
   python_module: linalg
