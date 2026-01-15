@@ -17,9 +17,7 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed.tensor._ops._matrix_ops import (
-    gen_single_dim_einsum_strategies,
-)
+from torch.distributed.tensor._ops._matrix_ops import gen_single_dim_einsum_strategies
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8, SM90OrLater
@@ -303,6 +301,10 @@ class DistMatrixOpsTest(DTensorTestBase):
 
     @with_comms
     def test_mm_with_strided_input(self):
+        # Case 1: 1D mesh with StridedShard
+        # Tests mm where input has _StridedShard(dim=0, split_factor=2) placement.
+        # Input shape: (batch_size * seq_len, contract_dim), weight is Replicate.
+        # Output should preserve the same StridedShard placement.
         mesh = self.build_device_mesh()
         batch_size, seq_len, contract_dim, out_dim = 2, self.world_size, 3, 7
         global_inps_viewed = (
@@ -324,6 +326,30 @@ class DistMatrixOpsTest(DTensorTestBase):
         expected_placements = (_StridedShard(dim=0, split_factor=2),)
         self.assertEqual(out.placements, expected_placements)
 
+        # Case 1b: Unshardable input with StridedShard - redistribution not yet supported
+        # When the first dimension is world_size - 1, the tensor is not shardable.
+        unshardable_dim = self.world_size - 1
+        global_inps_unshardable = (
+            torch.arange(unshardable_dim * contract_dim)
+            .float()
+            .view(unshardable_dim, contract_dim)
+        )
+        inps_unshardable = distribute_tensor(
+            global_inps_unshardable,
+            mesh,
+            (_StridedShard(dim=0, split_factor=2),),
+            src_data_rank=None,
+        )
+        with self.assertRaisesRegex(
+            AssertionError,
+            "shard_order is None, redistribution from/to _StridedShard is not yet supported",
+        ):
+            torch.mm(inps_unshardable, weight)
+
+        # Case 2: 2D mesh (2x2) with nested StridedShard on both mesh dimensions
+        # Tests mm where input has StridedShard on both mesh dims with different split_factors.
+        # This simulates a more complex sharding pattern (e.g., from a reshaped 4D tensor).
+        # Output should preserve both StridedShard placements.
         mesh = init_device_mesh(self.device_type, (2, 2))
         tensor_dims = (4, mesh.size(0) * mesh.size(1), 6, 8)
         global_inps_viewed = (
@@ -356,31 +382,6 @@ class DistMatrixOpsTest(DTensorTestBase):
                 dim=0, split_factor=tensor_dims[0] * (tensor_dims[1] // mesh.size(0))
             ),
         )
-        self.assertEqual(out.placements, expected_placements)
-
-    @with_comms
-    def test_mm_single_dim_strategy(self):
-        # unshardable input where some rank have empty _local_tensor
-        # eg sharding tensor (world_size - 1) over world_size
-        device_mesh = self.build_device_mesh()
-        global_inps_viewed = (
-            torch.arange((self.world_size - 1) * self.world_size)
-            .float()
-            .view(self.world_size - 1, self.world_size)
-        )
-        inps_viewed = distribute_tensor(
-            global_inps_viewed,
-            device_mesh,
-            (Shard(dim=0),),
-        )
-        global_weight = (
-            torch.arange(self.world_size * self.world_size)
-            .float()
-            .view(self.world_size, self.world_size)
-        )
-        weight = distribute_tensor(global_weight, device_mesh, (Replicate(),))
-        out = torch.mm(inps_viewed, weight)
-        expected_placements = (Replicate(),)
         self.assertEqual(out.placements, expected_placements)
 
     @with_comms

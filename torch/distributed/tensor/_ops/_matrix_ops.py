@@ -256,6 +256,12 @@ def dot_strategy(op_schema: OpSchema) -> OpStrategy:
     return _mm_like_strategy("i,i->", mesh, op_schema)
 
 
+@register_op_strategy(aten.mm.default)
+def mm_strategy(op_schema: OpSchema) -> OpStrategy:
+    mesh = op_schema.get_mesh_from_args()
+    return _mm_like_strategy("mk,kn->mn", mesh, op_schema)
+
+
 from ._einsum_strategy import EinsumDims
 
 
@@ -423,6 +429,12 @@ def addmm_single_dim_strategy(
     bias_meta = args_schema[0]
     assert isinstance(bias_meta, TensorMeta)
     return gen_single_dim_einsum_strategies("mk,kn->mn", bias_shape=bias_meta.shape)
+
+
+@register_op_strategy(aten.bmm.default)
+def bmm_strategy(op_schema: OpSchema) -> OpStrategy:
+    mesh = op_schema.get_mesh_from_args()
+    return _mm_like_strategy("bmk,bkn->bmn", mesh, op_schema)
 
 
 @register_single_dim_strategy(aten.bmm.default)
