@@ -161,7 +161,8 @@ C10_XPU_API void recordHistory(
     CreateContextFn context_recorder,
     size_t alloc_trace_max_entries,
     RecordContext when,
-    bool clearHistory);
+    bool clearHistory,
+    const std::vector<std::string>& skip_actions);
 
 C10_XPU_API SnapshotInfo snapshot(MempoolId_t mempool_id = {0, 0});
 
