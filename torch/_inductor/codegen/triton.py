@@ -6250,7 +6250,16 @@ class TritonScheduling(SIMDScheduling):
             kernels.sort(key=lambda k: k.persistent_reduction)
         return kernels
 
-    def benchmark_combo_kernel(self, node_list):
+    def benchmark_combo_kernel(self, node_list, node_benchmark_results):
+        """
+        Benchmark combo kernel partitions and return total execution time.
+
+        Generates kernel code for each partition and benchmarks them.
+        Single-node partitions use benchmark_fused_nodes(), while multi-node
+        partitions use the combo kernel benchmarking path.
+
+        Returns (total_ms, total_clone_ms, file_list).
+        """
         mod: ModuleType
         ms: float
         ms_clone: float
@@ -6287,10 +6296,20 @@ class TritonScheduling(SIMDScheduling):
         )
 
         # pyrefly: ignore [bad-assignment]
-        for src_code, _, node_group in kernel_code_list:
+        for src_code, kernel, node_group in kernel_code_list:
             fused_node_lists = [node.get_nodes() for node in node_group]
             names = [n.get_name() for nodes in fused_node_lists for n in nodes]
 
+            if len(node_group) == 1:
+                # Single-node partition: use cached benchmark results from speedup_by_combo_kernel
+                node_ms, path = node_benchmark_results[node_group[0]]
+                # Regular kernels have negligible clone overhead
+                total_ms += node_ms
+                total_clone_ms += 0
+                file_list.append(path)
+                continue
+
+            assert src_code is not None
             src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "triton_")
             mod = PyCodeCache.load(src_code)
 
