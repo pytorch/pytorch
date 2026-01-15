@@ -24,6 +24,7 @@ def to_cutlass_scale_mode(
     .name attribute can be used for codegen (e.g., scale_mode.name -> "Blockwise1x32").
     """
     from cutlass_api.library import ScaleMode, ScaleSwizzleMode
+
     from torch.nn.functional import ScalingType, SwizzleType
 
     scale_mode_map = {
