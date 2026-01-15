@@ -54,7 +54,7 @@ def evaluate_gfx_arch_within(arch_list):
     return any(arch in effective_arch for arch in arch_list)
 
 def CDNA3OrLater():
-    return evaluate_gfx_arch_within(["gfx940", "gfx941", "gfx942", "gfx950"])
+    return evaluate_gfx_arch_within(["gfx942", "gfx950"])
 
 def CDNA2OrLater():
     return evaluate_gfx_arch_within(["gfx90a", "gfx942"])
@@ -68,12 +68,6 @@ def evaluate_platform_supports_flash_attention():
     if TEST_CUDA:
         return not IS_WINDOWS and SM80OrLater
     return False
-
-def evaluate_platform_supports_ck_sdpa():
-    if TEST_WITH_ROCM:
-        return torch.backends.cuda.is_ck_sdpa_available()
-    else:
-        return False
 
 def evaluate_platform_supports_efficient_attention():
     if TEST_WITH_ROCM:
@@ -112,8 +106,6 @@ PLATFORM_SUPPORTS_BF16: bool = LazyVal(lambda: TEST_CUDA and SM80OrLater)
 
 PLATFORM_SUPPORTS_GREEN_CONTEXT: bool = LazyVal(lambda: evaluate_platform_supports_green_context())
 
-PLATFORM_SUPPORTS_CK_SDPA: bool = LazyVal(lambda: evaluate_platform_supports_ck_sdpa())
-
 def evaluate_platform_supports_fp8():
     if torch.cuda.is_available():
         if torch.version.hip:
@@ -132,7 +124,7 @@ def evaluate_platform_supports_fp8():
 def evaluate_platform_supports_fp8_grouped_gemm():
     if torch.cuda.is_available():
         if torch.version.hip:
-            if "USE_FBGEMM_GENAI" not in torch.__config__.show():
+            if "USE_MSLK" not in torch.__config__.show():
                 return False
             archs = ['gfx942']
             for arch in archs:
@@ -153,8 +145,8 @@ def evaluate_platform_supports_mx_gemm():
 
 def evaluate_platform_supports_mxfp8_grouped_gemm():
     if torch.cuda.is_available() and not torch.version.hip:
-        built_with_fbgemm_genai = "USE_FBGEMM_GENAI" in torch.__config__.show()
-        return built_with_fbgemm_genai and IS_SM100
+        built_with_mslk = "USE_MSLK" in torch.__config__.show()
+        return built_with_mslk and IS_SM100
     return False
 
 PLATFORM_SUPPORTS_MX_GEMM: bool = LazyVal(lambda: evaluate_platform_supports_mx_gemm())
