@@ -2761,7 +2761,7 @@ class SIMDScheduling(BaseScheduling):
             # TODO: incorporate exact bitwidth, and read/write
             # coalesced write is 2x more important
             for i in range(len(splits)):
-                s = V.graph.sizevars.size_hint(splits[i], fallback=32)
+                s = V.graph.sizevars.optimization_hint(splits[i], fallback=32)
                 s = min(s, 8)
                 split_scores[i] = int(split_scores[i] * s / 8)
 
@@ -3110,7 +3110,7 @@ class CandidateTiling:
     @staticmethod
     def is_good_size(s):
         """Somewhat arbitrary heuristic used to boost scores for some sizes"""
-        s = V.graph.sizevars.size_hint(s, fallback=8192)
+        s = V.graph.sizevars.optimization_hint(s, fallback=8192)
         return s >= 32 and (s % 32 == 0)
 
 

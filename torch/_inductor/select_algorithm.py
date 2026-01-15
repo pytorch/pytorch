@@ -620,7 +620,7 @@ class TritonTemplateKernel(TritonKernel):
         ninplace_args = len(unique(self.args.inplace_buffers.values()))
         num_bytes = []
         for i, inp in enumerate(itertools.chain(self.input_nodes, (self.output_node,))):
-            size = V.graph.sizevars.size_hints(inp.get_size(), fallback=0)
+            size = V.graph.sizevars.optimization_hints(inp.get_size(), fallback=0)
             numel = functools.reduce(operator.mul, size, 1)
             dtype_size = get_dtype_size(inp.get_dtype())
             num_bytes.append(numel * dtype_size * (1 + int(i < ninplace_args)))
@@ -633,7 +633,7 @@ class TritonTemplateKernel(TritonKernel):
                 if f is not None:
                     if isinstance(f, torch.SymInt):
                         f = f.node.expr
-                    return V.graph.sizevars.size_hint(f, fallback=0)
+                    return V.graph.sizevars.optimization_hint(f)
         return 0
 
     def jit_lines(self):
