@@ -45,8 +45,6 @@ class NCCLSymmetricMemory : public SymmetricMemory {
 
   ncclWindow_t get_signal_pad_handle();
 
-  ncclComm_t get_comm();
-
   size_t get_offset() override;
 
  private:

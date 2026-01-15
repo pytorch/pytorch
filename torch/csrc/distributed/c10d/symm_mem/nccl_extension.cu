@@ -4,6 +4,7 @@
 #include <torch/csrc/distributed/c10d/symm_mem/nccl_extension.cuh>
 #include <torch/csrc/distributed/c10d/symm_mem/SymmetricMemory.hpp>
 #include <torch/csrc/distributed/c10d/symm_mem/NCCLSymmetricMemory.hpp>
+#include <torch/csrc/distributed/c10d/symm_mem/nccl_devcomm_manager.hpp>
 #include <torch/csrc/distributed/c10d/NCCLUtils.hpp>
 
 namespace c10d::nccl_extension {
@@ -189,30 +190,25 @@ void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal) {
   auto stream = at::cuda::getCurrentCUDAStream();
   auto symm_mem = c10d::symmetric_memory::rendezvous(sigpad, "0");
 
-#ifdef NCCL_HAS_ONESIDED_API
+#ifdef NCCL_HAS_ONE_SIDED_API
   // use NCCL 2.29+ host-side API
-  auto* nccl_symm_mem = dynamic_cast<c10d::symmetric_memory::NCCLSymmetricMemory*>(symm_mem.get());
-  if (nccl_symm_mem) {
-    ncclWaitSignalDesc_t signalDesc;
-    signalDesc.sigIdx = signal;
-    signalDesc.ctx = 0;
+  auto& manager = NCCLDevCommManager::get(sigpad.device());
+  ncclComm_t comm = manager.get_comm("0");  // group_name is "0"
 
-    C10D_NCCL_CHECK(
-        ncclWaitSignal(
-            1,
-            &signalDesc,
-            nccl_symm_mem->get_comm(),
-            stream),
-        c10::str("ncclWaitSignal failed for signal=", signal));
-  } else {
-    // fallback to device kernel for non-NCCL backends
-    int cur_rank = symm_mem->get_rank();
-    nccl_wait_for_signal_kernel<<<1, THREADS_PER_BLOCK, 0, stream>>>(
-      symm_mem->get_signal_pad_ptrs_dev(),
-      cur_rank,
-      signal);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-  }
+  // Populate all fields in ncclWaitSignalDesc_t
+  ncclWaitSignalDesc_t signalDesc;
+  signalDesc.opCnt = 1;
+  signalDesc.peer = symm_mem->get_rank();
+  signalDesc.sigIdx = signal;
+  signalDesc.ctx = 0;
+
+  C10D_NCCL_CHECK(
+      ncclWaitSignal(
+          1,
+          &signalDesc,
+          comm,
+          stream),
+      c10::str("ncclWaitSignal failed for signal=", signal));
 #else
   // use device-side kernel for NCCL < 2.29
   int cur_rank = symm_mem->get_rank();
@@ -237,50 +233,31 @@ void nccl_put_with_signal(at::Tensor& tensor, int64_t signal, int64_t peer) {
   c10::cuda::CUDAGuard guard(tensor.device());
   auto stream = at::cuda::getCurrentCUDAStream();
 
-#ifdef NCCL_HAS_ONESIDED_API
+#ifdef NCCL_HAS_ONE_SIDED_API
   // use NCCL 2.29+ host-side API
+  auto& manager = NCCLDevCommManager::get(tensor.device());
+  ncclComm_t comm = manager.get_comm("0");  // group_name is "0"
+
   auto* nccl_symm_mem = dynamic_cast<c10d::symmetric_memory::NCCLSymmetricMemory*>(symm_mem.get());
-  if (nccl_symm_mem) {
-    ncclDataType_t datatype = getNcclDataType(tensor.scalar_type());
-    size_t offset = nccl_symm_mem->get_offset();
+  TORCH_CHECK(nccl_symm_mem != nullptr, "Expected NCCLSymmetricMemory for NCCL one-sided API");
 
-    C10D_NCCL_CHECK(
-        ncclPutSignal(
-            tensor.data_ptr(),
-            tensor.numel(),
-            datatype,
-            peer,
-            nccl_symm_mem->get_window(),
-            offset,
-            signal,
-            0,
-            0,
-            nccl_symm_mem->get_comm(),
-            stream),
-        c10::str("ncclPutSignal failed for peer=", peer, ", signal=", signal));
-  } else {
-    // fallback to device kernel for non-NCCL backends
-    int threads = THREADS_PER_BLOCK;
-    int blocks = (tensor.numel() + threads - 1) / threads;
-    auto opts = at::TensorOptions()
-      .dtype(at::kInt)
-      .device(tensor.device());
-    at::Tensor blocks_done = at::zeros({1}, opts);
-    unsigned int* blocks_done_dev =
-      reinterpret_cast<unsigned int*>(blocks_done.data_ptr<int>());
-    size_t nbytes = tensor.numel() * c10::elementSize(tensor.scalar_type());
+  ncclDataType_t datatype = getNcclDataType(tensor.scalar_type());
+  size_t offset = nccl_symm_mem->get_offset();
 
-    lsa_put_signal_kernel<<<blocks, threads, 0, stream>>>(
-      symm_mem->get_buffer_ptrs_dev(),
-      symm_mem->get_signal_pad_ptrs_dev(),
-      peer,
-      0,
-      tensor.data_ptr(),
-      nbytes,
-      blocks_done_dev,
-      signal);
-    C10_CUDA_KERNEL_LAUNCH_CHECK();
-  }
+  C10D_NCCL_CHECK(
+      ncclPutSignal(
+          tensor.data_ptr(),
+          tensor.numel(),
+          datatype,
+          peer,
+          nccl_symm_mem->get_window(),
+          offset,
+          signal,
+          0,
+          0,
+          comm,
+          stream),
+      c10::str("ncclPutSignal failed for peer=", peer, ", signal=", signal));
 #else
   // use device-side kernel for NCCL < 2.29
   int threads = THREADS_PER_BLOCK;

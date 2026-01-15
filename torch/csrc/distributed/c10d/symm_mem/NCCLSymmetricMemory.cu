@@ -81,7 +81,6 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
         group->getBackend(c10::DeviceType::CUDA).get());
     TORCH_CHECK(ncclPg != nullptr, "backend must be a NCCL process group");
     ncclComm_t comm = reinterpret_cast<ncclComm_t>(ncclPg->getCommPtr());
-    comm_ = comm;
 
     C10D_NCCL_CHECK(
       ncclCommWindowRegister(comm, allocation->ptr, buffer_size_, &buffer_win_, NCCL_WIN_COLL_SYMMETRIC),
@@ -162,7 +161,6 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   ncclWindow_t signal_handle_;
   // Multicast address
   void* mc_addr_ = nullptr;
-  ncclComm_t comm_;
 
   friend class NCCLSymmetricMemory;
 };
@@ -213,8 +211,14 @@ void NCCLSymmetricMemory::barrier(int channel, size_t timeout_ms) {
 }
 
 void NCCLSymmetricMemory::put_signal(int dst_rank, int channel, size_t timeout_ms) {
+#ifdef NCCL_HAS_ONE_SIDED_API
+  TORCH_CHECK(channel == 0, "channel must be 0 (sigIdx is reserved for future use)");
+
   c10::cuda::CUDAGuard guard(device_idx_);
   auto stream = at::cuda::getCurrentCUDAStream();
+
+  auto& manager = NCCLDevCommManager::get(c10::Device(c10::DeviceType::CUDA, device_idx_));
+  ncclComm_t comm = manager.get_comm(pai_->group_name_);
 
   // use ncclSignal for pure signaling without data transfer
   C10D_NCCL_CHECK(
@@ -223,17 +227,28 @@ void NCCLSymmetricMemory::put_signal(int dst_rank, int channel, size_t timeout_m
           channel,
           0,
           0,
-          pai_->comm_,
+          comm,
           stream),
       c10::str("ncclSignal failed for dst_rank=", dst_rank, ", channel=", channel));
+#else
+  TORCH_CHECK(false, "NYI");
+#endif
 }
 
 void NCCLSymmetricMemory::wait_signal(int src_rank, int channel, size_t timeout_ms) {
+#ifdef NCCL_HAS_ONE_SIDED_API
+  TORCH_CHECK(channel == 0, "channel must be 0 (sigIdx is reserved for future use)");
+
   c10::cuda::CUDAGuard guard(device_idx_);
   auto stream = at::cuda::getCurrentCUDAStream();
 
-  // create signal descriptor for waiting
+  auto& manager = NCCLDevCommManager::get(c10::Device(c10::DeviceType::CUDA, device_idx_));
+  ncclComm_t comm = manager.get_comm(pai_->group_name_);
+
+  // create signal descriptor for waiting - populate all fields
   ncclWaitSignalDesc_t signalDesc;
+  signalDesc.opCnt = 1;
+  signalDesc.peer = src_rank;
   signalDesc.sigIdx = channel;
   signalDesc.ctx = 0;
 
@@ -241,9 +256,12 @@ void NCCLSymmetricMemory::wait_signal(int src_rank, int channel, size_t timeout_
       ncclWaitSignal(
           1,
           &signalDesc,
-          pai_->comm_,
+          comm,
           stream),
       c10::str("ncclWaitSignal failed for src_rank=", src_rank, ", channel=", channel));
+#else
+  TORCH_CHECK(false, "NYI");
+#endif
 }
 
 int NCCLSymmetricMemory::get_rank() {
@@ -264,10 +282,6 @@ ncclWindow_t NCCLSymmetricMemory::get_window() {
 
 ncclWindow_t NCCLSymmetricMemory::get_signal_pad_handle() {
   return pai_->signal_handle_;
-}
-
-ncclComm_t NCCLSymmetricMemory::get_comm() {
-  return pai_->comm_;
 }
 
 size_t NCCLSymmetricMemory::get_offset() {

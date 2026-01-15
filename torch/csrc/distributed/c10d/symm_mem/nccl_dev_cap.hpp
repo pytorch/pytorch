@@ -15,6 +15,6 @@
 #endif
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
-#define NCCL_HAS_ONESIDED_API
+#define NCCL_HAS_ONE_SIDED_API
 #endif
 #endif // USE_NCCL
