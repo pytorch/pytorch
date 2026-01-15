@@ -340,6 +340,8 @@ op_db: list[OpInfo] = [
                 "TestUnaryUfuncs",
                 "test_reference_numerics_large",
             ),
+            # NotImplementedError: The operator 'aten::special_airy_ai.out' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, "TestCommon", device_type="mps"),
         ),
         supports_autograd=False,
     ),
@@ -494,6 +496,44 @@ op_db: list[OpInfo] = [
             DecorateInfo(
                 unittest.skip, "TestCommon", "test_compare_cpu", device_type="xpu"
             ),
+            # NotImplementedError: The operator 'aten::special_laguerre_polynomial_l.out'
+            # is not currently implemented for the MPS device
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_variant_consistency_eager",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_promotes_int_to_float",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out_warning",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_non_standard_bool_values",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -507,6 +547,44 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), "TestNNCOpInfo"),
             # Greatest absolute difference: nan
             DecorateInfo(unittest.expectedFailure, "TestCommon", "test_compare_cpu"),
+            # NotImplementedError: The operator 'aten::special_legendre_polynomial_p.out'
+            # is not currently implemented for the MPS device
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_variant_consistency_eager",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_promotes_int_to_float",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_out_warning",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_out", device_type="mps"
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_noncontiguous_samples",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_non_standard_bool_values",
+                device_type="mps",
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, "TestCommon", "test_dtypes", device_type="mps"
+            ),
         ),
         supports_one_python_scalar=True,
         supports_autograd=False,
@@ -536,6 +614,7 @@ op_db: list[OpInfo] = [
             ),
         ),
         dtypes=all_types_and(torch.bool),
+        dtypesIfMPS=all_types_and(torch.bool, torch.float16, torch.bfloat16),
         ref=scipy.special.i1 if TEST_SCIPY else None,
         supports_autograd=False,
     ),
@@ -760,6 +839,21 @@ python_ref_db: list[OpInfo] = [
                 "test_reference_numerics_large",
                 dtypes=(torch.int8,),
             ),
+            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref",
+                device_type="mps",
+                dtypes=(torch.float16,),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref_torch_fallback",
+                device_type="mps",
+                dtypes=(torch.float16,),
+            ),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -780,6 +874,23 @@ python_ref_db: list[OpInfo] = [
         "_refs.special.ndtr",
         torch_opinfo_name="special.ndtr",
         op_db=op_db,
+        skips=(
+            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref",
+                device_type="mps",
+                dtypes=(torch.float16, torch.bfloat16),
+            ),
+            DecorateInfo(
+                unittest.expectedFailure,
+                "TestCommon",
+                "test_python_ref_torch_fallback",
+                device_type="mps",
+                dtypes=(torch.float16, torch.bfloat16),
+            ),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.special.ndtri",

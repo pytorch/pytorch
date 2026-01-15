@@ -380,12 +380,21 @@ if torch.backends.mps.is_available():
             "special.laguerre_polynomial_l": None,
             "special.legendre_polynomial_p": None,
             "special.log_ndtr": None,
+            "special.modified_bessel_i1": [torch.float16, torch.bfloat16],
             "special.ndtri": None,
             "svd_lowrank": None,
             "symeig": None,
             "take": None,
             "to": None,
             "vdot": None,
+            "var_meanunbiased": [
+                torch.uint8,
+                torch.int8,
+                torch.int32,
+                torch.int16,
+                torch.bool,
+            ],
+            "var_mean": [torch.uint8, torch.int8, torch.int32, torch.int16, torch.bool],
             "segment_reduce_": None,
             "_upsample_bilinear2d_aa": [torch.uint8],  # uint8 is for CPU only
             "_upsample_bicubic2d_aa": [torch.uint8],  # uint8 is for CPU only
