@@ -270,36 +270,6 @@ class DistMatrixOpsTest(DTensorTestBase):
                     )
 
     @with_comms
-    def test_mm(self):
-        device_mesh = self.build_device_mesh()
-        shard0_spec = Shard(0)
-        shard1_spec = Shard(1)
-        replica_spec = Replicate()
-
-        t1 = torch.randn(12, 8, requires_grad=True)
-        t2 = torch.randn(8, 16, requires_grad=True)
-        local_res = torch.mm(t1, t2)
-
-        def test_placement_comb(
-            placements1: list[Placement], placements2: list[Placement]
-        ) -> None:
-            dt1 = distribute_tensor(t1, device_mesh, placements1)
-            dt2 = distribute_tensor(t2, device_mesh, placements2)
-            dist_res: DTensor = cast(DTensor, torch.mm(dt1, dt2)).redistribute(
-                device_mesh, [replica_spec]
-            )
-            self.assertEqual(dist_res.to_local(), local_res)
-            # backward
-            grad_dist_res = torch.ones_like(dist_res)
-            dist_res.backward(grad_dist_res)
-            self.assertIsNotNone(dt1.grad)
-
-        placement_specs = [shard0_spec, shard1_spec, replica_spec]
-        shard_specs_comb = list(itertools.product(placement_specs, placement_specs))
-        for spec in shard_specs_comb:
-            test_placement_comb([spec[0]], [spec[1]])
-
-    @with_comms
     def test_mm_with_strided_input(self):
         # Case 1: 1D mesh with StridedShard
         # Tests mm where input has _StridedShard(dim=0, split_factor=2) placement.
@@ -383,6 +353,36 @@ class DistMatrixOpsTest(DTensorTestBase):
             ),
         )
         self.assertEqual(out.placements, expected_placements)
+
+    @with_comms
+    def test_mm(self):
+        device_mesh = self.build_device_mesh()
+        shard0_spec = Shard(0)
+        shard1_spec = Shard(1)
+        replica_spec = Replicate()
+
+        t1 = torch.randn(12, 8, requires_grad=True)
+        t2 = torch.randn(8, 16, requires_grad=True)
+        local_res = torch.mm(t1, t2)
+
+        def test_placement_comb(
+            placements1: list[Placement], placements2: list[Placement]
+        ) -> None:
+            dt1 = distribute_tensor(t1, device_mesh, placements1)
+            dt2 = distribute_tensor(t2, device_mesh, placements2)
+            dist_res: DTensor = cast(DTensor, torch.mm(dt1, dt2)).redistribute(
+                device_mesh, [replica_spec]
+            )
+            self.assertEqual(dist_res.to_local(), local_res)
+            # backward
+            grad_dist_res = torch.ones_like(dist_res)
+            dist_res.backward(grad_dist_res)
+            self.assertIsNotNone(dt1.grad)
+
+        placement_specs = [shard0_spec, shard1_spec, replica_spec]
+        shard_specs_comb = list(itertools.product(placement_specs, placement_specs))
+        for spec in shard_specs_comb:
+            test_placement_comb([spec[0]], [spec[1]])
 
     @with_comms
     @skip_unless_torch_gpu
