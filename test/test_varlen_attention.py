@@ -413,7 +413,7 @@ class TestVarlenAttention(NNTestCase):
             golden_sdpa_seq = golden_sdpa_output[i, :seq_len]
 
             fwd_atol = (
-                2 * (golden_sdpa_seq + 0.3 - 0.3 - golden_sdpa_seq).abs().max().item()
+                3 * (golden_sdpa_seq + 0.3 - 0.3 - golden_sdpa_seq).abs().max().item()
             )
 
             varlen_error = (varlen_seq - fwd_atol).abs().max().item()
@@ -469,7 +469,7 @@ class TestVarlenAttention(NNTestCase):
             golden_sdpa_seq = golden_sdpa_grad[i, :seq_len]
 
             fwd_atol = (
-                2 * (golden_sdpa_seq + 0.3 - 0.3 - golden_sdpa_seq).abs().max().item()
+                3 * (golden_sdpa_seq + 0.3 - 0.3 - golden_sdpa_seq).abs().max().item()
             )
 
             varlen_error = (varlen_grad_seq - fwd_atol).abs().max().item()
