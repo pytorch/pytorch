@@ -84,7 +84,6 @@ def _node_metadata_hook(
         "torch_fn",
         (
             f"{node.target.__name__}_0",
-            # pyrefly: ignore [missing-attribute]
             f"{node.target.__class__.__name__}.{node.target.__name__}",
         ),
     )
