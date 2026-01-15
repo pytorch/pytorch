@@ -15,7 +15,7 @@ from onnxscript.onnx_opset import (  # type: ignore[attr-defined]
 )
 
 import torch
-from torch.onnx._internal._lazy_import import onnxscript_ir as ir
+from torch.onnx._internal._lazy_import import onnx_ir as ir
 from torch.onnx._internal.exporter._torchlib._tensor_typing import TFloat, TReal
 from torch.onnx._internal.exporter._torchlib._torchlib_registry import onnx_impl
 

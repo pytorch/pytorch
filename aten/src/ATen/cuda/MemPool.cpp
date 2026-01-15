@@ -3,13 +3,15 @@
 namespace at::cuda {
 
 MemPool::MemPool(
-    CUDACachingAllocator::CUDAAllocator* allocator,
+    std::shared_ptr<CUDACachingAllocator::CUDAAllocator> allocator,
     bool is_user_created,
     bool use_on_oom,
     bool no_split)
-    : allocator_(allocator), id_(c10::generate_mempool_id(is_user_created)) {
+    : allocator_(allocator.get()),
+      id_(c10::generate_mempool_id(is_user_created)) {
   device_ = c10::cuda::current_device();
-  CUDACachingAllocator::createOrIncrefPool(device_, id_, allocator);
+  CUDACachingAllocator::createOrIncrefPool(
+      device_, id_, std::move(allocator));
   if (use_on_oom) {
     CUDACachingAllocator::setUseOnOOM(device_, id_, true);
   }

@@ -63,6 +63,17 @@ CUDA_GCC_VERSIONS: VersionMap = {
     '11.5': ((6, 0, 0), (12, 0)),
     '11.6': ((6, 0, 0), (12, 0)),
     '11.7': ((6, 0, 0), (12, 0)),
+    '12.0': ((6, 0, 0), (13, 0)),
+    '12.1': ((6, 0, 0), (13, 0)),
+    '12.2': ((6, 0, 0), (13, 0)),
+    '12.3': ((6, 0, 0), (14, 0)),
+    '12.4': ((6, 0, 0), (14, 0)),
+    '12.5': ((6, 0, 0), (14, 0)),
+    '12.6': ((6, 0, 0), (14, 0)),
+    '12.7': ((6, 0, 0), (14, 0)),
+    '12.8': ((6, 0, 0), (14, 0)),
+    '12.9': ((6, 0, 0), (14, 0)),
+    '13.0': ((6, 0, 0), (16, 0)),
 }
 
 MINIMUM_CLANG_VERSION = (3, 3, 0)
@@ -74,6 +85,17 @@ CUDA_CLANG_VERSIONS: VersionMap = {
     '11.5': (MINIMUM_CLANG_VERSION, (13, 0)),
     '11.6': (MINIMUM_CLANG_VERSION, (14, 0)),
     '11.7': (MINIMUM_CLANG_VERSION, (14, 0)),
+    '12.0': ((7, 0), (15, 0)),
+    '12.1': ((7, 0), (15, 0)),
+    '12.2': ((7, 0), (16, 0)),
+    '12.3': ((7, 0), (16, 0)),
+    '12.4': ((7, 0), (17, 0)),
+    '12.5': ((7, 0), (18, 0)),
+    '12.6': ((7, 0), (18, 0)),
+    '12.7': ((7, 0), (19, 0)),
+    '12.8': ((7, 0), (19, 0)),
+    '12.9': ((7, 0), (19, 0)),
+    '13.0': ((7, 0), (21, 0)),
 }
 
 __all__ = ["get_default_build_root", "check_compiler_ok_for_platform", "get_compiler_abi_compatibility_and_version", "BuildExtension",
@@ -479,9 +501,8 @@ def get_compiler_abi_compatibility_and_version(compiler) -> tuple[bool, TorchVer
             compiler_info = subprocess.check_output(compiler, stderr=subprocess.STDOUT)
         match = re.search(r'(\d+)\.(\d+)\.(\d+)', compiler_info.decode(*SUBPROCESS_DECODE_ARGS).strip())
         version = ['0', '0', '0'] if match is None else list(match.groups())
-    except Exception:
-        _, error, _ = sys.exc_info()
-        logger.warning('Error checking compiler version for %s: %s', compiler, error)
+    except (subprocess.CalledProcessError, OSError):
+        logger.warning('Error checking compiler version for %s', compiler, exc_info=True)
         return (False, TorchVersion('0.0.0'))
 
     # convert alphanumeric string to numeric string
@@ -1159,10 +1180,20 @@ class BuildExtension(build_ext):
         if self.no_python_abi_suffix:
             # The parts will be e.g. ["my_extension", "cpython-37m-x86_64-linux-gnu", "so"].
             ext_filename_parts = ext_filename.split('.')
-            # Omit the second to last element.
-            without_abi = ext_filename_parts[:-2] + ext_filename_parts[-1:]
-            ext_filename = '.'.join(without_abi)
+            # Remove ABI component only if it actually exists in a file name, see gh-170542.
+            if len(ext_filename_parts) > 2:
+                # Omit the second to last element.
+                without_abi = ext_filename_parts[:-2] + ext_filename_parts[-1:]
+                ext_filename = '.'.join(without_abi)
         return ext_filename
+
+    def get_export_symbols(self, ext):
+        if IS_WINDOWS:
+            # Skips exporting the module "PyInit_" function that the
+            # distutils Extension.get_export_symbols would add to
+            # ext.export_symbols. Only relevant for Windows builds.
+            return ext.export_symbols
+        return super().get_export_symbols(ext)
 
     def _check_abi(self) -> tuple[str, TorchVersion]:
         # On some platforms, like Windows, compiler_cxx is not available.
@@ -1798,10 +1829,10 @@ def check_compiler_is_gcc(compiler) -> bool:
     env['LC_ALL'] = 'C'  # Don't localize output
     try:
         version_string = subprocess.check_output([compiler, '-v'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
-    except Exception:
+    except (subprocess.CalledProcessError, OSError):
         try:
             version_string = subprocess.check_output([compiler, '--version'], stderr=subprocess.STDOUT, env=env).decode(*SUBPROCESS_DECODE_ARGS)
-        except Exception:
+        except (subprocess.CalledProcessError, OSError):
             return False
     # Check for GCC by verifying both COLLECT_GCC and gcc version string are present
     # This works for c++, g++, gcc, and versioned variants like g++-13
@@ -2603,6 +2634,12 @@ def _get_rocm_arch_flags(cflags: list[str] | None = None) -> list[str]:
             archs = archFlags.split()
         else:
             archs = []
+            logger.warning(
+                "Failed to auto-detect ROCm architecture. Extensions will be compiled "
+                "without architecture-specific optimizations. Set PYTORCH_ROCM_ARCH "
+                "environment variable to specify target architectures "
+                "(e.g., export PYTORCH_ROCM_ARCH='gfx90a;gfx942')."
+            )
     else:
         archs = _archs.replace(' ', ';').split(';')
     flags = [f'--offload-arch={arch}' for arch in archs]
@@ -2669,7 +2706,7 @@ def _get_num_workers(verbose: bool) -> int | None:
 def _get_vc_env(vc_arch: str) -> dict[str, str]:
     try:
         from setuptools import distutils  # type: ignore[attr-defined]
-        # pyrefly: ignore [missing-attribute]
+
         return distutils._msvccompiler._get_vc_env(vc_arch)
     except AttributeError:
         try:
@@ -3017,15 +3054,14 @@ e.
     if with_cuda:
         cuda_compile_rule = ['rule cuda_compile']
         nvcc_gendeps = ''
-        # --generate-dependencies-with-compile is not supported by ROCm
-        # Nvcc flag `--generate-dependencies-with-compile` is not supported by sccache, which may increase build time.
+        # -MD is not supported by ROCm
+        # Nvcc flag `-MD` is not supported by sccache, which may increase build time.
         if torch.version.cuda is not None and os.getenv('TORCH_EXTENSION_SKIP_NVCC_GEN_DEPENDENCIES', '0') != '1':
             cuda_compile_rule.append('  depfile = $out.d')
             cuda_compile_rule.append('  deps = gcc')
             # Note: non-system deps with nvcc are only supported
-            # on Linux so use --generate-dependencies-with-compile
-            # to make this work on Windows too.
-            nvcc_gendeps = '--generate-dependencies-with-compile --dependency-output $out.d'
+            # on Linux so use -MD to make this work on Windows too.
+            nvcc_gendeps = '-MD -MF $out.d'
         cuda_compile_rule.append(
             f'  command = $nvcc {nvcc_gendeps} $cuda_cflags -c $in -o $out $cuda_post_cflags')
 
