@@ -128,6 +128,8 @@ else:
         """
         return getattr(torch, device_type, None)
 
+    # Subclass ABC which will be used by opaque objects to register
+    # FakeScriptObject as a virtual subclass
     class DeviceMesh(ABC):
         """
         DeviceMesh represents a mesh of devices, where layout of devices could be

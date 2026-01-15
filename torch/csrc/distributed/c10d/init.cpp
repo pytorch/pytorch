@@ -2071,7 +2071,7 @@ communication mechanism.
           ::c10d::ProcessGroup, ::c10d::PyProcessGroup>(
           module,
           "ProcessGroup",
-          py::metaclass(abc_meta.ptr()),
+          py::metaclass(abc_meta),
           R"(A ProcessGroup is a communication primitive that allows for
           collective operations across a group of processes.
 
