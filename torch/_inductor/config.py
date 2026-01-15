@@ -860,7 +860,6 @@ combo_kernel_foreach_dynamic_shapes = True
 # Maximum number of arguments (read/write buffers) allowed in a combo kernel
 combo_kernel_max_num_args = 250
 
-
 # constant folding on the joint graph
 joint_graph_constant_folding = True
 

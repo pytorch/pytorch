@@ -21,14 +21,15 @@ class ReferenceQuantizedModule(torch.nn.Module):
 
         self.weight_qscheme: torch.qscheme = weight_qparams["qscheme"]
         self.weight_dtype = weight_qparams["dtype"]
-        assert self.weight_qscheme in [
+        if self.weight_qscheme not in [
             None,
             torch.per_tensor_affine,
             torch.per_channel_affine,
             torch.per_channel_affine_float_qparams,
-        ], (
-            f"qscheme: {self.weight_qscheme} is not support in reference quantized {self._get_name()}"
-        )
+        ]:
+            raise AssertionError(
+                f"qscheme: {self.weight_qscheme} is not supported in reference quantized {self._get_name()}"
+            )
         if self.weight_dtype in [
             torch.quint8,
             torch.qint8,
@@ -99,8 +100,10 @@ class ReferenceQuantizedModule(torch.nn.Module):
         model
         """
         # suppress mypy warning
-        assert isinstance(self.weight_scale, torch.Tensor)
-        assert isinstance(self.weight_zero_point, torch.Tensor)
+        if not isinstance(self.weight_scale, torch.Tensor):
+            raise AssertionError("weight_scale must be a Tensor")
+        if not isinstance(self.weight_zero_point, torch.Tensor):
+            raise AssertionError("weight_zero_point must be a Tensor")
         if self.is_decomposed:
             return _quantize_and_dequantize_weight_decomposed(
                 self.weight,  # type: ignore[arg-type]
@@ -124,8 +127,10 @@ class ReferenceQuantizedModule(torch.nn.Module):
 
     def get_quantized_weight(self):
         # suppress mypy warning
-        assert isinstance(self.weight_scale, torch.Tensor)
-        assert isinstance(self.weight_zero_point, torch.Tensor)
+        if not isinstance(self.weight_scale, torch.Tensor):
+            raise AssertionError("weight_scale must be a Tensor")
+        if not isinstance(self.weight_zero_point, torch.Tensor):
+            raise AssertionError("weight_zero_point must be a Tensor")
         # assert isinstance(self.weight_axis, torch.Tensor)
         if self.is_decomposed:
             return _quantize_weight_decomposed(

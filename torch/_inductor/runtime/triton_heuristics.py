@@ -30,6 +30,7 @@ from torch.utils._ordered_set import OrderedSet
 
 from ..triton_bundler import TritonBundler
 from ..utils import (
+    GPU_KERNEL_BIN_EXTS,
     prefix_is_reduction,
     tlx_only_cuda_options,
     triton_version_uses_attrs_dict,
@@ -65,7 +66,11 @@ from .runtime_utils import (
     triton_hash_to_path_key,
     validate_triton_config,
 )
-from .static_cuda_launcher import StaticallyLaunchedCudaKernel
+from .static_triton_launcher import (
+    statically_launched_kernel_by_device,
+    StaticallyLaunchedCudaKernel,
+    StaticallyLaunchedXpuKernel,
+)
 from .triton_compat import (
     ASTSource,
     autograd_profiler,
@@ -102,7 +107,9 @@ if TYPE_CHECKING:
 
     LauncherType = Any
 
-_KernelType = Union[CompiledKernel, StaticallyLaunchedCudaKernel]
+_KernelType = Union[
+    CompiledKernel, StaticallyLaunchedCudaKernel, StaticallyLaunchedXpuKernel
+]
 _T = TypeVar("_T", bound=_KernelType)
 
 log = logging.getLogger(__name__)
@@ -1666,7 +1673,7 @@ class CannotStaticallyLaunchKernel(Exception):
     pass
 
 
-class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
+class StaticTritonCompileResult(CompileResult[_T]):
     """
     TritonCompileResult that uses StaticCudaLauncher,
     which vastly simplifies the setup and metadata needed to be kept.
@@ -1678,14 +1685,18 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
         inductor_meta: dict[str, Any],
         triton_meta: dict[str, Any],
         heuristic_type: HeuristicType,
-    ) -> StaticallyLaunchedCudaKernel | None:
+    ) -> _KernelType | None:
         if not torch._inductor.config.use_static_triton_launcher:
             return None
 
-        def check_can_launch() -> StaticallyLaunchedCudaKernel:
-            if triton_meta.get("device_type") != "cuda":
-                # Only cuda kernels
-                raise CannotStaticallyLaunchKernel("Non-cuda device")
+        def check_can_launch() -> _KernelType:
+            if triton_meta.get("device_type") not in ("cuda", "xpu", "hip"):
+                raise CannotStaticallyLaunchKernel("Non-cuda/XPU/ROCm device")
+
+            if triton_meta.get("device_type") == "xpu" and XPU_KERNEL_FORMAT == "spv":
+                raise CannotStaticallyLaunchKernel(
+                    "Static XPU Triton kernel launch does not support SPIR-V kernel."
+                )
 
             if torch._inductor.config.cpp_wrapper:
                 # If we're running with cpp wrapper, it doesn't
@@ -1711,10 +1722,13 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
                     "static launch does not support launch attributes"
                 )
 
+            binary_ext = GPU_KERNEL_BIN_EXTS.get(
+                triton_meta.get("device_type"), ".cubin"
+            )
             cubin_location = os.path.join(
                 triton_cache_dir(triton_meta.get("device", 0)),
                 triton_hash_to_path_key(kernel.hash),
-                f"{kernel.src.fn.__name__}.cubin",
+                f"{kernel.src.fn.__name__}{binary_ext}",
             )
 
             if not os.path.exists(cubin_location):
@@ -1726,7 +1740,9 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
                 kernel._cubin_path = cubin_location
 
             try:
-                static_kernel = StaticallyLaunchedCudaKernel(kernel)
+                static_kernel = statically_launched_kernel_by_device(
+                    kernel, triton_meta.get("device_type")
+                )
             except NotImplementedError as e:
                 raise CannotStaticallyLaunchKernel(f"NotImplemented: {str(e)}") from e
 
@@ -1746,10 +1762,14 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
         When loading from cache on disk, we want to reload cubin
         files from their appropriate location on disc.
         """
+        device_type = (
+            "hip" if torch.version.hip else self.compile_meta.get("device_type", "cuda")
+        )
+        binary_ext = GPU_KERNEL_BIN_EXTS.get(device_type, "cubin")
         cubin_location = os.path.join(
             triton_cache_dir(self.compile_meta.get("device", 0)),
             triton_hash_to_path_key(self.kernel.hash),
-            f"{self.kernel.name}.cubin",
+            f"{self.kernel.name}{binary_ext}",
         )
         if not os.path.exists(cubin_location):
             if self.kernel.cubin_raw is not None:
@@ -1764,7 +1784,7 @@ class StaticTritonCompileResult(CompileResult[StaticallyLaunchedCudaKernel]):
     def make_launcher(self) -> LauncherType:
         # If at least one static make_launcher call occurs,
         # we're sure static cuda launcher was used for this compile
-        set_feature_use("static_cuda_launcher", True)
+        set_feature_use("static_triton_launcher", True)
         # Load the binary on the parent
         if not self.kernel.cubin_path:
             self.reload_cubin_path()
@@ -3985,6 +4005,15 @@ class GridExpr:
             return items[0]
         return " + ".join(map(str, items))
 
+    def product(self, seq: list[int | str]) -> int | str:
+        """Codegen for product function with constant folding, constants are represented as int"""
+        import math
+
+        items = self._constant_fold(math.prod, seq)
+        if len(items) <= 1:
+            return items[0]
+        return " * ".join(map(str, items))
+
     def _constant_fold(
         self, fn: Callable[[list[int]], int], seq: list[int | str]
     ) -> list[int | str]:
@@ -4111,63 +4140,53 @@ class PrecomputedGrid(GridExpr):
 
 
 class ComboKernelGrid(GridExpr):
+    """
+    Base class for combo kernel grid calculation.
+    Subclasses must override generate() to compute x_grid, y_grid, z_grid.
+    """
+
     def generate(self, meta: dict[str, int]):
-        combo_meta = self.inductor_meta["combo_grid_meta"]
-        if combo_meta["default_config"]:
-            meta = {**combo_meta["default_config"], **meta}
-        no_x_dims = []
-        xnumels = []
-        ynumels = []
-        znumels = []
-        for num in range(combo_meta["num_kernels"]):
-            assert (
-                combo_meta[f"xnumel_{num}"] is None or combo_meta[f"xnumel_{num}"] > 0
-            )
-            no_x_dims.append(combo_meta[f"no_x_dim_{num}"])
-            xnumels.append(combo_meta[f"xnumel_{num}"] or f"xnumel_{num}")
-            if f"ynumel_{num}" in combo_meta:
-                ynumels.append((combo_meta[f"ynumel_{num}"] or f"ynumel_{num}", num))
-            if f"znumel_{num}" in combo_meta:
-                znumels.append((combo_meta[f"znumel_{num}"] or f"znumel_{num}", num))
-
-        self.x_grid = self.combo_x_grid(xnumels, no_x_dims, meta)
-        if combo_meta["min_blocks"]:
-            self.x_grid = self.maximum([self.x_grid, combo_meta["min_blocks"]])
-        if ynumels:
-            self.y_grid = self.maximum(
-                [
-                    self.ceildiv(ynumel, meta.get(f"YBLOCK_{num}"))
-                    for ynumel, num in ynumels
-                ]
-            )
-        if znumels:
-            self.z_grid = self.maximum(
-                [
-                    self.ceildiv(znumel, meta.get(f"ZBLOCK_{num}"))
-                    for znumel, num in znumels
-                ]
-            )
-
-    def combo_x_grid(
-        self,
-        xnumels: list[int | str],
-        no_x_dims: list[bool],
-        meta: dict[str, int],
-    ) -> str | int:
-        raise NotImplementedError
+        raise NotImplementedError("Subclasses must implement generate()")
 
 
 class SequentialComboKernelGrid(ComboKernelGrid):
-    def combo_x_grid(
-        self,
-        xnumels: list[int | str],
-        no_x_dims: list[bool],
-        meta: dict[str, int],
-    ) -> str | int:
-        assert len(xnumels) == len(no_x_dims)
-        return self.summation(
-            [
-                self.ceildiv(x, 1 if no_x_dim else meta.get(f"XBLOCK_{i}"))
-                for i, (x, no_x_dim) in enumerate(zip(xnumels, no_x_dims))
-            ]
-        )
+    def generate(self, meta: dict[str, int]):
+        """
+        Flattened grid: (sum of x*y*z blocks for all sub-kernels, 1, 1)
+        """
+        combo_meta = self.inductor_meta["combo_grid_meta"]
+        if combo_meta["default_config"]:
+            meta = {**combo_meta["default_config"], **meta}
+
+        total_blocks_list = []
+        for num in range(combo_meta["num_kernels"]):
+            xnumel = combo_meta[f"xnumel_{num}"]
+            assert xnumel is None or xnumel > 0
+            xnumel = xnumel or f"xnumel_{num}"
+            x_blocks = self.ceildiv(
+                xnumel,
+                1 if combo_meta[f"no_x_dim_{num}"] else meta.get(f"XBLOCK_{num}"),
+            )
+            y_blocks = (
+                self.ceildiv(
+                    combo_meta[f"ynumel_{num}"] or f"ynumel_{num}",
+                    meta.get(f"YBLOCK_{num}"),
+                )
+                if f"ynumel_{num}" in combo_meta
+                else 1
+            )
+            z_blocks = (
+                self.ceildiv(
+                    combo_meta[f"znumel_{num}"] or f"znumel_{num}",
+                    meta.get(f"ZBLOCK_{num}"),
+                )
+                if f"znumel_{num}" in combo_meta
+                else 1
+            )
+            total_blocks_list.append(self.product([x_blocks, y_blocks, z_blocks]))
+
+        self.x_grid = self.summation(total_blocks_list)
+        if combo_meta["min_blocks"]:
+            self.x_grid = self.maximum([self.x_grid, combo_meta["min_blocks"]])
+        self.y_grid = 1
+        self.z_grid = 1

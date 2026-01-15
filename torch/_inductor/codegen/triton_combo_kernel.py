@@ -284,38 +284,89 @@ class ComboKernel(Kernel):
             cls, kernel: "ComboKernel", num: int, code: IndentedBuffer
         ) -> None:
             if num == 0:
-                cls._calculate_xblocks(kernel, code)
-                code.splice(f"if pid < num_xblocks_{num}:")
-                with code.indent():
-                    code.splice("pid_offset = pid")
+                cls._calculate_total_blocks(kernel, code)
+                code.splice(f"if pid < num_blocks_{num}:")
             else:
-                code.splice(f"elif pid < num_xblocks_{num}:")
-                with code.indent():
-                    code.splice(f"pid_offset = pid - num_xblocks_{num - 1}")
+                code.splice(f"elif pid < num_blocks_{num}:")
+
+            with code.indent():
+                # Compute local pid within this subkernel's block range
+                if num == 0:
+                    code.splice("local_pid = pid")
+                else:
+                    code.splice(f"local_pid = pid - num_blocks_{num - 1}")
+
+                # Compute x/y/z indices from flattened local_pid
+                if kernel.y_tree_list[num] or kernel.z_tree_list[num]:
+                    code.splice(f"x_pid_offset = local_pid % x_blocks_{num}")
+                else:
+                    code.splice("x_pid_offset = local_pid")
+
+                if kernel.z_tree_list[num]:
+                    code.splice(
+                        f"y_pid_offset = (local_pid // x_blocks_{num}) % y_blocks_{num}"
+                    )
+                    code.splice(
+                        f"z_pid_offset = local_pid // (x_blocks_{num} * y_blocks_{num})"
+                    )
+                elif kernel.y_tree_list[num]:
+                    code.splice(f"y_pid_offset = local_pid // x_blocks_{num}")
 
         @classmethod
-        def _calculate_xblocks(
+        def _calculate_total_blocks(
             cls, kernel: "ComboKernel", code: IndentedBuffer
         ) -> None:
-            x_numels_list = kernel.x_numels_list
-            for i in range(len(x_numels_list)):
-                xnumels, no_x_dim = (
-                    (x_numels_list[i], False)
-                    if isinstance(x_numels_list[i], str)
-                    and cast(str, x_numels_list[i])[0] != "-"
+            """
+            Calculate total blocks for each subkernel (x_blocks * y_blocks * z_blocks)
+            and cumulative block counts for dispatch boundaries.
+            Uses kernel.y_tree_list and kernel.z_tree_list populated by get_block_args().
+            """
+            for i, sub_kernel in enumerate(kernel.sub_kernels):
+                xnumel, no_x_dim = (
+                    (kernel.x_numels_list[i], False)
+                    if isinstance(kernel.x_numels_list[i], str)
+                    and cast(str, kernel.x_numels_list[i])[0] != "-"
                     or (
-                        isinstance(x_numels_list[i], int)
-                        and cast(int, x_numels_list[i]) > 0
+                        isinstance(kernel.x_numels_list[i], int)
+                        and cast(int, kernel.x_numels_list[i]) > 0
                     )
                     else (kernel.min_x_blocks_list[i], True)
                 )
-                xblock_str = (
-                    f"tl.cdiv({xnumels}, XBLOCK_{i})" if not no_x_dim else f"{xnumels}"
+                x_blocks_str = (
+                    f"tl.cdiv({xnumel}, XBLOCK_{i})" if not no_x_dim else f"{xnumel}"
                 )
-                if i == 0:
-                    code.splice(f"num_xblocks_{i} = {xblock_str}")
-                else:
-                    code.splice(f"num_xblocks_{i} = num_xblocks_{i - 1} + {xblock_str}")
+                code.splice(f"x_blocks_{i} = {x_blocks_str}")
+
+                if kernel.y_tree_list[i]:
+                    numel = V.graph.sizevars.simplify(kernel.y_tree_list[i].numel)
+                    ynumel = (
+                        int(numel)
+                        if isinstance(numel, (Integer, int))
+                        else f"ynumel_{i}"
+                    )
+                    code.splice(f"y_blocks_{i} = tl.cdiv({ynumel}, YBLOCK_{i})")
+
+                if kernel.z_tree_list[i]:
+                    numel = V.graph.sizevars.simplify(kernel.z_tree_list[i].numel)
+                    znumel = (
+                        int(numel)
+                        if isinstance(numel, (Integer, int))
+                        else f"znumel_{i}"
+                    )
+                    code.splice(f"z_blocks_{i} = tl.cdiv({znumel}, ZBLOCK_{i})")
+
+                blocks_expr = (
+                    f"x_blocks_{i} * y_blocks_{i} * z_blocks_{i}"
+                    if kernel.z_tree_list[i]
+                    else f"x_blocks_{i} * y_blocks_{i}"
+                    if kernel.y_tree_list[i]
+                    else f"x_blocks_{i}"
+                )
+                code.splice(
+                    f"num_blocks_{i} = {blocks_expr}"
+                    if i == 0
+                    else f"num_blocks_{i} = num_blocks_{i - 1} + {blocks_expr}"
+                )
 
     def __init__(
         self, enable_autotune: bool = False, mixed_sizes: bool = False
@@ -326,6 +377,8 @@ class ComboKernel(Kernel):
         self.grids: list[list[int]] = []
         self.min_x_blocks_list: list[Union[int, str]] = []
         self.x_numels_list: list[Union[int, str]] = []
+        self.y_tree_list: list = []
+        self.z_tree_list: list = []
         self.enable_autotune = enable_autotune
         self.mixed_sizes = mixed_sizes
         self.block_args: list[str] = []
@@ -359,7 +412,12 @@ class ComboKernel(Kernel):
         return TritonKernel(
             tiling,
             features=features,
-            pid_cache={"tl.program_id(0)": "pid_offset"},
+            # Flattened dispatch: all dimensions derived from single pid
+            pid_cache={
+                "tl.program_id(0)": "x_pid_offset",
+                "tl.program_id(1)": "y_pid_offset",
+                "tl.program_id(2)": "z_pid_offset",
+            },
             optimize_mask=optimize_mask,
             is_combo_kernel=True,
             # foreach kernels don't work with cooperative reductions
@@ -565,9 +623,6 @@ class ComboKernel(Kernel):
             "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             "constants": {},
         }
-        triton_meta[
-            "enable_fp_fusion"
-        ] = not config.emulate_precision_casts  # pyrefly: ignore[unsupported-operation]
 
         for arg_num in equal_1_arg_indices(signature):
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
@@ -624,8 +679,8 @@ class ComboKernel(Kernel):
         return heuristics_line
 
     def codegen_blocks(self, code: IndentedBuffer) -> None:
-        has_yblock = any("YBLOCK" in b for b in self.block_args)
-        has_zblock = any("ZBLOCK" in b for b in self.block_args)
+        has_yblock = any(self.y_tree_list)
+        has_zblock = any(self.z_tree_list)
         has_r1block = any("R1_BLOCK" in b for b in self.block_args)
 
         # When we have R1_BLOCK (2D reduction tiling), we need smaller reduction
@@ -661,11 +716,13 @@ class ComboKernel(Kernel):
     def get_block_args(self) -> list[ConstexprArg]:
         """
         Calculate blocks from sub_kernels and range_trees.
-        **Update self.block_args**
+        Update self.block_args, self.y_tree_list, self.z_tree_list
         Return the block args
         """
         block_names = {}
         for i, sub_kernel in enumerate(self.sub_kernels):
+            y_tree = None
+            z_tree = None
             for tree in sub_kernel.range_trees:
                 if tree.is_reduction and (
                     not sub_kernel.inside_reduction or sub_kernel.persistent_reduction
@@ -673,7 +730,13 @@ class ComboKernel(Kernel):
                     continue
                 if tree.prefix == "x" and sub_kernel.no_x_dim:
                     continue
+                if tree.prefix == "y":
+                    y_tree = tree
+                elif tree.prefix == "z":
+                    z_tree = tree
                 block_names[f"{tree.prefix.upper()}BLOCK_{i}"] = tree.prefix
+            self.y_tree_list.append(y_tree)
+            self.z_tree_list.append(z_tree)
         self.block_args = list(block_names.keys())
 
         return [ConstexprArg(x) for x in block_names]
@@ -990,22 +1053,20 @@ class ComboKernel(Kernel):
 
         if not self.enable_autotune:
             default_config: dict[str, int] = {}
-            has_yblock = any("YBLOCK" in b for b in self.block_args)
-            has_zblock = any("ZBLOCK" in b for b in self.block_args)
             for num, sub_kernel in enumerate(self.sub_kernels):
                 if sub_kernel.no_x_dim:
                     default_config[f"XBLOCK_{num}"] = 1
                 else:
                     block_size = (
                         self.block_size_2d
-                        if (has_yblock or has_zblock)
+                        if (any(self.y_tree_list) or any(self.z_tree_list))
                         else self.block_size_1d
                     )
                     default_config[f"XBLOCK_{num}"] = block_size
 
-                if has_yblock:
+                if self.y_tree_list[num]:
                     default_config[f"YBLOCK_{num}"] = self.block_size_2d
-                if has_zblock:
+                if self.z_tree_list[num]:
                     default_config[f"ZBLOCK_{num}"] = self.block_size_2d
             meta["default_config"] = default_config
         else:

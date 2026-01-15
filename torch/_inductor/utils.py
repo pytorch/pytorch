@@ -144,7 +144,11 @@ XPU_KERNEL_FORMAT = (
     "spv" if _IS_WINDOWS else os.getenv("TORCHINDUCTOR_XPU_KERNEL_FORMAT", "zebin")
 )
 
-GPU_KERNEL_BIN_EXTS = {"cuda": ".cubin", "xpu": f".{XPU_KERNEL_FORMAT}"}
+GPU_KERNEL_BIN_EXTS = {
+    "cuda": ".cubin",
+    "hip": ".hsaco",
+    "xpu": f".{XPU_KERNEL_FORMAT}",
+}
 
 GPU_ALIGN_BYTES = 16
 ALIGNMENT = 16
@@ -3137,6 +3141,11 @@ def get_cloned_parameter_buffer_name(name: str) -> str:
 
 def is_gpu(device: Optional[str]) -> bool:
     return device in GPU_TYPES
+
+
+def is_rocm() -> bool:
+    """Check if we're running on ROCm/HIP platform."""
+    return torch.version.hip is not None
 
 
 def device_need_guard(device: str) -> bool:
