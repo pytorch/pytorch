@@ -2830,6 +2830,10 @@ class TestSDPACudaOnly(NNTestCase):
                 test_attention(SDPBackend.CUDNN_ATTENTION, list(permute_order) + [3], use_compile)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
+    @unittest.skipIf(
+        not (isSM90Device and torch.backends.cudnn.version() >= 91000),
+        "head_dim > 128 requires SM90 with cuDNN >= 9.1.0"
+    )
     def test_cudnn_attention_interleaved_layout_compile(self, device):
         """
         Test cudnn attention with interleaved head layout under torch.compile.
