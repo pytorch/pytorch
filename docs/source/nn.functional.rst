@@ -221,11 +221,13 @@ DataParallel functions (multi-GPU, distributed)
 
 Low-Precision functions
 -----------------------
+
 .. autosummary::
     :toctree: generated
     :nosignatures:
 
     ScalingType
     SwizzleType
+    grouped_mm
     scaled_mm
     scaled_grouped_mm

@@ -53,7 +53,7 @@ std::ostream& operator<<(std::ostream& out, const ConvParams& params) {
       << "  transposed = " << params.transposed
       << "  output_padding = " << IntArrayRef{params.output_padding}
       << "  groups = " << params.groups << "  benchmark = " << params.benchmark
-      << "  deterministic = " << params.deterministic << "}";
+      << "  deterministic = " << params.deterministic << '}';
   return out;
 }
 
@@ -337,10 +337,6 @@ Tensor _convolution_out(
   TORCH_CHECK(
       3 == ndim || 4 == ndim || 5 == ndim,
       "convolution only supports 3D, 4D, 5D tensor");
-  // get computation format for Conv/TransposedConv
-  bool is_channels_last_suggested =
-      use_channels_last_for_conv(input_r, weight_r);
-
   Tensor input = input_r, weight = weight_r;
   // PyTorch does not support ChannelsLast1D case,
   // thus we need the transformation here
@@ -348,13 +344,8 @@ Tensor _convolution_out(
     input = view4d(input_r);
     weight = view4d(weight_r);
   }
-  // ensure the input/weight/bias/output are congituous in desired format
-  at::MemoryFormat mfmt = is_channels_last_suggested
-      ? get_cl_tag_by_ndim(input.ndimension())
-      : at::MemoryFormat::Contiguous;
-  auto bias = bias_r.defined() ? bias_r.contiguous() : bias_r;
-  input = input.contiguous(mfmt);
-  weight = weight.contiguous(mfmt);
+  // get computation format for Conv/TransposedConv
+  bool is_channels_last_suggested = use_channels_last_for_conv(input, weight);
 
   auto k = weight.ndimension();
   if (k == input.ndimension() + 1) {
@@ -388,6 +379,14 @@ Tensor _convolution_out(
         expand_param_if_needed(output_padding_, "output_padding", dim);
     params.groups = groups_;
   }
+
+  // ensure the input/weight/bias/output are congituous in desired format
+  at::MemoryFormat mfmt = is_channels_last_suggested
+      ? get_cl_tag_by_ndim(input.ndimension())
+      : at::MemoryFormat::Contiguous;
+  auto bias = bias_r.defined() ? bias_r.contiguous() : bias_r;
+  input = input.contiguous(mfmt);
+  weight = weight.contiguous(mfmt);
   check_shape_forward(input, weight, bias, params, true);
 
   Tensor output;
@@ -514,18 +513,9 @@ Tensor convolution_overrideable(
       at::borrow_from_optional_tensor(bias_r_opt);
   const Tensor& bias_r = *bias_r_maybe_owned;
 
-  auto k = weight_r.ndimension();
-  at::MemoryFormat backend_memory_format = at::MemoryFormat::Contiguous;
-  if (xpu_conv_use_channels_last(input_r, weight_r)) {
-    backend_memory_format = (k == 5) ? at::MemoryFormat::ChannelsLast3d
-                                     : at::MemoryFormat::ChannelsLast;
-  }
-  Tensor input_c = input_r.contiguous(backend_memory_format);
-  Tensor weight_c = weight_r.contiguous(backend_memory_format);
-
   return _convolution(
-      input_c,
-      weight_c,
+      input_r,
+      weight_r,
       bias_r,
       stride_,
       padding_,
@@ -625,6 +615,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
             weight_,
             stride_,
             padding_,
+            output_padding_,
             dilation_,
             groups_,
             output_mask[2]);
@@ -656,6 +647,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
             input_,
             stride_,
             padding_,
+            output_padding_,
             dilation_,
             groups_);
       } else {

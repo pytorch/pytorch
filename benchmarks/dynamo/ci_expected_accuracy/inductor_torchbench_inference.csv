@@ -2,10 +2,6 @@ name,accuracy,graph_breaks
 
 
 
-torchrec_dlrm,eager_fail_to_run,0
-
-
-
 BERT_pytorch,pass,0
 
 
@@ -39,10 +35,6 @@ basic_gnn_gin,pass,0
 
 
 basic_gnn_sage,pass,0
-
-
-
-cm3leon_generate,pass,4
 
 
 
@@ -82,7 +74,7 @@ detectron2_fasterrcnn_r_50_fpn,eager_fail_to_run,0
 
 
 
-detectron2_fcos_r_50_fpn,pass,22
+detectron2_fcos_r_50_fpn,pass,24
 
 
 
@@ -131,10 +123,6 @@ functorch_maml_omniglot,pass,0
 
 
 lennard_jones,pass,0
-
-
-
-llama,pass,0
 
 
 
@@ -270,15 +258,11 @@ squeezenet1_1,pass,0
 
 
 
-stable_diffusion_text_encoder,pass,0
-
-
-
-stable_diffusion_unet,pass_due_to_skip,0
-
-
-
 torch_multimodal_clip,pass,0
+
+
+
+torchrec_dlrm,eager_fail_to_run,0
 
 
 
@@ -290,7 +274,7 @@ vgg16,pass,0
 
 
 
-vision_maskrcnn,pass,18
+vision_maskrcnn,fail_to_run,18
 
 
 

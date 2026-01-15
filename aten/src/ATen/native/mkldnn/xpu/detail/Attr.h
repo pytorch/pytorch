@@ -34,7 +34,7 @@ namespace at::native::onednn {
 
 /*
    oneDNN postops usage:
-   Currently, oneDNN supports 5 kinds of post ops. More details can be refered
+   Currently, oneDNN supports 5 kinds of post ops. More details can be referred
 to oneDNN doc.
    https://oneapi-src.github.io/oneDNN/dev_guide_attributes_post_ops.html#doxid-dev-guide-attributes-post-ops-1dev-guide-attributes-post-ops-eltwise
 
@@ -399,7 +399,7 @@ static inline void construct_attr_for_unary(
   } else {
     TORCH_CHECK(
         unary_post_op == "none",
-        "onednn qlinear: unspported unary post op",
+        "onednn qlinear: unsupported unary post op",
         unary_post_op);
   }
 }

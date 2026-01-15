@@ -12,6 +12,7 @@ from torch.distributed.distributed_c10d import (
     _check_op,
     _get_default_group,
     _resolve_process_group,
+    GroupName,
     ProcessGroup,
     ReduceOp,
     Work,
@@ -104,7 +105,7 @@ def _prepare_collective_groups(
 # work object). Functional collectives expect the implementation to allocate outputs, accept
 # process group name that must be resolved and do not support async ops (return output).
 def _local_functional_all_gather_into_tensor(
-    tensor: torch.Tensor, group_size: int, group_name: str
+    tensor: torch.Tensor, group_size: int, group_name: GroupName
 ) -> torch.Tensor:
     # "all_gather_into_tensor(Tensor input, int group_size, str group_name) -> Tensor"
     from . import LocalTensor
@@ -120,6 +121,9 @@ def _local_functional_all_gather_into_tensor(
         group_ranks = [group_offset + r for r in ranks]
 
         group_tensors = []
+        if not all(rank in tensor._local_tensors for rank in group_ranks):
+            continue
+
         for rank in group_ranks:
             group_tensors.append(tensor._local_tensors[rank])
 
@@ -135,7 +139,7 @@ def _local_functional_all_gather_into_tensor(
 
 
 def _local_functional_reduce_scatter_tensor(
-    tensor: torch.Tensor, reduce_op: str, group_size: int, group_name: str
+    tensor: torch.Tensor, reduce_op: str, group_size: int, group_name: GroupName
 ) -> torch.Tensor:
     #  "reduce_scatter_tensor(Tensor input, str reduce_op, int group_size, str group_name) -> Tensor"
     from . import _zero_sized_like, LocalTensor
@@ -151,6 +155,9 @@ def _local_functional_reduce_scatter_tensor(
         group_ranks = [group_offset + r for r in ranks]
 
         group_tensors = []
+        if not all(rank in tensor._local_tensors for rank in group_ranks):
+            continue
+
         for rank in group_ranks:
             group_tensors.append(tensor._local_tensors[rank])
 
@@ -175,7 +182,7 @@ def _local_functional_reduce_scatter_tensor(
 
 
 def _local_functional_shard_dim_alltoall(
-    tensor: torch.Tensor, gather_dim: int, shard_dim: int, group_name: str
+    tensor: torch.Tensor, gather_dim: int, shard_dim: int, group_name: GroupName
 ) -> torch.Tensor:
     # "shard_dim_alltoall(Tensor input, int gather_dim, int shard_dim, str group_name) -> Tensor"
     from . import _zero_sized_like, LocalTensor
@@ -191,6 +198,9 @@ def _local_functional_shard_dim_alltoall(
         group_ranks = [group_offset + r for r in ranks]
 
         group_tensors = []
+        if not all(rank in tensor._local_tensors for rank in group_ranks):
+            continue
+
         for rank in group_ranks:
             group_tensors.append(tensor._local_tensors[rank])
 
@@ -209,6 +219,61 @@ def _local_functional_shard_dim_alltoall(
                 output_local_tensors[rank] = _zero_sized_like(
                     gathered_tensor, shard_dim
                 )
+
+    # pyrefly: ignore [bad-argument-type, bad-argument-count]
+    output = LocalTensor(output_local_tensors)
+
+    return output
+
+
+def _local_functional_all_to_all_single(
+    tensor: torch.Tensor,
+    output_split_sizes: list[torch.SymInt],
+    input_split_sizes: list[torch.SymInt],
+    group_name: GroupName,
+) -> torch.Tensor:
+    # "all_to_all_single(Tensor input, SymInt[] output_split_sizes, SymInt[] input_split_sizes, str group_name) -> Tensor"
+    from . import LocalIntNode, LocalTensor
+
+    ranks, group_offsets, offset = _prepare_collective_groups(
+        _resolve_process_group(group_name)
+    )
+
+    assert isinstance(tensor, LocalTensor), "Input tensor must be a LocalTensor"
+
+    split_local_sizes: dict[int, list[int]] = {}
+    for input_split_size in input_split_sizes:
+        if isinstance(input_split_size, torch.SymInt) and isinstance(
+            input_split_size.node, LocalIntNode
+        ):
+            local_ints = dict(input_split_size.node._local_ints.items())
+        else:
+            local_ints = {rank: int(input_split_size) for rank in tensor._local_tensors}
+        for rank, split_size in local_ints.items():
+            if rank not in split_local_sizes:
+                split_local_sizes[rank] = []
+            split_local_sizes[rank].append(split_size)
+
+    split_local_tensors: dict[int, list[torch.Tensor]] = {}
+
+    for rank, split_sizes in split_local_sizes.items():
+        split_local_tensors[rank] = list(
+            torch.split(tensor._local_tensors[rank], split_sizes)
+        )
+
+    output_local_tensors: dict[int, torch.Tensor] = {}
+
+    for group_offset in group_offsets:
+        group_ranks = [group_offset + r for r in ranks]
+
+        if not all(rank in split_local_tensors for rank in group_ranks):
+            continue
+
+        for i, dst in enumerate(group_ranks):
+            splits = []
+            for src in group_ranks:
+                splits.append(split_local_tensors[src][i])
+            output_local_tensors[dst] = torch.cat(splits)
 
     # pyrefly: ignore [bad-argument-type, bad-argument-count]
     output = LocalTensor(output_local_tensors)
@@ -244,6 +309,9 @@ def _local_broadcast_(
         # For the tensors in this group [group_offset + r for r in ranks]
         # perform the broadcast on them
         group_ranks = [group_offset + r for r in ranks]
+        if not all(rank in tensor._local_tensors for rank in group_ranks):
+            continue
+
         source_rank = group_offset + relative_root_rank
         source_tensor = tensor._local_tensors[source_rank]
 
@@ -314,6 +382,8 @@ def _local_all_reduce_(
         # For the tensors in this group [group_offset + r for r in ranks]
         # perform the allreduce on them
         group_ranks = [group_offset + r for r in ranks]
+        if not all(rank in tensor._local_tensors for rank in group_ranks):
+            continue
 
         # Collect tensors from the specified ranks in this group
         group_tensors = []
@@ -354,6 +424,8 @@ def _local_allreduce_coalesced_(
         # For each tensor, perform the reduction operation
         for tensor in tensors:
             assert isinstance(tensor, LocalTensor), "Input tensor must be a LocalTensor"
+            if not all(rank in tensor._local_tensors for rank in group_ranks):
+                continue
             # Collect tensors from the specified ranks in this group
             group_tensors = []
             for rank in group_ranks:
@@ -402,6 +474,11 @@ def _local_reduce_scatter_tensor_coalesced_(
             assert isinstance(output_tensor, LocalTensor), (
                 "Output tensor must be a LocalTensor"
             )
+            if not all(rank in input_tensor._local_tensors for rank in group_ranks):
+                continue
+            if not all(rank in output_tensor._local_tensors for rank in group_ranks):
+                continue
+
             # Collect tensors from the specified ranks in this group
             group_inputs = []
             for rank in group_ranks:
@@ -421,6 +498,91 @@ def _local_reduce_scatter_tensor_coalesced_(
     work = FakeWork()
     work_so = Work.boxed(work)
     return work_so
+
+
+def _local_allgather_base_(
+    output_tensor: torch.Tensor,
+    input_tensor: torch.Tensor,
+    process_group_so: ScriptObject,
+    async_op: bool = True,
+    timeout: int = -1,
+) -> tuple[torch.Tensor, ScriptObject]:
+    # "_allgather_base_(Tensor output_tensor, Tensor input_tensor, __torch__.torch.classes.c10d.ProcessGroup
+    # process_group, bool async_op=True, int timeout=-1) -> (Tensor, __torch__.torch.classes.c10d.Work)");
+    from . import LocalTensor
+
+    ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
+
+    assert isinstance(output_tensor, LocalTensor), "Output tensor must be a LocalTensor"
+    assert isinstance(input_tensor, LocalTensor), "Input tensor must be a LocalTensor"
+
+    for group_offset in group_offsets:
+        group_ranks = [group_offset + r for r in ranks]
+
+        if not all(rank in input_tensor._local_tensors for rank in group_ranks):
+            continue
+        if not all(rank in output_tensor._local_tensors for rank in group_ranks):
+            continue
+
+        gathered_tensors = []
+        for rank_i in group_ranks:
+            gathered_tensors.append(input_tensor._local_tensors[rank_i])
+
+        gathered_tensor = torch.cat(gathered_tensors, dim=0)
+
+        for rank_i in group_ranks:
+            output_tensor._local_tensors[rank_i].copy_(gathered_tensor)
+
+    work = FakeWork()
+    work_so = Work.boxed(work)
+    return output_tensor, work_so
+
+
+def _local_reduce_scatter_base_(  # type: ignore[no-untyped-def]
+    output_tensor: torch.Tensor,
+    input_tensor: torch.Tensor,
+    process_group_so: ScriptObject,
+    reduce_op_so: ScriptObject,
+    async_op: bool = True,
+    timeout: int = -1,
+) -> tuple[torch.Tensor, ScriptObject]:
+    # "_reduce_scatter_base_(Tensor output_tensor, Tensor input_tensor,
+    # __torch__.torch.classes.c10d.ProcessGroup process_group, __torch__.torch.classes.c10d.ReduceOp reduce_op,
+    # bool async_op=True, int timeout=-1) -> (Tensor, __torch__.torch.classes.c10d.Work)"
+
+    from . import LocalTensor
+
+    reduce_op = reduce_op_so.op()  # type: ignore[attr-defined]
+    ranks, group_offsets, _offset = _prepare_collective_groups(process_group_so)
+
+    assert isinstance(output_tensor, LocalTensor), "Output tensor must be a LocalTensor"
+    assert isinstance(input_tensor, LocalTensor), "Input tensor must be a LocalTensor"
+
+    for group_offset in group_offsets:
+        group_ranks = [group_offset + r for r in ranks]
+        if not all(rank in input_tensor._local_tensors for rank in group_ranks):
+            continue
+        if not all(rank in output_tensor._local_tensors for rank in group_ranks):
+            continue
+
+        gathered_tensors = []
+        for rank_i in group_ranks:
+            gathered_tensors.append(input_tensor._local_tensors[rank_i])
+
+        reduced_tensor = _local_reduce(reduce_op, gathered_tensors)
+
+        scattered_tensor = torch.split(
+            reduced_tensor,
+            reduced_tensor.size(0) // len(group_ranks),
+            dim=0,
+        )
+
+        for i, rank_i in enumerate(group_ranks):
+            output_tensor._local_tensors[rank_i].copy_(scattered_tensor[i].clone())
+
+    work = FakeWork()
+    work_so = Work.boxed(work)
+    return output_tensor, work_so
 
 
 def _local_all_gather_(
@@ -502,6 +664,12 @@ def _local_allgather_into_tensor_coalesced_(
             assert isinstance(output_tensor, LocalTensor), (
                 "Output tensor must be a LocalTensor"
             )
+
+            if not all(rank in input_tensor._local_tensors for rank in group_ranks):
+                continue
+            if not all(rank in output_tensor._local_tensors for rank in group_ranks):
+                continue
+
             # Gather input_tensor from all ranks into output_tensor
             # The output should be a concatenation of all inputs along the first dimension
             gathered_tensors = []
@@ -569,6 +737,8 @@ def _local_scatter_(
         # For the tensors in this group [group_offset + r for r in ranks]
         # perform the scatter on them
         group_ranks = [group_offset + r for r in ranks]
+        if not all(rank in output_tensor._local_tensors for rank in group_ranks):
+            continue
 
         # Root rank scatters its input tensors to all ranks in this group
         for i, rank in enumerate(group_ranks):
@@ -616,11 +786,19 @@ def _local_alltoall_(
             assert isinstance(output_tensor, LocalTensor), (
                 "Output tensor must be a LocalTensor"
             )
+
+            if not all(rank in output_tensor._local_tensors for rank in group_ranks):
+                continue
+
             for j, rank_j in enumerate(group_ranks):
                 input_tensor = input_tensors[j]
                 assert isinstance(input_tensor, LocalTensor), (
                     "Input tensor must be a LocalTensor"
                 )
+
+                if not all(rank in input_tensor._local_tensors for rank in group_ranks):
+                    continue
+
                 # Rank i's j-th input tensor goes to rank j's i-th output tensor
                 source_tensor = input_tensor._local_tensors[rank_i]
                 output_tensor._local_tensors[rank_j].copy_(source_tensor)
@@ -658,6 +836,11 @@ def _local_alltoall_base_(
         # For the tensors in this group [group_offset + r for r in ranks]
         # perform the alltoall_base on them
         group_ranks = [group_offset + r for r in ranks]
+
+        if not all(rank in input_tensor._local_tensors for rank in group_ranks):
+            continue
+        if not all(rank in output_tensor._local_tensors for rank in group_ranks):
+            continue
 
         for i, rank_i in enumerate(group_ranks):
             # Split input tensor from rank_i according to input_split_sizes
@@ -839,7 +1022,7 @@ def local_p2p_op(
     dst: torch.SymInt,
     tensor: torch.Tensor,
     op: Callable[[torch.Tensor, int], Work | None],
-) -> Work | None | list[Work | None]:
+) -> Work | list[Work | None] | None:
     """
     Runs a point-to-point (P2P) operation for all combinations of source and destination ranks.
     """
@@ -858,7 +1041,7 @@ def local_p2p_op(
     return w
 
 
-def wait_all(work: Work | None | list[Work | None]) -> None:
+def wait_all(work: Work | list[Work | None] | None) -> None:
     """
     Waits for all work objects in the input to complete.
 

@@ -120,16 +120,6 @@ std::shared_ptr<c10::GatheredContext> gather_with_cpp() {
   return CapturedTraceback::gather(true, true, true);
 }
 
-CapturedTraceback* getFromContext(
-    const std::shared_ptr<c10::GatheredContext>& x) {
-  if (CapturedTraceback* sc = dynamic_cast<CapturedTraceback*>(x.get())) {
-    return sc;
-  }
-  TORCH_CHECK(
-      false,
-      "attempting to gather stack context from the wrong StackContext type.");
-}
-
 #define ADD_CALLBACK(callbackType) at::add##callbackType##Callback
 at::CallbackHandle _initRecordAnnotations(bool useGlobalCallback) {
   auto addCallback =
@@ -209,7 +199,8 @@ void _record_memory_history(
     bool record_cpp_context,
     bool clearHistory,
     bool compileContext,
-    bool globalRecordAnnotations) {
+    bool globalRecordAnnotations,
+    const std::vector<std::string>& skip_actions) {
   c10::cuda::CUDACachingAllocator::CreateContextFn recorder = gather;
   if (enabled && record_cpp_context &&
       (trace_alloc_record_context || record_context)) {
@@ -227,7 +218,12 @@ void _record_memory_history(
 
   setRecordFunctionCallbacks(enabled, compileContext, globalRecordAnnotations);
   c10::cuda::CUDACachingAllocator::recordHistory(
-      enabled, recorder, trace_alloc_max_entries, when, clearHistory);
+      enabled,
+      recorder,
+      trace_alloc_max_entries,
+      when,
+      clearHistory,
+      skip_actions);
 }
 
 static void checkOptionIn(
@@ -245,7 +241,8 @@ void _record_memory_history(
     size_t max_entries,
     bool clearHistory,
     bool compileContext,
-    bool globalRecordAnnotations) {
+    bool globalRecordAnnotations,
+    const std::vector<std::string>& skip_actions) {
   if (enabled) {
     checkOptionIn(
         *enabled,
@@ -282,7 +279,12 @@ void _record_memory_history(
   setRecordFunctionCallbacks(
       enabled.has_value(), compileContext, globalRecordAnnotations);
   c10::cuda::CUDACachingAllocator::recordHistory(
-      enabled.has_value(), recorder, max_entries, when, clearHistory);
+      enabled.has_value(),
+      recorder,
+      max_entries,
+      when,
+      clearHistory,
+      skip_actions);
 }
 
 std::string _memory_snapshot_pickled() {
@@ -321,7 +323,7 @@ std::string _memory_snapshot_pickled() {
   auto add_frame_key = [&](const c10::Dict<IValue, IValue>& d,
                            const std::shared_ptr<c10::GatheredContext>& ctx) {
     if (ctx) {
-      frame_tracebacks.push_back(getFromContext(ctx));
+      frame_tracebacks.push_back(getCapturedTracebackFromContext(ctx));
       frame_dict.push_back(d);
     } else {
       d.insert(frames_s, empty_frames);
@@ -431,7 +433,7 @@ std::string _memory_snapshot_pickled() {
       trace_entry.insert(compile_contexts_s, te.compile_context_);
       trace_entry.insert(user_metadata_s, te.user_metadata_);
       if (te.context_) {
-        auto sc = getFromContext(te.context_);
+        auto sc = getCapturedTracebackFromContext(te.context_);
         frame_tracebacks.push_back(sc);
         frame_dict.push_back(trace_entry);
       }

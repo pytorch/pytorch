@@ -570,7 +570,7 @@ void OperatorEntry::checkInvariants() const {
 
 std::string OperatorEntry::listAllDispatchKeys() const {
   std::ostringstream str;
-  str << "[";
+  str << '[';
 
   bool has_kernels = false;
   for (auto k : allDispatchKeysInFullSet()) {
@@ -584,7 +584,7 @@ std::string OperatorEntry::listAllDispatchKeys() const {
     str << k;
     has_kernels = true;
   }
-  str << "]";
+  str << ']';
   return str.str();
 }
 
@@ -683,12 +683,12 @@ void OperatorEntry::setReportErrorCallback_(std::unique_ptr<c10::SafePyObject> c
 // This WON'T report backend fallbacks.
 std::string OperatorEntry::dumpState() const {
   std::ostringstream oss;
-  oss << "name: " << name_ << "\n";
+  oss << "name: " << name_ << '\n';
   if (schema_) {
-    oss << "schema: " << schema_->schema << "\n";
-    oss << "debug: " << schema_->debug << "\n";
+    oss << "schema: " << schema_->schema << '\n';
+    oss << "debug: " << schema_->debug << '\n';
     oss << "alias analysis kind: " << toString(schema_->schema.aliasAnalysis())
-        << (schema_->schema.isDefaultAliasAnalysisKind() ? " (default)" : "") << "\n";
+        << (schema_->schema.isDefaultAliasAnalysisKind() ? " (default)" : "") << '\n';
   } else {
     oss << "schema: (none)\n";
   }

@@ -5,7 +5,7 @@
 #include <ATen/cuda/nvrtc_stub/ATenNVRTC.h>
 #include <c10/macros/Macros.h>
 
-// Two warninngs in Cutlass included header files
+// Two warnings in Cutlass included header files
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wset-but-not-used")
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-parameter")
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wmissing-field-initializers")
@@ -14,7 +14,7 @@ C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-but-set-variable")
 // Determine if the architecture supports rowwise scaled mm
 // Currently failing on windows with:
 // https://github.com/NVIDIA/cutlass/issues/1571
-#if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION) && CUDA_VERSION >= 12000
+#if !defined(USE_ROCM) && !defined(_WIN32) && defined(CUDA_VERSION)
 
 #define BUILD_ROWWISE_FP8_KERNEL
 #endif
@@ -958,8 +958,9 @@ void dispatch_fp8_rowwise_kernel_on_sm(
   const bool sm89 = properties != nullptr && properties->major == 8 && properties->minor == 9;
   const bool sm9x = properties != nullptr && properties->major == 9;
   const bool sm10x = properties != nullptr && properties->major == 10;
+  const bool sm11x = properties != nullptr && properties->major == 11;
   const bool sm12x = properties != nullptr && properties->major == 12;
-  if (!(sm89 || sm9x || sm10x || sm12x)) {
+  if (!(sm89 || sm9x || sm10x || sm11x || sm12x)) {
     TORCH_CHECK(
         false, "Rowwise scaling is not currently supported on your device");
   }
@@ -968,7 +969,7 @@ void dispatch_fp8_rowwise_kernel_on_sm(
     dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<
       /*ArchTag=*/cutlass::arch::Sm90,
       Types...>(XQ, WQ, x_scale, w_scale, bias, out);
-  } else if (sm10x) {
+  } else if (sm10x || sm11x) {
     dispatch_fp8_rowwise_kernel_on_cluster_size_and_transpose<
       /*ArchTag=*/cutlass::arch::Sm100,
       Types...>(XQ, WQ, x_scale, w_scale, bias, out);

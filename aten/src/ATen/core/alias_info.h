@@ -100,18 +100,18 @@ inline bool operator==(const AliasInfo& lhs, const AliasInfo& rhs) {
 
 // this does match the way things are represented in the schema
 inline std::ostream& operator<<(std::ostream& out, const AliasInfo& aliasInfo) {
-  out << "(";
+  out << '(';
   bool first = true;
   for (const auto& set : aliasInfo.beforeSets()) {
     if (first) {
       first = false;
     } else {
-      out << "|";
+      out << '|';
     }
     out << set.toUnqualString();
   }
   if (aliasInfo.isWrite()) {
-    out << "!";
+    out << '!';
   }
   if (aliasInfo.beforeSets() != aliasInfo.afterSets()) {
     out << " -> ";
@@ -120,12 +120,12 @@ inline std::ostream& operator<<(std::ostream& out, const AliasInfo& aliasInfo) {
       if (first) {
         first = false;
       } else {
-        out << "|";
+        out << '|';
       }
       out << set.toUnqualString();
     }
   }
-  out << ")";
+  out << ')';
   return out;
 }
 } // namespace c10

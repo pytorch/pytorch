@@ -22,9 +22,9 @@ with open(sys.argv[1]) as input_yaml_file:
             # aggregate occurrence per op
             traced_operators[op] = 1 + (traced_operators.get(op, 0))
         # merge dtypes for each kernel
-        for kernal, dtypes in info["kernel_metadata"].items():
-            new_dtypes = dtypes + (kernel_metadata.get(kernal, []))
-            kernel_metadata[kernal] = list(set(new_dtypes))
+        for kernel, dtypes in info["kernel_metadata"].items():
+            new_dtypes = dtypes + (kernel_metadata.get(kernel, []))
+            kernel_metadata[kernel] = list(set(new_dtypes))
 
 
 # Only test these built-in ops. No custom ops or non-CPU ops.

@@ -170,7 +170,7 @@ inline bool isPrint(char s) {
 }
 
 inline void printQuotedString(std::ostream& stmt, const std::string_view str) {
-  stmt << "\"";
+  stmt << '"';
   for (auto s : str) {
     switch (s) {
       case '\\':
@@ -224,7 +224,7 @@ inline void printQuotedString(std::ostream& stmt, const std::string_view str) {
         break;
     }
   }
-  stmt << "\"";
+  stmt << '"';
 }
 
 template <typename T>

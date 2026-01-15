@@ -297,7 +297,8 @@ def smoke_test_conv2d() -> None:
     m = nn.Conv2d(16, 33, 3, stride=2)
     # non-square kernels and unequal stride and with padding
     m = nn.Conv2d(16, 33, (3, 5), stride=(2, 1), padding=(4, 2))
-    assert m is not None
+    if m is None:
+        raise AssertionError("Conv2d with non-square kernels returned None")
     # non-square kernels and unequal stride and with padding and dilation
     basic_conv = nn.Conv2d(
         16, 33, (3, 5), stride=(2, 1), padding=(4, 2), dilation=(3, 1)
@@ -311,7 +312,8 @@ def smoke_test_conv2d() -> None:
         x = torch.randn(1, 3, 24, 24, device="cuda")
         with torch.cuda.amp.autocast():
             out = conv(x)
-        assert out is not None
+        if out is None:
+            raise AssertionError("Conv2d with cuda autocast returned None")
 
         supported_dtypes = [torch.float16, torch.float32, torch.float64]
         for dtype in supported_dtypes:
@@ -319,26 +321,33 @@ def smoke_test_conv2d() -> None:
             conv = basic_conv.to(dtype).cuda()
             input = torch.randn(20, 16, 50, 100, device="cuda").type(dtype)
             output = conv(input)
-            assert output is not None
+            if output is None:
+                raise AssertionError(f"Conv2d with cuda for {dtype} returned None")
 
 
 def test_linalg(device="cpu") -> None:
     print(f"Testing smoke_test_linalg on {device}")
     A = torch.randn(5, 3, device=device)
     U, S, Vh = torch.linalg.svd(A, full_matrices=False)
-    assert (
+    if not (
         U.shape == A.shape
         and S.shape == torch.Size([3])
         and Vh.shape == torch.Size([3, 3])
-    )
+    ):
+        raise AssertionError(
+            f"SVD shapes mismatch: U.shape={U.shape}, S.shape={S.shape}, Vh.shape={Vh.shape}"
+        )
     torch.dist(A, U @ torch.diag(S) @ Vh)
 
     U, S, Vh = torch.linalg.svd(A)
-    assert (
+    if not (
         U.shape == torch.Size([5, 5])
         and S.shape == torch.Size([3])
         and Vh.shape == torch.Size([3, 3])
-    )
+    ):
+        raise AssertionError(
+            f"SVD full_matrices shapes mismatch: U.shape={U.shape}, S.shape={S.shape}, Vh.shape={Vh.shape}"
+        )
     torch.dist(A, U[:, :3] @ torch.diag(S) @ Vh)
 
     A = torch.randn(7, 5, 3, device=device)
@@ -361,7 +370,8 @@ def test_sdpa(device="cpu", dtype=torch.float16) -> None:
     k, q, v = torch.rand(3, 1, 16, 77, 64, dtype=dtype, device=device).unbind(0)
     attn = torch.rand(1, 1, 77, 77, dtype=dtype, device=device)
     rc = torch.nn.functional.scaled_dot_product_attention(q, k, v, attn)
-    assert rc.isnan().any().item() is False
+    if rc.isnan().any().item() is not False:
+        raise AssertionError("SDPA output contains NaN values")
 
 
 def smoke_test_compile(device: str = "cpu") -> None:
