@@ -82,11 +82,11 @@ mm = _add_docstr(
         **Gradient Support:**
 
         - **Sparse @ Dense (COO or CSR @ strided):** Backward is supported for both inputs.
-        The sparse input receives a sparse gradient matching its input format (COO→COO, CSR→CSR),
-        while the dense input receives a dense gradient.
+          The sparse input receives a sparse gradient matching its input format (COO→COO, CSR→CSR),
+          while the dense input receives a dense gradient.
 
         - **Sparse @ Sparse (COO @ COO or CSR @ CSR):** Forward pass is supported, but
-        backward is **not implemented** and will raise a RuntimeError.
+          backward is **not implemented** and will raise a RuntimeError.
 
         - **Mixed sparse formats (COO @ CSR or CSR @ COO):** Not supported. Will raise a RuntimeError.
 
