@@ -743,9 +743,6 @@ def retrieve_result_from_process_queue(
         except queue.Empty:
             # If not alive do a last check because the timeout might have happened just before completion
             if not process.is_alive() and queue.empty():
-                # Clean up process to avoid keeping a zombie process
-                process.terminate()  # Just to be sure
-                process.join(600)  # Usually completes immediately
                 return RuntimeError(f"Exited with {process.exitcode}")
         if timeout is not None:
             elapsed = time.time() - start_time
