@@ -82,8 +82,15 @@ def query_job_sha(repo, sha):
     }
     # If you are a Meta employee, go to P1679979893 to get the id and secret.
     # Otherwise, ask a Meta employee give you the id and secret.
-    KEY_ID = os.environ["CH_KEY_ID"]
-    KEY_SECRET = os.environ["CH_KEY_SECRET"]
+    try:
+        KEY_ID = os.environ["CH_KEY_ID"]
+        KEY_SECRET = os.environ["CH_KEY_SECRET"]
+    except KeyError as e:
+        raise RuntimeError(
+            "CH_KEY_ID and CH_KEY_SECRET environment variables must be set. "
+            "If you are a Meta employee, go to P1679979893 to get the id and secret. "
+            "Otherwise, ask a Meta employee to give you the id and secret."
+        ) from e
 
     r = requests.post(
         url=ARTIFACTS_QUERY_URL,

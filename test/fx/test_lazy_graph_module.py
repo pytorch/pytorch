@@ -1,8 +1,11 @@
 # Owner(s): ["oncall: fx"]
 
 import contextlib
+import importlib.util
 import pickle
 from io import BytesIO
+from pathlib import Path
+from tempfile import TemporaryDirectory
 from unittest.mock import patch
 
 import torch
@@ -273,6 +276,59 @@ class TestLazyGraphModule(TestCase):
             wrapped_lazy_forward
         )
         assert hasattr(got_lazy_inner_forward, "__self__")
+
+    def test_to_folder_class(self):
+        class TestModule(torch.nn.Module):
+            def __init__(self, features_in=10):
+                super().__init__()
+
+                self.seq = torch.nn.Sequential(
+                    torch.nn.Linear(features_in, features_in), torch.nn.ReLU()
+                )
+                self.a = torch.nn.Parameter(torch.randn(features_in))
+                setattr(self, "0", torch.nn.Parameter(torch.randn(features_in)))
+
+            def forward(self, x):
+                return self.seq.forward(x) + self.a + getattr(self, "0")
+
+        in_features = 10
+
+        f = TestModule(in_features)
+
+        self.validate_module(f, in_features=in_features)
+
+    def test_to_folder_sequential(self):
+        in_features = 10
+
+        f = torch.nn.Sequential(
+            torch.nn.Linear(in_features=in_features, out_features=in_features)
+        )
+
+        self.validate_module(f, in_features=in_features)
+
+    def validate_module(
+        self, module: torch.nn.Module, in_features: int, n_samples: int = 100
+    ):
+        gm = torch.fx.symbolic_trace(module)
+
+        with TemporaryDirectory() as tmp:
+            gm.to_folder(tmp)
+
+            path = Path(tmp) / "module.py"
+
+            spec = importlib.util.spec_from_file_location(
+                "module.FxModule", path.absolute()
+            )
+            foo = importlib.util.module_from_spec(spec)
+            spec.loader.exec_module(foo)
+
+            loaded_module = foo.FxModule()
+
+            del foo
+
+        val = torch.randn(n_samples, in_features)
+
+        self.assertEqual(module(val), loaded_module(val))
 
 
 if __name__ == "__main__":
