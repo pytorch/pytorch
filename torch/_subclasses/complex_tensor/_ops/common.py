@@ -186,7 +186,7 @@ def split_complex_arg(
 
 def split_complex_tensor(complex_tensor: ComplexTensor) -> tuple[Tensor, Tensor]:
     """Split a ComplexTensor into its real and imaginary parts."""
-    return complex_tensor.re, complex_tensor.im
+    return torch.resolve_neg(complex_tensor.re), torch.resolve_neg(complex_tensor.im)
 
 
 def complex_to_real_dtype(dtype: torch.dtype) -> torch.dtype:
@@ -227,7 +227,7 @@ def register_binary_nonlinear(
     """Register a "multiplication-style" op, e.g. aten.mul, aten.mm, ..."""
 
     def impl(
-        lhs: ComplexTensor, rhs: ComplexTensor, *args: Any, **kwargs: Any
+        a: ComplexTensor, b: ComplexTensor, *args: Any, **kwargs: Any
     ) -> ComplexTensor:
         out_dt, (a, b) = promote_tensors(a, b)
         a_r, a_i = split_complex_arg(a)
