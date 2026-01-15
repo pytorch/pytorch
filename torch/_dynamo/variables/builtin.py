@@ -879,6 +879,10 @@ class BuiltinVariable(VariableTracker):
                         return ConstantVariable.create(op.__name__ != "is_")
                     if left is right:
                         return ConstantVariable.create(op(left, right))
+                    if istype(left, variables.ObjectVariable) and istype(
+                        right, variables.ObjectVariable
+                    ):
+                        return ConstantVariable.create(op(left.value, right.value))
                     if (
                         istype(left, variables.ExceptionVariable)
                         and istype(right, variables.ExceptionVariable)
@@ -1631,8 +1635,14 @@ class BuiltinVariable(VariableTracker):
                 # Default repr - build and trace it
                 fn_vt = VariableTracker.build(tx, repr_method)
                 return fn_vt.call_function(tx, [], {})
+            elif is_wrapper_or_member_descriptor(repr_method):
+                unimplemented(
+                    gb_type="Attempted to call repr() method implemented in C/C++",
+                    context="",
+                    explanation=f"{type(arg.value)} has a C/C++ based repr method. This is not supported.",
+                    hints=["Write the repr method in Python"],
+                )
             else:
-                # Custom repr - inline the method for tracing
                 bound_method = repr_method.__func__
                 fn_vt = VariableTracker.build(tx, bound_method)
                 return fn_vt.call_function(tx, [arg], {})
