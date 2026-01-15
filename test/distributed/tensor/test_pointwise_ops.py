@@ -374,6 +374,54 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(z.to_local(), input)
 
     @with_comms
+    def test_div_partial(self):
+        # Test that Partial(sum) / Replicate -> Partial(sum)
+        # This is mathematically sound: (a1 + a2) / b = a1/b + a2/b
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        input = torch.full((8, 8), 2.0, device=self.device_type)
+
+        # Test for different types of divisors
+        other_inps = (
+            2.0,  # scalar
+            torch.tensor(2.0, device=self.device_type),  # scalar tensor
+            torch.full((8, 8), 2.0, device=self.device_type),  # tensor
+        )
+
+        for partial_op in ["sum", "avg"]:
+            expected_p_out = (
+                input * self.world_size / 2.0 if partial_op == "sum" else input / 2.0
+            )
+
+            d_input = DTensor.from_local(input, device_mesh, [Partial(partial_op)])
+
+            for other_inp in other_inps:
+                if isinstance(other_inp, Tensor) and other_inp.numel() > 1:
+                    d_other = distribute_tensor(other_inp, device_mesh, [Replicate()])
+                else:
+                    d_other = other_inp
+
+                with comm_mode:
+                    z = d_input / d_other
+
+                comm_counts = comm_mode.get_total_counts()
+                self.assertEqual(comm_counts, 0)
+                self.assertTrue(isinstance(z, DTensor))
+                self.assertEqual(z.placements, (Partial(partial_op),))
+                self.assertEqual(z.full_tensor(), expected_p_out)
+
+        # test other partial (e.g., max) to assert the partial not getting propagated
+        d_input = DTensor.from_local(input, device_mesh, [Partial("max")])
+        d_other = distribute_tensor(
+            torch.full((8, 8), 2.0, device=self.device_type), device_mesh, [Replicate()]
+        )
+
+        z = d_input / d_other
+        self.assertEqual(z.placements, (Replicate(),))
+        self.assertEqual(z.to_local(), input / 2.0)
+
+    @with_comms
     def test_masked_fill_scalar(self):
         """Test masked_fill_ with scalar value."""
         device_mesh = self.build_device_mesh()
