@@ -326,6 +326,8 @@ class ComboKernel(Kernel):
         self.grids: list[list[int]] = []
         self.min_x_blocks_list: list[Union[int, str]] = []
         self.x_numels_list: list[Union[int, str]] = []
+        self.y_tree_list: list = []
+        self.z_tree_list: list = []
         self.enable_autotune = enable_autotune
         self.mixed_sizes = mixed_sizes
         self.block_args: list[str] = []
@@ -565,9 +567,6 @@ class ComboKernel(Kernel):
             "device": DeviceProperties.create(V.graph.get_current_device_or_throw()),
             "constants": {},
         }
-        triton_meta[
-            "enable_fp_fusion"
-        ] = not config.emulate_precision_casts  # pyrefly: ignore[unsupported-operation]
 
         for arg_num in equal_1_arg_indices(signature):
             triton_meta["constants"][signature[arg_num].name] = 1  # type: ignore[index,union-attr]
@@ -624,8 +623,8 @@ class ComboKernel(Kernel):
         return heuristics_line
 
     def codegen_blocks(self, code: IndentedBuffer) -> None:
-        has_yblock = any("YBLOCK" in b for b in self.block_args)
-        has_zblock = any("ZBLOCK" in b for b in self.block_args)
+        has_yblock = any(self.y_tree_list)
+        has_zblock = any(self.z_tree_list)
         has_r1block = any("R1_BLOCK" in b for b in self.block_args)
 
         # When we have R1_BLOCK (2D reduction tiling), we need smaller reduction
@@ -661,11 +660,13 @@ class ComboKernel(Kernel):
     def get_block_args(self) -> list[ConstexprArg]:
         """
         Calculate blocks from sub_kernels and range_trees.
-        **Update self.block_args**
+        Update self.block_args, self.y_tree_list, self.z_tree_list
         Return the block args
         """
         block_names = {}
         for i, sub_kernel in enumerate(self.sub_kernels):
+            y_tree = None
+            z_tree = None
             for tree in sub_kernel.range_trees:
                 if tree.is_reduction and (
                     not sub_kernel.inside_reduction or sub_kernel.persistent_reduction
@@ -673,7 +674,13 @@ class ComboKernel(Kernel):
                     continue
                 if tree.prefix == "x" and sub_kernel.no_x_dim:
                     continue
+                if tree.prefix == "y":
+                    y_tree = tree
+                elif tree.prefix == "z":
+                    z_tree = tree
                 block_names[f"{tree.prefix.upper()}BLOCK_{i}"] = tree.prefix
+            self.y_tree_list.append(y_tree)
+            self.z_tree_list.append(z_tree)
         self.block_args = list(block_names.keys())
 
         return [ConstexprArg(x) for x in block_names]
@@ -990,22 +997,20 @@ class ComboKernel(Kernel):
 
         if not self.enable_autotune:
             default_config: dict[str, int] = {}
-            has_yblock = any("YBLOCK" in b for b in self.block_args)
-            has_zblock = any("ZBLOCK" in b for b in self.block_args)
             for num, sub_kernel in enumerate(self.sub_kernels):
                 if sub_kernel.no_x_dim:
                     default_config[f"XBLOCK_{num}"] = 1
                 else:
                     block_size = (
                         self.block_size_2d
-                        if (has_yblock or has_zblock)
+                        if (any(self.y_tree_list) or any(self.z_tree_list))
                         else self.block_size_1d
                     )
                     default_config[f"XBLOCK_{num}"] = block_size
 
-                if has_yblock:
+                if self.y_tree_list[num]:
                     default_config[f"YBLOCK_{num}"] = self.block_size_2d
-                if has_zblock:
+                if self.z_tree_list[num]:
                     default_config[f"ZBLOCK_{num}"] = self.block_size_2d
             meta["default_config"] = default_config
         else:

@@ -240,6 +240,7 @@ class ComboKernelTests(TestCase):
                 "'grid_type': 'Grid1D'"
             ).check_not("combo_grid_meta").run(code[0])
 
+    @requires_gpu_and_triton
     def test_combo_kernel_per_config_subkernel_poi(self):
         def fn(a, b):
             o1 = a * 2.0
@@ -298,6 +299,7 @@ class ComboKernelTests(TestCase):
             "XBLOCK_1 : tl.constexpr, R0_BLOCK_1 : tl.constexpr"
         ).run(code[0])
 
+    @requires_gpu_and_triton
     def test_combo_kernel_per_config_subkernel_red(self):
         def fn(a, b):
             r1 = a.sum(dim=(0, 2))
