@@ -65,9 +65,30 @@ namespace scaled_blas = at::scaled;
 using scaled_blas::ScaledGemmImplementation;
 using scaled_blas::convert_int_to_enum;
 
-using at::cuda::scaled::_scaled_mm_allowed_device;
-
 namespace at::native {
+
+static bool _scaled_mm_allowed_device(bool sm90_only=false, bool sm100_only=false) {
+#ifdef USE_ROCM
+  static const std::vector<std::string> archs = {
+    "gfx942",
+#if ROCM_VERSION >= 60300
+    "gfx1200", "gfx1201",
+#endif
+#if ROCM_VERSION >= 60500
+    "gfx950"
+#endif
+};
+  return at::detail::getCUDAHooks().isGPUArch(archs);
+#else
+  auto dprops = at::cuda::getCurrentDeviceProperties();
+
+  if (sm90_only || sm100_only) {
+    return (sm90_only && dprops->major == 9) || (sm100_only && dprops->major == 10);
+  } else {
+    return dprops->major >= 9 || (dprops->major == 8 && dprops->minor == 9);
+  }
+#endif
+}
 
 namespace {
 

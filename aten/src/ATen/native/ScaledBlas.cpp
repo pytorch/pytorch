@@ -330,16 +330,17 @@ using acceptance_fn = std::function<bool(
     std::vector<ScalingType>&,
     ArrayRef<Tensor>&)>;
 
-using at::scaled::convert_int_to_enum;
-using at::scaled::ScaledGemmImplementation;
+namespace scaled_blas = at::scaled;
+using scaled_blas::convert_int_to_enum;
+using scaled_blas::ScaledGemmImplementation;
 
-std::array<std::tuple<std::string, acceptance_fn, at::scaled::ScaledGemmImplementation>, 2>
+std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 2>
     scale_kernel_dispatch = {{
       {"tensorwise_tensorwise",
-       at::scaled::check_tensorwise_recipe,
+       scaled_blas::check_tensorwise_recipe,
        ScaledGemmImplementation::TENSORWISE_TENSORWISE},
       {"rowwise_rowwise",
-       at::scaled::check_rowwise_recipe,
+       scaled_blas::check_rowwise_recipe,
        ScaledGemmImplementation::ROWWISE_ROWWISE},
 
   }};
