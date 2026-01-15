@@ -59,6 +59,7 @@ echo "MAX_JOBS=${MAX_JOBS}"
 
 pushd "$FLASH_ATTENTION_HOPPER_DIR"
 
+git config --global --add safe.directory '*'
 git submodule update --init ../csrc/cutlass
 
 if [[ "$(uname -m)" != "aarch64" ]]; then
