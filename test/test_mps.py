@@ -12885,10 +12885,6 @@ class TestErrorInputs(TestCase):
             mps_args = [mps_sample_input.input] + list(mps_sample_input.args)
             mps_kwargs = mps_sample_input.kwargs
 
-            # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
-            if (op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor)):
-                mps_args[1] = mps_args[1].cpu()
-
             with self.assertRaisesRegex(error_type, error_regex):
                 op(*mps_args, **mps_kwargs)
 
