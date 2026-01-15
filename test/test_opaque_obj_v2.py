@@ -1,5 +1,6 @@
 # Owner(s): ["module: custom-operators"]
 
+import contextlib
 import gc
 import random
 from contextlib import ExitStack
@@ -14,6 +15,7 @@ from torch._dynamo.testing import (
     CompileCounter,
     CompileCounterWithBackend,
     EagerAndRecordGraphs,
+    InductorAndRecordGraphs,
     normalize_gm,
 )
 from torch._dynamo.utils import counters as dynamo_counters
@@ -40,6 +42,56 @@ from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
     parametrize,
 )
+
+
+class Color:
+    """Simulates a pybind11-style enum where class attributes are instances of the class."""
+
+    def __init__(self, name: str, value: int) -> None:
+        self._name = name
+        self._value = value
+
+    @property
+    def name(self) -> str:
+        return self._name
+
+    @property
+    def value(self) -> int:
+        return self._value
+
+    def __float__(self) -> float:
+        return float(self._value)
+
+    @staticmethod
+    def RED_STATIC() -> "Color":
+        return Color.RED
+
+
+Color.RED = Color("RED", 1)
+Color.GREEN = Color("GREEN", 2)
+Color.BLUE = Color("BLUE", 3)
+Color.DEFAULT_SCALE = 1.5  # Literal class attribute for testing inlining
+
+
+class CustomDescriptor:
+    def __get__(self, obj, objtype=None):
+        return 42
+
+
+# Create a class with an unsupported descriptor
+class ColorWithDescriptor:
+    def __init__(self, name: str, value: int) -> None:
+        self._name = name
+        self._value = value
+
+    def __float__(self) -> float:
+        return float(self._value)
+
+    # This is an unsupported descriptor type
+    custom_prop = CustomDescriptor()
+
+
+ColorWithDescriptor.RED = ColorWithDescriptor("RED", 1)
 
 
 class OpaqueQueue:
@@ -90,6 +142,13 @@ class RNGState:
 
     def noisy_inject(self, x):
         return torch.ops._TestOpaqueObject.noisy_inject(x, self)
+
+
+class OpaqueMultiplier:
+    """Opaque object that holds a multiplier value for backward tests."""
+
+    def __init__(self, multiplier: float):
+        self.multiplier = multiplier
 
 
 class Counter:
@@ -237,6 +296,9 @@ register_opaque_type(
     members={"size": MemberType.USE_REAL, "increment_size": MemberType.USE_REAL},
 )
 register_opaque_type(NestedValueSize, typ="value")
+register_opaque_type(OpaqueMultiplier, typ="reference")
+register_opaque_type(Color, typ="reference")
+register_opaque_type(ColorWithDescriptor, typ="reference")
 
 
 # A tensor subclass (similar to TwoTensor) that also holds an opaque Counter
@@ -498,6 +560,94 @@ class TestOpaqueObject(TestCase):
             x: torch.Tensor, config: Optional[list[SizeStore]]
         ) -> torch.Tensor:
             return torch.empty_like(x)
+
+        opaque_multiplier_type = get_opaque_type_name(OpaqueMultiplier)
+        color_type = get_opaque_type_name(Color)
+
+        torch.library.define(
+            "_TestOpaqueObject::apply_color_scale",
+            f"({color_type} color, Tensor x) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::apply_color_scale",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def apply_color_scale_impl(color: Color, x: torch.Tensor) -> torch.Tensor:
+            return x * float(color)
+
+        @torch.library.register_fake(
+            "_TestOpaqueObject::apply_color_scale", lib=self.lib
+        )
+        def apply_color_scale_fake(color: Color, x: torch.Tensor) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        torch.library.define(
+            "_TestOpaqueObject::mul_with_scale",
+            f"({opaque_multiplier_type} scale_obj, Tensor x) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        torch.library.define(
+            "_TestOpaqueObject::get_multiplier_tensor",
+            f"({opaque_multiplier_type} scale_obj, Tensor tensor) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::mul_with_scale",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def mul_with_scale_impl(
+            scale_obj: OpaqueMultiplier, x: torch.Tensor
+        ) -> torch.Tensor:
+            return x * scale_obj.multiplier
+
+        @torch.library.register_fake("_TestOpaqueObject::mul_with_scale", lib=self.lib)
+        def mul_with_scale_fake(
+            scale_obj: OpaqueMultiplier, x: torch.Tensor
+        ) -> torch.Tensor:
+            return torch.empty_like(x)
+
+        @torch.library.impl(
+            "_TestOpaqueObject::get_multiplier_tensor",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def get_multiplier_tensor_impl(
+            scale_obj: OpaqueMultiplier, tensor: torch.Tensor
+        ) -> torch.Tensor:
+            return tensor * scale_obj.multiplier
+
+        @torch.library.register_fake(
+            "_TestOpaqueObject::get_multiplier_tensor", lib=self.lib
+        )
+        def get_multiplier_tensor_fake(
+            scale_obj: OpaqueMultiplier, tensor: torch.Tensor
+        ) -> torch.Tensor:
+            return torch.empty_like(tensor)
+
+        def mul_setup_context(ctx, inputs, output):
+            ctx.scale_obj = inputs[0]
+
+        def mul_backward(ctx, grad) -> tuple[torch.Tensor, None]:
+            scale = torch.ops._TestOpaqueObject.get_multiplier_tensor(
+                ctx.scale_obj, grad
+            )
+            return None, scale
+
+        torch.library.register_autograd(
+            "_TestOpaqueObject::mul_with_scale",
+            mul_backward,
+            setup_context=mul_setup_context,
+            lib=self.lib,
+        )
 
         super().setUp()
 
@@ -1437,6 +1587,262 @@ class GraphModule(torch.nn.Module):
 
         # Recompile since Counter has changed
         self.assertEqual(cnt.frame_count, 2)
+
+    def test_opaque_obj_saved_for_backward(self):
+        """Test that opaque objects are correctly saved and passed to backward."""
+        import torch._dynamo.compiled_autograd
+
+        def foo(scale_obj, x):
+            result = torch.ops._TestOpaqueObject.mul_with_scale(scale_obj, x)
+            result = result * 2
+            return result
+
+        def compile_and_run_with_backend(backend):
+            scale_obj = OpaqueMultiplier(2.5)
+            x = torch.randn(3, 3, requires_grad=True)
+
+            opt_f = torch.compile(foo, fullgraph=True, backend=backend)
+            out = opt_f(scale_obj, x)
+            expected = x * 2.5 * 2
+            self.assertTrue(torch.allclose(out, expected))
+
+            upstream_grad = torch.ones_like(out) * 5
+            out.backward(upstream_grad)
+            self.assertIsNotNone(x.grad)
+            expected_grad = torch.ones_like(x) * 5 * 5
+            self.assertTrue(torch.allclose(x.grad, expected_grad))
+
+        backend = InductorAndRecordGraphs()
+        compile_and_run_with_backend(backend)
+        self.assertTrue(len(backend.graphs) > 0)
+        fw_graph = backend.graphs[0]
+        self.assertExpectedInline(
+            fw_graph.code.strip(),
+            f"""\
+def forward(self, L_x_ : torch.Tensor, L_scale_obj_ : {_illegal_char_regex.sub("_", get_opaque_type_name(OpaqueMultiplier))}):
+    l_x_ = L_x_
+    l_scale_obj_ = L_scale_obj_
+    result = torch.ops._TestOpaqueObject.mul_with_scale(l_scale_obj_, l_x_);  l_scale_obj_ = l_x_ = None
+    result_1 = result * 2;  result = None
+    return (result_1,)""",  # noqa: B950
+        )
+
+        backend = AotEagerAndRecordGraphs()
+        compile_and_run_with_backend(backend)
+        self.assertTrue(len(backend.fw_graphs) > 0)
+        fw_graph = backend.fw_graphs[0]
+        self.assertExpectedInline(
+            fw_graph.code.strip(),
+            """\
+def forward(self, primals_1, primals_2):
+    mul_with_scale = torch.ops._TestOpaqueObject.mul_with_scale.default(primals_2, primals_1);  primals_1 = None
+    mul = torch.ops.aten.mul.Tensor(mul_with_scale, 2);  mul_with_scale = None
+    return (mul, primals_2)""",
+        )
+        self.assertTrue(len(backend.bw_graphs) > 0)
+        bw_graph = backend.bw_graphs[0]
+        self.assertExpectedInline(
+            bw_graph.code.strip(),
+            """\
+def forward(self, primals_2, tangents_1):
+    mul_1 = torch.ops.aten.mul.Tensor(tangents_1, 2);  tangents_1 = None
+    get_multiplier_tensor = torch.ops._TestOpaqueObject.get_multiplier_tensor.default(primals_2, mul_1);  primals_2 = mul_1 = None
+    return (get_multiplier_tensor, None)""",
+        )
+
+        for use_compiled_autograd in [False, True]:
+            with self.subTest(use_compiled_autograd=use_compiled_autograd):
+                torch._dynamo.reset()
+
+                def run_with_multiplier(multiplier_value: float):
+                    scale_obj = OpaqueMultiplier(multiplier_value)
+                    x = torch.randn(3, 3, requires_grad=True)
+
+                    opt_f = torch.compile(foo, fullgraph=True, backend="aot_eager")
+                    out = opt_f(scale_obj, x)
+                    expected = x * multiplier_value * 2
+                    self.assertTrue(torch.allclose(out, expected))
+
+                    upstream_grad = torch.ones_like(out) * 5
+                    with (
+                        torch._dynamo.compiled_autograd._enable(
+                            torch.compile(backend="eager")
+                        )
+                        if use_compiled_autograd
+                        else contextlib.nullcontext()
+                    ):
+                        out.backward(upstream_grad)
+
+                    self.assertIsNotNone(x.grad)
+                    # gradient = upstream_grad * 2 * multiplier_value
+                    expected_grad = torch.ones_like(x) * 5 * 2 * multiplier_value
+                    self.assertTrue(torch.allclose(x.grad, expected_grad))
+                    return x.grad.clone()
+
+                grad1 = run_with_multiplier(2.5)
+                torch._dynamo.reset()
+                grad2 = run_with_multiplier(3.0)
+                self.assertFalse(torch.allclose(grad1, grad2))
+
+    def test_subgraph_tracer_create_arg_with_fake_script_object(self):
+        """Test that opaque class attribute access works correctly.
+
+        This tests the code path where:
+        1. An opaque class (like Color) is accessed via OpaqueObjectClassVariable
+        2. Attribute access (Color.RED) goes through var_getattr with static getattr
+        3. The opaque object is correctly lifted as a graph input
+        """
+        from torch._library.opaque_object import is_opaque_reference_type
+
+        self.assertTrue(is_opaque_reference_type(Color))
+        self.assertTrue(is_opaque_reference_type(type(Color.RED)))
+
+        captured = {"graph": None, "example_inputs": None}
+
+        def capture_backend(gm, example_inputs):
+            captured["graph"] = gm
+            captured["example_inputs"] = example_inputs
+            return gm
+
+        @torch.compile(fullgraph=True, backend=capture_backend)
+        def fn(x):
+            return torch.ops._TestOpaqueObject.apply_color_scale(Color.GREEN, x)
+
+        x = torch.randn(3, 3)
+        result = fn(x)
+
+        self.assertIsNotNone(captured["graph"])
+        print(captured["graph"].code.strip())
+
+        expected = x * float(Color.GREEN.value)
+        self.assertTrue(torch.allclose(result, expected))
+
+        graph_code = captured["graph"].code.strip()
+        self.assertExpectedInline(
+            graph_code,
+            f"""\
+def forward(self, L_x_ : torch.Tensor, G_Color_GREEN : {_illegal_char_regex.sub("_", get_opaque_type_name(Color))}):
+    l_x_ = L_x_
+    g_color_green = G_Color_GREEN
+    apply_color_scale = torch.ops._TestOpaqueObject.apply_color_scale(g_color_green, l_x_);  g_color_green = l_x_ = None
+    return (apply_color_scale,)""",  # noqa: B950
+        )
+
+    def test_opaque_class_literal_attribute_inlined(self):
+        """Test that literal attributes on opaque classes are inlined without source tracking.
+
+        When accessing a literal class attribute (like Color.DEFAULT_SCALE = 1.5),
+        the value should be constant-folded directly without creating a graph input.
+        """
+        captured = {"graph": None}
+
+        def capture_backend(gm, example_inputs):
+            captured["graph"] = gm
+            return gm
+
+        @torch.compile(fullgraph=True, backend=capture_backend)
+        def fn(x):
+            return x * Color.DEFAULT_SCALE
+
+        x = torch.randn(3, 3)
+        result = fn(x)
+
+        expected = x * 1.5
+        self.assertTrue(torch.allclose(result, expected))
+
+        self.assertIsNotNone(captured["graph"])
+        graph_code = captured["graph"].code.strip()
+        self.assertExpectedInline(
+            graph_code,
+            """\
+def forward(self, L_x_ : torch.Tensor):
+    l_x_ = L_x_
+    mul = l_x_ * 1.5;  l_x_ = None
+    return (mul,)""",
+        )
+
+    def test_opaque_class_missing_attribute_graph_break(self):
+        """Test that accessing a non-existent attribute on an opaque class causes a graph break.
+
+        This tests GB7685: "Attribute not found on opaque class"
+        """
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return x * Color.NONEXISTENT
+
+        x = torch.randn(3, 3)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Attribute not found on opaque class",
+        ):
+            fn(x)
+
+    def test_opaque_class_unsupported_descriptor_graph_break(self):
+        """Test that accessing an unsupported descriptor on an opaque class causes a graph break.
+
+        This tests GB9567: "Unsupported descriptor on opaque class"
+        """
+
+        @torch.compile(fullgraph=True)
+        def fn(x):
+            return x * ColorWithDescriptor.custom_prop
+
+        x = torch.randn(3, 3)
+
+        with self.assertRaisesRegex(
+            torch._dynamo.exc.Unsupported,
+            "Unsupported descriptor on opaque class",
+        ):
+            fn(x)
+
+    def test_opaque_class_staticmethod(self):
+        """Test that accessing a staticmethod on an opaque class works correctly.
+
+        This verifies that OpaqueObjectClassVariable.var_getattr properly handles
+        staticmethod descriptors (instead of raising 'Unsupported descriptor').
+        """
+        captured = {"graph": None}
+
+        def capture_backend(gm, _):
+            captured["graph"] = gm
+            return gm
+
+        @torch.compile(fullgraph=True, backend=capture_backend)
+        def fn(x):
+            _ = Color.RED_STATIC
+            return x * 2
+
+        x = torch.randn(3, 3)
+        result = fn(x)
+        expected = x * 2
+        self.assertTrue(torch.allclose(result, expected))
+        self.assertIsNotNone(captured["graph"])
+
+    def test_opaque_class_property(self):
+        """Test that accessing a property descriptor on an opaque class works correctly.
+
+        This verifies that OpaqueObjectClassVariable.var_getattr properly handles
+        property descriptors. When accessing a property on the class (not instance),
+        you get the property object back.
+        """
+        captured = {"graph": None}
+
+        def capture_backend(gm, _):
+            captured["graph"] = gm
+            return gm
+
+        @torch.compile(fullgraph=True, backend=capture_backend)
+        def fn(x):
+            _ = Color.name
+            return x * 2
+
+        x = torch.randn(3, 3)
+        result = fn(x)
+        expected = x * 2
+        self.assertTrue(torch.allclose(result, expected))
+        self.assertIsNotNone(captured["graph"])
 
 
 instantiate_parametrized_tests(TestOpaqueObject)
