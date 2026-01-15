@@ -5687,10 +5687,11 @@ class Scheduler:
         unmet_output_names = OrderedSet(V.graph.get_output_names())
         name_to_node = self.get_name_to_nodes()
 
-        def is_none_layout(buf_name: str) -> bool:
+        def is_unallocated_buffer(buf_name: str) -> bool:
             """
-            Checks if buf_name is NoneLayout. Buffers with NoneLayout is not allocated
-            so graph partition should not take it as inputs or outputs.
+            Checks if buf_name resolves to a NoneLayout buffer (following mutation_real_name).
+            Buffers with NoneLayout are not allocated so graph partition should not
+            take them as inputs or outputs.
             """
             buf = self.name_to_buf.get(buf_name, None)
 
@@ -5698,10 +5699,11 @@ class Scheduler:
                 return False
 
             if isinstance(buf.node.layout, NoneLayout):
-                if isinstance(buf.node, ir.MutationOutput) and (
-                    real_name := self.mutation_real_name.get(buf_name, None)
-                ):
-                    return is_none_layout(real_name)
+                # If there's a mutation real name, check the underlying buffer
+                # This handles both MutationOutput and other mutation ops like
+                # IndexPutFallback that have NoneLayout but mutate real buffers
+                if real_name := self.mutation_real_name.get(buf_name, None):
+                    return is_unallocated_buffer(real_name)
 
                 return True
 
@@ -5730,7 +5732,7 @@ class Scheduler:
                     [
                         x.name
                         for x in read_writes.reads | read_writes.writes
-                        if not is_none_layout(x.name)
+                        if not isinstance(x, WeakDep)
                     ]
                 )
                 - output_names
@@ -5786,7 +5788,7 @@ class Scheduler:
             output_nodes = [
                 name_to_node[name]
                 for name in returned_output_names
-                if not is_none_layout(name)
+                if not is_unallocated_buffer(name)
             ]
 
             constant_names = [
