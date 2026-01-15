@@ -359,7 +359,7 @@ class OverlapPreservingBucketer:
             self._bucket_collectives_impl()
 
         # Step 2: Inline fusion regions (expand call_module -> original nodes)
-        replaced: dict[fx.Node, fx.Node] = {}
+        replaced: dict[fx.Node, fx.Node | None] = {}
         if self.region_of:
             from torch._inductor.fx_passes.fusion_regions import expand_fusion_regions
 
@@ -933,7 +933,7 @@ class OverlapPreservingBucketer:
         assert isinstance(new_start, fx.Node)
 
         # Create mapping of all erased nodes to their replacements
-        erased_to_new = {}
+        erased_to_new: dict[fx.Node, fx.Node | None] = {}
         for old_start in old_starts:
             erased_to_new[old_start] = new_start
         for old_wait in old_waits:
