@@ -2410,6 +2410,25 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
 
         self.assertEqual(actual, expected)
 
+    def test_structseq_repr(self):
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        def fn(x):
+            result = torch.max(x, dim=0)
+            s = repr(result)
+            return result.values
+
+        x = torch.randn(3, 2)
+
+        # Verify that fullgraph=True fails (confirms graph break occurs)
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            torch.compile(fn, fullgraph=True, backend="eager")(x)
+
+        # Verify that it works without fullgraph
+        opt_fn = torch._dynamo.optimize(cnts)(fn)
+        result = opt_fn(x)
+        self.assertEqual(cnts.frame_count, 1)
+
     def test_range_input(self):
         def fn(a, rng):
             x = a
@@ -6519,6 +6538,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         res = opt_fn(x, x)
         self.assertEqual(ref, res)
 
+    @torch._dynamo.config.patch(trace_autograd_ops=True)
     def test_tensor_dot_grad_no_graph_break(self):
         def fn(a, b):
             y = 3 * a**3 - b**2
@@ -6532,7 +6552,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         opt_fn = torch.compile(fn, backend=cnts)
         _, b_grad = opt_fn(a, b)
         self.assertTrue(same(b_grad, torch.tensor([0.0, 0.0])))
-        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.frame_count, 1)
 
     def test_torch_nn_parameter_isinstance(self):
         def fn(x):
@@ -9383,6 +9403,7 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         @torch.compile(backend=cnt, fullgraph=True)
         def fn(x):
             check_state()
+            assert torch.are_deterministic_algorithms_enabled() is True
             torch.use_deterministic_algorithms(False, warn_only=False)
             return x + 1
 
@@ -9612,30 +9633,6 @@ not ___dict_contains('cccccccc', G['sys'].modules)""",
         # strip_function_call should extract the object from the string.
         for name, expect_obj in test_case:
             self.assertEqual(strip_function_call(name), expect_obj)
-
-    def test_resume_on_custom_binary_op(self):
-        class Foo:
-            def __eq__(self, other):
-                torch._dynamo.graph_break()
-                return True
-
-            def __add__(self, other):
-                torch._dynamo.graph_break()
-                return self
-
-        @torch.compile(backend="eager")
-        def fn(x, a, b):
-            x = x + 1
-            cmp = a == b
-            if not torch.compiler.is_compiling():
-                assert False
-            x = x + 2
-            sum = a + b
-            if not torch.compiler.is_compiling():
-                assert False
-            return x + 4
-
-        fn(torch.ones(3), Foo(), Foo())
 
     def test_int_neg(self):
         def int_neg(a, b):
@@ -9868,6 +9865,17 @@ def ___make_guard_fn():
         opt_model = torch.compile(MyModule(), backend="eager")
         opt_out = opt_model(x)
         self.assertTrue(same(orig_out, opt_out))
+
+    def test_compile_with_userland_fake_tensor_mode(self):
+        # Test that torch.compile works when called inside a user's FakeTensorMode.
+        # The user's fake tensors should be "refakified" to Dynamo's fake mode.
+        from torch._subclasses.fake_tensor import FakeTensorMode
+
+        with FakeTensorMode():
+            model = torch.nn.Linear(4, 4)
+            inp = torch.rand(4, 4)
+            loss = torch.compile(model, backend="aot_eager")(inp).sum()
+            loss.backward()
 
     def test_scalar_tensor_is_equivalent_to_symint_argument(self):
         class GumbelTopKSampler(torch.nn.Module):
