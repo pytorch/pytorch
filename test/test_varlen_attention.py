@@ -9,7 +9,7 @@ from torch.nn.attention.varlen import varlen_attn
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FLASH_ATTENTION
 from torch.testing._internal.common_device_type import instantiate_device_type_tests
 from torch.testing._internal.common_nn import NNTestCase
-from torch.testing._internal.common_utils import parametrize, run_tests
+from torch.testing._internal.common_utils import parametrize, run_tests, TEST_WITH_ROCM
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
@@ -268,9 +268,15 @@ class TestVarlenAttention(NNTestCase):
 
         q, k, v = attention_block.get_varlen_qkv(x_packed)
 
+        test_utils = (
+            ["test_schema", "test_faketensor"]
+            if TEST_WITH_ROCM # skip aot autograd test on ROCm
+            else None
+        )
         torch.library.opcheck(
             torch.ops.torch_attn._varlen_attn,
             (q, k, v, cu_seq, cu_seq, shape.max_seq_len, shape.max_seq_len, False),
+            test_utils=test_utils,
         )
 
         out, lse, rng_state = torch.ops.torch_attn._varlen_attn(
