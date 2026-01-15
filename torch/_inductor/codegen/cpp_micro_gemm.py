@@ -2139,7 +2139,6 @@ def create_micro_gemm(
     assert isinstance(k, int) or k.is_number, k
 
     m = V.graph.sizevars.optimization_hint(m, fallback=1)
-    assert isinstance(m, int) or m.is_number, m
     if output_dtype is None:
         output_dtype = input_dtype
     if compute_dtype is None:
