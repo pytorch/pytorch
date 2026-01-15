@@ -212,21 +212,22 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def masked(mask: CSEVariable, body: sympy.Expr, other: CSEVariable) -> str:
         # TODO: Type annotation for other is wrong, it's often float or int
-        # TODO: Use lambda here rather than allocating variable with default type when on MacOS-15+
         masked_code = IndentedBuffer()
-        masked_code.writeline(f"if ({mask}) {{")
-        with V.kernel.swap_buffers(masked_code), masked_code.indent():
-            rc = body()
-
-        var = V.kernel.cse.newvar(dtype=rc.dtype)
+        masked_code.writeline("[&]() {")
         with masked_code.indent():
-            masked_code.writeline(f"{var} = {rc};")
-        masked_code.writeline("}")
-        V.kernel.compute.writeline(
-            f"{DTYPE_TO_METAL[rc.dtype]} {var} = {value_to_metal(other)};"
+            masked_code.writeline(f"if ({mask}) {{")
+            with V.kernel.swap_buffers(masked_code), masked_code.indent():
+                V.kernel.cse.iter_buffer_ids = itertools.count()
+                V.kernel.cse.name_prefix = "tmp_scoped_"
+                rc = body()
+            with masked_code.indent():
+                masked_code.writeline(f"return {rc};")
+            masked_code.writeline("}")
+            masked_code.writeline(f"return static_cast<{DTYPE_TO_METAL[rc.dtype]}>({value_to_metal(other)});")
+        masked_code.writeline("}()")
+        return V.kernel.cse.generate(
+            V.kernel.compute, masked_code, dtype=rc.dtype
         )
-        V.kernel.compute.splice(masked_code)
-        return var
 
     @staticmethod
     def where(a: OpVarT, b: OpVarT, c: OpVarT) -> str:
@@ -328,7 +329,7 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def tanh(x: CSEVariable) -> str:
-        return f"metal::tanh({x})"
+        return f"metal::precise::tanh({x})"
 
     @staticmethod
     def atanh(x: CSEVariable) -> str:

@@ -48,7 +48,7 @@ from torch.compiler._cache import (
     CacheArtifactFactory,
     CacheArtifactManager,
 )
-from torch.fx.experimental.symbolic_shapes import hint_int
+from torch.fx.experimental.symbolic_shapes import size_hint
 from torch.utils._triton import has_triton_package
 
 from .aot_autograd_result import (
@@ -149,6 +149,7 @@ def check_node_safe(node: Node):
         "torch._sym_sqrt",
         "torch.sym_float",
         "torch.sym_sum",
+        "torch.autograd.grad",
     )
     SAFE_NON_TORCH_FUNCTIONS = (
         "einops.einops.rearrange",
@@ -820,7 +821,10 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
         cls: type[AOTAutogradCache], cache_info: AOTAutogradCacheInfo
     ) -> Optional[str]:
         shape_env = cls._get_shape_env()
-        assert shape_env is not None
+
+        if shape_env is None:
+            return None
+
         symints = cache_info.forward_symints
         guards = shape_env.get_pruned_guards(symints)
         return shape_env.produce_guards_expression(placeholders=symints, guards=guards)
@@ -896,7 +900,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
             remote_cache = AOTAutogradCache.get_remote_cache()
 
         symints = AOTAutogradCache._filter_backed_symints(args)
-        hints = [hint_int(s) for s in symints]
+        hints = [size_hint(s) for s in symints]
         entry = None
         pickled_content = None
         try:
@@ -974,6 +978,8 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
             AOTAutogradCache._write_to_local_cache(key, content)
             counters["aot_autograd"]["autograd_cache_saved"] += 1
         except BypassAOTAutogradCache as e:
+            if config.strict_autograd_cache:
+                raise
             counters["aot_autograd"]["autograd_cache_bypass"] += 1
             log.info("Bypassing autograd cache due to: %s", e)  # noqa: G200
             if remote:
@@ -986,7 +992,7 @@ class AOTAutogradCache(GuardedCache[GenericAOTAutogradResult]):
                     "bypass_aot_autograd", "Unable to serialize: " + str(e)
                 )
             if config.strict_autograd_cache:
-                raise e
+                raise
             return None
 
         if remote:

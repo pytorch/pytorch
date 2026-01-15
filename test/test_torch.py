@@ -6240,6 +6240,18 @@ class TestTorchDeviceType(TestCase):
         actual = t_non_contig.masked_scatter_(mask_contig, source)
         self.assertEqual(actual, expected)
 
+    def test_tolist_with_grad(self, device):
+        def f(x):
+            result = x.tolist()
+            for l, r in zip(result, [1.0, 2.0, 3.0]):
+                assert l == r
+            return sum(x)
+
+        x = torch.tensor([1.0, 2.0, 3.0], requires_grad=True, device=device)
+        grad_f = torch.func.grad(f)
+        result = grad_f(x)
+        self.assertEqual(result.tolist() , [1.0, 1.0, 1.0])
+
 
 # Tests that compare a device's computation with the (gold-standard) CPU's.
 class TestDevicePrecision(TestCase):
@@ -10701,7 +10713,6 @@ tensor([[[1.+1.j, 1.+1.j, 1.+1.j,  ..., 1.+1.j, 1.+1.j, 1.+1.j],
             x.item()  # No warning
 
             self.assertEqual(len(w), 0)
-
 
 # The following block extends TestTorch with negative dim wrapping tests
 # FIXME: replace these with OpInfo sample inputs or systemic OpInfo tests
