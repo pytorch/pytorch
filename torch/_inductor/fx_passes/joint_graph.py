@@ -44,6 +44,7 @@ PatternMatcherPass = functools.partial(
 )
 
 log = logging.getLogger(__name__)
+early_patterns = PatternMatcherPass()
 patterns = PatternMatcherPass()
 aten = torch.ops.aten
 prims = torch.ops.prims
@@ -341,6 +342,14 @@ class UniformValueConstantFolder(ConstantFolder):
 
         # handle before view ops because this changes value
         if node.target is aten.view.dtype:
+            (input_tensor, output_dtype), kwargs = self.fetch_args_kwargs_from_env(node)
+            # view.dtype fails on 0-d tensors when element size changes
+            # (e.g., 0-d complex tensors can't be viewed as float)
+            if (
+                input_tensor.ndim == 0
+                and input_tensor.element_size() != output_dtype.itemsize
+            ):
+                return self.unknown_value
             return super(ConstantFolder, self).run_node(node)
 
         # view ops, return input tensor, the first argument
@@ -596,6 +605,22 @@ def joint_graph_passes(graph: torch.fx.GraphModule):
         )
 
     if config.pattern_matcher:
+        count += early_patterns.apply(graph.graph)
+
+    # Make sure AutoChunker happens before pad_mm so we don't need
+    # to handle padding when searching for chunking patterns.
+    if config.auto_chunker.enable:
+        from .auto_chunker import CantChunk, chunk
+
+        try:
+            graph = chunk(graph)
+        except CantChunk:
+            auto_chunker_log = torch._logging.getArtifactLogger(
+                __name__, "auto_chunker"
+            )
+            auto_chunker_log.debug("AutoChunker fail.", exc_info=True)
+
+    if config.pattern_matcher:
         for i, patterns in enumerate(pass_patterns):
             maybe_count = GraphTransformObserver(
                 graph, f"pass_pattern_{i}"
@@ -748,7 +773,7 @@ def definitely_equal(
 @register_graph_pattern(
     CallFunction(torch.ops.aten.view.default, KeywordArg("arg"), KeywordArg("size")),
     # pyrefly: ignore [bad-argument-type]
-    pass_dict=patterns,
+    pass_dict=early_patterns,
 )
 def pointless_view(match: Match, arg, size):
     """Remove no-op view"""
@@ -766,7 +791,7 @@ def pointless_view(match: Match, arg, size):
         KeywordArg("size2"),
     ),
     # pyrefly: ignore [bad-argument-type]
-    pass_dict=patterns,
+    pass_dict=early_patterns,
 )
 def pointless_view_pair(match: Match, arg, size1, size2):
     """
@@ -787,7 +812,7 @@ def pointless_view_pair(match: Match, arg, size1, size2):
         KeywordArg("perm2"),
     ),
     # pyrefly: ignore [bad-argument-type]
-    pass_dict=patterns,
+    pass_dict=early_patterns,
 )
 def pointless_permute_pair(match: Match, arg, perm1, perm2):
     rank = len(perm1)
@@ -914,7 +939,7 @@ def mul_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
 
         inp = inp * sign
         max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
-        # pyrefly: ignore [unsupported-operation]
+
         return (inp - max_) * (sign * other)
 
     # pyrefly: ignore [bad-argument-type]
@@ -944,7 +969,7 @@ def div_softmax_pattern(match: Match, *, inp, other, dim, keepdim, dtype=None):
 
         inp = inp * sign
         max_ = torch.amax(inp, dim=dim, keepdim=keepdim)
-        # pyrefly: ignore [unsupported-operation]
+
         return (inp - max_) / (sign * other)
 
     # pyrefly: ignore [bad-argument-type]

@@ -34,13 +34,11 @@ extern TORCH_API struct PushPRIVATEUSE1CallbacksStub
     pushPRIVATEUSE1CallbacksStub;
 
 struct RegisterPRIVATEUSE1Observer {
-  RegisterPRIVATEUSE1Observer(
-      PushPRIVATEUSE1CallbacksStub& stub,
-      CallBackFnPtr value) {
-    stub.set_privateuse1_dispatch_ptr(value);
+  RegisterPRIVATEUSE1Observer(CallBackFnPtr cb) {
+    pushPRIVATEUSE1CallbacksStub.set_privateuse1_dispatch_ptr(cb);
   }
 };
 
-#define REGISTER_PRIVATEUSE1_OBSERVER(name, fn) \
-  static RegisterPRIVATEUSE1Observer name##__register(name, fn);
+#define REGISTER_PRIVATEUSE1_OBSERVER(cb) \
+  static RegisterPRIVATEUSE1Observer privateuse1_callbacks_stub_register(cb);
 } // namespace torch::profiler::impl
