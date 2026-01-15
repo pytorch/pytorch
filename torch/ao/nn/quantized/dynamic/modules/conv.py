@@ -74,7 +74,7 @@ class Conv1d(nnq.Conv1d):
         factory_kwargs = {"device": device, "dtype": dtype}
         kernel_size = _single(kernel_size)
         stride = _single(stride)
-        # pyrefly: ignore [bad-assignment]
+
         padding = padding if isinstance(padding, str) else _single(padding)
         dilation = _single(dilation)
 
