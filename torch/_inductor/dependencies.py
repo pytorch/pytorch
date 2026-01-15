@@ -258,7 +258,7 @@ class MemoryDep(Dep):
 
     def numbytes_hint(self) -> int:
         try:
-            return V.graph.sizevars.size_hint(self.get_numel()) * get_dtype_size(
+            return V.graph.sizevars.optimization_hint(self.get_numel()) * get_dtype_size(
                 V.graph.get_dtype(self.name)
             )
         except NotImplementedError:  # NoneLayout
@@ -266,7 +266,7 @@ class MemoryDep(Dep):
 
     def numel_hint(self) -> int:
         try:
-            return V.graph.sizevars.size_hint(self.get_numel(), fallback=0)
+            return V.graph.sizevars.optimization_hint(self.get_numel(), fallback=0)
         except NotImplementedError:  # NoneLayout
             return 0
 
@@ -343,7 +343,7 @@ class StarDep(Dep):
 
     def numbytes_hint(self) -> int:
         try:
-            return V.graph.sizevars.size_hint(self.get_numel()) * get_dtype_size(
+            return V.graph.sizevars.optimization_hint(self.get_numel()) * get_dtype_size(
                 V.graph.get_dtype(self.name)
             )
         except NotImplementedError:
@@ -351,7 +351,7 @@ class StarDep(Dep):
 
     def numel_hint(self) -> int:
         try:
-            return V.graph.sizevars.size_hint(self.get_numel(), fallback=0)
+            return V.graph.sizevars.optimization_hint(self.get_numel(), fallback=0)
         except NotImplementedError:
             return 0  # NoneLayout, MultiOutputLayout, etc
 
