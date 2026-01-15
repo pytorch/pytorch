@@ -149,7 +149,7 @@
 // Simply define the namespace, in case a dependent library want to refer to
 // the c10 namespace but not any nontrivial files.
 namespace c10 {}
-namespace c10::cuda {}
+namespace c10::hip {}
 namespace c10::hip {}
 namespace c10::xpu {}
 
@@ -164,7 +164,7 @@ namespace at {
 using namespace c10;
 }
 namespace at::cuda {
-using namespace c10::cuda;
+using namespace c10::hip;
 } // namespace at::cuda
 
 // WARNING!!! THIS IS A GIANT HACK!!!
@@ -258,7 +258,7 @@ using namespace c10::xpu;
 #include <hip/hip_runtime.h>
 #endif
 
-#if defined(__CUDACC__) || defined(__HIPCC__)
+#if defined(__HIPCC__) || defined(__HIPCC__)
 // Designates functions callable from the host (CPU) and the device (GPU)
 #define C10_HOST_DEVICE __host__ __device__
 #define C10_DEVICE __device__
@@ -327,14 +327,20 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 
 #if defined(USE_ROCM)
 // C10_WARP_SIZE is only allowed for device code.
-// Host code _must_ use at::cuda::warp_size()
+// Host code _must_ use at::cuda::warp_size().
 // HIP header used to define warpSize as a constexpr that was either 32 or 64
 // depending on the target device, and then always set it to 64 for host code.
-// Host pass of HIP compiler needs C10_WARP_SIZE defined to _something_ so we
-// set it to something unreasonable to trigger obvious host code errors.
+// PyTorch Device code assumes C10_WARP_SIZE is constexpr, but in ROCm 7,
+// warpSize is no longer constexpr, matching CUDA behavior. We can no longer
+// use warpSize for C10_WARP_SIZE. Further, amdgcnspirv needs a fully dynamic
+// warp size and cannot use the __GFX9__ trick below, which means we set
+// C10_WARP_SIZE to 64 for amdgcnspirv because it is used to statically size
+// arrays in certain device code and 64 is the larger of 32, erroring on the 
+// side of larger arrays. However, all use of C10_WARP_SIZE must be carefully
+// scrutinized. It is better to use warpSize in device code where possible.
 
 namespace at::cuda {
-TORCH_CUDA_CPP_API int warp_size();
+TORCH_HIP_CPP_API int warp_size();
 }
 #ifdef __HIPCC__
 static inline int __host__ C10_WARP_SIZE_INTERNAL() {
@@ -344,7 +350,7 @@ static inline int __host__ C10_WARP_SIZE_INTERNAL() {
 static inline constexpr int __device__ C10_WARP_SIZE_INTERNAL() {
 // amdgcnspirv target needs a dynamic warp size, but we set it to
 // the largest possible size to correctly size static-sized arrays
-#if __SPIRV__
+#if defined(__SPIRV__)
   return 64;
 #else
 #if defined(__GFX9__)
