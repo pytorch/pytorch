@@ -564,6 +564,19 @@ max_autotune_gemm_backends = os.environ.get(
 ).upper()
 
 
+# Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile
+# in max_autotune. By default it's 5, to keep compile time reasonable.
+# Set to None (or env var "none"/"all") to tune all configs.
+def _nvgemm_max_profiling_configs_default() -> Optional[int]:
+    env_val = os.environ.get("TORCHINDUCTOR_NVGEMM_MAX_PROFILING_CONFIGS", "5")
+    if env_val.lower() in ("none", "all"):
+        return None
+    return int(env_val)
+
+
+nvgemm_max_profiling_configs: Optional[int] = _nvgemm_max_profiling_configs_default()
+
+
 # As above, specify candidate backends for conv autotune.
 # NB: in some cases for 1x1 convs we emit as matmul,
 # which will use the backends of `max_autotune_gemm_backends`
@@ -2016,10 +2029,6 @@ class cuda:
     # By default it's None, so that all CUTLASS configs are tuned.
     # This is mainly used to reduce test time in CI.
     cutlass_max_profiling_configs: Optional[int] = None
-
-    # Configures the maximum number of NVIDIA Universal GEMM (NVGEMM) configs to profile in max_autotune.
-    # By default it's 5, to keep compile time to a reasonable level.
-    nvgemm_max_profiling_configs: Optional[int] = 5
 
     # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
     cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4, 8]
