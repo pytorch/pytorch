@@ -134,7 +134,7 @@ class MetalExprPrinter(ExprPrinter_):
     def _print_PowByNatural(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 2
         x, y = map(self.doprint, expr.args)
-        return f"metal::pow(static_cast<float>({x}), static_cast<float>({y}))"
+        return f"metal::precise::pow(static_cast<float>({x}), static_cast<float>({y}))"
 
     def _print_ToFloat(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
@@ -165,7 +165,7 @@ class MetalExprPrinter(ExprPrinter_):
     def _print_OpaqueUnaryFn_log2(self, expr: sympy.Expr) -> str:
         assert len(expr.args) == 1
         x = self.doprint(expr.args[0])
-        return f"metal::log2({x})"
+        return f"metal::precise::log2({x})"
 
     def _print_Where(self, expr: sympy.Expr) -> str:
         c, p, q = (
@@ -258,11 +258,11 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def log(x: CSEVariable) -> str:
-        return f"metal::log({x})"
+        return f"metal::precise::log({x})"
 
     @staticmethod
     def exp(x: CSEVariable) -> str:
-        return f"metal::exp({x})"
+        return f"metal::precise::exp({x})"
 
     @staticmethod
     def abs(x: CSEVariable) -> str:
@@ -286,27 +286,27 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def tan(x: CSEVariable) -> str:
-        return f"metal::tan({x})"
+        return f"metal::precise::tan({x})"
 
     @staticmethod
     def asin(x: CSEVariable) -> str:
-        return f"metal::asin({x})"
+        return f"metal::precise::asin({x})"
 
     @staticmethod
     def acos(x: CSEVariable) -> str:
-        return f"metal::acos({x})"
+        return f"metal::precise::acos({x})"
 
     @staticmethod
     def atan(x: CSEVariable) -> str:
-        return f"metal::atan({x})"
+        return f"metal::precise::atan({x})"
 
     @staticmethod
     def atan2(x: CSEVariable, y: CSEVariable) -> str:
-        return f"::metal::atan2({x}, {y})"
+        return f"::metal::precise::atan2({x}, {y})"
 
     @staticmethod
     def sqrt(x: CSEVariable) -> str:
-        return f"metal::sqrt({x})"
+        return f"metal::precise::sqrt({x})"
 
     @staticmethod
     def neg(x: CSEVariable) -> str:
@@ -316,15 +316,15 @@ class MetalOverrides(OpOverrides):
 
     @staticmethod
     def rsqrt(x: CSEVariable) -> str:
-        return f"metal::rsqrt({x})"
+        return f"metal::precise::rsqrt({x})"
 
     @staticmethod
     def tanh(x: CSEVariable) -> str:
-        return f"metal::tanh({x})"
+        return f"metal::precise::tanh({x})"
 
     @staticmethod
     def atanh(x: CSEVariable) -> str:
-        return f"metal::atanh({x})"
+        return f"metal::precise::atanh({x})"
 
     @staticmethod
     def floordiv(a: CSEVariable, b: CSEVariable) -> str:
