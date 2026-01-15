@@ -4,6 +4,7 @@
 
 #include <c10/core/Allocator.h>
 #include <c10/core/Device.h>
+#include <c10/core/DispatchKey.h>
 #include <c10/core/Stream.h>
 
 C10_DIAGNOSTIC_PUSH_AND_IGNORED_IF_DEFINED("-Wunused-parameter")
@@ -34,6 +35,10 @@ struct TORCH_API AcceleratorHooksInterface {
   // While it is acceptable for this function to poison fork, it is
   // recommended to avoid doing so whenever possible.
   virtual bool isAvailable() const {
+    return false;
+  }
+
+  virtual bool hasCompatibleShallowCopyType(DispatchKeySet self, DispatchKeySet from) const {
     return false;
   }
 
