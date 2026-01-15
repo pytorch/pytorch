@@ -137,7 +137,9 @@ def sdpa_kernel(backends: list[SDPBackend] | SDPBackend, set_priority: bool = Fa
             scaled_dot_product_attention(...)
 
         # Enable the cuDNN or flash attention backends, and in that order
-        with sdpa_kernel([SDPBackend.CUDNN_ATTENTION, SDPBackend.FLASH_ATTENTION], set_priority=True):
+        with sdpa_kernel(
+            [SDPBackend.CUDNN_ATTENTION, SDPBackend.FLASH_ATTENTION], set_priority=True
+        ):
             scaled_dot_product_attention(...)
 
     This context manager can be used to select which backend to use for scaled dot product attention.
