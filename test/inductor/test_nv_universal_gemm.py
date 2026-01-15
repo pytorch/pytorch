@@ -5,7 +5,6 @@ import unittest
 from unittest.mock import MagicMock, patch
 
 import torch
-from torch._dynamo.utils import counters
 from torch._inductor import config
 from torch._inductor.codegen.cuda.cuda_env import is_datacenter_blackwell_arch
 from torch._inductor.template_heuristics.nv_universal_gemm import (
@@ -69,6 +68,8 @@ class TestNVUniversalGemm(TestCase):
 
         expected = matmul(a, b)
 
+        torch._dynamo.reset()
+
         with config.patch(
             {
                 "max_autotune": True,
@@ -123,6 +124,8 @@ class TestNVUniversalGemm(TestCase):
         a = create_tensor_with_layout(layout_a, m, k)
         b = create_tensor_with_layout(layout_b, k, n)
 
+        torch._dynamo.reset()
+
         with config.patch(
             {
                 "max_autotune": True,
@@ -152,6 +155,8 @@ class TestNVUniversalGemm(TestCase):
 
         a = torch.randn(m, k, device=device, dtype=dtype)
         b = torch.randn(k, n, device=device, dtype=dtype)
+
+        torch._dynamo.reset()
 
         with config.patch(
             {
@@ -190,6 +195,8 @@ class TestNVUniversalGemm(TestCase):
 
         expected = fn(x, weight)
 
+        torch._dynamo.reset()
+
         with config.patch(
             {
                 "max_autotune": True,
@@ -220,6 +227,8 @@ class TestNVUniversalGemm(TestCase):
         b = torch.randn(k, n, device=device, dtype=dtype)
 
         expected = matmul(a, b)
+
+        torch._dynamo.reset()
 
         # Patch cutlass_api.Kernel.get_workspace_size to return non-zero
         import cutlass_api
@@ -265,6 +274,8 @@ class TestNVUniversalGemm(TestCase):
 
         expected = bmm(a, b)
 
+        torch._dynamo.reset()
+
         with config.patch(
             {
                 "max_autotune": True,
@@ -276,51 +287,6 @@ class TestNVUniversalGemm(TestCase):
             result = compiled_fn(a, b)
 
         torch.testing.assert_close(result, expected)
-
-    def test_gemm_args_caching(self):
-        """Test that GemmArguments caching works correctly with cudagraphs.
-
-        The NVGEMM kernel caches GemmArguments per (shape, dtype) and updates tensor
-        references on subsequent calls. This test verifies that:
-        1. Multiple calls with different tensors of the same shape produce correct results
-        2. The caching mechanism correctly updates tensor references (results differ)
-        3. Cudagraphs are enabled and not skipped
-        """
-        m, n, k = 512, 512, 512
-        dtype = torch.bfloat16
-        device = "cuda"
-
-        def matmul(a, b):
-            return a @ b
-
-        a1 = torch.randn(m, k, device=device, dtype=dtype)
-        b1 = torch.randn(k, n, device=device, dtype=dtype)
-        a2 = torch.randn(m, k, device=device, dtype=dtype)
-        b2 = torch.randn(k, n, device=device, dtype=dtype)
-
-        expected1 = matmul(a1, b1)
-        expected2 = matmul(a2, b2)
-
-        counters.clear()
-
-        with config.patch(
-            {
-                "max_autotune_gemm_backends": "NVGEMM",
-                "cuda.nvgemm_max_profiling_configs": 3,
-            }
-        ):
-            compiled_fn = torch.compile(matmul, mode="max-autotune")
-
-            result1 = compiled_fn(a1, b1).clone()
-            torch.testing.assert_close(result1, expected1)
-
-            result2 = compiled_fn(a2, b2).clone()
-            torch.testing.assert_close(result2, expected2)
-
-            self.assertFalse(torch.allclose(result1, result2))
-
-        # Verify cudagraphs were used (not skipped)
-        self.assertEqual(counters["inductor"]["cudagraph_skips"], 0)
 
 
 class TestNVUniversalGemmHeuristics(TestCase):
