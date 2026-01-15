@@ -505,12 +505,6 @@ __device__ __forceinline__ void fillDataSmem(
     // Finally, each thread within the warp writes its value to the appropriate slot in dataSmem.
     // This is done to minimize the amount of time each warp spends waiting for others.
     
-    constexpr index_t MAX_WARPS = 1024/32; // max number of warps in a block.
-    __shared__ index_t warp_bases[MAX_WARPS]; // to store the base index in dataSmem for each warp.
-    
-    int warp_bits = __builtin_ctz(warpSize); // = log2(WARP_SIZE).
-    
-    int warp_id = threadIdx.x >> warp_bits; // = threadIdx.x / WARP_SIZE
     int lane_id = at::cuda::getLaneId(); // = threadIdx.x % WARP_SIZE
   
     for (index_t i = threadIdx.x; i < round_up(static_cast<index_t>(sliceSize), static_cast<index_t>(warpSize)); i += blockDim.x) {        
@@ -525,14 +519,16 @@ __device__ __forceinline__ void fillDataSmem(
       uint64_t ballot = WARP_BALLOT(match); // what threads in this warp match the desired pattern?
       int warp_count = __popcll(ballot); // how many threads in this warp match the desired pattern?
   
+      int warp_base = 0;
       if (lane_id == 0 && warp_count > 0) {
-        warp_bases[warp_id] = atomicAdd(&DataSmemWriteIndex, warp_count); // reserve warp_count slots in dataSmem for this warp, and get the base index.
+        warp_base = atomicAdd(&DataSmemWriteIndex, warp_count); // reserve warp_count slots in dataSmem for this warp, and get the base index.
       }
+      warp_base = __shfl(warp_base, 0); // broadcast the warp_base to all threads in the warp.
 
       if (match) { // if the current thread matches the desired pattern, store the value in dataSmem.
         uint64_t my_mask = (1ULL << lane_id) - 1; // a bitmask: [0, 0, 0, ..., 0, 1, 1, 1, ..., 1] with (64-lane_id) 0s and lane_id 1s.
         int my_offset = __popcll(ballot & my_mask); // count the number of threads that have match to the right of the current thread in bitmask.
-        dataSmem[warp_bases[warp_id] + my_offset] = v;
+        dataSmem[warp_base + my_offset] = v;
       }
 
     }
