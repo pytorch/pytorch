@@ -12681,16 +12681,6 @@ class TestConsistency(TestCaseMPS):
             mps_args = [mps_sample.input] + list(mps_sample.args)
             mps_kwargs = mps_sample.kwargs
 
-            # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
-            if op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor):
-                mps_args[1] = cpu_args[1]
-
-            # Order of ops in index_put is not guaranteed, which can lead to large errors if inputs are
-            # not normalized
-            if op.name == "_unsafe_masked_index_put_accumulate" and dtype in [torch.bfloat16, torch.float16]:
-                mps_args[3] = F.normalize(mps_args[3])
-                cpu_args[3] = F.normalize(cpu_args[3])
-
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=UserWarning)
                 cpu_out = op(*cpu_args, **cpu_kwargs)
@@ -12747,16 +12737,6 @@ class TestConsistency(TestCaseMPS):
             cpu_kwargs = cpu_sample.kwargs
             mps_args = [mps_sample.input] + list(mps_sample.args)
             mps_kwargs = mps_sample.kwargs
-
-            # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
-            if op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor):
-                mps_args[1] = cpu_args[1]
-
-            # Order of ops in index_put is not guaranteed, which can lead to large errors if inputs are
-            # not normalized
-            if op.name == "_unsafe_masked_index_put_accumulate" and dtype in [torch.bfloat16, torch.float16]:
-                mps_args[3] = F.normalize(mps_args[3])
-                cpu_args[3] = F.normalize(cpu_args[3])
 
             with warnings.catch_warnings():
                 warnings.filterwarnings("ignore", category=UserWarning)
@@ -12904,10 +12884,6 @@ class TestErrorInputs(TestCase):
 
             mps_args = [mps_sample_input.input] + list(mps_sample_input.args)
             mps_kwargs = mps_sample_input.kwargs
-
-            # for tensor_split(), the second tensor arg ("tensor_indices_or_sections") must be on CPU only
-            if (op.name == "tensor_split" and isinstance(mps_args[1], torch.Tensor)):
-                mps_args[1] = mps_args[1].cpu()
 
             with self.assertRaisesRegex(error_type, error_regex):
                 op(*mps_args, **mps_kwargs)
