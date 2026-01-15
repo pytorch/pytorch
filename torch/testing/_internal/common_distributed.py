@@ -723,6 +723,33 @@ def cleanup_temp_dir() -> None:
         tmp_dir.cleanup()
 
 
+def retrieve_result_from_process_queue(
+    process: torch.multiprocessing.Process,
+    queue: torch.multiprocessing.Queue,
+    timeout: Optional[int] = None,
+) -> Any:
+    """Get result from queue associated with process.
+
+    When the process finished without putting a result or the timeout expired an exception instance will be returned"""
+    queue_timeout = 120 if timeout is None else max(10, min(120, timeout // 4))
+    start_time = time.time()
+    # Periodically check the process for liveness
+    while True:
+        try:
+            return queue.get(timeout=queue_timeout)
+        except queue.Empty:
+            # If not alive do a last check because the timeout might have happened just before completion
+            if not process.is_alive() and queue.empty():
+                # Clean up process to avoid keeping a zombie process
+                process.terminate()  # Just to be sure
+                process.join(600)  # Usually completes immediately
+                return RuntimeError(f"Exited with {process.exitcode}")
+        if timeout is not None:
+            elapsed = time.time() - start_time
+            if elapsed > timeout:
+                return RuntimeError(f"Process timeout out after {elapsed}s")
+
+
 # Most tests operate with this worldsize
 DEFAULT_WORLD_SIZE = 4
 
@@ -1911,20 +1938,7 @@ class MultiProcContinuousTest(TestCase):
                 for i, (p, completion_queue) in enumerate(
                     zip(self.processes, self.completion_queues)
                 ):
-                    # When the process died before filling the completion queue `get` will never return.
-                    # Hence periodically check the process for liveness
-                    while True:
-                        try:
-                            rv = completion_queue.get(timeout=120)
-                            break
-                        except queue.Empty:
-                            # If not alive do a last check because the timeout might have happened just before completion
-                            if not p.is_alive() and completion_queue.empty():
-                                # Clean up process to avoid keeping a zombie process
-                                p.terminate()  # Just to be sure
-                                p.join(600)  # Usually completes immediately
-                                rv = RuntimeError(f"Exited with {p.exitcode}")
-                                break
+                    rv = retrieve_result_from_process_queue(p, completion_queue)
                     if isinstance(rv, unittest.SkipTest):
                         raise rv
                     if isinstance(rv, BaseException):
