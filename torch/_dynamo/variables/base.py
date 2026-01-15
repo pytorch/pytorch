@@ -383,6 +383,24 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         except NotImplementedError:
             return False
 
+    def try_peek_constant(self) -> tuple[bool, bool, Any]:
+        """Try to peek at the constant value without triggering realization.
+
+        Returns a tuple of (can_peek, is_unrealized, value):
+        - can_peek: True if this variable can be peeked as a constant
+        - is_unrealized: True if this is an unrealized lazy constant (guards not yet installed)
+        - value: The constant value (only valid if can_peek is True)
+
+        Default implementation for non-lazy variables: returns (is_python_constant, False, value).
+        LazyConstantVariable and ComputedLazyConstantVariable override this to peek without
+        realizing. Container types (TupleVariable, ListVariable) override this to recursively
+        peek at their contents.
+        """
+        try:
+            return (True, False, self.as_python_constant())
+        except NotImplementedError:
+            return (False, False, None)
+
     def is_constant_match(self, *values: Any) -> bool:
         """
         Check if this variable is a python constant matching one of the given values.
@@ -416,6 +434,19 @@ class VariableTracker(metaclass=VariableTrackerMeta):
     def is_tensor(self) -> bool:
         """Return True for TensorVariable instances"""
         return False
+
+    def get_handler_type_for_dispatch(self) -> type["VariableTracker"]:
+        """Return the VariableTracker type to use for builtin handler dispatch.
+
+        This is used by BuiltinVariable to look up the appropriate handler for
+        a given set of arguments. Most VariableTrackers just return their own
+        type, but LazyConstantVariable returns ConstantVariable since it can
+        be treated as a constant for most builtin operations.
+
+        Subclasses that override this should install appropriate guards to
+        ensure the dispatched handler remains valid.
+        """
+        return type(self)
 
     def var_getattr(self, tx: "InstructionTranslator", name: str) -> "VariableTracker":
         """getattr(self, name) returning a new variable"""
@@ -719,6 +750,11 @@ class VariableTracker(metaclass=VariableTrackerMeta):
         """Create a new VariableTracker from a value and optional Source"""
         if source is None:
             return builder.SourcelessBuilder.create(tx, value)
+        elif type(value) in variables.LazyConstantVariable.supported_types:
+            # Use LazyConstantVariable for primitives to enable deferred
+            # guard installation - constants that are just passed through
+            # won't cause recompilation when their values change.
+            return variables.LazyConstantVariable.create(value, source)
         else:
             return variables.LazyVariableTracker.create(value, source)
 
