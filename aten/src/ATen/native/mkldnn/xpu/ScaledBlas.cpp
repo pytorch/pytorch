@@ -7,6 +7,7 @@
 #include <ATen/native/xpu/Blas.h>
 #include <ATen/xpu/XPUScaledBlas.h>
 #include <torch/library.h>
+#include <functional>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -72,14 +73,49 @@ bool is_rowwise_scaling(const at::Tensor& t, const at::Tensor& scale) {
       scale.is_contiguous());
 }
 
+bool is_blockwise_1x128_scaling(const at::Tensor& t, const at::Tensor& scale) {
+  // For 1x128 blockwise scaling:
+  // scale shape: [outer_dim x K // 128], stride: [1, outer_dim]
+  int64_t outer_dim = t.size(0);
+  int64_t K = t.size(1);
+  return (
+      at::isFloat8Type(t.scalar_type()) && scale.scalar_type() == at::kFloat &&
+      scale.dim() == 2 && scale.size(0) == outer_dim &&
+      scale.size(1) == at::ceil_div<int64_t>(K, 128) &&
+      scale.stride(0) == 1 &&
+      (scale.stride(1) == outer_dim || (scale.size(1) == 1 && scale.stride(1) == 1)));
+}
+
+bool is_blockwise_128x128_scaling(const at::Tensor& t, const at::Tensor& scale) {
+  // For 128x128 blockwise scaling:
+  // scale shape: [round_up(K // 128, 4), outer_dim // 128], stride: [1, round_up(K // 128, 4)]
+  int64_t outer_dim = t.size(0);
+  int64_t K = t.size(1);
+  int64_t k_blocks = at::round_up<int64_t>(at::ceil_div<int64_t>(K, 128), 4);
+  return (
+      at::isFloat8Type(t.scalar_type()) && scale.scalar_type() == at::kFloat &&
+      scale.dim() == 2 && scale.size(0) == k_blocks &&
+      scale.size(1) == at::ceil_div<int64_t>(outer_dim, 128) &&
+      scale.stride(0) == 1 &&
+      (scale.stride(1) == k_blocks || (scale.size(1) == 1 && scale.stride(1) == 1)));
+}
+
 bool is_desired_scaling(
     const at::Tensor& t,
     const at::Tensor& scale,
     ScalingType desired_scaling) {
-  auto result = desired_scaling == ScalingType::TensorWise
-      ? is_tensorwise_scaling(t, scale)
-      : is_rowwise_scaling(t, scale);
-  return result;
+  switch (desired_scaling) {
+    case ScalingType::TensorWise:
+      return is_tensorwise_scaling(t, scale);
+    case ScalingType::RowWise:
+      return is_rowwise_scaling(t, scale);
+    case ScalingType::BlockWise1x128:
+      return is_blockwise_1x128_scaling(t, scale);
+    case ScalingType::BlockWise128x128:
+      return is_blockwise_128x128_scaling(t, scale);
+    default:
+      return false;
+  }
 }
 
 std::pair<ScalingType, ScalingType> get_joint_scaling(
@@ -103,6 +139,24 @@ std::pair<ScalingType, ScalingType> get_joint_scaling(
       ", 1) and scale_b should be (1, ",
       b.size(1),
       "), and both should be contiguous.\n"
+      "- For BlockWise 1x128 scaling, a and b should be float8, scales should be float, scale_a should be (",
+      a.size(0),
+      ", ",
+      ceil_div<int64_t>(a.size(1), 128),
+      ") and scale_b should be (",
+      ceil_div<int64_t>(b.size(0), 128),
+      ", ",
+      b.size(1),
+      "), and both should be outer-dim-major.\n"
+      "- For BlockWise 128x128 scaling, a and b should be float8, scales should be float, scale_a should be (",
+      ceil_div<int64_t>(a.size(0), 128),
+      ", ",
+      ceil_div<int64_t>(a.size(1), 128),
+      ") and scale_b should be (",
+      ceil_div<int64_t>(b.size(0), 128),
+      ", ",
+      ceil_div<int64_t>(b.size(1), 128),
+      "), and both should be near-inner-dim-major.\n"
       "Got a.dtype()=",
       a.scalar_type(),
       ", scale_a.dtype()=",
@@ -222,10 +276,15 @@ Tensor& _scaled_mm_out_xpu(
 
   // List of supported datatypes for XPU with oneDNN:
   // https://uxlfoundation.github.io/oneDNN/dev_guide_matmul.html#data-types
+  // List of supported BlockWise pairs for FP8:
+  // https://docs.nvidia.com/cuda/cublas/#element-1d-and-128x128-2d-block-scaling-for-fp8-data-types
   auto [scaling_choice_a, scaling_choice_b] = get_joint_scaling(
       {
           std::make_pair(ScalingType::TensorWise, ScalingType::TensorWise),
           std::make_pair(ScalingType::RowWise, ScalingType::RowWise),
+          std::make_pair(ScalingType::BlockWise128x128, ScalingType::BlockWise1x128),
+          std::make_pair(ScalingType::BlockWise1x128, ScalingType::BlockWise128x128),
+          std::make_pair(ScalingType::BlockWise1x128, ScalingType::BlockWise1x128),
       },
       mat1,
       mat2,
@@ -363,7 +422,7 @@ namespace scaled_blas = at::native::onednn::scaled;
 using scaled_blas::convert_int_to_enum;
 using scaled_blas::ScaledGemmImplementation;
 
-std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 2>
+std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 5>
     scale_kernel_dispatch = {{
         {"tensorwise_tensorwise",
          scaled_blas::check_tensorwise_recipe,
@@ -371,7 +430,15 @@ std::array<std::tuple<std::string, acceptance_fn, ScaledGemmImplementation>, 2>
         {"rowwise_rowwise",
          scaled_blas::check_rowwise_recipe,
          ScaledGemmImplementation::ROWWISE_ROWWISE},
-
+        {"block_1x128_128x128",
+         std::bind(scaled_blas::check_deepseek_recipe, ScalingType::BlockWise1x128, ScalingType::BlockWise128x128, _1, _2, _3, _4, _5, _6),
+         ScaledGemmImplementation::BLOCK_1x128_128x128},
+        {"block_128x128_1x128",
+         std::bind(scaled_blas::check_deepseek_recipe, ScalingType::BlockWise128x128, ScalingType::BlockWise1x128, _1, _2, _3, _4, _5, _6),
+         ScaledGemmImplementation::BLOCK_128x128_1x128},
+        {"block_1x128_1x128",
+         std::bind(scaled_blas::check_deepseek_recipe, ScalingType::BlockWise1x128, ScalingType::BlockWise1x128, _1, _2, _3, _4, _5, _6),
+         ScaledGemmImplementation::BLOCK_1x128_1x128},
     }};
 
 Tensor& _scaled_tensorwise_tensorwise(
@@ -462,6 +529,257 @@ Tensor& _scaled_rowwise_rowwise(
 
   auto scaling_choice_a = ScalingType::RowWise;
   auto scaling_choice_b = ScalingType::RowWise;
+
+  _scaled_gemm(
+      mat_a,
+      mat_b,
+      scale_a,
+      scale_b,
+      scaling_choice_a,
+      scaling_choice_b,
+      bias,
+      use_fast_accum,
+      out);
+
+  return out;
+}
+
+Tensor& _scaled_block1x128_block1x128(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const Tensor& scale_a,
+    const Tensor& scale_b,
+    const std::optional<Tensor>& bias,
+    const c10::ScalarType out_dtype,
+    const bool use_fast_accum,
+    Tensor& out) {
+  // Restrictions:
+  // A, B are FP8, scales are fp32, shape K//128
+  // As: [M x K // 128], stride: [1, M]
+  // Bs: [N x K // 128], stride: [1, N]
+
+  // check types
+  TORCH_CHECK_VALUE(
+      isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()),
+      "mat_a and mat_b must be fp8 types, got: ",
+      mat_a.scalar_type(),
+      mat_b.scalar_type());
+
+  const int64_t M = mat_a.sizes()[0];
+  const int64_t K = mat_a.sizes()[1];
+  const int64_t N = mat_b.sizes()[1];
+
+  // scale_a shape
+  TORCH_CHECK_VALUE(
+      scale_a.size(0) == M &&
+          scale_a.size(1) == ceil_div<int64_t>(K, 128) &&
+          scale_a.scalar_type() == kFloat,
+      "scale_a must have shape ",
+      M,
+      " x ",
+      ceil_div<int64_t>(K, 128),
+      " Float elements, got ",
+      scale_a.sizes());
+  // scale_a stride
+  TORCH_CHECK_VALUE(
+      scale_a.stride(0) == 1 &&
+          (scale_a.stride(1) == M ||
+           (scale_a.size(1) == 1 && scale_b.stride(1) == 1)),
+      "scale_a strides must be (",
+      1,
+      ", ",
+      M,
+      "); got: ",
+      scale_a.strides());
+
+  // scale_b shape
+  TORCH_CHECK_VALUE(
+      scale_b.size(0) == N &&
+          scale_b.size(1) == ceil_div<int64_t>(K, 128) &&
+          scale_b.scalar_type() == kFloat,
+      "scale_b must have shape ",
+      N,
+      " x ",
+      ceil_div<int64_t>(K, 128),
+      " Float elements, got ",
+      scale_b.sizes());
+  // scale_b stride
+  TORCH_CHECK_VALUE(
+      scale_b.stride(0) == 1 &&
+          (scale_b.stride(1) == N ||
+           (scale_b.size(1) == 1 && scale_b.stride(1) == 1)),
+      "scale_b strides must be (",
+      1,
+      ", ",
+      N,
+      "); got: ",
+      scale_a.strides());
+
+  auto scaling_choice_a = ScalingType::BlockWise1x128;
+  auto scaling_choice_b = ScalingType::BlockWise1x128;
+
+  _scaled_gemm(
+      mat_a,
+      mat_b,
+      scale_a,
+      scale_b,
+      scaling_choice_a,
+      scaling_choice_b,
+      bias,
+      use_fast_accum,
+      out);
+
+  return out;
+}
+
+Tensor& _scaled_block128x128_block1x128(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const Tensor& scale_a,
+    const Tensor& scale_b,
+    const std::optional<Tensor>& bias,
+    const c10::ScalarType out_dtype,
+    const bool use_fast_accum,
+    Tensor& out) {
+  // Restrictions:
+  // A: [M, K], B: [K, N] are FP8, scales are fp32
+  // As: [round_up(K // 128, 4), M // 128], stride: [M // 128, 1]
+  // Bs: [N x K // 128], stride: [1, N]
+  TORCH_CHECK_VALUE(
+      isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()),
+      "mat_a and mat_b must be fp8 types, got: ",
+      mat_a.scalar_type(),
+      mat_b.scalar_type());
+
+  const int64_t M = mat_a.sizes()[0];
+  const int64_t K = mat_a.sizes()[1];
+  const int64_t N = mat_b.sizes()[1];
+
+  // scale_a shape
+  TORCH_CHECK_VALUE(
+      scale_a.size(0) == round_up<int64_t>(ceil_div<int64_t>(K, 128), 4) &&
+          scale_a.size(1) == ceil_div<int64_t>(M, 128) &&
+          scale_a.scalar_type() == kFloat,
+      "scale_a must have shape ",
+      round_up<int64_t>(ceil_div<int64_t>(K, 128), 4),
+      " x ",
+      ceil_div<int64_t>(M, 128),
+      " Float elements, got ",
+      scale_a.sizes());
+  // scale_a stride
+  TORCH_CHECK_VALUE(
+      scale_a.stride(0) == 1 &&
+          (scale_a.stride(1) == round_up<int64_t>(ceil_div<int64_t>(K, 128), 4) ||
+           (scale_a.size(1) == 1 && scale_a.stride(1) == 1)),
+      "scale_a must have strides (1, ",
+      round_up<int64_t>(ceil_div<int64_t>(K, 128), 4),
+      "); got ",
+      scale_b.strides());
+
+  // scale_b shape
+  TORCH_CHECK_VALUE(
+      scale_b.size(0) == N &&
+          scale_b.size(1) == ceil_div<int64_t>(K, 128) &&
+          scale_b.scalar_type() == kFloat,
+      "scale_b must have shape ",
+      N,
+      " x ",
+      ceil_div<int64_t>(K, 128),
+      " Float elements, got ",
+      scale_b.sizes());
+  // scale_b stride
+  TORCH_CHECK_VALUE(
+      scale_b.stride(0) == 1 &&
+          (scale_b.stride(1) == N ||
+           (scale_b.size(1) == 1 && scale_b.stride(1) == 1)),
+      "scale_b must have strides (1, ",
+      N,
+      "); got ",
+      scale_b.strides());
+
+  auto scaling_choice_a = ScalingType::BlockWise128x128;
+  auto scaling_choice_b = ScalingType::BlockWise1x128;
+
+  _scaled_gemm(
+      mat_a,
+      mat_b,
+      scale_a,
+      scale_b,
+      scaling_choice_a,
+      scaling_choice_b,
+      bias,
+      use_fast_accum,
+      out);
+
+  return out;
+}
+
+Tensor& _scaled_block1x128_block128x128(
+    const Tensor& mat_a,
+    const Tensor& mat_b,
+    const Tensor& scale_a,
+    const Tensor& scale_b,
+    const std::optional<Tensor>& bias,
+    const c10::ScalarType out_dtype,
+    const bool use_fast_accum,
+    Tensor& out) {
+  // Restrictions:
+  // A: [M, K], B: [K, N] are FP8, scales are fp32
+  // As: [M x K // 128], stride: [1, M]
+  // Bs: [round_up(K // 128, 4) x N // 128], stride: [1, N // 128]
+  TORCH_CHECK_VALUE(
+      isFloat8Type(mat_a.scalar_type()) && isFloat8Type(mat_b.scalar_type()),
+      "mat_a and mat_b must be fp8 types, got: ",
+      mat_a.scalar_type(),
+      mat_b.scalar_type());
+
+  int64_t M = mat_a.size(0);
+  int64_t K = mat_a.size(1);
+  int64_t N = mat_b.size(1);
+
+  // scale_a shape
+  TORCH_CHECK_VALUE(
+      scale_a.size(0) == M &&
+          scale_a.size(1) == ceil_div<int64_t>(K, 128) &&
+          scale_a.scalar_type() == kFloat,
+      "scale_a must have shape ",
+      M,
+      " x ",
+      ceil_div<int64_t>(K, 128),
+      " Float elements, got ",
+      scale_a.sizes());
+  // scale_a stride
+  TORCH_CHECK_VALUE(
+      scale_a.stride(0) == 1 &&
+          (scale_a.stride(1) == M ||
+           (scale_a.size(1) == 1 && scale_a.stride(1) == 1)),
+      "scale_a must have strides (1, ",
+      M,
+      "); got ",
+      scale_b.strides());
+  // scale_b shape
+  TORCH_CHECK_VALUE(
+      scale_b.size(0) == round_up<int64_t>(ceil_div<int64_t>(K, 128), 4) &&
+          scale_b.size(1) == ceil_div<int64_t>(N, 128) &&
+          scale_b.scalar_type() == kFloat,
+      "scale_b must have shape ",
+      round_up<int64_t>(ceil_div<int64_t>(K, 128), 4),
+      " x ",
+      ceil_div<int64_t>(N, 128),
+      " Float elements, got ",
+      scale_b.sizes());
+  // scale_b stride
+  TORCH_CHECK_VALUE(
+      scale_b.stride(0) == 1 &&
+          (scale_b.stride(1) == round_up<int64_t>(ceil_div<int64_t>(K, 128), 4) ||
+           (scale_b.size(1) == 1 && scale_b.stride(1) == 1)),
+      "scale_b must have strides (1, ",
+      round_up<int64_t>(ceil_div<int64_t>(K, 128), 4),
+      "); got ",
+      scale_b.strides());
+
+  auto scaling_choice_a = ScalingType::BlockWise1x128;
+  auto scaling_choice_b = ScalingType::BlockWise128x128;
 
   _scaled_gemm(
       mat_a,
@@ -664,6 +982,24 @@ Tensor& _scaled_mm_xpu_v2_out(
       ", 1) and scale_b should be (1, ",
       mat_b.size(1),
       "), and both should be contiguous.\n"
+      "- For BlockWise 1x128 scaling, a and b should be float8, scales should be float, scale_a should be (",
+      mat_a.size(0),
+      ", ",
+      ceil_div<int64_t>(mat_a.size(1), 128),
+      ") and scale_b should be (",
+      ceil_div<int64_t>(mat_b.size(0), 128),
+      ", ",
+      mat_b.size(1),
+      "), and both should be outer-dim-major.\n"
+      "- For BlockWise 128x128 scaling, a and b should be float8, scales should be float, scale_a should be (",
+      ceil_div<int64_t>(mat_a.size(0), 128),
+      ", ",
+      ceil_div<int64_t>(mat_a.size(1), 128),
+      ") and scale_b should be (",
+      ceil_div<int64_t>(mat_b.size(0), 128),
+      ", ",
+      ceil_div<int64_t>(mat_b.size(1), 128),
+      "), and both should be near-inner-dim-major (with 16-byte aligned strides).\n"
       "Got mat_a.dtype()=",
       mat_a.scalar_type(),
       ", scale_a[0].dtype()=",
@@ -699,6 +1035,36 @@ Tensor& _scaled_mm_xpu_v2_out(
         out);
   } else if (gemm_impl == ScaledGemmImplementation::ROWWISE_ROWWISE) {
     return _scaled_rowwise_rowwise(
+        mat_a,
+        mat_b,
+        scale_a[0],
+        scale_b[0],
+        bias,
+        out_dtype_,
+        use_fast_accum,
+        out);
+  } else if (gemm_impl == ScaledGemmImplementation::BLOCK_128x128_1x128) {
+    return _scaled_block128x128_block1x128(
+        mat_a,
+        mat_b,
+        scale_a[0],
+        scale_b[0],
+        bias,
+        out_dtype_,
+        use_fast_accum,
+        out);
+  } else if (gemm_impl == ScaledGemmImplementation::BLOCK_1x128_128x128) {
+    return _scaled_block1x128_block128x128(
+        mat_a,
+        mat_b,
+        scale_a[0],
+        scale_b[0],
+        bias,
+        out_dtype_,
+        use_fast_accum,
+        out);
+  } else if (gemm_impl == ScaledGemmImplementation::BLOCK_1x128_1x128) {
+    return _scaled_block1x128_block1x128(
         mat_a,
         mat_b,
         scale_a[0],
