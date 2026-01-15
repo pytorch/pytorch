@@ -550,7 +550,7 @@ Tensor& _int_mm_out_xpu(
       self.contiguous(),
       1.0,
       0,
-      mat2.contiguous(),
+      mat2,
       mat2_scales,
       mat2_zero_points,
       bias,

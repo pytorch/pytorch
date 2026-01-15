@@ -3278,13 +3278,7 @@ class RpcTest(RpcAgentTestFixture, RpcTestCommon):
         expected.update(rref_info)
         expected.update(agent_info)
         expected.update(autograd_info)
-        # NB: Key ordering is only preserved in python 3.6+. So here, we
-        # manually check keys are equal.
-        for key in expected:
-            self.assertIn(key, info.keys())
-
-        for key in info:
-            self.assertIn(key, expected.keys())
+        self.assertEqual(info.keys(), expected.keys())
 
     @dist_init(setup_rpc=False)
     @skip_but_pass_in_sandcastle_if(
