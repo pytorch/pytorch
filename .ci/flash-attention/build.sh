@@ -26,6 +26,9 @@ PYTHON="${PYTHON_EXECUTABLE:-python}"
 echo "installing dependencies"
 "$PYTHON" -m pip install einops packaging ninja numpy wheel setuptools
 
+export PATH="$(dirname "$PYTHON"):$PATH"
+echo "ninja location: $(which ninja)"
+
 export FLASH_ATTENTION_FORCE_BUILD="${FLASH_ATTENTION_FORCE_BUILD:-TRUE}"
 
 export FLASH_ATTENTION_DISABLE_SPLIT="${FLASH_ATTENTION_DISABLE_SPLIT:-FALSE}"
@@ -58,8 +61,10 @@ pushd "$FLASH_ATTENTION_HOPPER_DIR"
 
 git submodule update --init ../csrc/cutlass
 
-sed -i 's/bare_metal_version != Version("12.8")/bare_metal_version < Version("12.8")/' \
-    "$FLASH_ATTENTION_HOPPER_DIR/setup.py"
+if [[ "$(uname -m)" != "aarch64" ]]; then
+    sed -i 's/bare_metal_version != Version("12.8")/bare_metal_version < Version("12.8")/' \
+        "$FLASH_ATTENTION_HOPPER_DIR/setup.py"
+fi
 
 "$PYTHON" setup.py bdist_wheel \
     -d "$FA_FINAL_PACKAGE_DIR" \
