@@ -52,7 +52,7 @@ from .dicts import (
     OrderedSetVariable,
     SetVariable,
 )
-from .distributed import BackwardHookVariable, DistributedVariable
+from .distributed import BackwardHookVariable, DistributedVariable, PlacementVariable
 from .functions import (
     BuiltinMethodVariable,
     CollectionsNamedTupleFunction,
@@ -91,7 +91,7 @@ from .iter import (
     RepeatIteratorVariable,
     ZipVariable,
 )
-from .lazy import LazyVariableTracker
+from .lazy import LazyConstantVariable, LazyVariableTracker
 from .lists import (
     BaseListVariable,
     ListIteratorVariable,
@@ -185,6 +185,7 @@ __all__ = [
     "IteratorVariable",
     "ItertoolsVariable",
     "LambdaVariable",
+    "LazyConstantVariable",
     "LazyVariableTracker",
     "ListIteratorVariable",
     "ListVariable",
@@ -196,6 +197,7 @@ __all__ = [
     "NumpyNdarrayVariable",
     "NumpyVariable",
     "OptimizerVariable",
+    "PlacementVariable",
     "PolyfilledFunctionVariable",
     "PythonModuleVariable",
     "RangeVariable",
