@@ -31,7 +31,11 @@ from typing import (
     TYPE_CHECKING,
     TypeVar as _TypeVar,
 )
-from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
+from typing_extensions import (
+    deprecated as _deprecated,
+    ParamSpec as _ParamSpec,
+    TypeIs as _TypeIs,
+)
 
 
 # As a bunch of torch.packages internally still have this check
@@ -1744,7 +1748,11 @@ def _check(cond, message=None):  # noqa: F811
     _check_with(RuntimeError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
-# TODO add deprecation annotation
+@_deprecated(
+    "_check_is_size will be removed in a future PyTorch release along with guard_size_oblivious. \
+    Use _check(i >= 0) instead.",
+    category=FutureWarning,
+)
 def _check_is_size(i, message=None, *, max=None):
     """Checks that a given integer is a valid size (i.e., is non-negative).
     You should use this over ``_check(i >= 0)`` because it can prevent
