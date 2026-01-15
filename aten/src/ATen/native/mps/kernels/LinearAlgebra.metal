@@ -974,7 +974,6 @@ kernel void linalg_qr_householder(
     uint3 thread_pos [[thread_position_in_threadgroup]],
     uint3 tpg [[threads_per_threadgroup]],
     uint3 tg_pos [[threadgroup_position_in_grid]]) {
-
   using opmath_t = c10::metal::opmath_t<T>;
 
   const uint32_t tid = thread_pos.x;
@@ -1009,7 +1008,6 @@ kernel void linalg_qr_householder(
   threadgroup_barrier(mem_flags::mem_device);
 
   for (uint32_t k = 0; k < n; k++) {
-
     // Step 1: compute norm of R[k:m, k] and copy to v_batch
     opmath_t norm_sq = 0.0;
     for (uint32_t i = k + tid; i < m; i += group_size) {
@@ -1017,7 +1015,8 @@ kernel void linalg_qr_householder(
       v_batch[i] = static_cast<T>(val);
       norm_sq = fma(val, val, norm_sq);
     }
-    opmath_t norm = sqrt(parallel_reduce_sum(norm_sq, tid, group_size, scratch));
+    opmath_t norm =
+        sqrt(parallel_reduce_sum(norm_sq, tid, group_size, scratch));
 
     // Step 2: compute Householder vector and tau
     if (tid == 0) {
@@ -1043,7 +1042,8 @@ kernel void linalg_qr_householder(
     threadgroup_barrier(mem_flags::mem_device);
 
     opmath_t tau = tau_shared;
-    if (tau < 1e-10) continue;
+    if (tau < 1e-10)
+      continue;
 
     // (zero out column k below diagonal)
     for (uint32_t i = k + 1 + tid; i < m; i += group_size) {
@@ -1051,7 +1051,8 @@ kernel void linalg_qr_householder(
     }
 
     // Step 3: apply reflection to trailing columns of R
-    // Parallelize across columns: each SIMD group (32 threads) handles one column
+    // Parallelize across columns: each SIMD group (32 threads) handles one
+    // column
     uint32_t simd_lane = tid % 32;
     uint32_t simd_group_id = tid / 32;
     uint32_t num_simd_groups = group_size / 32;
@@ -1111,17 +1112,17 @@ kernel void linalg_qr_householder(
   }
 }
 
-#define REGISTER_QR(T) \
+#define REGISTER_QR(T)                                \
   template [[host_name("linalg_qr_householder_" #T)]] \
-  kernel void linalg_qr_householder<T>( \
-      device T* A [[buffer(0)]], \
-      device T* Q [[buffer(1)]], \
-      device T* R [[buffer(2)]], \
-      device int* info [[buffer(3)]], \
-      constant QrParams<>& params [[buffer(4)]], \
-      device T* v_work [[buffer(5)]], \
-      uint3 tid [[thread_position_in_threadgroup]], \
-      uint3 tpg [[threads_per_threadgroup]], \
+  kernel void linalg_qr_householder<T>(               \
+      device T * A [[buffer(0)]],                     \
+      device T * Q [[buffer(1)]],                     \
+      device T * R [[buffer(2)]],                     \
+      device int* info [[buffer(3)]],                 \
+      constant QrParams<>& params [[buffer(4)]],      \
+      device T* v_work [[buffer(5)]],                 \
+      uint3 tid [[thread_position_in_threadgroup]],   \
+      uint3 tpg [[threads_per_threadgroup]],          \
       uint3 tg_pos [[threadgroup_position_in_grid]]);
 
 REGISTER_QR(float);
