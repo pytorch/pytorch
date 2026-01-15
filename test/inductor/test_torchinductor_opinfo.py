@@ -997,6 +997,7 @@ inductor_skip_exact_stride = {
     "empty_permuted",
     "fft.irfftn",
     "fft.irfft2",
+    "linalg.lu_factor",
     "linalg.matrix_norm",
     "linalg.norm",
     "linalg.norm.subgradients_at_zero",
