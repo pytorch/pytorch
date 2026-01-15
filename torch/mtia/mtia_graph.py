@@ -1,7 +1,6 @@
 # pylint: disable=useless-parent-delegation
 from __future__ import annotations
 
-from typing import Optional, Union
 from typing_extensions import Self
 
 import torch
@@ -64,20 +63,18 @@ class MTIAGraph(torch._C._MTIAGraph):
 
 
 class graph:
-    default_capture_stream: Optional[torch.mtia.Stream] = None
+    default_capture_stream: torch.mtia.Stream | None = None
 
     def __init__(
         self,
         mtia_graph: MTIAGraph,
-        pool: Optional[_POOL_HANDLE] = None,
-        stream: Optional[torch.mtia.Stream] = None,
+        pool: _POOL_HANDLE | None = None,
+        stream: torch.mtia.Stream | None = None,
     ):
         if self.__class__.default_capture_stream is None:
             self.__class__.default_capture_stream = torch.mtia.current_stream()
 
-        self.pool: Union[tuple[()], tuple[_POOL_HANDLE]] = (
-            () if pool is None else (pool,)
-        )
+        self.pool: tuple[()] | tuple[_POOL_HANDLE] = () if pool is None else (pool,)
         self.capture_stream = (
             stream if stream is not None else self.__class__.default_capture_stream
         )

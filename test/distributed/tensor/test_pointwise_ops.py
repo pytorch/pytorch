@@ -374,6 +374,56 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(z.to_local(), input)
 
     @with_comms
+    def test_div_partial(self):
+        # we only test the partial behavior for div op as other placement
+        # behaviors should be well tested in test_dtensor_ops.py
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        # 1. test the partial input DTensor / scalar/replicate input
+        # This is mathematically sound: (a1 + a2) / b = a1/b + a2/b
+        input = torch.full((8, 8), 2.0, device=self.device_type)
+
+        # test for different types of other inputs
+        other_inps = (
+            2.0,  # scalar
+            torch.tensor(2.0, device=self.device_type),  # scalar tensor
+            torch.full((8, 8), 2.0, device=self.device_type),  # tensor
+        )
+
+        for partial_op in ["sum", "avg"]:
+            expected_p_out = (
+                input * self.world_size / 2.0 if partial_op == "sum" else input / 2.0
+            )
+
+            d_input = DTensor.from_local(input, device_mesh, [Partial(partial_op)])
+
+            for other_inp in other_inps:
+                if isinstance(other_inp, Tensor) and other_inp.numel() > 1:
+                    d_other = distribute_tensor(other_inp, device_mesh, [Replicate()])
+                else:
+                    d_other = other_inp
+
+                with comm_mode:
+                    z = d_input / d_other
+
+                comm_counts = comm_mode.get_total_counts()
+                self.assertEqual(comm_counts, 0)
+                self.assertTrue(isinstance(z, DTensor))
+                self.assertEqual(z.placements, (Partial(partial_op),))
+                self.assertEqual(z.full_tensor(), expected_p_out)
+
+        # test other partial to assert the partial not getting propagated
+        d_input = DTensor.from_local(input, device_mesh, [Partial("max")])
+        d_other = distribute_tensor(
+            torch.full((8, 8), 2.0, device=self.device_type), device_mesh, [Replicate()]
+        )
+
+        z = d_input / d_other
+        self.assertEqual(z.placements, (Replicate(),))
+        self.assertEqual(z.to_local(), input / 2.0)
+
+    @with_comms
     def test_masked_fill_scalar(self):
         """Test masked_fill_ with scalar value."""
         device_mesh = self.build_device_mesh()
@@ -468,7 +518,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
         self.assertTrue(res._spec.placements[0].is_partial())
         res = res.redistribute(dt.device_mesh, placements=[Replicate()])
-        expected = sum(i * 2 for i in range(self.world_size))
+        expected = sum(i for i in range(self.world_size)) * 2
         self.assertEqual(res, expected)
 
         res = aten.div.Scalar(dt, 2)
@@ -479,8 +529,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
         self.assertTrue(res._spec.placements[0].is_partial())
         res = res.redistribute(dt.device_mesh, placements=[Replicate()])
-
-        expected = expected / 4.0
+        expected = sum(i for i in range(self.world_size)) / 2
         self.assertEqual(res, expected)
 
     @with_comms
@@ -524,7 +573,8 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         )
 
         res = dt + 1
-        self.assertEqual(res, 7)
+        expected = sum(i for i in range(self.world_size)) + 1
+        self.assertEqual(res, expected)
         self.assertTrue(res._spec.placements[0].is_replicate())
 
         # regular partial - scalar -> replicate
@@ -535,11 +585,13 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         )
 
         res = dt - 1
-        self.assertEqual(res, 5)
+        expected = sum(i for i in range(self.world_size)) - 1
+        self.assertEqual(res, expected)
         self.assertTrue(res._spec.placements[0].is_replicate())
 
         res = 7 - dt
-        self.assertEqual(res, 1)
+        expected = 7 - sum(i for i in range(self.world_size))
+        self.assertEqual(res, expected)
         self.assertTrue(res._spec.placements[0].is_replicate())
 
         # regular partial + regular partial -> partial
@@ -547,7 +599,8 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(res.to_local(), rank + rank)
         self.assertTrue(res._spec.placements[0].is_partial())
         res = res.redistribute(dt.device_mesh, placements=[Replicate()])
-        self.assertEqual(res, 12)
+        expected = sum(i for i in range(self.world_size)) * 2
+        self.assertEqual(res, expected)
 
         # regular partial - regular partial -> partial
         res = dt - dt
