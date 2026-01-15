@@ -35,8 +35,8 @@ fi
 
 
 # NS: Ugly hack to be remove by Feb 15 2026
-# Mac runners reuse previos checkouts, and actions/checkout does not clean untracked submodules
-# Which results in build failures, when we validate all the included lincenses, which reference some
+# Mac runners reuse previous checkouts, and actions/checkout does not clean untracked submodules
+# Which results in build failures, when we validate all the included licenses, which reference some
 # no longer used opentelementry submodules
 if [[ -d third_party/opentelementry-cpp ]]; then
   rm -rf third_party/opentelementry-cpp
