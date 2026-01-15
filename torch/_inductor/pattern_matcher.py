@@ -2328,7 +2328,7 @@ def clone_graph(input_graph: torch.fx.GraphModule) -> torch.fx.GraphModule:
                 new_node.node.name = self.new_graph._graph_namespace.create_name(
                     old_node.name, None
                 )
-            # pyrefly: ignore [bad-return]
+
             return new_node
 
     return CopyGraph(input_graph).transform()
