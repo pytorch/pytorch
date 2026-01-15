@@ -986,7 +986,7 @@ class CppFlexAttentionTemplate(CppTemplate):
 
         num_threads = parallel_num_threads()
         assert isinstance(self.output_node, ir.IRNode)
-        buf_out: ir.IRNode = TensorBox.create(self.output_node)
+        buf_out = TensorBox.create(self.output_node)
         if template_buffer_node is not None:
             buf_out = template_buffer_node
         options = dict(

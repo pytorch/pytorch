@@ -2,7 +2,6 @@
 
 #if !defined(CAFFE2_IS_XPLAT_BUILD) && !defined(C10_MOBILE) && !defined(BUILD_LITE_INTERPRETER)
 #include <ATen/autocast_mode.h>
-#include <ATen/core/grad_mode.h>
 #endif
 
 #include <ATen/record_function.h>

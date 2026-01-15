@@ -227,6 +227,11 @@ class TestDynamoTimed(TestCase):
     Test utilities surrounding dynamo_timed.
     """
 
+    def setUp(self):
+        super().setUp()
+        if hasattr(torch._dynamo, "reset_recompile_user_contexts"):
+            torch._dynamo.reset_recompile_user_contexts()
+
     def run_forward_backward(self):
         model = torch.compile(TestModel())
         x = torch.rand([3], requires_grad=True)
@@ -361,6 +366,7 @@ class TestDynamoTimed(TestCase):
         {
             "bundle_triton_into_fx_graph_cache": False,
             "bundled_autotune_remote_cache": False,
+            "force_disable_caches": True,
         }
     )
     # We can't easily test that timing is actually accurate. Mock time to always
@@ -385,12 +391,20 @@ class TestDynamoTimed(TestCase):
             self.run_forward_backward()
             compilation_events = [arg[0][0] for arg in log_event.call_args_list]
 
+        def filter_expected(s: str) -> str:
+            d = eval(s)
+            if not dynamo_config.run_gc_after_compile:
+                d.pop("gc", None)
+                if "gc_time_us" in d:
+                    d["gc_time_us"] = None
+            return pprint.pformat(d)
+
         # Validate utils.compile_times(). Unfortunately, we can't test the output
         # reliably because it depends on whether 'tabulate' is installed. So we'll
         # directly inspect the dict it prints instead:
         self.assertExpectedInline(
             pprint.pformat(utils.compilation_time_metrics),
-            (
+            filter_expected(
                 """\
 {'GraphLowering.codegen': [0.0, 0.0],
  'GraphLowering.compile_to_fn': [0.0, 0.0],
@@ -461,7 +475,7 @@ class TestDynamoTimed(TestCase):
         time_spent = utils.calculate_time_spent()
         self.assertExpectedInline(
             pprint.pformat(time_spent),
-            (
+            filter_expected(
                 """\
 {'_recursive_joint_graph_passes': 0.0,
  '_recursive_post_grad_passes': 0.0,
@@ -524,10 +538,14 @@ class TestDynamoTimed(TestCase):
         del raw["guard_latency_us"]
         self.assertExpectedInline(
             pprint.pformat(raw),
-            (
+            filter_expected(
                 """\
 {'accumulated_cache_size': 0,
  'aot_autograd_cumulative_compile_time_us': 0,
+ 'aotautograd_local_cache_hit_count': 0,
+ 'aotautograd_local_cache_miss_count': 0,
+ 'aotautograd_remote_cache_hit_count': 0,
+ 'aotautograd_remote_cache_miss_count': 0,
  'backend_compile_time_s': 0.0,
  'backward_cumulative_compile_time_us': None,
  'cache_size': 0,
@@ -568,10 +586,12 @@ class TestDynamoTimed(TestCase):
  'inductor_compile_time_s': 0.0,
  'inductor_config': None,
  'inductor_cumulative_compile_time_us': 0,
+ 'inductor_fx_local_cache_hit_count': 0,
+ 'inductor_fx_local_cache_miss_count': 0,
  'inductor_fx_remote_cache_backend_type': None,
- 'inductor_fx_remote_cache_hit_count': None,
+ 'inductor_fx_remote_cache_hit_count': 0,
  'inductor_fx_remote_cache_hit_keys': None,
- 'inductor_fx_remote_cache_miss_count': None,
+ 'inductor_fx_remote_cache_miss_count': 0,
  'inductor_fx_remote_cache_miss_keys': None,
  'inline_inbuilt_nn_modules_candidate': False,
  'is_forward': True,
@@ -615,6 +635,10 @@ class TestDynamoTimed(TestCase):
                 else """\
 {'accumulated_cache_size': 0,
  'aot_autograd_cumulative_compile_time_us': 0,
+ 'aotautograd_local_cache_hit_count': 0,
+ 'aotautograd_local_cache_miss_count': 0,
+ 'aotautograd_remote_cache_hit_count': 0,
+ 'aotautograd_remote_cache_miss_count': 0,
  'backend_compile_time_s': 0.0,
  'backward_cumulative_compile_time_us': None,
  'cache_size': 0,
@@ -655,10 +679,12 @@ class TestDynamoTimed(TestCase):
  'inductor_compile_time_s': 0.0,
  'inductor_config': None,
  'inductor_cumulative_compile_time_us': 0,
+ 'inductor_fx_local_cache_hit_count': 0,
+ 'inductor_fx_local_cache_miss_count': 0,
  'inductor_fx_remote_cache_backend_type': None,
- 'inductor_fx_remote_cache_hit_count': None,
+ 'inductor_fx_remote_cache_hit_count': 0,
  'inductor_fx_remote_cache_hit_keys': None,
- 'inductor_fx_remote_cache_miss_count': None,
+ 'inductor_fx_remote_cache_miss_count': 0,
  'inductor_fx_remote_cache_miss_keys': None,
  'inline_inbuilt_nn_modules_candidate': False,
  'is_forward': True,
@@ -716,6 +742,10 @@ class TestDynamoTimed(TestCase):
                 """\
 {'accumulated_cache_size': None,
  'aot_autograd_cumulative_compile_time_us': None,
+ 'aotautograd_local_cache_hit_count': 0,
+ 'aotautograd_local_cache_miss_count': 0,
+ 'aotautograd_remote_cache_hit_count': 0,
+ 'aotautograd_remote_cache_miss_count': 0,
  'backend_compile_time_s': None,
  'backward_cumulative_compile_time_us': 0,
  'cache_size': None,
@@ -756,10 +786,12 @@ class TestDynamoTimed(TestCase):
  'inductor_compile_time_s': 0.0,
  'inductor_config': None,
  'inductor_cumulative_compile_time_us': 0,
+ 'inductor_fx_local_cache_hit_count': 0,
+ 'inductor_fx_local_cache_miss_count': 0,
  'inductor_fx_remote_cache_backend_type': None,
- 'inductor_fx_remote_cache_hit_count': None,
+ 'inductor_fx_remote_cache_hit_count': 0,
  'inductor_fx_remote_cache_hit_keys': None,
- 'inductor_fx_remote_cache_miss_count': None,
+ 'inductor_fx_remote_cache_miss_count': 0,
  'inductor_fx_remote_cache_miss_keys': None,
  'inline_inbuilt_nn_modules_candidate': False,
  'is_forward': False,
@@ -803,6 +835,10 @@ class TestDynamoTimed(TestCase):
                 else """\
 {'accumulated_cache_size': None,
  'aot_autograd_cumulative_compile_time_us': None,
+ 'aotautograd_local_cache_hit_count': 0,
+ 'aotautograd_local_cache_miss_count': 0,
+ 'aotautograd_remote_cache_hit_count': 0,
+ 'aotautograd_remote_cache_miss_count': 0,
  'backend_compile_time_s': None,
  'backward_cumulative_compile_time_us': 0,
  'cache_size': None,
@@ -843,10 +879,12 @@ class TestDynamoTimed(TestCase):
  'inductor_compile_time_s': 0.0,
  'inductor_config': None,
  'inductor_cumulative_compile_time_us': 0,
+ 'inductor_fx_local_cache_hit_count': 0,
+ 'inductor_fx_local_cache_miss_count': 0,
  'inductor_fx_remote_cache_backend_type': None,
- 'inductor_fx_remote_cache_hit_count': None,
+ 'inductor_fx_remote_cache_hit_count': 0,
  'inductor_fx_remote_cache_hit_keys': None,
- 'inductor_fx_remote_cache_miss_count': None,
+ 'inductor_fx_remote_cache_miss_count': 0,
  'inductor_fx_remote_cache_miss_keys': None,
  'inline_inbuilt_nn_modules_candidate': False,
  'is_forward': False,

@@ -9,6 +9,7 @@ from typing import Any, cast, Optional, Union
 import sympy
 from sympy import Expr
 
+from torch import SymInt
 from torch.fx.experimental.symbolic_shapes import (
     free_symbols,
     has_free_unbacked_symbols,
@@ -76,7 +77,7 @@ class SizeVarAllocator:
         if shape_env is None:
             shape_env = ShapeEnv()
         self.shape_env = shape_env
-        self.var_to_val = self.shape_env.var_to_val
+        self.backed_var_to_val = self.shape_env.backed_var_to_val
         self.var_to_hint_override = self.shape_env.var_to_hint_override
         self.replacements: dict[sympy.Symbol, Expr] = self.shape_env.replacements
         self.unbacked_replacements: Optional[dict[Expr, Expr]] = None
@@ -387,10 +388,6 @@ class SizeVarAllocator:
         """
         # The reason we skip compute here is to avoid the cost of trying to eval this symbolically.
         # see https://github.com/sympy/sympy/issues/28200
-        if has_free_unbacked_symbols(numerator) or has_free_unbacked_symbols(
-            denominator
-        ):
-            return False
 
         if len(free_symbols(numerator)) > 20:
             return False
@@ -593,7 +590,7 @@ class SizeVarAllocator:
         if use_user_provided_hint_override:
             expr = sympy_subs(expr, self.var_to_hint_override)
 
-        return sympy_subs(expr, self.var_to_val)
+        return sympy_subs(expr, self.backed_var_to_val)
 
     def size_hint(
         self,
@@ -602,6 +599,11 @@ class SizeVarAllocator:
         fallback: Optional[int] = None,
         hint_override: Optional[int] = None,
     ) -> int:
+        if isinstance(expr, SymInt):
+            raise TypeError(
+                "wrong API usage!, use size_hint from torch.fx.experimental.symbolic_shapes or pass sympy expressions instead"
+            )
+
         out = self.symbolic_hint(
             expr,
             hint_override=hint_override,
@@ -981,7 +983,9 @@ class SizeVarAllocator:
         return self.precomputed_replacements[expr]
 
     def free_symbols(self) -> OrderedSet[sympy.Symbol]:
-        return OrderedSet(self.var_to_val.keys()) - OrderedSet(self.replacements.keys())
+        return OrderedSet(self.backed_var_to_val.keys()) - OrderedSet(
+            self.replacements.keys()
+        )
 
     def combine_modular_indexing_pairs(self, index: sympy.Expr) -> sympy.Expr:
         """

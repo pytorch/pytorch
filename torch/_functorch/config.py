@@ -71,9 +71,27 @@ autograd_cache_allow_custom_autograd_functions: bool = Config(
 # need to add env vars or make it configurable
 bundled_autograd_cache: bool = False
 
+bypass_autograd_cache_key: bool = False
+
 # Whether or not to normalize placeholder names in graphs
 # from dynaom in AOTAutogradCache
 autograd_cache_normalize_inputs = not is_fbcode()
+
+# Enable debug mode at first invocation to check if custom ops are valid.
+# When enabled, this checks that custom operators don't violate aliasing constraints.
+#
+# check_custom_op_aliasing: Controls whether to run the custom op aliasing check at all.
+#   - When True: The check runs on first invocation of compiled functions.
+#   - When False: The check is skipped entirely.
+#
+# error_on_custom_op_aliasing: Controls behavior when a violation is detected.
+#   Only has effect when check_custom_op_aliasing is True.
+#   - When True: Raises RuntimeError on aliasing violations.
+#   - When False: Emits UserWarning on aliasing violations.
+#
+# Currently both are only enabled in CI, but eventually we should enable them everywhere.
+check_custom_op_aliasing = bool(os.getenv("CI"))
+error_on_custom_op_aliasing = bool(os.getenv("CI"))
 
 
 def remote_autograd_cache_default() -> Optional[bool]:
@@ -139,6 +157,17 @@ ban_recompute_reductions = True
 # Prevents the partitioner from ever saving views (i.e. always recompute them).
 # Generally a good idea since views are free to recompute.
 recompute_views = False
+# Set this flag to enable considering non-built-in ops, including triton and custom
+# ops, for recomputation during the knapsack optimization solver.
+is_non_builtin_to_include = False
+
+# Rematerialize AC nodes for graphs with forward+loss+backward in one graph.
+# This optimization minimizes activation checkpoint node lifetimes by computing them
+# just-in-time. For AC nodes only used in backward, they are deferred to backward region
+# instead of being computed and saved in forward. This reduces peak memory usage.
+# Note: This only applies to forward+loss+backward graphs where torch.autograd.grad is allowed
+# in the graph. Joint graphs (standard AOTAutograd) use the partitioner instead.
+remat_using_tags_for_fwd_loss_bwd_graph = True
 
 # By default, the partitioner is purely trying to optimize for runtime (although
 # it should always use less memory than eager)
@@ -183,6 +212,18 @@ memory_budget_pareto_dir = os.environ.get("PARTITIONER_MEMORY_BUDGET_PARETO_DIR"
 # Generally, this will probably result in some memory improvement, but at the
 # cost of some performance
 aggressive_recomputation = False
+
+# activation offloading enablement (testing purpose)
+enable_activation_offloading = False
+
+# activation offloading with separate CUDA stream
+activation_offload_separate_stream = False
+
+# activation offloading wait sinking when using separate stream (fwd graph)
+activation_offload_sink_wait = False
+
+# activation reloading with prefetching when using separate streams (bwd graph)
+activation_reload_prefetch = False
 
 # If FakeTensor.data_ptr() should error.
 # This option is independent of AOTAutograd and torch.compile, but our policy
@@ -374,6 +415,8 @@ saved_tensors_hooks_filtering_mode = "donated"
 
 # This callback is invoked on the joint graph before partitioning
 joint_custom_pass: Callable = None  # type: ignore[assignment]
+
+force_autograd_cache = False
 
 # Note [Selective Decomposition]
 # This config allows selective decomposition of certain operators in the graph.

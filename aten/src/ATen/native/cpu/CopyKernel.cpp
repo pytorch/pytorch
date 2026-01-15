@@ -235,6 +235,8 @@ void direct_copy_kernel(TensorIteratorBase &iter) {
     });
   } else if (dtype == ScalarType::ComplexHalf) {
     cpu_kernel(iter, [=](c10::complex<at::Half> a) -> c10::complex<at::Half> { return a; });
+  } else if (dtype == ScalarType::Float4_e2m1fn_x2) {
+    cpu_kernel(iter, [=](Float4_e2m1fn_x2 a) -> Float4_e2m1fn_x2 { return a; });
   } else if (isBitsType(dtype)) {
     AT_DISPATCH_BIT_TYPES(dtype, "copy_kernel", [&] {
       cpu_kernel(

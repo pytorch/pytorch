@@ -12,7 +12,7 @@ import uuid
 import warnings
 import zipfile
 from pathlib import Path
-from typing import Any, Optional, Union
+from typing import Any
 from typing_extensions import deprecated
 from urllib.error import HTTPError, URLError
 from urllib.parse import urlparse  # noqa: F401
@@ -91,7 +91,7 @@ DEFAULT_CACHE_DIR = "~/.cache"
 VAR_DEPENDENCY = "dependencies"
 MODULE_HUBCONF = "hubconf.py"
 READ_DATA_CHUNK = 128 * 1024
-_hub_dir: Optional[str] = None
+_hub_dir: str | None = None
 
 
 @contextlib.contextmanager
@@ -109,9 +109,11 @@ def _import_module(name, path):
     from importlib.abc import Loader
 
     spec = importlib.util.spec_from_file_location(name, path)
-    assert spec is not None
+    if spec is None:
+        raise AssertionError(f"failed to load spec from {path}")
     module = importlib.util.module_from_spec(spec)
-    assert isinstance(spec.loader, Loader)
+    if not isinstance(spec.loader, Loader):
+        raise AssertionError(f"expected Loader, got {type(spec.loader)}")
     spec.loader.exec_module(module)
     return module
 
@@ -417,7 +419,7 @@ def get_dir() -> str:
     return os.path.join(_get_torch_home(), "hub")
 
 
-def set_dir(d: Union[str, os.PathLike]) -> None:
+def set_dir(d: str | os.PathLike) -> None:
     r"""
     Optionally set the Torch Hub directory used to save downloaded models & weights.
 
@@ -694,7 +696,7 @@ def _load_local(hubconf_dir, model, *args, **kwargs):
 def download_url_to_file(
     url: str,
     dst: str,
-    hash_prefix: Optional[str] = None,
+    hash_prefix: str | None = None,
     progress: bool = True,
 ) -> None:
     r"""Download object at the given URL to a local path.
@@ -716,17 +718,6 @@ def download_url_to_file(
         ... )
 
     """
-    file_size = None
-    req = Request(url, headers={"User-Agent": "torch.hub"})
-    u = urlopen(req)
-    meta = u.info()
-    if hasattr(meta, "getheaders"):
-        content_length = meta.getheaders("Content-Length")
-    else:
-        content_length = meta.get_all("Content-Length")
-    if content_length is not None and len(content_length) > 0:
-        file_size = int(content_length[0])
-
     # We deliberately save it in a temp file and move it after
     # download is complete. This prevents a local working checkpoint
     # being overridden by a broken download.
@@ -742,33 +733,42 @@ def download_url_to_file(
         break
     else:
         raise FileExistsError(errno.EEXIST, "No usable temporary file name found")
-
+    req = Request(url, headers={"User-Agent": "torch.hub"})
     try:
-        if hash_prefix is not None:
-            sha256 = hashlib.sha256()
-        with tqdm(
-            total=file_size,
-            disable=not progress,
-            unit="B",
-            unit_scale=True,
-            unit_divisor=1024,
-        ) as pbar:
-            while True:
-                buffer = u.read(READ_DATA_CHUNK)
-                if len(buffer) == 0:
-                    break
-                f.write(buffer)  # type: ignore[possibly-undefined]
-                if hash_prefix is not None:
-                    sha256.update(buffer)  # type: ignore[possibly-undefined]
-                pbar.update(len(buffer))
+        with urlopen(req) as u:
+            meta = u.info()
+            if hasattr(meta, "getheaders"):
+                content_length = meta.getheaders("Content-Length")
+            else:
+                content_length = meta.get_all("Content-Length")
+            file_size = None
+            if content_length is not None and len(content_length) > 0:
+                file_size = int(content_length[0])
 
-        f.close()
-        if hash_prefix is not None:
-            digest = sha256.hexdigest()  # type: ignore[possibly-undefined]
-            if digest[: len(hash_prefix)] != hash_prefix:
-                raise RuntimeError(
-                    f'invalid hash value (expected "{hash_prefix}", got "{digest}")'
-                )
+            sha256 = hashlib.sha256() if hash_prefix is not None else None
+            with tqdm(
+                total=file_size,
+                disable=not progress,
+                unit="B",
+                unit_scale=True,
+                unit_divisor=1024,
+            ) as pbar:
+                while True:
+                    buffer = u.read(READ_DATA_CHUNK)
+                    if len(buffer) == 0:
+                        break
+                    f.write(buffer)
+                    if sha256 is not None:
+                        sha256.update(buffer)
+                    pbar.update(len(buffer))
+
+            f.close()
+            if sha256 is not None and hash_prefix is not None:
+                digest = sha256.hexdigest()
+                if digest[: len(hash_prefix)] != hash_prefix:
+                    raise RuntimeError(
+                        f'invalid hash value (expected "{hash_prefix}", got "{digest}")'
+                    )
         shutil.move(f.name, dst)
     finally:
         f.close()
@@ -816,11 +816,11 @@ def _legacy_zip_load(
 
 def load_state_dict_from_url(
     url: str,
-    model_dir: Optional[str] = None,
+    model_dir: str | None = None,
     map_location: MAP_LOCATION = None,
     progress: bool = True,
     check_hash: bool = False,
-    file_name: Optional[str] = None,
+    file_name: str | None = None,
     weights_only: bool = False,
 ) -> dict[str, Any]:
     r"""Loads the Torch serialized object at the given URL.

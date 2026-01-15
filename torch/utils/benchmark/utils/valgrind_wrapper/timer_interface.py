@@ -66,6 +66,7 @@ class FunctionCounts:
     def __getitem__(self, item: Any) -> Union[FunctionCount, "FunctionCounts"]:
         data: FunctionCount | tuple[FunctionCount, ...] = self._data[item]
         return (
+            # pyrefly: ignore [bad-return]
             FunctionCounts(cast(tuple[FunctionCount, ...], data), self.inclusive, truncate_rows=False)
             if isinstance(data, tuple) else data
         )
