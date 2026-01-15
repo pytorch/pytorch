@@ -1417,6 +1417,12 @@ class OutputGraph(OutputGraphCommon):
         stack_values = []
         meta = StackLocalsMetadata()
 
+        def ctx_exit_check(var: VariableTracker) -> None:
+            if type.__instancecheck__(variables.WithExitFunctionVariable, var):
+                raise AssertionError(
+                    "Attempted to reconstruct WithExitFunctionVariable outside the stack"
+                )
+
         # realize any unrealized tensor VTs in case they
         # need to be added to self.nn_modules as attributes
         for i, value in enumerate(tx.stack):
@@ -1425,6 +1431,9 @@ class OutputGraph(OutputGraphCommon):
             variables.LazyVariableTracker.realize_all(
                 value, allow_lazy_constant=allow_lazy_constant
             )
+            # Do not allow non-stack WithExitFunctionVariable reconstructions
+            if not isinstance(value, variables.WithExitFunctionVariable):
+                VariableTracker.visit(ctx_exit_check, value)
             # ignore top `stack_pops` values on the stack
             if allow_lazy_constant:
                 stack_values.append(value)
@@ -1454,6 +1463,8 @@ class OutputGraph(OutputGraphCommon):
         # so checks for NULLs and context managers in the case of codegen'ing resume
         # functions will not be performed on them. This is expected behavior.
         for k, v in tx.symbolic_locals.items():
+            # Do not reconstruct WithExitFunctionVariable!
+            VariableTracker.visit(ctx_exit_check, v)
             # Note! this explicitly uses .local_name for matching
             # Failure to do so will cause spurious registrations in val_to_names.
             # This will in turn result in spurious variables showing up in the graph.
@@ -1494,7 +1505,6 @@ class OutputGraph(OutputGraphCommon):
         self,
         tx: "InstructionTranslatorBase",
         reason: GraphCompileReason,
-        partial_convert: bool = False,
         stack_pops: int = 0,
     ) -> list[StackLocalsMetadata]:
         """
@@ -1521,7 +1531,6 @@ class OutputGraph(OutputGraphCommon):
         # bytecode tracing has finished. Pop the context manager for dynamo_timed
         self.mark_bytecode_tracing_stop()
 
-        self.partial_convert = partial_convert
         self.compile_subgraph_reason = reason
         self.should_exit = True
 
