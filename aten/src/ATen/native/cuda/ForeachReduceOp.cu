@@ -397,6 +397,87 @@ inline void check_foreach_norm_dtype(
 }
 } // anonymous namespace
 
+template <
+    typename T,
+    NormType norm_type,
+    typename out_t,
+    int depth = 1,
+    int r_args_depth = 1,
+    int res_arg_index = 0>
+struct LpNormDimFunctor {
+  using out_opmath_t = typename at::opmath_type<out_t>;
+  
+  __device__ __forceinline__ void operator()(
+      int64_t /*unused_chunk_size*/,
+      TensorListDimMetadata<depth>& tl,
+      out_opmath_t* output_per_tensor_ptr,
+      const int max_output_per_tensor) {
+    
+    // int n_rows_or_columns_per_chunk = 16; 
+    const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
+    const auto row_or_col_idx = tl.block_to_row_or_col[blockIdx.x];
+    const auto num_rows = tl.num_rows[tensor_loc];
+    const auto num_cols = tl.num_cols[tensor_loc];
+    const auto row_stride = tl.row_stride[tensor_loc];
+    const auto reduce_dim = tl.reduce_dim;
+    // ///
+    // const int row_start = blockIdx.x * n_rows_or_columns_per_chunk;
+    // const int warp_id = threadIdx.x / 32;
+    // const int lane_id = threadIdx.x % 32;
+    // const int row_idx = row_start + warp_id;
+    // ///
+
+    T* data = (T*)tl.addresses[0][tensor_loc];
+    
+    __shared__ out_opmath_t s_vals[512];
+    out_opmath_t val = out_opmath_t(0);
+    
+    if (reduce_dim == 1) {
+      // Reduce across columns - row norm
+      // Each block handles one row, threads iterate over columns
+      T* row_ptr = data + row_or_col_idx * row_stride;
+      int64_t n = num_cols;
+      
+      for (int64_t i = threadIdx.x; i < n; i += blockDim.x) {
+        const auto elem = static_cast<out_opmath_t>(row_ptr[i]);
+        if constexpr (norm_type == NormType::LInf) {
+          val = max_propagate_nan(val, ::abs(elem));
+        } else {
+          val += norm_type == NormType::L1 ? ::abs(elem) : elem * elem;
+        }
+      }
+    } else {
+      // Reduce across rows - column norm  
+      // Each block handles one column, threads iterate over rows
+      int64_t col_idx = row_or_col_idx;
+      int64_t n = num_rows;
+      
+      for (int64_t i = threadIdx.x; i < n; i += blockDim.x) {
+        const auto elem = static_cast<out_opmath_t>(data[i * row_stride + col_idx]);
+        if constexpr (norm_type == NormType::LInf) {
+          val = max_propagate_nan(val, ::abs(elem));
+        } else {
+          val += norm_type == NormType::L1 ? ::abs(elem) : elem * elem;
+        }
+      }
+    }
+    
+    // Block reduction
+    out_opmath_t final_val = norm_type == NormType::L1 || norm_type == NormType::L2
+        ? at::native::cuda_utils::BlockReduceSum(val, s_vals)
+        : at::native::cuda_utils::BlockReduceMax(val, s_vals);
+    
+    if (threadIdx.x == 0) {
+      // Apply sqrt for L2 norm
+      if constexpr (norm_type == NormType::L2) {
+        final_val = ::sqrt(final_val);
+      }
+      // Write directly to output (no cleanup needed for simple rows/cols)
+      output_per_tensor_ptr[(tl.start_tensor_this_launch + tensor_loc) * max_output_per_tensor + row_or_col_idx] = final_val;
+    }
+  }
+};
+
 #define AT_DISPATCH_OUT_DTYPES(TYPE, NAME, ...)             \
   AT_DISPATCH_SWITCH(                                       \
       TYPE,                                                 \
@@ -424,6 +505,151 @@ template <>
 struct ForeachNormDispatchName<false> {
   static constexpr const char* value = "foreach_tensor_powsum_cuda";
 };
+
+std::vector<Tensor> _foreach_norm_cuda_with_dim(
+    TensorList tensors,
+    const Scalar& ord,
+    std::optional<ScalarType> dtype,
+    at::IntArrayRef dim,
+    bool keepdim) {
+  
+  // return foreach_tensor_norm_slow(tensors, ord, dtype, dim, keepdim);
+
+  const auto p = [&]() -> double {
+    if (ord.isIntegral(false)) {
+      return ord.to<int64_t>();
+    } else if (ord.isFloatingPoint()) {
+      return ord.to<double>();
+    } else {
+      TORCH_CHECK(
+          false, "foreach_tensor_norm_cuda expects ord to be integer or float");
+    }
+  }();
+
+  const size_t ntensors = tensors.size();
+  
+  int max_n_norm_elements_per_tensor = -1;  // chunks = n_rows if row norm or chunks = n_cols if col_norm.
+  int64_t wrapped_dim = c10::maybe_wrap_dim(dim[0],  tensors[0].dim());  // tensors[0].dim() should be 2.
+  // int max_n_elements_to_evaluate_norm = -1;
+  for (const auto t : c10::irange(ntensors)) {
+    int n_elements_to_evaluate_this_norm = tensors[t].sizes()[wrapped_dim];
+    // if (n_elements_to_evaluate_this_norm > max_n_elements_to_evaluate_norm)
+    // {
+    //   max_n_elements_to_evaluate_norm = n_elements_to_evaluate_this_norm;
+    // }
+    int n_norm_elements_this_tensor = tensors[t].numel() / n_elements_to_evaluate_this_norm;
+    if (n_norm_elements_this_tensor > max_n_norm_elements_per_tensor) {
+      max_n_norm_elements_per_tensor = n_norm_elements_this_tensor;
+    }
+  }
+  // int n_rows_or_columns_per_chunk = 16; // Each block handles 16 rows (1 warp per row/col)  //kChunkSize / max_n_elements_to_evaluate_norm;
+  int max_chunks_per_tensor = max_n_norm_elements_per_tensor;
+
+  const auto options = tensors[0].options();
+  const ScalarType output_dtype =
+      dtype.has_value() ? dtype.value() : tensors[0].scalar_type();
+  const ScalarType output_per_tensor_dtype = toOpMathType(output_dtype);
+  auto output_per_tensor = at::zeros(
+      {static_cast<int64_t>(ntensors) * max_n_norm_elements_per_tensor },
+      options.dtype(output_per_tensor_dtype));
+
+  std::vector<at::Tensor> vec_res; 
+  vec_res.reserve(ntensors);
+  const auto res_option = options.dtype(output_dtype);
+  for (const auto t : c10::irange(ntensors)) {
+    auto norm_tensor_size = tensors[t].sizes().vec();  
+    norm_tensor_size.erase(norm_tensor_size.begin() + wrapped_dim);
+    vec_res.push_back(at::native::empty_cuda(
+        norm_tensor_size,
+        optTypeMetaToScalarType(res_option.dtype_opt()),
+        res_option.layout_opt(),
+        res_option.device_opt(),
+        res_option.pinned_memory_opt(),
+        res_option.memory_format_opt()));
+  }
+
+  auto tensor_lists = std::vector<std::vector<Tensor>>{tensors.vec()};
+      
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf,                                    
+      c10::kBFloat16,                           
+      tensor_lists[0][0].scalar_type(),         
+      "foreach_tensor_norm_cuda_scalar_type",   
+      [&]() {
+        AT_DISPATCH_OUT_DTYPES(
+            output_dtype,                      
+            "foreach_tensor_norm_cuda_out_dtype", 
+            [&]() {
+              using out_opmath_t = typename at::opmath_type<out_t>;
+
+              if (p == static_cast<double>(1)) {
+                // L1 norm: sum of absolute values
+                multi_tensor_apply_dim<1>(
+                    tensor_lists,
+                    wrapped_dim,
+                    LpNormDimFunctor<scalar_t, NormType::L1, out_t>(),  
+                    output_per_tensor.mutable_data_ptr<out_opmath_t>(),  
+                    max_chunks_per_tensor);    
+              } else if (p == static_cast<double>(2)) {
+                // L2 norm: sqrt of sum of squares (sqrt applied later in cleanup)
+                multi_tensor_apply_dim<1>(
+                    tensor_lists,
+                    wrapped_dim,
+                    LpNormDimFunctor<scalar_t, NormType::L2, out_t>(),
+                    output_per_tensor.mutable_data_ptr<out_opmath_t>(),
+                    max_chunks_per_tensor);
+              } else if (p == std::numeric_limits<double>::infinity()) {
+                // L∞ norm: maximum absolute value
+                multi_tensor_apply_dim<1>(
+                    tensor_lists,
+                    wrapped_dim,
+                    LpNormDimFunctor<scalar_t, NormType::LInf, out_t>(),
+                    output_per_tensor.mutable_data_ptr<out_opmath_t>(),
+                    max_chunks_per_tensor);
+              }
+
+              for (const auto t : c10::irange(ntensors)) {
+                auto sub_t = output_per_tensor.slice(0, t*max_chunks_per_tensor, t*max_chunks_per_tensor + vec_res[t].numel());
+                vec_res[t] = sub_t;
+              }
+
+              // // Check that the kernel launched successfully (no launch errors)
+              // C10_CUDA_KERNEL_LAUNCH_CHECK();
+
+              // // Ensure we're operating on the correct GPU device
+              // const at::cuda::OptionalCUDAGuard device_guard(
+              //     device_of(output_per_tensor));
+
+              // // Get the current CUDA stream for kernel launches
+              // auto stream = at::cuda::getCurrentCUDAStream();
+
+              // const size_t num_kernels =
+              //     ceil_div(ntensors, MAX_TENSORS_PER_KERNEL);
+
+
+              // for (const auto i : c10::irange(num_kernels)) {
+              //   const size_t num_tensors_this_kernel =
+              //       (i < num_kernels - 1 ||              
+              //        ntensors % MAX_TENSORS_PER_KERNEL == 0)  
+              //       ? MAX_TENSORS_PER_KERNEL             
+              //       : (ntensors % MAX_TENSORS_PER_KERNEL); 
+
+              //   TensorListAddresses addr_struct;
+
+              //   for (const auto j : c10::irange(num_tensors_this_kernel)) {
+
+              //     addr_struct.addresses[j] =
+              //         vec_res[i * MAX_TENSORS_PER_KERNEL + j]
+              //             .mutable_data_ptr<out_t>();
+              //   }
+
+        
+              // } 
+            }); 
+      });  
+
+  return vec_res;
+}
 
 // Internal implementation for foreach_tensor_norm_cuda and
 // foreach_tensor_powsum_cuda apply_root: if true, applies sqrt for L2 norm; if
@@ -465,6 +691,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda_internal(
         res_option.memory_format_opt()));
   }
 
+  auto tv1 = tensors.vec();
   auto tensor_lists = std::vector<std::vector<Tensor>>{tensors.vec()};
 
   AT_DISPATCH_FLOATING_TYPES_AND2(
@@ -612,11 +839,23 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
   }
   if (!can_use_fast_route(tensors) || has_int_or_complex ||
       !(p == static_cast<double>(1) || p == static_cast<double>(2) ||
-        p == std::numeric_limits<double>::infinity()) || dim.has_value()) {
+        p == std::numeric_limits<double>::infinity())) {
     return foreach_tensor_norm_slow(tensors, ord, dtype, dim, keepdim);
   }
   check_foreach_norm_dtype(
       dtype, tensors[0].scalar_type(), "_foreach_tensor_norm_cuda");
+
+  std::cout << "dim.has_value() = " << dim.has_value() << std::endl;
+  if (dim.has_value()) {
+    for (auto tensor : tensors) {
+      // only do specialized cuda process if tensors are square matrices.
+      if (tensor.dim() != 2) {
+        return foreach_tensor_norm_slow(tensors, ord, dtype, dim, keepdim);
+      }
+    }
+
+    return _foreach_norm_cuda_with_dim(tensors, ord, dtype, dim.value(), keepdim);
+  }
 
   return foreach_tensor_norm_cuda_internal<
       /*apply_root=*/true,
