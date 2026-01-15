@@ -149,7 +149,7 @@
 // Simply define the namespace, in case a dependent library want to refer to
 // the c10 namespace but not any nontrivial files.
 namespace c10 {}
-namespace c10::hip {}
+namespace c10::cuda {}
 namespace c10::hip {}
 namespace c10::xpu {}
 
@@ -164,7 +164,7 @@ namespace at {
 using namespace c10;
 }
 namespace at::cuda {
-using namespace c10::hip;
+using namespace c10::cuda;
 } // namespace at::cuda
 
 // WARNING!!! THIS IS A GIANT HACK!!!
@@ -258,7 +258,7 @@ using namespace c10::xpu;
 #include <hip/hip_runtime.h>
 #endif
 
-#if defined(__HIPCC__) || defined(__HIPCC__)
+#if defined(__CUDACC__) || defined(__HIPCC__)
 // Designates functions callable from the host (CPU) and the device (GPU)
 #define C10_HOST_DEVICE __host__ __device__
 #define C10_DEVICE __device__
@@ -340,7 +340,7 @@ constexpr uint32_t CUDA_THREADS_PER_BLOCK_FALLBACK = 256;
 // scrutinized. It is better to use warpSize in device code where possible.
 
 namespace at::cuda {
-TORCH_HIP_CPP_API int warp_size();
+TORCH_CUDA_CPP_API int warp_size();
 }
 #ifdef __HIPCC__
 static inline int __host__ C10_WARP_SIZE_INTERNAL() {
