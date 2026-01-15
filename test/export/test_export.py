@@ -5283,6 +5283,45 @@ def forward(self, x):
         ):
             ref(torch.randn(4, 4), torch.randn(4, 4))
 
+    def test_detect_leak_nonstrict_buffer_in_hook(self):
+        # Test that leak detection catches buffer leaks from forward hooks.
+        # This is a regression test for a bug where FakeTensors created for
+        # params/buffers were not tracked because they were created before
+        # the exporting context was entered.
+        class Model(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.buffer = torch.nn.Buffer(torch.randn(4, 4))
+
+            def forward(self, x):
+                return self.buffer.sum() + x.sum()
+
+        class Pipeline:
+            def __init__(self, model):
+                self.model = model
+                self.bank = []
+
+            def __call__(self, x):
+                def log(model, inps, outputs):
+                    for n, b in model.named_buffers():
+                        self.bank.append(b)
+
+                self.model.register_forward_hook(log)
+                ep = export(self.model, (x,), strict=False).module()
+                return ep(x)
+
+        with (
+            torch._export.config.patch(detect_non_strict_fake_tensor_leaks=True),
+            self.assertWarnsRegex(
+                UserWarning, "Detected 1 fake tensors that are still alive after export"
+            ),
+        ):
+            p = Pipeline(model=Model())
+            p(torch.randn(4, 4))
+            self.assertTrue(
+                isinstance(p.bank[0], torch._subclasses.fake_tensor.FakeTensor)
+            )
+
     def test_detect_leak_nonstrict_with_stacktrace(self):
         global_list = []
 

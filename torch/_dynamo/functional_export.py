@@ -216,7 +216,9 @@ def clean_export_root(graph_module: torch.fx.GraphModule) -> None:
 
 
 class ModuleToTrace(torch.nn.Module):
-    def __init__(self, foo: Any, in_spec: Any) -> None:
+    def __init__(
+        self, foo: Any, in_spec: Any
+    ) -> None:
         super().__init__()
         self._export_root = foo
         self.in_spec = in_spec
@@ -759,6 +761,7 @@ def _dynamo_graph_capture_for_export(
         with _compiling_state_context():
             flat_inputs, in_spec = pytree.tree_flatten((args, kwargs))
             check_user_input_output(flat_inputs, UserErrorType.INVALID_INPUT)
+
             module_to_trace = ModuleToTrace(mod, in_spec)
             orig_callable = mod.forward if isinstance(mod, torch.nn.Module) else mod
 
@@ -848,6 +851,9 @@ def _dynamo_graph_capture_for_export(
             graph_input_order: dict[int, int] = {}
             for inp in graph_inputs:
                 source = graph_inputs[inp]
+                # Handle AttrSource (e.g., when accessing x._local_tensor on a DTensor)
+                if isinstance(source, torch._dynamo.source.AttrSource):
+                    source = source.base
                 assert isinstance(source, torch._dynamo.source.GetItemSource)
                 graph_input_order[source.index] = len(graph_input_order)
 
@@ -865,9 +871,10 @@ def _dynamo_graph_capture_for_export(
             ).transform()
 
             # Set up PyTree codegen for proper input/output handling
+            orig_arg_names = argument_names(inspect.signature(orig_callable), args, kwargs)  # type: ignore[attr-defined, arg-type]
             transformed_graph.graph._codegen = _PyTreeCodeGen(
                 _PyTreeInfo(
-                    argument_names(inspect.signature(orig_callable), args, kwargs),  # type: ignore[attr-defined, arg-type]
+                    orig_arg_names,
                     in_spec,
                     out_spec,
                 )

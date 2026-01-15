@@ -2124,22 +2124,33 @@ def _non_strict_export(
 
         return _aot_export_non_strict
 
-    (
-        fake_mode,
-        fake_args,
-        fake_kwargs,
-        equalities_inputs,
-        original_signature,
-        dynamic_shapes,
-    ) = make_fake_inputs(
-        mod,
-        args,
-        kwargs,
-        dynamic_shapes,
-        prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,  # for shape env initialization
+    # NOTE: We need to enter _compiling_state_context() here so that FakeTensors
+    # created for params/buffers are properly tracked for leak detection.
+    # See detect_non_strict_fake_tensor_leaks config.
+    # We only enter the context if leak detection is enabled to avoid changing
+    # behavior when the config is OFF.
+    _fakify_ctx = (
+        _compiling_state_context()
+        if torch._export.config.detect_non_strict_fake_tensor_leaks
+        else nullcontext()
     )
+    with _fakify_ctx:
+        (
+            fake_mode,
+            fake_args,
+            fake_kwargs,
+            equalities_inputs,
+            original_signature,
+            dynamic_shapes,
+        ) = make_fake_inputs(
+            mod,
+            args,
+            kwargs,
+            dynamic_shapes,
+            prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,  # for shape env initialization
+        )
 
-    fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
+        fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
 
     def _produce_guards_callback(gm):
         return produce_guards_and_solve_constraints(
