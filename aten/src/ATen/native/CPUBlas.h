@@ -294,6 +294,21 @@ TORCH_API void brgemm(
     int32_t* C,
     bool is_vnni = true);
 
+TORCH_API void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    const at::Float8_e4m3fn* A,
+    const at::Float8_e4m3fn* B,
+    float* C,
+    bool is_vnni = true);
+
+#define CPUBLAS_BRGEMM_F8F8F32
+
 // Release brgemm hardware context
 TORCH_API void brgemm_release(bool is_vnni = true);
 
