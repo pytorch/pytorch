@@ -24,4 +24,3 @@ Streams and events
     :nosignatures:
 
     Stream
-    Strum
