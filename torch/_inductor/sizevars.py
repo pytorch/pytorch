@@ -2,7 +2,6 @@
 import functools
 import itertools
 import logging
-import sys
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Sequence
 from typing import Any, cast, Optional, Union
@@ -18,11 +17,9 @@ from torch.fx.experimental.symbolic_shapes import (
 )
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._sympy.functions import FloorDiv, ModularIndexing
-from torch.utils._sympy.numbers import int_oo
 from torch.utils._sympy.symbol import symbol_is_type, SymT
 from torch.utils._sympy.value_ranges import bound_sympy, IntInfinity, ValueRanges
 
-from . import config
 from .runtime.runtime_utils import is_power_of_2
 from .utils import (
     has_free_symbols,
@@ -80,7 +77,7 @@ class SizeVarAllocator:
         if shape_env is None:
             shape_env = ShapeEnv()
         self.shape_env = shape_env
-        self.backed_var_to_val = self.shape_env.backed_var_to_val
+        self.var_to_val = self.shape_env.var_to_val
         self.var_to_hint_override = self.shape_env.var_to_hint_override
         self.replacements: dict[sympy.Symbol, Expr] = self.shape_env.replacements
         self.unbacked_replacements: Optional[dict[Expr, Expr]] = None
@@ -565,6 +562,7 @@ class SizeVarAllocator:
     def symbolic_hint(
         self,
         expr: Union[Expr, int],
+        hint_override: Optional[int] = None,
         # Only flip this flag if you don't plan on guarding/adding runtime
         # asserts based on this value and promise to only use this value
         # in a heuristic nature.
@@ -584,18 +582,22 @@ class SizeVarAllocator:
             except TypeError:
                 return expr  # inf/nan/I
 
+        if hint_override:
+            return hint_override
+
         expr = self.remove_precomputed_replacements(expr)
 
         if use_user_provided_hint_override:
             expr = sympy_subs(expr, self.var_to_hint_override)
 
-        return sympy_subs(expr, self.backed_var_to_val)
+        return sympy_subs(expr, self.var_to_val)
 
     def size_hint(
         self,
         expr: Union[Expr, int],
         *,
         fallback: Optional[int] = None,
+        hint_override: Optional[int] = None,
     ) -> int:
         if isinstance(expr, SymInt):
             raise TypeError(
@@ -604,6 +606,7 @@ class SizeVarAllocator:
 
         out = self.symbolic_hint(
             expr,
+            hint_override=hint_override,
             use_user_provided_hint_override=fallback is not None,
         )
         if not isinstance(out, (int, sympy.Integer)) and fallback is not None:
@@ -634,178 +637,18 @@ class SizeVarAllocator:
             log.debug("failed on: %s", out, exc_info=True)
             raise
 
-    def _handle_special_expr_values(self, expr: Expr, fallback: int) -> Optional[int]:
-        """
-        Handle special sympy values in optimization hints.
-
-        Returns:
-            - Raises ValueError for complex numbers
-            - sys.maxsize for positive infinity
-            - -sys.maxsize for negative infinity
-            - fallback for NaN
-            - None if no special handling needed
-        """
-        if isinstance(expr, (int, sympy.Integer, float, sympy.Float, sympy.Rational)):
-            return int(expr)
-
-        if isinstance(expr, Expr):
-            if expr.has(sympy.I):
-                raise ValueError(
-                    f"optimization_hint received a complex expression: {expr}. "
-                    "Tensor dimensions cannot be complex numbers."
-                )
-            if expr in (int_oo, sympy.oo):
-                return sys.maxsize
-            if expr in (-int_oo, -sympy.oo):
-                return -sys.maxsize
-            if expr is sympy.nan or expr.has(sympy.nan):
-                return fallback
-
-        return None
-
-    def optimization_hint(
-        self, expr: Union[Expr, int], fallback: Optional[int] = None
-    ) -> int:
-        """
-        Return a concrete integer hint for an expression.
-
-        This function will hint unbacked symbols using user provided optimization
-        hints. If not provided, fallback will be used along with some heuristics
-        that try to maximize consistency with the shape environment.
-
-        Special cases:
-        - Complex numbers (containing sympy.I): raises an error since tensor
-          dimensions cannot be complex.
-        - Infinity (int_oo, sympy.oo): returns sys.maxsize.
-        - NaN (sympy.nan): returns the fallback value.
-        """
-        # Read config at call time to respect runtime patches (e.g., in tests)
-        if fallback is None:
-            fallback = config.unbacked_symint_fallback
-
-        simplified = self.simplify(expr)
-        result = self._handle_special_expr_values(simplified, fallback)
-        if result is not None:
-            return result
-
-        # remove precomputed_replacements
-        expr = self.remove_precomputed_replacements(simplified)
-
-        # replace all backed symbols with their backed hints,
-        # unbacked with optimizations hints if exists.
-        expr = sympy_subs(expr, self.backed_var_to_val)
-        expr = sympy_subs(expr, self.var_to_hint_override)
-
-        result = self._handle_special_expr_values(expr, fallback)
-        if result is not None:
-            return result
-
-        # Assign values to remaining unbacked symbols using a heuristic
-        # tries to maximize consistency with shape environment.
-        assert has_free_unbacked_symbols(expr), expr
-
-        # Make sure to substitute with the factored version
-        # e.g. 10*(s0 + u0) instead of 10*s0 + 10*u0
-        expr = self._sub_unbacked_exprs(sympy.factor(expr))
-
-        # For multiple expressions that depend on an unbacked symint,
-        # we want to compute them consistently for a size hint we have chosen.
-        # So, recursively compute expressions via size hints of contained symbols.
-        # For example: u1 * u2 - 10 ==> fallback * fallback - 10
-
-        assert isinstance(expr, Expr), type(expr)
-        free_symbols = expr.free_symbols
-
-        # Constrain fallback per-symbol based on var_to_range bounds
-        size_dict = {}
-        for s in free_symbols:
-            sym_fallback = fallback
-            vr = self.shape_env.var_to_range.get(s, None)
-            if vr is not None:
-                if isinstance(vr.lower, (int, sympy.Integer)):
-                    sym_fallback = max(sym_fallback, int(vr.lower))
-                if isinstance(vr.upper, (int, sympy.Integer)):
-                    sym_fallback = min(sym_fallback, int(vr.upper))
-            size_dict[s] = sym_fallback
-
-        final_result = expr.subs(size_dict)
-
-        result = self._handle_special_expr_values(final_result, fallback)
-        if result is not None:
-            return result
-
-        return int(final_result)
-
-    def optimization_hints(
-        self,
-        exprs: Iterable[Union[Expr, int]],
-        fallback: int = config.unbacked_symint_fallback,
-    ) -> tuple[int, ...]:
-        """
-        Like optimization_hint but for a sequence of expressions.
-        Returns a tuple of concrete integer hints.
-        """
-        return tuple(self.optimization_hint(x, fallback=fallback) for x in exprs)
-
-    def optimization_hint_with_override(
-        self,
-        expr: Union[Expr, int],
-        hint_override: Optional[int],
-    ) -> int:
-        r"""Return a concrete integer hint for an expression, with optional override.
-        This is used in dynamic dispatch scenarios where callers may want to
-        provide a specific hint value rather than computing one from the expression.
-        The resolution order is:
-        1. If ``expr`` simplifies to a static integer, return that value
-           (``hint_override`` is ignored for static shapes).
-        2. If ``expr`` is dynamic and ``hint_override`` is not ``None``,
-           return ``hint_override``.
-        3. Otherwise, compute a hint via :meth:`optimization_hint`
-        Args:
-            expr (Expr or int): The expression to get a hint for.
-            hint_override (int, optional): If provided and ``expr`` is dynamic,
-                this value is returned instead of computing a hint.
-        Returns:
-            int: A concrete integer hint for the expression.
-        """
-        simplified = self.simplify(expr)
-        if isinstance(simplified, (int, sympy.Integer)):
-            return int(simplified)
-        if simplified in (int_oo, sympy.oo):
-            return sys.maxsize
-        if simplified in (-int_oo, -sympy.oo):
-            return -sys.maxsize
-
-        # Dynamic shape: use hint_override if set,
-        # else return optimization_hint
-        if hint_override is not None:
-            return hint_override
-
-        return self.optimization_hint(expr)
-
-    def optimization_hints_with_override(
-        self,
-        exprs: Iterable[Union[Expr, int]],
-        hint_override: Optional[int],
-    ) -> tuple[int, ...]:
-        """
-        Like optimization_hint_with_override but for a sequence of expressions.
-        Returns a tuple of concrete integer hints.
-        """
-        return tuple(
-            self.optimization_hint_with_override(e, hint_override) for e in exprs
-        )
-
     def size_hints(
         self,
         exprs: Iterable[Union[Expr, int]],
         *,
         fallback: Optional[int] = None,
+        hint_override: Optional[int] = None,
     ) -> tuple[int, ...]:
         return tuple(
             self.size_hint(
                 x,
                 fallback=fallback,
+                hint_override=hint_override,
             )
             for x in exprs
         )
@@ -1066,6 +909,35 @@ class SizeVarAllocator:
         log.warning("Substitution limit (%d) reached w/ %s", sub_cnt_limit, expr)
         return expr
 
+    def atomically_apply_size_hint(
+        self,
+        expr: Union[Expr, int],
+        *,
+        fallback: Optional[int] = None,
+        hint_override: Optional[int] = None,
+    ) -> Union[Expr, int]:
+        if isinstance(expr, (int, sympy.Integer)):
+            return int(expr)
+
+        if has_free_unbacked_symbols(expr):
+            # Make sure to substitute with the factored version
+            # e.g. 10*(s0 + u0) instead of 10*s0 + 10*u0
+            expr = self._sub_unbacked_exprs(sympy.factor(expr))
+
+        # For multiple expressions that depend on an unbacked symint,
+        # we want to compute them consistently for a size hint we have chosen.
+        # So, recursively compute expressions via size hints of contained symbols.
+        # For example: u1 * u2 - 10 ==> fallback * fallback - 10
+        assert isinstance(expr, Expr), type(expr)
+        free_symbols = expr.free_symbols
+        size_dict = {
+            symbol: V.graph.sizevars.size_hint(
+                symbol, fallback=fallback, hint_override=hint_override
+            )
+            for symbol in free_symbols
+        }
+        return expr.subs(size_dict)
+
     def offset_var(self, index: Expr, vars: Sequence[sympy.Symbol]) -> Expr:
         """Extract offset part of an indexing expression"""
         index = self.simplify(index)
@@ -1111,9 +983,7 @@ class SizeVarAllocator:
         return self.precomputed_replacements[expr]
 
     def free_symbols(self) -> OrderedSet[sympy.Symbol]:
-        return OrderedSet(self.backed_var_to_val.keys()) - OrderedSet(
-            self.replacements.keys()
-        )
+        return OrderedSet(self.var_to_val.keys()) - OrderedSet(self.replacements.keys())
 
     def combine_modular_indexing_pairs(self, index: sympy.Expr) -> sympy.Expr:
         """
