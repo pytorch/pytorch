@@ -44,7 +44,7 @@ from weakref import WeakKeyDictionary
 
 import torch
 
-from .fake_class_registry import register_fake_class
+from .fake_class_registry import register_fake_class, FakeScriptObject
 
 
 class MemberType(Enum):
@@ -85,9 +85,7 @@ class _OpaqueTypeInfo:
         [Any], list[Any]
     ]  # Callable that takes the object and returns list of values to guard on
     members: dict[str, MemberType]  # Maps member name to how it should be handled
-    fake_script_object_class: (
-        type  # Type-specific FakeScriptObject subclass for isinstance checks
-    )
+    fake_script_object_class: type  # Type-specific FakeScriptObject subclass for isinstance checks
 
 
 # Mapping of type -> (string name, reference/value type)
@@ -172,16 +170,11 @@ def register_opaque_type(
         )
 
     # Create a type-specific FakeScriptObject subclass for this opaque type.
-    # This allows isinstance(fake_obj, OpaqueType) to return True only for
-    # fake objects of that specific type, not all opaque types.
-    from torch._library.fake_class_registry import FakeScriptObject
-
-    subclass_name = f"FakeScriptObject_{cls.__name__}"
-    fake_script_object_subclass = type(subclass_name, (FakeScriptObject,), {})
-
     # Register the subclass as a virtual subclass of `cls` so that when
     # tracing, if we do isinstance(x, OpaqueType) where x is this specific
     # FakeScriptObject subclass, this will pass
+    subclass_name = f"FakeScriptObject_{cls.__name__}"
+    fake_script_object_subclass = type(subclass_name, (FakeScriptObject,), {})
     cls.register(fake_script_object_subclass)
 
     if typ not in ["reference", "value"]:
