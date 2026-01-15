@@ -122,52 +122,28 @@ class NVUniversalGemmKernel(Kernel):
             from torch._inductor.codegen.nv_universal_gemm.kernel_cache import get_kernel_by_name
 
             _NV_UNIVERSAL_GEMM_KERNEL_NAME = "{kernel_name_str}"
-
-            # Caching strategy for NVGEMM kernels:
-            # - Global kernel cache (in kernel_cache.py): kernel_name -> kernel object
-            #   Built lazily on first access, shared across all NVGEMM kernels
-            # - compiled_cache: stores (GemmArguments, artifact) tuple per (shape, dtype)
-            #   - GemmArguments: tensor wrapper object
-            #   - artifact: compiled GPU binary
-            # On subsequent calls, we reuse cached args and just update tensor pointers (A, B, out).
-            # After kernel.run(), we clear tensor references to avoid holding them in the cache,
-            # which would interfere with CUDA graph trees memory tracking.
-            _nv_universal_gemm_compiled_cache = {{}}
+            _nv_universal_gemm_artifact_cache = {{}}
 
             def {self.kernel_name}_main({params_str}):
-                global _nv_universal_gemm_compiled_cache
+                global _nv_universal_gemm_artifact_cache
 
                 kernel = get_kernel_by_name(_NV_UNIVERSAL_GEMM_KERNEL_NAME)
                 if kernel is None:
                     raise RuntimeError(f"Could not find NVIDIA Universal GEMM kernel: {{_NV_UNIVERSAL_GEMM_KERNEL_NAME}}")
 
+                args = cutlass_api.arguments.GemmArguments(
+                    in_ptr0,
+                    in_ptr1,
+                    out_ptr0,
+                    accumulator_type={acc_dtype_str},
+                )
+
                 cache_key = (in_ptr0.shape, in_ptr0.dtype, in_ptr1.shape, in_ptr1.dtype)
+                if cache_key not in _nv_universal_gemm_artifact_cache:
+                    _nv_universal_gemm_artifact_cache[cache_key] = kernel.compile(args)
 
-                if cache_key not in _nv_universal_gemm_compiled_cache:
-                    args = cutlass_api.arguments.GemmArguments(
-                        in_ptr0,
-                        in_ptr1,
-                        out_ptr0,
-                        accumulator_type={acc_dtype_str},
-                    )
-                    artifact = kernel.compile(args)
-                    _nv_universal_gemm_compiled_cache[cache_key] = (args, artifact)
-                else:
-                    args, artifact = _nv_universal_gemm_compiled_cache[cache_key]
-
-                # Set tensor pointers (for both cache hit and miss paths)
-                args.A.tensor.runtime_tensor = in_ptr0
-                args.B.tensor.runtime_tensor = in_ptr1
-                args.out.tensor.runtime_tensor = out_ptr0
-
+                artifact = _nv_universal_gemm_artifact_cache[cache_key]
                 kernel.run(args, artifact, stream=stream, workspace={workspace_arg}, assume_supported_args=True)
-
-                # This is required for CUDA graph trees compatibility - cached args must not
-                # hold references to tensors that would be tracked by the memory pool.
-                # The kernel has already captured the GPU memory addresses, so this is safe.
-                args.A.tensor.runtime_tensor = None
-                args.B.tensor.runtime_tensor = None
-                args.out.tensor.runtime_tensor = None
             """
         )
 
