@@ -59,6 +59,9 @@ enum class ScaledGemmImplementation {
   NONE = 0,
   TENSORWISE_TENSORWISE = 1,
   ROWWISE_ROWWISE = 2,
+  BLOCK_128x128_1x128 = 3,
+  BLOCK_1x128_128x128 = 4,
+  BLOCK_1x128_1x128 = 5,
 };
 
 /**
@@ -85,6 +88,16 @@ bool check_tensorwise_recipe(
     ArrayRef<Tensor>&);
 
 bool check_rowwise_recipe(
+    c10::ScalarType,
+    std::vector<ScalingType>&,
+    ArrayRef<Tensor>&,
+    c10::ScalarType,
+    std::vector<ScalingType>&,
+    ArrayRef<Tensor>&);
+
+bool check_deepseek_recipe(
+    ScalingType,
+    ScalingType,
     c10::ScalarType,
     std::vector<ScalingType>&,
     ArrayRef<Tensor>&,
