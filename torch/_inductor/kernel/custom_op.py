@@ -24,7 +24,7 @@ log = logging.getLogger(__name__)
 DEFAULT_RANGE_UPPER_BOUND = 65536
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class RangeBounds:
     """Inclusive range [start, end] for dimension-based dispatch."""
 
@@ -47,7 +47,7 @@ class RangeBounds:
         return f"[{self.start}, {end_str}]"
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class ImplConfig:
     """Implementation config with semantic identity (name + kwargs) for hashing."""
 
@@ -480,7 +480,6 @@ def autotune_custom_op(
     template = SubgraphTemplate(name=name)
     choices = template.generate_custom_op_choices(
         name=name,
-        # pyrefly: ignore [bad-argument-type]
         decompositions=decompositions,
         # pyrefly: ignore [no-matching-overload]
         input_nodes=list(inputs),
