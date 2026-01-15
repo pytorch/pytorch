@@ -19,7 +19,8 @@
 
 static ze_module_handle_t _createModule(
     const uint8_t* binaryPtr,
-    size_t binarySize) {
+    size_t binarySize,
+    bool isSpirv = false) {
   sycl::device& syclDevice =
       c10::xpu::get_raw_device(c10::xpu::current_device());
   auto& syclContext = c10::xpu::get_device_context();
@@ -29,7 +30,8 @@ static ze_module_handle_t _createModule(
       sycl::get_native<sycl::backend::ext_oneapi_level_zero>(syclContext);
 
   const char* buildFlags = "";
-  const ze_module_format_t format = ZE_MODULE_FORMAT_IL_SPIRV;
+  const ze_module_format_t format =
+      isSpirv ? ZE_MODULE_FORMAT_IL_SPIRV : ZE_MODULE_FORMAT_NATIVE;
   ze_module_desc_t moduleDescription = {};
   moduleDescription.stype = ZE_STRUCTURE_TYPE_MODULE_DESC;
   moduleDescription.format = format;
@@ -99,8 +101,10 @@ static std::unique_ptr<sycl::kernel> _createKernel(
   OSS << IFS.rdbuf();
   std::string data(OSS.str());
 
+  bool isSpirv = filePath.size() >= 4 &&
+      filePath.compare(filePath.size() - 4, 4, ".spv") == 0;
   auto mod = _createModule(
-      reinterpret_cast<const uint8_t*>(data.c_str()), data.size());
+      reinterpret_cast<const uint8_t*>(data.c_str()), data.size(), isSpirv);
 
   return _createKernel(mod, funcName.c_str());
 }
