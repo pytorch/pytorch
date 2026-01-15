@@ -1957,6 +1957,9 @@ elif [[ "${TEST_CONFIG}" == *torchbench* ]]; then
     # Skip torchrec/fbgemm for cuda13 as they're not compatible yet
     if [[ "${TEST_CONFIG}" != *cpu* && "${TEST_CONFIG}" != *xpu* && "${BUILD_ENVIRONMENT}" != *cuda13* ]]; then
       install_torchrec_and_fbgemm
+      # TODO (huydhn): Newer FBGEMM has a bug in detecting libtbb when building from source
+      LIBTBB_PATH="$(find "$(dirname "$(which python)")/../lib/" -name libtbb.so.12)"
+      export LD_PRELOAD="$LIBTBB_PATH":"$LD_PRELOAD"
     fi
     PYTHONPATH=/torchbench test_dynamo_benchmark torchbench "$id"
   fi
