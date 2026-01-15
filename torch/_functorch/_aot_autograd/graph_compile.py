@@ -21,6 +21,8 @@ from collections.abc import Callable
 from contextlib import nullcontext
 from typing import Any, Optional, TYPE_CHECKING, Union
 
+from torch._library.fake_class_registry import FakeScriptObject
+
 
 if TYPE_CHECKING:
     from collections.abc import Sequence
@@ -1737,18 +1739,16 @@ def _aot_stage2a_partition(
                 elif isinstance(node, torch.fx.Node) and "val" in getattr(
                     node, "meta", {}
                 ):
-                    val = node.meta["val"]
-                    if isinstance(val, FakeTensor):
+                    if isinstance(node.meta["val"], FakeTensor):
                         # record dynamic tensor activations
                         dynamic_dims: set[int] = {
                             dim
-                            for dim, size in enumerate(val.shape)
+                            for dim, size in enumerate(node.meta["val"].shape)
                             if not isinstance(size, int)
                         }
                         if dynamic_dims:
                             fw_metadata.dynamic_saved_tensors_idxs[idx] = dynamic_dims
-                    elif isinstance(val, FakeScriptObject):
-                        # Track opaque objects saved for backward
+                    elif isinstance(node.meta["val"], FakeScriptObject):
                         opaque_outs_saved_for_bw.append(node)
 
             num_symints_saved_for_bw = len(symint_outs_saved_for_bw)

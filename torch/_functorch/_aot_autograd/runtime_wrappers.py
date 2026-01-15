@@ -38,6 +38,7 @@ from torch._guards import (
     tracing,
     TracingContext,
 )
+from torch._library.opaque_object import is_opaque_type
 from torch._library.utils import is_builtin
 from torch._logging import getArtifactLogger
 from torch._prims_common import CUDARngStateHelper
@@ -616,6 +617,17 @@ def _create_runtime_wrapper(
                         # In that case, we fully want to hide the mutation from autograd, so detaching is ok.
                         original_inpt.detach().copy_(updated_inpt)
                     else:
+                        # Check if we have stream index information for this mutated input
+                        if (
+                            runtime_metadata.mutated_inp_stream_indices is not None
+                            and i < len(runtime_metadata.mutated_inp_stream_indices)
+                            and runtime_metadata.mutated_inp_stream_indices[i]
+                            is not None
+                        ):
+                            raise RuntimeError(
+                                "Mutations on inputs with user-specified streams are not yet supported. "
+                                "See: https://github.com/pytorch/pytorch/issues/172522"
+                            )
                         original_inpt.copy_(updated_inpt)
         else:
             fw_outs = all_outs
@@ -1805,10 +1817,10 @@ def _raise_if_functorch_active():
 def _backward_prologue_functional(
     ctx_saved_tensors,
     ctx_symints,
+    ctx_opaque_objects,
     metadata,
     maybe_subclass_metadata,
     *flat_args,
-    ctx_saved_opaque=None,
 ):
     # Calling convention: we expect a grad_out passed to the backward:
     # - for every output of the fw that does *not* alias an input or graph intermediate
@@ -1909,7 +1921,7 @@ def _backward_prologue_functional(
     all_args = [
         *ctx_symints,
         *ctx_saved_tensors,
-        *(ctx_saved_opaque if ctx_saved_opaque else ()),
+        *ctx_opaque_objects,
         *flat_bw_args_with_grads,
         *bw_tokens,
         *rng_args,
@@ -1943,7 +1955,9 @@ def _backward_prologue_functional(
     tangents_start_idx = (
         len(all_args) - num_flat_bw_args_with_grads - len(rng_args) - len(bw_tokens)
     )
-    assert tangents_start_idx == len(ctx_symints) + num_ctx_saved_tensors + num_opaque
+    assert tangents_start_idx == len(ctx_symints) + num_ctx_saved_tensors + len(
+        ctx_opaque_objects
+    )
     tangents_end_idx = len(all_args) - len(rng_args) - len(bw_tokens)
 
     # TODO: figure out how to refactor the backward properly
@@ -2418,6 +2432,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 # Only save tensors that need VC checks via save_for_backward
                 ctx.save_for_backward(*tensors_to_save)
                 ctx._tensors_no_vc_check = tensors_no_vc
+
                 symint_outs = fw_outs[
                     CompiledFunction.metadata.symints_saved_for_backwards_slice
                 ]
@@ -2427,12 +2442,11 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 ), str([type(x) for x in symint_outs])
                 ctx.symints = symint_outs
 
-                # Save opaque objects (FakeScriptObject instances) for backward
-                opaque_outs = fw_outs[
+                opaque_object_outs = fw_outs[
                     CompiledFunction.metadata.opaque_objects_saved_for_backwards_slice
                 ]
-                # Store opaque objects in ctx for backward
-                ctx.saved_opaque_objects = opaque_outs
+                assert all(is_opaque_type(type(obj)) for obj in opaque_object_outs)
+                ctx.opaque_objects = opaque_object_outs
 
                 raw_returns = fw_outs[0:num_forward_returns]
 
@@ -2520,6 +2534,7 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                         else ctx.saved_tensors
                     ),
                     ctx.symints,
+                    ctx.opaque_objects,
                     CompiledFunction.metadata,
                     CompiledFunction.maybe_subclass_metadata,
                     *flat_args,

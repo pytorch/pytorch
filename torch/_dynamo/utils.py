@@ -3053,6 +3053,8 @@ def same(
     log_error: Callable[..., None] = log.error,
     use_larger_multiplier_for_smaller_tensor: bool = False,
     force_max_multiplier: bool = False,
+    use_iou_for_bool: bool = False,
+    iou_threshold: float = 0.99,
 ) -> bool:
     """Check correctness to see if ref and res match"""
     if fp64_ref is None:
@@ -3080,6 +3082,8 @@ def same(
                 log_error=log_error,
                 use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
                 force_max_multiplier=force_max_multiplier,
+                use_iou_for_bool=use_iou_for_bool,
+                iou_threshold=iou_threshold,
             )
             for ai, bi, fp64_refi in zip(ref, res, fp64_ref)
         )
@@ -3100,6 +3104,8 @@ def same(
             log_error=log_error,
             use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
             force_max_multiplier=force_max_multiplier,
+            use_iou_for_bool=use_iou_for_bool,
+            iou_threshold=iou_threshold,
         )
     elif isinstance(ref, dict):
         assert isinstance(res, dict)
@@ -3121,6 +3127,8 @@ def same(
                     log_error=log_error,
                     use_larger_multiplier_for_smaller_tensor=use_larger_multiplier_for_smaller_tensor,
                     force_max_multiplier=force_max_multiplier,
+                    use_iou_for_bool=use_iou_for_bool,
+                    iou_threshold=iou_threshold,
                 )
             ):
                 log_error("Accuracy failed for key name %s", k)
@@ -3150,6 +3158,29 @@ def same(
                 return False
             if ref.dtype == torch.bool:
                 if ignore_non_fp:
+                    return True
+                if use_iou_for_bool:
+                    # Use IoU (Intersection over Union) metric for boolean mask comparison.
+                    # This is useful for segmentation models where small floating-point
+                    # differences get thresholded into boolean masks.
+                    intersection = (ref & res).sum().float()
+                    union = (ref | res).sum().float()
+                    if union == 0:
+                        # Both masks are empty
+                        return bool(intersection == 0)
+                    iou = (intersection / union).item()
+                    if iou < iou_threshold:
+                        log_error(
+                            "IoU accuracy failed: %.4f < %.2f (intersection=%d, union=%d, ref_sum=%d, res_sum=%d, shape=%s)",
+                            iou,
+                            iou_threshold,
+                            int(intersection.item()),
+                            int(union.item()),
+                            int(ref.sum().item()),
+                            int(res.sum().item()),
+                            list(ref.shape),
+                        )
+                        return False
                     return True
                 # triton stores bool as int8, so add this for more accurate checking
                 r = torch.allclose(
@@ -3462,12 +3493,12 @@ def get_concrete_sizes_from_symints(
     pattern = r"\(s(\d+)\)"
     assert fake_mode.shape_env is not None
     shape_env = fake_mode.shape_env
-    var_to_val = shape_env.var_to_val
+    backed_var_to_val = shape_env.backed_var_to_val
 
     def replace_sym(match: Any) -> str:
         sym_name = f"s{match.group(1)}"
         val = next(
-            (v for k, v in var_to_val.items() if k.name == sym_name),
+            (v for k, v in backed_var_to_val.items() if k.name == sym_name),
             None,
         )
         if isinstance(val, (int, Integer)):
