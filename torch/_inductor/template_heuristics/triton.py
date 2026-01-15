@@ -691,6 +691,10 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             if group_m is not None:
                 key += (group_m,)
 
+            # Add BlackwellGPUGemmConfig specific fields to key if present
+            if isinstance(conf, BlackwellGPUGemmConfig):
+                key += (conf.epilogue_subtile, conf.warp_specialize, conf.flatten)
+
             if key not in used and (
                 max_mm_configs is None or len(used) < max_mm_configs
             ):
@@ -2063,6 +2067,32 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 "FLATTEN": flatten,
             }
 
+    @staticmethod
+    def _generate_exhaustive_configs() -> list[BaseConfig]:
+        configs: list[BaseConfig] = []
+        for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
+            [32, 64, 128, 256],
+            repeat=3,
+        ):
+            for num_stages in [2, 3, 4, 5, 6]:
+                # AutoWS doesn't work with num_warps < 4
+                for num_warps in [4, 8]:
+                    for EPILOGUE_SUBTILE in [True, False]:
+                        configs.append(
+                            BlackwellGPUGemmConfig(
+                                block_m=BLOCK_M,
+                                block_n=BLOCK_N,
+                                block_k=BLOCK_K,
+                                num_stages=num_stages,
+                                num_warps=num_warps,
+                                group_m=8,
+                                epilogue_subtile=EPILOGUE_SUBTILE,
+                                warp_specialize=True,
+                                flatten=True,
+                            )
+                        )
+        return configs
+
 
 # Scaled MM-specific mixin for scaled MM templates
 class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
@@ -2357,6 +2387,7 @@ class CUDABlackwellPersistentTMATemplateConfigHeuristic(
     def __init__(self) -> None:
         super().__init__()
         self.mm_configs = self.blackwell_persistent_mm_configs
+        self.exhaustive_configs = self._generate_exhaustive_configs()
 
 
 @register_template_heuristic(
@@ -2389,6 +2420,7 @@ class CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic(
             self.blackwell_persistent_mm_configs
             + self.blackwell_persistent_addmm_configs
         )
+        self.exhaustive_configs = self._generate_exhaustive_configs()
 
 
 @register_template_heuristic(

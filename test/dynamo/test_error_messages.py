@@ -1400,9 +1400,6 @@ TRACE CALL 0 [NullVariable, LazyVariableTracker(unrealized: <class 'function'>)]
         self.assertEqual((len(matches) <= 20), True)
         self.assertIn("Most recent bytecode instructions traced (max 20):", s)
 
-    # TODO this test is broken with nested_graph_breaks because we need to update
-    # the resume collapse function for nested graph breaks
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @torch._dynamo.config.patch(verbose=True)
     @make_logging_test(graph_breaks=True)
     def test_graph_break_traceback_above_dynamo_shows_user_code(self, records):
@@ -1487,9 +1484,6 @@ Most recent bytecode instructions traced (max 20):
 """,
         )
 
-    # TODO this test is broken with nested_graph_breaks because we need to update
-    # the resume collapse function for nested graph breaks
-    @torch._dynamo.config.patch(nested_graph_breaks=False)
     @make_logging_test(graph_breaks=True)
     def test_graph_break_traceback_collapsed_resume_frames(self, records):
         @torch.compile(backend="eager")
@@ -1792,9 +1786,8 @@ from user code:
     @make_logging_test(graph_breaks=True)
     def test_store_attr_graph_break(self, records):
         class Foo:
-            @torch.compiler.disable
             def __setattr__(self, name, value):
-                super().__setattr__(name, value)
+                torch._dynamo.graph_break()
 
         @torch.compile(backend="eager")
         def fn(x):
@@ -1802,30 +1795,27 @@ from user code:
 
         fn(torch.ones(3))
 
-        def post_munge(s):
-            return re.sub(r"0x[0-9A-Fa-f]+", "0xmem_addr", s)
-
         self.assertExpectedInline(
-            post_munge(
-                munge_exc(records[-1].getMessage(), suppress_suffix=True, skip=0)
-            ),
+            munge_exc(records[0].getMessage(), suppress_suffix=True, skip=0),
             """\
 Graph break in user code at test_error_messages.py:N
 Graph Break Reason: Encountered graph break when attempting to trace STORE_ATTR: storing an object's attribute, e.g. x.attr = y:
 
-Skip inlining `torch.compiler.disable()`d function
-  Explanation: Skip inlining function <function ErrorMessagesTest.test_store_attr_graph_break.<locals>.Foo.__setattr__ at 0xmem_addr> since it was wrapped with `torch.compiler.disable` (reason: None)
-  Hint: Remove the `torch.compiler.disable` call
+Call to `torch._dynamo.graph_break()`
+  Explanation: User-inserted graph break. Message: None
+  Hint: Remove the `torch._dynamo.graph_break()` call.
 
-  Developer debug context: <function ErrorMessagesTest.test_store_attr_graph_break.<locals>.Foo.__setattr__ at 0xmem_addr>
+  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0099.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html
 
 User code traceback:
   File "test_error_messages.py", line N, in test_store_attr_graph_break
     fn(torch.ones(3))
   File "test_error_messages.py", line N, in fn
     Foo().attr = x
+  File "test_error_messages.py", line N, in __setattr__
+    torch._dynamo.graph_break()
 """,
         )
 
@@ -1836,18 +1826,19 @@ User code traceback:
                 Unsupported,
                 lambda: fn(torch.ones(3)),
                 """\
-Skip inlining `torch.compiler.disable()`d function
-  Explanation: Skip inlining function <function ErrorMessagesTest.test_store_attr_graph_break.<locals>.Foo.__setattr__ at 0xmem_addr> since it was wrapped with `torch.compiler.disable` (reason: None)
-  Hint: Remove the `torch.compiler.disable` call
+Call to `torch._dynamo.graph_break()`
+  Explanation: User-inserted graph break. Message: None
+  Hint: Remove the `torch._dynamo.graph_break()` call.
 
-  Developer debug context: <function ErrorMessagesTest.test_store_attr_graph_break.<locals>.Foo.__setattr__ at 0xmem_addr>
+  Developer debug context: Called `torch._dynamo.graph_break()` with args `[]`, kwargs `{}`
 
- For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0099.html
+ For more details about this graph break, please visit: https://meta-pytorch.github.io/compile-graph-break-site/gb/gb0025.html
 
 from user code:
    File "test_error_messages.py", line N, in fn
-    Foo().attr = x""",
-                post_munge=post_munge,
+    Foo().attr = x
+  File "test_error_messages.py", line N, in __setattr__
+    torch._dynamo.graph_break()""",
             )
 
     def test_runtime_error_readable_shape_mismatch(self):
@@ -2134,6 +2125,10 @@ from user code:
         outer(torch.ones(3))
 
         def post_munge(s):
+            # Remove user stack trace section that appears in recompile limit messages
+            s = re.sub(
+                r"\nUser stack trace:.*?(?=\nTo log all)", "", s, flags=re.DOTALL
+            )
             return re.sub(
                 r"# \S+/test_error_messages\.py", "# test_error_messages.py", s
             )
@@ -2168,6 +2163,9 @@ Dynamo recompile limit exceeded
             )
 
 
+class NestedGraphBreakLoggingTests(
+    LoggingTestCase, torch._dynamo.test_case.TestCaseWithNestedGraphBreaks
+):
     @make_logging_test(graph_breaks=True)
     def test_nested_generic_ctx_mgr(self, records):
         def inner():
@@ -2258,6 +2256,13 @@ Graph break under GenericContextWrappingVariable
     def test_skipped_frame_with_verbose_traceback_nested(self, records):
         global f1, f2, f3
 
+        class GenericCtxMgr:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                pass
+
         def f1(x):
             with GenericCtxMgr():
                 torch._dynamo.graph_break()
@@ -2311,6 +2316,13 @@ User code traceback:
     @make_logging_test(graph_breaks=True)
     def test_skip_frame_in_loop_message_nested(self, records):
         global f1, f2, f3
+
+        class GenericCtxMgr:
+            def __enter__(self):
+                return self
+
+            def __exit__(self, exc_type, exc_value, traceback):
+                pass
 
         def f1(x):
             for i in range(2):
