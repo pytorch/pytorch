@@ -94,16 +94,27 @@ jobs:
             "${DOCKER_IMAGE}"
           )
 
-          if [[ "${{ matrix.arch }}" == "aarch64" ]]; then
-            docker exec -t "${container_name}" bash -c \
-              "yum install -y glibc-2.29 || dnf install -y glibc-2.29 || true"
-          fi
-
           PYTHON_EXECUTABLE=/opt/python/cp312-cp312/bin/python
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" -m pip install \
             torch --index-url "https://download.pytorch.org/whl/cu${CUDA_SHORT}"
 
+          GLIBC_ENV=""
+          if [[ "${{ matrix.arch }}" == "aarch64" ]]; then
+            docker exec -t "${container_name}" bash -c "
+              set -ex
+              cd /tmp
+              curl -LO https://ftp.gnu.org/gnu/glibc/glibc-2.29.tar.gz
+              tar xzf glibc-2.29.tar.gz
+              mkdir glibc-2.29-build && cd glibc-2.29-build
+              ../glibc-2.29/configure --prefix=/opt/glibc-2.29
+              make -j\$(nproc)
+              make install
+            "
+            GLIBC_ENV="-e LD_LIBRARY_PATH=/opt/glibc-2.29/lib:\${LD_LIBRARY_PATH}"
+          fi
+
           docker exec -t \
+            ${GLIBC_ENV} \
             -e TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" \
             -e FA_FINAL_PACKAGE_DIR="/artifacts" \
             -e WHEEL_PLAT="${{ matrix.arch }}" \
