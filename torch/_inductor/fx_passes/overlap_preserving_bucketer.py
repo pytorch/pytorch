@@ -290,7 +290,7 @@ class OverlapPreservingBucketer:
                 checked_pgs.add(pg)
         return fsdp_pgs
 
-    def _bucket_collectives_impl(self) -> None:
+    def _bucket_collectives_impl(self) -> list[CollBucket]:
         """Find and apply bucket transformations for collectives."""
         pg_collectives: dict[str, OrderedSet[fx.Node]] = defaultdict(OrderedSet)
         fsdp_pgs = self.identify_fsdp_group_names()
@@ -330,6 +330,7 @@ class OverlapPreservingBucketer:
 
             counters["inductor"]["collective_buckets"] += 1
             self._apply_bucket(coll_bucket)
+        return all_buckets
 
     def _apply_deps_and_effect_tokens(self) -> None:
         """Apply topological sort and effect tokens to preserve overlap."""
@@ -379,8 +380,9 @@ class OverlapPreservingBucketer:
         reference the final inlined nodes, not the erased fusion modules.
         """
         # Step 1: Bucket collectives
+        all_buckets: list[ColBucket] | None  = None
         if self.collective_bucketing:
-            self._bucket_collectives_impl()
+            all_buckets = self._bucket_collectives_impl()
 
         # Step 2: Inline fusion regions (expand call_module -> original nodes)
         replaced: dict[fx.Node, fx.Node | None] = {}
@@ -398,7 +400,7 @@ class OverlapPreservingBucketer:
         self._apply_deps_and_effect_tokens()
         self.graph.lint()
 
-        if self.verbose:
+        if self.verbose and all_buckets is not None:
             log_strs: list[str] = []
             stats_num_buckets_per_key = defaultdict(int)
             stats_num_bucketed_collectives_per_key = defaultdict(int)
@@ -1059,7 +1061,7 @@ def finalize_overlap_scheduling(
     max_bucket_memory_gb: float = 2.0,
     max_coll_distance: int = 1000,
     region_of: dict[fx.Node, Any] | None = None,
-    bucket_exposed_first: bool = True,
+    bucket_exposed_first: Literal["True", "False", "auto"] = "auto",
 ) -> None:
     """
     Finalize overlap scheduling by applying deps, inlining fusions, and optionally bucketing.
