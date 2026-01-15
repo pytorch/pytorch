@@ -2364,31 +2364,50 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
                 )
                 num_forward_returns = CompiledFunction.metadata.num_forward_returns
 
+                # See Note [Activations with no version counter checks in eager]
                 # Partitioners must put symint arguments at the end separate from tensor arguments
-                tensors_saved_for_backwards = fw_outs[
-                    CompiledFunction.metadata.tensors_saved_for_backwards_slice
+                # Split tensors into those that need VC checks (via save_for_backward)
+                # and those that don't (stashed directly on ctx).
+                # The partitioner sorts tensors so that no-VC-check tensors are at the end.
+                tensors_saved_with_vc_check = fw_outs[
+                    CompiledFunction.metadata.tensors_saved_for_backwards_with_vc_check_slice
+                ]
+                tensors_saved_no_vc_check = fw_outs[
+                    CompiledFunction.metadata.tensors_saved_for_backwards_no_vc_check_slice
                 ]
                 assert all(
-                    isinstance(x, torch.Tensor) for x in tensors_saved_for_backwards
+                    isinstance(x, torch.Tensor) for x in tensors_saved_with_vc_check
                 )
-
-                def mark_dynamic_activations(activations: list[torch.Tensor]):
-                    for (
-                        idx,
-                        dims,
-                    ) in CompiledFunction.metadata.dynamic_saved_tensors_idxs.items():
-                        maybe_mark_dynamic_helper(activations[idx], dims)
-                    return activations
+                assert all(
+                    isinstance(x, torch.Tensor) for x in tensors_saved_no_vc_check
+                )
 
                 # See Note [Detaching saved tensors in AOTAutograd]
-                ctx.save_for_backward(
-                    *mark_dynamic_activations(
-                        [
-                            x.detach() if x._is_view() else x
-                            for x in tensors_saved_for_backwards
-                        ]
-                    )
-                )
+                num_vc_check = len(tensors_saved_with_vc_check)
+                tensors_to_save = [
+                    x.detach() if x._is_view() else x
+                    for x in tensors_saved_with_vc_check
+                ]
+                tensors_no_vc = [
+                    x.detach() if x._is_view() else x for x in tensors_saved_no_vc_check
+                ]
+
+                # dynamic_saved_tensors_idxs has indices relative to all saved tensors
+                # (vc_check + no_vc_check combined). Mark dynamics on the detached tensors.
+                for (
+                    idx,
+                    dims,
+                ) in CompiledFunction.metadata.dynamic_saved_tensors_idxs.items():
+                    if idx < num_vc_check:
+                        maybe_mark_dynamic_helper(tensors_to_save[idx], dims)
+                    else:
+                        maybe_mark_dynamic_helper(
+                            tensors_no_vc[idx - num_vc_check], dims
+                        )
+
+                # Only save tensors that need VC checks via save_for_backward
+                ctx.save_for_backward(*tensors_to_save)
+                ctx._tensors_no_vc_check = tensors_no_vc
                 symint_outs = fw_outs[
                     CompiledFunction.metadata.symints_saved_for_backwards_slice
                 ]
@@ -2474,8 +2493,15 @@ To fix this, your tensor subclass must implement the dunder method __force_to_sa
 
             @staticmethod
             def backward(ctx, *flat_args):
+                # Combine tensors from both sources:
+                # 1. ctx.saved_tensors - tensors that went through save_for_backward (with VC check)
+                # 2. ctx._tensors_no_vc_check - tensors stashed directly on ctx (no VC check)
                 all_args = _backward_prologue_functional(
-                    ctx.saved_tensors,
+                    (
+                        list(ctx.saved_tensors) + ctx._tensors_no_vc_check
+                        if len(ctx._tensors_no_vc_check) > 0
+                        else ctx.saved_tensors
+                    ),
                     ctx.symints,
                     CompiledFunction.metadata,
                     CompiledFunction.maybe_subclass_metadata,

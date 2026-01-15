@@ -41,9 +41,9 @@ class FakeScriptObject:
                 f"Tried to call __getattr__ with attr '{name}' on a FakeScriptObject, "
                 "implying that you are calling this inside of a fake kernel. "
                 "The fake kernel should not depend on the contents of the "
-                "OpaqueObject at all, so we're erroring out. If you need this"
-                "functionality, consider creating a custom TorchBind Object instead"
-                "(but note that this is more difficult)."
+                "OpaqueObject at all, so we're erroring out. If this attr is "
+                "a method or constant attribute, you can allow this member access by "
+                "registering it via `register_opaque_type(members=...)`."
             ) from e
 
     def __setattr__(self, name, value):
@@ -142,10 +142,10 @@ def tracing_with_real(x: torch.ScriptObject) -> bool:
     if not hasattr(x, "tracing_mode"):
         return False
 
-    assert x.tracing_mode() in [
-        "real",
-        "fake",
-    ], f"tracing_mode can be either real or fake but got {x.tracing_mode()}"
+    if x.tracing_mode() not in ["real", "fake"]:
+        raise AssertionError(
+            f"tracing_mode can be either real or fake but got {x.tracing_mode()}"
+        )
     return x.tracing_mode() == "real"
 
 
@@ -163,16 +163,31 @@ def maybe_to_fake_obj(
 
     from torch._library.opaque_object import (
         FakeOpaqueObject,
+        get_opaque_obj_info,
         get_opaque_type_name,
         is_opaque_type,
         OpaqueTypeStr,
     )
+    from torch._subclasses.fake_tensor import unset_fake_temporarily
 
-    if x is None or is_opaque_type(type(x)):
-        # In order to make OpaqueObjects truly opaque, the fake kernel should
-        # not depend on the contents of the OpaqueObject at all.
-        type_name = OpaqueTypeStr if x is None else get_opaque_type_name(type(x))
-        fake_x_wrapped = FakeScriptObject(FakeOpaqueObject(), type_name, None)
+    x_type = type(x)
+    if is_opaque_type(x_type):
+        type_name = OpaqueTypeStr if x is None else get_opaque_type_name(x_type)
+        fake_x_wrapped = FakeScriptObject(FakeOpaqueObject(), type_name, x)
+
+        # Set specified members onto the fake object
+        opaque_info = get_opaque_obj_info(x_type)
+        if opaque_info is None:
+            raise AssertionError(f"opaque_info for type {x_type} must not be None")
+        for attr_name in opaque_info.members:
+            with unset_fake_temporarily():
+                if not hasattr(x, attr_name):
+                    raise TypeError(
+                        f"Opaque object of type '{type_name}' was specified to have member "
+                        f"'{attr_name}', but this doesn't actually exist in the object."
+                    )
+                object.__setattr__(fake_x_wrapped, attr_name, getattr(x, attr_name))
+
         return fake_x_wrapped
     else:
         # x.__obj_flatten__() could be calling some tensor operations inside but we don't
@@ -376,7 +391,8 @@ def _is_script_object(obj: Any) -> bool:
 # Return the namespace and class name from fully qualified name.
 def _ns_and_class_name(full_qualname: str) -> tuple[str, str]:
     splits = full_qualname.split(".")
-    assert len(splits) == 5, f"Could not split {full_qualname=}"
+    if len(splits) != 5:
+        raise AssertionError(f"Could not split {full_qualname=}, expected 5 parts")
     _torch, _torch_ns, _classes, ns, class_name = splits
     return ns, class_name
 
