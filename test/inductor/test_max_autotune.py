@@ -55,6 +55,7 @@ from torch._inductor.template_heuristics.triton import (
     GemmConfig,
     get_shared_memory_checker_opts,
     XPUMMTemplateConfigHeuristic,
+    XPUPersistentTMATemplateConfigHeuristic,
 )
 from torch.testing._internal.common_cuda import PLATFORM_SUPPORTS_FP8
 from torch.testing._internal.common_utils import (
@@ -62,6 +63,7 @@ from torch.testing._internal.common_utils import (
     IS_WINDOWS,
     NAVI_ARCH,
     parametrize,
+    random_matrix_with_scaled_reduction_dim,
     skipIfRocmArch,
     TEST_WITH_ROCM,
 )
@@ -135,6 +137,17 @@ class FailChoiceCaller(ChoiceCaller):
 @config.patch(enable_caching_generated_triton_templates=True)
 @instantiate_parametrized_tests
 class TestMaxAutotune(TestCase):
+    def _make_matrices(self, M, K, N, *batch_dims, dtype, device, requires_grad):
+        make_matrix = functools.partial(
+            random_matrix_with_scaled_reduction_dim,
+            dtype=dtype,
+            device=device,
+            requires_grad=requires_grad,
+        )
+        a = make_matrix(M, K, *batch_dims, reduction_dim=-1)
+        b = make_matrix(K, N, *batch_dims, reduction_dim=-2)
+        return a, b
+
     @parametrize("dynamic", (False, True))
     @parametrize("search_space", ("DEFAULT", "EXHAUSTIVE"))
     def test_max_autotune_mm_plus_mm_zero_size_input(self, dynamic, search_space):
@@ -1225,8 +1238,18 @@ class TestMaxAutotune(TestCase):
 
             M, N, K = sizes
 
-            a = torch.randn(M, K, dtype=dtype, device=GPU_TYPE, requires_grad=True)
-            b = torch.randn(K, N, dtype=dtype, device=GPU_TYPE, requires_grad=True)
+            atol = 1e-4
+            rtol = 1e-4
+            # K can be huge huge, this is why the data distribution is set to iid N(0, K ** 0.5),
+            # which makes the result of reductions distributed as N(0, 1).
+            a, b = self._make_matrices(
+                M,
+                K,
+                N,
+                dtype=dtype,
+                device=GPU_TYPE,
+                requires_grad=True,
+            )
 
             possible_splits = range(2, min(K // M, K // N) + 1)
 
@@ -1259,7 +1282,7 @@ class TestMaxAutotune(TestCase):
                     "triton_.*_fused_0.run"
                 ).check("decompose_k").run(code[0])
                 check_divisors(code)
-                torch.testing.assert_close(out, a @ b, atol=1e-2, rtol=1e-2)
+                torch.testing.assert_close(out, a @ b, atol=atol, rtol=rtol)
 
             # Test adding epilogue also equivalent to eager
             compiled_func = torch.compile(lambda a, b: (a @ b).relu(), dynamic=dynamic)
@@ -1274,7 +1297,7 @@ class TestMaxAutotune(TestCase):
                 ).check("decompose_k").run(code[0])
                 check_divisors(code)
                 torch.testing.assert_close(
-                    compiled_func(a, b), (a @ b).relu(), atol=1e-2, rtol=1e-2
+                    compiled_func(a, b), (a @ b).relu(), atol=atol, rtol=rtol
                 )
 
             # Test adding reinterpret view before subgraph
@@ -1296,8 +1319,8 @@ class TestMaxAutotune(TestCase):
                 torch.testing.assert_close(
                     compiled_func(a, b),
                     (a.transpose(0, 1) @ b).relu(),
-                    atol=1e-2,
-                    rtol=1e-2,
+                    atol=atol,
+                    rtol=rtol,
                 )
 
             torch.backends.cuda.matmul.allow_fp16_reduced_precision_reduction = (
@@ -1323,11 +1346,13 @@ class TestMaxAutotune(TestCase):
             a_in = torch.stack((a, a), dim=0)
             return (a_in @ b).relu()
 
-        a = torch.randn(
-            32, 32768, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
-        )
-        b = torch.randn(
-            32768, 64, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+        a, b = self._make_matrices(
+            M=32,
+            K=32768,
+            N=64,
+            dtype=torch.bfloat16,
+            device=GPU_TYPE,
+            requires_grad=True,
         )
 
         torch._dynamo.reset()
@@ -1350,8 +1375,8 @@ class TestMaxAutotune(TestCase):
             torch.testing.assert_close(
                 out,
                 f(a, b),
-                atol=1e-2,
-                rtol=1e-2,
+                atol=1e-4,
+                rtol=1e-4,
             )
 
     @unittest.skipIf(
@@ -1373,11 +1398,13 @@ class TestMaxAutotune(TestCase):
                 a_in = torch.cat([a for _ in range(256)], dim=0)
                 return (a_in @ b).relu().sum()
 
-            a = torch.randn(
-                8, 64, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
-            )
-            b = torch.randn(
-                64, 32768, dtype=torch.bfloat16, device=GPU_TYPE, requires_grad=True
+            a, b = self._make_matrices(
+                M=8,
+                K=64,
+                N=32768,
+                dtype=torch.bfloat16,
+                device=GPU_TYPE,
+                requires_grad=True,
             )
 
             torch._dynamo.reset()
@@ -2459,6 +2486,7 @@ class TestTemplateConfigPruning(TestCase):
             counters["inductor"]["select_algorithm_num_precompilation_exceptions"], 0
         )
 
+    @skipIfXpu(msg="Missing device_properties shared_memory_per_block on xpu.")
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("mat1_transposed", (False, True))
     @parametrize("mat2_transposed", (False, True))
@@ -2507,6 +2535,7 @@ class TestTemplateConfigPruning(TestCase):
             shared_memory_checker_opts,
         )
 
+    @skipIfXpu(msg="Missing device_properties shared_memory_per_block on xpu.")
     @parametrize("dtype", (torch.float32, torch.bfloat16))
     @parametrize("mat1_transposed", (False, True))
     @parametrize("mat2_transposed", (False, True))
@@ -2555,6 +2584,8 @@ class TestTemplateConfigPruning(TestCase):
         exceeds_checker = heuristic._get_exceeding_shared_memory_checker(
             **shared_memory_checker_opts
         )
+        if exceeds_checker is None:
+            self.skipTest("Device does not support shared memory size query")
         for c in self.gemm_configs:
             smem_estimation = heuristic.get_shared_memory_estimation(
                 c, dtype_size, **shared_memory_checker_opts
@@ -3385,15 +3416,19 @@ class TestPrologueFusion(TestCase):
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=3)
 
     @parametrize("sizes", ((64, 128, 256), (64, 64, 64), (64, 120, 64)))
+    @parametrize("use_async_compile", (True, False))
     @unittest.skipIf(
         config.triton.native_matmul,
         "generated code is different in native matmul",
     )
-    def test_multiple_fusions(self, sizes):
+    def test_multiple_fusions(self, sizes, use_async_compile: bool):
         M, K, N = sizes
 
         def foo(x, y):
             return ((x - 1.1) @ (y + 1.1)) * 1.1
+
+        if use_async_compile:
+            torch._inductor.async_compile.AsyncCompile.wait_pool_ready()
 
         x = torch.rand([M, K], dtype=torch.float, device=GPU_TYPE)
         y = torch.rand([K, N], dtype=torch.float, device=GPU_TYPE)
@@ -3403,9 +3438,9 @@ class TestPrologueFusion(TestCase):
         self.check_code(code[0], num_kernels=1, num_allocs=1, num_deallocs=2)
 
         # check that we do not CSE any variables between prologues, epilogues
-        FileCheck().check("def triton").check_count("= 1.1", 3, exactly=True).check(
-            "tl.store"
-        ).run(code[0])
+        FileCheck().check("def triton").check_count(
+            "tl.full([1], 1.1, tl.float32)", 3, exactly=True
+        ).check("tl.store").run(code[0])
 
     @config.patch(
         {
@@ -3414,9 +3449,13 @@ class TestPrologueFusion(TestCase):
             "max_epilogue_benchmarked_choices": 3,
         }
     )
-    def test_pending_fusions_multiple(self):
+    @parametrize("use_async_compile", (True, False))
+    def test_pending_fusions_multiple(self, use_async_compile: bool):
         def multi_use(x, y):
             return (x @ x.T) * (y @ y.T)
+
+        if use_async_compile:
+            torch._inductor.async_compile.AsyncCompile.wait_pool_ready()
 
         x = torch.rand([128, 16], device=GPU_TYPE)
         y = torch.rand([128, 32], device=GPU_TYPE)
@@ -3445,10 +3484,14 @@ class TestPrologueFusion(TestCase):
             "max_epilogue_benchmarked_choices": 3,
         }
     )
-    def test_pending_fusion_pro_and_epi(self):
+    @parametrize("use_async_compile", (True, False))
+    def test_pending_fusion_pro_and_epi(self, use_async_compile: bool):
         def test_multiple_fusions(x):
             y = x.to(torch.float)
             return (y @ y).relu()
+
+        if use_async_compile:
+            torch._inductor.async_compile.AsyncCompile.wait_pool_ready()
 
         x = torch.rand([128, 128], dtype=torch.float16, device=GPU_TYPE)
         out, code = run_and_get_code(torch.compile(test_multiple_fusions), x)
@@ -3458,11 +3501,15 @@ class TestPrologueFusion(TestCase):
         self.assertEqual(out, test_multiple_fusions(x), atol=0.05, rtol=0.05)
 
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
-    def test_multiple_inputs(self, sizes):
+    @parametrize("use_async_compile", (True, False))
+    def test_multiple_inputs(self, sizes, use_async_compile: bool):
         M, K, N = sizes
 
         def foo(x, y, z):
             return (x + y).to(torch.float) @ z
+
+        if use_async_compile:
+            torch._inductor.async_compile.AsyncCompile.wait_pool_ready()
 
         x = torch.rand([M, K], dtype=torch.float16, device=GPU_TYPE)
         y = torch.rand([M, K], dtype=torch.float16, device=GPU_TYPE)
@@ -3485,15 +3532,19 @@ class TestPrologueFusion(TestCase):
 
     @config.patch(realize_reads_threshold=1, realize_opcount_threshold=1)
     @parametrize("sizes", ((64, 128, 256), (128, 128, 128), (63, 120, 250)))
+    @parametrize("use_async_compile", (True, False))
     @unittest.skipIf(
         config.triton.native_matmul,
         "generated code is different in native matmul",
     )
-    def test_prologue_multiple_nodes(self, sizes):
+    def test_prologue_multiple_nodes(self, sizes, use_async_compile: bool):
         M, K, N = sizes
 
         def foo(x, y):
             return ((((x * 2) - 1) / 2) @ (y * 4)) * 3.0
+
+        if use_async_compile:
+            torch._inductor.async_compile.AsyncCompile.wait_pool_ready()
 
         x = torch.rand([M, K], dtype=torch.float, device=GPU_TYPE)
         y = torch.rand([K, N], dtype=torch.float, device=GPU_TYPE)
@@ -3561,7 +3612,10 @@ class TestPrologueFusion(TestCase):
 
     @config.patch(realize_reads_threshold=1, realize_opcount_threshold=1)
     @parametrize("benchmark_fusion", (True, False))
-    def test_prologue_read_into_both_inputs(self, benchmark_fusion):
+    @parametrize("use_async_compile", (True, False))
+    def test_prologue_read_into_both_inputs(
+        self, benchmark_fusion, use_async_compile: bool
+    ):
         M = K = 256
 
         # not supported today. it could be, but typically the pointwise nodes would get
@@ -3570,6 +3624,9 @@ class TestPrologueFusion(TestCase):
         def foo(x):
             y = (x + 1) * 2
             return y @ (y - 2)
+
+        if use_async_compile:
+            torch._inductor.async_compile.AsyncCompile.wait_pool_ready()
 
         with config.patch(benchmark_epilogue_fusion=benchmark_fusion):
             x = torch.rand([M, K], dtype=torch.float, device=GPU_TYPE)
@@ -3603,6 +3660,72 @@ class TestPrologueFusion(TestCase):
         # there's one more dealloc than there should be because of a buffer reuse. TODO:
         # not sure why disabling buffer reuse doesn't stop
         self.check_code(code[0], num_kernels=2, num_allocs=2, num_deallocs=4)
+
+    @skipIfXpu
+    @config.patch(
+        {
+            "max_autotune": True,
+            "benchmark_epilogue_fusion": True,
+            "epilogue_fusion": True,
+            "prologue_fusion": True,
+        }
+    )
+    @unittest.skipIf(
+        config.triton.native_matmul,
+        "generated code is different in native matmul",
+    )
+    @parametrize("use_async_compile", (True, False))
+    def test_lazy_template_fusion_multiple_candidates(self, use_async_compile: bool):
+        """
+        Test lazy evaluation of template fusions with multiple templates,
+        multiple potential prologues, and a shared epilogue.
+
+        This test creates a computation graph with:
+        - 2 matmul templates (mm1, mm2)
+        - Multiple prologue candidates for each template (type conversions + arithmetic)
+        - A shared epilogue candidate that consumes both mm1 and mm2 outputs,
+          creating a fusion opportunity with either template
+
+        The lazy evaluation logic should:
+        1. Defer fusion decisions until all candidates are identified
+        2. Process epilogue fusions before prologue fusions
+        3. Cache attempted fusions to avoid redundant compilation
+        """
+
+        def foo(a, b, c, d):
+            # Prologues for first matmul: transform inputs a and b
+            a_transformed = a.to(torch.float) + 1.0
+            b_transformed = b.to(torch.float) * 2.0
+
+            # Prologues for second matmul: transform inputs c and d
+            c_transformed = c.to(torch.float) - 0.5
+            d_transformed = d.to(torch.float) / 2.0
+
+            # Two matmul templates
+            mm1 = a_transformed @ b_transformed
+            mm2 = c_transformed @ d_transformed
+
+            # Shared epilogue: complex element-wise operations on both mm1 and mm2
+            # This creates an epilogue node that could potentially fuse with either template
+            # The chain of pointwise ops tests fusion of multiple operations
+            combined = mm1 * mm2  # Multiply outputs from both matmuls
+            normalized = (combined * 0.5 + 1.0).relu().tanh()
+
+            return normalized
+
+        if use_async_compile:
+            torch._inductor.async_compile.AsyncCompile.wait_pool_ready()
+
+        M, K, N = 64, 128, 64
+        a = torch.rand([M, K], dtype=torch.bfloat16, device=GPU_TYPE)
+        b = torch.rand([K, N], dtype=torch.bfloat16, device=GPU_TYPE)
+        c = torch.rand([M, K], dtype=torch.bfloat16, device=GPU_TYPE)
+        d = torch.rand([K, N], dtype=torch.bfloat16, device=GPU_TYPE)
+
+        _, code = run_and_get_code(torch.compile(foo), a, b, c, d)
+        FileCheck().check("tem_fused__to_copy_add_mm_mul").check(
+            "to_copy_add_div_mm_mul_relu_sub_tanh_1"
+        ).run(code[0])
 
     @config.patch(shape_padding=True)
     @config.patch(force_shape_pad=True)
@@ -3684,8 +3807,12 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         a = torch.randn(512, 1152, device=GPU_TYPE, dtype=torch.bfloat16)
         b = torch.randn(1152, 7680, device=GPU_TYPE, dtype=torch.bfloat16)
 
-        tma_heuristic = CUDAPersistentTMATemplateConfigHeuristic()
-        mm_heuristic = CUDAMMTemplateConfigHeuristic()
+        if GPU_TYPE == "xpu":
+            tma_heuristic = XPUPersistentTMATemplateConfigHeuristic()
+            mm_heuristic = XPUMMTemplateConfigHeuristic()
+        else:
+            tma_heuristic = CUDAPersistentTMATemplateConfigHeuristic()
+            mm_heuristic = CUDAMMTemplateConfigHeuristic()
 
         # Save original configs to restore later
         original_tma_mm_configs = tma_heuristic.mm_configs
@@ -3694,8 +3821,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         bad_tma_config = GemmConfig(256, 128, 64, 4, 8, group_m=8)
         good_tma_config = GemmConfig(128, 64, 64, 4, 8, group_m=8)
         if use_async_compile:
-            async_compile = torch._inductor.async_compile.AsyncCompile()
-            async_compile.wait_pool_ready()
+            torch._inductor.async_compile.AsyncCompile.wait_pool_ready()
 
         for gemm_config in [bad_tma_config, good_tma_config]:
             torch._dynamo.reset()
@@ -3781,8 +3907,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         mm_heuristic.mm_configs = [gemm_config]
 
         if use_async_compile:
-            async_compile = torch._inductor.async_compile.AsyncCompile()
-            async_compile.wait_pool_ready()
+            torch._inductor.async_compile.AsyncCompile.wait_pool_ready()
 
         if test_case == "spills_reject":
             mock_n_spills = 100
@@ -3894,8 +4019,7 @@ class TestEpilogueFusionStaticAnalysis(TestCase):
         mm_heuristic.mm_configs = [gemm_config]
 
         if use_async_compile:
-            async_compile = torch._inductor.async_compile.AsyncCompile()
-            async_compile.wait_pool_ready()
+            torch._inductor.async_compile.AsyncCompile.wait_pool_ready()
 
         epilogue_runtime = 0.5
         aten_time = 1.0
