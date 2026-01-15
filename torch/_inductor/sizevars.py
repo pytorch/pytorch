@@ -664,7 +664,7 @@ class SizeVarAllocator:
         return None
 
     def optimization_hint(
-        self, expr: Union[Expr, int], fallback: int = config.unbacked_symint_fallback
+        self, expr: Union[Expr, int], fallback: Optional[int] = None
     ) -> int:
         """
         Return a concrete integer hint for an expression.
@@ -679,6 +679,10 @@ class SizeVarAllocator:
         - Infinity (int_oo, sympy.oo): returns sys.maxsize.
         - NaN (sympy.nan): returns the fallback value.
         """
+        # Read config at call time to respect runtime patches (e.g., in tests)
+        if fallback is None:
+            fallback = config.unbacked_symint_fallback
+
         simplified = self.simplify(expr)
         result = self._handle_special_expr_values(simplified, fallback)
         if result is not None:
