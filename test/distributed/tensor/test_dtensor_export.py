@@ -5,7 +5,7 @@ import contextlib
 import torch
 import torch.distributed as dist
 import torch.fx.traceback as fx_traceback
-from torch._dynamo.functional_export import dynamo_graph_capture_for_export
+from torch._dynamo.functional_export import dynamo_graph_capture_for_export, _dynamo_graph_capture_for_export
 from torch._functorch.aot_autograd import aot_export_joint_with_descriptors
 from torch._functorch.partitioners import min_cut_rematerialization_partition
 from torch._guards import tracing, TracingContext
@@ -507,6 +507,19 @@ class DTensorExportTest(TestCase):
         gm = graph_capture_and_aot_export_joint_with_descriptors_v2(fn, (z,))
 
         self.assertEqual(fn(z), gm(z)[0])
+
+    def test_dtensor_local_tensor_export(self):
+        device_mesh = init_device_mesh(self.device_type, mesh_shape=(self.world_size,))
+
+
+        class Model(torch.nn.Module):
+            def forward(self, x):
+                return x._local_tensor.sum()
+
+
+        dtensor = distribute_tensor(torch.randn(2, 4), device_mesh, [Replicate()])
+        print(_dynamo_graph_capture_for_export(Model())(dtensor))
+
 
     def test_dtensor_data_dependent_index_and_slice(self):
         device_mesh = init_device_mesh(self.device_type, mesh_shape=(self.world_size,))
