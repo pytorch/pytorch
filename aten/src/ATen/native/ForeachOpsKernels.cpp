@@ -230,25 +230,42 @@ namespace at::native {
     }                                                                  \
   }
 
+// scalars must be 0-d float64 tensors to preserve precision
 // `.item()` in non-cuda code does not prevent cudagraph
-#define FOREACH_BINARY_OP_SCALAR_TENSOR_LIST(OP)                           \
-  std::vector<Tensor> foreach_tensor_##OP##_scalar_tensor_list_slow(       \
-      TensorList tensors1, TensorList tensors2, TensorList scalars) {      \
-    check_foreach_api_restrictions(tensors1, tensors2, scalars);           \
-    std::vector<Tensor> result;                                            \
-    result.reserve(tensors1.size());                                       \
-    for (const auto i : c10::irange(tensors1.size())) {                    \
-      result.emplace_back(tensors1[i].OP(tensors2[i], scalars[i].item())); \
-    }                                                                      \
-    return result;                                                         \
-  }                                                                        \
-                                                                           \
-  void foreach_tensor_##OP##_scalar_tensor_list_slow_(                     \
-      TensorList tensors1, TensorList tensors2, TensorList scalars) {      \
-    check_foreach_api_restrictions(tensors1, tensors2, scalars);           \
-    for (const auto i : c10::irange(tensors1.size())) {                    \
-      tensors1[i].OP##_(tensors2[i], scalars[i].item());                   \
-    }                                                                      \
+#define FOREACH_BINARY_OP_SCALAR_TENSOR_LIST(OP)                            \
+  std::vector<Tensor> foreach_tensor_##OP##_scalar_tensor_list_slow(        \
+      TensorList tensors1, TensorList tensors2, TensorList scalars) {       \
+    check_foreach_api_restrictions(tensors1, tensors2, scalars);            \
+    for (const auto& s : scalars) {                                         \
+      TORCH_CHECK(                                                          \
+          s.dim() == 0, "scalars must be 0-d tensors, got ", s.dim(), "d"); \
+      TORCH_CHECK(                                                          \
+          s.dtype() == kFloat64,                                            \
+          "scalars must be float64 tensors, got ",                          \
+          s.dtype());                                                       \
+    }                                                                       \
+    std::vector<Tensor> result;                                             \
+    result.reserve(tensors1.size());                                        \
+    for (const auto i : c10::irange(tensors1.size())) {                     \
+      result.emplace_back(tensors1[i].OP(tensors2[i], scalars[i].item()));  \
+    }                                                                       \
+    return result;                                                          \
+  }                                                                         \
+                                                                            \
+  void foreach_tensor_##OP##_scalar_tensor_list_slow_(                      \
+      TensorList tensors1, TensorList tensors2, TensorList scalars) {       \
+    check_foreach_api_restrictions(tensors1, tensors2, scalars);            \
+    for (const auto& s : scalars) {                                         \
+      TORCH_CHECK(                                                          \
+          s.dim() == 0, "scalars must be 0-d tensors, got ", s.dim(), "d"); \
+      TORCH_CHECK(                                                          \
+          s.dtype() == kFloat64,                                            \
+          "scalars must be float64 tensors, got ",                          \
+          s.dtype());                                                       \
+    }                                                                       \
+    for (const auto i : c10::irange(tensors1.size())) {                     \
+      tensors1[i].OP##_(tensors2[i], scalars[i].item());                    \
+    }                                                                       \
   }
 
 #define FOREACH_UNARY_OP(OP)                                           \
