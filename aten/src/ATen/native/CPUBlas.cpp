@@ -344,6 +344,7 @@ void gemm(
    const float beta,
    at::BFloat16 *c, int64_t ldc) {
    internal::normalize_last_dims(transa, transb, m, n, k, &lda, &ldb, &ldc);
+
 #if AT_MKLDNN_ENABLED()
 #ifdef __aarch64__
    // MKLDNN also supports ARM for bf16, and the bypass is only
@@ -364,6 +365,7 @@ void gemm(
     return;
    }
 #endif
+
 #if AT_BUILD_WITH_BLAS() && (defined(BLAS_HAS_SBGEMM) || defined(BLAS_HAS_BGEMM))
    if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
       // ADD PRINTF HERE
@@ -411,6 +413,7 @@ void gemm(
         }
       }
 #endif // end of defined(BLAS_HAS_BGEMM)
+
       return;
    }
 #endif
