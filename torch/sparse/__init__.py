@@ -73,13 +73,22 @@ mm = _add_docstr(
     and the (sparse or strided) matrix :attr:`mat2`. Similar to :func:`torch.mm`, if :attr:`mat1` is a
     :math:`(n \times m)` tensor, :attr:`mat2` is a :math:`(m \times p)` tensor, out will be a
     :math:`(n \times p)` tensor.
+
     When :attr:`mat1` is a COO tensor it must have `sparse_dim = 2`.
-    When inputs are COO tensors, this function also supports backward for both inputs.
 
-    Supports both CSR and COO storage formats.
+    Supports both CSR and COO storage formats for :attr:`mat1`.
 
-.. note::
-    This function doesn't support computing derivatives with respect to CSR matrices.
+    .. note::
+        **Gradient Support:**
+
+        - **Sparse @ Dense (COO or CSR @ strided):** Backward is supported for both inputs.
+        The sparse input receives a sparse gradient matching its input format (COO→COO, CSR→CSR),
+        while the dense input receives a dense gradient.
+
+        - **Sparse @ Sparse (COO @ COO or CSR @ CSR):** Forward pass is supported, but
+        backward is **not implemented** and will raise a RuntimeError.
+
+        - **Mixed sparse formats (COO @ CSR or CSR @ COO):** Not supported. Will raise a RuntimeError.
 
     This function also additionally accepts an optional :attr:`reduce` argument that allows
     specification of an optional reduction operation, mathematically performs the following operation:
