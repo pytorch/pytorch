@@ -1941,7 +1941,9 @@ class MultiProcContinuousTest(TestCase):
                 for i, (p, completion_queue) in enumerate(
                     zip(self.processes, self.completion_queues)
                 ):
-                    rv = retrieve_result_from_process_queue(p, completion_queue)
+                    rv = retrieve_result_from_process_queue(
+                        p, completion_queue, timeout=get_timeout(self.id())
+                    )
                     if isinstance(rv, unittest.SkipTest):
                         raise rv
                     if isinstance(rv, BaseException):
