@@ -6672,7 +6672,6 @@ class CommonTemplate:
     @skip_if_gpu_halide
     # Constant folding was explicitly turned off due to issue #108388
     # Turn it back on for test
-    @unittest.skipIf(config.triton.native_matmul, "native matmul has better precision")
     @torch._inductor.config.patch(
         joint_graph_constant_folding=True,
         # Numerical accuracy failure for triton fp16
@@ -6702,7 +6701,10 @@ class CommonTemplate:
             if self.device == "cpu":
                 FileCheck().check_not("cpp_fused").run(source_codes[0])
             else:
-                FileCheck().check_not("triton.jit").run(source_codes[0])
+                if config.triton.native_matmul:
+                    FileCheck().check("triton.jit").run(source_codes[0])
+                else:
+                    FileCheck().check_not("triton.jit").run(source_codes[0])
 
         # test dtype conversion
         for lowp_dtype in [torch.float16, torch.bfloat16]:
@@ -7104,13 +7106,14 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         _, (code0, code1) = _run_and_get_stripped_kernels(b, x)
         self.assertEqual(code0, code1)
 
-    @config.patch(
-        force_disable_caches=True,
+    @config.patch({
+        "force_disable_caches": True,
         # Test expects a single (fused) kernel to be generated
-        max_autotune_gemm_backends="ATEN",
-    )
+        "max_autotune_gemm_backends": "ATEN",
+        # native matmul codegens the matrix multiplication
+        "triton.native_matmul" : False,
+    })
     @skip_if_cpp_wrapper("run_and_get_kernels issue")
-    @unittest.skipIf(config.triton.native_matmul, "matmul is now generated")
     def test_deterministic_codegen_with_suffix(self):
         if "cpu" in str(self.device) and config.is_fbcode():
             raise unittest.SkipTest("cpp packaging is wacky in fbcode")
