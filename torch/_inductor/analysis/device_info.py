@@ -9,7 +9,7 @@ from torch._dynamo.device_interface import get_interface_for_device
 log = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class DeviceInfo:
     """
     Theoretical Numbers from data sheet. If two numbers are given, Tensor/Matrix Core vs not,
