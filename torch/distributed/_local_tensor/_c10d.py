@@ -271,7 +271,7 @@ def _local_functional_all_to_all_single(
 
         for i, dst in enumerate(group_ranks):
             splits = []
-            for j, src in enumerate(group_ranks):
+            for src in group_ranks:
                 splits.append(split_local_tensors[src][i])
             output_local_tensors[dst] = torch.cat(splits)
 

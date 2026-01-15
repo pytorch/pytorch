@@ -72,12 +72,12 @@ def signature_of(arg: KernelArgType, *, size_dtype: Optional[str]) -> str:
             return "constexpr"
         elif isinstance(arg.expr, (float, sympy.Float)):
             # Python floats are natively fp64, so use fp64 to preserve precision
-            return "fp64"
+            return "fp64" if config._use_fp64_for_unbacked_floats else "fp32"
         elif isinstance(arg.expr, sympy.Symbol) and symbol_is_type(
             arg.expr, (SymT.UNBACKED_FLOAT)
         ):
             # Unbacked floats from .item() should preserve fp64 precision
-            return "fp64"
+            return "fp64" if config._use_fp64_for_unbacked_floats else "fp32"
         elif isinstance(arg.expr, bool):
             return "i1"
 
