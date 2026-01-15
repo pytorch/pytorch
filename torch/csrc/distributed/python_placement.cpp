@@ -32,7 +32,7 @@ void initPlacementBindings(PyObject* module) {
       py::class_<Placement>(
           distributed_module,
           "Placement",
-          py::metaclass(abc_meta.ptr()),
+          py::metaclass(abc_meta),
           placement_class_docstring)
           .def(py::init<>()) // Allow construction of Python subclasses.
           .def(
@@ -45,7 +45,7 @@ void initPlacementBindings(PyObject* module) {
 
   auto shard_cls =
       py::class_<Shard, Placement>(
-          distributed_module, "Shard", py::metaclass(abc_meta.ptr()))
+          distributed_module, "Shard", py::metaclass(abc_meta))
           .def(py::init<int64_t>(), py::arg("dim"))
           .def_readonly("dim", &Shard::dim)
           .def("is_shard", &Shard::is_shard, py::arg("dim") = py::none())
@@ -64,7 +64,7 @@ void initPlacementBindings(PyObject* module) {
 
   auto strided_shard_cls =
       py::class_<StridedShard, Placement>(
-          distributed_module, "StridedShard", py::metaclass(abc_meta.ptr()))
+          distributed_module, "StridedShard", py::metaclass(abc_meta))
           .def(
               py::init<int64_t, int64_t>(),
               py::arg("dim"),
@@ -92,7 +92,7 @@ void initPlacementBindings(PyObject* module) {
 
   auto replicate_cls =
       py::class_<Replicate, Placement>(
-          distributed_module, "Replicate", py::metaclass(abc_meta.ptr()))
+          distributed_module, "Replicate", py::metaclass(abc_meta))
           .def(py::init())
           .def("is_replicate", &Replicate::is_replicate)
           .def(
@@ -114,7 +114,7 @@ void initPlacementBindings(PyObject* module) {
 
   auto partial_cls =
       py::class_<Partial, Placement>(
-          distributed_module, "Partial", py::metaclass(abc_meta.ptr()))
+          distributed_module, "Partial", py::metaclass(abc_meta))
           .def(py::init<>())
           .def(py::init<std::optional<std::string>>(), py::arg("reduce_op"))
           .def_readonly("reduce_op", &Partial::reduce_op)
