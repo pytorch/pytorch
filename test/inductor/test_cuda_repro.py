@@ -42,6 +42,7 @@ from torch.testing._internal.common_utils import (
     IS_FBCODE,
     MI350_ARCH,
     parametrize,
+    skipIfRocm,
     skipIfRocmArch,
     TEST_WITH_ASAN,
     TEST_WITH_ROCM,
@@ -2687,6 +2688,7 @@ def triton_poi_fused_add_reflection_pad2d_0(in_ptr0, in_ptr1, out_ptr0, xnumel, 
 
         self.assertTrue(compile_decimal > Decimal(0))
 
+    @skipIfRocm(msg="ROCm preserves subnormals by default")
     @config.patch({"eager_numerics.disable_ftz": False})
     def test_not_disabling_ftz_yields_zero(self):
         from decimal import Decimal
