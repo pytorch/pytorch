@@ -2247,6 +2247,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @dtypes(*device_configs["cpu"].dtypes)
     @dtypesIfCUDA(*device_configs["cuda"].dtypes)
     @dtypesIfXPU(*device_configs["xpu"].dtypes)
+    @common_utils.skipIfRocmArch(common_utils.MI200_ARCH)
     def test_autocast(self, device, dtype):
         """Test torch autocast functionality"""
         q = torch.randn(1, 1, 1024, 64, device=device, dtype=dtype).to(torch.float16)
