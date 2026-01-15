@@ -2,6 +2,8 @@
 # implement matrix related ops for distributed tensor
 
 
+import copy
+
 import torch
 from torch._ops import OpOverload
 from torch.distributed.device_mesh import DeviceMesh
@@ -325,13 +327,8 @@ def gen_single_dim_einsum_strategies(
     ) -> Placement | _ShardingPlaceholder:
         """Derive bias placement from output placement, accounting for broadcast."""
         if broadcast_dims_map is None:
-            return output_placement
-
-        if isinstance(output_placement, Partial):
-            return Partial()
-        elif isinstance(output_placement, Replicate):
-            return Replicate()
-        elif isinstance(output_placement, _ShardingPlaceholder):
+            return copy.copy(output_placement)
+        if isinstance(output_placement, _ShardingPlaceholder):
             output_dim_idx = output_placement.dim
             bias_dim = broadcast_dims_map[output_dim_idx]
             if bias_dim == -1:
@@ -340,7 +337,8 @@ def gen_single_dim_einsum_strategies(
             else:
                 return _ShardingPlaceholder(bias_dim)
         else:
-            return Replicate()
+            # Clone Partial, Replicate, or other placements
+            return copy.copy(output_placement)
 
     def _maybe_add_bias(
         placement_list: list[Placement | _ShardingPlaceholder],
