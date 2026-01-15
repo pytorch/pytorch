@@ -94,6 +94,11 @@ jobs:
             "${DOCKER_IMAGE}"
           )
 
+          if [[ "${{ matrix.arch }}" == "aarch64"]]; then
+            docker exec -t "${container_name}" bash -c \
+              "yum install -y glibc-2.29 || dnf install -y glibc-2.29 || true"
+          fi
+
           PYTHON_EXECUTABLE=/opt/python/cp312-cp312/bin/python
           docker exec -t "${container_name}" "${PYTHON_EXECUTABLE}" -m pip install \
             torch --index-url "https://download.pytorch.org/whl/cu${CUDA_SHORT}"
