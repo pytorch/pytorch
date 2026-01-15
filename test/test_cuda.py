@@ -859,6 +859,7 @@ print(t.is_pinned())
             self.assertEqual(torch.backends.cudnn.rnn.fp32_precision, "none")
 
     @recover_orig_fp32_precision
+    @serialTest()
     def test_fp32_precision_with_float32_matmul_precision(self):
         torch.set_float32_matmul_precision("highest")
         self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "ieee")
@@ -868,6 +869,7 @@ print(t.is_pinned())
         self.assertEqual(torch.backends.cuda.matmul.fp32_precision, "tf32")
 
     @recover_orig_fp32_precision
+    @serialTest()
     def test_invalid_status_for_legacy_api(self):
         torch.backends.cudnn.conv.fp32_precision = "none"
         torch.backends.cudnn.rnn.fp32_precision = "tf32"
@@ -3998,6 +4000,7 @@ print(f"{{r1}}, {{r2}}")
         x = torch.cuda.device_count()
         self.assertEqual(f"{x}, 1", r)
 
+    @unittest.skipUnless("CI" in os.environ, "Only run on CI")
     @unittest.skipIf(
         _get_torch_cuda_version() >= (13, 1),
         "This test does not fail on CUDA 13.1 or newer",
@@ -5582,16 +5585,29 @@ class TestCachingHostAllocatorCudaGraph(TestCase):
                 assert new_data_ptr != old_data_ptr
 
     def test_unpinned_memory_use(self):
-        # It is allowed to call copy_(non_blocking=True) on pageable
-        # host memory. TODO: We should test that a warning is emitted
-        # here, since we have no way to guarantee that pageable host
-        # memory allocated during stream capture stays alive so long
-        # as the graph is alive.
+        # Copying between CPU and CUDA tensors during graph capture
+        # with unpinned CPU memory should raise an error.
         graph = torch.cuda.CUDAGraph()
-        with torch.cuda.graph(graph):
-            data = torch.empty(8)
-            data_gpu = torch.randn(8, device="cuda")
-            data_gpu.copy_(data, non_blocking=True)
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Cannot copy between CPU and CUDA tensors during CUDA graph capture",
+        ):
+            with torch.cuda.graph(graph):
+                data = torch.empty(8)
+                data_gpu = torch.randn(8, device="cuda")
+                data_gpu.copy_(data, non_blocking=True)
+
+    def test_unpinned_memory_use_device_to_host(self):
+        # Copying from CUDA to unpinned CPU during graph capture should also error.
+        graph = torch.cuda.CUDAGraph()
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "Cannot copy between CPU and CUDA tensors during CUDA graph capture",
+        ):
+            with torch.cuda.graph(graph):
+                data_gpu = torch.randn(8, device="cuda")
+                data = torch.empty(8)
+                data.copy_(data_gpu, non_blocking=True)
 
 
 @unittest.skipIf(not TEST_CUDA, "CUDA not available, skipping tests")
@@ -5800,6 +5816,37 @@ class TestMemPool(TestCase):
 
         # called_dummy_free should be 321 if dummy_free was used to deallocate
         # out tensor
+        self.assertEqual(called_dummy_free.value, 321)
+
+    def test_tensor_delete_after_allocator_delete(self):
+        allocator, dummy_allocator = self.get_dummy_allocator(check_vars=True)
+        pool = torch.cuda.MemPool(allocator.allocator())
+
+        with torch.cuda.use_mem_pool(pool):
+            data = torch.empty(4, device="cuda")
+
+        alloc_lib = ctypes.CDLL(dummy_allocator)
+        called_dummy_alloc = ctypes.c_int.in_dll(alloc_lib, "called_dummy_alloc")
+        called_dummy_free = ctypes.c_int.in_dll(alloc_lib, "called_dummy_free")
+
+        self.assertEqual(called_dummy_alloc.value, 123)
+        self.assertEqual(called_dummy_free.value, 0)
+
+        # Explicitly drop the allocator before releasing the
+        # tensor. CUDACachingAllocator's PrivatePool instance should
+        # keep the allocator live until all tensors die.
+
+        # N.B.: Deleting the pool doesn't actually do anything, since
+        # it doesn't own the allocator object. But we do it anyway
+        # because it is the situation that users are likely to face.
+        del pool
+        del allocator
+
+        self.assertEqual(called_dummy_free.value, 0)
+
+        del data
+        torch.cuda.empty_cache()
+
         self.assertEqual(called_dummy_free.value, 321)
 
     @serialTest()
@@ -7156,6 +7203,32 @@ class TestCudaAutocast(TestAutocast):
                     self.assertEqual(h_out, h_out_control)
                 for grad, grad_control in zip(grads, grads_control):
                     self.assertEqual(grad.half(), grad_control)
+
+    @unittest.skipIf(not TEST_CUDNN, "CUDNN not available")
+    def test_rnn_packed_sequence_batch_sizes_must_be_cpu(self):
+        # Verify that passing batch_sizes on CUDA raises an error instead of segfaulting
+        data = torch.randn([18, 16], dtype=torch.float32, device="cuda")
+        batch_sizes = torch.tensor([8, 6, 4], dtype=torch.int64, device="cuda")
+        hx = torch.randn([1, 8, 32], dtype=torch.float32, device="cuda")
+        params = [
+            torch.randn([32, 16], dtype=torch.float32, device="cuda"),
+            torch.randn([32, 32], dtype=torch.float32, device="cuda"),
+        ]
+
+        with self.assertRaisesRegex(
+            RuntimeError, "batch_sizes tensor should be on CPU"
+        ):
+            torch.ops.aten.rnn_relu(
+                data,
+                batch_sizes=batch_sizes,
+                hx=hx,
+                params=params,
+                has_biases=False,
+                num_layers=1,
+                dropout=0.5,
+                train=False,
+                bidirectional=False,
+            )
 
     @serialTest()
     def test_autocast_cache_leak(self):

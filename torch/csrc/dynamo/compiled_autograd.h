@@ -365,8 +365,10 @@ struct AutogradCompilerCall {
   std::vector<uint32_t> size_input_origins;
   std::unordered_map<const SavedVariable*, std::pair<size_t, size_t>>
       sv_to_hooks;
-  // pynode -> backward and backward state idx
-  std::unordered_map<const Node*, std::pair<size_t, std::optional<size_t>>>
+  // pynode -> backward idx, backward state idx, opaque object indices
+  std::unordered_map<
+      const Node*,
+      std::tuple<size_t, std::optional<size_t>, std::vector<size_t>>>
       pynode_objs;
 };
 
@@ -642,14 +644,20 @@ class CompiledNodeArgs {
   void collect_pynode_objs(
       const Node* pynode,
       c10::SafePyObject&& bwd,
-      std::optional<c10::SafePyObject>&& bwd_state) {
+      std::optional<c10::SafePyObject>&& bwd_state,
+      std::vector<c10::SafePyObject>&& opaque_objs) {
     size_t bwd_idx = _compiler.emplace_hook(std::move(bwd));
     std::optional<size_t> bwd_state_idx;
     if (auto state = std::move(bwd_state); state.has_value()) {
       bwd_state_idx = _compiler.emplace_hook(std::move(state.value()));
     }
+    std::vector<size_t> opaque_indices(opaque_objs.size());
+    for (size_t i = 0; i < opaque_objs.size(); i += 1) {
+      opaque_indices[i] = _compiler.emplace_hook(std::move(opaque_objs[i]));
+    }
     _compiler.pynode_objs.emplace(
-        pynode, std::make_pair(bwd_idx, bwd_state_idx));
+        pynode,
+        std::make_tuple(bwd_idx, bwd_state_idx, std::move(opaque_indices)));
   }
 
   void add_tensor_pre_hook(c10::SafePyObject&& obj, int index) {
@@ -785,8 +793,8 @@ class SwapSavedVariables {
   // cache-miss. It swaps any 'lifted' inputs (tensors, symints) to proxy nodes,
   // allows tracing to happen, then swaps them back afterwards.
  public:
-  std::pair<size_t, std::optional<size_t>> retrieve_pynode_objs(
-      Node* pynode) const {
+  std::tuple<size_t, std::optional<size_t>, std::vector<size_t>>
+  retrieve_pynode_objs(Node* pynode) const {
     auto it = compiler.pynode_objs.find(pynode);
     TORCH_INTERNAL_ASSERT(it != compiler.pynode_objs.end());
     return it->second;
