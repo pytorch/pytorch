@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import warnings
-from typing import TYPE_CHECKING
+from typing import Any, TYPE_CHECKING
 
 import torch
 
@@ -25,8 +25,6 @@ from .common import (
 
 if TYPE_CHECKING:
     from collections.abc import Callable, Sequence
-
-from typing import Any
 
 
 aten = torch.ops.aten
@@ -58,8 +56,12 @@ def register_binary_linear(op: OpType) -> Callable[..., Any]:
     return register_complex(op, impl)
 
 
-def register_binary_linear_inplace(op: OpType, out_of_place_impl: Callable):
-    def impl(lhs: ComplexTensor, rhs: ComplexTensor, *args, **kwargs) -> ComplexTensor:
+def register_binary_linear_inplace(
+    op: OpType, out_of_place_impl: Callable
+) -> Callable[..., Any]:
+    def impl(
+        lhs: ComplexTensor, rhs: ComplexTensor, *args: Any, **kwargs: Any
+    ) -> ComplexTensor:
         result = out_of_place_impl(lhs, rhs, *args, **kwargs)
         lhs.copy_(result)
         return lhs
@@ -976,18 +978,6 @@ def _dt_to_real(dt: torch.dtype | Any) -> torch.dtype | Any:
     return COMPLEX_TO_REAL[dt]
 
 
-def register_to_impl(op: OpType) -> Callable[..., Any]:
-    """Register an op similar to `aten.to`, but may have different signatures."""
-
-    def impl(
-        self: ComplexTensor, *args: Any, **kwargs: Any
-    ) -> torch.Tensor | ComplexTensor:
-        x, y = split_complex_tensor(self)
-        try:
-            args = tuple(_dt_to_real(a) for a in args)
-            kwargs = {k: _dt_to_real(v) for k, v in kwargs.items()}
-        except KeyError:
-            return op(x, *args, **kwargs)
 @register_complex(aten.to.dtype_layout)
 def to_dtype_layout(
     self: ComplexTensor,
@@ -995,8 +985,8 @@ def to_dtype_layout(
     dtype: torch.dtype | None,
     device: torch.Device | None = None,
     copy: bool = False,
-    _op=aten.to,
-    **kwargs,
+    _op: OpType = aten.to,
+    **kwargs: Any,
 ) -> ComplexTensor | torch.Tensor:
     if device == self.device:
         device = None

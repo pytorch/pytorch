@@ -43,7 +43,10 @@ class ComplexTensor(Tensor):
                     real = torch._conj(real)
                 data = torch.view_as_real(real)
             else:
-                assert real.shape[-1] == 2
+                if real.shape[-1] != 2:
+                    raise RuntimeError(
+                        f"Expected `real.shape[-1] == 2`, got `{real.shape=}`."
+                    )
                 data = real
 
         else:
@@ -108,7 +111,7 @@ class ComplexTensor(Tensor):
 
         return res
 
-    def __init__(self, *a, **kw) -> None:
+    def __init__(self, *a: Any, **kw: Any) -> None:
         super().__init__()
 
     @property
@@ -173,7 +176,7 @@ class ComplexTensor(Tensor):
         return ["_data"], {"neg_flag": self.is_neg(), "conj_flag": self.is_conj()}
 
     def __repr__(self, *, tensor_contents: object | None = None) -> str:
-        return f"ComplexTensor({self._data!r}, conj_flag={self._conj_flag!r}, neg_flag={self._neg_flag!r})"
+        return f"ComplexTensor({self._data!r}, conj_flag={self.is_conj()!r}, neg_flag={self.is_neg()!r})"
 
     def is_pinned(self, device: DeviceLikeType | None = None) -> bool:
         return self._data.is_pinned(device)
