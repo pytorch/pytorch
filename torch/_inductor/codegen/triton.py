@@ -5037,17 +5037,15 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 if isinstance(arg, int):
                     args.append(str(arg))
                 elif isinstance(arg, SymbolicCallArg):
-                    hint = V.graph.sizevars.size_hint(
+                    hint = V.graph.sizevars.optimization_hint_with_override(
                         arg.inner_expr,
                         hint_override=self.hint_override,
-                        fallback=config.unbacked_symint_fallback,
                     )
                     args.append(str(hint))
                 elif isinstance(arg, sympy.Expr):
-                    hint = V.graph.sizevars.size_hint(
+                    hint = V.graph.sizevars.optimization_hint_with_override(
                         arg,
                         hint_override=self.hint_override,
-                        fallback=config.unbacked_symint_fallback,
                     )
                     args.append(str(hint))
                 else:
@@ -5076,15 +5074,13 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 var_name = f"arg_{next(name_cnt)}"
                 buf = V.graph.try_get_buffer(arg_name)
                 if buf:
-                    size = V.graph.sizevars.size_hints(
+                    size = V.graph.sizevars.optimization_hints_with_override(
                         buf.get_size(),
                         hint_override=self.hint_override,
-                        fallback=config.unbacked_symint_fallback,
                     )
-                    stride = V.graph.sizevars.size_hints(
+                    stride = V.graph.sizevars.optimization_hints_with_override(
                         buf.get_stride(),
                         hint_override=self.hint_override,
-                        fallback=config.unbacked_symint_fallback,
                     )
                     result.writeline(
                         f"{var_name} = rand_strided({size}, {stride}, device='{buf.get_device()}', dtype={buf.get_dtype()})"  # noqa: B950 line too long
@@ -5092,24 +5088,21 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 elif arg_name in V.graph.constants:
                     # note that random seed is put in V.graph.constants
                     const_tensor = V.graph.constants[arg_name]
-                    size = V.graph.sizevars.size_hints(
+                    size = V.graph.sizevars.optimization_hints_with_override(
                         const_tensor.size(),
                         hint_override=self.hint_override,
-                        fallback=config.unbacked_symint_fallback,
                     )
-                    stride = V.graph.sizevars.size_hints(
+                    stride = V.graph.sizevars.optimization_hints_with_override(
                         const_tensor.stride(),
                         hint_override=self.hint_override,
-                        fallback=config.unbacked_symint_fallback,
                     )
                     result.writeline(
                         f"{var_name} = rand_strided({size}, {stride}, device='{const_tensor.device}', dtype={const_tensor.dtype})"  # type: ignore[arg-type]  # noqa: B950 line too long
                     )
                 elif isinstance(arg_sig, SizeArg):
-                    symval_hint = V.graph.sizevars.size_hint(
+                    symval_hint = V.graph.sizevars.optimization_hint_with_override(
                         arg_sig.expr,
                         hint_override=self.hint_override,
-                        fallback=config.unbacked_symint_fallback,
                     )
 
                     # Force the seed_offset to be 0 so calls to the same kernel
@@ -5120,7 +5113,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                     result.writeline(f"{var_name} = {symval_hint}")
                 elif isinstance(arg_sig, WorkspaceArg):
                     device = V.graph.get_current_device_or_throw()
-                    count = V.graph.sizevars.size_hint(
+                    count = V.graph.sizevars.optimization_hint_with_override(
                         arg_sig.count, hint_override=self.hint_override
                     )
                     result.writeline(
