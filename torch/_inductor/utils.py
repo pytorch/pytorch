@@ -2413,17 +2413,15 @@ def use_ck_tile_gemm_template(layout: Layout, m: int, n: int, k: int) -> bool:
         and V.graph.sizevars.optimization_hint(m * n * k, fallback=-1) > 0
     )
 
+
 def use_origami_gemm_template(layout: Layout) -> bool:
-    if config.origami:
+    if (torch.version.hip is not None) and (config.origami):
         try:
-            import origami
+            import origami  # type: ignore
         except ImportError:
-            print(
-                "Origami not imported, install it with `pip install git+https://github.com/origami-ai/origami.git`"
-            )
+            print("Origami not imported")
             return False
-        else:
-            return use_triton_template(layout, check_max_autotune=False)
+        return use_triton_template(layout, check_max_autotune=False)
     return False
 
 

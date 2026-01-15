@@ -325,7 +325,6 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             GemmConfig(256, 128, 128, 3, 8),
         ]
 
-        
         self.mixed_mm_configs: list[BaseConfig] = [
             GemmConfig(16, 128, 256, 3, 4),
             GemmConfig(16, 128, 256, 5, 8),
@@ -1086,7 +1085,6 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
 
     def get_exhaustive_mm_configs(self) -> partial[Generator[TritonConfig, None, None]]:
         return partial(self.preprocess_mm_configs, configs=self.exhaustive_configs)
-    
 
     def get_conv_configs(self) -> partial[Generator[TritonConfig, None, None]]:
         return partial(
@@ -2016,8 +2014,11 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
 
         # Generate and process configs
         if (torch.version.hip is not None) and config.origami:
-            import origami
-            #import pdb; pdb.set_trace()
+            try:
+                import origami  # type: ignore
+            except ImportError:
+                raise ImportError("Origami not imported")
+
             origami_cfg_gen = self.get_exhaustive_mm_configs()
             allcfgs = origami_cfg_gen(
                 m, n, k, dtype_size=dtype.itemsize, op_name=op_name
@@ -2026,19 +2027,19 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                 allcfgs, m, n, k, dtype, dtype, dtype, device
             )
             origami_config_kwargs = {
-                'EVEN_K': selector.even_k,
-                'USE_FAST_ACCUM': False,
-                'ACC_TYPE': 'tl.float32',
-                'num_stages': 2,
-                'num_warps': 8,
-                'BLOCK_M': selector.block_m,
-                'BLOCK_N': selector.block_n,
-                'BLOCK_K': selector.block_k,
-                'GROUP_M': selector.group_m,
-                'matrix_instr_nonkdim': 16,
-                'waves_per_eu': selector.waves_per_eu,
-                'kpack': 2,
-                '_origami_config': True,
+                "EVEN_K": selector.even_k,
+                "USE_FAST_ACCUM": False,
+                "ACC_TYPE": "tl.float32",
+                "num_stages": 2,
+                "num_warps": 8,
+                "BLOCK_M": selector.block_m,
+                "BLOCK_N": selector.block_n,
+                "BLOCK_K": selector.block_k,
+                "GROUP_M": selector.group_m,
+                "matrix_instr_nonkdim": 16,
+                "waves_per_eu": selector.waves_per_eu,
+                "kpack": 2,
+                "_origami_config": True,
             }
             yield origami_config_kwargs
         else:
@@ -2058,7 +2059,6 @@ class MMTemplateConfigMixin(GemmMaxAutotuneTemplateConfigHeuristics):
                     kernel_inputs.out_dtype(),
                 )
                 yield template_kwargs
-
 
     def _convert_config_to_template_kwargs(
         self,
