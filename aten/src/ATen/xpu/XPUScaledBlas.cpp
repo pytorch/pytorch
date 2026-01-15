@@ -119,4 +119,43 @@ bool check_rowwise_recipe(
   return true;
 }
 
+/**
+ * Both inputs must be fp8
+ * A, B must only have 1 scale each, A: {Blockwise_1x128 (float), B: {Blockwise_128x128 (float)
+ * or other DeepSeek-style blockwise scaling combinations
+ */
+bool check_deepseek_recipe(
+    ScalingType expected_recipe_a,
+    ScalingType expected_recipe_b,
+    c10::ScalarType type_a,
+    std::vector<ScalingType>& recipe_a,
+    ArrayRef<Tensor>& scales_a,
+    c10::ScalarType type_b,
+    std::vector<ScalingType>& recipe_b,
+    ArrayRef<Tensor>& scales_b) {
+  // both types must be fp8 (specifically e4m3fn for DeepSeek-style)
+  if (type_a != ScalarType::Float8_e4m3fn ||
+      type_b != ScalarType::Float8_e4m3fn) {
+    return false;
+  }
+
+  // 1 scales, 1 recipes for each input
+  if (scales_a.size() != 1 || recipe_a.size() != 1 || scales_b.size() != 1 ||
+      recipe_b.size() != 1) {
+    return false;
+  }
+
+  // Need {expected_recipe_a, float} for A, {expected_recipe_b, float} for B
+  if (recipe_a[0] != expected_recipe_a)
+    return false;
+  if (scales_a[0].scalar_type() != ScalarType::Float)
+    return false;
+  if (recipe_b[0] != expected_recipe_b)
+    return false;
+  if (scales_b[0].scalar_type() != ScalarType::Float)
+    return false;
+
+  return true;
+}
+
 } // namespace at::native::onednn::scaled
