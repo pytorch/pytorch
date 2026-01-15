@@ -375,14 +375,16 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
     @with_comms
     def test_div_partial(self):
-        # Test that Partial(sum) / Replicate -> Partial(sum)
-        # This is mathematically sound: (a1 + a2) / b = a1/b + a2/b
+        # we only test the partial behavior for div op as other placement
+        # behaviors should be well tested in test_dtensor_ops.py
         device_mesh = self.build_device_mesh()
         comm_mode = CommDebugMode()
 
+        # 1. test the partial input DTensor / scalar/replicate input
+        # This is mathematically sound: (a1 + a2) / b = a1/b + a2/b
         input = torch.full((8, 8), 2.0, device=self.device_type)
 
-        # Test for different types of divisors
+        # test for different types of other inputs
         other_inps = (
             2.0,  # scalar
             torch.tensor(2.0, device=self.device_type),  # scalar tensor
@@ -411,7 +413,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
                 self.assertEqual(z.placements, (Partial(partial_op),))
                 self.assertEqual(z.full_tensor(), expected_p_out)
 
-        # test other partial (e.g., max) to assert the partial not getting propagated
+        # test other partial to assert the partial not getting propagated
         d_input = DTensor.from_local(input, device_mesh, [Partial("max")])
         d_other = distribute_tensor(
             torch.full((8, 8), 2.0, device=self.device_type), device_mesh, [Replicate()]
