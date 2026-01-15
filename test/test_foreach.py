@@ -1561,7 +1561,7 @@ class TestForeach(TestCase):
 
     @dtypes(*all_types_and_complex_and(torch.half, torch.bfloat16))
     @parametrize("op_name", ["add", "sub"])
-    @parametrize("seed", list(range(1)))
+    @parametrize("seed", list(range(20)))
     def test_scalar_tensor_list_equivalence(self, device, dtype, op_name, seed):
         """Test that ScalarTensorList variants produce bitwise identical results to List variants with alpha."""
         torch.manual_seed(seed)
@@ -1570,19 +1570,6 @@ class TestForeach(TestCase):
         shapes = [(10,), (20, 30), (5, 5, 5), (1,), (100,)]
         tensors1 = [make_tensor(shape, device=device, dtype=dtype) for shape in shapes]
         tensors2 = [make_tensor(shape, device=device, dtype=dtype) for shape in shapes]
-
-        # Test with uniform alpha (same scalar for all tensors)
-        if dtype.is_complex:
-            alpha_val = 2.5 + 1.5j
-        elif dtype.is_floating_point:
-            alpha_val = 2.5
-        else:
-            alpha_val = 3
-
-        # Create 0-d tensors for ScalarTensorList variant (all same value)
-        scalar_tensors_uniform = [
-            torch.tensor(alpha_val, device=device, dtype=dtype) for _ in tensors1
-        ]
 
         # Get the foreach ops
         if op_name == "add":
