@@ -2027,6 +2027,7 @@ class MultiProcContinuousTest(TestCase):
                     while True:
                         try:
                             rv = completion_queue.get(timeout=120)
+                            break
                         except queue.Empty:
                             # If not alive do a last check because the timeout might have happened just before completion
                             if not p.is_alive() and completion_queue.empty():
