@@ -347,13 +347,14 @@ IF(USE_MSLK)
         list(PREPEND MSLK_EXTRA_HIPCC_FLAGS -mllvm -amdgpu-coerce-illegal-types=1)
       endif()
 
-    # Only compile for gfx942 for now.
-    # This is rather hacky, I could not figure out a clean solution :(
+    # Only compile for gfx942 and gfx950.
     set(HIP_CLANG_FLAGS_ORIGINAL ${HIP_CLANG_FLAGS})
     string(REGEX REPLACE "--offload-arch=[^ ]*" "" FILTERED_HIP_CLANG_FLAGS "${HIP_CLANG_FLAGS}")
-    if("gfx942" IN_LIST PYTORCH_ROCM_ARCH)
-      list(APPEND FILTERED_HIP_CLANG_FLAGS --offload-arch=gfx942;)
-    endif()
+    foreach(ARCH gfx942 gfx950)
+      if(${ARCH} IN_LIST PYTORCH_ROCM_ARCH)
+        list(APPEND FILTERED_HIP_CLANG_FLAGS --offload-arch=${ARCH})
+      endif()
+    endforeach()
     set(HIP_CLANG_FLAGS ${FILTERED_HIP_CLANG_FLAGS})
 
     hip_add_library(

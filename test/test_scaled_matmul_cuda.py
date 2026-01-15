@@ -70,7 +70,7 @@ if TEST_CUDA:
     _IS_SM8X = torch.cuda.get_device_capability(0)[0] == 8
 
 f8_msg = "FP8 is only supported on H100+, SM 8.9 and MI300+ and XPU devices"
-f8_grouped_msg = "FP8 grouped is only supported on SM90 and MI300+ devices"
+f8_grouped_msg = "FP8 grouped is only supported on SM90 and MI300/MI350 devices"
 mx_skip_msg = "MX gemm is only supported on CUDA capability 10.0+"
 mxfp8_grouped_mm_skip_msg = "MXFP8 grouped GEMM is only supported when PyTorch is built with USE_MSLK=1 on SM100+"
 
