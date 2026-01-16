@@ -212,22 +212,27 @@ class MetalOverrides(OpOverrides):
     @staticmethod
     def masked(mask: CSEVariable, body: sympy.Expr, other: CSEVariable) -> str:
         # TODO: Type annotation for other is wrong, it's often float or int
-        masked_code = IndentedBuffer()
-        masked_code.writeline("[&]() {")
-        with masked_code.indent():
-            masked_code.writeline(f"if ({mask}) {{")
-            with V.kernel.swap_buffers(masked_code), masked_code.indent():
-                V.kernel.cse.iter_buffer_ids = itertools.count()
-                V.kernel.cse.name_prefix = "tmp_scoped_"
-                rc = body()
-            with masked_code.indent():
-                masked_code.writeline(f"return {rc};")
-            masked_code.writeline("}")
-            masked_code.writeline(f"return static_cast<{DTYPE_TO_METAL[rc.dtype]}>({value_to_metal(other)});")
-        masked_code.writeline("}()")
-        return V.kernel.cse.generate(
-            V.kernel.compute, masked_code, dtype=rc.dtype
-        )
+        # TODO: Should it be converted to lambda on MacOS-15+?
+
+        other_str = value_to_metal(other)
+        scoped_body = IndentedBuffer()
+        with V.kernel.swap_buffers(scoped_body), scoped_body.indent():
+            V.kernel.cse.iter_buffer_ids = itertools.count()
+            V.kernel.cse.name_prefix = "tmp_scoped_"
+            rc = body()
+
+        cache_key = f"{scoped_body.getvalue()}:other_str"
+        var = V.kernel.cse.try_get(cache_key)
+        if not var:
+            var = V.kernel.cse.newvar(dtype=rc.dtype)
+            V.kernel.cse.put(cache_key, var)
+            V.kernel.compute.writeline(f"{DTYPE_TO_METAL[rc.dtype]} {var};")
+            V.kernel.compute.writeline(f"if ({mask}) {{")
+            with V.kernel.compute.indent():
+                V.kernel.compute.splice(scoped_body)
+                V.kernel.compute.writeline(f"{var} = {rc};")
+            V.kernel.compute.writeline(f"}} else {var} = {other_str};")
+        return var
 
     @staticmethod
     def where(a: OpVarT, b: OpVarT, c: OpVarT) -> str:
