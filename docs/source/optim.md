@@ -550,6 +550,7 @@ Decay is a parameter between 0 and 1 that controls how fast the averaged paramet
     W_0^{\text{EMA}} = W_0^{\text{model}}
     ```
 
+
     ```{math}
     W_{t+1}^{\text{EMA}} = \text{decay} \times W_t^{\text{EMA}} + (1 - \text{decay}) \times W_{t+1}^{\text{model}}
     ```
