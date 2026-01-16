@@ -1333,9 +1333,7 @@ def forward(self, primals_1):
             # Redistribute DTensor
             return dt.redistribute(mesh, [Replicate()])
 
-        compiled_fn = torch.compile(
-            inner_fn, backend="invoke_subgraph", fullgraph=True
-        )
+        compiled_fn = torch.compile(inner_fn, backend="invoke_subgraph", fullgraph=True)
 
         def outer_fn(x):
             # Convert plain tensor to DTensor
@@ -1352,7 +1350,8 @@ def forward(self, primals_1):
 
         # Verify the full graph structure including invoke_subgraph
         graph_str = "\n".join(
-            line.rstrip() for line in traced.print_readable(print_output=False).strip().split("\n")
+            line.rstrip()
+            for line in traced.print_readable(print_output=False).strip().split("\n")
         )
         self.assertExpectedInline(
             graph_str,
