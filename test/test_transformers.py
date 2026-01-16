@@ -2795,7 +2795,8 @@ class TestSDPACudaOnly(NNTestCase):
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_preserves_query_layout(self, device):
 
-        def test_attention(backend: SDPBackend, permute_order: list[list[int]]):
+        def test_attention(backend: SDPBackend, permute_order: list[list[int]], use_compile: bool):
+            torch._dynamo.reset()
             BHSqD = [4, 16, 256, 64]
             BHSkvD = [4, 16, 512, 64]
 
@@ -2809,17 +2810,60 @@ class TestSDPACudaOnly(NNTestCase):
             self.assertEqual(k.shape, BHSkvD)
             self.assertEqual(v.shape, BHSkvD)
 
-            with sdpa_kernel(backend):
-                out = F.scaled_dot_product_attention(q, k, v)
-                self.assertTrue(out.permute(permute_order).is_contiguous())
-                out.sum().backward()
+            def fn(q, k, v):
+                with sdpa_kernel(backend):
+                    return F.scaled_dot_product_attention(q, k, v)
+
+            if use_compile:
+                fn = torch.compile(fn)
+
+            out = fn(q, k, v)
+            self.assertTrue(out.permute(permute_order).is_contiguous())
+            out.sum().backward()
 
         permute_orders = list()
         permutable = [0, 1, 2]
         permute_orders = itertools.permutations(permutable)
 
         for permute_order in permute_orders:
-            test_attention(SDPBackend.CUDNN_ATTENTION, list(permute_order) + [3])
+            for use_compile in [False, True]:
+                test_attention(SDPBackend.CUDNN_ATTENTION, list(permute_order) + [3], use_compile)
+
+    @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
+    @unittest.skipIf(
+        not (isSM90Device and torch.backends.cudnn.version() >= 91000),
+        "head_dim > 128 requires SM90 with cuDNN >= 9.1.0"
+    )
+    def test_cudnn_attention_interleaved_layout_compile(self, device):
+        """
+        Test cudnn attention with interleaved head layout under torch.compile.
+
+        This tests the specific case where query has strides like (B*S*H*D, D, H*D, 1)
+        meaning heads are interleaved within the sequence dimension. This layout
+        triggered a bug where the C++ alloc_with_matching_layout had an operator
+        precedence issue causing stride mismatches between Inductor's meta prediction
+        and runtime allocation.
+        """
+        torch._dynamo.reset()
+
+        B, H, S, D_q, D_v = 1, 128, 512, 192, 128
+
+        q = torch.randn(B, S, H, D_q, dtype=torch.bfloat16, device='cuda').permute(0, 2, 1, 3)
+        k = torch.randn(B, S, H, D_q, dtype=torch.bfloat16, device='cuda').permute(0, 2, 1, 3)
+        v = torch.randn(B, S, H, D_v, dtype=torch.bfloat16, device='cuda').permute(0, 2, 1, 3)
+
+        self.assertEqual(q.shape, (B, H, S, D_q))
+        self.assertEqual(q.stride(1), D_q)
+        self.assertEqual(q.stride(2), H * D_q)
+        self.assertFalse(q.is_contiguous())
+
+        @torch.compile
+        def fn(q, k, v):
+            with sdpa_kernel(SDPBackend.CUDNN_ATTENTION):
+                return F.scaled_dot_product_attention(q, k, v)
+
+        out = fn(q, k, v)
+        self.assertEqual(out.shape, (B, H, S, D_v))
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_compiles(self):
@@ -4241,7 +4285,7 @@ class TestSDPAXpuOnly(NNTestCase):
 
     def test_default_priority_order(self, device):
         # The default priority order of xpu is overridable, math, flash, efficient, cudnn
-        # For xpu backend, we need to make sure that overridable > math > flash
+        # For xpu backend, we need to make sure that overridable > flash > math
         dtype = torch.bfloat16
         shape = SdpaShape(1, 1, 1, 1)
         make_tensor = partial(torch.rand, shape, device=device, dtype=dtype)
@@ -4253,8 +4297,8 @@ class TestSDPAXpuOnly(NNTestCase):
         flash_index = default_priority.index(SDPBackend.FLASH_ATTENTION)
         overrideable_index = default_priority.index(SDPBackend.OVERRIDEABLE)
         math_index = default_priority.index(SDPBackend.MATH)
-        self.assertTrue(overrideable_index < math_index < flash_index,
-                        f"Expected overrideable < math < flash, got {overrideable_index}, {math_index}, {flash_index}")
+        self.assertTrue(overrideable_index < flash_index < math_index,
+                        f"Expected overrideable < flash < math, got {overrideable_index}, {flash_index}, {math_index}")
 
     def test_onednn_attention_different_dk_dv(self, device):
         dtype = torch.bfloat16
@@ -4553,33 +4597,6 @@ class TestSDPAXpuOnly(NNTestCase):
                 F.scaled_dot_product_attention(q, k, v, dropout_p=0.1)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_XPU_FLASH_ATTENTION, "XPU Flash Attention is not supported")
-    def test_flash_attention_unsupport_bhsd_layout(self, device):
-        dtype = torch.bfloat16
-        make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=False)
-        batch, num_heads, seqlen, head_dim = 32, 16, 32, 64
-        q_shape = SdpaShape(batch, seqlen, num_heads, head_dim)
-        k_shape = SdpaShape(batch, seqlen, num_heads, head_dim)
-        v_shape = SdpaShape(batch, seqlen, num_heads, head_dim)
-        q, k, v = make_tensor(q_shape), make_tensor(k_shape), make_tensor(v_shape)
-
-        # (B, S, H, D)
-        q = q.view(batch, seqlen, num_heads, head_dim).transpose(1, 2)
-        k = k.view(batch, seqlen, num_heads, head_dim).transpose(1, 2)
-        v = v.view(batch, seqlen, num_heads, head_dim).transpose(1, 2)
-
-        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
-            F.scaled_dot_product_attention(q, k, v)
-
-        # (B, H, S, D)
-        q = q.contiguous()
-        k = k.contiguous()
-        v = v.contiguous()
-
-        with sdpa_kernel(backends=[SDPBackend.FLASH_ATTENTION]):
-            with self.assertRaisesRegex(RuntimeError, "No available kernel"):
-                F.scaled_dot_product_attention(q, k, v)
-
-    @unittest.skipIf(not PLATFORM_SUPPORTS_XPU_FLASH_ATTENTION, "XPU Flash Attention is not supported")
     def test_flash_attention_headdim_size(self, device):
         dtype = torch.bfloat16
         make_tensor = partial(torch.rand, device=device, dtype=dtype, requires_grad=False)
@@ -4627,7 +4644,7 @@ class TestSDPAXpuOnly(NNTestCase):
     @parametrize("head_dim", [64, 96, 128, 192])
     @parametrize("mask_type", [None, "causal"])
     @parametrize("train", [True, False])
-    @parametrize("layout", ["bshd"])
+    @parametrize("layout", ["bshd", "bhsd"])
     @parametrize("enable_gqa", [True, False])
     def test_flash_attention_vs_math(
         self,
