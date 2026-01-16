@@ -64,6 +64,11 @@ extern "C" void zaxpy_(int *n, void *a, const void *x, int *incx, void *y, int *
 #if ((defined(ONEDNN_UKERNEL_1) || defined(ONEDNN_UKERNEL_2)) && (defined(__x86_64__) || (defined(_M_X64) && !defined(_M_ARM64EC))))
 #define ONEDNN_UKERNEL_ENABLED
 #endif
+
+#if IDEEP_PREREQ(3, 9, 0, 0)
+#define ONEDNN_FP8_UKERNEL_AVAILABLE
+#endif
+
 #endif  // AT_MKLDNN_ENABLED()
 
 #if defined(ONEDNN_UKERNEL_ENABLED)
@@ -1181,7 +1186,7 @@ struct Brgemm : public KernelCache <BrgemmKey, GemmHelper> {
     static bool bf16_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core;
     static bool u8_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
     static bool s8_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_vnni;
-#ifdef CPUBLAS_BRGEMM_F8F8F32
+#ifdef ONEDNN_FP8_UKERNEL_AVAILABLE
     static bool f8_support = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
 #else
     static bool f8_support = false;
@@ -1242,7 +1247,7 @@ struct Pack : public KernelCache <PackKey, pack_t> {
     static bool fp16_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx_fp16;
     static bool bf16_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
     static bool bit8_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
-#ifdef CPUBLAS_BRGEMM_F8F8F32
+#ifdef ONEDNN_FP8_UKERNEL_AVAILABLE
     static bool fp8_pack = dnnl::get_effective_cpu_isa() >= dnnl::cpu_isa::avx512_core_amx;
 #else
     static bool fp8_pack = false;
@@ -1428,7 +1433,6 @@ void brgemm(
     "I8 Brgemm is only supported on X64 when oneDNN ukernel is enabled and `amx` is supported");
 }
 
-#ifdef CPUBLAS_BRGEMM_F8F8F32
 void brgemm(
     int64_t M,
     int64_t N,
@@ -1441,7 +1445,7 @@ void brgemm(
     const at::Float8_e4m3fn* B,
     float* C,
     bool is_vnni) {
-#if defined(ONEDNN_UKERNEL_ENABLED)
+#if defined(ONEDNN_UKERNEL_ENABLED) && defined(ONEDNN_FP8_UKERNEL_AVAILABLE)
   if (is_vnni && Brgemm::device_check(ScalarType::Float8_e4m3fn)) {
     Brgemm::call<at::Float8_e4m3fn, at::Float8_e4m3fn, float>(
       M, N, K, ld_a, ld_b, ld_c, add_C, A, B, C);
@@ -1465,7 +1469,7 @@ void brgemm(
     const at::Float8_e5m2* B,
     float* C,
     bool is_vnni) {
-#if defined(ONEDNN_UKERNEL_ENABLED)
+#if defined(ONEDNN_UKERNEL_ENABLED) && defined(ONEDNN_FP8_UKERNEL_AVAILABLE)
   if (is_vnni && Brgemm::device_check(ScalarType::Float8_e5m2)) {
     Brgemm::call<at::Float8_e5m2, at::Float8_e5m2, float>(
       M, N, K, ld_a, ld_b, ld_c, add_C, A, B, C);
@@ -1476,7 +1480,6 @@ void brgemm(
   TORCH_CHECK(false,
     "F8 Brgemm is only supported on X64 when oneDNN ukernel is enabled and `amx` is supported");
 }
-#endif
 
 void brgemm_release(bool is_vnni) {
 #if defined(ONEDNN_UKERNEL_ENABLED)

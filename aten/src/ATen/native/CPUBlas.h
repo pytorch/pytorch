@@ -7,9 +7,6 @@
 #include <c10/core/ScalarType.h>
 #include <c10/core/Scalar.h>
 #include <ATen/Config.h>
-#if AT_MKLDNN_ENABLED()
-#include <ATen/native/mkldnn/MKLDNNCommon.h>
-#endif
 
 
 namespace at::native::cpublas {
@@ -219,11 +216,7 @@ void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<fl
 #define CPUBLAS_BRGEMM_U8U8I32 // unsigned char * unsigned char -> int32
 #define CPUBLAS_BRGEMM_U8I8I32 // unsigned char * signed char -> int32
 #define CPUBLAS_BRGEMM_I8I8I32 // signed char * signed char -> int32
-#if defined(DNNL_PREREQ)
-#if DNNL_PREREQ(3, 9, 0)
 #define CPUBLAS_BRGEMM_F8F8F32 // float8 * float8 -> float (e4m3 & e5m2)
-#endif
-#endif
 
 TORCH_API void brgemm(
     int64_t M,
