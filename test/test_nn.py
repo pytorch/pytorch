@@ -8224,6 +8224,26 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(cudnn_output, thnn_output, atol=1e-4, rtol=0)
             self.assertEqual(cudnn_input_grad, thnn_input_grad, atol=1e-3, rtol=0)
 
+    def test_InstanceNorm_cuda_mixed_running_stats_dtype(self, device):
+        if self.device_type != "cuda" or not TEST_CUDNN:
+            return
+
+        input = torch.empty(2, 3, 4, device=device, dtype=torch.half).random_(1, 10)
+        input.requires_grad_(True)
+
+        m = nn.InstanceNorm1d(input.size(1), affine=True, track_running_stats=True).to(
+            device, torch.half
+        )
+        m(input).sum().backward()
+
+        input.grad = None
+        m = m.float()
+        m.running_mean = m.running_mean.half()
+        m.running_var = m.running_var.half()
+        output = m(input)
+        output.sum().backward()
+        self.assertEqualTypeString(output, input)
+
     def _test_LayerNorm_general(self, device, dtype=torch.float):
         for i in range(2, 6):
             shape = torch.randint(3, 6, (i,), dtype=torch.long).tolist()
@@ -8407,7 +8427,10 @@ class TestNNDeviceType(NNTestCase):
         layer = torch.nn.InstanceNorm2d(3, affine=True, dtype=param_dtype, device=device)
         input_tensor = torch.randn(2, 3, 4, 4, dtype=input_dtype, device=device)
 
-        with self.assertRaisesRegex(RuntimeError, "(mixed dtype|does not match|Expected weight to have type)"):
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "(mixed dtype|does not match|Expected weight to have type|Expected tensor for argument #1 'input')",
+        ):
             output = layer(input_tensor)
 
     def _test_GroupNorm_general(self, device, dtype=torch.float):

@@ -742,13 +742,13 @@ Tensor instance_norm(
   shape[1] = b * c;
   shape[0] = SymInt(1);
 
-  // handle mixed dtype for running stats
-  const auto input_dtype = input.scalar_type();
+  // handle mixed dtype for running stats (match weight dtype when defined)
+  const auto stats_dtype = weight.defined() ? weight.scalar_type() : input.scalar_type();
   const bool mixed_dtype_stats = running_mean.defined() &&
-                                 running_mean.scalar_type() != input_dtype;
+                                 running_mean.scalar_type() != stats_dtype;
 
-  Tensor running_mean_for_bn = mixed_dtype_stats ? running_mean.to(input_dtype) : running_mean;
-  Tensor running_var_for_bn = mixed_dtype_stats ? running_var.to(input_dtype) : running_var;
+  Tensor running_mean_for_bn = mixed_dtype_stats ? running_mean.to(stats_dtype) : running_mean;
+  Tensor running_var_for_bn = mixed_dtype_stats ? running_var.to(stats_dtype) : running_var;
 
   Tensor weight_ = repeat_if_defined(weight, b);
   Tensor bias_ = repeat_if_defined(bias, b);
