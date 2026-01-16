@@ -747,13 +747,12 @@ Tensor instance_norm(
   const bool mixed_dtype_stats = running_mean.defined() &&
                                  running_mean.scalar_type() != stats_dtype;
 
-  Tensor running_mean_for_bn = mixed_dtype_stats ? running_mean.to(stats_dtype) : running_mean;
-  Tensor running_var_for_bn = mixed_dtype_stats ? running_var.to(stats_dtype) : running_var;
-
   Tensor weight_ = repeat_if_defined(weight, b);
   Tensor bias_ = repeat_if_defined(bias, b);
-  Tensor running_mean_ = repeat_if_defined(running_mean_for_bn, b);
-  Tensor running_var_ = repeat_if_defined(running_var_for_bn, b);
+  Tensor running_mean_ = repeat_if_defined(
+      mixed_dtype_stats ? running_mean.to(stats_dtype) : running_mean, b);
+  Tensor running_var_ = repeat_if_defined(
+      mixed_dtype_stats ? running_var.to(stats_dtype) : running_var, b);
 
   auto input_reshaped = input.contiguous().view_symint(shape);
   auto out = at::batch_norm(input_reshaped, weight_, bias_, running_mean_, running_var_,
