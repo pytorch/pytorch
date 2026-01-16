@@ -1,4 +1,5 @@
 # Owner(s): ["module: inductor"]
+import contextlib
 import functools
 import unittest
 
@@ -690,6 +691,7 @@ class TestUnbackedSymints(InductorTestCase):
         expected = fn(*example_inputs)
         torch.testing.assert_close(actual, expected)
 
+    @contextlib.contextmanager
     def _make_unbacked_coord_subclass(self, lib_name, runtime_coord_value, dispatch_fn):
         """
         Helper to create a custom op + subclass that returns an unbacked SymInt
@@ -715,76 +717,74 @@ class TestUnbackedSymints(InductorTestCase):
         unique_lib_name = f"{lib_name}_{uuid.uuid4().hex[:8]}"
 
         # Define custom op that mimics _runtime_compute_coordinate_on_dim
-        lib = torch.library.Library(unique_lib_name, "DEF")
+        with torch.library._scoped_library(unique_lib_name, "DEF") as lib:
+            lib.define(
+                "get_coord(Tensor x, int max_val) -> SymInt",
+                tags=torch.Tag.pt2_compliant_tag,
+            )
 
-        lib.define(
-            "get_coord(Tensor x, int max_val) -> SymInt",
-            tags=torch.Tag.pt2_compliant_tag,
-        )
+            @torch.library.register_fake(f"{unique_lib_name}::get_coord", lib=lib)
+            def get_coord_fake(x: torch.Tensor, max_val: int):
+                ctx = torch._custom_op.impl.get_ctx()
+                shape_env = ctx._shape_env
+                sz = shape_env.create_unbacked_symint()
+                _constrain_range_for_size(sz, min=0, max=max_val - 1)
+                return sz
 
-        @torch.library.register_fake(f"{unique_lib_name}::get_coord", lib=lib)
-        def get_coord_fake(x: torch.Tensor, max_val: int):
-            ctx = torch._custom_op.impl.get_ctx()
-            shape_env = ctx._shape_env
-            sz = shape_env.create_unbacked_symint()
-            _constrain_range_for_size(sz, min=0, max=max_val - 1)
-            return sz
+            # Capture runtime_coord_value in closure
+            coord_value = runtime_coord_value
 
-        # Capture runtime_coord_value in closure
-        coord_value = runtime_coord_value
+            @torch.library.impl(
+                f"{unique_lib_name}::get_coord", "CompositeExplicitAutograd", lib=lib
+            )
+            def get_coord_impl(x: torch.Tensor, max_val: int) -> int:
+                return coord_value
 
-        @torch.library.impl(
-            f"{unique_lib_name}::get_coord", "CompositeExplicitAutograd", lib=lib
-        )
-        def get_coord_impl(x: torch.Tensor, max_val: int) -> int:
-            return coord_value
+            # Get the op reference
+            get_coord_op = getattr(torch.ops, unique_lib_name).get_coord
 
-        # Get the op reference
-        get_coord_op = getattr(torch.ops, unique_lib_name).get_coord
+            # Subclass that calls the custom op inside __torch_dispatch__
+            class CoordSubclass(WrapperTensor):
+                @classmethod
+                def get_wrapper_properties(cls, t):
+                    return t, {}
 
-        # Subclass that calls the custom op inside __torch_dispatch__
-        class CoordSubclass(WrapperTensor):
-            @classmethod
-            def get_wrapper_properties(cls, t):
-                return t, {}
+                def __init__(self, t):
+                    self.t = t
 
-            def __init__(self, t):
-                self.t = t
+                def __repr__(self):
+                    return f"CoordSubclass({self.t})"
 
-            def __repr__(self):
-                return f"CoordSubclass({self.t})"
+                def __tensor_flatten__(self):
+                    return ["t"], None
 
-            def __tensor_flatten__(self):
-                return ["t"], None
+                @classmethod
+                def __tensor_unflatten__(
+                    cls, inner_tensors, meta, outer_size, outer_stride
+                ):
+                    return cls(inner_tensors["t"])
 
-            @classmethod
-            def __tensor_unflatten__(
-                cls, inner_tensors, meta, outer_size, outer_stride
-            ):
-                return cls(inner_tensors["t"])
+                @classmethod
+                def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
+                    if kwargs is None:
+                        kwargs = {}
 
-            @classmethod
-            def __torch_dispatch__(cls, func, types, args=(), kwargs=None):
-                if kwargs is None:
-                    kwargs = {}
+                    def unwrap(e):
+                        return e.t if isinstance(e, CoordSubclass) else e
 
-                def unwrap(e):
-                    return e.t if isinstance(e, CoordSubclass) else e
+                    def wrap(e):
+                        return CoordSubclass(e) if isinstance(e, torch.Tensor) else e
 
-                def wrap(e):
-                    return CoordSubclass(e) if isinstance(e, torch.Tensor) else e
+                    # Try custom dispatch first
+                    result = dispatch_fn(func, args, kwargs, unwrap, wrap, get_coord_op)
+                    if result is not None:
+                        return result
 
-                # Try custom dispatch first
-                result = dispatch_fn(func, args, kwargs, unwrap, wrap, get_coord_op)
-                if result is not None:
-                    return result
+                    # Default: forward the op
+                    result = func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs))
+                    return tree_map(wrap, result)
 
-                # Default: forward the op
-                result = func(*tree_map(unwrap, args), **tree_map(unwrap, kwargs))
-                return tree_map(wrap, result)
-
-        # Return both the subclass and the library (caller must hold lib reference)
-        return CoordSubclass, lib
+            yield CoordSubclass
 
     def test_unbacked_symint_from_custom_op_in_torch_dispatch(self, device):
         """
@@ -813,19 +813,19 @@ class TestUnbackedSymints(InductorTestCase):
                 return wrap(result)
             return None
 
-        CoordSubclass, lib = self._make_unbacked_coord_subclass(
+        with self._make_unbacked_coord_subclass(
             "test_unbacked_ok", runtime_coord_value=0, dispatch_fn=embedding_dispatch
-        )
+        ) as CoordSubclass:
 
-        def fn(weight, indices):
-            return torch.embedding(weight, indices)
+            def fn(weight, indices):
+                return torch.embedding(weight, indices)
 
-        weight = CoordSubclass(torch.randn(32, 64, device=device))
-        indices = torch.tensor([0, 1, 2, 3], device=device)
+            weight = CoordSubclass(torch.randn(32, 64, device=device))
+            indices = torch.tensor([0, 1, 2, 3], device=device)
 
-        actual = torch.compile(fn, fullgraph=True)(weight, indices)
-        expected = fn(weight, indices)
-        torch.testing.assert_close(actual.t, expected.t)
+            actual = torch.compile(fn, fullgraph=True)(weight, indices)
+            expected = fn(weight, indices)
+            torch.testing.assert_close(actual.t, expected.t)
 
     def test_unbacked_symint_torch_check_fails_at_runtime(self, device):
         """
@@ -849,19 +849,19 @@ class TestUnbackedSymints(InductorTestCase):
             return None
 
         # Use runtime_coord_value=4 which violates torch._check(coord < 4)
-        CoordSubclass, lib = self._make_unbacked_coord_subclass(
+        with self._make_unbacked_coord_subclass(
             "test_unbacked_fail", runtime_coord_value=4, dispatch_fn=embedding_dispatch
-        )
+        ) as CoordSubclass:
 
-        def fn(weight, indices):
-            return torch.embedding(weight, indices)
+            def fn(weight, indices):
+                return torch.embedding(weight, indices)
 
-        weight = CoordSubclass(torch.randn(32, 64, device=device))
-        indices = torch.tensor([0, 1, 2, 3], device=device)
+            weight = CoordSubclass(torch.randn(32, 64, device=device))
+            indices = torch.tensor([0, 1, 2, 3], device=device)
 
-        with self.assertRaisesRegex(RuntimeError, ""):
-            compiled = torch.compile(fn, fullgraph=True)
-            compiled(weight, indices)
+            with self.assertRaisesRegex(RuntimeError, ""):
+                compiled = torch.compile(fn, fullgraph=True)
+                compiled(weight, indices)
 
     def test_unbacked_symint_returned_and_checked(self, device):
         """
@@ -886,28 +886,28 @@ class TestUnbackedSymints(InductorTestCase):
                 return wrap(result)
             return None
 
-        CoordSubclass, lib = self._make_unbacked_coord_subclass(
+        with self._make_unbacked_coord_subclass(
             "test_unbacked_return", runtime_coord_value=2, dispatch_fn=mul_dispatch
-        )
+        ) as CoordSubclass:
 
-        def fn(x, y):
-            # The mul goes through __torch_dispatch__ which creates unbacked symint
-            # and returns it as part of the result shape
-            result = x * y
+            def fn(x, y):
+                # The mul goes through __torch_dispatch__ which creates unbacked symint
+                # and returns it as part of the result shape
+                result = x * y
 
-            # Check the returned shape (which contains unbacked symint)
-            torch._check(result.size(0) >= 0)
-            torch._check(result.size(0) < 4)
+                # Check the returned shape (which contains unbacked symint)
+                torch._check(result.size(0) >= 0)
+                torch._check(result.size(0) < 4)
 
-            return result
+                return result
 
-        x = CoordSubclass(torch.randn(8, 16, device=device))
-        y = CoordSubclass(torch.randn(8, 16, device=device))
+            x = CoordSubclass(torch.randn(8, 16, device=device))
+            y = CoordSubclass(torch.randn(8, 16, device=device))
 
-        # Should compile and run successfully
-        actual = torch.compile(fn, fullgraph=True)(x, y)
-        expected = fn(x, y)
-        torch.testing.assert_close(actual.t, expected.t)
+            # Should compile and run successfully
+            actual = torch.compile(fn, fullgraph=True)(x, y)
+            expected = fn(x, y)
+            torch.testing.assert_close(actual.t, expected.t)
 
 
 instantiate_device_type_tests(TestUnbackedSymints, globals(), allow_xpu=True)
