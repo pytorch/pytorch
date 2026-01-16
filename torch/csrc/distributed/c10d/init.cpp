@@ -2063,7 +2063,7 @@ communication mechanism.
 
   // Use ABCMeta as the metaclass so that FakeScriptObject can be registered
   // as a virtual subclass, allowing isinstance(fake_obj, ProcessGroup) to work.
-  py::object abc_module = py::module_::import("torch._library.opaque_object");
+  py::object abc_module = py::module_::import("torch._opaque");
   py::object abc_meta = abc_module.attr("OpaqueBase");
 
   auto processGroup =
@@ -2709,8 +2709,8 @@ Arguments:
           });
 
   // Initialize ABC state for ProcessGroup so that register() works
-  py::object abc_init = abc_module.attr("_abc_init");
-  abc_init(processGroup);
+  // py::object abc_init = abc_module.attr("_abc_init");
+  // abc_init(processGroup);
 
   // Thread local process group manipulation
   module.def("_set_process_group", &::c10d::setProcessGroup);

@@ -41,13 +41,11 @@ from dataclasses import dataclass
 from enum import Enum
 from typing import Any, Literal, NewType, Optional
 from weakref import WeakKeyDictionary
+from torch._opaque import OpaqueBase
 
 import torch
 
 from .fake_class_registry import FakeScriptObject, register_fake_class
-
-class OpaqueBase(metaclass=ABCMeta):
-    pass
 
 
 class MemberType(Enum):
