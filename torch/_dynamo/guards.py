@@ -2593,47 +2593,6 @@ class GuardBuilder(GuardBuilderBase):
             return
         self.SEQUENCE_LENGTH(guard)
 
-    def NN_MODULE_HOOKS_IDENTITY(self, guard: Guard) -> None:
-        """
-        Guard on nn module hooks by checking the identity of hook functions.
-
-        This guard checks:
-        1. The length of the hooks dict
-        2. The identity (id) of each hook function in order
-
-        This allows reduces recompilations from O(num_modules) to O(num_unique_hook_patterns).
-        """
-        if config.skip_nnmodule_hook_guards:
-            return
-
-        ref = self.arg_ref(guard)
-        hooks_dict = self.get(guard)
-        self.SEQUENCE_LENGTH(guard)
-
-        # Set for export
-        hook_ids = tuple(id(hook) for hook in hooks_dict.values())
-        code = [f"tuple(id(v) for v in {ref}.values()) == {hook_ids!r}"]
-        self._set_guard_export_info(guard, code)
-
-        # Add guards for each function
-        guard_manager = self.get_guard_manager(guard)
-        assert isinstance(guard_manager, DictGuardManager), (
-            "Module hooks should be in dict guard manager"
-        )
-        for i, (hook, expected_id) in enumerate(zip(hooks_dict.values(), hook_ids)):
-            value_code = [f"id(list({ref}.values())[{i}]) == {expected_id}"]
-            value_manager = guard_manager.get_value_manager(
-                index=i,
-                source=f"{guard.name}[{i}]",
-                example_value=hook,
-                guard_manager_enum=GuardManagerType.GUARD_MANAGER,
-            )
-            value_manager.add_id_match_guard(
-                expected_id,
-                get_verbose_code_parts(value_code, guard),
-                guard.user_stack,
-            )
-
     def GRAD_MODE(self, guard: Guard) -> None:
         pass  # we always guard on this via GlobalStateGuard()
 

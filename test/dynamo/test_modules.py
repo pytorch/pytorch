@@ -3596,7 +3596,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
                 layer.linear.register_forward_hook(scale_output, with_kwargs=True)
 
         output_eager = model(inp)
-        eager_call_count = call_count[0]
+        eager_call_count = call_count.item()
         self.assertEqual(eager_call_count, 7)
 
         for i, layer in model.layers.named_children():
@@ -3604,7 +3604,7 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
         call_count[0] = 0
         output = model(inp)
-        compiled_call_count = call_count[0]
+        compiled_call_count = call_count.item()
 
         self.assertEqual(compiled_call_count, eager_call_count)
         self.assertTrue(torch.allclose(output_eager, output))

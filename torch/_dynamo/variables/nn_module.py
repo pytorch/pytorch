@@ -1287,11 +1287,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
         ):
             hooks_dict = getattr(self.value, name)
             hooks_dict_source = AttrSource(self.source, name)
-            # Guard on hook function id's so that duplicate layers w/ identical hooks
-            # don't cause recompiles
-            install_guard(
-                hooks_dict_source.make_guard(GuardBuilder.NN_MODULE_HOOKS_IDENTITY)
-            )
+            install_guard(hooks_dict_source.make_guard(GuardBuilder.SEQUENCE_LENGTH))
             tx.output.guard_on_key_order.add(hooks_dict_source)
 
             def build_key_value(
