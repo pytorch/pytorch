@@ -4,7 +4,6 @@ import logging
 import os
 import threading
 import warnings
-from abc import ABC
 from collections.abc import Iterator
 from itertools import zip_longest
 from typing import Optional, TYPE_CHECKING, Union
@@ -128,9 +127,7 @@ else:
         """
         return getattr(torch, device_type, None)
 
-    # Subclass ABC which will be used by opaque objects to register
-    # FakeScriptObject as a virtual subclass
-    class DeviceMesh(ABC):
+    class DeviceMesh:
         """
         DeviceMesh represents a mesh of devices, where layout of devices could be
         represented as a n-d dimension array, and each value of the n-d dimensional
