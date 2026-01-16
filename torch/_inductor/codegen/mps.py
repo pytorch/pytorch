@@ -217,17 +217,22 @@ class MetalOverrides(OpOverrides):
         other_str = value_to_metal(other)
         scoped_body = IndentedBuffer()
         with V.kernel.swap_buffers(scoped_body), scoped_body.indent():
+            # Reset the scoped variable counter so that each invocation of the same body
+            # generates identical variable names. Without this reset, repeated calls to
+            # body() would keep incrementing the counter, resulting in different cache key.
             V.kernel.cse.iter_buffer_ids = itertools.count()
             V.kernel.cse.name_prefix = "tmp_scoped_"
             rc = body()
 
-        cache_key = f"{scoped_body.getvalue()}:other_str"
+        # Compute cache key manually as variable name is needed to actually generate the code
+        cache_key = f"{mask}:{scoped_body.getvalue()}:{other_str}"
         var = V.kernel.cse.try_get(cache_key)
         if not var:
             var = V.kernel.cse.newvar(dtype=rc.dtype)
             V.kernel.cse.put(cache_key, var)
-            V.kernel.compute.writeline(f"{DTYPE_TO_METAL[rc.dtype]} {var};")
-            V.kernel.compute.writeline(f"if ({mask}) {{")
+            V.kernel.compute.writelines(
+                [f"{DTYPE_TO_METAL[rc.dtype]} {var};", f"if ({mask}) {{"]
+            )
             with V.kernel.compute.indent():
                 V.kernel.compute.splice(scoped_body)
                 V.kernel.compute.writeline(f"{var} = {rc};")
