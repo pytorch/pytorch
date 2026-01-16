@@ -685,6 +685,7 @@ def consolidate_safetensors_files_on_every_rank(
         if idx in indices_for_this_rank
     }
 
+    output_files_data: dict[str, _OutputFileData] = {}
     if filtered_mapping:
         # Convert index mapping to filename mapping
         max_index = max(unique_indices)
@@ -694,7 +695,7 @@ def consolidate_safetensors_files_on_every_rank(
             filtered_filename_mapping[fqn] = filename
 
         # Call the existing consolidation function with the filtered mapping
-        _consolidate_safetensors_files(
+        output_files_data = _consolidate_safetensors_files(
             input_dir=input_dir,
             output_dir=output_dir,
             fqn_to_file_mapping=filtered_filename_mapping,
@@ -708,10 +709,26 @@ def consolidate_safetensors_files_on_every_rank(
         time.time() - start_time,
     )
 
-    # Wait for all ranks to complete
+    # Wait for all ranks to complete and gather output_files_data on rank 0
     if dist.is_available() and dist.is_initialized():
-        logger.info("Rank %d: Waiting for all ranks to complete...", rank)
-        dist.barrier()
-        logger.info("Rank %d: All ranks have completed.", rank)
+        gathered_output_files_data: list[dict[str, _OutputFileData]] | None = (
+            [{} for _ in range(world_size)] if rank == 0 else None
+        )
+        dist.gather_object(
+            output_files_data,
+            gathered_output_files_data,
+            dst=0,
+            group=process_group,
+        )
+
         if rank == 0:
+            # Merge all output_files_data from all ranks
+            all_output_files_data: dict[str, _OutputFileData] = {}
+            assert gathered_output_files_data is not None
+            for rank_data in gathered_output_files_data:
+                all_output_files_data.update(rank_data)
+
+            _write_overall_metadata_file(output_dir, all_output_files_data)
+            logger.info("Rank 0: Wrote overall metadata file.")
             logger.info("Total time taken: %.2f secs.", time.time() - start_time)
+        dist.barrier(group=process_group)

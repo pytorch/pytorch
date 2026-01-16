@@ -34,7 +34,7 @@ import typing
 from enum import auto, Enum
 from functools import lru_cache
 from pathlib import Path
-from traceback import extract_stack, format_exc, format_list, StackSummary
+from traceback import extract_stack, format_exc, format_list, FrameSummary, StackSummary
 from typing import Any, NoReturn, Optional, TYPE_CHECKING
 
 import torch._guards
@@ -102,6 +102,13 @@ class RestartAnalysis(TorchDynamoException):
 
 class SpeculationRestartAnalysis(RestartAnalysis):
     pass
+
+
+class AutogradGradRestartAnalysis(RestartAnalysis):
+    """Raised when autograd.grad consumed grad_fns that are returned.
+
+    On restart, autograd.grad will graph break instead of being traced.
+    """
 
 
 class UnspecializeRestartAnalysis(RestartAnalysis):
@@ -763,7 +770,7 @@ def remove_resume_prefix(name: str) -> Optional[str]:
     return None
 
 
-def collapse_resume_frames(stack: StackSummary) -> StackSummary:
+def collapse_resume_frames(stack: StackSummary | list[FrameSummary]) -> StackSummary:
     """
     When we graph break, we create a resume function and make a regular Python call
     to it, which gets intercepted by Dynamo. This behavior is normally shown in the
