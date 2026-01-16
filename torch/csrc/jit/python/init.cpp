@@ -1886,6 +1886,12 @@ void initJITBindings(PyObject* module) {
         return torch::jit::isRegisteredOpaqueType(type_name);
       },
       R"doc(Checks if a type name is registered as an opaque type.)doc");
+  m.def(
+      "_unregister_opaque_type",
+      [](const std::string& type_name) {
+        torch::jit::unregisterOpaqueType(type_name);
+      },
+      R"doc(Unregisters a type name from the opaque type registry.)doc");
   m.def("unify_type_list", [](const std::vector<TypePtr>& types) {
     std::ostringstream s;
     auto type = unifyTypeList(types, s);
