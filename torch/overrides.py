@@ -877,6 +877,9 @@ def get_testing_overrides() -> dict[Callable, Callable]:
         torch.nn.functional.cross_entropy: (
             lambda input, target, weight=None, size_average=None, ignore_index=-100, reduce=None, reduction="mean", label_smoothing=0.0: -1  # noqa: B950
         ),
+        torch.nn.functional.linear_cross_entropy: (
+            lambda input, linear_weight, target, linear_bias=None, weight=None, ignore_index=-100, reduction="mean", label_smoothing=0.0: -1  # noqa: B950
+        ),
         torch.nn.functional.ctc_loss: (
             lambda log_probs, targets, input_lengths, target_lengths, blank=0, reduction="mean", zero_infinity=False: -1
         ),

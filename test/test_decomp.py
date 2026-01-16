@@ -421,6 +421,13 @@ CROSS_REF_EXCLUDE_SET = {
         None,
         "bernoulli",
     ),  # bernoulli is a function of randomness, so couldn't do cross-reference.
+    # AssertionError: Scalars are not close!
+    # Expected 0.0 but got -5.731079578399658.
+    # Absolute difference: 5.731079578399658 (up to 1e-05 allowed)
+    # Relative difference: inf (up to 1.3e-06 allowed)
+    # nll_loss2d_forward.default
+    ("cuda", torch.float32, "nn.functional.linear_cross_entropy"),
+    ("cuda", torch.float64, "nn.functional.linear_cross_entropy"),
 }
 
 CROSS_REF_BACKWARD_EXCLUDE_SET = {

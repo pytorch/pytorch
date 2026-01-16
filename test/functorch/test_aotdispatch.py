@@ -8238,6 +8238,9 @@ symbolic_aot_autograd_failures = {
         "nn.functional.cross_entropy", ""
     ),  # Cannot call sizes() on tensor with symbolic sizes/strides
     xfail(
+        "nn.functional.linear_cross_entropy", ""
+    ),  # Cannot call sizes() on tensor with symbolic sizes/strides
+    xfail(
         "nn.functional.ctc_loss", ""
     ),  # aten._ctc_loss.Tensor - couldn't find symbolic meta function/deco...
     xfail(

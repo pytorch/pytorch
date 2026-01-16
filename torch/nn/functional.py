@@ -3644,6 +3644,116 @@ def binary_cross_entropy_with_logits(
     )
 
 
+def linear_cross_entropy(
+    input: Tensor,
+    linear_weight: Tensor,
+    target: Tensor,
+    linear_bias: Optional[Tensor] = None,
+    weight: Optional[Tensor] = None,
+    reduction: str = "mean",
+    ignore_index: int = -100,
+    label_smoothing: float = 0.0,
+    # Optimization parameters:
+    # chunking_strategy: str = "none",
+    # vocab_chunk_size: Optional[int] = None,
+    # batch_chunk_size: Optional[int] = None
+) -> Tensor:
+    r"""Compute the cross entropy loss between inputs, transformed linearly, and target.
+
+    ::
+      loss = linear_cross_entropy(
+          input, linear_weight, target, linear_bias=linear_bias, **kwargs
+      )
+
+    is equivalent to
+
+    ::
+      logits = linear(input, linear_weight, bias=linear_bias)
+      if target.dtype.is_floating_point:
+          # target contains class probabilities
+          logits = logits.reshape(target.shape)
+      loss = cross_entropy(logits, target, **kwargs)
+
+    See :class:`~torch.nn.CrossEntropyLoss` for details.
+
+    Args:
+        input (Tensor) : input samples.
+        linear_weight (Tensor) : linear weight.
+        target (Tensor) : Ground truth class indices or class probabilities;
+        linear_bias (Tensor, optional) : linear bias.
+        weight (Tensor, optional): a manual rescaling weight given to each class.
+        reduction (str, optional): Specifies the reduction to apply to
+            the output: ``'none'`` | ``'mean'`` |
+            ``'sum'``. ``'none'``: no reduction will be applied,
+            ``'mean'``: the sum of the output will be divided by the
+            number of elements in the output, ``'sum'``: the output
+            will be summed.
+            Default: ``'mean'``.
+        ignore_index (int, optional): Specifies a target value that is
+            ignored and does not contribute to the input
+            gradient. Note that :attr:`ignore_index` is only
+            applicable when the target contains class indices.
+            Default: -100.
+        label_smoothing (float, optional): A float in [0.0, 1.0].
+            Specifies the amount of smoothing when computing the
+            loss, where 0.0 means no smoothing. The targets become a
+            mixture of the original ground truth and a uniform
+            distribution as described in `Rethinking the Inception
+            Architecture for Computer Vision
+            <https://arxiv.org/abs/1512.00567>`__.
+            Default: :math:`0.0`.
+
+    Shape:
+        - Input: :math:`(in_features)` or :math:`(N, in_features)`.
+        - Linear weight: :math:`(C * d_1 * ... * d_K, in_features)`.
+        - Target: If containing class indices, :math:`()`,
+          :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with :math:`K\geq 1`
+          in the case of K-dimensional loss where each value
+          should be between :math:`[0, C)`. The target data type is
+          required to be long when using class indices.
+          If containing class probabilities, the target must have
+          shape :math:`(C)` or :math:`(N, C, d_1, d_2, ..., d_K)`, and
+          each value should be between :math:`[0, 1]`. This means the
+          target data type is required to be float when using class
+          probabilities. Note that PyTorch does not strictly enforce
+          probability constraints on the class probabilities and that
+          it is the user's responsibility to ensure ``target``
+          contains valid probability distributions.
+        - Linear bias: :math:`(C * d_1 * ... * d_K)`.
+        - Weight: :math:`(C)`.
+        - Output: If reduction is 'none', shape :math:`()`,
+          :math:`(N)` or :math:`(N, d_1, d_2, ..., d_K)` with :math:`K\geq 1`
+          in the case of K-dimensional loss, depending on the
+          shape of the input. Otherwise, scalar.
+
+        where :math:`N` is batch size and :math:`C` is number of classes.
+    """
+    if has_torch_function_variadic(input, linear_weight, target, linear_bias, weight):
+        return handle_torch_function(
+            linear_cross_entropy,
+            (input, linear_weight, target, linear_bias, weight),
+            input,
+            linear_weight,
+            target,
+            linear_bias=linear_bias,
+            weight=weight,
+            ignore_index=ignore_index,
+            reduction=reduction,
+            label_smoothing=label_smoothing,
+        )
+    logits = linear(input, linear_weight, bias=linear_bias)
+    if target.dtype.is_floating_point:
+        logits = logits.reshape(target.shape)
+    return cross_entropy(
+        logits,
+        target,
+        weight=weight,
+        reduction=reduction,
+        ignore_index=ignore_index,
+        label_smoothing=label_smoothing,
+    )
+
+
 def smooth_l1_loss(
     input: Tensor,
     target: Tensor,
