@@ -5811,10 +5811,17 @@ def win_safe_rmtree(path):
             )
 
     # Execute rmtree using the logic above
-    try:
-        shutil.rmtree(path, onerror=handle_error)
-    except Exception:
-        log.exception("Fatal exception during directory removal for %s", path)
+    max_retries = 3
+    for i in range(max_retries):
+        try:
+            shutil.rmtree(path, onerror=handle_error)
+            break
+        except OSError:
+            if i < max_retries - 1:
+                time.sleep(0.1)  # Wait briefly for the system to release the file lock
+                continue
+            else:
+                raise  # If the last attempt fails, propagate the exception
 
 def remove_cpp_extensions_build_root():
     """
