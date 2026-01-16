@@ -13,7 +13,7 @@
 #include <ATen/OpMathType.h>
 #include <ATen/TensorUtils.h>
 #include <ATen/cuda/CUDABlas.h>
-#include <ATen/native/ScaledBlasUtils.h>
+#include <ATen/ScaledBlasUtils.h>
 #include <ATen/cuda/tunable/Tunable.h>
 #include <ATen/cuda/tunable/TunableGemm.h>
 #include <ATen/native/Resize.h>

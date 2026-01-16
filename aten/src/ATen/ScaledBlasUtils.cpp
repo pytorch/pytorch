@@ -1,12 +1,4 @@
-#define TORCH_ASSERT_ONLY_METHOD_OPERATORS
-#include <ATen/native/ScaledBlasUtils.h>
-
-#ifndef AT_PER_OPERATOR_HEADERS
-#include <ATen/Functions.h>
-#include <ATen/NativeFunctions.h>
-#else
-
-#endif
+#include <ATen/ScaledBlasUtils.h>
 
 namespace at::scaled {
 
