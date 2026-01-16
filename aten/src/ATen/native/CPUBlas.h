@@ -221,7 +221,7 @@ void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<fl
 #define CPUBLAS_BRGEMM_I8I8I32 // signed char * signed char -> int32
 #if defined(IDEEP_PREREQ)
 #if IDEEP_PREREQ(3, 9, 0, 0)
-#define CPUBLAS_BRGEMM_F8F8F32 // float8_e4m3 * float8_e4m3 -> float
+#define CPUBLAS_BRGEMM_F8F8F32 // float8 * float8 -> float (e4m3 & e5m2)
 #endif
 #endif
 
