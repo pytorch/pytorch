@@ -11,6 +11,8 @@ from typing import TYPE_CHECKING
 from torch.utils._config_module import install_config_module
 
 
+__all__ = ["compile_on_one_rank"]
+
 # When enabled, coordinates are computed at runtime via a custom op rather
 # than being baked in at compile time. This allows compiling on one rank
 # and running on multiple ranks.
