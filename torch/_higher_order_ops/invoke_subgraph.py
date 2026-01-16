@@ -24,9 +24,11 @@ from torch._higher_order_ops.utils import (
     redirect_to_mode,
     reenter_make_fx,
     register_fake,
-    save_tensors_and_symints_for_backward,
-    saved_tensors_and_symints,
+    save_values_for_backward,
+    saved_values,
 )
+from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_type
 from torch._ops import HigherOrderOperator
 from torch._subclasses.functional_tensor import disable_functional_mode
 from torch.fx.experimental.proxy_tensor import (
@@ -36,6 +38,7 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
+from torch.utils._debug_mode import DebugMode
 from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
@@ -121,11 +124,14 @@ class InvokeSubgraphHOP(HigherOrderOperator):
         )
 
         assert all(
-            isinstance(o, (torch.Tensor, int, torch.SymInt, torch.Generator))
+            isinstance(
+                o, (torch.Tensor, int, torch.SymInt, torch.Generator, FakeScriptObject)
+            )
+            or is_opaque_type(type(o))
             for o in operands
             if o is not None
         ), (
-            f"invoke_subgraph operands must be a list of tensors/ints/SymInts/Generator {operands}"
+            f"invoke_subgraph operands must be a list of tensors/ints/SymInts/Generator/opaque objects {operands}"
         )
 
         # pyrefly: ignore [missing-attribute]
@@ -523,7 +529,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         ctx._fw_include_key_set = torch._C._dispatch_tls_local_include_set()
         ctx._fw_exclude_key_set = torch._C._dispatch_tls_local_exclude_set()
 
-        save_tensors_and_symints_for_backward(ctx, operands)
+        save_values_for_backward(ctx, operands)
 
         with torch._C._AutoDispatchBelowAutograd():
             out = invoke_subgraph(
@@ -549,7 +555,7 @@ class InvokeSubgraphAutogradOp(torch.autograd.Function):
         subgraph = ctx._subgraph
         identifier = ctx._identifier
         output_metadata = ctx._output_metadata
-        primals = saved_tensors_and_symints(ctx)
+        primals = saved_values(ctx)
 
         # Filter out grads that are None or do not require_grad. This was
         # the assumption we made during the tracing of joint_graph.
@@ -675,12 +681,42 @@ def _(subgraph, identifier, *operands):
     return autograd_fn_callable(*operands)
 
 
+@invoke_subgraph.py_impl(DebugMode)
+def _(debug_mode, subgraph, identifier, *operands):
+    # record HOP call
+    call = torch.utils._debug_mode._OpCall(
+        invoke_subgraph,
+        (identifier, *operands),
+        kwargs={},
+        call_depth=debug_mode.call_depth + 1,
+        stack=debug_mode.record_stack_trace,
+    )
+    debug_mode._record_call(call)
+
+    debug_mode.call_depth += 1
+    debug_mode._handle_annotate(f"[enter InvokeSubgraph HOP] {identifier}")
+
+    # If the HOP is dispatched from DebugMode, we should enable debug_mode
+    # for the subgraph call.
+    with debug_mode:
+        if getattr(subgraph, "_boxed_call", False):
+            result = subgraph(list(operands))
+        else:
+            result = subgraph(*operands)
+    debug_mode._handle_annotate(f"[exit InvokeSubgraph HOP] {identifier}")
+    debug_mode.call_depth -= 1
+    # record output of HOP
+    debug_mode._record_call_output(call, result)
+    return result
+
+
 @invoke_subgraph.py_impl(DispatchKey.CompositeExplicitAutograd)
 def _(subgraph, identifier, *operands):
     from torch.utils._python_dispatch import _get_current_dispatch_mode
 
     mode = _get_current_dispatch_mode()
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
+
     if getattr(subgraph, "_boxed_call", False):
         return subgraph(list(operands))
     else:
@@ -800,14 +836,16 @@ def _(proxy_mode: ProxyTorchDispatchMode, subgraph, identifier, *operands):
         from torch._guards import detect_fake_mode
 
         fake_mode = detect_fake_mode(operands)
-        assert fake_mode is not None and fake_mode.shape_env is not None
-        insert_deferred_runtime_asserts(
-            graph,
-            fake_mode.shape_env,
-            "invoke_subgraph_proxy_torch_dispatch_mode",
-            export=True,
-        )
-        graph.recompile()
+        # Only insert deferred runtime asserts when we have dynamic shapes.
+        # When shape_env is None (static shapes), there are no deferred asserts to insert.
+        if fake_mode is not None and fake_mode.shape_env is not None:
+            insert_deferred_runtime_asserts(
+                graph,
+                fake_mode.shape_env,
+                "invoke_subgraph_proxy_torch_dispatch_mode",
+                export=True,
+            )
+            graph.recompile()
 
         assert isinstance(proxy_mode.tracer, torch.fx.Tracer)
         if invoke_subgraph_cache:
