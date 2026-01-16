@@ -664,6 +664,87 @@ class TestOpaqueObject(TestCase):
             lib=self.lib,
         )
 
+        rng_state_type = get_opaque_type_name(RNGState)
+        # Define forward custom op that takes two opaque objects
+        torch.library.define(
+            "_TestOpaqueObject::multi_rng",
+            f"(Tensor x, {rng_state_type} rng1, {rng_state_type} rng2) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::multi_rng",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def multi_rng_impl(
+            x: torch.Tensor, rng1: RNGState, rng2: RNGState
+        ) -> torch.Tensor:
+            val1 = rng1.rng.random()
+            val2 = rng2.rng.random()
+            return x + val1 + val2
+
+        @torch.library.register_fake("_TestOpaqueObject::multi_rng", lib=self.lib)
+        def multi_rng_fake(
+            x: torch.Tensor, rng1: RNGState, rng2: RNGState
+        ) -> torch.Tensor:
+            return torch.zeros_like(x)
+
+        # Define backward custom op that also takes two opaque objects
+        torch.library.define(
+            "_TestOpaqueObject::multi_rng_backward",
+            f"(Tensor grad_output, Tensor saved, {rng_state_type} rng1, {rng_state_type} rng2) -> Tensor",
+            tags=torch.Tag.pt2_compliant_tag,
+            lib=self.lib,
+        )
+
+        @torch.library.impl(
+            "_TestOpaqueObject::multi_rng_backward",
+            "CompositeExplicitAutograd",
+            lib=self.lib,
+        )
+        def multi_rng_backward_impl(
+            grad_output: torch.Tensor,
+            saved: torch.Tensor,
+            rng1: RNGState,
+            rng2: RNGState,
+        ) -> torch.Tensor:
+            return grad_output * 1.5
+
+        @torch.library.register_fake(
+            "_TestOpaqueObject::multi_rng_backward", lib=self.lib
+        )
+        def multi_rng_backward_fake(
+            grad_output: torch.Tensor,
+            saved: torch.Tensor,
+            rng1: RNGState,
+            rng2: RNGState,
+        ) -> torch.Tensor:
+            return grad_output
+
+        def setup_context(ctx, inputs, output):
+            """Save opaque objects for backward - tests correct positioning."""
+            x, rng1, rng2 = inputs
+            ctx.save_for_backward(output)
+            ctx.rng1 = rng1
+            ctx.rng2 = rng2
+
+        def backward(ctx, grad_output: torch.Tensor):
+            """Backward pass that uses the opaque objects."""
+            saved = ctx.saved_tensors[0]
+            grad_input = torch.ops._TestOpaqueObject.multi_rng_backward(
+                grad_output, saved, ctx.rng1, ctx.rng2
+            )
+            return grad_input, None, None
+
+        torch.library.register_autograd(
+            "_TestOpaqueObject::multi_rng",
+            backward,
+            setup_context=setup_context,
+            lib=self.lib,
+        )
+
         super().setUp()
 
     def tearDown(self):
@@ -1886,6 +1967,35 @@ def forward(self, L_x_ : torch.Tensor):
         expected = x * 2
         self.assertTrue(torch.allclose(result, expected))
         self.assertIsNotNone(captured["graph"])
+
+    def test_multiple_opaque_objects_in_backward(self):
+        """Test that multiple opaque objects are correctly positioned in backward pass.
+
+        This test verifies that when setup_context saves multiple opaque objects,
+        AOTAutograd correctly positions them when calling the backward function.
+        This addresses a bug where opaque objects were placed in the wrong position.
+        """
+        # Test eager mode
+        x = torch.randn(1, requires_grad=True)
+        rng1 = RNGState(123)
+        rng2 = RNGState(456)
+
+        result = torch.ops._TestOpaqueObject.multi_rng(x, rng1, rng2)
+        grad_o = torch.rand_like(result)
+        result.backward(grad_o)
+        self.assertEqual(x.grad, grad_o * 1.5)
+        x.grad = None
+
+        # Test compiled mode - this should not crash with incorrect opaque object positioning
+        x2 = torch.randn(1, requires_grad=True)
+        compiled_fn = torch.compile(
+            torch.ops._TestOpaqueObject.multi_rng,
+            fullgraph=True,
+        )
+        result = compiled_fn(x2, rng1, rng2)
+        grad_o = torch.rand_like(result)
+        result.backward(grad_o)
+        self.assertEqual(x2.grad, grad_o * 1.5)
 
     def test_invoke_subgraph(self):
         @torch.compiler.nested_compile_region
