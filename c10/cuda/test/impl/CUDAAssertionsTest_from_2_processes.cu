@@ -49,7 +49,7 @@ __global__ void cuda_always_succeed_assertion_kernel(
  */
 void cuda_device_assertions_from_2_processes() {
   const auto n1 = fork();
-  if (n1 == 0) {
+  if (n1 != 0) {
     // This is the parent process, that will call an assertion failure.
     // This should execute before the child process.
     // We are achieving this by putting the child process to sleep.
@@ -89,8 +89,6 @@ void cuda_device_assertions_from_2_processes() {
     } catch (const c10::Error& err) {
       ASSERT_TRUE(false); // This kernel should not have failed, but did.
     }
-    // End the child process
-    exit(0);
   }
 }
 

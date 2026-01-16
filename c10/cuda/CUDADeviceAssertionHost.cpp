@@ -298,7 +298,7 @@ DeviceAssertionsData* CUDAKernelLaunchRegistry::
   C10_CUDA_CHECK_WO_DSA(
       cudaMallocManaged(&uvm_assertions_ptr, sizeof(DeviceAssertionsData)));
 
-#if CUDART_VERSION >= 13000 || defined(USE_ROCM)
+#if CUDART_VERSION >= 13000 && !defined(USE_ROCM)
   cudaMemLocation cpuDevice;
   cpuDevice.type = cudaMemLocationTypeDevice;
   cpuDevice.id = cudaCpuDeviceId;
@@ -307,6 +307,9 @@ DeviceAssertionsData* CUDAKernelLaunchRegistry::
 #define hipMemAdvise hipMemAdvise_v2
 #endif
 #else
+  // might be a ROCm bug that using hipMemAdvise_v2 fails if
+  // hipMemLocationTypeDevice + hipCpuDeviceId, but using the v1 API sets
+  // hipMemLocationTypeHost + hipCpuDeviceId and passes
   const auto cpuDevice = cudaCpuDeviceId;
 #endif
 
