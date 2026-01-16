@@ -1,7 +1,6 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
 #include <ATen/core/Tensor.h>
 #include <ATen/native/TypeProperties.h>
-#include <ATen/detail/PrivateUse1HooksInterface.h>
 
 #ifndef AT_PER_OPERATOR_HEADERS
 #include <ATen/Functions.h>
@@ -60,8 +59,8 @@ bool is_neg(const Tensor& self) {
 // TensorImpl can be copied to `self`. Check privateuse1 backend compatibility
 // if either tensor is privateuse1.
 bool _has_compatible_shallow_copy_type(const Tensor& self, const Tensor& from) {
-  if (self.key_set().has_backend(BackendComponent::PrivateUse1Bit) || from.key_set().has_backend(BackendComponent::PrivateUse1Bit)) {
-    return at::detail::getPrivateUse1Hooks().hasCompatibleShallowCopyType(self.key_set(), from.key_set());
+  if (self.is_privateuseone() || from.is_privateuseone()) {
+    return at::globalContext().getAcceleratorHooksInterface().hasCompatibleShallowCopyType(self.key_set(), from.key_set());
   }
   return self.unsafeGetTensorImpl()->has_compatible_shallow_copy_type(
       from.key_set());
