@@ -466,7 +466,7 @@ def tuned_mm(mat1, mat2, out_dtype=None, *, layout=None):
     ):
         from ..codegen.nv_universal_gemm import add_nv_universal_gemm_choices
 
-        add_nv_universal_gemm_choices(choices, layout, kernel_inputs.nodes())
+        add_nv_universal_gemm_choices(choices, layout, kernel_inputs)
 
     if out_dtype is None and use_cpp_gemm_template(layout, mat1, mat2):
         CppGemmTemplate.add_choices(
