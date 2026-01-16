@@ -155,9 +155,25 @@ class PlacementClassVariable(DistributedVariable):
         if not DistributedVariable.is_available():
             return False
 
-        from torch.distributed.tensor.placement_types import Placement
+        from torch.distributed.tensor.placement_types import (
+            _MaskPartial,
+            _StridedShard,
+            Partial,
+            Placement,
+            Replicate,
+            Shard,
+        )
 
-        return isinstance(value, type) and issubclass(value, Placement)
+        placement_types = [
+            Placement,
+            Shard,
+            Replicate,
+            Partial,
+            _StridedShard,
+            _MaskPartial,
+        ]
+
+        return value in placement_types
 
     def as_python_constant(self) -> Any:
         return self.value
