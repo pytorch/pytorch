@@ -500,6 +500,7 @@ template <
     typename T,
     NormType norm_type,
     typename out_t,
+    int reduce_dim,
     int depth = 1,
     int r_args_depth = 1,
     int res_arg_index = 0>
@@ -507,37 +508,35 @@ struct LpNormDimFunctor {
   using out_opmath_t = typename at::opmath_type<out_t>;
   
   __device__ __forceinline__ out_opmath_t warpReduce(out_opmath_t val) {
-    for (int offset = 16; offset > 0; offset /= 2) {
+    constexpr unsigned int FULL_WARP_MASK = 0xffffffff;  // use all 32 bits
+    constexpr int HALF_WARP_SIZE = 16;
+    for (int offset = HALF_WARP_SIZE; offset > 0; offset /= 2) {
       if constexpr (norm_type == NormType::LInf) {
-        val = max_propagate_nan(val, __shfl_down_sync(0xffffffff, val, offset));
+        val = max_propagate_nan(val, __shfl_down_sync(FULL_WARP_MASK, val, offset));
       } else {
-        val += __shfl_down_sync(0xffffffff, val, offset);
+        val += __shfl_down_sync(FULL_WARP_MASK, val, offset);
       }
     }
     return val;
   }
   
-  __device__ __forceinline__ out_opmath_t rowNorm(
+  __device__ __forceinline__ void rowNorm(
       TensorListDimMetadata<depth>& tl,
       out_opmath_t* output_per_tensor_ptr,
-      const int max_output_per_tensor) {
+      const int max_num_output_per_tensor) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
     const auto num_rows = tl.num_rows[tensor_loc];
     const auto num_cols = tl.num_cols[tensor_loc];
     const auto row_stride = tl.row_stride[tensor_loc]; 
-    const auto reduce_dim = tl.reduce_dim;
       
     const int warp_id = threadIdx.y;
     const int lane = threadIdx.x;
-      
-    const int64_t output_size = num_rows;
-      
+            
     T* data = (T*)tl.addresses[0][tensor_loc];
 
-    // ========================================
-    // ROW NORM: Use loop (8 rows per warp)
-    // ========================================
+    // Row norms time is dominated by the number of kernel launch's
+    // so multiple rows are calculated per warp to reduce the number of kernel launches. 
     constexpr int ROWS_PER_CHUNK = 128;
     constexpr int WARPS_PER_BLOCK = 16;
     constexpr int ROWS_PER_WARP = ROWS_PER_CHUNK / WARPS_PER_BLOCK;  // 8
@@ -547,17 +546,17 @@ struct LpNormDimFunctor {
     for (int r = 0; r < ROWS_PER_WARP; r++) {
       const int row = chunk_row_start + warp_id * ROWS_PER_WARP + r;
       
-      if (row >= output_size) continue;
+      if (row >= num_rows) continue;
       
       out_opmath_t val = out_opmath_t(0);
       T* row_ptr = data + row * row_stride;
-      const int64_t n = num_cols;
       
-      if (n % kILP == 0 && is_aligned(row_ptr)) {
+      if (num_cols % kILP == 0 && is_aligned(row_ptr)) {
+        // fast path using Instruction-Level Parallelism (ILP) 
         out_opmath_t vals[kILP] = {0};
         T r_x[kILP];
         
-        for (int64_t i_start = lane; i_start * kILP < n; i_start += 32) {
+        for (int64_t i_start = lane; i_start * kILP < num_cols; i_start += blockDim.x) {
           load_store(r_x, row_ptr, 0, i_start);
           #pragma unroll
           for (int ii = 0; ii < kILP; ii++) {
@@ -578,7 +577,7 @@ struct LpNormDimFunctor {
           }
         }
       } else {
-        for (int64_t i = lane; i < n; i += 32) {
+        for (int64_t i = lane; i < num_cols; i += 32) {
           const auto elem = static_cast<out_opmath_t>(row_ptr[i]);
           if constexpr (norm_type == NormType::LInf) {
             val = max_propagate_nan(val, ::abs(elem));
@@ -594,43 +593,38 @@ struct LpNormDimFunctor {
         if constexpr (norm_type == NormType::L2) {
           val = ::sqrt(val);
         }
-        output_per_tensor_ptr[(tl.start_tensor_this_launch + tensor_loc) * max_output_per_tensor + row] = val;
+        output_per_tensor_ptr[(tl.start_tensor_this_launch + tensor_loc) * max_num_output_per_tensor + row] = val;
       }
     }
   }
 
-  __device__ __forceinline__ out_opmath_t colNorm(
+  __device__ __forceinline__ void colNorm(
       TensorListDimMetadata<depth>& tl,
       out_opmath_t* output_per_tensor_ptr,
-      const int max_output_per_tensor) {
+      const int max_num_output_per_tensor) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
     const auto num_rows = tl.num_rows[tensor_loc];
     const auto num_cols = tl.num_cols[tensor_loc];
     const auto row_stride = tl.row_stride[tensor_loc]; 
-    const auto reduce_dim = tl.reduce_dim;
       
     const int warp_id = threadIdx.y;
     const int lane = threadIdx.x;
       
-    const int64_t output_size = num_rows;
-      
     T* data = (T*)tl.addresses[0][tensor_loc];
   
-    // ========================================
-    // COLUMN NORM: No loop (1 column per warp)
-    // ========================================
+    // Col norms time is dominated by memory time not kernel launches
+    // so only one col is calculated per warp to increase compute per block time. 
     constexpr int COLS_PER_CHUNK = 16;  // Just blockDim.y, no multiplier
     
     const int chunk_col_start = chunk_idx * COLS_PER_CHUNK;
     const int col = chunk_col_start + warp_id;
     
-    if (col >= output_size) return;
+    if (col >= num_cols) return;
     
     out_opmath_t val = out_opmath_t(0);
-    const int64_t n = num_rows;
     
-    for (int64_t i = lane; i < n; i += 32) {
+    for (int64_t i = lane; i < num_rows; i += 32) {
       const auto elem = static_cast<out_opmath_t>(data[i * row_stride + col]);
       if constexpr (norm_type == NormType::LInf) {
         val = max_propagate_nan(val, ::abs(elem));
@@ -645,7 +639,7 @@ struct LpNormDimFunctor {
       if constexpr (norm_type == NormType::L2) {
         val = ::sqrt(val);
       }
-      output_per_tensor_ptr[(tl.start_tensor_this_launch + tensor_loc) * max_output_per_tensor + col] = val;
+      output_per_tensor_ptr[(tl.start_tensor_this_launch + tensor_loc) * max_num_output_per_tensor + col] = val;
     }
   }
 
@@ -653,11 +647,11 @@ struct LpNormDimFunctor {
       int64_t /*unused_chunk_size*/,
       TensorListDimMetadata<depth>& tl,
       out_opmath_t* output_per_tensor_ptr,
-      const int max_output_per_tensor) {      
-    if (tl.reduce_dim == 1) {
-      rowNorm(tl, output_per_tensor_ptr, max_output_per_tensor);
+      const int max_num_output_per_tensor) {      
+    if constexpr (reduce_dim == 1) {
+      rowNorm(tl, output_per_tensor_ptr, max_num_output_per_tensor);
     } else {
-      colNorm(tl, output_per_tensor_ptr, max_output_per_tensor);
+      colNorm(tl, output_per_tensor_ptr, max_num_output_per_tensor);
     }
   }
 };
@@ -692,62 +686,43 @@ struct ForeachNormDispatchName<false> {
 
 std::vector<Tensor> _foreach_norm_cuda_with_dim(
     TensorList tensors,
-    const Scalar& ord,
+    double p,
     std::optional<ScalarType> dtype,
     at::IntArrayRef dim,
     bool keepdim) {
   
-  // return foreach_tensor_norm_slow(tensors, ord, dtype, dim, keepdim);
-
-  const auto p = [&]() -> double {
-    if (ord.isIntegral(false)) {
-      return ord.to<int64_t>();
-    } else if (ord.isFloatingPoint()) {
-      return ord.to<double>();
-    } else {
-      TORCH_CHECK(
-          false, "foreach_tensor_norm_cuda expects ord to be integer or float");
-    }
-  }();
-
   const size_t ntensors = tensors.size();
   
-  int max_n_norm_elements_per_tensor = -1;  // chunks = n_rows if row norm or chunks = n_cols if col_norm.
-  const int reduce_dim = c10::maybe_wrap_dim(dim[0],  tensors[0].dim());  // tensors[0].dim() should be 2.
-  std::vector<long> norm_sizes;
-  norm_sizes.reserve(ntensors);
+  int max_num_output_per_tensor = -1;
+  const int reduce_dim = c10::maybe_wrap_dim(dim[0],  tensors[0].dim());
+  std::vector<long> ouptut_sizes;
+  ouptut_sizes.reserve(ntensors);
   for (const auto t : c10::irange(ntensors)) {
-    int n_elements_to_evaluate_this_norm = tensors[t].sizes()[reduce_dim];
-    // if (n_elements_to_evaluate_this_norm > max_n_elements_to_evaluate_norm)
-    // {
-    //   max_n_elements_to_evaluate_norm = n_elements_to_evaluate_this_norm;
-    // }
-    int n_norm_elements_this_tensor = tensors[t].numel() / n_elements_to_evaluate_this_norm;
-    norm_sizes.push_back(n_norm_elements_this_tensor);
-    if (n_norm_elements_this_tensor > max_n_norm_elements_per_tensor) {
-      max_n_norm_elements_per_tensor = n_norm_elements_this_tensor;
+    int num_outputs_this_tensor = tensors[t].numel() / tensors[t].sizes()[reduce_dim];
+    ouptut_sizes.push_back(num_outputs_this_tensor);
+    if (num_outputs_this_tensor > max_num_output_per_tensor) {
+      max_num_output_per_tensor = num_outputs_this_tensor;
     }
   }
-  // int max_chunks_per_tensor = max_n_norm_elements_per_tensor;
 
   const auto options = tensors[0].options();
   const ScalarType output_dtype =
       dtype.has_value() ? dtype.value() : tensors[0].scalar_type();
   const ScalarType output_per_tensor_dtype = toOpMathType(output_dtype);
   auto output_per_tensor = at::zeros(
-      {static_cast<int64_t>(ntensors) * max_n_norm_elements_per_tensor },
+      {static_cast<int64_t>(ntensors) * max_num_output_per_tensor },
       options.dtype(output_per_tensor_dtype));
 
-  std::vector<at::Tensor> vec_res; 
-  vec_res.reserve(ntensors);
+  std::vector<at::Tensor> norm_vec; 
+  norm_vec.reserve(ntensors);
   // std::vector<std::vector<long>> norm_sizes;  // will use this when I go to non-2D tensors 
   const auto res_option = options.dtype(output_dtype);
   for (const auto t : c10::irange(ntensors)) {
     // will use this when I go to non-2D tensors 
     // auto norm_tensor_size = tensors[t].sizes().vec();  
     // norm_tensor_size.erase(norm_tensor_size.begin() + reduce_dim);
-    vec_res.push_back(at::native::empty_cuda(
-        norm_sizes[t],
+    norm_vec.push_back(at::native::empty_cuda(
+        ouptut_sizes[t],
         optTypeMetaToScalarType(res_option.dtype_opt()),
         res_option.layout_opt(),
         res_option.device_opt(),
@@ -770,72 +745,62 @@ std::vector<Tensor> _foreach_norm_cuda_with_dim(
               using out_opmath_t = typename at::opmath_type<out_t>;
 
               if (p == static_cast<double>(1)) {
-                // L1 norm: sum of absolute values
-                multi_tensor_apply_dim<1>(
+                if (reduce_dim == 1) {
+                  multi_tensor_apply_dim<1>(
                     tensor_lists,
                     reduce_dim,
-                    LpNormDimFunctor<scalar_t, NormType::L1, out_t>(),  // want to change 1 to reduced_dim  
+                    LpNormDimFunctor<scalar_t, NormType::L1, out_t, 1>(),
                     output_per_tensor.mutable_data_ptr<out_opmath_t>(),  
-                    max_n_norm_elements_per_tensor);    
+                    max_num_output_per_tensor);
+                } else {
+                  multi_tensor_apply_dim<1>(
+                    tensor_lists,
+                    reduce_dim,
+                    LpNormDimFunctor<scalar_t, NormType::L1, out_t, 0>(),
+                    output_per_tensor.mutable_data_ptr<out_opmath_t>(),  
+                    max_num_output_per_tensor);
+                }   
               } else if (p == static_cast<double>(2)) {
-                // L2 norm: sqrt of sum of squares (sqrt applied later in cleanup)
-                multi_tensor_apply_dim<1>(
+                if (reduce_dim == 1) {
+                  multi_tensor_apply_dim<1>(
                     tensor_lists,
                     reduce_dim,
-                    LpNormDimFunctor<scalar_t, NormType::L2, out_t>(),
-                    output_per_tensor.mutable_data_ptr<out_opmath_t>(),
-                    max_n_norm_elements_per_tensor);
+                    LpNormDimFunctor<scalar_t, NormType::L2, out_t, 1>(),
+                    output_per_tensor.mutable_data_ptr<out_opmath_t>(),  
+                    max_num_output_per_tensor);
+                } else {
+                  multi_tensor_apply_dim<1>(
+                    tensor_lists,
+                    reduce_dim,
+                    LpNormDimFunctor<scalar_t, NormType::L2, out_t, 0>(),
+                    output_per_tensor.mutable_data_ptr<out_opmath_t>(),  
+                    max_num_output_per_tensor);
+                } 
               } else if (p == std::numeric_limits<double>::infinity()) {
-                // L∞ norm: maximum absolute value
-                multi_tensor_apply_dim<1>(
+                if (reduce_dim == 1) {
+                  multi_tensor_apply_dim<1>(
                     tensor_lists,
                     reduce_dim,
-                    LpNormDimFunctor<scalar_t, NormType::LInf, out_t>(),
-                    output_per_tensor.mutable_data_ptr<out_opmath_t>(),
-                    max_n_norm_elements_per_tensor);
+                    LpNormDimFunctor<scalar_t, NormType::LInf, out_t, 1>(),
+                    output_per_tensor.mutable_data_ptr<out_opmath_t>(),  
+                    max_num_output_per_tensor);
+                } else {
+                  multi_tensor_apply_dim<1>(
+                    tensor_lists,
+                    reduce_dim,
+                    LpNormDimFunctor<scalar_t, NormType::LInf, out_t, 0>(),
+                    output_per_tensor.mutable_data_ptr<out_opmath_t>(),  
+                    max_num_output_per_tensor);
+                } 
               }
-
+              C10_CUDA_KERNEL_LAUNCH_CHECK();
               for (const auto t : c10::irange(ntensors)) {
-                auto sub_t = output_per_tensor.slice(0, t*max_n_norm_elements_per_tensor, t*max_n_norm_elements_per_tensor + vec_res[t].numel());
-                vec_res[t] = sub_t;
+                auto sub_t = output_per_tensor.slice(0, t*max_num_output_per_tensor, t*max_num_output_per_tensor + norm_vec[t].numel());
+                norm_vec[t] = sub_t;
               }
-
-              // // Check that the kernel launched successfully (no launch errors)
-              // C10_CUDA_KERNEL_LAUNCH_CHECK();
-
-              // // Ensure we're operating on the correct GPU device
-              // const at::cuda::OptionalCUDAGuard device_guard(
-              //     device_of(output_per_tensor));
-
-              // // Get the current CUDA stream for kernel launches
-              // auto stream = at::cuda::getCurrentCUDAStream();
-
-              // const size_t num_kernels =
-              //     ceil_div(ntensors, MAX_TENSORS_PER_KERNEL);
-
-
-              // for (const auto i : c10::irange(num_kernels)) {
-              //   const size_t num_tensors_this_kernel =
-              //       (i < num_kernels - 1 ||              
-              //        ntensors % MAX_TENSORS_PER_KERNEL == 0)  
-              //       ? MAX_TENSORS_PER_KERNEL             
-              //       : (ntensors % MAX_TENSORS_PER_KERNEL); 
-
-              //   TensorListAddresses addr_struct;
-
-              //   for (const auto j : c10::irange(num_tensors_this_kernel)) {
-
-              //     addr_struct.addresses[j] =
-              //         vec_res[i * MAX_TENSORS_PER_KERNEL + j]
-              //             .mutable_data_ptr<out_t>();
-              //   }
-
-        
-              // } 
             }); 
       });  
-
-  return vec_res;
+  return norm_vec;
 }
 
 // Internal implementation for foreach_tensor_norm_cuda and
@@ -1032,7 +997,6 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
   check_foreach_norm_dtype(
       dtype, tensors[0].scalar_type(), "_foreach_tensor_norm_cuda");
 
-  std::cout << "dim.has_value() = " << dim.has_value() << std::endl;
   if (dim.has_value()) {
     for (auto tensor : tensors) {
       // only do specialized cuda process if tensors are square matrices.
@@ -1041,7 +1005,7 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
       }
     }
 
-    return _foreach_norm_cuda_with_dim(tensors, ord, dtype, dim.value(), keepdim);
+    return _foreach_norm_cuda_with_dim(tensors, p, dtype, dim.value(), keepdim);
   }
 
   return foreach_tensor_norm_cuda_internal<
