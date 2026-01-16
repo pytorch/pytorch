@@ -2063,8 +2063,8 @@ communication mechanism.
 
   // Use ABCMeta as the metaclass so that FakeScriptObject can be registered
   // as a virtual subclass, allowing isinstance(fake_obj, ProcessGroup) to work.
-  py::object abc_module = py::module_::import("abc");
-  py::object abc_meta = abc_module.attr("ABCMeta");
+  py::object abc_module = py::module_::import("torch._library.opaque_object");
+  py::object abc_meta = abc_module.attr("OpaqueBase");
 
   auto processGroup =
       intrusive_ptr_no_gil_destructor_trampoline_class_<

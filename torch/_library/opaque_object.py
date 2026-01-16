@@ -46,6 +46,9 @@ import torch
 
 from .fake_class_registry import FakeScriptObject, register_fake_class
 
+class OpaqueBase(metaclass=ABCMeta):
+    pass
+
 
 class MemberType(Enum):
     """
