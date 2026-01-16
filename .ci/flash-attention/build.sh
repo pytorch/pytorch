@@ -24,7 +24,7 @@ fi
 PYTHON="${PYTHON_EXECUTABLE:-python}"
 
 if [[ ! -d "/usr/local/cuda" ]]; then
-    echo "CUDA not found, setting up minimal CUDA environment for Flash Attention build"
+    echo "CUDA not found, installing CUDA toolkit for Flash Attention build"
 
     if command -v dnf &> /dev/null; then
         dnf install -y gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ || true
@@ -34,35 +34,14 @@ if [[ ! -d "/usr/local/cuda" ]]; then
         fi
     fi
 
-    mkdir -p /usr/local/cuda
-    CUDA_NVCC_VERSION="12.6.85"
-    CUDA_CUDART_VERSION="12.6.77"
-    CUDA_CCCL_VERSION="12.6.77"
-    if [[ "$(uname -m)" == "aarch64" ]]; then
-        NVCC_ARCH="sbsa"
-    else
-        NVCC_ARCH="x86_64"
-    fi
-
-    NVCC_URL="https://developer.download.nvidia.com/compute/cuda/redist/cuda_nvcc/linux-${NVCC_ARCH}/cuda_nvcc-linux-${NVCC_ARCH}-${CUDA_NVCC_VERSION}-archive.tar.xz"
-    echo "Downloading nvcc from ${NVCC_URL}"
-    curl -sL "${NVCC_URL}" | tar -xJ -C /usr/local/cuda --strip-components=1
-
-    CUDART_URL="https://developer.download.nvidia.com/compute/cuda/redist/cuda_cudart/linux-${NVCC_ARCH}/cuda_cudart-linux-${NVCC_ARCH}-${CUDA_CUDART_VERSION}-archive.tar.xz"
-    echo "Downloading cudart from ${CUDART_URL}"
-    curl -sL "${CUDART_URL}" | tar -xJ -C /usr/local/cuda --strip-components=1
-
-    CCCL_URL="https://developer.download.nvidia.com/compute/cuda/redist/cuda_cccl/linux-${NVCC_ARCH}/cuda_cccl-linux-${NVCC_ARCH}-${CUDA_CCCL_VERSION}-archive.tar.xz"
-    echo "Downloading CUDA C++ Core Libraries from ${CCCL_URL}"
-    curl -sL "${CCCL_URL}" | tar -xJ -C /usr/local/cuda --strip-components=1
+    source "${PYTORCH_ROOT}/.ci/docker/common/install_cuda.sh"
+    install_cuda 12.6.3 cuda_12.6.3_560.35.05_linux
 
     export CUDA_HOME=/usr/local/cuda
     export PATH=/usr/local/cuda/bin:$PATH
 
-    echo "Installed nvcc version: $(nvcc --version | grep release)"
-    echo "Checking CUDA headers:"
-    ls -la /usr/local/cuda/include/cuda_runtime.h || echo "WARNING: cuda_runtime.h not found!"
-    ls -la /usr/local/cuda/include/cuda_fp16.h || echo "WARNING: cuda_fp16.h not found!"
+    echo "Installed CUDA version:"
+    nvcc --version
 fi
 
 echo "installing dependencies"
