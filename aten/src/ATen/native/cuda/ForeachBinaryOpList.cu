@@ -19,12 +19,27 @@
 #include <ATen/ops/_foreach_mul_native.h>
 #include <ATen/ops/_foreach_pow_native.h>
 #include <ATen/ops/_foreach_sub_native.h>
-
+#include <ATen/ops/empty.h>
 #include <ATen/ops/empty_like_native.h>
-#include <ATen/ops/stack.h>
 #endif
 
 namespace at::native {
+
+// Pack scalar tensor data pointers into a device tensor (cudagraph-safe).
+// Uses pinned memory for async DMA transfer to avoid address instability.
+template <typename T>
+Tensor pack_scalar_tensor_ptrs(TensorList scalars, const Device& device) {
+  auto pinned = at::empty(
+      {static_cast<int64_t>(scalars.size())},
+      at::TensorOptions().dtype(at::kLong).pinned_memory(true));
+  auto* pinned_data = pinned.data_ptr<int64_t>();
+
+  for (const auto i : c10::irange(scalars.size())) {
+    pinned_data[i] = reinterpret_cast<int64_t>(scalars[i].const_data_ptr<T>());
+  }
+
+  return pinned.to(device, /*non_blocking=*/true);
+}
 
 template <typename T, template <class> class Op>
 std::vector<Tensor> foreach_tensor_list_op(
@@ -225,14 +240,13 @@ FOREACH_BINARY_OP_LIST_ALPHA(
     sub,
     std::minus);
 
-// Scalar tensor list variants: alpha is a list of 0-d tensors (cudagraph
-// compatible). Common implementation for both in-place and out-of-place
-// versions
-template <typename T, template <class> class Op, bool inplace>
+// Scalar tensor list op: T=tensor dtype, ScalarT=scalar dtype, supports mixed.
+// Cudagraph-safe: scalar values stay on GPU, pointers packed via pinned memory.
+template <typename T, typename ScalarT, template <class> class Op, bool inplace>
 auto foreach_tensor_list_op_scalar_tensor(
     TensorList tensors1,
     TensorList tensors2,
-    const Tensor& stacked_scalars) {
+    TensorList scalars) {
   std::vector<std::vector<at::Tensor>> tensor_lists;
   tensor_lists.emplace_back(tensors1.vec());
   tensor_lists.emplace_back(tensors2.vec());
@@ -246,6 +260,9 @@ auto foreach_tensor_list_op_scalar_tensor(
     tensor_lists.emplace_back(std::move(vec_res));
   }
 
+  auto device_ptrs =
+      pack_scalar_tensor_ptrs<ScalarT>(scalars, tensors1[0].device());
+
   using opmath_t = at::opmath_type<T>;
   constexpr int depth = inplace ? 2 : 3;
   constexpr int res_arg_index = inplace ? 0 : 2;
@@ -254,11 +271,13 @@ auto foreach_tensor_list_op_scalar_tensor(
       tensor_lists,
       BinaryOpListAlphaTensorFunctor<
           T,
+          ScalarT,
           depth,
           /* r_args_depth */ 2,
           res_arg_index>(),
       Op<opmath_t>(),
-      stacked_scalars.const_data_ptr<T>());
+      reinterpret_cast<const ScalarT* const*>(
+          device_ptrs.template const_data_ptr<int64_t>()));
 
   if constexpr (inplace) {
     increment_version(tensors1);
@@ -267,11 +286,14 @@ auto foreach_tensor_list_op_scalar_tensor(
   }
 }
 
+// Double dispatch on tensor dtype and scalar dtype. Inner dispatch shadows
+// outer scalar_t, so we save to tensor_t/alpha_t before entering next level.
+// Complex scalars fall back to slow path.
 template <template <class> class Op>
 std::vector<Tensor> all_types_complex_bool_half_bfloat16_scalar_tensor(
     TensorList tensors1,
     TensorList tensors2,
-    const Tensor& stacked_scalars) {
+    TensorList scalars) {
   return AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       kBool,
       kBFloat16,
@@ -279,16 +301,30 @@ std::vector<Tensor> all_types_complex_bool_half_bfloat16_scalar_tensor(
       tensors1[0].scalar_type(),
       "foreach_binary_op_scalar_tensor_list_cuda",
       [&]() {
-        return foreach_tensor_list_op_scalar_tensor<scalar_t, Op, false>(
-            tensors1, tensors2, stacked_scalars);
+        using tensor_t = scalar_t;
+        return AT_DISPATCH_ALL_TYPES_AND3(
+            kBool,
+            kBFloat16,
+            kHalf,
+            scalars[0].scalar_type(),
+            "foreach_binary_op_scalar_tensor_list_cuda_alpha",
+            [&]() {
+              using alpha_t = scalar_t;
+              return foreach_tensor_list_op_scalar_tensor<
+                  tensor_t,
+                  alpha_t,
+                  Op,
+                  false>(tensors1, tensors2, scalars);
+            });
       });
 }
 
+// In-place version of double dispatch (see above).
 template <template <class> class Op>
 void all_types_complex_bool_half_bfloat16_scalar_tensor_(
     TensorList tensors1,
     TensorList tensors2,
-    const Tensor& stacked_scalars) {
+    TensorList scalars) {
   AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND3(
       kBool,
       kBFloat16,
@@ -296,8 +332,18 @@ void all_types_complex_bool_half_bfloat16_scalar_tensor_(
       tensors1[0].scalar_type(),
       "foreach_binary_op_scalar_tensor_list_cuda_",
       [&]() {
-        foreach_tensor_list_op_scalar_tensor<scalar_t, Op, true>(
-            tensors1, tensors2, stacked_scalars);
+        using tensor_t = scalar_t;
+        AT_DISPATCH_ALL_TYPES_AND3(
+            kBool,
+            kBFloat16,
+            kHalf,
+            scalars[0].scalar_type(),
+            "foreach_binary_op_scalar_tensor_list_cuda_alpha_",
+            [&]() {
+              using alpha_t = scalar_t;
+              foreach_tensor_list_op_scalar_tensor<tensor_t, alpha_t, Op, true>(
+                  tensors1, tensors2, scalars);
+            });
       });
 }
 
@@ -308,12 +354,13 @@ void all_types_complex_bool_half_bfloat16_scalar_tensor_(
     TORCH_CHECK(                                                           \
         scalars.size() == tensors1.size(),                                 \
         "scalars must have same length as tensors");                       \
-    if (!can_use_fast_route({tensors1, tensors2})) {                       \
+    /* Fall back to slow path for complex scalars (complex->real not ok)*/ \
+    if (!can_use_fast_route({tensors1, tensors2}) ||                       \
+        scalars[0].is_complex()) {                                         \
       return at::native::foreach_tensor_##NAME##_scalar_tensor_list_slow_( \
           tensors1, tensors2, scalars);                                    \
     }                                                                      \
-    Tensor stacked_scalars = at::stack(scalars);                           \
-    FUNCTION##_<OP>(tensors1, tensors2, stacked_scalars);                  \
+    FUNCTION##_<OP>(tensors1, tensors2, scalars);                          \
   }                                                                        \
                                                                            \
   std::vector<Tensor> foreach_tensor_##NAME##_scalar_tensor_list_cuda(     \
@@ -322,12 +369,13 @@ void all_types_complex_bool_half_bfloat16_scalar_tensor_(
     TORCH_CHECK(                                                           \
         scalars.size() == tensors1.size(),                                 \
         "scalars must have same length as tensors");                       \
-    if (!can_use_fast_route({tensors1, tensors2})) {                       \
+    /* Fall back to slow path for complex scalars (complex->real not ok)*/ \
+    if (!can_use_fast_route({tensors1, tensors2}) ||                       \
+        scalars[0].is_complex()) {                                         \
       return at::native::foreach_tensor_##NAME##_scalar_tensor_list_slow(  \
           tensors1, tensors2, scalars);                                    \
     }                                                                      \
-    Tensor stacked_scalars = at::stack(scalars);                           \
-    return FUNCTION<OP>(tensors1, tensors2, stacked_scalars);              \
+    return FUNCTION<OP>(tensors1, tensors2, scalars);                      \
   }
 
 FOREACH_BINARY_OP_SCALAR_TENSOR_LIST(

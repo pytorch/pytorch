@@ -1581,8 +1581,7 @@ class TestForeach(TestCase):
 
         # Create random scalar tensors for per-tensor alpha
         scalar_tensors_varied = [
-            make_tensor((), device=device, dtype=dtype)
-            for _ in range(len(tensors1))
+            make_tensor((), device=device, dtype=dtype) for _ in range(len(tensors1))
         ]
 
         # For per-tensor alpha, compare against element-wise computation (Python for loop)
@@ -1639,8 +1638,7 @@ class TestForeach(TestCase):
         ]
 
         scalar_tensors = [
-            make_tensor((), device=device, dtype=dtype)
-            for _ in range(len(tensors1))
+            make_tensor((), device=device, dtype=dtype) for _ in range(len(tensors1))
         ]
 
         if op_name == "add":
@@ -1660,6 +1658,70 @@ class TestForeach(TestCase):
             scalar_tensors,
         )
         self.assertEqual(expected, actual, rtol=0.0, atol=0.0)
+
+    @onlyCUDA
+    @dtypes(torch.float32, torch.float64, torch.half, torch.bfloat16)
+    @parametrize("op_name", ["add", "sub"])
+    def test_scalar_tensor_list_cudagraph(self, device, dtype, op_name):
+        """Test ScalarTensorList cudagraph compatibility with mixed dtypes."""
+        n_tensors = 3
+        tensor_size = (25, 193)
+
+        # Static tensors for cudagraph
+        static_t1 = [
+            torch.zeros(tensor_size, device=device, dtype=dtype)
+            for _ in range(n_tensors)
+        ]
+        static_t2 = [
+            torch.zeros(tensor_size, device=device, dtype=dtype)
+            for _ in range(n_tensors)
+        ]
+        # Use float64 scalars (mixed dtype test)
+        static_scalars = [
+            torch.zeros((), device=device, dtype=torch.float64)
+            for _ in range(n_tensors)
+        ]
+
+        if op_name == "add":
+            scalar_tensor_op = torch.ops.aten._foreach_add.ScalarTensorList
+        else:
+            scalar_tensor_op = torch.ops.aten._foreach_sub.ScalarTensorList
+
+        # warmup
+        scalar_tensor_op(static_t1, static_t2, static_scalars)
+
+        # Record cudagraph
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            static_outs = scalar_tensor_op(static_t1, static_t2, static_scalars)
+
+        # Replay with new integer values
+        new_t1_vals = [
+            torch.randn(tensor_size, device=device, dtype=dtype)
+            for _ in range(n_tensors)
+        ]
+        new_t2_vals = [
+            torch.randn(tensor_size, device=device, dtype=dtype)
+            for _ in range(n_tensors)
+        ]
+        new_scalar_vals = [
+            torch.zeros((), device=device, dtype=torch.float64)
+            for _ in range(n_tensors)
+        ]
+
+        for i in range(n_tensors):
+            static_t1[i].copy_(new_t1_vals[i])
+            static_t2[i].copy_(new_t2_vals[i])
+            static_scalars[i].copy_(new_scalar_vals[i])
+
+        g.replay()
+        torch.cuda.synchronize()
+
+        # Check: out = t1 +/- t2 * scalar
+        expected_vals = scalar_tensor_op(new_t1_vals, new_t2_vals, new_scalar_vals)
+
+        for actual, expected in zip(static_outs, expected_vals):
+            self.assertEqual(actual, expected, rtol=0.0, atol=0.0)
 
 
 # TODO(crcrpar): Hide this inside torch/testing/_internal.

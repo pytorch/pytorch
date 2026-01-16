@@ -319,9 +319,14 @@ struct BinaryOpListAlphaFunctor {
   }
 };
 
-// Functor for binary op with per-tensor alpha from 1-d CUDA tensor (cudagraph
-// compatible)
-template <typename T, int depth, int r_args_depth, int res_arg_index>
+// Functor for binary op with per-tensor alpha from 0-d CUDA tensors.
+// T=tensor dtype, ScalarT=scalar dtype; converts ScalarT -> opmath_t in kernel.
+template <
+    typename T,
+    typename ScalarT,
+    int depth,
+    int r_args_depth,
+    int res_arg_index>
 struct BinaryOpListAlphaTensorFunctor {
   using opmath_t = at::opmath_type<T>;
   template <typename Op>
@@ -329,10 +334,10 @@ struct BinaryOpListAlphaTensorFunctor {
       int64_t chunk_size,
       TensorListMetadata<depth>& tl,
       Op op,
-      const T* alpha_ptr) {
+      const ScalarT* const* alpha_ptrs) {
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const opmath_t alpha = static_cast<opmath_t>(
-        alpha_ptr[tensor_loc + tl.start_tensor_this_launch]);
+        *alpha_ptrs[tensor_loc + tl.start_tensor_this_launch]);
     binary_op_list_alpha<T, depth, r_args_depth, res_arg_index>(
         chunk_size, tl, op, alpha);
   }
