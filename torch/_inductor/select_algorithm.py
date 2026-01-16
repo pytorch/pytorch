@@ -63,7 +63,6 @@ from .codegen.common import (
 from .codegen.simd_kernel_features import SIMDKernelFeatures
 from .codegen.subgraph import SubgraphChoiceCaller
 from .codegen.triton import (
-    gen_common_triton_imports,
     texpr,
     TMACompatibilityChecker,
     TritonKernel,
@@ -785,7 +784,7 @@ class TritonTemplateKernel(TritonKernel):
             # python_argdefs() cannot be run until after the rest of the template lazily adds more args
             arg_defs, *_ = self.args.python_argdefs()
             code = IndentedBuffer()
-            code.splice(gen_common_triton_imports())
+            code.splice(self.gen_common_triton_imports())
             code.splice(self.jit_lines())
             code.writeline(
                 f"def {self.kernel_name}({', '.join(x.full_name() for x in arg_defs)}):"
