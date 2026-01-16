@@ -185,7 +185,7 @@ inline void norm_two_reduce_step(Vectorized<float>& acc_fvec, Vectorized<BFloat1
 }
 
 template <typename scalar_t, typename out_t=typename scalar_value_type<scalar_t>::type>
-void norm_kernel_cpu_impl(TensorIterator& iter, const double& val) {
+void norm_kernel_cpu_impl(TensorIterator& iter, const double& val, bool skip_root) {
   // This reduction accumulates results as the type `acc_t`.
   using acc_t = at::opmath_type<typename scalar_value_type<scalar_t>::type>;
   if (val == 0.0) {
@@ -193,19 +193,28 @@ void norm_kernel_cpu_impl(TensorIterator& iter, const double& val) {
   } else if (val == 1.0) {
     binary_kernel_reduce(iter, NormOneOps<scalar_t, acc_t, out_t>(), acc_t(0));
   } else if (val == 2.0) {
-    binary_kernel_reduce(iter, NormTwoOps<scalar_t, acc_t, out_t>(), acc_t(0));
+    if (skip_root) {
+      binary_kernel_reduce(iter, NormTwoNoRootOps<scalar_t, acc_t, out_t>(), acc_t(0));
+    } else {
+      binary_kernel_reduce(iter, NormTwoOps<scalar_t, acc_t, out_t>(), acc_t(0));
+    }
   } else if (val == INFINITY) {
     binary_kernel_reduce(iter, AbsMaxOps<scalar_t, acc_t, out_t>(), acc_t(0));
   } else if (val == -INFINITY) {
     binary_kernel_reduce(iter, AbsMinOps<scalar_t, acc_t, out_t>(), std::numeric_limits<acc_t>::infinity());
   } else {
-    binary_kernel_reduce(iter, NormOps<scalar_t, acc_t, out_t>{acc_t(val)}, acc_t(0));
+    if (skip_root) {
+      binary_kernel_reduce(iter, NormNoRootOps<scalar_t, acc_t, out_t>{acc_t(val)}, acc_t(0));
+    } else {
+      binary_kernel_reduce(iter, NormOps<scalar_t, acc_t, out_t>{acc_t(val)}, acc_t(0));
+    }
   }
 }
 
 void norm_kernel_tensor_iterator_impl(
     TensorIterator& iter,
-    const Scalar& p) {
+    const Scalar& p,
+    bool skip_root) {
   double val = 0;
   if (p.isIntegral(false)) {
     val = p.to<int64_t>();
@@ -219,6 +228,9 @@ void norm_kernel_tensor_iterator_impl(
     return;
   }
 
+  // skip_root only applies for p-norms where p != inf, -inf, 0, 1
+  bool should_skip_root = skip_root && std::abs(val) != INFINITY && val != 0.0 && val != 1.0;
+
   if (val == 2.0 && is_reduce_lastdim(iter) &&
       iter.dtype(0) == iter.input_dtype() &&
       (iter.input_dtype() == kFloat || iter.input_dtype() == kDouble ||
@@ -229,7 +241,7 @@ void norm_kernel_tensor_iterator_impl(
     AT_DISPATCH_FLOATING_TYPES_AND(kBFloat16, iter.input_dtype(), "norm_cpu", [&] {
         // use float as accumulate type for BFloat16
         using acc_t = at::opmath_type<scalar_t>;
-        binary_kernel_reduce_lastdim(iter, [](char* result_data_bytes, char* self_data_bytes, int64_t size) {
+        binary_kernel_reduce_lastdim(iter, [should_skip_root](char* result_data_bytes, char* self_data_bytes, int64_t size) {
           scalar_t* result_data = (scalar_t*)result_data_bytes;
           scalar_t* self_data = (scalar_t*)self_data_bytes;
 
@@ -250,20 +262,24 @@ void norm_kernel_tensor_iterator_impl(
             acc_t data_val = acc_t(self_data[d]);
             buffer[0] += data_val * data_val;
           }
-          result_data[0] = scalar_t(std::sqrt(buffer[0]));
+          if (should_skip_root) {
+            result_data[0] = scalar_t(buffer[0]);
+          } else {
+            result_data[0] = scalar_t(std::sqrt(buffer[0]));
+          }
         });
       });
   } else {
     if (iter.input_dtype() == kHalf && iter.dtype(0) == kFloat) {
       // type promotion that does cast and reduction in a single kernel
-      norm_kernel_cpu_impl<at::Half, float>(iter, val); return;
+      norm_kernel_cpu_impl<at::Half, float>(iter, val, should_skip_root); return;
     } else if (iter.input_dtype() == kBFloat16 && iter.dtype(0) == kFloat) {
       // type promotion that does cast and reduction in a single kernel
-      norm_kernel_cpu_impl<at::BFloat16, float>(iter, val); return;
+      norm_kernel_cpu_impl<at::BFloat16, float>(iter, val, should_skip_root); return;
     }
 
     AT_DISPATCH_FLOATING_AND_COMPLEX_TYPES_AND3(kHalf, kBFloat16, kComplexHalf, iter.input_dtype(), "norm_cpu", [&] {
-      norm_kernel_cpu_impl<scalar_t>(iter, val);
+      norm_kernel_cpu_impl<scalar_t>(iter, val, should_skip_root);
     });
 
     // For complex outputs, the above kernels do not touch the imaginary values,

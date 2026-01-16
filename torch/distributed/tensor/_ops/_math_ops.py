@@ -59,33 +59,26 @@ class _NormPartial(Partial):
     """
     This placement is used for partial vector norm.
 
-    For p-norms (where p not inf or -inf), the p-norm over n elements computes
-        (sum_i x_i^p)^(1/p)
-    where the sum is from i=1 to n. The reduction op is the p-norm itself.
+    For p-norms (where p not in {inf, -inf, 0, 1}), the p-norm over n elements
+    computes (sum_i x_i^p)^(1/p). inf/-inf/0/1 norms are handled directly by
+    Partial("max"), Partial("min"), or Partial("sum"), so this class is only
+    used for other p-norms.
+
     For example, consider 2 ranks, a (4,) tensor sharded on dim-0, and 2-norm:
         Rank 0: [t1, t2] | Rank 1: [t3, t4]
     After computing 2-norm per gradient (partial placement):
         Rank 0: [sqrt(t1^2 + t2^2)] | Rank 1: [sqrt(t3^2 + t4^2)]
     Converting from partial to replicate wants to ultimately get:
         Rank 0/1: [sqrt(t1^2 + t2^2 + t3^2 + t4^2)]
-    This can be achieved by computing 2-norm on each rank's result. This holds
-    similarly for inf and -inf norm. For 0-norm, the reduction op is sum.
+    This is achieved by raising to power p, summing, then taking pth root.
     """
 
-    norm_type: int | float | str = 2
+    norm_type: int | float = 2
 
-    def __init__(self, norm_type: int | float | str = 2):
-        reduce_op = None
-        if norm_type in (float("inf"), "inf"):
-            reduce_op = "max"
-        elif norm_type in (float("-inf"), "-inf"):
-            reduce_op = "min"
-        elif isinstance(norm_type, (int, float)):
-            reduce_op = "sum"
-        else:
-            raise NotImplementedError(f"Unsupported norm type: {norm_type}")
-
-        super().__init__(reduce_op)
+    def __init__(self, norm_type: int | float = 2):
+        if not isinstance(norm_type, (int, float)):
+            raise AssertionError(f"Expected int or float, got {type(norm_type)}")
+        super().__init__("sum")
         object.__setattr__(self, "norm_type", norm_type)
 
     def _partition_value(
@@ -100,19 +93,7 @@ class _NormPartial(Partial):
         One such f(x) is f(x) = x / sqrt(4). This generalizes to d ranks and
         p-norm as f(x) = x / d^(1/p).
         """
-        if self.reduce_op in ("max", "min"):
-            return tensor
-        elif self.reduce_op == "sum":
-            if self.norm_type == 0:
-                raise NotImplementedError(f"Unsupported norm type:: {self.norm_type}")
-            elif self.norm_type == 1:
-                return tensor / mesh.size(mesh_dim)
-            if not isinstance(self.norm_type, (int, float)):
-                raise AssertionError(
-                    f"Expected int or float, got {type(self.norm_type)}"
-                )
-            return tensor / math.pow(mesh.size(mesh_dim), 1 / self.norm_type)
-        raise NotImplementedError(self.reduce_op)
+        return tensor / math.pow(mesh.size(mesh_dim), 1 / self.norm_type)
 
     def _reduce_shard_value(
         self,
@@ -135,24 +116,10 @@ class _NormPartial(Partial):
         return self._post_reduce_transform(reduced_tensor)
 
     def _pre_reduce_transform(self, tensor: torch.Tensor) -> torch.Tensor:
-        if self.reduce_op == "sum":
-            if not isinstance(self.norm_type, (int, float)):
-                raise AssertionError(
-                    f"Expected int or float, got {type(self.norm_type)}"
-                )
-            if self.norm_type != 0 and self.norm_type != 1:
-                return tensor**self.norm_type
-        return tensor
+        return tensor**self.norm_type
 
     def _post_reduce_transform(self, tensor: torch.Tensor) -> torch.Tensor:
-        if self.reduce_op == "sum":
-            if not isinstance(self.norm_type, (int, float)):
-                raise AssertionError(
-                    f"Expected int or float, got {type(self.norm_type)}"
-                )
-            if self.norm_type != 0 and self.norm_type != 1:
-                return tensor ** (1.0 / self.norm_type)
-        return tensor
+        return tensor ** (1.0 / self.norm_type)
 
     def __eq__(self, other: object) -> bool:
         if not isinstance(other, _NormPartial):
@@ -163,14 +130,29 @@ class _NormPartial(Partial):
         return 1 + hash(self.norm_type)
 
     def __repr__(self) -> str:
-        """
-        machine readable representation of the _NormPartial placement
-        """
-        return f"_NormPartial(reduce_op={self.reduce_op}, norm_type={self.norm_type})"
+        return f"_NormPartial(norm_type={self.norm_type})"
 
     def __str__(self) -> str:
-        """human readable representation of the _NormPartial placement"""
-        return f"_NormP({self.reduce_op}, {self.norm_type})"
+        return f"_NormP({self.norm_type})"
+
+
+def _get_norm_reduction_op(
+    norm_type: int | float | str, skip_root: bool = False
+) -> ReductionOpType:
+    """Get the reduction op for vector/foreach norm based on norm_type and skip_root."""
+    if norm_type in (float("inf"), "inf"):
+        return "max"
+    elif norm_type in (float("-inf"), "-inf"):
+        return "min"
+    elif norm_type == 0 or norm_type == 1:
+        return "sum"
+    elif skip_root:
+        # With skip_root, output is sum(|x|^p), directly reducible with sum
+        return "sum"
+    else:
+        # For p-norms without skip_root, use NormReduction which produces _NormPartial
+        # This is needed for Partial inputs; Shard inputs are handled by the handler
+        return NormReduction(norm_type)
 
 
 def _infer_reduction_dims(dims_arg: object, ndim: int) -> list[int] | None:
@@ -465,14 +447,16 @@ def vector_norm_strategy(op_schema: OpSchema) -> OpStrategy:
         raise AssertionError(f"Expected int, float, or str, got {type(norm_type)}")
     dim = args_schema[2] if len(args_schema) > 2 else None
     keepdim = args_schema[3] if len(args_schema) > 3 else False
+    skip_root = op_schema.kwargs_schema.get("skip_root", False)
     dims = _infer_reduction_dims(dim, input_strategy.ndim)
     reduce_dims = list(range(input_strategy.ndim)) if dims is None else dims
+
     return common_reduction_strategy(
         input_strategy,
         reduce_dims,
         keep_dim=cast(bool, keepdim),
         reduction_linear=True,
-        reduction_op=NormReduction(norm_type),
+        reduction_op=_get_norm_reduction_op(norm_type, skip_root),
     )
 
 
@@ -489,6 +473,10 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
     norm_type = args_schema[1] if len(args_schema) > 1 else 2
     if not isinstance(norm_type, (int, float, str)):
         raise AssertionError(f"Expected int, float, or str, got {type(norm_type)}")
+    skip_root = args_schema[3] if len(args_schema) > 3 else False
+
+    reduction_op = _get_norm_reduction_op(norm_type, skip_root)
+
     output_tuple_strategy_children: list[OpStrategy] = []
     for op_strategy in input_tuple_strategy.children:
         if not isinstance(op_strategy, OpStrategy):
@@ -498,7 +486,7 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
             op_strategy,
             reduce_dims,
             reduction_linear=True,
-            reduction_op=NormReduction(norm_type),
+            reduction_op=reduction_op,
         )
         output_tuple_strategy_children.append(output_strategy)
     return TupleStrategy(output_tuple_strategy_children)
