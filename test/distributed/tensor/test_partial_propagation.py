@@ -61,23 +61,110 @@ PARTIAL_TYPES = [
 ]
 
 # Unary pointwise aten ops to test
+# These are all unary ops from pointwise_ops in _pointwise_ops.py that work with float tensors
 UNARY_OPS = [
+    # Trigonometric functions
+    torch.ops.aten.acos.default,
+    torch.ops.aten.acosh.default,
+    torch.ops.aten.asin.default,
+    torch.ops.aten.asinh.default,
+    torch.ops.aten.atan.default,
+    torch.ops.aten.atanh.default,
+    torch.ops.aten.cos.default,
+    torch.ops.aten.cosh.default,
+    torch.ops.aten.sin.default,
+    torch.ops.aten.sinc.default,
+    torch.ops.aten.sinh.default,
+    torch.ops.aten.tan.default,
+    torch.ops.aten.tanh.default,
+    # Exponential and logarithmic
+    torch.ops.aten.exp.default,
+    torch.ops.aten.exp2.default,
+    torch.ops.aten.expm1.default,
+    torch.ops.aten.log.default,
+    torch.ops.aten.log10.default,
+    torch.ops.aten.log1p.default,
+    torch.ops.aten.log2.default,
+    # Rounding and sign
     torch.ops.aten.abs.default,
+    torch.ops.aten.ceil.default,
+    torch.ops.aten.floor.default,
+    torch.ops.aten.frac.default,
     torch.ops.aten.neg.default,
+    torch.ops.aten.positive.default,
+    torch.ops.aten.round.default,
+    torch.ops.aten.sgn.default,
+    torch.ops.aten.sign.default,
+    torch.ops.aten.trunc.default,
+    # Power and roots
+    torch.ops.aten.reciprocal.default,
+    torch.ops.aten.rsqrt.default,
+    torch.ops.aten.sqrt.default,
+    torch.ops.aten.square.default,
+    # Error functions
+    torch.ops.aten.erf.default,
+    torch.ops.aten.erfc.default,
+    torch.ops.aten.erfinv.default,
+    # Gamma functions
+    torch.ops.aten.digamma.default,
+    torch.ops.aten.lgamma.default,
+    # Activation functions
+    torch.ops.aten.gelu.default,
     torch.ops.aten.relu.default,
     torch.ops.aten.sigmoid.default,
-    torch.ops.aten.tanh.default,
+    torch.ops.aten.silu.default,
+    # Conversions
+    torch.ops.aten.deg2rad.default,
+    torch.ops.aten.rad2deg.default,
+    # Special functions
+    torch.ops.aten.i0.default,
+    torch.ops.aten.nan_to_num.default,
+    torch.ops.aten.logit.default,
 ]
+# Note: Excluded ops that require specific dtypes:
+# - bitwise_not, logical_not: require integer/bool types
+# - signbit: returns bool, not float
+# - isnan, isinf, isneginf, isposinf: return bool, not float
+# - angle, _conj, conj_physical: require complex types
 
 # Binary pointwise aten ops to test
+# These are all binary ops from pointwise_ops in _pointwise_ops.py that work with float tensors
 BINARY_OPS = [
+    # Basic arithmetic
     torch.ops.aten.add.Tensor,
     torch.ops.aten.sub.Tensor,
     torch.ops.aten.mul.Tensor,
     torch.ops.aten.div.Tensor,
+    torch.ops.aten.true_divide.Tensor,
+    torch.ops.aten.fmod.Tensor,
+    torch.ops.aten.remainder.Tensor,
+    # Power
+    torch.ops.aten.pow.Tensor_Tensor,
+    torch.ops.aten.float_power.Tensor_Tensor,
+    # Min/Max
     torch.ops.aten.maximum.default,
     torch.ops.aten.minimum.default,
+    torch.ops.aten.fmax.default,
+    torch.ops.aten.fmin.default,
+    # Trigonometric
+    torch.ops.aten.atan2.default,
+    torch.ops.aten.hypot.default,
+    # Special functions
+    torch.ops.aten.copysign.Tensor,
+    torch.ops.aten.heaviside.default,
+    torch.ops.aten.nextafter.default,
+    torch.ops.aten.logaddexp.default,
+    torch.ops.aten.logaddexp2.default,
+    torch.ops.aten.xlogy.Tensor,
+    # Gamma functions
+    torch.ops.aten.igamma.default,
+    torch.ops.aten.igammac.default,
 ]
+# Note: Excluded ops that require specific dtypes or have special requirements:
+# - ldexp.Tensor: second argument must be integer
+# - Comparison ops (eq, ne, gt, lt, ge, le): return bool tensors
+# - Logical ops (logical_and, logical_or, logical_xor): require bool inputs
+# - Bitwise ops: require integer types
 
 OUTPUT_FILE = "partial_propagation_results.txt"
 
