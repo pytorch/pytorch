@@ -6395,6 +6395,7 @@ Done""",
     # tracing autograd.grad into graph because now you will get different
     # result from eager. One potential fix is to detect x is None in dynamo
     # bytecode level but that is too complicated so we just YOLO.
+    @skipIfTorchDynamo("branching on grad")
     def test_gradcheck_undefined_grad(self):
         def check(fast_mode):
             # when encounter runtime error while running backward
