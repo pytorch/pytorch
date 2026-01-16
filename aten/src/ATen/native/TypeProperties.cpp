@@ -1,4 +1,5 @@
 #define TORCH_ASSERT_ONLY_METHOD_OPERATORS
+#include <ATen/Context.h>
 #include <ATen/core/Tensor.h>
 #include <ATen/native/TypeProperties.h>
 
