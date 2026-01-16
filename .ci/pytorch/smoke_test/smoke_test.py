@@ -252,6 +252,7 @@ def smoke_test_cuda(
         "linux-aarch64",
         "macos-arm64",
         "darwin",
+        "windows",
     ]:
         smoke_test_compile("cuda" if torch.cuda.is_available() else "cpu")
 
