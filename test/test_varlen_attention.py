@@ -476,12 +476,17 @@ class TestVarlenAttention(NNTestCase):
             sdpa_grad_seq = sdpa_grad[i, :seq_len]
             golden_sdpa_seq = golden_sdpa_grad[i, :seq_len]
 
+            print(varlen_grad_seq, sdpa_grad_seq, golden_sdpa_seq)
             fwd_atol = (
                 2 * (golden_sdpa_seq + 0.3 - 0.3 - golden_sdpa_seq).abs().max().item()
             )
 
             varlen_error = (varlen_grad_seq - fwd_atol).abs().max().item()
             sdpa_error = (sdpa_grad_seq - fwd_atol).abs().max().item()
+
+            print("errors")
+            print(varlen_error, sdpa_error)
+            print(abs(varlen_error - sdpa_error))
 
             self.assertLessEqual(varlen_error, sdpa_error + fwd_atol)
 
