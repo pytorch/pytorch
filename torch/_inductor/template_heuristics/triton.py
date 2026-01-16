@@ -741,9 +741,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
         for hint_override in [None] + config.multi_kernel_hints:
             m_hint = max(
                 next_power_of_2(
-                    V.graph.sizevars.size_hint(
+                    V.graph.sizevars.optimization_hint_with_override(
                         m,
-                        fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
                         hint_override=hint_override,
                     )
                 ),
@@ -751,9 +750,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             )
             n_hint = max(
                 next_power_of_2(
-                    V.graph.sizevars.size_hint(
+                    V.graph.sizevars.optimization_hint_with_override(
                         n,
-                        fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
                         hint_override=hint_override,
                     )
                 ),
@@ -761,9 +759,8 @@ class BaseConfigHeuristic(metaclass=BaseHeuristicSingleton):
             )
             k_hint = max(
                 next_power_of_2(
-                    V.graph.sizevars.size_hint(
+                    V.graph.sizevars.optimization_hint_with_override(
                         k,
-                        fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
                         hint_override=hint_override,
                     )
                 ),
@@ -2067,6 +2064,32 @@ class BlackwellTMATemplateConfigMixin(TMATemplateConfigMixin):
                 "FLATTEN": flatten,
             }
 
+    @staticmethod
+    def _generate_exhaustive_configs() -> list[BaseConfig]:
+        configs: list[BaseConfig] = []
+        for BLOCK_M, BLOCK_N, BLOCK_K in itertools.product(
+            [32, 64, 128, 256],
+            repeat=3,
+        ):
+            for num_stages in [2, 3, 4, 5, 6]:
+                # AutoWS doesn't work with num_warps < 4
+                for num_warps in [4, 8]:
+                    for EPILOGUE_SUBTILE in [True, False]:
+                        configs.append(
+                            BlackwellGPUGemmConfig(
+                                block_m=BLOCK_M,
+                                block_n=BLOCK_N,
+                                block_k=BLOCK_K,
+                                num_stages=num_stages,
+                                num_warps=num_warps,
+                                group_m=8,
+                                epilogue_subtile=EPILOGUE_SUBTILE,
+                                warp_specialize=True,
+                                flatten=True,
+                            )
+                        )
+        return configs
+
 
 # Scaled MM-specific mixin for scaled MM templates
 class BaseScaledMMConfigMixin(MMTemplateConfigMixin):
@@ -2361,6 +2384,7 @@ class CUDABlackwellPersistentTMATemplateConfigHeuristic(
     def __init__(self) -> None:
         super().__init__()
         self.mm_configs = self.blackwell_persistent_mm_configs
+        self.exhaustive_configs = self._generate_exhaustive_configs()
 
 
 @register_template_heuristic(
@@ -2393,6 +2417,7 @@ class CUDABlackwellAddmmPersistentTMATemplateConfigHeuristic(
             self.blackwell_persistent_mm_configs
             + self.blackwell_persistent_addmm_configs
         )
+        self.exhaustive_configs = self._generate_exhaustive_configs()
 
 
 @register_template_heuristic(

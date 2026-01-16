@@ -35,9 +35,6 @@ def _runtime_compute_coordinate_on_dim_fake(
         sz, min=0, max=mesh_size - 1 if isinstance(mesh_size, int) else None
     )
 
-    # We may or may not actually end up returning/using this symbol - so
-    # mark it as ignorable.
-    shape_env.ignorable_fresh_unbacked_symbols.append(sz.node._expr)
     return sz
 
 
