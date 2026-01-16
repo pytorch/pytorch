@@ -646,9 +646,7 @@ class VariableBuilder:
                 ],
             )
 
-        def build_key_value(
-            k: Any, v: Any
-        ) -> tuple[VariableTracker, LazyVariableTracker]:
+        def build_key_value(k: Any, v: Any) -> tuple[VariableTracker, VariableTracker]:
             key = ConstantVariable.create(k)
             source_key = k
 
@@ -821,7 +819,7 @@ class VariableBuilder:
             # _HashableTracker class in dicts.py
             def build_key_value(
                 i: Any, k: Any, v: Any
-            ) -> tuple[LazyVariableTracker, LazyVariableTracker]:
+            ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 if all_const:
                     key = ConstantVariable.create(k)
@@ -1628,7 +1626,7 @@ class VariableBuilder:
             # _HashableTracker class in dicts.py
             def build_key_value(
                 i: Any, k: Any, v: Any
-            ) -> tuple[LazyVariableTracker, LazyVariableTracker]:
+            ) -> tuple[VariableTracker, VariableTracker]:
                 base = self.get_source()
                 source_key = ConstDictKeySource(base, i)
                 key = LazyVariableTracker.create(k, source_key)
@@ -2367,7 +2365,7 @@ class VariableBuilder:
                 gb_type="Attempted to wrap sparse Tensor",
                 context="",
                 explanation="torch.compile does not support sparse Tensors",
-                hints=[*graph_break_hints.SUPPORTABLE],
+                hints=[*graph_break_hints.SPARSE_TENSOR],
             )
 
         if (
@@ -3228,7 +3226,7 @@ def handle_traced_output(
                 gb_type="Attempted to wrap sparse Tensor with VariableTracker",
                 context=str(example_value),
                 explanation="torch.compile does not support sparse Tensors with VariableTracker",
-                hints=[*graph_break_hints.SUPPORTABLE],
+                hints=[*graph_break_hints.SPARSE_TENSOR],
             )
         var = construct_tensor_variable(
             target_cls, tx, proxy, example_value, subclass_type, options
