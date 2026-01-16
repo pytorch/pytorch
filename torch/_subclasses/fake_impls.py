@@ -728,6 +728,7 @@ def _view_unbacked_meta(
     # as "materialize": clone the input to break aliasing, then reshape.
     if allow_copy:
         strides = make_contiguous_strides_for(shape)
+        # pyrefly: ignore[bad-return]
         return a.clone(memory_format=torch.contiguous_format).as_strided(shape, strides)
 
     msg = f"Cannot view a tensor with shape {a.shape} and strides {a.stride()} as a tensor with shape {shape}!"
@@ -769,10 +770,13 @@ def _view_meta(
     if torch.fx.experimental._config.backed_size_oblivious or _view_has_unbacked_input(
         a, shape
     ):
-        return typing_cast(FakeTensor, _view_unbacked_meta(a, shape, allow_copy=allow_copy))
+        return typing_cast(
+            FakeTensor, _view_unbacked_meta(a, shape, allow_copy=allow_copy)
+        )
     else:
         return typing_cast(
-            FakeTensor, torch._refs._reshape_view_helper(a, *shape, allow_copy=allow_copy)
+            FakeTensor,
+            torch._refs._reshape_view_helper(a, *shape, allow_copy=allow_copy),
         )
 
 
