@@ -2,7 +2,6 @@
 import copy
 import itertools
 
-from torch._dynamo.variables.distributed import PlacementClassVariable
 from torch.distributed.tensor.placement_types import (
     _StridedShard,
     Partial,
@@ -65,12 +64,6 @@ class PlacementTypesTestCase(TestCase):
         with self.assertRaises(TypeError):
             _StridedShard(3, 4)
         _StridedShard(3, split_factor=4)
-
-    def test_dynamo_can_identify_placement_classes(self):
-        for cls in (Replicate, Shard, _StridedShard, Partial):
-            self.assertTrue(
-                PlacementClassVariable.is_placement_type(cls), msg=f"failed on {cls}"
-            )
 
 
 if __name__ == "__main__":

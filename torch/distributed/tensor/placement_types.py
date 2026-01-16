@@ -1419,3 +1419,6 @@ def _register_placements_as_opaque():
         members=allowed_members | {"dim": MemberType.USE_REAL},
     )
     register_opaque_type(_MaskPartial, typ="value", members=allowed_members)
+
+
+_register_placements_as_opaque()
