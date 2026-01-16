@@ -1512,14 +1512,6 @@ class NamedTupleVariable(UserDefinedTupleVariable):
         if self._is_method_overridden(name):
             # Fall back to UserDefinedTupleVariable
             return super().call_method(tx, name, args, kwargs)
-        elif name == "__eq__":
-            if len(args) != 1 or kwargs:
-                raise ValueError("Improper arguments for method.")
-            return ConstantVariable(self.is_python_equal(args[0]))
-        elif name == "__ne__":
-            if len(args) != 1 or kwargs:
-                raise ValueError("Improper arguments for method.")
-            return ConstantVariable(not self.is_python_equal(args[0]))
         elif name == "__setattr__":
             if kwargs or len(args) != 2:
                 raise_args_mismatch(
