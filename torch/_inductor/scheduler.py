@@ -305,28 +305,30 @@ class MixOrderReduction:
         nrow = sympy.Max(g1[0], g1[1])
         ncol = sympy.Min(g1[0], g1[1])
 
-        # the fused version has worse perf than non-fused version for
-        # small workload. When a workload is small enough, data can be
-        # fully cached by L2
-        size_thres = 5 * 2**20
+        # in non strict mode, we will skip the non-critical checks
+        if not config.triton.mix_order_reduction_non_strict_mode:
+            # the fused version has worse perf than non-fused version for
+            # small workload. When a workload is small enough, data can be
+            # fully cached by L2
+            size_thres = 5 * 2**20
 
-        # Call evaluate_expr rather than statically_known_geq since nrow can
-        # have dynamic shape in real models.
-        # Don't use hint directly since hint can be non-representative.
-        if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow * ncol, size_thres)):
-            return False
+            # Call evaluate_expr rather than statically_known_geq since nrow can
+            # have dynamic shape in real models.
+            # Don't use hint directly since hint can be non-representative.
+            if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow * ncol, size_thres)):
+                return False
 
-        # We require more more row than columns since
-        # 1, we prefer doing persistent reduction for each row
-        # 2, we will split the reduction across the rows
-        if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow, ncol * 2)):
-            return False
+            # We require more more row than columns since
+            # 1, we prefer doing persistent reduction for each row
+            # 2, we will split the reduction across the rows
+            if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow, ncol * 2)):
+                return False
 
-        # When nrow is small, ncol should also be small (due to the check
-        # above). Thus the entire tensor should be well cached in L2.
-        # Mix order reduction is less beneficial.
-        if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow, 4096)):
-            return False
+            # When nrow is small, ncol should also be small (due to the check
+            # above). Thus the entire tensor should be well cached in L2.
+            # Mix order reduction is less beneficial.
+            if not V.graph.sizevars.evaluate_expr(sympy.Ge(nrow, 4096)):
+                return False
 
         contiguous_node, other_node = (
             (node1, node2)
@@ -722,6 +724,9 @@ class BaseSchedulerNode:
         def should_prune(dep: Dep) -> bool:
             if not isinstance(dep, WeakDep):
                 return False
+            if dep.name not in self.scheduler.name_to_buf:
+                return False
+
             op_name = self.scheduler.name_to_buf[dep.name].defining_op_name()
             return op_name in V.graph.removed_operations
 
@@ -6009,10 +6014,11 @@ class Scheduler:
         unmet_output_names = OrderedSet(V.graph.get_output_names())
         name_to_node = self.get_name_to_nodes()
 
-        def is_none_layout(buf_name: str) -> bool:
+        def is_unallocated_buffer(buf_name: str) -> bool:
             """
-            Checks if buf_name is NoneLayout. Buffers with NoneLayout is not allocated
-            so graph partition should not take it as inputs or outputs.
+            Checks if buf_name resolves to a NoneLayout buffer (following mutation_real_name).
+            Buffers with NoneLayout are not allocated so graph partition should not
+            take them as inputs or outputs.
             """
             buf = self.name_to_buf.get(buf_name, None)
 
@@ -6020,10 +6026,11 @@ class Scheduler:
                 return False
 
             if isinstance(buf.node.layout, NoneLayout):
-                if isinstance(buf.node, ir.MutationOutput) and (
-                    real_name := self.mutation_real_name.get(buf_name, None)
-                ):
-                    return is_none_layout(real_name)
+                # If there's a mutation real name, check the underlying buffer
+                # This handles both MutationOutput and other mutation ops like
+                # IndexPutFallback that have NoneLayout but mutate real buffers
+                if real_name := self.mutation_real_name.get(buf_name, None):
+                    return is_unallocated_buffer(real_name)
 
                 return True
 
@@ -6052,7 +6059,7 @@ class Scheduler:
                     [
                         x.name
                         for x in read_writes.reads | read_writes.writes
-                        if not is_none_layout(x.name)
+                        if not isinstance(x, WeakDep)
                     ]
                 )
                 - output_names
@@ -6108,7 +6115,7 @@ class Scheduler:
             output_nodes = [
                 name_to_node[name]
                 for name in returned_output_names
-                if not is_none_layout(name)
+                if not is_unallocated_buffer(name)
             ]
 
             constant_names = [

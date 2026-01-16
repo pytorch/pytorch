@@ -77,14 +77,6 @@ class _LinearLoss(_Loss):
         super().__init__(size_average, reduce, reduction)
         self.linear = Linear(in_features, out_features, bias, device, dtype)
 
-    @property
-    def linear_weight(self):
-        return self.linear.weight
-
-    @property
-    def linear_bias(self):
-        return self.linear.bias
-
 
 class _WeightedLinearLoss(_LinearLoss):
     def __init__(
@@ -1525,7 +1517,14 @@ class LinearCrossEntropyLoss(_WeightedLinearLoss):
         where :math:`N` is batch size.
     """
 
-    __constants__ = ["reduction", "loss_dims", "ignore_index", "label_smoothing"]
+    __constants__ = [
+        "num_classes",
+        "reduction",
+        "loss_dims",
+        "ignore_index",
+        "label_smoothing",
+    ]
+    num_classes: int
     loss_dims: tuple[int, ...]
     ignore_index: int
     label_smoothing: float
@@ -1555,32 +1554,27 @@ class LinearCrossEntropyLoss(_WeightedLinearLoss):
             reduction,
             weight,
         )
+        self.num_classes = num_classes
         self.loss_dims = loss_dims
         self.ignore_index = ignore_index
         self.label_smoothing = label_smoothing
 
-    @property
-    def num_classes(self):
-        return self.linear.out_features // math.prod(self.loss_dims)
-
     def forward(self, input: Tensor, target: Tensor) -> Tensor:
         """Runs the forward pass."""
-        batch_dims = input.shape[:-1]
-        logits = self.linear(input).reshape(
-            (*batch_dims, self.num_classes, *self.loss_dims)
-        )
-        return F.cross_entropy(
-            logits,
+        return F.linear_cross_entropy(  # pyrefly: ignore [missing-attribute]
+            input,
+            self.linear.weight,
             target,
+            linear_bias=self.linear.bias,
             weight=self.loss_weight,
-            ignore_index=self.ignore_index,
             reduction=self.reduction,
+            ignore_index=self.ignore_index,
             label_smoothing=self.label_smoothing,
         )
 
     def extra_repr(self) -> str:
         return (
-            f"reduction={self.reduction}, "
+            f"num_classes={self.num_classes}, reduction={self.reduction}, "
             f"loss_dims={self.loss_dims}, ignore_index={self.ignore_index}, label_smoothing={self.label_smoothing}"
         )
 
