@@ -196,6 +196,13 @@ filegroup(
 )
 
 filegroup(
+    name = "aten_mklrng_cpp",
+    srcs = glob([
+        "aten/src/ATen/mklrng/*.cpp",
+    ]),
+)
+
+filegroup(
     name = "aten_native_mkldnn_cpp",
     srcs = glob(["aten/src/ATen/native/mkldnn/*.cpp"]),
 )
@@ -357,6 +364,7 @@ cc_library(
         ":aten_base_cpp",
         ":aten_base_metal",
         ":aten_base_vulkan",
+        ":aten_mklrng_cpp",
         ":aten_native_cpp",
         ":aten_native_mkl_cpp",
         ":aten_native_mkldnn_cpp",
