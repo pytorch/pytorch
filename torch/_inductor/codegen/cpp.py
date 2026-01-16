@@ -676,9 +676,9 @@ class RecordOptimizationContext:
 
 
 def decltype_promoted(*args):
-    assert not any(isinstance(arg, CppCSEVariable) and arg.is_vec for arg in args), (
-        "Promotion of vector types is not supported"
-    )
+    assert not any(
+        isinstance(arg, CppCSEVariable) and arg.is_vec for arg in args
+    ), "Promotion of vector types is not supported"
 
     if (dt := get_promote_dtype(args)) is not None:
         return DTYPE_TO_CPP[dt]
@@ -749,7 +749,7 @@ class CppOverrides(OpOverrides):
         assert isinstance(x, CppCSEVariable)
         if src_dtype is None:
             src_dtype = x.dtype
-        expr = V.kernel.get_round_int_expr(x, dtype, src_dtype)
+        expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype, rounding=True)
         csevar = V.kernel.cse.generate(V.kernel.compute, expr)
         csevar.update_on_args("round_to_int", (x, dtype), {"src_dtype": src_dtype})
         if dtype in DTYPE_LOWP_FP and src_dtype == torch.float:
@@ -1680,7 +1680,7 @@ class CppVecOverrides(CppOverrides):
         ], f"{__name__} does not support {dtype}"
         assert isinstance(x, CppCSEVariable)
         src_dtype = x.dtype
-        expr = V.kernel.get_round_int_expr(x, dtype, src_dtype)
+        expr = V.kernel.get_to_dtype_expr(x, dtype, src_dtype, rounding=True)
         csevar = V.kernel.cse.generate(V.kernel.compute, expr)
         csevar.update_on_args("round_to_int", (x, dtype), {"src_dtype": src_dtype})
         if dtype in DTYPE_LOWP_FP and src_dtype == torch.float:
@@ -2612,7 +2612,13 @@ class CppKernel(Kernel):
     def create_cse_var(self, *args, **kwargs):
         return CppCSEVariable(*args, **kwargs)
 
-    def get_to_dtype_expr(self, src, dtype, src_dtype):
+    def get_to_dtype_expr(self, src, dtype, src_dtype, rounding=False):
+        if (
+            rounding
+            and dtype in [torch.int8, torch.uint8]
+            and src_dtype in [torch.float, torch.double]
+        ):
+            return f"c10::convert<{DTYPE_TO_CPP[dtype]}>(std::round({src}))"
         return f"c10::convert<{DTYPE_TO_CPP[dtype]}>({src})"
 
     def get_round_int_expr(self, src, dtype, src_dtype):
@@ -3521,10 +3527,10 @@ class CppVecKernel(CppKernel):
         cond = f"({cond}).all_masked()"
         return f'{self.assert_function}({cond}, "index out of bounds: {cond_print}")'
 
-    def get_to_dtype_expr(self, src, dtype, src_dtype):
+    def get_to_dtype_expr(self, src, dtype, src_dtype, rounding=False):
         assert isinstance(src, CppCSEVariable)
         if not src.is_vec:
-            return super().get_to_dtype_expr(src, dtype, src_dtype)
+            return super().get_to_dtype_expr(src, dtype, src_dtype, rounding)
         src_cpp_type = DTYPE_TO_CPP[src_dtype]
         src_num_vectors = self._get_num_vectors(src_dtype)
         dst_cpp_type = DTYPE_TO_CPP[dtype]
@@ -3535,30 +3541,15 @@ class CppVecKernel(CppKernel):
         elif src_dtype == torch.bool and dtype != torch.bool:
             expr = f"{src}.to<{dst_cpp_type},{dst_num_vectors}>()"
         elif src_dtype != dtype:
-            if src_num_vectors == dst_num_vectors == 1:
-                expr = f"at::vec::convert<{dst_cpp_type}>({src})"
+            expr = ""
+            if rounding and src_dtype in [torch.float, torch.double] and dtype in [torch.int8,torch.uint8]:
+                expr = "at::vec::round_convert"
             else:
-                expr = f"at::vec::convert<{dst_cpp_type},{dst_num_vectors},{src_cpp_type},{src_num_vectors}>({src})"
-        return expr
-
-    def get_round_int_expr(self, src, dtype, src_dtype):
-        assert isinstance(src, CppCSEVariable)
-        if not src.is_vec:
-            return super().get_round_int_expr(src, dtype, src_dtype)
-        src_cpp_type = DTYPE_TO_CPP[src_dtype]
-        src_num_vectors = self._get_num_vectors(src_dtype)
-        dst_cpp_type = DTYPE_TO_CPP[dtype]
-        dst_num_vectors = self._get_num_vectors(dtype)
-        expr = f"({src})"
-        if src_dtype != torch.bool and dtype == torch.bool:
-            expr = f"{self._get_mask_type(src_dtype)}::from<{src_cpp_type},{src_num_vectors}>({src})"
-        elif src_dtype == torch.bool and dtype != torch.bool:
-            expr = f"{src}.to<{dst_cpp_type},{dst_num_vectors}>()"
-        elif src_dtype != dtype:
+                expr = "at::vec::convert"
             if src_num_vectors == dst_num_vectors == 1:
-                expr = f"at::vec::round_convert<{dst_cpp_type}>({src})"
+                expr = expr + f"<{dst_cpp_type}>({src})"
             else:
-                expr = f"at::vec::round_convert<{dst_cpp_type},{dst_num_vectors},{src_cpp_type},{src_num_vectors}>({src})"
+                expr = expr + f"<{dst_cpp_type},{dst_num_vectors},{src_cpp_type},{src_num_vectors}>({src})"
         return expr
 
 

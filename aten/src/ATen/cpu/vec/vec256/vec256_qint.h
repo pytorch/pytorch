@@ -176,8 +176,8 @@ at::vec::Vectorized<T> inline round_convert_float_to_int8(
 template <>
 at::vec::Vectorized<int8_t> inline round_convert_float_to_int8(
     at::vec::Vectorized<float> src) {
-  // Convert from float32 to int32 with truncation
-  __m256i x_values_int32 = _mm256_cvttps_epi32(src);
+  // Convert from float32 to int32 with round nearest
+  __m256i x_values_int32 = _mm256_cvtps_epi32(src);
 
   // Convert from int32 to int16 using signed saturation
   __m256i xy_packed_v = _mm256_packs_epi32(x_values_int32, x_values_int32);
@@ -203,13 +203,13 @@ at::vec::Vectorized<uint8_t> inline round_convert_float_to_int8(
   __m256 float32_max_val = _mm256_set1_ps(float(max_val));
   __m256 float32_src = _mm256_max_ps(src, float32_min_val);
   float32_src = _mm256_min_ps(float32_src, float32_max_val);
-  __m256i truncated_src = _mm256_cvttps_epi32(float32_src);
+  __m256i round_src = _mm256_cvtps_epi32(float32_src);
 
-  __m128i r1 = _mm256_castsi256_si128(truncated_src);
+  __m128i r1 = _mm256_castsi256_si128(round_src);
   __m128i mask = _mm_setr_epi8(
       0, 4, 8, 12, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1);
   __m128i r1_shuffled = _mm_shuffle_epi8(r1, mask);
-  __m128i r2 = _mm256_extractf128_si256(truncated_src, 1);
+  __m128i r2 = _mm256_extractf128_si256(round_src, 1);
   __m128i r2_shuffled = _mm_shuffle_epi8(r2, mask);
   __m128i result = _mm_unpacklo_epi32(r1_shuffled, r2_shuffled);
 

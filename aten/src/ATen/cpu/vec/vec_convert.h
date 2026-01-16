@@ -42,7 +42,7 @@ struct VecRoundConvert {
     src.store(src_buf);
     __at_align__ dst_t dst_buf[VectorizedN<dst_t, dst_n>::size()];
     for (int i = 0; i < count; i++) {
-      dst_buf[i] = static_cast<dst_t>(src_buf[i]);
+      dst_buf[i] = static_cast<dst_t>(std::round(src_buf[i]));
     }
     return VectorizedN<dst_t, dst_n>::loadu(dst_buf, count);
   }
