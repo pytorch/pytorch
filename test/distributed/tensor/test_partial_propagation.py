@@ -83,6 +83,55 @@ BINARY_OPS = [
 OUTPUT_FILE = "partial_propagation_results.txt"
 
 
+# =============================================================================
+# Test Data Generation
+# =============================================================================
+
+
+def generate_test_data(device_type: str, rank: int) -> dict[str, torch.Tensor]:
+    """
+    Generate all test data patterns for a given rank.
+    Returns a dict with keys: mono1, mono2, varied1, varied2, neg1, neg2
+    """
+    # Monotonic: lower ranks have smaller values
+    mono1 = torch.tensor([[-1.0, -2.0], [-3.0, 4.0]], device=device_type) + rank
+    mono2 = torch.tensor([[-5.0, 6.0], [-7.0, -8.0]], device=device_type) + rank
+
+    # Varied: min/max on different ranks for different elements
+    if rank % 2 == 0:
+        varied1 = torch.tensor([[10.0, 1.0], [1.0, 10.0]], device=device_type)
+        varied2 = torch.tensor([[1.0, 10.0], [10.0, 1.0]], device=device_type)
+    else:
+        varied1 = torch.tensor([[1.0, 10.0], [10.0, 1.0]], device=device_type)
+        varied2 = torch.tensor([[10.0, 1.0], [1.0, 10.0]], device=device_type)
+
+    # All negative: all values are negative
+    neg1 = torch.tensor([[-1.0, -2.0], [-3.0, -4.0]], device=device_type) - rank
+    neg2 = torch.tensor([[-5.0, -6.0], [-7.0, -8.0]], device=device_type) - rank
+
+    return {
+        "mono1": mono1,
+        "mono2": mono2,
+        "varied1": varied1,
+        "varied2": varied2,
+        "neg1": neg1,
+        "neg2": neg2,
+    }
+
+
+def generate_replicate_data(device_type: str) -> dict[str, torch.Tensor]:
+    """Generate fixed data for Replicate inputs (same across all ranks)."""
+    return {
+        "pos": torch.tensor([[2.0, 3.0], [4.0, 5.0]], device=device_type),
+        "neg": torch.tensor([[-2.0, -3.0], [-4.0, -5.0]], device=device_type),
+    }
+
+
+# =============================================================================
+# Strategy Override Context Manager
+# =============================================================================
+
+
 @contextmanager
 def override_op_strategies(ops: list[OpOverload]):
     """
@@ -115,98 +164,82 @@ def override_op_strategies(ops: list[OpOverload]):
         propagator.propagate_op_sharding.cache_clear()
 
 
-def write_results_by_op(f, results, title):
-    """
-    Write results organized by op name.
-    Collapses mono/varied/allneg - a placement combo passes only if ALL pass.
-    Shows which data patterns failed for failed cases.
-    """
-    # Group results by op, then by placement (without mono/varied/allneg)
+# =============================================================================
+# Result Writing Functions
+# =============================================================================
+
+# Data pattern types used in result keys
+DATA_PATTERNS = ("mono", "varied", "allneg", "rneg")
+
+
+def _group_results_by_op(results: dict) -> dict:
+    """Group results by op name, collapsing data patterns."""
     by_op = defaultdict(lambda: defaultdict(list))
     for key, (success, error) in results.items():
         op_name = key[0]
         placements = key[1:]
         # Remove the last element if it's a data pattern type
-        if placements and placements[-1] in ("mono", "varied", "allneg", "rneg"):
+        if placements and placements[-1] in DATA_PATTERNS:
             base_placements = placements[:-1]
             data_type = placements[-1]
         else:
             base_placements = placements
             data_type = None
         by_op[op_name][base_placements].append((data_type, success, error))
+    return by_op
+
+
+def write_results_by_op(f, results, title):
+    """
+    Write results organized by op name.
+    Collapses data patterns - a placement combo passes only if ALL pass.
+    Shows which data patterns failed for failed cases.
+    """
+    by_op = _group_results_by_op(results)
 
     f.write(f"\n{'=' * 80}\n")
     f.write(f"{title}\n")
     f.write(f"{'=' * 80}\n\n")
 
-    # Write results for each op
     for op_name in sorted(by_op.keys()):
         f.write(f"{op_name}:\n")
-
-        passed = []
-        failed = []
+        passed, failed = [], []
 
         for base_placements, results_list in sorted(by_op[op_name].items()):
             placement_str = ", ".join(str(p) for p in base_placements)
-            # A combo passes only if ALL (mono, varied, allneg) pass
             all_passed = all(success for _, success, _ in results_list)
 
             if all_passed:
                 passed.append(f"  [PASS] {placement_str}")
             else:
-                # Show which data patterns failed
-                failed_patterns = [
-                    data_type for data_type, success, _ in results_list if not success
-                ]
+                failed_patterns = [dt for dt, success, _ in results_list if not success]
                 failed_str = (
                     ", ".join(failed_patterns) if failed_patterns else "unknown"
                 )
                 failed.append(f"  [FAIL] {placement_str} (failed: {failed_str})")
 
-        # Write passed tests first
-        for line in passed:
+        for line in passed + failed:
             f.write(line + "\n")
-
-        # Then failed tests
-        for line in failed:
-            f.write(line + "\n")
-
         f.write(f"  Summary: {len(passed)} passed, {len(failed)} failed\n\n")
 
 
 def write_results_by_placement(f, results, title):
     """
     Write summarized results organized by op name.
-    Collapses mono/varied/allneg - a placement combo passes only if ALL pass.
+    Collapses data patterns - a placement combo passes only if ALL pass.
     """
-    # Group results by op, then by placement (without mono/varied/allneg)
-    by_op = defaultdict(lambda: defaultdict(list))
-    for key, (success, error) in results.items():
-        op_name = key[0]
-        placements = key[1:]
-        # Remove the last element if it's a data pattern type
-        if placements and placements[-1] in ("mono", "varied", "allneg", "rneg"):
-            base_placements = placements[:-1]
-            data_type = placements[-1]
-        else:
-            base_placements = placements
-            data_type = None
-        by_op[op_name][base_placements].append((data_type, success, error))
+    by_op = _group_results_by_op(results)
 
     f.write(f"\n{'=' * 80}\n")
     f.write(f"{title} (SUMMARIZED)\n")
     f.write(f"{'=' * 80}\n\n")
 
-    # Write results for each op
     for op_name in sorted(by_op.keys()):
         f.write(f"{op_name}:\n")
-
-        passed = []
-        failed = []
+        passed, failed = [], []
 
         for base_placements, results_list in sorted(by_op[op_name].items()):
             placement_str = ", ".join(str(p) for p in base_placements)
-            # A combo passes only if ALL (mono and varied) pass
             all_passed = all(success for _, success, _ in results_list)
 
             if all_passed:
@@ -214,14 +247,8 @@ def write_results_by_placement(f, results, title):
             else:
                 failed.append(f"  [FAIL] {placement_str}")
 
-        # Write passed tests first
-        for line in passed:
+        for line in passed + failed:
             f.write(line + "\n")
-
-        # Then failed tests
-        for line in failed:
-            f.write(line + "\n")
-
         f.write(f"  Summary: {len(passed)} passed, {len(failed)} failed\n\n")
 
 
@@ -231,6 +258,11 @@ def write_results(f, results, title):
         write_results_by_placement(f, results, title)
     else:
         write_results_by_op(f, results, title)
+
+
+# =============================================================================
+# Test Class
+# =============================================================================
 
 
 class TestPartialPropagation(DTensorOpTestBase):
@@ -253,84 +285,88 @@ class TestPartialPropagation(DTensorOpTestBase):
         2. Redistribute all inputs to Replicate first, then apply op
 
         Returns (success, error_message)
-
-        Note: We don't catch exceptions during collective ops (redistribute)
-        to avoid thread desync in multi-threaded tests.
         """
-        # Method 2 first (baseline): Redistribute first, then compute
-        # Do this BEFORE overriding strategies so we use normal behavior
+        # Baseline: Redistribute first, then compute
         inputs_replicate = [inp.redistribute(mesh, [Replicate()]) for inp in inputs]
         result2 = op(*inputs_replicate)
         result2_full = result2.to_local()
 
-        # Method 1: Override strategy, propagate partial, then redistribute
+        # Experimental: Override strategy, propagate partial, then redistribute
         with override_op_strategies([aten_op]):
             result1 = op(*inputs)
             result1_full = result1.redistribute(mesh, [Replicate()]).to_local()
 
-        # Compare results - this is the only place we catch exceptions
         try:
             torch.testing.assert_close(result1_full, result2_full)
             return True, ""
         except AssertionError as e:
             return False, f"Results differ: {str(e)}"
 
+    def _run_unary_test(
+        self,
+        torch_op: Callable,
+        aten_op: OpOverload,
+        partial_cls,
+        partial_arg,
+        partial_name: str,
+        data: torch.Tensor,
+        pattern_name: str,
+        mesh: DeviceMesh,
+    ) -> tuple[tuple, tuple[bool, str]]:
+        """Run a single unary op test and return (key, result)."""
+        dt = DTensor.from_local(data, mesh, [partial_cls(partial_arg)])
+        success, error = self._compare_propagate_vs_redistribute(
+            torch_op, aten_op, [dt], mesh
+        )
+        key = (torch_op.__name__, partial_name, pattern_name)
+        return key, (success, error)
+
+    def _run_binary_test(
+        self,
+        torch_op: Callable,
+        aten_op: OpOverload,
+        dt1: DTensor,
+        dt2: DTensor,
+        placement1_name: str,
+        placement2_name: str,
+        pattern_name: str,
+        mesh: DeviceMesh,
+    ) -> tuple[tuple, tuple[bool, str]]:
+        """Run a single binary op test and return (key, result)."""
+        success, error = self._compare_propagate_vs_redistribute(
+            torch_op, aten_op, [dt1, dt2], mesh
+        )
+        key = (torch_op.__name__, placement1_name, placement2_name, pattern_name)
+        return key, (success, error)
+
     @with_comms
     def test_unary_ops(self):
         """Test all unary ops with all partial types using three data patterns."""
         mesh = self.build_device_mesh()
         results = {}
-        rank = dist.get_rank()
+        data = generate_test_data(self.device_type, dist.get_rank())
+
+        test_patterns = [
+            ("mono", data["mono1"]),
+            ("varied", data["varied1"]),
+            ("allneg", data["neg1"]),
+        ]
 
         for partial_cls, partial_arg, partial_name in PARTIAL_TYPES:
             for torch_op, aten_op in UNARY_OPS:
-                # Test 1: Monotonic data
-                local_mono = (
-                    torch.tensor([[-1.0, -2.0], [-3.0, 4.0]], device=self.device_type)
-                    + rank
-                )
-                dt = DTensor.from_local(local_mono, mesh, [partial_cls(partial_arg)])
-                success, error = self._compare_propagate_vs_redistribute(
-                    torch_op, aten_op, [dt], mesh
-                )
-                results[(torch_op.__name__, partial_name, "mono")] = (
-                    success,
-                    error,
-                )
-
-                # Test 2: Varied data
-                if rank % 2 == 0:
-                    local_var = torch.tensor(
-                        [[10.0, 1.0], [1.0, 10.0]], device=self.device_type
+                for pattern_name, tensor in test_patterns:
+                    key, result = self._run_unary_test(
+                        torch_op,
+                        aten_op,
+                        partial_cls,
+                        partial_arg,
+                        partial_name,
+                        tensor,
+                        pattern_name,
+                        mesh,
                     )
-                else:
-                    local_var = torch.tensor(
-                        [[1.0, 10.0], [10.0, 1.0]], device=self.device_type
-                    )
-                dt = DTensor.from_local(local_var, mesh, [partial_cls(partial_arg)])
-                success, error = self._compare_propagate_vs_redistribute(
-                    torch_op, aten_op, [dt], mesh
-                )
-                results[(torch_op.__name__, partial_name, "varied")] = (
-                    success,
-                    error,
-                )
+                    results[key] = result
 
-                # Test 3: All negative values
-                local_neg = (
-                    torch.tensor([[-1.0, -2.0], [-3.0, -4.0]], device=self.device_type)
-                    - rank
-                )
-                dt = DTensor.from_local(local_neg, mesh, [partial_cls(partial_arg)])
-                success, error = self._compare_propagate_vs_redistribute(
-                    torch_op, aten_op, [dt], mesh
-                )
-                results[(torch_op.__name__, partial_name, "allneg")] = (
-                    success,
-                    error,
-                )
-
-        # Write to file (only rank 0)
         if dist.get_rank() == 0:
             with open(OUTPUT_FILE, "a") as f:
                 write_results(f, results, "UNARY OPS")
@@ -340,142 +376,55 @@ class TestPartialPropagation(DTensorOpTestBase):
         """
         Test binary ops with:
         1. Matching partial types (P + P)
-        2. Partial + Replicate combinations (P + R only, not R + P)
+        2. Partial + Replicate combinations (P + R only)
         """
         mesh = self.build_device_mesh()
         results = {}
         rank = dist.get_rank()
 
-        # Fixed data for Replicate inputs (same across all ranks)
-        replicate_data = torch.tensor([[2.0, 3.0], [4.0, 5.0]], device=self.device_type)
-        replicate_data_neg = torch.tensor(
-            [[-2.0, -3.0], [-4.0, -5.0]], device=self.device_type
-        )
+        data = generate_test_data(self.device_type, rank)
+        rep_data = generate_replicate_data(self.device_type)
 
         for partial_cls, partial_arg, partial_name in PARTIAL_TYPES:
             for torch_op, aten_op in BINARY_OPS:
-                # Test 1: Monotonic data (lower ranks have smaller values)
-                local1_mono = (
-                    torch.tensor([[-1.0, -2.0], [-3.0, 4.0]], device=self.device_type)
-                    + rank
-                )
-                local2_mono = (
-                    torch.tensor([[-5.0, 6.0], [-7.0, -8.0]], device=self.device_type)
-                    + rank
-                )
+                # Define all test cases: (pattern_name, data1, data2, is_p_plus_r)
+                test_cases = [
+                    # P + P tests
+                    ("mono", data["mono1"], data["mono2"], False),
+                    ("varied", data["varied1"], data["varied2"], False),
+                    ("allneg", data["neg1"], data["neg2"], False),
+                    # P + R tests
+                    ("mono", data["mono1"], rep_data["pos"], True),
+                    ("varied", data["varied1"], rep_data["pos"], True),
+                    ("allneg", data["neg1"], rep_data["neg"], True),
+                    ("rneg", data["mono1"], rep_data["neg"], True),
+                ]
 
-                # P + P (monotonic)
-                dt1 = DTensor.from_local(local1_mono, mesh, [partial_cls(partial_arg)])
-                dt2 = DTensor.from_local(local2_mono, mesh, [partial_cls(partial_arg)])
-                success, error = self._compare_propagate_vs_redistribute(
-                    torch_op, aten_op, [dt1, dt2], mesh
-                )
-                results[(torch_op.__name__, partial_name, partial_name, "mono")] = (
-                    success,
-                    error,
-                )
+                for pattern_name, tensor1, tensor2, is_p_plus_r in test_cases:
+                    dt1 = DTensor.from_local(tensor1, mesh, [partial_cls(partial_arg)])
+                    if is_p_plus_r:
+                        dt2 = DTensor.from_local(
+                            tensor2, mesh, [Replicate()], run_check=True
+                        )
+                        placement2_name = "R"
+                    else:
+                        dt2 = DTensor.from_local(
+                            tensor2, mesh, [partial_cls(partial_arg)]
+                        )
+                        placement2_name = partial_name
 
-                # P + R (monotonic) - use fixed replicate data
-                dt1 = DTensor.from_local(local1_mono, mesh, [partial_cls(partial_arg)])
-                dt2 = DTensor.from_local(
-                    replicate_data, mesh, [Replicate()], run_check=True
-                )
-                success, error = self._compare_propagate_vs_redistribute(
-                    torch_op, aten_op, [dt1, dt2], mesh
-                )
-                results[(torch_op.__name__, partial_name, "R", "mono")] = (
-                    success,
-                    error,
-                )
-
-                # Test 2: Varied data (min/max on different ranks for different elements)
-                if rank % 2 == 0:
-                    local1_var = torch.tensor(
-                        [[10.0, 1.0], [1.0, 10.0]], device=self.device_type
+                    key, result = self._run_binary_test(
+                        torch_op,
+                        aten_op,
+                        dt1,
+                        dt2,
+                        partial_name,
+                        placement2_name,
+                        pattern_name,
+                        mesh,
                     )
-                    local2_var = torch.tensor(
-                        [[1.0, 10.0], [10.0, 1.0]], device=self.device_type
-                    )
-                else:
-                    local1_var = torch.tensor(
-                        [[1.0, 10.0], [10.0, 1.0]], device=self.device_type
-                    )
-                    local2_var = torch.tensor(
-                        [[10.0, 1.0], [1.0, 10.0]], device=self.device_type
-                    )
+                    results[key] = result
 
-                # P + P (varied)
-                dt1 = DTensor.from_local(local1_var, mesh, [partial_cls(partial_arg)])
-                dt2 = DTensor.from_local(local2_var, mesh, [partial_cls(partial_arg)])
-                success, error = self._compare_propagate_vs_redistribute(
-                    torch_op, aten_op, [dt1, dt2], mesh
-                )
-                results[(torch_op.__name__, partial_name, partial_name, "varied")] = (
-                    success,
-                    error,
-                )
-
-                # P + R (varied) - use fixed replicate data
-                dt1 = DTensor.from_local(local1_var, mesh, [partial_cls(partial_arg)])
-                dt2 = DTensor.from_local(
-                    replicate_data, mesh, [Replicate()], run_check=True
-                )
-                success, error = self._compare_propagate_vs_redistribute(
-                    torch_op, aten_op, [dt1, dt2], mesh
-                )
-                results[(torch_op.__name__, partial_name, "R", "varied")] = (
-                    success,
-                    error,
-                )
-
-                # Test 3: All negative values
-                local1_neg = (
-                    torch.tensor([[-1.0, -2.0], [-3.0, -4.0]], device=self.device_type)
-                    - rank
-                )
-                local2_neg = (
-                    torch.tensor([[-5.0, -6.0], [-7.0, -8.0]], device=self.device_type)
-                    - rank
-                )
-
-                # P + P (all negative)
-                dt1 = DTensor.from_local(local1_neg, mesh, [partial_cls(partial_arg)])
-                dt2 = DTensor.from_local(local2_neg, mesh, [partial_cls(partial_arg)])
-                success, error = self._compare_propagate_vs_redistribute(
-                    torch_op, aten_op, [dt1, dt2], mesh
-                )
-                results[(torch_op.__name__, partial_name, partial_name, "allneg")] = (
-                    success,
-                    error,
-                )
-
-                # P + R (all negative) - use fixed negative replicate data
-                dt1 = DTensor.from_local(local1_neg, mesh, [partial_cls(partial_arg)])
-                dt2 = DTensor.from_local(
-                    replicate_data_neg, mesh, [Replicate()], run_check=True
-                )
-                success, error = self._compare_propagate_vs_redistribute(
-                    torch_op, aten_op, [dt1, dt2], mesh
-                )
-                results[(torch_op.__name__, partial_name, "R", "allneg")] = (
-                    success,
-                    error,
-                )
-
-                # Test 4: P + R with negative replicate (partial has mixed, replicate is negative)
-                dt1 = DTensor.from_local(local1_mono, mesh, [partial_cls(partial_arg)])
-                dt2 = DTensor.from_local(
-                    replicate_data_neg, mesh, [Replicate()], run_check=True
-                )
-                success, error = self._compare_propagate_vs_redistribute(
-                    torch_op, aten_op, [dt1, dt2], mesh
-                )
-                results[(torch_op.__name__, partial_name, "R", "rneg")] = (
-                    success,
-                    error,
-                )
-
-        # Write to file (only rank 0)
         if dist.get_rank() == 0:
             with open(OUTPUT_FILE, "a") as f:
                 write_results(f, results, "BINARY OPS")
@@ -483,7 +432,6 @@ class TestPartialPropagation(DTensorOpTestBase):
 
 if __name__ == "__main__":
     # Clear output file at start (only rank 0)
-    # Use RANK env var since dist isn't initialized yet when running with torchrun
     rank = int(os.environ.get("RANK", 0))
     if rank == 0:
         open(OUTPUT_FILE, "w").close()
