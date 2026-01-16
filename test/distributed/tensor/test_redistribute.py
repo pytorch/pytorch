@@ -33,7 +33,6 @@ from torch.distributed.tensor._dtensor_spec import (
     TensorMeta,
 )
 from torch.distributed.tensor._redistribute import (
-    _assert_no_mixed_partial_types,
     _FlattenedTransformInfo,
     _gen_transform_infos,
     _optimize_transform_infos,

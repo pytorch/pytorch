@@ -218,7 +218,8 @@ def _optimize_transform_infos(
     outermost mesh dimension (smallest mesh_dim index) which represents the
     global tensor shape needed for correct padding/unpadding.
 
-    all_to_all operations are excluded from merging as they require more investigation.
+    TODO:
+    all_to_all operations are excluded from merging, but it may be possible to merge them in some cases.
     """
     if not transform_infos:
         return []
@@ -1039,27 +1040,6 @@ def _gen_transform_infos_non_cached(
     else:
         transform_infos = drp.generate_greedy_transform_infos(src_spec, dst_spec)
     return transform_infos
-
-
-def _assert_no_mixed_partial_types(placements: tuple[Placement, ...]) -> None:
-    """
-    Assert that a placement list doesn't contain mixed Partial reduce types.
-
-    Mixed Partial types (e.g., Partial("sum") and Partial("max") together) create
-    ordering constraints during redistribution that complicate optimization.
-    We ban them to enable simpler and more aggressive collective merging.
-    """
-    partial_reduce_ops: set[str] = set()
-    for p in placements:
-        if p.is_partial():
-            partial_reduce_ops.add(p.reduce_op)  # type: ignore[union-attr]
-
-    if len(partial_reduce_ops) > 1:
-        raise ValueError(
-            f"Mixed Partial reduce types are not supported in the same placement list. "
-            f"Found reduce ops: {partial_reduce_ops}. "
-            f"Please ensure all Partial placements use the same reduce operation."
-        )
 
 
 @cache
