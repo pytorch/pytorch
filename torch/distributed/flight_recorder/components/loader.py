@@ -11,7 +11,7 @@ import pickle
 import re
 import time
 from collections import defaultdict
-from typing import Any, Union
+from typing import Any
 
 from torch.distributed.flight_recorder.components.fr_logger import FlightRecorderLogger
 
@@ -25,7 +25,7 @@ __all__ = [
 logger: FlightRecorderLogger = FlightRecorderLogger()
 
 
-def read_dump(prefix: str, filename: str) -> dict[str, Union[str, int, list[Any]]]:
+def read_dump(prefix: str, filename: str) -> dict[str, str | int | list[Any]]:
     basename = os.path.basename(filename)
 
     rank = int(basename[len(prefix) :])

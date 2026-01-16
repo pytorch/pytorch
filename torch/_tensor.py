@@ -109,7 +109,8 @@ def _dtype_to_typestr(dtype):
 # otherwise, it will not show up in autocomplete.
 class Tensor(torch._C.TensorBase):
     _is_param: bool
-    __c_dlpack_exchange_api__: object = torch._C._dlpack_exchange_api()
+    # pyrefly: ignore [missing-attribute]
+    __dlpack_c_exchange_api__: object = torch._C._dlpack_exchange_api()
 
     def _clear_non_serializable_cached_data(self):
         r"""Clears any data cached in the tensor's ``__dict__`` that would prevent the tensor
@@ -553,7 +554,7 @@ class Tensor(torch._C.TensorBase):
             raise RuntimeError("__setstate__ can be only called on leaf Tensors")
         if len(state) == 4:
             # legacy serialization of Tensor
-            # pyrefly: ignore [not-iterable]
+
             self.set_(*state)
             return
         elif len(state) == 5:
@@ -1065,7 +1066,6 @@ class Tensor(torch._C.TensorBase):
         else:
             return torch._VF.split_with_sizes(
                 self,
-                # pyrefly: ignore [bad-argument-type]
                 split_size,
                 dim,
             )
@@ -1799,9 +1799,12 @@ class Tensor(torch._C.TensorBase):
                     raise BufferError("per-thread default stream is not supported.")
 
                 device_str = "CUDA" if is_cuda else "ROCm"
-                assert (is_cuda and stream != 0) or (
-                    is_rocm and stream not in (1, 2)
-                ), f"unsupported stream on {device_str}: {stream}."
+                if not (
+                    (is_cuda and stream != 0) or (is_rocm and stream not in (1, 2))
+                ):
+                    raise AssertionError(
+                        f"unsupported stream on {device_str}: {stream}."
+                    )
 
                 stream = torch.cuda.ExternalStream(stream)
 
@@ -1812,7 +1815,8 @@ class Tensor(torch._C.TensorBase):
                 event.record(current_stream)
                 stream.wait_event(event)
         elif self.device.type == "cpu":
-            assert stream is None or stream == -1, "stream should be None on cpu."
+            if stream is not None and stream != -1:
+                raise AssertionError("stream should be None on cpu.")
 
         if self.device.type == "xla":
             import torch_xla

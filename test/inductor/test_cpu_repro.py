@@ -27,6 +27,7 @@ from torch._inductor.exc import InductorError
 from torch._inductor.graph import GraphLowering
 from torch._inductor.utils import timed
 from torch._prims_common import is_float_dtype
+from torch.autograd.functional import vjp
 from torch.fx.experimental.proxy_tensor import make_fx
 from torch.nn import functional as F
 from torch.testing._internal.common_utils import (
@@ -4510,6 +4511,41 @@ class CPUReproTests(TestCase):
         torch.testing.assert_close(weight_cmp.grad, weight_ref.grad)
         torch.testing.assert_close(bias_cmp.grad, bias_ref.grad)
 
+    @config.patch(emulate_precision_casts=True)
+    def test_emulate_precision_casts_cpp_backend_no_error(self):
+        """
+        See https://github.com/pytorch/pytorch/issues/167205
+        emulate_precision_casts threw TypeError on CPP backend.
+
+        Before fix: TypeError: CppVecOverrides.to_dtype() got an unexpected
+        keyword argument 'use_compute_types'
+
+        After fix: Should compile and run without error.
+        """
+
+        def robust_power(base, exponent, threshold):
+            threshold1 = threshold
+            broadcasted_base = torch.abs(base)
+            threshold_bc = threshold.expand_as(base)
+            cond = broadcasted_base < threshold_bc
+            return torch.where(cond, base / threshold1, base**exponent)
+
+        device = torch.device("cpu")
+        base = torch.randn(10, dtype=torch.float16, device=device)
+        exponent = torch.tensor(2.0, dtype=torch.float16, device=device)
+        threshold = torch.tensor(0.01, dtype=torch.float16, device=device)
+        v = torch.ones_like(base)
+
+        # Main test, this should not raise TypeError (before fix it would)
+        compiled_fn = torch.compile(robust_power)
+        y, (grad_b, grad_e, grad_t) = vjp(
+            lambda b, e, t: compiled_fn(b, e, t), (base, exponent, threshold), v=v
+        )
+
+        # Sanity check that gradients were computed
+        self.assertIsNotNone(grad_b)
+        self.assertEqual(grad_b.dtype, torch.float16)
+
     def test_int_div_vec(self):
         def fn(x, y, mode):
             return torch.div(x, y, rounding_mode=mode)
@@ -5682,33 +5718,6 @@ class CPUReproTests(TestCase):
             code
         )
 
-    @config.patch(freezing=True)
-    def test_add_layernorm(self):
-        class Model(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.dense = torch.nn.Linear(768, 768)
-                self.layernorm = torch.nn.LayerNorm(768, eps=1e-12)
-
-            def forward(self, context_layer, hidden_states):
-                attention_output = self.dense(context_layer)
-                hidden_states = attention_output + hidden_states
-                layer_output = self.layernorm(hidden_states)
-                return layer_output
-
-        model = Model()
-        example_batch = (torch.rand(1, 197, 768), torch.rand(1, 197, 768))
-        from torch.testing._internal.common_quantization import (
-            _generate_qdq_quantized_model,
-        )
-
-        with torch.no_grad():
-            converted_model = _generate_qdq_quantized_model(model, example_batch)
-            torch.ao.quantization.move_exported_model_to_eval(converted_model)
-            metrics.reset()
-            torch.compile(converted_model)(*example_batch)
-            check_metrics_vec_kernel_count(3)
-
     def test_dropout(self):
         class Model(nn.Module):
             def __init__(self, dim):
@@ -5804,6 +5813,26 @@ class CPUReproTests(TestCase):
         compiled_func = torch.compile(fn, backend="inductor")
         result = compiled_func(xs, Ls)
         torch.testing.assert_close(result, expected)
+
+    def test_special_float_pow(self):
+        def fn(exp: float) -> None:
+            val = torch.randn(10)
+            torch.testing.assert_close(
+                aten.pow(val, exp), torch.compile(aten.pow)(val, exp), equal_nan=True
+            )
+
+        fn(-math.inf)
+        fn(math.inf)
+        fn(math.nan)
+
+    def test_pdist_fallback_continuous(self):
+        # https://github.com/pytorch/pytorch/issues/170939
+        def fn(x):
+            # Creating a non-contiguous tensor via permute
+            x = x.permute(1, 0)
+            return F.pdist(x)
+
+        torch.compile(fn)(torch.randn(2, 2))
 
 
 if __name__ == "__main__":

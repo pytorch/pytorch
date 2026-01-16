@@ -2,7 +2,7 @@
 from __future__ import annotations
 
 import logging
-from typing import Optional, overload, Union
+from typing import overload
 
 import torch
 import torch.distributed as dist
@@ -54,17 +54,17 @@ class _ReplicateStateContext:
         # Iteration's forward root runs the once-per-forward logic; this root
         # may not be the overall root set by lazy initialization in cases where
         # only a submodule runs forward (e.g. encoder-only for eval)
-        self.iter_forward_root: Optional[_ReplicateState] = None
+        self.iter_forward_root: _ReplicateState | None = None
         # Final callback should only be queued once per backward
         self.post_backward_final_callback_queued: bool = False
         # Whether to finalize backward in this backward's final callback
         self.is_last_backward: bool = True
         # Optional user-provided event recorded after optimizer for the
         # all-gather streams to wait on in the root pre-forward
-        self.post_optim_event: Optional[torch.Event] = None
+        self.post_optim_event: torch.Event | None = None
 
 
-def _get_module_replicate_state(module: nn.Module) -> Optional[_ReplicateState]:
+def _get_module_replicate_state(module: nn.Module) -> _ReplicateState | None:
     """Checks if module state is ReplicateState"""
     state = _get_module_state(module)
     if isinstance(state, _ReplicateState):
@@ -163,10 +163,10 @@ def replicate_impl(
     module,
     mesh: DeviceMesh,
     *,
-    device_id: Optional[Union[int, torch.device]] = None,
+    device_id: int | torch.device | None = None,
     mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
     offload_policy: OffloadPolicy = OffloadPolicy(),
-    ignored_params: Optional[set[nn.Parameter]] = None,
+    ignored_params: set[nn.Parameter] | None = None,
 ):
     torch._C._log_api_usage_once("torch.distributed._composable.replicate_with_fsdp")
     if isinstance(module, (nn.ModuleList, nn.ModuleDict)):
@@ -228,10 +228,10 @@ def replicate_impl(
 def replicate(
     module: nn.Module,
     *,
-    mesh: Optional[DeviceMesh] = ...,
+    mesh: DeviceMesh | None = ...,
     mp_policy: MixedPrecisionPolicy = ...,
     offload_policy: OffloadPolicy = ...,
-    ignored_params: Optional[set[nn.Parameter]] = ...,
+    ignored_params: set[nn.Parameter] | None = ...,
 ) -> ReplicateModule: ...
 
 
@@ -240,10 +240,10 @@ def replicate(
 def replicate(
     module: list[nn.Module],
     *,
-    mesh: Optional[DeviceMesh] = ...,
+    mesh: DeviceMesh | None = ...,
     mp_policy: MixedPrecisionPolicy = ...,
     offload_policy: OffloadPolicy = ...,
-    ignored_params: Optional[set[nn.Parameter]] = ...,
+    ignored_params: set[nn.Parameter] | None = ...,
 ) -> list[ReplicateModule]: ...
 
 
@@ -251,10 +251,10 @@ def replicate(
 def replicate(
     module: nn.Module,
     *,
-    mesh: Optional[DeviceMesh] = None,
+    mesh: DeviceMesh | None = None,
     mp_policy: MixedPrecisionPolicy = MixedPrecisionPolicy(),
     offload_policy: OffloadPolicy = OffloadPolicy(),
-    ignored_params: Optional[set[nn.Parameter]] = None,
+    ignored_params: set[nn.Parameter] | None = None,
 ):
     r"""Replicates a module
 
@@ -300,7 +300,7 @@ class ReplicateModule(FSDPModule):
 
 def _get_managed_modules(
     root_modules: tuple[nn.Module, ...],
-    ignored_params: Optional[set[nn.Parameter]] = None,
+    ignored_params: set[nn.Parameter] | None = None,
 ) -> list[nn.Module]:
     modules: list[nn.Module] = []
     root_modules_set = set(root_modules)

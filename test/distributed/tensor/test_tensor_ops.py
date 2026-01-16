@@ -17,7 +17,7 @@ from torch.distributed.tensor import (
 from torch.distributed.tensor._sharding_prop import ShardingPropagator
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
-from torch.testing._internal.common_utils import run_tests, skipIfRocm
+from torch.testing._internal.common_utils import MI200_ARCH, run_tests, skipIfRocmArch
 from torch.testing._internal.distributed._tensor.common_dtensor import (
     create_local_tensor_test_class,
     DTensorConverter,
@@ -111,6 +111,22 @@ class DistTensorOpsTest(DTensorTestBase):
             self.assertEqual(dst_dtensor.placements, (Partial(),))
             self.assertEqual(dst_dtensor._local_tensor, dst_tensor)
 
+        # test that copy_ preserves any Partial type, not just sum/avg
+        for reduce_op in ["max", "min"]:
+            src_tensor = torch.randn((64, 1))
+            dst_tensor = torch.zeros(16, 32, 64, 128)
+            partial_placement = Partial(reduce_op)
+            src_dtensor = DTensor.from_local(
+                src_tensor, device_mesh, [partial_placement]
+            )
+            dst_dtensor = DTensor.from_local(
+                dst_tensor, device_mesh, [partial_placement]
+            )
+            dst_dtensor.copy_(src_dtensor)
+            dst_tensor.copy_(src_tensor)
+            self.assertEqual(dst_dtensor.placements, (partial_placement,))
+            self.assertEqual(dst_dtensor._local_tensor, dst_tensor)
+
     @with_comms
     def test_contiguous(self):
         device_mesh = self.build_device_mesh()
@@ -195,6 +211,30 @@ class DistTensorOpsTest(DTensorTestBase):
         empty_like_dt = torch.empty_like(dist_tensor)
         # empty is not deterministic, so we only check that the shard propagation worked
         self.assertEqual((4, 8), empty_like_dt.to_local().shape)
+
+    @with_comms
+    def test_meta_init_partial(self):
+        device_mesh = self.build_device_mesh()
+        partial_spec = [Partial()]
+
+        class ToyModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.register_buffer(
+                    "scalar_buffer", torch.tensor(0.0, dtype=torch.float32)
+                )
+
+        with torch.device("meta"):
+            module = ToyModule()
+            module._buffers["scalar_buffer"] = DTensor.from_local(
+                module.scalar_buffer,
+                device_mesh=device_mesh,
+                placements=partial_spec,
+            )
+        module.to_empty(device=None)
+
+        # check that to_empty preserves partial
+        self.assertEqual(module.scalar_buffer.placements, (Partial(),))
 
     @with_comms
     def test_fill_inplace(self):
@@ -541,7 +581,7 @@ class DistTensorOpsTest(DTensorTestBase):
         # case 2 input sharding: input sharded, index replicated, output mask partial
         # only works when index has size 1 on the gather dimension and
         # input is sharded on the gather dimension
-        from torch.distributed.tensor.placement_types import MaskPartial
+        from torch.distributed.tensor.placement_types import _MaskPartial
 
         gather_dim = 1
         global_input = torch.randn(12, 8, 16)
@@ -552,7 +592,7 @@ class DistTensorOpsTest(DTensorTestBase):
         with comm_mode:
             output_dt = torch.gather(input_dt, gather_dim, index_dt)
             self.assertEqual(comm_mode.get_total_counts(), 0)
-        self.assertIsInstance(output_dt.placements[0], MaskPartial)
+        self.assertIsInstance(output_dt.placements[0], _MaskPartial)
         self.assertEqual(output_dt.full_tensor(), global_output)
 
         # case 3 index sharding: input replicated, index sharded, output sharded
@@ -569,7 +609,7 @@ class DistTensorOpsTest(DTensorTestBase):
             self.assertEqual(output_dt.placements, [Shard(gather_dim)])
             self.assertEqual(output_dt.full_tensor(), global_output)
 
-    @skipIfRocm
+    @skipIfRocmArch(MI200_ARCH)
     @with_comms
     def test_index(self):
         meshes = [
@@ -736,11 +776,11 @@ class DistTensorOpsTest(DTensorTestBase):
     @with_comms
     def test_dtensor_dtype_conversion(self):
         from torch.distributed.tensor.debug import (
-            _clear_fast_path_sharding_prop_cache,
+            _clear_sharding_prop_cache,
             _get_fast_path_sharding_prop_cache_stats,
         )
 
-        _clear_fast_path_sharding_prop_cache()
+        _clear_sharding_prop_cache()
         device_mesh = self.build_device_mesh()
         shard_spec = [Shard(0)]
         # by default we start from bf16 dtype
@@ -797,6 +837,39 @@ class DistTensorOpsTest(DTensorTestBase):
 
         self.assertEqual(sharded_out.full_tensor(), global_out)
         self.assertEqual(sharded_dtensor.grad.full_tensor(), global_tensor.grad)
+
+    @with_comms
+    def test_slice_full_size_on_sharded_dim(self):
+        """
+        Test for the issue #170427 where slicing with a size that equals or
+        exceeds the full dimension size should work correctly on sharded
+        dimensions.
+
+        So when slicing [:, :N] where N >= dim_size on a tensor sharded on that
+        dimension, the operation may be optimized to use aten.alias.default,
+        which must have a proper sharding strategy registered.
+        """
+        mesh = self.build_device_mesh()
+
+        global_tensor = torch.randn(2, 4)
+        sharded_dtensor = distribute_tensor(global_tensor, mesh, [Shard(1)])
+
+        result1 = sharded_dtensor[:, :2]  # partial slice
+        self.assertEqual(result1.full_tensor(), global_tensor[:, :2])
+
+        result2 = sharded_dtensor[:, 2:]  # partial slice from middle
+        self.assertEqual(result2.full_tensor(), global_tensor[:, 2:])
+
+        # This used to fail with: NotImplementedError: Operator aten.alias.default
+        # does not have a sharding strategy registered
+        result3 = sharded_dtensor[:, :4]  # full dimension slice
+        self.assertEqual(result3.full_tensor(), global_tensor[:, :4])
+
+        result4 = sharded_dtensor[:, :8]  # beyond dimension size
+        self.assertEqual(result4.full_tensor(), global_tensor[:, :8])
+
+        result5 = sharded_dtensor[:2, :]  # full slice on dim 0
+        self.assertEqual(result5.full_tensor(), global_tensor[:2, :])
 
     @with_comms
     def test_split_on_partial(self):

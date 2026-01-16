@@ -170,7 +170,8 @@ def _extract_parameters_and_gradients(
     #       a particular time.
     elif node.typed[0] == _EventType.PyCall:
         typed_fields = node.typed[1]
-        assert typed_fields.module is None or typed_fields.optimizer is None
+        if typed_fields.module is not None and typed_fields.optimizer is not None:
+            raise AssertionError("module and optimizer cannot both be set")
         if typed_fields.module is not None:
             for _, p, p_grad in typed_fields.module.parameters:
                 yield TensorKey.from_tensor(p), TensorKey.from_tensor(p_grad)
@@ -341,7 +342,11 @@ class SizeMap:
 
             elif node.typed[0] == _EventType.PyCall:
                 typed_fields = node.typed[1]
-                assert typed_fields.module is None or typed_fields.optimizer is None
+                if (
+                    typed_fields.module is not None
+                    and typed_fields.optimizer is not None
+                ):
+                    raise AssertionError("module and optimizer cannot both be set")
                 if typed_fields.module is not None:
                     for _, p, p_grad in typed_fields.module.parameters:
                         self._update_values(p)
@@ -384,7 +389,8 @@ class SizeMap:
             )
 
             num_bytes = n * _element_size(t.dtype)
-            assert num_bytes >= 0, f"{num_bytes}"
+            if num_bytes < 0:
+                raise AssertionError(f"num_bytes must be non-negative, got {num_bytes}")
             self._values[key] = max(self._values.get(key, 0), num_bytes)
 
     @staticmethod
@@ -425,7 +431,8 @@ class DataFlowNode:
 
         # Make sure the version bumping behavior matches what we expect.
         versions = {k: (v, self._graph.lookup(k)) for k, v in self.outputs.items()}
-        assert all(i == j for i, j in versions.values()), f"{versions}, {self._edges}"
+        if not all(i == j for i, j in versions.values()):
+            raise AssertionError(f"version mismatch: {versions}, {self._edges}")
 
     def _determine_edges(self) -> dict[TensorKey, DataFlowEdge]:
         subtree = tuple(_utils.traverse_dfs([self._event]))
@@ -465,7 +472,8 @@ class DataFlowNode:
             if i.typed[0] == _EventType.Allocation and i.typed[1].alloc_size < 0:
                 key = TensorKey.from_allocation(i.typed[1])
                 edge = edges[key]
-                assert key is None or edge.mutated is not None, f"Double delete: {key}"
+                if key is not None and edge.mutated is None:
+                    raise AssertionError(f"Double delete: {key}")
                 edge.mutated = None
                 edge.input_version = self._graph.lookup(key) if key else -1
 
@@ -526,7 +534,10 @@ class DataFlowGraph:
         for node in self.flow_nodes:
             node_outputs = set(node.outputs.items())
             duplicates = outputs & node_outputs
-            assert not duplicates, f"{node._event.name} {node._edges} {duplicates}"
+            if duplicates:
+                raise AssertionError(
+                    f"duplicate outputs: {node._event.name} {node._edges} {duplicates}"
+                )
             outputs |= node_outputs
 
         # And check that `self._nodes` forms a valid topologically sorted DAG.
@@ -534,11 +545,17 @@ class DataFlowGraph:
         for node in self.flow_nodes:
             for key, (_, version) in node.inputs.items():
                 expected = tensor_versions.get(key, 0)
-                assert expected == version, (expected, version)
+                if expected != version:
+                    raise AssertionError(
+                        f"version mismatch for input: expected {expected}, got {version}"
+                    )
 
             for key, version in node.outputs.items():
                 prior_version = tensor_versions.get(key, version)
-                assert version >= prior_version, (version, prior_version)
+                if version < prior_version:
+                    raise AssertionError(
+                        f"version regression: {version} < {prior_version}"
+                    )
                 tensor_versions[key] = version
 
     @property
@@ -600,16 +617,19 @@ class DataFlowGraph:
 
     def lookup(self, key: TensorKey) -> int:
         version = self._active_version.setdefault(key, 0)
-        assert version is not None
+        if version is None:
+            raise AssertionError(f"version for key {key} is None")
         return version
 
     def bump(self, key: TensorKey) -> None:
         prior_version = self._active_version.get(key, None)
-        assert prior_version is not None
+        if prior_version is None:
+            raise AssertionError(f"prior_version for key {key} is None")
         self._active_version[key] = prior_version + 1
 
     def delete(self, key: TensorKey) -> None:
-        assert self._active_version.setdefault(key, 0) is not None
+        if self._active_version.setdefault(key, 0) is None:
+            raise AssertionError(f"cannot delete key {key}, already deleted")
         self._active_version[key] = None
 
 
@@ -724,7 +744,8 @@ class MemoryProfile:
                 elif edge.mutated:
                     t = node._event.start_time_ns
                     version = edge.input_version
-                    assert version is not None
+                    if version is None:
+                        raise AssertionError(f"input_version is None for key {key}")
                     events.append((t, Action.INCREMENT_VERSION, (key, version)))
 
                 if edge.is_deletion:
@@ -1194,7 +1215,8 @@ class MemoryProfileTimeline:
 
             tmpfile.seek(0, 0)
             encoded = b64encode(tmpfile.read()).decode("utf-8")
-            assert encoded
+            if not encoded:
+                raise AssertionError("failed to encode image as base64")
             html = f"""<html>
 <head><meta charset="utf-8" /><title>GPU Memory Timeline HTML</title></head>
 <body>

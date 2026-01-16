@@ -51,7 +51,6 @@ namespace c10::cuda::CUDACachingAllocator {
 
 // Preserved only for BC reasons
 // NOLINTNEXTLINE(misc-unused-using-decls)
-using c10::CachingAllocator::kLargeBuffer;
 using c10::CachingDeviceAllocator::DeviceStats;
 
 typedef std::shared_ptr<GatheredContext> (*CreateContextFn)();
@@ -71,6 +70,7 @@ struct BlockInfo {
 // Struct containing info of a memory segment (i.e. one contiguous cudaMalloc).
 struct SegmentInfo {
   c10::DeviceIndex device = 0;
+  int32_t registration_counter = -1;
   size_t address = 0;
   size_t total_size = 0;
   size_t requested_size = 0; // unrounded, actually requested size
@@ -256,7 +256,7 @@ class CUDAAllocator : public DeviceAllocator {
   virtual void createOrIncrefPool(
       c10::DeviceIndex /*device*/,
       MempoolId_t /*mempool_id*/,
-      CUDAAllocator* allocator = nullptr) {
+      std::shared_ptr<CUDAAllocator> allocator = nullptr) {
     TORCH_CHECK(
         false,
         name(),
@@ -271,6 +271,13 @@ class CUDAAllocator : public DeviceAllocator {
         false,
         name(),
         " does not yet support setUseOnOOM. "
+        "If you need it, please file an issue describing your use case.");
+  }
+  virtual void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) {
+    TORCH_CHECK(
+        false,
+        name(),
+        " does not yet support setNoSplit. "
         "If you need it, please file an issue describing your use case.");
   }
 
@@ -299,7 +306,8 @@ class CUDAAllocator : public DeviceAllocator {
       CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
       RecordContext when,
-      bool clearHistory) = 0;
+      bool clearHistory,
+      const std::vector<std::string>& skip_actions) = 0;
   virtual void recordAnnotation(
       const std::vector<std::pair<std::string, std::string>>& /*md*/) {}
   virtual void pushCompileContext(std::string& md) {}
@@ -468,9 +476,15 @@ inline void recordHistory(
     CreateContextFn context_recorder,
     size_t alloc_trace_max_entries,
     RecordContext when,
-    bool clearHistory) {
+    bool clearHistory,
+    const std::vector<std::string>& skip_actions) {
   get()->recordHistory(
-      enabled, context_recorder, alloc_trace_max_entries, when, clearHistory);
+      enabled,
+      context_recorder,
+      alloc_trace_max_entries,
+      when,
+      clearHistory,
+      skip_actions);
 }
 
 inline void recordAnnotation(
@@ -512,8 +526,8 @@ inline void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
 inline void createOrIncrefPool(
     c10::DeviceIndex device,
     MempoolId_t mempool_id,
-    CUDAAllocator* allocator_ptr = nullptr) {
-  get()->createOrIncrefPool(device, mempool_id, allocator_ptr);
+    std::shared_ptr<CUDAAllocator> allocator_ptr = nullptr) {
+  get()->createOrIncrefPool(device, mempool_id, std::move(allocator_ptr));
 }
 inline void setUseOnOOM(
     c10::DeviceIndex device,
@@ -521,7 +535,9 @@ inline void setUseOnOOM(
     bool use_on_oom) {
   get()->setUseOnOOM(device, mempool_id, use_on_oom);
 }
-
+inline void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) {
+  get()->setNoSplit(device, mempool_id);
+}
 inline int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {
   return get()->getPoolUseCount(device, mempool_id);
 }

@@ -102,9 +102,10 @@ inline void recordHistory(
     HIPCachingAllocator::CreateContextFn context_recorder,
     size_t alloc_trace_max_entries,
     HIPCachingAllocator::RecordContext when,
-    bool clearHistory) {
+    bool clearHistory,
+    const std::vector<std::string>& skip_actions) {
   return get()->recordHistory(
-      enabled, context_recorder, alloc_trace_max_entries, when, clearHistory);
+      enabled, context_recorder, alloc_trace_max_entries, when, clearHistory, skip_actions);
 }
 
 inline void recordAnnotation(
@@ -147,12 +148,16 @@ inline void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
 inline void createOrIncrefPool(
     c10::DeviceIndex device,
     MempoolId_t mempool_id,
-    HIPCachingAllocator::HIPAllocator* allocator_ptr = nullptr) {
-  get()->createOrIncrefPool(device, mempool_id, allocator_ptr);
+    std::shared_ptr<HIPCachingAllocator::HIPAllocator> allocator_ptr = nullptr) {
+  get()->createOrIncrefPool(device, mempool_id, std::move(allocator_ptr));
 }
 
 inline void setUseOnOOM(c10::DeviceIndex device, MempoolId_t mempool_id, bool use_on_oom) {
   get()->setUseOnOOM(device, mempool_id, use_on_oom);
+}
+
+inline void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) {
+  get()->setNoSplit(device, mempool_id);
 }
 
 inline int getPoolUseCount(c10::DeviceIndex device, MempoolId_t mempool_id) {

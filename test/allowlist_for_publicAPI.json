@@ -2091,7 +2091,6 @@
     "Tuple",
     "compatibility",
     "legalize_graph",
-    "stable_topological_sort",
     "lift_subgraph_as_module"
   ],
   "torch.fx.tensor_type": [

@@ -1,5 +1,4 @@
 # mypy: allow-untyped-defs
-from typing import Optional
 
 import torch
 from torch import Tensor
@@ -62,7 +61,7 @@ class Dirichlet(ExponentialFamily):
     def __init__(
         self,
         concentration: Tensor,
-        validate_args: Optional[bool] = None,
+        validate_args: bool | None = None,
     ) -> None:
         if concentration.dim() < 1:
             raise ValueError(
@@ -70,6 +69,7 @@ class Dirichlet(ExponentialFamily):
             )
         self.concentration = concentration
         batch_shape, event_shape = concentration.shape[:-1], concentration.shape[-1:]
+        # pyrefly: ignore [bad-argument-type]
         super().__init__(batch_shape, event_shape, validate_args=validate_args)
 
     def expand(self, batch_shape, _instance=None):

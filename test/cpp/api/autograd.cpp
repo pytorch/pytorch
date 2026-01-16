@@ -366,43 +366,6 @@ TEST(CustomAutogradTest, CustomFunctionWithTensorList) {
   ASSERT_VARIABLE_EQ(y.grad(), x + torch::ones({5, 5}));
 }
 
-TEST(CustomAutogradTest, CustomFunctionWithVectorOfTensors) {
-  struct MyFunction : public Function<MyFunction> {
-    static Variable forward(
-        AutogradContext* ctx,
-        const std::vector<at::Tensor>& tensors) {
-      torch::autograd::variable_list vars;
-      for (const at::Tensor& tensor : tensors) {
-        vars.push_back(tensor);
-      }
-      ctx->save_for_backward(vars);
-      return tensors[0] + tensors[1] + tensors[0] * tensors[1];
-    }
-
-    static variable_list backward(
-        AutogradContext* ctx,
-        variable_list grad_output) {
-      auto saved = ctx->get_saved_variables();
-      auto var1 = saved[0];
-      auto var2 = saved[1];
-      variable_list output = {
-          grad_output[0] + grad_output[0] * var2,
-          grad_output[0] + grad_output[0] * var1};
-      return output;
-    }
-  };
-
-  at::Tensor x = torch::randn({5, 5}, torch::requires_grad());
-  at::Tensor y = torch::randn({5, 5}, torch::requires_grad());
-  std::vector<at::Tensor> tensors = {x, y};
-  auto res = MyFunction::apply(tensors);
-  auto go = torch::ones({}, torch::requires_grad());
-  res.sum().backward(go, false, true);
-
-  ASSERT_VARIABLE_EQ(x.grad(), y + torch::ones({5, 5}));
-  ASSERT_VARIABLE_EQ(y.grad(), x + torch::ones({5, 5}));
-}
-
 TEST(CustomAutogradTest, GraphTaskTrimEdges) {
   struct MyFunction : public Function<MyFunction> {
     static Variable forward(
