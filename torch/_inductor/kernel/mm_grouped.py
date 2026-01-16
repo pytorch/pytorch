@@ -306,6 +306,10 @@ def can_use_gluon_kernel(
     scale_result: Optional[TensorBox],
 ) -> bool:
     from ..utils import _use_autotune_backend
+    import torch._inductor.config as config
+
+    if not (config.max_autotune or config.max_autotune_gemm):
+        return False
 
     if not _use_autotune_backend("GLUON"):
         return False
