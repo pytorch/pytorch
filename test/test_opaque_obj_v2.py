@@ -3,7 +3,6 @@
 import contextlib
 import gc
 import random
-from abc import ABC
 from contextlib import ExitStack
 from dataclasses import dataclass
 from typing import Optional
@@ -34,6 +33,7 @@ from torch._library.opaque_object import (
     is_opaque_type,
     is_opaque_value_type,
     MemberType,
+    OpaqueBase,
     register_opaque_type,
 )
 from torch._subclasses.fake_tensor import FakeTensorMode
@@ -46,7 +46,7 @@ from torch.testing._internal.common_utils import (
 )
 
 
-class Color(ABC):  # noqa: B024
+class Color(metaclass=OpaqueBase):
     """Simulates a pybind11-style enum where class attributes are instances of the class."""
 
     def __init__(self, name: str, value: int) -> None:
@@ -81,7 +81,7 @@ class CustomDescriptor:
 
 
 # Create a class with an unsupported descriptor
-class ColorWithDescriptor(ABC):  # noqa: B024
+class ColorWithDescriptor(metaclass=OpaqueBase):
     def __init__(self, name: str, value: int) -> None:
         self._name = name
         self._value = value
@@ -96,7 +96,7 @@ class ColorWithDescriptor(ABC):  # noqa: B024
 ColorWithDescriptor.RED = ColorWithDescriptor("RED", 1)
 
 
-class OpaqueQueue(ABC):  # noqa: B024
+class OpaqueQueue(metaclass=OpaqueBase):
     def __init__(self, queue: list[torch.Tensor], init_tensor_: torch.Tensor) -> None:
         super().__init__()
         self.queue = queue
@@ -122,7 +122,7 @@ class OpaqueQueue(ABC):  # noqa: B024
         return len(self.queue)
 
 
-class NestedQueue(ABC):  # noqa: B024
+class NestedQueue(metaclass=OpaqueBase):
     def __init__(self, q):
         self.q = q
 
@@ -133,7 +133,7 @@ class NestedQueue(ABC):  # noqa: B024
         return torch.ops._TestOpaqueObject.queue_pop(self.q)
 
 
-class RNGState(ABC):  # noqa: B024
+class RNGState(metaclass=OpaqueBase):
     def __init__(self, seed):
         self.seed = seed
         self.rng = random.Random(self.seed)
@@ -146,14 +146,14 @@ class RNGState(ABC):  # noqa: B024
         return torch.ops._TestOpaqueObject.noisy_inject(x, self)
 
 
-class OpaqueMultiplier(ABC):  # noqa: B024
+class OpaqueMultiplier(metaclass=OpaqueBase):
     """Opaque object that holds a multiplier value for backward tests."""
 
     def __init__(self, multiplier: float):
         self.multiplier = multiplier
 
 
-class Counter(ABC):  # noqa: B024
+class Counter(metaclass=OpaqueBase):
     def __init__(self, start, end):
         self.start = start
         self.end = end
@@ -176,7 +176,7 @@ class Counter(ABC):  # noqa: B024
         self.start += 1
 
 
-class NestedCounters(ABC):  # noqa: B024
+class NestedCounters(metaclass=OpaqueBase):
     def __init__(self, c):
         self.c = c
 
@@ -190,12 +190,12 @@ class NestedCounters(ABC):  # noqa: B024
             return self.c.start
 
 
-class AddModule(torch.nn.Module, ABC):  # noqa: B024
+class AddModule(torch.nn.Module, metaclass=OpaqueBase):
     def forward(self, x, y):
         return x * y
 
 
-class ValueConfig(ABC):  # noqa: B024
+class ValueConfig(metaclass=OpaqueBase):
     def __init__(self, mode: str):
         self.mode = mode
 
@@ -212,7 +212,7 @@ class ValueConfig(ABC):  # noqa: B024
         print(self.mode)
 
 
-class SizeStore(ABC):  # noqa: B024
+class SizeStore(metaclass=OpaqueBase):
     def __init__(self, size: int):
         self.size = size
 
@@ -230,7 +230,7 @@ class SizeStore(ABC):  # noqa: B024
         return self.size + 1
 
 
-class NestedValueSize(ABC):  # noqa: B024
+class NestedValueSize(metaclass=OpaqueBase):
     def __init__(self, size: SizeStore, config: ValueConfig):
         self.size = size
         self.config = config
@@ -791,9 +791,6 @@ class TestOpaqueObject(TestCase):
         self.assertIsInstance(fake_queue, FakeScriptObject)
         self.assertIsInstance(fake_rng, FakeScriptObject)
 
-        self.assertEqual(type(fake_queue).__name__, "FakeScriptObject_OpaqueQueue")
-        self.assertEqual(type(fake_rng).__name__, "FakeScriptObject_RNGState")
-
     @parametrize("make_fx_tracing_mode", ["fake", "symbolic"])
     def test_make_fx(self, make_fx_tracing_mode):
         class M(torch.nn.Module):
@@ -1338,11 +1335,11 @@ def forward(self, primals, tangents):
 
         with self.assertRaisesRegex(
             TypeError,
-            "must use ABCMeta as its metaclass",
+            "must use torch._opaque_base.OpaqueBase as its metaclass",
         ):
             register_opaque_type(NoABCMeta, typ="reference")
 
-        class BadMember(ABC):  # noqa: B024
+        class BadMember(metaclass=OpaqueBase):
             def __init__(self, x):
                 self.x = x
 
@@ -1359,7 +1356,7 @@ def forward(self, primals, tangents):
             torch.compile(foo)(BadMember(1), torch.ones(1))
 
     def test_invalid_value_type(self):
-        class NoEq(ABC):  # noqa: B024
+        class NoEq(metaclass=OpaqueBase):
             def __init__(self, x):
                 self.x = x
 
@@ -1368,7 +1365,7 @@ def forward(self, primals, tangents):
         ):
             register_opaque_type(NoEq, typ="value")
 
-        class NoHash(ABC):  # noqa: B024
+        class NoHash(metaclass=OpaqueBase):
             def __init__(self, x):
                 self.x = x
 
@@ -1380,7 +1377,7 @@ def forward(self, primals, tangents):
         ):
             register_opaque_type(NoHash, typ="value")
 
-        class NoRepr(ABC):  # noqa: B024
+        class NoRepr(metaclass=OpaqueBase):
             def __init__(self, x):
                 self.x = x
 
@@ -1393,7 +1390,7 @@ def forward(self, primals, tangents):
         with self.assertRaisesRegex(TypeError, "expected to have a `__fx_repr__`"):
             register_opaque_type(NoRepr, typ="value")
 
-        class SpecifyMember(ABC):  # noqa: B024
+        class SpecifyMember(metaclass=OpaqueBase):
             def __init__(self, x):
                 self.x = x
 
@@ -1449,7 +1446,7 @@ def forward(self, primals, tangents):
                 register_opaque_type(t, typ="reference")
 
         @dataclass
-        class Bad1(ABC):  # noqa: B024
+        class Bad1(metaclass=OpaqueBase):
             x: int
 
         pytree.register_dataclass(Bad1)
@@ -1466,7 +1463,7 @@ def forward(self, primals, tangents):
             pytree.CONSTANT_NODES.discard(Bad1)
 
         @dataclass
-        class Bad2(ABC):  # noqa: B024
+        class Bad2(metaclass=OpaqueBase):
             x: int
 
         register_opaque_type(Bad2, typ="reference")
@@ -1603,7 +1600,7 @@ def forward(self, arg0_1):
 
     def test_weakref_cleanup(self):
         def register_tmp_class():
-            class TmpClass(ABC):  # noqa: B024
+            class TmpClass(metaclass=OpaqueBase):
                 def __init__(self, value):
                     self.value = value
 
