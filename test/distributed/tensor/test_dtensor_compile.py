@@ -1343,7 +1343,7 @@ def forward(self, primals_1):
             # Convert back to plain tensor
             return dt_out.to_local()
 
-        x = torch.randn(4, 4)
+        x = torch.randn(4, 4, device=self.device_type)
 
         # Trace with make_fx
         traced = make_fx(outer_fn, tracing_mode="fake")(x)
@@ -1360,8 +1360,7 @@ class outer_fn(torch.nn.Module):
     def forward(self, x_1: "f32[4, 4]"):
         # No stacktrace found for following nodes
         add: "f32[4, 4]" = torch.ops.aten.add.Tensor(x_1, 1);  x_1 = None
-        _to_copy: "f32[4, 4]" = torch.ops.aten._to_copy.default(add, dtype = torch.float32, layout = torch.strided, device = device(type='cuda', index=0));  add = None
-        view: "f32[4, 4]" = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
+        view: "f32[4, 4]" = torch.ops.aten.view.default(add, [4, 4]);  add = None
         repeated_subgraph0 = self.repeated_subgraph0
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_1', view);  repeated_subgraph0 = view = None
         getitem: "f32[8, 4]" = invoke_subgraph[0];  invoke_subgraph = None
@@ -1373,8 +1372,8 @@ class outer_fn(torch.nn.Module):
             # No stacktrace found for following nodes
             all_gather_into_tensor: "f32[8, 4]" = torch.ops._c10d_functional.all_gather_into_tensor.default(arg0_1, 2, '0');  arg0_1 = None
             wait_tensor: "f32[8, 4]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
-            return (wait_tensor,)""",
-        )  # noqa: B950
+            return (wait_tensor,)""",  # noqa: B950
+        )
 
 
 @instantiate_parametrized_tests
