@@ -95,6 +95,10 @@ jobs:
           submodules: 'recursive'
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
+
+      - name: Login to ECR
+        uses: ./.github/actions/ecr-login
+
       - name: Login to GitHub Container Registry
         if: ${{ env.WITH_PUSH == 'true' }}
         uses: docker/login-action@74a5d142397b4f367a81961eba4e8cd7edddf772 # v3.4.0
@@ -170,6 +174,7 @@ jobs:
 
   validate:
     needs: build
+    if: ${{ github.event_name == 'push' && (github.event.ref == 'refs/heads/nightly' || startsWith(github.event.ref, 'refs/tags/v')) }}
     uses: pytorch/test-infra/.github/workflows/validate-docker-images.yml@main
     with:
       channel: nightly

@@ -55,8 +55,8 @@ static py::handle _callback_from_action(
 static int32_t c_recursion_limit = -1;
 
 void dynamo_set_c_recursion_limit(int32_t limit) {
-  if (limit < 1) {
-    throw std::range_error("recursion limit must be greater or equal than 1");
+  if (limit < 1 && limit != -1) {
+    throw std::range_error("recursion limit must be >= 1, or -1 to reset");
   }
   c_recursion_limit = limit;
 }

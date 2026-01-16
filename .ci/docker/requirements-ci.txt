@@ -117,7 +117,7 @@ ninja==1.11.1.4
 #Pinned versions: 1.11.1.4
 #test that import: run_test.py, test_cpp_extensions_aot.py,test_determination.py
 
-numba==0.55.2 ; python_version == "3.10" and platform_machine != "s390x"
+numba==0.57.1 ; python_version == "3.10" and platform_machine != "s390x"
 numba==0.60.0 ; python_version == "3.12" and platform_machine != "s390x"
 #Description: Just-In-Time Compiler for Numerical Functions
 #Pinned versions: 0.55.2, 0.60.0
@@ -136,7 +136,7 @@ numba==0.60.0 ; python_version == "3.12" and platform_machine != "s390x"
 #test_nn.py, test_namedtensor.py, test_linalg.py, test_jit_cuda_fuser.py,
 #test_jit.py, test_indexing.py, test_datapipe.py, test_dataloader.py,
 #test_binary_ufuncs.py
-numpy==1.22.4; python_version == "3.10"
+numpy==1.23.2; python_version == "3.10"
 numpy==1.26.2; python_version == "3.11" or python_version == "3.12"
 numpy==2.1.2; python_version >= "3.13" and python_version < "3.14"
 numpy==2.3.4; python_version >= "3.14"
@@ -340,9 +340,7 @@ sympy==1.13.3
 #Pinned versions:
 #test that import:
 
-onnx==1.19.1 ; python_version < "3.14"
-# Unpin once Python 3.14 is supported. See  onnxruntime issue 26309.
-onnx==1.18.0 ; python_version == "3.14"
+onnx==1.20.0
 #Description: Required by onnx tests, and mypy and test_public_bindings.py when checking torch.onnx._internal
 #Pinned versions:
 #test that import:
@@ -350,6 +348,11 @@ onnx==1.18.0 ; python_version == "3.14"
 onnxscript==0.5.4
 #Description: Required by mypy and test_public_bindings.py when checking torch.onnx._internal
 #Pinned versions:
+#test that import:
+
+onnx-ir==0.1.12
+#Description: In-memory IR for ONNX, dependency of onnxscript. Pinned to avoid breaking changes in newer versions.
+#Pinned versions: 0.1.12
 #test that import:
 
 parameterized==0.8.1
@@ -391,7 +394,7 @@ cmake==3.31.6
 tlparse==0.4.0
 #Description: required for log parsing
 
-filelock==3.18.0
+filelock==3.20.3
 #Description: required for inductor testing
 
 cuda-bindings>=12.0,<13.0 ; platform_machine != "s390x" and platform_system != "Darwin"
@@ -409,5 +412,5 @@ tqdm>=4.66.0
 #test that import: benchmarks/dynamo/*
 
 Jinja2==3.1.6
-aiohttp==3.13.2
+aiohttp==3.13.3
 #Description: required for torch.distributed.debug

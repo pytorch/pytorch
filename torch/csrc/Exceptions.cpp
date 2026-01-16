@@ -241,8 +241,7 @@ void PyWarningHandler::InternalHandler::process(const c10::Warning& warning) {
 }
 
 PyWarningHandler::PyWarningHandler() noexcept(true)
-    : prev_handler_(c10::WarningUtils::get_warning_handler()),
-      in_exception_(false) {
+    : prev_handler_(c10::WarningUtils::get_warning_handler()) {
   c10::WarningUtils::set_warning_handler(&internal_handler_);
 }
 

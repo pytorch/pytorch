@@ -11,6 +11,7 @@
 #include <hip/hip_fp16.h>
 #include <hip/hip_bf16.h>
 
+#if ROCM_VERSION < 60400
 __device__ inline __hip_bfloat162 preview_unsafeAtomicAdd(__hip_bfloat162* address, __hip_bfloat162 value) {
 #if (defined(__gfx942__)) && \
   __has_builtin(__builtin_amdgcn_flat_atomic_fadd_v2bf16)
@@ -68,6 +69,9 @@ __device__ inline __half2 preview_unsafeAtomicAdd(__half2* address, __half2 valu
 #endif
 }
 #define ATOMICADD preview_unsafeAtomicAdd
+#else
+#define ATOMICADD unsafeAtomicAdd
+#endif
 #define NATIVE_ZERO_BF16 __float2bfloat16(0.0f)
 #else
 #define ATOMICADD atomicAdd
@@ -254,7 +258,7 @@ __device__ inline void cmtdStore(void* address, T value) {
 }
 #endif
 
-#if (defined(__gfx940__) || defined(__gfx941__) || defined(__gfx942__) || defined(__gfx950__))
+#if (defined(__gfx942__) || defined(__gfx950__))
 // This function implements warp-level opportunistic fastatomics
 // To reduce contention on an atomicAdd, this replaces per-thread atomicAdd with a per-warp atomicAdd.
 // We identify all the threads within a warp that will perform an atomicAdd on the same destination

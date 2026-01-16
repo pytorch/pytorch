@@ -328,7 +328,6 @@ class _ChildDataPipe(IterDataPipe):
         if not isinstance(main_datapipe, _ContainerTemplate):
             raise AssertionError("main_datapipe must implement _ContainerTemplate")
 
-        # pyrefly: ignore [bad-assignment]
         self.main_datapipe: IterDataPipe = main_datapipe
         self.instance_id = instance_id
 

@@ -7,6 +7,8 @@ from typing_extensions import ParamSpec, TypeIs, TypeVarTuple, Unpack
 import torch
 import torch.fx.node
 import torch.utils._pytree as pytree
+from torch._library.fake_class_registry import FakeScriptObject
+from torch._library.opaque_object import is_opaque_type
 from torch._ops import HigherOrderOperator
 
 
@@ -16,13 +18,19 @@ _Ts = TypeVarTuple("_Ts")
 
 
 def is_graphable(val: object) -> TypeIs[torch.fx.node.BaseArgumentTypes]:
-    """Definition: a graphable type is a type that that is an acceptable input/output type to a FX node."""
-    return isinstance(val, torch.fx.node.base_types)
+    """Definition: a graphable type is a type that is an acceptable input/output type to a FX node."""
+    return isinstance(
+        val, (*torch.fx.node.base_types, FakeScriptObject)
+    ) or is_opaque_type(type(val))
 
 
 def is_graphable_type(typ: type[object]) -> bool:
-    """Return whether the given type is graphable"""
-    return issubclass(typ, torch.fx.node.base_types)
+    """Return whether the given type is graphable."""
+    return (
+        issubclass(typ, torch.fx.node.base_types)
+        or is_opaque_type(typ)
+        or issubclass(typ, FakeScriptObject)
+    )
 
 
 def to_graphable(stuff: pytree.PyTree) -> tuple[list[object], pytree.TreeSpec]:
@@ -58,7 +66,7 @@ def func_to_graphable(
     return pytree.tree_flatten(_ConstantFunction(func))
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class _ConstantFunction(Generic[_P, _R]):
     func: Callable[_P, _R]
 
@@ -89,7 +97,10 @@ class FlatApply(HigherOrderOperator):
         self,
         func: _OpTypes | pytree.TreeSpec,
         in_spec: pytree.TreeSpec,
-        *flat_args: tuple[Unpack[_Ts]],
+        *flat_args: Unpack[_Ts],
+        # If True then the output is checked to be valid. If False then it is up
+        # to the caller to ensure the output is appropriate.
+        checked_output: bool = True,
         **_unused: object,
     ) -> object:
         """
@@ -111,24 +122,24 @@ class FlatApply(HigherOrderOperator):
         - an input type is a constant type (i.e. torch.compile will specialize on it)
         registered with pytree.register_constant. The constant type goes directly
         into the spec.
-
         """
         assert isinstance(func, _op_types) or pytree._is_constant_holder(func)
         assert len(_unused) == 0
-        return impl(func, in_spec, flat_args)
+        # pyrefly: ignore[bad-argument-type]  # pyrefly bug?
+        return impl(func, in_spec, flat_args, checked_output)
 
 
 @overload
-def _is_valid_output(x: tuple[object, ...]) -> TypeIs[tuple[_FXOutput, ...]]: ...
+def is_valid_output(x: tuple[object, ...]) -> TypeIs[tuple[_FXOutput, ...]]: ...
 
 
 @overload
-def _is_valid_output(x: Sequence[object]) -> TypeIs[Sequence[_FXOutput]]: ...
+def is_valid_output(x: Sequence[object]) -> TypeIs[Sequence[_FXOutput]]: ...
 
 
-def _is_valid_output(x: object) -> bool:
+def is_valid_output(x: object) -> bool:
     if isinstance(x, (tuple, list)):
-        return all(map(_is_valid_output, x))
+        return all(map(is_valid_output, x))
     return is_graphable(x)
 
 
@@ -136,6 +147,7 @@ def impl(
     func: _OpTypes | pytree.TreeSpec,
     in_spec: pytree.TreeSpec,
     flat_args: tuple[Unpack[_Ts]],
+    checked_output: bool,
 ) -> _FXOutput:
     if isinstance(func, pytree.TreeSpec):
         # assume _ConstantFunction
@@ -146,17 +158,10 @@ def impl(
     args, kwargs = from_graphable(flat_args, in_spec)
     out = func(*args, **kwargs)
 
-    # Right now, all outputs must either be graphable or lists/tuples of graphables.
-    #
-    # TODO: The following can be updated to support non-graphable outputs and pytrees.
-    # For non-graphable constant outputs: the assumption would be that they are constant
-    # (every time the function runs those MUST be the same)
-    # For pytree outputs:
-    # I'm not sure if we need to return (flat_output, spec) or just (flat_output,):
-    # in the latter case the tracers need to carry out the output specs
-    # (they need to know how to reconstruct the object from just the flat_output).
-
-    assert _is_valid_output(out)
+    if checked_output:
+        # For "normal" usage all outputs must either be graphable or
+        # lists/tuples of graphables.
+        assert is_valid_output(out)
     return out
 
 
