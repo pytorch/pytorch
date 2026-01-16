@@ -14,6 +14,7 @@ import unittest
 from functools import partial
 from pathlib import Path
 from typing import *  # noqa: F403
+from unittest.mock import patch
 
 import numpy as np
 import yaml
@@ -2979,6 +2980,33 @@ class TestCustomOpAPI(TestCase):
                 continue
             self.assertGreater(after, prev)
 
+    def test_mutated_no_warning(self):
+        # Run in subprocess since the warning is emitted only once
+        script = """\
+import warnings
+import torch
+from torch import Tensor
+
+with warnings.catch_warnings(record=True) as w:
+    warnings.simplefilter("always")
+    torch.set_warn_always(True)
+
+    @torch.library.custom_op("mylib::func", mutates_args=("x",))
+    def func(x: Tensor) -> None:
+        x.add_(1)
+
+    if len(w) > 0:
+        raise AssertionError(f"Unexpected warning: {w[0].message}")
+"""
+        try:
+            subprocess.check_output(
+                [sys.executable, "-c", script],
+                stderr=subprocess.STDOUT,
+                cwd=os.path.dirname(os.path.realpath(__file__)),
+            )
+        except subprocess.CalledProcessError as e:
+            self.fail(e.output.decode("utf-8"))
+
     def test_mutated_unknown(self):
         @torch.library.custom_op(
             "_torch_testing::f", mutates_args="unknown", device_types="cpu"
@@ -4643,6 +4671,7 @@ opcheck(op, args, kwargs, test_utils="test_schema")
         ):
             self.assertTrue(optests.is_inside_opcheck_mode())
 
+    @patch("torch._functorch.config.check_custom_op_aliasing", False)
     def test_opcheck_bad_op(self):
         op = op_with_incorrect_schema(self, "foo")
         x = torch.randn(3)

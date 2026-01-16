@@ -132,6 +132,9 @@ namespace Native {
  *                  notifyCaptureDestroy.
  */
 
+// counter to track order for Mempool Registration
+thread_local int32_t registration_counter_global = -1;
+
 static char SHAREABLE_HANDLE_VERSION = 2;
 enum ShareableHandleType : char {
   SHAREABLE_CUDA_MALLOC = 'c',
@@ -187,6 +190,7 @@ struct Block {
   c10::DeviceIndex device; // gpu
   cudaStream_t stream; // allocation stream
   stream_set stream_uses; // streams on which the block was used
+  int32_t registration_counter{-1};
   size_t size; // block size in bytes
   size_t requested_size; // memory originally requested
   BlockPool* pool{nullptr}; // owning memory pool
@@ -221,11 +225,15 @@ struct Block {
         size(size),
         requested_size(0),
         pool(pool),
-        ptr(ptr) {}
+        ptr(ptr) {
+    registration_counter = ++registration_counter_global;
+  }
 
   // constructor for search key
   Block(c10::DeviceIndex device, cudaStream_t stream, size_t size)
-      : device(device), stream(stream), size(size), requested_size(0) {}
+      : device(device), stream(stream), size(size), requested_size(0) {
+    registration_counter = ++registration_counter_global;
+  }
 
   size_t gc_count() {
     TORCH_INTERNAL_ASSERT(pool);
@@ -960,9 +968,11 @@ class EventPool {
 
 // CUDA graphs helper
 struct PrivatePool {
-  explicit PrivatePool(MempoolId_t id, CUDAAllocator* allocator = nullptr)
+  explicit PrivatePool(
+      MempoolId_t id,
+      std::shared_ptr<CUDAAllocator> allocator = nullptr)
       : id(std::move(id)),
-        allocator_(allocator),
+        allocator_(std::move(allocator)),
         large_blocks(/*small=*/false, this),
         small_blocks(/*small=*/true, this) {}
   PrivatePool(const PrivatePool&) = delete;
@@ -983,13 +993,13 @@ struct PrivatePool {
   // distinguish private blocks by adding a "pool id" check above the stream
   // check in BlockComparator. BlockComparator is performance- critical though,
   // I'd rather not add more logic to it.
-  CUDAAllocator* allocator_;
+  std::shared_ptr<CUDAAllocator> allocator_;
   BlockPool large_blocks;
   BlockPool small_blocks;
 
  public:
   CUDAAllocator* allocator() {
-    return allocator_;
+    return allocator_.get();
   }
 };
 
@@ -1097,6 +1107,7 @@ class RingBuffer {
     std::lock_guard<std::mutex> lk(alloc_trace_lock);
     alloc_trace_next = 0;
     alloc_trace->clear();
+    alloc_trace->shrink_to_fit();
   }
 
  private:
@@ -1200,6 +1211,9 @@ class DeviceCachingAllocator {
   // tracks which pools we can use as a last resort before ooming
   ska::flat_hash_set<MempoolId_t, MempoolIdHash> use_on_oom_pools;
 
+  // tracks which pools should not split a segment
+  ska::flat_hash_set<MempoolId_t, MempoolIdHash> no_split_pools;
+
   // Map of blocks whose freeing is deferred until after CUDA graph capture.
   //   - Key: Block* to be freed.
   //   - Value: List of "empty nodes" inserted as free markers during capture.
@@ -1237,6 +1251,7 @@ class DeviceCachingAllocator {
   std::vector<c10::DeviceIndex> devices_with_peer_access_;
 
   bool record_history = false;
+  std::unordered_set<TraceEntry::Action> skip_actions_list;
 
   std::atomic<CreateContextFn> context_recorder_;
   RecordContext record_context_ = RecordContext::NEVER;
@@ -1290,10 +1305,32 @@ class DeviceCachingAllocator {
       CreateContextFn context_recorder,
       size_t alloc_buffer_max_entries,
       RecordContext when,
-      bool clearHistory) {
+      bool clearHistory,
+      const std::vector<std::string>& skip_actions) {
     std::unique_lock<std::recursive_mutex> lock(mutex);
     TORCH_CHECK(when == RecordContext::NEVER || context_recorder);
     record_history = enabled;
+
+    // Convert string list to action enum set
+    skip_actions_list.clear();
+    for (const auto& action_str : skip_actions) {
+      if (action_str == "alloc") {
+        skip_actions_list.insert(TraceEntry::Action::ALLOC);
+      } else if (action_str == "free_requested") {
+        skip_actions_list.insert(TraceEntry::Action::FREE_REQUESTED);
+      } else if (action_str == "free_completed") {
+        skip_actions_list.insert(TraceEntry::Action::FREE_COMPLETED);
+      } else if (action_str == "segment_alloc") {
+        skip_actions_list.insert(TraceEntry::Action::SEGMENT_ALLOC);
+      } else if (action_str == "segment_free") {
+        skip_actions_list.insert(TraceEntry::Action::SEGMENT_FREE);
+      } else if (action_str == "oom") {
+        skip_actions_list.insert(TraceEntry::Action::OOM);
+      } else if (action_str == "snapshot") {
+        skip_actions_list.insert(TraceEntry::Action::SNAPSHOT);
+      }
+    }
+
     context_recorder_.store(record_history ? context_recorder : nullptr);
     alloc_buffer.setMaxEntries(alloc_buffer_max_entries);
     record_context_ = enabled ? when : RecordContext::NEVER;
@@ -1572,7 +1609,7 @@ class DeviceCachingAllocator {
           " If reserved but unallocated memory is large try setting",
           " PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid"
           " fragmentation.  See documentation for Memory Management "
-          " (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)");
+          " (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)");
     }
 
     bool split_remainder = should_split(
@@ -1585,9 +1622,9 @@ class DeviceCachingAllocator {
       AllocParams& params,
       size_t size,
       cudaStream_t stream,
-      c10::DeviceIndex device_id,
+      c10::DeviceIndex device_idx,
       size_t alloc_size,
-      DeviceStats& stats) {
+      DeviceStats& device_stats) {
     bool block_found = false;
     // if already trying to use a mempool, then just oom
     bool active_pool = params.pool->owner_PrivatePool;
@@ -1600,7 +1637,7 @@ class DeviceCachingAllocator {
         beginAllocateToPool(mempool_id, filter);
         auto& mempool = get_pool(size, stream);
         AllocParams mempool_params(
-            device_id, size, stream, &mempool, alloc_size, false);
+            device_idx, size, stream, &mempool, alloc_size, false);
         mempool_params.stat_types = get_stat_types_for_pool(mempool);
         block_found = get_free_block(mempool_params);
         endAllocateToPool(mempool_id);
@@ -2467,6 +2504,7 @@ class DeviceCachingAllocator {
           id == mempool_id) {
         segment_info.owner_private_pool_id = id;
       }
+      segment_info.registration_counter = head_block->registration_counter;
 
       const Block* block = head_block;
       while (block != nullptr && block->mapped) {
@@ -2534,14 +2572,14 @@ class DeviceCachingAllocator {
     // divide the space between these 2's power into equal divisions
     // If division is zero, return the power-of-2 ceiling.
     size_t power2_floor = llvm::PowerOf2Floor(size);
-    size_t power2_divison =
+    size_t power2_division =
         power2_floor >> (63 - llvm::countLeadingZeros(divisions));
-    if (C10_UNLIKELY(power2_divison == 0)) {
+    if (C10_UNLIKELY(power2_division == 0)) {
       return (power2_floor << 1);
     }
-    size_t round_size_floor = size & (~(power2_divison - 1));
+    size_t round_size_floor = size & (~(power2_division - 1));
     return (round_size_floor == size) ? size
-                                      : round_size_floor + power2_divison;
+                                      : round_size_floor + power2_division;
   }
 
   static size_t round_size(size_t size) {
@@ -2558,11 +2596,13 @@ class DeviceCachingAllocator {
     }
   }
 
-  void createOrIncrefPool(MempoolId_t mempool_id, CUDAAllocator* allocator) {
+  void createOrIncrefPool(
+      MempoolId_t mempool_id,
+      std::shared_ptr<CUDAAllocator> allocator) {
     // Create a PrivatePool object if it does not exist yet
     // and increment its use_count
     std::lock_guard<std::recursive_mutex> lock(mutex);
-    create_or_incref_pool(mempool_id, allocator);
+    create_or_incref_pool(mempool_id, std::move(allocator));
   }
 
   void setUseOnOOM(MempoolId_t mempool_id, bool use_on_oom) {
@@ -2572,6 +2612,12 @@ class DeviceCachingAllocator {
     } else {
       use_on_oom_pools.erase(mempool_id);
     }
+  }
+
+  void setNoSplit(MempoolId_t mempool_id) {
+    // Choose if this pool should not split a segment
+    std::lock_guard<std::recursive_mutex> lock(mutex);
+    no_split_pools.insert(mempool_id);
   }
 
   // See Note [Interaction with CUDA graph capture]
@@ -2720,7 +2766,7 @@ class DeviceCachingAllocator {
 
   void create_or_incref_pool(
       MempoolId_t mempool_id,
-      CUDAAllocator* allocator = nullptr) {
+      std::shared_ptr<CUDAAllocator> allocator = nullptr) {
     auto it = graph_pools.find(mempool_id);
     if (it == graph_pools.end()) {
       // mempool_id does not reference an existing pool.
@@ -2728,14 +2774,15 @@ class DeviceCachingAllocator {
       // usage. use_count is initially 1, which means the pool is
       // being used since somebody called createOrIncrefPool.
       graph_pools.emplace(
-          mempool_id, std::make_unique<PrivatePool>(mempool_id, allocator));
+          mempool_id,
+          std::make_unique<PrivatePool>(mempool_id, std::move(allocator)));
     } else {
       // mempool_id references an existing pool, which the current CUDAGraph
       // capture or torch.cuda.use_mem_pool will
       // share. Check this pool is live (at least one other capture already
       // references it). Increment it to establish the usage.
       TORCH_INTERNAL_ASSERT(it->second->use_count > 0);
-      TORCH_INTERNAL_ASSERT(allocator == nullptr);
+      TORCH_INTERNAL_ASSERT(!allocator);
       it->second->use_count++;
     }
   }
@@ -2782,7 +2829,9 @@ class DeviceCachingAllocator {
         return c;
       }
     }
-    auto segment_size = pool->is_small ? kSmallBuffer : kLargeBuffer;
+    auto segment_size = pool->is_small
+        ? kSmallBuffer
+        : AcceleratorAllocatorConfig::large_segment_size();
     expandable_segments_.emplace_back(new ExpandableSegment(
         device, stream, segment_size, devices_with_peer_access_));
 
@@ -3047,6 +3096,13 @@ class DeviceCachingAllocator {
       const Block* block,
       size_t size,
       bool is_expandable_segments_active) {
+    // If the pool is marked as not splitting a segment, do not split
+    if (no_split_pools.find(block->pool->owner_MempoolId()) !=
+        no_split_pools.end()) {
+      return false;
+    }
+    // Otherwise, check if the remaining size is greater than the minimum block
+    // size
     size_t remaining = block->size - size;
     if (block->pool->is_small || is_expandable_segments_active) {
       return remaining >= kMinBlockSize;
@@ -3060,7 +3116,7 @@ class DeviceCachingAllocator {
     if (size <= kSmallSize) {
       return kSmallBuffer;
     } else if (size < kMinLargeAlloc) {
-      return kLargeBuffer;
+      return AcceleratorAllocatorConfig::large_segment_size();
     } else {
       return kRoundLarge * ((size + kRoundLarge - 1) / kRoundLarge);
     }
@@ -3360,6 +3416,15 @@ class DeviceCachingAllocator {
     return true;
   }
 
+  /**
+   * If mempool_id is {0,0} (the default pool) and there are no
+   * currently capturing memory pools, free the default pool's blocks
+   * and also free the blocks of the freeable private pools.
+   *
+   * If mempool_id corresponds to a private pool that is freeable,
+   * call synchronize_and_free_events() on that private pool. Free the
+   * blocks of all freeable private pools, including this one.
+   */
   bool release_cached_blocks(
       const std::shared_ptr<GatheredContext>& context,
       MempoolId_t mempool_id) {
@@ -3756,7 +3821,11 @@ class DeviceCachingAllocator {
     }
 
     if (record_history) {
-      alloc_buffer.insertEntries(te);
+      // Skip if action is in the skip_actions set
+      bool should_skip = skip_actions_list.count(action) > 0;
+      if (!should_skip) {
+        alloc_buffer.insertEntries(te);
+      }
     }
   }
 };
@@ -3941,17 +4010,21 @@ class NativeCachingAllocator : public CUDAAllocator {
       CreateContextFn context_recorder,
       size_t alloc_buffer_max_entries,
       RecordContext when,
-      bool clearHistory) override {
+      bool clearHistory,
+      const std::vector<std::string>& skip_actions) override {
     record_history = enabled;
     annotation_buffer.setMaxEntries(alloc_buffer_max_entries);
-    annotation_buffer.clear();
+    if (!enabled || clearHistory) {
+      annotation_buffer.clear();
+    }
     for (auto& allocator : device_allocator) {
       allocator->recordHistory(
           enabled,
           context_recorder,
           alloc_buffer_max_entries,
           when,
-          clearHistory);
+          clearHistory,
+          skip_actions);
     }
   }
 
@@ -4229,10 +4302,10 @@ class NativeCachingAllocator : public CUDAAllocator {
   void createOrIncrefPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
-      CUDAAllocator* allocator) override {
+      std::shared_ptr<CUDAAllocator> allocator) override {
     assertValidDevice(device);
     device_allocator[device]->createOrIncrefPool(
-        std::move(mempool_id), allocator);
+        std::move(mempool_id), std::move(allocator));
   }
 
   void setUseOnOOM(
@@ -4241,6 +4314,11 @@ class NativeCachingAllocator : public CUDAAllocator {
       bool use_on_oom) override {
     assertValidDevice(device);
     device_allocator[device]->setUseOnOOM(std::move(mempool_id), use_on_oom);
+  }
+
+  void setNoSplit(c10::DeviceIndex device, MempoolId_t mempool_id) override {
+    assertValidDevice(device);
+    device_allocator[device]->setNoSplit(std::move(mempool_id));
   }
 
   // CUDAGraph interactions

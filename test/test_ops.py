@@ -31,6 +31,7 @@ from torch.testing._internal.common_device_type import (
     onlyOn,
     OpDTypes,
     ops,
+    skipCUDAIfNotRocm,
     skipMeta,
     skipXPU,
 )
@@ -65,7 +66,6 @@ from torch.testing._internal.common_utils import (
     set_default_dtype,
     skipIfTorchDynamo,
     skipIfTorchInductor,
-    slowTest,
     suppress_warnings,
     TEST_WITH_ROCM,
     TEST_WITH_TORCHDYNAMO,
@@ -486,7 +486,7 @@ class TestCommon(TestCase):
     # Tests that the cpu and gpu results are consistent
     @onlyOn(["cuda", "xpu"])
     @suppress_warnings
-    @slowTest
+    @skipCUDAIfNotRocm
     @ops(_ops_and_refs_with_no_numpy_ref, dtypes=OpDTypes.any_common_cpu_cuda_one)
     def test_compare_cpu(self, device, dtype, op):
         def to_cpu(arg):
@@ -509,9 +509,10 @@ class TestCommon(TestCase):
             cuda_results = sample.output_process_fn_grad(cuda_results)
             cpu_results = cpu_sample.output_process_fn_grad(cpu_results)
 
-            # Lower tolerance because we are running this as a `@slowTest`
-            # Don't want the periodic tests to fail frequently
-            self.assertEqual(cuda_results, cpu_results, atol=1e-3, rtol=1e-3)
+            atol, rtol = 0, 0
+            if dtype.is_floating_point or dtype.is_complex:
+                atol, rtol = 1e-3, 1e-3
+            self.assertEqual(cuda_results, cpu_results, atol=atol, rtol=rtol)
 
     # Tests that experimental Python References can propagate shape, dtype,
     # and device metadata properly.
@@ -739,8 +740,6 @@ class TestCommon(TestCase):
         # In this test, refs call into the torch namespace (after the initial invocation)
         # For example, a ref with torch.foo in it will call torch.foo instead of refs.foo
         # Direct calls to refs and prims are not translated
-        if TEST_WITH_ROCM and op.name == "_refs.fft.ihfftn" and dtype == torch.float16:
-            self.skipTest("Skipped on ROCm")
         if op.full_name == "_refs.div.floor_rounding" and dtype == torch.bfloat16:
             self.skipTest(
                 "Skipped _refs.div.floor_rounding with bfloat16"
@@ -753,12 +752,6 @@ class TestCommon(TestCase):
     @parametrize("executor", ["aten"])
     @skipIfTorchInductor("Takes too long for inductor")
     def test_python_ref_executor(self, device, dtype, op, executor):
-        if (
-            TEST_WITH_ROCM
-            and (op.name == "_refs.fft.ihfftn" or op.name == "_refs.fft.ihfft2")
-            and dtype == torch.float16
-        ):
-            self.skipTest("Skipped on ROCm")
         from copy import copy
 
         from torch._prims.executor import make_traced

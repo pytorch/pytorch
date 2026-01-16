@@ -1,6 +1,7 @@
 # mypy: allow-untyped-defs
 # Owner(s): ["module: unknown"]
 
+import multiprocessing
 import os
 import random
 import shutil
@@ -1013,11 +1014,44 @@ def _deprecated_api(x, y=15):
 class TestDeprecate(TestCase):
     def test_deprecated(self):
         with self.assertWarnsRegex(Warning, "is DEPRECATED"):
+            # pyrefly: ignore [unknown-name]
             deprecated_api(1, 2)  # noqa: F821
         with self.assertWarnsRegex(Warning, "is DEPRECATED"):
+            # pyrefly: ignore [unknown-name]
             deprecated_api(1, y=2)  # noqa: F821
         _deprecated_api(1, 2)
         _deprecated_api(1, y=2)
+
+
+class TestDeviceLazyInit(TestCase):
+    @unittest.skipIf(IS_WINDOWS, "pthread_atfork not available on Windows")
+    def test_fork_poison_on_lazy_init(self, device):
+        torch.empty(1, device=device)
+
+        def child(q):
+            try:
+                torch.empty(1, device=device)
+            except Exception as e:
+                q.put(e)
+
+        ctx = multiprocessing.get_context("fork")
+        q = ctx.Queue()
+        p = ctx.Process(target=child, args=(q,))
+        p.start()
+        p.join()
+        self.assertTrue(not q.empty())
+        exc = q.get()
+        pattern = (
+            r"Cannot re-initialize .* in forked subprocess\. "
+            r"To use .* with multiprocessing, you must use the 'spawn' start method"
+        )
+        self.assertIsInstance(exc, RuntimeError)
+        self.assertRegex(str(exc), pattern)
+
+
+instantiate_device_type_tests(
+    TestDeviceLazyInit, globals(), except_for=["cpu"], allow_xpu=True
+)
 
 
 if __name__ == "__main__":

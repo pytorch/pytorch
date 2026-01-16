@@ -1096,6 +1096,10 @@ The set of leaf modules can be customized by overriding
 ```{eval-rst}
 .. autofunction:: torch.fx.traceback.annotate
 ```
+```{eval-rst}
+.. autofunction:: torch.fx.passes.tools_common.stable_topological_sort
+```
+
 
 <!-- The experimental and passes submodules are missing docs. -->
 <!-- Adding it here for coverage but this doesn't add anything to the -->
@@ -1117,23 +1121,15 @@ The set of leaf modules can be customized by overriding
 .. py:module:: torch.fx.experimental.accelerator_partitioner
 .. py:module:: torch.fx.experimental.const_fold
 .. py:module:: torch.fx.experimental.debug
-.. py:module:: torch.fx.experimental.graph_gradual_typechecker
 .. py:module:: torch.fx.experimental.merge_matmul
-.. py:module:: torch.fx.experimental.meta_tracer
-.. py:module:: torch.fx.experimental.migrate_gradual_types.constraint
-.. py:module:: torch.fx.experimental.migrate_gradual_types.constraint_generator
-.. py:module:: torch.fx.experimental.migrate_gradual_types.constraint_transformation
 .. py:module:: torch.fx.experimental.migrate_gradual_types.operation
 .. py:module:: torch.fx.experimental.migrate_gradual_types.util
 .. py:module:: torch.fx.experimental.migrate_gradual_types.z3_types
 .. py:module:: torch.fx.experimental.normalize
-.. py:module:: torch.fx.experimental.optimization
 .. py:module:: torch.fx.experimental.partitioner_utils
-.. py:module:: torch.fx.experimental.recording
 .. py:module:: torch.fx.experimental.refinement_types
 .. py:module:: torch.fx.experimental.rewriter
 .. py:module:: torch.fx.experimental.schema_type_annotation
-.. py:module:: torch.fx.experimental.unification.core
 .. py:module:: torch.fx.experimental.unification.dispatch
 .. py:module:: torch.fx.experimental.unification.match
 .. py:module:: torch.fx.experimental.unification.more
@@ -1172,6 +1168,7 @@ The set of leaf modules can be customized by overriding
 .. py:module:: torch.fx.passes.shape_prop
 .. py:module:: torch.fx.passes.split_module
 .. py:module:: torch.fx.passes.split_utils
+.. autofunction:: torch.fx.passes.split_utils.move_non_tensor_nodes_on_boundary
 .. py:module:: torch.fx.passes.splitter_base
 .. py:module:: torch.fx.passes.tests.test_pass_manager
 .. py:module:: torch.fx.passes.tools_common

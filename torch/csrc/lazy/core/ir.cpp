@@ -1,5 +1,4 @@
 #include <c10/util/env.h>
-#include <torch/csrc/lazy/backend/backend_interface.h>
 #include <torch/csrc/lazy/core/cache.h>
 #include <torch/csrc/lazy/core/config.h>
 #include <torch/csrc/lazy/core/ir.h>

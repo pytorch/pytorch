@@ -88,6 +88,14 @@ _side_effectful_need_to_be_preserved_pre_dispatch: list[Callable[..., Any]] = [
 
 # TODO: Either refactor this into 2 functions 1 dce for functional graphs and 1 dce for all graphs,
 # or add logic to correctly mark all inplace ops as side effectful.
+#
+# NOTE: For new operators, please do not add to this set!
+# Instead, consider using the effects system via
+# torch.library._register_effectful_op() for operators.
+#
+# This _side_effectful_functions set is only for:
+# - Legacy functions that aren't operators (e.g., profiler ops, asserts)
+# - Things that cannot be marked via the normal effects system
 _side_effectful_functions: set[Callable[..., Any]] = {
     torch._assert,
     torch._assert_async,
@@ -97,8 +105,11 @@ _side_effectful_functions: set[Callable[..., Any]] = {
     _ops.aten.sym_constrain_range.default,
     _ops.aten.sym_constrain_range_for_size.default,
     _ops.profiler._record_function_enter,
+    _ops.profiler._record_function_enter.default,
     _ops.profiler._record_function_enter_new,
+    _ops.profiler._record_function_enter_new.default,
     _ops.profiler._record_function_exit,
+    _ops.profiler._record_function_exit._RecordFunction,
     _ops.inductor.accumulate_grad_.default,
     operator.setitem,
     *_side_effectful_need_to_be_preserved_pre_dispatch,
@@ -110,6 +121,18 @@ if hasattr(_ops.inductor, "resize_storage_bytes_"):
 
 @compatibility(is_backward_compatible=False)
 def has_side_effect(fn: Callable[_P, _R]) -> Callable[_P, _R]:
+    """
+    Registers a function to not be dead code eliminated by
+    fx.graph.eliminate_dead_code
+
+    NOTE: For new operators, please do not add to this set!
+    Instead, consider using the effects system via
+    torch.library._register_effectful_op() for operators.
+
+    This _side_effectful_functions set is only for:
+    - Legacy functions that aren't operators (e.g., profiler ops, asserts)
+    - Things that cannot be marked via the normal effects system
+    """
     _side_effectful_functions.add(fn)
     return fn
 
@@ -336,7 +359,7 @@ class Node(_NodeBase):
             "name": self.name,
             "op": self.op,
             "target": self.target,
-            "type": self.target,
+            "type": self.type,
             "_sort_key": self._sort_key,
             "_args": self._args,
             "_kwargs": self._kwargs,
@@ -388,7 +411,7 @@ class Node(_NodeBase):
         Args:
             x (Node): The node to put before this node. Must be a member of the same graph.
         """
-        # pyrefly: ignore [missing-attribute]
+
         self._prepend(x)
 
     @compatibility(is_backward_compatible=True)
@@ -400,7 +423,7 @@ class Node(_NodeBase):
         Args:
             x (Node): The node to put after this node. Must be a member of the same graph.
         """
-        # pyrefly: ignore [missing-attribute]
+
         self._next._prepend(x)
 
     @property
@@ -701,8 +724,8 @@ class Node(_NodeBase):
             if replace_hooks:
                 for replace_hook in replace_hooks:
                     replace_hook(old=self, new=replace_with.name, user=use_node)
-            # pyrefly: ignore [missing-attribute]
-            use_node._replace_input_with(self, replace_with)  # type: ignore[attr-defined]
+
+            use_node._replace_input_with(self, replace_with)
         return result
 
     @compatibility(is_backward_compatible=False)
@@ -718,44 +741,9 @@ class Node(_NodeBase):
 
             bool: If the op is impure or not.
         """
+        # Placeholders and outputs are always impure for DCE purposes
         if self.op in {"placeholder", "output"}:
             return True
-
-        if self.op == "call_function":
-            schema = getattr(self.target, "_schema", None)
-            if schema is not None and schema.is_mutable:
-                # impure since it mutates inputs
-                return True
-
-            if impure_random:
-                if getattr(self.target, "_nondeterministic_seeded", False):
-                    # impure since it mutates RNG state
-                    return True
-
-            # Handle Python random functions that don't have _nondeterministic_seeded
-            # but still affect global RNG state (issue #151524)
-            # These should be impure regardless of impure_random setting to maintain
-            # consistency between eager and compiled execution
-            _random_functions = {
-                torch.rand,
-                torch.randn,
-                torch.randint,
-                torch.randperm,
-                torch.rand_like,
-                torch.randn_like,
-                torch.randint_like,
-                torch.normal,
-                torch.poisson,
-                torch.bernoulli,
-                torch.multinomial,
-            }
-
-            if self.target in _random_functions:
-                # All random operations are impure to ensure consistent behavior
-                # between eager and compiled execution, regardless of generator usage
-                return True
-
-            return self.target in _side_effectful_functions
 
         # Check if an impure module.
         if self.op == "call_module":
@@ -771,6 +759,17 @@ class Node(_NodeBase):
             # because this function is used by graph.eliminate_dead_code,
             # and some users depend on current elimination behavior.
             return getattr(target_mod, "_is_impure", False)
+
+        # For call_function, delegate to the unified has_side_effects function
+        if self.op == "call_function":
+            from torch._library.utils import is_impure
+
+            return is_impure(
+                self.target,  # pyrefly: ignore[bad-argument-type]
+                args=self.args,
+                kwargs=self.kwargs,
+                impure_random=impure_random,
+            )
 
         return False
 
@@ -843,8 +842,7 @@ class Node(_NodeBase):
             for replace_hook in m._replace_hooks:
                 replace_hook(old=old_input, new=new_input.name, user=self)
 
-        # pyrefly: ignore [missing-attribute]
-        self._replace_input_with(old_input, new_input)  # type: ignore[attr-defined]
+        self._replace_input_with(old_input, new_input)
 
     def _rename(self, candidate: str) -> None:
         if candidate == self.name:

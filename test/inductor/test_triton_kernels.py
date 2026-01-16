@@ -26,12 +26,7 @@ from torch._inductor.utils import run_and_get_code, triton_version_uses_attrs_di
 from torch._library import capture_triton
 from torch.testing import FileCheck
 from torch.testing._internal import common_utils
-from torch.testing._internal.common_utils import (
-    parametrize,
-    skipIfRocm,
-    skipIfWindows,
-    skipIfXpu,
-)
+from torch.testing._internal.common_utils import parametrize, skipIfWindows, skipIfXpu
 from torch.testing._internal.inductor_utils import (
     GPU_TYPE,
     HAS_CUDA_AND_TRITON,
@@ -112,6 +107,44 @@ class KernelTests(torch._inductor.test_case.TestCase):
         f(t1)
         # No need to assert anything, the goal is to make sure dynamo does
         # not crash
+
+    @requires_gpu
+    def test_triton_kernel_ill_formed(self):
+        @triton.jit
+        def ill_formed_kernel(kernel):
+            off_n = tl.program_id(0)
+            seq_len_a = 5
+            if off_n < seq_len_a:
+                out_row_idx = off_n + seq_len_a
+            else:
+                out_row_idx = (off_n + seq_len_a).to(tl.int64)
+            tl.store(kernel, out_row_idx)
+
+        @torch.compile(backend="inductor")
+        def f(x):
+            grid = (x.numel(),)
+            ill_formed_kernel[grid](kernel=x)
+
+        catch_error = False
+        try:
+            t1 = torch.rand(5, device=GPU_TYPE)
+            f(t1)
+        except torch._inductor.exc.InductorError as e:
+            if isinstance(e.inner_exception, triton.compiler.errors.CompilationError):
+                catch_error = True
+            if (
+                isinstance(
+                    e.inner_exception,
+                    torch._inductor.compile_worker.subproc_pool.SubprocException,
+                )
+                and "triton.compiler.errors.CompilationError"
+                in e.inner_exception.details
+            ):
+                catch_error = True
+        finally:
+            # we assert user custom Triton kernel compile error can be captured
+            # after torch.compile
+            self.assertTrue(catch_error)
 
     @requires_gpu
     def test_triton_kernel_higher_order_func(self):
@@ -2556,19 +2589,22 @@ def forward(self, arg0_1, arg1_1):
         self.assertEqual(actual, expected)
 
     @requires_gpu
-    @skipIfXpu(
-        msg="XPU Triton result in nan, "
-        "https://github.com/intel/torch-xpu-ops/issues/2330"
-    )
-    @skipIfRocm
+    @skipIfXpu(msg="`tl.inline_asm_elementwise` is not yet supported on Intel GPUs")
     @inductor_config.patch({"triton.autotune_at_compile_time": True})
     @parametrize("quotes", ["single", "double"])
     def test_kernel_inline_asm(self, quotes):
-        kernel = (
-            kernel_inline_asm_single_quotes
-            if quotes == "single"
-            else kernel_inline_asm_double_quotes
-        )
+        if torch.version.cuda:
+            kernel = (
+                kernel_inline_asm_single_quotes
+                if quotes == "single"
+                else kernel_inline_asm_double_quotes
+            )
+        else:
+            kernel = (
+                kernel_inline_asm_rocm_single_quotes
+                if quotes == "single"
+                else kernel_inline_asm_rocm_double_quotes
+            )
 
         # https://github.com/pytorch/pytorch/issues/155006
         def fn(inp):

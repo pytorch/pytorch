@@ -57,6 +57,7 @@ def fetch_thread_pool(urls: list[str]) -> Iterable[Response]:
 
 def fetch_aiohttp(urls: list[str]) -> Iterable[Response]:
     # late import for optional dependency
+    # pyrefly: ignore [missing-import]
     import aiohttp
 
     async def fetch(session: aiohttp.ClientSession, url: str) -> Response:
@@ -460,7 +461,7 @@ class FrontendServer:
 
     def _render_fr_trace(self, addrs: list[str], resps: list[Response]) -> bytes:
         config = JobConfig()
-        # pyrefly: ignore [bad-assignment]
+
         args = config.parse_args(args=[])
         args.allow_incomplete_ranks = True
         args.verbose = True

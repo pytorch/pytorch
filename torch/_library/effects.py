@@ -11,6 +11,19 @@ class EffectType(Enum):
 from torch._library.utils import RegistrationHandle
 
 
+# These classes do not have side effects as they just store quantization
+# params, so we dont need to mark them as ordered
+skip_classes = (
+    "__torch__.torch.classes.quantized.Conv2dPackedParamsBase",
+    "__torch__.torch.classes.quantized.Conv3dPackedParamsBase",
+    "__torch__.torch.classes.quantized.EmbeddingPackedParamsBase",
+    "__torch__.torch.classes.quantized.LinearPackedParamsBase",
+    "__torch__.torch.classes.xnnpack.Conv2dOpContext",
+    "__torch__.torch.classes.xnnpack.LinearOpContext",
+    "__torch__.torch.classes.xnnpack.TransposeConv2dOpContext",
+)
+
+
 class EffectHolder:
     """A holder where one can register an effect impl to."""
 
@@ -25,9 +38,10 @@ class EffectHolder:
         namespace, opname = torch._library.utils.parse_namespace(self.qualname)
         split = opname.split(".")
         if len(split) > 1:
-            assert len(split) == 2, (
-                f"Tried to split {opname} based on '.' but found more than 1 '.'"
-            )
+            if len(split) != 2:
+                raise AssertionError(
+                    f"Tried to split {opname} based on '.' but found more than 1 '.'"
+                )
             opname, overload = split
         else:
             overload = ""
@@ -42,6 +56,9 @@ class EffectHolder:
             schema = torch._C._get_schema(opname, overload)
             for arg in schema.arguments:
                 if isinstance(arg.type, torch.ClassType):
+                    type_str = arg.type.str()  # pyrefly: ignore[missing-attribute]
+                    if type_str in skip_classes:
+                        continue
                     self._effect = EffectType.ORDERED
                     return
 
