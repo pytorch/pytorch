@@ -344,6 +344,63 @@ class ConcatDataset(Dataset[_T_co]):
             sample_idx = idx - self.cumulative_sizes[dataset_idx - 1]
         return self.datasets[dataset_idx][sample_idx]
 
+    def __getitems__(self, indices: list[int]) -> list:
+        """Fetch multiple samples by indices in a single operation.
+
+        This method enables efficient batch fetching for DataLoader by grouping
+        indices by their source dataset and using batch fetching when available.
+
+        Args:
+            indices: List of indices to fetch.
+
+        Returns:
+            List of samples corresponding to the given indices.
+
+        Example:
+            >>> t1 = torch.tensor([[1, 2], [3, 4]])
+            >>> t2 = torch.tensor([[5, 6], [7, 8], [9, 10]])
+            >>> ds1 = TensorDataset(t1)
+            >>> ds2 = TensorDataset(t2)
+            >>> concat_ds = ConcatDataset([ds1, ds2])
+            >>> concat_ds.__getitems__([0, 2, 4])  # indices from both datasets
+            [(tensor([1, 2]),), (tensor([5, 6]),), (tensor([9, 10]),)]
+        """
+        # Group indices by dataset: {dataset_idx: [(position_in_result, sample_idx), ...]}
+        grouped: dict[int, list[tuple[int, int]]] = {}
+        for pos, idx in enumerate(indices):
+            if idx < 0:
+                if -idx > len(self):
+                    raise ValueError(
+                        "absolute value of index should not exceed dataset length"
+                    )
+                idx = len(self) + idx
+            dataset_idx = bisect.bisect_right(self.cumulative_sizes, idx)
+            if dataset_idx == 0:
+                sample_idx = idx
+            else:
+                sample_idx = idx - self.cumulative_sizes[dataset_idx - 1]
+            if dataset_idx not in grouped:
+                grouped[dataset_idx] = []
+            grouped[dataset_idx].append((pos, sample_idx))
+
+        # Fetch samples from each dataset and place in result
+        result: list = [None] * len(indices)
+        for dataset_idx, pos_sample_pairs in grouped.items():
+            dataset = self.datasets[dataset_idx]
+            positions = [p for p, _ in pos_sample_pairs]
+            sample_indices = [s for _, s in pos_sample_pairs]
+
+            # Use __getitems__ if available, otherwise fall back to __getitem__
+            if callable(getattr(dataset, "__getitems__", None)):
+                samples = dataset.__getitems__(sample_indices)
+            else:
+                samples = [dataset[s] for s in sample_indices]
+
+            for pos, sample in zip(positions, samples):
+                result[pos] = sample
+
+        return result
+
     @property
     @deprecated(
         "`cummulative_sizes` attribute is renamed to `cumulative_sizes`",

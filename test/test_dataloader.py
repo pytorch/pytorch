@@ -632,6 +632,108 @@ class TestConcatDataset(TestCase):
         with self.assertRaisesRegex(AssertionError, "does not support IterableDataset"):
             ConcatDataset([it1, d1])
 
+    def test_getitems(self):
+        """Test batch fetching with __getitems__ for ConcatDataset."""
+        d1 = TensorDataset(torch.tensor([[1, 2], [3, 4], [5, 6]]))
+        d2 = TensorDataset(torch.tensor([[7, 8], [9, 10]]))
+        concat = ConcatDataset([d1, d2])
+
+        # Test that __getitems__ exists
+        self.assertTrue(hasattr(concat, "__getitems__"))
+
+        # Test fetching indices from both datasets
+        indices = [0, 2, 3, 4]  # 0,2 from d1; 3,4 from d2
+        batch = concat.__getitems__(indices)
+
+        self.assertIsInstance(batch, list)
+        self.assertEqual(len(batch), 4)
+
+        # Verify each sample matches __getitem__
+        for i, idx in enumerate(indices):
+            expected = concat[idx]
+            self.assertEqual(batch[i][0], expected[0])
+
+    def test_getitems_single_dataset(self):
+        """Test __getitems__ when all indices are from a single dataset."""
+        d1 = TensorDataset(torch.tensor([[1, 2], [3, 4], [5, 6]]))
+        d2 = TensorDataset(torch.tensor([[7, 8], [9, 10]]))
+        concat = ConcatDataset([d1, d2])
+
+        # All from first dataset
+        batch = concat.__getitems__([0, 1, 2])
+        self.assertEqual(len(batch), 3)
+        for i in range(3):
+            self.assertEqual(batch[i][0], concat[i][0])
+
+        # All from second dataset
+        batch = concat.__getitems__([3, 4])
+        self.assertEqual(len(batch), 2)
+        self.assertEqual(batch[0][0], concat[3][0])
+        self.assertEqual(batch[1][0], concat[4][0])
+
+    def test_getitems_empty_indices(self):
+        """Test __getitems__ with empty indices list."""
+        d1 = TensorDataset(torch.tensor([[1, 2], [3, 4]]))
+        concat = ConcatDataset([d1])
+
+        batch = concat.__getitems__([])
+        self.assertEqual(len(batch), 0)
+
+    def test_getitems_negative_indices(self):
+        """Test __getitems__ with negative indices."""
+        d1 = TensorDataset(torch.tensor([[1, 2], [3, 4]]))
+        d2 = TensorDataset(torch.tensor([[5, 6], [7, 8]]))
+        concat = ConcatDataset([d1, d2])
+
+        # -1 should be last element (index 3), -4 should be first (index 0)
+        batch = concat.__getitems__([-1, -4])
+        self.assertEqual(batch[0][0], concat[3][0])  # last
+        self.assertEqual(batch[1][0], concat[0][0])  # first
+
+    def test_getitems_preserves_order(self):
+        """Test that __getitems__ returns samples in the same order as indices."""
+        d1 = TensorDataset(torch.arange(5))
+        d2 = TensorDataset(torch.arange(5, 10))
+        concat = ConcatDataset([d1, d2])
+
+        # Non-sequential indices crossing dataset boundaries
+        indices = [7, 2, 9, 0, 5]
+        batch = concat.__getitems__(indices)
+
+        for i, idx in enumerate(indices):
+            self.assertEqual(batch[i][0], concat[idx][0])
+
+    def test_getitems_with_child_getitems(self):
+        """Test that __getitems__ leverages child dataset's __getitems__ when available."""
+        # TensorDataset has __getitems__, so this tests the optimization path
+        t1 = torch.randn(10, 3)
+        t2 = torch.randn(10, 3)
+        d1 = TensorDataset(t1)
+        d2 = TensorDataset(t2)
+        concat = ConcatDataset([d1, d2])
+
+        indices = [0, 5, 10, 15]
+        batch = concat.__getitems__(indices)
+
+        self.assertEqual(len(batch), 4)
+        for i, idx in enumerate(indices):
+            self.assertEqual(batch[i][0], concat[idx][0])
+
+    def test_getitems_with_dataloader(self):
+        """Test that __getitems__ integrates correctly with DataLoader."""
+        d1 = TensorDataset(torch.arange(50))
+        d2 = TensorDataset(torch.arange(50, 100))
+        concat = ConcatDataset([d1, d2])
+
+        loader = DataLoader(concat, batch_size=16, shuffle=False)
+
+        # Verify DataLoader produces correct batches
+        all_values = []
+        for (batch,) in loader:
+            all_values.extend(batch.tolist())
+
+        self.assertEqual(all_values, list(range(100)))
+
 
 # takes in dummy var so this can also be used as a `worker_init_fn`
 def set_faulthander_if_available(_=None):
