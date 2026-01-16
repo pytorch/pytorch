@@ -2286,7 +2286,11 @@ class SIMDScheduling(BaseScheduling):
         mixed_sizes: bool,
         only_gen_src_code: bool = False,
     ) -> list[tuple[str, Any, Any]]:
+        from .triton import TritonKernel
         from .triton_combo_kernel import ComboKernel
+
+        # This is currently the only type supported by this method
+        assert issubclass(self.kernel_type, TritonKernel)
 
         fused_node_lists = [node.get_nodes() for node in subkernel_nodes]
         subkernel_map, node_schedule_map = {}, {}
@@ -2299,6 +2303,7 @@ class SIMDScheduling(BaseScheduling):
                 tiling,
                 features=SIMDKernelFeatures(node_schedule, numel, rnumel),
                 optimize_mask=not mixed_sizes,
+                triton_kernel_cls=self.kernel_type,
             )
 
         partitions = ComboKernel.horizontal_partition(
@@ -2318,6 +2323,7 @@ class SIMDScheduling(BaseScheduling):
             if len(node_group) == 0:
                 continue
             kernel = ComboKernel(
+                triton_kernel_cls=self.kernel_type,
                 enable_autotune=enable_autotune,
                 mixed_sizes=mixed_sizes,
             )
