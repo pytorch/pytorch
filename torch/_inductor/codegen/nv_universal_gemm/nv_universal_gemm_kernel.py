@@ -17,6 +17,9 @@ from torch._inductor.codegen.common import (
     WorkspaceZeroMode,
 )
 from torch._inductor.codegen.cutedsl.cutedsl_op_overrides import CuteDSLOpOverrides
+from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
+    to_cutlass_scale_mode,
+)
 from torch._inductor.ir import (
     BaseView,
     Buffer,
@@ -137,7 +140,6 @@ class NVUniversalGemmKernel(Kernel):
         cache_var = f"_{var_prefix}_compiled_cache"
         kernel_name_var = f"_{var_prefix}_KERNEL_NAME"
 
-        # Additional imports for SCALED_GEMM
         extra_imports = ""
         if is_scaled:
             extra_imports = """from cutlass_api.arguments import ScaledTensor
@@ -159,12 +161,6 @@ class NVUniversalGemmKernel(Kernel):
                         offsets=in_ptr2,
                     )"""
         elif is_scaled:
-            # SCALED_GEMM: FP8 with block-scaled inputs (MXFP8)
-            # Input order: in_ptr0=A, in_ptr1=B, in_ptr2=scale_a, in_ptr3=scale_b
-            from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
-                to_cutlass_scale_mode,
-            )
-
             scale_mode_a, swizzle_mode_a = to_cutlass_scale_mode(
                 self.scale_type_a, self.swizzle_type_a
             )
