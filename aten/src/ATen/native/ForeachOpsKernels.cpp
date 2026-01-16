@@ -470,12 +470,13 @@ void foreach_tensor_zero_slow_(TensorList tensors) {
 std::vector<Tensor> foreach_tensor_norm_slow(
     TensorList tensors,
     const Scalar& ord,
-    std::optional<ScalarType> dtype) {
+    std::optional<ScalarType> dtype,
+    bool skip_root) {
   check_foreach_api_restrictions(tensors);
   std::vector<Tensor> result;
   result.reserve(tensors.size());
   for (const auto& t : tensors) {
-    result.emplace_back(at::linalg_vector_norm(t, ord, {}, false, dtype));
+    result.emplace_back(at::linalg_vector_norm(t, ord, {}, false, dtype, skip_root));
   }
   return result;
 }

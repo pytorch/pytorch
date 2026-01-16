@@ -11553,7 +11553,7 @@
     CUDA: foreach_tensor_neg_cuda_
   autogen: _foreach_neg.out
 
-- func: _foreach_norm.Scalar(Tensor[] self, Scalar ord=2, ScalarType? dtype=None) -> Tensor[]
+- func: _foreach_norm.Scalar(Tensor[] self, Scalar ord=2, ScalarType? dtype=None, bool skip_root=False) -> Tensor[]
   device_check: NoCheck   # foreach kernels fall back to slow path when tensor are on different devices
   variants: function
   dispatch:
@@ -14499,13 +14499,13 @@
   python_module: linalg
   variants: function
 
-- func: linalg_vector_norm(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- func: linalg_vector_norm(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, bool skip_root=False) -> Tensor
   python_module: linalg
   variants: function
   structured_delegate: linalg_vector_norm.out
   tags: reduction
 
-- func: linalg_vector_norm.out(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, Tensor(a!) out) -> Tensor(a!)
+- func: linalg_vector_norm.out(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, bool skip_root=False, Tensor(a!) out) -> Tensor(a!)
   python_module: linalg
   structured: True
   dispatch:
