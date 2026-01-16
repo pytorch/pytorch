@@ -18,6 +18,9 @@ from torch._inductor.autotune_process import (
     TensorMeta,
 )
 from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch
+from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
+    to_cutlass_scale_mode,
+)
 from torch._inductor.ir import Buffer, ChoiceCaller, Layout, TensorBox
 from torch._inductor.kernel_inputs import MMKernelInputs
 from torch._inductor.template_heuristics.nv_universal_gemm import get_nvgemm_heuristics
@@ -37,7 +40,7 @@ class GemmVariant(Enum):
 
     GROUPED_GEMM = auto()
 
-    SCALED_GEMM = auto()  # FP8 GEMM with block-scaled inputs
+    SCALED_GEMM = auto()
 
     @property
     def op_name(self) -> str:
@@ -155,10 +158,6 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
             )
         elif self.variant == GemmVariant.SCALED_GEMM:
             from cutlass_api.arguments import ScaledTensor
-
-            from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
-                to_cutlass_scale_mode,
-            )
 
             scale_mode_a, swizzle_mode_a = to_cutlass_scale_mode(
                 self.scale_type_a, self.swizzle_type_a
@@ -352,6 +351,7 @@ def _add_nv_gemm_choices_impl(
     out_tensor = _create_dummy_tensor_from_layout(layout)
 
     if any(t is None for t in dummy_tensors) or out_tensor is None:
+        log.debug("Failed to create dummy tensors for %s", variant.op_name)
         return
 
     if variant == GemmVariant.GROUPED_GEMM:
@@ -367,10 +367,6 @@ def _add_nv_gemm_choices_impl(
         )
     elif variant == GemmVariant.SCALED_GEMM:
         from cutlass_api.arguments import ScaledTensor
-
-        from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_utils import (
-            to_cutlass_scale_mode,
-        )
 
         scale_mode_a, swizzle_mode_a = to_cutlass_scale_mode(
             scale_type_a, swizzle_type_a
@@ -427,7 +423,7 @@ def _add_nv_gemm_choices_impl(
             kernels, mm_inputs, max_configs, accumulator_type
         )
     else:
-        # TODO(nikhilap): Enable heuristics for groupeded and scaled GEMMs
+        # TODO(nikhilap): Enable heuristics for grouped and scaled GEMMs
         # when nvMatmulHeuristics adds support
         kernels = kernels[:max_configs]
 
@@ -453,7 +449,9 @@ def _add_nv_gemm_choices_impl(
             choices.append(caller)
             num_added += 1
         except Exception:
-            pass
+            log.debug("Failed to create %s choice", variant.op_name, exc_info=True)
+
+    log.debug("Added %d %s choices", num_added, variant.op_name)
 
 
 def add_nv_universal_gemm_choices(
