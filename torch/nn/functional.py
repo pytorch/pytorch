@@ -6119,6 +6119,69 @@ scaled_dot_product_attention = _add_docstr(
 )
 
 
+def _scaled_dot_product_attention_fp8(
+    query: Tensor,
+    key: Tensor,
+    value: Tensor,
+    is_causal: bool = False,
+    scale: Optional[float] = None,
+    q_descale: Optional[Tensor] = None,
+    k_descale: Optional[Tensor] = None,
+    v_descale: Optional[Tensor] = None,
+) -> Tensor:
+    r"""Scaled dot product attention for FP8 inputs.
+
+    This is a specialized version of scaled_dot_product_attention that supports
+    FP8 quantized inputs (float8_e4m3fn) with per-head descaling. Requires the
+    Flash Attention 3 backend to be activated.
+
+    .. warning::
+        This function is experimental and only supports forward pass.
+
+    Args:
+        query (Tensor): Query tensor; shape :math:`(N, H_q, L, E)` dtype float8_e4m3fn
+        key (Tensor): Key tensor; shape :math:`(N, H, S, E)` dtype float8_e4m3fn
+        value (Tensor): Value tensor; shape :math:`(N, H, S, E_v)` dtype float8_e4m3fn
+        is_causal (bool): Apply causal attention mask
+        scale (float, optional): Scaling factor for attention weights
+        descale_q (Tensor, optional): Query descale tensor; shape :math:`(N, H_q)`
+        descale_k (Tensor, optional): Key descale tensor; shape :math:`(N, H)`
+        descale_v (Tensor, optional): Value descale tensor; shape :math:`(N, H)`
+
+    Returns:
+        Tensor: Attention output; shape :math:`(N, H_q, L, E_v)` dtype bfloat16
+
+    Example::
+        >>> # Requires FA3 to be activated
+        >>> from torch.nn.attention import activate_flash_attention_impl, sdpa_kernel, SDPBackend
+        >>> activate_flash_attention_impl("FA3")
+        >>> with sdpa_kernel(SDPBackend.FLASH_ATTENTION):
+        ...     out = F._scaled_dot_product_attention_fp8(q, k, v, descale_q=dq, descale_k=dk, descale_v=dv)
+    """
+    if torch.is_grad_enabled() and (
+        query.requires_grad or key.requires_grad or value.requires_grad
+    ):
+        warnings.warn(
+            "_scaled_dot_product_attention_fp8 does not support backward pass. "
+            "Gradients will not be computed for query, key, or value.",
+            UserWarning,
+        )
+    # Directly call the internal flash attention operator which has descale support
+    result = torch._scaled_dot_product_flash_attention(
+        query,
+        key,
+        value,
+        q_descale,
+        k_descale,
+        v_descale,
+        0.0,  # dropout_p is always 0.0 for FP8
+        is_causal,
+        False,  # return_debug_mask is always False for FP8
+        scale=scale,
+    )
+    return result[0]  # Return the output tensor, mirroring scaled_dot_product_attention
+
+
 def _mha_shape_check(
     query: Tensor,
     key: Tensor,
