@@ -580,7 +580,7 @@ class FunctionTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
     def test_tuple2(a, b):
         args = [a, b]
         return sub(*args)
-    
+
     @make_test
     def test_tuple_map(a, b):
         t = tuple(map(torch.sin, [a, b]))
@@ -5137,10 +5137,10 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         def fn(x, my_tuple_1, my_tuple_2):
             """Returns different values based on equality check"""
             if my_tuple_1 != my_tuple_2:
-                return x + 1.0 
+                return x + 1.0
             else:
                 return x - 1.0
-        
+
         opt_fn = torch.compile(fn, backend="eager", fullgraph=True)
         x = torch.randn(1)
         my_tuple_1 = MyTuple([1, -1])
@@ -5148,7 +5148,6 @@ class DefaultsTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreaks):
         ref_x = fn(x, my_tuple_1, my_tuple_2)
         res_x = opt_fn(x, my_tuple_1, my_tuple_2)
         self.assertEqual(ref_x, res_x)
-       
 
     def test_udf_namedtuple(self):
         class MyTuple(NamedTuple):
