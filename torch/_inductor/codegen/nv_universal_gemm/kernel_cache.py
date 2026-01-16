@@ -37,24 +37,7 @@ def get_compatible_kernels(
     cc: int,
     metadata_filter: Optional[Callable[[Any], bool]] = None,
 ) -> list[Any]:
-    """Get kernels compatible with the given arguments from the cache.
-
-    Filters the cached kernels by:
-    1. Compute capability
-    2. Optional metadata filter
-    3. Argument compatibility
-
-    Args:
-        args: cutlass_api.arguments.GemmArguments
-        cc: CUDA compute capability (e.g., 90 for SM90)
-        metadata_filter: Optional filter function on kernel metadata
-
-    Returns:
-        List of compatible kernels.
-
-    This reuses the global kernel cache instead of calling get_kernels()
-    again, avoiding redundant manifest scans.
-    """
+    """Get kernels compatible with the given arguments from the cache."""
     global _kernel_by_name_cache
 
     if _kernel_by_name_cache is None:
@@ -62,14 +45,12 @@ def get_compatible_kernels(
 
     compatible = []
     for kernel in _kernel_by_name_cache.values():
-        # Check compute capability
         if kernel.metadata.min_cc > cc:
             continue
-        # Check metadata filter
+
         if metadata_filter is not None and not metadata_filter(kernel.metadata):
             continue
-        # Check if kernel supports the arguments
-        # Status.error is None for supported kernels
+
         status = kernel.supports(args)
         if status.error is not None:
             continue
@@ -84,14 +65,7 @@ def get_compatible_kernels(
 
 
 def get_kernel_by_name(kernel_name: str) -> Any:
-    """Get a cutlass_api kernel by name using the global cache.
-
-    Args:
-        kernel_name: The full kernel name (e.g., "cutedsl.PersistentDenseGemmKernel_...")
-
-    Returns:
-        The kernel object, or None if not found.
-    """
+    """Get a cutlass_api kernel by name using the global cache."""
     global _kernel_by_name_cache
 
     if _kernel_by_name_cache is None:
@@ -101,11 +75,7 @@ def get_kernel_by_name(kernel_name: str) -> Any:
 
 
 def ensure_cache_initialized() -> None:
-    """Ensure the kernel cache is initialized.
-
-    Call this during compilation to front-load the cache building cost,
-    rather than paying it on the first runtime kernel call.
-    """
+    """Ensure the kernel cache is initialized."""
     global _kernel_by_name_cache
 
     if _kernel_by_name_cache is None:
