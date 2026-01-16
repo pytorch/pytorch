@@ -1495,13 +1495,6 @@ class NamedTupleVariable(UserDefinedTupleVariable):
             return False
         return True
 
-    def is_python_equal(self, other: Any) -> bool:
-        if isinstance(other, UserDefinedTupleVariable):
-            return super().is_python_equal(other)
-        elif isinstance(other, TupleVariable):
-            return all(a.is_python_equal(b) for (a, b) in zip(self.items, other.items))
-        return False
-
     def call_method(
         self,
         tx: "InstructionTranslator",
