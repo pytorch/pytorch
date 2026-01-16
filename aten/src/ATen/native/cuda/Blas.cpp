@@ -24,8 +24,8 @@
 #include <ATen/native/cuda/GroupMM.h>
 #include <ATen/ceil_div.h>
 
-#ifdef USE_FBGEMM_GENAI
-#include <fbgemm_gpu/torch_ops.h>
+#ifdef USE_MSLK
+#include <mslk/gemm/gemm_torch.h>
 #endif
 
 #ifndef AT_PER_OPERATOR_HEADERS
@@ -123,7 +123,7 @@ static bool isGloballyDisabledAddmmCudaLt(const at::Device& device) {
   static const std::vector<std::string> archs = {
         "gfx90a", "gfx942",
     #if ROCM_VERSION >= 60300
-        "gfx1100", "gfx1101", "gfx1200", "gfx1201", "gfx908",
+        "gfx1100", "gfx1101", "gfx1103", "gfx1200", "gfx1201", "gfx908",
     #endif
     #if ROCM_VERSION >= 70000
         "gfx950", "gfx1150", "gfx1151"

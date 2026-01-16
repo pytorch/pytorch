@@ -5814,6 +5814,26 @@ class CPUReproTests(TestCase):
         result = compiled_func(xs, Ls)
         torch.testing.assert_close(result, expected)
 
+    def test_special_float_pow(self):
+        def fn(exp: float) -> None:
+            val = torch.randn(10)
+            torch.testing.assert_close(
+                aten.pow(val, exp), torch.compile(aten.pow)(val, exp), equal_nan=True
+            )
+
+        fn(-math.inf)
+        fn(math.inf)
+        fn(math.nan)
+
+    def test_pdist_fallback_continuous(self):
+        # https://github.com/pytorch/pytorch/issues/170939
+        def fn(x):
+            # Creating a non-contiguous tensor via permute
+            x = x.permute(1, 0)
+            return F.pdist(x)
+
+        torch.compile(fn)(torch.randn(2, 2))
+
 
 if __name__ == "__main__":
     from torch._inductor.test_case import run_tests
