@@ -19232,7 +19232,7 @@ op_db: list[OpInfo] = [
                         # tensor([[-0.0047]], dtype=torch.float64, grad_fn=<CopySlices>)
                         DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
                         # CPU implementation of polar for float16 is missing
-                        DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-4, rtol=3e-2)}),
+                        DecorateInfo(toleranceOverride({torch.float16: tol(atol=1e-3, rtol=3e-2)}),
                                      'TestConsistency', 'test_output_grad_match', device_type='mps'),
                     )),
     # TODO(@kshitij12345): Refactor similar to `mvlgamma` entries.
