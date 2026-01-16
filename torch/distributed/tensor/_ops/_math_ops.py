@@ -465,14 +465,30 @@ def vector_norm_strategy(op_schema: OpSchema) -> OpStrategy:
         raise AssertionError(f"Expected int, float, or str, got {type(norm_type)}")
     dim = args_schema[2] if len(args_schema) > 2 else None
     keepdim = args_schema[3] if len(args_schema) > 3 else False
+    skip_root = op_schema.kwargs_schema.get("skip_root", False)
     dims = _infer_reduction_dims(dim, input_strategy.ndim)
     reduce_dims = list(range(input_strategy.ndim)) if dims is None else dims
+
+    # For inf/-inf/0/1 norms, use Partial directly instead of NormReduction
+    if norm_type in (float("inf"), "inf"):
+        reduction_op: ReductionOpType = "max"
+    elif norm_type in (float("-inf"), "-inf"):
+        reduction_op = "min"
+    elif norm_type == 0 or norm_type == 1:
+        reduction_op = "sum"
+    elif skip_root:
+        # For other p-norms with skip_root=True, use Partial(sum) directly
+        reduction_op = "sum"
+    else:
+        # For other p-norms without skip_root, use _NormPartial
+        reduction_op = NormReduction(norm_type)
+
     return common_reduction_strategy(
         input_strategy,
         reduce_dims,
         keep_dim=cast(bool, keepdim),
         reduction_linear=True,
-        reduction_op=NormReduction(norm_type),
+        reduction_op=reduction_op,
     )
 
 
@@ -489,6 +505,22 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
     norm_type = args_schema[1] if len(args_schema) > 1 else 2
     if not isinstance(norm_type, (int, float, str)):
         raise AssertionError(f"Expected int, float, or str, got {type(norm_type)}")
+    skip_root = args_schema[3] if len(args_schema) > 3 else False
+
+    # For inf/-inf/0/1 norms, use Partial directly instead of NormReduction
+    if norm_type in (float("inf"), "inf"):
+        reduction_op: ReductionOpType = "max"
+    elif norm_type in (float("-inf"), "-inf"):
+        reduction_op = "min"
+    elif norm_type == 0 or norm_type == 1:
+        reduction_op = "sum"
+    elif skip_root:
+        # For other p-norms with skip_root=True, use Partial(sum) directly
+        reduction_op = "sum"
+    else:
+        # For other p-norms without skip_root, use _NormPartial
+        reduction_op = NormReduction(norm_type)
+
     output_tuple_strategy_children: list[OpStrategy] = []
     for op_strategy in input_tuple_strategy.children:
         if not isinstance(op_strategy, OpStrategy):
@@ -498,7 +530,7 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
             op_strategy,
             reduce_dims,
             reduction_linear=True,
-            reduction_op=NormReduction(norm_type),
+            reduction_op=reduction_op,
         )
         output_tuple_strategy_children.append(output_strategy)
     return TupleStrategy(output_tuple_strategy_children)

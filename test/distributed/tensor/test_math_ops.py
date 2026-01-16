@@ -739,6 +739,73 @@ class DistMathOpsTest(DTensorTestBase):
             self.assertEqual(po.full_tensor(), o)
 
     @with_comms
+    def test_vector_norm_skip_root(self):
+        # Test that skip_root=True produces Partial(sum) placement and correct values
+        device_mesh = self.build_device_mesh()
+
+        grad = torch.randn(12, 8)
+        sharded_grad = distribute_tensor(grad, device_mesh, [Shard(0)])
+
+        # With skip_root=True, the result should be sum(|x|^p) without the root
+        sharded_out = torch.ops.aten.linalg_vector_norm(sharded_grad, 2, skip_root=True)
+
+        # Expected: sum(|x|^2) over all elements
+        expected = (grad.abs() ** 2).sum()
+        self.assertEqual(sharded_out.full_tensor(), expected)
+
+        # The placement should be Partial("sum") for sharded input with skip_root=True
+        self.assertTrue(sharded_out.placements[0].is_partial())
+
+    @with_comms
+    def test_vector_norm_special_norms_placement(self):
+        # Test that inf/-inf/0/1 norms produce correct Partial placements
+        device_mesh = self.build_device_mesh()
+
+        grad = torch.randn(12, 8).abs() + 0.1  # Ensure positive for proper test
+        sharded_grad = distribute_tensor(grad, device_mesh, [Shard(0)])
+
+        # Test inf norm -> Partial(max)
+        out_inf = torch.ops.aten.linalg_vector_norm(sharded_grad, float("inf"))
+        self.assertEqual(out_inf.full_tensor(), grad.max())
+        self.assertTrue(out_inf.placements[0].is_partial())
+
+        # Test -inf norm -> Partial(min)
+        out_neginf = torch.ops.aten.linalg_vector_norm(sharded_grad, float("-inf"))
+        self.assertEqual(out_neginf.full_tensor(), grad.min())
+        self.assertTrue(out_neginf.placements[0].is_partial())
+
+        # Test 1-norm -> Partial(sum)
+        out_1 = torch.ops.aten.linalg_vector_norm(sharded_grad, 1)
+        self.assertEqual(out_1.full_tensor(), grad.abs().sum())
+        self.assertTrue(out_1.placements[0].is_partial())
+
+        # Test 0-norm -> Partial(sum)
+        out_0 = torch.ops.aten.linalg_vector_norm(sharded_grad, 0)
+        self.assertEqual(out_0.full_tensor(), (grad != 0).sum().float())
+        self.assertTrue(out_0.placements[0].is_partial())
+
+    @with_comms
+    def test_foreach_norm_skip_root(self):
+        # Test that skip_root=True produces correct values for foreach_norm
+        device_mesh = self.build_device_mesh()
+
+        grad0 = torch.randn(12, 8)
+        grad1 = torch.randn(8, 8)
+
+        sharded_grad0 = distribute_tensor(grad0, device_mesh, [Shard(0)])
+        sharded_grad1 = distribute_tensor(grad1, device_mesh, [Shard(0)])
+
+        # With skip_root=True
+        sharded_out = torch.ops.aten._foreach_norm([sharded_grad0, sharded_grad1], 2, skip_root=True)
+
+        # Expected: sum(|x|^2) for each tensor
+        expected0 = (grad0.abs() ** 2).sum()
+        expected1 = (grad1.abs() ** 2).sum()
+
+        self.assertEqual(sharded_out[0].full_tensor(), expected0)
+        self.assertEqual(sharded_out[1].full_tensor(), expected1)
+
+    @with_comms
     def test_foreach_norm_different_mesh(self):
         mesh_shape = (2, self.world_size // 2)
         mesh_2d = init_device_mesh(
