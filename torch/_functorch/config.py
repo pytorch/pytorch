@@ -429,7 +429,7 @@ selective_decompose: bool = False
 # This config disallows decomposition of complex-valued Tensors using
 # `torch._subclasses.complex_tensor.ComplexTensor` by decomposing everything into
 # real-valued operations, passing through the regular pipeline as necessary,
-# then convertin back to a regular tensor.
+# then converting back to a regular tensor.
 enable_complex_wrapper: bool = False
 
 
