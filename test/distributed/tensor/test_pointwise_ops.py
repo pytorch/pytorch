@@ -17,7 +17,6 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed.tensor._ops._math_ops import _NormPartial
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -534,22 +533,23 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
 
     @with_comms
     def test_mul_div_scalar_norm_partial(self):
+        # With decomposed vector_norm handler, p-norms on Shard inputs
+        # return Replicate (after skip_root -> allreduce -> root decomposition)
         mesh = self.build_device_mesh()
         aten = torch.ops.aten
         local_tensor = torch.tensor([1.0, 1.0, 7.0, 7.0])
         dt = distribute_tensor(local_tensor, mesh, [Shard(0)])
 
         norm = dt.norm()
-        self.assertTrue(isinstance(norm._spec.placements[0], _NormPartial))
+        # Handler decomposes p-norms, returning Replicate
+        self.assertTrue(norm._spec.placements[0].is_replicate())
 
         res = aten.mul.Scalar(norm, 2)
-        self.assertTrue(isinstance(res._spec.placements[0], _NormPartial))
-        res = res.redistribute(dt.device_mesh, placements=[Replicate()])
+        self.assertTrue(res._spec.placements[0].is_replicate())
         self.assertEqual(res, 20)
 
         res = aten.div.Scalar(norm, 2)
-        self.assertTrue(isinstance(res._spec.placements[0], _NormPartial))
-        res = res.redistribute(dt.device_mesh, placements=[Replicate()])
+        self.assertTrue(res._spec.placements[0].is_replicate())
         self.assertEqual(res, 5)
 
         res = aten.mul.Scalar(norm, -2)
@@ -613,12 +613,14 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
     def test_add_sub_scalar_norm_partial(self):
         mesh = self.build_device_mesh()
 
-        # norm partial + scalar
+        # With decomposed vector_norm handler, p-norms on Shard inputs
+        # are computed as: skip_root -> allreduce -> root, returning Replicate
         local_tensor = torch.tensor([1.0, 1.0, 7.0, 7.0])
         dt = distribute_tensor(local_tensor, mesh, [Shard(0)])
 
         norm = dt.norm()
-        self.assertTrue(isinstance(norm._spec.placements[0], _NormPartial))
+        # Handler decomposes p-norms to avoid sqrt->pow->sqrt, returning Replicate
+        self.assertTrue(norm._spec.placements[0].is_replicate())
         norm = norm + 1
 
         self.assertEqual(norm, 11)
@@ -627,7 +629,7 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         dt = distribute_tensor(local_tensor, mesh, [Shard(0)])
 
         norm = dt.norm()
-        self.assertTrue(isinstance(norm._spec.placements[0], _NormPartial))
+        self.assertTrue(norm._spec.placements[0].is_replicate())
         norm = norm - 1
 
         self.assertEqual(norm, 9)

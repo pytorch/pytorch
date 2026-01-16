@@ -260,7 +260,7 @@ def embedding_bag(
 
 
 @_onnx_symbolic("aten::linalg_vector_norm")
-@symbolic_helper.parse_args("v", "f", "is", "b", "v")
+@symbolic_helper.parse_args("v", "f", "is", "b", "v", "b")
 def linalg_vector_norm(
     g: jit_utils.GraphContext,
     self: torch._C.Value,
@@ -268,5 +268,6 @@ def linalg_vector_norm(
     dim: Optional[Sequence[int]],
     keepdim: bool,
     dtype: torch._C.Value,
+    skip_root: bool = False,
 ):
     return symbolic_helper._linalg_vector_norm_helper(g, self, ord, dim, keepdim, dtype)

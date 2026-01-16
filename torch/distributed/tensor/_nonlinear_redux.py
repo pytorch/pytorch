@@ -307,7 +307,7 @@ def vector_norm_handler(
 
     For p-norms (p not in {inf, -inf, 0, 1}) with skip_root=False on Shard inputs:
     - Computes vector_norm(skip_root=True) to get sum(|x|^p) as Partial("sum")
-    - Redistributes to Replicate (triggers allreduce on scalar)
+    - Redistributes Partial to Replicate (allreduce), preserving Shard on non-reduced dims
     - Applies root locally: result ** (1/p)
 
     This avoids the sqrt->pow->sqrt cycle of _NormPartial while only allreducing
@@ -325,7 +325,7 @@ def vector_norm_handler(
     dim = args[2] if len(args) > 2 else None
     keepdim = args[3] if len(args) > 3 else False
     skip_root = kwargs.get("skip_root", False)
-    dtype = kwargs.get("dtype", None)
+    dtype = kwargs.get("dtype")
 
     # Check if input has any Partial placements - if so, use normal dispatch
     # because the decomposition only works correctly for Shard inputs
@@ -340,11 +340,19 @@ def vector_norm_handler(
         # Decompose: vector_norm(x, p) = vector_norm(x, p, skip_root=True) ** (1/p)
         # Step 1: Compute sum(|x|^p) with skip_root=True -> Partial("sum")
         partial_result = torch.linalg.vector_norm(
-            input_tensor, ord=norm_type, dim=dim, keepdim=keepdim, dtype=dtype, skip_root=True
+            input_tensor,
+            ord=norm_type,
+            dim=dim,
+            keepdim=keepdim,
+            dtype=dtype,
+            skip_root=True,
         )
-        # Step 2: Redistribute to Replicate (allreduce on scalar)
-        replicate_placements = tuple(Replicate() for _ in range(input_tensor.device_mesh.ndim))
-        replicated_result = partial_result.redistribute(placements=replicate_placements)
+        # Step 2: Redistribute Partial to Replicate (allreduce), preserving Shard
+        # on non-reduced dims
+        new_placements = tuple(
+            Replicate() if p.is_partial() else p for p in partial_result.placements
+        )
+        replicated_result = partial_result.redistribute(placements=new_placements)
         # Step 3: Apply root locally
         return replicated_result ** (1.0 / norm_type)
 
@@ -367,4 +375,7 @@ def vector_norm_handler(
     local_results = op_call(*op_info.local_args, **op_info.local_kwargs)
 
     # Wrap result
-    return dtensor.DTensor._op_dispatcher.wrap(local_results, output_sharding.output_spec)
+    return dtensor.DTensor._op_dispatcher.wrap(
+        local_results, output_sharding.output_spec
+    )
+

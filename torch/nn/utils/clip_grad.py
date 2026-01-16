@@ -97,14 +97,19 @@ def _get_total_norm(
         if (foreach is None and _has_foreach_support(device_tensors, device)) or (
             foreach and _device_has_foreach_support(device)
         ):
-            norms.extend(torch._foreach_norm(device_tensors, norm_type, skip_root=use_skip_root))
+            norms.extend(
+                torch._foreach_norm(device_tensors, norm_type, skip_root=use_skip_root)
+            )
         elif foreach:
             raise RuntimeError(
                 f"foreach=True was passed, but can't use the foreach API on {device.type} tensors"
             )
         else:
             norms.extend(
-                [torch.linalg.vector_norm(g, norm_type, skip_root=use_skip_root) for g in device_tensors]
+                [
+                    torch.linalg.vector_norm(g, norm_type, skip_root=use_skip_root)
+                    for g in device_tensors
+                ]
             )
 
     stacked_norms = torch.stack([norm.to(first_device) for norm in norms])
