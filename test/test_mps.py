@@ -12667,6 +12667,7 @@ class TestConsistency(TestCaseMPS):
             try:
                 cpu_out = op(cpu_sample.input, *cpu_sample.args, **cpu_sample.kwargs)
             except NotImplementedError:
+                # TODO: Handle list inputs later
                 if not isinstance(mps_out, torch.Tensor):
                     raise
 
@@ -12800,7 +12801,11 @@ class TestConsistency(TestCaseMPS):
             if op.name == "nn.functional.embedding_bag" and dtype == torch.float16:
                 atol, rtol = 5e-3, 5e-3
 
-            equal_input_types = cpu_sample.input.dtype == mps_sample.input.dtype
+            if isinstance(cpu_sample.input, torch.Tensor):
+                equal_input_types = cpu_sample.input.dtype == mps_sample.input.dtype
+            else:
+                # TODO: Handle list inputs later
+                equal_input_types = True
             self.assertEqual(cpu_grad_inputs, mps_grad_inputs, atol=atol, rtol=rtol, exact_dtype=equal_input_types)
 
     # The CPU impl of grid_sampler_3d gives a large amount of error for half
