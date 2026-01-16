@@ -134,17 +134,7 @@ class TestExpandPlaceholder(TestCase):
             self.assertEqual(
                 len(strategy.children), len(args[0])
             )  # no. of list elements
-
-            # Detect inplace ops: base name ends with '_' (e.g., _foreach_add_.List)
-            op_name = op.name()
-            base_name = op_name.split("::")[1].split(".")[0]
-            is_inplace = base_name.endswith("_")
-
-            if is_inplace:
-                # For inplace ops, the only valid strategy is the one that matches
-                # the self input's placement
-                self.assertEqual(len(strategy.children[0].strategies), 1)
-            elif linearity == 1:
+            if linearity == 1:
                 self.assertEqual(
                     len(strategy.children[0].strategies), 125
                 )  # len([S(0), S(1), S(2), R, P]) ** 3 = 125
@@ -272,10 +262,8 @@ class TestExpandPlaceholder(TestCase):
         ]
         expected_output_placements = [
             (Shard(0), Replicate(), Shard(1)),
-            # P(avg) -> P(sum) is currently not supported, but could be in principle.
-            # The optimal is (R, P(sum), P(sum)) since reducing the mixed partials
-            # to that placement has lower cost due to partial ordering constraints.
-            (Replicate(), Partial("sum"), Partial("sum")),
+            # P(avg) -> P(sum) is currently not supported, but could be in principle
+            (Partial("sum"), Partial("sum"), Replicate()),
         ]
         tuple_strategy = _expand_foreach_add_list(
             inputs_a, inputs_b, placements_a, placements_b
@@ -775,6 +763,52 @@ class TestExpandPlaceholder(TestCase):
         # Verify result is valid
         self.assertIsInstance(result, OpStrategy)
         self.assertGreater(len(result.strategies), 0)
+
+    def test_expand_to_full_mesh_filters_out_variant_strategies(self):
+        """Test that expand_to_full_mesh_op_strategy filters strategies for out= variant ops.
+        For out-variant ops like torch.mul(..., out=...), the output placement must
+        match the 'out' kwarg's placement. This test verifies that strategies with
+        mismatched output placements are filtered out.
+        """
+        mesh = DeviceMesh("cpu", mesh=torch.arange(4))
+        meta = TensorMeta(torch.Size([8, 8]), (8, 1), torch.float32)
+
+        # Create specs: args have Shard(0), out kwarg has Replicate
+        arg_spec = DTensorSpec(mesh, (Shard(0),), meta)
+        out_spec = DTensorSpec(mesh, (Replicate(),), meta)
+
+        # Create OpSchema for out-variant op (aten.mul.out)
+        op_schema = OpSchema(
+            op=torch.ops.aten.mul.out,
+            args_schema=(
+                OpStrategy([OpSpec(arg_spec)]),
+                OpStrategy([OpSpec(arg_spec)]),
+            ),
+            kwargs_schema={"out": OpStrategy([OpSpec(out_spec)])},
+        )
+
+        # Define strategies: output can be Shard(0) or Replicate
+        # [output, input1, input2, out_kwarg]
+        single_mesh_dim_strategies = [
+            [Shard(0), Shard(0), Shard(0), Shard(0)],  # All sharded
+            [Replicate(), Replicate(), Replicate(), Replicate()],  # All replicated
+        ]
+
+        result = expand_to_full_mesh_op_strategy(
+            mesh,
+            op_schema,
+            single_mesh_dim_strategies,
+            output_tensor_meta=meta,
+        )
+
+        # All strategies in result should have output placement matching out kwarg (Replicate)
+        for strategy in result.strategies:
+            output_spec = strategy.output_spec
+            self.assertEqual(
+                output_spec.placements,
+                (Replicate(),),
+                f"Output placement {output_spec.placements} should match out kwarg placement (Replicate(),)",
+            )
 
 
 @torch.library.custom_op("mylib::dummy_add", mutates_args=())
