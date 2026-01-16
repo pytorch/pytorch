@@ -22,18 +22,27 @@ jobs:
         uses: actions/github-script@v6
         with:
           script: |
-            const reviewers = await github.rest.pulls.listReviewRequests({
-              owner: context.repo.owner,
-              repo: context.repo.repo,
-              pull_number: context.payload.pull_request.number
+            const { owner, repo, number } = context.issue;
+            // Get PR details
+            const { data: pr } = await github.rest.pulls.get({
+              owner,
+              repo,
+              pull_number: number,
             });
-            if (reviewers.data.users.length > 0) {
+            // Check for requested reviewers (users) or teams
+            const hasUserReviewers = pr.requested_reviewers && pr.requested_reviewers.length > 0;
+            const hasTeamReviewers = pr.requested_teams && pr.requested_teams.length > 0;
+            if (hasUserReviewers || hasTeamReviewers) {
+              // Add label if either is non-empty
               await github.rest.issues.addLabels({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.payload.pull_request.number,
-                labels: ['triage']
+                owner,
+                repo,
+                issue_number: number,
+                labels: ['triage'],
               });
+              console.log('Label added: triage');
+            } else {
+              console.log('No reviewers or team reviewers requested.');
             }
 
 concurrency:
