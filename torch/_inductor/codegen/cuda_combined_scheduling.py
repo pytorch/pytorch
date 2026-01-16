@@ -166,7 +166,56 @@ class CUDACombinedScheduling(BaseScheduling):
         return self._triton_scheduling.benchmark_fused_nodes(nodes)
 
     def benchmark_codegened_module(self, module):
+        # Check if this is an NVGEMM module
+        if getattr(module, "is_nvgemm", False):
+            return self._benchmark_nvgemm_module(module)
         return self._triton_scheduling.benchmark_codegened_module(module)
+
+    def _benchmark_nvgemm_module(self, module) -> tuple[float, str]:
+        """
+        Benchmark an NVGEMM module.
+
+        NVGEMM modules have get_args() and call() functions similar to Triton,
+        but without the triton_ wrapper.
+        """
+        import os
+
+        import torch
+        from torch._dynamo.utils import preserve_rng_state
+        from torch._inductor.runtime.benchmarking import benchmarker
+        from torch._inductor.utils import get_interface_for_device
+        from torch._inductor.virtualized import V
+
+        device_interface = get_interface_for_device(V.graph.device_type)
+
+        with (
+            preserve_rng_state(),
+            device_interface.device(V.graph.get_current_device_or_throw()),
+        ):
+            # Get args and call function from the module
+            args = module.get_args()
+            call = module.call
+
+            # Warmup call to trigger compilation
+            try:
+                call(args)
+            except Exception as e:
+                from torch._inductor.codegen.triton import log
+
+                log.debug(
+                    "Exception (%s) in compiling NVGEMM fused kernel",
+                    e,
+                )
+                return float("inf"), module.__file__ or ""
+
+            # Benchmark - reuse args (NVGEMM doesn't modify inputs in-place)
+            device = V.graph.get_current_device_or_throw()
+            ms = benchmarker.benchmark(
+                lambda: call(args),
+                device=device,
+            )
+
+            return ms, module.__file__ or ""
 
     def generate_kernel_code_from_nodes(
         self,

@@ -3968,6 +3968,13 @@ class Scheduler:
             choice_timings = multi_node.choice_timings()
             min_choice, ms1 = multi_node.get_min_choice()
 
+            # Debug: print all unfused kernel benchmark times
+            print(f"\n[Unfused GEMM Benchmarks] ({len(choice_timings)} kernels)")
+            for choice, unfused_time in sorted(choice_timings.items(), key=lambda x: x[1]):
+                choice_name = getattr(choice, 'name', str(choice))
+                is_best = " <-- BEST" if choice == min_choice else ""
+                print(f"  {choice_name}: {unfused_time:.4f} ms{is_best}")
+
             ms2 = float("inf")
             bench_epilogue = config.benchmark_epilogue_fusion
             if bench_epilogue:
@@ -3976,6 +3983,7 @@ class Scheduler:
                     if epilogue_fusion
                     else self.benchmark_fused_nodes(node_list_1)
                 )
+                print(f"\n[Epilogue Benchmark] ms2={ms2:.4f} ms")
             else:
                 # By default, don't do prologue fusion. Generally slower
                 if not epilogue_fusion:
@@ -4044,6 +4052,8 @@ class Scheduler:
                 ms_fused_choice = None
                 new_timings = {}
                 # Benchmark each choice after compilation completes
+                if bench_epilogue:
+                    print(f"\n[Fused Benchmarks] ({len(future_choices)} kernels to benchmark)")
                 for choice, future, mod_fused in future_choices:
                     try:
                         if future is not None:
@@ -4074,18 +4084,15 @@ class Scheduler:
                             else multi_node.swap_as_triton_caller(choice)
                         )
                         with swap_ctx:
-                            if is_nvgemm_choice:
-                                # For NVGEMM, skip benchmarking and assume fusion is beneficial
-                                # (fusion reduces kernel launches which is generally faster)
-                                # TODO: Implement proper NVGEMM benchmarking
-                                ms_fused = 0.0  # Assume fused is always best for NVGEMM
-                            else:
-                                ms_fused, path = self.benchmark_codegened_module(
-                                    mod_fused,
-                                    # pyrefly: ignore [bad-argument-type]
-                                    device,
-                                )
+                            ms_fused, path = self.benchmark_codegened_module(
+                                mod_fused,
+                                # pyrefly: ignore [bad-argument-type]
+                                device,
+                            )
                             new_timings[choice] = ms_fused
+                            # Debug: print each kernel's fused benchmark time
+                            choice_name = getattr(choice, 'name', str(choice))
+                            print(f"  [Fused Benchmark] {choice_name}: {ms_fused:.4f} ms")
                             if ms_fused < min_ms_fused:
                                 min_ms_fused = ms_fused
                                 ms_fused_choice = choice
@@ -4108,6 +4115,8 @@ class Scheduler:
 
                 if bench_epilogue:
                     log_fusion(min_ms_fused, ms1, ms2)
+                    # Debug: print benchmark results
+                    print(f"[NVGEMM Epilogue Benchmark] ms_fused={min_ms_fused:.4f}, ms1(gemm)={ms1:.4f}, ms2(epilogue)={ms2:.4f}, sum={ms1+ms2:.4f}, fuse={'YES' if min_ms_fused < (ms1 + ms2) else 'NO'}")
 
                 if (
                     not bench_epilogue or min_ms_fused < (ms1 + ms2)

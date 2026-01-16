@@ -402,4 +402,120 @@ class NVUniversalGemmScheduling(BaseScheduling):
         assert src_code is not None
         # Replace placeholder with generic name for benchmarking
         src_code = src_code.replace(str(Placeholder.KERNEL_NAME), "nv_gemm_")
+
+        # Add benchmarking helpers for epilogue fusion benchmarking
+        if benchmark_kernel:
+            src_code = self._add_benchmark_helpers(src_code, template, epilogue)
+
         return src_code
+
+    def _add_benchmark_helpers(
+        self,
+        src_code: str,
+        template_node: BaseSchedulerNode,
+        epilogue_nodes: Sequence[BaseSchedulerNode],
+    ) -> str:
+        """
+        Add get_args() and call() functions to enable benchmarking.
+
+        This generates code similar to Triton's benchmark helpers so that
+        benchmark_codegened_module can use the same interface.
+        """
+        template_node = cast(SchedulerNode, template_node)
+        ctb: NVUniversalGemmBuffer = self.get_nv_gemm_buffer_from_node(template_node)
+
+        # Get the original buffer name (important for MultiTemplateBuffer case)
+        # This name is what the epilogue nodes reference as their input
+        original_buffer_name = template_node.node.get_name()
+
+        # Get input shapes and dtypes
+        input_nodes = ctb.inputs
+        output_layout = ctb.layout
+
+        # Pre-compute epilogue reads if there are epilogue nodes
+        epilogue_reads: list[str] = []
+        if epilogue_nodes:
+            removed_buffers_with_gemm = V.graph.removed_buffers | OrderedSet(
+                [original_buffer_name]
+            )
+            try:
+                reads, _, _, _ = CutlassEVTCodegen.ir_to_evt_python_code(
+                    original_buffer_name,  # Use original buffer name, not ctb.get_name()
+                    list(epilogue_nodes),
+                    removed_buffers_with_gemm,
+                )
+                epilogue_reads = reads
+            except (NotImplementedError, AssertionError):
+                pass
+
+        # Build get_args code
+        args_code = IndentedBuffer()
+        args_code.writeline("")
+        args_code.writeline("# Benchmark helper functions for NVGEMM")
+        args_code.writeline("is_nvgemm = True  # Marker for NVGEMM modules")
+        args_code.writeline("")
+        args_code.writeline("def get_args():")
+        with args_code.indent():
+            args_code.writeline("import torch")
+            args_code.writeline("from torch._dynamo.testing import rand_strided")
+            args_code.writeline("args = []")
+
+            # Generate random tensors for each input
+            for i, inp in enumerate(input_nodes):
+                size = V.graph.sizevars.size_hints(inp.get_size())
+                stride = V.graph.sizevars.size_hints(inp.get_stride())
+                dtype = inp.get_dtype()
+                device = inp.get_device()
+                args_code.writeline(
+                    f"# Input {i}: {inp.get_name()}"
+                )
+                args_code.writeline(
+                    f"args.append(rand_strided({size}, {stride}, device='{device}', dtype={dtype}))"
+                )
+
+            # Generate output tensor
+            out_size = V.graph.sizevars.size_hints(output_layout.size)
+            out_stride = V.graph.sizevars.size_hints(output_layout.stride)
+            out_dtype = output_layout.dtype
+            out_device = output_layout.device
+            args_code.writeline(f"# Output")
+            args_code.writeline(
+                f"args.append(rand_strided({out_size}, {out_stride}, device='{out_device}', dtype={out_dtype}))"
+            )
+
+            # Handle epilogue read tensors (external inputs, not the accumulator)
+            for read_name in epilogue_reads:
+                buf = V.graph.get_buffer(read_name)
+                if buf is not None:
+                    size = V.graph.sizevars.size_hints(buf.get_size())
+                    stride = V.graph.sizevars.size_hints(buf.get_stride())
+                    dtype = buf.get_dtype()
+                    device = buf.get_device()
+                    args_code.writeline(f"# Epilogue input: {read_name}")
+                    args_code.writeline(
+                        f"args.append(rand_strided({size}, {stride}, device='{device}', dtype={dtype}))"
+                    )
+
+            args_code.writeline("return args")
+
+        # Build call function
+        args_code.writeline("")
+        args_code.writeline("def call(args):")
+        with args_code.indent():
+            args_code.writeline("import torch")
+            # Extract args and call main function
+            num_inputs = len(input_nodes)
+            param_list = [f"args[{i}]" for i in range(num_inputs)]
+            param_list.append(f"args[{num_inputs}]")  # output
+
+            # Add epilogue read args
+            for j in range(len(epilogue_reads)):
+                param_list.append(f"args[{num_inputs + 1 + j}]")
+
+            params_str = ", ".join(param_list)
+            args_code.writeline(
+                f"stream = torch.cuda.current_stream().cuda_stream"
+            )
+            args_code.writeline(f"nv_gemm__main({params_str}, stream=stream)")
+
+        return src_code + args_code.getvalue()
