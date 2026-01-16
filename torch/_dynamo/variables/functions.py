@@ -60,6 +60,7 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
+    CellContentsSource,
     ClosureSource,
     CollectionsSource,
     ConstantSource,
@@ -547,7 +548,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
             elif source:
                 closure_cell = GetItemSource(ClosureSource(source), idx)
-                closure_cell_contents = AttrSource(closure_cell, "cell_contents")
+                closure_cell_contents = CellContentsSource(
+                    closure_cell, "cell_contents", freevar_name=name
+                )
                 try:
                     contents_var = VariableTracker.build(
                         parent, cell.cell_contents, closure_cell_contents
@@ -3164,3 +3167,32 @@ class PyTreeTreeIsLeafFunctionVariable(UserFunctionVariable):
         )
         out = supported_nodes_var.call_method(tx, "__contains__", [node_type_var], {})
         return ConstantVariable.create(not out.value)
+
+
+class SparseTensorCreationSkipVariable(SkipFunctionVariable):
+    """
+    Skip variable for sparse tensor factory functions with clear messaging regarding lack of support.
+    """
+
+    def __init__(self, value: Any, **kwargs: Any) -> None:
+        reason = "sparse tensor creation is not supported in torch.compile"
+        super().__init__(value, reason=reason, **kwargs)
+
+    def call_function(
+        self,
+        tx: "InstructionTranslator",
+        args: Sequence[VariableTracker],
+        kwargs: dict[str, VariableTracker],
+    ) -> VariableTracker:
+        from .. import graph_break_hints
+
+        fn_name = getattr(self.value, "__name__", str(self.value))
+        unimplemented(
+            gb_type="Sparse tensor creation not supported",
+            context=f"function: {fn_name}",
+            explanation=(
+                f"torch.compile does not support sparse tensor creation functions like {fn_name}. "
+                "Sparse tensors require specialized handling that is not yet implemented in the compiler."
+            ),
+            hints=[*graph_break_hints.SPARSE_TENSOR],
+        )
