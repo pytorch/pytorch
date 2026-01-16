@@ -39,7 +39,7 @@ import logging
 import os
 import traceback
 import weakref
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from typing import Any, TYPE_CHECKING
 
 import torch
@@ -82,6 +82,8 @@ _RECORD_TRITON_OUTPUTS = False
 _TRITON_OUTPUT_HASH_FN = None
 # Annotates kernel input hashes, and stores them in call.pre_hashes
 _TRITON_INPUT_HASH_FN = None
+# Counter for active DebugMode instances (fast path for get_active_debug_mode)
+_ACTIVE_DEBUG_MODE_COUNT = 0
 
 
 def _stringify_shape(shape) -> str:
@@ -463,6 +465,22 @@ class _RedistributeCall(_DebugCall):
             yield [arg, self.src_placement, self.dst_placement]
         yield {}
         yield self.call_depth
+
+
+class _OutputPlacementCall(_DebugCall):
+    """Records output placement for a DTensor op."""
+
+    def __init__(self, placements_str: str, call_depth: int) -> None:
+        super().__init__(call_depth)
+        self.placements_str = placements_str
+
+    def stringify_args(
+        self, attributes: list[str], tensor_memo: TensorIdTracker | None = None
+    ) -> None:
+        pass  # Already stringified
+
+    def render(self, attributes: list[str]) -> str:
+        return f"-> output: {self.placements_str}"
 
 
 class _TritonKernelCall(_DebugCall):
@@ -956,6 +974,8 @@ class DebugMode(TorchDispatchMode):
         return result
 
     def __enter__(self):
+        global _ACTIVE_DEBUG_MODE_COUNT
+        _ACTIVE_DEBUG_MODE_COUNT += 1
         if self.record_torchfunction:
             torch._C._push_on_torch_function_stack(self)
 
@@ -972,6 +992,8 @@ class DebugMode(TorchDispatchMode):
 
     # pyrefly: ignore [bad-override]
     def __exit__(self, *args):
+        global _ACTIVE_DEBUG_MODE_COUNT
+        _ACTIVE_DEBUG_MODE_COUNT -= 1
         super().__exit__(*args)
         if self.record_nn_module:
             self.module_tracker.__exit__()  # type: ignore[attribute, union-attr]
@@ -1084,6 +1106,26 @@ class DebugMode(TorchDispatchMode):
             yield
         finally:
             self.call_depth -= 1
+
+    def record_output_placements(self, output_spec) -> None:
+        """Record output placements for a DTensor op as a separate line."""
+        if not self.record_output:
+            return
+        from torch.distributed.tensor._dtensor_spec import DTensorSpec
+
+        if isinstance(output_spec, DTensorSpec):
+            placements_str = _stringify_dtensor_spec(output_spec)
+        elif isinstance(output_spec, Sequence):
+            # Multi-output operation
+            parts = [
+                _stringify_dtensor_spec(spec) if spec else "None"
+                for spec in output_spec
+            ]
+            placements_str = "(" + ", ".join(parts) + ")"
+        else:
+            placements_str = "None"
+        call = _OutputPlacementCall(placements_str, self.call_depth + 1)
+        self._record_call(call)
 
     def record_triton_kernel(
         self, kernel_name: str, kwargs: dict[str, Any]
@@ -1532,6 +1574,9 @@ class DebugMode(TorchDispatchMode):
 
 
 def get_active_debug_mode() -> DebugMode | None:
+    # Fast path: if no DebugMode is active, skip the stack walk
+    if _ACTIVE_DEBUG_MODE_COUNT == 0:
+        return None
     debug_mode = None
     for mode in _get_current_dispatch_mode_stack():
         if isinstance(mode, DebugMode):
