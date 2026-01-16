@@ -12528,7 +12528,7 @@ class TestNoRegression(TestCase):
 MPS_GRAD_DTYPES = [torch.float32, torch.float16]
 
 
-def transform_opinfo_sample_to_cpu(sample, dtype = None):
+def transform_opinfo_sample_to_cpu(sample, dtype=None):
     """Transforms opinfo.core.SampleInput from MPS to CPU"""
     def transform_sample(x):
         if not isinstance(x, torch.Tensor):
