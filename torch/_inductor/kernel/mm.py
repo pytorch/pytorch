@@ -824,14 +824,6 @@ def is_desired_scaling(
             return _is_blockwise1xTILESIZE_scaling(
                 scale_size, t.get_size(), 128, transpose
             )
-        case ScalingType.BlockWise1x32:
-            return _is_blockwise1xTILESIZE_scaling(
-                scale_size, t.get_size(), 32, transpose
-            )
-        case ScalingType.BlockWise1x16:
-            return _is_blockwise1xTILESIZE_scaling(
-                scale_size, t.get_size(), 16, transpose
-            )
         case ScalingType.BlockWise128x128:
             return _is_blockwise128x128_scaling(scale_size, t.get_size())
         case _:
@@ -844,35 +836,10 @@ def get_tile_size(scale_option) -> int:
             return 128
         case ScalingType.BlockWise1x128:
             return 128
-        case ScalingType.BlockWise1x32:
-            return 32
-        case ScalingType.BlockWise1x16:
-            return 16
         case _:
             raise AssertionError(
                 f"Unsupported scaling type {scale_option} in get_tile_size"
             )
-
-
-def _get_scaling_options_impl(
-    mat_a: Any,
-    mat_b: Any,
-    scale_a_size: torch.Tensor,
-    scale_b_size: torch.Tensor,
-    valid_scaling_pairs: list[tuple[ScalingType, ScalingType]],
-) -> Optional[tuple[ScalingType, ScalingType]]:
-    """
-    Get the scaling options for a given set of valid scaling pairs.
-
-    Returns the first matching (scale_option_a, scale_option_b) pair,
-    or None if no compatible scaling option is found.
-    """
-    for scale_option_a, scale_option_b in valid_scaling_pairs:
-        if is_desired_scaling(
-            mat_a, scale_a_size, scale_option_a
-        ) and is_desired_scaling(mat_b, scale_b_size, scale_option_b, transpose=True):
-            return scale_option_a, scale_option_b
-    return None
 
 
 def get_scaling_options(
@@ -881,15 +848,15 @@ def get_scaling_options(
     scale_a_size: torch.Tensor,
     scale_b_size: torch.Tensor,
 ) -> tuple[ScalingType, ScalingType]:
-    """Get scaling options for Triton backend."""
-    result = _get_scaling_options_impl(
-        mat_a, mat_b, scale_a_size, scale_b_size, scaling_pairs
-    )
-    if result is None:
-        raise AssertionError(
-            f"Inductor Triton does not support scale_a.shape = {scale_a_size}, scale_b.shape = {scale_b_size}"
-        )
-    return result
+    for scale_option_a, scale_option_b in scaling_pairs:
+        if is_desired_scaling(
+            mat_a, scale_a_size, scale_option_a
+        ) and is_desired_scaling(mat_b, scale_b_size, scale_option_b, transpose=True):
+            return scale_option_a, scale_option_b
+
+    raise AssertionError(
+        f"Inductor Triton does not support scale_a.shape = {scale_a_size}, scale_b.shape = {scale_b_size}"
+    )  # verify that shapes are supported by at least one existing pairing
 
 
 @register_lowering(aten._scaled_mm.default, type_promotion_kind=None)  # type: ignore[misc]
@@ -1034,8 +1001,7 @@ def tuned_scaled_mm(
         )
     )
 
-    # Add NVGEMM scaled GEMM choices for FP8 with block scaling
-    # get_kernels() will return empty if the scaling mode/dtype is unsupported
+    # NVGEMM get_kernels() will return empty if the scaling mode/dtype is unsupported
     if is_nonzero and use_nv_universal_gemm_template(layout, m, n, k, mat_a, mat_b):
         from ..codegen.nv_universal_gemm import add_nv_universal_scaled_gemm_choices
 
@@ -1047,7 +1013,7 @@ def tuned_scaled_mm(
 
     # Early return for MX variants
     if scale_a.dtype != torch.float32:
-        return autotune_select_algorithm(name, choices, kernel_inputs.nodes(), layout)
+        return autotune_select_algorithm(name, choices, input_nodes, layout)
 
     if (
         is_nonzero
