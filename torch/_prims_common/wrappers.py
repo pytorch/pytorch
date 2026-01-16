@@ -299,7 +299,6 @@ def out_wrapper(
                         kwargs[k] = out_attr
 
             def maybe_check_copy_devices(out):
-                # pyrefly: ignore [unsupported-operation]
                 if isinstance(out, TensorLike) and isinstance(args[0], TensorLike):
                     check_copy_devices(copy_from=args[0], copy_to=out)
 
