@@ -46,7 +46,6 @@ from functorch.experimental import control_flow
 
 from fx.named_tup import MyNamedTup
 from fx.test_common_passes import TestCommonPass  # noqa: F401
-from fx.test_fx_traceback import TestFXNodeSource  # noqa: F401
 from fx.test_cse_pass import TestCSEPass  # noqa: F401
 from fx.test_dce_pass import TestDCE  # noqa: F401
 from fx.test_fx_const_fold import TestConstFold  # noqa: F401
