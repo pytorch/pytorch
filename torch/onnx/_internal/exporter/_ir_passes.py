@@ -89,7 +89,7 @@ def rename_axis(
         else:
             string_mapping[key] = value
 
-    # NOTE: Mapping needs to be srted by length because the shape expression
+    # NOTE: Mapping needs to be sorted by length because the shape expression
     # could have multiple ways to be expressed, for example,
     # {"s1": sequence_length, "s11": "past_sequence_length", "s1 + s11": "masked_sequence_length"}
     # We prefer the replacement starts from the longest match.
