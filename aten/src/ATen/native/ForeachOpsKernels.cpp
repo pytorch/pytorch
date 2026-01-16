@@ -480,6 +480,19 @@ std::vector<Tensor> foreach_tensor_norm_slow(
   return result;
 }
 
+std::vector<Tensor> foreach_tensor_powsum_slow(
+    TensorList tensors,
+    const Scalar& ord,
+    std::optional<ScalarType> dtype) {
+  check_foreach_api_restrictions(tensors);
+  std::vector<Tensor> result;
+  result.reserve(tensors.size());
+  for (const auto& t : tensors) {
+    result.emplace_back(at::linalg_powsum(t, ord, {}, false, dtype));
+  }
+  return result;
+}
+
 std::vector<Tensor> foreach_tensor_max_slow(TensorList tensors) {
   check_foreach_api_restrictions(tensors);
   std::vector<Tensor> result;

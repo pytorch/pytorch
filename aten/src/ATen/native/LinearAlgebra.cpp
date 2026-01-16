@@ -2878,7 +2878,50 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   }
 
   auto iter = make_reduction("vector_norm", const_cast<Tensor&>(result), self_, dim, keepdim, result.scalar_type());
-  norm_stub(iter.device_type(), iter, ord);
+  norm_stub(iter.device_type(), iter, ord, /*skip_root=*/false);
+}
+
+// linalg_powsum: computes sum(|x|^ord) - the "power sum" without the final root
+// This is useful for distributed computing where we want to reduce partial
+// power sums across shards before taking the final root.
+Tensor linalg_powsum(
+    const Tensor& self,
+    const Scalar& scalar_ord,
+    OptionalIntArrayRef opt_dim,
+    bool keepdim,
+    std::optional<ScalarType> opt_dtype) {
+  auto ord = scalar_ord.toDouble();
+
+  // Validate ord: powsum only makes sense for p-norms where p > 0 and p != inf
+  TORCH_CHECK(
+      ord > 0 && ord != INFINITY,
+      "linalg.powsum only supports finite positive ord values, got: ", ord);
+
+  auto dim = opt_dim.value_or(IntArrayRef{});
+
+  // Compute output dtype (same logic as vector_norm)
+  auto compute_dtype = at::native::get_dtype_from_self(self, opt_dtype, /*promote_integers=*/true);
+
+  // Handle dtype conversion
+  Tensor self_;
+  if (opt_dtype.has_value()) {
+    self_ = self.to(*opt_dtype);
+  } else {
+    self_ = self;
+  }
+
+  // Compute result shape using meta::make_reduction_from_out_ty
+  auto result = meta::make_reduction_from_out_ty(self_, dim, keepdim, toRealValueType(compute_dtype)).first;
+
+  if (result.numel() == 0) {
+    // For empty reductions, powsum returns 0
+    result.zero_();
+    return result;
+  }
+
+  auto iter = make_reduction("powsum", result, self_, dim, keepdim, result.scalar_type());
+  norm_stub(iter.device_type(), iter, ord, /*skip_root=*/true);
+  return result;
 }
 
 static void _linalg_matrix_norm_checks(const Tensor& A, std::vector<int64_t>& dim, std::optional<ScalarType> opt_dtype, bool low_precision) {
