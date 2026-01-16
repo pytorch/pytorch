@@ -27,7 +27,7 @@ if [[ ! -d "/usr/local/cuda" ]]; then
     echo "CUDA not found, installing CUDA toolkit for Flash Attention build"
 
     if command -v dnf &> /dev/null; then
-        dnf install -y gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ || true
+        dnf install -y wget gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ || true
         if [[ -d "/opt/rh/gcc-toolset-13" ]]; then
             export PATH=/opt/rh/gcc-toolset-13/root/usr/bin:$PATH
             export LD_LIBRARY_PATH=/opt/rh/gcc-toolset-13/root/usr/lib64:/opt/rh/gcc-toolset-13/root/usr/lib:${LD_LIBRARY_PATH:-}
