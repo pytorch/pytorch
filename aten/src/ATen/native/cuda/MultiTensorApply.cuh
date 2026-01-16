@@ -428,14 +428,9 @@ void multi_tensor_apply_dim(
           tensor_lists[d][t].const_data_ptr();
     }
     loc_tensor_info++;
-
-    // Row norms time is dominated by the number of kernel launches
-    // so multiple rows are calculated per warp to reduce the number of kernel launches. 
-    // Col norms time is dominated by memory time not kernel launches
-    // so only one col is calculated per warp to increase compute per block time. 
-    bool reduce_dim_is_row = reduce_dim == 1; 
-    int outer_dim_size = reduce_dim_is_row ? tensor.size(0) : tensor.size(1);
-    const int CHUNK_SIZE = reduce_dim_is_row ? 8*kBlockSizeDim.y: kBlockSizeDim.y;  // 128 : 16
+ 
+    int outer_dim_size = reduce_dim == 1 ? tensor.size(0) : tensor.size(1);
+    const int CHUNK_SIZE = kBlockSizeDim.y;  //   reduce_dim_is_row ? kBlockSizeDim.y: kBlockSizeDim.y;  // 128 : 16
     const int64_t num_chunks_per_tensor = (outer_dim_size + CHUNK_SIZE - 1) / CHUNK_SIZE; 
     for (int64_t idx = 0; idx < num_chunks_per_tensor; idx++) {
       tensorListMeta.block_to_tensor[loc_block_info] = loc_tensor_info - 1;
