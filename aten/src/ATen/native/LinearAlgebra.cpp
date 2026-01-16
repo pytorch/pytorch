@@ -209,7 +209,7 @@ TORCH_META_FUNC(mm)(const Tensor & self, const Tensor & mat2) {
   set_output_raw_strided(0, {self.sizes()[0], mat2.sizes()[1]}, {}, self.options(), names);
 }
 
-TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype) {
+TORCH_META_FUNC(linalg_vector_norm)(const Tensor& self, const Scalar& scalar_ord, OptionalIntArrayRef opt_dim, bool keepdim, std::optional<ScalarType> opt_dtype, bool /*skip_root*/) {
   at::native::checkFloatingOrComplex(self, "linalg.vector_norm");
   TORCH_CHECK(!at::isComplexType(scalar_ord.type()), "linalg.vector_norm: Expected a non-complex scalar as the order of norm.");
 
@@ -2842,7 +2842,7 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   }
 
   // Check if skip_root applies (only for p-norms where p != inf, -inf, 0, 1)
-  bool should_undo_root = skip_root && std::abs(ord) != INFINITY && ord != 0.0 && ord != 1.0;
+  bool should_skip_root = skip_root && std::abs(ord) != INFINITY && ord != 0.0 && ord != 1.0;
 
   if (is_reduce_over_1D_vector) {
     Tensor self_;
@@ -2853,7 +2853,7 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
     }
     if (ord != 0.0) {
       keepdim ? at::abs_outf(self_, const_cast<Tensor&>(result)) : at::abs_outf(self_.squeeze(reduce_dim), const_cast<Tensor&>(result));
-      if (should_undo_root) {
+      if (should_skip_root) {
         const_cast<Tensor&>(result).pow_(ord);
       }
     } else {
@@ -2884,11 +2884,7 @@ TORCH_IMPL_FUNC(linalg_vector_norm_out)(const Tensor& self, const Scalar& scalar
   }
 
   auto iter = make_reduction("vector_norm", const_cast<Tensor&>(result), self_, dim, keepdim, result.scalar_type());
-  norm_stub(iter.device_type(), iter, ord);
-
-  if (should_undo_root) {
-    const_cast<Tensor&>(result).pow_(ord);
-  }
+  norm_stub(iter.device_type(), iter, ord, should_skip_root);
 }
 
 static void _linalg_matrix_norm_checks(const Tensor& A, std::vector<int64_t>& dim, std::optional<ScalarType> opt_dtype, bool low_precision) {
