@@ -131,7 +131,9 @@ jobs:
         with:
           repository: pytorch/pytorch-integration-testing
           path: pytorch/pytorch-integration-testing
-          ref: main
+          # ref: main
+          # TESTING, TO BE REMOVED BEFORE LANDING
+          ref: check-vllm-benchmark-result
 
       - name: Check if the device is supported
         run: |
@@ -197,6 +199,16 @@ jobs:
         run: |
           set -eux
           bash .buildkite/performance-benchmarks/scripts/run-performance-benchmarks.sh
+
+      - name: Check the benchmark results
+        env:
+          BENCHMARK_RESULTS: vllm-project/vllm/benchmarks/results
+        run: |
+          set -eux
+
+          # Fail when there is no result or if the metrics are all zero
+          python3 pytorch/pytorch-integration-testing/.github/scripts/check_benchmark_results.py \
+            --benchmark-results "${BENCHMARK_RESULTS}"
 
       - name: Authenticate with AWS
         uses: aws-actions/configure-aws-credentials@ececac1a45f3b08a01d2dd070d28d111c5fe6722 # v4.1.0
