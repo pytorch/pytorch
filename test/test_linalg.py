@@ -1457,6 +1457,55 @@ class TestLinalg(TestCase):
                             keepdim,
                             norm_dtype)
 
+    @dtypes(torch.float, torch.double)
+    def test_vector_norm_skip_root(self, device, dtype):
+        # Test that skip_root=True returns sum(|x|^p) instead of (sum(|x|^p))^(1/p)
+        input_sizes = [(10,), (4, 5), (3, 4, 5)]
+        ord_values = [2, 3, 4.5]
+
+        for input_size, ord in product(input_sizes, ord_values):
+            input = make_tensor(input_size, dtype=dtype, device=device, low=0.1, high=2.0)
+
+            # With skip_root=False (default), we get the standard p-norm
+            result_with_root = torch.linalg.vector_norm(input, ord=ord)
+
+            # With skip_root=True, we get sum(|x|^p)
+            result_skip_root = torch.linalg.vector_norm(input, ord=ord, skip_root=True)
+
+            # The relationship should be: result_skip_root = result_with_root ^ ord
+            expected = result_with_root ** ord
+            self.assertEqual(result_skip_root, expected,
+                            msg=f'input.size()={input.size()}, ord={ord}')
+
+        # Test that skip_root has no effect for inf, -inf, 0, 1 norms
+        input = make_tensor((10,), dtype=dtype, device=device, low=0.1, high=2.0)
+        for ord in [float('inf'), float('-inf'), 0, 1]:
+            result_normal = torch.linalg.vector_norm(input, ord=ord)
+            result_skip_root = torch.linalg.vector_norm(input, ord=ord, skip_root=True)
+            self.assertEqual(result_normal, result_skip_root,
+                            msg=f'skip_root should have no effect for ord={ord}')
+
+    @dtypes(torch.float, torch.double)
+    def test_foreach_norm_skip_root(self, device, dtype):
+        # Test that _foreach_norm with skip_root=True returns sum(|x|^p) for each tensor
+        input_sizes = [(10,), (20,), (5, 6)]
+        ord_values = [2, 3]
+
+        for ord in ord_values:
+            tensors = [make_tensor(size, dtype=dtype, device=device, low=0.1, high=2.0)
+                      for size in input_sizes]
+
+            # With skip_root=False (default)
+            results_with_root = torch._foreach_norm(tensors, ord=ord)
+
+            # With skip_root=True
+            results_skip_root = torch._foreach_norm(tensors, ord=ord, skip_root=True)
+
+            # Each result should satisfy: result_skip_root = result_with_root ^ ord
+            for r_root, r_skip in zip(results_with_root, results_skip_root):
+                expected = r_root ** ord
+                self.assertEqual(r_skip, expected, msg=f'ord={ord}')
+
 
     def test_vector_norm_decom_unbacked_checks(self):
         from torch._refs.linalg import _check_vector_norm_args

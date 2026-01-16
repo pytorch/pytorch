@@ -135,6 +135,7 @@ def vector_norm(
     keepdim: bool = False,
     *,
     dtype: Optional[torch.dtype] = None,
+    skip_root: bool = False,
 ) -> Tensor:
     from torch.fx.experimental.symbolic_shapes import guard_or_false
 
@@ -152,6 +153,9 @@ def vector_norm(
     )
 
     to_result_dtype = partial(_maybe_convert_to_dtype, dtype=result_dtype)
+
+    # skip_root only applies to p-norms where p != inf, -inf, 0, 1
+    should_skip_root = skip_root and ord not in (0.0, 1.0, float("inf"), float("-inf"))
 
     # Implementation
     if ord == 0.0:
@@ -178,6 +182,8 @@ def vector_norm(
                     f"Received a tensor with {x.ndim} dimensions, but only tensors with up to 64 dims are supported!"
                 )
             x = torch.abs(x)
+            if should_skip_root:
+                x = torch.pow(x, ord)
             if keepdim or x.ndim == 0:
                 return to_result_dtype(x).contiguous()
             elif dim is None:
@@ -188,6 +194,8 @@ def vector_norm(
 
         if not (is_ord_even and utils.is_float_dtype(x.dtype)):
             x = torch.abs(x)
+        if should_skip_root:
+            return to_result_dtype(reduce_sum(torch.pow(x, ord)))  # type: ignore[return-value]
         return to_result_dtype(torch.pow(reduce_sum(torch.pow(x, ord)), 1.0 / ord))  # type: ignore[return-value]
 
 
