@@ -300,10 +300,11 @@ def _local_map_wrapped(
                     in_grad_placements[idx] if in_grad_placements is not None else None
                 )
 
-                original_params = {}
-                for name, param in arg.named_parameters(recurse=False):
-                    if isinstance(param, DTensor):
-                        original_params[name] = param
+                original_params = {
+                    name: param
+                    for name, param in arg.named_parameters(recurse=False)
+                    if isinstance(param, DTensor)
+                }
 
                 # convert DTensor parameters to local tensors
                 # note: this modifies the module in-place, but we restore it later
