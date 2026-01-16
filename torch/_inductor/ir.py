@@ -5332,6 +5332,30 @@ class MultiTemplateBuffer(TritonTemplateBuffer):
         assert self.get_stride() == caller.layout.stride
         self.make_kernel_render = caller.get_make_kernel_render()
 
+    @contextlib.contextmanager
+    def swap_as_nvgemm_caller(self, caller: ChoiceCaller) -> Iterator[None]:
+        """Temporarily swap make_kernel_render with an NVUniversalGemmCaller's version."""
+        from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
+
+        assert isinstance(caller, NVUniversalGemmCaller), type(caller)
+        assert self.layout == caller.layout
+
+        render = self.make_kernel_render
+        self.make_kernel_render = caller.get_make_kernel_render()
+        try:
+            yield
+        finally:
+            self.make_kernel_render = render
+
+    def finalize_as_nvgemm_caller(self, caller: ChoiceCaller) -> None:
+        """Finalize with an NVUniversalGemmCaller's make_kernel_render."""
+        from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
+
+        assert isinstance(caller, NVUniversalGemmCaller), type(caller)
+        assert self.get_size() == caller.layout.size
+        assert self.get_stride() == caller.layout.stride
+        self.make_kernel_render = caller.get_make_kernel_render()
+
     def get_min_choice(
         self, hint_override: Optional[int] = None
     ) -> tuple[ChoiceCaller, float]:
@@ -5452,6 +5476,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         scale_type_b: Optional[Any] = None,
         swizzle_type_a: Optional[Any] = None,
         swizzle_type_b: Optional[Any] = None,
+        supports_epilogue_fusion: bool = False,
     ) -> None:
         # We pass None initially, then override with our method below
         super().__init__(layout, inputs, make_kernel_render=None)
@@ -5464,6 +5489,7 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         self.scale_type_b = scale_type_b
         self.swizzle_type_a = swizzle_type_a
         self.swizzle_type_b = swizzle_type_b
+        self.supports_epilogue_fusion = supports_epilogue_fusion
         # Store kernel metadata for code generation since kernels aren't serializeable yet
         self.kernel_metadata = {
             "kernel_name": kernel.metadata.kernel_name,
@@ -5481,7 +5507,13 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         return self.outputs
 
     def _make_kernel_render(
-        self, out_node: Any, hint_override: Optional[int] = None
+        self,
+        out_node: Any,
+        hint_override: Optional[int] = None,
+        epilogue_fn_code: Optional[str] = None,
+        epilogue_reads: Optional[list[str]] = None,
+        epilogue_writes: Optional[list[str]] = None,
+        epilogue_var_renames: Optional[dict[str, Any]] = None,
     ) -> tuple[Any, Any]:
         """
         Create a kernel renderer for code generation.
@@ -5489,6 +5521,14 @@ class NVUniversalGemmBuffer(TemplateBuffer):
         Returns (kernel, render) tuple where:
         - kernel: NVUniversalGemmKernel object with call_kernel() method
         - render: function that returns source code string
+
+        Args:
+            out_node: The output node for the GEMM
+            hint_override: Optional hint override (unused)
+            epilogue_fn_code: Python function code string for epilogue
+            epilogue_reads: List of buffer names read by the epilogue
+            epilogue_writes: List of buffer names written by the epilogue
+            epilogue_var_renames: Mapping from Python var names to buffer names
         """
         from torch._inductor.codegen.nv_universal_gemm.nv_universal_gemm_kernel import (
             NVUniversalGemmKernel,
@@ -5517,6 +5557,10 @@ class NVUniversalGemmBuffer(TemplateBuffer):
             scale_type_b=self.scale_type_b,
             swizzle_type_a=self.swizzle_type_a,
             swizzle_type_b=self.swizzle_type_b,
+            epilogue_fn_code=epilogue_fn_code,
+            epilogue_reads=epilogue_reads,
+            epilogue_writes=epilogue_writes,
+            epilogue_var_renames=epilogue_var_renames,
         )
 
         def render():

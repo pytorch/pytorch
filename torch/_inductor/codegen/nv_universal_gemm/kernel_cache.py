@@ -116,3 +116,36 @@ def clear_cache() -> None:
     """Clear the kernel cache."""
     global _kernel_by_name_cache
     _kernel_by_name_cache = None
+
+
+def get_efc_kernel_for(kernel_name: str) -> Any:
+    """Get the EFC (Epilogue Fusion Compatible) variant of a kernel.
+
+    Given a non-EFC kernel name like:
+        cutedsl.PersistentDenseGemmKernel_sm100_ttt_...
+    Returns the corresponding EFC kernel:
+        cutedsl.PersistentDenseGemmEFCKernel_sm100_ttt_...
+
+    Args:
+        kernel_name: The non-EFC kernel name
+
+    Returns:
+        The EFC kernel object, or None if not found.
+    """
+    # Check if already EFC
+    if "EFCKernel" in kernel_name:
+        return get_kernel_by_name(kernel_name)
+
+    # Transform non-EFC kernel name to EFC
+    # Pattern: ...GemmKernel_... -> ...GemmEFCKernel_...
+    efc_name = kernel_name.replace("GemmKernel_", "GemmEFCKernel_")
+
+    if efc_name == kernel_name:
+        # No transformation happened, not a GEMM kernel
+        log.debug("Cannot find EFC variant for kernel: %s", kernel_name)
+        return None
+
+    efc_kernel = get_kernel_by_name(efc_name)
+    if efc_kernel is None:
+        log.debug("EFC kernel not found: %s", efc_name)
+    return efc_kernel

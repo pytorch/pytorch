@@ -77,11 +77,11 @@ class CUDACombinedScheduling(BaseScheduling):
             node1
         ) or self._cutedsl_scheduling.is_cutedsl_template(node2):
             return False
-        # NVIDIA Universal GEMM doesn't support vertical fusion currently
+        # NVIDIA Universal GEMM supports epilogue fusion
         elif self._nv_universal_gemm_scheduling.is_nv_universal_gemm_template(
             node1
         ) or self._nv_universal_gemm_scheduling.is_nv_universal_gemm_template(node2):
-            return False
+            return self._nv_universal_gemm_scheduling.can_fuse_vertical(node1, node2)
         return self._triton_scheduling.can_fuse_vertical(node1, node2)
 
     def can_fuse_horizontal(
@@ -134,9 +134,9 @@ class CUDACombinedScheduling(BaseScheduling):
         elif self._nv_universal_gemm_scheduling.is_nv_universal_gemm_template(
             template_node
         ):
-            # NVIDIA Universal GEMM doesn't support epilogue/prologue fusion yet
-            assert not epilogue_nodes
-            assert not prologue_nodes
+            assert not prologue_nodes, (
+                "NVIDIA Universal GEMM doesn't support prologue fusion yet"
+            )
             return self._nv_universal_gemm_scheduling.codegen_template(
                 template_node, epilogue_nodes, prologue_nodes
             )
@@ -174,6 +174,16 @@ class CUDACombinedScheduling(BaseScheduling):
         benchmark_kernel: bool = False,
         hint_override: Optional[int] = None,
     ) -> str:
+        # Check if any node is an NVGEMM template
+        for node in nodes:
+            if hasattr(node, "is_template") and node.is_template():
+                if self._nv_universal_gemm_scheduling.is_nv_universal_gemm_template(
+                    node
+                ):
+                    return self._nv_universal_gemm_scheduling.generate_kernel_code_from_nodes(
+                        nodes, benchmark_kernel
+                    )
+                break  # Only check the first template node
         return self._triton_scheduling.generate_kernel_code_from_nodes(
             nodes, benchmark_kernel, hint_override=hint_override
         )

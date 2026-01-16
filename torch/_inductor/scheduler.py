@@ -3823,6 +3823,8 @@ class Scheduler:
         if not config.benchmark_fusion and not is_multi_template:
             return True
 
+        template_node = node1.get_template_node() if node1.is_template() else None
+
         if (
             node1.is_template()
             and not isinstance(node1.get_template_node(), ir.TritonTemplateBuffer)
@@ -3858,7 +3860,14 @@ class Scheduler:
 
         def log_fusion(ms_fused: float, ms1: float, ms2: float) -> None:
             if fusion_log.isEnabledFor(logging.DEBUG):
-                if ms_fused < ms1 + ms2:
+                # Guard against zero values (e.g., NVGEMM skips benchmarking)
+                if ms_fused == 0.0:
+                    fusion_log.debug(
+                        "can fuse (assumed): fusing %s with %s (benchmarking skipped)",
+                        node1.get_buffer_names(),
+                        node2.get_buffer_names(),
+                    )
+                elif ms_fused < ms1 + ms2:
                     fusion_log.debug(
                         "can fuse (benchmark): fusing %s with %s cause %sx speedup",
                         node1.get_buffer_names(),
@@ -3882,7 +3891,13 @@ class Scheduler:
                 nodes, benchmark_kernel=True, hint_override=hint_override
             )
             mod = PyCodeCache.load(src_code)
-            if not async_compile.use_process_pool():
+
+            # Check if this is an NVGEMM template (no triton_ kernel to compile)
+            has_triton = hasattr(mod, "triton_")
+            if not has_triton:
+                # No triton kernel to compile (e.g., NVGEMM templates)
+                fut = None
+            elif not async_compile.use_process_pool():
                 fut = None
             else:
                 fut = async_compile.triton(kernel_name="triton_", source_code=src_code)
@@ -3970,12 +3985,23 @@ class Scheduler:
                 ms2_fused = _estimate_fused_epilogue_runtime(node1, node2, ms2)
 
             # Start compiling choices in parallel
+            from torch._inductor.codegen.nv_universal_gemm import NVUniversalGemmCaller
+
             future_choices: list[tuple[Any, Optional[LambdaFuture], ModuleType]] = []
-            triton_choices = 0
+            template_choices = 0
             for choice, unfused_time in sorted(
                 choice_timings.items(), key=operator.itemgetter(1)
             ):
-                if not isinstance(choice, torch._inductor.ir.TritonTemplateCallerBase):
+                is_triton = isinstance(
+                    choice, torch._inductor.ir.TritonTemplateCallerBase
+                )
+                is_nvgemm = isinstance(choice, NVUniversalGemmCaller)
+
+                if not is_triton and not is_nvgemm:
+                    continue
+
+                # For NVGEMM, only consider choices that support epilogue fusion
+                if is_nvgemm and not choice.supports_epilogue_fusion:
                     continue
 
                 # For prologue fusion we check if the underlying template of the choice
@@ -3984,7 +4010,8 @@ class Scheduler:
                 # TODO: Remove this check after all Triton templates support prologue fusion.
                 # Currently, persistent+TMA Triton template does not due to the TMA-based loads.
                 if (
-                    not epilogue_fusion
+                    is_triton
+                    and not epilogue_fusion
                     and hasattr(choice, "allowed_prologue_inps")
                     and choice.allowed_prologue_inps != multi_node.allowed_prologue_inps
                 ):
@@ -3993,12 +4020,21 @@ class Scheduler:
                 if bench_epilogue and unfused_time >= ms1 + ms2:
                     break
 
-                triton_choices += 1
-                if triton_choices > config.max_epilogue_benchmarked_choices:
+                template_choices += 1
+                if template_choices > config.max_epilogue_benchmarked_choices:
                     break
 
-                with multi_node.swap_as_triton_caller(choice):
-                    future_choices.append((choice, *compile_kernel(node_list_fused)))
+                # Use appropriate swap method based on choice type
+                if is_triton:
+                    with multi_node.swap_as_triton_caller(choice):
+                        future_choices.append(
+                            (choice, *compile_kernel(node_list_fused))
+                        )
+                else:  # is_nvgemm
+                    with multi_node.swap_as_nvgemm_caller(choice):
+                        future_choices.append(
+                            (choice, *compile_kernel(node_list_fused))
+                        )
 
             if len(future_choices) == 0:
                 return False
@@ -4030,13 +4066,25 @@ class Scheduler:
                         continue
 
                     if bench_epilogue:
-                        # pyrefly: ignore [missing-attribute]
-                        with multi_node.swap_as_triton_caller(choice):
-                            ms_fused, path = self.benchmark_codegened_module(
-                                mod_fused,
-                                # pyrefly: ignore [bad-argument-type]
-                                device,
-                            )
+                        # Use appropriate swap method based on choice type
+                        is_nvgemm_choice = isinstance(choice, NVUniversalGemmCaller)
+                        swap_ctx = (
+                            multi_node.swap_as_nvgemm_caller(choice)
+                            if is_nvgemm_choice
+                            else multi_node.swap_as_triton_caller(choice)
+                        )
+                        with swap_ctx:
+                            if is_nvgemm_choice:
+                                # For NVGEMM, skip benchmarking and assume fusion is beneficial
+                                # (fusion reduces kernel launches which is generally faster)
+                                # TODO: Implement proper NVGEMM benchmarking
+                                ms_fused = 0.0  # Assume fused is always best for NVGEMM
+                            else:
+                                ms_fused, path = self.benchmark_codegened_module(
+                                    mod_fused,
+                                    # pyrefly: ignore [bad-argument-type]
+                                    device,
+                                )
                             new_timings[choice] = ms_fused
                             if ms_fused < min_ms_fused:
                                 min_ms_fused = ms_fused
@@ -4071,8 +4119,12 @@ class Scheduler:
                             hint_override_best_fusion_choice
                         )
                     else:
-                        # pyrefly: ignore [missing-attribute]
-                        multi_node.finalize_as_triton_caller(ms_fused_choice)
+                        # Finalize with the winning choice using appropriate method
+                        if isinstance(ms_fused_choice, NVUniversalGemmCaller):
+                            multi_node.finalize_as_nvgemm_caller(ms_fused_choice)
+                        else:
+                            # pyrefly: ignore [missing-attribute]
+                            multi_node.finalize_as_triton_caller(ms_fused_choice)
 
                     # pyrefly: ignore [missing-attribute]
                     multi_node._choice_timings[None] = new_timings

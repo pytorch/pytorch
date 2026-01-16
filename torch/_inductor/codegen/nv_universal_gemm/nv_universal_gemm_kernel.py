@@ -72,6 +72,10 @@ class NVUniversalGemmKernel(Kernel):
         scale_type_b: Optional[Any] = None,
         swizzle_type_a: Optional[Any] = None,
         swizzle_type_b: Optional[Any] = None,
+        epilogue_fn_code: Optional[str] = None,
+        epilogue_reads: Optional[list[str]] = None,
+        epilogue_writes: Optional[list[str]] = None,
+        epilogue_var_renames: Optional[dict[str, Any]] = None,
     ) -> None:
         super().__init__()
         self.kernel_name = kernel_name
@@ -85,6 +89,10 @@ class NVUniversalGemmKernel(Kernel):
         self.scale_type_b = scale_type_b
         self.swizzle_type_a = swizzle_type_a
         self.swizzle_type_b = swizzle_type_b
+        self.epilogue_fn_code = epilogue_fn_code
+        self.epilogue_reads = epilogue_reads or []
+        self.epilogue_writes = epilogue_writes or []
+        self.epilogue_var_renames = epilogue_var_renames or {}
 
         self._template_input_args: list[tuple[str, Buffer]] = []
         self._seen_input_args: OrderedSet[str] = OrderedSet()
@@ -102,9 +110,10 @@ class NVUniversalGemmKernel(Kernel):
         1. Looks up the cutlass_api kernel by name from the manifest (cached in
            _nv_universal_gemm_kernel_cache to avoid repeated manifest searches)
         2. Creates GemmArguments with the input/output tensors and accumulator type
-        3. Compiles the kernel for the specific tensor shapes/dtypes (cached in
+        3. Optionally creates EpilogueArguments if epilogue fusion is enabled
+        4. Compiles the kernel for the specific tensor shapes/dtypes (cached in
            _nv_universal_gemm_artifact_cache keyed by (shape, dtype) tuple)
-        4. Runs the kernel with the compiled artifact and CUDA stream
+        5. Runs the kernel with the compiled artifact and CUDA stream
 
         The caching strategy ensures:
         - Kernel lookup happens once per unique kernel name
@@ -127,8 +136,15 @@ class NVUniversalGemmKernel(Kernel):
             self.accumulator_type, "cutlass.Float32"
         )
 
+        # Build function parameters
         input_params = [f"in_ptr{i}" for i, _ in enumerate(self.input_nodes)]
         input_params.append("out_ptr0")
+
+        # Add epilogue read parameters
+        for read_name in self.epilogue_reads:
+            input_params.append(read_name)
+
+        # Add workspace parameter if needed
         if self.workspace_size > 0:
             input_params.append("workspace")
         input_params.append("stream=None")
@@ -197,40 +213,157 @@ class NVUniversalGemmKernel(Kernel):
                         accumulator_type={acc_dtype_str},
                     )"""
 
+        # Build epilogue code if present
+        if self.epilogue_fn_code:
+            epilogue_kwargs = self._render_epilogue_kwargs()
+            epilogue_import = "from cutlass_api.arguments import EpilogueArguments"
+            epilogue_fn_def = f'_epilogue_fn = """{self.epilogue_fn_code}"""'
+            epilogue_args_construction = f"""
+    epi_args = EpilogueArguments(
+        _epilogue_fn,
+        {epilogue_kwargs}
+    )"""
+            gemm_epilogue_arg = "epilogue=epi_args,"
+        else:
+            epilogue_import = ""
+            epilogue_fn_def = ""
+            epilogue_args_construction = ""
+            gemm_epilogue_arg = ""
+
+        # Generate args creation code based on epilogue presence
+        if self.epilogue_fn_code:
+            # With epilogue: add epilogue args to GemmArguments
+            create_args_with_epilogue = f"""args = cutlass_api.arguments.GemmArguments(
+        in_ptr0,
+        in_ptr1,
+        out_ptr0,
+        accumulator_type={acc_dtype_str},
+        {gemm_epilogue_arg}
+    )"""
+            # Include "epilogue" in cache key to differentiate from non-epilogue compilations
+            cache_key_code_with_epilogue = cache_key_code[:-1] + ', "epilogue")'
+        else:
+            create_args_with_epilogue = create_args_code
+            cache_key_code_with_epilogue = cache_key_code
+
+        # Kernel lookup
+        # For epilogue cases, we need to use get_kernels(args) to get a properly configured
+        # EFC kernel. The cached kernel from get_kernel_by_name() doesn't work with epilogue
+        # because it lacks the epilogue configuration.
+        if self.epilogue_fn_code:
+            # Transform kernel name to EFC variant for filtering
+            efc_kernel_name = kernel_name_str.replace("GemmKernel_", "GemmEFCKernel_")
+            kernel_cache_import = ""  # cutlass_api is already imported above
+            # Use get_kernels with epilogue args to get properly configured EFC kernel
+            # Cache the kernel object to avoid repeated lookups
+            kernel_lookup_code = f"""# Get EFC kernel configured for epilogue (cached after first call)
+    global _efc_kernel_cache
+    efc_kernel_name = "{efc_kernel_name}"
+    kernel = _efc_kernel_cache.get(efc_kernel_name)
+    if kernel is None:
+        matching = [k for k in cutlass_api.get_kernels(args, cc=100)
+                    if k.metadata.kernel_name == efc_kernel_name]
+        if not matching:
+            raise RuntimeError(f"Could not find EFC kernel: {{efc_kernel_name}}")
+        kernel = matching[0]
+        _efc_kernel_cache[efc_kernel_name] = kernel"""
+        else:
+            kernel_cache_import = "from torch._inductor.codegen.nv_universal_gemm.kernel_cache import get_kernel_by_name"
+            kernel_lookup_code = f"""kernel = get_kernel_by_name({kernel_name_var})
+    if kernel is None:
+        raise RuntimeError(f"Could not find kernel: {{{kernel_name_var}}}")"""
+
+        # Generate main body
+        if self.epilogue_fn_code:
+            # Epilogue case: create epilogue args first, then GEMM args with epilogue
+            # Need _efc_kernel_cache for caching the configured EFC kernel
+            efc_kernel_cache_init = "_efc_kernel_cache = {}"
+            global_decl = f"global {cache_var}, _efc_kernel_cache"
+            main_body = f"""
+    {epilogue_args_construction}
+
+    {preprocess_inputs}
+
+    {create_args_with_epilogue}
+
+    {kernel_lookup_code}
+
+    cache_key = {cache_key_code_with_epilogue}
+    artifact = {cache_var}.get(cache_key)
+    if artifact is None:
+        artifact = kernel.compile(args)
+        {cache_var}[cache_key] = artifact
+
+    kernel.run(args, artifact, stream=stream, workspace={workspace_arg}, assume_supported_args=True)"""
+        else:
+            # Non-epilogue case: standard order
+            efc_kernel_cache_init = ""
+            global_decl = f"global {cache_var}"
+            main_body = f"""
+    {kernel_lookup_code}
+
+    {preprocess_inputs}
+
+    {create_args_with_epilogue}
+
+    cache_key = {cache_key_code_with_epilogue}
+    artifact = {cache_var}.get(cache_key)
+    if artifact is None:
+        artifact = kernel.compile(args)
+        {cache_var}[cache_key] = artifact
+
+    kernel.run(args, artifact, stream=stream, workspace={workspace_arg}, assume_supported_args=True)"""
+
         code = IndentedBuffer()
         code.splice(
             f"""
-            import cutlass
-            import cutlass_api
-            from torch._inductor.codegen.nv_universal_gemm.kernel_cache import get_kernel_by_name
-            {extra_imports}
+import cutlass
+import cutlass_api
+{kernel_cache_import}
+{epilogue_import}
+{extra_imports}
 
-            {kernel_name_var} = "{kernel_name_str}"
-            # Maps (shape, dtype, shape, dtype, ...) -> compiled kernel artifact
-            {cache_var} = {{}}
+{epilogue_fn_def}
 
-            def {self.kernel_name}_main({params_str}):
-                global {cache_var}
+{kernel_name_var} = "{kernel_name_str}"
+# Maps (shape, dtype, shape, dtype, ...) -> compiled kernel artifact
+{cache_var} = {{}}
+{efc_kernel_cache_init}
 
-                kernel = get_kernel_by_name({kernel_name_var})
-                if kernel is None:
-                    raise RuntimeError(f"Could not find kernel: {{{kernel_name_var}}}")
-
-                {preprocess_inputs}
-
-                {create_args_code}
-
-                cache_key = {cache_key_code}
-                artifact = {cache_var}.get(cache_key)
-                if artifact is None:
-                    artifact = kernel.compile(args)
-                    {cache_var}[cache_key] = artifact
-
-                kernel.run(args, artifact, stream=stream, workspace={workspace_arg}, assume_supported_args=True)
+def {self.kernel_name}_main({params_str}):
+    {global_decl}
+{main_body}
             """
         )
 
         return code.getvalue()
+
+    def _render_epilogue_kwargs(self) -> str:
+        """
+        Render kwargs for EpilogueArguments constructor.
+
+        Maps Python variable names from the epilogue function to actual tensor arguments.
+        The 'D' output is mapped to out_ptr0, 'accum' is implicit (provided by GEMM),
+        and other reads are passed directly.
+        """
+        kwargs_parts = []
+
+        # Map Python var names to actual tensor args
+        for var_name, buffer_name in self.epilogue_var_renames.items():
+            if var_name == "D":
+                # D is the output, map to out_ptr0
+                kwargs_parts.append("D=out_ptr0")
+            elif var_name == "accum":
+                # Skip accum, it's implicit (the GEMM result)
+                continue
+            elif buffer_name in self.epilogue_reads:
+                # This is an epilogue input tensor - use buffer_name as the parameter
+                kwargs_parts.append(f"{var_name}={buffer_name}")
+            else:
+                # Could be a scalar or intermediate value
+                kwargs_parts.append(f"{var_name}={buffer_name}")
+
+        return ", ".join(kwargs_parts)
 
     def _get_reinterpret_view(self, node) -> Optional[ReinterpretView]:
         """Extract or convert to ReinterpretView from a node, handling all views."""
@@ -245,14 +378,17 @@ class NVUniversalGemmKernel(Kernel):
         Generate the kernel call in the wrapper code.
 
         Similar to CuteDSLTemplateKernel.call_kernel but simplified for NVIDIA Universal GEMM.
+        Includes epilogue input tensors when epilogue fusion is enabled.
         """
         wrapper = V.graph.wrapper_code
 
         call_args: list[str] = []
         arg_types: list[Any] = []
         raw_args: list[Union[Buffer, ReinterpretView, None]] = []
+        raw_keys: list[Optional[str]] = []
 
-        for _, input_node in self._template_input_args:
+        # Add GEMM input args (A, B)
+        for param_name, input_node in self._template_input_args:
             reinterpret_view = self._get_reinterpret_view(input_node)
             if reinterpret_view is not None:
                 call_args.append(reinterpret_view.codegen_reference())
@@ -263,11 +399,28 @@ class NVUniversalGemmKernel(Kernel):
                 call_args.append(input_node.get_name())
                 raw_args.append(input_node)
             arg_types.append(V.graph.get_dtype(input_node.get_name()))
+            raw_keys.append(param_name)
 
-        output_name = self.output_node.get_name()
+        # Add output arg
+        # When epilogue is fused, use the epilogue output; otherwise use GEMM output
+        if self.epilogue_writes:
+            # The epilogue's D output is stored in epilogue_writes
+            # Use the last epilogue write as the actual output
+            output_name = self.epilogue_writes[-1]
+        else:
+            output_name = self.output_node.get_name()
         call_args.append(output_name)
         arg_types.append(V.graph.get_dtype(output_name))
         raw_args.append(None)  # Output buffer is findable by name
+        raw_keys.append("out_ptr0")
+
+        # Add epilogue input args
+        for read_name in self.epilogue_reads:
+            call_args.append(read_name)
+            arg_types.append(V.graph.get_dtype(read_name))
+            buf = V.graph.get_buffer(read_name)
+            raw_args.append(buf)
+            raw_keys.append(read_name)
 
         # Allocate workspace if needed
         ws: Optional[WorkspaceArg] = None
@@ -282,17 +435,16 @@ class NVUniversalGemmKernel(Kernel):
             call_args.append(ws.outer_name)
             arg_types.append(ws.dtype)
             raw_args.append(None)
+            raw_keys.append(None)
 
         # Generate the kernel call using triton=True for Python-based kernels
-        # Pass raw_keys as None list to match raw_args length
-        # TODO(nikhilap)  We don't use autotune_args like the Triton path
         wrapper.generate_kernel_call(
             name,
             call_args,
             triton=True,
             arg_types=arg_types,
             raw_args=raw_args,
-            raw_keys=[None] * len(raw_args),
+            raw_keys=raw_keys,
         )
 
         # Deallocate workspace after kernel call
