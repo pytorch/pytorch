@@ -360,24 +360,16 @@ void gemm(
      transb == TransposeType::NoTranspose && n == 1 && alpha == 1.0;
 #endif
    if (!use_bf16_gemv_trans && mkldnn_bf16_gemm(transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc)) {
-    std::printf("[MKLDNN_BF16] m=%ld n=%ld k=%ld\n", (long)m, (long)n, (long)k);
-    std::fflush(stdout);
     return;
    }
 #endif
 
 #if AT_BUILD_WITH_BLAS() && (defined(BLAS_HAS_SBGEMM) || defined(BLAS_HAS_BGEMM))
    if (use_blas_gemm(transa, transb, m, n, k, lda, ldb, ldc)) {
-      // ADD PRINTF HERE
-      std::printf("[GEMM_STUB] m=%ld n=%ld k=%ld\n", (long)m, (long)n, (long)k);
-      std::fflush(stdout);
       int m_ = m, n_ = n, k_ = k, lda_ = lda, ldb_ = ldb, ldc_ = ldc;
       char transa_ = to_blas(transa), transb_ = to_blas(transb);
       // C matrix in OpenBLAS sbgemm are of type "float" so we have to convert, copy and copy back.
 #ifdef BLAS_HAS_BGEMM
-      // ADD PRINTF HERE
-      std::printf("[BGEMM] m=%ld n=%ld k=%ld\n", (long)m, (long)n, (long)k);
-      std::fflush(stdout);
       at::BFloat16 alpha_ = c10::convert<at::BFloat16>(alpha);
       at::BFloat16 beta_ = c10::convert<at::BFloat16>(beta);
       bgemm_(&transa_, &transb_,
@@ -388,9 +380,6 @@ void gemm(
              &beta_,
              c, &ldc_);
 #else
-      // ADD PRINTF HERE
-      std::printf("[SBGEMM] m=%ld n=%ld k=%ld\n", (long)m, (long)n, (long)k);
-      std::fflush(stdout);
       // C matrix in OpenBLAS sbgemm are of type "float" so we have to convert, copy and copy back.
       int c_size = n_ * m_;
       std::vector<float> float_v(c_size, 0.0f);
@@ -417,9 +406,6 @@ void gemm(
       return;
    }
 #endif
-   // ADD PRINTF HERE
-   std::printf(">>> Using gemm_stub fallback path (not BLAS)\n");
-   std::fflush(stdout);
    gemm_stub(
       at::kCPU, at::kBFloat16,
       transa, transb, m, n, k, alpha, a, lda, b, ldb, beta, c, ldc);
