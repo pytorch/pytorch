@@ -1,5 +1,6 @@
 # mypy: ignore-errors
 
+import dataclasses
 import warnings
 from collections.abc import KeysView
 from contextlib import contextmanager
@@ -124,6 +125,9 @@ def _try_get_metadata_from_dynamo(
     We first verify that `mod` does come from Dynamo, then we handle cases where
     metadata might be missing.
 
+    This function also populates the `source` field on descriptors in `full_args_descs`
+    when sources are available from Dynamo.
+
     Returns:
         aot_autograd_arg_pos_to_source: used to dedup params and their guards
         static_input_indices: used to identify static inputs for cudagraphs
@@ -164,6 +168,9 @@ def _try_get_metadata_from_dynamo(
         seen_sources.add(source)
         aot_autograd_arg_pos_to_source.append(source)
 
+        # Update the descriptor with the source
+        full_args_descs[i] = dataclasses.replace(full_args_descs[i], source=source)
+
         static_input_indices.append(i)
 
     # Collect the dynamo graph inputs
@@ -185,6 +192,11 @@ def _try_get_metadata_from_dynamo(
         # where extra_params are the params/buffers that dynamo baked into the
         # OutputGraph
         actual_pos = pos + len(param_keys)
+
+        # Update the descriptor with the source
+        full_args_descs[actual_pos] = dataclasses.replace(
+            full_args_descs[actual_pos], source=source
+        )
 
         if "tensor_dict" in node.meta and node.meta["tensor_dict"].get(
             "_dynamo_static_input_type", None
