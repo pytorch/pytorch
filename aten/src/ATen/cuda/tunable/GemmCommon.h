@@ -389,7 +389,7 @@ struct GemmAndBiasParams : OpParams {
     std::string activation_str = to_string_epilogue(activation);
     return fmt::sprintf("- { function: matmul, M: %ld, N: %ld, K: %ld, lda: %ld, ldb: %ld, ldc: %ld, ldd: %ld, stride_a: 0, stride_b: 0, stride_c: 0, stride_d: 0, "
       "alpha: %s, beta: %s, transA: %c, transB: %c, batch_count: 1, a_type: %s, b_type: %s, c_type: %s, d_type: %s, activation: %s, bias_type: %s, scale_type: %s, compute_type: %s }",
-      m, n, k, lda, ldb, ldc, ldc, alpha_str, transa, transb,
+      m, n, k, lda, ldb, ldc, ldc, alpha_str, beta_str, transa, transb,
       BLASTypeName<T>(T{}), BLASTypeName<T>(T{}), BLASTypeName<T>(T{}), BLASTypeName<T>(T{}), activation_str, BLASTypeName<T>(T{}), ComputeTypeFor<T>(), ComputeTypeFor<T>(), ComputeTypeFor<T>());
   }
 
