@@ -26,14 +26,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # Check if we're in a pull request context
-          if [ "${{ github.event_name }}" = "pull_request" ] || [ "${{ github.event_name }}" = "pull_request_target" ]; then
+          if [[ "${{ github.event_name }}" == "pull_request" || "${{ github.event_name }}" == "pull_request_target" ]]; then
             echo "Running in PR context"
 
             # Get the PR number from the github context
             PR_NUMBER="${{ github.event.number }}"
 
             # Check if all_files is requested
-            if [ "${{ inputs.all_files }}" = "true" ]; then
+            if [[ "${{ inputs.all_files }}" = "true" ]]; then
               echo "all_files input is true, returning all files"
               echo "changed-files=*" >> "$GITHUB_OUTPUT"
             else
@@ -49,7 +49,11 @@ jobs:
               done
               CHANGED_FILES="${CHANGED_FILES}${PYI_FILES_TO_ADD}"
 
-              if [ -z "$CHANGED_FILES" ]; then
+              SEP=" "
+              if [[ "${SEP}${CHANGED_FILES}${SEP}" == *"${SEP}.lintrunner.toml${SEP}"* ]]; then
+                echo ".lintrunner.toml changed, setting to '*'"
+                CHANGED_FILES="*"
+              elif [[ -z "$CHANGED_FILES" ]]; then
                 echo "No changed files found, setting to '*'"
                 CHANGED_FILES="*"
               fi
