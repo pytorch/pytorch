@@ -310,8 +310,6 @@ if torch.backends.mps.is_available():
             "linalg.eig": None,
             "linalg.eigvals": None,
             "put": None,
-            "cauchy_": None,
-            "cauchy": None,
             "cholesky_solve": None,
             "frexp": None,
             "gcd": None,
@@ -484,6 +482,7 @@ if torch.backends.mps.is_available():
             "bernoulli": [torch.float16, torch.float32, torch.bfloat16],
             "exponential": [torch.float16, torch.float32, torch.bfloat16],
             "log_normal": [torch.float16, torch.float32, torch.bfloat16],
+            "cauchy": [torch.float16, torch.float32, torch.bfloat16],
             "nn.functional.feature_alpha_dropoutwith_train": [
                 torch.float16,
                 torch.float32,
@@ -719,6 +718,7 @@ if torch.backends.mps.is_available():
             # Random output
             "exponential": [torch.float16, torch.float32],
             "log_normal": [torch.float16, torch.float32],
+            "cauchy": [torch.float16, torch.float32],
             # CPU errors
             # derivative for zeta is not implemented
             "special.zeta": None,
