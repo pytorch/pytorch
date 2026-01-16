@@ -6,6 +6,7 @@
 {%- set M_IS_VARYING = A_IS_2D and not B_IS_2D -%}
 {%- set N_IS_VARYING = not A_IS_2D and B_IS_2D -%}
 {%- set K_IS_VARYING = A_IS_2D and B_IS_2D -%}
+{%- set USE_TMA_STORE = not C_IS_2D or (USE_RAGGED_TENSOR_DESCRIPTOR and M_IS_VARYING) -%}
 
 import triton
 
@@ -40,7 +41,9 @@ import triton.profiler.language as pl
 class PartitionArgs:
     a_desc: tma.tensor_descriptor
     b_desc: tma.tensor_descriptor
+{%- if USE_TMA_STORE %}
     c_desc: tma.tensor_descriptor
+{%- endif %}
 {%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
     offs_ptr: gl.tensor
 {%- endif %}
@@ -50,6 +53,9 @@ class PartitionArgs:
 {%- endif %}
     c_stride_m: gl.tensor
     c_stride_n: gl.tensor
+{%- if not USE_TMA_STORE %}
+    output_dtype: gl.constexpr
+{%- endif %}
     c_layout: gl.constexpr
     a_smem_bufs: gl.shared_memory_descriptor
     b_smem_bufs: gl.shared_memory_descriptor
@@ -74,7 +80,9 @@ class PartitionArgs:
         self,
         a_desc,
         b_desc,
+{%- if USE_TMA_STORE %}
         c_desc,
+{%- endif %}
 {%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
         offs_ptr,
 {%- endif %}
@@ -84,6 +92,9 @@ class PartitionArgs:
 {%- endif %}
         c_stride_m,
         c_stride_n,
+{%- if not USE_TMA_STORE %}
+        output_dtype,
+{%- endif %}
         c_layout,
         a_smem_bufs,
         b_smem_bufs,
@@ -105,7 +116,9 @@ class PartitionArgs:
     ):
         self.a_desc = a_desc
         self.b_desc = b_desc
+{%- if USE_TMA_STORE %}
         self.c_desc = c_desc
+{%- endif %}
 {%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
         self.offs_ptr = offs_ptr
 {%- endif %}
@@ -115,6 +128,9 @@ class PartitionArgs:
 {%- endif %}
         self.c_stride_m = c_stride_m
         self.c_stride_n = c_stride_n
+{%- if not USE_TMA_STORE %}
+        self.output_dtype = gl.constexpr(output_dtype)
+{%- endif %}
         self.c_layout = gl.constexpr(c_layout)
         self.a_smem_bufs = a_smem_bufs
         self.b_smem_bufs = b_smem_bufs
@@ -557,8 +573,6 @@ def compute_partition(pargs: PartitionArgs):
 def store_partition(pargs: PartitionArgs):
     pl.enter_scope("store_partition")
 
-    c_desc = pargs.c_desc
-
     G = pargs.G
     M = pargs.M
     N = pargs.N
@@ -580,9 +594,11 @@ def store_partition(pargs: PartitionArgs):
         instr_variant="32x32b",
     )
 
+{%- if USE_TMA_STORE %}
     c_smem = gl.allocate_shared_memory(
         pargs.c_desc.dtype, [BLOCK_M, BLOCK_N], pargs.c_layout
     )
+{%- endif %}
 
     group_iter = GroupIterator.create(
         G, M, N, K,
@@ -613,43 +629,70 @@ def store_partition(pargs: PartitionArgs):
             acc_state = acc_state.next()
 
             with pl.scope("store_convert"):
-                c = acc.to(c_desc.dtype)
+{%- if USE_TMA_STORE %}
+                c = acc.to(pargs.c_desc.dtype)
+{%- else %}
+                c = acc.to(pargs.output_dtype)
+{%- endif %}
 
+            with pl.scope("store_barrier_arrive"):
+                mbarrier.arrive(acc_buf_empty_bar, count=1)
+
+{%- if C_IS_2D %}
+{%- if USE_RAGGED_TENSOR_DESCRIPTOR and M_IS_VARYING %}
             with pl.scope("store_tma_wait"):
                 tma.store_wait(pendings=0)
 
             with pl.scope("store_smem_write"):
                 c_smem.store(c)
 
-            with pl.scope("store_barrier_arrive"):
-                mbarrier.arrive(acc_buf_empty_bar, count=1)
-
             with pl.scope("store_fence_and_tma"):
                 fence_async_shared()
-{%- if not USE_RAGGED_TENSOR_DESCRIPTOR %}
-{%- if C_IS_2D %}
-                tma.async_copy_shared_to_global(c_desc, [tile_iter.m_offset, tile_iter.n_offset], c_smem)
-{%- else %}
-                tma.async_copy_shared_to_global(c_desc, [group_iter.g, tile_iter.m_offset, tile_iter.n_offset], c_smem)
-{%- endif %}
-{%- else %}
                 c_smem_4d = c_smem.reshape([1, 1, BLOCK_M, BLOCK_N])
                 store_ragged(
-                    c_desc,
+                    pargs.c_desc,
                     group_iter.m_start_offset,
                     group_iter.m_size,
                     [tile_iter.m_tile_offset, tile_iter.n_offset],
                     c_smem_4d,
                     ragged_dim=0
                 )
+{%- else %}
+            with pl.scope("store_masked"):
+                offs_m = gl.arange(0, BLOCK_M)
+                offs_n = gl.arange(0, BLOCK_N)
+
+                idx_m = tile_iter.m_offset + offs_m
+                idx_n = tile_iter.n_offset + offs_n
+
+                mask_m = tile_iter.m_tile_offset + offs_m < group_iter.m_size
+                mask_n = tile_iter.n_tile_offset + offs_n < group_iter.n_size
+                mask = mask_m[:, None] & mask_n[None, :]
+
+                c_ptrs = pargs.c_ptr + idx_m[:, None] * pargs.c_stride_m + idx_n[None, :] * pargs.c_stride_n
+
+                gl.store(c_ptrs, c, mask=mask)
+{%- endif %}
+{%- else %}
+            with pl.scope("store_tma_wait"):
+                tma.store_wait(pendings=0)
+
+            with pl.scope("store_smem_write"):
+                c_smem.store(c)
+
+            with pl.scope("store_fence_and_tma"):
+                fence_async_shared()
+                tma.async_copy_shared_to_global(pargs.c_desc, [group_iter.g, tile_iter.m_offset, tile_iter.n_offset], c_smem)
 {%- endif %}
 
             tile_iter = tile_iter.next()
 
         group_iter = group_iter.next()
 
+{%- if not C_IS_2D or (USE_RAGGED_TENSOR_DESCRIPTOR and M_IS_VARYING) %}
     with pl.scope("store_final_tma_wait"):
         tma.store_wait(pendings=0)
+{%- endif %}
 
     pl.exit_scope("store_partition")
 
@@ -737,7 +780,7 @@ def store_partition(pargs: PartitionArgs):
     {{ assign_maybe_constexpr_gluon("c_stride_n", output_stride(-1)) }}
 
     NUM_BLOCKS: gl.constexpr = {{NUM_SMS}}
-    dtype: gl.constexpr = {{DTYPE}}
+    input_dtype: gl.constexpr = {{INPUT_DTYPE}}
 
     # Create tensor descriptors
     a_desc = tma.make_tensor_descriptor(
@@ -792,18 +835,13 @@ def store_partition(pargs: PartitionArgs):
         layout=b_layout,
     )
 
-{%- if not USE_RAGGED_TENSOR_DESCRIPTOR %}
+{%- if USE_TMA_STORE %}
+{%- if not C_IS_2D %}
     c_desc = tma.make_tensor_descriptor(
         c_ptr,
-{%- if C_IS_2D %}
-        shape=[M, N],
-        strides=[c_stride_m, c_stride_n],
-        block_shape=[BLOCK_M, BLOCK_N],
-{%- else %}
         shape=[G, M, N],
         strides=[c_stride_g, c_stride_m, c_stride_n],
         block_shape=[1, BLOCK_M, BLOCK_N],
-{%- endif %}
         layout=c_layout,
     )
 {%- else %}
@@ -816,10 +854,13 @@ def store_partition(pargs: PartitionArgs):
         ragged_dim=0,
     )
 {%- endif %}
+{%- else %}
+    output_dtype: gl.constexpr = {{OUTPUT_DTYPE}}
+{%- endif %}
 
     # Allocate shared memory buffers
     a_smem_bufs = gl.allocate_shared_memory(
-        dtype,
+        input_dtype,
 {%- if A_IS_K_MAJOR %}
         [NUM_LOAD_BUFFERS, BLOCK_M, BLOCK_K],
 {%- else %}
@@ -828,7 +869,7 @@ def store_partition(pargs: PartitionArgs):
         a_layout
     )
     b_smem_bufs = gl.allocate_shared_memory(
-        dtype,
+        input_dtype,
 {%- if B_IS_K_MAJOR %}
         [NUM_LOAD_BUFFERS, BLOCK_N, BLOCK_K],
 {%- else %}
@@ -868,7 +909,9 @@ def store_partition(pargs: PartitionArgs):
     pargs = PartitionArgs(
         a_desc,
         b_desc,
+{%- if USE_TMA_STORE %}
         c_desc,
+{%- endif %}
 {%- if M_IS_VARYING or N_IS_VARYING or K_IS_VARYING %}
         offs_ptr,
 {%- endif %}
@@ -878,6 +921,9 @@ def store_partition(pargs: PartitionArgs):
 {%- endif %}
         gl.to_tensor(c_stride_m),
         gl.to_tensor(c_stride_n),
+{%- if not USE_TMA_STORE %}
+        output_dtype,
+{%- endif %}
         c_layout,
         a_smem_bufs,
         b_smem_bufs,

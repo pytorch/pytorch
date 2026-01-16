@@ -88,39 +88,42 @@ from triton.experimental.gluon import language as gl
                 # Get PyTorch dtype from input nodes
                 import torch
 
-                input_nodes = kwargs.get("input_nodes", [])
+                input_nodes = getattr(self, "input_nodes", [])
                 if input_nodes:
-                    torch_dtype = input_nodes[0].get_dtype()
+                    input_torch_dtype = input_nodes[0].get_dtype()
                 else:
-                    torch_dtype = torch.bfloat16
+                    input_torch_dtype = torch.bfloat16
+                output_torch_dtype = self.output_node.get_dtype()  # type: ignore[attr-defined]
 
-                # Convert torch dtype to gluon dtype (following triton's approach)
-                if torch_dtype == torch.float8_e5m2:
-                    gluon_dtype = gl.float8e5
-                    dtype_str = "gl.float8e5"
-                elif torch_dtype == torch.float8_e4m3fn:
-                    gluon_dtype = gl.float8e4nv
-                    dtype_str = "gl.float8e4nv"
-                else:
-                    dtype_name = str(torch_dtype).split(".")[
-                        1
-                    ]  # 'torch.bfloat16' -> 'bfloat16'
-                    gluon_dtype = getattr(gl, dtype_name)
-                    dtype_str = f"gl.{dtype_name}"
+                def torch_dtype_to_gluon(dtype):
+                    if dtype == torch.float8_e5m2:
+                        return gl.float8e5, "gl.float8e5"
+                    elif dtype == torch.float8_e4m3fn:
+                        return gl.float8e4nv, "gl.float8e4nv"
+                    else:
+                        dtype_name = str(dtype).split(".")[1]
+                        return getattr(gl, dtype_name), f"gl.{dtype_name}"
+
+                input_gluon_dtype, input_dtype_str = torch_dtype_to_gluon(
+                    input_torch_dtype
+                )
+                output_gluon_dtype, output_dtype_str = torch_dtype_to_gluon(
+                    output_torch_dtype
+                )
 
                 # Compute layouts using get_default_for() with the actual dtype
                 a_is_k_major = kwargs.get("A_IS_K_MAJOR", True)
                 b_is_k_major = kwargs.get("B_IS_K_MAJOR", True)
                 a_layout = gl.NVMMASharedLayout.get_default_for(
                     [BLOCK_M, BLOCK_K] if a_is_k_major else [BLOCK_K, BLOCK_M],
-                    gluon_dtype,
+                    input_gluon_dtype,
                 )
                 b_layout = gl.NVMMASharedLayout.get_default_for(
                     [BLOCK_N, BLOCK_K] if b_is_k_major else [BLOCK_K, BLOCK_N],
-                    gluon_dtype,
+                    input_gluon_dtype,
                 )
                 c_layout = gl.NVMMASharedLayout.get_default_for(
-                    [BLOCK_M, BLOCK_N], gluon_dtype
+                    [BLOCK_M, BLOCK_N], output_gluon_dtype
                 )
 
                 # Extract swizzle widths and add to kwargs
@@ -128,8 +131,9 @@ from triton.experimental.gluon import language as gl
                 kwargs["B_LAYOUT_SWIZZLE_BYTE_WIDTH"] = b_layout.swizzle_byte_width
                 kwargs["C_LAYOUT_SWIZZLE_BYTE_WIDTH"] = c_layout.swizzle_byte_width
 
-                # Add dtype string for template
-                kwargs["DTYPE"] = dtype_str
+                # Add dtype strings for template
+                kwargs["INPUT_DTYPE"] = input_dtype_str
+                kwargs["OUTPUT_DTYPE"] = output_dtype_str
 
                 # Call parent render with updated kwargs
                 return super().render(
