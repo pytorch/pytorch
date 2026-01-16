@@ -1541,11 +1541,18 @@ except RuntimeError as e:
                 )
 
                 if show_cpp_stacktraces:
-                    self.assertIn(
-                        "C++ CapturedTraceback:",
-                        error_message,
-                        f"Expected C++ stack trace info in error message when TORCH_SHOW_CPP_STACKTRACES=1, got: {error_message}",  # noqa: B950
-                    )
+                    # C++ CapturedTraceback is not available on aarch64 due to:
+                    # #if !defined(FBCODE_CAFFE2) && !defined(__aarch64__)
+                    # in torch/csrc/Module.cpp
+                    import platform
+
+                    is_aarch64 = platform.machine() in ("aarch64", "arm64")
+                    if not is_aarch64:
+                        self.assertIn(
+                            "C++ CapturedTraceback:",
+                            error_message,
+                            f"Expected C++ stack trace info in error message when TORCH_SHOW_CPP_STACKTRACES=1, got: {error_message}",  # noqa: B950
+                        )
                     self.assertRegex(
                         error_message,
                         r"Exception raised from trigger_torch_check_eq_failure at .*/main.cpp:8",
