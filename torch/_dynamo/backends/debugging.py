@@ -164,7 +164,6 @@ def invoke_subgraph_inner_compiler(
     from torch._higher_order_ops.invoke_subgraph import (
         invoke_subgraph as invoke_subgraph_hop,
     )
-    from torch.fx.experimental.proxy_tensor import get_proxy_mode
 
     global _invoke_subgraph_counter
     _invoke_subgraph_counter += 1
@@ -172,22 +171,10 @@ def invoke_subgraph_inner_compiler(
 
     from torch._dynamo import disable
 
-    # Check if fx_g uses boxed calling convention
-    fx_g_is_boxed = getattr(fx_g, "_boxed_call", False)
-
     @disable
     @torch._dynamo.allow_in_graph
     def invoke_subgraph_wrapper_unboxed(*args: Any) -> Any:
-        proxy_mode = get_proxy_mode()
-        if proxy_mode is not None:
-            # When being traced by make_fx, emit invoke_subgraph HOP
-            return invoke_subgraph_hop(fx_g, name, *args)  # type: ignore[arg-type]
-        else:
-            # Normal execution path - call fx_g with proper calling convention
-            if fx_g_is_boxed:
-                return fx_g(list(args))
-            else:
-                return fx_g(*args)
+        return invoke_subgraph_hop(fx_g, name, *args)  # type: ignore[arg-type]
 
     # Wrap to handle boxed arguments (list of args) as expected by AOTAutograd
     def invoke_subgraph_wrapper(args: list[Any]) -> Any:
