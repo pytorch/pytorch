@@ -35,6 +35,20 @@ def _runtime_compute_coordinate_on_dim_fake(
         sz, min=0, max=mesh_size - 1 if isinstance(mesh_size, int) else None
     )
 
+    try:
+        # Check if we're currently tracing in dynamo (as opposed to AOT or export).
+        in_dynamo = torch._dynamo.symbolic_convert.InstructionTranslator.current_tx()
+    except AttributeError:
+        in_dynamo = False
+
+    if in_dynamo:
+        # During dynamo tracing, distributed ops are treated as atomic - so the
+        # rank SymInt may be computed but not traced into the graph (e.g., it
+        # affects tensor values but not shapes). Mark it as ignorable here;
+        # when we decompose these ops later (after dynamo), we'll create fresh
+        # SymInts that do get traced.
+        shape_env.ignorable_fresh_unbacked_symbols.append(sz.node._expr)
+
     return sz
 
 
