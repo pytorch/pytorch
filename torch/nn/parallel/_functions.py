@@ -18,16 +18,7 @@ class Broadcast(Function):
             return ()
         ctx.num_inputs = len(inputs)
         ctx.input_device = inputs[0].get_device()
-
-        ctx.complex_mask = [inp.is_complex() for inp in inputs]
-
         outputs = comm.broadcast_coalesced(inputs, ctx.target_gpus)
-
-        for device_outputs in outputs:
-            for i, is_complex in enumerate(ctx.complex_mask):
-                if is_complex:
-                    device_outputs[i] = torch.view_as_complex(device_outputs[i])
-
         non_differentiables = []
         for idx, input_requires_grad in enumerate(ctx.needs_input_grad[1:]):
             if not input_requires_grad:
@@ -37,11 +28,9 @@ class Broadcast(Function):
 
     @staticmethod
     def backward(ctx, *grad_outputs):
-        grads = ReduceAddCoalesced.apply(
+        return (None,) + ReduceAddCoalesced.apply(
             ctx.input_device, ctx.num_inputs, *grad_outputs
         )
-
-        return (None,) + grads
 
 
 class ReduceAddCoalesced(Function):
@@ -51,25 +40,8 @@ class ReduceAddCoalesced(Function):
             grads[i].get_device() for i in range(0, len(grads), num_inputs)
         ]
 
-        complex_mask = [grads[i].is_complex() for i in range(num_inputs)]
-        ctx.complex_mask = complex_mask
-
-        grads_converted = tuple(
-            torch.view_as_real(g) if g.is_complex() else g for g in grads
-        )
-
-        grads_ = [
-            grads_converted[i : i + num_inputs]
-            for i in range(0, len(grads_converted), num_inputs)
-        ]
-        results = comm.reduce_add_coalesced(grads_, destination)
-
-        results = tuple(
-            torch.view_as_complex(r) if is_complex else r
-            for r, is_complex in zip(results, complex_mask)
-        )
-
-        return results
+        grads_ = [grads[i : i + num_inputs] for i in range(0, len(grads), num_inputs)]
+        return comm.reduce_add_coalesced(grads_, destination)
 
     @staticmethod
     def backward(ctx, *grad_outputs):
@@ -103,15 +75,7 @@ class Gather(Function):
         else:
             ctx.unsqueezed_scalar = False
         ctx.input_sizes = tuple(i.size(ctx.dim) for i in inputs)
-
-        is_complex = len(inputs) > 0 and inputs[0].is_complex()
-
-        output = comm.gather(inputs, ctx.dim, ctx.target_device)
-
-        if is_complex:
-            output = torch.view_as_complex(output)
-
-        return output
+        return comm.gather(inputs, ctx.dim, ctx.target_device)
 
     @staticmethod
     def backward(ctx, grad_output):
@@ -133,14 +97,7 @@ class Scatter(Function):
         if torch.accelerator.is_available() and ctx.input_device == -1:
             # Perform CPU to GPU copies in a background stream
             streams = [_get_stream(torch.device(device)) for device in target_gpus]
-
-        is_complex = input.is_complex()
-
         outputs = comm.scatter(input, target_gpus, chunk_sizes, ctx.dim, streams)
-
-        if is_complex:
-            outputs = tuple(torch.view_as_complex(o) for o in outputs)
-
         # Synchronize with the copy stream
         if streams is not None:
             for i, output in enumerate(outputs):

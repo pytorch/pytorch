@@ -7,7 +7,6 @@ from typing_extensions import ParamSpec, TypeIs, TypeVarTuple, Unpack
 import torch
 import torch.fx.node
 import torch.utils._pytree as pytree
-from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.opaque_object import is_opaque_type
 from torch._ops import HigherOrderOperator
 
@@ -19,18 +18,12 @@ _Ts = TypeVarTuple("_Ts")
 
 def is_graphable(val: object) -> TypeIs[torch.fx.node.BaseArgumentTypes]:
     """Definition: a graphable type is a type that is an acceptable input/output type to a FX node."""
-    return isinstance(
-        val, (*torch.fx.node.base_types, FakeScriptObject)
-    ) or is_opaque_type(type(val))
+    return isinstance(val, torch.fx.node.base_types) or is_opaque_type(type(val))
 
 
 def is_graphable_type(typ: type[object]) -> bool:
     """Return whether the given type is graphable."""
-    return (
-        issubclass(typ, torch.fx.node.base_types)
-        or is_opaque_type(typ)
-        or issubclass(typ, FakeScriptObject)
-    )
+    return issubclass(typ, torch.fx.node.base_types) or is_opaque_type(typ)
 
 
 def to_graphable(stuff: pytree.PyTree) -> tuple[list[object], pytree.TreeSpec]:
@@ -66,7 +59,7 @@ def func_to_graphable(
     return pytree.tree_flatten(_ConstantFunction(func))
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class _ConstantFunction(Generic[_P, _R]):
     func: Callable[_P, _R]
 

@@ -1467,7 +1467,6 @@ class GraphLowering(torch.fx.Interpreter):
                     int,
                     ir.EffectfulKernel,
                     ir.ShapeAsConstantBuffer,
-                    TorchBindObject,
                 ),
             )
             for x in result

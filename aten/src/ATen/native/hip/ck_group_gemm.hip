@@ -2,7 +2,6 @@
 #include <ATen/hip/HIPContext.h>
 #include <ATen/Tensor.h>
 #include <ATen/TensorAccessor.h>
-#include <c10/hip/HIPCachingAllocator.h>
 #include <c10/hip/HIPStream.h>
 #include <iostream>
 #include <vector>
@@ -380,8 +379,11 @@ void launch_grouped_bgemm_ck_impl_dispatch(
     size_t arg_buf_size = gemm_instance.GetDeviceKernelArgSize(&argument);
     size_t ws_size = gemm_instance.GetWorkSpaceSize(&argument);
 
-    void* gemm_arg_buf = c10::hip::HIPCachingAllocator::raw_alloc(arg_buf_size);
-    void* ws_buf = c10::hip::HIPCachingAllocator::raw_alloc(ws_size);
+    void* gemm_arg_buf = nullptr;
+    void* ws_buf = nullptr;
+
+    hipMalloc(&gemm_arg_buf, arg_buf_size);
+    hipMalloc(&ws_buf, ws_size);
 
     gemm_instance.SetDeviceKernelArgs(&argument, gemm_arg_buf);
     gemm_instance.SetWorkSpacePointer(&argument, ws_buf);
@@ -389,8 +391,8 @@ void launch_grouped_bgemm_ck_impl_dispatch(
     auto invoker = gemm_instance.MakeInvoker();
     hipStream_t stream = c10::hip::getCurrentHIPStream();
     invoker.Run(argument, {stream});
-    c10::hip::HIPCachingAllocator::raw_delete(gemm_arg_buf);
-    c10::hip::HIPCachingAllocator::raw_delete(ws_buf);
+    hipFree(gemm_arg_buf);
+    hipFree(ws_buf);
 }
 
 void group_gemm_ck(

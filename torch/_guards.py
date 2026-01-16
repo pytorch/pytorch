@@ -6,6 +6,7 @@ import enum
 import functools
 import logging
 import re
+import sys
 import threading
 import traceback
 import unittest.mock
@@ -15,7 +16,18 @@ from collections import defaultdict
 from contextlib import contextmanager
 from dataclasses import dataclass
 from typing import Any, Generic, NamedTuple, Optional, overload, TYPE_CHECKING, TypeVar
-from typing_extensions import dataclass_transform
+
+
+if sys.version_info >= (3, 11):
+    from typing import dataclass_transform
+else:
+
+    def dataclass_transform():
+        def decorator(fn):
+            return fn
+
+        return decorator
+
 
 import torch
 from torch.utils import _pytree as pytree

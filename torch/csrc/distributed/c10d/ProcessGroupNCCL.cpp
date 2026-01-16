@@ -3,7 +3,6 @@
 #include <nlohmann/json.hpp>
 #include <exception>
 #include <map>
-#include <memory>
 #include <mutex>
 #include <sstream>
 #include <stdexcept>
@@ -5862,10 +5861,11 @@ at::Tensor ProcessGroupNCCL::allocateTensor(
   // Create memory pool
   if (!memPool_) {
     // Needs a CUDAAllocator
-    auto allocator = std::static_pointer_cast<
-        c10::cuda::CUDACachingAllocator::CUDAAllocator>(getMemAllocator());
+    auto allocator =
+        reinterpret_cast<c10::cuda::CUDACachingAllocator::CUDAAllocator*>(
+            getMemAllocator().get());
     // Pool is created
-    memPool_ = std::make_unique<at::cuda::MemPool>(std::move(allocator));
+    memPool_ = std::make_unique<at::cuda::MemPool>(allocator);
     // Register so that we call ncclCommRegister on all new allocations
     registerMemPool(memPool_.get(), /*symmetric*/ false);
     LOG(INFO) << logPrefix() << "Created memory pool";

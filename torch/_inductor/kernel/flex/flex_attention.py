@@ -44,7 +44,6 @@ from .flex_flash_attention import (
     create_flex_flash_attention_backward_kernel,
     create_flex_flash_attention_kernel,
     is_trivial_mask_graph,
-    is_trivial_score_graph,
 )
 
 
@@ -551,7 +550,7 @@ def validate_joint_graph(joint_graph: torch.fx.Graph):
     return
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class JointOutputResult:
     """Results from processing joint outputs."""
 
@@ -760,7 +759,6 @@ def flex_attention_backward(*args, **kwargs):
         score_mod_other_buffers=score_mod_other_buffers,
     ):
         needs_block_mask = not is_trivial_mask_graph(mask_graph.graph_module)
-        score_is_trivial = is_trivial_score_graph(fw_graph.graph_module)
         return create_flex_flash_attention_backward_kernel(
             query,
             key,
@@ -770,10 +768,8 @@ def flex_attention_backward(*args, **kwargs):
             grad_out,
             scale,
             kernel_options,
-            fw_subgraph_buffer=None if score_is_trivial else fw_subgraph_buffer,
-            joint_subgraph_buffer=None
-            if score_is_trivial
-            else joint_outputs.grad_input,
+            fw_subgraph_buffer=fw_subgraph_buffer,
+            joint_subgraph_buffer=joint_outputs.grad_input,
             score_mod_other_buffers=list(score_mod_other_buffers),
             mask_graph_buffer=mask_graph_buffer if needs_block_mask else None,
             q_num_blocks=q_num_blocks if needs_block_mask else None,

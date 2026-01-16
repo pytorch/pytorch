@@ -53,14 +53,11 @@ class Embedding(nn.Embedding):
             # pyrefly: ignore [bad-argument-type]
             **factory_kwargs,
         )
-        if not qconfig:
-            raise AssertionError("qconfig must be provided for QAT module")
-        weight_qscheme = qconfig.weight().qscheme
-        if weight_qscheme != torch.per_channel_affine_float_qparams:
-            raise AssertionError(
-                "Embedding weights requires a qscheme of torch.per_channel_affine_float_qparams Got "
-                + str(weight_qscheme)
-            )
+        assert qconfig, "qconfig must be provided for QAT module"
+        assert qconfig.weight().qscheme == torch.per_channel_affine_float_qparams, (
+            "Embedding weights requires a qscheme of torch.per_channel_affine_float_qparams Got "
+            + str(qconfig.weight().qscheme)
+        )
         self.qconfig = qconfig
         self.weight_fake_quant = qconfig.weight(factory_kwargs=factory_kwargs)
 
@@ -82,23 +79,19 @@ class Embedding(nn.Embedding):
         Args: `mod` a float module, either produced by torch.ao.quantization utilities
         or directly from user
         """
-        if type(mod) is not cls._FLOAT_MODULE:
-            raise AssertionError(
-                " qat."
-                + cls.__name__
-                + ".from_float only works for "
-                + cls._FLOAT_MODULE.__name__
-            )
-        if not hasattr(mod, "qconfig"):
-            raise AssertionError("Input float module must have qconfig defined")
-        if not mod.qconfig:
-            raise AssertionError("Input float module must have a valid qconfig")
+        assert type(mod) is cls._FLOAT_MODULE, (
+            " qat."
+            + cls.__name__
+            + ".from_float only works for "
+            + cls._FLOAT_MODULE.__name__
+        )
+        assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
+        assert mod.qconfig, "Input float module must have a valid qconfig"
         weight_qscheme = mod.qconfig.weight().qscheme  # type: ignore[union-attr, operator]
-        if weight_qscheme != torch.per_channel_affine_float_qparams:
-            raise AssertionError(
-                "Embedding weights requires a qscheme of torch.per_channel_affine_float_qparams Got "
-                + str(weight_qscheme)
-            )
+        assert weight_qscheme == torch.per_channel_affine_float_qparams, (
+            "Embedding weights requires a qscheme of torch.per_channel_affine_float_qparams Got "
+            + str(weight_qscheme)
+        )
 
         qconfig = mod.qconfig
         qat_embedding_bag = cls(
@@ -179,14 +172,11 @@ class EmbeddingBag(nn.EmbeddingBag):
             padding_idx,
             **factory_kwargs,
         )
-        if not qconfig:
-            raise AssertionError("qconfig must be provided for QAT module")
-        weight_qscheme = qconfig.weight().qscheme
-        if weight_qscheme != torch.per_channel_affine_float_qparams:
-            raise AssertionError(
-                "Embedding Bag weights requires a qscheme of torch.per_channel_affine_float_qparams Got "
-                + str(weight_qscheme)
-            )
+        assert qconfig, "qconfig must be provided for QAT module"
+        assert qconfig.weight().qscheme == torch.per_channel_affine_float_qparams, (
+            "Embedding Bag weights requires a qscheme of torch.per_channel_affine_float_qparams Got "
+            + str(qconfig.weight().qscheme)
+        )
         self.qconfig = qconfig
         self.weight_fake_quant = qconfig.weight(factory_kwargs=factory_kwargs)
 
@@ -212,23 +202,19 @@ class EmbeddingBag(nn.EmbeddingBag):
         Args: `mod` a float module, either produced by torch.ao.quantization utilities
         or directly from user
         """
-        if type(mod) is not cls._FLOAT_MODULE:
-            raise AssertionError(
-                " qat."
-                + cls.__name__
-                + ".from_float only works for "
-                + cls._FLOAT_MODULE.__name__
-            )
-        if not hasattr(mod, "qconfig"):
-            raise AssertionError("Input float module must have qconfig defined")
-        if not mod.qconfig:
-            raise AssertionError("Input float module must have a valid qconfig")
+        assert type(mod) is cls._FLOAT_MODULE, (
+            " qat."
+            + cls.__name__
+            + ".from_float only works for "
+            + cls._FLOAT_MODULE.__name__
+        )
+        assert hasattr(mod, "qconfig"), "Input float module must have qconfig defined"
+        assert mod.qconfig, "Input float module must have a valid qconfig"
         weight_qscheme = mod.qconfig.weight().qscheme  # type: ignore[union-attr, operator]
-        if weight_qscheme != torch.per_channel_affine_float_qparams:
-            raise AssertionError(
-                "Embedding Bag weights requires a qscheme of torch.per_channel_affine_float_qparams Got "
-                + str(weight_qscheme)
-            )
+        assert weight_qscheme == torch.per_channel_affine_float_qparams, (
+            "Embedding Bag weights requires a qscheme of torch.per_channel_affine_float_qparams Got "
+            + str(weight_qscheme)
+        )
 
         qconfig = mod.qconfig
         qat_embedding_bag = cls(

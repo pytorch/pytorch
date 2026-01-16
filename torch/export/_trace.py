@@ -256,12 +256,11 @@ def detect_shape_env(inputs: Any = None):
     if shape_envs:
         shape_env, desc1, i1 = shape_envs[0]
         for m, desc2, i2 in shape_envs[1:]:
-            if shape_env is not m:
-                raise AssertionError(
-                    f"shape env ({shape_env}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}\n\n"
-                    f"shape env from {desc1} {i1} allocated at:\n{shape_env.stack}\n"
-                    f"shape env from {desc2} {i2} allocated at:\n{m.stack}"
-                )
+            assert shape_env is m, (
+                f"shape env ({shape_env}) from {desc1} {i1} doesn't match mode ({m}) from {desc2} {i2}\n\n"
+                f"shape env from {desc1} {i1} allocated at:\n{shape_env.stack}\n"
+                f"shape env from {desc2} {i2} allocated at:\n{m.stack}"
+            )
         return shape_env
     else:
         return None
@@ -308,10 +307,9 @@ def _extract_fake_inputs(gm, args, kwargs):
 
     if detected_fake_mode:
         if detected_shape_env:
-            if detected_shape_env is not detected_fake_mode.shape_env:
-                raise AssertionError(
-                    "Detected shape env does not match fake mode's shape env"
-                )
+            assert detected_shape_env is detected_fake_mode.shape_env, (
+                "Detected shape env does not match fake mode's shape env"
+            )
         fake_mode = detected_fake_mode
     elif detected_shape_env:
         fake_mode = FakeTensorMode(shape_env=detected_shape_env, export=True)
@@ -348,11 +346,10 @@ def _replace_param_buffer_names(param_buffer_table, sig):
 
 
 def _convert_to_positional_args(orig_arg_names, args, kwargs):
-    if len(orig_arg_names) != len(args) + len(kwargs):
-        raise AssertionError(
-            f"Total number of arg names is expected to be {len(orig_arg_names)} "
-            f"but got {len(args)} positional args, {len(kwargs)} kwargs."
-        )
+    assert len(orig_arg_names) == len(args) + len(kwargs), (
+        f"Total number of arg names is expected to be {len(orig_arg_names)} "
+        f"but got {len(args)} positional args, {len(kwargs)} kwargs."
+    )
     reordered_kwargs = [kwargs[kw_name] for kw_name in orig_arg_names[len(args) :]]
     return (
         *args,
@@ -380,8 +377,7 @@ def _normalize_nn_module_stack(gm_torch_level, root_cls):
                     if path == root and ty is root_cls:
                         add_root = False
                 else:
-                    if not isinstance(ty, str):
-                        raise AssertionError(f"expected ty to be str, got {type(ty)}")
+                    assert isinstance(ty, str)
             if add_root:
 
                 def normalize_path(path):
@@ -425,20 +421,14 @@ def _get_param_buffer_mapping(
     for dynamo_name, dynamo_param in traced_module.named_parameters(
         remove_duplicate=False
     ):
-        if dynamo_name in param_buffer_table:
-            raise AssertionError(
-                f"dynamo_name {dynamo_name!r} already exists in param_buffer_table"
-            )
+        assert dynamo_name not in param_buffer_table
         if id(dynamo_param) in param_lookup:
             param_buffer_table[dynamo_name] = param_lookup[id(dynamo_param)]
 
     for dynamo_name, dynamo_buffer in traced_module.named_buffers(
         remove_duplicate=False
     ):
-        if dynamo_name in param_buffer_table:
-            raise AssertionError(
-                f"dynamo_name {dynamo_name!r} already exists in param_buffer_table for buffer"
-            )
+        assert dynamo_name not in param_buffer_table
         if id(dynamo_buffer) in buffer_lookup:
             param_buffer_table[dynamo_name] = buffer_lookup[id(dynamo_buffer)]
 
@@ -453,20 +443,14 @@ def _preserve_requires_grad_pass(
     flat_fake_args: list[Any],
 ):
     placeholders = [node for node in gm.graph.nodes if node.op == "placeholder"]
-    if len(sig.input_specs) != len(placeholders):
-        raise AssertionError(
-            f"input_specs length {len(sig.input_specs)} does not match placeholders length {len(placeholders)}"
-        )
+    assert len(sig.input_specs) == len(placeholders)
     i = 0
     for node, spec in zip(placeholders, sig.input_specs):
         if spec.kind in (
             InputKind.PARAMETER,
             InputKind.BUFFER,
         ):
-            if spec.target is None:
-                raise AssertionError(
-                    f"spec.target must not be None for kind {spec.kind}"
-                )
+            assert spec.target is not None
             node.meta["val"].requires_grad = fake_params_buffers[
                 spec.target
             ].requires_grad
@@ -476,21 +460,14 @@ def _preserve_requires_grad_pass(
                 node.meta["val"].requires_grad = fake_arg.requires_grad
             i += 1
         elif spec.kind == InputKind.CONSTANT_TENSOR:
-            if spec.target is None:
-                raise AssertionError(
-                    "spec.target must not be None for CONSTANT_TENSOR kind"
-                )
+            assert spec.target is not None
             constant = constants[spec.target]
             if isinstance(constant, torch.Tensor):
                 # If the tensor is not leaf, it should already have a correct requires grad field
                 if node.meta["val"].is_leaf:
                     node.meta["val"].requires_grad = constant.requires_grad
                 else:
-                    if node.meta["val"].requires_grad != constant.requires_grad:
-                        raise AssertionError(
-                            f"node requires_grad {node.meta['val'].requires_grad} does not match "
-                            f"constant requires_grad {constant.requires_grad}"
-                        )
+                    assert node.meta["val"].requires_grad == constant.requires_grad
         elif spec.kind in (InputKind.CUSTOM_OBJ, InputKind.TOKEN):
             continue
         else:
@@ -514,10 +491,7 @@ def _remap_constants(
             InputKind.CUSTOM_OBJ,
         ):
             orig_target = spec.target
-            if orig_target is None:
-                raise AssertionError(
-                    f"spec.target must not be None for kind {spec.kind}"
-                )
+            assert orig_target is not None
             targets = remap_table.get(orig_target, [orig_target])
             spec.target = targets[0]
 
@@ -651,8 +625,7 @@ def _produce_aten_artifact(
                 node.meta.pop("stack_trace", None)
 
     # Prettify names for placeholder nodes.
-    if export_graph_signature is None:
-        raise AssertionError("export_graph_signature must not be None")
+    assert export_graph_signature is not None
     if _prettify_placeholder_names:
         placeholder_naming_pass(
             gm,
@@ -775,10 +748,7 @@ def _make_module_call_graph(
         ModuleCallEntry(fqn=fqn, signature=module_call_signatures.get(fqn))
         for fqn in _EXPORT_MODULE_HIERARCHY  # type: ignore[union-attr]
     ]
-    if original[0].fqn != "":
-        raise AssertionError(
-            f"expected first fqn to be empty string, got {original[0].fqn!r}"
-        )
+    assert original[0].fqn == ""
     original[0].signature = ModuleCallSignature(
         inputs=[],
         outputs=[],
@@ -960,8 +930,7 @@ def _aot_export_joint_with_descriptors(
         joint_with_descriptors._aot_graph_capture,
     )
 
-    if not isinstance(gm, torch.fx.GraphModule):
-        raise AssertionError(f"expected gm to be torch.fx.GraphModule, got {type(gm)}")
+    assert isinstance(gm, torch.fx.GraphModule)
 
     # Create GraphSignature from the metadata
     graph_signature = create_graph_signature(
@@ -1033,10 +1002,7 @@ def _export_to_aten_ir(
                 new_gm.meta.update(old_gm.meta)
             old_output_node = list(old_gm.graph.nodes)[-1]
             new_output_node = list(new_gm.graph.nodes)[-1]
-            if old_output_node.op != "output" or new_output_node.op != "output":
-                raise AssertionError(
-                    f"expected both output nodes to have op='output', got old={old_output_node.op!r}, new={new_output_node.op!r}"
-                )
+            assert old_output_node.op == "output" and new_output_node.op == "output"
             # make sure we don't override any meta
             if "desc" in new_output_node.meta:
                 del new_output_node.meta["desc"]
@@ -1128,8 +1094,7 @@ def _rewrite_dynamo_tensor_constants(
     """
     for spec in graph_signature.input_specs:
         if spec.kind == InputKind.BUFFER:
-            if spec.target is None:
-                raise AssertionError("spec.target must not be None for BUFFER kind")
+            assert spec.target is not None
             value = traced_mod_buffers[spec.target]
             if value not in orig_mod_buffers:
                 # This was a tensor constant erroneously marked as a buffer.
@@ -1149,14 +1114,8 @@ def _move_non_persistent_buffers_to_tensor_constants(
     """
     for spec in graph_signature.input_specs:
         if spec.kind == InputKind.BUFFER and not spec.persistent:
-            if spec.target is None:
-                raise AssertionError(
-                    "spec.target must not be None for non-persistent BUFFER kind"
-                )
-            if spec.target in constants:
-                raise AssertionError(
-                    f"spec.target {spec.target!r} should not already be in constants"
-                )
+            assert spec.target is not None
+            assert spec.target not in constants
             constants[spec.target] = orig_mod.get_buffer(spec.target)  # type: ignore[arg-type]
 
 
@@ -1263,14 +1222,8 @@ def get_ep_stats(ep: ExportedProgram) -> dict[str, Any]:
             if node.op != "call_function":
                 continue
             op_count += 1
-            if not hasattr(node.target, "__module__"):
-                raise AssertionError(
-                    f"node.target {node.target} must have __module__ attribute"
-                )
-            if not hasattr(node.target, "__name__"):
-                raise AssertionError(
-                    f"node.target {node.target} must have __name__ attribute"
-                )
+            assert hasattr(node.target, "__module__")
+            assert hasattr(node.target, "__name__")
             op_set.add(f"{node.target.__module__}.{node.target.__name__}")
     return {"op_count": op_count, "op_set": op_set}
 
@@ -1463,12 +1416,10 @@ def _get_module_call_graph(
         if not strict_mode_export:
             _rewrite_tracepoint_node(gm)
         res = CollectTracepointsPass(module_call_signatures, export_graph_signature)(gm)
-        if res is None:
-            raise AssertionError("CollectTracepointsPass returned None")
+        assert res is not None
         gm = res.graph_module
 
-    if _EXPORT_MODULE_HIERARCHY is None:
-        raise AssertionError("_EXPORT_MODULE_HIERARCHY must not be None")
+    assert _EXPORT_MODULE_HIERARCHY is not None
     module_call_graph = _make_module_call_graph(
         in_spec,
         out_spec,
@@ -1523,8 +1474,7 @@ def _get_range_constraints(
 
 
 def _get_inline_constraints(fake_mode: FakeTensorMode):
-    if fake_mode.shape_env is None:
-        raise AssertionError("fake_mode.shape_env must not be None")
+    assert fake_mode.shape_env is not None
     return {
         k: v
         for k, v in fake_mode.shape_env.var_to_range.items()
@@ -1604,10 +1554,9 @@ def _strict_export(
             attr = getattr(gm_torch_level, node.target)
             # Checks if it is not a HigherOrderOp branch or a module
             if not isinstance(attr, torch.nn.Module):
-                if dynamo_fake_mode is None:
-                    raise AssertionError(
-                        "Cannot find dynamo_fake_mode. This could be due to the exported graph module have no placeholders."
-                    )
+                assert dynamo_fake_mode is not None, (
+                    "Cannot find dynamo_fake_mode. This could be due to the exported graph module have no placeholders."
+                )
                 node.meta["val"] = dynamo_fake_mode.from_tensor(
                     attr, static_shapes=True
                 )
@@ -1615,10 +1564,7 @@ def _strict_export(
     # Fix the graph output signature to be tuple if scalar
 
     # gm_torch_level.graph._codegen is made a _PyTreeCodeGen in rewrite_signature in eval_frame.py
-    if not isinstance(gm_torch_level.graph._codegen, torch.fx.graph._PyTreeCodeGen):
-        raise AssertionError(
-            f"expected gm_torch_level.graph._codegen to be _PyTreeCodeGen, got {type(gm_torch_level.graph._codegen)}"
-        )
+    assert isinstance(gm_torch_level.graph._codegen, torch.fx.graph._PyTreeCodeGen)
 
     # Calling gm_torch_level._out_spec is not safe because gm_torch_level might be
     # a _LazyGraphModule, which does not populate _out_spec when calling recompile().
@@ -1626,10 +1572,8 @@ def _strict_export(
     out_spec = orig_out_spec = gm_torch_level.graph._codegen.pytree_info.out_spec
 
     # Used to get rid of lint type error.
-    if out_spec is None:
-        raise AssertionError("out_spec must not be None")
-    if orig_out_spec is None:
-        raise AssertionError("orig_out_spec must not be None")
+    assert out_spec is not None
+    assert orig_out_spec is not None
 
     # aot_export expect the return type to always be a tuple.
     if out_spec.type not in (list, tuple):
@@ -1831,10 +1775,7 @@ def _export_to_aten_ir_make_fx(
                     ] = get_subclass_typing_container(arg)
                     for subclass_type in subclass_types_to_instances:
                         if subclass_type not in tensor_type_to_old_getattribute:
-                            if len(subclass_types_to_instances[subclass_type]) == 0:
-                                raise AssertionError(
-                                    f"subclass_types_to_instances[{subclass_type}] must not be empty"
-                                )
+                            assert len(subclass_types_to_instances[subclass_type]) > 0
                             instance = subclass_types_to_instances[subclass_type][0]
                             # Query subclass specific attrs
                             attrs_to_proxy = set(dir(instance)) - set(dir(torch.Tensor))
@@ -1927,8 +1868,7 @@ def _export_to_aten_ir_make_fx(
             gm.graph.eliminate_dead_code(_is_impure)
 
         # create graph signature
-        if out_spec.spec is None:
-            raise AssertionError("out_spec.spec is None!")
+        assert out_spec.spec is not None, "out_spec.spec is None!"
         input_names = _graph_input_names(gm)
         output_names = _graph_output_names(gm)
         sig = GraphSignature(
@@ -2197,10 +2137,8 @@ def _non_strict_export(
         mod, aten_export_artifact.sig, aten_export_artifact.constants
     )
 
-    if out_spec is None:
-        raise AssertionError("out_spec must not be None")
-    if in_spec is None:
-        raise AssertionError("in_spec must not be None")
+    assert out_spec is not None
+    assert in_spec is not None
 
     return ExportArtifact(
         aten=aten_export_artifact,

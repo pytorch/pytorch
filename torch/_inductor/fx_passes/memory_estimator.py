@@ -6,7 +6,7 @@ from dataclasses import dataclass
 
 import torch
 import torch.fx as fx
-from torch.fx.experimental.symbolic_shapes import size_hint
+from torch.fx.experimental.symbolic_shapes import hint_int
 from torch.utils._ordered_set import OrderedSet
 from torch.utils._pytree import tree_map_only
 
@@ -14,7 +14,7 @@ from torch.utils._pytree import tree_map_only
 log = logging.getLogger(__name__)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class StorageKey:
     storage: torch.UntypedStorage
     device: torch.device
@@ -144,9 +144,7 @@ class GraphAliasTracker:
 
 
 def _size_of_default(num_bytes: int | torch.SymInt) -> int:
-    return size_hint(
-        num_bytes, fallback=torch._inductor.config.unbacked_symint_fallback
-    )
+    return hint_int(num_bytes, fallback=torch._inductor.config.unbacked_symint_fallback)
 
 
 def device_filter(device: torch.device) -> bool:
@@ -387,7 +385,7 @@ class MemoryTracker:
     def _get_storage_size(self, storage_key: StorageKey) -> int:
         """Get the size of a storage in bytes, handling symbolic shapes."""
         size_bytes = storage_key.storage.nbytes()
-        return size_hint(
+        return hint_int(
             size_bytes, fallback=torch._inductor.config.unbacked_symint_fallback
         )
 

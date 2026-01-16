@@ -8,22 +8,6 @@
 
 namespace torch::nativert {
 
-// CPU-specific launch parameters
-class CpuLaunchParams : public LaunchParams {
- public:
-  int num_cpu_threads = 0; // 0 means use all available threads
-
-  void parseAttributes(const Node* node) {
-    parseCommonAttributes(node);
-    for (const auto& attr : node->attributes()) {
-      set_from_variant<int64_t>(
-          num_cpu_threads, "num_cpu_threads", attr, [](auto v) {
-            return v >= 0;
-          });
-    }
-  }
-};
-
 namespace {
 void* _dlopen(const char* filename) {
 #if defined(_WIN32)
@@ -74,14 +58,6 @@ class CpuTritonKernelManager final : public TritonKernelManager {
       std::string kernel_bin_path,
       std::string kernel_launcher_bin_path);
   ~CpuTritonKernelManager() final = default;
-
-  std::unique_ptr<LaunchParams> createLaunchParams(
-      const Node* node) const override {
-    auto params = std::make_unique<CpuLaunchParams>();
-    params->parseAttributes(node);
-    return params;
-  }
-
   void launch(const LaunchParams& launch_params, void** args) final;
 
  private:
@@ -140,13 +116,12 @@ void CpuTritonKernelManager::load() {
 void CpuTritonKernelManager::launch(
     const LaunchParams& launch_params,
     void** args /* { ...inputs, output }*/) {
-  const auto& cpu_params = static_cast<const CpuLaunchParams&>(launch_params);
   load();
   launcher_fn_(
-      cpu_params.grid_dims.x,
-      cpu_params.grid_dims.y,
-      cpu_params.grid_dims.z,
-      cpu_params.num_cpu_threads,
+      launch_params.grid_dims.x,
+      launch_params.grid_dims.y,
+      launch_params.grid_dims.z,
+      launch_params.num_cpu_threads,
       args,
       kernel_fn_);
 }

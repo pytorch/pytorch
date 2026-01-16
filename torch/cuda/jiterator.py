@@ -57,8 +57,9 @@ class _JittedFunction:
     ):
         self.code_string = code_string
 
-        if not (return_by_ref or num_outputs == 1):
-            raise AssertionError("Return by value only works for single output.")
+        assert return_by_ref or num_outputs == 1, (
+            "Return by value only works for single output. "
+        )
         self.return_by_ref = return_by_ref
         self.num_outputs = num_outputs
 
@@ -71,15 +72,11 @@ class _JittedFunction:
     def __call__(self, *tensors: Tensor, **kwargs):
         # Jiterator follow torch.cuda's lazy initialization behavior
         # Defer checking cuda's availability at the function invocation time
-        if not self.is_cuda_available:
-            raise AssertionError(
-                "Jiterator is only supported on CUDA and ROCm GPUs, none are available."
-            )
+        assert self.is_cuda_available, (
+            "Jiterator is only supported on CUDA and ROCm GPUs, none are available."
+        )
 
-        if len(tensors) > 8:
-            raise AssertionError(
-                f"jiterator only supports up to 8 tensor inputs, got {len(tensors)}"
-            )
+        assert len(tensors) <= 8, "jiterator only supports up to 8 tensor inputs."
 
         expanded_kwargs = self.kwargs_dict.copy()
         for key, value in kwargs.items():

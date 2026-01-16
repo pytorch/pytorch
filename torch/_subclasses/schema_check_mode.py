@@ -1,32 +1,19 @@
-from __future__ import annotations
+# mypy: ignore-errors
 
+from collections import namedtuple
 from copy import deepcopy
 from itertools import combinations
-from typing import Any, NamedTuple, TYPE_CHECKING
 
 import torch
-from torch.fx.operator_schemas import _normalize_function_or_error
+from torch.fx.operator_schemas import normalize_function
 from torch.utils import _pytree as pytree
 from torch.utils._python_dispatch import TorchDispatchMode
 from torch.utils._pytree import tree_map
 
 
-if TYPE_CHECKING:
-    from collections.abc import Iterable
-
-    from torch._ops import OpOverload
-
-
-class Mutation(NamedTuple):
-    op_name: str
-    arg_name: str
-
-
-class Aliasing(NamedTuple):
-    op_name: str
-    arg_name: str
-    output_number: str
-
+# Named Tuples used within SchemaCheckMode
+Mutation = namedtuple("Mutation", ["op_name", "arg_name"])
+Aliasing = namedtuple("Aliasing", ["op_name", "arg_name", "output_number"])
 
 # Simplified naming for C++ classes
 SchemaArgument = torch._C._SchemaArgument
@@ -43,12 +30,11 @@ SchemaInfo = torch._C._SchemaInfo
 # move these 2 functions here to avoid numpy dependency in testing/_internal/common_utils.py
 
 
-def is_iterable_of_tensors(iterable: Iterable[Any]) -> bool:
+def is_iterable_of_tensors(iterable):
     # Tensor itself is iterable so we check this first
     if isinstance(iterable, torch.Tensor):
         return False
     try:
-        # pyrefly: ignore[bad-argument-type]
         if len(iterable) == 0:
             return False
         for t in iter(iterable):
@@ -59,8 +45,8 @@ def is_iterable_of_tensors(iterable: Iterable[Any]) -> bool:
     return True
 
 
-def clone_inputs(args: Iterable[Any]) -> list[Any]:
-    inputs: list[Any] = []
+def clone_inputs(args):
+    inputs = []
 
     for arg in args:
         if isinstance(arg, torch.Tensor):
@@ -78,26 +64,20 @@ class SchemaCheckMode(TorchDispatchMode):
         # Information recorded for testing purposes. For example:
         #  - incorrect schemas
         #  - overly conservative schemas
-        self.ops: list[str] = []
-        self.mutated: list[Mutation] = []
-        self.aliasing: list[Aliasing] = []
+        self.ops = []
+        self.mutated = []
+        self.aliasing = []
 
-    def reset_cache(self) -> None:
+    def reset_cache(self):
         self.ops.clear()
         self.mutated.clear()
         self.aliasing.clear()
 
-    def display_ops(self) -> None:
+    def display_ops(self):
         print(*self.ops, sep=",")
 
-    def __torch_dispatch__(
-        self,
-        func: OpOverload,
-        types: tuple[type[Any], ...],
-        args: tuple[Any, ...] = (),
-        kwargs: dict[str, Any] | None = None,
-    ) -> Any:
-        def bitwise_equal(lhs: torch.Tensor, rhs: torch.Tensor) -> bool:
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
+        def bitwise_equal(lhs, rhs):
             if lhs.is_quantized:
                 # TODO: This is only OK if can't have NaN quantized; idk if
                 # this is actually true
@@ -105,16 +85,14 @@ class SchemaCheckMode(TorchDispatchMode):
             else:
                 return torch.allclose(lhs, rhs, equal_nan=True)
 
-        def has_mutated(
-            before: Any, after: Any, md: tuple[tuple[int, ...], int] | None
-        ) -> bool:
+        def has_mutated(before, after, md):
             are_tensors = type(before) is torch.Tensor and type(after) is torch.Tensor
             if (
                 are_tensors
                 and before.layout != torch.sparse_csr
                 and after.layout != torch.sparse_csr
             ):
-                return md is not None and not (
+                return not (
                     before.size() == after.size()
                     and bitwise_equal(before, after)
                     and md[0] == after.stride()
@@ -122,7 +100,7 @@ class SchemaCheckMode(TorchDispatchMode):
                 )
             return False
 
-        def has_aliased(lhs: Any, rhs: Any) -> bool:
+        def has_aliased(lhs, rhs):
             try:
                 return torch._C._overlaps(lhs, rhs)
             except Exception as exception:
@@ -131,23 +109,21 @@ class SchemaCheckMode(TorchDispatchMode):
                 else:
                     raise exception
 
-        def standardize_name(name: str) -> str:
+        def standardize_name(name):
             return name if name != "self" else "input"
 
-        def unwrap(e: Any) -> Any:
+        def unwrap(e):
             if isinstance(e, torch.Tensor) and type(e) is not torch.Tensor:
                 try:
-                    # pyrefly: ignore[missing-attribute]
                     return e.elem
                 except AttributeError:
                     return e
             return e
 
-        def parse_metadata(e: Any) -> tuple[tuple[int, ...], int] | None:
+        def parse_metadata(e):
             if isinstance(e, torch.Tensor):
                 if type(e) is not torch.Tensor:
                     try:
-                        # pyrefly: ignore[missing-attribute]
                         current = e.elem
                         return (
                             deepcopy(current.stride()),
@@ -163,7 +139,7 @@ class SchemaCheckMode(TorchDispatchMode):
         self.ops.append(func._schema.name)
 
         # Clone and process arguments and outputs
-        pre_arguments = _normalize_function_or_error(
+        pre_arguments = normalize_function(
             func, args, kwargs, normalize_to_only_use_kwargs=True
         ).kwargs
 
@@ -227,7 +203,7 @@ class SchemaCheckMode(TorchDispatchMode):
 Dispatcher operators below autograd are not allowed to directly return inputs.
 However, we found that `outputs[{str(j)}] is {name}"""
                             )
-                if md is not None and any(
+                if any(
                     has_mutated(a, b, c)
                     for a, b, c in zip(
                         pytree.tree_leaves(before), pytree.tree_leaves(after), md

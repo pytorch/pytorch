@@ -53,8 +53,9 @@ def _new_tensor(
     new_stride: Optional[Sequence[int]] = None,
 ) -> Any:
     if isinstance(t, torch.Tensor):
-        if type(t) not in (FunctionalTensor, FakeTensor, torch.Tensor):
-            raise AssertionError(f"No subclasses support for now, found {type(t)}")
+        assert type(t) in (FunctionalTensor, FakeTensor, torch.Tensor), (
+            f"No subclasses support for now, found {type(t)}"
+        )
         return torch.empty_strided(
             t.size() if new_shape is None else new_shape,
             t.stride() if new_stride is None else new_stride,
@@ -83,8 +84,9 @@ def _redistribute(
         disable_proxy_modes_tracing(),
     ):
         fake_mode = detect_fake_mode(args)
-        if fake_mode is None:
-            raise AssertionError("defer_inlining() is only supported for FakeTensors")
+        assert fake_mode is not None, (
+            "defer_inlining() is only supported for FakeTensors"
+        )
 
         with fake_mode:
             new_args = list(pytree.tree_map(_new_tensor, args))
@@ -103,11 +105,10 @@ def _redistribute(
                 )
 
             new_args = tuple(new_args)
-            if not all(
+            assert all(
                 isinstance(t, (FakeTensor, int, torch.SymInt, type(None)))
                 for t in new_args
-            ):
-                raise AssertionError(f"Unexpected element in {args=}")
+            ), f"Unexpected element in {args=}"
 
     return new_args
 
@@ -115,10 +116,7 @@ def _redistribute(
 def redistribute_fw_inputs(
     global_args: Any, all_placements: Any, mesh: Any, _: Optional[int] = None
 ) -> GraphArg:
-    if len(global_args) != len(all_placements):
-        raise AssertionError(
-            f"global_args length ({len(global_args)}) != all_placements length ({len(all_placements)})"
-        )
+    assert len(global_args) == len(all_placements)
     return _redistribute(
         global_args,
         all_placements,
@@ -130,14 +128,9 @@ def redistribute_fw_inputs(
 def redistribute_fw_outputs(
     local_outs: Any, all_placements: Any, mesh: Any, num_activations: int
 ) -> GraphArg:
-    if len(local_outs) != len(all_placements) + num_activations:
-        raise AssertionError(
-            f"local_outs length ({len(local_outs)}) != "
-            f"all_placements length ({len(all_placements)}) + num_activations ({num_activations})"
-        )
+    assert len(local_outs) == len(all_placements) + num_activations
     num_fw_outs = len(local_outs) - num_activations
-    if num_fw_outs <= 0:
-        raise AssertionError(f"num_fw_outs must be > 0, got {num_fw_outs}")
+    assert num_fw_outs > 0
     outs, activations = local_outs[:num_fw_outs], local_outs[num_fw_outs:]
     return (
         *_redistribute(
@@ -153,14 +146,9 @@ def redistribute_fw_outputs(
 def redistribute_bw_inputs(
     global_args: Any, all_placements: Any, mesh: Any, num_activations: int
 ) -> GraphArg:
-    if len(global_args) != len(all_placements) + num_activations:
-        raise AssertionError(
-            f"global_args length ({len(global_args)}) != "
-            f"all_placements length ({len(all_placements)}) + num_activations ({num_activations})"
-        )
+    assert len(global_args) == len(all_placements) + num_activations
     activations, inputs = global_args[:num_activations], global_args[num_activations:]
-    if len(inputs) <= 0:
-        raise AssertionError("inputs must not be empty")
+    assert len(inputs) > 0
     local_inputs = _redistribute(
         inputs,
         all_placements,
@@ -176,10 +164,7 @@ def redistribute_bw_inputs(
 def redistribute_bw_outputs(
     local_outs: Any, all_placements: Any, mesh: Any, _: Optional[int] = None
 ) -> GraphArg:
-    if len(local_outs) != len(all_placements):
-        raise AssertionError(
-            f"local_outs length ({len(local_outs)}) != all_placements length ({len(all_placements)})"
-        )
+    assert len(local_outs) == len(all_placements)
     return _redistribute(
         local_outs,
         all_placements,
@@ -221,16 +206,10 @@ def create_hop_fw_bw(
     from torch.fx.experimental.proxy_tensor import disable_proxy_modes_tracing, make_fx
 
     local_map_kwargs = fw_gm.meta["local_map_kwargs"]  # type: ignore[attr-defined]
-    if "in_placements" not in local_map_kwargs:
-        raise AssertionError("'in_placements' not found in local_map_kwargs")
-    if "out_placements" not in local_map_kwargs:
-        raise AssertionError("'out_placements' not found in local_map_kwargs")
-    if "device_mesh" not in local_map_kwargs:
-        raise AssertionError("'device_mesh' not found in local_map_kwargs")
-    if len(local_map_kwargs["in_placements"]) != len(_args):
-        raise AssertionError(
-            f"in_placements length ({len(local_map_kwargs['in_placements'])}) != _args length ({len(_args)})"
-        )
+    assert "in_placements" in local_map_kwargs
+    assert "out_placements" in local_map_kwargs
+    assert "device_mesh" in local_map_kwargs
+    assert len(local_map_kwargs["in_placements"]) == len(_args)
 
     dummy_aot_config = AOTConfig(
         fw_compiler=None,  # type: ignore[arg-type]
@@ -258,16 +237,11 @@ def create_hop_fw_bw(
                     local_map_kwargs["in_placements"],
                     local_map_kwargs["device_mesh"],
                 )
-                if len(fw_inputs) != len(local_map_kwargs["in_placements"]):
-                    raise AssertionError(
-                        f"fw_inputs length ({len(fw_inputs)}) != "
-                        f"in_placements length ({len(local_map_kwargs['in_placements'])})"
-                    )
+                assert len(fw_inputs) == len(local_map_kwargs["in_placements"])
 
-            if not all(
+            assert all(
                 isinstance(t, (FakeTensor, int, torch.SymInt)) for t in fw_inputs
-            ):
-                raise AssertionError(f"Unexpected element in {fw_inputs=}")
+            ), f"Unexpected element in {fw_inputs=}"
 
             ctx = (
                 fake_mode.shape_env.ignore_fresh_unbacked_symbols
@@ -301,10 +275,9 @@ def create_hop_fw_bw(
                     # from the dynamo graph body to the local_map graph body.
                     # This is required for fx_traceback.annotate for work.
                     fw_out = torch.fx.Interpreter(fw_gm).run(*args)
-                    if not isinstance(fw_out, tuple):
-                        raise AssertionError(
-                            "Dynamo traced submodule should return tuple"
-                        )
+                    assert isinstance(fw_out, tuple), (
+                        "Dynamo traced submodule should return tuple"
+                    )
                     return fw_out, [
                         bool(isinstance(ret, torch.Tensor) and ret.requires_grad)
                         for ret in fw_out
@@ -317,10 +290,9 @@ def create_hop_fw_bw(
             )(primals, tangents)
             from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
 
-            if has_free_unbacked_symbols((*fw_outs, *grads)):
-                raise AssertionError(
-                    "Unbacked symints leaking outside of the joint graph is not yet supported."
-                )
+            assert not has_free_unbacked_symbols((*fw_outs, *grads)), (
+                "Unbacked symints leaking outside of the joint graph is not yet supported."
+            )
 
             maybe_clone = clone_outputs_aliasing_inputs(primals_and_tangents)
             # put grads first to work with existing hop utils
@@ -387,26 +359,16 @@ def create_hop_fw_bw(
         expected_fw_outputs = len(fw_kwargs["out_placements"])
         actual_fw_inputs = len(new_fw_gm.graph.find_nodes(op="placeholder"))
         actual_fw_outputs = num_fw_outputs
-        if expected_fw_inputs != actual_fw_inputs:
-            raise AssertionError(
-                f"expected_fw_inputs ({expected_fw_inputs}) != actual_fw_inputs ({actual_fw_inputs})"
-            )
-        if expected_fw_outputs != actual_fw_outputs:
-            raise AssertionError(
-                f"expected_fw_outputs ({expected_fw_outputs}) != actual_fw_outputs ({actual_fw_outputs})"
-            )
+        assert expected_fw_inputs == actual_fw_inputs
+        assert expected_fw_outputs == actual_fw_outputs
 
         # Validate Activations
-        if len(new_fw_gm.graph.find_nodes(op="output")) != 1:
-            raise AssertionError(
-                f"Expected exactly 1 output node, got {len(new_fw_gm.graph.find_nodes(op='output'))}"
-            )
+        assert len(new_fw_gm.graph.find_nodes(op="output")) == 1
         num_activations = (
             len(new_fw_gm.graph.find_nodes(op="output")[0].args[0]) - num_fw_outputs
         )
         # tensors first, then symints
-        if num_activations < 0:
-            raise AssertionError(f"num_activations must be >= 0, got {num_activations}")
+        assert num_activations >= 0
 
         # Validate Backward
         bw_kwargs = new_bw_gm.meta["local_map_kwargs"]
@@ -415,33 +377,13 @@ def create_hop_fw_bw(
         actual_bw_inputs = (
             len(new_bw_gm.graph.find_nodes(op="placeholder")) - num_activations
         )
-        if actual_bw_inputs <= 0:
-            raise AssertionError(
-                f"actual_bw_inputs must be > 0, got {actual_bw_inputs}"
-            )
-        if expected_fw_inputs + expected_bw_inputs != len(primals_and_tangents):
-            raise AssertionError(
-                f"expected_fw_inputs ({expected_fw_inputs}) + expected_bw_inputs ({expected_bw_inputs}) "
-                f"!= primals_and_tangents length ({len(primals_and_tangents)})"
-            )
-        if actual_fw_inputs + actual_bw_inputs != len(primals_and_tangents):
-            raise AssertionError(
-                f"actual_fw_inputs ({actual_fw_inputs}) + actual_bw_inputs ({actual_bw_inputs}) "
-                f"!= primals_and_tangents length ({len(primals_and_tangents)})"
-            )
-        if len(new_bw_gm.graph.find_nodes(op="output")) != 1:
-            raise AssertionError(
-                f"Expected exactly 1 bw output node, got {len(new_bw_gm.graph.find_nodes(op='output'))}"
-            )
+        assert actual_bw_inputs > 0
+        assert expected_fw_inputs + expected_bw_inputs == len(primals_and_tangents)
+        assert actual_fw_inputs + actual_bw_inputs == len(primals_and_tangents)
+        assert len(new_bw_gm.graph.find_nodes(op="output")) == 1
         actual_bw_outputs = len(new_bw_gm.graph.find_nodes(op="output")[0].args[0])
-        if expected_bw_inputs != actual_bw_inputs:
-            raise AssertionError(
-                f"expected_bw_inputs ({expected_bw_inputs}) != actual_bw_inputs ({actual_bw_inputs})"
-            )
-        if expected_bw_outputs != actual_bw_outputs:
-            raise AssertionError(
-                f"expected_bw_outputs ({expected_bw_outputs}) != actual_bw_outputs ({actual_bw_outputs})"
-            )
+        assert expected_bw_inputs == actual_bw_inputs
+        assert expected_bw_outputs == actual_bw_outputs
 
         new_fw_gm.meta["num_activations"] = num_activations
         new_fw_gm.meta["is_backward"] = False
@@ -490,10 +432,9 @@ class LocalMapAutogradOp(torch.autograd.Function):
             coerce_to_expected_memory_format,
         )
 
-        if ctx.pos != sorted(ctx.pos):
-            raise AssertionError(
-                "Interleaving saved tensor activations and symints is not expected from min-cut partitioner."
-            )
+        assert ctx.pos == sorted(ctx.pos), (
+            "Interleaving saved tensor activations and symints is not expected from min-cut partitioner."
+        )
         ctx.pos = list(
             reversed(ctx.pos)
         )  # make saved_tensors_and_symints return symints first
@@ -502,10 +443,9 @@ class LocalMapAutogradOp(torch.autograd.Function):
             # Filter out grads that are None or do not require_grad.
             # The AOTAutograd utils we rely on force this assumption.
             grads = [_grads[i] for i in ctx.filtered_grads_idx]
-            if len(grads) != len(ctx.expected_tangent_metadata):
-                raise AssertionError(
-                    f"{len(grads)=} vs {len(ctx.expected_tangent_metadata)}"
-                )
+            assert len(grads) == len(ctx.expected_tangent_metadata), (
+                f"{len(grads)=} vs {len(ctx.expected_tangent_metadata)}"
+            )
 
             for i, meta in ctx.expected_tangent_metadata.items():
                 grads[i] = coerce_to_expected_memory_format(grads[i], meta)
@@ -525,8 +465,9 @@ def autograd_key(
     **kwargs: Any,
 ) -> Any:
     local_map_kwargs = fw_gm.meta["local_map_kwargs"]  # type: ignore[attr-defined]
-    if local_map_kwargs.get("in_grad_placements", None) is not None:
-        raise AssertionError("local_map in_grad_placements are not yet supported.")
+    assert local_map_kwargs.get("in_grad_placements", None) is None, (
+        "local_map in_grad_placements are not yet supported."
+    )
     if _DEFER_INLINING:
         fw_gm, bw_gm, num_fw_ins, num_fw_outs, filtered_grads_idx = create_hop_fw_bw(
             fw_gm, *args
@@ -543,8 +484,7 @@ def autograd_key(
 def functional_mode_key(
     ctx: Any, gm: GraphModule, *args: Any, **kwargs: Any
 ) -> tuple[torch.Tensor]:
-    if kwargs:
-        raise AssertionError(f"kwargs must be empty, got {kwargs}")
+    assert not kwargs
 
     unwrapped_inputs = ctx.unwrap_tensors(args)
     with ctx.redispatch_to_next():
@@ -594,10 +534,10 @@ def proxy_mode_key_common(
     *args: Any,
     **kwargs: Any,
 ) -> tuple[torch.Tensor]:
-    if proxy_mode is None:
-        raise AssertionError("Mode should always be enabled for python fallback key")
-    if len(kwargs) != 0:
-        raise AssertionError(f"kwargs must be empty, got {kwargs}")
+    assert proxy_mode is not None, (
+        "Mode should always be enabled for python fallback key"
+    )
+    assert len(kwargs) == 0
 
     example_out = call_hop(*args, **kwargs)
     proxy_args = pytree.tree_map(proxy_mode.tracer.unwrap_proxy, args)  # type: ignore[union-attr]
@@ -607,8 +547,7 @@ def proxy_mode_key_common(
     )
 
     # extract local_map args, post-dispatch operates on GraphModules
-    if not gm.meta["local_map_kwargs"]:
-        raise AssertionError("gm.meta['local_map_kwargs'] must be set")
+    assert gm.meta["local_map_kwargs"]
     local_map_kwargs = gm.meta["local_map_kwargs"]
 
     # propagate local_map args to the call_function node

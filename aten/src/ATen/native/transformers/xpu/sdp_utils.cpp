@@ -145,22 +145,9 @@ inline bool check_flash_causal_non_square_seqlens(
   return true;
 }
 
-inline bool check_flash_attention_deterministic(
-    const sdp_params& params,
-    bool debug) {
-  auto& ctx = at::globalContext();
-  if (ctx.deterministicAlgorithms()) {
-    if (debug) {
-      TORCH_WARN("Flash attention XPU is not deterministic.");
-    }
-    return false;
-  }
-  return true;
-}
-
 bool can_use_flash_attention(sdp_params const& params, bool debug) {
   constexpr auto constraints =
-      std::array<bool (*)(sdp_params const&, bool), 14>{
+      std::array<bool (*)(sdp_params const&, bool), 13>{
           is_flash_attention_available,
           check_flash_attention_hardware_support,
           check_for_attn_mask,
@@ -173,8 +160,7 @@ bool can_use_flash_attention(sdp_params const& params, bool debug) {
           check_flash_causal_non_square_seqlens,
           check_flash_attention_datatype,
           check_flash_attention_head_dim_size,
-          check_flash_attention_layout,
-          check_flash_attention_deterministic};
+          check_flash_attention_layout};
   for (auto& constraint : constraints) {
     if (!constraint(params, debug)) {
       return false;

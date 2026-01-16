@@ -24,10 +24,7 @@ class AutogradStateOpsFailSafeguard(TorchFunctionMode):
         # any active PROXY. This is to allow the autograd ops out of tracing.
         current_state = torch._C.is_grad_enabled()
         if func in unsupported_grad_mode_ops:
-            if len(args) != 1:
-                raise AssertionError(
-                    f"Expected exactly 1 argument for grad mode op, but got {len(args)}"
-                )
+            assert len(args) == 1
             changed_state = args[0]
             mode = torch._C._get_dispatch_mode(torch._C._TorchDispatchModeKey.PROXY)
             # Intend to check if it's not the pre_dispatch mode. It's allowed to use

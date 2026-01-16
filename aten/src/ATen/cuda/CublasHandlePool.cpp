@@ -216,12 +216,7 @@ size_t getChosenWorkspaceSize() {
 size_t getCUDABlasLtWorkspaceSize() {
   size_t pool_size = parseCUDABlasLtWorkspaceSize();
 #ifndef USE_ROCM
-  static auto unified_env_var = c10::utils::check_env(TORCH_CUBLASLT_UNIFIED_WORKSPACE);
-#if !defined(FBCODE)
-  static bool unified = (unified_env_var == std::nullopt) || (unified_env_var == true);
-#else
-  static bool unified = unified_env_var == true;
-#endif
+  static bool unified = c10::utils::check_env(TORCH_CUBLASLT_UNIFIED_WORKSPACE) == true;
   if (unified) {
     auto cublasWorkspaceSize = getChosenWorkspaceSize();
     if (cublasWorkspaceSize < pool_size) {

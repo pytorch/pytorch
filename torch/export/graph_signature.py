@@ -96,9 +96,10 @@ class InputSpec:
 
     def __post_init__(self):
         if self.kind == InputKind.BUFFER:
-            if self.persistent is None:
-                raise AssertionError("Failed to specify persistent flag on BUFFER.")
-        if not isinstance(
+            assert self.persistent is not None, (
+                "Failed to specify persistent flag on BUFFER."
+            )
+        assert isinstance(
             self.arg,
             (
                 TensorArgument,
@@ -109,8 +110,7 @@ class InputSpec:
                 CustomObjArgument,
                 TokenArgument,
             ),
-        ):
-            raise AssertionError(f"expected valid arg type, got {type(self.arg)}")
+        ), f"got {type(self.arg)}"
 
     def __str__(self):
         target = "" if self.target is None else f" target='{self.target}'"
@@ -136,7 +136,7 @@ class OutputSpec:
     target: str | None
 
     def __post_init__(self):
-        if not isinstance(
+        assert isinstance(
             self.arg,
             (
                 TensorArgument,
@@ -147,8 +147,7 @@ class OutputSpec:
                 TokenArgument,
                 CustomObjArgument,
             ),
-        ):
-            raise AssertionError(f"expected valid arg type, got {self.arg}")
+        ), self.arg
 
     def __str__(self):
         target = "" if self.target is None else f" target='{self.target}'"
@@ -457,32 +456,16 @@ class ExportGraphSignature:
         gradients_to_user_inputs: dict[str, str] = {}
         for spec in self.output_specs:
             if spec.kind == OutputKind.LOSS_OUTPUT:
-                if loss_output is not None:
-                    raise AssertionError("multiple LOSS_OUTPUT specs found")
-                if not isinstance(spec.arg, TensorArgument):
-                    raise AssertionError(
-                        f"expected TensorArgument for LOSS_OUTPUT, got {type(spec.arg)}"
-                    )
+                assert loss_output is None
+                assert isinstance(spec.arg, TensorArgument)
                 loss_output = spec.arg.name
             elif spec.kind == OutputKind.GRADIENT_TO_PARAMETER:
-                if not isinstance(spec.target, str):
-                    raise AssertionError(
-                        f"expected str target for GRADIENT_TO_PARAMETER, got {type(spec.target)}"
-                    )
-                if not isinstance(spec.arg, TensorArgument):
-                    raise AssertionError(
-                        f"expected TensorArgument for GRADIENT_TO_PARAMETER, got {type(spec.arg)}"
-                    )
+                assert isinstance(spec.target, str)
+                assert isinstance(spec.arg, TensorArgument)
                 gradients_to_parameters[spec.arg.name] = spec.target
             elif spec.kind == OutputKind.GRADIENT_TO_USER_INPUT:
-                if not isinstance(spec.target, str):
-                    raise AssertionError(
-                        f"expected str target for GRADIENT_TO_USER_INPUT, got {type(spec.target)}"
-                    )
-                if not isinstance(spec.arg, TensorArgument):
-                    raise AssertionError(
-                        f"expected TensorArgument for GRADIENT_TO_USER_INPUT, got {type(spec.arg)}"
-                    )
+                assert isinstance(spec.target, str)
+                assert isinstance(spec.arg, TensorArgument)
                 gradients_to_user_inputs[spec.arg.name] = spec.target
 
         if loss_output is None:
@@ -506,10 +489,7 @@ class ExportGraphSignature:
         input_tokens = []
         for s in self.input_specs:
             if s.kind == InputKind.TOKEN:
-                if not isinstance(s.arg, TokenArgument):
-                    raise AssertionError(
-                        f"expected TokenArgument for TOKEN kind, got {type(s.arg)}"
-                    )
+                assert isinstance(s.arg, TokenArgument)
                 input_tokens.append(s.arg.name)
         return tuple(input_tokens)
 
@@ -518,10 +498,7 @@ class ExportGraphSignature:
         output_tokens = []
         for s in self.output_specs:
             if s.kind == OutputKind.TOKEN:
-                if not isinstance(s.arg, TokenArgument):
-                    raise AssertionError(
-                        f"expected TokenArgument for TOKEN kind, got {type(s.arg)}"
-                    )
+                assert isinstance(s.arg, TokenArgument)
                 output_tokens.append(s.arg.name)
         return tuple(output_tokens)
 
@@ -529,25 +506,19 @@ class ExportGraphSignature:
         assertion_dep_token = self.assertion_dep_token
         if assertion_dep_token is None:
             return
-        if len(assertion_dep_token) != 1:
-            raise AssertionError(
-                f"expected exactly 1 assertion_dep_token, got {len(assertion_dep_token)}"
-            )
+        assert len(assertion_dep_token) == 1
         assertion_dep_token_index = next(iter(assertion_dep_token.keys()))
-        expected_index = len(self.user_outputs) + len(self.buffers_to_mutate)
-        if expected_index != assertion_dep_token_index:
-            raise AssertionError(
-                f"expected assertion_dep_token_index to be {expected_index}, got {assertion_dep_token_index}"
-            )
+        assert (
+            len(self.user_outputs) + len(self.buffers_to_mutate)
+            == assertion_dep_token_index
+        )
 
     def replace_all_uses(self, old: str, new: str):
         """
         Replace all uses of the old name with new name in the signature.
         """
-        if not isinstance(old, str):
-            raise AssertionError(f"expected old to be str, got {type(old)}")
-        if not isinstance(new, str):
-            raise AssertionError(f"expected new to be str, got {type(new)}")
+        assert isinstance(old, str)
+        assert isinstance(new, str)
         arg_types = (
             TensorArgument,
             SymIntArgument,
@@ -598,10 +569,9 @@ def _make_argument_spec(node, token_names) -> ArgumentSpec:
         # For const outputs we just directly return this
         return ConstantArgument(name="", value=node)
 
-    if "val" not in node.meta:
-        raise AssertionError(
-            f"{node} is not a constant or a node with a 'val' metadata field"
-        )
+    assert "val" in node.meta, (
+        f"{node} is not a constant or a node with a 'val' metadata field"
+    )
     val = node.meta["val"]
     if node.name in token_names:
         return TokenArgument(name=node.name)

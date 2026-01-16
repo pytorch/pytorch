@@ -19,10 +19,7 @@ def _get_custom_obj_for_node(node, inputs_to_lifted_custom_objs, constants):
     """Extract the custom object from a node's arguments."""
     custom_obj_node = node
     custom_obj_meta = custom_obj_node.meta["val"]  # type: ignore[union-attr]
-    if not isinstance(custom_obj_meta, CustomObjArgument):
-        raise AssertionError(
-            f"Expected custom_obj_meta to be a CustomObjArgument, but got {type(custom_obj_meta)}"
-        )
+    assert isinstance(custom_obj_meta, CustomObjArgument)
 
     if custom_obj_meta.fake_val:
         return custom_obj_meta.fake_val
@@ -41,10 +38,7 @@ def _replace_with_effects_node(
     if token_node.op == "placeholder":
         input_tokens.append(token_node)
 
-    if not isinstance(func, (torch._ops.OpOverload, torch._ops.HigherOrderOperator)):
-        raise AssertionError(
-            f"Expected func to be an OpOverload or HigherOrderOperator, but got {type(func)}"
-        )
+    assert isinstance(func, (torch._ops.OpOverload, torch._ops.HigherOrderOperator))
 
     # Get the schema for the function
     if func is torch.ops.higher_order.call_torchbind:
@@ -61,10 +55,7 @@ def _replace_with_effects_node(
 
     # Update getitem nodes that extract outputs from with_effects
     for user in list(node.users.keys()):
-        if user.target is not operator.getitem:
-            raise AssertionError(
-                f"Expected user target to be operator.getitem, but got {user.target}"
-            )
+        assert user.target is operator.getitem
         # getitem(with_effects, 0) is the token node
         if user.args[1] == 0:
             for user_user in list(user.users.keys()):
@@ -97,23 +88,14 @@ def _replace_with_effects_node(
         new_node.meta["val"] = node.meta["val"][1:]
     else:
         # No returns
-        if len(schema.returns) != 0:
-            raise AssertionError(
-                f"Expected schema.returns to be empty, but got {len(schema.returns)} returns"
-            )
-        if len(new_node.users) != 0:
-            raise AssertionError(
-                f"Expected new_node to have no users, but got {len(new_node.users)} users"
-            )
+        assert len(schema.returns) == 0
+        assert len(new_node.users) == 0
         new_node.meta["val"] = None
 
 
 def _replace_invoke_subgraph_node(node, module, output_tokens, input_tokens):
     """Replace an invoke_subgraph node to remove the token argument."""
-    if node.args[0].op != "get_attr":
-        raise AssertionError(
-            f"Expected node.args[0].op to be 'get_attr', but got {node.args[0].op}"
-        )
+    assert node.args[0].op == "get_attr"
     submod = getattr(module, node.args[0].target)
     if not submod.meta.get("has_with_effects", False):
         return
@@ -184,12 +166,11 @@ def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
             if len(output_tokens) > 0:
                 output_node = next(reversed(module.graph.find_nodes(op="output")))
                 output_args = output_node.args[0]
-                if len(output_args) < len(output_tokens):
-                    raise AssertionError(
-                        f"{output_args} output arguments found\n"
-                        f"{output_tokens} output tokens found\n"
-                        f"{module.graph}"
-                    )
+                assert len(output_args) >= len(output_tokens), (
+                    f"{output_args} output arguments found\n"
+                    f"{output_tokens} output tokens found\n"
+                    f"{module.graph}"
+                )
                 output_node.args = (tuple(output_args[len(output_tokens) :]),)
 
             module.graph.eliminate_dead_code()
@@ -207,10 +188,7 @@ def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
     for inp in ep.graph_signature.input_specs:
         if inp.kind == InputKind.TOKEN:
             num_tokens += 1
-            if not isinstance(inp.arg, TokenArgument):
-                raise AssertionError(
-                    f"Expected inp.arg to be a TokenArgument, but got {type(inp.arg)}"
-                )
+            assert isinstance(inp.arg, TokenArgument)
             input_token_names.append(inp.arg.name)
         else:
             new_input_specs.append(inp)
@@ -229,9 +207,6 @@ def _remove_effect_tokens(ep: ExportedProgram) -> ExportedProgram:
     ep.graph_signature.input_specs = new_input_specs
     ep.graph_signature.output_specs = new_output_specs
 
-    if num_tokens != num_out_tokens:
-        raise AssertionError(
-            f"Number of input tokens ({num_tokens}) does not match output tokens ({num_out_tokens})"
-        )
+    assert num_tokens == num_out_tokens
 
     return ep
