@@ -74,11 +74,9 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
         group_name_(std::move(group_name))
   {
     c10::cuda::CUDAGuard guard(device_idx_);
-    GroupInfo& group_info = get_group_info(group_name_);
-    rank_ = group_info.rank;
-    world_size_ = group_info.world_size;  // size of current group
-
     auto group = resolve_process_group(group_name_);
+    rank_ = group->getRank();
+    world_size_ = group->getSize();
     auto* ncclPg = dynamic_cast<c10d::ProcessGroupNCCL*>(
         group->getBackend(c10::DeviceType::CUDA).get());
     TORCH_CHECK(ncclPg != nullptr, "backend must be a NCCL process group");
@@ -107,27 +105,6 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
         signal_pad_size,
         " on rank ",
         rank_));
-
-    // For logging only
-    static int exchanged_n_times = 0;
-    auto global_rank = get_group_info("0").rank;
-    auto store = group_info.store;
-    // Exchange rank to global rank mapping for this group.
-    // If it is already available, skip the exchange.
-    if (group_info.rank_to_global_rank.empty()) {
-      group_info.rank_to_global_rank =
-          storeExchange.all_gather(store, rank_, world_size_, global_rank);
-      exchanged_n_times++;
-      if (rank_ == 0) {
-        LOG(INFO) << "[rank " << rank_ << ']'
-                  << " rank_to_global_rank: " << group_info.rank_to_global_rank
-                  << ", group_name: " << group_name_
-                  << ", exchanged_n_times: " << exchanged_n_times;
-      }
-    }
-
-    TORCH_INTERNAL_ASSERT(!group_info.rank_to_global_rank.empty());
-    rank_to_global_rank_ = group_info.rank_to_global_rank;
 
     // Starting from NCCL 2.28, we can use device communicators and get peer pointers
 #ifdef NCCL_HAS_SYMMEM_DEVICE_SUPPORT
@@ -182,7 +159,6 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   std::string group_name_;
   ncclWindow_t buffer_win_;
   ncclWindow_t signal_handle_;
-  std::vector<int> rank_to_global_rank_;
 
   friend class NCCLSymmetricMemory;
 };
@@ -252,14 +228,6 @@ c10::Device NCCLSymmetricMemory::get_device() {
   return c10::Device(c10::DeviceType::CUDA, device_idx_);
 }
 
-const std::vector<int>& NCCLSymmetricMemory::get_rank_to_global_rank() {
-  return pai_->rank_to_global_rank_;
-}
-
-int* NCCLSymmetricMemory::get_rank_to_global_rank_dev() {
-  return nullptr;
-}
-
 ncclWindow_t NCCLSymmetricMemory::get_window() {
   return pai_->buffer_win_;
 }
@@ -283,8 +251,6 @@ class NCCLSymmetricMemoryAllocator : public SymmetricMemoryAllocator {
         "NCCLSymmetricMemoryAllocator::alloc "
         "must not be called with a group_name");
 
-    auto group_info = get_group_info("0");
-    auto store = group_info.store;
     c10::cuda::CUDAGuard guard(device_idx);
     // TODO: we might need to use a roundup or mempool for mem allocation.
     void* ptr;

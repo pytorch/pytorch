@@ -238,7 +238,6 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         # initialize NCCL communicator.
         c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
-        symm_mem.enable_symm_mem_for_group(group_name)
 
         dtype = torch.float
         numel = 1024
@@ -266,7 +265,6 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         # initialize NCCL communicator.
         c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
-        symm_mem.enable_symm_mem_for_group(group_name)
 
         dtype = torch.float
         numel = 1024
@@ -298,7 +296,6 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         # initialize NCCL communicator.
         c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
-        symm_mem.enable_symm_mem_for_group(group_name)
 
         dtype = torch.float
         numel = 1024
@@ -339,7 +336,6 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         # initialize NCCL communicator.
         c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
-        symm_mem.enable_symm_mem_for_group(group_name)
 
         dtype = torch.float
         numel = 1024
@@ -371,7 +367,6 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         # initialize NCCL communicator.
         c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
-        symm_mem.enable_symm_mem_for_group(group_name)
 
         dtype = torch.float
         numel = 1024
@@ -400,7 +395,6 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         # initialize NCCL communicator.
         c10d.all_reduce(torch.ones(1, device=self.device))
         group_name = c10d.group.WORLD.group_name
-        symm_mem.enable_symm_mem_for_group(group_name)
 
         dtype = torch.float
         dim = 1024
