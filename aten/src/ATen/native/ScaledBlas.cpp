@@ -11,7 +11,7 @@
 #include <ATen/native/Resize.h>
 #include <ATen/native/GroupedMMUtils.h>
 #include <ATen/BlasBackend.h>
-#include <ATen/native/ScaledBlasUtils.h>
+#include <ATen/ScaledBlasUtils.h>
 #if !defined(__s390x__) && !defined(__powerpc__)
 #include <cpuinfo.h>
 #endif
