@@ -602,18 +602,26 @@ def max_memory_cached(device: "Device" = None) -> int:
     return max_memory_reserved(device=device)
 
 
-def memory_snapshot(mempool_id=None):
+def memory_snapshot(mempool_id=None, include_traces=True):
     r"""Return a snapshot of the CUDA memory allocator state across all devices.
 
     Interpreting the output of this function requires familiarity with the
     memory allocator internals.
 
+    Args:
+        mempool_id: Optional memory pool ID to get snapshot for a specific pool
+        include_traces: Whether to include trace entries in the snapshot.
+            If True (default), all trace entries are included.
+            If False, no trace entries are included (lightweight/fast snapshot).
+
     .. note::
         See :ref:`cuda-memory-management` for more details about GPU memory
         management.
     """
-    return torch._C._cuda_memorySnapshot(mempool_id)["segments"]
-
+    if mempool_id is None:
+        return torch._C._cuda_memorySnapshot((0, 0, include_traces))["segments"]
+    else:
+        return torch._C._cuda_memorySnapshot((mempool_id[0], mempool_id[1], include_traces))["segments"]
 
 def memory_summary(device: "Device" = None, abbreviated: bool = False) -> str:
     r"""Return a human-readable printout of the current memory allocator statistics for a given device.
@@ -1262,18 +1270,23 @@ class MemPool(_MemPool):
         r"""Returns the reference count of this pool."""
         return super().use_count()
 
-    def snapshot(self):
+    def snapshot(self, include_traces=True):
         r"""Return a snapshot of the CUDA memory allocator pool state across all
         devices.
 
         Interpreting the output of this function requires familiarity with the
         memory allocator internals.
 
+        Args:
+            include_traces: Whether to include trace entries in the snapshot.
+                If True (default), all trace entries are included.
+                If False, no trace entries are included (lightweight/fast snapshot).
+
         .. note::
             See :ref:`cuda-memory-management` for more details about GPU memory
             management.
         """
-        snapshot = torch.cuda.memory_snapshot(self.id)
+        snapshot = torch.cuda.memory_snapshot(self.id, include_traces=include_traces)
         return snapshot
 
 

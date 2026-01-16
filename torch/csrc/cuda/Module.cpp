@@ -716,19 +716,30 @@ PyObject* THCPModule_resetPeakHostMemoryStats(
 PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
   HANDLE_TH_ERRORS
   c10::cuda::MempoolId_t mempool_id = {0, 0};
+  bool include_traces = true;
+  
   if (arg && arg != Py_None) {
-    TORCH_CHECK(PyTuple_Check(arg), "mempool_id must be a tuple");
+    TORCH_CHECK(PyTuple_Check(arg), "Expected tuple or None");
     Py_ssize_t size = PyTuple_Size(arg);
-    TORCH_CHECK(size == 2, "mempool_id must be a tuple of 2 integers");
-
-    auto id1 = THPObjectPtr(PyTuple_GetItem(arg, 0));
-    auto id2 = THPObjectPtr(PyTuple_GetItem(arg, 1));
-    TORCH_CHECK(
-        THPUtils_checkLong(id1) && THPUtils_checkLong(id2),
-        "mempool_id elements must be integers");
-
-    mempool_id = c10::cuda::MempoolId_t(
-        THPUtils_unpackLong(id1), THPUtils_unpackLong(id2));
+    
+    if (size == 2) {
+      // Legacy format: (int, int) - mempool_id only
+      auto id1 = THPObjectPtr(PyTuple_GetItem(arg, 0));
+      auto id2 = THPObjectPtr(PyTuple_GetItem(arg, 1));
+      TORCH_CHECK(THPUtils_checkLong(id1) && THPUtils_checkLong(id2), "mempool_id elements must be integers");
+      mempool_id = c10::cuda::MempoolId_t(THPUtils_unpackLong(id1), THPUtils_unpackLong(id2));
+    } else if (size == 3) {
+      // New format: (int, int, bool) - mempool_id + include_traces
+      auto id1 = THPObjectPtr(PyTuple_GetItem(arg, 0));
+      auto id2 = THPObjectPtr(PyTuple_GetItem(arg, 1));
+      auto traces = THPObjectPtr(PyTuple_GetItem(arg, 2));
+      TORCH_CHECK(THPUtils_checkLong(id1) && THPUtils_checkLong(id2), "mempool_id elements must be integers");
+      TORCH_CHECK(PyBool_Check(traces.get()), "include_traces must be a boolean");
+      mempool_id = c10::cuda::MempoolId_t(THPUtils_unpackLong(id1), THPUtils_unpackLong(id2));
+      include_traces = (traces.get() == Py_True);
+    } else {
+      TORCH_CHECK(false, "Expected tuple of size 2 or 3");
+    }
   }
 
   using c10::cuda::CUDACachingAllocator::BlockInfo;
@@ -809,7 +820,7 @@ PyObject* THCPModule_memorySnapshot(PyObject* _unused, PyObject* arg) {
     return segmentDict;
   };
 
-  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot(mempool_id);
+  auto snapshot = c10::cuda::CUDACachingAllocator::snapshot(mempool_id, include_traces);
 
   py::list segments;
 
