@@ -67,6 +67,26 @@ if [[ ! -d "/usr/local/cuda" ]]; then
     ls -la /usr/local/cuda/include/cuda_runtime.h || echo "WARNING: cuda_runtime.h not found"
     ls -la /usr/local/cuda/include/cuda/std/utility || echo "WARNING: libcu++ headers not found"
 
+    if [[ ! -f "/usr/local/cuda/include/cuda/std/utility" ]]; then
+        echo "libcu++ headers missing, downloading CCCL 12.6 package"
+
+        CCCL_VERSION="12.6.77"
+        CCCL_PKG="cuda_cccl-linux-sbsa-${CCCL_VERSION}-archive"
+        CCCL_URL="https://developer.download.nvidia.com/compute/cuda/redist/cuda_cccl/linux-sbsa/${CCCL_PKG}.tar.xz"
+        echo "Downloading CCCL from: ${CCCL_URL}"
+
+        CCCL_TMP=$(mktemp -d)
+        pushd "${CCCL_TMP}"
+        wget -q "${CCCL_URL}" -O cccl.tar.xz
+        tar xf cccl.tar.xz
+        cp -a "${CCCL_PKG}"/include/* /usr/local/cuda/include/
+        popd
+        rm -rf "${CCCL_TMP}"
+
+        echo "CCCL installed, verifying..."
+        ls -la /usr/local/cuda/include/cuda/std/utility
+    fi
+
     echo "Installed CUDA version:"
     nvcc --version
 fi
