@@ -36,6 +36,7 @@ from torch.fx.experimental.proxy_tensor import (
 )
 from torch.fx.graph_module import GraphModule
 from torch.fx.passes.runtime_assert import insert_deferred_runtime_asserts
+from torch.utils._debug_mode import DebugMode
 from torch.utils.checkpoint import _CachedTorchDispatchMode, _CachingTorchDispatchMode
 
 
@@ -675,12 +676,42 @@ def _(subgraph, identifier, *operands):
     return autograd_fn_callable(*operands)
 
 
+@invoke_subgraph.py_impl(DebugMode)
+def _(debug_mode, subgraph, identifier, *operands):
+    # record HOP call
+    call = torch.utils._debug_mode._OpCall(
+        invoke_subgraph,
+        (identifier, *operands),
+        kwargs={},
+        call_depth=debug_mode.call_depth + 1,
+        stack=debug_mode.record_stack_trace,
+    )
+    debug_mode._record_call(call)
+
+    debug_mode.call_depth += 1
+    debug_mode._handle_annotate(f"[enter InvokeSubgraph HOP] {identifier}")
+
+    # If the HOP is dispatched from DebugMode, we should enable debug_mode
+    # for the subgraph call.
+    with debug_mode:
+        if getattr(subgraph, "_boxed_call", False):
+            result = subgraph(list(operands))
+        else:
+            result = subgraph(*operands)
+    debug_mode._handle_annotate(f"[exit InvokeSubgraph HOP] {identifier}")
+    debug_mode.call_depth -= 1
+    # record output of HOP
+    debug_mode._record_call_output(call, result)
+    return result
+
+
 @invoke_subgraph.py_impl(DispatchKey.CompositeExplicitAutograd)
 def _(subgraph, identifier, *operands):
     from torch.utils._python_dispatch import _get_current_dispatch_mode
 
     mode = _get_current_dispatch_mode()
     assert mode is None, "Mode should never be enabled for CPU/CUDA key"
+
     if getattr(subgraph, "_boxed_call", False):
         return subgraph(list(operands))
     else:
