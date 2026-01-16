@@ -183,7 +183,9 @@ def download_artifacts_and_extract_csvs(urls):
                     for name in possible_names:
                         try:
                             df = pd.read_csv(artifact.open(name))
-                            df["graph_breaks"] = df["graph_breaks"].fillna(0).astype(int)
+                            df["graph_breaks"] = (
+                                df["graph_breaks"].fillna(0).astype(int)
+                            )
                             prev_df = dataframes.get((suite, phase), None)
                             dataframes[(suite, phase)] = (
                                 pd.concat([prev_df, df]) if prev_df is not None else df
@@ -202,7 +204,9 @@ def download_artifacts_and_extract_csvs(urls):
             except urllib.error.HTTPError:
                 continue  # Try next candidate URL
         if not downloaded:
-            print(f"Unable to download any artifact for {suite} shard {shard}, tried {len(url_candidates)} URLs")
+            print(
+                f"Unable to download any artifact for {suite} shard {shard}, tried {len(url_candidates)} URLs"
+            )
 
     return dataframes
 
