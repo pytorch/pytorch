@@ -1325,7 +1325,7 @@
   self: norm_backward(grad, self.to(grad.scalar_type()), p, result, dim, keepdim)
   result: norm_jvp(self_p, self_t, p, result, dim, keepdim)
 
-- name: linalg_vector_norm(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None) -> Tensor
+- name: linalg_vector_norm(Tensor self, Scalar ord=2, int[1]? dim=None, bool keepdim=False, *, ScalarType? dtype=None, bool skip_root=False) -> Tensor
   self: linalg_vector_norm_backward(grad, self, ord, result, dim, keepdim)
   result: linalg_vector_norm_jvp(self_p, self_t, ord, result, dim, keepdim)
 
@@ -3248,6 +3248,6 @@
 
 # note(crcrpar): forward-mode AD is tricky for a simple string replace to handle:
 #   formula.replace("p", "ord") produces `norm_jvord(self_ord, self_t, ord, result)`
-- name: _foreach_norm.Scalar(Tensor[] self, Scalar ord=2, ScalarType? dtype=None) -> Tensor[]
+- name: _foreach_norm.Scalar(Tensor[] self, Scalar ord=2, ScalarType? dtype=None, bool skip_root=False) -> Tensor[]
   self: norm_backward(grads[i], self[i], ord, result[i])
   result: norm_jvp(self_p, self_t, ord, result[i])
