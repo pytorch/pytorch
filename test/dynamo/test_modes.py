@@ -1184,6 +1184,102 @@ class outer_fn(torch.nn.Module):
             f"Expected 1 compilation, got {compile_counter.frame_count}",
         )
 
+    @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
+    def test_aot_autograd_over_dynamo_train_step(self):
+        """Test a full training step with nn.Module traced by AOTAutograd over Dynamo.
+
+        This tests a realistic training scenario where:
+        1. We have an actual nn.Module with parameters
+        2. make_fx traces the forward and backward as a single graph
+        3. Inside the module, a torch.compile'd function with invoke_subgraph is called
+        4. We use torch.autograd.grad to compute gradients (not .backward())
+        5. Gradients are returned explicitly from the traced function
+        """
+        from torch._dynamo.testing import CompileCounterWithBackend
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        torch._dynamo.reset()
+
+        # Use a compile counter to track how many times Dynamo compiles
+        compile_counter = CompileCounterWithBackend("invoke_subgraph")
+
+        # Define a simple MLP module
+        class SimpleMLP(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(4, 8)
+                self.fc2 = torch.nn.Linear(8, 4)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = torch.relu(x)
+                x = self.fc2(x)
+                return x
+
+        model = SimpleMLP()
+
+        # Inner compiled function that will be called inside the training step
+        def inner_fn(x):
+            return x * 2 + 1
+
+        compiled_inner = torch.compile(inner_fn, backend=compile_counter)
+
+        # Training step function that uses the model and compiled inner function
+        def train_step(params, x):
+            # params is a flat list of parameters: [fc1.weight, fc1.bias, fc2.weight, fc2.bias]
+            fc1_weight, fc1_bias, fc2_weight, fc2_bias = params
+
+            # Manual forward pass using functional style
+            h = torch.nn.functional.linear(x, fc1_weight, fc1_bias)
+            h = torch.relu(h)
+            # Apply compiled inner function
+            h = compiled_inner(h)
+            out = torch.nn.functional.linear(h, fc2_weight, fc2_bias)
+
+            # Compute loss
+            loss = out.sum()
+
+            # Compute gradients using torch.autograd.grad
+            grads = torch.autograd.grad(loss, params)
+
+            return (loss, *grads)
+
+        # Prepare inputs
+        x = torch.randn(2, 4)
+        params = (
+            model.fc1.weight.detach().clone().requires_grad_(True),
+            model.fc1.bias.detach().clone().requires_grad_(True),
+            model.fc2.weight.detach().clone().requires_grad_(True),
+            model.fc2.bias.detach().clone().requires_grad_(True),
+        )
+
+        # Trace using make_fx
+        fx_graph = make_fx(train_step, _disable_torch_fn_metadata_mode=True)(params, x)
+
+        # Run the traced graph
+        result = fx_graph(params, x)
+        loss = result[0]
+        grads = result[1:]
+
+        # Basic sanity checks
+        self.assertEqual(loss.shape, ())
+        self.assertEqual(len(grads), 4)
+        self.assertEqual(grads[0].shape, params[0].shape)  # fc1.weight grad
+        self.assertEqual(grads[1].shape, params[1].shape)  # fc1.bias grad
+        self.assertEqual(grads[2].shape, params[2].shape)  # fc2.weight grad
+        self.assertEqual(grads[3].shape, params[3].shape)  # fc2.bias grad
+
+        # Check that we got a graph with invoke_subgraph
+        graph_code = fx_graph.print_readable(print_output=False)
+        self.assertIn("invoke_subgraph", graph_code)
+
+        # Check compile count - should be exactly 1 compilation
+        self.assertEqual(
+            compile_counter.frame_count,
+            1,
+            f"Expected 1 compilation, got {compile_counter.frame_count}",
+        )
+
 
 class TorchFunctionModeLifecycleTests(torch._dynamo.test_case.TestCase):
     def test_default_device_restored_after_mode_tests(self):
