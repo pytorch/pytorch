@@ -43,7 +43,7 @@ if [[ ! -d "/usr/local/cuda" ]]; then
             ;;
         13.0|13.0.*)
             install_cuda 13.0.2 cuda_13.0.2_580.95.05_linux
-            CCCL_VERSION="13.0.76"
+            CCCL_VERSION="13.0.85"
             ;;
         *)
             echo "Unsupported CUDA_VERSION: ${CUDA_VERSION}"
