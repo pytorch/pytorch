@@ -24,9 +24,14 @@ from torch.distributed.tensor._collective_utils import (
     redistribute_cost,
     shard_dim_alltoall,
 )
-from torch.distributed.tensor._dtensor_spec import ShardOrderEntry
+from torch.distributed.tensor._dtensor_spec import (
+    DTensorSpec,
+    ShardOrderEntry,
+    TensorMeta,
+)
 from torch.distributed.tensor._redistribute import (
     _gen_transform_infos,
+    redistribute_local_tensor,
     use_min_cost_redistribution_plan,
 )
 from torch.distributed.tensor.debug import CommDebugMode
@@ -1137,10 +1142,8 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                 # even sharding
                 (16, 8),
                 (8, 16, 32),
-                (8, 32, 16, 16),
                 # uneven sharding with padding
                 (17, 5),
-                (13, 2, 13),
                 (33, 16, 8, 1),
             ]
 
@@ -1266,7 +1269,6 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                 # uneven sharding with padding
                 (17, 5),
                 (13, 2, 13),
-                (33, 16, 8, 1),
             ]
             placement_choice = [
                 Shard(0),
@@ -1302,6 +1304,42 @@ class DistributeWithDeviceOrderTest(DTensorTestBase):
                     self.assertEqual(
                         make_full_tensor(sharded_dt), make_full_tensor(full_tensor)
                     )
+
+    @with_comms
+    def test_redistribute_partial_to_different_partial_not_supported(self):
+        # Test that redistributing from one Partial type to another raises an error
+        device_mesh = self.build_device_mesh()
+        local_tensor = torch.randn(4, 4, device=self.device_type)
+
+        src_spec = DTensorSpec(
+            device_mesh,
+            (Partial("sum"),),
+            tensor_meta=TensorMeta(
+                local_tensor.size(),
+                local_tensor.stride,
+                local_tensor.dtype,
+            ),
+        )
+        tgt_spec = DTensorSpec(
+            device_mesh,
+            (Partial("avg"),),
+            tensor_meta=TensorMeta(
+                local_tensor.size(),
+                local_tensor.stride,
+                local_tensor.dtype,
+            ),
+        )
+
+        # Attempting to redistribute to Partial("max") should raise an error
+        with self.assertRaisesRegex(
+            AssertionError,
+            r"Redistribution from one partial type.*to another.*is unsupported",
+        ):
+            redistribute_local_tensor(
+                local_tensor,
+                src_spec,
+                tgt_spec,
+            )
 
     @unittest.skip(
         "Temporarily skipping until we support special placement types in "

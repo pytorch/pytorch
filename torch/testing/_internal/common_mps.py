@@ -312,7 +312,6 @@ if torch.backends.mps.is_available():
             "put": None,
             "cauchy_": None,
             "cauchy": None,
-            "cholesky_inverse": None,
             "cholesky_solve": None,
             "frexp": None,
             "gcd": None,
@@ -392,8 +391,6 @@ if torch.backends.mps.is_available():
             "_upsample_bicubic2d_aa": [torch.uint8],  # uint8 is for CPU only
             "geometric": None,
             "geometric_": None,
-            "log_normal_": None,
-            "log_normal": None,
             "cdouble": None,
             "double": None,
             "log_softmaxwith_dtype": [
@@ -407,6 +404,7 @@ if torch.backends.mps.is_available():
             "float_power": None,
             "linalg.matrix_rankhermitian": None,
             "linalg.pinvhermitian": None,
+            "linalg.pinvsingular": None,  # Missing `aten::linalg_qr.out`.
             "nonzero_static": None,
             # MPS: input sizes must be divisible by output sizes
             "nn.functional.adaptive_avg_pool1d": None,
@@ -485,6 +483,7 @@ if torch.backends.mps.is_available():
             "randn_like": None,
             "bernoulli": [torch.float16, torch.float32, torch.bfloat16],
             "exponential": [torch.float16, torch.float32, torch.bfloat16],
+            "log_normal": [torch.float16, torch.float32, torch.bfloat16],
             "nn.functional.feature_alpha_dropoutwith_train": [
                 torch.float16,
                 torch.float32,
@@ -719,6 +718,7 @@ if torch.backends.mps.is_available():
             "msort": [torch.float16],
             # Random output
             "exponential": [torch.float16, torch.float32],
+            "log_normal": [torch.float16, torch.float32],
             # CPU errors
             # derivative for zeta is not implemented
             "special.zeta": None,

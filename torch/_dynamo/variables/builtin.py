@@ -1009,14 +1009,33 @@ class BuiltinVariable(VariableTracker):
         ],
         VariableTracker | None,
     ]:
-        from .lazy import LazyVariableTracker
+        from .lazy import LazyConstantVariable, LazyVariableTracker
 
         obj = BuiltinVariable(fn)
         handlers: list[_HandlerCallback] = []
 
-        if any(issubclass(t, LazyVariableTracker) for t in arg_types):
+        # Check for non-LazyConstantVariable lazy types that need realization.
+        # LazyConstantVariable is mapped to ConstantVariable in call_function's
+        # get_handler_type_for_dispatch, so it won't appear in arg_types here.
+        # But regular LazyVariableTracker still needs to be realized before handling.
+        if any(
+            issubclass(t, LazyVariableTracker)
+            and not issubclass(t, LazyConstantVariable)
+            for t in arg_types
+        ):
+            # Realize lazy args except LazyConstantVariable.
+            # Only realize top-level args, not nested VariableTracker fields.
+            def realize_arg(arg: VariableTracker) -> VariableTracker:
+                if isinstance(arg, LazyVariableTracker) and not isinstance(
+                    arg, LazyConstantVariable
+                ):
+                    return arg.realize()
+                return arg
+
             return lambda tx, args, kwargs: obj.call_function(
-                tx, [v.realize() for v in args], kwargs
+                tx,
+                [realize_arg(a) for a in args],
+                kwargs,
             )
 
         if inspect.isclass(fn) and (
@@ -1419,17 +1438,20 @@ class BuiltinVariable(VariableTracker):
         args: Sequence[VariableTracker],
         kwargs: dict[str, VariableTracker],
     ) -> VariableTracker:
+        # Get handler types for dispatch. This may install guards for lazy variables.
+        handler_types = [x.get_handler_type_for_dispatch() for x in args]
+
         key: tuple[object, ...]
         if kwargs:
             kwargs = {k: v.realize() for k, v in kwargs.items()}
-            key = (self.fn, *(type(x) for x in args), True)
+            key = (self.fn, *handler_types, True)
         else:
-            key = (self.fn, *(type(x) for x in args))
+            key = (self.fn, *handler_types)
 
         handler = self.call_function_handler_cache.get(key)
         if not handler:
             self.call_function_handler_cache[key] = handler = self._make_handler(  # type: ignore[assignment]
-                self.fn, [type(x) for x in args], bool(kwargs)
+                self.fn, handler_types, bool(kwargs)
             )
         assert handler is not None
         return handler(tx, args, kwargs)  # type: ignore[return-value]
@@ -1635,8 +1657,14 @@ class BuiltinVariable(VariableTracker):
                 # Default repr - build and trace it
                 fn_vt = VariableTracker.build(tx, repr_method)
                 return fn_vt.call_function(tx, [], {})
+            elif is_wrapper_or_member_descriptor(repr_method):
+                unimplemented(
+                    gb_type="Attempted to call repr() method implemented in C/C++",
+                    context="",
+                    explanation=f"{type(arg.value)} has a C/C++ based repr method. This is not supported.",
+                    hints=["Write the repr method in Python"],
+                )
             else:
-                # Custom repr - inline the method for tracing
                 bound_method = repr_method.__func__
                 fn_vt = VariableTracker.build(tx, bound_method)
                 return fn_vt.call_function(tx, [arg], {})
@@ -2678,7 +2706,7 @@ class BuiltinVariable(VariableTracker):
                         gb_type="Attempted to wrap sparse Tensor",
                         context="",
                         explanation="torch.compile does not support sparse Tensors",
-                        hints=[*graph_break_hints.SUPPORTABLE],
+                        hints=[*graph_break_hints.SPARSE_TENSOR],
                     )
 
             try:
