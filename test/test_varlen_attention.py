@@ -197,6 +197,9 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
+    @unittest.skipIf(
+        TEST_WITH_ROCM, "varlen attention w/ sliding window not supported on ROCm"
+    )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     def test_basic_functionality(self, device, dtype):
         torch.manual_seed(42)
@@ -245,6 +248,9 @@ class TestVarlenAttention(NNTestCase):
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
     )
+    @unittest.skipIf(
+        TEST_WITH_ROCM, "varlen attention w/ sliding window not supported on ROCm"
+    )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     def test_custom_op_compliance(self, device, dtype):
         torch.manual_seed(42)
@@ -268,15 +274,9 @@ class TestVarlenAttention(NNTestCase):
 
         q, k, v = attention_block.get_varlen_qkv(x_packed)
 
-        test_utils = (
-            ["test_schema", "test_faketensor"]
-            if TEST_WITH_ROCM # skip aot autograd test on ROCm
-            else None
-        )
         torch.library.opcheck(
             torch.ops.torch_attn._varlen_attn,
             (q, k, v, cu_seq, cu_seq, shape.max_seq_len, shape.max_seq_len, False),
-            test_utils=test_utils,
         )
 
         out, lse, rng_state = torch.ops.torch_attn._varlen_attn(
@@ -307,6 +307,9 @@ class TestVarlenAttention(NNTestCase):
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM, "varlen attention w/ sliding window not supported on ROCm"
     )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     def test_custom_op_registration(self, device, dtype):
@@ -357,6 +360,9 @@ class TestVarlenAttention(NNTestCase):
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM, "varlen attention w/ sliding window not supported on ROCm"
     )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("is_causal", [False, True])
@@ -483,6 +489,9 @@ class TestVarlenAttention(NNTestCase):
 
     @unittest.skipIf(
         not PLATFORM_SUPPORTS_FLASH_ATTENTION, "Flash Attention not supported"
+    )
+    @unittest.skipIf(
+        TEST_WITH_ROCM, "varlen attention w/ sliding window not supported on ROCm"
     )
     @parametrize("dtype", [torch.bfloat16, torch.float16])
     @parametrize("is_causal", [False, True])
