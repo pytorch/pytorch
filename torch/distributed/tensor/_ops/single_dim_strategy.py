@@ -67,8 +67,8 @@ def _insert_single_dim_replication_strategy(
     """
     for strategy in single_dim_strategies_with_placeholders:
         assert not all(isinstance(p, Replicate) for p in strategy)
-    single_dim_strategies_with_placeholders.append(
-        [Replicate()] * (1 + num_input_tensors)
+    single_dim_strategies_with_placeholders.insert(
+        0, [Replicate()] * (1 + num_input_tensors)
     )
     return single_dim_strategies_with_placeholders
 
@@ -144,6 +144,9 @@ def _get_unique_placements(op_schema: OpSchema) -> set[Placement]:
 
     for obj in op_schema.args_schema:
         _update_placements(obj)
+    # Also include placements from kwargs (e.g., "out" tensor)
+    for obj in op_schema.kwargs_schema.values():
+        _update_placements(obj)
 
     return unique_placements
 
@@ -151,6 +154,12 @@ def _get_unique_placements(op_schema: OpSchema) -> set[Placement]:
 def _get_num_tensor_inputs(op_schema: OpSchema) -> int:
     num_inputs = 0
     for obj in op_schema.args_schema:
+        if isinstance(obj, OpStrategy):
+            num_inputs += 1
+        elif isinstance(obj, TupleStrategy):
+            num_inputs += len(obj.children)
+    # Also count tensor kwargs (e.g., "out" for out-variant ops)
+    for obj in op_schema.kwargs_schema.values():
         if isinstance(obj, OpStrategy):
             num_inputs += 1
         elif isinstance(obj, TupleStrategy):
