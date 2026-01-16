@@ -5169,17 +5169,18 @@ class TestSimpleModel(TestCase):
             os.unlink(path)
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    def test_nn_linear_ordering_mismatch_documented(self):
+    def test_nn_linear_ordering_params_first(self):
         """
-        Test that documents the nn.Linear ordering mismatch.
+        Test that nn.Linear uses correct params-first ordering.
 
         This test verifies that:
         1. Inductor expects parameters FIRST for nn.Linear
-        2. Pythonify extracts inputs FIRST
-        3. This mismatch causes exec to fail
+        2. Pythonify correctly extracts parameters first (via ordered_arg_info)
+        3. The ordering matches Inductor's expectations for correct execution
 
-        This is a KNOWN LIMITATION that would require parsing the Inductor
-        code to determine the correct argument order.
+        This ordering issue was previously a known limitation but has been fixed
+        by using ordered_arg_info which preserves the iteration order from
+        input_source_to_sizes_strides during compilation.
         """
         import re
 
@@ -5229,13 +5230,24 @@ class TestSimpleModel(TestCase):
                 f"primals_3 should be input with batch=3, got {primals_3_shape}",
             )
 
+            # Verify params-first ordering: arg1 and arg2 are params (via obj_from_id),
+            # arg3 is the input x (from f_locals)
             extract_match = re.search(
-                r'arg1\s*=\s*f_locals\["x"\]',
+                r'arg1\s*=\s*obj_from_id\(\d+\)',
                 code,
             )
             self.assertIsNotNone(
                 extract_match,
-                "arg1 should be the input x (inputs-first ordering)",
+                "arg1 should be a parameter accessed via obj_from_id (params-first ordering)",
+            )
+
+            input_match = re.search(
+                r'arg3\s*=\s*f_locals\["x"\]',
+                code,
+            )
+            self.assertIsNotNone(
+                input_match,
+                "arg3 should be the input x (after weight and bias params)",
             )
 
         finally:
@@ -5246,8 +5258,8 @@ class TestSimpleModel(TestCase):
         """
         Test that nn.Linear without bias compiles successfully.
 
-        Even without bias, the ordering mismatch still exists because
-        Inductor expects weight before input.
+        Pythonify correctly extracts weight before input, matching Inductor's
+        expectations. This ordering is preserved via ordered_arg_info.
         """
         torch.set_default_device("cuda")
 

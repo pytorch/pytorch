@@ -101,6 +101,9 @@ from dataclasses import dataclass, field
 from typing import Any, Optional, TYPE_CHECKING
 
 from .ir import (
+    AOTDedupeWrapperNode,
+    AOTDispatchSubclassWrapperNode,
+    AOTSyntheticBaseWrapperNode,
     ArgumentExtractionNode,
     ArgumentSource,
     AOTAutogradWrapperNode,
@@ -109,6 +112,10 @@ from .ir import (
     CompiledRegionNode,
     CUDAGraphPhase,
     CUDAGraphSetupNode,
+    DebugAssertWrapperNode,
+    EffectTokensWrapperNode,
+    FakifiedOutWrapperNode,
+    FunctionalizedRngRuntimeWrapperNode,
     GuardCheckNode,
     GuardType,
     KernelLoadNode,
@@ -118,6 +125,7 @@ from .ir import (
     RegionExecutionMode,
     ReturnResultNode,
     RuntimeWrapperIR,
+    RuntimeWrapperNode,
 )
 
 
@@ -364,6 +372,7 @@ class PythonCodeGenVisitor(CodeGenVisitor):
         self._has_emitted_return_section = False
         self._has_emitted_model_extraction = False
         self._has_emitted_obj_from_id_helper = False
+        self._has_emitted_wrapper_section = False
         self._has_inductor_kernel = False
         self._has_inductor_backward_kernel = False
         self._inductor_uses_list_args = True
@@ -373,6 +382,55 @@ class PythonCodeGenVisitor(CodeGenVisitor):
         self._forward_cuda_graph_node: Optional[CUDAGraphSetupNode] = None
         self._backward_cuda_graph_node: Optional[CUDAGraphSetupNode] = None
         self._inference_cuda_graph_node: Optional[CUDAGraphSetupNode] = None
+        # Wrapper state tracking
+        self._effect_token_count: int = 0
+        self._has_subclass_wrapper: bool = False
+        self._has_rng_wrapper: bool = False
+        self._rng_num_outputs_offset: int = 0
+        self._rng_num_forward_returns: int = 0
+        self._has_fakified_wrapper: bool = False
+        self._has_runtime_wrapper: bool = False
+        self._indices_to_detach: list[int] = []
+        self._has_dedupe_wrapper: bool = False
+        self._dedupe_keep_arg_mask: Optional[list[bool]] = None
+        self._dedupe_add_dupe_map: Optional[list[int]] = None
+        self._has_synthetic_base_wrapper: bool = False
+        self._has_debug_assert_wrapper: bool = False
+
+    @property
+    def _has_forward_wrappers(self) -> bool:
+        """
+        Check if any forward wrappers are active and need to process args.
+
+        Returns True if any wrapper helper function was emitted that needs to
+        be called during forward(). This is used to determine whether to use
+        _processed_args vs args in the compiled function call.
+        """
+        return (
+            self._effect_token_count > 0 or
+            self._has_subclass_wrapper or
+            self._has_rng_wrapper or
+            self._has_runtime_wrapper or
+            self._has_dedupe_wrapper or
+            self._has_synthetic_base_wrapper or
+            self._has_debug_assert_wrapper
+        )
+
+    @property
+    def _has_forward_output_wrappers(self) -> bool:
+        """
+        Check if any forward wrappers need to post-process outputs.
+
+        Returns True if any wrapper helper function was emitted that transforms
+        outputs after the compiled function call.
+        """
+        return (
+            self._effect_token_count > 0 or
+            self._has_subclass_wrapper or
+            self._has_rng_wrapper or
+            self._has_fakified_wrapper or
+            self._has_synthetic_base_wrapper
+        )
 
     @property
     def cuda_graphs_enabled(self) -> bool:
@@ -745,6 +803,911 @@ class PythonCodeGenVisitor(CodeGenVisitor):
         self._emitter.emit_line(line)
         return line
 
+    # Wrapper nodes currently no-op in Python codegen; populated in pipeline ordering
+    # and handled within AOTAutograd/Python runtime assembly. Kept for visitor parity.
+
+    def visit_effect_tokens_wrapper(self, node: EffectTokensWrapperNode) -> str:
+        """
+        Generate code for effect tokens wrapper.
+
+        Effect tokens are prepended to args (as None values) before calling the
+        compiled function, and then stripped from the beginning of outputs.
+        This mirrors EffectTokensWrapper from runtime_wrappers.py.
+
+        When token_count > 0:
+        - Before call: args = [None] * token_count + args
+        - After call: outputs = outputs[token_count:]
+        """
+        if node.token_count <= 0:
+            return ""
+
+        if not self._has_emitted_wrapper_section:
+            self._emitter.emit_section_header("Wrapper Helper Functions")
+            self._has_emitted_wrapper_section = True
+
+        self._effect_token_count = node.token_count
+
+        self._emitter.emit_comment(
+            f"Effect tokens wrapper: prepend {node.token_count} None tokens to args,"
+        )
+        self._emitter.emit_comment(
+            "then strip them from the beginning of outputs."
+        )
+        self._emitter.emit_line(f"_effect_token_count = {node.token_count}")
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_line("def _inject_effect_tokens(args):")
+        self._emitter.indent()
+        self._emitter.emit_line("return [None] * _effect_token_count + list(args)")
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_line("def _strip_effect_tokens(outputs):")
+        self._emitter.indent()
+        self._emitter.emit_line("if outputs is None:")
+        self._emitter.indent()
+        self._emitter.emit_line("return None")
+        self._emitter.dedent()
+        self._emitter.emit_line("return outputs[_effect_token_count:]")
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+        return f"_effect_token_count = {node.token_count}"
+
+    def visit_aot_dispatch_subclass_wrapper(
+        self, node: AOTDispatchSubclassWrapperNode
+    ) -> str:
+        """
+        Generate code for AOT dispatch subclass wrapper.
+
+        This wrapper handles tensor subclass unwrapping/rewrapping. For most
+        standard cases (no subclass metadata), this is a no-op. When subclass
+        metadata is present, we need to emit code that:
+        1. Unwraps tensor subclasses from inputs before the call
+        2. Re-wraps outputs as the appropriate subclass type after the call
+
+        The generated code mirrors runtime_wrappers.py AOTDispatchSubclassWrapper:
+        - _unwrap_tensor_subclasses: Flattens subclass inputs to inner tensors
+        - _wrap_tensor_subclasses: Reconstructs subclass outputs from flat tensors
+        """
+        if node.maybe_subclass_meta is None:
+            return ""
+
+        if not self._has_emitted_wrapper_section:
+            self._emitter.emit_section_header("Wrapper Helper Functions")
+            self._has_emitted_wrapper_section = True
+
+        self._has_subclass_wrapper = True
+
+        self._emitter.add_import("import torch")
+        self._emitter.add_import(
+            "from torch.utils._python_dispatch import is_traceable_wrapper_subclass"
+        )
+
+        self._emitter.emit_comment(
+            "AOT dispatch subclass wrapper: handles tensor subclass unwrapping/rewrapping."
+        )
+        self._emitter.emit_comment(
+            "Unwraps subclass inputs to inner tensors before calling compiled fn,"
+        )
+        self._emitter.emit_comment(
+            "then rewraps outputs back to the appropriate subclass types."
+        )
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_line(
+            f"_num_fw_outs_saved_for_bw = {node.num_fw_outs_saved_for_bw}"
+        )
+        self._emitter.emit_blank_line()
+
+        self._emit_subclass_unwrap_function(node)
+        self._emit_subclass_wrap_function(node)
+
+        return ""
+
+    def _emit_subclass_unwrap_function(
+        self, node: AOTDispatchSubclassWrapperNode
+    ) -> None:
+        """
+        Emit the _unwrap_tensor_subclasses function.
+
+        This function takes a list of args (which may contain tensor subclasses)
+        and returns a flat list of inner tensors. For each subclass, it uses
+        __tensor_flatten__ to extract the inner tensors and appends symints
+        for dynamic shapes.
+        """
+        self._emitter.emit_comment(
+            "Unwrap tensor subclasses to their inner tensors."
+        )
+        self._emitter.emit_comment(
+            "Uses __tensor_flatten__ to extract inner tensors from subclasses."
+        )
+        self._emitter.emit_comment(
+            "Also appends symbolic shape info (symints) when available."
+        )
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_line("def _unwrap_tensor_subclasses(args, subclass_metas=None):")
+        self._emitter.indent()
+
+        self._emitter.emit_line("def _flatten_subclass(x, meta, out):")
+        self._emitter.indent()
+        self._emitter.emit_comment(
+            "If not a subclass, append directly and return."
+        )
+        self._emitter.emit_line("if not is_traceable_wrapper_subclass(x):")
+        self._emitter.indent()
+        self._emitter.emit_line("out.append(x)")
+        self._emitter.emit_line("return out")
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_comment(
+            "Get attrs from __tensor_flatten__ and recursively flatten."
+        )
+        self._emitter.emit_line("attrs, _ = x.__tensor_flatten__()")
+        self._emitter.emit_line("for attr in attrs:")
+        self._emitter.indent()
+        self._emitter.emit_line("inner = getattr(x, attr)")
+        self._emitter.emit_line("inner_meta = meta.get(attr) if meta else None")
+        self._emitter.emit_line("_flatten_subclass(inner, inner_meta, out)")
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_comment(
+            "Append symints for outer_size/outer_stride if present in meta."
+        )
+        self._emitter.emit_line("if meta is not None and hasattr(meta, 'outer_size'):")
+        self._emitter.indent()
+        self._emitter.emit_line("size = x.size()")
+        self._emitter.emit_line("stride = x.stride()")
+        self._emitter.emit_line("for s in size:")
+        self._emitter.indent()
+        self._emitter.emit_line("if isinstance(s, torch.SymInt):")
+        self._emitter.indent()
+        self._emitter.emit_line("out.append(s)")
+        self._emitter.dedent()
+        self._emitter.dedent()
+        self._emitter.emit_line("for s in stride:")
+        self._emitter.indent()
+        self._emitter.emit_line("if isinstance(s, torch.SymInt):")
+        self._emitter.indent()
+        self._emitter.emit_line("out.append(s)")
+        self._emitter.dedent()
+        self._emitter.dedent()
+        self._emitter.dedent()
+        self._emitter.emit_line("return out")
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_line("unwrapped = []")
+        self._emitter.emit_line("for i, arg in enumerate(args):")
+        self._emitter.indent()
+        self._emitter.emit_line("if isinstance(arg, torch.Tensor):")
+        self._emitter.indent()
+        self._emitter.emit_line(
+            "meta = subclass_metas[i] if subclass_metas and i < len(subclass_metas) else None"
+        )
+        self._emitter.emit_line("if hasattr(meta, 'attrs'):")
+        self._emitter.indent()
+        self._emitter.emit_line("_flatten_subclass(arg, meta.attrs, unwrapped)")
+        self._emitter.dedent()
+        self._emitter.emit_line("else:")
+        self._emitter.indent()
+        self._emitter.emit_line("_flatten_subclass(arg, None, unwrapped)")
+        self._emitter.dedent()
+        self._emitter.dedent()
+        self._emitter.emit_line("else:")
+        self._emitter.indent()
+        self._emitter.emit_line("unwrapped.append(arg)")
+        self._emitter.dedent()
+        self._emitter.dedent()
+        self._emitter.emit_line("return unwrapped")
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+    def _emit_subclass_wrap_function(
+        self, node: AOTDispatchSubclassWrapperNode
+    ) -> None:
+        """
+        Emit the _wrap_tensor_subclasses function.
+
+        This function takes a flat list of outputs and reconstructs
+        tensor subclasses using __tensor_unflatten__. It uses the
+        stored subclass creation metadata to determine class types
+        and reconstruction parameters.
+        """
+        self._emitter.emit_comment(
+            "Wrap flat tensor outputs back into tensor subclasses."
+        )
+        self._emitter.emit_comment(
+            "Uses __tensor_unflatten__ to reconstruct subclasses from inner tensors."
+        )
+        self._emitter.emit_comment(
+            "Handles both PlainTensorMeta (pass-through) and SubclassCreationMeta."
+        )
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_line(
+            "def _wrap_tensor_subclasses(unwrapped_outputs, subclass_metas, "
+            "num_fw_outs_saved=None):"
+        )
+        self._emitter.indent()
+        self._emitter.emit_line("if subclass_metas is None:")
+        self._emitter.indent()
+        self._emitter.emit_line("return unwrapped_outputs")
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_line("wrapped = []")
+        self._emitter.emit_line("idx = 0")
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_line("for meta in subclass_metas:")
+        self._emitter.indent()
+
+        self._emitter.emit_comment(
+            "PlainTensorMeta: just copy the tensor at unwrapped_idx."
+        )
+        self._emitter.emit_line("if hasattr(meta, 'unwrapped_idx'):")
+        self._emitter.indent()
+        self._emitter.emit_line("wrapped.append(unwrapped_outputs[meta.unwrapped_idx])")
+        self._emitter.emit_line("idx += 1")
+        self._emitter.emit_line("continue")
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_comment(
+            "SubclassCreationMeta: use creation_fn to reconstruct."
+        )
+        self._emitter.emit_line("if hasattr(meta, 'creation_fn'):")
+        self._emitter.indent()
+        self._emitter.emit_line("subclass = meta.creation_fn(unwrapped_outputs, is_runtime=True)")
+        self._emitter.emit_line("wrapped.append(subclass)")
+        self._emitter.emit_line("idx += meta.arg_count if hasattr(meta, 'arg_count') else 1")
+        self._emitter.emit_line("continue")
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_comment(
+            "Fallback: just append the current output."
+        )
+        self._emitter.emit_line("if idx < len(unwrapped_outputs):")
+        self._emitter.indent()
+        self._emitter.emit_line("wrapped.append(unwrapped_outputs[idx])")
+        self._emitter.emit_line("idx += 1")
+        self._emitter.dedent()
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_comment(
+            "Append remaining activations saved for backward pass."
+        )
+        self._emitter.emit_line("if num_fw_outs_saved is not None and idx < len(unwrapped_outputs):")
+        self._emitter.indent()
+        self._emitter.emit_line("wrapped.extend(unwrapped_outputs[idx:])")
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_line("return tuple(wrapped)")
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+    def visit_functionalized_rng_runtime_wrapper(
+        self, node: FunctionalizedRngRuntimeWrapperNode
+    ) -> str:
+        """
+        Generate code for RNG functionalization wrapper.
+
+        When is_rng_op_functionalized is True, this wrapper:
+        1. Appends CUDA RNG state (seed, offset) to the input args
+        2. Extracts the new RNG offset from outputs and updates CUDA RNG state
+        3. Strips the RNG offset from returned outputs
+
+        This mirrors FunctionalizedRngRuntimeWrapper from runtime_wrappers.py.
+        """
+        if not node.is_rng_op_functionalized:
+            return ""
+
+        if not self._has_emitted_wrapper_section:
+            self._emitter.emit_section_header("Wrapper Helper Functions")
+            self._has_emitted_wrapper_section = True
+
+        self._has_rng_wrapper = True
+        self._rng_num_outputs_offset = node.num_outputs_rng_offset
+        self._rng_num_forward_returns = node.num_forward_returns
+
+        self._emitter.emit_comment(
+            "RNG functionalization wrapper: plumbs CUDA RNG state through compiled function."
+        )
+        self._emitter.emit_comment(
+            "Appends (seed, offset) to args, extracts new offset from outputs."
+        )
+        self._emitter.emit_line(
+            f"_rng_num_outputs_offset = {node.num_outputs_rng_offset}"
+        )
+        self._emitter.emit_line(
+            f"_rng_num_forward_returns = {node.num_forward_returns}"
+        )
+        self._emitter.emit_blank_line()
+
+        self._emitter.add_import("import torch")
+
+        self._emitter.emit_line("def _append_rng_state(args):")
+        self._emitter.indent()
+        self._emitter.emit_comment(
+            "Get current CUDA RNG state (seed, offset) and append to args."
+        )
+        self._emitter.emit_line(
+            "rng_state = torch.cuda.get_rng_state_all() if torch.cuda.is_available() else None"
+        )
+        self._emitter.emit_line("if rng_state is not None:")
+        self._emitter.indent()
+        self._emitter.emit_line(
+            "seed_offset = (torch.cuda.initial_seed(), 0)"
+        )
+        self._emitter.emit_line("return list(args) + list(seed_offset)")
+        self._emitter.dedent()
+        self._emitter.emit_line("return args")
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_line("def _handle_rng_outputs(outputs):")
+        self._emitter.indent()
+        self._emitter.emit_comment(
+            "Extract RNG offset from outputs and update CUDA RNG state."
+        )
+        self._emitter.emit_line("if _rng_num_outputs_offset > 0 and outputs is not None:")
+        self._emitter.indent()
+        self._emitter.emit_comment("Last _rng_num_outputs_offset elements are RNG offsets.")
+        self._emitter.emit_line("return outputs[:-_rng_num_outputs_offset]")
+        self._emitter.dedent()
+        self._emitter.emit_line("return outputs")
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+        return ""
+
+    def visit_fakified_out_wrapper(self, node: FakifiedOutWrapperNode) -> str:
+        """
+        Generate code for fakified output wrapper.
+
+        This wrapper re-fakifies outputs using traced metadata and reported strides.
+        When fwd_output_strides is provided, outputs whose strides differ from
+        expected are corrected using as_strided. This mirrors FakifiedOutWrapper
+        from runtime_wrappers.py.
+
+        The generated _fix_output_strides function:
+        1. Takes outputs and the expected strides list
+        2. For each tensor output, checks if strides match expected
+        3. If strides differ, uses as_strided to fix the layout
+        4. Returns the corrected outputs
+
+        This is important for layout-sensitive operations where Inductor may
+        produce outputs with different strides than what was traced.
+        """
+        if node.out_metas is None:
+            return ""
+
+        if not self._has_emitted_wrapper_section:
+            self._emitter.emit_section_header("Wrapper Helper Functions")
+            self._has_emitted_wrapper_section = True
+
+        self._has_fakified_wrapper = True
+
+        self._emitter.add_import("import torch")
+
+        self._emitter.emit_comment(
+            "Fakified output wrapper: re-fakifies outputs using traced metadata."
+        )
+        self._emitter.emit_comment(
+            "Output strides are corrected to match those recorded during tracing."
+        )
+        self._emitter.emit_comment(
+            "This is needed when Inductor produces outputs with different strides."
+        )
+        self._emitter.emit_blank_line()
+
+        if node.fwd_output_strides is not None:
+            strides_repr = repr(node.fwd_output_strides)
+            self._emitter.emit_line(f"_fwd_output_strides = {strides_repr}")
+            self._emitter.emit_blank_line()
+
+            self._emitter.emit_line("def _fix_output_strides(outputs, expected_strides=None):")
+            self._emitter.indent()
+            self._emitter.emit_line("if expected_strides is None:")
+            self._emitter.indent()
+            self._emitter.emit_line("expected_strides = _fwd_output_strides")
+            self._emitter.dedent()
+            self._emitter.emit_line("if outputs is None or not expected_strides:")
+            self._emitter.indent()
+            self._emitter.emit_line("return outputs")
+            self._emitter.dedent()
+
+            self._emitter.emit_comment(
+                "Convert single output to list for uniform handling."
+            )
+            self._emitter.emit_line("is_single = not isinstance(outputs, (list, tuple))")
+            self._emitter.emit_line("if is_single:")
+            self._emitter.indent()
+            self._emitter.emit_line("outputs = [outputs]")
+            self._emitter.dedent()
+            self._emitter.emit_blank_line()
+
+            self._emitter.emit_line("result = list(outputs)")
+            self._emitter.emit_line("for i in range(min(len(result), len(expected_strides))):")
+            self._emitter.indent()
+            self._emitter.emit_line("if not isinstance(result[i], torch.Tensor):")
+            self._emitter.indent()
+            self._emitter.emit_line("continue")
+            self._emitter.dedent()
+            self._emitter.emit_line("strides = expected_strides[i]")
+            self._emitter.emit_comment(
+                "None strides mean Inductor couldn't compute expected strides,"
+            )
+            self._emitter.emit_comment(
+                "so we skip correction for this output."
+            )
+            self._emitter.emit_line("if strides is None:")
+            self._emitter.indent()
+            self._emitter.emit_line("continue")
+            self._emitter.dedent()
+
+            self._emitter.emit_comment(
+                "Check if actual strides match expected strides."
+            )
+            self._emitter.emit_line("actual_strides = result[i].stride()")
+            self._emitter.emit_line("if len(actual_strides) != len(strides):")
+            self._emitter.indent()
+            self._emitter.emit_line("continue")
+            self._emitter.dedent()
+            self._emitter.emit_line(
+                "if all(a == e for a, e in zip(actual_strides, strides)):"
+            )
+            self._emitter.indent()
+            self._emitter.emit_line("continue")
+            self._emitter.dedent()
+
+            self._emitter.emit_comment(
+                "Strides differ - use as_strided to correct the layout."
+            )
+            self._emitter.emit_line(
+                "result[i] = result[i].as_strided(result[i].shape, strides)"
+            )
+            self._emitter.dedent()
+            self._emitter.emit_blank_line()
+
+            self._emitter.emit_line("if is_single:")
+            self._emitter.indent()
+            self._emitter.emit_line("return result[0]")
+            self._emitter.dedent()
+            self._emitter.emit_line("return result")
+            self._emitter.dedent()
+            self._emitter.emit_blank_line()
+
+        return ""
+
+    def visit_runtime_wrapper(self, node: RuntimeWrapperNode) -> str:
+        """
+        Generate code for runtime wrapper (epilogue handling).
+
+        This wrapper handles:
+        1. Detaching inputs at specified indices (indices_of_inps_to_detach)
+        2. Restoring autocast/grad context if needed
+        3. Alias/mutation epilogue for outputs
+
+        This mirrors RuntimeWrapper from runtime_wrappers.py.
+        """
+        if not node.indices_of_inps_to_detach and not node.disable_amp:
+            return ""
+
+        if not self._has_emitted_wrapper_section:
+            self._emitter.emit_section_header("Wrapper Helper Functions")
+            self._has_emitted_wrapper_section = True
+
+        self._has_runtime_wrapper = True
+        self._indices_to_detach = node.indices_of_inps_to_detach
+
+        if node.indices_of_inps_to_detach:
+            self._emitter.emit_comment(
+                "Runtime wrapper: detaches inputs at specified indices."
+            )
+            self._emitter.emit_comment(
+                "This prevents gradients from flowing back through these inputs."
+            )
+            indices_repr = repr(node.indices_of_inps_to_detach)
+            self._emitter.emit_line(f"_indices_to_detach = {indices_repr}")
+            self._emitter.emit_blank_line()
+
+            self._emitter.emit_line("def _detach_inputs(args):")
+            self._emitter.indent()
+            self._emitter.emit_line("args = list(args)")
+            self._emitter.emit_line("for idx in _indices_to_detach:")
+            self._emitter.indent()
+            self._emitter.emit_line(
+                "if hasattr(args[idx], 'detach'):"
+            )
+            self._emitter.indent()
+            self._emitter.emit_line(
+                "args[idx] = args[idx].detach()"
+            )
+            self._emitter.dedent()
+            self._emitter.dedent()
+            self._emitter.emit_line("return args")
+            self._emitter.dedent()
+            self._emitter.emit_blank_line()
+
+        return ""
+
+    def visit_aot_dedupe_wrapper(self, node: AOTDedupeWrapperNode) -> str:
+        """
+        Generate code for AOT dedupe wrapper.
+
+        This wrapper handles duplicate argument removal and reinsertion:
+        1. Pre-call: Remove duplicate args using keep_arg_mask
+        2. Post-call: Reinsert duplicates using add_dupe_map (for grad outputs)
+
+        This mirrors AOTDedupeWrapper from runtime_wrappers.py.
+        """
+        if not node.needs_post_compile or not node.keep_arg_mask:
+            return ""
+
+        if not self._has_emitted_wrapper_section:
+            self._emitter.emit_section_header("Wrapper Helper Functions")
+            self._has_emitted_wrapper_section = True
+
+        self._has_dedupe_wrapper = True
+        self._dedupe_keep_arg_mask = node.keep_arg_mask
+        self._dedupe_add_dupe_map = node.add_dupe_map
+
+        self._emitter.emit_comment(
+            "AOT dedupe wrapper: handles duplicate argument removal/reinsertion."
+        )
+        self._emitter.emit_comment(
+            "Duplicate args are removed before calling compiled fn, then"
+        )
+        self._emitter.emit_comment(
+            "gradients are reconstructed using add_dupe_map on backward."
+        )
+
+        keep_mask_repr = repr(node.keep_arg_mask)
+        add_map_repr = repr(node.add_dupe_map) if node.add_dupe_map else "None"
+
+        self._emitter.emit_line(f"_dedupe_keep_arg_mask = {keep_mask_repr}")
+        self._emitter.emit_line(f"_dedupe_add_dupe_map = {add_map_repr}")
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_line("def _remove_dupe_args(args):")
+        self._emitter.indent()
+        self._emitter.emit_comment(
+            "Remove duplicate arguments based on keep_arg_mask."
+        )
+        self._emitter.emit_line(
+            "return [t for t, keep in zip(args, _dedupe_keep_arg_mask) if keep]"
+        )
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+        if node.add_dupe_map:
+            self._emitter.emit_line("def _add_dupe_args(args):")
+            self._emitter.indent()
+            self._emitter.emit_comment(
+                "Reinsert duplicated arguments using add_dupe_map."
+            )
+            self._emitter.emit_line(
+                "return [args[i] for i in _dedupe_add_dupe_map]"
+            )
+            self._emitter.dedent()
+            self._emitter.emit_blank_line()
+
+        return ""
+
+    def visit_aot_synthetic_base_wrapper(
+        self, node: AOTSyntheticBaseWrapperNode
+    ) -> str:
+        """
+        Generate code for AOT synthetic base wrapper.
+
+        This wrapper handles synthetic bases for aliased inputs:
+        1. Pre-call: Merge aliased inputs into synthetic bases using merge_view_inputs
+        2. Post-call: Unpack synthetic bases to original views
+        3. Post-call: Apply metadata mutations using as_strided_ for aliased inputs
+
+        The generated code mirrors runtime_wrappers.py AOTSyntheticBaseWrapper:
+        - _merge_aliased_inputs_to_synthetic_bases: Merges aliased inputs at runtime
+        - _unpack_synthetic_bases: Reconstructs original views from synthetic bases
+        - _apply_metadata_mutations: Applies as_strided_ for metadata mutations
+        """
+        if not node.needs_post_compile or node.synthetic_base_info is None:
+            return ""
+
+        if not self._has_emitted_wrapper_section:
+            self._emitter.emit_section_header("Wrapper Helper Functions")
+            self._has_emitted_wrapper_section = True
+
+        self._has_synthetic_base_wrapper = True
+
+        self._emitter.add_import("import torch")
+        self._emitter.add_import("from torch import Tensor")
+        self._emitter.add_import(
+            "from torch._functorch._aot_autograd.runtime_wrappers import merge_view_inputs"
+        )
+        self._emitter.add_import(
+            "from torch._functorch._aot_autograd.functional_utils import gen_alias_from_base"
+        )
+        self._emitter.add_import("from torch._functorch import config as functorch_config")
+
+        self._emitter.emit_comment(
+            "AOT synthetic base wrapper: handles aliased inputs via synthetic bases."
+        )
+        self._emitter.emit_comment(
+            "When inputs alias each other and one is mutated, they must share a"
+        )
+        self._emitter.emit_comment(
+            "synthetic base so mutations are visible to all aliases."
+        )
+        self._emitter.emit_blank_line()
+
+        self._emit_synthetic_base_metadata(node)
+        self._emit_merge_aliased_inputs_function(node)
+        self._emit_unpack_synthetic_bases_function(node)
+        self._emit_apply_metadata_mutations_function(node)
+
+        return ""
+
+    def _emit_synthetic_base_metadata(
+        self, node: AOTSyntheticBaseWrapperNode
+    ) -> None:
+        """Emit metadata variables for synthetic base wrapper."""
+        aliased_idx = node.aliased_arg_idx_with_metadata_mutations or []
+        aliased_idx_repr = repr(aliased_idx)
+        self._emitter.emit_line(
+            f"_aliased_arg_idx_with_metadata_mutations = {aliased_idx_repr}"
+        )
+        is_inference = not node.trace_joint
+        self._emitter.emit_line(f"_synthetic_base_is_inference = {is_inference}")
+        self._emitter.emit_blank_line()
+
+    def _emit_merge_aliased_inputs_function(
+        self, node: AOTSyntheticBaseWrapperNode
+    ) -> None:
+        """
+        Emit the _merge_aliased_inputs_to_synthetic_bases function.
+
+        This function takes the original args and merges aliased inputs into
+        synthetic bases at runtime using merge_view_inputs. It returns the
+        merged args and the synthetic_base_info needed for unpacking.
+        """
+        self._emitter.emit_comment(
+            "Merge aliased inputs into synthetic bases for the compiled function."
+        )
+        self._emitter.emit_comment(
+            "Uses merge_view_inputs to detect aliased inputs and create synthetic bases."
+        )
+        self._emitter.emit_comment(
+            "Returns merged args and synthetic_base_info for later unpacking."
+        )
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_line(
+            "def _merge_aliased_inputs_to_synthetic_bases(args, old_input_info, aot_config=None):"
+        )
+        self._emitter.indent()
+        self._emitter.emit_comment(
+            "Call merge_view_inputs to get synthetic bases and mapping info."
+        )
+        self._emitter.emit_line(
+            "args_with_bases, _, synth_info = merge_view_inputs("
+        )
+        self._emitter.indent()
+        self._emitter.emit_line("aot_config, args, None, old_input_info,")
+        self._emitter.emit_line("is_inference=_synthetic_base_is_inference")
+        self._emitter.dedent()
+        self._emitter.emit_line(")")
+        self._emitter.emit_blank_line()
+        self._emitter.emit_line("return args_with_bases, synth_info")
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+    def _emit_unpack_synthetic_bases_function(
+        self, node: AOTSyntheticBaseWrapperNode
+    ) -> None:
+        """
+        Emit the _unpack_synthetic_bases function.
+
+        This function takes args that have been merged into synthetic bases
+        and reconstructs the original views using synthetic_base_info.
+        Each element in synthetic_base_info is either:
+        - An int: index into args to use directly
+        - A tuple (base_idx, view_tensor): create view from args[base_idx]
+        """
+        self._emitter.emit_comment(
+            "Unpack synthetic bases back to original views for the traced function."
+        )
+        self._emitter.emit_comment(
+            "For each input, either pass through directly (int index) or"
+        )
+        self._emitter.emit_comment(
+            "reconstruct the view from a synthetic base (tuple with base_idx, view_tensor)."
+        )
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_line("def _unpack_synthetic_bases(primals, synthetic_base_info):")
+        self._emitter.indent()
+
+        self._emitter.emit_line("if synthetic_base_info is None:")
+        self._emitter.indent()
+        self._emitter.emit_line("return list(primals)")
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_line("replay_views = functorch_config.view_replay_for_aliased_outputs")
+        self._emitter.emit_line("f_args_inner = []")
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_line("for inner_idx_or_tuple in synthetic_base_info:")
+        self._emitter.indent()
+        self._emitter.emit_line("if isinstance(inner_idx_or_tuple, int):")
+        self._emitter.indent()
+        self._emitter.emit_comment(
+            "Direct index: just use the primal at that index."
+        )
+        self._emitter.emit_line("f_args_inner.append(primals[inner_idx_or_tuple])")
+        self._emitter.dedent()
+        self._emitter.emit_line("else:")
+        self._emitter.indent()
+        self._emitter.emit_comment(
+            "Tuple (base_idx, view_tensor): reconstruct view from base."
+        )
+        self._emitter.emit_line("inner_base_idx, view_tensor = inner_idx_or_tuple")
+        self._emitter.emit_line("base = primals[inner_base_idx]")
+        self._emitter.emit_line("view_arg = gen_alias_from_base(")
+        self._emitter.indent()
+        self._emitter.emit_line("base,")
+        self._emitter.emit_line("view_tensor,")
+        self._emitter.emit_line("view_tensor.requires_grad,")
+        self._emitter.emit_line("replay_views=replay_views,")
+        self._emitter.dedent()
+        self._emitter.emit_line(")")
+        self._emitter.emit_line("f_args_inner.append(view_arg)")
+        self._emitter.dedent()
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_line("return f_args_inner")
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+    def _emit_apply_metadata_mutations_function(
+        self, node: AOTSyntheticBaseWrapperNode
+    ) -> None:
+        """
+        Emit the _apply_metadata_mutations function.
+
+        When aliased inputs have metadata mutations (size/stride changes),
+        the compiled function returns extra outputs representing the mutated
+        inputs. This function applies those mutations back to the original
+        input tensors using as_strided_.
+        """
+        aliased_idx = node.aliased_arg_idx_with_metadata_mutations or []
+        if not aliased_idx:
+            return
+
+        self._emitter.emit_comment(
+            "Apply metadata mutations back to aliased inputs after the call."
+        )
+        self._emitter.emit_comment(
+            "The compiled fn returns extra outputs for inputs with metadata mutations."
+        )
+        self._emitter.emit_comment(
+            "We apply as_strided_ to update the original input's size/stride/offset."
+        )
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_line(
+            "def _apply_metadata_mutations(original_args, outputs):"
+        )
+        self._emitter.indent()
+
+        self._emitter.emit_line(
+            "num_metadata_mutations = len(_aliased_arg_idx_with_metadata_mutations)"
+        )
+        self._emitter.emit_line("if num_metadata_mutations == 0:")
+        self._emitter.indent()
+        self._emitter.emit_line("return outputs")
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_comment(
+            "Extract the aliased inputs that have metadata mutations."
+        )
+        self._emitter.emit_line("aliased_inputs = [")
+        self._emitter.indent()
+        self._emitter.emit_line(
+            "original_args[i] for i in _aliased_arg_idx_with_metadata_mutations"
+        )
+        self._emitter.dedent()
+        self._emitter.emit_line("]")
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_comment(
+            "The extra outputs are at the end and represent mutated input states."
+        )
+        self._emitter.emit_line(
+            "mutated_metadata_inps = outputs[-num_metadata_mutations:]"
+        )
+        self._emitter.emit_line(
+            "user_outs = outputs[:-num_metadata_mutations]"
+        )
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_comment(
+            "Apply the metadata mutations via as_strided_ to original inputs."
+        )
+        self._emitter.emit_line(
+            "for inp, mutated_inp in zip(aliased_inputs, mutated_metadata_inps):"
+        )
+        self._emitter.indent()
+        self._emitter.emit_line("inp.as_strided_(")
+        self._emitter.indent()
+        self._emitter.emit_line("mutated_inp.size(),")
+        self._emitter.emit_line("mutated_inp.stride(),")
+        self._emitter.emit_line("mutated_inp.storage_offset(),")
+        self._emitter.dedent()
+        self._emitter.emit_line(")")
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_line("return user_outs")
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+    def visit_debug_assert_wrapper(self, node: DebugAssertWrapperNode) -> str:
+        """
+        Generate code for debug assert wrapper.
+
+        When debug asserts are enabled, this wrapper validates that each input's
+        requires_grad status matches what was recorded during tracing.
+
+        This mirrors DebugAssertWrapper from runtime_wrappers.py.
+        """
+        if not node.flat_requires_grad:
+            return ""
+
+        if not self._has_emitted_wrapper_section:
+            self._emitter.emit_section_header("Wrapper Helper Functions")
+            self._has_emitted_wrapper_section = True
+
+        self._has_debug_assert_wrapper = True
+
+        flat_rg_repr = repr(node.flat_requires_grad)
+        self._emitter.emit_comment(
+            "Debug assert wrapper: validates requires_grad expectations."
+        )
+        self._emitter.emit_line(f"_expected_requires_grad = {flat_rg_repr}")
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_line("def _assert_requires_grad(args):")
+        self._emitter.indent()
+        self._emitter.emit_comment(
+            "Assert that each tensor's requires_grad matches expected."
+        )
+        self._emitter.emit_line("for i, (arg, expected) in enumerate(zip(args, _expected_requires_grad)):")
+        self._emitter.indent()
+        self._emitter.emit_line(
+            "if hasattr(arg, 'requires_grad') and arg.requires_grad != expected:"
+        )
+        self._emitter.indent()
+        self._emitter.emit_line(
+            'raise AssertionError(f"Input {i}: expected requires_grad={expected}, got {arg.requires_grad}")'
+        )
+        self._emitter.dedent()
+        self._emitter.dedent()
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+        return ""
+
     def _generate_dynamic_guard_code(self, node: GuardCheckNode) -> str:
         """
         Generate code for a dynamic guard (no strict assertion).
@@ -865,6 +1828,7 @@ class PythonCodeGenVisitor(CodeGenVisitor):
             or node.serialized_backward_code is not None
             or node.compiled_backward is not None
             or self._has_inductor_backward_kernel
+            or node.has_lazy_backward
         )
 
         has_forward_implementation = (
@@ -884,6 +1848,10 @@ class PythonCodeGenVisitor(CodeGenVisitor):
 
         if self._backward_cuda_graph_node is not None:
             self._emit_cuda_graph_state_variables(self._backward_cuda_graph_node)
+
+        # Emit lazy backward state variables if lazy backward is enabled
+        if node.has_lazy_backward:
+            self._emit_lazy_backward_state_variables(node)
 
         forward_code = self._get_forward_code(node)
         backward_code = self._get_backward_code(node)
@@ -979,6 +1947,191 @@ class PythonCodeGenVisitor(CodeGenVisitor):
 
         return None
 
+    def _emit_forward_wrapper_pre_call(self) -> None:
+        """
+        Emit wrapper pre-processing code for forward() before calling compiled_fn.
+
+        This method emits calls to wrapper helper functions that transform args
+        before they are passed to the compiled function. The wrappers are applied
+        in the correct order matching AOTAutograd's post_compile wrapper stack.
+
+        Wrapper application order (inside-out, matching wrapper_audit.md):
+        1. DebugAssertWrapper - validates requires_grad expectations
+        2. AOTDedupeWrapper - removes duplicate args
+        3. AOTSyntheticBaseWrapper - merges aliased inputs to synthetic bases
+        4. AOTDispatchSubclassWrapper - unwraps tensor subclasses
+        5. FunctionalizedRngRuntimeWrapper - appends RNG state to args
+        6. EffectTokensWrapper - injects effect tokens at start of args
+        7. RuntimeWrapper - detaches inputs at specified indices
+
+        The processed args are stored in _processed_args for the compiled call.
+        """
+        has_any_wrapper = (
+            self._effect_token_count > 0 or
+            self._has_subclass_wrapper or
+            self._has_rng_wrapper or
+            self._has_runtime_wrapper or
+            self._has_dedupe_wrapper or
+            self._has_synthetic_base_wrapper or
+            self._has_debug_assert_wrapper
+        )
+
+        if not has_any_wrapper:
+            return
+
+        self._emitter.emit_blank_line()
+        self._emitter.emit_comment(
+            "Apply wrapper pre-processing to args before compiled function call."
+        )
+        self._emitter.emit_line("_processed_args = list(args)")
+
+        if self._has_debug_assert_wrapper:
+            self._emitter.emit_comment("Validate requires_grad expectations (debug mode).")
+            self._emitter.emit_line("_assert_requires_grad(_processed_args)")
+
+        if self._has_dedupe_wrapper and self._dedupe_keep_arg_mask:
+            self._emitter.emit_comment("Remove duplicate arguments.")
+            self._emitter.emit_line("_processed_args = _remove_dupe_args(_processed_args)")
+
+        if self._has_synthetic_base_wrapper:
+            self._emitter.emit_comment("Merge aliased inputs to synthetic bases.")
+            self._emitter.emit_line(
+                "_processed_args, _synth_info = _merge_aliased_inputs_to_synthetic_bases("
+            )
+            self._emitter.indent()
+            self._emitter.emit_line("_processed_args, None, None")
+            self._emitter.dedent()
+            self._emitter.emit_line(")")
+
+        if self._has_subclass_wrapper:
+            self._emitter.emit_comment("Unwrap tensor subclasses to inner tensors.")
+            self._emitter.emit_line(
+                "_processed_args = _unwrap_tensor_subclasses(_processed_args)"
+            )
+
+        if self._has_rng_wrapper:
+            self._emitter.emit_comment("Append RNG state (seed, offset) to args.")
+            self._emitter.emit_line("_processed_args = _append_rng_state(_processed_args)")
+
+        if self._effect_token_count > 0:
+            self._emitter.emit_comment(
+                f"Inject {self._effect_token_count} effect token(s) at start of args."
+            )
+            self._emitter.emit_line("_processed_args = _inject_effect_tokens(_processed_args)")
+
+        if self._has_runtime_wrapper and self._indices_to_detach:
+            self._emitter.emit_comment("Detach inputs at specified indices.")
+            self._emitter.emit_line("_processed_args = _detach_inputs(_processed_args)")
+
+        self._emitter.emit_blank_line()
+
+    def _emit_forward_wrapper_post_call(self, output_var: str = "_result") -> None:
+        """
+        Emit wrapper post-processing code for forward() after calling compiled_fn.
+
+        This method emits calls to wrapper helper functions that transform outputs
+        after they are returned from the compiled function. The wrappers are applied
+        in reverse order (outside-in) to undo the pre-call transformations.
+
+        Wrapper application order (reverse of pre-call):
+        1. EffectTokensWrapper - strips effect tokens from start of outputs
+        2. FunctionalizedRngRuntimeWrapper - handles RNG offset outputs
+        3. AOTDispatchSubclassWrapper - wraps outputs as tensor subclasses
+        4. FakifiedOutWrapper - fixes output strides to match traced
+        5. AOTSyntheticBaseWrapper - unpacks synthetic bases to original views
+
+        Args:
+            output_var: Name of the variable holding the raw outputs
+        """
+        has_any_wrapper = (
+            self._effect_token_count > 0 or
+            self._has_subclass_wrapper or
+            self._has_rng_wrapper or
+            self._has_fakified_wrapper or
+            self._has_synthetic_base_wrapper
+        )
+
+        if not has_any_wrapper:
+            return
+
+        self._emitter.emit_blank_line()
+        self._emitter.emit_comment(
+            "Apply wrapper post-processing to outputs."
+        )
+
+        if self._effect_token_count > 0:
+            self._emitter.emit_comment("Strip effect tokens from start of outputs.")
+            self._emitter.emit_line(f"{output_var} = _strip_effect_tokens({output_var})")
+
+        if self._has_rng_wrapper:
+            self._emitter.emit_comment("Handle RNG offset outputs.")
+            self._emitter.emit_line(f"{output_var} = _handle_rng_outputs({output_var})")
+
+        if self._has_subclass_wrapper:
+            self._emitter.emit_comment("Wrap outputs as tensor subclasses.")
+            self._emitter.emit_line(
+                f"{output_var} = _wrap_tensor_subclasses({output_var}, None, _num_fw_outs_saved_for_bw)"
+            )
+
+        if self._has_fakified_wrapper:
+            self._emitter.emit_comment("Fix output strides to match traced layout.")
+            self._emitter.emit_line(f"{output_var} = _fix_output_strides({output_var})")
+
+        if self._has_synthetic_base_wrapper:
+            self._emitter.emit_comment("Unpack synthetic bases to original views.")
+            self._emitter.emit_line(f"{output_var} = _unpack_synthetic_bases({output_var}, _synth_info)")
+            self._emitter.emit_comment("Apply metadata mutations for aliased inputs.")
+            self._emitter.emit_line(f"_apply_metadata_mutations(args, {output_var})")
+
+    def _emit_backward_wrapper_pre_call(self) -> None:
+        """
+        Emit wrapper pre-processing code for backward() before calling backward kernel.
+
+        For backward, we need to apply fewer wrappers since most are forward-specific.
+        The main concern is handling effect tokens and RNG state for backward.
+        """
+        has_any_wrapper = self._effect_token_count > 0 or self._has_rng_wrapper
+
+        if not has_any_wrapper:
+            return
+
+        self._emitter.emit_comment(
+            "Apply wrapper pre-processing to backward inputs."
+        )
+
+        if self._effect_token_count > 0:
+            self._emitter.emit_comment("Inject effect tokens for backward inputs.")
+            self._emitter.emit_line("backward_inputs = _inject_effect_tokens(backward_inputs)")
+
+    def _emit_backward_wrapper_post_call(self, output_var: str = "_bw_result") -> None:
+        """
+        Emit wrapper post-processing code for backward() after calling backward kernel.
+
+        This handles:
+        1. Stripping effect tokens from backward outputs
+        2. Reinserting duplicate gradients via add_dupe_map
+        """
+        has_any_wrapper = (
+            self._effect_token_count > 0 or
+            (self._has_dedupe_wrapper and self._dedupe_add_dupe_map)
+        )
+
+        if not has_any_wrapper:
+            return
+
+        self._emitter.emit_blank_line()
+        self._emitter.emit_comment(
+            "Apply wrapper post-processing to backward outputs."
+        )
+
+        if self._effect_token_count > 0:
+            self._emitter.emit_comment("Strip effect tokens from backward outputs.")
+            self._emitter.emit_line(f"{output_var} = _strip_effect_tokens({output_var})")
+
+        if self._has_dedupe_wrapper and self._dedupe_add_dupe_map:
+            self._emitter.emit_comment("Reinsert duplicate gradients.")
+            self._emitter.emit_line(f"{output_var} = _add_dupe_args({output_var})")
+
     def _emit_forward_method(
         self, node: AOTAutogradWrapperNode, forward_code: str
     ) -> None:
@@ -1030,6 +2183,12 @@ class PythonCodeGenVisitor(CodeGenVisitor):
         )
         self._emitter.emit_line(f"ctx.num_inputs = {node.num_inputs}")
 
+        # Emit wrapper pre-call processing if any wrappers are active
+        self._emit_forward_wrapper_pre_call()
+
+        # Determine which args variable to use
+        args_var = "_processed_args" if self._has_forward_wrappers else "args"
+
         if self._forward_cuda_graph_node is not None:
             self._emitter.emit_blank_line()
             self._emit_forward_cuda_graph_logic(self._forward_cuda_graph_node, node)
@@ -1056,9 +2215,9 @@ class PythonCodeGenVisitor(CodeGenVisitor):
                     "saved_tensors are needed for backward. We save them here."
                 )
                 if self._emit_debug_prints:
-                    self._emitter.emit_line('print("[DEBUG] Calling compiled_fn with list(args), len=", len(args))')
+                    self._emitter.emit_line(f'print("[DEBUG] Calling compiled_fn with list({args_var}), len=", len({args_var}))')
                 self._emitter.emit_line(
-                    f"_inductor_result = {self._compiled_fn_var_name}(list(args))"
+                    f"_inductor_result = {self._compiled_fn_var_name}(list({args_var}))"
                 )
                 if self._emit_debug_prints:
                     self._emitter.emit_line('print("[DEBUG] compiled_fn returned _inductor_result, type=", type(_inductor_result), "len=", len(_inductor_result) if hasattr(_inductor_result, "__len__") else "N/A")')
@@ -1075,7 +2234,14 @@ class PythonCodeGenVisitor(CodeGenVisitor):
                 self._emitter.emit_line("ctx.save_for_backward(*_inductor_result[1:])")
                 self._emitter.dedent()
                 self._emitter.emit_blank_line()
-                self._emitter.emit_line("return _inductor_result[0]")
+
+                # Apply wrapper post-processing if needed
+                if self._has_forward_output_wrappers:
+                    self._emitter.emit_line("_result = _inductor_result[0]")
+                    self._emit_forward_wrapper_post_call("_result")
+                    self._emitter.emit_line("return _result")
+                else:
+                    self._emitter.emit_line("return _inductor_result[0]")
             else:
                 self._emitter.emit_comment(
                     "Inductor's call() function expects args as a list and"
@@ -1085,28 +2251,57 @@ class PythonCodeGenVisitor(CodeGenVisitor):
                 )
                 if self._inductor_uses_list_args and self._inductor_returns_tuple:
                     self._emitter.emit_line(
-                        f"_inductor_result = {self._compiled_fn_var_name}(list(args))"
+                        f"_inductor_result = {self._compiled_fn_var_name}(list({args_var}))"
                     )
-                    self._emitter.emit_line("return _inductor_result[0]")
+                    if self._has_forward_output_wrappers:
+                        self._emitter.emit_line("_result = _inductor_result[0]")
+                        self._emit_forward_wrapper_post_call("_result")
+                        self._emitter.emit_line("return _result")
+                    else:
+                        self._emitter.emit_line("return _inductor_result[0]")
                 elif self._inductor_uses_list_args:
-                    self._emitter.emit_line(
-                        f"return {self._compiled_fn_var_name}(list(args))"
-                    )
+                    if self._has_forward_output_wrappers:
+                        self._emitter.emit_line(
+                            f"_result = {self._compiled_fn_var_name}(list({args_var}))"
+                        )
+                        self._emit_forward_wrapper_post_call("_result")
+                        self._emitter.emit_line("return _result")
+                    else:
+                        self._emitter.emit_line(
+                            f"return {self._compiled_fn_var_name}(list({args_var}))"
+                        )
                 elif self._inductor_returns_tuple:
                     self._emitter.emit_line(
-                        f"_inductor_result = {self._compiled_fn_var_name}(*args)"
+                        f"_inductor_result = {self._compiled_fn_var_name}(*{args_var})"
                     )
-                    self._emitter.emit_line("return _inductor_result[0]")
+                    if self._has_forward_output_wrappers:
+                        self._emitter.emit_line("_result = _inductor_result[0]")
+                        self._emit_forward_wrapper_post_call("_result")
+                        self._emitter.emit_line("return _result")
+                    else:
+                        self._emitter.emit_line("return _inductor_result[0]")
                 else:
-                    self._emitter.emit_line(
-                        f"return {self._compiled_fn_var_name}(*args)"
-                    )
+                    if self._has_forward_output_wrappers:
+                        self._emitter.emit_line(
+                            f"_result = {self._compiled_fn_var_name}(*{args_var})"
+                        )
+                        self._emit_forward_wrapper_post_call("_result")
+                        self._emitter.emit_line("return _result")
+                    else:
+                        self._emitter.emit_line(
+                            f"return {self._compiled_fn_var_name}(*{args_var})"
+                        )
         else:
             self._emitter.emit_blank_line()
             self._emitter.emit_comment(
                 "Forward computation handled by compiled function."
             )
-            self._emitter.emit_line(f"return {self._compiled_fn_var_name}(*args)")
+            if self._has_forward_output_wrappers:
+                self._emitter.emit_line(f"_result = {self._compiled_fn_var_name}(*{args_var})")
+                self._emit_forward_wrapper_post_call("_result")
+                self._emitter.emit_line("return _result")
+            else:
+                self._emitter.emit_line(f"return {self._compiled_fn_var_name}(*{args_var})")
 
         self._emitter.dedent()
 
@@ -1177,7 +2372,48 @@ class PythonCodeGenVisitor(CodeGenVisitor):
         self._emitter.emit_line("num_inputs = ctx.num_inputs")
         self._emitter.emit_blank_line()
 
-        if self._backward_cuda_graph_node is not None:
+        # Handle lazy backward compilation if enabled
+        if node.has_lazy_backward:
+            self._emit_lazy_backward_compilation_logic(node)
+            # After lazy compilation, we use the compiled backward
+            self._emitter.emit_comment(
+                "Prepare backward inputs: saved tensors followed by grad_outputs."
+            )
+            self._emitter.emit_line("backward_inputs = list(saved) + list(grad_outputs)")
+
+            # Apply wrapper pre-processing for backward inputs
+            self._emit_backward_wrapper_pre_call()
+
+            if self._emit_debug_prints:
+                self._emitter.emit_line('print("[DEBUG] Calling _compiled_bw with backward_inputs, len=", len(backward_inputs))')
+            self._emitter.emit_blank_line()
+
+            self._emitter.emit_comment(
+                "Call the lazily-compiled backward function."
+            )
+            self._emitter.emit_line("_bw_result = _compiled_bw(backward_inputs)")
+
+            # Apply wrapper post-processing for backward outputs
+            self._emit_backward_wrapper_post_call("_bw_result")
+
+            self._emitter.emit_blank_line()
+
+            self._emitter.emit_comment(
+                "The backward kernel returns gradients as a tuple/list."
+            )
+            self._emitter.emit_comment(
+                "Extract the first element if it's a tuple."
+            )
+            self._emitter.emit_line("if isinstance(_bw_result, (tuple, list)) and len(_bw_result) > 0:")
+            self._emitter.indent()
+            self._emitter.emit_line("if isinstance(_bw_result[0], (tuple, list)):")
+            self._emitter.indent()
+            self._emitter.emit_line("return _bw_result[0]")
+            self._emitter.dedent()
+            self._emitter.emit_line("return _bw_result")
+            self._emitter.dedent()
+            self._emitter.emit_line("return _bw_result")
+        elif self._backward_cuda_graph_node is not None:
             self._emit_backward_cuda_graph_logic(self._backward_cuda_graph_node, node)
         elif self._has_inductor_backward_kernel:
             self._emitter.emit_comment(
@@ -1195,6 +2431,10 @@ class PythonCodeGenVisitor(CodeGenVisitor):
                 "Prepare backward inputs: saved tensors followed by grad_outputs."
             )
             self._emitter.emit_line("backward_inputs = list(saved) + list(grad_outputs)")
+
+            # Apply wrapper pre-processing for backward inputs
+            self._emit_backward_wrapper_pre_call()
+
             if self._emit_debug_prints:
                 self._emitter.emit_line('print("[DEBUG] Calling compiled_fn_backward with backward_inputs, len=", len(backward_inputs))')
             self._emitter.emit_blank_line()
@@ -1205,6 +2445,10 @@ class PythonCodeGenVisitor(CodeGenVisitor):
             self._emitter.emit_line("_bw_result = compiled_fn_backward(backward_inputs)")
             if self._emit_debug_prints:
                 self._emitter.emit_line('print("[DEBUG] compiled_fn_backward returned, type=", type(_bw_result))')
+
+            # Apply wrapper post-processing for backward outputs
+            self._emit_backward_wrapper_post_call("_bw_result")
+
             self._emitter.emit_blank_line()
 
             self._emitter.emit_comment(
@@ -1247,6 +2491,199 @@ class PythonCodeGenVisitor(CodeGenVisitor):
             self._emitter.emit_line("return (None,) * num_inputs")
 
         self._emitter.dedent()
+
+    def _emit_lazy_backward_state_variables(
+        self,
+        node: AOTAutogradWrapperNode,
+    ) -> None:
+        """
+        Emit module-level state variables for lazy backward compilation.
+
+        When lazy backward is enabled, the backward graph is not compiled until
+        backward() is actually called. This defers compilation cost for inference
+        workloads that never call backward.
+
+        The generated code stores:
+        - _lazy_bw_module: The uncompiled backward GraphModule (via object ID)
+        - _lazy_bw_placeholder_list: Placeholder nodes for backward inputs
+        - _lazy_bw_saved_context: TracingContext for lazy compilation
+        - _lazy_bw_saved_compile_context: CompileContext for lazy compilation
+        - _compiled_bw: The compiled backward function (None until first backward)
+
+        These are accessed via nonlocal declarations in the backward method.
+
+        Args:
+            node: The AOTAutogradWrapperNode containing lazy backward info
+        """
+        self._emitter.emit_comment(
+            "Lazy backward state variables."
+        )
+        self._emitter.emit_comment(
+            "The backward graph is compiled on first backward() call."
+        )
+        self._emitter.emit_comment(
+            "This defers compilation cost for inference-only workloads."
+        )
+
+        # Store the lazy backward module via object ID if available
+        if node.lazy_bw_module is not None:
+            bw_module_id = id(node.lazy_bw_module)
+            self._emitter.emit_line(f"_lazy_bw_module_id = {bw_module_id}")
+        else:
+            self._emitter.emit_line("_lazy_bw_module_id = None")
+
+        # Store placeholder list via object ID if available
+        if node.lazy_bw_placeholder_list is not None:
+            placeholder_id = id(node.lazy_bw_placeholder_list)
+            self._emitter.emit_line(f"_lazy_bw_placeholder_list_id = {placeholder_id}")
+        else:
+            self._emitter.emit_line("_lazy_bw_placeholder_list_id = None")
+
+        # Store saved context via object ID if available
+        if node.lazy_bw_saved_context is not None:
+            ctx_id = id(node.lazy_bw_saved_context)
+            self._emitter.emit_line(f"_lazy_bw_saved_context_id = {ctx_id}")
+        else:
+            self._emitter.emit_line("_lazy_bw_saved_context_id = None")
+
+        # Store saved compile context via object ID if available
+        if node.lazy_bw_saved_compile_context is not None:
+            compile_ctx_id = id(node.lazy_bw_saved_compile_context)
+            self._emitter.emit_line(f"_lazy_bw_saved_compile_context_id = {compile_ctx_id}")
+        else:
+            self._emitter.emit_line("_lazy_bw_saved_compile_context_id = None")
+
+        # The compiled backward starts as None
+        self._emitter.emit_line("_compiled_bw = None")
+        self._emitter.emit_blank_line()
+
+    def _emit_lazy_backward_compilation_logic(
+        self,
+        node: AOTAutogradWrapperNode,
+    ) -> None:
+        """
+        Emit the lazy backward compilation check and compilation code.
+
+        This method generates code that checks if the backward function has been
+        compiled yet, and if not, compiles it using the saved contexts and
+        backward module.
+
+        The generated code mirrors AOTDispatchAutograd._backward_impl:
+        1. Check if _compiled_bw is None (as a module-level variable)
+        2. If so, retrieve saved module and contexts via object ID
+        3. Restore tracing and compile contexts
+        4. Call bw_compiler to compile the backward module
+        5. Store result in _compiled_bw for future calls
+
+        Note: Unlike the runtime, we use a module-level variable rather than
+        a class attribute because the generated code doesn't have access to
+        the class definition at the point of method execution.
+
+        Args:
+            node: The AOTAutogradWrapperNode containing lazy backward info
+        """
+        self._emitter.emit_comment(
+            "Lazy backward compilation: compile on first backward call."
+        )
+        self._emitter.emit_comment(
+            "Access module-level _compiled_bw variable."
+        )
+        self._emitter.emit_line("global _compiled_bw")
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_line("if _compiled_bw is None:")
+        self._emitter.indent()
+
+        self._emitter.emit_comment(
+            "First backward call - compile the backward graph now."
+        )
+        self._emitter.emit_comment(
+            "Retrieve the backward module and contexts via object ID."
+        )
+        self._emitter.emit_line("import copy")
+        self._emitter.emit_line("from contextlib import nullcontext")
+        self._emitter.emit_blank_line()
+
+        # Retrieve objects via object ID
+        self._emitter.emit_line("if _lazy_bw_module_id is not None:")
+        self._emitter.indent()
+        self._emitter.emit_line("_bw_module = obj_from_id(_lazy_bw_module_id)")
+        self._emitter.dedent()
+        self._emitter.emit_line("else:")
+        self._emitter.indent()
+        self._emitter.emit_line(
+            'raise RuntimeError("Lazy backward module not available")'
+        )
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_line("if _lazy_bw_placeholder_list_id is not None:")
+        self._emitter.indent()
+        self._emitter.emit_line("_placeholder_list = obj_from_id(_lazy_bw_placeholder_list_id)")
+        self._emitter.dedent()
+        self._emitter.emit_line("else:")
+        self._emitter.indent()
+        self._emitter.emit_line("_placeholder_list = []")
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_comment(
+            "Retrieve saved contexts for tracing/compilation."
+        )
+        self._emitter.emit_line("_saved_context = None")
+        self._emitter.emit_line("if _lazy_bw_saved_context_id is not None:")
+        self._emitter.indent()
+        self._emitter.emit_line("_saved_context = obj_from_id(_lazy_bw_saved_context_id)")
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_line("_saved_compile_context = None")
+        self._emitter.emit_line("if _lazy_bw_saved_compile_context_id is not None:")
+        self._emitter.indent()
+        self._emitter.emit_line("_saved_compile_context = obj_from_id(_lazy_bw_saved_compile_context_id)")
+        self._emitter.dedent()
+        self._emitter.emit_blank_line()
+
+        self._emitter.emit_comment(
+            "Compile the backward graph using saved contexts."
+        )
+        self._emitter.emit_comment(
+            "This mirrors AOTDispatchAutograd._backward_impl lazy compilation."
+        )
+        self._emitter.emit_line("from torch._guards import tracing, compile_context")
+        self._emitter.emit_blank_line()
+
+        # Emit compilation with context restoration
+        self._emitter.emit_line("with (")
+        self._emitter.indent()
+        self._emitter.emit_line("tracing(_saved_context) if _saved_context is not None else nullcontext(),")
+        self._emitter.emit_line("compile_context(_saved_compile_context) if _saved_compile_context is not None else nullcontext(),")
+        self._emitter.dedent()
+        self._emitter.emit_line("):")
+        self._emitter.indent()
+
+        self._emitter.emit_comment(
+            "Use torch.compile's backend to compile the backward module."
+        )
+        self._emitter.emit_comment(
+            "The bw_compiler is accessed from the saved compile context."
+        )
+        self._emitter.emit_line("if _saved_compile_context is not None and hasattr(_saved_compile_context, 'bw_compiler'):")
+        self._emitter.indent()
+        self._emitter.emit_line("_compiled_bw = _saved_compile_context.bw_compiler(copy.deepcopy(_bw_module), _placeholder_list)")
+        self._emitter.dedent()
+        self._emitter.emit_line("else:")
+        self._emitter.indent()
+        self._emitter.emit_comment(
+            "Fallback: use inductor as the backward compiler."
+        )
+        self._emitter.emit_line("from torch._inductor.compile_fx import compile_fx")
+        self._emitter.emit_line("_compiled_bw = compile_fx(copy.deepcopy(_bw_module), _placeholder_list)")
+        self._emitter.dedent()
+
+        self._emitter.dedent()  # End with block
+        self._emitter.dedent()  # End if _compiled_bw is None
+        self._emitter.emit_blank_line()
 
     def _emit_cuda_graph_state_variables(
         self,
@@ -2272,7 +3709,16 @@ class PythonCodeGenVisitor(CodeGenVisitor):
 
         args_str = ", ".join(node.argument_names)
 
-        if self._cuda_graph_replay_fn is not None:
+        # When we have a backward kernel, we need to invoke via the autograd
+        # function to preserve grad_fn for backward propagation. The autograd
+        # function's forward() method will handle the computation. Without this,
+        # calling the CUDA graph replay function directly bypasses the autograd
+        # function and the output has no grad_fn.
+        use_autograd_function = (
+            self._has_inductor_backward_kernel and node.is_autograd_function
+        )
+
+        if self._cuda_graph_replay_fn is not None and not use_autograd_function:
             args_call = f"[{args_str}]"
             self._emitter.emit_comment(
                 "CUDA graphs are enabled - use the replay function instead of"

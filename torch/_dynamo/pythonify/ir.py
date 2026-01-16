@@ -252,6 +252,126 @@ class GuardCheckNode(IRNode):
         return visitor.visit_guard_check(self)
 
 
+# Wrapper IR nodes
+@dataclass
+class EffectTokensWrapperNode(IRNode):
+    """
+    Injects effect tokens on input and strips them from outputs.
+
+    Attributes:
+        token_count: Number of effect tokens to prepend to args and drop from outputs.
+    """
+
+    token_count: int = 0
+
+    def accept(self, visitor: "CodeGenVisitor") -> Any:
+        return visitor.visit_effect_tokens_wrapper(self)
+
+
+@dataclass
+class AOTDispatchSubclassWrapperNode(IRNode):
+    """
+    Handles unwrapping/rewrapping tensor subclasses around compiled callables.
+
+    Attributes capture metadata from ViewAndMutationMeta for subclass handling.
+    """
+
+    subclass_inp_meta: Any = None
+    subclass_fw_graph_out_meta: Any = None
+    num_fw_outs_saved_for_bw: int = 0
+    maybe_subclass_meta: Any = None
+
+    def accept(self, visitor: "CodeGenVisitor") -> Any:
+        return visitor.visit_aot_dispatch_subclass_wrapper(self)
+
+
+@dataclass
+class FunctionalizedRngRuntimeWrapperNode(IRNode):
+    """
+    Manages RNG functionalization inputs/outputs and CUDA offset updates.
+    """
+
+    is_rng_op_functionalized: bool = False
+    num_outputs_rng_offset: int = 0
+    num_forward_returns: int = 0
+    num_graphsafe_rng_states: int = 0
+    graphsafe_rng_state_index: Optional[int] = None
+
+    def accept(self, visitor: "CodeGenVisitor") -> Any:
+        return visitor.visit_functionalized_rng_runtime_wrapper(self)
+
+
+@dataclass
+class FakifiedOutWrapperNode(IRNode):
+    """
+    Re-fakifies outputs using traced metadata and reported strides.
+    """
+
+    out_metas: Any = None
+    fwd_output_strides: Optional[list[Any]] = None
+
+    def accept(self, visitor: "CodeGenVisitor") -> Any:
+        return visitor.visit_fakified_out_wrapper(self)
+
+
+@dataclass
+class RuntimeWrapperNode(IRNode):
+    """
+    Runtime epilogue handling detach, alias, and autocast/grad restoration.
+    """
+
+    indices_of_inps_to_detach: list[int] = field(default_factory=list)
+    disable_amp: bool = False
+    runtime_metadata: Any = None
+    trace_joint: bool = False
+
+    def accept(self, visitor: "CodeGenVisitor") -> Any:
+        return visitor.visit_runtime_wrapper(self)
+
+
+@dataclass
+class AOTDedupeWrapperNode(IRNode):
+    """
+    Re-inserts duplicated arguments removed during compile-time deduping.
+    """
+
+    keep_arg_mask: Optional[list[bool]] = None
+    add_dupe_map: Optional[list[tuple[int, int]]] = None
+    needs_post_compile: bool = False
+    old_input_metadata: Any = None
+
+    def accept(self, visitor: "CodeGenVisitor") -> Any:
+        return visitor.visit_aot_dedupe_wrapper(self)
+
+
+@dataclass
+class AOTSyntheticBaseWrapperNode(IRNode):
+    """
+    Reconstructs views from synthetic bases and reapplies metadata mutations.
+    """
+
+    synthetic_base_info: Any = None
+    aliased_arg_idx_with_metadata_mutations: Optional[list[int]] = None
+    old_input_info: Any = None
+    needs_post_compile: bool = False
+    trace_joint: bool = False
+
+    def accept(self, visitor: "CodeGenVisitor") -> Any:
+        return visitor.visit_aot_synthetic_base_wrapper(self)
+
+
+@dataclass
+class DebugAssertWrapperNode(IRNode):
+    """
+    Asserts requires_grad expectations at runtime when debug asserts are enabled.
+    """
+
+    flat_requires_grad: Optional[list[bool]] = None
+
+    def accept(self, visitor: "CodeGenVisitor") -> Any:
+        return visitor.visit_debug_assert_wrapper(self)
+
+
 @dataclass
 class AOTAutogradWrapperNode(IRNode):
     """
@@ -259,7 +379,48 @@ class AOTAutogradWrapperNode(IRNode):
 
     This node encapsulates the torch.autograd.Function that wraps the
     Inductor-compiled forward and backward functions. It contains all
-    the information needed to generate the autograd wrapper.
+    the information needed to generate the autograd wrapper, including
+    lazy backward compilation and forward/backward stitching.
+
+    Lazy Backward Compilation
+    -------------------------
+    AOTDispatchAutograd.post_compile supports lazy backward compilation, where
+    the backward graph is not compiled until backward() is actually called.
+    This optimization avoids compiling backward for inference-only workloads.
+
+    When lazy backward is enabled:
+    - compiled_backward is None at generation time
+    - has_lazy_backward is True
+    - lazy_bw_module holds the uncompiled backward GraphModule
+    - lazy_bw_placeholder_list holds the placeholder nodes for backward inputs
+
+    At runtime, when backward() is first called:
+    1. The tracing and compile contexts are restored
+    2. The backward module is compiled via bw_compiler(bw_module, placeholder_list)
+    3. The compiled backward is cached for future calls
+
+    Forward/Backward Stitching
+    --------------------------
+    AOTDispatchAutograd.post_compile stitches forward and backward callables
+    into a torch.autograd.Function class. This involves:
+
+    1. Saved tensor management: Forward outputs are sliced into user outputs
+       and saved tensors/symints for backward. Slices are specified by:
+       - tensors_saved_for_bw_with_vc_check_slice: tensors needing version check
+       - tensors_saved_for_bw_no_vc_check_slice: tensors without version check
+       - symints_saved_for_bw_slice: symbolic integers saved for backward
+       - num_symints_saved_for_bw: count of saved symints
+
+    2. RNG state pairing: When CUDA graphs with graphsafe RNG are used:
+       - Forward stores RNG generator state per iteration
+       - Backward restores matching RNG state from forward iteration
+       - num_graphsafe_rng_states and graphsafe_rng_state_index control this
+
+    3. Input detachment: Certain inputs are detached before backward to prevent
+       gradient accumulation issues (indices_of_inps_to_detach)
+
+    4. Subclass tangent processing: When inputs are tensor subclasses, tangents
+       (gradient outputs) need special handling via maybe_subclass_meta
 
     Attributes:
         class_name: Name of the generated autograd.Function class
@@ -287,6 +448,53 @@ class AOTAutogradWrapperNode(IRNode):
             When set, the generated code will reference this callable.
         compiled_backward: Reference to a callable for the backward pass.
             When set, the generated code will reference this callable.
+            May be None if has_lazy_backward is True.
+
+        Lazy Backward Fields:
+        has_lazy_backward: True if backward compilation is deferred until runtime.
+            When True, compiled_backward is None and lazy_bw_module holds the
+            uncompiled backward graph.
+        lazy_bw_module: The uncompiled backward GraphModule for lazy compilation.
+            Only set when has_lazy_backward is True.
+        lazy_bw_placeholder_list: List of placeholder nodes for backward inputs.
+            Passed to bw_compiler during lazy compilation.
+        lazy_bw_saved_context: Serializable representation of TracingContext
+            needed to restore tracing state during lazy backward compilation.
+        lazy_bw_saved_compile_context: Serializable representation of CompileContext
+            needed to restore compile state during lazy backward compilation.
+
+        Saved Tensor Slice Fields:
+        tensors_saved_for_bw_with_vc_check_slice: Slice indices for saved tensors
+            that require version counter checks (detect in-place modifications).
+        tensors_saved_for_bw_no_vc_check_slice: Slice indices for saved tensors
+            that do not require version counter checks.
+        symints_saved_for_bw_slice: Slice indices for symbolic integers saved
+            for backward (e.g., dynamic shape values).
+        num_symints_saved_for_bw: Count of symbolic integers saved for backward.
+        dynamic_saved_tensors_idxs: Mapping from saved tensor index to set of
+            dimension indices that have dynamic shapes.
+
+        RNG State Fields:
+        num_graphsafe_rng_states: Number of CUDA graph-safe RNG generator states
+            to maintain for forward/backward RNG pairing.
+        graphsafe_rng_state_index: Device index for CUDA RNG state management.
+            When set, RNG generators are created on this device.
+        is_rng_op_functionalized: Whether RNG operations were functionalized
+            during AOT compilation.
+
+        Autograd Assembly Fields:
+        backward_state_indices: Indices of BackwardState objects in inputs.
+            Used by compiled autograd for stateful backward passes.
+        indices_of_inps_to_detach: List of input indices to detach before
+            backward to prevent gradient accumulation issues.
+        disable_amp: Whether autocast was disabled during compilation.
+            Used to restore proper autocast context during backward.
+        maybe_subclass_meta: SubclassMeta for tensor subclass handling.
+            Contains grad_input_metas for processing tangent subclasses.
+        fw_metadata: ViewAndMutationMeta containing runtime metadata about
+            mutations, aliasing, and output structure.
+        try_save_cache_entry_present: Whether a cache save callback is available
+            for caching lazy-compiled backward.
     """
 
     class_name: str
@@ -305,8 +513,67 @@ class AOTAutogradWrapperNode(IRNode):
     compiled_forward: Optional[Callable] = None
     compiled_backward: Optional[Callable] = None
 
+    # Lazy backward compilation fields
+    has_lazy_backward: bool = False
+    lazy_bw_module: Optional["GraphModule"] = None
+    lazy_bw_placeholder_list: Optional[list[Any]] = None
+    lazy_bw_saved_context: Optional[dict[str, Any]] = None
+    lazy_bw_saved_compile_context: Optional[dict[str, Any]] = None
+
+    # Saved tensor slice metadata for fw/bw stitching
+    tensors_saved_for_bw_with_vc_check_slice: Optional[tuple[int, int]] = None
+    tensors_saved_for_bw_no_vc_check_slice: Optional[tuple[int, int]] = None
+    symints_saved_for_bw_slice: Optional[tuple[int, int]] = None
+    num_symints_saved_for_bw: int = 0
+    dynamic_saved_tensors_idxs: dict[int, set[int]] = field(default_factory=dict)
+
+    # RNG state pairing fields
+    num_graphsafe_rng_states: int = 0
+    graphsafe_rng_state_index: Optional[int] = None
+    is_rng_op_functionalized: bool = False
+
+    # Autograd assembly fields
+    backward_state_indices: list[int] = field(default_factory=list)
+    indices_of_inps_to_detach: list[int] = field(default_factory=list)
+    disable_amp: bool = False
+    maybe_subclass_meta: Optional[Any] = None
+    fw_metadata: Optional[Any] = None
+    try_save_cache_entry_present: bool = False
+
     def accept(self, visitor: "CodeGenVisitor") -> Any:
         return visitor.visit_aot_autograd_wrapper(self)
+
+    def is_lazy_backward_enabled(self) -> bool:
+        """
+        Check if lazy backward compilation is enabled.
+
+        Returns True if backward compilation is deferred to runtime.
+        In this case, compiled_backward will be None and lazy_bw_module
+        holds the uncompiled backward graph.
+        """
+        return self.has_lazy_backward and self.lazy_bw_module is not None
+
+    def requires_rng_pairing(self) -> bool:
+        """
+        Check if RNG state pairing is required for forward/backward.
+
+        Returns True if CUDA graph-safe RNG states need to be managed
+        across forward/backward iterations.
+        """
+        return self.num_graphsafe_rng_states > 0
+
+    def requires_saved_tensor_slicing(self) -> bool:
+        """
+        Check if saved tensor slicing is required.
+
+        Returns True if forward outputs need to be sliced into user outputs
+        and saved tensors for backward.
+        """
+        return (
+            self.tensors_saved_for_bw_with_vc_check_slice is not None
+            or self.tensors_saved_for_bw_no_vc_check_slice is not None
+            or self.symints_saved_for_bw_slice is not None
+        )
 
 
 @dataclass
@@ -619,6 +886,52 @@ class CodeGenVisitor(abc.ABC):
         pass
 
     @abc.abstractmethod
+    def visit_effect_tokens_wrapper(self, node: EffectTokensWrapperNode) -> Any:
+        """Process an effect tokens wrapper node."""
+        pass
+
+    @abc.abstractmethod
+    def visit_aot_dispatch_subclass_wrapper(
+        self, node: AOTDispatchSubclassWrapperNode
+    ) -> Any:
+        """Process an AOT subclass dispatch wrapper node."""
+        pass
+
+    @abc.abstractmethod
+    def visit_functionalized_rng_runtime_wrapper(
+        self, node: FunctionalizedRngRuntimeWrapperNode
+    ) -> Any:
+        """Process an RNG functionalization wrapper node."""
+        pass
+
+    @abc.abstractmethod
+    def visit_fakified_out_wrapper(self, node: FakifiedOutWrapperNode) -> Any:
+        """Process a fakified out wrapper node."""
+        pass
+
+    @abc.abstractmethod
+    def visit_runtime_wrapper(self, node: RuntimeWrapperNode) -> Any:
+        """Process a runtime epilogue wrapper node."""
+        pass
+
+    @abc.abstractmethod
+    def visit_aot_dedupe_wrapper(self, node: AOTDedupeWrapperNode) -> Any:
+        """Process an AOT dedupe wrapper node."""
+        pass
+
+    @abc.abstractmethod
+    def visit_aot_synthetic_base_wrapper(
+        self, node: AOTSyntheticBaseWrapperNode
+    ) -> Any:
+        """Process a synthetic base wrapper node."""
+        pass
+
+    @abc.abstractmethod
+    def visit_debug_assert_wrapper(self, node: DebugAssertWrapperNode) -> Any:
+        """Process a debug assert wrapper node."""
+        pass
+
+    @abc.abstractmethod
     def visit_aot_autograd_wrapper(self, node: AOTAutogradWrapperNode) -> Any:
         """Process an AOT Autograd wrapper node."""
         pass
@@ -654,6 +967,67 @@ class CodeGenVisitor(abc.ABC):
         pass
 
 
+class WrapperStackSegment(Enum):
+    """
+    Logical segments of the post-compile wrapper stack.
+
+    AOTAutograd applies wrappers in multiple phases. To keep ordering
+    explicit in the RuntimeWrapperIR we annotate which segment each
+    wrapper belongs to:
+
+    * FORWARD_INFERENCE: Wrappers applied to the compiled forward/inference
+      callable before autograd assembly. Expected order (inner-most callable
+      first) is EffectTokensWrapper → AOTDispatchSubclassWrapper →
+      FunctionalizedRngRuntimeWrapper → FakifiedOutWrapper.
+
+    * AUTOGRAD_ASSEMBLY: Wrappers applied while stitching fw/bw (post_compile).
+      Expected order (inner-most callable first) is AOTAutogradWrapper →
+      RuntimeWrapper → DebugAssertWrapper.
+
+    * DISPATCH: Dispatch-level wrappers added via _create_wrappers_for_dispatch
+      and applied in reverse order at runtime. Expected order (inner-most
+      callable first) is AOTSyntheticBaseWrapper → AOTDedupeWrapper.
+
+    These segments allow codegen/pipeline to preserve reverse-application
+    semantics without interleaving non-wrapper nodes (e.g., guards).
+    """
+
+    FORWARD_INFERENCE = auto()
+    AUTOGRAD_ASSEMBLY = auto()
+    DISPATCH = auto()
+
+
+# Keep __all__ minimal and focused on public IR types.
+__all__ = [
+    "ArgumentExtractionNode",
+    "ArgumentSource",
+    "AOTAutogradWrapperNode",
+    "AOTDedupeWrapperNode",
+    "AOTDispatchSubclassWrapperNode",
+    "AOTSyntheticBaseWrapperNode",
+    "CallableInvocationNode",
+    "CodeGenVisitor",
+    "CompiledRegionNode",
+    "CUDAGraphPhase",
+    "CUDAGraphSetupNode",
+    "DebugAssertWrapperNode",
+    "EffectTokensWrapperNode",
+    "FakifiedOutWrapperNode",
+    "FunctionalizedRngRuntimeWrapperNode",
+    "GuardCheckNode",
+    "GuardType",
+    "IRNode",
+    "KernelLoadNode",
+    "KernelType",
+    "ModelSource",
+    "MultiRegionDispatchNode",
+    "RegionExecutionMode",
+    "ReturnResultNode",
+    "RuntimeWrapperIR",
+    "WrapperStackSegment",
+]
+
+
 @dataclass
 class RuntimeWrapperIR:
     """
@@ -663,19 +1037,90 @@ class RuntimeWrapperIR:
     all the runtime machinery for a compiled function. The nodes should
     be processed in order to generate the complete runtime wrapper.
 
+    Wrapper ordering metadata
+    -------------------------
+    AOTAutograd applies wrappers in logical segments. To avoid interleaving
+    wrapper ordering with non-wrapper nodes (guards, argument extraction), we
+    track the expected wrapper stack per segment in `wrapper_stack_order`.
+    The order recorded for each segment is **inner-most callable first**,
+    matching the audit in wrapper_audit.md:
+
+    - WrapperStackSegment.FORWARD_INFERENCE: EffectTokensWrapper →
+      AOTDispatchSubclassWrapper → FunctionalizedRngRuntimeWrapper →
+      FakifiedOutWrapper.
+    - WrapperStackSegment.AUTOGRAD_ASSEMBLY: AOTAutogradWrapper →
+      RuntimeWrapper → DebugAssertWrapper.
+    - WrapperStackSegment.DISPATCH: AOTSyntheticBaseWrapper → AOTDedupeWrapper
+      (post_compile applies these in reverse order at runtime).
+
+    `wrapper_stack_metadata` can hold per-wrapper metadata placeholders keyed
+    by wrapper name (e.g., "RuntimeWrapper" → {"indices_of_inps_to_detach": [...]})
+    so pipeline/codegen can preserve reverse-application semantics without
+    altering node ordering.
+
     Attributes:
         nodes: Ordered list of IR nodes
         metadata: Additional compilation metadata
         source_info: Information about the source function being compiled
+        wrapper_stack_order: Expected wrapper order per segment (inner → outer)
+        wrapper_stack_metadata: Optional metadata keyed by wrapper name
     """
 
     nodes: list[IRNode] = field(default_factory=list)
     metadata: dict[str, Any] = field(default_factory=dict)
     source_info: dict[str, Any] = field(default_factory=dict)
+    wrapper_stack_order: dict[WrapperStackSegment, list[str]] = field(
+        default_factory=lambda: {
+            WrapperStackSegment.FORWARD_INFERENCE: [],
+            WrapperStackSegment.AUTOGRAD_ASSEMBLY: [],
+            WrapperStackSegment.DISPATCH: [],
+        }
+    )
+    wrapper_stack_metadata: dict[str, dict[str, Any]] = field(default_factory=dict)
 
     def add_node(self, node: IRNode) -> None:
         """Add a node to the IR."""
         self.nodes.append(node)
+
+    def record_wrapper(
+        self,
+        segment: WrapperStackSegment,
+        wrapper_name: str,
+        metadata: Optional[dict[str, Any]] = None,
+    ) -> None:
+        """
+        Record a wrapper in a specific stack segment.
+
+        Ordering is stored as inner-most → outer-most callable for the segment.
+        Dispatch wrappers are applied in reverse at runtime; callers can use
+        get_wrapper_order(..., reverse_for_application=True) to retrieve that
+        ordering without mutating node sequencing.
+        """
+
+        stack = self.wrapper_stack_order.setdefault(segment, [])
+        stack.append(wrapper_name)
+        if metadata is not None:
+            self.wrapper_stack_metadata[wrapper_name] = metadata
+
+    def get_wrapper_order(
+        self, segment: WrapperStackSegment, reverse_for_application: bool = False
+    ) -> list[str]:
+        """
+        Retrieve wrapper order for a segment.
+
+        Args:
+            segment: WrapperStackSegment to query
+            reverse_for_application: When True, reverse the ordering to match
+                runtime application semantics (useful for DISPATCH).
+
+        Returns:
+            List of wrapper names for the requested segment.
+        """
+
+        ordered = list(self.wrapper_stack_order.get(segment, []))
+        if reverse_for_application:
+            ordered.reverse()
+        return ordered
 
     def accept_all(self, visitor: CodeGenVisitor) -> list[Any]:
         """

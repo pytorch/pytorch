@@ -2288,18 +2288,37 @@ def _parse_guard_code_part(
 
 def _simplify_source_name(source_name: str) -> str:
     """
-    Simplify a Dynamo source name to a simple variable name.
+    Simplify a Dynamo source name to a meaningful variable name.
 
     Dynamo source names can be complex expressions like "L['x']" or
-    "G['module'].weight". This extracts a simpler name for display.
+    "L['self']._modules['layer1']._parameters['weight']". For nested module
+    parameters, this extracts the full path like "layer1.weight" to avoid
+    name collisions between parameters in different modules.
+
+    For simple local/global variables, returns just the name (e.g., "x").
+    For nested module parameters/buffers, returns the full path (e.g., "layer1.weight").
 
     Args:
         source_name: The complex source name expression
 
     Returns:
-        Simplified variable name
+        Simplified variable name, with full path for nested parameters/buffers
     """
     import re
+
+    if "_modules[" in source_name and ("_parameters[" in source_name or "_buffers[" in source_name):
+        modules = re.findall(r"_modules\['([^']+)'\]", source_name)
+        param_match = re.search(r"_parameters\['([^']+)'\]", source_name)
+        buffer_match = re.search(r"_buffers\['([^']+)'\]", source_name)
+
+        path_parts = list(modules)
+        if param_match:
+            path_parts.append(param_match.group(1))
+        elif buffer_match:
+            path_parts.append(buffer_match.group(1))
+
+        if path_parts:
+            return ".".join(path_parts)
 
     match = re.search(r"\['(\w+)'\]", source_name)
     if match:
@@ -2430,6 +2449,10 @@ def _build_pythonify_artifacts(
         Analyzes the source chain to determine the source type (local, parameter,
         buffer, etc.) and extracts the access path and nested path for code
         generation.
+
+        For nested module parameters like self._modules['layer1']._parameters['weight'],
+        this extracts the full path ['self', 'layer1', 'weight'] by traversing
+        DictGetItemSource nodes for _modules and extracting their index values.
         """
         source_type = "unknown"
         simple_name = ""
@@ -2437,6 +2460,30 @@ def _build_pythonify_artifacts(
         is_parameter = False
         is_buffer = False
         is_input = False
+
+        def _collect_module_path(base: Any) -> list[str]:
+            """
+            Recursively collect module names from a source chain.
+
+            This traverses the source base chain looking for DictGetItemSource
+            nodes whose base member is '_modules', extracting the module names
+            like 'layer1', 'layer2', etc.
+            """
+            path_parts: list[str] = []
+            current = base
+            while current is not None:
+                if hasattr(current, "index") and hasattr(current, "base"):
+                    if hasattr(current.base, "member") and current.base.member == "_modules":
+                        path_parts.insert(0, str(current.index))
+                    current = getattr(current, "base", None)
+                elif hasattr(current, "base"):
+                    current = getattr(current, "base", None)
+                elif hasattr(current, "local_name"):
+                    path_parts.insert(0, current.local_name)
+                    break
+                else:
+                    break
+            return path_parts
 
         if isinstance(source, LocalSource):
             source_type = "local"
@@ -2455,21 +2502,14 @@ def _build_pythonify_artifacts(
                 simple_name = source.index
                 is_parameter = True
                 base = source.base.base if hasattr(source.base, "base") else None
-                while base is not None:
-                    if hasattr(base, "local_name"):
-                        nested_path.insert(0, base.local_name)
-                        break
-                    elif hasattr(base, "base"):
-                        if hasattr(base, "member"):
-                            pass
-                        base = base.base
-                    else:
-                        break
+                nested_path = _collect_module_path(base)
                 nested_path.append(simple_name)
             elif hasattr(source.base, "member") and source.base.member == "_buffers":
                 source_type = "buffer"
                 simple_name = source.index
                 is_buffer = True
+                base = source.base.base if hasattr(source.base, "base") else None
+                nested_path = _collect_module_path(base)
                 nested_path.append(simple_name)
             else:
                 source_type = "dict_get_item"
@@ -2522,24 +2562,34 @@ def _build_pythonify_artifacts(
         for source, info in output.input_source_to_sizes_strides.items():
             extracted = _extract_source_info(source)
             simple_name = extracted["simple_name"]
+            nested_path = extracted["nested_path"]
+
+            effective_name = simple_name
+            if (extracted["is_parameter"] or extracted["is_buffer"]) and nested_path:
+                model_prefixes = ("self", "model", "module", "mod", "net")
+                path_without_model = [
+                    p for p in nested_path if p not in model_prefixes
+                ]
+                if path_without_model:
+                    effective_name = ".".join(path_without_model)
 
             if extracted["is_parameter"]:
-                parameter_names.append(simple_name)
+                parameter_names.append(effective_name)
             elif extracted["is_buffer"]:
-                buffer_names.append(simple_name)
+                buffer_names.append(effective_name)
             elif extracted["is_input"]:
                 input_names.append(simple_name)
 
-            if extracted["nested_path"] and extracted["nested_path"][0] in (
+            if nested_path and nested_path[0] in (
                 "self", "model", "module", "mod", "net"
             ):
-                model_name = extracted["nested_path"][0]
+                model_name = nested_path[0]
 
             input_sources_info.append({
-                "name": simple_name,
+                "name": effective_name,
                 "source_name": str(source),
                 "source_type": extracted["source_type"],
-                "nested_path": extracted["nested_path"],
+                "nested_path": nested_path,
                 "is_tensor": True,
                 "is_parameter": extracted["is_parameter"],
                 "is_buffer": extracted["is_buffer"],
@@ -2594,7 +2644,13 @@ def _build_pythonify_artifacts(
                     elif hasattr(base, "global_name"):
                         nested_path.insert(0, base.global_name)
                     nested_path.append(simple_name)
-                    parameter_names.append(simple_name)
+                    model_prefixes = ("self", "model", "module", "mod", "net")
+                    path_without_model = [
+                        p for p in nested_path if p not in model_prefixes
+                    ]
+                    effective_name = ".".join(path_without_model) if path_without_model else simple_name
+                    parameter_names.append(effective_name)
+                    simple_name = effective_name
                 elif isinstance(source, AttrSource):
                     source_type = "attribute"
                     simple_name = source.member
@@ -2841,6 +2897,8 @@ def _build_pythonify_artifacts(
     # when pythonify is active and mode='reduce-overhead' is used.
     cuda_graphs_enabled = False
     cuda_graph_config: dict[str, Any] = {}
+    wrapper_stack_order: dict[str, list[str]] = {}
+    wrapper_stack_metadata: dict[str, dict[str, Any]] = {}
     if inductor_output is not None:
         metadata["inductor_cache_key"] = inductor_output.get("cache_key")
         metadata["inductor_device_types"] = inductor_output.get("device_types")
@@ -2848,6 +2906,32 @@ def _build_pythonify_artifacts(
         metadata["inductor_constants"] = inductor_output.get("constants")
         cuda_graphs_enabled = inductor_output.get("cuda_graphs_enabled", False)
         cuda_graph_config = inductor_output.get("cuda_graph_config", {})
+
+        # Extract AOTAutograd wrapper metadata for pythonify. This metadata
+        # is captured in compile_fx.py when fw_metadata is available and describes
+        # the wrapper stack applied during compilation (tokens, subclass, RNG,
+        # fakified out, runtime detach, dedupe, synthetic bases).
+        wrapper_stack_order = inductor_output.get("wrapper_stack_order", {})
+        wrapper_stack_metadata = inductor_output.get("wrapper_stack_metadata", {})
+
+    # Build ordered_arg_info from input_sources_info, preserving the exact order
+    # that the Inductor kernel expects. This is crucial for correct argument
+    # passing - the order from input_source_to_sizes_strides iteration matches
+    # the order expected by the compiled kernel (typically: params, then inputs).
+    ordered_arg_info: list[dict[str, Any]] = []
+    for info in input_sources_info:
+        source_type = "input"
+        if info.get("is_parameter"):
+            source_type = "parameter"
+        elif info.get("is_buffer"):
+            source_type = "buffer"
+
+        arg_info: dict[str, Any] = {
+            "name": info.get("name", ""),
+            "source_type": source_type,
+            "nested_path": info.get("nested_path", []),
+        }
+        ordered_arg_info.append(arg_info)
 
     return CompilationArtifacts(
         fx_graph=fx_graph,
@@ -2868,6 +2952,9 @@ def _build_pythonify_artifacts(
         buffer_tensors=buffer_tensors,
         cuda_graphs_enabled=cuda_graphs_enabled,
         cuda_graph_config=cuda_graph_config,
+        wrapper_stack_order=wrapper_stack_order,
+        wrapper_stack_metadata=wrapper_stack_metadata,
+        ordered_arg_info=ordered_arg_info,
     )
 
 

@@ -53,6 +53,9 @@ from dataclasses import dataclass, field
 from typing import Any, Callable, Optional, TYPE_CHECKING
 
 from .ir import (
+    AOTDedupeWrapperNode,
+    AOTDispatchSubclassWrapperNode,
+    AOTSyntheticBaseWrapperNode,
     ArgumentExtractionNode,
     ArgumentSource,
     AOTAutogradWrapperNode,
@@ -60,6 +63,10 @@ from .ir import (
     CodeGenVisitor,
     CompiledRegionNode,
     CUDAGraphSetupNode,
+    DebugAssertWrapperNode,
+    EffectTokensWrapperNode,
+    FakifiedOutWrapperNode,
+    FunctionalizedRngRuntimeWrapperNode,
     GuardCheckNode,
     GuardType,
     KernelLoadNode,
@@ -68,6 +75,7 @@ from .ir import (
     RegionExecutionMode,
     ReturnResultNode,
     RuntimeWrapperIR,
+    RuntimeWrapperNode,
 )
 
 
@@ -420,6 +428,45 @@ class BinaryCodeGenVisitor(CodeGenVisitor):
         )
         self._wrapper.guards.append(guard)
         return guard
+
+    def visit_effect_tokens_wrapper(self, node: EffectTokensWrapperNode) -> Any:
+        """Binary backend currently ignores effect token wrapper in pythonify IR."""
+        # No-op for binary codegen; metadata is consumed elsewhere.
+        return None
+
+    def visit_aot_dispatch_subclass_wrapper(
+        self, node: AOTDispatchSubclassWrapperNode
+    ) -> Any:
+        """Binary backend currently ignores subclass wrapper in pythonify IR."""
+        return None
+
+    def visit_functionalized_rng_runtime_wrapper(
+        self, node: FunctionalizedRngRuntimeWrapperNode
+    ) -> Any:
+        """Binary backend currently ignores RNG wrapper in pythonify IR."""
+        return None
+
+    def visit_fakified_out_wrapper(self, node: FakifiedOutWrapperNode) -> Any:
+        """Binary backend currently ignores fakified out wrapper in pythonify IR."""
+        return None
+
+    def visit_runtime_wrapper(self, node: RuntimeWrapperNode) -> Any:
+        """Binary backend currently ignores runtime epilogue wrapper in pythonify IR."""
+        return None
+
+    def visit_aot_dedupe_wrapper(self, node: AOTDedupeWrapperNode) -> Any:
+        """Binary backend currently ignores dedupe wrapper in pythonify IR."""
+        return None
+
+    def visit_aot_synthetic_base_wrapper(
+        self, node: AOTSyntheticBaseWrapperNode
+    ) -> Any:
+        """Binary backend currently ignores synthetic base wrapper in pythonify IR."""
+        return None
+
+    def visit_debug_assert_wrapper(self, node: DebugAssertWrapperNode) -> Any:
+        """Binary backend currently ignores debug assert wrapper in pythonify IR."""
+        return None
 
     def visit_aot_autograd_wrapper(self, node: AOTAutogradWrapperNode) -> Any:
         """

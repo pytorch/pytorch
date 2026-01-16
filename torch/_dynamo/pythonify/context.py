@@ -85,7 +85,11 @@ class PythonifyContext:
     Thread-local context for pythonify compilation.
 
     Stores the pythonify path and collected compilation artifacts that will
-    be used to generate the Python file after compilation completes.
+    be used to generate the Python file after compilation completes. Wrapper
+    stack ordering/metadata (wrapper_stack_order, wrapper_stack_metadata) is
+    carried through untouched when present in CompilationArtifacts so callers
+    can model AOTAutograd post-compile wrapper behavior without impacting
+    runs that do not populate these optional fields.
 
     Attributes:
         pythonify_path: Path to write the generated Python file
@@ -101,6 +105,15 @@ class PythonifyContext:
             captured for ctypes-based object retrieval in generated code.
             The reference is set when the model enters the pythonify compilation
             region and cleared after code generation completes.
+        merged_wrapper_stack_order: Aggregated wrapper stack ordering from all
+            artifacts. Keys are segment identifiers (e.g., "forward", "dispatch"),
+            values are ordered lists of wrapper names. When multiple artifacts
+            contribute entries for the same segment, wrapper lists are merged by
+            appending new wrappers that aren't already present.
+        merged_wrapper_stack_metadata: Aggregated per-wrapper metadata from all
+            artifacts. Keys are wrapper names, values are wrapper-specific dicts.
+            When multiple artifacts provide metadata for the same wrapper, entries
+            are merged with later values taking precedence for duplicate keys.
     """
 
     pythonify_path: Optional[str] = None
@@ -112,6 +125,8 @@ class PythonifyContext:
     forward_inductor_output: Optional[dict[str, Any]] = None
     backward_inductor_output: Optional[dict[str, Any]] = None
     model_ref: Optional[Any] = None
+    merged_wrapper_stack_order: dict[str, list[str]] = field(default_factory=dict)
+    merged_wrapper_stack_metadata: dict[str, dict[str, Any]] = field(default_factory=dict)
 
 
 class _PythonifyContextManager:
@@ -235,6 +250,40 @@ def get_model_reference() -> Optional[Any]:
     return None
 
 
+def get_merged_wrapper_stack_order() -> dict[str, list[str]]:
+    """
+    Get the merged wrapper stack ordering from the current pythonify context.
+
+    Returns the aggregated wrapper stack order accumulated from all
+    CompilationArtifacts added to the context. Each segment maps to an
+    ordered list of wrapper names that should be applied in that segment.
+
+    Returns:
+        The merged wrapper stack order dict, or empty dict if not active
+    """
+    ctx = _pythonify_context.get()
+    if ctx is not None:
+        return ctx.merged_wrapper_stack_order
+    return {}
+
+
+def get_merged_wrapper_stack_metadata() -> dict[str, dict[str, Any]]:
+    """
+    Get the merged wrapper metadata from the current pythonify context.
+
+    Returns the aggregated per-wrapper metadata accumulated from all
+    CompilationArtifacts added to the context. Each wrapper name maps to
+    a dict of metadata relevant for that wrapper's code generation.
+
+    Returns:
+        The merged wrapper metadata dict, or empty dict if not active
+    """
+    ctx = _pythonify_context.get()
+    if ctx is not None:
+        return ctx.merged_wrapper_stack_metadata
+    return {}
+
+
 @contextlib.contextmanager
 def pythonify_context(pythonify_path: Optional[str]):
     """
@@ -262,12 +311,143 @@ def pythonify_context(pythonify_path: Optional[str]):
         _pythonify_context.clear()
 
 
+def _merge_wrapper_stack_order(
+    existing: dict[str, list[str]],
+    incoming: dict[str, list[str]],
+) -> None:
+    """
+    Merge incoming wrapper stack order into existing order in-place.
+
+    For each segment (key) in the incoming order, appends any wrapper names
+    that are not already present in the existing list for that segment. This
+    preserves the order of wrappers while avoiding duplicates.
+
+    The merge strategy ensures that:
+    - Existing wrappers in each segment retain their positions
+    - New wrappers from incoming artifacts are appended at the end
+    - Duplicate wrappers (same name in same segment) are not added twice
+
+    Args:
+        existing: The current wrapper stack order to merge into (modified in-place)
+        incoming: The new wrapper stack order from an artifact
+    """
+    for segment, wrappers in incoming.items():
+        if segment not in existing:
+            existing[segment] = []
+        existing_set = set(existing[segment])
+        for wrapper in wrappers:
+            if wrapper not in existing_set:
+                existing[segment].append(wrapper)
+                existing_set.add(wrapper)
+
+
+def _merge_wrapper_stack_metadata(
+    existing: dict[str, dict[str, Any]],
+    incoming: dict[str, dict[str, Any]],
+) -> None:
+    """
+    Merge incoming wrapper metadata into existing metadata in-place.
+
+    For each wrapper name (key) in the incoming metadata, merges the metadata
+    dict with any existing metadata for that wrapper. Later values take
+    precedence for duplicate keys within a wrapper's metadata dict.
+
+    The merge strategy ensures that:
+    - Existing wrapper metadata is preserved when no new data is provided
+    - New wrappers get their metadata added to the merged result
+    - For overlapping keys within a wrapper's metadata, incoming values win
+
+    Args:
+        existing: The current wrapper metadata to merge into (modified in-place)
+        incoming: The new wrapper metadata from an artifact
+    """
+    for wrapper_name, metadata in incoming.items():
+        if wrapper_name not in existing:
+            existing[wrapper_name] = {}
+        existing[wrapper_name].update(metadata)
+
+
+def validate_wrapper_metadata_merge(
+    merged_order: dict[str, list[str]],
+    merged_metadata: dict[str, dict[str, Any]],
+    prior_order: dict[str, list[str]],
+    prior_metadata: dict[str, dict[str, Any]],
+) -> bool:
+    """
+    Validate that wrapper metadata merge preserved prior entries.
+
+    This helper confirms that all wrappers and segments from the prior state
+    are still present in the merged result. Use this after calling
+    add_compilation_artifacts to verify that new artifacts did not clobber
+    existing wrapper stack information.
+
+    The validation checks:
+    - All segments from prior_order exist in merged_order
+    - All wrappers from each prior segment are still present (order preserved)
+    - All wrapper names from prior_metadata exist in merged_metadata
+    - All metadata keys from prior wrappers are still present (values may be
+      overwritten by incoming data, which is expected behavior)
+
+    Args:
+        merged_order: The wrapper stack order after merge
+        merged_metadata: The wrapper metadata after merge
+        prior_order: The wrapper stack order before new artifact was added
+        prior_metadata: The wrapper metadata before new artifact was added
+
+    Returns:
+        True if all prior entries are preserved, False otherwise
+
+    Example:
+        >>> prior_order = {"forward": ["WrapperA"]}
+        >>> prior_meta = {"WrapperA": {"key1": "val1"}}
+        >>> # After adding new artifact...
+        >>> merged_order = {"forward": ["WrapperA", "WrapperB"]}
+        >>> merged_meta = {"WrapperA": {"key1": "val1"}, "WrapperB": {"key2": "val2"}}
+        >>> validate_wrapper_metadata_merge(merged_order, merged_meta, prior_order, prior_meta)
+        True
+    """
+    for segment, prior_wrappers in prior_order.items():
+        if segment not in merged_order:
+            return False
+        merged_wrappers = merged_order[segment]
+        for wrapper in prior_wrappers:
+            if wrapper not in merged_wrappers:
+                return False
+            prior_idx = prior_wrappers.index(wrapper)
+            merged_idx = merged_wrappers.index(wrapper)
+            if prior_idx != merged_idx:
+                return False
+
+    for wrapper_name, prior_meta in prior_metadata.items():
+        if wrapper_name not in merged_metadata:
+            return False
+        merged_meta = merged_metadata[wrapper_name]
+        for key in prior_meta:
+            if key not in merged_meta:
+                return False
+
+    return True
+
+
 def add_compilation_artifacts(artifacts: CompilationArtifacts) -> None:
     """
     Add compilation artifacts to the current pythonify context.
 
     Called during compilation to store artifacts that will be used to
-    generate the Python file.
+    generate the Python file. Wrapper stack ordering/metadata stored on
+    CompilationArtifacts is merged into context-level aggregated fields
+    (merged_wrapper_stack_order, merged_wrapper_stack_metadata) without
+    loss or overwrite. When wrapper metadata is absent on an artifact,
+    behavior is unchanged and defaults are preserved.
+
+    The merge strategy for wrapper_stack_order appends new wrappers to each
+    segment while preserving existing order and avoiding duplicates. For
+    wrapper_stack_metadata, per-wrapper dicts are merged with later values
+    taking precedence for duplicate keys.
+
+    Multiple calls append to the artifacts list in order without mutating
+    prior entries, so wrapper_stack_order and wrapper_stack_metadata on
+    individual artifacts remain intact.
 
     Args:
         artifacts: The compilation artifacts to add
@@ -275,6 +455,14 @@ def add_compilation_artifacts(artifacts: CompilationArtifacts) -> None:
     ctx = _pythonify_context.get()
     if ctx is not None:
         ctx.artifacts_list.append(artifacts)
+        _merge_wrapper_stack_order(
+            ctx.merged_wrapper_stack_order,
+            artifacts.wrapper_stack_order,
+        )
+        _merge_wrapper_stack_metadata(
+            ctx.merged_wrapper_stack_metadata,
+            artifacts.wrapper_stack_metadata,
+        )
 
 
 def add_inductor_output(inductor_output: dict[str, Any]) -> None:
@@ -352,6 +540,40 @@ def get_backward_inductor_output() -> Optional[dict[str, Any]]:
     return None
 
 
+def _merge_wrapper_metadata_from_inductor_output(
+    artifact: CompilationArtifacts,
+    inductor_output: dict[str, Any],
+) -> None:
+    """
+    Merge wrapper metadata from an Inductor output dict into an artifact.
+
+    Inductor outputs may contain wrapper_stack_order and wrapper_stack_metadata
+    fields populated during compilation. This function merges those into the
+    artifact's existing wrapper metadata without losing prior data.
+
+    The merge strategy matches add_compilation_artifacts:
+    - For wrapper_stack_order: appends new wrappers to each segment while
+      avoiding duplicates and preserving existing order
+    - For wrapper_stack_metadata: merges per-wrapper dicts with incoming
+      values taking precedence for duplicate keys
+
+    If the inductor output contains no wrapper metadata fields, this function
+    is a no-op and the artifact's existing wrapper metadata remains untouched.
+
+    Args:
+        artifact: The CompilationArtifacts to merge wrapper metadata into
+        inductor_output: The Inductor output dict that may contain wrapper metadata
+    """
+    incoming_order = inductor_output.get("wrapper_stack_order", {})
+    incoming_metadata = inductor_output.get("wrapper_stack_metadata", {})
+
+    if incoming_order:
+        _merge_wrapper_stack_order(artifact.wrapper_stack_order, incoming_order)
+
+    if incoming_metadata:
+        _merge_wrapper_stack_metadata(artifact.wrapper_stack_metadata, incoming_metadata)
+
+
 def _merge_inductor_outputs_into_artifacts(ctx: PythonifyContext) -> None:
     """
     Merge captured Inductor outputs into compilation artifacts.
@@ -365,6 +587,17 @@ def _merge_inductor_outputs_into_artifacts(ctx: PythonifyContext) -> None:
 
     For multi-artifact compilations (with graph breaks), each artifact is matched
     with its corresponding Inductor output based on order.
+
+    Wrapper Metadata Preservation:
+    This function only updates inductor-related fields (inductor_source_code,
+    inductor_graph_str, backward_inductor_source_code, backward_inductor_graph_str)
+    on artifacts. Existing wrapper metadata on artifacts (wrapper_stack_order,
+    wrapper_stack_metadata) is explicitly preserved and never overwritten by this
+    function. If inductor outputs contain wrapper metadata, it is merged into the
+    artifact's existing wrapper metadata using the same merge strategy as
+    add_compilation_artifacts: new wrappers are appended to segments without
+    duplicates, and per-wrapper metadata dicts are merged with incoming values
+    taking precedence for duplicate keys.
 
     Args:
         ctx: The PythonifyContext containing artifacts and Inductor outputs
@@ -381,10 +614,12 @@ def _merge_inductor_outputs_into_artifacts(ctx: PythonifyContext) -> None:
         if forward_output is not None and artifact.inductor_source_code is None:
             artifact.inductor_source_code = forward_output.get("source_code")
             artifact.inductor_graph_str = forward_output.get("graph_str")
+            _merge_wrapper_metadata_from_inductor_output(artifact, forward_output)
 
         if backward_output is not None and artifact.backward_inductor_source_code is None:
             artifact.backward_inductor_source_code = backward_output.get("source_code")
             artifact.backward_inductor_graph_str = backward_output.get("graph_str")
+            _merge_wrapper_metadata_from_inductor_output(artifact, backward_output)
     else:
         forward_outputs = [
             out for out in ctx.inductor_outputs
@@ -395,6 +630,7 @@ def _merge_inductor_outputs_into_artifacts(ctx: PythonifyContext) -> None:
                 out = forward_outputs[i]
                 artifact.inductor_source_code = out.get("source_code")
                 artifact.inductor_graph_str = out.get("graph_str")
+                _merge_wrapper_metadata_from_inductor_output(artifact, out)
 
 
 def _uses_object_ids(artifacts_list: list[CompilationArtifacts]) -> bool:

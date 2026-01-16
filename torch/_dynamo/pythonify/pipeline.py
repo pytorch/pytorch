@@ -50,18 +50,27 @@ from .errors import (
     PythonifyStage,
 )
 from .ir import (
+    AOTDedupeWrapperNode,
+    AOTDispatchSubclassWrapperNode,
+    AOTSyntheticBaseWrapperNode,
     ArgumentExtractionNode,
     ArgumentSource,
     AOTAutogradWrapperNode,
     CallableInvocationNode,
     CodeGenVisitor,
     CUDAGraphSetupNode,
+    DebugAssertWrapperNode,
+    EffectTokensWrapperNode,
+    FakifiedOutWrapperNode,
+    FunctionalizedRngRuntimeWrapperNode,
     GuardCheckNode,
     GuardType,
     KernelLoadNode,
     KernelType,
     ReturnResultNode,
     RuntimeWrapperIR,
+    RuntimeWrapperNode,
+    WrapperStackSegment,
 )
 
 
@@ -133,6 +142,11 @@ class CompilationArtifacts:
     num_inputs: int = 0
     num_outputs: int = 0
     metadata: dict[str, Any] = field(default_factory=dict)
+    # Wrapper ordering/metadata (optional, additive)
+    wrapper_stack_order: dict[str, list[str]] = field(default_factory=dict)
+    # Per-wrapper metadata keyed by wrapper name. Values are wrapper-specific
+    # dicts and are left opaque to keep this container backward compatible.
+    wrapper_stack_metadata: dict[str, dict[str, Any]] = field(default_factory=dict)
     dynamic_dims: dict[str, list[int]] = field(default_factory=dict)
     inductor_source_code: Optional[str] = None
     backward_inductor_source_code: Optional[str] = None
@@ -142,6 +156,14 @@ class CompilationArtifacts:
     kernel_output_dir: Optional[str] = None
     parameter_tensors: dict[str, Any] = field(default_factory=dict)
     buffer_tensors: dict[str, Any] = field(default_factory=dict)
+    # Ordered list of argument info dicts that preserves the exact order
+    # arguments are expected by the Inductor kernel. Each dict has:
+    # - name: simple argument name (e.g., "x", "weight")
+    # - source_type: "input", "parameter", or "buffer"
+    # - nested_path: list of path components for model attribute access
+    # - object_id: optional int, the id() of the tensor object
+    # When populated, this overrides the default (inputs, params, buffers) order.
+    ordered_arg_info: list[dict[str, Any]] = field(default_factory=list)
 
 
 class RuntimeWrapperPipeline:
@@ -193,11 +215,12 @@ class RuntimeWrapperPipeline:
         This method constructs all IR nodes in the correct order:
         1. Argument extraction (parameters, buffers, inputs)
         2. Guard checks
-        3. AOT Autograd wrapper
-        4. CUDA graph setup (if enabled)
-        5. Kernel load (if Inductor source code is available)
-        6. Callable invocation
-        7. Return result
+        3. Wrapper nodes (from wrapper_stack_metadata in correct order)
+        4. AOT Autograd wrapper
+        5. CUDA graph setup (if enabled)
+        6. Kernel load (if Inductor source code is available)
+        7. Callable invocation
+        8. Return result
 
         Returns:
             RuntimeWrapperIR containing all nodes in execution order
@@ -246,6 +269,17 @@ class RuntimeWrapperPipeline:
                 PythonifyStage.GUARD_TRANSLATION,
                 e,
                 context={"num_guards": len(self.artifacts.guards)},
+            ) from e
+
+        try:
+            self._build_wrapper_nodes()
+        except PythonifyError:
+            raise
+        except Exception as e:
+            raise create_pythonify_error(
+                PythonifyStage.IR_CONSTRUCTION,
+                e,
+                context={"step": "wrapper nodes"},
             ) from e
 
         try:
@@ -315,14 +349,12 @@ class RuntimeWrapperPipeline:
         Creates nodes for model inputs, parameters, and buffers. The order
         MUST match what Inductor expects.
 
-        NOTE: The ordering of arguments depends on how the FX graph was traced.
-        Different models may have different orderings. For simple models like
-        `x + x.matmul(self.W)`, the input comes first. For models using
-        nn.Linear, the parameters may come first.
+        When ordered_arg_info is available (populated from the iteration order of
+        input_source_to_sizes_strides during compilation), we use that order since
+        it exactly matches what the Inductor kernel expects.
 
-        Currently we use the order: (inputs, parameters, buffers) which works
-        for many common cases like `x.matmul(W)` where x appears as the first
-        operand.
+        Otherwise, we fall back to the legacy order: (inputs, parameters, buffers)
+        which may not always be correct for all models.
 
         When parameter_tensors or buffer_tensors are available in the artifacts,
         we capture the object IDs of the actual tensor objects. This allows the
@@ -333,6 +365,57 @@ class RuntimeWrapperPipeline:
         assert self._ir is not None
 
         arg_counter = 1
+
+        # Use ordered_arg_info if available - this preserves the exact order
+        # the Inductor kernel expects (from input_source_to_sizes_strides)
+        if self.artifacts.ordered_arg_info:
+            for info in self.artifacts.ordered_arg_info:
+                name = info.get("name", "")
+                source_type = info.get("source_type", "input")
+                nested_path = info.get("nested_path", [])
+
+                if source_type == "parameter":
+                    object_id = None
+                    source = ArgumentSource.PARAMETER
+                    if name in self.artifacts.parameter_tensors:
+                        tensor = self.artifacts.parameter_tensors[name]
+                        object_id = id(tensor)
+                        source = ArgumentSource.OBJECT_ID
+                    node = ArgumentExtractionNode(
+                        name=f"arg{arg_counter}",
+                        source=source,
+                        access_path=name,
+                        nested_path=nested_path if nested_path else self._parse_nested_path(name),
+                        object_id=object_id,
+                    )
+                elif source_type == "buffer":
+                    object_id = None
+                    source = ArgumentSource.BUFFER
+                    if name in self.artifacts.buffer_tensors:
+                        tensor = self.artifacts.buffer_tensors[name]
+                        object_id = id(tensor)
+                        source = ArgumentSource.OBJECT_ID
+                    node = ArgumentExtractionNode(
+                        name=f"arg{arg_counter}",
+                        source=source,
+                        access_path=name,
+                        nested_path=nested_path if nested_path else self._parse_nested_path(name),
+                        object_id=object_id,
+                    )
+                else:
+                    # Input from locals
+                    node = ArgumentExtractionNode(
+                        name=f"arg{arg_counter}",
+                        source=ArgumentSource.F_LOCALS,
+                        access_path=name,
+                    )
+
+                self._ir.add_node(node)
+                arg_counter += 1
+            return
+
+        # Legacy fallback: use (inputs, parameters, buffers) order
+        # This may not be correct for all models but maintains backward compat.
 
         # Inputs first
         for input_name in self.artifacts.input_names:
@@ -526,6 +609,9 @@ class RuntimeWrapperPipeline:
             "True",
             "False",
             "None",
+            "self",
+            "model",
+            "module",
         }
         return target_name in invalid_targets
 
@@ -537,10 +623,9 @@ class RuntimeWrapperPipeline:
         function. We expand these into individual Python assertions for shape
         and dtype that can be executed without Dynamo internals.
 
-        The argument numbering follows the order in _build_argument_extraction_nodes:
-        1. Inputs first (arg1, arg2, ...)
-        2. Parameters next
-        3. Buffers last
+        When ordered_arg_info is available, the argument numbering follows that
+        order (typically: params, inputs, buffers - matching FX graph tracing).
+        Otherwise falls back to legacy order (inputs, params, buffers).
 
         For guards with target="self", we extract the parameter name from the
         condition string (e.g., L['self']._parameters['W'] -> W).
@@ -561,20 +646,31 @@ class RuntimeWrapperPipeline:
             if match:
                 target_name = match.group(1)
 
-        num_inputs = len(self.artifacts.input_names)
-        num_params = len(self.artifacts.parameter_names)
+        # Determine variable name based on ordering
+        var_name = None
 
-        # Order: inputs first, then params, then buffers
-        if target_name in self.artifacts.input_names:
-            idx = self.artifacts.input_names.index(target_name) + 1
-            var_name = f"arg{idx}"
-        elif target_name in self.artifacts.parameter_names:
-            idx = num_inputs + self.artifacts.parameter_names.index(target_name) + 1
-            var_name = f"arg{idx}"
-        elif target_name in self.artifacts.buffer_names:
-            idx = num_inputs + num_params + self.artifacts.buffer_names.index(target_name) + 1
-            var_name = f"arg{idx}"
+        # Use ordered_arg_info if available (new ordering from FX graph)
+        if self.artifacts.ordered_arg_info:
+            for idx, info in enumerate(self.artifacts.ordered_arg_info):
+                if info.get("name") == target_name:
+                    var_name = f"arg{idx + 1}"
+                    break
         else:
+            # Legacy fallback: inputs first, then params, then buffers
+            num_inputs = len(self.artifacts.input_names)
+            num_params = len(self.artifacts.parameter_names)
+
+            if target_name in self.artifacts.input_names:
+                idx = self.artifacts.input_names.index(target_name) + 1
+                var_name = f"arg{idx}"
+            elif target_name in self.artifacts.parameter_names:
+                idx = num_inputs + self.artifacts.parameter_names.index(target_name) + 1
+                var_name = f"arg{idx}"
+            elif target_name in self.artifacts.buffer_names:
+                idx = num_inputs + num_params + self.artifacts.buffer_names.index(target_name) + 1
+                var_name = f"arg{idx}"
+
+        if var_name is None:
             return
 
         if shape_info and isinstance(shape_info, list):
@@ -632,6 +728,144 @@ class RuntimeWrapperPipeline:
 
         dynamic_dims_for_target = self.artifacts.dynamic_dims.get(target_name, [])
         return dimension in dynamic_dims_for_target
+
+    def _build_wrapper_nodes(self) -> None:
+        """
+        Build wrapper IR nodes from wrapper_stack_metadata in correct order.
+
+        This method creates IR nodes for each post-compile wrapper specified in
+        the artifacts' wrapper_stack_order and wrapper_stack_metadata. The order
+        follows the AOTAutograd wrapper stack:
+
+        1. FORWARD_INFERENCE segment (inner-most first):
+           - EffectTokensWrapper
+           - AOTDispatchSubclassWrapper
+           - FunctionalizedRngRuntimeWrapper
+           - FakifiedOutWrapper
+
+        2. AUTOGRAD_ASSEMBLY segment (for training):
+           - RuntimeWrapper
+           - DebugAssertWrapper
+
+        3. DISPATCH segment (applied in reverse at runtime):
+           - AOTSyntheticBaseWrapper
+           - AOTDedupeWrapper
+
+        For each wrapper found in wrapper_stack_order, we create the corresponding
+        IR node with metadata from wrapper_stack_metadata. The nodes are added to
+        the IR and recorded in the wrapper_stack_order for later use by codegen.
+
+        The ordering follows the audit in wrapper_audit.md: wrappers are recorded
+        inner-most callable first. When generating code, dispatch wrappers are
+        applied in reverse to match runtime semantics.
+        """
+        assert self._ir is not None
+
+        wrapper_stack_order = self.artifacts.wrapper_stack_order
+        wrapper_stack_metadata = self.artifacts.wrapper_stack_metadata
+
+        if not wrapper_stack_order:
+            return
+
+        # Map segment names from artifacts to WrapperStackSegment enums.
+        # The artifacts use string keys matching compile_fx.py naming.
+        segment_mapping = {
+            "forward_inference": WrapperStackSegment.FORWARD_INFERENCE,
+            "forward": WrapperStackSegment.FORWARD_INFERENCE,
+            "autograd_assembly": WrapperStackSegment.AUTOGRAD_ASSEMBLY,
+            "autograd": WrapperStackSegment.AUTOGRAD_ASSEMBLY,
+            "dispatch": WrapperStackSegment.DISPATCH,
+        }
+
+        # Process each segment in the defined order (forward_inference first,
+        # then autograd_assembly, then dispatch). Within each segment, wrappers
+        # are processed in the order they appear (inner-most callable first).
+        segment_order = ["forward_inference", "forward", "autograd_assembly", "autograd", "dispatch"]
+
+        for segment_key in segment_order:
+            if segment_key not in wrapper_stack_order:
+                continue
+
+            segment = segment_mapping.get(segment_key)
+            if segment is None:
+                continue
+
+            wrapper_names = wrapper_stack_order[segment_key]
+            for wrapper_name in wrapper_names:
+                meta = wrapper_stack_metadata.get(wrapper_name, {})
+                node = self._create_wrapper_node(wrapper_name, meta)
+                if node is not None:
+                    self._ir.add_node(node)
+                    self._ir.record_wrapper(segment, wrapper_name, meta)
+
+    def _create_wrapper_node(self, wrapper_name: str, meta: dict) -> Optional[Any]:
+        """
+        Create an IR node for a specific wrapper based on its name and metadata.
+
+        This factory method maps wrapper names to their corresponding IR node
+        classes and populates them with the appropriate metadata fields.
+
+        Args:
+            wrapper_name: Name of the wrapper (e.g., "EffectTokensWrapper")
+            meta: Metadata dict for the wrapper from wrapper_stack_metadata
+
+        Returns:
+            The corresponding IR node, or None if the wrapper is not recognized
+        """
+        if wrapper_name == "EffectTokensWrapper":
+            return EffectTokensWrapperNode(
+                token_count=meta.get("num_tokens", meta.get("token_count", 0)),
+            )
+        elif wrapper_name == "AOTDispatchSubclassWrapper":
+            return AOTDispatchSubclassWrapperNode(
+                subclass_inp_meta=meta.get("subclass_inp_meta"),
+                subclass_fw_graph_out_meta=meta.get("subclass_fw_graph_out_meta"),
+                num_fw_outs_saved_for_bw=meta.get("num_fw_outs_saved_for_bw", 0),
+                maybe_subclass_meta=meta.get("maybe_subclass_meta"),
+            )
+        elif wrapper_name == "FunctionalizedRngRuntimeWrapper":
+            return FunctionalizedRngRuntimeWrapperNode(
+                is_rng_op_functionalized=meta.get("is_rng_op_functionalized", False),
+                num_outputs_rng_offset=meta.get("num_outputs_rng_offset", 0),
+                num_forward_returns=meta.get("num_forward_returns", 0),
+                num_graphsafe_rng_states=meta.get("num_graphsafe_rng_states", 0),
+                graphsafe_rng_state_index=meta.get("graphsafe_rng_state_index"),
+            )
+        elif wrapper_name == "FakifiedOutWrapper":
+            return FakifiedOutWrapperNode(
+                out_metas=meta.get("out_metas"),
+                fwd_output_strides=meta.get("fwd_output_strides"),
+            )
+        elif wrapper_name == "RuntimeWrapper":
+            return RuntimeWrapperNode(
+                indices_of_inps_to_detach=meta.get("indices_of_inps_to_detach", []),
+                disable_amp=meta.get("disable_amp", False),
+                runtime_metadata=meta.get("runtime_metadata"),
+                trace_joint=meta.get("trace_joint", False),
+            )
+        elif wrapper_name == "AOTDedupeWrapper":
+            return AOTDedupeWrapperNode(
+                keep_arg_mask=meta.get("keep_arg_mask"),
+                add_dupe_map=meta.get("add_dupe_map"),
+                needs_post_compile=meta.get("needs_post_compile", False),
+                old_input_metadata=meta.get("old_input_metadata"),
+            )
+        elif wrapper_name == "AOTSyntheticBaseWrapper":
+            return AOTSyntheticBaseWrapperNode(
+                synthetic_base_info=meta.get("synthetic_base_info"),
+                aliased_arg_idx_with_metadata_mutations=meta.get(
+                    "aliased_arg_idx_with_metadata_mutations"
+                ),
+                old_input_info=meta.get("old_input_info"),
+                needs_post_compile=meta.get("needs_post_compile", False),
+                trace_joint=meta.get("trace_joint", False),
+            )
+        elif wrapper_name == "DebugAssertWrapper":
+            return DebugAssertWrapperNode(
+                flat_requires_grad=meta.get("flat_requires_grad"),
+            )
+        else:
+            return None
 
     def _build_aot_autograd_wrapper_node(self) -> None:
         """

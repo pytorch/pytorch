@@ -257,6 +257,137 @@ def get_static_input_idxs(num_fixed: int) -> list[int]:
     return context.fw_metadata.static_input_indices
 
 
+def _extract_wrapper_metadata_for_pythonify(
+    is_backward: bool = False,
+) -> dict[str, Any] | None:
+    """
+    Extract AOTAutograd wrapper metadata from TracingContext for pythonify.
+
+    This function extracts metadata needed to faithfully model the post-compile
+    wrapper behavior in generated Python code. The wrappers (EffectTokensWrapper,
+    AOTDispatchSubclassWrapper, FunctionalizedRngRuntimeWrapper, FakifiedOutWrapper,
+    RuntimeWrapper, AOTDedupeWrapper, AOTSyntheticBaseWrapper, DebugAssertWrapper)
+    alter calling conventions and input/output handling.
+
+    The metadata is extracted from TracingContext.fw_metadata (ViewAndMutationMeta)
+    and TracingContext.output_strides when available. Missing metadata is handled
+    gracefully by returning None for the entire result or omitting specific fields.
+
+    Args:
+        is_backward: True if extracting for backward graph (currently unused,
+            but reserved for future backward-specific metadata)
+
+    Returns:
+        Dict containing wrapper_stack_order and wrapper_stack_metadata, or None
+        if TracingContext or fw_metadata is not available.
+    """
+    context = torch._guards.TracingContext.try_get()
+    if context is None:
+        return None
+
+    fw_metadata = context.fw_metadata
+    if fw_metadata is None:
+        return None
+
+    # Build wrapper stack ordering. The order matches the audit in wrapper_audit.md:
+    # Forward/inference segment: EffectTokensWrapper -> AOTDispatchSubclassWrapper
+    #   -> FunctionalizedRngRuntimeWrapper -> FakifiedOutWrapper
+    # Autograd assembly segment: AOTAutogradWrapper -> RuntimeWrapper -> DebugAssertWrapper
+    # Dispatch segment: AOTSyntheticBaseWrapper -> AOTDedupeWrapper (reverse at runtime)
+    wrapper_stack_order: dict[str, list[str]] = {
+        "forward_inference": [],
+        "autograd_assembly": [],
+        "dispatch": [],
+    }
+
+    wrapper_stack_metadata: dict[str, dict[str, Any]] = {}
+
+    # EffectTokensWrapper - check if tokens are present
+    tokens = getattr(fw_metadata, "tokens", None)
+    if tokens and len(tokens) > 0:
+        wrapper_stack_order["forward_inference"].append("EffectTokensWrapper")
+        wrapper_stack_metadata["EffectTokensWrapper"] = {
+            "num_tokens": len(tokens),
+        }
+
+    # AOTDispatchSubclassWrapper - check subclass metadata presence
+    # Subclass metadata is typically stored at SubclassMeta level, not fw_metadata
+    # but we can check subclass_inp_meta and subclass_fw_graph_out_meta
+    subclass_inp_meta = getattr(fw_metadata, "subclass_inp_meta", None)
+    subclass_fw_graph_out_meta = getattr(fw_metadata, "subclass_fw_graph_out_meta", None)
+    if subclass_inp_meta is not None or subclass_fw_graph_out_meta is not None:
+        wrapper_stack_order["forward_inference"].append("AOTDispatchSubclassWrapper")
+        wrapper_stack_metadata["AOTDispatchSubclassWrapper"] = {
+            "has_subclass_inp_meta": subclass_inp_meta is not None,
+            "has_subclass_fw_graph_out_meta": subclass_fw_graph_out_meta is not None,
+        }
+
+    # FunctionalizedRngRuntimeWrapper - check RNG functionalization
+    is_rng_op_functionalized = getattr(fw_metadata, "is_rng_op_functionalized", False)
+    if is_rng_op_functionalized:
+        wrapper_stack_order["forward_inference"].append("FunctionalizedRngRuntimeWrapper")
+        wrapper_stack_metadata["FunctionalizedRngRuntimeWrapper"] = {
+            "is_rng_op_functionalized": True,
+            "num_outputs_rng_offset": getattr(fw_metadata, "num_outputs_rng_offset", 0),
+            "num_forward_returns": getattr(fw_metadata, "num_forward_returns", None),
+        }
+
+    # FakifiedOutWrapper - always added (uses output_strides for stride restoration)
+    output_strides = context.output_strides
+    wrapper_stack_order["forward_inference"].append("FakifiedOutWrapper")
+    wrapper_stack_metadata["FakifiedOutWrapper"] = {
+        "has_output_strides": output_strides is not None and len(output_strides) > 0,
+    }
+
+    # RuntimeWrapper - captures alias/mutation epilogue metadata
+    # indices_of_inps_to_detach is set per-compilation, get from wherever available
+    indices_of_inps_to_detach = getattr(fw_metadata, "indices_of_inps_to_detach", [])
+    num_mutated_inp_runtime_indices = getattr(
+        fw_metadata, "num_mutated_inp_runtime_indices", 0
+    )
+    num_outputs_aliased = getattr(fw_metadata, "num_outputs_aliased", 0)
+    wrapper_stack_order["autograd_assembly"].append("RuntimeWrapper")
+    wrapper_stack_metadata["RuntimeWrapper"] = {
+        "indices_of_inps_to_detach": list(indices_of_inps_to_detach) if indices_of_inps_to_detach else [],
+        "num_mutated_inp_runtime_indices": num_mutated_inp_runtime_indices,
+        "num_outputs_aliased": num_outputs_aliased,
+    }
+
+    # DebugAssertWrapper - only added when config.debug_assert is enabled.
+    # This wrapper validates requires_grad expectations at runtime.
+    # Per wrapper_audit.md, it is applied after RuntimeWrapper in autograd_assembly.
+    if functorch_config.debug_assert:
+        wrapper_stack_order["autograd_assembly"].append("DebugAssertWrapper")
+        wrapper_stack_metadata["DebugAssertWrapper"] = {
+            "enabled": True,
+        }
+
+    # AOTDedupeWrapper and AOTSyntheticBaseWrapper are dispatch-level wrappers.
+    # Their metadata is captured during pre_compile in TracingContext.dispatch_wrappers_metadata.
+    # If metadata is available, use it; otherwise fall back to empty placeholders.
+    wrapper_stack_order["dispatch"].append("AOTSyntheticBaseWrapper")
+    wrapper_stack_order["dispatch"].append("AOTDedupeWrapper")
+
+    dispatch_wrappers_metadata = context.dispatch_wrappers_metadata
+    if dispatch_wrappers_metadata is not None:
+        # Use actual metadata captured during pre_compile
+        wrapper_stack_metadata["AOTSyntheticBaseWrapper"] = (
+            dispatch_wrappers_metadata.get("AOTSyntheticBaseWrapper", {})
+        )
+        wrapper_stack_metadata["AOTDedupeWrapper"] = (
+            dispatch_wrappers_metadata.get("AOTDedupeWrapper", {})
+        )
+    else:
+        # Fallback to empty placeholders when metadata not available
+        wrapper_stack_metadata["AOTSyntheticBaseWrapper"] = {}
+        wrapper_stack_metadata["AOTDedupeWrapper"] = {}
+
+    return {
+        "wrapper_stack_order": wrapper_stack_order,
+        "wrapper_stack_metadata": wrapper_stack_metadata,
+    }
+
+
 def _maybe_capture_inductor_output_for_pythonify(
     compiled_graph: CompiledFxGraph,
     is_backward: bool = False,
@@ -324,6 +455,18 @@ def _maybe_capture_inductor_output_for_pythonify(
             "cuda_graphs_enabled": cuda_graphs_enabled,
             "cuda_graph_config": cuda_graph_config,
         }
+
+        # Capture AOTAutograd wrapper metadata from TracingContext for pythonify.
+        # fw_metadata (ViewAndMutationMeta) contains runtime wrapper info needed
+        # to faithfully model wrapper behavior in generated Python code.
+        wrapper_metadata = _extract_wrapper_metadata_for_pythonify(is_backward)
+        if wrapper_metadata:
+            inductor_output["wrapper_stack_order"] = wrapper_metadata.get(
+                "wrapper_stack_order", {}
+            )
+            inductor_output["wrapper_stack_metadata"] = wrapper_metadata.get(
+                "wrapper_stack_metadata", {}
+            )
 
         add_inductor_output(inductor_output)
     except ImportError:
