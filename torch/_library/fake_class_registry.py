@@ -163,7 +163,6 @@ def maybe_to_fake_obj(
 
     from torch._library.opaque_object import (
         FakeOpaqueObject,
-        get_fake_script_object_class,
         get_opaque_obj_info,
         get_opaque_type_name,
         is_opaque_type,
@@ -174,10 +173,7 @@ def maybe_to_fake_obj(
     x_type = type(x)
     if is_opaque_type(x_type):
         type_name = OpaqueTypeStr if x is None else get_opaque_type_name(x_type)
-        # Use the type-specific FakeScriptObject subclass so that isinstance()
-        # checks work correctly (only returns True for this specific opaque type)
-        fake_class = get_fake_script_object_class(x_type)
-        fake_x_wrapped = fake_class(FakeOpaqueObject(), type_name, x)
+        fake_x_wrapped = FakeScriptObject(FakeOpaqueObject(), type_name, x)
 
         # Set specified members onto the fake object
         opaque_info = get_opaque_obj_info(x_type)
