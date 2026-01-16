@@ -5728,7 +5728,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             self.is_native_matmul
             and entry.tensor_dim == 0
             and self.triton_tensor_ndim() == 4
-        ) :
+        ):
             size = ""
         index_dtype = self.index_dtype
         suffix = f".to({index_dtype})" if index_dtype != "tl.int32" else ""
@@ -5763,7 +5763,7 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         # batch dimension is placed on CUDA gridDim.x (the fastest-varying launch axis).
         # - gridDim.x scales to much larger sizes than gridDim.z (limited to 65536 in CUDA)
         if self.is_native_matmul and self.triton_tensor_ndim() == 4:
-            reversed_pid_map = {0:2, 1:1, 2:0}
+            reversed_pid_map = {0: 2, 1: 1, 2: 0}
             key = f"tl.program_id({reversed_pid_map[entry.grid_dim]})"
 
         pid = entry.pid_cache.get(key, key)
