@@ -7731,6 +7731,11 @@ but got grad_output_size({i}) = {grad_output.size(i)}""",
     ]
 )
 def _foreach_binop_scalar_tensor_list(self, other, scalars):
+    for s in scalars:
+        torch._check(
+            s.dim() == 0,
+            lambda: f"scalars must be 0-d tensors, got {s.dim()}d",
+        )
     return [torch.empty_like(t) for t in self]
 
 
@@ -7741,7 +7746,11 @@ def _foreach_binop_scalar_tensor_list(self, other, scalars):
     ]
 )
 def _foreach_binop_scalar_tensor_list_(self, other, scalars):
-    pass
+    for s in scalars:
+        torch._check(
+            s.dim() == 0,
+            lambda: f"scalars must be 0-d tensors, got {s.dim()}d",
+        )
 
 
 # From aten/src/ATen/native/cuda/AmpKernels.cu

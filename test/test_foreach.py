@@ -1580,9 +1580,8 @@ class TestForeach(TestCase):
             scalar_tensor_op_ = torch.ops.aten._foreach_sub_.ScalarTensorList
 
         # Create random scalar tensors for per-tensor alpha
-        # Scalars must be float64 to preserve precision
         scalar_tensors_varied = [
-            make_tensor((), device=device, dtype=torch.float64)
+            make_tensor((), device=device, dtype=dtype)
             for _ in range(len(tensors1))
         ]
 
@@ -1639,9 +1638,8 @@ class TestForeach(TestCase):
             for shape in shapes
         ]
 
-        # Scalars must be float64 to preserve precision
         scalar_tensors = [
-            make_tensor((), device=device, dtype=torch.float64)
+            make_tensor((), device=device, dtype=dtype)
             for _ in range(len(tensors1))
         ]
 

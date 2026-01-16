@@ -230,7 +230,7 @@ namespace at::native {
     }                                                                  \
   }
 
-// scalars must be 0-d float64 tensors to preserve precision
+// scalars must be 0-d tensors
 // `.item()` in non-cuda code does not prevent cudagraph
 #define FOREACH_BINARY_OP_SCALAR_TENSOR_LIST(OP)                            \
   std::vector<Tensor> foreach_tensor_##OP##_scalar_tensor_list_slow(        \
@@ -239,10 +239,6 @@ namespace at::native {
     for (const auto& s : scalars) {                                         \
       TORCH_CHECK(                                                          \
           s.dim() == 0, "scalars must be 0-d tensors, got ", s.dim(), "d"); \
-      TORCH_CHECK(                                                          \
-          s.dtype() == kFloat64,                                            \
-          "scalars must be float64 tensors, got ",                          \
-          s.dtype());                                                       \
     }                                                                       \
     std::vector<Tensor> result;                                             \
     result.reserve(tensors1.size());                                        \
@@ -258,10 +254,6 @@ namespace at::native {
     for (const auto& s : scalars) {                                         \
       TORCH_CHECK(                                                          \
           s.dim() == 0, "scalars must be 0-d tensors, got ", s.dim(), "d"); \
-      TORCH_CHECK(                                                          \
-          s.dtype() == kFloat64,                                            \
-          "scalars must be float64 tensors, got ",                          \
-          s.dtype());                                                       \
     }                                                                       \
     for (const auto i : c10::irange(tensors1.size())) {                     \
       tensors1[i].OP##_(tensors2[i], scalars[i].item());                    \
