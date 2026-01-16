@@ -1,11 +1,12 @@
-# A workflow that deletes branches of closed PRs
+# TEMPORARY: Testing Bedrock OIDC role assumption
+# Original workflow: deletes branches of closed PRs
 
 name: Delete old branches
 
 on:
-  schedule:
-    # Run daily.
-    - cron: 30 1 * * *
+  # schedule:
+  #   # Run daily.
+  #   - cron: 30 1 * * *
   workflow_dispatch:
 
 concurrency:
@@ -13,27 +14,44 @@ concurrency:
   cancel-in-progress: true
 
 permissions:
-  contents: write
+  id-token: write
+  contents: read
 
 jobs:
-  delete:
-    if: ${{ github.repository == 'pytorch/pytorch' }}
-    runs-on: ubuntu-latest
-
+  test-bedrock-oidc:
+    if: github.repository_owner == 'pytorch'
+    runs-on: linux.2xlarge
+    environment: bedrock
     steps:
-      - name: Checkout repo
-        uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
+      - name: Configure AWS credentials via OIDC
+        uses: aws-actions/configure-aws-credentials@v4
         with:
-          fetch-depth: 0
+          role-to-assume: arn:aws:iam::308535385114:role/gha_workflow_claude_code
+          aws-region: us-east-1
 
-      - name: Setup Python
-        uses: actions/setup-python@a26af69be951a213d495a4c3e4e4022e16d87065 # v5.6.0
-        with:
-          python-version: '3.11'
-          architecture: x64
-          check-latest: false
+      - name: Verify assumed role identity
+        run: |
+          echo "=== AWS Identity ==="
+          aws sts get-caller-identity
 
-      - name: Delete old branches
-        run: python .github/scripts/delete_old_branches.py
-        env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+      - name: List available Anthropic models
+        run: |
+          echo "=== Available Anthropic Models in Bedrock ==="
+          aws bedrock list-foundation-models \
+            --region us-east-1 \
+            --query "modelSummaries[?contains(providerName, 'Anthropic')].{ModelId:modelId,Name:modelName}" \
+            --output table
+
+      - name: Test Bedrock invoke with Claude Haiku
+        run: |
+          echo "=== Testing Bedrock InvokeModel ==="
+          aws bedrock-runtime invoke-model \
+            --region us-east-1 \
+            --model-id anthropic.claude-3-haiku-20240307-v1:0 \
+            --content-type application/json \
+            --accept application/json \
+            --body '{"anthropic_version":"bedrock-2023-05-31","max_tokens":20,"messages":[{"role":"user","content":"Say OK if you can read this."}]}' \
+            /tmp/response.json
+          echo "Response:"
+          cat /tmp/response.json
+          echo ""
