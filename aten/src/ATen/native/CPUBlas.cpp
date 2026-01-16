@@ -994,7 +994,7 @@ struct PackKey {
 
 static inline dnnl::memory::data_type get_dnnl_dtype(ScalarType dtype) {
   using at::ScalarType;
-  using dnnl::memory::data_type;
+  using data_type = dnnl::memory::data_type;
   switch (dtype) {
     case ScalarType::Float:          return data_type::f32;
     case ScalarType::BFloat16:       return data_type::bf16;
