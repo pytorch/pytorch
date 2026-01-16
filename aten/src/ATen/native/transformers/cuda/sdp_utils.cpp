@@ -504,8 +504,14 @@ bool check_cudnn_tensor_shapes(sdp_params const& params, bool debug) {
   auto head_dim_limit = 128;
   if (cudnn_version >= 91000) {
     auto dprops = at::cuda::getCurrentDeviceProperties();
-    if (dprops->major == 9 && !dprops->minor) {
+    auto major = dprops->major;
+    auto minor = dprops->minor;
+    if (major == 9 && !minor) {
       head_dim_limit = 256;
+    } else if (major == 10 && (!minor || minor == 3)) {
+      // Blackwell GPUs: B200, GB200 (SM 10.0), B300, GB300 (SM 10.3)
+      // 192 is a special case allowed by cuDNN frontend to support DeepSeek dimensions
+      head_dim_limit = 192;
     }
   }
   if (d_qk > head_dim_limit || d_v > head_dim_limit) {
