@@ -21,6 +21,7 @@ from torch._guards import detect_fake_mode
 from torch._logging import getArtifactLogger
 from torch._subclasses.functional_tensor import FunctionalTensor, FunctionalTensorMode
 from torch._subclasses.meta_utils import safe_is_leaf
+from torch.fx.experimental.proxy_tensor import disable_autocast_cache
 from torch.fx.experimental.symbolic_shapes import is_concrete_int
 from torch.multiprocessing.reductions import StorageWeakRef
 from torch.utils._python_dispatch import (
@@ -202,7 +203,7 @@ def run_functionalized_fw_and_collect_metadata(
         fake_mode = detect_fake_mode()
         if fake_mode and (shape_env := fake_mode.shape_env):
             suppress_pending = shape_env.ignore_fresh_unbacked_symbols()
-        with disable_above, mode, suppress_pending:
+        with disable_above, mode, suppress_pending, disable_autocast_cache():
             # precondition: The passed in function already handles unflattening inputs + flattening outputs
             flat_f_args = pytree.tree_map(_to_fun, flat_args)
             flat_f_args_descs = flat_args_descs
