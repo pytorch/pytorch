@@ -6167,7 +6167,8 @@ def _scaled_dot_product_attention_fp8(
             UserWarning,
         )
     # Directly call the internal flash attention operator which has descale support
-    result = torch._scaled_dot_product_flash_attention(
+    # Use the .low_p OpOverload directly for better torch.compile compatibility
+    result = torch.ops.aten._scaled_dot_product_flash_attention.low_p(
         query,
         key,
         value,
