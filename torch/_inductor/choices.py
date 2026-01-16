@@ -400,12 +400,12 @@ class InductorChoices:
 
         if cooperative_reduction:
             # The RSPLIT of cooperative reductions means each thread block is operating on fewer elements
-            # The default fallback will be used if optimizations hint is not provided. The default fallback 
-            # is >> 32. 
+            # The default fallback will be used if optimizations hint is not provided. The default fallback
+            # is >> 32.
             threshold *= 32 // min(
                 V.graph.sizevars.optimization_hint(features.numel), 32
             )
-  
+
         # If multi_kernel is enabled, we do more aggressive persistent reduction.
         # This may result in some persistent reductions slower than the
         # corresponding non-persistent reductions. MultiKernel will do benchmarking
