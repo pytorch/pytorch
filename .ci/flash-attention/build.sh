@@ -35,7 +35,19 @@ if [[ ! -d "/usr/local/cuda" ]]; then
     fi
 
     source "${PYTORCH_ROOT}/.ci/docker/common/install_cuda.sh"
-    install_cuda 12.6.3 cuda_12.6.3_560.35.05_linux
+
+    case "${CUDA_VERSION:-12.6}" in
+        12.6|12.6.*)
+            install_cuda 12.6.3 cuda_12.6.3_560.35.05_linux
+            ;;
+        13.0|13.0.*)
+            install_cuda 13.0.2 cuda_13.0.2_580.95.05_linux
+            ;;
+        *)
+            echo "Unsupported CUDA_VERSION: ${CUDA_VERSION}"
+            exit 1
+            ;;
+    esac
 
     export CUDA_HOME=/usr/local/cuda
     export PATH=/usr/local/cuda/bin:$PATH
@@ -56,7 +68,7 @@ export FLASH_ATTENTION_DISABLE_SPLIT="${FLASH_ATTENTION_DISABLE_SPLIT:-FALSE}"
 export FLASH_ATTENTION_DISABLE_PAGEDKV="${FLASH_ATTENTION_DISABLE_PAGEDKV:-FALSE}"
 export FLASH_ATTENTION_DISABLE_APPENDKV="${FLASH_ATTENTION_DISABLE_APPENDKV:-FALSE}"
 export FLASH_ATTENTION_DISABLE_LOCAL="${FLASH_ATTENTION_DISABLE_LOCAL:-FALSE}"
-export FLASH_ATTENTION_DISABLE_SOFTCAP="${FLASH_ATTENTION_DISABLE_SOFTCAP:-TRUE}"
+export FLASH_ATTENTION_DISABLE_SOFTCAP="${FLASH_ATTENTION_DISABLE_SOFTCAP:-FALSE}"
 export FLASH_ATTENTION_DISABLE_PACKGQA="${FLASH_ATTENTION_DISABLE_PACKGQA:-FALSE}"
 export FLASH_ATTENTION_DISABLE_FP16="${FLASH_ATTENTION_DISABLE_FP16:-FALSE}"
 export FLASH_ATTENTION_DISABLE_FP8="${FLASH_ATTENTION_DISABLE_FP8:-FALSE}"

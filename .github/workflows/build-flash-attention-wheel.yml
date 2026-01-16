@@ -53,7 +53,7 @@ jobs:
             arch: "aarch64"
             cuda_short: "130"
             torch_cuda_arch_list: "9.0;10.0"
-            docker_image: "pytorch/manylinuxaarch64-builder:cuda13.0"
+            docker_image: "quay.io/pypa/manylinux_2_34_aarch64"
             runner: "linux.arm64.r7g.12xlarge.memory"
     timeout-minutes: 1440
     env:
@@ -99,6 +99,7 @@ jobs:
             torch --index-url "https://download.pytorch.org/whl/cu${CUDA_SHORT}"
 
           docker exec -t \
+            -e CUDA_VERSION="${CUDA_VERSION}" \
             -e TORCH_CUDA_ARCH_LIST="${TORCH_CUDA_ARCH_LIST}" \
             -e FA_FINAL_PACKAGE_DIR="/artifacts" \
             -e WHEEL_PLAT="${{ matrix.arch }}" \
