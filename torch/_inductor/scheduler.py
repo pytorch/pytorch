@@ -5666,7 +5666,7 @@ class Scheduler:
         buffers_removed_during_codegen = (
             V.graph.removed_buffers - removed_buffers_before_codegen
         )
-        
+
         input_nodes = {
             name: buffer
             for name, buffer in signature.input_nodes.items()
@@ -5882,12 +5882,12 @@ class Scheduler:
                 parent_wrapper_code=parent_wrapper_code,
                 partition_signatures=signature,
             )
-            
+
             # Snapshot removed_buffers before partition codegen to distinguish
             # buffers removed during this partition's codegen from those marked
             # as dead globally. See Note: [Removed Graph Partition Arguments]
             removed_buffers_before_codegen = V.graph.removed_buffers.copy()
-            
+
             self._codegen(partition)
 
             # Note: [Removed Graph Partition Arguments]
