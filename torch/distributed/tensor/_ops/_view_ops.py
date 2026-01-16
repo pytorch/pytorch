@@ -385,21 +385,17 @@ def view_groups(from_size: Shape, to_size: Shape) -> DimMap:
             from_group_dim = []
         else:
             # produces ([1], [1]),  ([2], [2]), ([2,3], [6])
-            exit_from_f = False
             while f != t:
                 if f < t:
                     nf = from_size[from_idx]
                     from_group_dim.append(from_idx)
                     from_idx += 1
-                    exit_from_f = True
                     f *= nf
                 else:
                     nt = to_size[to_idx]
                     to_group_shape.append(nt)
                     to_idx += 1
-                    exit_from_f = False
                     t *= nt
-            # from_idx = include_singletons_in_from(f, from_idx if exit_from_f, from_size, from_len, from_group_dim, t)
 
         if len(to_group_shape) > 0:
             flattened = Flatten.new(
@@ -583,7 +579,7 @@ def propagate_shape_and_sharding(
     ) -> tuple[int | None, Shard | _StridedShard | None]:
         processed_dims = set(processed_dims)
         for mesh_dim, placement in enumerate(placements):
-            if not isinstance(placement, (Shard, _StridedShard)):
+            if not isinstance(placement, Shard | _StridedShard):
                 continue
             if placement.dim in processed_dims:
                 processed_dims.remove(placement.dim)
