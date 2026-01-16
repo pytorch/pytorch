@@ -430,7 +430,8 @@ void multi_tensor_apply_dim(
     loc_tensor_info++;
 
     int outer_dim_size = reduce_dim == 1 ? tensor.size(0) : tensor.size(1);
-    const int64_t num_chunks_per_tensor = (outer_dim_size + 15) / 16;  // 16 rows per chunk. 
+    const int CHUNK_SIZE = (reduce_dim == 1) ? 128 : 16;
+    const int64_t num_chunks_per_tensor = (outer_dim_size + CHUNK_SIZE - 1) / CHUNK_SIZE;  // 16 rows per chunk. 
     for (int64_t idx = 0; idx < num_chunks_per_tensor; idx++) {
       tensorListMeta.block_to_tensor[loc_block_info] = loc_tensor_info - 1;
       tensorListMeta.block_to_chunk[loc_block_info] = idx;
