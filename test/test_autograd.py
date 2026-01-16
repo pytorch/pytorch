@@ -6390,7 +6390,11 @@ Done""",
     #    gets resulted as Zero tensors when getting passed into custom
     #    autograd function in the runtime. Apply materialize grad is tricky,
     #    because user function (dynamo in this case) needs to handle None case
-    @skipIfTorchDynamo("hook's None grad check is lost when backward is traced")
+    # this is fine in normal torch.compile case because aot_autograd would
+    # never receive None tensors. But it will be a problem when we are directly
+    # tracing autograd.grad into graph because now you will get different
+    # result from eager. One potential fix is to detect x is None in dynamo
+    # bytecode level but that is too complicated so we just YOLO.
     def test_gradcheck_undefined_grad(self):
         def check(fast_mode):
             # when encounter runtime error while running backward

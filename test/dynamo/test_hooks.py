@@ -522,7 +522,7 @@ def forward(self, L_x_ : torch.Tensor):
     sum_1 = result.sum();  result = None
     sum_2 = getitem_3.sum();  getitem_3 = None
     add = sum_1 + sum_2;  sum_1 = sum_2 = None
-    return (add,)""",
+    return (add,)""",  # noqa: B950
         )
 
     def test_intermediary_hooks(self):
