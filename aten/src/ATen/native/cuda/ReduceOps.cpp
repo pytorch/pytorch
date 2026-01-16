@@ -27,7 +27,7 @@
 namespace at::native {
 namespace {
 
-void norm_kernel_cuda(TensorIterator& iter, const Scalar& val) {
+void norm_kernel_cuda(TensorIterator& iter, const Scalar& val, bool skip_root) {
   double p = 0;
   if (val.isIntegral(false)) {
     p = static_cast<double>(val.to<int64_t>());
@@ -41,7 +41,9 @@ void norm_kernel_cuda(TensorIterator& iter, const Scalar& val) {
     return;
   }
 
-  norm_launch_kernel(iter, p);
+  // skip_root only applies for p-norms where p != inf, -inf, 0, 1
+  bool should_skip_root = skip_root && std::abs(p) != INFINITY && p != 0.0 && p != 1.0;
+  norm_launch_kernel(iter, p, should_skip_root);
 
   if (isComplexType(iter.output().scalar_type())) {
     at::imag(iter.output()).zero_();

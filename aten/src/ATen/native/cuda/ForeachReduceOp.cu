@@ -406,7 +406,8 @@ inline void check_foreach_norm_dtype(
 std::vector<Tensor> foreach_tensor_norm_cuda(
     TensorList tensors,
     const Scalar& ord,
-    std::optional<ScalarType> dtype) {
+    std::optional<ScalarType> dtype,
+    bool skip_root) {
   const auto p = [&]() -> double {
     if (ord.isIntegral(false)) {
       return ord.to<int64_t>();
@@ -424,10 +425,11 @@ std::vector<Tensor> foreach_tensor_norm_cuda(
         return at::isIntegralType(scalar_type, /*includeBool*/ true) ||
             at::isComplexType(scalar_type);
       });
-  if (!can_use_fast_route(tensors) || has_int_or_complex ||
+  // Fall back to slow path when skip_root is true (CUDA fast path applies root internally)
+  if (!can_use_fast_route(tensors) || has_int_or_complex || skip_root ||
       !(p == static_cast<double>(1) || p == static_cast<double>(2) ||
         p == std::numeric_limits<double>::infinity())) {
-    return foreach_tensor_norm_slow(tensors, ord, dtype);
+    return foreach_tensor_norm_slow(tensors, ord, dtype, skip_root);
   }
   check_foreach_norm_dtype(
       dtype, tensors[0].scalar_type(), "_foreach_tensor_norm_cuda");
