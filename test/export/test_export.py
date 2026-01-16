@@ -16,6 +16,7 @@ import traceback
 import unittest
 import warnings
 import weakref
+from abc import ABC
 from contextlib import contextmanager, nullcontext
 from dataclasses import dataclass
 from re import escape
@@ -13522,7 +13523,7 @@ graph():
     @testing.expectedFailureSerDer  # register_constant needs to handle serialization
     def test_opaque_obj(self):
         @dataclass(frozen=True)
-        class MyInput:
+        class MyInput(ABC):  # noqa: B024
             int_1: int
             int_2: int
 
