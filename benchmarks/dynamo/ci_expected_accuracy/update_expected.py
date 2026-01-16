@@ -195,6 +195,17 @@ def download_artifacts_and_extract_csvs(urls):
 def write_filtered_csvs(root_path, dataframes):
     for (suite, phase), df in dataframes.items():
         out_fn = os.path.join(root_path, f"{suite}_{phase}.csv")
+        # Read existing CSV and merge with new data to preserve entries
+        # from shards that failed to download
+        if os.path.exists(out_fn):
+            existing_df = pd.read_csv(out_fn)
+            # Use new data where available, keep old data for missing entries
+            # Set 'name' as index for both, update existing with new, then reset
+            existing_df = existing_df.set_index("name")
+            df = df.set_index("name")
+            existing_df.update(df)
+            # Add any new entries from df that weren't in existing
+            df = existing_df.combine_first(df).reset_index()
         df = df.sort_values(by="name")
         df.to_csv(out_fn, index=False, columns=["name", "accuracy", "graph_breaks"])
         apply_lints(out_fn)
