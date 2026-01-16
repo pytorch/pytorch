@@ -147,6 +147,7 @@ _f8_f8_bf16_rowwise_grouped_mm_cuda(
 // 2d-2d and 2d-3d cases
 // scaling=rowwise
 // only being called for rocm
+#ifdef USE_ROCM
 Tensor&
 _f8_f8_bf16_rowwise_grouped_mm_rocm(
       const Tensor& mat_a,
@@ -180,6 +181,7 @@ _f8_f8_bf16_rowwise_grouped_mm_rocm(
   return out;
 
 }
+#endif // USE_ROCM
 
 // Dispatch f8 x f8 -> bf16 row-wise scaled to rocm/cuda
 Tensor&
