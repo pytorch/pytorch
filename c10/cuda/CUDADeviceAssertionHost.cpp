@@ -63,7 +63,7 @@ int dsa_get_device_count() {
 
 bool dsa_check_if_all_devices_support_managed_memory() {
 #ifdef USE_ROCM
-    return true;
+  return true;
 #else
 // It looks as though this'll work best on CUDA GPUs with Pascal
 // architectures or newer, per
@@ -303,7 +303,7 @@ DeviceAssertionsData* CUDAKernelLaunchRegistry::
   cpuDevice.type = cudaMemLocationTypeDevice;
   cpuDevice.id = cudaCpuDeviceId;
 #ifdef USE_ROCM
-  // hipify replaces cudaMemAdvise -> hipMemAdvise, but we want v2 with hipMemLocation
+  // hipify replaces cudaMemAdvise -> hipMemAdvise, but we want v2
 #define hipMemAdvise hipMemAdvise_v2
 #endif
 #else
