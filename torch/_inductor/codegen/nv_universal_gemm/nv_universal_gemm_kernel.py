@@ -119,23 +119,17 @@ class NVUniversalGemmKernel(Kernel):
             f"""
             import cutlass
             import cutlass_api
+            from torch._inductor.codegen.nv_universal_gemm.kernel_cache import get_kernel_by_name
 
             _NV_UNIVERSAL_GEMM_KERNEL_NAME = "{kernel_name_str}"
-            _nv_universal_gemm_kernel_cache = {{}}
             _nv_universal_gemm_artifact_cache = {{}}
 
             def {self.kernel_name}_main({params_str}):
-                global _nv_universal_gemm_kernel_cache, _nv_universal_gemm_artifact_cache
+                global _nv_universal_gemm_artifact_cache
 
-                if _NV_UNIVERSAL_GEMM_KERNEL_NAME not in _nv_universal_gemm_kernel_cache:
-                    kernels = cutlass_api.get_kernels(
-                        metadata_filter=lambda m: m.kernel_name == _NV_UNIVERSAL_GEMM_KERNEL_NAME
-                    )
-                    if not kernels:
-                        raise RuntimeError(f"Could not find NVIDIA Universal GEMM kernel: {{_NV_UNIVERSAL_GEMM_KERNEL_NAME}}")
-                    _nv_universal_gemm_kernel_cache[_NV_UNIVERSAL_GEMM_KERNEL_NAME] = kernels[0]
-
-                kernel = _nv_universal_gemm_kernel_cache[_NV_UNIVERSAL_GEMM_KERNEL_NAME]
+                kernel = get_kernel_by_name(_NV_UNIVERSAL_GEMM_KERNEL_NAME)
+                if kernel is None:
+                    raise RuntimeError(f"Could not find NVIDIA Universal GEMM kernel: {{_NV_UNIVERSAL_GEMM_KERNEL_NAME}}")
 
                 args = cutlass_api.arguments.GemmArguments(
                     in_ptr0,
