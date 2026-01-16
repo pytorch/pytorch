@@ -60,6 +60,7 @@ from ..exc import (
 from ..guards import GuardBuilder, install_guard
 from ..source import (
     AttrSource,
+    CellContentsSource,
     ClosureSource,
     CollectionsSource,
     ConstantSource,
@@ -547,7 +548,9 @@ class UserFunctionVariable(BaseUserFunctionVariable):
 
             elif source:
                 closure_cell = GetItemSource(ClosureSource(source), idx)
-                closure_cell_contents = AttrSource(closure_cell, "cell_contents")
+                closure_cell_contents = CellContentsSource(
+                    closure_cell, "cell_contents", freevar_name=name
+                )
                 try:
                     contents_var = VariableTracker.build(
                         parent, cell.cell_contents, closure_cell_contents
@@ -2295,6 +2298,7 @@ class CollectiveFunctionRewriteVariable(UserFunctionVariable):
         if self.fn in (
             dist.all_reduce,
             dist.reduce_scatter_tensor,
+            # pyrefly: ignore [deprecated]
             dist._reduce_scatter_base,
         ):
             reduce_op_var = kwargs.get("op")
@@ -2668,7 +2672,7 @@ class SysFunctionVariable(VariableTracker):
     ) -> VariableTracker:
         if self.value is sys.exc_info:
             return self.exc_info(tx)
-        # pyrefly: ignore[missing-attribute]
+
         assert self.value is sys.exception
         return self.exception(tx)
 

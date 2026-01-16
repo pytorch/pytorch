@@ -198,6 +198,7 @@ DEFAULT_LOGGING = {
     "fsdp": logging.INFO,
     "ddp_graphs": True,
     "graph_breaks": True,
+    "side_effects": True,
     "guards": True,
     "recompiles": True,
     "dynamic": logging.INFO,
@@ -226,6 +227,7 @@ def set_logs(
     graph_code: bool = False,
     graph_code_verbose: bool = False,
     graph_breaks: bool = False,
+    side_effects: bool = False,
     graph_sizes: bool = False,
     guards: bool = False,
     recompiles: bool = False,
@@ -363,6 +365,10 @@ def set_logs(
         graph_breaks (:class:`bool`):
             Whether to emit the graph breaks encountered by TorchDynamo.
             Default: ``False``
+
+        side_effects (:class:`bool`):
+            Whether to emit side effects (mutations, hooks, etc.) that TorchDynamo
+            codegenerates in the output graph. Default: ``False``
 
         graph_sizes (:class:`bool`):
             Whether to emit tensor sizes of the graph captured by TorchDynamo.
@@ -549,6 +555,7 @@ def set_logs(
         graph_code=graph_code,
         graph_code_verbose=graph_code_verbose,
         graph_breaks=graph_breaks,
+        side_effects=side_effects,
         graph_sizes=graph_sizes,
         guards=guards,
         recompiles=recompiles,
