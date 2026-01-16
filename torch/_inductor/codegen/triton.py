@@ -5651,6 +5651,8 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
                 return triton_heuristics.Grid2DWithYZOverflow
             return triton_heuristics.Grid2D
         elif n == 3:
+            if self.is_native_matmul:
+                return triton_heuristics.BatchMatmulGrid3D
             return triton_heuristics.Grid3D
         raise ValueError(f"Unsupported number of dimensions: {n}")
 
@@ -5720,6 +5722,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
     def iteration_ranges_ranges_code(self, entry: IterationRangesRoot) -> str:
         assert entry.tensor_dim is not None
         size = self.indexing_size_str(entry.tensor_dim)
+        # For batch matmul, we always set the ZBLOCK=1.
+        # In this case, we found not broadcasting tl.arange(0, ZBLOCK) is faster.
+        if (
+            self.is_native_matmul
+            and entry.tensor_dim == 0
+            and self.triton_tensor_ndim() == 4
+        ) :
+            size = ""
         index_dtype = self.index_dtype
         suffix = f".to({index_dtype})" if index_dtype != "tl.int32" else ""
         if (
@@ -5748,6 +5758,14 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
             # For each z dimension, there are tl.num_programs(1) yblocks which is passed by grad(x,y,z).
             # So, we need to add tl.program_id(z) * tl.num_programs(y) *YBLOCK to get the correct yoffset.
             key = f"({key} + tl.program_id({entry.grid_dim + 1}) * tl.num_programs({entry.grid_dim}))"
+
+        # For batched matmul, we intentionally remap program_id axes so that the
+        # batch dimension is placed on CUDA gridDim.x (the fastest-varying launch axis).
+        # - gridDim.x scales to much larger sizes than gridDim.z (limited to 65536 in CUDA)
+        if self.is_native_matmul and self.triton_tensor_ndim() == 4:
+            reversed_pid_map = {0:2, 1:1, 2:0}
+            key = f"tl.program_id({reversed_pid_map[entry.grid_dim]})"
+
         pid = entry.pid_cache.get(key, key)
         if self.index_dtype != "tl.int32":
             return f"{pid}.to({self.index_dtype})"
