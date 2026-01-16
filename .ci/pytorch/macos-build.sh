@@ -33,7 +33,6 @@ if which sccache > /dev/null; then
   export PATH="${tmp_dir}:$PATH"
 fi
 
-print_cmake_info
 if [[ ${BUILD_ENVIRONMENT} == *"distributed"* ]]; then
   # Needed for inductor benchmarks, as lots of HF networks make `torch.distribtued` calls
   USE_DISTRIBUTED=1 USE_OPENMP=1 WERROR=1 python -m build --wheel --no-isolation

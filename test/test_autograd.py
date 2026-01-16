@@ -76,6 +76,7 @@ from torch.testing._internal.common_utils import (
     skipCUDANonDefaultStreamIf,
     skipIfMPS,
     skipIfNoLapack,
+    skipIfSlowGradcheckEnv,
     skipIfTorchDynamo,
     skipIfWindows,
     skipIfXpu,
@@ -4563,6 +4564,7 @@ class TestAutograd(TestCase):
         torch.autograd.backward(r2, grad)
         self.assertEqual(input1.grad, input2.grad, rtol=0.01, atol=0.0)
 
+    @skipIfSlowGradcheckEnv
     @skipIfNoLapack
     def test_lobpcg(self):
         def func(k, A, largest=True, B=None):

@@ -142,7 +142,6 @@ def load_guard_manager(
         OutputGraphCommon(guards_state.output_graph),
         shape_code_parts=guards_state.shape_code_parts,
         runtime_global_scope=runtime_global_scope,
-        source_get_cache=guards_state.source_get_cache,
     ).guard_manager
 
 
