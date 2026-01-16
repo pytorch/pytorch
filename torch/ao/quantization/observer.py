@@ -23,6 +23,7 @@ from torch.ao.quantization.utils import (
     check_min_max_valid,
     is_per_channel,
     is_per_tensor,
+    round_to_power_of_2,
     validate_qmin_qmax,
 )
 from torch.fx import Node
@@ -192,7 +193,14 @@ class UniformQuantizationObserverBase(ObserverBase):
                       This is sometimes required to avoid instruction overflow.
         quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
         quant_max: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
+        factory_kwargs: Dictionary of kwargs to use for creating buffers.
         eps: Epsilon value for float32, Defaults to `torch.finfo(torch.float32).eps`.
+        is_dynamic: Indicator for whether the observer is a placeholder for dynamic quantization
+                   or static quantization.
+        power_of_2_scale: If True, rounds the quantization scale to the nearest power of 2.
+                         This improves operational efficiency on hardware like DSPs, NPUs, and FPGAs
+                         by enabling efficient bit-shift operations instead of multiplications.
+                         Default: False.
 
     .. warning::
 
@@ -237,11 +245,13 @@ class UniformQuantizationObserverBase(ObserverBase):
         factory_kwargs=None,
         eps=torch.finfo(torch.float32).eps,
         is_dynamic=False,
+        power_of_2_scale=False,
         **kwargs,
     ) -> None:
         factory_kwargs = torch.nn.factory_kwargs(factory_kwargs)
         super().__init__(dtype=dtype, is_dynamic=is_dynamic, **kwargs)
         self.qscheme = qscheme
+        self.power_of_2_scale = power_of_2_scale
         if reduce_range:
             warnings.warn(
                 "Please use quant_min and quant_max to specify the range for observers. \
@@ -357,7 +367,8 @@ class UniformQuantizationObserverBase(ObserverBase):
             max_val: Maximum values per channel
 
         Returns:
-            scales: Scales tensor of shape (#channels,)
+            scales: Scales tensor of shape (#channels,). If :attr:`power_of_2_scale` is True,
+                   scales are rounded to the nearest power of 2 (2^n for some integer n).
             zero_points: Zero points tensor of shape (#channels,)
         """
         # Functionally equivalent to 'determine_qparams' in utils.py. Observers must be torchscriptable however and qscheme
@@ -424,6 +435,10 @@ class UniformQuantizationObserverBase(ObserverBase):
                     [float(zero_point)], dtype=zero_point.dtype, device=device
                 )
 
+        # Apply power-of-2 scale optimization if enabled
+        if self.power_of_2_scale:
+            scale = round_to_power_of_2(scale, self.eps)
+
         return scale, zero_point
 
     @torch.jit.export
@@ -452,7 +467,13 @@ class MinMaxObserver(UniformQuantizationObserverBase):
         reduce_range: Reduces the range of the quantized data type by 1 bit
         quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
         quant_max: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
+        factory_kwargs: Dictionary of kwargs to use for creating buffers.
         eps: Epsilon value for float32, Defaults to `torch.finfo(torch.float32).eps`.
+        is_dynamic: Indicator for whether the observer is a placeholder for dynamic quantization
+                   or static quantization.
+        power_of_2_scale: If True, rounds the quantization scale to the nearest power of 2.
+                         See :class:`~torch.ao.quantization.observer.UniformQuantizationObserverBase`
+                         for details. Default: False.
 
     Given running min/max as :math:`x_\text{min}` and :math:`x_\text{max}`,
     scale :math:`s` and zero point :math:`z` are computed as:
@@ -602,6 +623,11 @@ class MovingAverageMinMaxObserver(MinMaxObserver):
         quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
         quant_max: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
         eps: Epsilon value for float32, Defaults to `torch.finfo(torch.float32).eps`.
+        is_dynamic: Indicator for whether the observer is a placeholder for dynamic quantization
+                   or static quantization.
+        power_of_2_scale: If True, rounds the quantization scale to the nearest power of 2.
+                         See :class:`~torch.ao.quantization.observer.UniformQuantizationObserverBase`
+                         for details. Default: False.
 
     The moving average min/max is computed as follows
 
@@ -700,7 +726,13 @@ class PerChannelMinMaxObserver(UniformQuantizationObserverBase):
         reduce_range: Reduces the range of the quantized data type by 1 bit
         quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
         quant_max: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
+        factory_kwargs: Dictionary of kwargs to use for creating buffers.
         eps: Epsilon value for float32, Defaults to `torch.finfo(torch.float32).eps`.
+        is_dynamic: Indicator for whether the observer is a placeholder for dynamic quantization
+                   or static quantization.
+        power_of_2_scale: If True, rounds the quantization scale to the nearest power of 2.
+                         See :class:`~torch.ao.quantization.observer.UniformQuantizationObserverBase`
+                         for details. Default: False.
 
     The quantization parameters are computed the same way as in
     :class:`~torch.ao.quantization.observer.MinMaxObserver`, with the difference
@@ -912,6 +944,11 @@ class MovingAveragePerChannelMinMaxObserver(PerChannelMinMaxObserver):
         quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
         quant_max: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
         eps: Epsilon value for float32, Defaults to `torch.finfo(torch.float32).eps`.
+        is_dynamic: Indicator for whether the observer is a placeholder for dynamic quantization
+                   or static quantization.
+        power_of_2_scale: If True, rounds the quantization scale to the nearest power of 2.
+                         See :class:`~torch.ao.quantization.observer.UniformQuantizationObserverBase`
+                         for details. Default: False.
 
     The quantization parameters are computed the same way as in
     :class:`~torch.ao.quantization.observer.MovingAverageMinMaxObserver`, with the
@@ -995,7 +1032,15 @@ class HistogramObserver(UniformQuantizationObserverBase):
                reference model spec
         qscheme: Quantization scheme to be used
         reduce_range: Reduces the range of the quantized data type by 1 bit
+        quant_min: Minimum quantization value. If unspecified, it will follow the 8-bit setup.
+        quant_max: Maximum quantization value. If unspecified, it will follow the 8-bit setup.
+        factory_kwargs: Dictionary of kwargs to use for creating buffers.
         eps: Epsilon value for float32, Defaults to `torch.finfo(torch.float32).eps`.
+        is_dynamic: Indicator for whether the observer is a placeholder for dynamic quantization
+                   or static quantization.
+        power_of_2_scale: If True, rounds the quantization scale to the nearest power of 2.
+                         See :class:`~torch.ao.quantization.observer.UniformQuantizationObserverBase`
+                         for details. Default: False.
 
     The scale and zero point are computed as follows:
 
