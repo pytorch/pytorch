@@ -1,4 +1,4 @@
-# TEMPORARY: Testing Bedrock OIDC role assumption
+# TEMPORARY: Testing Claude Code action with Bedrock
 # Original workflow: deletes branches of closed PRs
 
 name: Delete old branches
@@ -18,11 +18,13 @@ permissions:
   contents: read
 
 jobs:
-  test-bedrock-oidc:
+  test-claude-code:
     if: github.repository_owner == 'pytorch'
     runs-on: linux.2xlarge
-#    environment: bedrock
+    environment: bedrock
     steps:
+      - uses: actions/checkout@v4
+
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
         with:
@@ -30,28 +32,11 @@ jobs:
           aws-region: us-east-1
 
       - name: Verify assumed role identity
-        run: |
-          echo "=== AWS Identity ==="
-          aws sts get-caller-identity
+        run: aws sts get-caller-identity
 
-      - name: List available Anthropic models
-        run: |
-          echo "=== Available Anthropic Models in Bedrock ==="
-          aws bedrock list-foundation-models \
-            --region us-east-1 \
-            --query "modelSummaries[?contains(providerName, 'Anthropic')].{ModelId:modelId,Name:modelName}" \
-            --output table
-
-      - name: Test Bedrock invoke with Claude Haiku
-        run: |
-          echo "=== Testing Bedrock InvokeModel ==="
-          aws bedrock-runtime invoke-model \
-            --region us-east-1 \
-            --model-id anthropic.claude-3-haiku-20240307-v1:0 \
-            --content-type application/json \
-            --accept application/json \
-            --body '{"anthropic_version":"bedrock-2023-05-31","max_tokens":20,"messages":[{"role":"user","content":"Say OK if you can read this."}]}' \
-            /tmp/response.json
-          echo "Response:"
-          cat /tmp/response.json
-          echo ""
+      - name: Test Claude Code action
+        uses: anthropics/claude-code-action@v1
+        with:
+          use_bedrock: "true"
+          prompt: "Say 'Hello from Claude Code on PyTorch!' and nothing else."
+          claude_args: "--max-turns 5"
