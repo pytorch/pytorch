@@ -191,6 +191,96 @@ class TestScheduler(TestCase):
         # Assert: Fusion should be allowed (4 unique buffers <= 5 threshold)
         self.assertFalse(result)
 
+    def test_clean_removed_buffer_from_partition_signatures(self):
+        """
+        Test that clean_removed_buffer_from_partition_signatures() correctly
+        distinguishes between buffers removed during partition codegen and
+        globally-dead buffers that may still be needed by the partition.
+        
+        This tests the fix for issue #169232 where buffers marked as globally
+        dead during whole-graph DCE were incorrectly removed from partition
+        signatures, causing NameError when partition kernels referenced them.
+        """
+        from torch._inductor.ir import GraphPartitionSignature
+        from torch.fx.node import Node
+        
+        # Create mock nodes for the partition signature
+        mock_input_node = Mock(spec=Node)
+        mock_input_node.name = "input_0"
+        mock_input_node.maybe_get_name = Mock(return_value="input_0")
+        
+        mock_output_node = Mock(spec=Node)
+        mock_output_node.name = "output_0"
+        mock_output_node.maybe_get_name = Mock(return_value="output_0")
+        
+        # Create initial partition signature with some input buffers
+        signature = GraphPartitionSignature(
+            symbol_inputs=[],
+            input_nodes={"globally_dead_buf": mock_input_node, "regular_buf": mock_input_node},
+            output_nodes=[mock_output_node],
+            input_deallocation={"globally_dead_buf": None, "regular_buf": None},
+            constant_names=[],
+        )
+        
+        # Simulate the scenario:
+        # - "globally_dead_buf" was marked as dead before partition codegen
+        # - "regular_buf" was fused during partition codegen and added to removed_buffers
+        removed_buffers_before_codegen = OrderedSet(["globally_dead_buf"])
+        current_removed_buffers = OrderedSet(["globally_dead_buf", "regular_buf"])
+        
+        # Create a mock scheduler
+        scheduler = Mock(spec=Scheduler)
+        
+        # Temporarily patch V.graph.removed_buffers to return our test value
+        import torch._inductor.scheduler as scheduler_module
+        original_V = None
+        try:
+            # Store the original V if it exists
+            if hasattr(scheduler_module, 'V'):
+                original_V = scheduler_module.V
+            
+            # Create a mock V object with removed_buffers
+            mock_V = Mock()
+            mock_V.graph = Mock()
+            mock_V.graph.removed_buffers = current_removed_buffers
+            
+            # Monkey patch V in the scheduler module
+            scheduler_module.V = mock_V
+            
+            # Call the method we're testing
+            cleaned_signature = Scheduler.clean_removed_buffer_from_partition_signatures(
+                scheduler,
+                signature,
+                removed_buffers_before_codegen,
+            )
+            
+            # Assertions:
+            # 1. globally_dead_buf should NOT be removed (it was dead before codegen)
+            self.assertIn(
+                "globally_dead_buf",
+                cleaned_signature.input_nodes,
+                "Globally-dead buffer should be preserved in partition signature",
+            )
+            
+            # 2. regular_buf SHOULD be removed (it was removed during codegen)
+            self.assertNotIn(
+                "regular_buf",
+                cleaned_signature.input_nodes,
+                "Buffer fused during partition codegen should be removed",
+            )
+            
+            # 3. output_nodes should still contain the output
+            self.assertEqual(
+                len(cleaned_signature.output_nodes),
+                1,
+                "Output nodes should be preserved",
+            )
+            
+        finally:
+            # Restore original V if it was modified
+            if original_V is not None:
+                scheduler_module.V = original_V
+
     def _create_mock_node(self, name: str, reads: list[str], writes: list[str]) -> Mock:
         """Helper method to create a mock scheduler node with specified reads/writes"""
         node = Mock(spec=BaseSchedulerNode)
