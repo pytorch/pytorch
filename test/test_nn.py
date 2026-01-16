@@ -12921,6 +12921,33 @@ if __name__ == '__main__':
             for p, pe in zip(test_model.parameters(), ref_model.parameters()):
                 self.assertEqual(p.grad.to(devices[0]), pe.grad)
 
+    @parametrize_test('foreach', (False, True))
+    def test_get_total_norm_numerics(self, device, foreach):
+        # Test that _get_total_norm with skip_root produces correct results
+        from torch.nn.utils.clip_grad import _get_total_norm
+
+        tensors = [
+            torch.randn(10, 10, device=device),
+            torch.randn(5, 5, device=device),
+            torch.randn(20, device=device),
+        ]
+
+        for norm_type in [2.0, 3.0, 4.5]:
+            # Compute expected result manually
+            total_sum = sum((t.abs() ** norm_type).sum() for t in tensors)
+            expected = total_sum ** (1.0 / norm_type)
+
+            # Use _get_total_norm
+            actual = _get_total_norm(tensors, norm_type=norm_type, foreach=foreach)
+
+            self.assertEqual(actual, expected, msg=f'norm_type={norm_type}, foreach={foreach}')
+
+        # Test inf/-inf/0/1 norms still work
+        for norm_type in [float('inf'), float('-inf'), 0.0, 1.0]:
+            actual = _get_total_norm(tensors, norm_type=norm_type, foreach=foreach)
+            # Just check it doesn't error
+            self.assertTrue(actual.numel() == 1)
+
     def test_elu_inplace_overlap(self, device):
         dtype = torch.bfloat16 if device != 'mps:0' else torch.float16
         x = torch.randn((1, 6), dtype=dtype, device=device).expand((6, 6))
