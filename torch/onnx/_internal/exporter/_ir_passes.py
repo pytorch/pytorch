@@ -85,9 +85,18 @@ def rename_axis(
         if isinstance(key, ir.SymbolicDim):
             if isinstance(key.value, str):
                 string_mapping[key.value] = value
-            # Skip non-string keys (None)
-        else:
+            else:
+                raise ValueError(
+                    f"Invalid SymbolicDim value in rename_mapping: {key.value!r}. "
+                    "Expected str."
+                )
+        elif isinstance(key, str):
             string_mapping[key] = value
+        else:
+            raise ValueError(
+                f"Invalid key type in rename_mapping: {type(key)}({key!r}). Expected "
+                "str or ir.SymbolicDim."
+            )
 
     # NOTE: Mapping needs to be sorted by length because the shape expression
     # could have multiple ways to be expressed, for example,
