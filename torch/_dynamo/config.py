@@ -53,10 +53,12 @@ dead_code_elimination = True
 replay_side_effects = True
 
 # Configure side effect warning level
-# If `silent`, we silently allow side effects
-# If `warn`, we warn side effects
+# If `info` (default): allow side effects and log to TORCH_LOGS="side_effects" and tlparse
+# If `silent`, we allow side effects, no logs are made.
+# If `warn`, we allow side effects but issue warnings
 # If `error`, we error on side effects
-side_effect_replay_policy = "silent"
+# NOTE: it is NOT safe to change this config during compilation!
+side_effect_replay_policy = "info"
 
 # disable (for a function) when cache reaches this size
 
@@ -121,7 +123,9 @@ assume_static_by_default = True
 # with assume_static_by_default=True.
 # With this flag enabled, we always compile a frame as fully static for the first time, and, if we fail
 # any guards due to wobbles in shape, we recompile with *all* the wobbled shapes as being marked dynamic.
-automatic_dynamic_shapes = True
+automatic_dynamic_shapes = (
+    os.environ.get("TORCH_DYNAMO_AUTOMATIC_DYNAMIC_SHAPES", "1") == "1"
+)
 
 # Valid options: "dynamic", "unbacked"
 automatic_dynamic_shapes_mark_as: Literal["dynamic", "unbacked"] = "dynamic"
@@ -446,6 +450,9 @@ base_dir = dirname(dirname(dirname(abspath(__file__))))
 
 # Trace through NumPy or graphbreak
 trace_numpy = True
+
+# Trace through torch.autograd.grad or graphbreak
+trace_autograd_ops = False
 
 # Default NumPy dtypes when tracing with torch.compile
 # We default to 64bits. For efficiency, one may want to change these to float32

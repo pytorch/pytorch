@@ -1,13 +1,10 @@
-# pyre-strict
-
 """
-Custom encoder functions for use with PersistentMemoizer.
+Custom encoder functions
 
 This module provides reusable encoder functions that convert function parameters
 into JSON-serializable dictionaries for caching purposes.
 """
 
-from typing import cast
 from typing_extensions import TypedDict
 
 import torch
@@ -64,8 +61,7 @@ def should_pad_params_encoder(
         mat2_exclude_padding_time=should_exclude_padding_time(match, "mat2"),
         tf32=False
         if mat1.dtype != torch.float32
-        else cast(
-            bool,
-            torch.backends.cuda.matmul.allow_tf32 or torch.backends.mkldnn.allow_tf32,
+        else bool(
+            torch.backends.cuda.matmul.allow_tf32 or torch.backends.mkldnn.allow_tf32
         ),
     )
