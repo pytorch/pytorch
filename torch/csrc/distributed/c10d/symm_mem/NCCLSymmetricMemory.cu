@@ -138,6 +138,14 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
       arr_size,
       cudaMemcpyDeviceToHost));
 #endif
+
+#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
+  // Starting from NCCL 2.29, we can use `ncclGetLsaMultimemDevicePointer`
+  void* mc_addr = nullptr;
+  if (ncclGetLsaMultimemDevicePointer(buffer_win_, 0, &mc_addr) == ncclSuccess) {
+    mc_addr_ = mc_addr;
+  }
+#endif
   }
 
   // Exact copy is not needed / supported
@@ -159,6 +167,8 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   std::string group_name_;
   ncclWindow_t buffer_win_;
   ncclWindow_t signal_handle_;
+  // Multicast address
+  void* mc_addr_{nullptr};
 
   friend class NCCLSymmetricMemory;
 };
@@ -194,15 +204,15 @@ size_t NCCLSymmetricMemory::get_buffer_size() {
   return pai_->buffer_size_;
 }
 
+bool NCCLSymmetricMemory::has_multicast_support() {
+  return pai_->mc_addr_ != nullptr;
+}
+
 void* NCCLSymmetricMemory::get_multicast_ptr() {
-  // Starting from NCCL 2.29, we can use `ncclGetLsaMultimemDevicePointer`
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
-  void* mc_addr = nullptr;
-  if (ncclGetLsaMultimemDevicePointer(pai_->buffer_win_, offset_, &mc_addr) == ncclSuccess) {
-    return mc_addr;
+  if (!has_multicast_support()) {
+    return nullptr;
   }
-#endif
-  return nullptr;
+  return static_cast<char*>(pai_->mc_addr_) + offset_;
 }
 
 void NCCLSymmetricMemory::barrier(int channel, size_t timeout_ms) {
