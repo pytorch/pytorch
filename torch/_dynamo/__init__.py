@@ -161,6 +161,7 @@ def reset() -> None:
         TensorifyState.clear()
         torch._dynamo.utils.warn_once_cache.clear()
         torch._C._autograd._saved_tensors_hooks_set_tracing(False)
+        torch._dynamo.backends.debugging._invoke_subgraph_counter = 0
 
         # Reset cudagraph trees unconditionally since they are global state
         # not tied to a specific backend instance

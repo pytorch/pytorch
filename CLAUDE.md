@@ -27,10 +27,16 @@ Disclose that the PR was authored with Claude.
 
 # Dynamo Config
 
-Use `torch._dynamo.config.patch` context manager instead of manual try/finally for temporarily changing config:
+Use `torch._dynamo.config.patch` for temporarily changing config. It can be used as a decorator on test methods or as a context manager:
 
 ```python
-# Good - use patch context manager
+# Good - use patch as decorator on test method
+@torch._dynamo.config.patch(force_compile_during_fx_trace=True)
+def test_my_feature(self):
+    # test code here
+    pass
+
+# Good - use patch as context manager
 with torch._dynamo.config.patch(force_compile_during_fx_trace=True):
     # test code here
     pass

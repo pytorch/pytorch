@@ -1313,6 +1313,7 @@ def forward(self, primals_1):
     def test_tp_compile_comm_reordering_graph_partition(self):
         self._test_tp_compile_comm_reordering()
 
+    @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
     def test_make_fx_with_invoke_subgraph_dtensor(self):
         """Test that make_fx can trace over torch.compile with invoke_subgraph backend and DTensor.
 
@@ -1326,34 +1327,55 @@ def forward(self, primals_1):
 
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-        # force_compile_during_fx_trace implicitly overrides error_on_nested_fx_trace
-        with torch._dynamo.config.patch(force_compile_during_fx_trace=True):
-            torch._dynamo.reset()
+        torch._dynamo.reset()
 
-            def inner_fn(dt):
-                # Redistribute DTensor
-                return dt.redistribute(mesh, [Replicate()])
+        def inner_fn(dt):
+            # Redistribute DTensor
+            return dt.redistribute(mesh, [Replicate()])
 
-            compiled_fn = torch.compile(
-                inner_fn, backend="invoke_subgraph", fullgraph=True
-            )
+        compiled_fn = torch.compile(
+            inner_fn, backend="invoke_subgraph", fullgraph=True
+        )
 
-            def outer_fn(x):
-                # Convert plain tensor to DTensor
-                dt = DTensor.from_local(x + 1, mesh, [Shard(0)], run_check=False)
-                # Call compiled function with DTensor
-                dt_out = compiled_fn(dt)
-                # Convert back to plain tensor
-                return dt_out.to_local()
+        def outer_fn(x):
+            # Convert plain tensor to DTensor
+            dt = DTensor.from_local(x + 1, mesh, [Shard(0)], run_check=False)
+            # Call compiled function with DTensor
+            dt_out = compiled_fn(dt)
+            # Convert back to plain tensor
+            return dt_out.to_local()
 
-            x = torch.randn(4, 4)
+        x = torch.randn(4, 4)
 
-            # Trace with make_fx
-            traced = make_fx(outer_fn, tracing_mode="fake")(x)
+        # Trace with make_fx
+        traced = make_fx(outer_fn, tracing_mode="fake")(x)
 
-            # Verify invoke_subgraph appears in the graph
-            graph_code = traced.print_readable(print_output=False)
-            self.assertIn("invoke_subgraph", graph_code)
+        # Verify the full graph structure including invoke_subgraph
+        graph_str = "\n".join(
+            line.rstrip() for line in traced.print_readable(print_output=False).strip().split("\n")
+        )
+        self.assertExpectedInline(
+            graph_str,
+            """\
+class outer_fn(torch.nn.Module):
+    def forward(self, x_1: "f32[4, 4]"):
+        # No stacktrace found for following nodes
+        add: "f32[4, 4]" = torch.ops.aten.add.Tensor(x_1, 1);  x_1 = None
+        _to_copy: "f32[4, 4]" = torch.ops.aten._to_copy.default(add, dtype = torch.float32, layout = torch.strided, device = device(type='cuda', index=0));  add = None
+        view: "f32[4, 4]" = torch.ops.aten.view.default(_to_copy, [4, 4]);  _to_copy = None
+        repeated_subgraph0 = self.repeated_subgraph0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_1', view);  repeated_subgraph0 = view = None
+        getitem: "f32[8, 4]" = invoke_subgraph[0];  invoke_subgraph = None
+        view_1: "f32[8, 4]" = torch.ops.aten.view.default(getitem, [8, 4]);  getitem = None
+        return view_1
+
+    class repeated_subgraph0(torch.nn.Module):
+        def forward(self, arg0_1: "f32[4, 4]"):
+            # No stacktrace found for following nodes
+            all_gather_into_tensor: "f32[8, 4]" = torch.ops._c10d_functional.all_gather_into_tensor.default(arg0_1, 2, '0');  arg0_1 = None
+            wait_tensor: "f32[8, 4]" = torch.ops._c10d_functional.wait_tensor.default(all_gather_into_tensor);  all_gather_into_tensor = None
+            return (wait_tensor,)""",
+        )  # noqa: B950
 
 
 @instantiate_parametrized_tests

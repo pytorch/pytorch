@@ -36,6 +36,7 @@ from torch.testing._internal.autocast_test_lists import AutocastTestLists, TestA
 from torch.testing._internal.common_cuda import (
     _create_scaling_case,
     _get_torch_cuda_version,
+    blas_library_context,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
     SM70OrLater,
     TEST_CUDNN,
@@ -672,9 +673,8 @@ print(t.is_pinned())
             self.assertEqual("_BlasBackend.Cublaslt", r)
 
     @unittest.skipIf(TEST_CUDAMALLOCASYNC, "temporarily disabled for async")
-    @setBlasBackendsToDefaultFinally
+    @blas_library_context("cublas")
     def test_cublas_workspace_explicit_allocation(self):
-        torch.backends.cuda.preferred_blas_library("cublas")
         a = torch.randn(7, 7, device="cuda", requires_grad=False)
         if torch.version.hip:
             default_workspace_size = 1024 * 32 * 1024  # :1024:32  32MiB
@@ -2408,9 +2408,8 @@ exit(2)
         not TEST_CUDA_GRAPH, "CUDA >= 11.0 or ROCM >= 5.3 required for graphs"
     )
     @serialTest()
-    @setBlasBackendsToDefaultFinally
+    @blas_library_context("cublas")
     def test_repeat_graph_capture_cublas_workspace_memory(self):
-        torch.backends.cuda.preferred_blas_library("cublas")
         (x, y, z) = 1024, 512, 64
         a = torch.rand((x, y), device="cuda")
         b = torch.rand((y, z), device="cuda")
