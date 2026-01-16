@@ -437,7 +437,7 @@ class TritonTemplateKernel(TritonKernel):
             reduction_idx = None
             for i, prefix in enumerate(tiling):
                 rt = prefix_to_range_tree[prefix]
-                # pyrefly: ignore  # missing-argument
+
                 if rt.is_reduction:
                     reduction_idx = i
                     break
@@ -631,6 +631,8 @@ class TritonTemplateKernel(TritonKernel):
             for fx_node in node._current_origins:
                 f = count_flops_fx(fx_node)
                 if f is not None:
+                    if isinstance(f, torch.SymInt):
+                        f = f.node.expr
                     return V.graph.sizevars.size_hint(f, fallback=0)
         return 0
 
@@ -1233,7 +1235,6 @@ class TritonTemplateKernel(TritonKernel):
                                 val_shape[i],
                                 i,
                                 len(val_shape),
-                                # pyrefly: ignore [missing-argument]
                                 block_name=range_tree.symt.name,
                             )
                         )
@@ -1247,7 +1248,7 @@ class TritonTemplateKernel(TritonKernel):
                         )
                         # Update the val_shape information to use consistent naming
                         # after the remapping.
-                        # pyrefly: ignore [missing-argument]
+
                         val_shape_copy[i] = range_tree.symt.name
                     # pyrefly: ignore [bad-assignment]
                     val_shape = tuple(val_shape_copy)
@@ -1322,7 +1323,6 @@ class TritonTemplateKernel(TritonKernel):
                 if output_index == contiguous_index:
                     output_index = sympy.Symbol("xindex", integer=True)
 
-            # pyrefly: ignore [bad-assignment]
             self.template_out_shape = val_shape if val_shape else val
             acc_dtype = (
                 triton_type_to_torch(self.meta["ACC_TYPE"])
@@ -2048,10 +2048,13 @@ class TritonTemplate(KernelTemplate):
         codegen_input_nodes = (
             tuple(input_nodes) + kernel_input_nodes[len(expected_input_args) :]
         )
-        extra_args = V.graph.sizevars.size_hints(
-            map(sympy.expand, result.kernel_args_sizevars_keys),
-            fallback=config.unbacked_symint_fallback,
-            hint_override=hint_override,
+
+        extra_args = tuple(
+            V.graph.sizevars.optimization_hint_with_override(
+                sympy.expand(e),
+                hint_override=hint_override,
+            )
+            for e in result.kernel_args_sizevars_keys
         )
 
         kernel_hash_name = f"triton_{self.name}_{next(self.index_counter)}"
@@ -2096,10 +2099,10 @@ class TritonTemplate(KernelTemplate):
 
         # create the BenchmarkRequest
         assert result.mod.__file__ is not None
+
         grid = self.grid(
-            *V.graph.sizevars.size_hints(
+            *V.graph.sizevars.optimization_hints_with_override(
                 call_sizes,
-                fallback=config.unbacked_symint_fallback,
                 hint_override=hint_override,
             ),
             kwargs,
@@ -2589,7 +2592,7 @@ class DataProcessorTemplateWrapper:
             self._postprocessor = lambda x: x
         assert "input_nodes" in kwargs
         assert "layout" in kwargs
-        # pyrefly: ignore [not-callable]
+
         kwargs["input_nodes"], kwargs["layout"] = preprocessor(
             kwargs["input_nodes"], kwargs["layout"]
         )
@@ -2780,7 +2783,6 @@ class AlgorithmSelectorCache(PersistentCache):
             choice for choice in choices if isinstance(choice, ExternKernelChoice)
         ]
         if len(externs) > 0:
-            # pyrefly: ignore [bad-return]
             return externs[0]
         else:
             return choices[0]
@@ -3102,13 +3104,13 @@ class AlgorithmSelectorCache(PersistentCache):
         if log.isEnabledFor(logging.DEBUG):
             # Log shape information for debugging timeout issues
             sizevars = V.graph.sizevars
+
             shapes = [
                 "x".join(
                     map(
                         str,
-                        sizevars.size_hints(
+                        sizevars.optimization_hints_with_override(
                             node.get_size(),
-                            fallback=config.unbacked_symint_fallback,
                             hint_override=hint_override,
                         ),
                     )
@@ -3530,25 +3532,16 @@ class AlgorithmSelectorCache(PersistentCache):
                     storage_offset = generated_tensor.storage_offset()
                 else:
                     # Use IR node's shape resolved via size hints
-                    sizes = tuple(
-                        V.graph.sizevars.atomically_apply_size_hint(
-                            size,
-                            fallback=config.unbacked_symint_fallback,
-                            hint_override=hint_override,
-                        )
-                        for size in input_node.get_size()
+                    sizes = V.graph.sizevars.optimization_hints_with_override(
+                        input_node.get_size(),
+                        hint_override=hint_override,
                     )
-                    strides = tuple(
-                        V.graph.sizevars.atomically_apply_size_hint(
-                            stride,
-                            fallback=config.unbacked_symint_fallback,
-                            hint_override=hint_override,
-                        )
-                        for stride in input_node.get_stride()
+                    strides = V.graph.sizevars.optimization_hints_with_override(
+                        input_node.get_stride(),
+                        hint_override=hint_override,
                     )
-                    storage_offset = V.graph.sizevars.atomically_apply_size_hint(
+                    storage_offset = V.graph.sizevars.optimization_hint_with_override(
                         input_node.get_layout().offset,
-                        fallback=config.unbacked_symint_fallback,
                         hint_override=hint_override,
                     )
 
@@ -4182,14 +4175,14 @@ class AlgorithmSelectorCache(PersistentCache):
         )
         if not (config.max_autotune or config.max_autotune_gemm) or not PRINT_AUTOTUNE:
             return
+
         sizes = ", ".join(
             [
                 "x".join(
                     map(
                         str,
-                        V.graph.sizevars.size_hints(
+                        V.graph.sizevars.optimization_hints_with_override(
                             n.get_size(),
-                            fallback=config.unbacked_symint_fallback,  # type: ignore[arg-type]
                             hint_override=hint_override,
                         ),
                     )
@@ -4297,38 +4290,23 @@ class AlgorithmSelectorCache(PersistentCache):
         # So we need call as_strided in the end to 'view' the tensor with the correct
         # sizes/strides
         return AlgorithmSelectorCache.generate_example_value(
-            tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    size,
-                    fallback=config.unbacked_symint_fallback,
-                    hint_override=hint_override,
-                )
-                for size in node.get_size()
+            V.graph.sizevars.optimization_hints_with_override(
+                node.get_size(),
+                hint_override=hint_override,
             ),
-            tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    stride,
-                    fallback=config.unbacked_symint_fallback,
-                    hint_override=hint_override,
-                )
-                for stride in node.get_stride()
+            V.graph.sizevars.optimization_hints_with_override(
+                node.get_stride(),
+                hint_override=hint_override,
             ),
             node.get_device(),
             node.get_dtype(),
-            V.graph.sizevars.atomically_apply_size_hint(
-                # pyrefly: ignore [missing-attribute]
+            V.graph.sizevars.optimization_hint_with_override(
                 node.layout.offset,
-                fallback=config.unbacked_symint_fallback,
                 hint_override=hint_override,
             ),
-            tuple(
-                V.graph.sizevars.atomically_apply_size_hint(
-                    size,
-                    fallback=config.unbacked_symint_fallback,
-                    hint_override=hint_override,
-                )
-                # pyrefly: ignore [bad-argument-type]
-                for size in V.graph.get_allocation_size(node)
+            V.graph.sizevars.optimization_hints_with_override(
+                V.graph.get_allocation_size(node),
+                hint_override=hint_override,
             ),
         )
 

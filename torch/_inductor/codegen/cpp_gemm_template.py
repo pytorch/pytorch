@@ -1541,7 +1541,6 @@ class CppGemmTemplate(CppTemplate):
             self.n,
             self.k,
             input_dtype=X.get_dtype(),
-            # pyrefly: ignore [missing-attribute]
             input2_dtype=W.get_dtype(),
             output_dtype=output_dtype,
             compute_dtype=compute_dtype,
