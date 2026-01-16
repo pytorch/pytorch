@@ -320,6 +320,75 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
         self.assertEqual(cnts.frame_count, 3)
         self.assertEqual(cnts.op_count, 7)
 
+    def test_ctx_manager_nested_step_graph_break(self):
+        global f1, f2
+
+        def f1(x):
+            x = x + 1
+            torch._dynamo.step_unsupported()
+            return x + 2
+
+        def f2(x):
+            x = x + 4
+            with torch.no_grad():
+                x = f1(x)
+            return x + 8
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(f2)
+        x = torch.zeros(3)
+        res = f2(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 5)
+
+    def test_ctx_manager_active_in_nested_call(self):
+        @torch._dynamo.disable()
+        def f1(x):
+            assert not torch.is_grad_enabled()
+            return x + 1
+
+        def f2(x):
+            # order matters! should cancel out the enable_grad
+            with torch.no_grad():
+                return f1(x + 2) + 4
+
+        def f3(x):
+            with torch.enable_grad():
+                return f2(x + 8) + 16
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(f3)
+        x = torch.zeros(3)
+        res = f3(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 8)
+
+    def test_ctx_manager_active_in_nested_step_graph_break(self):
+        def f1(x):
+            torch._dynamo.step_unsupported()
+            assert not torch.is_grad_enabled()
+            return x + 1
+
+        def f2(x):
+            return f1(x + 2) + 4
+
+        def f3(x):
+            with torch.no_grad():
+                return f2(x + 8) + 16
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(f3)
+        x = torch.zeros(3)
+        res = f3(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 8)
+
     @torch._dynamo.config.patch(recompile_limit=1, fail_on_recompile_limit_hit=True)
     def test_no_recompiles(self):
         global f1, f2, f3
@@ -664,6 +733,32 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
         self.assertEqual(cnts.op_count, 4)
         self.assertEqual(torch._dynamo.utils.counters["frames"]["total"], 3)
 
+    def test_nested_step_graph_break_diff_args(self):
+        global inner, outer
+
+        def inner(x1, x2):
+            torch._dynamo.step_unsupported()
+            return x1 + x2
+
+        class Foo:
+            def __init__(self):
+                self.attr = 1
+
+        def outer(x):
+            z = Foo()
+            y = inner(x + 1, x + 2)
+            y = y + z.attr
+            return y
+
+        cnts = torch._dynamo.testing.CompileCounter()
+        opt_fn = torch._dynamo.optimize(backend=cnts)(outer)
+        x = torch.zeros(3)
+        res = outer(x)
+        ref = opt_fn(x)
+        self.assertEqual(ref, res)
+        self.assertEqual(cnts.frame_count, 2)
+        self.assertEqual(cnts.op_count, 3)
+
     def test_generator_nested_graph_break(self):
         def gen(x):
             yield x + 1
@@ -942,6 +1037,72 @@ class NestedGraphBreakTests(torch._dynamo.test_case.TestCaseWithNestedGraphBreak
         self.assertEqual(cnts.frame_count, 2)
         # multiplication by 32, 64, 128, 256
         self.assertEqual(cnts.op_count, 4)
+
+    def test_error_on_graph_break_nested(self):
+        # error_on_graph_break in a nested frame
+        cnts = torch._dynamo.testing.CompileCounter()
+
+        @torch._dynamo.error_on_graph_break(False)
+        def inner_f5(x):
+            x = x + 2
+            torch._dynamo.graph_break()
+            return x + 4
+
+        @torch._dynamo.error_on_graph_break(True)
+        @torch.compile(backend=cnts)
+        def f5(x):
+            x = x + 1
+            return inner_f5(x)
+
+        inp = torch.ones(3)
+        self.assertEqual(f5(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 2)
+
+        def inner_f6(x):
+            x = x + 2
+            with torch._dynamo.error_on_graph_break(False):
+                torch._dynamo.graph_break()
+            return x + 4
+
+        @torch._dynamo.error_on_graph_break(True)
+        @torch.compile(backend=cnts)
+        def f6(x):
+            x = x + 1
+            return inner_f6(x)
+
+        cnts.clear()
+        self.assertEqual(f6(inp), inp + 7)
+        self.assertEqual(cnts.frame_count, 2)
+
+        def inner_f7(x):
+            x = x + 2
+            with torch._dynamo.error_on_graph_break(True):
+                torch._dynamo.graph_break()
+            return x + 4
+
+        @torch._dynamo.error_on_graph_break(False)
+        @torch.compile(backend=cnts)
+        def f7(x):
+            x = x + 1
+            return inner_f7(x)
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            f7(inp)
+
+        def inner_f8(x):
+            x = x + 2
+            with torch._dynamo.error_on_graph_break(True):
+                torch._dynamo.graph_break()
+            return x + 4
+
+        @torch._dynamo.error_on_graph_break(True)
+        @torch.compile(backend=cnts)
+        def f8(x):
+            x = x + 1
+            return inner_f7(x)
+
+        with self.assertRaises(torch._dynamo.exc.Unsupported):
+            f8(inp)
 
 
 if __name__ == "__main__":
