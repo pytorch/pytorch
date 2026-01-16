@@ -65,26 +65,19 @@ if [[ ! -d "/usr/local/cuda" ]]; then
 
     echo "=== CUDA installation check ==="
     ls -la /usr/local/cuda/include/cuda_runtime.h || echo "WARNING: cuda_runtime.h not found"
-    ls -la /usr/local/cuda/include/cuda/std/utility || echo "WARNING: libcu++ headers not found"
 
-    if [[ ! -f "/usr/local/cuda/include/cuda/std/utility" ]]; then
-        echo "libcu++ headers missing, downloading CCCL 12.6 package"
+    CCCL_PATH_NEW="/usr/local/cuda/include/cccl/cuda/std/utility"
+    CCCL_PATH_OLD="/usr/local/cuda/include/cuda/std/utility"
 
-        CCCL_VERSION="12.6.77"
-        CCCL_PKG="cuda_cccl-linux-sbsa-${CCCL_VERSION}-archive"
-        CCCL_URL="https://developer.download.nvidia.com/compute/cuda/redist/cuda_cccl/linux-sbsa/${CCCL_PKG}.tar.xz"
-        echo "Downloading CCCL from: ${CCCL_URL}"
-
-        CCCL_TMP=$(mktemp -d)
-        pushd "${CCCL_TMP}"
-        wget -q "${CCCL_URL}" -O cccl.tar.xz
-        tar xf cccl.tar.xz
-        cp -a "${CCCL_PKG}"/include/* /usr/local/cuda/include/
-        popd
-        rm -rf "${CCCL_TMP}"
-
-        echo "CCCL installed, verifying..."
-        ls -la /usr/local/cuda/include/cuda/std/utility
+    if [[ -f "${CCCL_PATH_NEW}" ]]; then
+        echo "libcu++ headers found at new CUDA 13.0+ location: ${CCCL_PATH_NEW}"
+        ls -la "${CCCL_PATH_NEW}"
+    elif [[ -f "${CCCL_PATH_OLD}" ]]; then
+        echo "libcu++ headers found at standard location: ${CCCL_PATH_OLD}"
+        ls -la "${CCCL_PATH_OLD}"
+    else
+        echo "WARNING: libcu++ headers not found at either location"
+        echo "Checked: ${CCCL_PATH_NEW} and ${CCCL_PATH_OLD}"
     fi
 
     echo "Installed CUDA version:"
@@ -130,10 +123,19 @@ pushd "$FLASH_ATTENTION_HOPPER_DIR"
 git config --global --add safe.directory '*'
 git submodule update --init ../csrc/cutlass
 
-if [[ "$(uname -m)" != "aarch64" ]]; then
-    sed -i 's/bare_metal_version != Version("12.8")/bare_metal_version < Version("12.8")/' \
-        "$FLASH_ATTENTION_HOPPER_DIR/setup.py"
+if [[ "${CUDA_VERSION:-12.6}" == 13.* ]]; then
+    CCCL_INCLUDE="/usr/local/cuda/include/cccl"
+    if [[ -d "${CCCL_INCLUDE}" ]]; then
+        echo "Adding CCCL include path: ${CCCL_INCLUDE}"
+        export CPLUS_INCLUDE_PATH="${CCCL_INCLUDE}${CPLUS_INCLUDE_PATH:+:$CPLUS_INCLUDE_PATH}"
+        export C_INCLUDE_PATH="${CCCL_INCLUDE}${C_INCLUDE_PATH:+:$C_INCLUDE_PATH}"
+    else
+        echo "WARNING: CCCL include directory not found at ${CCCL_INCLUDE}"
+    fi
 fi
+
+sed -i 's/bare_metal_version != Version("12.8")/bare_metal_version >= Version("12.3") and bare_metal_version < Version("13.0") and bare_metal_version != Version("12.8")/' \
+    "$FLASH_ATTENTION_HOPPER_DIR/setup.py"
 
 "$PYTHON" setup.py bdist_wheel \
     -d "$FA_FINAL_PACKAGE_DIR" \
