@@ -689,7 +689,7 @@ inline void {{kernel_name}}_transpose_b_kernel(
     //   which introduces an additional transpose overhead of [K, N] compared to the non-transpose version.
     // Second implementation:
     //   Directly perform inner product calculation in sub-blocks,
-    //   which introduces an additional vector reduction of [M, N] compared to the non-tranpose version.
+    //   which introduces an additional vector reduction of [M, N] compared to the non-transpose version.
     // Therefore, when M * N / (K * N) is large, the first implementation has better performance.
     {%- if tail_n %}
     if (K % Vectorized::size() == 0 && N % Vectorized::size() == 0 && 24 * BLOCK_M > K) {

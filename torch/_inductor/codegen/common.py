@@ -917,6 +917,11 @@ class OpDecompositions:
         return ops.add(ops.mul(x, y), z)
 
     @staticmethod
+    def mul_rn(x: OpVarT, y: OpVarT) -> OpVarT:
+        # for backends that don't override this, just use regular mul
+        return ops.mul(x, y)
+
+    @staticmethod
     def floor_to_int(a: OpVarT, dtype: torch.dtype) -> OpVarT:
         return ops.to_dtype(ops.floor(a), dtype)
 
@@ -970,7 +975,7 @@ class OpOverrides(BasicMathOpsMixin, OpDecompositions, OpsHandler[Any]):
             or _all_in_parens(string)
         ):
             # don't put extra parens for strings that are already wrapped in parens
-            # pyrefly: ignore [bad-return]
+
             return string
         return f"({string})"
 
@@ -1236,8 +1241,26 @@ pointwise_overrides_data: dict[str, OverridesData] = dict(
         type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.INT_TO_FLOAT,
         cpp=lambda x, y, z: f"std::fma({x}, {y}, {z})",
         cppvec=lambda x, y, z: f"fmadd({x}, {y}, {z})",
-        triton=lambda x, y, z: f"libdevice.fma({x}, {y}, {z})",
+        # NOTE: We use tl.fma instead of libdevice.fma because libdevice.fma
+        # has Flush-To-Zero (FTZ) behavior for subnormal values, which causes
+        # numerical differences compared to eager CUDA execution. tl.fma
+        # preserves subnormals and matches eager's FMA precision.
+        triton=lambda x, y, z: f"tl.fma({x}, {y}, {z})",
         name="fma",
+    ),
+    # mul_rn: Multiplication with round-to-nearest. This prevents Triton's
+    # compiler from fusing the multiplication with subsequent operations,
+    # which is needed to match eager's rounding behavior in operations like
+    # addcmul where the product must be rounded before use.
+    # Note: libdevice.mul_rn is not supported on ROCm, so we fall back to
+    # regular multiplication there.
+    mul_rn=OverridesData(
+        type_promotion_kind=ELEMENTWISE_TYPE_PROMOTION_KIND.DEFAULT,
+        cpp=lambda x, y: f"({x}) * ({y})",  # C++ doesn't need special handling
+        triton=lambda x, y: f"({x}) * ({y})"
+        if torch.version.hip
+        else f"libdevice.mul_rn({x}, {y})",
+        name="mul_rn",
     ),
     # erfinv, exp2, expit, gammaln
     igamma=OverridesData(
@@ -2432,7 +2455,6 @@ class KernelTemplate:
             class DetailedTemplateSyntaxError(TemplateSyntaxError):
                 def __init__(self, original_error: TemplateSyntaxError) -> None:
                     super().__init__(
-                        # pyrefly: ignore [bad-argument-type]
                         original_error.message,
                         original_error.lineno,
                         original_error.name,
@@ -2444,7 +2466,6 @@ class KernelTemplate:
                     error_info = f"Error in template at line {self.lineno}\n"
                     error_info += f"Error message: {self.message}\n"
                     if hasattr(self.original_error, "source"):
-                        # pyrefly: ignore [missing-attribute]
                         lines = self.original_error.source.split("\n")
                         error_info += "Context:\n"
                         start = max(0, self.lineno - 2)

@@ -392,7 +392,6 @@ def create_flex_decoding_kernel(*args, **kwargs):
     ]
 
     inputs_for_flex_decoding = (
-        # pyrefly: ignore [unsupported-operation]
         [
             query,
             key,
