@@ -24,6 +24,48 @@ add:
   [FAIL] P(sum), R
   Summary: 8 passed, 10 failed
 
+atan2:
+  [FAIL] NP(-inf), NP(-inf)
+  [FAIL] NP(-inf), R
+  [FAIL] NP(1), NP(1)
+  [FAIL] NP(1), R
+  [FAIL] NP(2), NP(2)
+  [FAIL] NP(2), R
+  [FAIL] NP(inf), NP(inf)
+  [FAIL] NP(inf), R
+  [FAIL] P(avg), P(avg)
+  [FAIL] P(avg), R
+  [FAIL] P(max), P(max)
+  [FAIL] P(max), R
+  [FAIL] P(min), P(min)
+  [FAIL] P(min), R
+  [FAIL] P(product), P(product)
+  [FAIL] P(product), R
+  [FAIL] P(sum), P(sum)
+  [FAIL] P(sum), R
+  Summary: 0 passed, 18 failed
+
+copysign:
+  [PASS] NP(2), NP(2)
+  [PASS] P(product), P(product)
+  [FAIL] NP(-inf), NP(-inf)
+  [FAIL] NP(-inf), R
+  [FAIL] NP(1), NP(1)
+  [FAIL] NP(1), R
+  [FAIL] NP(2), R
+  [FAIL] NP(inf), NP(inf)
+  [FAIL] NP(inf), R
+  [FAIL] P(avg), P(avg)
+  [FAIL] P(avg), R
+  [FAIL] P(max), P(max)
+  [FAIL] P(max), R
+  [FAIL] P(min), P(min)
+  [FAIL] P(min), R
+  [FAIL] P(product), R
+  [FAIL] P(sum), P(sum)
+  [FAIL] P(sum), R
+  Summary: 2 passed, 16 failed
+
 div:
   [PASS] NP(1), R
   [PASS] P(avg), R
@@ -43,6 +85,216 @@ div:
   [FAIL] P(min), R
   [FAIL] P(product), R
   [FAIL] P(sum), P(sum)
+  Summary: 4 passed, 14 failed
+
+float_power:
+  [PASS] P(product), R
+  [FAIL] NP(-inf), NP(-inf)
+  [FAIL] NP(-inf), R
+  [FAIL] NP(1), NP(1)
+  [FAIL] NP(1), R
+  [FAIL] NP(2), NP(2)
+  [FAIL] NP(2), R
+  [FAIL] NP(inf), NP(inf)
+  [FAIL] NP(inf), R
+  [FAIL] P(avg), P(avg)
+  [FAIL] P(avg), R
+  [FAIL] P(max), P(max)
+  [FAIL] P(max), R
+  [FAIL] P(min), P(min)
+  [FAIL] P(min), R
+  [FAIL] P(product), P(product)
+  [FAIL] P(sum), P(sum)
+  [FAIL] P(sum), R
+  Summary: 1 passed, 17 failed
+
+fmax:
+  [PASS] NP(-inf), R
+  [PASS] NP(inf), NP(inf)
+  [PASS] NP(inf), R
+  [PASS] P(max), P(max)
+  [PASS] P(max), R
+  [PASS] P(min), R
+  [FAIL] NP(-inf), NP(-inf)
+  [FAIL] NP(1), NP(1)
+  [FAIL] NP(1), R
+  [FAIL] NP(2), NP(2)
+  [FAIL] NP(2), R
+  [FAIL] P(avg), P(avg)
+  [FAIL] P(avg), R
+  [FAIL] P(min), P(min)
+  [FAIL] P(product), P(product)
+  [FAIL] P(product), R
+  [FAIL] P(sum), P(sum)
+  [FAIL] P(sum), R
+  Summary: 6 passed, 12 failed
+
+fmin:
+  [PASS] NP(-inf), NP(-inf)
+  [PASS] NP(-inf), R
+  [PASS] NP(inf), R
+  [PASS] P(max), R
+  [PASS] P(min), P(min)
+  [PASS] P(min), R
+  [FAIL] NP(1), NP(1)
+  [FAIL] NP(1), R
+  [FAIL] NP(2), NP(2)
+  [FAIL] NP(2), R
+  [FAIL] NP(inf), NP(inf)
+  [FAIL] P(avg), P(avg)
+  [FAIL] P(avg), R
+  [FAIL] P(max), P(max)
+  [FAIL] P(product), P(product)
+  [FAIL] P(product), R
+  [FAIL] P(sum), P(sum)
+  [FAIL] P(sum), R
+  Summary: 6 passed, 12 failed
+
+fmod:
+  [FAIL] NP(-inf), NP(-inf)
+  [FAIL] NP(-inf), R
+  [FAIL] NP(1), NP(1)
+  [FAIL] NP(1), R
+  [FAIL] NP(2), NP(2)
+  [FAIL] NP(2), R
+  [FAIL] NP(inf), NP(inf)
+  [FAIL] NP(inf), R
+  [FAIL] P(avg), P(avg)
+  [FAIL] P(avg), R
+  [FAIL] P(max), P(max)
+  [FAIL] P(max), R
+  [FAIL] P(min), P(min)
+  [FAIL] P(min), R
+  [FAIL] P(product), P(product)
+  [FAIL] P(product), R
+  [FAIL] P(sum), P(sum)
+  [FAIL] P(sum), R
+  Summary: 0 passed, 18 failed
+
+heaviside:
+  [FAIL] NP(-inf), NP(-inf)
+  [FAIL] NP(-inf), R
+  [FAIL] NP(1), NP(1)
+  [FAIL] NP(1), R
+  [FAIL] NP(2), NP(2)
+  [FAIL] NP(2), R
+  [FAIL] NP(inf), NP(inf)
+  [FAIL] NP(inf), R
+  [FAIL] P(avg), P(avg)
+  [FAIL] P(avg), R
+  [FAIL] P(max), P(max)
+  [FAIL] P(max), R
+  [FAIL] P(min), P(min)
+  [FAIL] P(min), R
+  [FAIL] P(product), P(product)
+  [FAIL] P(product), R
+  [FAIL] P(sum), P(sum)
+  [FAIL] P(sum), R
+  Summary: 0 passed, 18 failed
+
+hypot:
+  [PASS] NP(2), NP(2)
+  [FAIL] NP(-inf), NP(-inf)
+  [FAIL] NP(-inf), R
+  [FAIL] NP(1), NP(1)
+  [FAIL] NP(1), R
+  [FAIL] NP(2), R
+  [FAIL] NP(inf), NP(inf)
+  [FAIL] NP(inf), R
+  [FAIL] P(avg), P(avg)
+  [FAIL] P(avg), R
+  [FAIL] P(max), P(max)
+  [FAIL] P(max), R
+  [FAIL] P(min), P(min)
+  [FAIL] P(min), R
+  [FAIL] P(product), P(product)
+  [FAIL] P(product), R
+  [FAIL] P(sum), P(sum)
+  [FAIL] P(sum), R
+  Summary: 1 passed, 17 failed
+
+igamma:
+  [FAIL] NP(-inf), NP(-inf)
+  [FAIL] NP(-inf), R
+  [FAIL] NP(1), NP(1)
+  [FAIL] NP(1), R
+  [FAIL] NP(2), NP(2)
+  [FAIL] NP(2), R
+  [FAIL] NP(inf), NP(inf)
+  [FAIL] NP(inf), R
+  [FAIL] P(avg), P(avg)
+  [FAIL] P(avg), R
+  [FAIL] P(max), P(max)
+  [FAIL] P(max), R
+  [FAIL] P(min), P(min)
+  [FAIL] P(min), R
+  [FAIL] P(product), P(product)
+  [FAIL] P(product), R
+  [FAIL] P(sum), P(sum)
+  [FAIL] P(sum), R
+  Summary: 0 passed, 18 failed
+
+igammac:
+  [FAIL] NP(-inf), NP(-inf)
+  [FAIL] NP(-inf), R
+  [FAIL] NP(1), NP(1)
+  [FAIL] NP(1), R
+  [FAIL] NP(2), NP(2)
+  [FAIL] NP(2), R
+  [FAIL] NP(inf), NP(inf)
+  [FAIL] NP(inf), R
+  [FAIL] P(avg), P(avg)
+  [FAIL] P(avg), R
+  [FAIL] P(max), P(max)
+  [FAIL] P(max), R
+  [FAIL] P(min), P(min)
+  [FAIL] P(min), R
+  [FAIL] P(product), P(product)
+  [FAIL] P(product), R
+  [FAIL] P(sum), P(sum)
+  [FAIL] P(sum), R
+  Summary: 0 passed, 18 failed
+
+logaddexp:
+  [PASS] NP(-inf), R
+  [PASS] NP(inf), R
+  [PASS] P(max), R
+  [PASS] P(min), R
+  [FAIL] NP(-inf), NP(-inf)
+  [FAIL] NP(1), NP(1)
+  [FAIL] NP(1), R
+  [FAIL] NP(2), NP(2)
+  [FAIL] NP(2), R
+  [FAIL] NP(inf), NP(inf)
+  [FAIL] P(avg), P(avg)
+  [FAIL] P(avg), R
+  [FAIL] P(max), P(max)
+  [FAIL] P(min), P(min)
+  [FAIL] P(product), P(product)
+  [FAIL] P(product), R
+  [FAIL] P(sum), P(sum)
+  [FAIL] P(sum), R
+  Summary: 4 passed, 14 failed
+
+logaddexp2:
+  [PASS] NP(-inf), R
+  [PASS] NP(inf), R
+  [PASS] P(max), R
+  [PASS] P(min), R
+  [FAIL] NP(-inf), NP(-inf)
+  [FAIL] NP(1), NP(1)
+  [FAIL] NP(1), R
+  [FAIL] NP(2), NP(2)
+  [FAIL] NP(2), R
+  [FAIL] NP(inf), NP(inf)
+  [FAIL] P(avg), P(avg)
+  [FAIL] P(avg), R
+  [FAIL] P(max), P(max)
+  [FAIL] P(min), P(min)
+  [FAIL] P(product), P(product)
+  [FAIL] P(product), R
+  [FAIL] P(sum), P(sum)
+  [FAIL] P(sum), R
   Summary: 4 passed, 14 failed
 
 maximum:
@@ -108,6 +360,69 @@ mul:
   [FAIL] P(sum), P(sum)
   Summary: 4 passed, 14 failed
 
+nextafter:
+  [PASS] NP(-inf), NP(-inf)
+  [PASS] NP(-inf), R
+  [PASS] NP(1), NP(1)
+  [PASS] NP(1), R
+  [PASS] NP(2), NP(2)
+  [PASS] NP(2), R
+  [PASS] NP(inf), NP(inf)
+  [PASS] NP(inf), R
+  [PASS] P(avg), P(avg)
+  [PASS] P(avg), R
+  [PASS] P(max), P(max)
+  [PASS] P(max), R
+  [PASS] P(min), P(min)
+  [PASS] P(min), R
+  [PASS] P(product), P(product)
+  [PASS] P(product), R
+  [PASS] P(sum), P(sum)
+  [PASS] P(sum), R
+  Summary: 18 passed, 0 failed
+
+pow:
+  [PASS] P(product), R
+  [FAIL] NP(-inf), NP(-inf)
+  [FAIL] NP(-inf), R
+  [FAIL] NP(1), NP(1)
+  [FAIL] NP(1), R
+  [FAIL] NP(2), NP(2)
+  [FAIL] NP(2), R
+  [FAIL] NP(inf), NP(inf)
+  [FAIL] NP(inf), R
+  [FAIL] P(avg), P(avg)
+  [FAIL] P(avg), R
+  [FAIL] P(max), P(max)
+  [FAIL] P(max), R
+  [FAIL] P(min), P(min)
+  [FAIL] P(min), R
+  [FAIL] P(product), P(product)
+  [FAIL] P(sum), P(sum)
+  [FAIL] P(sum), R
+  Summary: 1 passed, 17 failed
+
+remainder:
+  [FAIL] NP(-inf), NP(-inf)
+  [FAIL] NP(-inf), R
+  [FAIL] NP(1), NP(1)
+  [FAIL] NP(1), R
+  [FAIL] NP(2), NP(2)
+  [FAIL] NP(2), R
+  [FAIL] NP(inf), NP(inf)
+  [FAIL] NP(inf), R
+  [FAIL] P(avg), P(avg)
+  [FAIL] P(avg), R
+  [FAIL] P(max), P(max)
+  [FAIL] P(max), R
+  [FAIL] P(min), P(min)
+  [FAIL] P(min), R
+  [FAIL] P(product), P(product)
+  [FAIL] P(product), R
+  [FAIL] P(sum), P(sum)
+  [FAIL] P(sum), R
+  Summary: 0 passed, 18 failed
+
 sub:
   [PASS] NP(-inf), R
   [PASS] NP(1), NP(1)
@@ -129,6 +444,48 @@ sub:
   [FAIL] P(sum), R
   Summary: 8 passed, 10 failed
 
+true_divide:
+  [PASS] NP(1), R
+  [PASS] P(avg), R
+  [PASS] P(product), P(product)
+  [PASS] P(sum), R
+  [FAIL] NP(-inf), NP(-inf)
+  [FAIL] NP(-inf), R
+  [FAIL] NP(1), NP(1)
+  [FAIL] NP(2), NP(2)
+  [FAIL] NP(2), R
+  [FAIL] NP(inf), NP(inf)
+  [FAIL] NP(inf), R
+  [FAIL] P(avg), P(avg)
+  [FAIL] P(max), P(max)
+  [FAIL] P(max), R
+  [FAIL] P(min), P(min)
+  [FAIL] P(min), R
+  [FAIL] P(product), R
+  [FAIL] P(sum), P(sum)
+  Summary: 4 passed, 14 failed
+
+xlogy:
+  [FAIL] NP(-inf), NP(-inf)
+  [FAIL] NP(-inf), R
+  [FAIL] NP(1), NP(1)
+  [FAIL] NP(1), R
+  [FAIL] NP(2), NP(2)
+  [FAIL] NP(2), R
+  [FAIL] NP(inf), NP(inf)
+  [FAIL] NP(inf), R
+  [FAIL] P(avg), P(avg)
+  [FAIL] P(avg), R
+  [FAIL] P(max), P(max)
+  [FAIL] P(max), R
+  [FAIL] P(min), P(min)
+  [FAIL] P(min), R
+  [FAIL] P(product), P(product)
+  [FAIL] P(product), R
+  [FAIL] P(sum), P(sum)
+  [FAIL] P(sum), R
+  Summary: 0 passed, 18 failed
+
 
 ================================================================================
 UNARY OPS (SUMMARIZED)
@@ -146,6 +503,342 @@ abs:
   [FAIL] P(sum)
   Summary: 2 passed, 7 failed
 
+acos:
+  [FAIL] NP(-inf)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] NP(inf)
+  [FAIL] P(avg)
+  [FAIL] P(max)
+  [FAIL] P(min)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 0 passed, 9 failed
+
+acosh:
+  [FAIL] NP(-inf)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] NP(inf)
+  [FAIL] P(avg)
+  [FAIL] P(max)
+  [FAIL] P(min)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 0 passed, 9 failed
+
+asin:
+  [FAIL] NP(-inf)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] NP(inf)
+  [FAIL] P(avg)
+  [FAIL] P(max)
+  [FAIL] P(min)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 0 passed, 9 failed
+
+asinh:
+  [PASS] NP(-inf)
+  [PASS] NP(inf)
+  [PASS] P(max)
+  [PASS] P(min)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] P(avg)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 4 passed, 5 failed
+
+atan:
+  [PASS] NP(-inf)
+  [PASS] NP(inf)
+  [PASS] P(max)
+  [PASS] P(min)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] P(avg)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 4 passed, 5 failed
+
+atanh:
+  [FAIL] NP(-inf)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] NP(inf)
+  [FAIL] P(avg)
+  [FAIL] P(max)
+  [FAIL] P(min)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 0 passed, 9 failed
+
+ceil:
+  [PASS] NP(-inf)
+  [PASS] NP(1)
+  [PASS] NP(inf)
+  [PASS] P(max)
+  [PASS] P(min)
+  [PASS] P(product)
+  [PASS] P(sum)
+  [FAIL] NP(2)
+  [FAIL] P(avg)
+  Summary: 7 passed, 2 failed
+
+cos:
+  [FAIL] NP(-inf)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] NP(inf)
+  [FAIL] P(avg)
+  [FAIL] P(max)
+  [FAIL] P(min)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 0 passed, 9 failed
+
+cosh:
+  [FAIL] NP(-inf)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] NP(inf)
+  [FAIL] P(avg)
+  [FAIL] P(max)
+  [FAIL] P(min)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 0 passed, 9 failed
+
+deg2rad:
+  [PASS] NP(-inf)
+  [PASS] NP(1)
+  [PASS] NP(2)
+  [PASS] NP(inf)
+  [PASS] P(avg)
+  [PASS] P(max)
+  [PASS] P(min)
+  [PASS] P(sum)
+  [FAIL] P(product)
+  Summary: 8 passed, 1 failed
+
+digamma:
+  [FAIL] NP(-inf)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] NP(inf)
+  [FAIL] P(avg)
+  [FAIL] P(max)
+  [FAIL] P(min)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 0 passed, 9 failed
+
+erf:
+  [PASS] NP(-inf)
+  [PASS] NP(inf)
+  [PASS] P(max)
+  [PASS] P(min)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] P(avg)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 4 passed, 5 failed
+
+erfc:
+  [FAIL] NP(-inf)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] NP(inf)
+  [FAIL] P(avg)
+  [FAIL] P(max)
+  [FAIL] P(min)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 0 passed, 9 failed
+
+erfinv:
+  [FAIL] NP(-inf)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] NP(inf)
+  [FAIL] P(avg)
+  [FAIL] P(max)
+  [FAIL] P(min)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 0 passed, 9 failed
+
+exp:
+  [PASS] NP(-inf)
+  [PASS] NP(inf)
+  [PASS] P(max)
+  [PASS] P(min)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] P(avg)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 4 passed, 5 failed
+
+exp2:
+  [PASS] NP(-inf)
+  [PASS] NP(inf)
+  [PASS] P(max)
+  [PASS] P(min)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] P(avg)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 4 passed, 5 failed
+
+expm1:
+  [PASS] NP(-inf)
+  [PASS] NP(inf)
+  [PASS] P(max)
+  [PASS] P(min)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] P(avg)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 4 passed, 5 failed
+
+floor:
+  [PASS] NP(-inf)
+  [PASS] NP(1)
+  [PASS] NP(inf)
+  [PASS] P(max)
+  [PASS] P(min)
+  [PASS] P(product)
+  [PASS] P(sum)
+  [FAIL] NP(2)
+  [FAIL] P(avg)
+  Summary: 7 passed, 2 failed
+
+frac:
+  [PASS] NP(-inf)
+  [PASS] NP(1)
+  [PASS] NP(inf)
+  [PASS] P(max)
+  [PASS] P(min)
+  [PASS] P(product)
+  [PASS] P(sum)
+  [FAIL] NP(2)
+  [FAIL] P(avg)
+  Summary: 7 passed, 2 failed
+
+gelu:
+  [FAIL] NP(-inf)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] NP(inf)
+  [FAIL] P(avg)
+  [FAIL] P(max)
+  [FAIL] P(min)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 0 passed, 9 failed
+
+i0:
+  [FAIL] NP(-inf)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] NP(inf)
+  [FAIL] P(avg)
+  [FAIL] P(max)
+  [FAIL] P(min)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 0 passed, 9 failed
+
+lgamma:
+  [FAIL] NP(-inf)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] NP(inf)
+  [FAIL] P(avg)
+  [FAIL] P(max)
+  [FAIL] P(min)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 0 passed, 9 failed
+
+log:
+  [FAIL] NP(-inf)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] NP(inf)
+  [FAIL] P(avg)
+  [FAIL] P(max)
+  [FAIL] P(min)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 0 passed, 9 failed
+
+log10:
+  [FAIL] NP(-inf)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] NP(inf)
+  [FAIL] P(avg)
+  [FAIL] P(max)
+  [FAIL] P(min)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 0 passed, 9 failed
+
+log1p:
+  [FAIL] NP(-inf)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] NP(inf)
+  [FAIL] P(avg)
+  [FAIL] P(max)
+  [FAIL] P(min)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 0 passed, 9 failed
+
+log2:
+  [FAIL] NP(-inf)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] NP(inf)
+  [FAIL] P(avg)
+  [FAIL] P(max)
+  [FAIL] P(min)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 0 passed, 9 failed
+
+logit:
+  [FAIL] NP(-inf)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] NP(inf)
+  [FAIL] P(avg)
+  [FAIL] P(max)
+  [FAIL] P(min)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 0 passed, 9 failed
+
+nan_to_num:
+  [PASS] NP(-inf)
+  [PASS] NP(1)
+  [PASS] NP(2)
+  [PASS] NP(inf)
+  [PASS] P(avg)
+  [PASS] P(max)
+  [PASS] P(min)
+  [PASS] P(product)
+  [PASS] P(sum)
+  Summary: 9 passed, 0 failed
+
 neg:
   [PASS] NP(1)
   [PASS] P(avg)
@@ -157,6 +850,42 @@ neg:
   [FAIL] P(min)
   [FAIL] P(product)
   Summary: 3 passed, 6 failed
+
+positive:
+  [PASS] NP(-inf)
+  [PASS] NP(1)
+  [PASS] NP(2)
+  [PASS] NP(inf)
+  [PASS] P(avg)
+  [PASS] P(max)
+  [PASS] P(min)
+  [PASS] P(product)
+  [PASS] P(sum)
+  Summary: 9 passed, 0 failed
+
+rad2deg:
+  [PASS] NP(-inf)
+  [PASS] NP(1)
+  [PASS] NP(2)
+  [PASS] NP(inf)
+  [PASS] P(avg)
+  [PASS] P(max)
+  [PASS] P(min)
+  [PASS] P(sum)
+  [FAIL] P(product)
+  Summary: 8 passed, 1 failed
+
+reciprocal:
+  [PASS] P(product)
+  [FAIL] NP(-inf)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] NP(inf)
+  [FAIL] P(avg)
+  [FAIL] P(max)
+  [FAIL] P(min)
+  [FAIL] P(sum)
+  Summary: 1 passed, 8 failed
 
 relu:
   [PASS] NP(-inf)
@@ -170,6 +899,42 @@ relu:
   [FAIL] P(sum)
   Summary: 4 passed, 5 failed
 
+round:
+  [PASS] NP(-inf)
+  [PASS] NP(1)
+  [PASS] NP(inf)
+  [PASS] P(max)
+  [PASS] P(min)
+  [PASS] P(product)
+  [PASS] P(sum)
+  [FAIL] NP(2)
+  [FAIL] P(avg)
+  Summary: 7 passed, 2 failed
+
+rsqrt:
+  [FAIL] NP(-inf)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] NP(inf)
+  [FAIL] P(avg)
+  [FAIL] P(max)
+  [FAIL] P(min)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 0 passed, 9 failed
+
+sgn:
+  [PASS] NP(-inf)
+  [PASS] NP(inf)
+  [PASS] P(max)
+  [PASS] P(min)
+  [PASS] P(product)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] P(avg)
+  [FAIL] P(sum)
+  Summary: 5 passed, 4 failed
+
 sigmoid:
   [PASS] NP(-inf)
   [PASS] NP(inf)
@@ -182,6 +947,102 @@ sigmoid:
   [FAIL] P(sum)
   Summary: 4 passed, 5 failed
 
+sign:
+  [PASS] NP(-inf)
+  [PASS] NP(inf)
+  [PASS] P(max)
+  [PASS] P(min)
+  [PASS] P(product)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] P(avg)
+  [FAIL] P(sum)
+  Summary: 5 passed, 4 failed
+
+silu:
+  [FAIL] NP(-inf)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] NP(inf)
+  [FAIL] P(avg)
+  [FAIL] P(max)
+  [FAIL] P(min)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 0 passed, 9 failed
+
+sin:
+  [FAIL] NP(-inf)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] NP(inf)
+  [FAIL] P(avg)
+  [FAIL] P(max)
+  [FAIL] P(min)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 0 passed, 9 failed
+
+sinc:
+  [PASS] NP(-inf)
+  [PASS] P(min)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] NP(inf)
+  [FAIL] P(avg)
+  [FAIL] P(max)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 2 passed, 7 failed
+
+sinh:
+  [PASS] NP(-inf)
+  [PASS] NP(inf)
+  [PASS] P(max)
+  [PASS] P(min)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] P(avg)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 4 passed, 5 failed
+
+sqrt:
+  [FAIL] NP(-inf)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] NP(inf)
+  [FAIL] P(avg)
+  [FAIL] P(max)
+  [FAIL] P(min)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 0 passed, 9 failed
+
+square:
+  [PASS] NP(-inf)
+  [PASS] NP(1)
+  [PASS] NP(2)
+  [PASS] NP(inf)
+  [PASS] P(avg)
+  [PASS] P(max)
+  [PASS] P(min)
+  [PASS] P(product)
+  [PASS] P(sum)
+  Summary: 9 passed, 0 failed
+
+tan:
+  [FAIL] NP(-inf)
+  [FAIL] NP(1)
+  [FAIL] NP(2)
+  [FAIL] NP(inf)
+  [FAIL] P(avg)
+  [FAIL] P(max)
+  [FAIL] P(min)
+  [FAIL] P(product)
+  [FAIL] P(sum)
+  Summary: 0 passed, 9 failed
+
 tanh:
   [PASS] NP(-inf)
   [PASS] NP(inf)
@@ -193,4 +1054,16 @@ tanh:
   [FAIL] P(product)
   [FAIL] P(sum)
   Summary: 4 passed, 5 failed
+
+trunc:
+  [PASS] NP(-inf)
+  [PASS] NP(1)
+  [PASS] NP(inf)
+  [PASS] P(max)
+  [PASS] P(min)
+  [PASS] P(product)
+  [PASS] P(sum)
+  [FAIL] NP(2)
+  [FAIL] P(avg)
+  Summary: 7 passed, 2 failed
 
