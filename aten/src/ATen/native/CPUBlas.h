@@ -6,6 +6,10 @@
 #include <c10/util/complex.h>
 #include <c10/core/ScalarType.h>
 #include <c10/core/Scalar.h>
+#include <ATen/Config.h>
+#if AT_MKLDNN_ENABLED()
+#include <ideep.hpp>
+#endif
 
 
 namespace at::native::cpublas {
@@ -215,7 +219,11 @@ void copy(int64_t n, const c10::complex<float> *x, int64_t incx, c10::complex<fl
 #define CPUBLAS_BRGEMM_U8U8I32 // unsigned char * unsigned char -> int32
 #define CPUBLAS_BRGEMM_U8I8I32 // unsigned char * signed char -> int32
 #define CPUBLAS_BRGEMM_I8I8I32 // signed char * signed char -> int32
+#if defined(IDEEP_PREREQ)
+#if IDEEP_PREREQ(3, 9, 0, 0)
 #define CPUBLAS_BRGEMM_F8F8F32 // float8_e4m3 * float8_e4m3 -> float
+#endif
+#endif
 
 TORCH_API void brgemm(
     int64_t M,
@@ -295,6 +303,7 @@ TORCH_API void brgemm(
     int32_t* C,
     bool is_vnni = true);
 
+#ifdef CPUBLAS_BRGEMM_F8F8F32
 TORCH_API void brgemm(
     int64_t M,
     int64_t N,
@@ -307,6 +316,20 @@ TORCH_API void brgemm(
     const at::Float8_e4m3fn* B,
     float* C,
     bool is_vnni = true);
+
+TORCH_API void brgemm(
+    int64_t M,
+    int64_t N,
+    int64_t K,
+    int64_t ld_a,
+    int64_t ld_b,
+    int64_t ld_c,
+    const bool add_C,
+    const at::Float8_e5m2* A,
+    const at::Float8_e5m2* B,
+    float* C,
+    bool is_vnni = true);
+#endif
 
 // Release brgemm hardware context
 TORCH_API void brgemm_release(bool is_vnni = true);
