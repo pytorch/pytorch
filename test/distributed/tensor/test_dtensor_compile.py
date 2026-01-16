@@ -38,7 +38,12 @@ from torch.distributed.tensor.parallel import (
     PrepareModuleOutput,
     RowwiseParallel,
 )
-from torch.distributed.tensor.placement_types import _StridedShard
+from torch.distributed.tensor.placement_types import (
+    _MaskPartial,
+    _register_placements_as_opaque,
+    _StridedShard,
+    Placement,
+)
 from torch.testing._internal.common_device_type import skipXPUIf
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import get_devtype
@@ -60,55 +65,40 @@ from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import checkpoint
 
 
+def with_placements_as_opaque(fn):
+    """
+    Decorator that registers placements as opaque types before running the test
+    and cleans them up afterward.
+    TODO: can remove this once we turn on placements as opaque by default
+    """
+    from torch._library.opaque_object import _OPAQUE_TYPES, _OPAQUE_TYPES_BY_NAME
+
+    placement_types = [
+        Placement,
+        Shard,
+        Replicate,
+        Partial,
+        _StridedShard,
+        _MaskPartial,
+    ]
+
+    @functools.wraps(fn)
+    def wrapper(*args, **kwargs):
+        _register_placements_as_opaque()
+        try:
+            return fn(*args, **kwargs)
+        finally:
+            for cls in placement_types:
+                if cls in _OPAQUE_TYPES:
+                    name = _OPAQUE_TYPES[cls].class_name
+                    torch._C._unregister_opaque_type(name)
+                    del _OPAQUE_TYPES[cls]
+                    _OPAQUE_TYPES_BY_NAME.pop(name, None)
+
+    return wrapper
+
+
 dev_type = torch.device(get_devtype())
-
-
-class PytreeTuple:
-    """
-    Tuple-like values that are treated as leaves of a PyTree.
-    """
-
-    def __init__(self, *values):
-        self._values = tuple(values)
-
-    def __repr__(self):
-        pr = repr(self._values)[1:-1]
-        return f"{type(self).__name__}({pr})"
-
-    def __getitem__(self, i):
-        return self._values[i]
-
-    def __iter__(self):
-        return iter(self._values)
-
-    def __len__(self):
-        return len(self._values)
-
-    def __eq__(self, other: object) -> bool:
-        if isinstance(other, self.__class__):
-            return self._values == other._values
-        elif isinstance(other, tuple):
-            return self._values == other
-        return False
-
-    def __hash__(self) -> int:
-        return hash(self._values)
-
-    def __add__(self, other):
-        if isinstance(other, (self.__class__, tuple)):
-            return self.__class__(*self, *other)
-        raise NotImplementedError(type(other))
-
-    def __radd__(self, other):
-        if isinstance(other, (self.__class__, tuple)):
-            return self.__class__(*other, *self)
-        raise NotImplementedError(type(other))
-
-    def index(self, value):
-        return self._values.index(value)
-
-    def count(self, value):
-        return self._values.count(value)
 
 
 class SimpleModel(nn.Module):
@@ -902,8 +892,9 @@ def forward(self, b_parametrizations_buffer_original0, x):
         # this fails with an inductor stride assert
         out_dt.to_local().sum().backward()
 
+    @with_placements_as_opaque
     def test_dynamo_to_local_grad_placements_sequence(self):
-        placements = PytreeTuple([Shard(0)])
+        placements = [Shard(0)]
 
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -918,11 +909,12 @@ def forward(self, b_parametrizations_buffer_original0, x):
         out_test = fn_opt(dt)
         self.assertEqual(out_ref, out_test)
 
+    @with_placements_as_opaque
     def test_dynamo_to_local_grad_placements_sequence_intermediate(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
         def fn(x):
-            placements = PytreeTuple([Shard(0)])
+            placements = [Shard(0)]
             return dt.to_local(grad_placements=placements) + 2
 
         fn_opt = torch.compile(fn, backend="aot_eager", fullgraph=True)
@@ -933,10 +925,11 @@ def forward(self, b_parametrizations_buffer_original0, x):
         out_test = fn_opt(dt)
         self.assertEqual(out_ref, out_test)
 
+    @with_placements_as_opaque
     def test_dynamo_from_local_grad_placements_sequence_intermediate(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-        placements = PytreeTuple(Shard(0))
+        placements = [Shard(0)]
 
         def fn(x):
             dt = DTensor.from_local(
@@ -954,10 +947,11 @@ def forward(self, b_parametrizations_buffer_original0, x):
         out_test = fn_opt(x)
         self.assertEqual(out_ref, out_test)
 
+    @with_placements_as_opaque
     def test_dynamo_from_local_grad_placements_sequence_intermediate_as_args(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
-        placements = PytreeTuple(Shard(0))
+        placements = [Shard(0)]
 
         def fn(x):
             dt = DTensor.from_local(
