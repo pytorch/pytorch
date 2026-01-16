@@ -1,0 +1,82 @@
+# Copyright (c) Meta Platforms, Inc. and affiliates.
+# All rights reserved.
+#
+# This source code is licensed under the BSD-style license found in the
+# LICENSE file in the root directory of this source tree.
+
+name: Export Models
+
+on:
+  pull_request:
+    branches:
+      - main
+  schedule:
+    # Run nightly at midnight UTC
+    - cron: '0 0 * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  export:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+
+    name: Export DL3
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+
+      - name: Install dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install executorch torchvision
+
+      - name: Run export script
+        run: python export_dl3.py
+
+      - name: Upload exported model
+        uses: actions/upload-artifact@v4
+        with:
+          name: dl3-xnnpack-fp32
+          path: dl3_xnnpack_fp32.pte
+          if-no-files-found: error
+  
+  upload_s3:
+    needs: export
+    runs-on: ubuntu-22.04
+    timeout-minutes: 10
+    permissions:
+      id-token: write
+      contents: read
+    steps:
+      - name: configure aws credentials
+        uses: aws-actions/configure-aws-credentials@v1.7.0
+        with:
+          role-to-assume: arn:aws:iam::308535385114:role/gha_executorch_upload-frameworks-android
+          aws-region: us-east-1
+
+      - name: Download all artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: artifacts
+
+      - name: Install AWS CLI
+        run: |
+          pip install awscli==1.32.18
+      - name: Upload to S3
+        env:
+          AWS_CMD: "aws s3 cp"
+        run: |
+          DATE=$(date +%Y%m%d)
+          for file in $(find artifacts -name "*.pte"); do
+            echo "Uploading $file..."
+            ${AWS_CMD} "$file" "s3://ossci-android/executorch/models/${DATE}/$(basename $file)"
+          done
