@@ -315,6 +315,31 @@ def std_var_reduction_strategy(op_schema: OpSchema) -> OpStrategy:
     )
 
 
+def _get_norm_reduction_params(
+    norm_type: int | float | str, skip_root: bool
+) -> tuple[str, bool]:
+    """
+    Get reduction_op and reduction_linear for norm operations.
+
+    Returns:
+        (reduction_op, reduction_linear) tuple
+    """
+    if norm_type in (float("inf"), "inf"):
+        return "max", True
+    elif norm_type in (float("-inf"), "-inf"):
+        return "min", True
+    elif norm_type == 0 or norm_type == 1:
+        return "sum", True
+    elif skip_root:
+        # With skip_root, output is sum(|x|^p), directly reducible with sum
+        return "sum", True
+    else:
+        # For p-norms without skip_root, force redistribution before the norm
+        # Shard inputs are handled by the custom handler which decomposes
+        # Partial inputs need redistribution first
+        return "sum", False
+
+
 @register_op_strategy(
     [aten.linalg_vector_norm.default], schema_info=RuntimeSchemaInfo(1)
 )
@@ -333,26 +358,7 @@ def vector_norm_strategy(op_schema: OpSchema) -> OpStrategy:
     dims = _infer_reduction_dims(dim, input_strategy.ndim)
     reduce_dims = list(range(input_strategy.ndim)) if dims is None else dims
 
-    # Determine reduction_op and reduction_linear based on norm_type and skip_root
-    if norm_type in (float("inf"), "inf"):
-        reduction_op = "max"
-        reduction_linear = True
-    elif norm_type in (float("-inf"), "-inf"):
-        reduction_op = "min"
-        reduction_linear = True
-    elif norm_type == 0 or norm_type == 1:
-        reduction_op = "sum"
-        reduction_linear = True
-    elif skip_root:
-        # With skip_root, output is sum(|x|^p), directly reducible with sum
-        reduction_op = "sum"
-        reduction_linear = True
-    else:
-        # For p-norms without skip_root, force redistribution before the norm
-        # Shard inputs are handled by the custom handler which decomposes
-        # Partial inputs need redistribution first
-        reduction_op = "sum"
-        reduction_linear = False
+    reduction_op, reduction_linear = _get_norm_reduction_params(norm_type, skip_root)
 
     return common_reduction_strategy(
         input_strategy,
@@ -378,24 +384,7 @@ def foreach_norm_strategy(op_schema: OpSchema) -> TupleStrategy:
         raise AssertionError(f"Expected int, float, or str, got {type(norm_type)}")
     skip_root = args_schema[3] if len(args_schema) > 3 else False
 
-    # Determine reduction_op and reduction_linear based on norm_type and skip_root
-    if norm_type in (float("inf"), "inf"):
-        reduction_op = "max"
-        reduction_linear = True
-    elif norm_type in (float("-inf"), "-inf"):
-        reduction_op = "min"
-        reduction_linear = True
-    elif norm_type == 0 or norm_type == 1:
-        reduction_op = "sum"
-        reduction_linear = True
-    elif skip_root:
-        reduction_op = "sum"
-        reduction_linear = True
-    else:
-        # For p-norms without skip_root, foreach_norm doesn't have a custom handler
-        # so we use reduction_linear=False to force redistribution
-        reduction_op = "sum"
-        reduction_linear = False
+    reduction_op, reduction_linear = _get_norm_reduction_params(norm_type, skip_root)
 
     output_tuple_strategy_children: list[OpStrategy] = []
     for op_strategy in input_tuple_strategy.children:

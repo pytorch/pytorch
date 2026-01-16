@@ -792,6 +792,34 @@ class DistMathOpsTest(DTensorTestBase):
         self.assertEqual(out_0.placements[0].reduce_op, "sum")
 
     @with_comms
+    def test_vector_norm_decomposed_handler_comm(self):
+        # Test that the decomposed handler uses allreduce (not allgather) before root
+        device_mesh = self.build_device_mesh()
+        comm_mode = CommDebugMode()
+
+        torch.manual_seed(42)
+        grad = torch.randn(12, 8)
+        sharded_grad = distribute_tensor(grad, device_mesh, [Shard(0)])
+
+        # 2-norm on sharded input should trigger the decomposed handler:
+        # 1. vector_norm(skip_root=True) -> Partial("sum")
+        # 2. allreduce to get global sum
+        # 3. apply root locally
+        with comm_mode:
+            result = torch.linalg.vector_norm(sharded_grad, 2)
+
+        # Should use exactly one allreduce (for Partial -> Replicate)
+        comm_counts = comm_mode.get_comm_counts()
+        self.assertEqual(comm_counts.get(funcol.all_reduce, 0), 1)
+        # Should NOT use allgather
+        self.assertEqual(comm_counts.get(funcol.all_gather_into_tensor, 0), 0)
+
+        # Result should be Replicate and correct
+        self.assertTrue(result.placements[0].is_replicate())
+        expected = torch.linalg.vector_norm(grad, 2)
+        self.assertEqual(result.full_tensor(), expected)
+
+    @with_comms
     def test_foreach_norm_skip_root(self):
         # Test that skip_root=True produces correct values for foreach_norm
         device_mesh = self.build_device_mesh()

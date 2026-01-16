@@ -378,4 +378,3 @@ def vector_norm_handler(
     return dtensor.DTensor._op_dispatcher.wrap(
         local_results, output_sharding.output_spec
     )
-
