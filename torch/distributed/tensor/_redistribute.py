@@ -1126,6 +1126,16 @@ class Redistribute(torch.autograd.Function):
 
 
 class NestedRedistribute(torch.autograd.Function):
+    """
+    This class is used to make the redistribution of a DTensor twice-differentiable.
+    This is called during the `Redistribute.forward`.
+    Therefore, `NestedRedistribute.forward` is called during the first backward pass,
+    and `NestedRedistribute.backward` is called during the second backward pass.
+
+    Note: `NestedRedistribute.backward` is not differentiable, and therefore triple
+    backward is not yet supported.
+    """
+
     @staticmethod
     def forward(  # type: ignore[override]
         # pyre-fixme[2]: Parameter must be annotated.
