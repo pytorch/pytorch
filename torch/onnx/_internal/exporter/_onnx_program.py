@@ -470,8 +470,8 @@ ONNXProgram(
         Args:
             rename_mapping: A dictionary mapping old axes to new axis names.
                 Keys can be either:
-                - String axis names (e.g., "s1", "s2")
-                - SymbolicDim objects obtained from the model
+                * String axis names (e.g., "s1", "s2")
+                * SymbolicDim objects obtained from the model
                   (e.g., onnx_program.model.graph.inputs[0].shape[0])
                 Values must be strings representing the new axis names.
         """
