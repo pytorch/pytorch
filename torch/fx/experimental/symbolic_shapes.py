@@ -3548,11 +3548,17 @@ class DimConstraints:
             elif left.isdigit():
                 relation_with_digit(right, flip(op), int(left))
             else:
-                assert op == "==", t
-                try:
-                    results[left]["eq"] = sympy.sympify(right)
-                except TypeError:  # rhs source is not linked to Dim name
-                    pass
+                if op == "==":
+                    try:
+                        results[left]["eq"] = sympy.sympify(right)
+                    except (TypeError, ValueError):
+                        pass
+                elif op in ("<=", ">=", "<", ">"):
+                    try:
+                        rhs_value = sympy.sympify(right)
+                        results[left]["ineq"] = (op, rhs_value)
+                    except (TypeError, ValueError): # rhs source is not linked to Dim name
+                        pass
 
         # order forced specializations based on name
         forced_specializations = {
