@@ -7,10 +7,28 @@
 #include <torch/csrc/dynamo/utils.h>
 #include <torch/csrc/utils/pybind.h>
 #include <list>
+#include <optional>
+
+namespace py = pybind11;
 
 extern "C" {
 
+#else
+
+#include <stdbool.h>
+
 #endif
+
+enum FrameAction {
+  DEFAULT, // look through the cache, compile if not found
+  SKIP, // eager
+  RUN_ONLY, // look through the cache, run eager if not found
+};
+
+typedef struct FrameExecStrategy {
+  enum FrameAction cur_action; // action to take for current frame
+  enum FrameAction recursive_action; // action to take for recursive frames
+} FrameExecStrategy;
 
 /*
 Our cache resides on the extra scratch space of the code object. The structure
@@ -60,8 +78,14 @@ typedef struct VISIBILITY_HIDDEN CacheEntry {
   std::list<CacheEntry>::iterator _owner_loc;
   // Reference to string representation of the CompileContext
   std::string trace_annotation;
+  // Optional recursive action for this cache entry (used on cache hits).
+  // If not set, falls back to ExtraState's recursive_action.
+  std::optional<FrameAction> recursive_action;
 
-  CacheEntry(const py::handle& guarded_code, PyObject* backend);
+  CacheEntry(
+      const py::handle& guarded_code,
+      PyObject* backend,
+      std::optional<FrameAction> recursive_action);
   CacheEntry(const CacheEntry&) = default;
   CacheEntry(CacheEntry&&) = default;
   CacheEntry& operator=(const CacheEntry&) = default;

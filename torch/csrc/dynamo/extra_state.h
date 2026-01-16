@@ -2,6 +2,7 @@
 
 #include <Python.h>
 
+#include <torch/csrc/dynamo/cache_entry.h>
 #include <torch/csrc/dynamo/framelocals_mapping.h>
 
 #ifdef __cplusplus
@@ -9,6 +10,7 @@
 #include <torch/csrc/dynamo/utils.h>
 #include <torch/csrc/utils/pybind.h>
 #include <list>
+#include <optional>
 
 namespace py = pybind11;
 
@@ -20,17 +22,6 @@ extern "C" {
 
 #endif
 
-enum FrameAction {
-  DEFAULT, // look through the cache, compile if not found
-  SKIP, // eager
-  RUN_ONLY, // look through the cache, run eager if not found
-};
-
-typedef struct FrameExecStrategy {
-  enum FrameAction cur_action; // action to take for current frame
-  enum FrameAction recursive_action; // action to take for recursive frames
-} FrameExecStrategy;
-
 // Points to the extra scratch space on the code object
 extern Py_ssize_t extra_index;
 
@@ -38,7 +29,6 @@ extern Py_ssize_t extra_index;
 extern PyObject* guard_error_hook;
 
 typedef PyObject FrameState;
-typedef struct CacheEntry CacheEntry;
 
 // ExtraState encasulates CacheEntry and FrameState. ExtraState is the highest
 // level of abstraction of what is stored on the extra code object. Previously,
@@ -160,20 +150,12 @@ void set_extra_state(PyCodeObject* code, ExtraState* extra_state);
 // the final owner of these references.
 ExtraState* init_and_set_extra_state(PyCodeObject* code);
 
-// Lookup the cache held by extra_state.
-// Ownership contract
-// args
-//  - extra_state: Borrowed
-// return:
-//   - Py_None or PyCodeObject: Borrowed reference.
-//   - Py_None or PyObject: Trace id of the compiled code.
-void lookup(
-    ExtraState* extra_state,
-    FrameLocalsMapping* f_locals,
-    PyObject* backend,
-    PyObject** maybe_cached_code,
-    const char** trace_annotation,
-    bool is_skip_guard_eval_unsafe);
+// Extracts the backend fn from the callback.
+PyObject* get_backend(PyObject* callback);
+
+#ifdef __cplusplus
+
+} // extern "C"
 
 // Create a new cache entry at extra_state holding on to guarded_code.
 // Ownership contract
@@ -185,14 +167,25 @@ void lookup(
 CacheEntry* create_cache_entry(
     ExtraState* extra_state,
     PyObject* guraded_code,
-    PyObject* callback);
+    PyObject* callback,
+    std::optional<FrameAction> recursive_action);
 
-// Extracts the backend fn from the callback.
-PyObject* get_backend(PyObject* callback);
-
-#ifdef __cplusplus
-
-} // extern "C"
+// Lookup the cache held by extra_state.
+// Ownership contract
+// args
+//  - extra_state: Borrowed
+// return:
+//   - maybe_cached_code: Py_None or PyCodeObject: Borrowed reference.
+//   - trace_annotation: Py_None or PyObject: Trace id of the compiled code.
+//   - recursive_action: Optional recursive action from the matched cache entry.
+void lookup(
+    ExtraState* extra_state,
+    FrameLocalsMapping* f_locals,
+    PyObject* backend,
+    PyObject** maybe_cached_code,
+    const char** trace_annotation,
+    std::optional<FrameAction>* recursive_action,
+    bool is_skip_guard_eval_unsafe);
 
 // Returns the list of CacheEntry corresponding to code_obj.
 // Warning: returns references whose lifetimes are controlled by C++

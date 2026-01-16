@@ -152,6 +152,7 @@ PyObject* dynamo__custom_eval_frame(
   py::handle callback(callback_py);
 
   // callback to run on recursively invoked frames
+  // NOTE: must be properly set before calling any eval_* function!
   py::handle recursive_callback = callback; // borrowed
   PyCodeObject* cached_code = nullptr; // borrowed
   const char* trace_annotation = "";
@@ -212,11 +213,11 @@ PyObject* dynamo__custom_eval_frame(
 
   // Get recursive action
   FrameExecStrategy strategy = extra_state_get_exec_strategy(extra);
-  recursive_callback =
-      _callback_from_action(recursive_callback, strategy.recursive_action);
 
   // Skip this frame
   if (strategy.cur_action == SKIP) {
+    recursive_callback =
+        _callback_from_action(recursive_callback, strategy.recursive_action);
     DEBUG_TRACE("skip %s", get_frame_name(frame));
     eval_default();
     return eval_result;
@@ -238,14 +239,25 @@ PyObject* dynamo__custom_eval_frame(
   _PytorchRecordFunctionState* rf =
       _pytorch_record_function_enter(cache_lookup_profiler_str);
   PyObject* maybe_cached_code = nullptr;
+  std::optional<FrameAction> cache_entry_recursive_action;
   lookup(
       extra,
       locals.get(),
       backend,
       &maybe_cached_code,
       &trace_annotation,
+      &cache_entry_recursive_action,
       is_skip_guard_eval_unsafe);
   _pytorch_record_function_exit(rf);
+
+  // If the cache entry has a recursive action, apply that one instead of the
+  // one provided by ExtraState Use the cache entry's recursive_action if
+  // specified, otherwise fall back to ExtraState's recursive_action.
+  // See torch/_dynamo/types.py for rules on how the recursive_action is
+  // determined.
+  recursive_callback = _callback_from_action(
+      recursive_callback,
+      cache_entry_recursive_action.value_or(strategy.recursive_action));
 
   // A callback of Py_False indicates "run only" mode, the cache is checked,
   // but we never compile.
@@ -306,6 +318,7 @@ PyObject* dynamo__custom_eval_frame(
   py::object callback_result;
   FrameExecStrategy new_strategy;
   bool apply_to_code = false;
+  bool apply_to_cache_entry = false;
   PyObject* guarded_code = nullptr;
   try {
     CRecursionLimitRAII tmp(tstate); // increase C recursion limit to the given
@@ -320,6 +333,8 @@ PyObject* dynamo__custom_eval_frame(
     new_strategy =
         callback_result.attr("frame_exec_strategy").cast<FrameExecStrategy>();
     apply_to_code = callback_result.attr("apply_to_code").cast<bool>();
+    apply_to_cache_entry =
+        callback_result.attr("apply_to_cache_entry").cast<bool>();
     guarded_code = callback_result.attr("guarded_code").ptr();
   } catch (py::error_already_set& e) {
     // internal exception, returning here will leak the exception into user
@@ -356,12 +371,17 @@ PyObject* dynamo__custom_eval_frame(
   if (guarded_code != Py_None) {
     DEBUG_TRACE("create cache %s", get_frame_name(frame));
 
+    std::optional<FrameAction> new_cache_entry_recursive_action = std::nullopt;
+    if (apply_to_cache_entry) {
+      new_cache_entry_recursive_action = new_strategy.recursive_action;
+    }
+
     // NB: We could use extract_cache_entry to get the cache_entry, but
     // extract_cache_entry returns a borrowed reference. Modifying a borrowed
     // reference seems wrong. Therefore, we directly access the
     // extra->cache_entry. extra won't be NULL here.
-    CacheEntry* new_cache_entry =
-        create_cache_entry(extra, guarded_code, backend);
+    CacheEntry* new_cache_entry = create_cache_entry(
+        extra, guarded_code, backend, new_cache_entry_recursive_action);
 
     // Update the existing cache_entry on the extra object. This extra object
     // is sitting on the extra scratch space, we are just changing the

@@ -218,6 +218,7 @@ void initDynamoBindings(PyObject* torch) {
       .def_readonly("compile_id", &CacheEntry::compile_id)
       .def_readonly("trace_annotation", &CacheEntry::trace_annotation)
       .def_readonly("backend", &CacheEntry::backend)
+      .def_readonly("recursive_action", &CacheEntry::recursive_action)
       .def_property_readonly("next", &CacheEntry::next)
       .def(
           "update_diff_guard_root_manager",

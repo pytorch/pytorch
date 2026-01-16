@@ -80,12 +80,23 @@ class ConvertFrameReturn:
     frame_exec_strategy: FrameExecStrategy = dataclasses.field(
         default_factory=lambda: FrameExecStrategy(FrameAction.SKIP, FrameAction.DEFAULT)
     )
-    # also apply frame_exec strategy to future frames with same code
+    # also apply frame_exec strategy to future frames with same code (i.e. same ExtraState)
     apply_to_code: bool = True
+    # if True, apply recursive_action to the current frame (i.e. CacheEntry)
+    # This is useful for shared wrapper codes where we don't want to pollute
+    # the code-level state with frame-specific settings (i.e. recursive skips due to fullgraph=True)
+    # The order of priority for applying recursive action is:
+    #   1. If code level (ExtraState) action is SKIP, apply its recursive action (since we don't even look for a cache entry)
+    #   2. If frame level (CacheEntry) has a recursive action, apply that
+    #   3. Apply code level (ExtraState) recursive action
+    apply_to_cache_entry: bool = False
     guarded_code: Optional[GuardedCode] = None
 
 
-def wrap_guarded_code(guarded_code: GuardedCode, fullgraph: bool) -> ConvertFrameReturn:
+def wrap_guarded_code(
+    guarded_code: GuardedCode,
+    fullgraph: bool,
+) -> ConvertFrameReturn:
     """
     Wraps GuardedCode for output from convert_frame.py.
 
@@ -95,6 +106,8 @@ def wrap_guarded_code(guarded_code: GuardedCode, fullgraph: bool) -> ConvertFram
     recursive_action = FrameAction.SKIP if fullgraph else FrameAction.DEFAULT
     return ConvertFrameReturn(
         frame_exec_strategy=FrameExecStrategy(FrameAction.DEFAULT, recursive_action),
+        apply_to_code=False,
+        apply_to_cache_entry=True,
         guarded_code=guarded_code,
     )
 
