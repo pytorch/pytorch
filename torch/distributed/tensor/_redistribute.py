@@ -107,6 +107,233 @@ class _TransformInfo(NamedTuple):
     src_dst_placements: tuple[Placement, Placement]
     # logical_shape on this mesh dimension
     logical_shape: list[int]
+    # Optional mesh override (None means use the default device_mesh)
+    mesh: DeviceMesh | None = None
+
+    def _comm_type_key(self) -> str | None:
+        """
+        Return a key for grouping transforms by communication type.
+
+        Returns None for local ops (no communication needed), or a string
+        that identifies the collective type for potential grouping/merging.
+        """
+        src, dst = self.src_dst_placements
+        if src.is_partial() and dst.is_replicate():
+            # allreduce - include reduce_op so different reduce ops don't merge
+            return f"allreduce_{cast(Partial, src).reduce_op}"
+        elif src.is_partial() and dst.is_shard():
+            # reduce-scatter
+            return f"reduce_scatter_{cast(Partial, src).reduce_op}"
+        elif src.is_shard() and dst.is_replicate():
+            return "all_gather"
+        elif src.is_shard() and dst.is_shard():
+            # all_to_all (shard on different dims)
+            return "all_to_all"
+        else:
+            # Local ops (Replicate->Shard, Replicate->Partial, noop, etc.)
+            return None
+
+
+class _FlattenedTransformInfo(NamedTuple):
+    """
+    Represents a flattened transform that combines multiple mesh dimensions
+    into a single collective operation using a flattened DeviceMesh.
+
+    Duck-type compatible with _TransformInfo: has mesh_dim=0 and mesh=flattened_mesh
+    so the main redistribute loop can handle both uniformly.
+    """
+
+    # Always 0 for flattened 1D mesh
+    mesh_dim: int
+    # Source and target placements (should be same type across all dims)
+    src_dst_placements: tuple[Placement, Placement]
+    # logical_shape (combined from all dims)
+    logical_shape: list[int]
+    # The flattened DeviceMesh to use for the collective operation
+    mesh: DeviceMesh
+    # The mesh dimensions from the original mesh that are being flattened (for debugging)
+    original_mesh_dims: tuple[int, ...]
+
+
+def _get_flattened_mesh_by_layout(
+    mesh: DeviceMesh, mesh_dims: tuple[int, ...]
+) -> DeviceMesh | None:
+    """
+    Query for an explicitly created flattened mesh using layout comparison.
+
+    Args:
+        mesh: The DeviceMesh to query
+        mesh_dims: Tuple of mesh dimension indices to look for
+
+    Returns:
+        The flattened DeviceMesh if it was explicitly created, None otherwise.
+    """
+    root_mesh = mesh._get_root_mesh()
+    mesh_dim_names = root_mesh.mesh_dim_names
+
+    if mesh_dim_names is None:
+        return None
+
+    # Convert mesh dim indices to dim names
+    dim_names = tuple(mesh_dim_names[i] for i in mesh_dims)
+
+    # Get the submesh for these dimensions
+    submesh = mesh[dim_names]
+
+    # Compute expected flattened layout
+    expected_layout = submesh._layout.coalesce()
+    if len(expected_layout) > 1:
+        expected_layout = expected_layout.nest()
+
+    # Search existing flattened meshes by comparing layouts
+    for flattened_mesh in root_mesh._flatten_mapping.values():
+        if flattened_mesh._layout == expected_layout:
+            return flattened_mesh
+
+    return None
+
+
+# Track (mesh_hash, mesh_dims) we've already warned about to avoid repeated warnings
+_warned_missing_flattened_meshes: set[tuple[int, tuple[int, ...]]] = set()
+
+
+def _optimize_transform_infos(
+    transform_infos: list[_TransformInfo],
+    device_mesh: DeviceMesh,
+    src_placements: tuple[Placement, ...],
+    dst_placements: tuple[Placement, ...],
+) -> list[_TransformInfo | _FlattenedTransformInfo]:
+    """
+    Optimize transform infos by merging consecutive same-type collectives into
+    a single flattened operation when a matching flattened DeviceMesh exists.
+
+    Merging requirements:
+    - Operations must be consecutive in the transform list (no reordering)
+    - Operations must have the same comm type (e.g., all allgather or all reduce_scatter)
+    - Operations must have identical src_dst_placements (e.g., can't merge
+      Partial->Shard(0) with Partial->Shard(1))
+    - A flattened mesh covering the relevant dimensions must exist
+
+    For nested sharding, the merged operation uses the logical_shape from the
+    outermost mesh dimension (smallest mesh_dim index) which represents the
+    global tensor shape needed for correct padding/unpadding.
+
+    all_to_all operations are excluded from merging as they require more investigation.
+    """
+    if not transform_infos:
+        return []
+
+    # Comm types that are safe to merge (all_to_all excluded for now)
+    MERGEABLE_COMM_TYPES = frozenset({"all_gather", "allreduce", "reduce_scatter"})
+
+    def is_mergeable(key: str | None) -> bool:
+        """Check if a comm type key represents a mergeable operation."""
+        if key is None:
+            return False
+        # Check if key starts with any mergeable comm type
+        # (key format is like "allreduce_sum" or "reduce_scatter_sum")
+        for comm_type in MERGEABLE_COMM_TYPES:
+            if key.startswith(comm_type):
+                return True
+        return False
+
+    def try_create_flattened(
+        infos: list[_TransformInfo],
+    ) -> _FlattenedTransformInfo | None:
+        """
+        Try to create a flattened transform from 2+ same-type transforms.
+
+        Returns None if:
+        - Less than 2 transforms provided
+        - Transforms have different src_dst_placements
+        - No flattened mesh exists for the required dimensions
+        """
+        if len(infos) < 2:
+            return None
+
+        # All transforms must have the same src_dst_placements to be merged
+        # (e.g., can't merge Partial->Shard(0) with Partial->Shard(1))
+        first_placements = infos[0].src_dst_placements
+        if not all(info.src_dst_placements == first_placements for info in infos):
+            return None
+
+        mesh_dims = tuple(sorted(info.mesh_dim for info in infos))
+        flattened_mesh = _get_flattened_mesh_by_layout(device_mesh, mesh_dims)
+        if flattened_mesh is None:
+            return None
+
+        # For nested sharding, each transform has a different logical_shape.
+        # We need to use the logical_shape from the outermost mesh dimension
+        # (the one with the smallest mesh_dim), which represents the global shape.
+        outermost_info = min(infos, key=lambda x: x.mesh_dim)
+
+        return _FlattenedTransformInfo(
+            mesh_dim=0,
+            src_dst_placements=first_placements,
+            logical_shape=outermost_info.logical_shape,
+            mesh=flattened_mesh,
+            original_mesh_dims=mesh_dims,
+        )
+
+    # Merge consecutive same-type operations (without reordering)
+    result: list[_TransformInfo | _FlattenedTransformInfo] = []
+    i = 0
+
+    while i < len(transform_infos):
+        info = transform_infos[i]
+        current_key = info._comm_type_key()
+
+        # Only try to merge if this is a mergeable comm type
+        if not is_mergeable(current_key):
+            result.append(info)
+            i += 1
+            continue
+
+        # Collect consecutive same-type transforms
+        group: list[_TransformInfo] = [info]
+        j = i + 1
+        while (
+            j < len(transform_infos)
+            and transform_infos[j]._comm_type_key() == current_key
+        ):
+            group.append(transform_infos[j])
+            j += 1
+
+        # Try to flatten the group
+        if flattened := try_create_flattened(group):
+            result.append(flattened)
+        else:
+            # Can't flatten - add individually and warn once if applicable
+            result.extend(group)
+            if len(group) >= 2:
+                mesh_dims = tuple(sorted(g.mesh_dim for g in group))
+                cache_key = (hash(device_mesh), mesh_dims)
+                if cache_key not in _warned_missing_flattened_meshes:
+                    _warned_missing_flattened_meshes.add(cache_key)
+                    mesh_dim_names = device_mesh.mesh_dim_names
+                    if mesh_dim_names is not None:
+                        dim_names = [mesh_dim_names[d] for d in mesh_dims]
+                        dims_str = ", ".join(f'"{name}"' for name in dim_names)
+                    else:
+                        dims_str = f"dims {', '.join(str(d) for d in mesh_dims)} of {device_mesh}"
+                    logger.warning(
+                        "While redistributing from %s to %s, %d sequential %s "
+                        "operations will be performed. This is suboptimal: "
+                        "multiple collective operations have higher latency "
+                        "(separate kernel launches and synchronization points) "
+                        "and may give inconsistent results between ranks due to different reduction orders. "
+                        "To optimize, flatten mesh dimensions [%s] so DTensor "
+                        "can use a single operation instead.",
+                        src_placements,
+                        dst_placements,
+                        len(group),
+                        current_key,
+                        dims_str,
+                    )
+
+        i = j
+
+    return result
 
 
 # Global cache for DTensorRedistributePlanner instances
@@ -814,6 +1041,27 @@ def _gen_transform_infos_non_cached(
     return transform_infos
 
 
+def _assert_no_mixed_partial_types(placements: tuple[Placement, ...]) -> None:
+    """
+    Assert that a placement list doesn't contain mixed Partial reduce types.
+
+    Mixed Partial types (e.g., Partial("sum") and Partial("max") together) create
+    ordering constraints during redistribution that complicate optimization.
+    We ban them to enable simpler and more aggressive collective merging.
+    """
+    partial_reduce_ops: set[str] = set()
+    for p in placements:
+        if p.is_partial():
+            partial_reduce_ops.add(p.reduce_op)  # type: ignore[union-attr]
+
+    if len(partial_reduce_ops) > 1:
+        raise ValueError(
+            f"Mixed Partial reduce types are not supported in the same placement list. "
+            f"Found reduce ops: {partial_reduce_ops}. "
+            f"Please ensure all Partial placements use the same reduce operation."
+        )
+
+
 @cache
 def _gen_transform_infos(
     src_spec: DTensorSpec,
@@ -887,6 +1135,11 @@ def redistribute_local_tensor(
             current_spec, target_spec, use_graph_based_transform
         )
 
+    # Optimize by grouping same-type collectives into flattened operations
+    optimized_transform_infos = _optimize_transform_infos(
+        transform_infos, device_mesh, current_spec.placements, target_spec.placements
+    )
+
     debug_mode = get_active_debug_mode()
     redistribute_context = (
         debug_mode.record_redistribute_calls(  # type: ignore[union-attr]
@@ -905,10 +1158,12 @@ def redistribute_local_tensor(
     )
 
     with redistribute_context:
-        for transform_info in transform_infos:
+        for transform_info in optimized_transform_infos:
+            # Determine which mesh to use: flattened transforms have their own mesh
+            mesh_to_use = transform_info.mesh if transform_info.mesh else device_mesh
             i = transform_info.mesh_dim
             current, target = transform_info.src_dst_placements
-            num_chunks = device_mesh.size(mesh_dim=i)
+            num_chunks = mesh_to_use.size(mesh_dim=i)
 
             if current == target:
                 # short cut, just use the original local tensor
@@ -926,12 +1181,12 @@ def redistribute_local_tensor(
                 if current.is_partial():
                     partial_spec = cast(Partial, current)
                     new_local_tensor = partial_spec._reduce_value(
-                        local_tensor, device_mesh, i
+                        local_tensor, mesh_to_use, i
                     )
                 elif current.is_shard():
                     current_placement = cast(Shard, current)
                     new_local_tensor = current_placement._to_replicate_tensor(
-                        local_tensor, device_mesh, i, transform_info.logical_shape
+                        local_tensor, mesh_to_use, i, transform_info.logical_shape
                     )
                 else:
                     raise RuntimeError(
@@ -944,12 +1199,12 @@ def redistribute_local_tensor(
                 if current.is_partial():
                     partial_spec = cast(Partial, current)
                     new_local_tensor = partial_spec._reduce_shard_value(
-                        local_tensor, device_mesh, i, target_placement
+                        local_tensor, mesh_to_use, i, target_placement
                     )
                 elif current.is_replicate():
                     # split the tensor and return the corresponding cloned local shard
                     new_local_tensor = target_placement._replicate_to_shard(
-                        local_tensor, device_mesh, i, device_mesh._sym_get_coordinate(i)
+                        local_tensor, mesh_to_use, i, device_mesh._sym_get_coordinate(i)
                     )
                 else:
                     assert current.is_shard(), (
@@ -959,7 +1214,7 @@ def redistribute_local_tensor(
                     if shard_spec.dim != target_placement.dim:
                         new_local_tensor = shard_spec._to_new_shard_dim(
                             local_tensor,
-                            device_mesh,
+                            mesh_to_use,
                             i,
                             transform_info.logical_shape,
                             target_placement.dim,
@@ -968,7 +1223,7 @@ def redistribute_local_tensor(
                 if current.is_replicate():
                     partial_spec = cast(Partial, target)
                     new_local_tensor = partial_spec._partition_value(
-                        local_tensor, device_mesh, i
+                        local_tensor, mesh_to_use, i
                     )
                 elif current.is_shard():
                     raise RuntimeError(
