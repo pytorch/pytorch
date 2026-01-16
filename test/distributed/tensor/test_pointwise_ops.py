@@ -17,7 +17,6 @@ from torch.distributed.tensor import (
     Replicate,
     Shard,
 )
-from torch.distributed.tensor._ops._math_ops import _NormPartial
 from torch.distributed.tensor.debug import CommDebugMode
 from torch.testing._internal.common_utils import (
     instantiate_parametrized_tests,
@@ -533,31 +532,26 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(res, expected)
 
     @with_comms
-    def test_mul_div_scalar_norm_partial(self):
+    def test_mul_div_scalar_norm_replicate(self):
+        # With the removal of _NormPartial, norm on sharded tensor now produces
+        # Replicate output (via allreduce) for general p-norms with skip_root=False
         mesh = self.build_device_mesh()
         aten = torch.ops.aten
         local_tensor = torch.tensor([1.0, 1.0, 7.0, 7.0])
         dt = distribute_tensor(local_tensor, mesh, [Shard(0)])
 
         norm = dt.norm()
-        self.assertTrue(isinstance(norm._spec.placements[0], _NormPartial))
+        # After removal of _NormPartial, norm output is Replicate for p-norms
+        self.assertTrue(norm._spec.placements[0].is_replicate())
+        self.assertEqual(norm, 10.0)
 
         res = aten.mul.Scalar(norm, 2)
-        self.assertTrue(isinstance(res._spec.placements[0], _NormPartial))
-        res = res.redistribute(dt.device_mesh, placements=[Replicate()])
-        self.assertEqual(res, 20)
+        self.assertTrue(res._spec.placements[0].is_replicate())
+        self.assertEqual(res, 20.0)
 
         res = aten.div.Scalar(norm, 2)
-        self.assertTrue(isinstance(res._spec.placements[0], _NormPartial))
-        res = res.redistribute(dt.device_mesh, placements=[Replicate()])
-        self.assertEqual(res, 5)
-
-        res = aten.mul.Scalar(norm, -2)
         self.assertTrue(res._spec.placements[0].is_replicate())
-
-        res = aten.div.Scalar(norm, -2)
-        self.assertEqual(res, -5)
-        self.assertTrue(res._spec.placements[0].is_replicate())
+        self.assertEqual(res, 5.0)
 
     @with_comms
     def test_add_sub_scalar_partial(self):
@@ -610,28 +604,26 @@ class DistElementwiseOpsTest(DTensorOpTestBase):
         self.assertEqual(res, 0)
 
     @with_comms
-    def test_add_sub_scalar_norm_partial(self):
+    def test_add_sub_scalar_norm_replicate(self):
+        # With the removal of _NormPartial, norm on sharded tensor now produces
+        # Replicate output (via allreduce) for general p-norms with skip_root=False
         mesh = self.build_device_mesh()
 
-        # norm partial + scalar
         local_tensor = torch.tensor([1.0, 1.0, 7.0, 7.0])
         dt = distribute_tensor(local_tensor, mesh, [Shard(0)])
 
         norm = dt.norm()
-        self.assertTrue(isinstance(norm._spec.placements[0], _NormPartial))
-        norm = norm + 1
-
-        self.assertEqual(norm, 11)
+        # After removal of _NormPartial, norm output is Replicate
         self.assertTrue(norm._spec.placements[0].is_replicate())
+        self.assertEqual(norm, 10.0)
 
-        dt = distribute_tensor(local_tensor, mesh, [Shard(0)])
+        res = norm + 1
+        self.assertEqual(res, 11.0)
+        self.assertTrue(res._spec.placements[0].is_replicate())
 
-        norm = dt.norm()
-        self.assertTrue(isinstance(norm._spec.placements[0], _NormPartial))
-        norm = norm - 1
-
-        self.assertEqual(norm, 9)
-        self.assertTrue(norm._spec.placements[0].is_replicate())
+        res = norm - 1
+        self.assertEqual(res, 9.0)
+        self.assertTrue(res._spec.placements[0].is_replicate())
 
     @with_comms
     @parametrize("op,reduce_op", [(torch.maximum, "max"), (torch.minimum, "min")])
