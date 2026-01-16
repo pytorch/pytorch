@@ -2962,7 +2962,7 @@ class ExpandView(BaseView):
                     == 0
                 ), (
                     f"Broadcast failed in ExpandView({x.get_size()}, {new_size}) on dimension {i}"
-                )git
+                )
         return new_size
 
     @classmethod
