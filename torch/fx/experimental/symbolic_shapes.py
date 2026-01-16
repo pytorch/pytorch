@@ -3557,7 +3557,10 @@ class DimConstraints:
                     try:
                         rhs_value = sympy.sympify(right)
                         results[left]["ineq"] = (op, rhs_value)
-                    except (TypeError, ValueError): # rhs source is not linked to Dim name
+                    except (
+                        TypeError,
+                        ValueError,
+                    ):  # rhs source is not linked to Dim name
                         pass
 
         # order forced specializations based on name
