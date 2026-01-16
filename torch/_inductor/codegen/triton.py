@@ -5199,7 +5199,11 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
 
     @classmethod
     def triton_meta_common(cls):
-        return {"enable_fp_fusion": not config.emulate_precision_casts, "disable_ftz": config.eager_numerics.disable_ftz, "launch_pdl": cls._enable_pdl_codegen()}
+        return {
+            "enable_fp_fusion": not config.emulate_precision_casts,
+            "disable_ftz": config.eager_numerics.disable_ftz,
+            "launch_pdl": cls._enable_pdl_codegen(),
+        }
 
     @classmethod
     def inductor_meta_common(cls):
