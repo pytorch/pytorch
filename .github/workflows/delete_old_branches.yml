@@ -21,7 +21,7 @@ jobs:
   test-bedrock-oidc:
     if: github.repository_owner == 'pytorch'
     runs-on: linux.2xlarge
-    environment: bedrock
+#    environment: bedrock
     steps:
       - name: Configure AWS credentials via OIDC
         uses: aws-actions/configure-aws-credentials@v4
