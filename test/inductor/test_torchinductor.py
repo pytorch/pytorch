@@ -15270,6 +15270,38 @@ def forward(self, arg0_1: "Sym(s77)", arg1_1: "Sym(s27)", arg2_1: "Sym(s53)", ar
         expected = torch.tensor([[311.0], [1.0]])
         self.assertEqual(out, expected)
 
+    @requires_gpu()
+    def test_device_context_with_python_scalar(self):
+        from torch.utils._device import DeviceContext
+
+        class SimpleModel(torch.nn.Module):
+            def __init__(self, x, y):
+                super().__init__()
+                self.conv = torch.nn.Conv2d(3, 16, kernel_size=3, padding=1)
+                self.scale = (x // y) ** -0.5
+                self.relu = torch.nn.ReLU()
+                self.tao = torch.nn.Parameter(torch.tensor([1.0]))
+                self.forward = torch.compile(self.forward)
+
+            def forward(self, x):
+                x = self.relu(self.conv(x)) * self.scale
+                x = x / self.tao
+                return x * x
+
+        def run_session(x_param, y_param, size, device):
+            model = SimpleModel(x_param, y_param).to(device)
+            input_data = torch.randn(1, 3, size, size, device=device)
+            return model(input_data)
+
+        with DeviceContext(self.device):
+            # First call
+            out1 = run_session(100, 24, 32, self.device)
+            self.assertEqual(out1.device.type, self.device)
+
+            # Second call with different params triggers recompilation
+            out2 = run_session(100, 16, 64, self.device)
+            self.assertEqual(out2.device.type, self.device)
+
     # end of class CommonTemplate - add new tests here
 
 

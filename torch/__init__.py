@@ -2977,14 +2977,16 @@ def _as_tensor_fullprec(t):
     """
     Like torch.as_tensor, but when given Python data types it will keep
     them in full precision.  Used for calling convention for Dynamo.
+    Always creates CPU tensors to avoid being affected by DeviceContext,
+    so that Python scalar stays on CPU.
     """
     ty = type(t)
     if ty is builtins.float:
-        return torch.as_tensor(t, dtype=torch.float64)
+        return torch.as_tensor(t, dtype=torch.float64, device="cpu")
     elif ty is builtins.int:
-        return torch.as_tensor(t, dtype=torch.int64)
+        return torch.as_tensor(t, dtype=torch.int64, device="cpu")
     else:
-        return torch.as_tensor(t)
+        return torch.as_tensor(t, device="cpu")
 
 
 # `_import_device_backends` should be kept at the end to ensure
