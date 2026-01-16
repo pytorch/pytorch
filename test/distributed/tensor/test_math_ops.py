@@ -743,6 +743,7 @@ class DistMathOpsTest(DTensorTestBase):
         # Test that skip_root=True produces Partial(sum) placement and correct values
         device_mesh = self.build_device_mesh()
 
+        torch.manual_seed(42)
         grad = torch.randn(12, 8)
         sharded_grad = distribute_tensor(grad, device_mesh, [Shard(0)])
 
@@ -761,6 +762,7 @@ class DistMathOpsTest(DTensorTestBase):
         # Test that inf/-inf/0/1 norms produce correct Partial placements
         device_mesh = self.build_device_mesh()
 
+        torch.manual_seed(42)
         grad = torch.randn(12, 8).abs() + 0.1  # Ensure positive for proper test
         sharded_grad = distribute_tensor(grad, device_mesh, [Shard(0)])
 
@@ -789,6 +791,7 @@ class DistMathOpsTest(DTensorTestBase):
         # Test that skip_root=True produces correct values for foreach_norm
         device_mesh = self.build_device_mesh()
 
+        torch.manual_seed(42)
         grad0 = torch.randn(12, 8)
         grad1 = torch.randn(8, 8)
 
