@@ -16,7 +16,6 @@ Uses the experimental `propagate_all_partials_pointwise_strategy` which:
 import os
 import sys
 from collections import defaultdict
-from collections.abc import Callable
 from contextlib import contextmanager
 
 import torch
@@ -61,23 +60,23 @@ PARTIAL_TYPES = [
     (_NormPartial, float("-inf"), "NP(-inf)"),
 ]
 
-# Unary pointwise ops to test (torch function -> aten op)
+# Unary pointwise aten ops to test
 UNARY_OPS = [
-    (torch.abs, torch.ops.aten.abs.default),
-    (torch.neg, torch.ops.aten.neg.default),
-    (torch.relu, torch.ops.aten.relu.default),
-    (torch.sigmoid, torch.ops.aten.sigmoid.default),
-    (torch.tanh, torch.ops.aten.tanh.default),
+    torch.ops.aten.abs.default,
+    torch.ops.aten.neg.default,
+    torch.ops.aten.relu.default,
+    torch.ops.aten.sigmoid.default,
+    torch.ops.aten.tanh.default,
 ]
 
-# Binary pointwise ops to test (torch function -> aten op)
+# Binary pointwise aten ops to test
 BINARY_OPS = [
-    (torch.add, torch.ops.aten.add.Tensor),
-    (torch.sub, torch.ops.aten.sub.Tensor),
-    (torch.mul, torch.ops.aten.mul.Tensor),
-    (torch.div, torch.ops.aten.div.Tensor),
-    (torch.maximum, torch.ops.aten.maximum.default),
-    (torch.minimum, torch.ops.aten.minimum.default),
+    torch.ops.aten.add.Tensor,
+    torch.ops.aten.sub.Tensor,
+    torch.ops.aten.mul.Tensor,
+    torch.ops.aten.div.Tensor,
+    torch.ops.aten.maximum.default,
+    torch.ops.aten.minimum.default,
 ]
 
 OUTPUT_FILE = "partial_propagation_results.txt"
@@ -273,7 +272,6 @@ class TestPartialPropagation(DTensorOpTestBase):
 
     def _compare_propagate_vs_redistribute(
         self,
-        op: Callable,
         aten_op: OpOverload,
         inputs: list[DTensor],
         mesh: DeviceMesh,
@@ -288,12 +286,12 @@ class TestPartialPropagation(DTensorOpTestBase):
         """
         # Baseline: Redistribute first, then compute
         inputs_replicate = [inp.redistribute(mesh, [Replicate()]) for inp in inputs]
-        result2 = op(*inputs_replicate)
+        result2 = aten_op(*inputs_replicate)
         result2_full = result2.to_local()
 
         # Experimental: Override strategy, propagate partial, then redistribute
         with override_op_strategies([aten_op]):
-            result1 = op(*inputs)
+            result1 = aten_op(*inputs)
             result1_full = result1.redistribute(mesh, [Replicate()]).to_local()
 
         try:
@@ -302,9 +300,12 @@ class TestPartialPropagation(DTensorOpTestBase):
         except AssertionError as e:
             return False, f"Results differ: {str(e)}"
 
+    def _get_op_name(self, aten_op: OpOverload) -> str:
+        """Extract a clean op name from an aten op (e.g., 'abs' from 'aten.abs.default')."""
+        return aten_op._schema.name.split("::")[-1]
+
     def _run_unary_test(
         self,
-        torch_op: Callable,
         aten_op: OpOverload,
         partial_cls,
         partial_arg,
@@ -315,15 +316,12 @@ class TestPartialPropagation(DTensorOpTestBase):
     ) -> tuple[tuple, tuple[bool, str]]:
         """Run a single unary op test and return (key, result)."""
         dt = DTensor.from_local(data, mesh, [partial_cls(partial_arg)])
-        success, error = self._compare_propagate_vs_redistribute(
-            torch_op, aten_op, [dt], mesh
-        )
-        key = (torch_op.__name__, partial_name, pattern_name)
+        success, error = self._compare_propagate_vs_redistribute(aten_op, [dt], mesh)
+        key = (self._get_op_name(aten_op), partial_name, pattern_name)
         return key, (success, error)
 
     def _run_binary_test(
         self,
-        torch_op: Callable,
         aten_op: OpOverload,
         dt1: DTensor,
         dt2: DTensor,
@@ -334,9 +332,14 @@ class TestPartialPropagation(DTensorOpTestBase):
     ) -> tuple[tuple, tuple[bool, str]]:
         """Run a single binary op test and return (key, result)."""
         success, error = self._compare_propagate_vs_redistribute(
-            torch_op, aten_op, [dt1, dt2], mesh
+            aten_op, [dt1, dt2], mesh
         )
-        key = (torch_op.__name__, placement1_name, placement2_name, pattern_name)
+        key = (
+            self._get_op_name(aten_op),
+            placement1_name,
+            placement2_name,
+            pattern_name,
+        )
         return key, (success, error)
 
     @with_comms
@@ -353,10 +356,9 @@ class TestPartialPropagation(DTensorOpTestBase):
         ]
 
         for partial_cls, partial_arg, partial_name in PARTIAL_TYPES:
-            for torch_op, aten_op in UNARY_OPS:
+            for aten_op in UNARY_OPS:
                 for pattern_name, tensor in test_patterns:
                     key, result = self._run_unary_test(
-                        torch_op,
                         aten_op,
                         partial_cls,
                         partial_arg,
@@ -386,7 +388,7 @@ class TestPartialPropagation(DTensorOpTestBase):
         rep_data = generate_replicate_data(self.device_type)
 
         for partial_cls, partial_arg, partial_name in PARTIAL_TYPES:
-            for torch_op, aten_op in BINARY_OPS:
+            for aten_op in BINARY_OPS:
                 # Define all test cases: (pattern_name, data1, data2, is_p_plus_r)
                 test_cases = [
                     # P + P tests
@@ -414,7 +416,6 @@ class TestPartialPropagation(DTensorOpTestBase):
                         placement2_name = partial_name
 
                     key, result = self._run_binary_test(
-                        torch_op,
                         aten_op,
                         dt1,
                         dt2,
