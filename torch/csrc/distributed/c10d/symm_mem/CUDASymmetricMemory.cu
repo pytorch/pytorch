@@ -137,8 +137,12 @@ size_t CUDASymmetricMemory::get_buffer_size() {
   return pai_->buffer_size_;
 }
 
+bool CUDASymmetricMemory::has_multicast_support() {
+  return pai_->mc_addr_ != nullptr;
+}
+
 void* CUDASymmetricMemory::get_multicast_ptr() {
-  return static_cast<char*>(pai_->mc_addr_) + offset_;
+  return pai_->mc_addr_;
 }
 
 size_t CUDASymmetricMemory::get_offset() {
