@@ -278,12 +278,17 @@ jobs:
             source /etc/rocm_env.sh
             env | grep -iE 'rocm|hip|ld_library' | sort
             ls -la /dev/kfd /dev/dri/ 2>&1 || echo 'No devices'
-            rocminfo 2>&1 | head -40 || echo 'rocminfo failed'
-            python -c 'import torch; print(\"HIP:\", torch.version.hip); print(\"CUDA available:\", torch.cuda.is_available()); print(\"Device count:\", torch.cuda.device_count())'
+            rocminfo 2>&1 || echo 'rocminfo failed'
           " || true
 
           # jenkins user does not have write permission to mounted workspace; work-around by copying within container to jenkins home
           docker exec -t "${container_name}" sh -c "cd .. && cp -R workspace pytorch && cd pytorch && pip install dist/*.whl && ${TEST_COMMAND}"
+
+          # Debug torch GPU detection after wheel is installed
+          docker exec -t "${container_name}" bash -c "
+            source /etc/rocm_env.sh
+            python -c 'import torch; print(\"HIP:\", torch.version.hip); print(\"CUDA available:\", torch.cuda.is_available()); print(\"Device count:\", torch.cuda.device_count())'
+          " || true
 
       - name: Save test results
         if: always()
