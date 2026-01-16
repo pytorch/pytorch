@@ -449,6 +449,7 @@ def pointwise_strategy(
     op_schema: OpSchema,
     linearity: int = -1,
     preserve_partial: str | None = None,
+    propagate_all: bool = False,
 ) -> OpStrategy:
     followed_strategy_index = -1
     max_shards = -1
@@ -495,6 +496,7 @@ def pointwise_strategy(
         followed_strategy_index,
         linearity,
         preserve_partial=preserve_partial,
+        propagate_all=propagate_all,
     )
 
 
@@ -613,6 +615,22 @@ def copy_strategy(op_schema: OpSchema) -> StrategyType:
     return pointwise_strategy(op_schema, preserve_partial="all")
 
 
+def propagate_all_partials_pointwise_strategy(op_schema: OpSchema) -> StrategyType:
+    """
+    Experimental strategy that:
+    1. Propagates ALL partial types through pointwise ops (not just sum/avg)
+    2. Keeps Replicate inputs as Replicate (no redistribution to Partial)
+
+    This allows testing which partial combinations are mathematically valid
+    for each pointwise operation.
+
+    Usage:
+        Register this strategy for specific ops to test partial propagation:
+        register_op_strategy(aten.add.Tensor)(propagate_all_partials_pointwise_strategy)
+    """
+    return pointwise_strategy(op_schema, propagate_all=True)
+
+
 def common_pointwise_strategy(
     op,
     args_schema: Sequence[object],
@@ -621,6 +639,7 @@ def common_pointwise_strategy(
     linearity: int = -1,
     scalar_tensor_idx: int | None = None,
     preserve_partial: str | None = None,
+    propagate_all: bool = False,
 ) -> OpStrategy:
     """
     Common strategy for pointwise operations.
@@ -641,6 +660,8 @@ def common_pointwise_strategy(
             to be different from the mesh of followed_strategy
         preserve_partial: If set, Partial placements with this reduce_op will be preserved
             through the operation (e.g., "max" for torch.maximum, "min" for torch.minimum).
+        propagate_all: If True, propagate ALL partial types (not just sum/avg) and keep
+            Replicate inputs as Replicate (experimental, for testing partial propagation).
     """
     # handle broadcasting
     common_shape = torch.broadcast_shapes(
@@ -684,8 +705,11 @@ def common_pointwise_strategy(
                     )
 
                 # Check if this partial type should be preserved
+                # propagate_all: experimental mode to propagate ALL partial types
+                if propagate_all:
+                    out_placements.append(placement)
                 # preserve_partial="all" preserves any Partial type (used for copy_)
-                if preserve_partial == "all":
+                elif preserve_partial == "all":
                     out_placements.append(placement)
                 elif preserve_partial is not None and placement.is_partial(
                     preserve_partial
@@ -771,6 +795,20 @@ def common_pointwise_strategy(
                     input_arg_dims_map,
                     partial_to_replicate=should_convert_partial,
                 )
+
+                # When propagate_all is True, keep Replicate inputs as Replicate
+                # instead of converting them to match the output partial placement.
+                # This allows testing P+R combinations without redistribution.
+                if propagate_all:
+                    adjusted_placements = []
+                    for orig_p, target_p in zip(
+                        input_arg_spec.placements, input_target_placements
+                    ):
+                        if isinstance(orig_p, Replicate):
+                            adjusted_placements.append(Replicate())
+                        else:
+                            adjusted_placements.append(target_p)
+                    input_target_placements = tuple(adjusted_placements)
 
                 input_arg_target_spec = DTensorSpec(
                     mesh=followed_strategy.mesh,
