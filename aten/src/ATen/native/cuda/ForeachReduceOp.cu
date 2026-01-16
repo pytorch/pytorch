@@ -397,6 +397,105 @@ inline void check_foreach_norm_dtype(
 }
 } // anonymous namespace
 
+// template <
+//     typename T,
+//     NormType norm_type,
+//     typename out_t,
+//     int depth = 1,
+//     int r_args_depth = 1,
+//     int res_arg_index = 0>
+// struct LpNormDimFunctor {
+//   using out_opmath_t = typename at::opmath_type<out_t>;
+  
+//   __device__ __forceinline__ void operator()(
+//       int64_t /*unused_chunk_size*/,
+//       TensorListDimMetadata<depth>& tl,
+//       out_opmath_t* output_per_tensor_ptr,
+//       const int max_output_per_tensor) {
+    
+   
+//     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
+//     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
+//     const auto num_rows = tl.num_rows[tensor_loc];
+//     const auto num_cols = tl.num_cols[tensor_loc];
+//     const auto row_stride = tl.row_stride[tensor_loc]; 
+//     const auto reduce_dim = tl.reduce_dim;
+//     ///
+//     int n_norm_elements_per_chunk = 16;  // Each block handles 16 rows (row_norm) or cols (col_norm)
+//     const int row_start = chunk_idx * n_norm_elements_per_chunk;  // first row of this chunk
+//     // Each warp (32 threads) handles one row (or col)
+//     const int row = row_start + threadIdx.y;
+//     ///
+
+//     T* data = (T*)tl.addresses[0][tensor_loc];
+    
+//     __shared__ out_opmath_t s_vals[512];  // 512 = blockDim.x * blockDim.y
+//     out_opmath_t val = out_opmath_t(0);
+//     // out_opmath_t vals[kILP];
+//     // T r_x[kILP];
+//     // for (int64_t i = 0; i < kILP; i++) {
+//     //   vals[i] = out_opmath_t(0);
+//     //   r_x[i] = T(0);
+//     // }
+    
+//     if (reduce_dim == 1) {  // want to change this to a constexpr
+//       // Reduce across columns - row norm
+//       T* row_ptr = data + row * row_stride;
+      
+//       for (int64_t i = threadIdx.x; i < num_cols; i += blockDim.x) {
+//         const auto elem = static_cast<out_opmath_t>(row_ptr[i]);
+//         if constexpr (norm_type == NormType::LInf) {
+//           val = max_propagate_nan(val, ::abs(elem));
+//         } else {
+//           val += norm_type == NormType::L1 ? ::abs(elem) : elem * elem;
+//         }
+//       }
+//     } else {
+//       // Reduce across rows - column norm  
+//       // Each block handles one column, threads iterate over rows
+//       int64_t col_idx = row;
+      
+//       for (int64_t i = threadIdx.x; i < num_rows; i += blockDim.x) {
+//         const auto elem = static_cast<out_opmath_t>(data[i * row_stride + col_idx]);
+//         if constexpr (norm_type == NormType::LInf) {
+//           val = max_propagate_nan(val, ::abs(elem));
+//         } else {
+//           val += norm_type == NormType::L1 ? ::abs(elem) : elem * elem;
+//         }
+//       }
+//     }
+
+//     int64_t block_row = threadIdx.y * blockDim.x;
+//     int64_t block_elem = block_row + threadIdx.x;
+//     s_vals[block_elem] = val;
+    
+//     // Block reduction
+//     __syncthreads();
+//     for (int64_t s = blockDim.x / 2; s > 0; s >>= 1) {
+//       if (threadIdx.x < s)
+//       {
+//         if constexpr (norm_type == NormType::LInf) {
+//           s_vals[block_elem] = max_propagate_nan(s_vals[block_elem], s_vals[block_elem + s]);
+//         } else {
+//           s_vals[block_elem] += s_vals[block_elem + s];
+//         } 
+//       }
+//       __syncthreads();
+//     }
+    
+//     if (threadIdx.x == 0 && row < max_output_per_tensor) {
+//       auto final_val = s_vals[block_elem];
+//       // Apply sqrt for L2 norm
+//       if constexpr (norm_type == NormType::L2) {
+//         final_val = ::sqrt(final_val);
+//       }
+//       // Write directly to output (no cleanup needed for simple rows/cols)
+//       output_per_tensor_ptr[(tl.start_tensor_this_launch + tensor_loc) * max_output_per_tensor + row] = final_val;
+//     }
+//   }
+// };
+
+
 template <
     typename T,
     NormType norm_type,
@@ -407,90 +506,158 @@ template <
 struct LpNormDimFunctor {
   using out_opmath_t = typename at::opmath_type<out_t>;
   
-  __device__ __forceinline__ void operator()(
-      int64_t /*unused_chunk_size*/,
+  __device__ __forceinline__ out_opmath_t warpReduce(out_opmath_t val) {
+    for (int offset = 16; offset > 0; offset /= 2) {
+      if constexpr (norm_type == NormType::LInf) {
+        val = max_propagate_nan(val, __shfl_down_sync(0xffffffff, val, offset));
+      } else {
+        val += __shfl_down_sync(0xffffffff, val, offset);
+      }
+    }
+    return val;
+  }
+  
+  __device__ __forceinline__ out_opmath_t rowNorm(
       TensorListDimMetadata<depth>& tl,
       out_opmath_t* output_per_tensor_ptr,
       const int max_output_per_tensor) {
-    
-   
     const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
     const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
     const auto num_rows = tl.num_rows[tensor_loc];
     const auto num_cols = tl.num_cols[tensor_loc];
     const auto row_stride = tl.row_stride[tensor_loc]; 
     const auto reduce_dim = tl.reduce_dim;
-    ///
-    int n_norm_elements_per_chunk = 16;  // Each block handles 16 rows (row_norm) or cols (col_norm)
-    const int row_start = chunk_idx * n_norm_elements_per_chunk;  // first row of this chunk
-    // Each warp (32 threads) handles one row (or col)
-    const int row = row_start + threadIdx.y;
-    ///
-
+      
+    const int warp_id = threadIdx.y;
+    const int lane = threadIdx.x;
+      
+    const int64_t output_size = num_rows;
+      
     T* data = (T*)tl.addresses[0][tensor_loc];
-    
-    __shared__ out_opmath_t s_vals[512];  // 512 = blockDim.x * blockDim.y
-    out_opmath_t val = out_opmath_t(0);
-    // out_opmath_t vals[kILP];
-    // T r_x[kILP];
-    // for (int64_t i = 0; i < kILP; i++) {
-    //   vals[i] = out_opmath_t(0);
-    //   r_x[i] = T(0);
-    // }
-    
-    if (reduce_dim == 1) {  // want to change this to a constexpr
-      // Reduce across columns - row norm
-      T* row_ptr = data + row * row_stride;
-      
-      for (int64_t i = threadIdx.x; i < num_cols; i += blockDim.x) {
-        const auto elem = static_cast<out_opmath_t>(row_ptr[i]);
-        if constexpr (norm_type == NormType::LInf) {
-          val = max_propagate_nan(val, ::abs(elem));
-        } else {
-          val += norm_type == NormType::L1 ? ::abs(elem) : elem * elem;
-        }
-      }
-    } else {
-      // Reduce across rows - column norm  
-      // Each block handles one column, threads iterate over rows
-      int64_t col_idx = row;
-      
-      for (int64_t i = threadIdx.x; i < num_rows; i += blockDim.x) {
-        const auto elem = static_cast<out_opmath_t>(data[i * row_stride + col_idx]);
-        if constexpr (norm_type == NormType::LInf) {
-          val = max_propagate_nan(val, ::abs(elem));
-        } else {
-          val += norm_type == NormType::L1 ? ::abs(elem) : elem * elem;
-        }
-      }
-    }
 
-    int64_t block_row = threadIdx.y * blockDim.x;
-    int64_t block_elem = block_row + threadIdx.x;
-    s_vals[block_elem] = val;
+    // ========================================
+    // ROW NORM: Use loop (8 rows per warp)
+    // ========================================
+    constexpr int ROWS_PER_CHUNK = 128;
+    constexpr int WARPS_PER_BLOCK = 16;
+    constexpr int ROWS_PER_WARP = ROWS_PER_CHUNK / WARPS_PER_BLOCK;  // 8
     
-    // Block reduction
-    __syncthreads();
-    for (int64_t s = blockDim.x / 2; s > 0; s >>= 1) {
-      if (threadIdx.x < s)
-      {
-        if constexpr (norm_type == NormType::LInf) {
-          s_vals[block_elem] = max_propagate_nan(s_vals[block_elem], s_vals[block_elem + s]);
-        } else {
-          s_vals[block_elem] += s_vals[block_elem + s];
-        } 
+    const int chunk_row_start = chunk_idx * ROWS_PER_CHUNK;
+    
+    for (int r = 0; r < ROWS_PER_WARP; r++) {
+      const int row = chunk_row_start + warp_id * ROWS_PER_WARP + r;
+      
+      if (row >= output_size) continue;
+      
+      out_opmath_t val = out_opmath_t(0);
+      T* row_ptr = data + row * row_stride;
+      const int64_t n = num_cols;
+      
+      if (n % kILP == 0 && is_aligned(row_ptr)) {
+        out_opmath_t vals[kILP] = {0};
+        T r_x[kILP];
+        
+        for (int64_t i_start = lane; i_start * kILP < n; i_start += 32) {
+          load_store(r_x, row_ptr, 0, i_start);
+          #pragma unroll
+          for (int ii = 0; ii < kILP; ii++) {
+            const auto elem = static_cast<out_opmath_t>(r_x[ii]);
+            if constexpr (norm_type == NormType::LInf) {
+              vals[ii] = max_propagate_nan(vals[ii], ::abs(elem));
+            } else {
+              vals[ii] += norm_type == NormType::L1 ? ::abs(elem) : elem * elem;
+            }
+          }
+        }
+        
+        for (int ii = 0; ii < kILP; ii++) {
+          if constexpr (norm_type == NormType::LInf) {
+            val = max_propagate_nan(val, vals[ii]);
+          } else {
+            val += vals[ii];
+          }
+        }
+      } else {
+        for (int64_t i = lane; i < n; i += 32) {
+          const auto elem = static_cast<out_opmath_t>(row_ptr[i]);
+          if constexpr (norm_type == NormType::LInf) {
+            val = max_propagate_nan(val, ::abs(elem));
+          } else {
+            val += norm_type == NormType::L1 ? ::abs(elem) : elem * elem;
+          }
+        }
       }
-      __syncthreads();
+      
+      val = warpReduce(val);
+      
+      if (lane == 0) {
+        if constexpr (norm_type == NormType::L2) {
+          val = ::sqrt(val);
+        }
+        output_per_tensor_ptr[(tl.start_tensor_this_launch + tensor_loc) * max_output_per_tensor + row] = val;
+      }
+    }
+  }
+
+  __device__ __forceinline__ out_opmath_t colNorm(
+      TensorListDimMetadata<depth>& tl,
+      out_opmath_t* output_per_tensor_ptr,
+      const int max_output_per_tensor) {
+    const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
+    const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
+    const auto num_rows = tl.num_rows[tensor_loc];
+    const auto num_cols = tl.num_cols[tensor_loc];
+    const auto row_stride = tl.row_stride[tensor_loc]; 
+    const auto reduce_dim = tl.reduce_dim;
+      
+    const int warp_id = threadIdx.y;
+    const int lane = threadIdx.x;
+      
+    const int64_t output_size = num_rows;
+      
+    T* data = (T*)tl.addresses[0][tensor_loc];
+  
+    // ========================================
+    // COLUMN NORM: No loop (1 column per warp)
+    // ========================================
+    constexpr int COLS_PER_CHUNK = 16;  // Just blockDim.y, no multiplier
+    
+    const int chunk_col_start = chunk_idx * COLS_PER_CHUNK;
+    const int col = chunk_col_start + warp_id;
+    
+    if (col >= output_size) return;
+    
+    out_opmath_t val = out_opmath_t(0);
+    const int64_t n = num_rows;
+    
+    for (int64_t i = lane; i < n; i += 32) {
+      const auto elem = static_cast<out_opmath_t>(data[i * row_stride + col]);
+      if constexpr (norm_type == NormType::LInf) {
+        val = max_propagate_nan(val, ::abs(elem));
+      } else {
+        val += norm_type == NormType::L1 ? ::abs(elem) : elem * elem;
+      }
     }
     
-    if (threadIdx.x == 0 && row < max_output_per_tensor) {
-      auto final_val = s_vals[block_elem];
-      // Apply sqrt for L2 norm
+    val = warpReduce(val);
+    
+    if (lane == 0) {
       if constexpr (norm_type == NormType::L2) {
-        final_val = ::sqrt(final_val);
+        val = ::sqrt(val);
       }
-      // Write directly to output (no cleanup needed for simple rows/cols)
-      output_per_tensor_ptr[(tl.start_tensor_this_launch + tensor_loc) * max_output_per_tensor + row] = final_val;
+      output_per_tensor_ptr[(tl.start_tensor_this_launch + tensor_loc) * max_output_per_tensor + col] = val;
+    }
+  }
+
+  __device__ __forceinline__ void operator()(
+      int64_t /*unused_chunk_size*/,
+      TensorListDimMetadata<depth>& tl,
+      out_opmath_t* output_per_tensor_ptr,
+      const int max_output_per_tensor) {      
+    if (tl.reduce_dim == 1) {
+      rowNorm(tl, output_per_tensor_ptr, max_output_per_tensor);
+    } else {
+      colNorm(tl, output_per_tensor_ptr, max_output_per_tensor);
     }
   }
 };
