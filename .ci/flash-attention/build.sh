@@ -26,42 +26,41 @@ PYTHON="${PYTHON_EXECUTABLE:-python}"
 if [[ ! -d "/usr/local/cuda" ]]; then
     echo "CUDA not found, installing CUDA toolkit for Flash Attention build"
 
+    # Install required packages (matching what Dockerfile_cuda_aarch64 installs)
     if command -v dnf &> /dev/null; then
-        dnf install -y wget gcc-toolset-13-gcc gcc-toolset-13-gcc-c++ || true
+        dnf install -y \
+            wget \
+            perl \
+            make \
+            xz \
+            bzip2 \
+            gcc-toolset-13-gcc \
+            gcc-toolset-13-gcc-c++ \
+            || true
         if [[ -d "/opt/rh/gcc-toolset-13" ]]; then
             export PATH=/opt/rh/gcc-toolset-13/root/usr/bin:$PATH
             export LD_LIBRARY_PATH=/opt/rh/gcc-toolset-13/root/usr/lib64:/opt/rh/gcc-toolset-13/root/usr/lib:${LD_LIBRARY_PATH:-}
         fi
     fi
 
-    source "${PYTORCH_ROOT}/.ci/docker/common/install_cuda.sh"
+    CUDA_INSTALL_DIR=$(mktemp -d)
+    cp "${PYTORCH_ROOT}/.ci/docker/common/install_cuda.sh" "${CUDA_INSTALL_DIR}/"
+    cp "${PYTORCH_ROOT}/.ci/docker/common/install_nccl.sh" "${CUDA_INSTALL_DIR}/"
+    cp "${PYTORCH_ROOT}/.ci/docker/common/install_cusparselt.sh" "${CUDA_INSTALL_DIR}/"
+    mkdir -p "${CUDA_INSTALL_DIR}/ci_commit_pins"
+    cp "${PYTORCH_ROOT}/.ci/docker/ci_commit_pins"/nccl* "${CUDA_INSTALL_DIR}/ci_commit_pins/" 2>/dev/null || true
 
-    case "${CUDA_VERSION:-12.6}" in
-        12.6|12.6.*)
-            install_cuda 12.6.3 cuda_12.6.3_560.35.05_linux
-            CCCL_VERSION="12.6.77"
-            ;;
-        13.0|13.0.*)
-            install_cuda 13.0.2 cuda_13.0.2_580.95.05_linux
-            CCCL_VERSION="13.0.85"
-            ;;
-        *)
-            echo "Unsupported CUDA_VERSION: ${CUDA_VERSION}"
-            exit 1
-            ;;
-    esac
+    pushd "${CUDA_INSTALL_DIR}"
+    bash ./install_cuda.sh "${CUDA_VERSION:-12.6}"
+    popd
+    rm -rf "${CUDA_INSTALL_DIR}"
 
     export CUDA_HOME=/usr/local/cuda
     export PATH=/usr/local/cuda/bin:$PATH
 
-    if [[ ! -f "/usr/local/cuda/include/cuda/std/utility" ]]; then
-        echo "libcu++ headers not found, downloading cuda_cccl package..."
-        CCCL_URL="https://developer.download.nvidia.com/compute/cuda/redist/cuda_cccl/linux-${arch_path}/cuda_cccl-linux-${arch_path}-${CCCL_VERSION}-archive.tar.xz"
-        wget -q "${CCCL_URL}" -O - | tar -xJ -C /usr/local/cuda --strip-components=1
-    fi
-
-    echo "Checking libcu++ headers:"
-    ls -la /usr/local/cuda/include/cuda/std/utility || echo "WARNING: libcu++ headers still not found!"
+    echo "=== CUDA installation check ==="
+    ls -la /usr/local/cuda/include/cuda_runtime.h || echo "WARNING: cuda_runtime.h not found"
+    ls -la /usr/local/cuda/include/cuda/std/utility || echo "WARNING: libcu++ headers not found"
 
     echo "Installed CUDA version:"
     nvcc --version
