@@ -3594,7 +3594,15 @@ def get_fake_value(
         )
 
     try:
-        with fake_mode, enable_python_dispatcher():
+        with contextlib.ExitStack() as ctx:
+            ctx.enter_context(fake_mode)
+
+            # Ignore any fresh unbacked SymInts created by this node; when we
+            # eventually fx-trace this node it will resolve them.
+            if fake_mode.shape_env:
+                ctx.enter_context(fake_mode.shape_env.ignore_fresh_unbacked_symbols())
+
+            ctx.enter_context(enable_python_dispatcher())
             ret_val = wrap_fake_exception(
                 lambda: run_node(tx.output, node, args, kwargs, nnmodule)
             )
