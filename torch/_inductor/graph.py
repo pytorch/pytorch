@@ -1467,6 +1467,7 @@ class GraphLowering(torch.fx.Interpreter):
                     int,
                     ir.EffectfulKernel,
                     ir.ShapeAsConstantBuffer,
+                    TorchBindObject,
                 ),
             )
             for x in result
@@ -1802,7 +1803,6 @@ class GraphLowering(torch.fx.Interpreter):
                         # require_exact_strides to handle views. But ultimately it's better to require
                         # the right strides at the tensor definition.
                         if n.meta["val"]._is_view() or isinstance(
-                            # pyrefly: ignore [missing-attribute]
                             result.data,
                             ir.BaseView,
                         ):
