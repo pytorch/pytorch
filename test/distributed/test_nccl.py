@@ -284,9 +284,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
-    @requires_nccl_version(
-        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
-    )
+    @requires_nccl_version((2, 29), "NCCL one-sided host API support from nccl 2.29")
     @skip_if_lt_x_gpu(2)
     def test_nccl_symmem_put(self):
         symm_mem.set_backend("NCCL")
@@ -324,6 +322,48 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
             torch.testing.assert_close(
                 tensor, torch.ones(numel, dtype=dtype, device=self.device) * 2
             )
+
+    @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
+    @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
+    @requires_nccl_version((2, 29), "NCCL one-sided host API support from nccl 2.29")
+    @skip_if_lt_x_gpu(2)
+    def test_nccl_symmem_handle_signal(self):
+        symm_mem.set_backend("NCCL")
+        torch.cuda.set_device(self.rank)
+        # need this all_reduce to initialize NCCL communicator. Otherwise, the
+        # test will hang.  TODO: investigate how NCCLSymmetricMemory can
+        # initialize NCCL communicator.
+        c10d.all_reduce(torch.ones(1, device=self.device))
+        group_name = c10d.group.WORLD.group_name
+
+        dtype = torch.float
+        numel = 1024
+        tensor = symm_mem.empty(numel, dtype=dtype, device=self.device).fill_(self.rank)
+        handle = symm_mem.rendezvous(tensor, group=group_name)
+
+        channel = 0
+
+        # Get signal pad to verify signal is written
+        signal_pad = handle.get_signal_pad(0)  # Rank 0's signal pad
+
+        c10d.barrier()
+
+        if self.rank == 1:
+            # Rank 1: send signal to rank 0
+            handle.put_signal(dst_rank=0, channel=channel)
+            torch.cuda.synchronize()
+        elif self.rank == 0:
+            # Rank 0: wait for signal from rank 1
+            initial_val = signal_pad[channel].item()
+            handle.wait_signal(src_rank=1, channel=channel)
+            final_val = signal_pad[channel].item()
+            self.assertGreater(
+                final_val,
+                initial_val,
+                "Signal value should have incremented after wait_signal",
+            )
+
+        c10d.barrier()
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
