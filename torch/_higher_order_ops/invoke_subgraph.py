@@ -166,6 +166,39 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 invoke_subgraph = InvokeSubgraphHOP()
 
 
+def invoke_subgraph_infer(
+    subgraph: Union[GraphModule, FunctionalizeCtxWrapper],
+    *operands,
+):
+    """Inference-only entrypoint for invoke_subgraph that auto-generates identifier.
+
+    This is intended for use cases where we are building an inference graph and
+    don't need the forward/backward caching that requires a stable identifier.
+    The identifier is automatically computed based on the current proxy mode's
+    tracer state.
+
+    If no proxy mode is active, the subgraph is called directly.
+    """
+    from torch.fx.experimental.proxy_tensor import get_proxy_mode
+
+    proxy_mode = get_proxy_mode()
+    if proxy_mode is None:
+        # No tracing active, just call the subgraph directly
+        if getattr(subgraph, "_boxed_call", False):
+            return subgraph(list(operands))
+        else:
+            return subgraph(*operands)
+
+    from torch._dynamo.utils import get_unique_name_wrt
+
+    name = get_unique_name_wrt(
+        "subgraph",
+        proxy_mode.tracer.root.named_modules(),
+        requires_suffix=True,
+    )
+    return invoke_subgraph(subgraph, name, *operands)
+
+
 # Registers dispatches for SAC
 redirect_to_mode(invoke_subgraph, _CachingTorchDispatchMode)
 redirect_to_mode(invoke_subgraph, _CachedTorchDispatchMode)
