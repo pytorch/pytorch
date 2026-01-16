@@ -260,10 +260,9 @@ class TestNVUniversalGemm(TestCase):
     def test_scaled_gemm_mxfp8(self):
         """Test MXFP8 scaled GEMM with NVGEMM backend.
 
-        MXFP8 format requires:
-        - Input dtypes: float8_e4m3fn for both A and B
-        - Scale dtypes: float8_e8m0fnu for both
-        - Scaling type: BlockWise1x32
+        Note: Invalid inputs (wrong shapes, dtypes, K not divisible by 16, etc.)
+        are caught early by Dynamo's _check_scaled_mm_sizes in torch/_meta_registrations.py.
+        NVGEMM can assume inputs are valid by the time they reach kernel selection.
         """
         from torch._inductor.utils import ceildiv
 
