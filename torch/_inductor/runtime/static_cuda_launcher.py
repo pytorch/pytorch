@@ -1,6 +1,5 @@
 import functools
 import os
-from functools import cached_property
 from typing import Any
 from typing_extensions import Unpack
 
@@ -8,7 +7,7 @@ from .triton_compat import ASTSource, CompiledKernel, knobs as triton_knobs
 from .triton_helpers import get_constexprs
 
 
-class StaticallyLaunchedTritonKernel:
+class StaticallyLaunchedCudaKernel:
     """
     Parses the metadata of a CompiledKernel from Triton into a structure that can
     launch the cuda kernel directly. Only works for triton kernels compiled to cubin.
@@ -21,23 +20,19 @@ class StaticallyLaunchedTritonKernel:
     Workflow:
     Compile time:
     1. Compile a kernel with triton and get a CompiledKernel
-    2. Instantiate kernel = StaticallyLaunchedTritonKernel(triton_kernel)
+    2. Instantiate kernel = StaticallyLaunchedCudaKernel(triton_kernel)
     3. Write to a cubin file: kernel.write_cubin_to_file(filepath)
     4. Call kernel.load_kernel() (CUDA should be initialized by this point) to load the cubin
     Runtime:
     5. Call kernel.run(grid, stream, args) to launch the kernel
 
-    Note that after step 3, StaticallyLaunchedTritonKernel is fully pickleable/serializable.
+    Note that after step 3, StaticallyLaunchedCudaKernel is fully pickleable/serializable.
     This allows it to be cached by FXGraphCache/TritonBundler, as well as sent from the worker
     to the parent process in inductor.
 
     There are two main versions of triton that we wish to support: 3.3 and 3.2. Triton makes considerable changes
     to how it handles constants in 3.3, so there's some special logic necessary to handle both versions.
     """
-
-    @cached_property
-    def C_impl(self):
-        raise NotImplementedError
 
     def __init__(self, kernel: CompiledKernel) -> None:
         # pyrefly: ignore [missing-attribute]
@@ -136,12 +131,14 @@ class StaticallyLaunchedTritonKernel:
         return self.cubin_path
 
     def load_kernel(self, device: int) -> None:
+        from torch._C import _StaticCudaLauncher
+
         if self.function is not None:
             return
 
         assert hasattr(self, "cubin_path")
         assert self.cubin_path is not None
-        (self.function, self.n_regs, self.n_spills) = self.C_impl._load_kernel(
+        (self.function, self.n_regs, self.n_spills) = _StaticCudaLauncher._load_kernel(
             self.cubin_path, self.name, self.shared, device
         )
         # Don't need the cubin path anymore now that we've loaded
@@ -181,7 +178,7 @@ class StaticallyLaunchedTritonKernel:
             return "O"
         elif ty == "nvTmaDesc":
             raise NotImplementedError("nvTmaDesc kernels are not yet supported")
-        return StaticallyLaunchedTritonKernel.type_mappings()[ty]
+        return StaticallyLaunchedCudaKernel.type_mappings()[ty]
 
     def arg_ty_from_signature(self, src: ASTSource) -> str:
         def index_key(i: Any) -> int:
@@ -238,6 +235,7 @@ class StaticallyLaunchedTritonKernel:
         *args: Unpack[tuple[object, ...]],
     ) -> None:
         """Actually run the kernel at runtime. This function is the hot codepath."""
+        from torch._C import _StaticCudaLauncher
 
         # Assert load_kernel() has been called and args match
         assert self.function is not None
@@ -258,7 +256,7 @@ class StaticallyLaunchedTritonKernel:
 
         # TODO: can handle grid functions here or in C++, so
         # that we don't need the grid handler above.
-        self.C_impl._launch_kernel(
+        _StaticCudaLauncher._launch_kernel(
             self.function,
             grid_x,
             grid_y,
@@ -269,20 +267,3 @@ class StaticallyLaunchedTritonKernel:
             args,
             stream,
         )
-
-
-class StaticallyLaunchedCudaKernel(StaticallyLaunchedTritonKernel):
-    @cached_property
-    def C_impl(self):
-        from torch._C import _StaticCudaLauncher
-
-        return _StaticCudaLauncher
-
-
-def statically_launched_kernel_by_device(
-    kernel: CompiledKernel, device_type: str = "cuda"
-) -> StaticallyLaunchedTritonKernel:
-    if device_type == "cuda":
-        return StaticallyLaunchedCudaKernel(kernel)
-    else:
-        raise NotImplementedError(f"Device type {device_type} not supported")

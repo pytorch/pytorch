@@ -117,7 +117,7 @@
 #include <ATen/cuda/CUDABlas.h>
 #include <ATen/cuda/CUDAConfig.h>
 #include <ATen/native/transformers/cuda/sdp_utils.h>
-#include <torch/csrc/inductor/static_launcher/cuda.h>
+#include <torch/csrc/inductor/static_cuda_launcher.h>
 #ifdef __HIP_PLATFORM_AMD__
 #include <ATen/native/cudnn/hip/BatchNorm.h>
 #else
