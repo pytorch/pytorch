@@ -1622,7 +1622,7 @@ class triton:
     )
 
     # used for debugging cooperative reduction codegen, always generate cooperative_reductions
-    force_cooperative_reductions = False
+    force_cooperative_reductions = True
 
     # 0: disable
     # 1/True: enable, use tuning to pick between different subkernels

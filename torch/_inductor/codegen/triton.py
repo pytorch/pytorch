@@ -4653,7 +4653,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         Perform an associative scan on 'values'.
         """
         assert self.inside_reduction
-        assert not self.cooperative_reduction, "TODO"
         masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
         self.filter_masks(masks)
         masks = sorted(masks)
@@ -4778,7 +4777,6 @@ class TritonKernel(SIMDKernel[TritonCSEVariable]):
         descending: bool,
     ) -> tuple[CSEVariable, ...]:
         assert self.inside_reduction
-        assert not self.cooperative_reduction, "TODO"
         masks = OrderedSet(f"{tree.prefix}mask" for tree in self.range_trees)
         self.filter_masks(masks)
         masks = sorted(masks)
@@ -6169,10 +6167,6 @@ class TritonScheduling(SIMDScheduling):
             from .triton_split_scan import TritonSplitScanKernel
 
             kernel_type = TritonSplitScanKernel
-
-        if is_scan:
-            # TODO(jansel): scan does not yet work with cooperative reductions
-            kernel_kwargs["override_cooperative_reduction"] = False
 
         # ops.sort only works with persistent reduction, and is not bandwidth bound anyway
         # so taking the hit of non-coalesced loads is okay
