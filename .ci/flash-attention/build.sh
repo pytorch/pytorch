@@ -26,7 +26,6 @@ PYTHON="${PYTHON_EXECUTABLE:-python}"
 if [[ ! -d "/usr/local/cuda" ]]; then
     echo "CUDA not found, installing CUDA toolkit for Flash Attention build"
 
-    # Install required packages (matching what Dockerfile_cuda_aarch64 installs)
     if command -v dnf &> /dev/null; then
         dnf install -y \
             wget \
@@ -61,6 +60,72 @@ if [[ ! -d "/usr/local/cuda" ]]; then
     echo "=== CUDA installation check ==="
     ls -la /usr/local/cuda/include/cuda_runtime.h || echo "WARNING: cuda_runtime.h not found"
     ls -la /usr/local/cuda/include/cuda/std/utility || echo "WARNING: libcu++ headers not found"
+
+    if [[ ! -f "/usr/local/cuda/include/cuda/std/utility" ]]; then
+        echo "libcu++ headers missing, downloading cuda_cccl package..."
+
+        if [[ "$(uname -m)" == "aarch64" ]]; then
+            REDIST_ARCH="linux-sbsa"
+        else
+            REDIST_ARCH="linux-x86_64"
+        fi
+
+        CUDA_MAJOR_MINOR="${CUDA_VERSION:-12.6}"
+        case "${CUDA_MAJOR_MINOR}" in
+            13.0|13.0.*)
+                CCCL_VERSION="13.0.85"
+                ;;
+            12.6|12.6.*)
+                CCCL_VERSION="12.6.77"
+                ;;
+            *)
+                echo "Unknown CUDA version for CCCL: ${CUDA_MAJOR_MINOR}"
+                CCCL_VERSION=""
+                ;;
+        esac
+
+        if [[ -n "${CCCL_VERSION}" ]]; then
+            CCCL_PKG="cuda_cccl-${REDIST_ARCH}-${CCCL_VERSION}-archive"
+            CCCL_URL="https://developer.download.nvidia.com/compute/cuda/redist/cuda_cccl/${REDIST_ARCH}/${CCCL_PKG}.tar.xz"
+            echo "Downloading CCCL from: ${CCCL_URL}"
+
+            CCCL_TMP=$(mktemp -d)
+            pushd "${CCCL_TMP}"
+            wget -q "${CCCL_URL}" -O cccl.tar.xz
+            tar xf cccl.tar.xz
+
+            echo "=== CCCL package contents ==="
+            find "${CCCL_PKG}" -type d -name "cuda" | head -20
+            find "${CCCL_PKG}" -name "utility" | head -10
+
+            # Copy all include directories
+            if [[ -d "${CCCL_PKG}/include" ]]; then
+                cp -a "${CCCL_PKG}"/include/* /usr/local/cuda/include/
+            fi
+
+            # CCCL 2.x may have libcudacxx headers under lib/cmake or different location
+            # Check for cuda/std in various locations and copy if found
+            for search_dir in "${CCCL_PKG}/lib" "${CCCL_PKG}"; do
+                if [[ -d "${search_dir}" ]]; then
+                    cuda_std_dir=$(find "${search_dir}" -type d -path "*/cuda/std" 2>/dev/null | head -1)
+                    if [[ -n "${cuda_std_dir}" ]]; then
+                        # Found cuda/std, copy the parent cuda directory
+                        cuda_dir=$(dirname "${cuda_std_dir}")
+                        echo "Found libcu++ at: ${cuda_dir}"
+                        mkdir -p /usr/local/cuda/include/cuda
+                        cp -a "${cuda_dir}"/* /usr/local/cuda/include/cuda/
+                        break
+                    fi
+                fi
+            done
+
+            popd
+            rm -rf "${CCCL_TMP}"
+
+            echo "CCCL installed, verifying..."
+            ls -la /usr/local/cuda/include/cuda/std/utility || echo "WARNING: libcu++ still not found after CCCL install"
+        fi
+    fi
 
     echo "Installed CUDA version:"
     nvcc --version
