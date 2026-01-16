@@ -65,13 +65,13 @@ def _is_fake_tensor(t: object) -> TypeIs[FakeTensor]:
 
 
 DimList = list
-_TensorLikeT = TypeVar("_TensorLikeT", "MetaTensorDesc[Any]", torch.Tensor)
+_TensorLikeT = TypeVar("_TensorLikeT", "MetaTensorDesc", torch.Tensor)
 _T = TypeVar("_T")
 _TensorT = TypeVar("_TensorT", bound=torch.Tensor)
 _TensorT_cov = TypeVar("_TensorT_cov", bound=torch.Tensor, covariant=True)
 
 
-def safe_is_leaf(t: Union[MetaTensorDesc[Any], torch.Tensor]) -> bool:
+def safe_is_leaf(t: Union[MetaTensorDesc, torch.Tensor]) -> bool:
     try:
         return t.is_leaf
     except RuntimeError:
@@ -87,14 +87,12 @@ def safe_grad(t: _TensorLikeT) -> Optional[_TensorLikeT]:
 
 def _expect_safe_grad(t: _TensorLikeT) -> _TensorLikeT:
     grad = safe_grad(t)
-    if grad is None:
-        raise AssertionError("Expected tensor to have a gradient but grad is None")
+    assert grad is not None
     return grad
 
 
 def assert_eq(a: _T, b: _T) -> None:
-    if a != b:
-        raise AssertionError(f"{a} != {b}")
+    assert a == b, f"{a} != {b}"
 
 
 tls = threading.local()
@@ -116,7 +114,7 @@ def disable_inference_mode_for_fake_prop() -> Generator[None, None, None]:
 
 def assert_metadata_eq(
     assert_eq: Callable[[object, object], None],
-    m1: Union[MetaTensorDesc[Any], torch.Tensor],
+    m1: Union[MetaTensorDesc, torch.Tensor],
     m2: torch.Tensor,
     *,
     skip_symbolic: bool = False,
@@ -128,7 +126,7 @@ def assert_metadata_eq(
         else m1
     )
 
-    def go(m1: MetaTensorDesc[Any], m2: torch.Tensor) -> None:
+    def go(m1: MetaTensorDesc, m2: torch.Tensor) -> None:
         assert_eq(m1.dtype, m2.dtype)
         if not skip_symbolic:
             assert_eq(m1.shape, m2.shape)
@@ -164,10 +162,8 @@ def assert_metadata_eq(
                 assert_eq(m1.storage_offset, m2.storage_offset())
             assert_eq(m1.is_view, m2._is_view())
             if m1.is_view:
-                if m1.base is None:
-                    raise AssertionError("m1.base must not be None for a view tensor")
-                if m2._base is None:
-                    raise AssertionError("m2._base must not be None for a view tensor")
+                assert m1.base is not None
+                assert m2._base is not None
                 go(m1.base, m2._base)
         # TODO: test if is resizable (no direct query for this atm)
         # TODO: audit AutogradMeta to see if it matches
@@ -201,8 +197,7 @@ def is_sparse_any(t: object) -> TypeGuard[torch.Tensor]:
 
 
 def _checked_cast(ty: type[_T], obj: object) -> _T:
-    if not isinstance(obj, ty):
-        raise AssertionError(f"expected {ty} but got {type(obj)}")
+    assert isinstance(obj, ty), f"expected {ty} but got {type(obj)}"
     return obj
 
 
@@ -282,7 +277,7 @@ class MetaTensorDescriber:
 
     def describe_tensor(
         self, t: torch.Tensor, *, recurse: bool = True, trace: bool = False
-    ) -> MetaTensorDesc[Any]:
+    ) -> MetaTensorDesc:
         is_leaf = safe_is_leaf(t)
         is_view = t._is_view()
         is_sparse = t.is_sparse
@@ -370,10 +365,7 @@ class MetaTensorDescriber:
         ctx = None
         type_v = None
         if is_traceable_wrapper_subclass_v:
-            if not hasattr(t, "__tensor_flatten__"):
-                raise AssertionError(
-                    "Traceable wrapper subclass must have __tensor_flatten__ method"
-                )
+            assert hasattr(t, "__tensor_flatten__")
             raw_attrs, ctx = t.__tensor_flatten__()
             attrs = {
                 attr: self.describe_tensor(getattr(t, attr), trace=trace)
@@ -388,7 +380,7 @@ class MetaTensorDescriber:
         # TODO: Is it important to enable torch.inference_mode before querying
         # these values?
         is_inference_mode_disabled = getattr(tls, "disable_inference_mode", False)
-        r: MetaTensorDesc[Any] = MetaTensorDesc(
+        r: MetaTensorDesc = MetaTensorDesc(
             id=self.get_tensor_id(t),
             storage=storage,
             is_inference=False if is_inference_mode_disabled else t.is_inference(),
@@ -504,7 +496,7 @@ class MetaTensorDescriber:
         return r
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class MetaStorageDesc:
     id: MetaStorageId
     size: int
@@ -520,7 +512,7 @@ class MetaStorageDesc:
         }
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class ViewFunc(Generic[_TensorT]):
     @abstractmethod
     def apply(
@@ -532,14 +524,14 @@ class ViewFunc(Generic[_TensorT]):
     ) -> _TensorT: ...
 
     @staticmethod
-    def from_tensor(t: torch.Tensor) -> ViewFunc[Any]:
+    def from_tensor(t: torch.Tensor) -> ViewFunc:
         if _is_fake_tensor(t):
             return _FakeTensorViewFunc()
         else:
             return _CustomViewFunc(t._view_func_unsafe)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class _FakeTensorViewFunc(ViewFunc["FakeTensor"]):
     @override
     def apply(
@@ -558,7 +550,7 @@ class _FakeTensorViewFunc(ViewFunc["FakeTensor"]):
         )
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class _CustomViewFunc(ViewFunc[_TensorT], Generic[_TensorT]):
     func: Callable[
         [
@@ -609,7 +601,7 @@ class _MetaTensorCallbackOptDevice(Protocol, Generic[_TensorT_cov]):
     ) -> _TensorT_cov: ...
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class MetaTensorDesc(Generic[_TensorT]):
     id: MetaTensorId
     ndim: int
@@ -663,19 +655,17 @@ class MetaTensorDesc(Generic[_TensorT]):
     sparse_dim: Optional[int] = None  # is_sparse, is_sparse_compressed
     dense_dim: Optional[int] = None  # is_sparse, is_sparse_compressed
     is_coalesced: Optional[bool] = None  # is_sparse
-    crow_indices: Optional[MetaTensorDesc[Any]] = None  # is_sparse_compressed
-    col_indices: Optional[MetaTensorDesc[Any]] = None  # is_sparse_compressed
-    ccol_indices: Optional[MetaTensorDesc[Any]] = None  # is_sparse_compressed
-    row_indices: Optional[MetaTensorDesc[Any]] = None  # is_sparse_compressed
-    values: Optional[MetaTensorDesc[Any]] = None  # is_sparse_compressed
-    unwrapped: Optional[MetaTensorDesc[Any]] = None  # is_functorch_wrapped
+    crow_indices: Optional[MetaTensorDesc] = None  # is_sparse_compressed
+    col_indices: Optional[MetaTensorDesc] = None  # is_sparse_compressed
+    ccol_indices: Optional[MetaTensorDesc] = None  # is_sparse_compressed
+    row_indices: Optional[MetaTensorDesc] = None  # is_sparse_compressed
+    values: Optional[MetaTensorDesc] = None  # is_sparse_compressed
+    unwrapped: Optional[MetaTensorDesc] = None  # is_functorch_wrapped
     bdim: Optional[int] = None  # is_functorch_wrapped
-    base: Optional[MetaTensorDesc[Any]] = None  # is_view
-    attrs: Optional[dict[str, MetaTensorDesc[Any]]] = (
-        None  # is_traceable_wrapper_subclass
-    )
+    base: Optional[MetaTensorDesc] = None  # is_view
+    attrs: Optional[dict[str, MetaTensorDesc]] = None  # is_traceable_wrapper_subclass
     creation_meta: Optional[CreationMeta] = None
-    grad: Optional[MetaTensorDesc[Any]] = None
+    grad: Optional[MetaTensorDesc] = None
 
     # Everything below is NOT serializable, need some more work
 
@@ -696,7 +686,7 @@ class MetaTensorDesc(Generic[_TensorT]):
     ctx: Optional[object] = None  # is_traceable_wrapper_subclass
     type: Optional[type] = None  # is_traceable_wrapper_subclass
     fake_mode: Optional[FakeTensorMode] = None
-    view_func: Optional[ViewFunc[Any]] = None
+    view_func: Optional[ViewFunc] = None
     # level looks serializable, but actually it is meaningless without
     # the functorch_stack below
     level: Optional[int] = None  # is_functorch_wrapped
@@ -818,16 +808,15 @@ class MetaConverter(Generic[_TensorT]):
     def successful(self) -> bool:
         return self.hit > 0 and self.miss == 0
 
-    def get_tensor_memo(self, t: MetaTensorDesc[Any]) -> Optional[torch.Tensor]:
+    def get_tensor_memo(self, t: MetaTensorDesc) -> Optional[torch.Tensor]:
         return self.tensor_memo.get(t.id, None)
 
-    def _checked_get_tensor_memo(self, t: MetaTensorDesc[Any]) -> _TensorT:
+    def _checked_get_tensor_memo(self, t: MetaTensorDesc) -> _TensorT:
         r = self.tensor_memo.get(t.id, None)
-        if r is None:
-            raise AssertionError(f"Tensor memo for id {t.id} is None")
+        assert r is not None
         return r
 
-    def set_tensor_memo(self, t: MetaTensorDesc[Any], v: _TensorT) -> None:
+    def set_tensor_memo(self, t: MetaTensorDesc, v: _TensorT) -> None:
         self.tensor_memo[t.id] = v
 
     def get_storage_memo(self, s: MetaStorageDesc) -> Optional[torch.UntypedStorage]:
@@ -851,10 +840,7 @@ class MetaConverter(Generic[_TensorT]):
                 # NB: no_dispatch is needed because internally storage copy is
                 # implemented as Tensor operations
                 with torch.no_grad(), no_dispatch():
-                    if s.data is None:
-                        raise AssertionError(
-                            "s.data must not be None when copy_data is True"
-                        )
+                    assert s.data is not None
                     _set_real_storage(r_s, s.data.clone())
             self.set_storage_memo(s, r_s)
             return r_s
@@ -891,13 +877,13 @@ class MetaConverter(Generic[_TensorT]):
     # other users of this may not need it this property to be upheld.)
     def meta_tensor(
         self,
-        t: MetaTensorDesc[Any],
+        t: MetaTensorDesc,
         shape_env: Optional[ShapeEnv],
         callback_: _MetaTensorCallback[_TensorT],
         source: Optional[Source],
         symbolic_context: Optional[SymbolicContext],
     ) -> _TensorT:
-        callback: _MetaTensorCallbackOptDevice[_TensorT] = functools.partial(
+        callback: _MetaTensorCallbackOptDevice = functools.partial(
             callback_, device=t.device
         )
         if source is None:
@@ -914,8 +900,9 @@ class MetaConverter(Generic[_TensorT]):
             " will perform operations on them which need fake tensor mode to"
             " be active.  You will segfault if you are in a no_dispatch() block."
         )
-        if torch._C._dispatch_tls_local_exclude_set().has(torch._C.DispatchKey.Python):
-            raise AssertionError(msg)
+        assert not torch._C._dispatch_tls_local_exclude_set().has(
+            torch._C.DispatchKey.Python
+        ), msg
         self.arg_cnt += 1
 
         # When we make as_strided calls, we end up generating a guard
@@ -947,34 +934,18 @@ class MetaConverter(Generic[_TensorT]):
             maybe_suppress = shape_env.suppress_guards
 
         def sym_sizes_strides_storage_offset(
-            t: MetaTensorDesc[Any],
+            t: MetaTensorDesc,
             src: torch._guards.Source,
             symbolic_context: Optional[
                 torch.fx.experimental.symbolic_shapes.SymbolicContext
             ] = symbolic_context,
         ) -> tuple[tuple[int, ...], tuple[int, ...], int]:
-            # local import to prevent circular import
-            from torch.fx.experimental.symbolic_shapes import is_symbolic
-
-            if t.stride is None:
-                raise AssertionError("t.stride must not be None")
-
+            assert t.stride is not None
             if shape_env is not None:
                 fake_mode = t.fake_mode
-                has_symbolic = (
-                    any(is_symbolic(sz) for sz in t.size)
-                    or any(is_symbolic(sd) for sd in t.stride)
-                    or is_symbolic(t.storage_offset)
-                )
                 if fake_mode is not None and fake_mode.shape_env is shape_env:
                     # Don't reallocate the sizes; the shape envs are the same,
                     # so reuse the old sizes/strides/etc
-                    return (t.size, t.stride, t.storage_offset)
-                elif (
-                    fake_mode is not None
-                    and not has_symbolic
-                    and symbolic_context is None
-                ):
                     return (t.size, t.stride, t.storage_offset)
                 else:
                     # TODO: deduplicate this
@@ -1002,7 +973,7 @@ class MetaConverter(Generic[_TensorT]):
                 return (t.size, t.stride, t.storage_offset)
 
         def empty_create(
-            inner_t: MetaTensorDesc[Any],
+            inner_t: MetaTensorDesc,
             inner_src: torch._guards.Source,
             symbolic_context: Optional[
                 torch.fx.experimental.symbolic_shapes.SymbolicContext
@@ -1023,7 +994,7 @@ class MetaConverter(Generic[_TensorT]):
         # Creates a subclass instance with empty inner tensors according to the specified
         # symbolic context.
         def empty_create_subclass(
-            t: MetaTensorDesc[Any],
+            t: MetaTensorDesc,
             outer_size: tuple[int, ...],
             outer_stride: tuple[int, ...],
             symbolic_context: Optional[
@@ -1034,10 +1005,8 @@ class MetaConverter(Generic[_TensorT]):
             from torch._dynamo.source import AttrSource
             from torch.fx.experimental.symbolic_shapes import SubclassSymbolicContext
 
-            if t.attrs is None:
-                raise AssertionError("t.attrs must not be None for subclass")
-            if t.type is None:
-                raise AssertionError("t.type must not be None for subclass")
+            assert t.attrs is not None
+            assert t.type is not None
             # NB: t.ctx could be None if the subclass in question has no
             # meaningful context
 
@@ -1054,15 +1023,12 @@ class MetaConverter(Generic[_TensorT]):
             # pyrefly: ignore [bad-assignment]
             outer_stride = outer_stride if outer_stride is not None else t.stride
 
-            if symbolic_context is not None and not isinstance(
+            assert symbolic_context is None or isinstance(
                 symbolic_context, SubclassSymbolicContext
-            ):
-                raise AssertionError(
-                    f"Expected SubclassSymbolicContext or None, got {type(symbolic_context)}"
-                )
+            )
 
             def _empty_create_subclass(
-                t: MetaTensorDesc[Any],
+                t: MetaTensorDesc,
                 outer_size: Optional[tuple[int, ...]],
                 outer_stride: Optional[tuple[int, ...]],
                 symbolic_context: Optional[
@@ -1086,10 +1052,7 @@ class MetaConverter(Generic[_TensorT]):
                 for attr, meta_tensor_desc in t.attrs.items():
                     current_context = None
                     if symbolic_context is not None:
-                        if not isinstance(symbolic_context, SubclassSymbolicContext):
-                            raise AssertionError(
-                                f"Expected SubclassSymbolicContext, got {type(symbolic_context)}"
-                            )
+                        assert isinstance(symbolic_context, SubclassSymbolicContext)
                         if (
                             current_context_ := symbolic_context.inner_contexts[attr]
                         ) is not None:
@@ -1112,14 +1075,12 @@ class MetaConverter(Generic[_TensorT]):
                     )
                     inner_tensors[attr] = new_empty_tensor
 
-                if t.type is None:
-                    raise AssertionError("t.type must not be None for subclass")
+                assert t.type is not None
                 return t.type.__tensor_unflatten__(  # type: ignore[attr-defined]
                     inner_tensors, t.ctx, outer_size, outer_stride
                 )
 
-            if source is None:
-                raise AssertionError("source must not be None")
+            assert source is not None
             sub = _empty_create_subclass(
                 t, outer_size, outer_stride, symbolic_context, callback, source
             )
@@ -1127,16 +1088,14 @@ class MetaConverter(Generic[_TensorT]):
             # NB: Purposefully guard here to simplify the inner / outer symbols.
             # Using sym_eq() for symbolic comparison can result in an expression that's too
             # difficult to guard on, so we use == here.
-            if sub.shape != outer_size:
-                raise AssertionError(
-                    f"Expected return value from {t.type}__tensor_unflatten__() to have "
-                    f"shape equal to {outer_size}, but got: {sub.shape}"
-                )
-            if sub.stride() != outer_stride:
-                raise AssertionError(
-                    f"Expected return value from {t.type}__tensor_unflatten__() to have "
-                    f"stride equal to {outer_stride}, but got: {sub.stride()}"
-                )
+            assert sub.shape == outer_size, (
+                f"Expected return value from {t.type}__tensor_unflatten__() to have "
+                f"shape equal to {outer_size}, but got: {sub.shape}"
+            )
+            assert sub.stride() == outer_stride, (
+                f"Expected return value from {t.type}__tensor_unflatten__() to have "
+                f"stride equal to {outer_stride}, but got: {sub.stride()}"
+            )
 
             return sub
 
@@ -1145,7 +1104,7 @@ class MetaConverter(Generic[_TensorT]):
         # closed-over ViewFunc state, as we don't have symbolic contexts for them, but we
         # don't want to over-specialize during view replay.
         def all_dynamic_symbolic_context(
-            t: MetaTensorDesc[Any],
+            t: MetaTensorDesc,
             source: torch._guards.Source,
             shape_env: Optional[torch.fx.experimental.symbolic_shapes.ShapeEnv],
             callback: _MetaTensorCallback[_TensorT],
@@ -1161,8 +1120,7 @@ class MetaConverter(Generic[_TensorT]):
                 torch.fx.experimental.symbolic_shapes.SymbolicContext
             ] = None
             if t.is_view:
-                if t.base is None:
-                    raise AssertionError("t.base must not be None for view tensor")
+                assert t.base is not None
                 view_base_context = all_dynamic_symbolic_context(
                     t.base, AttrSource(source, "_base"), shape_env, callback
                 )
@@ -1170,16 +1128,12 @@ class MetaConverter(Generic[_TensorT]):
             t_symbolic_context: torch.fx.experimental.symbolic_shapes.SymbolicContext
             t_dynamic_sizes = [DimDynamic.DYNAMIC] * t.ndim
             if t.is_traceable_wrapper_subclass:
-                if t.attrs is None:
-                    raise AssertionError("t.attrs must not be None for subclass")
+                assert t.attrs is not None
                 inner_contexts: dict[
                     str, torch.fx.experimental.symbolic_shapes.SymbolicContext
                 ] = {}
                 for attr, inner in t.attrs.items():
-                    if not isinstance(attr, str):
-                        raise AssertionError(
-                            f"Expected attr to be str, got {type(attr)}"
-                        )
+                    assert isinstance(attr, str)
                     inner_contexts[attr] = all_dynamic_symbolic_context(
                         inner, AttrSource(source, attr), shape_env, callback
                     )
@@ -1230,7 +1184,7 @@ class MetaConverter(Generic[_TensorT]):
         #     is fully fake with no invalid specialization.
         def view_from_base(
             base: _TensorT,
-            t: MetaTensorDesc[Any],
+            t: MetaTensorDesc,
             shape_env: Optional[
                 torch.fx.experimental.symbolic_shapes.ShapeEnv
             ] = shape_env,
@@ -1290,12 +1244,10 @@ class MetaConverter(Generic[_TensorT]):
 
                 real_to_fake_mapping = {}
                 if t.is_traceable_wrapper_subclass:
-                    if t.attrs is None:
-                        raise AssertionError("t.attrs must not be None for subclass")
+                    assert t.attrs is not None
                     # NB: t.ctx could be None if the subclass in question has no
                     # meaningful context
-                    if t.type is None:
-                        raise AssertionError("t.type must not be None for subclass")
+                    assert t.type is not None
 
                     # Fake-ify t naively here; this is only done so we can get fake-ified inner
                     # tensors with the correct relationships to the outer sizes / strides for use
@@ -1358,8 +1310,7 @@ class MetaConverter(Generic[_TensorT]):
 
                 # Replay the view, swapping out any non-symbolic SymInts or real tensors
                 # for symbolic SymInts or fake tensors.
-                if t.view_func is None:
-                    raise AssertionError("t.view_func must not be None for view replay")
+                assert t.view_func is not None
                 # NB: we do NOT suppress guards here, we need to remove ephemeral
                 # sources
                 fake_t = t.view_func.apply(
@@ -1396,19 +1347,11 @@ class MetaConverter(Generic[_TensorT]):
                     )
                     if self.copy_data:
                         # Pray that sparse clone doesn't lose information
-                        if t.data is None:
-                            raise AssertionError(
-                                "t.data must not be None when copy_data is True"
-                            )
+                        assert t.data is not None
                         with torch.no_grad(), no_dispatch():
-                            if not _is_fake_tensor(r):
-                                raise AssertionError("Expected r to be a FakeTensor")
-                            # pyrefly: ignore[bad-assignment]
+                            assert _is_fake_tensor(r)
                             r.real_tensor = _safe_clone(t.data)
-                    if not safe_is_leaf(r):
-                        raise AssertionError(
-                            "the callback you passed in doesn't detach"
-                        )
+                    assert safe_is_leaf(r), "the callback you passed in doesn't detach"
                     # Note [is_coalesced is dispatched]
                     # Strangely enough, is_coalesced() is a dispatched operator,
                     # which means that it will get caught by fake tensor mode.
@@ -1429,33 +1372,18 @@ class MetaConverter(Generic[_TensorT]):
                     is_leaf = t.is_leaf
 
                     if t.layout in {torch.sparse_bsr, torch.sparse_bsc}:
-                        if t.sparse_dim is None:
-                            raise AssertionError(
-                                "t.sparse_dim must not be None for sparse block layout"
-                            )
-                        if t.dense_dim is None:
-                            raise AssertionError(
-                                "t.dense_dim must not be None for sparse block layout"
-                            )
-                        if t.values is None:
-                            raise AssertionError(
-                                "t.values must not be None for sparse block layout"
-                            )
+                        assert t.sparse_dim is not None
+                        assert t.dense_dim is not None
+                        assert t.values is not None
                         batch_dim = t.ndim - t.sparse_dim - t.dense_dim
                         blocksize = t.values.shape[batch_dim + 1 : batch_dim + 3]
                     else:
                         blocksize = ()
                     if t.layout in {torch.sparse_csr, torch.sparse_bsr}:
-                        if t.crow_indices is None:
-                            raise AssertionError(
-                                "t.crow_indices must not be None for sparse csr/bsr layout"
-                            )
+                        assert t.crow_indices is not None
                         index_dtype = t.crow_indices.dtype
                     else:
-                        if t.ccol_indices is None:
-                            raise AssertionError(
-                                "t.ccol_indices must not be None for sparse csc/bsc layout"
-                            )
+                        assert t.ccol_indices is not None
                         index_dtype = t.ccol_indices.dtype
 
                     r = callback(
@@ -1472,19 +1400,11 @@ class MetaConverter(Generic[_TensorT]):
                     )
                     if self.copy_data:
                         # Pray sparse clone doesn't lose information
-                        if t.data is None:
-                            raise AssertionError(
-                                "t.data must not be None when copy_data is True"
-                            )
+                        assert t.data is not None
                         with torch.no_grad(), no_dispatch():
-                            if not _is_fake_tensor(r):
-                                raise AssertionError("Expected r to be a FakeTensor")
-                            # pyrefly: ignore[bad-assignment]
+                            assert _is_fake_tensor(r)
                             r.real_tensor = _safe_clone(t.data)
-                    if not safe_is_leaf(r):
-                        raise AssertionError(
-                            "the callback you passed in doesn't detach"
-                        )
+                    assert safe_is_leaf(r), "the callback you passed in doesn't detach"
                     if t.requires_grad:
                         r.requires_grad = True
                     if t.requires_grad and not is_leaf:
@@ -1518,29 +1438,15 @@ class MetaConverter(Generic[_TensorT]):
                     )
                     if self.copy_data:
                         with torch.no_grad(), no_dispatch():
-                            if t.size is None:
-                                raise AssertionError(
-                                    "t.size must not be None when copy_data is True"
-                                )
-                            if t.stride is None:
-                                raise AssertionError(
-                                    "t.stride must not be None when copy_data is True"
-                                )
-                            if not _is_fake_tensor(r):
-                                raise AssertionError("Expected r to be a FakeTensor")
-                            # pyrefly: ignore[bad-assignment]
+                            assert t.size is not None
+                            assert t.stride is not None
+                            assert _is_fake_tensor(r)
                             r.real_tensor = torch.empty_strided(
                                 t.size, t.stride, dtype=t.dtype, device=t.device
                             )
-                            if t.data is None:
-                                raise AssertionError(
-                                    "t.data must not be None when copy_data is True"
-                                )
+                            assert t.data is not None
                             _safe_copy(r.real_tensor, t.data)
-                    if not safe_is_leaf(r):
-                        raise AssertionError(
-                            "the callback you passed in doesn't detach"
-                        )
+                    assert safe_is_leaf(r), "the callback you passed in doesn't detach"
                     if t.requires_grad:
                         r.requires_grad = True
                     if t.requires_grad and not is_leaf:
@@ -1558,23 +1464,14 @@ class MetaConverter(Generic[_TensorT]):
 
                     # Wraps a functorch tensor class (BatchedTensor, GradTrackingTensor)
                     # in a FakeTensor
-                    def _to_fake_tensor(t: MetaTensorDesc[Any]) -> _TensorT:
+                    def _to_fake_tensor(t: MetaTensorDesc) -> _TensorT:
                         # TODO: why aren't the recursive calls going to
                         # meta_tensor
                         r: _TensorT
                         if t.is_batchedtensor:
-                            if t.unwrapped is None:
-                                raise AssertionError(
-                                    "t.unwrapped must not be None for batchedtensor"
-                                )
-                            if t.level is None:
-                                raise AssertionError(
-                                    "t.level must not be None for batchedtensor"
-                                )
-                            if t.bdim is None:
-                                raise AssertionError(
-                                    "t.bdim must not be None for batchedtensor"
-                                )
+                            assert t.unwrapped is not None
+                            assert t.level is not None
+                            assert t.bdim is not None
                             ft = _to_fake_tensor(t.unwrapped)
                             lvl = t.level
                             bdim = t.bdim
@@ -1589,14 +1486,8 @@ class MetaConverter(Generic[_TensorT]):
                                     _add_batch_dim(ft, bdim, lvl)
                                 )
                         elif t.is_gradtrackingtensor:
-                            if t.unwrapped is None:
-                                raise AssertionError(
-                                    "t.unwrapped must not be None for gradtrackingtensor"
-                                )
-                            if t.level is None:
-                                raise AssertionError(
-                                    "t.level must not be None for gradtrackingtensor"
-                                )
+                            assert t.unwrapped is not None
+                            assert t.level is not None
                             disable_functorch = torch._C._DisableFuncTorch
                             with disable_functorch():
                                 ft = _to_fake_tensor(t.unwrapped)
@@ -1617,14 +1508,8 @@ class MetaConverter(Generic[_TensorT]):
                             elif t.requires_grad and not is_leaf:
                                 r = self._backward_error(r)
                         elif t.is_functional:
-                            if t.unwrapped is None:
-                                raise AssertionError(
-                                    "t.unwrapped must not be None for functional tensor"
-                                )
-                            if t.current_level is None:
-                                raise AssertionError(
-                                    "t.current_level must not be None for functional tensor"
-                                )
+                            assert t.unwrapped is not None
+                            assert t.current_level is not None
                             ft = self.meta_tensor(
                                 t.unwrapped,
                                 shape_env,
@@ -1641,8 +1526,7 @@ class MetaConverter(Generic[_TensorT]):
                             )
                             # TODO: is_leaf/requires_grad?
                         else:
-                            if t.stride is None:
-                                raise AssertionError("t.stride must not be None")
+                            assert t.stride is not None
 
                             sizes = t.size
                             strides = t.stride
@@ -1663,10 +1547,7 @@ class MetaConverter(Generic[_TensorT]):
                                         dtype=t.dtype,
                                         device=t.device,
                                     )
-                                    if t.data is None:
-                                        raise AssertionError(
-                                            "t.data must not be None when copy_data is True"
-                                        )
+                                    assert t.data is not None
                                     _safe_copy(r.real_tensor, t.data)  # type: ignore[attr-defined]
                         # pyrefly: ignore [bad-return]
                         return r
@@ -1674,14 +1555,8 @@ class MetaConverter(Generic[_TensorT]):
                     r = _to_fake_tensor(t)
 
                 elif t.is_functional and t.device.type not in ["xla", "lazy"]:
-                    if t.unwrapped is None:
-                        raise AssertionError(
-                            "t.unwrapped must not be None for functional tensor"
-                        )
-                    if t.is_functorch_wrapped:  # handled above
-                        raise AssertionError(
-                            "Expected non-functorch wrapped functional tensor"
-                        )
+                    assert t.unwrapped is not None
+                    assert not t.is_functorch_wrapped  # handled above
                     unwrapped = self.meta_tensor(
                         t.unwrapped,
                         shape_env,
@@ -1700,8 +1575,7 @@ class MetaConverter(Generic[_TensorT]):
                     # directly from storage is WRONG because this won't cause
                     # version counters to get shared.
 
-                    if t.base is None:
-                        raise AssertionError("t.base must not be None for view tensor")
+                    assert t.base is not None
 
                     base_symbolic_context = None
                     if shape_env and symbolic_context is not None:
@@ -1709,10 +1583,7 @@ class MetaConverter(Generic[_TensorT]):
                             StatelessSymbolicContext,
                         )
 
-                        if not isinstance(symbolic_context, StatelessSymbolicContext):
-                            raise AssertionError(
-                                f"Expected StatelessSymbolicContext, got {type(symbolic_context)}"
-                            )
+                        assert isinstance(symbolic_context, StatelessSymbolicContext)
                         # NB: This should generally be set when the input is a view,
                         # but the exception right now is for fake-ifying grads, which is
                         # a work in progress.
@@ -1800,10 +1671,7 @@ class MetaConverter(Generic[_TensorT]):
                                 # Obscure case.  Create a leaf view and give it the
                                 # correct requires_grad, then do the final view.
                                 # NB: Can't have a non-leaf without requiring grad!
-                                if not t.requires_grad:
-                                    raise AssertionError(
-                                        "t.requires_grad must be True for non-leaf view"
-                                    )
+                                assert t.requires_grad
                                 with torch.no_grad(), enable_python_dispatcher():
                                     mid = self._checked_cast_tensor_t(
                                         base.view(base.shape)
@@ -1814,10 +1682,7 @@ class MetaConverter(Generic[_TensorT]):
                         # The CreationMeta influences whether or not inplace
                         # mutation is an error or not.  So we need to make
                         # sure we properly propagate this as well.
-                        if t.creation_meta is None:
-                            raise AssertionError(
-                                "t.creation_meta must not be None for view tensor"
-                            )
+                        assert t.creation_meta is not None
                         torch._C._autograd._set_creation_meta(r, t.creation_meta)
                     finally:
                         torch._C._dispatch_tls_set_dispatch_key_excluded(
@@ -1860,28 +1725,15 @@ class MetaConverter(Generic[_TensorT]):
                         )
                         if self.copy_data:
                             with torch.no_grad(), no_dispatch():
-                                if t.size is None:
-                                    raise AssertionError(
-                                        "t.size must not be None when copy_data is True"
-                                    )
-                                if t.stride is None:
-                                    raise AssertionError(
-                                        "t.stride must not be None when copy_data is True"
-                                    )
-                                if not _is_fake_tensor(r):
-                                    raise AssertionError(
-                                        "Expected r to be a FakeTensor"
-                                    )
-                                # pyrefly: ignore[bad-assignment]
+                                assert t.size is not None
+                                assert t.stride is not None
+                                assert _is_fake_tensor(r)
                                 r.real_tensor = torch.empty_strided(
                                     t.size, t.stride, dtype=t.dtype, device=t.device
                                 )
                                 _safe_copy(r.real_tensor, t.data)
 
-                    if not safe_is_leaf(r):
-                        raise AssertionError(
-                            "the callback you passed in doesn't detach"
-                        )
+                    assert safe_is_leaf(r), "the callback you passed in doesn't detach"
                     if t.requires_grad:
                         r.requires_grad = t.requires_grad
                         if not is_leaf:
@@ -1898,8 +1750,7 @@ class MetaConverter(Generic[_TensorT]):
                             r = self._backward_error(r)
 
                     s = t.storage
-                    if s is None:
-                        raise AssertionError("t.storage must not be None")
+                    assert s is not None
                     if s.id not in self.storage_memo and (
                         r.is_nested
                         or (
@@ -1910,12 +1761,8 @@ class MetaConverter(Generic[_TensorT]):
                         # You're normal and happy, install the fresh storage into the memo
                         self.set_storage_memo(s, r.untyped_storage())
                         if self.copy_data:
-                            if not _is_fake_tensor(r):
-                                raise AssertionError("Expected r to be a FakeTensor")
-                            if r.real_tensor is None:
-                                raise AssertionError(
-                                    "r.real_tensor must not be None when copy_data is True"
-                                )
+                            assert _is_fake_tensor(r)
+                            assert r.real_tensor is not None
                             _set_real_storage(
                                 r.untyped_storage(), r.real_tensor.untyped_storage()
                             )
@@ -1964,18 +1811,9 @@ class MetaConverter(Generic[_TensorT]):
                                 r.set_(r_s, storage_offset, sizes, strides)
                             if self.copy_data:
                                 with torch.no_grad(), no_dispatch():
-                                    if not _is_fake_tensor(r):
-                                        raise AssertionError(
-                                            "Expected r to be a FakeTensor"
-                                        )
-                                    if r.real_tensor is None:
-                                        raise AssertionError(
-                                            "r.real_tensor must not be None when copy_data is True"
-                                        )
-                                    if t.stride is None:
-                                        raise AssertionError(
-                                            "t.stride must not be None when copy_data is True"
-                                        )
+                                    assert _is_fake_tensor(r)
+                                    assert r.real_tensor is not None
+                                    assert t.stride is not None
                                     r.real_tensor.set_(
                                         _get_real_storage(r_s),
                                         t.storage_offset,
@@ -2022,8 +1860,7 @@ class MetaConverter(Generic[_TensorT]):
             # See Note: [Creating symbolic nested int]
             if t.nested_int is not None:
                 # pyrefly: ignore [unbound-name]
-                if not _is_fake_tensor(r):
-                    raise AssertionError("Expected r to be a FakeTensor for nested int")
+                assert _is_fake_tensor(r)
                 # pyrefly: ignore [unbound-name]
                 r.nested_int_memo = r.fake_mode.create_symbolic_nested_int(
                     nt_tensor_id=t.nested_int
@@ -2093,8 +1930,7 @@ class MetaConverter(Generic[_TensorT]):
         t_desc = self.describer.describe_tensor(t, trace=trace)
 
         if trace:
-            if source is None:
-                raise AssertionError("source must not be None when trace is True")
+            assert source is not None
             trace_structured(
                 "describe_source",
                 metadata_fn=lambda: {

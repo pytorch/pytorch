@@ -21,26 +21,11 @@ def _dummy_fn(name: str) -> Callable:
 
 
 if not hasattr(torch._C, "_gds_register_buffer"):
-    if hasattr(torch._C, "_gds_deregister_buffer"):
-        raise AssertionError(
-            "_gds_deregister_buffer exists but _gds_register_buffer does not"
-        )
-    if hasattr(torch._C, "_gds_register_handle"):
-        raise AssertionError(
-            "_gds_register_handle exists but _gds_register_buffer does not"
-        )
-    if hasattr(torch._C, "_gds_deregister_handle"):
-        raise AssertionError(
-            "_gds_deregister_handle exists but _gds_register_buffer does not"
-        )
-    if hasattr(torch._C, "_gds_load_storage"):
-        raise AssertionError(
-            "_gds_load_storage exists but _gds_register_buffer does not"
-        )
-    if hasattr(torch._C, "_gds_save_storage"):
-        raise AssertionError(
-            "_gds_save_storage exists but _gds_register_buffer does not"
-        )
+    assert not hasattr(torch._C, "_gds_deregister_buffer")
+    assert not hasattr(torch._C, "_gds_register_handle")
+    assert not hasattr(torch._C, "_gds_deregister_handle")
+    assert not hasattr(torch._C, "_gds_load_storage")
+    assert not hasattr(torch._C, "_gds_save_storage")
     # Define functions
     torch._C.__dict__["_gds_register_buffer"] = _dummy_fn("_gds_register_buffer")
     torch._C.__dict__["_gds_deregister_buffer"] = _dummy_fn("_gds_deregister_buffer")
@@ -134,8 +119,9 @@ class GdsFile:
 
         This is a wrapper around ``cuFileHandleRegister``.
         """
-        if self.handle is not None:
-            raise AssertionError("Cannot register a handle that is already registered.")
+        assert self.handle is None, (
+            "Cannot register a handle that is already registered."
+        )
         self.handle = torch._C._gds_register_handle(self.fd)
 
     def deregister_handle(self) -> None:
@@ -143,8 +129,9 @@ class GdsFile:
 
         This is a wrapper around ``cuFileHandleDeregister``.
         """
-        if self.handle is None:
-            raise AssertionError("Cannot deregister a handle that is not registered.")
+        assert self.handle is not None, (
+            "Cannot deregister a handle that is not registered."
+        )
         torch._C._gds_deregister_handle(self.handle)
         self.handle = None
 
@@ -158,8 +145,9 @@ class GdsFile:
             storage (Storage): Storage to load data into.
             offset (int, optional): Offset into the file to start loading from. (Default: 0)
         """
-        if self.handle is None:
-            raise AssertionError("Cannot load data from a file that is not registered.")
+        assert self.handle is not None, (
+            "Cannot load data from a file that is not registered."
+        )
         torch._C._gds_load_storage(self.handle, storage, offset)
 
     def save_storage(self, storage: Storage, offset: int = 0) -> None:
@@ -172,6 +160,7 @@ class GdsFile:
             storage (Storage): Storage to save data from.
             offset (int, optional): Offset into the file to start saving to. (Default: 0)
         """
-        if self.handle is None:
-            raise AssertionError("Cannot save data to a file that is not registered.")
+        assert self.handle is not None, (
+            "Cannot save data to a file that is not registered."
+        )
         torch._C._gds_save_storage(self.handle, storage, offset)

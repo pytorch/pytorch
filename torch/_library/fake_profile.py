@@ -184,8 +184,7 @@ def unsafe_generate_fake_kernels(op_profiles: dict[str, set[OpProfile]]) -> Gene
         # Restore abstract_fns for CustomOpDefs
         for op_str, old_fake in old_fake_impls.items():
             opdef = _maybe_get_opdef(op_str)
-            if opdef is None:
-                raise AssertionError(f"opdef for {op_str} must not be None")
+            assert opdef is not None
             opdef.register_fake(old_fake)
 
 

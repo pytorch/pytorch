@@ -40,14 +40,12 @@ void fake_quantize_tensor_cachemask_kernel_cuda(
       gpu_kernel_multiple_outputs(
         iter,
         [=] GPU_LAMBDA (scalar_t input_val) -> thrust::tuple<scalar_t, bool> {
-          // Clamp the float value before casting to avoid undefined behavior with inf/nan
-          const float raw_qval = std::nearbyint(input_val * inv_scale) + zero_point;
-          const float qval_float = fminf(static_cast<float>(quant_max),
-                                         fmaxf(static_cast<float>(quant_min), raw_qval));
-          const auto qval = static_cast<int64_t>(qval_float);
+          const auto qval = static_cast<int64_t>(std::nearbyint(input_val * inv_scale) + zero_point);
           return {
-              (qval - zero_point) * scale,
-              ((quant_min <= raw_qval) && (raw_qval <= quant_max))  // Use raw_qval for mask
+            // fake_quantized value
+            (fminf(quant_max, fmaxf(quant_min, qval)) - zero_point) * scale,
+            // mask for grad
+            ((quant_min <= qval) && (qval <= quant_max))
           };
         }
       );
@@ -57,14 +55,12 @@ void fake_quantize_tensor_cachemask_kernel_cuda(
       gpu_kernel_multiple_outputs(
         iter,
         [=] GPU_LAMBDA (scalar_t input_val) -> thrust::tuple<scalar_t, bool> {
-          // Clamp the float value before casting to avoid undefined behavior with inf/nan
-          const float raw_qval = std::nearbyint(input_val * inv_scale) + zero_point;
-          const float qval_float = fminf(static_cast<float>(quant_max),
-                                         fmaxf(static_cast<float>(quant_min), raw_qval));
-          const auto qval = static_cast<int64_t>(qval_float);
+          const auto qval = static_cast<int64_t>(std::nearbyint(input_val * inv_scale) + zero_point);
           return {
-              (qval - zero_point) * scale,
-              ((quant_min <= raw_qval) && (raw_qval <= quant_max))  // Use raw_qval for mask
+            // fake_quantized value
+            (fminf(quant_max, fmaxf(quant_min, qval)) - zero_point) * scale,
+            // mask for grad
+            ((quant_min <= qval) && (qval <= quant_max))
           };
         }
       );

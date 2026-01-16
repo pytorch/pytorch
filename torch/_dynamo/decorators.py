@@ -539,7 +539,7 @@ def _apply_func_to_inner_tensors_of_same_dim(
             func(inner, *args, **kwargs)
 
 
-@dataclass(frozen=True, slots=True)
+@dataclass(frozen=True)
 class _DimRange:
     """
     This represents an dimension of a tensor and the corresponding

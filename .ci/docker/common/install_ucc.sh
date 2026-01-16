@@ -80,10 +80,7 @@ function install_ucc() {
     --with-nvcc-gencode="${NVCC_GENCODE}" \
     --with-rocm=$with_rocm                \
     --with-rocm-arch="${HIP_OFFLOAD}"
-  # First observed by ROCm nightly builds, ucc rccl sources fail compile with
-  # error: #warning "NCCL C++ API is disabled because C compiler is being used. [-Werror=cpp]
-  # Work-around by adding make CFLAGS=-Wno-error=cpp
-  time make -j CFLAGS=-Wno-error=cpp
+  time make -j
   sudo make install
 
   popd

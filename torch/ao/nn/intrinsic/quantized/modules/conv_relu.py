@@ -83,10 +83,7 @@ class ConvReLU1d(nnq.Conv1d):
     def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         r"""Creates a quantized module from a float module."""
         if type(mod) is torch.ao.nn.intrinsic.qat.ConvBnReLU1d:
-            if mod.bn.running_var is None or mod.bn.running_mean is None:
-                raise AssertionError(
-                    "mod.bn.running_var and mod.bn.running_mean must not be None"
-                )
+            assert mod.bn.running_var is not None and mod.bn.running_mean is not None
             mod.weight, mod.bias = fuse_conv_bn_weights(
                 mod.weight,
                 mod.bias,
@@ -101,10 +98,9 @@ class ConvReLU1d(nnq.Conv1d):
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
         r"""Creates a quantized module from a reference module."""
-        if type(ref_qconv) is torch.ao.nn.intrinsic.ConvBnReLU1d:
-            raise AssertionError(
-                "BatchNorm1d should be fused into Conv1d before converting to reference module"
-            )
+        assert type(ref_qconv) is not torch.ao.nn.intrinsic.ConvBnReLU1d, (
+            "BatchNorm1d should be fused into Conv1d before converting to reference module"
+        )
         return super().from_reference(ref_qconv[0], output_scale, output_zero_point)
 
 
@@ -171,10 +167,7 @@ class ConvReLU2d(nnq.Conv2d):
     def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         r"""Creates a quantized module from a float module."""
         if type(mod) is torch.ao.nn.intrinsic.qat.ConvBnReLU2d:
-            if mod.bn.running_var is None or mod.bn.running_mean is None:
-                raise AssertionError(
-                    "mod.bn.running_var and mod.bn.running_mean must not be None"
-                )
+            assert mod.bn.running_var is not None and mod.bn.running_mean is not None
             mod.weight, mod.bias = fuse_conv_bn_weights(
                 mod.weight,
                 mod.bias,
@@ -191,10 +184,9 @@ class ConvReLU2d(nnq.Conv2d):
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
         r"""Creates a quantized module from a reference module."""
-        if type(ref_qconv) is torch.ao.nn.intrinsic.ConvBnReLU2d:
-            raise AssertionError(
-                "BatchNorm2d should be fused into Conv2d before converting to reference module"
-            )
+        assert type(ref_qconv) is not torch.ao.nn.intrinsic.ConvBnReLU2d, (
+            "BatchNorm2d should be fused into Conv2d before converting to reference module"
+        )
         return super().from_reference(ref_qconv[0], output_scale, output_zero_point)
 
 
@@ -224,8 +216,7 @@ class ConvReLU3d(nnq.Conv3d):
         device=None,
         dtype=None,
     ):
-        if padding_mode == "reflect":
-            raise AssertionError("Conv3d does not support reflection padding")
+        assert padding_mode != "reflect", "Conv3d does not support reflection padding"
         super().__init__(
             in_channels,
             out_channels,
@@ -262,10 +253,7 @@ class ConvReLU3d(nnq.Conv3d):
     def from_float(cls, mod, use_precomputed_fake_quant=False):  # type: ignore[override]
         r"""Creates a quantized module from a float module."""
         if type(mod) is torch.ao.nn.intrinsic.qat.ConvBnReLU3d:
-            if mod.bn.running_var is None or mod.bn.running_mean is None:
-                raise AssertionError(
-                    "mod.bn.running_var and mod.bn.running_mean must not be None"
-                )
+            assert mod.bn.running_var is not None and mod.bn.running_mean is not None
             mod.weight, mod.bias = fuse_conv_bn_weights(
                 mod.weight,
                 mod.bias,
@@ -282,8 +270,7 @@ class ConvReLU3d(nnq.Conv3d):
     @classmethod
     def from_reference(cls, ref_qconv, output_scale, output_zero_point):
         r"""Creates a quantized module from a reference module."""
-        if type(ref_qconv) is torch.ao.nn.intrinsic.ConvBnReLU3d:
-            raise AssertionError(
-                "BatchNorm3d should be fused into Conv3d before converting to reference module"
-            )
+        assert type(ref_qconv) is not torch.ao.nn.intrinsic.ConvBnReLU3d, (
+            "BatchNorm3d should be fused into Conv3d before converting to reference module"
+        )
         return super().from_reference(ref_qconv[0], output_scale, output_zero_point)

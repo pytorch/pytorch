@@ -86,13 +86,11 @@ class FakeImplHolder:
 
 
 def construct_meta_kernel(qualname: str, fake_impl_holder: FakeImplHolder) -> Callable:
-    if fake_impl_holder.kernel is None:
-        raise AssertionError("fake_impl_holder.kernel must not be None")
+    assert fake_impl_holder.kernel is not None
 
     @functools.wraps(fake_impl_holder.kernel.func)
     def meta_kernel(*args, **kwargs):
-        if fake_impl_holder.kernel is None:
-            raise AssertionError("fake_impl_holder.kernel must not be None")
+        assert fake_impl_holder.kernel is not None
         source = fake_impl_holder.kernel.source
 
         def error_on_ctx():

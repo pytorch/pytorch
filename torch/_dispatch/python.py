@@ -1,6 +1,7 @@
+# mypy: allow-untyped-defs
 import itertools
 import unittest.mock
-from collections.abc import Callable, Generator, Iterator
+from collections.abc import Callable, Iterator
 from contextlib import contextmanager
 from typing import TypeVar, Union
 from typing_extensions import ParamSpec
@@ -23,7 +24,6 @@ CROSSREF_FUNCTIONALIZE = False
 
 _P = ParamSpec("_P")
 _T = TypeVar("_T")
-_R = TypeVar("_R")
 
 
 def all_py_loaded_overloads() -> Iterator[torch._ops.OpOverload]:
@@ -53,7 +53,7 @@ def all_py_loaded_overloads() -> Iterator[torch._ops.OpOverload]:
 
 
 @contextmanager
-def suspend_functionalization() -> Generator[None, None, None]:
+def suspend_functionalization():
     f_tls = torch._C._dispatch_tls_is_dispatch_key_included(
         torch._C.DispatchKey.Functionalize
     )
@@ -67,9 +67,7 @@ def suspend_functionalization() -> Generator[None, None, None]:
             torch._enable_functionalization(reapply_views=f_rv)
 
 
-def check_tensor_metadata_matches(
-    nv: torch.Tensor, rv: torch.Tensor, desc: Callable[[], str]
-) -> None:
+def check_tensor_metadata_matches(nv, rv, desc):
     if not callable(desc):
         raise AssertionError(f"desc must be callable, got {type(desc)}")
     if nv.size() != rv.size():
@@ -85,7 +83,7 @@ def check_tensor_metadata_matches(
         )
 
 
-def check_metadata_matches(n: object, r: object, desc: Callable[[], str]) -> None:
+def check_metadata_matches(n, r, desc):
     if not callable(desc):
         raise AssertionError(f"desc must be callable, got {type(desc)}")
     n_vals, _n_spec = pytree.tree_flatten(n)
@@ -101,10 +99,10 @@ def check_metadata_matches(n: object, r: object, desc: Callable[[], str]) -> Non
 
 
 class Lit:
-    def __init__(self, s: str) -> None:
+    def __init__(self, s):
         self.s = s
 
-    def __repr__(self) -> str:
+    def __repr__(self):
         return self.s
 
 
@@ -129,7 +127,7 @@ def make_crossref_functionalize(
     def handler(*args: _P.args, **kwargs: _P.kwargs) -> _T:
         fake_mode = FakeTensorMode()
 
-        def fakeify_defun(t: _R) -> _R | torch._subclasses.fake_tensor.FakeTensor:
+        def fakeify_defun(t):
             if isinstance(t, torch.Tensor):
                 if torch._is_functional_tensor(t):
                     r = torch._from_functional_tensor(t)
@@ -149,7 +147,7 @@ def make_crossref_functionalize(
                 return fake_mode.from_tensor(r)
             return t
 
-        def maybe_detach(t: _R) -> _R | torch.Tensor:
+        def maybe_detach(t):
             if isinstance(t, torch.Tensor):
                 return t.detach()
             else:
@@ -169,7 +167,7 @@ def make_crossref_functionalize(
                 f_r = op(*f_args, **f_kwargs)  # pyrefly: ignore [invalid-param-spec]
         r = op._op_dk(final_key, *args, **kwargs)
 
-        def desc() -> str:
+        def desc():
             fmt_args = ", ".join(
                 itertools.chain(
                     (repr(pytree.tree_map(_fmt, a)) for a in orig_f_args),
@@ -190,7 +188,7 @@ def make_crossref_functionalize(
 # NB: enabling this is slow, don't do it in a hot loop.  This is purely
 # for debugging purposes.
 @contextmanager
-def enable_crossref_functionalize() -> Generator[None, None, None]:
+def enable_crossref_functionalize():
     for op in all_py_loaded_overloads():
         op._uncache_dispatch(torch._C.DispatchKey.Functionalize)
     try:

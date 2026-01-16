@@ -1,6 +1,6 @@
 from collections.abc import Callable
 from typing import Any, overload, TypeAlias
-from typing_extensions import Never, ParamSpec, TypeIs, TypeVar
+from typing_extensions import TypeIs
 
 import torch
 from torch import Tensor
@@ -13,9 +13,6 @@ from torch.utils._pytree import tree_flatten, tree_map, tree_unflatten
 
 from .._core import ComplexTensor
 
-
-_P = ParamSpec("_P")
-_R = TypeVar("_R")
 
 OpType: TypeAlias = OpOverloadPacket | OpOverload
 
@@ -92,11 +89,11 @@ def promote_tensors(
 
 def register_complex(
     op: OpType,
-    func_impl: Callable[..., Any] | None = None,
-) -> Callable[[Callable[_P, _R]], Callable[_P, _R]] | Callable[..., Any]:
+    func_impl: Callable | None = None,
+):
     """Decorator to register an implementation for some ops in some dispatch tables"""
 
-    def inner(func: Callable[_P, _R]) -> Callable[_P, _R]:
+    def inner(func):
         if COMPLEX_OPS_TABLE.get(op, func) is not func:
             raise RuntimeError(f"Attempted to register multiple functions for {op}")
         COMPLEX_OPS_TABLE[op] = func
@@ -111,20 +108,16 @@ def register_complex(
 FORCE_TEST_LIST: list[OpType] = []
 
 
-def register_force_test(
-    op: OpType, func_impl: Callable[..., Any] | None = None
-) -> Callable[[Callable[_P, _R]], Callable[_P, _R]] | Callable[..., Any]:
+def register_force_test(op: OpType, *args, **kwargs):
     """Will attempt to test these ops even if they err on "normal" inputs"""
     FORCE_TEST_LIST.append(op)
-    return register_complex(op, func_impl)
+    return register_complex(op, *args, **kwargs)
 
 
 DECOMPOSITIONS = get_decompositions(list(torch.ops.aten))  # type: ignore[no-matching-overload]
 
 
-def lookup_complex(
-    func: OpOverload, *args: Any, **kwargs: Any
-) -> Callable[..., Any] | None:
+def lookup_complex(func: OpOverload, *args, **kwargs) -> Callable | None:
     """
     Lookup an impl from the table.
 
@@ -206,12 +199,10 @@ def _get_func_name(op: OpType) -> str:
     return f"{_get_op_name(op)}_impl"
 
 
-def register_error(
-    op: OpType, exc_type: type[Exception] = NotImplementedError
-) -> Callable[[Callable[_P, _R]], Callable[_P, _R]] | Callable[..., Any]:
+def register_error(op: OpType, exc_type: type[Exception] = NotImplementedError):
     msg = f"`aten.{_get_op_name(op)}` not implemented for `{ComplexTensor.__name__}`."
 
-    def ordered_impl(*args: Any, **kwargs: Any) -> Never:
+    def ordered_impl(*args, **kwargs):
         raise exc_type(msg)
 
     func_name = _get_func_name(op)
@@ -221,14 +212,10 @@ def register_error(
     return register_force_test(op, ordered_impl)
 
 
-def register_binary_nonlinear(
-    op: OpType,
-) -> Callable[[Callable[_P, _R]], Callable[_P, _R]] | Callable[..., Any]:
+def register_binary_nonlinear(op: OpType) -> Callable:
     """Register a "multiplication-style" op, e.g. aten.mul, aten.mm, ..."""
 
-    def impl(
-        lhs: ComplexTensor, rhs: ComplexTensor, *args: Any, **kwargs: Any
-    ) -> ComplexTensor:
+    def impl(lhs: ComplexTensor, rhs: ComplexTensor, *args, **kwargs) -> ComplexTensor:
         a_r, a_i = split_complex_arg(lhs)
         b_r, b_i = split_complex_arg(rhs)
         out_dt, (a_r, a_i, b_r, b_i) = promote_tensors(a_r, a_i, b_r, b_i)
@@ -243,13 +230,11 @@ def register_binary_nonlinear(
     return register_complex(op, impl)
 
 
-def register_simple(
-    op: OpType,
-) -> Callable[[Callable[_P, _R]], Callable[_P, _R]] | Callable[..., Any]:
+def register_simple(op: OpType):
     """Register an op which can be applied independently to the real and complex parts to get the result."""
 
     def impl(
-        self: ComplexTensor, *args: Any, dtype: torch.dtype | None = None, **kwargs: Any
+        self: ComplexTensor, *args, dtype: torch.dtype | None = None, **kwargs
     ) -> ComplexTensor:
         x, y = split_complex_tensor(self)
         if dtype is not None and dtype not in COMPLEX_TO_REAL:
@@ -258,8 +243,7 @@ def register_simple(
             )
 
         if dtype in COMPLEX_TO_REAL:
-            if dtype is None:
-                raise AssertionError("dtype must not be None when in COMPLEX_TO_REAL")
+            assert dtype is not None
             kwargs["dtype"] = COMPLEX_TO_REAL[dtype]
 
         u = op(x, *args, **kwargs)
@@ -267,8 +251,7 @@ def register_simple(
 
         u_flat, u_spec = tree_flatten(u)
         v_flat, v_spec = tree_flatten(v)
-        if u_spec != v_spec:
-            raise AssertionError(f"Tree specs must match: {u_spec} != {v_spec}")
+        assert u_spec == v_spec
         out_flat = [
             ComplexTensor(ui, vi) for ui, vi in zip(u_flat, v_flat, strict=False)
         ]
@@ -304,7 +287,7 @@ class ComplexTensorMode(TorchDispatchMode):
 
     """ A TorchDispatchMode to replace any Tensor that has a complex dtype with a ComplexTensor for the computation. """
 
-    def __init__(self, _dispatch_key: Any = None, *, _compile: bool = False) -> None:
+    def __init__(self, _dispatch_key=None, *, _compile: bool = False):
         """Initialize a ComplexTensorMode.
 
         Args:
@@ -317,10 +300,10 @@ class ComplexTensorMode(TorchDispatchMode):
     def __torch_dispatch__(
         self,
         func: OpOverload,
-        types: tuple[type, ...],
-        args: tuple[Any, ...] = (),
+        types: tuple[type],
+        args: tuple = (),
         kwargs: dict[str, Any] | None = None,
-    ) -> Any:
+    ):
         if kwargs is None:
             kwargs = {}
 

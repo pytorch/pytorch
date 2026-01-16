@@ -1,11 +1,10 @@
 import warnings
 from collections.abc import Callable, Iterable
-from typing import Any, NamedTuple, TypeVar
+from typing import Any, NamedTuple, overload, TypeVar
 from typing_extensions import Self
 
 import torch
 from torch import _VF, Tensor
-from torch.utils._typing_utils import copy_method_params
 
 
 __all__ = [
@@ -100,11 +99,37 @@ class PackedSequence(PackedSequence_):
             bind(self.unsorted_indices, lambda t: t.pin_memory()),
         )
 
-    @copy_method_params(torch.Tensor.to)
+    @overload
+    def to(
+        self,
+        dtype: torch.dtype,
+        non_blocking: bool = ...,
+        copy: bool = ...,
+    ) -> Self: ...
+
+    @overload
+    def to(
+        self,
+        device: str | torch.device | int | None = ...,
+        dtype: torch.dtype | None = ...,
+        non_blocking: bool = ...,
+        copy: bool = ...,
+    ) -> Self: ...
+
+    @overload
+    def to(
+        self,
+        other: Tensor,
+        non_blocking: bool = ...,
+        copy: bool = ...,
+    ) -> Self: ...
+
     def to(self, *args: Any, **kwargs: Any) -> Self:
         r"""Perform dtype and/or device conversion on `self.data`.
 
-        It has similar signature as :meth:`torch.Tensor.to`
+        It has similar signature as :meth:`torch.Tensor.to`, except optional
+        arguments like `non_blocking` and `copy` should be passed as kwargs,
+        not args, or they will not apply to the index tensors.
 
         .. note::
 
@@ -112,30 +137,24 @@ class PackedSequence(PackedSequence_):
             and :class:`torch.device`, then ``self`` is returned.
             Otherwise, returns a copy with the desired configuration.
         """
-
         # Why not convert `batch_sizes`?
         # See NOTE [ device and dtype of a PackedSequence ]
         data = self.data.to(*args, **kwargs)
         if data is self.data:
             return self
         else:
-            _device, _dtype, non_blocking, convert_to_format = torch._C._nn._parse_to(
-                *args, **kwargs
-            )
-
             # Does not forward device or dtype arg/kwargs, device is set from data.device
-            def call_to(t: torch.Tensor) -> torch.Tensor:
-                return t.to(
-                    data.device,
-                    non_blocking=non_blocking,
-                    memory_format=convert_to_format,
-                )
-
-            sorted_indices = bind(self.sorted_indices, call_to)
-            unsorted_indices = bind(self.unsorted_indices, call_to)
+            kwargs = dict(
+                filter(lambda t: t[0] != "device" and t[0] != "dtype", kwargs.items())
+            )
+            sorted_indices = bind(
+                self.sorted_indices, lambda t: t.to(data.device, **kwargs)
+            )
+            unsorted_indices = bind(
+                self.unsorted_indices, lambda t: t.to(data.device, **kwargs)
+            )
             return type(self)(data, self.batch_sizes, sorted_indices, unsorted_indices)
 
-    @copy_method_params(torch.Tensor.cuda)
     def cuda(self, *args: Any, **kwargs: Any) -> Self:
         # Tests to see if 'cuda' should be added to kwargs
         ex = torch.tensor((), dtype=self.data.dtype, device=self.data.device).to(
@@ -146,7 +165,6 @@ class PackedSequence(PackedSequence_):
         kwargs["device"] = "cuda"
         return self.to(*args, **kwargs)
 
-    @copy_method_params(torch.Tensor.cpu)
     def cpu(self, *args: Any, **kwargs: Any) -> Self:
         ex = torch.tensor((), dtype=self.data.dtype, device=self.data.device).to(
             *args, **kwargs

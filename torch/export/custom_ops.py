@@ -20,11 +20,7 @@ def _access_subclass_inner_tensor(
 ) -> torch.Tensor:
     from torch.utils._python_dispatch import is_traceable_wrapper_subclass
 
-    if not is_traceable_wrapper_subclass(src_subclass_tensor):
-        raise AssertionError(
-            f"Expected src_subclass_tensor to be a traceable wrapper subclass, "
-            f"but got {type(src_subclass_tensor)}"
-        )
+    assert is_traceable_wrapper_subclass(src_subclass_tensor)
     val = getattr(src_subclass_tensor, attr, None)
     if val is None or not isinstance(val, torch.Tensor):
         raise RuntimeError(
@@ -49,8 +45,5 @@ def _call_custom_autograd_function_in_pre_dispatch(function_cls_name, *args, **k
     # Import the module and get the class
     module = importlib.import_module(module_name)
     function_cls = getattr(module, class_name)
-    if not hasattr(function_cls, "apply"):
-        raise AssertionError(
-            f"Expected function class {function_cls_name} to have 'apply' method"
-        )
+    assert hasattr(function_cls, "apply")
     return function_cls.apply(*args, **kwargs)

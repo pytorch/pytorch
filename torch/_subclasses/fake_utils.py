@@ -1,11 +1,13 @@
-from __future__ import annotations
+# mypy: ignore-errors
 
 import functools
 import warnings
-from typing import Any, TYPE_CHECKING
+from collections.abc import Callable
+from typing import Any, Union
 
 import torch
 import torch.utils._pytree as pytree
+from torch._ops import OpOverload
 from torch._subclasses.fake_tensor import (
     FakeTensor,
     FakeTensorMode,
@@ -16,17 +18,10 @@ from torch._subclasses.fake_tensor import (
 from torch.utils._python_dispatch import TorchDispatchMode
 
 
-if TYPE_CHECKING:
-    from collections.abc import Callable, Mapping, Sequence
-
-    from torch._ops import OpOverload
-    from torch.utils._pytree import PyTree
-
-
 aten = torch._ops.ops.aten
 
 
-def outputs_alias_inputs(outputs: PyTree, inputs: PyTree) -> bool:
+def outputs_alias_inputs(outputs, inputs):
     input_storages = {
         inp._typed_storage()._cdata
         for inp in tree_flatten_only(torch.Tensor, inputs)
@@ -38,12 +33,12 @@ def outputs_alias_inputs(outputs: PyTree, inputs: PyTree) -> bool:
     )
 
 
-def outputs_are_inputs(outputs: PyTree, inputs: PyTree) -> bool:
+def outputs_are_inputs(outputs, inputs):
     input_ids = {id(inp) for inp in tree_flatten_only(torch.Tensor, inputs)}
     return any(id(out) in input_ids for out in tree_flatten_only(torch.Tensor, outputs))
 
 
-def output_alias_each_other(outputs: PyTree) -> bool:
+def output_alias_each_other(outputs):
     storages = set()
     for out in tree_flatten_only(torch.Tensor, outputs):
         if not torch._C._has_storage(out):
@@ -55,13 +50,7 @@ def output_alias_each_other(outputs: PyTree) -> bool:
     return False
 
 
-def _check_alias_info(
-    context: str,
-    real_out: PyTree,
-    real_in: PyTree,
-    fake_out: PyTree,
-    fake_in: PyTree,
-) -> None:
+def _check_alias_info(context, real_out, real_in, fake_out, fake_in):
     r_aliasing = outputs_alias_inputs(real_out, real_in)
     f_aliasing = outputs_alias_inputs(fake_out, fake_in)
     if r_aliasing != f_aliasing:
@@ -85,7 +74,7 @@ def _check_alias_info(
         )
 
 
-def is_sdpa_error(func: OpOverload, idx: int, e: Exception) -> bool:
+def is_sdpa_error(func, idx, e):
     if (
         (
             func is aten._scaled_dot_product_flash_attention.default
@@ -114,8 +103,8 @@ def is_sdpa_error(func: OpOverload, idx: int, e: Exception) -> bool:
 
 
 def try_convert_fake_to_real(
-    ten_list: list[FakeTensor | Any],
-) -> list[FakeTensor | torch.Tensor | Any]:
+    ten_list: list[Union[FakeTensor, Any]],
+) -> list[Union[FakeTensor, torch.Tensor, Any]]:
     """
     Attempt to convert fake tensors to a corresponding real tensor with the correct underlying storage by looking up
     the FakeTensorMode meta to real storage mapping. On failure to find the storage mapping, the FakeTensor will
@@ -150,7 +139,7 @@ def try_convert_fake_to_real(
 
         unhinted = False
 
-        def map_symint(s: torch.SymInt | int) -> int:
+        def map_symint(s):
             nonlocal unhinted
             if not isinstance(s, torch.SymInt):
                 return s
@@ -184,12 +173,12 @@ def try_convert_fake_to_real(
 def _check_fake_real_tensors(
     real_out: torch.Tensor,
     fake_out: FakeTensor,
-    context: str = "",
-    sizes: bool = True,
-    strides: bool = False,
-    storage_offset: bool = True,
-    requires_grad: bool = True,
-) -> None:
+    context="",
+    sizes=True,
+    strides=False,
+    storage_offset=True,
+    requires_grad=True,
+):
     if requires_grad:
         if real_out.requires_grad != fake_out.requires_grad:
             raise MetadataMismatchError(
@@ -217,12 +206,12 @@ def _check_fake_real_tensors(
 class CrossRefFakeMode(TorchDispatchMode):
     def __init__(
         self,
-        ignore_op_fn: Callable[[OpOverload], bool] | None = None,
+        ignore_op_fn: Union[Callable[[OpOverload], bool], None] = None,
         *,
-        check_strides: bool = True,
-        check_aliasing: bool = True,
-        only_check_ops_with_meta: bool = True,
-    ) -> None:
+        check_strides=True,
+        check_aliasing=True,
+        only_check_ops_with_meta=True,
+    ):
         super().__init__()
         self.ignore_op_fn = (
             ignore_op_fn if ignore_op_fn is not None else lambda fn: False
@@ -231,18 +220,10 @@ class CrossRefFakeMode(TorchDispatchMode):
         self.check_aliasing = check_aliasing
         self.only_check_ops_with_meta = only_check_ops_with_meta
 
-    def __torch_dispatch__(
-        self,
-        func: OpOverload,
-        types: Sequence[type],
-        args: Sequence[object] = (),
-        kwargs: Mapping[str, object] | None = None,
-    ) -> object:
+    def __torch_dispatch__(self, func, types, args=(), kwargs=None):
         kwargs = kwargs or {}
 
         fake_r = None
-        fake_args: Sequence[object] = ()
-        fake_kwargs: Mapping[str, object] = {}
 
         # empty_like excluded for now due to sparse complex
         # aten._to_dense.default this one is getting called with csc
@@ -286,10 +267,9 @@ class CrossRefFakeMode(TorchDispatchMode):
         if fake_r is not None:
             r_flat = pytree.tree_leaves(r)
             f_flat = pytree.tree_leaves(fake_r)
-            if len(f_flat) != len(r_flat):
-                raise AssertionError(
-                    f"{context} mismatch in number of returns {len(f_flat)} != {len(r_flat)}"
-                )
+            assert len(f_flat) == len(r_flat), (
+                f"{context} mismatch in number of returns {len(f_flat)} != {len(r_flat)}"
+            )
 
             if self.check_aliasing:
                 _check_alias_info(
@@ -300,10 +280,9 @@ class CrossRefFakeMode(TorchDispatchMode):
                 zip(pytree.tree_leaves(r), pytree.tree_leaves(fake_r))
             ):
                 r_is_ten = isinstance(r_out, torch.Tensor)
-                if r_is_ten != isinstance(f_out, torch.Tensor):
-                    raise AssertionError(
-                        f"{context} mismatched number of tensor outputs"
-                    )
+                assert r_is_ten == isinstance(f_out, torch.Tensor), (
+                    f"{context} mismatched number of tensor outputs"
+                )
                 if r_is_ten:
                     try:
                         _check_fake_real_tensors(

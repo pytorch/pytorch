@@ -38,7 +38,7 @@ import types
 import warnings
 import weakref
 from collections.abc import Callable, Iterable, Sequence
-from typing import Any, Literal, TYPE_CHECKING, Union
+from typing import Any, Literal, TYPE_CHECKING
 from typing_extensions import is_typeddict
 
 import torch._dynamo.config
@@ -97,6 +97,7 @@ from ..utils import (
 )
 from .base import MutationType, raise_type_error_exc, ValueMutationNew, VariableTracker
 from .dicts import ConstDictVariable, DefaultDictVariable, SetVariable
+from .lists import ListVariable, SizeVariable, TupleVariable
 
 
 try:
@@ -115,8 +116,6 @@ if TYPE_CHECKING:
     from torch._dynamo.side_effects import SideEffects
     from torch._dynamo.symbolic_convert import InstructionTranslator
     from torch._dynamo.variables.constant import ConstantVariable
-
-    from .lists import ListVariable, TupleVariable
 
 
 def is_standard_setattr(val: object) -> bool:
@@ -742,7 +741,9 @@ class UserDefinedClassVariable(UserDefinedVariable):
                         "1 args and 0 kwargs",
                         f"{len(args)} args and {len(kwargs)} kwargs",
                     )
-                items = args[0].force_unpack_var_sequence(tx)
+                items_ret_type: list[VariableTracker] = args[
+                    0
+                ].force_unpack_var_sequence(tx)
             else:
                 field_defaults = self.value._field_defaults  # type: ignore[attr-defined]
 
@@ -767,22 +768,20 @@ class UserDefinedClassVariable(UserDefinedVariable):
                     items[fields.index(name)] = value  # type: ignore[call-overload]
 
                 assert all(x is not None for x in items)
+                items_ret_type = items  # type: ignore[assignment]
 
             # Modify mutability of namedtuple for sourcelesss instantiations.
             from .base import AttributeMutationNew
-            from .lists import NamedTupleVariable
 
-            return NamedTupleVariable(
-                items,
-                self.value,  # type: ignore[arg-type]
+            return variables.NamedTupleVariable(
+                items_ret_type,
+                self.value,
                 mutation_type=AttributeMutationNew(),
             )
         elif self.value is torch.Size:
             # This simulates `THPSize_pynew`, the C impl for `Size.__new__`.
-            from .lists import SizeVariable
-
             tup = variables.BuiltinVariable(tuple).call_function(tx, args, kwargs)
-            return SizeVariable(tup.items)  # type: ignore[missing-attribute]
+            return SizeVariable(tup.items)  # type: ignore[attr-defined]
         elif is_frozen_dataclass(self.value) and self.is_standard_new():
             fields = dataclasses.fields(self.value)  # type: ignore[arg-type]
             assert self.source is not None
@@ -833,13 +832,11 @@ class UserDefinedClassVariable(UserDefinedVariable):
         ):
             # torch.LongTensor cannot accept a list of FakeTensors.
             # So we stack the list of FakeTensors instead.
-            from .lists import ListVariable
-
             if (
                 np
                 and self.value in tensortype_to_dtype
                 and len(args) == 1
-                and isinstance(args[0], ListVariable)
+                and isinstance(args[0], variables.ListVariable)
                 and len(args[0].items) > 1
                 and all(x.is_tensor() for x in args[0].items)
             ):
@@ -856,7 +853,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
 
             if issubclass(self.value, torch.Stream):
                 from .constant import ConstantVariable
-                from .lists import TupleVariable
 
                 var_kwargs = ConstDictVariable(
                     {ConstantVariable(k): v for k, v in kwargs.items()}
@@ -883,7 +879,6 @@ class UserDefinedClassVariable(UserDefinedVariable):
                 )
             elif issubclass(self.value, torch.Event):
                 from .constant import ConstantVariable
-                from .lists import TupleVariable
 
                 # Register newly created event for reconstruction
                 var_kwargs = ConstDictVariable(
@@ -1128,7 +1123,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         self,
         tx: "InstructionTranslator",
         fn: VariableTracker,
-        types: "TupleVariable",
+        types: TupleVariable,
         args: Sequence[Any],
         kwargs: dict[str, Any],
     ) -> VariableTracker:
@@ -1271,20 +1266,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
                 func_var = VariableTracker.build(tx, setter, func_source)
                 args = [desc_var, self, value]
                 return func_var.call_function(tx, args, {})
-
-            # Check for property descriptors with fset.
-            # property.__set__ is a slot wrapper (not a Python function), so
-            # try_get_descritor_and_setter_py_func returns None.
-            # We need to handle properties specially by calling their fset.
-            property_fset = self.try_get_property_fset(name_str)
-            if property_fset is not None:
-                fset_source = None
-                if self.cls_source:
-                    desc_source = self.get_source_by_walking_mro(name_str)
-                    fset_source = AttrSource(desc_source, "fset")
-                fset_vt = VariableTracker.build(tx, property_fset, fset_source)
-                return fset_vt.call_function(tx, [self, value], {})
-
             # NOTE: else we assume the descriptor (if any) has a
             # side-effect-free `__set__` as far as Dynamo tracing is concerned.
 
@@ -1460,9 +1441,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # Skip if `__set__` was traceable (no need to redo the side effect).
             if inspect.isfunction(setter):
                 return True
-            # Skip for property descriptors with fset - we trace fset directly.
-            if isinstance(descriptor, property) and descriptor.fset is not None:
-                return True
             # For untraceable `__set__` we should still skip if the attribute
             # was mutated via instance `__dict__`.
             elif attr_name in self.attrs_directly_modifed_on_dict:
@@ -1476,20 +1454,6 @@ class UserDefinedObjectVariable(UserDefinedVariable):
         setter = inspect.getattr_static(type(descriptor), "__set__", None)
         if inspect.isfunction(setter):
             return (descriptor, setter)
-        return None
-
-    def try_get_property_fset(self, attr_name: str) -> types.FunctionType | None:
-        """
-        Check if attr_name corresponds to a property descriptor with an fset.
-        Returns the fset function if found, None otherwise.
-
-        This is needed because property.__set__ is a slot wrapper (C function),
-        not a Python function, so try_get_descritor_and_setter_py_func returns None
-        for properties. But property.fset IS a Python function that we can trace.
-        """
-        descriptor = inspect.getattr_static(type(self.value), attr_name, None)
-        if isinstance(descriptor, property) and descriptor.fset is not None:
-            return descriptor.fset
         return None
 
     def has_key_in_generic_dict(self, tx: "InstructionTranslator", key: str) -> bool:
@@ -1558,9 +1522,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             getattribute_fn = inspect.getattr_static(
                 type(self.value), "__getattribute__"
             )
-            new_source: AttrSource | None = (
-                AttrSource(self.source, "__getattribute__") if self.source else None
-            )
+            if self.source:
+                new_source: AttrSource | None = AttrSource(
+                    self.source, "__getattribute__"
+                )
 
             try:
                 return variables.UserMethodVariable(
@@ -1924,16 +1889,10 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # In optree, types can be registered globally (type in registry)
             # or with a namespace ((namespace, type) in registry)
             try:
-                import optree
                 from optree.registry import _NODETYPE_REGISTRY
 
                 # Check if registered globally
-                # Namedtuples and structseqs are implicitly pytree nodes
-                is_registered = (
-                    self.value_type in _NODETYPE_REGISTRY
-                    or optree.is_namedtuple_class(self.value_type)
-                    or optree.is_structseq_class(self.value_type)
-                )
+                is_registered = self.value_type in _NODETYPE_REGISTRY
 
                 # Also check if registered with a namespace that's being used
                 if not is_registered:
@@ -1975,12 +1934,7 @@ class UserDefinedObjectVariable(UserDefinedVariable):
             # Check pytorch's pytree registry
             import torch.utils._pytree as pytree
 
-            # Namedtuples and structseqs are implicitly pytree nodes
-            is_registered = (
-                self.value_type in pytree.SUPPORTED_NODES
-                or pytree.is_namedtuple_class(self.value_type)
-                or pytree.is_structseq_class(self.value_type)
-            )
+            is_registered = self.value_type in pytree.SUPPORTED_NODES
 
         # If not registered, it's a leaf and we should apply the map_fn directly
         if not is_registered:
@@ -2539,16 +2493,14 @@ class UserDefinedListVariable(UserDefinedObjectVariable):
     """
 
     def __init__(
-        self, value: object, list_vt: Union["ListVariable", None] = None, **kwargs: Any
+        self, value: object, list_vt: ListVariable | None = None, **kwargs: Any
     ) -> None:
-        from .lists import ListVariable
-
         super().__init__(value, **kwargs)
         if list_vt is None:
             assert self.source is None, (
                 "list_vt must be constructed by builder.py when source is present"
             )
-            self._list_vt = ListVariable([], mutation_type=ValueMutationNew())
+            self._list_vt = variables.ListVariable([], mutation_type=ValueMutationNew())
         else:
             self._list_vt = list_vt
 
@@ -2588,11 +2540,13 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
     UserDefinedObjectVariable.
     """
 
-    _nonvar_fields = UserDefinedObjectVariable._nonvar_fields
-
-    def __init__(self, value, tuple_vt=None, init_args=None, **kwargs):  # type: ignore[all]
-        from .lists import TupleVariable
-
+    def __init__(
+        self,
+        value: object,
+        tuple_vt: TupleVariable | None = None,
+        init_args: list[VariableTracker] | None = None,
+        **kwargs: Any,
+    ) -> None:
         tx = kwargs.pop("tx", None)
         super().__init__(value, init_args=init_args, **kwargs)
         if tuple_vt is None:
@@ -2609,7 +2563,9 @@ class UserDefinedTupleVariable(UserDefinedObjectVariable):
 
                 tx = InstructionTranslator.current_tx()
             elems = init_args[0].force_unpack_var_sequence(tx)
-            self._tuple_vt = TupleVariable(elems, mutation_type=ValueMutationNew())
+            self._tuple_vt = variables.TupleVariable(
+                elems, mutation_type=ValueMutationNew()
+            )
         else:
             self._tuple_vt = tuple_vt
 

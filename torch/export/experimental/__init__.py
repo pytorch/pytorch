@@ -35,11 +35,7 @@ def _copy_graph_module_and_signature(
         old_phs = [node for node in old_gm.graph.nodes if node.op == "placeholder"]
         new_phs = [node for node in new_gm.graph.nodes if node.op == "placeholder"]
         # iterate over placeholders
-        if len(old_phs) != len(new_phs):
-            raise AssertionError(
-                f"Number of old placeholders ({len(old_phs)}) does not match "
-                f"new placeholders ({len(new_phs)})"
-            )
+        assert len(old_phs) == len(new_phs)
         for old_node, new_node in zip(old_phs, new_phs):
             new_node.name = old_node.name
 
@@ -332,19 +328,13 @@ class _ExportPackage:
         def _define_overload(
             overload: str, spec: typing.Callable[_InputT, typing.Any]
         ) -> typing.Any:
-            if overload in specs:
-                raise AssertionError(f"Overload '{overload}' already exists in specs")
-            if not callable(spec):
-                raise AssertionError(f"spec must be callable, but got {type(spec)}")
-            if not overload.isidentifier():
-                raise AssertionError(
-                    f"Overload '{overload}' is not a valid Python identifier"
-                )
+            assert overload not in specs
+            assert callable(spec)
+            assert overload.isidentifier()
             specs[overload] = spec
             return _exporter_context
 
-        if hasattr(fn, "_define_overload"):
-            raise AssertionError("fn already has a '_define_overload' attribute")
+        assert not hasattr(fn, "_define_overload")
         _exporter_context._define_overload = _define_overload  # type: ignore[attr-defined]
 
         # pyrefly: ignore [bad-return]
@@ -397,10 +387,7 @@ class _ExportPackage:
         if not standalone:
             return
 
-        if not isinstance(pt2_path, str):
-            raise AssertionError(
-                f"Expected pt2_path to be a string, but got {type(pt2_path)}"
-            )
+        assert isinstance(pt2_path, str)
         base_directory = os.path.dirname(pt2_path)
         package_name = os.path.basename(pt2_path)[:-4]
         with (
@@ -423,10 +410,7 @@ class _ExportPackage:
                     # TODO: more carefully determine the device type
                     use_cuda = True
             if package_example_inputs:
-                if example_inputs_map is None:
-                    raise AssertionError(
-                        "example_inputs_map cannot be None when package_example_inputs is True"
-                    )
+                assert example_inputs_map is not None
                 example_inputs_map[name] = len(ep.example_inputs[0])
                 for i, t in enumerate(ep.example_inputs[0]):
                     path = Path(base_directory) / f"{name}_input_{i}.pt"

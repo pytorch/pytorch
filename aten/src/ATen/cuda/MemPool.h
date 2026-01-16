@@ -3,8 +3,6 @@
 #include <c10/core/Allocator.h>
 #include <c10/cuda/CUDACachingAllocator.h>
 
-#include <memory>
-
 namespace at::cuda {
 
 // Keep BC only
@@ -19,8 +17,7 @@ using c10::MempoolId_t;
 // system allocator such as ncclMemAlloc.
 struct TORCH_CUDA_CPP_API MemPool {
   MemPool(
-      std::shared_ptr<c10::cuda::CUDACachingAllocator::CUDAAllocator> allocator =
-          nullptr,
+      c10::cuda::CUDACachingAllocator::CUDAAllocator* allocator = nullptr,
       bool is_user_created = true,
       bool use_on_oom = false,
       bool no_split = false);

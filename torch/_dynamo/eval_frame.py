@@ -67,7 +67,6 @@ from torch._C._dynamo.eval_frame import (  # noqa: F401
 from torch._dispatch.python import enable_python_dispatcher
 from torch._dynamo.types import ConvertFrameReturn, FrameAction, FrameExecStrategy
 from torch._export.utils import _compiling_state_context
-from torch._library.opaque_object import is_opaque_type
 from torch._subclasses.fake_tensor import unset_fake_temporarily
 from torch._utils_internal import DISABLE_JUSTKNOBS, justknobs_check, log_export_usage
 from torch.export.dynamic_shapes import (
@@ -939,20 +938,14 @@ class _TorchDynamoContext:
                         return fn(*args, **kwargs)
                 # Skip nested compile during export (but not HOP internal compile)
                 # Only skip if there's an active TracingContext (nested), not for top-level export
-                if (
-                    torch.compiler.is_exporting()
-                    and not config.force_compile_during_fx_trace
-                ):
+                if torch.compiler.is_exporting():
                     from torch._higher_order_ops.utils import _in_hop_compile
 
                     if not _in_hop_compile():
                         if torch._guards.TracingContext.try_get() is not None:
                             return fn(*args, **kwargs)
                 # Skip nested compile - just inline the function
-                if (
-                    is_fx_symbolic_tracing()
-                    and not config.force_compile_during_fx_trace
-                ):
+                if is_fx_symbolic_tracing():
                     if config.error_on_nested_fx_trace:
                         raise RuntimeError(
                             "Detected that you are using FX to symbolically trace "
@@ -1822,7 +1815,7 @@ def check_user_input_output(flat_values: list[Any], error_type: UserErrorType) -
     ] + list(common_constant_types)
 
     def is_supported_type(val: Any) -> bool:
-        return isinstance(val, tuple(supported_types)) or is_opaque_type(type(val))
+        return isinstance(val, tuple(supported_types))
 
     value_type = "input" if error_type == UserErrorType.INVALID_INPUT else "output"
     # We only check that the outputs are not None. Inputs can be None.

@@ -390,7 +390,7 @@ if [[ -n "${CI:-}" ]]; then
 fi
 
 # Build image
-docker buildx build \
+docker build \
        ${no_cache_flag} \
        ${progress_flag} \
        --build-arg "BUILD_ENVIRONMENT=${image}" \
@@ -428,7 +428,6 @@ docker buildx build \
        --build-arg "SKIP_LLVM_SRC_BUILD_INSTALL=${SKIP_LLVM_SRC_BUILD_INSTALL:-}" \
        --build-arg "INSTALL_MINGW=${INSTALL_MINGW:-}" \
        -f $(dirname ${DOCKERFILE})/Dockerfile \
-       --load \
        -t "$tmp_tag" \
        "$@" \
        .

@@ -71,8 +71,7 @@ def lookup_op(qualname: str) -> OpOverload:
 
 
 def is_builtin(op: OpOverload) -> bool:
-    if not isinstance(op, OpOverload):
-        raise AssertionError(f"op must be OpOverload, got {type(op)}")
+    assert isinstance(op, OpOverload)
     return op.namespace in {"aten", "prim", "prims"}
 
 
@@ -132,8 +131,7 @@ def is_functional_schema(schema: Any, *, allow_valid_view: bool = False) -> bool
 
     if isinstance(schema, str):
         schema = FunctionSchema.parse(schema)
-    if not isinstance(schema, FunctionSchema):
-        raise AssertionError(f"schema must be FunctionSchema, got {type(schema)}")
+    assert isinstance(schema, FunctionSchema)
     return is_functional(schema)
 
 
@@ -216,10 +214,7 @@ def zip_schema(
     Assumes that (args, kwargs) were the inputs to some torch._ops.OpOverload:
     that is, (args, kwargs) must be bindable to the schema (args, kwargs).
     """
-    if len(schema.arguments) < len(args) + len(kwargs):
-        raise AssertionError(
-            f"schema has {len(schema.arguments)} arguments but got {len(args)} args and {len(kwargs)} kwargs"
-        )
+    assert len(schema.arguments) >= len(args) + len(kwargs)
     for i in range(len(schema.arguments)):
         info = schema.arguments[i]
         if info.kwarg_only:
@@ -247,10 +242,7 @@ def hop_schema_from_fx_node(node):
     def _collect_example_val(node):
         meta_val = node.meta.get("val", None)
         if meta_val is None:
-            if node.op != "get_attr":
-                raise AssertionError(
-                    f"node.op must be 'get_attr' when val is None, got {node.op!r}"
-                )
+            assert node.op == "get_attr"
             meta_val = getattr(node.graph.owning_module, node.target)
         return meta_val
 
@@ -279,8 +271,7 @@ def hop_schema_from_fx_node(node):
 
 
 def can_generate_trivial_fake_impl(op: OpOverload) -> bool:
-    if not isinstance(op, OpOverload):
-        raise AssertionError(f"op must be OpOverload, got {type(op)}")
+    assert isinstance(op, OpOverload)
     if is_builtin(op):
         # We control the built-ins. These may (in rare cases)
         # do input metadata mutation (which we have banned on custom ops)
@@ -305,10 +296,7 @@ def requires_set_python_module() -> bool:
 
 
 def handle_dispatch_mode(curr_mode, op_overload, *args, **kwargs):
-    if not isinstance(curr_mode, torch.utils._python_dispatch.TorchDispatchMode):
-        raise AssertionError(
-            f"curr_mode must be TorchDispatchMode, got {type(curr_mode)}"
-        )
+    assert isinstance(curr_mode, torch.utils._python_dispatch.TorchDispatchMode)
     args_flattened, _ = torch.utils._pytree.tree_flatten((args, kwargs.values()))
     # TODO: need to double check the semantics of the "types" argument to torch_dispatch.
     # It's generated in PyInterpreter.cpp, but seems to be generated in two places,

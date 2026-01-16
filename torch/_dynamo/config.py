@@ -426,11 +426,6 @@ error_on_nested_jit_trace = True
 # dynamo-optimized function. If false, silently suppress dynamo.
 error_on_nested_fx_trace = True
 
-# If true, force dynamo compilation even when inside FX symbolic tracing.
-# This allows nested compilation where the outer tracer (e.g., make_fx) can
-# trace over dynamo-compiled functions. Use with error_on_nested_fx_trace=False.
-force_compile_during_fx_trace = False
-
 # Disables graph breaking on rnn. YMMV with backends.
 allow_rnn = False
 
@@ -453,9 +448,6 @@ base_dir = dirname(dirname(dirname(abspath(__file__))))
 
 # Trace through NumPy or graphbreak
 trace_numpy = True
-
-# Trace through torch.autograd.grad or graphbreak
-trace_autograd_ops = False
 
 # Default NumPy dtypes when tracing with torch.compile
 # We default to 64bits. For efficiency, one may want to change these to float32

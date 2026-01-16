@@ -158,8 +158,7 @@ def infer_schema(
         else:
             schema_type = SUPPORTED_PARAM_TYPES[annotation_type]
 
-        if schema_type is None:
-            raise AssertionError(f"schema_type is None for param {name}")
+        assert schema_type is not None
 
         if type(mutates_args) is str:
             if mutates_args != UNKNOWN_MUTATES:
@@ -188,10 +187,7 @@ def infer_schema(
             elif isinstance(param.default, torch.dtype):
                 dtype_repr = str(param.default)
                 torch_dot = "torch."
-                if not dtype_repr.startswith(torch_dot):
-                    raise AssertionError(
-                        f"dtype repr {dtype_repr!r} must start with 'torch.'"
-                    )
+                assert dtype_repr.startswith(torch_dot)
                 default_repr = dtype_repr[len(torch_dot) :]
             else:
                 error_fn(

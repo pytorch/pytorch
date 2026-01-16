@@ -31,7 +31,7 @@ log = logging.getLogger(__name__)
 CUTLASS_OPERATION_KIND: str = "gemm"
 ACCUMULATOR_DTYPES: OrderedSet[torch.dtype] = OrderedSet([torch.float, torch.int32])
 XW_DTYPES: OrderedSet[torch.dtype] = OrderedSet(
-    [torch.half, torch.bfloat16, torch.float8_e4m3fn, torch.int8, torch.float8_e5m2]
+    [torch.half, torch.bfloat16, torch.float8_e4m3fn, torch.int8]
 )
 
 
@@ -178,31 +178,26 @@ def try_import_cutlass() -> bool:
 
 @functools.lru_cache(8)
 def _normalize_cuda_arch(arch: str) -> str:
-    arch_num = arch
-    if isinstance(arch, str):
-        digits = "".join(ch for ch in arch if ch.isdigit())
-        if not digits:
-            raise ValueError(f"Unrecognized cuda arch: {arch}")
-        arch_num = int(digits)
-    else:
-        arch_num = int(arch)
+    if int(arch) >= 100:
+        log.warning(
+            "Detected CUDA architecture >= 100: %s. We will generate operations with "
+            "GenerateSM100 (if available) and GenerateSM90. Please file an "
+            "issue for any problems and feedback. ",
+            arch,
+        )
 
-    if arch_num > 103:
-        log.warning("Detected CUDA architecture > 103: %s. Please file an issue.", arch)
-        return str(arch_num)
-    if arch_num >= 103:
-        return "103"
-    if arch_num >= 100:
+    if int(arch) >= 100:
         return "100"
-    if arch_num >= 90:
+    elif int(arch) >= 90:
         return "90"
-    if arch_num >= 80:
+    elif int(arch) >= 80:
         return "80"
-    if arch_num >= 75:
+    elif int(arch) >= 75:
         return "75"
-    if arch_num >= 70:
+    elif int(arch) >= 70:
         return "70"
-    raise NotImplementedError(f"Unsupported cuda arch: {arch}")
+    else:
+        raise NotImplementedError(f"Unsupported cuda arch: {arch}")
 
 
 @dataclass
@@ -257,12 +252,9 @@ def _gen_ops_cached(arch, version) -> dict[Any, Any]:
         )
         return {}
     arch = _normalize_cuda_arch(arch)
-    gen_arch = (
-        "100" if arch == "103" else arch
-    )  # CUTLASS SM103 generator only covers NVFB4; fallback to SM100 set
     instantiation_level: str = config.cuda.cutlass_instantiation_level
     args = CUTLASSArgs(
-        architectures=gen_arch,
+        architectures=arch,
         cuda_version=version,
         instantiation_level=instantiation_level,
         operations=CUTLASS_OPERATION_KIND,
@@ -270,17 +262,17 @@ def _gen_ops_cached(arch, version) -> dict[Any, Any]:
     manifest = cutlass_manifest.Manifest(args)
 
     start_time = time.time()
-    if gen_arch == "100":
+    if arch == "100":
         if hasattr(cutlass_generator, "GenerateSM100"):
             cutlass_generator.GenerateSM100(manifest, args.cuda_version)
         cutlass_generator.GenerateSM90(manifest, args.cuda_version)
     else:
         try:
-            func = getattr(cutlass_generator, "GenerateSM" + gen_arch)
+            func = getattr(cutlass_generator, "GenerateSM" + arch)
             func(manifest, args.cuda_version)
         except AttributeError as e:
             raise NotImplementedError(
-                "Arch " + gen_arch + " is not supported by current cutlass lib."
+                "Arch " + arch + " is not supported by current cutlass lib."
             ) from e
 
     log.info(
@@ -306,7 +298,6 @@ DTYPE_TO_CUTLASS_TYPE = {
     torch.float16: "__half",
     torch.bfloat16: "__nv_bfloat16",
     torch.float8_e4m3fn: "__nv_fp8_e4m3",
-    torch.float8_e5m2: "__nv_fp8_e5m2",
 }
 
 
@@ -354,8 +345,6 @@ def dtype_match(
         return cutlass_dtype == cutlass_library.library.DataType.s32
     elif torch_dtype == torch.float8_e4m3fn:
         return cutlass_dtype == cutlass_library.library.DataType.e4m3
-    elif torch_dtype == torch.float8_e5m2:
-        return cutlass_dtype == cutlass_library.library.DataType.e5m2
     else:
         return False
 
@@ -374,11 +363,6 @@ def get_accumulator_dtype(
     if len(input_torch_dtypes) != 2:
         return None
 
-    if OrderedSet(input_torch_dtypes) == OrderedSet(
-        [torch.float8_e5m2, torch.float8_e4m3fn]
-    ):
-        return torch.float
-
     torch_dtype = None
     if input_torch_dtypes[0] == input_torch_dtypes[1]:
         torch_dtype = input_torch_dtypes[0]
@@ -395,13 +379,7 @@ def get_accumulator_dtype(
         ]:
             torch_dtype = dtype0
 
-    if torch_dtype in (
-        torch.float16,
-        torch.bfloat16,
-        torch.float,
-        torch.float8_e4m3fn,
-        torch.float8_e5m2,
-    ):
+    if torch_dtype in (torch.float16, torch.bfloat16, torch.float, torch.float8_e4m3fn):
         accumulator_dtype = torch.float
     elif torch_dtype == torch.int8:
         accumulator_dtype = torch.int32
@@ -425,12 +403,7 @@ def get_alignments(torch_dtype: torch.dtype) -> list[int]:
         return [8, 4, 2, 1]
     elif torch_dtype == torch.float:
         return [4, 2, 1]
-    elif torch_dtype in (
-        torch.uint8,
-        torch.int8,
-        torch.float8_e4m3fn,
-        torch.float8_e5m2,
-    ):
+    elif torch_dtype in (torch.uint8, torch.int8, torch.float8_e4m3fn):
         return [16, 8, 4, 2]
     elif torch_dtype == torch.int32:
         return [4, 2, 1]

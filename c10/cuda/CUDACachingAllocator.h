@@ -257,7 +257,7 @@ class CUDAAllocator : public DeviceAllocator {
   virtual void createOrIncrefPool(
       c10::DeviceIndex /*device*/,
       MempoolId_t /*mempool_id*/,
-      std::shared_ptr<CUDAAllocator> allocator = nullptr) {
+      CUDAAllocator* allocator = nullptr) {
     TORCH_CHECK(
         false,
         name(),
@@ -527,8 +527,8 @@ inline void releasePool(c10::DeviceIndex device, MempoolId_t mempool_id) {
 inline void createOrIncrefPool(
     c10::DeviceIndex device,
     MempoolId_t mempool_id,
-    std::shared_ptr<CUDAAllocator> allocator_ptr = nullptr) {
-  get()->createOrIncrefPool(device, mempool_id, std::move(allocator_ptr));
+    CUDAAllocator* allocator_ptr = nullptr) {
+  get()->createOrIncrefPool(device, mempool_id, allocator_ptr);
 }
 inline void setUseOnOOM(
     c10::DeviceIndex device,
