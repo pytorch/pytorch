@@ -19262,9 +19262,9 @@ op_db: list[OpInfo] = [
                         # Analytical:
                         # tensor([[-0.0047]], dtype=torch.float64, grad_fn=<CopySlices>)
                         DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
-                        # CPU implementation of polar for float16 is missing
-                        DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-3, rtol=3e-2)}),
-                                     'TestConsistency', 'test_output_grad_match', device_type='mps'),
+                        # Comparing fp32 CPU grads with fp16 MPS ones leads to high errors
+                        DecorateInfo(unittest.expectedFailure, 'TestConsistency', 'test_output_grad_match',
+                                     device_type='mps', dtypes=(torch.float16,)),
                     )),
     # TODO(@kshitij12345): Refactor similar to `mvlgamma` entries.
     # To test reference numerics against multiple values of argument `n`,
