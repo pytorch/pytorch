@@ -20,8 +20,7 @@ extern "C" void dgemm_(char *transa, char *transb, int *m, int *n, int *k, doubl
 extern "C" void sgemm_(char *transa, char *transb, int *m, int *n, int *k, float *alpha, const float *a, int *lda, const float *b, int *ldb, float *beta, float *c, int *ldc);
 extern "C" void cgemm_(char *transa, char *transb, int *m, int *n, int *k, void *alpha, const void *a, int *lda, const void *b, int *ldb, void *beta, void *c, int *ldc);
 extern "C" void zgemm_(char *transa, char *transb, int *m, int *n, int *k, void *alpha, const void *a, int *lda, const void *b, int *ldb, void *beta, void *c, int *ldc);
-//#ifdef BLAS_HAS_BGEMM
-#if defined(BLAS_HAS_BGEMM)
+#ifdef BLAS_HAS_BGEMM
 extern "C" void bgemm_(char *transa, char *transb, int *m, int *n, int *k,
                 const at::BFloat16 *alpha,
                 const at::BFloat16 *a, int *lda,
