@@ -39,9 +39,11 @@ if [[ ! -d "/usr/local/cuda" ]]; then
     case "${CUDA_VERSION:-12.6}" in
         12.6|12.6.*)
             install_cuda 12.6.3 cuda_12.6.3_560.35.05_linux
+            CCCL_VERSION="12.6.77"
             ;;
         13.0|13.0.*)
             install_cuda 13.0.2 cuda_13.0.2_580.95.05_linux
+            CCCL_VERSION="13.0.76"
             ;;
         *)
             echo "Unsupported CUDA_VERSION: ${CUDA_VERSION}"
@@ -51,6 +53,15 @@ if [[ ! -d "/usr/local/cuda" ]]; then
 
     export CUDA_HOME=/usr/local/cuda
     export PATH=/usr/local/cuda/bin:$PATH
+
+    if [[ ! -f "/usr/local/cuda/include/cuda/std/utility" ]]; then
+        echo "libcu++ headers not found, downloading cuda_cccl package..."
+        CCCL_URL="https://developer.download.nvidia.com/compute/cuda/redist/cuda_cccl/linux-${arch_path}/cuda_cccl-linux-${arch_path}-${CCCL_VERSION}-archive.tar.xz"
+        wget -q "${CCCL_URL}" -O - | tar -xJ -C /usr/local/cuda --strip-components=1
+    fi
+
+    echo "Checking libcu++ headers:"
+    ls -la /usr/local/cuda/include/cuda/std/utility || echo "WARNING: libcu++ headers still not found!"
 
     echo "Installed CUDA version:"
     nvcc --version
