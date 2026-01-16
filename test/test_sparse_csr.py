@@ -13,7 +13,7 @@ from torch.testing._internal.common_cuda import SM80OrLater, TEST_CUSPARSE_GENER
 from torch.testing._internal.common_utils import \
     (TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, TEST_CUDA_CUDSS, TEST_SCIPY, TEST_NUMPY, TEST_MKL, IS_WINDOWS, TestCase,
      run_tests, load_tests, coalescedonoff, parametrize, subtest, skipIfTorchDynamo,
-     IS_FBCODE, IS_REMOTE_GPU, suppress_warnings)
+     IS_FBCODE, IS_REMOTE_GPU, suppress_warnings, LazyVal, getRocmVersion)
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoSparseGeneric,
      precisionOverride, skipMeta, skipCUDAIfRocm, skipCPUIfNoMklSparse, largeTensorTest)
@@ -28,10 +28,6 @@ from torch.testing._internal.opinfo.definitions.sparse import validate_sample_in
 from test_sparse import CUSPARSE_SPMM_COMPLEX128_SUPPORTED, HIPSPARSE_SPMM_COMPLEX128_SUPPORTED
 import operator
 
-from torch.testing._internal.common_utils import (
-    getRocmVersion,
-)
-
 if TEST_SCIPY:
     import scipy.sparse as sp
 
@@ -42,7 +38,21 @@ if TEST_NUMPY:
 load_tests = load_tests  # noqa: PLW0127
 
 no_mkl_sparse = IS_WINDOWS or not TEST_MKL
-no_rocm_or_rocm_8_plus = not TEST_WITH_ROCM or (TEST_WITH_ROCM and getRocmVersion() >= (8, 0))
+
+def evaluate_platform_supports_bf16():
+    if torch.version.cuda:
+        return SM80OrLater
+    elif torch.version.hip:
+        return getRocmVersion() >= (8, 0)
+    return False
+
+def evaluate_platform_supports_half():
+    if torch.version.hip:
+        return getRocmVersion() >= (8, 0)
+    return True
+
+PLATFORM_SUPPORTS_BF16: bool = LazyVal(lambda: evaluate_platform_supports_bf16())
+PLATFORM_SUPPORTS_HALF: bool = LazyVal(lambda: evaluate_platform_supports_half())
 
 
 def _check_cusparse_spgemm_available():
@@ -1472,8 +1482,8 @@ class TestSparseCSR(TestCase):
     @skipCUDAIfNoSparseGeneric
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
-                  *[torch.half] if no_rocm_or_rocm_8_plus else [],
-                  *[torch.bfloat16] if SM80OrLater and no_rocm_or_rocm_8_plus else []))
+                  *[torch.half] if PLATFORM_SUPPORTS_HALF else [],
+                  *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else []))
     def test_csr_matvec(self, device, dtype):
 
         side = 100
@@ -1600,8 +1610,8 @@ class TestSparseCSR(TestCase):
     @skipIfTorchDynamo("raises 'sparse matrix length is ambiguous; use getnnz()'")
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
-                  *[torch.half] if no_rocm_or_rocm_8_plus else [],
-                  *[torch.bfloat16] if SM80OrLater else []))
+                  *[torch.half] if PLATFORM_SUPPORTS_HALF else [],
+                  *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else []))
     @precisionOverride({torch.float32: 1e-3, torch.complex64: 1e-3,
                         torch.float64: 1e-5, torch.complex128: 1e-5,
                         torch.float16: 1e-3, torch.bfloat16: 1e-3})
@@ -1921,8 +1931,8 @@ class TestSparseCSR(TestCase):
     @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
-                  *[torch.half] if no_rocm_or_rocm_8_plus else [],
-                  *[torch.bfloat16] if SM80OrLater and no_rocm_or_rocm_8_plus else []))
+                  *[torch.half] if PLATFORM_SUPPORTS_HALF else [],
+                  *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else []))
     @precisionOverride({torch.bfloat16: 1e-2, torch.float16: 1e-2})
     def test_sparse_mm(self, device, dtype):
         def test_shape(d1, d2, d3, nnz, transposed, index_dtype):
@@ -1940,8 +1950,8 @@ class TestSparseCSR(TestCase):
 
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
-                  *[torch.half] if no_rocm_or_rocm_8_plus else [],
-                  *[torch.bfloat16] if SM80OrLater and no_rocm_or_rocm_8_plus else []))
+                  *[torch.half] if PLATFORM_SUPPORTS_HALF else [],
+                  *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else []))
     @precisionOverride({torch.bfloat16: 3.5e-2, torch.float16: 1e-2})
     def test_sparse_addmm(self, device, dtype):
         def test_shape(m, n, p, nnz, broadcast, index_dtype, alpha_beta=None):
@@ -1974,8 +1984,8 @@ class TestSparseCSR(TestCase):
     @precisionOverride({torch.double: 1e-8, torch.float: 1e-4, torch.bfloat16: 0.6,
                         torch.half: 1e-1, torch.cfloat: 1e-4, torch.cdouble: 1e-8})
     @dtypesIfCUDA(*floating_types_and(torch.complex64,
-                                      *[torch.bfloat16] if SM80OrLater and no_rocm_or_rocm_8_plus else [],
-                                      *[torch.half] if no_rocm_or_rocm_8_plus else [],
+                                      *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [],
+                                      *[torch.half] if PLATFORM_SUPPORTS_HALF else [],
                                       *[torch.complex128]
                                       if CUSPARSE_SPMM_COMPLEX128_SUPPORTED or HIPSPARSE_SPMM_COMPLEX128_SUPPORTED
                                       else []))
@@ -2050,8 +2060,8 @@ class TestSparseCSR(TestCase):
     @skipCPUIfNoMklSparse
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_types_and(torch.complex64,
-                                      *[torch.bfloat16] if SM80OrLater and no_rocm_or_rocm_8_plus else [],
-                                      *[torch.half] if no_rocm_or_rocm_8_plus else [],
+                                      *[torch.bfloat16] if PLATFORM_SUPPORTS_BF16 else [],
+                                      *[torch.half] if PLATFORM_SUPPORTS_HALF else [],
                                       *[torch.complex128]
                                       if CUSPARSE_SPMM_COMPLEX128_SUPPORTED or HIPSPARSE_SPMM_COMPLEX128_SUPPORTED
                                       else []))
