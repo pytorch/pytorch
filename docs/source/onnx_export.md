@@ -242,6 +242,8 @@ Each initialized value, input, output has the following metadata:
 .. autofunction:: torch.onnx.export
 .. autoclass:: torch.onnx.ONNXProgram
     :members:
+.. autoclass:: torch.onnx.ExportableModule
+    :members:
 .. autofunction:: torch.onnx.is_in_onnx_export
 .. autoclass:: torch.onnx.OnnxExporterError
     :members:
