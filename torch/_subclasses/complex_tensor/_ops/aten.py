@@ -721,7 +721,16 @@ def logical_not_impl(self: ComplexTensor, *args: Any, **kwargs: Any) -> torch.Te
 
 @register_complex(aten.view_as_real)
 def view_as_real_impl(self: ComplexTensor) -> torch.Tensor:
-    return aten.alias(self._data)
+    if self.is_conj():
+        raise RuntimeError(
+            "view_as_real doesn't work on unresolved conjugated tensors.  To resolve the conjugate"
+            " tensor so you can view it as real, use self.resolve_conj(); however, be warned that "
+            "the resulting tensor will NOT alias the original."
+        )
+    out = aten.alias(self._data)
+    if self.is_neg():
+        out = torch._neg_view(out)
+    return out
 
 
 @register_complex(aten.linalg_vector_norm)
