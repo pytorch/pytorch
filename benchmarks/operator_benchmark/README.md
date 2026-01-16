@@ -145,6 +145,64 @@ Run torch.add benchmark with tag 'long':
 python -m pt.add_test --tag-filter long
 ```
 
+## CI Regression Tracking
+
+The operator benchmarks are continuously monitored in CI to track performance regressions across a diverse set of CPU and GPU devices. Two GitHub Actions workflows run these benchmarks on a regular schedule:
+
+### CPU Microbenchmarks
+
+The [operator_benchmark.yml](../../.github/workflows/operator_benchmark.yml) workflow runs operator benchmarks on CPU devices:
+
+**Devices:**
+- x86_64: `linux.12xlarge` (Intel/AMD CPUs)
+- aarch64: `linux.arm64.m8g.4xlarge` (ARM64 CPUs)
+
+**Operators Tracked:** All operators in the `pt/` directory with tag: `short`
+
+**Schedule:** Weekly on Sundays at 07:00 UTC
+
+**Test Modes:** `short`, `long`, or `all` (default: `short`)
+
+**Triggers:**
+- Scheduled runs (weekly)
+- Manual workflow dispatch with configurable test mode
+- Push to `ciflow/op-benchmark/*` tags
+- Pull requests that modify benchmark files
+
+### GPU Microbenchmarks
+
+The [operator_microbenchmark.yml](../../.github/workflows/operator_microbenchmark.yml) workflow runs operator microbenchmarks on GPU devices:
+
+**CUDA Devices:**
+- H100 GPUs (`linux.aws.h100`) - CUDA 12.8, sm_90
+- A100 GPUs (`linux.aws.a100`) - CUDA 12.8, sm_80
+- B200 GPUs (`linux.dgx.b200`) - CUDA 12.8, sm_100
+
+**ROCm Devices:**
+- MI300X GPUs (`linux.rocm.gpu.gfx942.1`) - gfx942
+
+**Operators Tracked in CI:** `matmul`, `mm`, `addmm`, `bmm`, `conv` (with tag `long`)
+- Other operators in the `pt/` directory can be run ad-hoc using the workflow dispatch
+
+**Schedule:** Daily at 06:00 UTC
+
+**Performance Dashboard:** [PyTorch Operator Microbenchmark Dashboard](https://hud.pytorch.org/benchmark/v3/dashboard/pytorch_operator_microbenchmark) @lint-ignore
+
+**Triggers:**
+- Scheduled runs (daily)
+- Manual workflow dispatch
+- Push to `ciflow/op-benchmark/*` tags
+
+### Running Manual Benchmarks
+
+To trigger a manual run of the benchmarks:
+
+1. Navigate to the GitHub Actions workflows
+2. Select either [operator_benchmark](https://github.com/pytorch/pytorch/actions/workflows/operator_benchmark.yml) or [operator_microbenchmark](https://github.com/pytorch/pytorch/actions/workflows/operator_microbenchmark.yml)
+3. Click "Run workflow" in the top right
+4. For CPU benchmarks, optionally select a test mode (`short`, `long`, or `all`)
+5. Click "Run workflow" to start the benchmark run
+
 ## Adding New Operators to the Benchmark Suite
 In the previous sections, we gave several examples to show how to run the already available operators in the benchmark suite. In the following sections, we'll step through the complete flow of adding PyTorch operators to the benchmark suite. Existing benchmarks for operators are in the `pt` directory and we highly recommend putting your new operators in those directories as well.
 

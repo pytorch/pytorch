@@ -27,13 +27,15 @@ from collections.abc import Callable as _Callable
 from typing import (
     Any as _Any,
     get_origin as _get_origin,
-    Optional as _Optional,
     overload as _overload,
     TYPE_CHECKING,
     TypeVar as _TypeVar,
-    Union as _Union,
 )
-from typing_extensions import ParamSpec as _ParamSpec, TypeIs as _TypeIs
+from typing_extensions import (
+    deprecated as _deprecated,
+    ParamSpec as _ParamSpec,
+    TypeIs as _TypeIs,
+)
 
 
 # As a bunch of torch.packages internally still have this check
@@ -137,7 +139,8 @@ __all__ = [
 ]
 
 # Please keep this list sorted
-assert __all__ == sorted(__all__)
+if __all__ != sorted(__all__):
+    raise AssertionError("__all__ must be kept sorted")
 
 ################################################################################
 # Load the extension module
@@ -306,7 +309,8 @@ def _get_cuda_dep_paths(path: str, lib_folder: str, lib_name: str) -> list[str]:
 def _preload_cuda_lib(lib_folder: str, lib_name: str, required: bool = True) -> None:  # type: ignore[valid-type]
     """Preloads cuda library if it could not be found otherwise."""
     # Should only be called on Linux if default path resolution have failed
-    assert platform.system() == "Linux", "Should only be called on Linux"
+    if platform.system() != "Linux":
+        raise AssertionError(f"Should only be called on Linux, got {platform.system()}")
 
     lib_path = None
     for path in sys.path:
@@ -340,7 +344,7 @@ def _preload_cuda_deps(err: OSError | None = None) -> None:
     ]
     # If error is passed, re-raise it if it's not about one of the abovementioned
     # libraries
-    if err is not None and [
+    if err is not None and not [
         lib for _, lib in cuda_libs if lib.split(".", 1)[0] in err.args[0]
     ]:
         raise err
@@ -895,8 +899,10 @@ def sym_max(a, b):
 
     all_types, float_types = __all_and_float_types()
 
-    assert isinstance(a, all_types), type(a)
-    assert isinstance(b, all_types), type(b)
+    if not isinstance(a, all_types):
+        raise AssertionError(f"expected {all_types}, got {type(a)}")
+    if not isinstance(b, all_types):
+        raise AssertionError(f"expected {all_types}, got {type(b)}")
     if isinstance(a, float_types) or isinstance(b, float_types):
         return builtins.float(builtins.max(a, b))  # type: ignore[call-overload]
     else:
@@ -932,8 +938,10 @@ def sym_min(a, b):
 
     all_types, float_types = __all_and_float_types()
 
-    assert isinstance(a, all_types), type(a)
-    assert isinstance(b, all_types), type(b)
+    if not isinstance(a, all_types):
+        raise AssertionError(f"expected {all_types}, got {type(a)}")
+    if not isinstance(b, all_types):
+        raise AssertionError(f"expected {all_types}, got {type(b)}")
     if isinstance(a, float_types) or isinstance(b, float_types):
         return builtins.float(builtins.min(a, b))  # type: ignore[call-overload]
     else:
@@ -1007,7 +1015,10 @@ def sym_ite(b, t, f):
     """SymInt-aware utility for ternary operator (``t if b else f``.)"""
     if overrides.has_torch_function((b, t, f)):
         return overrides.handle_torch_function(sym_ite, (b, t, f), b, t, f)
-    assert isinstance(b, (SymBool, builtins.bool)) and type(t) is type(f)
+    if not isinstance(b, (SymBool, builtins.bool)):
+        raise AssertionError(f"expected SymBool or bool, got {type(b)}")
+    if type(t) is not type(f):
+        raise AssertionError(f"type mismatch: {type(t)} vs {type(f)}")
     if isinstance(b, SymBool):
         return b.__sym_ite__(t, f)
     return t if b else f
@@ -1698,7 +1709,10 @@ def _check_with(
         return
 
     # error_type must be a subclass of Exception and not subclass of Warning
-    assert issubclass(error_type, Exception) and not issubclass(error_type, Warning)
+    if not issubclass(error_type, Exception) or issubclass(error_type, Warning):
+        raise AssertionError(
+            f"error_type must be a subclass of Exception but not Warning, got {error_type}"
+        )
 
     if message is None:
         message_evaluated = (
@@ -1734,7 +1748,11 @@ def _check(cond, message=None):  # noqa: F811
     _check_with(RuntimeError, cond, message)  # pyrefly: ignore [bad-argument-type]
 
 
-# TODO add deprecation annotation
+@_deprecated(
+    "_check_is_size will be removed in a future PyTorch release along with guard_size_oblivious. \
+    Use _check(i >= 0) instead.",
+    category=FutureWarning,
+)
 def _check_is_size(i, message=None, *, max=None):
     """Checks that a given integer is a valid size (i.e., is non-negative).
     You should use this over ``_check(i >= 0)`` because it can prevent
@@ -2227,7 +2245,8 @@ def _assert(condition, message):
         return overrides.handle_torch_function(
             _assert, (condition,), condition, message
         )
-    assert condition, message
+    if not condition:
+        raise AssertionError(message)
 
 
 ################################################################################
@@ -2597,7 +2616,7 @@ def compile(
         - Experimental or debug in-tree backends can be seen with `torch._dynamo.list_backends(None)`
 
         - To register an out-of-tree custom backend:
-          https://pytorch.org/docs/main/torch.compiler_custom_backends.html#registering-custom-backends
+          https://docs.pytorch.org/docs/main/user_guide/torch_compiler/torch.compiler_custom_backends.html#registering-custom-backends
        mode (str): Can be either "default", "reduce-overhead", "max-autotune" or "max-autotune-no-cudagraphs"
 
         - "default" is the default mode, which is a good balance between performance and overhead
@@ -2713,28 +2732,15 @@ def compile(
         use_aoti = options.pop("use_aoti", False)
 
     if torch.compiler.is_exporting():
-        warnings.warn(
-            "You are calling torch.compile inside torch.export region. "
-            "To capture an useful graph, we will implicitly switch to torch.compile(backend=eager)",
-            stacklevel=2,
-        )
-        from torch._higher_order_ops.utils import setup_compilation_env
+        from torch._higher_order_ops.utils import _in_hop_compile
 
-        # Create wrapper that always uses eager backend during export
-        def export_wrapped_fn(*args, **kwargs):
-            with setup_compilation_env() as backend:  # type: ignore[attr-defined]
-                # Force eager backend regardless of original backend
-                backend_wrapper = _TorchCompileWrapper(backend, mode, options, dynamic)
-                return torch._dynamo.optimize(
-                    backend=backend_wrapper,
-                    nopython=fullgraph,
-                    dynamic=dynamic,
-                    disable=disable,
-                    guard_filter_fn=guard_filter_fn,
-                    # pyrefly: ignore [bad-argument-type]
-                )(model)(*args, **kwargs)
-
-        return export_wrapped_fn
+        if not _in_hop_compile():
+            warnings.warn(
+                "torch.compile is ignored when called inside torch.export region",
+                stacklevel=2,
+            )
+            # torch.compile is a no-op when inside torch.export region
+            return model
 
     if backend == "inductor":
         if use_aoti:
@@ -2784,6 +2790,12 @@ from torch.func import vmap as vmap
 
 
 if not TYPE_CHECKING:
+    # register python metas for distributed ops
+    # Only import if distributed is available (USE_DISTRIBUTED=1)
+    if hasattr(torch._C, "_c10d_init"):
+        import torch.distributed._meta_registrations as coll_meta_registrations
+
+        del coll_meta_registrations
     from torch import _meta_registrations
 
 # Enable CUDA Sanitizer

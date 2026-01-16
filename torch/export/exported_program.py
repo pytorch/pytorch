@@ -10,7 +10,7 @@ import warnings
 from collections import defaultdict
 from collections.abc import Callable, Iterator
 from contextlib import contextmanager
-from typing import Any, final, NamedTuple, Optional, TYPE_CHECKING, Union
+from typing import Any, final, NamedTuple, TYPE_CHECKING
 
 from torch._guards import tracing, TracingContext
 from torch._higher_order_ops.utils import autograd_not_implemented
@@ -91,7 +91,7 @@ __all__ = [
 ]
 
 
-PassType = Callable[[torch.fx.GraphModule], Optional[PassResult]]
+PassType = Callable[[torch.fx.GraphModule], PassResult | None]
 
 
 @dataclasses.dataclass
@@ -100,7 +100,7 @@ class ModuleCallSignature:
     outputs: list[ArgumentSpec]
     in_spec: pytree.TreeSpec
     out_spec: pytree.TreeSpec
-    forward_arg_names: Optional[list[str]] = None
+    forward_arg_names: list[str] | None = None
 
     def replace_all_uses_with(self, original_node, new_node):
         for i in self.inputs:
@@ -114,7 +114,7 @@ class ModuleCallSignature:
 @dataclasses.dataclass
 class ModuleCallEntry:
     fqn: str
-    signature: Optional[ModuleCallSignature] = None
+    signature: ModuleCallSignature | None = None
 
 
 def _disable_prexisiting_fake_mode(fn):
@@ -127,9 +127,9 @@ def _disable_prexisiting_fake_mode(fn):
 
 
 def _fx_collection_equivalence_fn(
-    spec1_type: Optional[type],
+    spec1_type: type | None,
     spec1_context: pytree.Context,
-    spec2_type: Optional[type],
+    spec2_type: type | None,
     spec2_context: pytree.Context,
 ) -> bool:
     """Treat containers and their immutable variants as the same type. Otherwise
@@ -305,7 +305,10 @@ def _split_decomp_table_to_cia_and_python_decomp(
         # from CIA list is because we don't query custom ops.
         elif _is_preservable_cia_op(op):
             op_name = op.name()
-            assert not op_name.startswith("aten"), "This should be a custom op"
+            if op_name.startswith("aten"):
+                raise AssertionError(
+                    f"This should be a custom op, got aten op: {op_name}"
+                )
             cia_ops_to_callable[op] = decomp_table[op]
 
     # If we reached here, it means user intentionally deleted these CIA ops from
@@ -330,7 +333,7 @@ def _decompose_and_get_gm_with_new_signature_constants(
     *,
     cia_to_decomp: dict[torch._ops.OperatorBase, Callable],
     python_decomp_table: dict[torch._ops.OperatorBase, Callable],
-    joint_loss_index: Optional[int],
+    joint_loss_index: int | None,
     decompose_custom_triton_ops,
 ):
     from torch._export.passes.lift_constants_pass import _materialize_and_lift_constants
@@ -385,11 +388,15 @@ def _decompose_and_get_gm_with_new_signature_constants(
         # Fix the graph output signature to be tuple if scalar
         out_spec = mod._out_spec
 
-        assert isinstance(mod.graph._codegen, _PyTreeCodeGen)
+        if not isinstance(mod.graph._codegen, _PyTreeCodeGen):
+            raise AssertionError(
+                f"expected mod.graph._codegen to be _PyTreeCodeGen, got {type(mod.graph._codegen)}"
+            )
         orig_arg_names = mod.graph._codegen.pytree_info.orig_args
 
         # aot_export expect the return type to always be a tuple.
-        assert out_spec is not None
+        if out_spec is None:
+            raise AssertionError("out_spec must not be None")
         if out_spec.type not in (list, tuple):
             out_spec = pytree.treespec_tuple([out_spec])
 
@@ -555,7 +562,10 @@ def _decompose_and_get_gm_with_new_signature_constants(
         for name, p in wrapped_params_buffers.items():
             # Buffers can be persistent/non-persistent
             if name not in new_state_dict:
-                assert not isinstance(p, torch.nn.Parameter)
+                if isinstance(p, torch.nn.Parameter):
+                    raise AssertionError(
+                        f"expected {name!r} not to be a torch.nn.Parameter when not in state_dict"
+                    )
 
             if name in new_state_dict:
                 if name not in unwrapped_params_buffers:
@@ -616,7 +626,10 @@ def _decompose_and_get_gm_with_new_signature_constants(
     new_outputs: tuple[torch.fx.Node, ...] = tuple(gm.graph.output_node().args[0])  # type: ignore[arg-type]
 
     # rename the placeholders
-    assert len(new_placeholders) == len(old_placeholders)
+    if len(new_placeholders) != len(old_placeholders):
+        raise AssertionError(
+            f"new_placeholders length {len(new_placeholders)} does not match old_placeholders length {len(old_placeholders)}"
+        )
     for old_ph, new_ph in zip(old_placeholders, new_placeholders):
         new_ph.name = new_ph.target = old_ph.name
 
@@ -698,11 +711,18 @@ def _decompose_and_get_gm_with_new_signature_constants(
     # map (3) -> (2) for input order, -> (1) for input type
     user_inputs_index = {name: i for i, name in enumerate(graph_signature.user_inputs)}
     mutation_names = list(graph_signature.user_inputs_to_mutate.keys())
-    assert mutation_names == [node.name for node in new_outputs[: len(mutation_names)]]
+    expected_names = [node.name for node in new_outputs[: len(mutation_names)]]
+    if mutation_names != expected_names:
+        raise AssertionError(
+            f"mutation_names {mutation_names} does not match expected {expected_names}"
+        )
     for output_name, input_name in graph_signature.user_inputs_to_mutate.items():
         i = user_inputs_index[input_name]
         input_spec = ep.graph_signature.input_specs[i]
-        assert input_spec.kind in (InputKind.USER_INPUT, InputKind.BUFFER)
+        if input_spec.kind not in (InputKind.USER_INPUT, InputKind.BUFFER):
+            raise AssertionError(
+                f"expected input_spec.kind to be USER_INPUT or BUFFER, got {input_spec.kind}"
+            )
         output_kind = (
             OutputKind.BUFFER_MUTATION
             if input_spec.kind == InputKind.BUFFER
@@ -732,9 +752,16 @@ def _decompose_and_get_gm_with_new_signature_constants(
         )
 
     if joint_loss_index is not None:
-        assert graph_signature.backward_signature is not None
+        if graph_signature.backward_signature is None:
+            raise AssertionError(
+                "graph_signature.backward_signature must not be None when joint_loss_index is set"
+            )
         gradients = graph_signature.backward_signature.gradients_to_user_inputs
-        assert len(graph_signature.user_inputs) == len(ep.graph_signature.input_specs)
+        if len(graph_signature.user_inputs) != len(ep.graph_signature.input_specs):
+            raise AssertionError(
+                f"graph_signature.user_inputs length {len(graph_signature.user_inputs)} does not match "
+                f"input_specs length {len(ep.graph_signature.input_specs)}"
+            )
         specs = {
             graph_signature.user_inputs[i]: spec
             for i, spec in enumerate(ep.graph_signature.input_specs)
@@ -759,7 +786,10 @@ def _decompose_and_get_gm_with_new_signature_constants(
                 )
             )
 
-    assert len(new_placeholders) == len(old_placeholders)
+    if len(new_placeholders) != len(old_placeholders):
+        raise AssertionError(
+            f"new_placeholders length {len(new_placeholders)} does not match old_placeholders length {len(old_placeholders)}"
+        )
 
     new_graph_signature = ExportGraphSignature(
         input_specs=input_specs, output_specs=output_specs
@@ -887,9 +917,15 @@ def _get_updated_module_call_graph(
                 or node.target in graph_signature.input_tokens
             ):
                 if node.target in new_user_input_names:
-                    assert isinstance(node.name, str)
+                    if not isinstance(node.name, str):
+                        raise AssertionError(
+                            f"expected node.name to be str, got {type(node.name)}"
+                        )
                     old_name = old_user_input_names[user_input_counter]
-                    assert isinstance(old_name, str)
+                    if not isinstance(old_name, str):
+                        raise AssertionError(
+                            f"expected old_name to be str, got {type(old_name)}"
+                        )
                     provenance[old_name] = node.name
                     user_input_counter += 1
 
@@ -957,7 +993,7 @@ def _decompose_exported_program(
     *,
     cia_to_decomp: dict[torch._ops.OperatorBase, Callable],
     python_decomp_table: dict[torch._ops.OperatorBase, Callable],
-    joint_loss_index: Optional[int],
+    joint_loss_index: int | None,
     decompose_custom_triton_ops: bool,
 ):
     (
@@ -1038,7 +1074,7 @@ class ExportedProgram:
     _module_call_graph: list[ModuleCallEntry]
     """Call graph information tracking module hierarchy and signatures."""
 
-    _example_inputs: Optional[tuple[tuple[Any, ...], dict[str, Any]]]
+    _example_inputs: tuple[tuple[Any, ...], dict[str, Any]] | None
     """Example inputs used during export, stored as (args, kwargs) tuple."""
 
     _constants: dict[str, _ConstantAttributeType]
@@ -1051,16 +1087,16 @@ class ExportedProgram:
 
     def __init__(
         self,
-        root: Union[torch.nn.Module, dict[str, Any]],
+        root: torch.nn.Module | dict[str, Any],
         graph: torch.fx.Graph,
         graph_signature: ExportGraphSignature,
-        state_dict: dict[str, Union[torch.Tensor, torch.nn.Parameter]],
+        state_dict: dict[str, torch.Tensor | torch.nn.Parameter],
         range_constraints: "dict[sympy.Symbol, Any]",
         module_call_graph: list[ModuleCallEntry],
-        example_inputs: Optional[tuple[tuple[Any, ...], dict[str, Any]]] = None,
-        constants: Optional[dict[str, _ConstantAttributeType]] = None,
+        example_inputs: tuple[tuple[Any, ...], dict[str, Any]] | None = None,
+        constants: dict[str, _ConstantAttributeType] | None = None,
         *,
-        verifiers: Optional[list[type[Verifier]]] = None,
+        verifiers: list[type[Verifier]] | None = None,
     ):
         # Remove codegen related things from the graph. It should just be a flat graph.
         graph._codegen = torch.fx.graph.CodeGen()
@@ -1074,14 +1110,18 @@ class ExportedProgram:
         self._graph_signature: ExportGraphSignature = graph_signature
         self._state_dict: dict[str, Any] = state_dict
         self._range_constraints: dict[sympy.Symbol, ValueRanges] = range_constraints
-        assert module_call_graph is not None
+        if module_call_graph is None:
+            raise AssertionError("module_call_graph must not be None")
         self._module_call_graph: list[ModuleCallEntry] = module_call_graph
         self._example_inputs = example_inputs
 
         self._constants = constants or {}
 
         verifiers = verifiers or [Verifier]
-        assert all(issubclass(v, Verifier) for v in verifiers)
+        if not all(issubclass(v, Verifier) for v in verifiers):
+            raise AssertionError(
+                f"all verifiers must be subclasses of Verifier, got {verifiers}"
+            )
         self._verifiers = verifiers
         # Validate should be always the last step of the constructor.
         self.validate()
@@ -1226,12 +1266,15 @@ class ExportedProgram:
     @compatibility(is_backward_compatible=False)
     def call_spec(self):
         class CallSpec(NamedTuple):
-            in_spec: Optional[pytree.TreeSpec]
-            out_spec: Optional[pytree.TreeSpec]
+            in_spec: pytree.TreeSpec | None
+            out_spec: pytree.TreeSpec | None
 
         if len(self.module_call_graph) == 0:
             return CallSpec(in_spec=None, out_spec=None)
-        assert self.module_call_graph[0].fqn == ""
+        if self.module_call_graph[0].fqn != "":
+            raise AssertionError(
+                f"expected first module_call_graph fqn to be empty string, got {self.module_call_graph[0].fqn!r}"
+            )
         return CallSpec(
             in_spec=self.module_call_graph[0].signature.in_spec,
             out_spec=self.module_call_graph[0].signature.out_spec,
@@ -1255,7 +1298,8 @@ class ExportedProgram:
     @property
     @compatibility(is_backward_compatible=False)
     def dialect(self) -> str:
-        assert self._verifiers is not None
+        if self._verifiers is None:
+            raise AssertionError("_verifiers must not be None")
         return self._verifiers[0].dialect
 
     @dialect.setter
@@ -1421,7 +1465,7 @@ class ExportedProgram:
     @_disable_prexisiting_fake_mode
     def run_decompositions(
         self,
-        decomp_table: Optional[dict[torch._ops.OperatorBase, Callable]] = None,
+        decomp_table: dict[torch._ops.OperatorBase, Callable] | None = None,
         decompose_custom_triton_ops: bool = False,
     ) -> "ExportedProgram":
         """
@@ -1498,7 +1542,8 @@ class ExportedProgram:
         with _ignore_backend_decomps():
             res = pm(self.graph_module)
         transformed_gm = res.graph_module if res is not None else self.graph_module
-        assert transformed_gm is not None
+        if transformed_gm is None:
+            raise AssertionError("transformed_gm must not be None")
 
         # pyrefly: ignore [missing-attribute]
         if transformed_gm is self.graph_module and not res.modified:
@@ -1517,9 +1562,11 @@ class ExportedProgram:
                 if node.op != "placeholder":
                     break
 
-                assert i < len(old_signature.input_specs), (
-                    "Number of inputs changed after transformation"
-                )
+                if i >= len(old_signature.input_specs):
+                    raise AssertionError(
+                        f"Number of inputs changed after transformation: got index {i} "
+                        f"but only {len(old_signature.input_specs)} input_specs"
+                    )
                 old_input_spec = old_signature.input_specs[i]
                 arg = (
                     old_input_spec.arg
@@ -1538,13 +1585,18 @@ class ExportedProgram:
                 )
 
             output_node = list(new_gm.graph.nodes)[-1]
-            assert output_node.op == "output"
+            if output_node.op != "output":
+                raise AssertionError(
+                    f"expected last node to have op='output', got {output_node.op!r}"
+                )
 
             new_output_specs = []
             for i, node in enumerate(output_node.args[0]):
-                assert i < len(old_signature.output_specs), (
-                    "Number of outputs changed after transformation"
-                )
+                if i >= len(old_signature.output_specs):
+                    raise AssertionError(
+                        f"Number of outputs changed after transformation: got index {i} "
+                        f"but only {len(old_signature.output_specs)} output_specs"
+                    )
                 old_output_spec = old_signature.output_specs[i]
                 arg = (
                     old_output_spec.arg
@@ -1603,9 +1655,8 @@ class ExportedProgram:
     # TODO: remove this
     @final
     def _validate(self):
-        assert len(self.verifiers) > 0, (
-            "ExportedProgram must have at least one verifier."
-        )
+        if len(self.verifiers) == 0:
+            raise AssertionError("ExportedProgram must have at least one verifier.")
         for v in self.verifiers:
             v().check(self)
 
@@ -1650,9 +1701,10 @@ def _get_shape_env(gm):
 
 def _get_updated_range_constraints(
     gm: torch.fx.GraphModule,
-    old_range_constraints: "Optional[dict[sympy.Symbol, Any]]" = None,
+    old_range_constraints: "dict[sympy.Symbol, Any] | None" = None,
 ) -> "dict[sympy.Symbol, Any]":
-    assert old_range_constraints is not None
+    if old_range_constraints is None:
+        raise AssertionError("old_range_constraints must not be None")
 
     shape_env = _get_shape_env(gm)
     if shape_env is None:

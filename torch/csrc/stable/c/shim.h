@@ -16,7 +16,6 @@ extern "C" {
 #endif
 
 #if TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
-using StableIValue = uint64_t;
 
 // Has the same semantic as aoti_torch_call_dispatcher, but takes an
 // additional argument for the extension build version. This is
@@ -148,6 +147,10 @@ AOTI_TORCH_EXPORT AOTITorchError torch_c10_cuda_check_msg(
 AOTI_TORCH_EXPORT void torch_c10_cuda_free_error_msg(char* error_msg);
 
 #endif // USE_CUDA
+
+// Set requires_grad on a tensor
+AOTI_TORCH_EXPORT AOTITorchError
+torch_set_requires_grad(AtenTensorHandle tensor, bool requires_grad);
 
 #endif // TORCH_FEATURE_VERSION >= TORCH_VERSION_2_10_0
 

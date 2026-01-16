@@ -51,7 +51,7 @@ jobs:
         docker-image-name: [
           pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11,
-          pytorch-linux-jammy-cuda12.8-cudnn9-py3.12-gcc11-vllm,
+          pytorch-linux-jammy-cuda12.9-cudnn9-py3.12-gcc11-vllm,
           pytorch-linux-jammy-cuda12.8-cudnn9-py3-gcc11-inductor-benchmarks,
           pytorch-linux-jammy-cuda13.0-cudnn9-py3-gcc11-inductor-benchmarks,
           pytorch-linux-jammy-cuda12.4-cudnn9-py3-gcc11,
@@ -62,6 +62,7 @@ jobs:
           pytorch-linux-jammy-py3.14-clang12,
           pytorch-linux-jammy-rocm-n-py3,
           pytorch-linux-noble-rocm-n-py3,
+          pytorch-linux-noble-rocm-nightly-py3,
           pytorch-linux-jammy-rocm-n-py3-benchmarks,
           pytorch-linux-jammy-cuda12.8-cudnn9-py3.10-clang12,
           pytorch-linux-jammy-py3.10-gcc11,
@@ -69,6 +70,7 @@ jobs:
           pytorch-linux-jammy-py3.12-halide,
           pytorch-linux-jammy-py3.12-pallas,
           pytorch-linux-jammy-cuda12.8-py3.12-pallas,
+          pytorch-linux-jammy-tpu-py3.12-pallas,
           pytorch-linux-jammy-xpu-n-1-py3,
           pytorch-linux-noble-xpu-n-py3,
           pytorch-linux-noble-xpu-n-py3-inductor-benchmarks,
@@ -107,6 +109,9 @@ jobs:
 
       - name: Setup Linux
         uses: ./.github/actions/setup-linux
+
+      - name: Login to ECR
+        uses: ./.github/actions/ecr-login
 
       - name: Build docker image
         id: build-docker-image

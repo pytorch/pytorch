@@ -1,5 +1,0 @@
-ERROR
-  File "/tmp/tmp3rla9i2f/lv/clvwvfmajfbfqpgybn3rtgne4esw2fu7p45jsdd4mogluqk3inyt.py", line 12, in pallas_fused_arange_index_select_855e98b7_kernel
-    tmp1 = s25
-           ^^^
-NameError: name 's25' is not defined

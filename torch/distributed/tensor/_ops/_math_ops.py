@@ -17,7 +17,6 @@ from torch.distributed.tensor._op_schema import (
     RuntimeSchemaInfo,
     TupleStrategy,
 )
-from torch.distributed.tensor._ops.registration import register_op_strategy
 from torch.distributed.tensor._ops.utils import (
     as_list,
     expand_to_full_mesh_op_strategy,
@@ -26,9 +25,11 @@ from torch.distributed.tensor._ops.utils import (
     is_tensor_evenly_shardable_on_dim,
     normalize_dim,
     normalize_dims,
+    register_op_strategy,
 )
 from torch.distributed.tensor._utils import normalize_to_torch_size
 from torch.distributed.tensor.placement_types import (
+    _StridedShard,
     Partial,
     Placement,
     Replicate,
@@ -140,7 +141,6 @@ class _NormPartial(Partial):
                     f"Expected int or float, got {type(self.norm_type)}"
                 )
             if self.norm_type != 0 and self.norm_type != 1:
-                # pyrefly: ignore [unsupported-operation]
                 return tensor**self.norm_type
         return tensor
 
@@ -151,7 +151,6 @@ class _NormPartial(Partial):
                     f"Expected int or float, got {type(self.norm_type)}"
                 )
             if self.norm_type != 0 and self.norm_type != 1:
-                # pyrefly: ignore [unsupported-operation]
                 return tensor ** (1.0 / self.norm_type)
         return tensor
 
@@ -258,8 +257,10 @@ def map_placements_after_reduction(
         if isinstance(placement, (Replicate, Partial)):
             new_placements.append(placement)
         else:
-            if not isinstance(placement, Shard):
-                raise AssertionError(f"Expected Shard, got {type(placement)}")
+            if not isinstance(placement, Shard | _StridedShard):
+                raise AssertionError(
+                    f"Expected Shard/_StridedShard, got {type(placement)}"
+                )
             shard_dim = placement.dim
             new_shard_dim = reduction_dims_map[shard_dim]
             if new_shard_dim == -1 or shard_dim in reduction_dims:
@@ -267,7 +268,14 @@ def map_placements_after_reduction(
                 # (i.e. for the case where keepdims=True), we generate partial
                 new_placements.append(get_placement_from_reduction_op(reduction_op))
             else:
-                new_placements.append(Shard(new_shard_dim))
+                if isinstance(placement, Shard):
+                    new_placements.append(Shard(new_shard_dim))
+                else:
+                    new_placements.append(
+                        _StridedShard(
+                            new_shard_dim, split_factor=placement.split_factor
+                        )
+                    )
     return tuple(new_placements)
 
 

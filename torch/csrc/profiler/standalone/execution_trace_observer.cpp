@@ -23,7 +23,6 @@
 
 #include <ATen/core/TensorBody.h>
 #include <ATen/core/function_schema.h>
-#include <ATen/core/stack.h>
 #include <ATen/record_function.h>
 #include <c10/util/env.h>
 #include <c10/util/irange.h>
@@ -113,7 +112,7 @@ struct TORCH_API ExecutionTraceObserver { // NOLINT
   // Uses the underlying TensorImpl object pointer as the key and map to its
   // unique id.
 
-  std::map<const void*, ID> objectId{};
+  std::map<const void*, ID> objectId;
   // Observer run state.
   enum class RunState { uninitialized, disabled, enabled };
 
@@ -271,7 +270,7 @@ static void writeJsonNode(
     const std::string& kernelBackend = "",
     const std::string& kernelFile = "",
     const std::string& tensor_range = "",
-    const std::string& additiona_attrs = "") {
+    const std::string& additional_attrs = "") {
   if (!out.is_open() || out.fail() || out.bad()) {
     return;
   }
@@ -306,7 +305,7 @@ static void writeJsonNode(
         kernelBackend,
         kernelFile,
         tensor_range,
-        additiona_attrs);
+        additional_attrs);
   } catch (const std::exception& e) {
     LOG(ERROR) << "Failed to write json node to execution trace: " << e.what();
   }
@@ -843,7 +842,7 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
         op_schema_str = json_str_escape(c10::toString(op_schema.value()));
       }
 
-      const std::string additiona_attrs =
+      const std::string additional_attrs =
           fn.isNcclMeta() ? getCommsNodeAttrs(fn) : "";
       {
         const std::lock_guard<std::recursive_mutex> lock(ob->gMutex);
@@ -874,7 +873,7 @@ static void onFunctionExit(const RecordFunction& fn, ObserverContext* ctx_ptr) {
             fc.kernelBackend,
             fc.kernelFile,
             fc.get_string_for_tensor_range(),
-            additiona_attrs);
+            additional_attrs);
         ob->out << ',';
       }
     } catch (const std::exception& e) {

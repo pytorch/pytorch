@@ -174,6 +174,7 @@ def get_device_capability(device: _device_t = None, /) -> dict[str, Any]:
         >>> print("Supported dtypes:", capabilities["supported_dtypes"])
     """
     device_index = _get_device_index(device, optional=True)
+    # pyrefly: ignore [missing-attribute]
     return torch._C._accelerator_getDeviceCapability(device_index)
 
 

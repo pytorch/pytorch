@@ -4,13 +4,14 @@ import threading
 from collections.abc import Callable, Sequence
 from functools import lru_cache
 from itertools import chain
-from typing import cast
+from typing import cast, Optional
 
 import torch
 from torch._guards import detect_fake_mode
 from torch._ops import OpOverload
 from torch._subclasses import FakeTensorMode
 from torch.distributed._functional_collectives import _are_we_tracing
+from torch.distributed.device_mesh import DeviceMesh
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
 from torch.distributed.tensor._op_schema import (
     OpInfo,
@@ -23,10 +24,16 @@ from torch.distributed.tensor._op_schema import (
     StrategyType,
     TupleStrategy,
 )
+from torch.distributed.tensor._ops.single_dim_strategy import (
+    _expand_single_dim_strategy_to_mesh,
+    _SingleDimStrategyFunc,
+)
 from torch.distributed.tensor._utils import (
     compute_local_shape_and_global_offset,
     compute_local_stride,
+    try_find_mesh_from_args,
 )
+from torch.distributed.tensor.placement_types import _StridedShard, Shard
 
 
 aten = torch.ops.aten
@@ -56,6 +63,73 @@ class LocalLRUCache(threading.local):
         return self.cache.cache_clear()
 
 
+def _select_min_cost_strategy(
+    strategy: OpStrategy, op_schema: OpSchema | None = None
+) -> OpSpec:
+    from torch.fx.experimental.symbolic_shapes import guard_or_false
+
+    if len(strategy.strategies) == 1:
+        # short cut with only one possible OpSpec
+        return strategy.strategies[0]
+
+    op_spec_costs: list[torch.types.FloatLikeType] = []
+    no_redistribute_strategy_index: int = -1
+    negative_cost_index: int = -1
+    zero_cost_index: int = -1
+    for strategy_idx, op_spec in enumerate(strategy.strategies):
+        assert op_spec.redistribute_cost is not None, (
+            "must set redistribute cost each OpSpec!"
+        )
+        redistribute_cost = sum(chain.from_iterable(op_spec.redistribute_cost))
+        op_spec_costs.append(redistribute_cost)
+
+        # If there are strategies with negative/zero/no redistribute cost,
+        # we record those indices.
+        # TODO: Currently this only applies to OpStrategy selection. Requires extra
+        # logic to make it work for TupleStrategy, if needed.
+        if op_schema is not None:
+            if guard_or_false(redistribute_cost < 0):
+                if (
+                    negative_cost_index == -1
+                    or redistribute_cost < op_spec_costs[negative_cost_index]
+                ):
+                    negative_cost_index = strategy_idx
+            elif guard_or_false(redistribute_cost == 0):
+                needs_redistribute = False
+                for spec_idx, input_spec in enumerate(op_schema.args_spec):
+                    desired_spec = (
+                        op_spec.output_spec
+                        if op_spec.input_specs is None
+                        else op_spec.input_specs[spec_idx]
+                    )
+                    if input_spec.placements != desired_spec.placements:
+                        needs_redistribute = True
+                        break
+
+                if not needs_redistribute:
+                    no_redistribute_strategy_index = strategy_idx
+                elif zero_cost_index == -1:
+                    zero_cost_index = strategy_idx
+
+    # prioritize negative/zero/no redistribute cost strategies
+    if negative_cost_index != -1:
+        # If there's negative cost, we select the one with the minimal cost,
+        # even if this means we need to redistribute, e.g. via local chunking.
+        # E.g. this can happen for ops in self.op_to_shape_and_stride_idx
+        # when the inputs / outputs are sharded.
+        selected_strategy_index = negative_cost_index
+    elif no_redistribute_strategy_index != -1:
+        selected_strategy_index = no_redistribute_strategy_index
+    elif zero_cost_index != -1:
+        selected_strategy_index = zero_cost_index
+    else:
+        # default to choosing minimal redistribute cost
+        min_cost = min(op_spec_costs)
+        selected_strategy_index = op_spec_costs.index(min_cost)
+
+    return strategy.strategies[selected_strategy_index]
+
+
 class ShardingPropagator:
     def __init__(self) -> None:
         self.op_to_rules: dict[OpOverload, Callable[[OpSchema], OutputSharding]] = {}
@@ -63,9 +137,16 @@ class ShardingPropagator:
             OpOverload,
             Callable[[OpSchema], StrategyType],
         ] = {}
+        self.op_single_dim_strategy_funcs: dict[
+            OpOverload,
+            _SingleDimStrategyFunc,
+        ] = {}
         # op map to save static argnum to decide to reuse sharding prop cache or
         # re-run sharding prop
         self.op_to_schema_info: dict[OpOverload, RuntimeSchemaInfo] = {}
+        self.op_to_schema_info_for_single_dim_strategy: dict[
+            OpOverload, RuntimeSchemaInfo
+        ] = {}
         self.propagate_op_sharding = LocalLRUCache(
             self.propagate_op_sharding_non_cached
         )
@@ -99,6 +180,19 @@ class ShardingPropagator:
         self.op_to_rules[op_overload] = rule_func
         if schema_info is not None:
             self.op_to_schema_info[op_overload] = schema_info
+
+    def register_single_dim_op_strategy(
+        self,
+        op_overload: OpOverload,
+        strategy_func: _SingleDimStrategyFunc,
+        schema_info: Optional[RuntimeSchemaInfo] = None,
+    ):
+        """
+        Register a strategy over a single mesh-dim, relying on infra to automatically expand to the full mesh.
+        """
+        self.op_single_dim_strategy_funcs[op_overload] = strategy_func
+        if schema_info is not None:
+            self.op_to_schema_info_for_single_dim_strategy[op_overload] = schema_info
 
     def register_op_strategy(
         self,
@@ -157,7 +251,7 @@ class ShardingPropagator:
 
     def _propagate_tensor_meta_non_cached(
         self, op_schema: OpSchema
-    ) -> None | TensorMeta | Sequence[TensorMeta | None]:
+    ) -> TensorMeta | Sequence[TensorMeta | None] | None:
         """
         Propagate the tensor metadata, it could either return a TensorMeta
         or a list/tuple of TensorMetas
@@ -202,33 +296,33 @@ class ShardingPropagator:
             return None
 
     @lru_cache  # noqa: B019
-    def _propagate_tensor_meta(
+    def _propagate_tensor_meta_cached(
         self, op_schema: OpSchema
-    ) -> None | TensorMeta | Sequence[TensorMeta | None]:
+    ) -> TensorMeta | Sequence[TensorMeta | None] | None:
         """
         Cached version of _propagate_tensor_meta_non_cached
-        This is a private API. Use propagate_tensor_meta instead.
+        Use _propagate_tensor_meta instead to handle dynamic shapes.
         """
         return self._propagate_tensor_meta_non_cached(op_schema)
 
-    def propagate_tensor_meta(
+    def _propagate_tensor_meta(
         self, op_schema: OpSchema
-    ) -> None | TensorMeta | Sequence[TensorMeta | None]:
+    ) -> TensorMeta | Sequence[TensorMeta | None] | None:
         """
         Propagate the tensor metadata, it could either return a TensorMeta
-        or a list/tuple of TensorMetas. This is a public API that should be
-        used if cache should be used.
+        or a list/tuple of TensorMetas. Uses the cached version if not
+        actively tracing. Use this method instead of _propagate_tensor_meta_non_cached
         """
         if _are_we_tracing():
             return self._propagate_tensor_meta_non_cached(op_schema)
         else:
-            return self._propagate_tensor_meta(op_schema)
+            return self._propagate_tensor_meta_cached(op_schema)
 
     def _create_output_spec_with_new_tensor_meta(
         self,
         op: OpOverload,
         output_specs: OutputSpecType,
-        output_tensor_meta: None | TensorMeta | Sequence[TensorMeta | None],
+        output_tensor_meta: TensorMeta | Sequence[TensorMeta | None] | None,
     ) -> OutputSpecType:
         """
         Wrap the output_specs with the tensor metadata from the output.
@@ -259,6 +353,7 @@ class ShardingPropagator:
                     f"number of op outputs {_length(output_tensor_meta)}."
                 )
 
+            # pyrefly: ignore [bad-argument-type]
             for i, spec in enumerate(output_specs):
                 if isinstance(spec, DTensorSpec):
                     output_tensor_meta_i = output_tensor_meta[i]
@@ -338,6 +433,13 @@ class ShardingPropagator:
         # Ideally, this function would be deleted, but there are a handful of
         # one off call sites here that aren't cleaned up.
 
+        # NOTE: schema should always be populated when calling this function,
+        # as it's only called after unwrap_to_op_info (create_schema=True).
+        assert op_info.schema is not None, (
+            "op_info.schema should not be None in propagate. "
+            "This function should only be called after unwrap_to_op_info."
+        )
+
         # We cannot use an lru cache if we know that inputs will have dynamic shapes,
         # because SymInts are not hashable.
         # This is generally ok because this only happens during tracing in torch.compile,
@@ -364,16 +466,48 @@ class ShardingPropagator:
             return OutputSharding(None, op_schema)
 
         out_tensor_meta = self._propagate_tensor_meta_non_cached(op_schema)
-        if op_schema.op in self.op_strategy_funcs:
+
+        single_dim_strategy = self.op_single_dim_strategy_funcs.get(op_schema.op)
+        op_strategy_func = self.op_strategy_funcs.get(op_schema.op)
+        if single_dim_strategy is not None or op_strategy_func is not None:
+            """
+            Given the single_dim_strategy, which is just a minimal set of valid input-output placement specifications
+            for the operator over a single mesh dimension,
+
+            And the OpSchema, which includes information about the runtime input tensor placements, and the mesh,
+
+            Combine single_dim_strategies across mesh dims, also expanding placeholders (ShardPlaceholder) to any real
+            sharding types in op_schema, and find the lowest cost redistribution of inputs to match a valid strategy
+            combination.
+            """
             # wrap the op_schema with op strategy for sharding strategy propagation
             strategy_schema = self._wrap_with_op_strategy(op_schema)
 
-            # run sharding strategy propagation/generation
-            op_strategy = self.op_strategy_funcs[op_schema.op](strategy_schema)
+            if single_dim_strategy is not None:
+                mesh = try_find_mesh_from_args(op_schema.op, op_schema.args_schema)
+                assert isinstance(mesh, DeviceMesh), "Expected to find a valid mesh"
+                # if we run into a case where we register a single-dim rule for an op that can't propagate tensor meta,
+                # we could loosen this assert, but it's better to fix gaps in tensor meta prop. We want to end up
+                # with the invariant that all DTensorSpec have a valid tensormeta, but many existing sharding rules
+                # skip this.  We try to enforce it for all newly added single-dim rules.
+                assert out_tensor_meta is not None, (
+                    f"_propagate_tensor_meta_non_cached returned None for {op_schema}, but tensor_meta is required"
+                )
+                # expand to generate the full set of strategy combinations, each one
+                # with a redistribute cost, and then find the min strategy over those costs.
+                _expanded_strategy_fn = _expand_single_dim_strategy_to_mesh(
+                    mesh, strategy_schema, single_dim_strategy, out_tensor_meta
+                )
+                op_strategy = _expanded_strategy_fn(
+                    op_schema.op, strategy_schema.args_meta, strategy_schema.kwargs_meta
+                )
+            else:
+                assert op_strategy_func is not None
+                op_strategy = op_strategy_func(strategy_schema)
 
             if isinstance(op_strategy, OpStrategy):
                 # single Op strategy
-                output_strategy = self._select_strategy(op_strategy, op_schema)
+                output_strategy = _select_min_cost_strategy(op_strategy, op_schema)
 
                 # check if we need to redistribute the input
                 needs_redistribute = False
@@ -414,7 +548,10 @@ class ShardingPropagator:
                     assert isinstance(output_strategy.output_spec, DTensorSpec)
                     # It happens when the output has the same shape as the input
                     # and the input placements are not all Replicate().
-                    if output_strategy.output_spec.is_sharded():
+                    if any(
+                        isinstance(p, Shard | _StridedShard)
+                        for p in output_strategy.output_spec.placements
+                    ):
                         schema = suggestion_schema or op_schema
                         assert isinstance(out_tensor_meta, TensorMeta)
                         suggestion_schema = self._adjust_shape_and_stride_args(
@@ -461,7 +598,7 @@ class ShardingPropagator:
                 out_spec_list: list[DTensorSpec] = []
                 for strategy in op_strategy.children:
                     assert isinstance(strategy, OpStrategy)
-                    selected_strategy = self._select_strategy(strategy)
+                    selected_strategy = _select_min_cost_strategy(strategy)
                     selected_strategies.append(selected_strategy)
                     out_spec_list.append(selected_strategy.output_spec)
 
@@ -580,72 +717,6 @@ class ShardingPropagator:
             raise NotImplementedError(
                 f"Operator {op_schema.op} does not have a sharding strategy registered."
             )
-
-    def _select_strategy(
-        self, strategy: OpStrategy, op_schema: OpSchema | None = None
-    ) -> OpSpec:
-        from torch.fx.experimental.symbolic_shapes import guard_or_false
-
-        if len(strategy.strategies) == 1:
-            # short cut with only one possible OpSpec
-            return strategy.strategies[0]
-
-        op_spec_costs: list[torch.types.FloatLikeType] = []
-        no_redistribute_strategy_index: int = -1
-        negative_cost_index: int = -1
-        zero_cost_index: int = -1
-        for strategy_idx, op_spec in enumerate(strategy.strategies):
-            assert op_spec.redistribute_cost is not None, (
-                "must set redistribute cost each OpSpec!"
-            )
-            redistribute_cost = sum(chain.from_iterable(op_spec.redistribute_cost))
-            op_spec_costs.append(redistribute_cost)
-
-            # If there are strategies with negative/zero/no redistribute cost,
-            # we record those indices.
-            # TODO: Currently this only applies to OpStrategy selection. Requires extra
-            # logic to make it work for TupleStrategy, if needed.
-            if op_schema is not None:
-                if guard_or_false(redistribute_cost < 0):
-                    if (
-                        negative_cost_index == -1
-                        or redistribute_cost < op_spec_costs[negative_cost_index]
-                    ):
-                        negative_cost_index = strategy_idx
-                elif guard_or_false(redistribute_cost == 0):
-                    needs_redistribute = False
-                    for spec_idx, input_spec in enumerate(op_schema.args_spec):
-                        desired_spec = (
-                            op_spec.output_spec
-                            if op_spec.input_specs is None
-                            else op_spec.input_specs[spec_idx]
-                        )
-                        if input_spec.placements != desired_spec.placements:
-                            needs_redistribute = True
-                            break
-
-                    if not needs_redistribute:
-                        no_redistribute_strategy_index = strategy_idx
-                    elif zero_cost_index == -1:
-                        zero_cost_index = strategy_idx
-
-        # prioritize negative/zero/no redistribute cost strategies
-        if negative_cost_index != -1:
-            # If there's negative cost, we select the one with the minimal cost,
-            # even if this means we need to redistribute, e.g. via local chunking.
-            # E.g. this can happen for ops in self.op_to_shape_and_stride_idx
-            # when the inputs / outputs are sharded.
-            selected_strategy_index = negative_cost_index
-        elif no_redistribute_strategy_index != -1:
-            selected_strategy_index = no_redistribute_strategy_index
-        elif zero_cost_index != -1:
-            selected_strategy_index = zero_cost_index
-        else:
-            # default to choosing minimal redistribute cost
-            min_cost = min(op_spec_costs)
-            selected_strategy_index = op_spec_costs.index(min_cost)
-
-        return strategy.strategies[selected_strategy_index]
 
     def _adjust_shape_and_stride_args(
         self,

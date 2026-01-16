@@ -1,5 +1,0 @@
-ERROR
-  File "/tmp/tmpchioddua/uo/cuou3rjcm4zegaqg6qk2aty72tpx3ragnepw7raebgel544gmtc3.py", line 12, in pallas_fused__softmax_amax_ge_mul_neg_scalar_tensor_sub_where_01ebda8e_kernel
-    tmp2 = s53
-           ^^^
-NameError: name 's53' is not defined

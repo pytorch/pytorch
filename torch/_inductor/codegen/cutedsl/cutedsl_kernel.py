@@ -17,7 +17,15 @@ from torch._inductor.codegen.common import (
     Kernel,
     ValueRanges,
 )
-from torch._inductor.ir import Buffer, ComputedBuffer, InputBuffer
+from torch._inductor.ir import (
+    BaseView,
+    Buffer,
+    ComputedBuffer,
+    ExternKernel,
+    InputBuffer,
+    MutableBox,
+    ReinterpretView,
+)
 from torch._inductor.ops_handler import StoreMode
 from torch._inductor.utils import OrderedSet
 from torch._inductor.virtualized import V
@@ -237,31 +245,58 @@ class CuteDSLTemplateKernel(Kernel):
         with self.set_subgraph_body(body_name):
             yield
 
+    def _get_reinterpret_view(self, node) -> ReinterpretView | None:
+        """Extract or convert to ReinterpretView from a node, handling all views."""
+        while isinstance(node, MutableBox):
+            node = node.data
+        if isinstance(node, BaseView):
+            return ExternKernel.convert_to_reinterpret_view(node)
+        return None
+
     def def_kernel(self, *argnames):
-        """Define kernel function signature for CuteDSL templates."""
+        """Define kernel function signature for CuteDSL templates.
+
+        When inputs are ReinterpretViews of the same underlying buffer (e.g., Q/K/V
+        from fused QKV projection), we generate separate arguments for each input
+        even though they share the same underlying buffer.
+        """
         renames = IndentedBuffer(initial_indent=1)
+
+        # Track template input args - each input gets its own arg even if buffers are shared
+        self._template_input_args: list[tuple[str, Buffer]] = []
+        self._seen_input_args: OrderedSet[str] = OrderedSet()
 
         for i, input_node in enumerate(self.input_nodes):
             buf_name = input_node.get_name()
+            # Register with args system (may deduplicate, but we track separately)
             self.args.input(buf_name)
 
-            # Template aliasing: converts template variables (e.g., "input_a") to function args (e.g., "arg_input_a")
-            # and generates rename statements so template code can use the original names
             if i < len(argnames):
                 template_name = argnames[i]
                 arg_name = f"arg_{template_name}"
                 self.args.input_buffers[buf_name] = arg_name
                 renames.writeline(f"{template_name} = {arg_name}")
+                self._template_input_args.append((arg_name, input_node))
+                self._seen_input_args.add(arg_name)
 
         if self.output_node:
             self.args.output(self.output_node.get_name())
 
         def hook():
-            # Deferred execution: arg definitions must be collected after template processing adds all args
-            arg_defs, *_ = self.args.python_argdefs()
+            # Generate signature with template input args plus additional args (output, sizevars)
             code = IndentedBuffer()
             code.writeline(f"# Kernel function signature: {self.kernel_name}")
-            params = [x.full_name() for x in arg_defs] + ["stream"]
+
+            # Start with template input args
+            params = [arg_name for arg_name, _ in self._template_input_args]
+
+            # Get additional args from python_argdefs (output, sizevars, etc.)
+            arg_defs, _, _, _ = self.args.python_argdefs()
+            for arg_def in arg_defs:
+                if arg_def.full_name() not in self._seen_input_args:
+                    params.append(arg_def.full_name())
+
+            params.append("stream")
             code.writeline(
                 f"def {self.kernel_name}_{MAIN_SUFFIX}({', '.join(params)}):"
             )
@@ -322,10 +357,36 @@ class CuteDSLTemplateKernel(Kernel):
         return placeholder
 
     def call_kernel(self, name: str, node=None):
-        """Call the kernel function. Simplified version of TritonTemplateKernel.call_kernel."""
+        """Call the kernel function. Simplified version of TritonTemplateKernel.call_kernel.
+
+        For inputs that are ReinterpretViews (e.g., Q/K/V slices from fused QKV),
+        we generate reinterpret_tensor() calls to properly handle the views.
+        """
         wrapper = V.graph.wrapper_code
-        _, call_args, _, arg_types = self.args.python_argdefs()
-        # TODO triton should really be swapped w/ `python`
+
+        # Build call args matching the signature generated in `def_kernel`
+        call_args = []
+        arg_types = []
+
+        for _, input_node in self._template_input_args:
+            reinterpret_view = self._get_reinterpret_view(input_node)
+            if reinterpret_view is not None:
+                call_args.append(reinterpret_view.codegen_reference())
+            else:
+                call_args.append(input_node.get_name())
+            arg_types.append(V.graph.get_dtype(input_node.get_name()))
+
+        # Add additional args from python_argdefs (output, sizevars, ..)
+        orig_arg_defs, orig_call_args, _, orig_arg_types = self.args.python_argdefs()
+        for arg_def, call_arg, arg_type in zip(
+            orig_arg_defs, orig_call_args, orig_arg_types
+        ):
+            # dedupe
+            if arg_def.full_name() not in self._seen_input_args:
+                call_args.append(call_arg)
+                arg_types.append(arg_type)
+
+        # TODO this karg really should not be called `triton`
         wrapper.generate_kernel_call(name, call_args, triton=True, arg_types=arg_types)
 
     def _get_subgraph(self, subgraph_number: int):
@@ -428,6 +489,8 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
 
     def load(self, name: str, index: sympy.Expr):
         """Handle loading from tensor or fixed(template args) input for CuteDSL."""
+        from torch._inductor.kernel.flex.flex_flash_attention import HierarchicalIndex
+
         if name not in self.fixed_inputs:
             var = self._add_kernel_input(name)
             buffer = V.graph.get_buffer(name)
@@ -436,18 +499,24 @@ class ModificationWrapperCuteDSL(V.WrapperHandler):  # type: ignore[name-defined
             cute_dtype = CuteDSLOpOverrides.TORCH_TO_CUTE_DTYPE.get(
                 var_dtype, "cutlass.Float32"
             )
-            renamed_index = self.kernel.rename_indexing(index)
-
-            idx_var = self._emit_scalar_fragment(
-                self.kernel.kexpr(renamed_index), "cutlass.Int32", torch.int32
-            )
+            idx_vars = [
+                self._emit_scalar_fragment(
+                    self.kernel.kexpr(self.kernel.rename_indexing(dim_index)),
+                    "cutlass.Int32",
+                    torch.int32,
+                )
+                for dim_index in (
+                    index.args if isinstance(index, HierarchicalIndex) else (index,)
+                )
+            ]
 
             val_frag = self.kernel.cse.newvar(dtype=var_dtype)
             self.kernel.body.writeline(
                 f"{val_frag} = cute.make_rmem_tensor(1, {cute_dtype})"
             )
-
-            self.kernel.body.writeline(f"{val_frag}[0] = ({var}[{idx_var}])")
+            self.kernel.body.writeline(
+                f"{val_frag}[0] = ({var}[{', '.join(idx_vars)}])"
+            )
 
             final_expr = f"{val_frag}.load()"
 

@@ -3383,7 +3383,8 @@ class OptimizedModuleTest(torch._dynamo.test_case.TestCase):
 
             def __bool__(self):
                 self.bool_invoked += 1
-                return len(self.key_cache)
+                # __bool__ must return a real bool; use truthiness of cache size
+                return len(self.key_cache) > 0
 
         @torch.compile(fullgraph=True, backend="eager")
         def f(x):

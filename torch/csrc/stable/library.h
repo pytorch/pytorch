@@ -131,6 +131,11 @@ struct UnboxType<torch::headeronly::HeaderOnlyArrayRef<T>> {
   using type = std::vector<T>;
 };
 
+template <typename T>
+struct UnboxType<std::optional<torch::headeronly::HeaderOnlyArrayRef<T>>> {
+  using type = std::optional<std::vector<T>>;
+};
+
 template <>
 struct UnboxType<std::string_view> {
   using type = std::string;
@@ -145,7 +150,7 @@ using unbox_type_t =
 template <class... T, std::size_t... I>
 std::tuple<T...> unbox_to_tuple_impl(
     StableIValue* stack,
-    std::index_sequence<I...>) {
+    std::index_sequence<I...> /*unused*/) {
   return std::make_tuple(to<T>(stack[I])...);
 }
 
@@ -159,7 +164,7 @@ template <class... T, std::size_t... I>
 void box_from_tuple_impl(
     StableIValue* stack,
     std::tuple<T...> vals,
-    std::index_sequence<I...>) {
+    std::index_sequence<I...> /*unused*/) {
   ((stack[I] = from<T>(std::get<I>(vals))), ...);
 }
 

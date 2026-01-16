@@ -53,8 +53,7 @@ jobs:
               if [[ "${SEP}${CHANGED_FILES}${SEP}" == *"${SEP}.lintrunner.toml${SEP}"* ]]; then
                 echo ".lintrunner.toml changed, setting to '*'"
                 CHANGED_FILES="*"
-              fi
-              if [[ -z "$CHANGED_FILES" ]]; then
+              elif [[ -z "$CHANGED_FILES" ]]; then
                 echo "No changed files found, setting to '*'"
                 CHANGED_FILES="*"
               fi
