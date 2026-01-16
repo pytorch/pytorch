@@ -44,7 +44,7 @@ from weakref import WeakKeyDictionary
 
 import torch
 
-from .fake_class_registry import register_fake_class, FakeScriptObject
+from .fake_class_registry import FakeScriptObject, register_fake_class
 
 
 class MemberType(Enum):
@@ -85,7 +85,9 @@ class _OpaqueTypeInfo:
         [Any], list[Any]
     ]  # Callable that takes the object and returns list of values to guard on
     members: dict[str, MemberType]  # Maps member name to how it should be handled
-    fake_script_object_class: type  # Type-specific FakeScriptObject subclass for isinstance checks
+    fake_script_object_class: (
+        type  # Type-specific FakeScriptObject subclass for isinstance checks
+    )
 
 
 # Mapping of type -> (string name, reference/value type)
