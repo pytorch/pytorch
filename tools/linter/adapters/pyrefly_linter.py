@@ -20,6 +20,7 @@
 #   "optree==0.17.0",
 #   "types-openpyxl==3.1.5.20250919",
 #   "types-python-dateutil==2.9.0.20251008",
+#   "packaging",
 # ]
 # ///
 from __future__ import annotations
