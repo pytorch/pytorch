@@ -661,7 +661,7 @@ class DeviceCachingAllocator {
     if (size <= kSmallSize) {
       return kSmallBuffer;
     } else if (size < kMinLargeAlloc) {
-      return kLargeBuffer;
+      return AcceleratorAllocatorConfig::large_segment_size();
     } else {
       return kRoundLarge * ((size + kRoundLarge - 1) / kRoundLarge);
     }
@@ -683,7 +683,7 @@ class DeviceCachingAllocator {
         }
       }
     }
-    if (size < kSmallSize) {
+    if (size <= kSmallSize) {
       return small_blocks;
     } else {
       return large_blocks;
@@ -727,7 +727,9 @@ class DeviceCachingAllocator {
         return c;
       }
     }
-    auto segment_size = pool->is_small ? kSmallBuffer : kLargeBuffer;
+    auto segment_size = pool->is_small
+        ? kSmallBuffer
+        : AcceleratorAllocatorConfig::large_segment_size();
     expandable_segments.emplace_back(new ExpandableSegment(
         device, queue, segment_size, devices_with_peer_access));
 

@@ -2,6 +2,7 @@
 
 import contextlib
 import itertools
+import time
 from collections.abc import Callable
 from contextlib import nullcontext
 from functools import wraps
@@ -707,6 +708,7 @@ or otherwise set torch._functorch.config.functionalize_rng_ops = False."""
         # Packaging this just for later use
         aot_config=aot_config,
         stack=stack,
+        fake_mode=fake_mode,
     )
 
 
@@ -906,6 +908,7 @@ def prepare_aot_module_simplified(
     force_non_lazy_backward_lowering: bool = False,
     disable_functionalization: bool = False,
     _record_nn_module_stack: bool = False,
+    _disable_torch_fn_metadata_mode: bool = False,
 ):
     if not flatten:
         assert kwargs is None
@@ -1005,6 +1008,7 @@ def prepare_aot_module_simplified(
         precompile_backend_id=getattr(mod, "_backend_id", None),
         force_non_lazy_backward_lowering=force_non_lazy_backward_lowering,
         disable_functionalization=False,
+        _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
     )
     fake_mode, shape_env = construct_fake_mode(full_args, aot_config)
     # NB: full_args_descs not needed here, fake_flat_args is 1:1 with full_args
@@ -1085,7 +1089,10 @@ def aot_module_simplified(
 
         compiled_fn = None
 
-        if isinstance(fw_compiler, SerializableAOTDispatchCompiler):
+        if (
+            isinstance(fw_compiler, SerializableAOTDispatchCompiler)
+            or torch._functorch.config.force_autograd_cache
+        ):
             local = should_use_local_autograd_cache()
             remote = should_use_remote_autograd_cache()
             if local or remote:
@@ -1185,6 +1192,7 @@ def aot_export_joint_with_descriptors(
     ignore_shape_env=False,
     disable_functionalization=False,
     _record_nn_module_stack=False,
+    _disable_torch_fn_metadata_mode=False,
 ) -> JointWithDescriptors:
     """
     This API captures the joint graph for an nn.Module.  However, unlike
@@ -1276,6 +1284,7 @@ def aot_export_joint_with_descriptors(
         force_non_lazy_backward_lowering=True,
         disable_functionalization=disable_functionalization,
         _record_nn_module_stack=_record_nn_module_stack,
+        _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
     )
 
     # TODO: Maybe this should be in create_aot_state?  Not sure, that would
@@ -1313,6 +1322,7 @@ def aot_compile_joint_with_descriptors(
     partition_fn: Callable = default_partition,
     fw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
     bw_compiler: Optional[AOTDispatchCompiler] = boxed_nop_preserve_node_meta,
+    serializable: bool = False,
 ) -> callable:
     """
     Companion function for aot_export_joint_with_descriptors which compiles the joint
@@ -1322,15 +1332,66 @@ def aot_compile_joint_with_descriptors(
     Note: We do NOT instantiate the module; this gives you the flexibility to subclass it and
     customize its behavior without having to worry about FQN rebinding.
 
-    TODO: Consider if we should allow_in_graph the result by default.
+    Args:
+        serializable: If True, configures the compilation to produce a serializable
+            callable by leveraging AOTAutogradCache machinery. This sets up the
+            necessary cache_info and patches config options required for serialization.
+            When True, this function will always return a BundledAOTAutogradSerializableCallable.
     """
-    compiled_fn, _ = aot_stage2_compile(
-        jd._aot_state,
-        jd._aot_graph_capture,
-        partition_fn,
-        fw_compiler,
-        bw_compiler,
+    # TODO: Consider if we should allow_in_graph the result by default.
+    from torch._dynamo.aot_compile_types import (
+        BundledAOTAutogradSerializableCallable,
+        SerializableCallable,
     )
+    from torch._functorch._aot_autograd.schemas import AOTAutogradCacheInfo
+    from torch._guards import detect_fake_mode
+    from torch._inductor.output_code import OutputCode
+
+    fw_compiler = SerializableAOTDispatchCompiler(OutputCode, fw_compiler)
+
+    cache_ctx = nullcontext()
+    if serializable:
+        jd._aot_state.aot_config.cache_info = AOTAutogradCacheInfo(
+            jd.cache_hash(),
+            time.time_ns(),
+            forward_symints=[],
+        )
+        cache_ctx = torch._functorch.config.patch(
+            {
+                "strict_autograd_cache": True,
+                "bundled_autograd_cache": True,
+                "force_non_lazy_backward_lowering": True,
+                "bypass_autograd_cache_key": True,
+            }
+        )
+
+    # Set up a TracingContext if one isn't already available.
+    # This is needed for compilers (like regional_inductor) that call
+    # standalone_compile with dynamic_shapes="from_tracing_context".
+    tracing_context = torch._guards.TracingContext.try_get()
+    if tracing_context is None:
+        fake_mode = detect_fake_mode(jd._aot_state.flat_args)
+        if fake_mode is not None:
+            tracing_context = torch._guards.TracingContext(fake_mode)
+            tracing_ctx = torch._guards.tracing(tracing_context)
+        else:
+            tracing_ctx = nullcontext()
+    else:
+        tracing_ctx = nullcontext()
+
+    with cache_ctx, tracing_ctx:
+        compiled_fn, _ = aot_stage2_compile(
+            jd._aot_state,
+            jd._aot_graph_capture,
+            partition_fn,
+            fw_compiler,
+            bw_compiler,
+        )
+
+    if not isinstance(compiled_fn, SerializableCallable) and hasattr(
+        compiled_fn, "serialize"
+    ):
+        compiled_fn = BundledAOTAutogradSerializableCallable(compiled_fn)
 
     # Cribbed from torch/export/pt2_archive/_package.py
     @simple_wraps(compiled_fn)
