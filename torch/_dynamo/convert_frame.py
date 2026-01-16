@@ -682,6 +682,10 @@ class ConvertFrameAssert:
             return ConvertFrameReturn(apply_to_code=False)
 
         global initial_global_state
+        # Save the previous initial_global_state to handle nested compilations
+        # (e.g., compiled autograd running during graph execution can trigger
+        # nested compilations that would otherwise overwrite the outer state)
+        prev_initial_global_state = initial_global_state
         initial_global_state = GlobalStateGuard()
 
         compile_id = get_compile_id(frame_state)
@@ -706,27 +710,31 @@ class ConvertFrameAssert:
             info = f"{code.co_name} {code.co_filename}:{code.co_firstlineno}"
             dynamo_tls.traced_frame_infos.append(info)
 
-        with compile_context(CompileContext(compile_id)):
-            result = _compile(
-                frame.f_code,
-                frame.f_globals,
-                frame.f_locals,
-                frame.f_builtins,
-                frame.closure,
-                self._torchdynamo_orig_backend,
-                self._one_graph,
-                self._export,
-                self._export_constraints,
-                hooks,
-                cache_entry,
-                cache_size,
-                frame,
-                frame_state=frame_state,
-                compile_id=compile_id,
-                skip=skip + 1,
-                package=self._package,
-                convert_frame_box=self._box,
-            )
+        try:
+            with compile_context(CompileContext(compile_id)):
+                result = _compile(
+                    frame.f_code,
+                    frame.f_globals,
+                    frame.f_locals,
+                    frame.f_builtins,
+                    frame.closure,
+                    self._torchdynamo_orig_backend,
+                    self._one_graph,
+                    self._export,
+                    self._export_constraints,
+                    hooks,
+                    cache_entry,
+                    cache_size,
+                    frame,
+                    frame_state=frame_state,
+                    compile_id=compile_id,
+                    skip=skip + 1,
+                    package=self._package,
+                    convert_frame_box=self._box,
+                )
+        finally:
+            # Restore the previous initial_global_state for nested compilation handling
+            initial_global_state = prev_initial_global_state
 
         if config.caching_precompile and self._package is not None:
             from .package import DynamoCache
@@ -1103,11 +1111,6 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
             # pyrefly: ignore [missing-attribute]
             resolved_forward = resolved_forward.__func__
 
-        resolved_call = mod.__call__
-        if hasattr(resolved_call, "__self__"):
-            # pyrefly: ignore [missing-attribute]
-            resolved_call = resolved_call.__func__
-
         # Mirrored from NNModuleVariable.call_function:
         # https://github.com/pytorch/pytorch/blob/main/torch/_dynamo/variables/nn_module.py#L1035
         if (
@@ -1119,8 +1122,7 @@ def get_traced_fn(mod: Any) -> tuple[FunctionType, Optional[object]]:
             and len(mod._backward_hooks) == 0
             and len(torch.nn.modules.module._global_backward_pre_hooks) == 0
             and len(torch.nn.modules.module._global_backward_hooks) == 0
-            and resolved_forward != torch.nn.Module.forward  # has forward impl
-            and resolved_call == torch.nn.Module.__call__  # no custom __call__ impl
+            and resolved_forward != torch.nn.Module.forward
         ):
             # We cannot trace __call__ by default because it will break
             # the legacy dynamo export. If we want to revisit this,
