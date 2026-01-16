@@ -2061,17 +2061,17 @@ communication mechanism.
           py::arg("rank"),
           py::arg("world_size"));
 
-  // Use ABCMeta as the metaclass so that FakeScriptObject can be registered
-  // as a virtual subclass, allowing isinstance(fake_obj, ProcessGroup) to work.
-  py::object abc_module = py::module_::import("abc");
-  py::object abc_meta = abc_module.attr("ABCMeta");
+  // Use OpaqueBase as the metaclass to allow isinstance(fake_obj, ProcessGroup)
+  // to work.
+  py::object opaque_base_module = py::module_::import("torch._opaque_base");
+  py::object opaque_base = opaque_base_module.attr("OpaqueBase");
 
   auto processGroup =
       intrusive_ptr_no_gil_destructor_trampoline_class_<
           ::c10d::ProcessGroup, ::c10d::PyProcessGroup>(
           module,
           "ProcessGroup",
-          py::metaclass(abc_meta),
+          py::metaclass(opaque_base),
           R"(A ProcessGroup is a communication primitive that allows for
           collective operations across a group of processes.
 
@@ -2707,10 +2707,6 @@ Arguments:
               auto ivalue = torch::jit::toIValue(std::move(obj), typePtr);
               return ivalue.toCustomClass<::c10d::ProcessGroup>();
           });
-
-  // Initialize ABC state for ProcessGroup so that register() works
-  py::object abc_init = abc_module.attr("_abc_init");
-  abc_init(processGroup);
 
   // Thread local process group manipulation
   module.def("_set_process_group", &::c10d::setProcessGroup);

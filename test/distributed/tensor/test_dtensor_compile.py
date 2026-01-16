@@ -38,12 +38,7 @@ from torch.distributed.tensor.parallel import (
     PrepareModuleOutput,
     RowwiseParallel,
 )
-from torch.distributed.tensor.placement_types import (
-    _MaskPartial,
-    _register_placements_as_opaque,
-    _StridedShard,
-    Placement,
-)
+from torch.distributed.tensor.placement_types import _StridedShard
 from torch.testing._internal.common_device_type import skipXPUIf
 from torch.testing._internal.common_distributed import skip_if_lt_x_gpu
 from torch.testing._internal.common_fsdp import get_devtype
@@ -63,39 +58,6 @@ from torch.testing._internal.distributed.fake_pg import FakeStore
 from torch.testing._internal.inductor_utils import HAS_GPU
 from torch.testing._internal.two_tensor import TwoTensor
 from torch.utils.checkpoint import checkpoint
-
-
-def with_placements_as_opaque(fn):
-    """
-    Decorator that registers placements as opaque types before running the test
-    and cleans them up afterward.
-    TODO: can remove this once we turn on placements as opaque by default
-    """
-    from torch._library.opaque_object import _OPAQUE_TYPES, _OPAQUE_TYPES_BY_NAME
-
-    placement_types = [
-        Placement,
-        Shard,
-        Replicate,
-        Partial,
-        _StridedShard,
-        _MaskPartial,
-    ]
-
-    @functools.wraps(fn)
-    def wrapper(*args, **kwargs):
-        _register_placements_as_opaque()
-        try:
-            return fn(*args, **kwargs)
-        finally:
-            for cls in placement_types:
-                if cls in _OPAQUE_TYPES:
-                    name = _OPAQUE_TYPES[cls].class_name
-                    torch._C._unregister_opaque_type(name)
-                    del _OPAQUE_TYPES[cls]
-                    _OPAQUE_TYPES_BY_NAME.pop(name, None)
-
-    return wrapper
 
 
 dev_type = torch.device(get_devtype())
@@ -892,7 +854,6 @@ def forward(self, b_parametrizations_buffer_original0, x):
         # this fails with an inductor stride assert
         out_dt.to_local().sum().backward()
 
-    @with_placements_as_opaque
     def test_dynamo_to_local_grad_placements_sequence(self):
         placements = [Shard(0)]
 
@@ -909,7 +870,6 @@ def forward(self, b_parametrizations_buffer_original0, x):
         out_test = fn_opt(dt)
         self.assertEqual(out_ref, out_test)
 
-    @with_placements_as_opaque
     def test_dynamo_to_local_grad_placements_sequence_intermediate(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -925,7 +885,6 @@ def forward(self, b_parametrizations_buffer_original0, x):
         out_test = fn_opt(dt)
         self.assertEqual(out_ref, out_test)
 
-    @with_placements_as_opaque
     def test_dynamo_from_local_grad_placements_sequence_intermediate(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
@@ -947,7 +906,6 @@ def forward(self, b_parametrizations_buffer_original0, x):
         out_test = fn_opt(x)
         self.assertEqual(out_ref, out_test)
 
-    @with_placements_as_opaque
     def test_dynamo_from_local_grad_placements_sequence_intermediate_as_args(self):
         mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
 
