@@ -6470,6 +6470,10 @@ def meta__efficient_attention_backward(
     return grad_query, grad_key, grad_value, grad_bias
 
 
+def is_fp4_type(dtype):
+    return dtype == torch.float4_e2m1fn_x2
+
+
 def _check_scaled_mm_sizes(
     self: torch.Tensor,
     mat2: torch.Tensor,
@@ -6530,6 +6534,10 @@ def _check_scaled_mm_sizes(
 
         m, _k = self.shape
         n = mat2.size(1)
+        # If we're using fp4, using fp4x2 packed format - adjust K appropriately
+        if is_fp4_type(self.dtype) and is_fp4_type(mat2.dtype):
+            K_packed_multiplier = 2
+            _k *= K_packed_multiplier
 
         is_blockwise_scaling = (
             (
@@ -6556,7 +6564,6 @@ def _check_scaled_mm_sizes(
                 # * block size is 16 elements packed (32 unpacked)
                 # * _k needs to be translated to the unpacked version
                 block_size_k = 16
-                _k = _k * 2
             else:
                 block_size_k = 32
 
@@ -6696,9 +6703,6 @@ def _check_scaled_mm_sizes_v2(
             torch.float8_e5m2fnuz,
             torch.float4_e2m1fn_x2,
         )
-
-    def is_fp4_type(dtype):
-        return dtype == torch.float4_e2m1fn_x2
 
     torch._check(
         self.dim() == 2 and mat2.dim() == 2,
