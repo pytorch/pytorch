@@ -690,6 +690,7 @@ class SizeVarAllocator:
 
         # remove precomputed_replacements
         expr = self.remove_precomputed_replacements(simplified)
+        original = expr
 
         # replace all backed symbols with their backed hints,
         # unbacked with optimizations hints if exists.
@@ -706,7 +707,11 @@ class SizeVarAllocator:
 
         # Make sure to substitute with the factored version
         # e.g. 10*(s0 + u0) instead of 10*s0 + 10*u0
-        expr = self._sub_unbacked_exprs(sympy.factor(expr))
+        # TODO optimize _sub_unbacked_exprs
+        expr = self._sub_unbacked_exprs(sympy.factor(original))
+        # remove precomputed_replacements
+        expr = sympy_subs(expr, self.backed_var_to_val)
+        expr = sympy_subs(expr, self.var_to_hint_override)
 
         # For multiple expressions that depend on an unbacked symint,
         # we want to compute them consistently for a size hint we have chosen.
@@ -731,8 +736,7 @@ class SizeVarAllocator:
         final_result = expr.subs(size_dict)
 
         result = self._handle_special_expr_values(final_result, fallback)
-        if result is not None:
-            return result
+        assert result is not None
 
         return int(final_result)
 
