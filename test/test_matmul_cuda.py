@@ -19,7 +19,6 @@ from torch.quantization._quantized_conversions import (
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
-    blas_library_context,
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
     SM80OrLater,
@@ -75,6 +74,15 @@ def xfailIfSM100OrLaterNonRTXAndCondition(condition_fn):
         lambda params: computeCapabilityCheck and condition_fn(params)
     )
 
+
+@contextlib.contextmanager
+def blas_library_context(backend):
+    prev_backend = torch.backends.cuda.preferred_blas_library()
+    torch.backends.cuda.preferred_blas_library(backend)
+    try:
+        yield
+    finally:
+        torch.backends.cuda.preferred_blas_library(prev_backend)
 
 @contextlib.contextmanager
 def rocm_group_gemm_ck_env(value):
