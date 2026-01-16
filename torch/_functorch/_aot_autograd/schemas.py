@@ -491,6 +491,13 @@ class ViewAndMutationMeta:
 
     graphsafe_rng_state_index: Optional[int] = None
 
+    # Stream indices for mutated inputs in the epilogue
+    # Maps from index in mutated_inp_runtime_indices to the stream index that last touched
+    # the storage of the tensor that will be copied back into the original input
+    # None means use the current/default stream
+    # This is populated during graph compilation when stream assignments are made
+    mutated_inp_stream_indices: Optional[list[Optional[int]]] = None
+
     def __post_init__(self):
         # pre-compute the indices of the inputs that are mutated.
         # When keep_input_mutations is set, we don't need to worry about our epilogue

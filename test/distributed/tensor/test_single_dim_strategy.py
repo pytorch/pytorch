@@ -134,17 +134,7 @@ class TestExpandPlaceholder(TestCase):
             self.assertEqual(
                 len(strategy.children), len(args[0])
             )  # no. of list elements
-
-            # Detect inplace ops: base name ends with '_' (e.g., _foreach_add_.List)
-            op_name = op.name()
-            base_name = op_name.split("::")[1].split(".")[0]
-            is_inplace = base_name.endswith("_")
-
-            if is_inplace:
-                # For inplace ops, the only valid strategy is the one that matches
-                # the self input's placement
-                self.assertEqual(len(strategy.children[0].strategies), 1)
-            elif linearity == 1:
+            if linearity == 1:
                 self.assertEqual(
                     len(strategy.children[0].strategies), 216
                 )  # len([S(0), S(1), S(2), R, P_sum, P_avg]) ** 3 = 216
