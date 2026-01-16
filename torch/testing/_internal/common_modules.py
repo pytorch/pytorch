@@ -8,6 +8,7 @@ from functools import wraps, partial
 from itertools import chain, product
 import itertools
 import math
+import random
 import torch.nn.functional as F
 from torch.nn.utils.rnn import pack_padded_sequence
 from torch.testing import make_tensor
@@ -20,7 +21,7 @@ from torch.testing._internal.common_device_type import (
 from torch.testing._internal.common_methods_invocations import DecorateInfo
 from torch.testing._internal.common_nn import (
     cosineembeddingloss_reference, cross_entropy_loss_reference, ctcloss_reference,
-    hingeembeddingloss_reference, huberloss_reference, kldivloss_reference,
+    hingeembeddingloss_reference, huberloss_reference, kldivloss_reference, linear_cross_entropy_loss_reference,
     marginrankingloss_reference, multimarginloss_reference, multilabelmarginloss_reference,
     nllloss_reference, nlllossNd_reference, smoothl1loss_reference, softmarginloss_reference, get_reduction)
 from torch.testing._internal.common_utils import (
@@ -1664,6 +1665,79 @@ def module_inputs_torch_nn_CrossEntropyLoss(module_info, device, dtype, requires
 
     return module_inputs
 
+
+def module_inputs_torch_nn_LinearCrossEntropyLoss(module_info, device, dtype, requires_grad, training, **kwargs_unused):
+    make_input = partial(make_tensor, device=device, dtype=dtype, requires_grad=requires_grad)
+    make_loss_weight = partial(make_tensor, device=device, dtype=dtype, requires_grad=False)
+
+    def make_target(is_prob, batch_size, num_classes, kwargs):
+        loss_dims = kwargs.get("loss_dims", ())
+        if is_prob:
+            shape = (*batch_size, num_classes, *loss_dims)
+            target = make_tensor(shape, device=device, dtype=dtype, requires_grad=False).softmax(dim=min(1, len(shape) - 1))
+        else:
+            assert loss_dims == (), loss_dims
+            shape = (*batch_size, *loss_dims)
+            target = make_tensor(shape, device=device, dtype=torch.long, requires_grad=False,
+                                 low=0, high=num_classes)
+            if "ignore_index" in kwargs and target.device.type != "meta" and torch.all(target == kwargs["ignore_index"]):
+                # make sure at least one item in target is not ignored
+                t = random.sample(sorted(set(range(num_classes)) - {kwargs["ignore_index"]}), 1)[0]
+                target[0 if target.shape else ()] = t
+        return target
+
+    def reference_fn(m, p, i, t):
+        return linear_cross_entropy_loss_reference(
+            i, p[0], t,
+            linear_bias=p[1] if m.linear.bias is not None else None,
+            weight=m.loss_weight,
+            reduction=m.reduction, ignore_index=m.ignore_index, label_smoothing=m.label_smoothing)
+
+    reductions: list[str] = ['mean', 'sum', 'none']
+    cases: list[tuple[str, dict]] = [
+        ('', {}),
+        ('ignore_index', {'ignore_index': 1}),
+        ('label_smoothing', {'label_smoothing': 0.15}),
+        ('ignore_index_label_smoothing', {'ignore_index': 1, 'label_smoothing': 0.5}),
+        ('loss_dims', {'loss_dims': (3, 2)}),
+    ]
+
+    in_features, num_classes = 5, 4
+
+    module_inputs = []
+    for is_prob, batch_size, bias, weight, reduction, (desc, constructor_kwargs) in product(
+            (False, True),
+            ((), (7,)),
+            (False, True),
+            (None, make_loss_weight(num_classes)),
+            reductions, cases):
+        if is_prob:
+            if "ignore_index" in constructor_kwargs:
+                # ignore_index is not supported for floating point target
+                continue
+            if constructor_kwargs.get("loss_dims", ()) and not batch_size:
+                # K-dimensional loss requires batched input
+                continue
+        else:
+            if constructor_kwargs.get("loss_dims", ()):
+                # multi-target with class indices is not supported
+                continue
+        assert len(batch_size) <= 1
+
+        target = make_target(is_prob, batch_size, num_classes, constructor_kwargs)
+        module_inputs.append(
+            ModuleInput(
+                constructor_input=FunctionInput(
+                    in_features, num_classes, reduction=reduction,
+                    bias=bias,
+                    weight=weight,
+                    **constructor_kwargs),
+                forward_input=FunctionInput(make_input((*batch_size, in_features)), target),
+                desc=f"{'prob_' if is_prob else ''}{len(target.shape)}d_{desc}_{reduction}",
+                reference_fn=reference_fn)
+        )
+
+    return module_inputs
 
 
 def module_inputs_torch_nn_CTCLoss(module_info, device, dtype, requires_grad, training, **kwargs):
@@ -4054,6 +4128,17 @@ module_db: list[ModuleInfo] = [
                                 device_type='cuda'),
                    DecorateInfo(unittest.expectedFailure, "TestModule", "test_cpu_gpu_parity", dtypes=[torch.float16],
                                 device_type='xpu'),),
+               ),
+    ModuleInfo(torch.nn.LinearCrossEntropyLoss,
+               module_inputs_func=module_inputs_torch_nn_LinearCrossEntropyLoss,
+               dtypes=get_all_fp_dtypes(include_half=True,
+                                        include_bfloat16=False),
+               decorators=(
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-3, rtol=1e-2)}), "TestModule",
+                                "test_non_contiguous_tensors", dtypes=[torch.float16]),
+                   DecorateInfo(toleranceOverride({torch.float16: tol(atol=4e-2, rtol=3e-1)}), "TestModule",
+                                "test_cpu_gpu_parity", dtypes=[torch.float16]),
+               ),
                ),
     ModuleInfo(torch.nn.CTCLoss,
                module_inputs_func=module_inputs_torch_nn_CTCLoss,
