@@ -153,6 +153,49 @@ class TestTritonDotReduction(TestCase):
         self._check_equal(f, (x, y))
         self._check_code(f, (x, y), 1, 1)
 
+    def test_bmm_large_batch_reversed_pid(self):
+        def f(x, y):
+            z = torch.bmm(x, y)
+            return z
+
+        B, M, K, N = 65537, 128, 128, 128
+        x = rand_strided((B, M, K), (M * K, K, 1), device=GPU_TYPE)
+        y = rand_strided((B, K, N), (K * N, N, 1), device=GPU_TYPE)
+
+        f = torch.compile(f)
+        code = run_and_get_triton_code(f, x, y)
+        
+        FileCheck().check(
+            "zoffset = tl.program_id(0)"
+        ).check(
+            "yoffset = tl.program_id(1)"
+        ).check(
+            "xoffset = tl.program_id(2)"
+        ).run(code)
+
+    def test_bmm_no_z_broadcast(self):
+        def f(x, y):
+            z = torch.bmm(x, y)
+            return z
+
+        B, M, K, N = 256, 128, 128, 128
+        x = rand_strided((B, M, K), (M * K, K, 1), device=GPU_TYPE)
+        y = rand_strided((B, K, N), (K * N, N, 1), device=GPU_TYPE)
+
+        f = torch.compile(f)
+        code = run_and_get_triton_code(f, x, y)
+        
+        FileCheck().check_not(
+            "tl.arange(0, ZBLOCK)[:, None, None, None]"
+        ).check(
+            "tl.arange(0, ZBLOCK)"
+        ).check(
+            "tl.arange(0, YBLOCK)[None, :, None, None]"
+        ).check(
+            "tl.arange(0, XBLOCK)[None, None, :, None]"
+        ).check(
+            "tl.arange(0, R0_BLOCK)[None, None, None, :]"
+        ).run(code)
 
 if HAS_GPU:
     torch.set_default_device(GPU_TYPE)
