@@ -1,5 +1,0 @@
-ERROR
-    ^^^^^^^^^^^^^^^^^^^^^^
-  File "/home/oulgen/py312/lib/python3.12/site-packages/jax/_src/state/indexing.py", line 78, in from_slice
-    raise ValueError(f"slice must have a step >= 1 (found: {step})")
-ValueError: slice must have a step >= 1 (found: -1)

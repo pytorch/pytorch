@@ -7,7 +7,6 @@ high-performance GEMM kernels for NVIDIA GPUs.
 """
 
 import itertools
-import random
 from typing import Any, Optional, Union
 
 import torch
@@ -19,6 +18,8 @@ from torch._inductor.autotune_process import (
 )
 from torch._inductor.codegen.cuda.cuda_env import get_cuda_arch
 from torch._inductor.ir import Buffer, ChoiceCaller, Layout, TensorBox
+from torch._inductor.kernel_inputs import MMKernelInputs
+from torch._inductor.template_heuristics.nv_universal_gemm import get_nvgemm_heuristics
 from torch._inductor.utils import ensure_nv_universal_gemm_available
 from torch._logging import getArtifactLogger
 
@@ -36,11 +37,14 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         output_tensor_meta: Union[TensorMeta, list[TensorMeta]],
         kernel,  # cutlass_api.Kernel object
         accumulator_type: torch.dtype,
+        workspace_size: int = 0,
     ) -> None:
         super().__init__(kernel_name, input_tensor_meta, output_tensor_meta, ())
         self.kernel = kernel
         self.accumulator_type = accumulator_type
         self._compiled_artifact = None
+        self._workspace: Optional[torch.Tensor] = None
+        self.workspace_size = workspace_size
 
     def benchmark(
         self,
@@ -70,27 +74,41 @@ class NVUniversalGemmBenchmarkRequest(GPUDeviceBenchmarkMixin, BenchmarkRequest)
         import cutlass_api
 
         a, b = input_tensors
-
         args = cutlass_api.arguments.GemmArguments(
             a,
             b,
             out,
             accumulator_type=self.accumulator_type,
         )
-
         if self._compiled_artifact is None:
             self._compiled_artifact = self.kernel.compile(args)
-
         artifact = self._compiled_artifact
         kernel = self.kernel
 
+        # Allocate workspace if needed
+        if self.workspace_size > 0:
+            self._workspace = torch.empty(
+                self.workspace_size, device=out.device, dtype=torch.int8
+            )
+        else:
+            self._workspace = None
+
+        workspace = self._workspace
+
         def run_kernel():
-            kernel.run(args, artifact, assume_supported_args=True)
+            stream = torch.cuda.current_stream()
+            kernel.run(
+                args,
+                artifact,
+                stream=stream,
+                workspace=workspace,
+                assume_supported_args=True,
+            )
 
         return run_kernel
 
     def cleanup_run_fn(self) -> None:
-        pass
+        self._workspace = None
 
 
 class NVUniversalGemmCaller(ChoiceCaller):
@@ -109,6 +127,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
         layout: Layout,
         kernel,  # cutlass_api.Kernel object
         accumulator_type: torch.dtype,
+        workspace_size: int = 0,
     ) -> None:
         super().__init__(
             name=name,
@@ -118,6 +137,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
         )
         self.kernel = kernel
         self.accumulator_type = accumulator_type
+        self.workspace_size = workspace_size
 
         output_buffer = Buffer(name="nv_universal_gemm_out", layout=layout)
 
@@ -127,6 +147,7 @@ class NVUniversalGemmCaller(ChoiceCaller):
             output_tensor_meta=TensorMeta.from_irnodes(output_buffer),
             kernel=kernel,
             accumulator_type=accumulator_type,
+            workspace_size=workspace_size,
         )
 
     def __str__(self) -> str:
@@ -138,14 +159,17 @@ class NVUniversalGemmCaller(ChoiceCaller):
     def output_node(self) -> TensorBox:
         from torch._inductor.ir import NVUniversalGemmBuffer
 
-        return TensorBox.create(
-            NVUniversalGemmBuffer(
-                layout=self.layout,
-                inputs=self.input_nodes,
-                kernel=self.kernel,
-                accumulator_type=self.accumulator_type,
-            )
+        buffer = NVUniversalGemmBuffer(
+            layout=self.layout,
+            inputs=self.input_nodes,
+            kernel=self.kernel,
+            accumulator_type=self.accumulator_type,
+            workspace_size=self.workspace_size,
         )
+        # Pass KTC annotation to the buffer for encoding
+        if "ktc" in self.annotations:
+            buffer.annotations["ktc"] = self.annotations["ktc"]
+        return TensorBox.create(buffer)
 
     def call_name(self) -> str:
         return self.name
@@ -181,7 +205,7 @@ def _create_dummy_tensor_from_layout(layout: Layout) -> Optional[torch.Tensor]:
 def add_nv_universal_gemm_choices(
     choices: list[ChoiceCaller],
     layout: Layout,
-    input_nodes: list[Buffer],
+    inputs: MMKernelInputs,
     accumulator_type: Optional[torch.dtype] = None,
 ) -> None:
     """
@@ -198,6 +222,7 @@ def add_nv_universal_gemm_choices(
     if accumulator_type is None:
         accumulator_type = torch.float32
 
+    input_nodes = inputs.nodes()
     a_node, b_node = input_nodes
 
     # Create dummy tensors for cutlass_api's supports() checks
@@ -231,22 +256,14 @@ def add_nv_universal_gemm_choices(
         log.debug("No compatible NVIDIA Universal GEMM kernels found")
         return
 
-    # Filter out kernels that require a workspace buffer.
-    # TODO(nikhilap): Add workspace support to enable these kernels.
-    kernels = [k for k in kernels if k.get_workspace_size(args) == 0]
-    if not kernels:
-        return
+    max_configs = config.cuda.nvgemm_max_profiling_configs or len(kernels)
 
-    # Limit kernels to profile if configured
-    if config.cuda.nvgemm_max_profiling_configs:
-        kernels = random.sample(
-            kernels,
-            min(len(kernels), config.cuda.nvgemm_max_profiling_configs),
-        )
-
+    heuristics = get_nvgemm_heuristics()
+    kernels = heuristics.filter_kernels(kernels, inputs, max_configs, accumulator_type)
     num_added = 0
     for kernel in kernels:
         name = f"nv_universal_gemm_{next(NVUniversalGemmCaller.index_counter)}"
+        workspace_size = kernel.get_workspace_size(args)
         try:
             caller = NVUniversalGemmCaller(
                 name=name,
@@ -254,10 +271,10 @@ def add_nv_universal_gemm_choices(
                 layout=layout,
                 kernel=kernel,
                 accumulator_type=accumulator_type,
+                workspace_size=workspace_size,
             )
             choices.append(caller)
             num_added += 1
         except Exception:
             log.debug("Failed to create NVIDIA Universal GEMM choice", exc_info=True)
-
     log.debug("Added %d NVIDIA Universal GEMM choices", num_added)

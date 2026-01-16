@@ -56,12 +56,8 @@ def requires_subclass_dispatch(args, fw_metadata: ViewAndMutationMeta) -> bool:
     )
     from torch._functorch._aot_autograd.schemas import SubclassCreationMeta
 
-    any_subclass_outputs = (
-        any(
-            type(x) is SubclassCreationMeta
-            for x in fw_metadata.subclass_fw_graph_out_meta
-        )
-        or fw_metadata.opaque_inp_descs
+    any_subclass_outputs = any(
+        type(x) is SubclassCreationMeta for x in fw_metadata.subclass_fw_graph_out_meta
     )
     # This tells us whether or not we need to perform any unwrapping/wrapping of tensor subclasses at runtime.
     return bool(any_subclass_args or any_subclass_outputs)
@@ -380,7 +376,6 @@ def wrap_tensor_subclasses(
     included_subclass_symints: bool = False,
     is_runtime: bool = False,
     make_subclass_override: Optional[Callable] = None,
-    num_derived_opaques: int,
 ) -> tuple[Any, ...]:
     wrapped_args = []
     num_args_tallied = 0
@@ -436,8 +431,8 @@ def wrap_tensor_subclasses(
             return wrapped_args + activations
         return tuple(list(wrapped_args) + list(activations))
     else:
-        assert len(unwrapped_args) == num_args_tallied + num_derived_opaques, (
-            f"Expected {len(unwrapped_args)} == {num_args_tallied} + {num_derived_opaques}"
+        assert len(unwrapped_args) == num_args_tallied, (
+            f"Expected {len(unwrapped_args)} == {num_args_tallied}"
         )
         return tuple(wrapped_args)
 
@@ -460,13 +455,11 @@ def wrap_tensor_subclasses_maybe_joint(
             primals,
             subclass_metas=meta.subclass_inp_meta,
             included_subclass_symints=True,
-            num_derived_opaques=len(meta.opaque_inp_descs),
         )
         wrapped_tangents = wrap_tensor_subclasses(
             tangents,
             subclass_metas=meta.subclass_tangent_meta,
             included_subclass_symints=False,
-            num_derived_opaques=0,
         )
         return (wrapped_primals, wrapped_tangents)
     else:
@@ -474,7 +467,6 @@ def wrap_tensor_subclasses_maybe_joint(
             unwrapped_args,
             subclass_metas=meta.subclass_inp_meta,
             included_subclass_symints=True,
-            num_derived_opaques=len(meta.opaque_inp_descs),
         )
         return wrapped_args
 
