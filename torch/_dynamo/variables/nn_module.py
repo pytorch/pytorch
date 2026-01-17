@@ -1084,6 +1084,7 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
 
         # Check if we can short circuit nn.Module._call_impl to the forward
         # method.  NB - This is done to reduce the compile time of Dynamo.
+        forward_method = inspect.getattr_static(mod, "forward")
         if (
             istype(mod.__call__, types.MethodType)  # type: ignore[operator]
             and istype(mod._call_impl, types.MethodType)  # type: ignore[attr-defined]
@@ -1091,7 +1092,6 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             and mod._call_impl.__func__ is unpatched_nn_module_call_impl  # type: ignore[attr-defined]
             and "forward" not in mod.__dict__
         ):
-            forward_method = inspect.getattr_static(mod, "forward")
             if isinstance(forward_method, types.FunctionType):
                 globals_vt = tx.nn_modules_globals_vt
                 if not (
@@ -1129,7 +1129,12 @@ class UnspecializedNNModuleVariable(UserDefinedObjectVariable):
             else nullcontext()
         )
         with ctx:
-            if not isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)):
+            # Check if fn is a leaf_function (e.g., forward decorated with @leaf_function)
+            if trace_rules.is_leaf_function(fn):
+                return variables.TorchInGraphFunctionVariable(
+                    fn, leaf_function=True
+                ).call_function(tx, [self] + list(args), kwargs)
+            elif not isinstance(fn, (types.FunctionType, torch.jit.ScriptFunction)):
                 fn_vt = VariableTracker.build(tx, fn, source=source)
                 return fn_vt.call_function(tx, [self] + list(args), kwargs)
             else:
