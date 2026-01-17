@@ -344,6 +344,9 @@ def higher_order_invoke_subgraph(
     This preserves the function as a separate entity in the ONNX graph
     instead of inlining it, which is the purpose of invoke_subgraph.
 
+    Note: The onnxscript optimizer should be configured to not inline functions
+    created by invoke_subgraph to preserve the intended structure.
+
     Args:
         subgraph: The function to invoke
         identifier: Optional identifier for the subgraph (used for caching in PyTorch)
