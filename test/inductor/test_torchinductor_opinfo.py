@@ -231,9 +231,6 @@ inductor_skips["xpu"] = {}
 inductor_expected_failures_single_sample = defaultdict(dict)
 
 inductor_expected_failures_single_sample["cpu"] = {
-    "_softmax_backward_data": {
-        f16
-    },  # half_to_float is only valid for the CUDA implementation
     "_upsample_bilinear2d_aa": {f32, f64},
     "cholesky": {f32, f64},
     "complex": {f16},
