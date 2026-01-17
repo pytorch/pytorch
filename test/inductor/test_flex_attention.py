@@ -3576,6 +3576,8 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     def test_flex_attention_backward_stride_ordering(
         self, device, mode, permute_order, shape
     ):
+        from torch._inductor.ir import get_stride_order
+
         dtype = torch.float32
         make_tensor = functools.partial(
             torch.randn, shape, device=device, dtype=dtype, requires_grad=False
@@ -3606,6 +3608,16 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
         ]:
             self.assertIsNotNone(grad, f"Grad {name} should be computed")
             self.assertFalse(torch.isnan(grad).any(), f"Grad {name} contains NaN")
+
+            # When input has stride[-1]=1, verify stride order is preserved
+            if leaf.stride()[-1] == 1:
+                input_stride_order = get_stride_order(grad.stride())
+                orig_stride_order = get_stride_order(leaf.stride())
+                self.assertEqual(
+                    input_stride_order,
+                    orig_stride_order,
+                    f"Mode: {mode}, Stride order mismatch for {name}: grad {input_stride_order}, input {orig_stride_order}.",
+                )
 
     @supported_platform
     def test_non_contiguous_last_dim(self, device):
