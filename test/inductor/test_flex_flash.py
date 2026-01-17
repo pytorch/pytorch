@@ -1014,6 +1014,41 @@ class TestFlexFlash(InductorTestCase):
         out = compiled_fn(x, weight)
         self.assertEqual(out.shape, (B, H, M, D))
 
+    @dtypes(torch.float16, torch.bfloat16)
+    def test_gqa_expand_stride_zero_backward(self, device, dtype):
+        """Test GQA backward with expand()-created K/V tensors (stride=0).
+
+        Regression test for gradient buffer stride bug with expand().
+        """
+        batch_size = 1
+        seqlen = 512
+        headdim = 128
+        n_heads = 4
+        n_kv_heads = 1
+
+        q, k_orig, v_orig = create_test_tensors(
+            batch_size=batch_size,
+            num_heads=n_heads,
+            num_heads_kv=n_kv_heads,
+            seq_len=seqlen,
+            dim=headdim,
+            dtype=dtype,
+            device=device,
+            requires_grad=True,
+        )
+
+        k = k_orig.expand(batch_size, n_heads, seqlen, headdim)
+        v = v_orig.expand(batch_size, n_heads, seqlen, headdim)
+
+        self.assertEqual(k.stride()[1], 0, "K should have stride=0 from expand()")
+        self.assertEqual(v.stride()[1], 0, "V should have stride=0 from expand()")
+
+        block_mask = _create_block_mask_for_device(
+            _causal_mask, batch_size, n_heads, seqlen, seqlen, device=device
+        )
+
+        flash_vs_triton(q, k, v, block_mask=block_mask)
+
 
 instantiate_device_type_tests(TestFlexFlash, globals(), only_for="cuda")
 

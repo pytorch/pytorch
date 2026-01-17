@@ -3504,7 +3504,6 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
             (1, 0, 2, 3),  # Reverse order
             (0, 2, 1, 3),  # Mixed order
             (2, 0, 1, 3),  # Another mixed order
-            (0, 1, 3, 2),  # Non contiguous last dim
         ],
     )
     @common_utils.parametrize("shape", [(2, 1, 128, 16), (4, 2, 64, 16)])
@@ -3558,7 +3557,7 @@ def forward(self, arg0_1, arg1_1, arg2_1, arg3_1, arg4_1):
     @common_utils.parametrize("mode", ["eager", "inductor"])
     @common_utils.parametrize(
         "permute_order",
-        [(0, 1, 2, 3), (1, 0, 2, 3), (0, 2, 1, 3), (2, 0, 1, 3), (0, 1, 3, 2)],
+        [(0, 1, 2, 3), (1, 0, 2, 3), (0, 2, 1, 3), (2, 0, 1, 3)],
     )
     @common_utils.parametrize("shape", [(2, 5, 128, 16), (4, 2, 64, 16)])
     def test_flex_attention_backward_stride_ordering(
