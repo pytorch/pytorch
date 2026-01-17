@@ -275,8 +275,10 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     - By default, the decorated function itself is used as fake_impl. This works when
       the function can run with fake tensors (no data-dependent control flow).
     - For functions with data-dependent control flow (e.g., ``if x.sum() > 0:``),
-      provide an explicit fake_impl using the ``@<func>.fake_impl`` decorator, where
-      ``<func>`` is the decorated function name (e.g., ``@my_leaf_fn.fake_impl``).
+      or when you don't want the function to run multiple times during compilation
+      (e.g., it produces side-effects), provide an explicit fake_impl using the
+      ``@<func>.fake_impl`` decorator, where ``<func>`` is the decorated function
+      name (e.g., ``@my_leaf_fn.fake_impl``).
     - Output validation against the real function is disabled by default; set
       ``torch._dynamo.config.leaf_function_validate_outputs = True`` to enable.
 
@@ -347,7 +349,7 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
           same primitives and structure on every execution.
 
     Example:
-        # Pattern 1: Standalone function
+        # Example 1: Standalone function
         # Pass modules/tensors as explicit arguments, call from forward()
         @leaf_function
         def my_leaf_fn(model, x):
@@ -367,7 +369,14 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
             def forward(self, x):
                 return my_leaf_fn(self.linear, x)
 
-        # Pattern 2: nn.Module method
+        # Training - gradients flow through the leaf function
+        model = MyModule()
+        compiled_model = torch.compile(model, backend="aot_eager")
+        x = torch.randn(32, 10, requires_grad=True)
+        out = compiled_model(x)[0]
+        out.sum().backward()  # Gradients propagate through the leaf function
+
+        # Example 2: nn.Module method
         # Apply to custom methods, access module state via self
         class CustomModule(torch.nn.Module):
             def __init__(self):
@@ -387,7 +396,7 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
             def compute_fake(self, x):
                 return (self.linear(x),)
 
-        # Pattern 3: nn.Module forward
+        # Example 3: nn.Module forward
         # The forward method itself becomes opaque
         class LeafForwardModule(torch.nn.Module):
             def __init__(self):
@@ -402,6 +411,28 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
 
             @forward.fake_impl
             def forward_fake(self, x):
+                return (self.linear(x),)
+
+        # Example 4: Hook
+        # Make a forward_pre_hook opaque to the compiler
+        @leaf_function
+        def my_pre_hook(module, args):
+            x = args[0]
+            if x.sum() > 0:
+                return (x * 1.1,)
+            return (x * 0.9,)
+
+        @my_pre_hook.fake_impl
+        def my_pre_hook_fake(module, args):
+            return (args[0] * 1.1,)
+
+        class ModuleWithHook(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+                self.register_forward_pre_hook(my_pre_hook)
+
+            def forward(self, x):
                 return (self.linear(x),)
 
     Args:
