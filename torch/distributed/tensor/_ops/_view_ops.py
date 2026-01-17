@@ -577,25 +577,41 @@ def propagate_shape_and_sharding(
     def maybe_get_shard_mesh_dim_and_placement_split(
         current_dim: int, processed_dims: Iterable[int], placements
     ) -> tuple[int | None, Shard | _StridedShard | None]:
+        """
+        Find the mesh dimension and placement for an input dimension in Split operations.
+
+        This handles cases like [Shard(0), Shard(0)] where the same input dimension
+        is sharded on multiple mesh dimensions. When an input dimension is split into
+        multiple output dimensions, each output dimension needs a corresponding shard
+        placement.
+
+        Args:
+            current_dim: The input dimension we're looking for a shard placement for.
+            processed_dims: Input dimensions that have already been mapped to output
+                dimensions (i.e., input_dim_to_output_dims.keys()). Used to skip
+                shard placements that were already "consumed" by earlier output dims.
+            placements: The input source placements to search through.
+
+        Returns:
+            (mesh_dim, placement) if found, else (None, None).
+
+        Example:
+            With placements=[Shard(0), Shard(0)] and processing two output dims from
+            input dim 0:
+            - First call: processed_dims={}, returns (0, Shard(0))
+            - Second call: processed_dims={0}, skips mesh_dim=0's Shard(0),
+              returns (1, Shard(0))
+        """
         processed_dims = set(processed_dims)
         for mesh_dim, placement in enumerate(placements):
             if not isinstance(placement, Shard | _StridedShard):
                 continue
             if placement.dim in processed_dims:
+                # This shard was already "consumed" by a previous output dimension.
+                # Remove it so we can find the next shard on the same dimension.
                 processed_dims.remove(placement.dim)
             elif placement.dim == current_dim:
                 return mesh_dim, placement
-        return None, None
-
-        num_shard_placements = 0
-        for mesh_dim, placement in enumerate(input_src_placements):
-            if isinstance(placement, Shard):
-                num_shard_placements += 1
-                if placement.dim == input_dim.input_dim:
-                    if ith_shard is None:
-                        return mesh_dim, placement
-                    elif (num_shard_placements - 1) == ith_shard:
-                        return mesh_dim, placement
         return None, None
 
     # NOTE: This function has three responsibilities:
