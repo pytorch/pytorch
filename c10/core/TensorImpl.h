@@ -2073,6 +2073,9 @@ struct C10_API TensorImpl : public c10::intrusive_ptr_target {
    * - Or both have DispatchKey::Sparse and a supported sparse backend
    *   (CPU, CUDA, MPS, HIP, XPU)
    * - Or both have DispatchKey::SparseCsr
+   * For PrivateUse1 backend, user can implement their own
+   * `_has_compatible_shallow_copy_type` operator.
+   * See OpenRegMinimal.cpp for an example of overriding this operator.
    */
   inline bool has_compatible_shallow_copy_type(DispatchKeySet from) {
     auto is_dense = [](DispatchKeySet ts) {

@@ -31,10 +31,6 @@ struct TORCH_API PrivateUse1HooksInterface : AcceleratorHooksInterface {
     FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
   }
 
-  bool hasCompatibleShallowCopyType(DispatchKeySet self, DispatchKeySet from) const override {
-    FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
-  }
-
   const at::Generator& getDefaultGenerator(
       c10::DeviceIndex device_index) const override {
     FAIL_PRIVATEUSE1HOOKS_FUNC(__func__);
