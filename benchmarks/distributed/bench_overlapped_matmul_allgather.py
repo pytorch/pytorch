@@ -4,7 +4,7 @@ Benchmark compute/comm overlap: CUDA matmul overlapped with NCCL all-gather.
 
 Run with torchrun, e.g.:
 
-  torchrun --nproc_per_node=8 test/distributed/bench_overlapped_matmul_allgather.py \
+  torchrun --nproc_per_node=8 benchmarks/distributed/bench_overlapped_matmul_allgather.py \
     --m 8192 --n 8192 --k 8192 --ag-mb 64 --dtype fp16 --iters 200 --warmup 50
 
 This measures *total* per-iteration GPU time for:
@@ -19,7 +19,6 @@ import os
 import sys
 import time
 from dataclasses import dataclass
-from typing import Iterable, List, Tuple
 
 import torch
 import torch.distributed as dist
@@ -52,7 +51,7 @@ def _env_int(name: str, default: int) -> int:
         return default
 
 
-def _percentile(sorted_vals: List[float], pct: float) -> float:
+def _percentile(sorted_vals: list[float], pct: float) -> float:
     if not sorted_vals:
         return float("nan")
     if pct <= 0:
@@ -78,7 +77,7 @@ def _make_allgather_tensors(
     world_size: int,
     ag_mb: int,
     use_symmetric_memory: bool,
-) -> Tuple[torch.Tensor, torch.Tensor]:
+) -> tuple[torch.Tensor, torch.Tensor]:
     bytes_per_elem = torch.empty((), device="cpu", dtype=dtype).element_size()
     num_bytes = int(ag_mb) * 1024 * 1024
     numel = max(1, num_bytes // bytes_per_elem)
@@ -143,7 +142,7 @@ def _time_mode(
                 raise AssertionError(f"unknown mode: {mode}")
         torch.cuda.synchronize()
 
-    times_ms: List[float] = []
+    times_ms: list[float] = []
     start = torch.cuda.Event(enable_timing=True)
     end = torch.cuda.Event(enable_timing=True)
     for _ in range(iters):
@@ -175,7 +174,7 @@ def _reduce_max_ms(ms: float, *, device: torch.device) -> float:
     return float(t.item())
 
 
-def main(argv: List[str]) -> int:
+def main(argv: list[str]) -> int:
     parser = argparse.ArgumentParser(
         description="Benchmark overlapped matmul and all-gather (CUDA/NCCL)."
     )
@@ -184,7 +183,9 @@ def main(argv: List[str]) -> int:
     parser.add_argument("--m", type=int, default=8192)
     parser.add_argument("--n", type=int, default=8192)
     parser.add_argument("--k", type=int, default=8192)
-    parser.add_argument("--ag-mb", type=int, default=64, help="All-gather input size in MiB")
+    parser.add_argument(
+        "--ag-mb", type=int, default=64, help="All-gather input size in MiB"
+    )
     parser.add_argument("--iters", type=int, default=200)
     parser.add_argument("--warmup", type=int, default=50)
     parser.add_argument(
@@ -201,11 +202,15 @@ def main(argv: List[str]) -> int:
             "torch.distributed._symmetric_memory."
         ),
     )
-    parser.add_argument("--tf32", action="store_true", help="Enable TF32 matmul (fp32 only)")
+    parser.add_argument(
+        "--tf32", action="store_true", help="Enable TF32 matmul (fp32 only)"
+    )
     args = parser.parse_args(argv)
 
     if not torch.cuda.is_available():
-        print("CUDA not available; this benchmark requires CUDA + NCCL.", file=sys.stderr)
+        print(
+            "CUDA not available; this benchmark requires CUDA + NCCL.", file=sys.stderr
+        )
         return 0
 
     # torchrun env
@@ -219,7 +224,9 @@ def main(argv: List[str]) -> int:
     if args.nccl_cta_policy_zero:
         opts = dist.ProcessGroupNCCL.Options()
         opts.config.cta_policy = dist.ProcessGroupNCCL.NCCL_CTA_POLICY_ZERO
-        dist.init_process_group(backend=args.backend, init_method="env://", pg_options=opts)
+        dist.init_process_group(
+            backend=args.backend, init_method="env://", pg_options=opts
+        )
         symm_mem.set_backend("NCCL")
     else:
         dist.init_process_group(backend=args.backend, init_method="env://")
@@ -258,7 +265,7 @@ def main(argv: List[str]) -> int:
 
     dist.barrier()
     t0 = time.time()
-    results: List[Result] = []
+    results: list[Result] = []
     for mode in args.modes:
         results.append(
             _time_mode(
@@ -306,4 +313,3 @@ def main(argv: List[str]) -> int:
 
 if __name__ == "__main__":
     raise SystemExit(main(sys.argv[1:]))
-
