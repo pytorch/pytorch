@@ -1559,6 +1559,179 @@ class TestForeach(TestCase):
                 )
                 self.assertEqual(hook_buffer, list(reversed(range(len(inputs)))))
 
+    @onlyCUDA
+    @dtypes(
+        torch.float32,
+        torch.float64,
+        torch.half,
+        torch.bfloat16,
+        torch.complex64,
+        torch.complex128,
+    )
+    @parametrize("seed", list(range(5)))
+    @parametrize("scalar_position", ["tensor1", "tensor2"])
+    @parametrize("inplace", [True, False])
+    def test_addcmul_0d_tensor_broadcast_equivalence(
+        self, device, dtype, seed, scalar_position, inplace
+    ):
+        """Test that addcmul with value=1 and 0-d tensor broadcast produces bitwise
+        identical results to per-tensor add/add_.
+
+        This tests the FMA optimization path for optimizer use case where we have
+        floating point params/grads and float64 alpha for numeric precision.
+
+        Tests both scalar positions and both in-place/out-of-place variants.
+        """
+        torch.manual_seed(seed)
+
+        shapes = [(10,), (20, 30), (5, 5, 5), (1,), (100,)]
+        tensors_self = [
+            make_tensor(shape, device=device, dtype=dtype) for shape in shapes
+        ]
+        tensors_full = [
+            make_tensor(shape, device=device, dtype=dtype) for shape in shapes
+        ]
+        scalars_0d = [
+            make_tensor((), device=device, dtype=torch.float64)
+            for _ in range(len(tensors_self))
+        ]
+
+        # Expected: Python for loop with per-tensor add/add_
+        if inplace:
+            expected = [t.clone() for t in tensors_self]
+            for i in range(len(tensors_self)):
+                expected[i].add_(tensors_full[i], alpha=scalars_0d[i].item())
+        else:
+            expected = [
+                t.add(tensors_full[i], alpha=scalars_0d[i].item())
+                for i, t in enumerate(tensors_self)
+            ]
+
+        # Actual: foreach_addcmul with value=1 and 0-d tensor broadcast
+        if inplace:
+            actual = [t.clone() for t in tensors_self]
+            if scalar_position == "tensor2":
+                torch._foreach_addcmul_(actual, tensors_full, scalars_0d, value=1)
+            else:
+                torch._foreach_addcmul_(actual, scalars_0d, tensors_full, value=1)
+        else:
+            if scalar_position == "tensor2":
+                actual = torch._foreach_addcmul(
+                    tensors_self, tensors_full, scalars_0d, value=1
+                )
+            else:
+                actual = torch._foreach_addcmul(
+                    tensors_self, scalars_0d, tensors_full, value=1
+                )
+
+        self.assertEqual(expected, actual, rtol=0.0, atol=0.0)
+
+    @onlyCUDA
+    @dtypes(
+        torch.float32,
+        torch.float64,
+        torch.half,
+        torch.bfloat16,
+        torch.complex64,
+        torch.complex128,
+    )
+    def test_addcmul_0d_tensor_broadcast_cudagraph(self, device, dtype):
+        """Test addcmul with 0-d tensor broadcast is CUDAGraph compatible."""
+        n_tensors = 3
+        tensor_size = (25, 193)
+
+        # Static tensors for cudagraph
+        static_self = [
+            torch.zeros(tensor_size, device=device, dtype=dtype)
+            for _ in range(n_tensors)
+        ]
+        static_t1 = [
+            torch.zeros(tensor_size, device=device, dtype=dtype)
+            for _ in range(n_tensors)
+        ]
+        # Use float64 scalars (mixed dtype test)
+        static_scalars = [
+            torch.zeros((), device=device, dtype=torch.float64)
+            for _ in range(n_tensors)
+        ]
+
+        # warmup
+        torch._foreach_addcmul_(
+            [t.clone() for t in static_self], static_t1, static_scalars, value=1
+        )
+
+        # Record cudagraph
+        g = torch.cuda.CUDAGraph()
+        with torch.cuda.graph(g):
+            torch._foreach_addcmul_(static_self, static_t1, static_scalars, value=1)
+
+        # Replay with new values
+        new_self_vals = [
+            torch.randn(tensor_size, device=device, dtype=dtype)
+            for _ in range(n_tensors)
+        ]
+        new_t1_vals = [
+            torch.randn(tensor_size, device=device, dtype=dtype)
+            for _ in range(n_tensors)
+        ]
+        new_scalar_vals = [
+            torch.randn((), device=device, dtype=torch.float64)
+            for _ in range(n_tensors)
+        ]
+
+        for i in range(n_tensors):
+            static_self[i].copy_(new_self_vals[i])
+            static_t1[i].copy_(new_t1_vals[i])
+            static_scalars[i].copy_(new_scalar_vals[i])
+
+        g.replay()
+        torch.cuda.synchronize()
+
+        # Check: compute expected using per-tensor add_
+        expected_vals = [t.clone() for t in new_self_vals]
+        for i in range(n_tensors):
+            expected_vals[i].add_(new_t1_vals[i], alpha=new_scalar_vals[i].item())
+
+        for actual, expected in zip(static_self, expected_vals):
+            self.assertEqual(actual, expected, rtol=0.0, atol=0.0)
+
+    @onlyCUDA
+    @dtypes(
+        torch.float32,
+        torch.float64,
+        torch.half,
+        torch.bfloat16,
+        torch.complex64,
+        torch.complex128,
+    )
+    def test_addcmul_0d_tensor_broadcast_noncontiguous(self, device, dtype):
+        """Test addcmul with 0-d tensor broadcast falls back correctly for non-contiguous tensors."""
+        # Create non-contiguous tensors (should go through slow path)
+        shapes = [(20, 30), (10, 10, 10)]
+        tensors_self = [
+            make_tensor(shape, device=device, dtype=dtype).transpose(0, 1)
+            for shape in shapes
+        ]
+        tensors1 = [
+            make_tensor(shape, device=device, dtype=dtype).transpose(0, 1)
+            for shape in shapes
+        ]
+        scalars_0d = [
+            make_tensor((), device=device, dtype=torch.float64)
+            for _ in range(len(tensors_self))
+        ]
+
+        # Expected: Python for loop
+        expected = [t.clone() for t in tensors_self]
+        for i in range(len(tensors_self)):
+            expected[i].add_(tensors1[i], alpha=scalars_0d[i].item())
+
+        # Actual
+        actual = [t.clone() for t in tensors_self]
+        torch._foreach_addcmul_(actual, tensors1, scalars_0d, value=1)
+
+        self.assertEqual(expected, actual, rtol=0.0, atol=0.0)
+
 
 # TODO(crcrpar): Hide this inside torch/testing/_internal.
 # would end up adding another layer to `foreach_inputs_sample_func.__call__`

@@ -189,7 +189,7 @@ std::vector<Tensor> foreach_pointwise_op_fma_broadcast(
   tensor_lists.emplace_back(tensors2.vec());
   tensor_lists.emplace_back(std::move(vec_res));
 
-  AT_DISPATCH_FLOATING_TYPES_AND2(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       kHalf,
       kBFloat16,
       input[0].scalar_type(),
@@ -217,7 +217,7 @@ void foreach_pointwise_op_fma_broadcast_(
   tensor_lists.emplace_back(tensors1.vec());
   tensor_lists.emplace_back(tensors2.vec());
 
-  AT_DISPATCH_FLOATING_TYPES_AND2(
+  AT_DISPATCH_ALL_TYPES_AND_COMPLEX_AND2(
       kHalf,
       kBFloat16,
       input[0].scalar_type(),
