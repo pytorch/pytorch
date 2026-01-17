@@ -140,9 +140,11 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
 #endif
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 0)
-    C10D_NCCL_CHECK(
-        ncclGetLsaMultimemDevicePointer(buffer_win_, offset_, &mc_addr_),
-        "Failed to get multicast pointer");
+  // Starting from NCCL 2.29, we can use `ncclGetLsaMultimemDevicePointer`
+  void* mc_addr = nullptr;
+  if (ncclGetLsaMultimemDevicePointer(buffer_win_, 0, &mc_addr) == ncclSuccess) {
+    mc_addr_ = mc_addr;
+  }
 #endif
   }
 
@@ -166,7 +168,7 @@ class NCCLPeerAllocInfo : public c10::intrusive_ptr_target {
   ncclWindow_t buffer_win_;
   ncclWindow_t signal_handle_;
   // Multicast address
-  void* mc_addr_ = nullptr;
+  void* mc_addr_{nullptr};
 
   friend class NCCLSymmetricMemory;
 };
