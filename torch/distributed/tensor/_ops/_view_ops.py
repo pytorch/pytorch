@@ -684,9 +684,15 @@ def propagate_shape_and_sharding(
                 if isinstance(input_src_placement, _StridedShard):
                     # calculate the expected split_factor
                     split_factor = math.prod(cmd.group_shape[0 : cmd.split_id])
-                    split_factor = split_factor // math.prod(
-                        mesh_sizes[0:shard_mesh_dim]
-                    )
+                    # Only divide by mesh dims that are sharding the same dimension,
+                    # not all mesh dims before shard_mesh_dim
+                    for m in range(shard_mesh_dim):
+                        p = input_src_placements[m]
+                        if (
+                            isinstance(p, Shard | _StridedShard)
+                            and p.dim == in_dim.input_dim
+                        ):
+                            split_factor = split_factor // mesh_sizes[m]
                     if input_src_placement.split_factor != split_factor:
                         return None
                     else:

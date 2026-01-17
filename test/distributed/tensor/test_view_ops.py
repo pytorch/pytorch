@@ -1495,6 +1495,8 @@ TestViewOpsWithLocalTensor = create_local_tensor_test_class(
         "test_dtensor_flatten_1d",
         "test_dtensor_flatten_2d",
         "test_dtensor_unflatten_1d",
+        "test_dtensor_unflatten_2d",
+        "test_dtensor_unflatten_2d_special",
     ],
 )
 
