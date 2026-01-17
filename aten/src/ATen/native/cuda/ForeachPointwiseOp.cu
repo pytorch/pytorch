@@ -163,6 +163,144 @@ std::vector<Tensor> foreach_pointwise_op(
   return std::move(tensor_lists[3]);
 }
 
+// Helper to check if scalar equals 1
+inline bool is_scalar_one(const Scalar& scalar) {
+  return (scalar.isFloatingPoint() && scalar.toDouble() == 1.0) ||
+      (scalar.isIntegral(/*includeBool=*/false) && scalar.toLong() == 1);
+}
+
+// FMA broadcast path: computes self + tensor1 * scalar where scalar
+// is read from 0-d float64 tensors. Used when value=1 and tensor2 contains
+// 0-d float64 tensors.
+std::vector<Tensor> foreach_pointwise_op_fma_broadcast(
+    TensorList input,
+    TensorList tensors1,
+    TensorList tensors2) {
+  std::vector<std::vector<at::Tensor>> tensor_lists;
+  std::vector<at::Tensor> vec_res;
+  vec_res.reserve(input.size());
+  for (const auto& t : input) {
+    vec_res.emplace_back(at::native::empty_like(t));
+  }
+
+  // tensor_lists layout: [self, tensor1, 0d_scalars (float64), result]
+  tensor_lists.emplace_back(input.vec());
+  tensor_lists.emplace_back(tensors1.vec());
+  tensor_lists.emplace_back(tensors2.vec());
+  tensor_lists.emplace_back(std::move(vec_res));
+
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf,
+      kBFloat16,
+      input[0].scalar_type(),
+      "foreach_pointwise_op_fma_broadcast_cuda",
+      [&]() {
+        multi_tensor_apply<4>(
+            tensor_lists,
+            PointwiseOpFmaBroadcastFunctor<
+                scalar_t,
+                /* depth */ 4,
+                /* r_args_depth */ 2,
+                /* res_arg_index */ 3>());
+      });
+
+  return std::move(tensor_lists[3]);
+}
+
+void foreach_pointwise_op_fma_broadcast_(
+    TensorList input,
+    TensorList tensors1,
+    TensorList tensors2) {
+  std::vector<std::vector<at::Tensor>> tensor_lists;
+  // tensor_lists layout: [self, tensor1, 0d_scalars (float64)]
+  tensor_lists.emplace_back(input.vec());
+  tensor_lists.emplace_back(tensors1.vec());
+  tensor_lists.emplace_back(tensors2.vec());
+
+  AT_DISPATCH_FLOATING_TYPES_AND2(
+      kHalf,
+      kBFloat16,
+      input[0].scalar_type(),
+      "foreach_pointwise_op_fma_broadcast__cuda",
+      [&]() {
+        multi_tensor_apply<3>(
+            tensor_lists,
+            PointwiseOpFmaBroadcastFunctor<
+                scalar_t,
+                /* depth */ 3,
+                /* r_args_depth */ 2,
+                /* res_arg_index */ 0>());
+      });
+  increment_version(input);
+}
+
+// Addcmul with value=1 and 0-d tensor broadcast for FMA optimization.
+// Use case: optimizer with floating point params/grads and float64 alpha for
+// numeric precision (e.g., after pow/div operations). Computes self + t1 * t2
+// using single FMA for bitwise equivalence with per-tensor add_(t1, alpha=t2).
+//
+// NOTE: FMA broadcast check MUST precede can_use_fast_route() because 0-d
+// tensors fail the standard sizes/strides check, causing incorrect slow path
+// fallback.
+std::vector<Tensor> foreach_tensor_addcmul_scalar_cuda(
+    TensorList input,
+    TensorList tensors1,
+    TensorList tensors2,
+    const Scalar& scalar) {
+  check_foreach_api_restrictions(input, tensors1, tensors2);
+
+  if (is_scalar_one(scalar) &&
+      !has_integral_tensor(input, /* includeBool */ true)) {
+    // tensor2 as 0-d float64 scalars
+    if (can_use_fast_route_for_fma_broadcast({input, tensors1, tensors2})) {
+      return foreach_pointwise_op_fma_broadcast(input, tensors1, tensors2);
+    }
+    // tensor1 as 0-d float64 scalars
+    if (can_use_fast_route_for_fma_broadcast({input, tensors2, tensors1})) {
+      return foreach_pointwise_op_fma_broadcast(input, tensors2, tensors1);
+    }
+  }
+
+  if (!can_use_fast_route({input, tensors1, tensors2}, scalar) ||
+      has_integral_tensor(input, /* includeBool */ true)) {
+    return at::native::foreach_tensor_addcmul_scalar_slow(
+        input, tensors1, tensors2, scalar);
+  }
+
+  return foreach_pointwise_op<std::multiplies>(
+      input, tensors1, tensors2, scalar);
+}
+
+// In-place version: see foreach_tensor_addcmul_scalar_cuda for documentation.
+void foreach_tensor_addcmul_scalar_cuda_(
+    TensorList input,
+    TensorList tensors1,
+    TensorList tensors2,
+    const Scalar& scalar) {
+  check_foreach_api_restrictions(input, tensors1, tensors2);
+
+  if (is_scalar_one(scalar) &&
+      !has_integral_tensor(input, /* includeBool */ true)) {
+    // tensor2 as 0-d float64 scalars
+    if (can_use_fast_route_for_fma_broadcast({input, tensors1, tensors2})) {
+      return foreach_pointwise_op_fma_broadcast_(input, tensors1, tensors2);
+    }
+    // tensor1 as 0-d float64 scalars
+    if (can_use_fast_route_for_fma_broadcast({input, tensors2, tensors1})) {
+      return foreach_pointwise_op_fma_broadcast_(input, tensors2, tensors1);
+    }
+  }
+
+  if (!can_use_fast_route({input, tensors1, tensors2}, scalar) ||
+      has_integral_tensor(input, /* includeBool */ true)) {
+    return at::native::foreach_tensor_addcmul_scalar_slow_(
+        input, tensors1, tensors2, scalar);
+  }
+
+  foreach_pointwise_op_<std::multiplies>(input, tensors1, tensors2, scalar);
+}
+
+// addcdiv uses the standard macro (no FMA optimization needed)
 #define FOREACH_POINTWISE_OP_SCALAR(NAME, OP)                           \
   std::vector<Tensor> foreach_tensor_##NAME##_scalar_cuda(              \
       TensorList input,                                                 \
@@ -262,7 +400,6 @@ std::vector<Tensor> foreach_pointwise_op(
     foreach_pointwise_op_<OP>(input, tensors1, tensors2, scalars);        \
   }
 
-FOREACH_POINTWISE_OP_SCALAR(addcmul, std::multiplies);
 FOREACH_POINTWISE_OP_SCALAR(addcdiv, std::divides);
 FOREACH_POINTWISE_OP_SCALARLIST(addcmul, std::multiplies);
 FOREACH_POINTWISE_OP_SCALARLIST(addcdiv, std::divides);

@@ -258,6 +258,32 @@ inline bool can_use_fast_route(
       {tensors1, tensors2}, {}, does_op_promote_integer_inputs_to_float);
 }
 
+// Check if all tensors in the list are 0-d float64 (scalar tensors)
+inline bool _check_all_tensors_are_0d_float64(TensorList tensors) {
+  return std::all_of(tensors.begin(), tensors.end(), [](const auto& t) {
+    return t.dim() == 0 && t.scalar_type() == at::ScalarType::Double;
+  });
+}
+
+// Check if all tensors are on the specified device
+inline bool _check_tensors_on_device(TensorList tensors, at::Device device) {
+  return std::all_of(tensors.begin(), tensors.end(), [&](const auto& t) {
+    return t.device() == device;
+  });
+}
+
+// Fast path check for addcmul with value=1 and 0-d tensor broadcast.
+// tensorLists[0]=self, tensorLists[1]=tensor1, tensorLists[2]=tensor2
+inline bool can_use_fast_route_for_fma_broadcast(
+    ArrayRef<TensorList> tensorLists) {
+  return _check_all_tensors_are_0d_float64(tensorLists[2]) &&
+      _check_tensors_share_device_and_dtype({tensorLists[0], tensorLists[1]}) &&
+      _check_tensors_share_sizes_and_strides(
+             {tensorLists[0], tensorLists[1]}) &&
+      at::isFloatingType(tensorLists[0][0].scalar_type()) &&
+      _check_tensors_on_device(tensorLists[2], tensorLists[0][0].device());
+}
+
 using DeviceDtypeKey = std::pair<at::Device, at::ScalarType>;
 using IndicesT = std::vector<size_t>;
 using nested_optional_tensorvec_t =

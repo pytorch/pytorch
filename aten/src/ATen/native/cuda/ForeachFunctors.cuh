@@ -720,6 +720,61 @@ struct TernaryOpScalarListFunctor {
   }
 };
 
+// FMA broadcast functor for addcmul with value=1 and 0-d tensor broadcast.
+// Computes: self + tensor1 * scalar where scalar is read from 0-d float64
+// tensor. tensor_lists layout: [self, tensor1, 0d_scalars, result] or [self,
+// tensor1, 0d_scalars]. The 0-d tensors are float64 and we always read from
+// index 0 of each tensor.
+template <typename T, int depth, int r_args_depth, int res_arg_index>
+struct PointwiseOpFmaBroadcastFunctor {
+  using opmath_t = at::opmath_type<T>;
+  __device__ __forceinline__ void operator()(
+      int64_t chunk_size,
+      TensorListMetadata<depth>& tl) {
+    const auto tensor_loc = tl.block_to_tensor[blockIdx.x];
+    const auto chunk_idx = tl.block_to_chunk[blockIdx.x];
+    auto n = tl.numel_for_tensor[tensor_loc];
+
+    T* args[depth];
+    const bool all_aligned =
+        init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc);
+    // Read scalar from 0-d float64 tensor at addresses[2] (always index 0 and
+    // no offset since it is 0-d scalar tensor with only 1 element.element).
+    opmath_t scalar = static_cast<opmath_t>(
+        *reinterpret_cast<const double*>(tl.addresses[2][tensor_loc]));
+    n -= chunk_idx * chunk_size;
+    T r_args[r_args_depth][kILP];
+
+    if (n % kILP == 0 && chunk_size % kILP == 0 && all_aligned) {
+      for (int64_t i_start = threadIdx.x;
+           i_start * kILP < n && i_start * kILP < chunk_size;
+           i_start += blockDim.x) {
+        load_store(r_args[0], args[0], 0, i_start);
+        load_store(r_args[1], args[1], 0, i_start);
+#pragma unroll
+        for (int ii = 0; ii < kILP; ii++) {
+          r_args[0][ii] = static_cast<T>(
+              static_cast<opmath_t>(r_args[0][ii]) +
+              scalar * static_cast<opmath_t>(r_args[1][ii]));
+        }
+        load_store(args[res_arg_index], r_args[0], i_start, 0);
+      }
+    } else {
+      for (int64_t i_start = 0; i_start < n && i_start < chunk_size;
+           i_start += blockDim.x * kILP) {
+        load_args<2>(r_args, args, i_start, chunk_size, n);
+#pragma unroll
+        for (int ii = 0; ii < kILP; ii++) {
+          r_args[0][ii] = static_cast<T>(
+              static_cast<opmath_t>(r_args[0][ii]) +
+              scalar * static_cast<opmath_t>(r_args[1][ii]));
+        }
+        store_args(args[res_arg_index], r_args[0], i_start, chunk_size, n);
+      }
+    }
+  }
+};
+
 template <typename T>
 struct power_functor {
   C10_DEVICE T operator()(const T& a, const T& b) const {
