@@ -1362,7 +1362,7 @@ class outer_fn(torch.nn.Module):
         add: "f32[4, 4]" = torch.ops.aten.add.Tensor(x_1, 1);  x_1 = None
         view: "f32[4, 4]" = torch.ops.aten.view.default(add, [4, 4]);  add = None
         repeated_subgraph0 = self.repeated_subgraph0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_1', view);  repeated_subgraph0 = view = None
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'subgraph_0', view);  repeated_subgraph0 = view = None
         getitem: "f32[8, 4]" = invoke_subgraph[0];  invoke_subgraph = None
         view_1: "f32[8, 4]" = torch.ops.aten.view.default(getitem, [8, 4]);  getitem = None
         return view_1
