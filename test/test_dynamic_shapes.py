@@ -4855,6 +4855,56 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         compiled_func(x3)
         self.assertEqual(counter.frame_count, 2)
 
+    def test_duck_shape_id_no_recompile_without_dynamic_indices(self):
+        """
+        Test that passing a tensor without _dynamo_dynamic_indices after
+        compiling with duck_shape_ids does NOT trigger recompilation.
+        The guard on duck_shape_ids only applies when the runtime tensor
+        also has _dynamo_dynamic_indices.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with duck_shape_id (has _dynamo_dynamic_indices)
+        x1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, 0, duck_shape_id="batch")
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with regular tensor (no _dynamo_dynamic_indices)
+        # Should NOT recompile - guard passes when no _dynamo_dynamic_indices
+        x2 = torch.rand(4, 3)
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+    def test_duck_shape_id_recompile_with_different_id(self):
+        """
+        Test that passing a tensor with same _dynamo_dynamic_indices but
+        different duck_shape_id DOES trigger recompilation.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with duck_shape_id="batch"
+        x1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, 0, duck_shape_id="batch")
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with different duck_shape_id - should recompile
+        x2 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x2, 0, duck_shape_id="other")
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 2)
+
 
 instantiate_parametrized_tests(TestUnbacked)
 
