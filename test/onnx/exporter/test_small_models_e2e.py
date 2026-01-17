@@ -942,6 +942,28 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
         self.assertIn("Expand", all_ops)
         self.assertIn("Reshape", all_ops)
 
+    def test_onnx_export_invoke_subgraph(self):
+        class InvokeSubgraphModel(torch.nn.Module):
+            def forward(self, x, y):
+                def inner_fn(a, b):
+                    return torch.mul(a, b) + a
+
+                return torch.compiler.nested_compile_region(inner_fn)(x, y)
+
+        x = torch.randn(8)
+        y = torch.randn(8)
+        
+        onnx_program = self.export(InvokeSubgraphModel(), (x, y))
+        onnx_model = onnx_program.model
+        
+        # Verify that the function is preserved in the ONNX graph
+        # The function should appear in the model's functions list
+        self.assertGreater(len(onnx_model.functions), 0, 
+                          "Expected at least one function in the ONNX model")
+        
+        # Verify the output is correct
+        onnx_testing.assert_onnx_program(onnx_program, args=(x, y))
+
 
 if __name__ == "__main__":
     common_utils.run_tests()

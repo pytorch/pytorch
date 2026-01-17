@@ -331,3 +331,40 @@ def higher_order_while_loop(
     )
 
     return loop_outputs
+
+
+@onnx_impl(torch.ops.higher_order.invoke_subgraph, no_compile=True)
+def higher_order_invoke_subgraph(
+    subgraph: ir.Function,
+    identifier: str | None,
+    *operands: ir.Value,
+) -> Sequence[ir.Value]:
+    """Export invoke_subgraph HOP by creating a direct function call.
+
+    This preserves the function as a separate entity in the ONNX graph
+    instead of inlining it, which is the purpose of invoke_subgraph.
+
+    Args:
+        subgraph: The function to invoke
+        identifier: Optional identifier for the subgraph (used for caching in PyTorch)
+        *operands: Input values to pass to the function
+
+    Returns:
+        Sequence of output values from the function call
+    """
+    # Create a node that calls the subgraph function directly with the operands
+    assert _core.current_tracer is not None
+    tracer = _core.current_tracer
+
+    # Create the function call node
+    node = ir.Node(
+        subgraph.domain,
+        subgraph.name,
+        list(operands),
+        num_outputs=len(subgraph.outputs),
+    )
+
+    # Add the node to the current tracer
+    tracer.nodes.append(node)
+
+    return node.outputs
