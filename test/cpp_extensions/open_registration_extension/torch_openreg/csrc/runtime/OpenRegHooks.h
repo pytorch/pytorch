@@ -35,10 +35,6 @@ struct OPENREG_EXPORT OpenRegHooksInterface : public at::PrivateUse1HooksInterfa
     return device_count() > 0;
   }
 
-  bool hasCompatibleShallowCopyType(DispatchKeySet self, DispatchKeySet from) const override {
-    return true;
-  }
-
   DeviceIndex deviceCount() const override {
     return device_count();
   }
