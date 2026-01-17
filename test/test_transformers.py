@@ -2745,11 +2745,11 @@ class TestSDPACudaOnly(NNTestCase):
                     attn_mask=None, dropout_p=0.0, is_causal=False)
             self.assertEqual(actual.contiguous(), math_ref.contiguous().to(dtype), atol=1e-3, rtol=1e-2)
 
-        # head_dim=192 support on SM 9.0 (Hopper) and SM 10.x (Blackwell) requires cuDNN >= 9.10.0 (91000)
+        # head_dim=192 support on SM 9.0 (Hopper) and SM 10.x (Blackwell) requires cuDNN >= 9.11.0 (91100)
         # This is a special case for DeepSeek model dimensions
         cudnn_version = torch.backends.cudnn.version() if torch.backends.cudnn.is_available() else 0
         device_capability = torch.cuda.get_device_capability()
-        if (device_capability == (9, 0) or device_capability[0] == 10) and cudnn_version >= 91000:
+        if (device_capability == (9, 0) or device_capability[0] == 10) and cudnn_version >= 91100:
             test()
         else:
             with self.assertRaisesRegex(RuntimeError, "No available kernel."):
