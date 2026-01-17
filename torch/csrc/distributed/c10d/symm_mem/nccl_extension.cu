@@ -184,7 +184,7 @@ void nccl_put(at::Tensor& tensor, const int64_t peer) {
 #endif
 }
 
-void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal) {
+void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal, int64_t peer) {
 #ifdef NCCL_HAS_SYMMEM_SUPPORT
   c10::cuda::CUDAGuard guard(sigpad.device());
   auto stream = at::cuda::getCurrentCUDAStream();
@@ -198,7 +198,7 @@ void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal) {
   // Populate all fields in ncclWaitSignalDesc_t
   ncclWaitSignalDesc_t signalDesc;
   signalDesc.opCnt = 1;
-  signalDesc.peer = symm_mem->get_rank();
+  signalDesc.peer = peer;
   signalDesc.sigIdx = signal;
   signalDesc.ctx = 0;
 
@@ -208,7 +208,7 @@ void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal) {
           &signalDesc,
           comm,
           stream),
-      c10::str("ncclWaitSignal failed for signal=", signal));
+      c10::str("ncclWaitSignal failed for signal=", signal, ", peer=", peer));
 #else
   // use device-side kernel for NCCL < 2.29
   int cur_rank = symm_mem->get_rank();

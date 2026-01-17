@@ -284,7 +284,9 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
 
     @skip_but_pass_in_sandcastle_if(TEST_WITH_ROCM, "Skip NCCL tests for ROCm")
     @skip_but_pass_in_sandcastle_if(IS_WINDOWS, "NCCL doesn't support Windows")
-    @requires_nccl_version((2, 29), "NCCL one-sided host API support from nccl 2.29")
+    @requires_nccl_version(
+        (2, 28), "NCCL Symmetric Memory support device API from nccl 2.28"
+    )
     @skip_if_lt_x_gpu(2)
     def test_nccl_symmem_put(self):
         symm_mem.set_backend("NCCL")
@@ -307,7 +309,7 @@ class NCCLSymmetricMemoryTest(MultiProcContinuousTest):
         if self.rank == 1:
             torch.ops.symm_mem.nccl_put_with_signal(tensor, signal_val, 0)
         elif self.rank == 0:
-            torch.ops.symm_mem.nccl_wait_for_signal(tensor, signal_val)
+            torch.ops.symm_mem.nccl_wait_for_signal(tensor, signal_val, 1)
             torch.testing.assert_close(
                 tensor, torch.ones(numel, dtype=dtype, device=self.device)
             )
