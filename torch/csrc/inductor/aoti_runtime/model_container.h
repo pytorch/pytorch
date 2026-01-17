@@ -76,15 +76,36 @@ class AOTInductorModelContainer {
     }
     model->load_constants();
     constant_blob_ = model->release_constant_blob();
-    constants_internal_offset_.resize(
-        model->num_constants() - model->num_folded_constants());
-    secondary_cpu_constants_internal_offset_.resize(
-        model->num_constants() - model->num_folded_constants());
+    size_t num_constants = model->num_constants();
+    constants_internal_offset_.assign(num_constants, 0);
+    secondary_cpu_constants_internal_offset_.assign(num_constants, 0);
+    // Offsets are returned in packed (non-folded) order per device, so we
+    // need to map them back to the original constant indices.
+    std::vector<size_t> packed_constants_internal_offset(
+        num_constants - model->num_folded_constants());
+    std::vector<size_t> packed_secondary_cpu_constants_internal_offset(
+        num_constants - model->num_folded_constants());
     model->compute_constant_blob(
         blob_size_,
-        constants_internal_offset_,
+        packed_constants_internal_offset,
         secondary_cpu_blob_size_,
-        secondary_cpu_constants_internal_offset_);
+        packed_secondary_cpu_constants_internal_offset);
+    size_t main_idx = 0;
+    size_t secondary_idx = 0;
+    int32_t model_device_type = model->get_device_type();
+    for (size_t idx = 0; idx < num_constants; ++idx) {
+      if (model->constant_from_folded(static_cast<int64_t>(idx))) {
+        continue;
+      }
+      if (model->constant_device_type(static_cast<int64_t>(idx)) ==
+          model_device_type) {
+        constants_internal_offset_[idx] =
+            packed_constants_internal_offset[main_idx++];
+      } else {
+        secondary_cpu_constants_internal_offset_[idx] =
+            packed_secondary_cpu_constants_internal_offset[secondary_idx++];
+      }
+    }
     constant_folded_ = ConstantState::INITIALIZED;
 
     for (auto& model : models_) {
