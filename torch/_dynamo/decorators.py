@@ -559,6 +559,7 @@ def mark_unbacked(
     hint_override: Optional[int] = None,
     strict: bool = False,
     specialize_on: Optional[list[Any]] = None,
+    duck_shape_id: Optional[Any] = None,
 ) -> None:
     """
     Mark a tensor as having an unbacked dimension. This changes the semantics of operations:
@@ -576,12 +577,15 @@ def mark_unbacked(
             By default (strict=False), specialization is allowed and will proceed without error.
         specialize_on (Optional[list[Any]], default=None): A list of specialization criteria (e.g., lambdas) for this dimension.
             If provided, Dynamo will generate specialized compiled regions for each criterion in addition to a generic trace.
+        duck_shape_id (Optional[Any], default=None): An optional identifier to group unbacked dimensions together.
+            All unbacked dimensions with the same duck_shape_id will share the same unbacked symbol.
+            This is useful when multiple tensors are known to have the same batch size at runtime.
     """
     if torch.distributed.is_available() and isinstance(
         t, torch.distributed.tensor.DTensor
     ):
         # apply on inner tensor sizes/strides
-        mark_unbacked(t._local_tensor, index)
+        mark_unbacked(t._local_tensor, index, duck_shape_id=duck_shape_id)
     else:
         # You could have copied the mark_dynamic behavior but I'm not convinced
         # it's what you want
@@ -604,8 +608,14 @@ def mark_unbacked(
         if not hasattr(t, "_dynamo_hint_overrides"):
             t._dynamo_hint_overrides = {}
 
+        if not hasattr(t, "_dynamo_duck_shape_ids"):
+            t._dynamo_duck_shape_ids = {}
+
         if hint_override:
             t._dynamo_hint_overrides[index] = hint_override
+
+        if duck_shape_id is not None:
+            t._dynamo_duck_shape_ids[index] = duck_shape_id
 
         # FX tracers don't respect @forbid_in_graph and choke on the following error since it passes in proxies:
         # TypeError: 'Attribute' object does not support item assignment
@@ -618,7 +628,7 @@ def mark_unbacked(
 
     assert isinstance(index, (list, tuple))
     for i in index:
-        mark_unbacked(t, i)
+        mark_unbacked(t, i, duck_shape_id=duck_shape_id)
 
 
 @forbid_in_graph

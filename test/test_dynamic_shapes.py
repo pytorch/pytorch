@@ -4767,6 +4767,42 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
 
         self.assertRaises(GuardOnDataDependentSymNode, lambda: func(torch.tensor([33])))
 
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_duck_shape_id_unifies_unbacked_symbols(self):
+        """
+        Test that duck_shape_id parameter in mark_unbacked causes tensors to share
+        the same unbacked symbol, allowing equality comparisons without DDE.
+        """
+
+        def func(x, y):
+            if x.size()[0] == y.size()[0]:
+                return x + y
+            else:
+                return x - y
+
+        # Test 1: Without duck_shape_id, comparing unbacked symbols raises DDE
+        x1 = torch.rand(4, 3)
+        y1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, 0)
+        torch._dynamo.decorators.mark_unbacked(y1, 0)
+
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.UserError):
+            compiled_func = torch.compile(func, fullgraph=True, backend="eager")
+            compiled_func(x1, y1)
+
+        # Test 2: With duck_shape_id, same symbol is used - no DDE, fullgraph succeeds
+        x2 = torch.rand(4, 3)
+        y2 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x2, 0, duck_shape_id="batch")
+        torch._dynamo.decorators.mark_unbacked(y2, 0, duck_shape_id="batch")
+
+        torch._dynamo.reset()
+        compiled_func = torch.compile(func, fullgraph=True, backend="eager")
+        result = compiled_func(x2, y2)
+        # Since both use same symbol, x.size()[0] == y.size()[0] is always True
+        self.assertTrue(torch.allclose(result, x2 + y2))
+
 
 instantiate_parametrized_tests(TestUnbacked)
 

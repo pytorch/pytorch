@@ -2158,6 +2158,9 @@ class StatelessSymbolicContext(SymbolicContext, Generic[_P1, _T1]):
     # information on how to allocate symbols when recursively fakeifying the base
     # during view fake-ification.
     view_base_context: Optional[SymbolicContext] = None
+    # Maps dimension index to duck_shape_id. If two unbacked dimensions have the
+    # same duck_shape_id, they will share the same unbacked symbol.
+    duck_shape_ids: Optional[dict[int, Any]] = None
     # TODO: add storage offset and stride symbolic_context
 
     def __post_init__(self) -> None:
@@ -3837,6 +3840,10 @@ class ShapeEnv:
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
         self.val_to_var: dict[int, sympy.Symbol] = {}
+        # Maps duck_shape_id to unbacked symbol. When mark_unbacked is called with
+        # a duck_shape_id, all unbacked dimensions with the same duck_shape_id will
+        # share the same unbacked symbol.
+        self.duck_shape_id_to_unbacked_symbol: dict[Any, sympy.Expr] = {}
         self.unbacked_symfloat_counter = 0
         self.unbacked_symint_counter = 0
         # Similar to guards, but these MUST evaluate to true and can
@@ -5080,8 +5087,29 @@ class ShapeEnv:
             ]
 
         if dynamic_dim is DimDynamic.UNBACKED:
-            out = self.create_unbacked_symint(source).node.expr
-            self._constrain_range_for_size(out)
+            # Check if this unbacked dimension has a duck_shape_id
+            # If so, reuse the same unbacked symbol for all dimensions with same duck_shape_id
+            duck_shape_id = None
+            if (
+                isinstance(symbolic_context, StatelessSymbolicContext)
+                and symbolic_context.duck_shape_ids is not None
+            ):
+                from torch._dynamo.source import TensorPropertySource
+
+                if isinstance(source, TensorPropertySource) and source.idx is not None:
+                    duck_shape_id = symbolic_context.duck_shape_ids.get(source.idx)
+
+            if (
+                duck_shape_id is not None
+                and duck_shape_id in self.duck_shape_id_to_unbacked_symbol
+            ):
+                out = self.duck_shape_id_to_unbacked_symbol[duck_shape_id]
+            else:
+                out = self.create_unbacked_symint(source).node.expr
+                self._constrain_range_for_size(out)
+
+                if duck_shape_id is not None:
+                    self.duck_shape_id_to_unbacked_symbol[duck_shape_id] = out
 
             self.unbacked_inputs.add(out)
 
