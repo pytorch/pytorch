@@ -206,12 +206,7 @@ __device__ __forceinline__ void reserveWarpSpace(bool hasTopK,
                                                 int& my_offset,
                                                 int& warp_count) {
   auto ballot = WARP_BALLOT(hasTopK); // a bitmask of threads that have hasTopK == true within the warp.
-  // count the number of threads that have hasTopK == true within the warp.
-  if constexpr (sizeof(decltype(ballot)) == 8) {
-    warp_count = __popcll(ballot); // use __popcll for 64 bit ballot
-  } else {
-    warp_count = __popc(ballot); // use __popc for 32 bit ballot
-  }
+  warp_count = __popcll(ballot); // count the number of threads that have hasTopK == true within the warp.
 
   int lane_id = at::cuda::getLaneId();
 
@@ -222,15 +217,8 @@ __device__ __forceinline__ void reserveWarpSpace(bool hasTopK,
   }
   start_index = __shfl(start_index, 0); // broadcast the start index to all threads in the warp.
 
-  // to get number of threads that have hasTopK == true to the right of the current lane, we count bits set
-  // for lanes with lane_id < current lane_id
-  if constexpr (sizeof(decltype(ballot)) == 8) {
-    uint64_t mask = (1ULL << lane_id) - 1; // a bitmask: [0, 0, 0, ..., 0, 1, 1, 1, ..., 1] with (64-lane_id) 0s and (lane_id) 1s
-    my_offset = __popcll(ballot & mask);  // use __popcll for 64 bit ballot
-  } else {
-    uint32_t mask = (1U << lane_id) - 1; // a bitmask: [0, 0, 0, ..., 0, 1, 1, 1, ..., 1] with (32-lane_id) 0s and (lane_id) 1s
-    my_offset = __popc(ballot & mask);  // use __popc for 32 bit ballot
-  }
+  uint64_t mask = (1ULL << lane_id) - 1; // a bitmask: [0, 0, 0, ..., 0, 1, 1, 1, ..., 1] with (64-lane_id) 0s and (lane_id) 1s
+  my_offset = __popcll(ballot & mask);  // get number of threads that have hasTopK == true to the right of the current lane
 }
 
 // helper function to write the result to the output.
