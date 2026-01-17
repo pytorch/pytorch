@@ -11,21 +11,100 @@ representation that can be consumed by multiple code generation backends:
 The IR uses the visitor pattern to allow different backends to traverse
 and process the node tree without modifying the node classes themselves.
 
-Object ID Approach for Parameter/Buffer Access
-==============================================
-The pythonify feature uses Python object IDs to reference model parameters
-and buffers in generated code. When `ArgumentSource.OBJECT_ID` is used, the
-`object_id` field of `ArgumentExtractionNode` contains the result of calling
-`id(tensor)` on the actual tensor object at compile time.
+Preferred Model Reconstruction Path (Golden Path)
+================================================
+The pythonify IR is designed to reconstruct parameters, buffers, and
+submodules directly from an in-scope nn.Module instance. Callers are
+expected to supply the module (commonly ``self``) in the exec namespace and
+describe where it lives via ``ModelSource``. This structured path is the
+"golden path" for pythonify and should be the default for nn.Module flows.
 
-At runtime, the generated code uses ctypes to reconstruct the object:
+Golden Path Usage Example
+-------------------------
+Below is the recommended pattern for using pythonify with an nn.Module.
+The key points are: (1) configure ModelSource in CompilationArtifacts,
+(2) use PARAMETER/BUFFER sources with nested_path for module attributes,
+and (3) pass the model in the exec namespace when running the generated code.
 
-    import ctypes
-    def obj_from_id(obj_id):
-        return ctypes.cast(obj_id, ctypes.py_object).value
+::
 
-IMPORTANT LIMITATIONS:
-----------------------
+    import torch
+    import torch.nn as nn
+    from torch._dynamo.pythonify import set_model_reference, get_model_source
+    from torch._dynamo.pythonify.ir import ModelSource, ArgumentSource
+    from torch._dynamo.pythonify.pipeline import (
+        CompilationArtifacts,
+        RuntimeWrapperPipeline,
+    )
+
+    # 1. Define your nn.Module
+    class MyModel(nn.Module):
+        def __init__(self):
+            super().__init__()
+            self.encoder = nn.Linear(10, 20)
+            self.decoder = nn.Linear(20, 10)
+            self.register_buffer("scale", torch.ones(10))
+
+        def forward(self, x):
+            x = self.encoder(x)
+            x = self.decoder(x)
+            return x * self.scale
+
+    model = MyModel()
+
+    # 2. Set up pythonify context with ModelSource (default is CLOSURE)
+    #    This tells codegen how the model will be referenced in exec()
+    set_model_reference(model, model_source=ModelSource.CLOSURE)
+
+    # 3. Create CompilationArtifacts with model_name and model_source
+    #    The pipeline will populate PARAMETER/BUFFER sources with nested_path
+    artifacts = CompilationArtifacts(
+        model_name="model",
+        model_source=ModelSource.CLOSURE,
+        # ... other fields populated by torch.compile ...
+    )
+
+    # 4. Build IR via pipeline - this creates ArgumentExtractionNodes with:
+    #    - source=PARAMETER for encoder.weight, encoder.bias, decoder.weight, etc.
+    #    - source=BUFFER for scale
+    #    - nested_path=["encoder", "weight"] etc. for attribute traversal
+    pipeline = RuntimeWrapperPipeline(artifacts)
+    ir = pipeline.build()
+
+    # 5. Generate Python code - the code will emit module-based access:
+    #    W_encoder = model.encoder.weight
+    #    b_encoder = model.encoder.bias
+    #    scale = model.scale
+    #    (NOT obj_from_id(12345678) which is the legacy fallback)
+    from torch._dynamo.pythonify.gen_python import PythonCodeGenVisitor
+    visitor = PythonCodeGenVisitor()
+    code = visitor.generate(ir)
+
+    # 6. Execute the generated code with model in namespace
+    #    Because we used ModelSource.CLOSURE, "model" should be directly accessible
+    namespace = {
+        "model": model,
+        "compiled_fn": compiled_callable,
+        "f_locals": {"x": input_tensor},
+    }
+    exec(code, namespace)
+    result = namespace["y"]
+
+    # Benefits of the golden path:
+    # - PROCESS-PORTABLE: Code works in any Python process
+    # - LIVE ACCESS: Sees current parameter values (not stale compile-time values)
+    # - SAFE: No ctypes memory access that can crash on invalid IDs
+    # - NATURAL: Matches typical nn.Module attribute access patterns
+
+Object ID Fallback (Legacy)
+---------------------------
+``ArgumentSource.OBJECT_ID`` remains as a fallback for non-module inputs or
+ad-hoc objects that cannot be recovered from a module reference. When used,
+``ArgumentExtractionNode.object_id`` holds ``id(obj)`` from compile time and
+the generated code will reconstruct via ``ctypes``. This path is intentionally
+process-local and should not be used for typical nn.Module reconstruction.
+
+IMPORTANT LIMITATIONS OF OBJECT_ID (fallback path only):
 1. PROCESS-LOCAL ONLY: Object IDs are memory addresses valid only within
    the Python process where they were captured. The generated file CANNOT
    be used in a different process or after a Python restart.
@@ -41,11 +120,6 @@ IMPORTANT LIMITATIONS:
 4. UNSAFE IF MISUSED: Using ctypes to cast an invalid object ID will crash
    the Python interpreter or produce undefined behavior. Only use the
    generated code in the same process immediately after compilation.
-
-The object ID approach is used because:
-- It avoids needing the model variable in the exec() scope
-- It guarantees we get the exact tensor that was compiled against
-- It works with any model structure (nested modules, dynamic attributes)
 """
 
 from __future__ import annotations
@@ -65,8 +139,8 @@ class ModelSource(Enum):
     """
     Specifies where the model object comes from for exec() compatibility.
 
-    When generated code is executed via exec(code, f_globals, f_locals), the
-    model object must be accessible. This enum specifies where to find it:
+    The pythonify "golden path" expects callers to provide an nn.Module in the
+    exec namespace. ModelSource tells codegen how to reference that module:
 
     F_LOCALS: Model is in frame locals (e.g., f_locals["model"])
         Use this when model is a local variable in the calling function.
@@ -74,6 +148,10 @@ class ModelSource(Enum):
         Use this when model is defined at module level.
     CLOSURE: Model is directly accessible as a variable (e.g., just "model")
         Use this when the variable is already in scope (passed to exec globals).
+
+    For nn.Module reconstruction, one of these sources should be provided so
+    parameters/buffers/submodules can be recovered via attribute traversal.
+    Object-id based reconstruction is a fallback and should not be the default.
     """
 
     F_LOCALS = auto()
@@ -85,17 +163,58 @@ class ArgumentSource(Enum):
     """
     Specifies where an argument value comes from when generating code.
 
-    MODEL_ATTRIBUTE: Attribute from the model object (e.g., model.W)
-    F_LOCALS: Value from frame locals dictionary (e.g., f_locals["x"])
-    F_GLOBALS: Value from frame globals dictionary (e.g., f_globals["torch"])
-    CONSTANT: Literal constant value
-    BUFFER: Registered buffer from nn.Module
-    PARAMETER: Registered parameter from nn.Module
-    OBJECT_ID: Value retrieved via object ID using ctypes. The object_id field
-        of ArgumentExtractionNode contains the Python id() of the object at
-        compile time. At runtime, ctypes.cast(object_id, ctypes.py_object).value
-        is used to retrieve the object. This is only valid within the same
-        Python process and requires the original object to still be alive.
+    Preferred Sources for nn.Module Reconstruction (Golden Path)
+    -------------------------------------------------------------
+    For typical nn.Module pythonify flows, use these sources in combination
+    with ModelSource to enable attribute-based reconstruction:
+
+    PARAMETER: Registered parameter from nn.Module. Generated code accesses
+        the parameter via module attribute traversal (e.g., ``model.layer.weight``).
+        Requires ``nested_path`` to be populated with the attribute path.
+        This is the preferred source for nn.Module parameters.
+
+    BUFFER: Registered buffer from nn.Module. Generated code accesses the
+        buffer via module attribute traversal (e.g., ``model.running_mean``).
+        Requires ``nested_path`` to be populated with the attribute path.
+        This is the preferred source for nn.Module buffers.
+
+    MODEL_ATTRIBUTE: Generic attribute from the model object (e.g., model.config).
+        Use when the attribute is not a parameter or buffer but still accessible
+        from the in-scope module.
+
+    Standard Sources
+    ----------------
+    F_LOCALS: Value from frame locals dictionary (e.g., f_locals["x"]).
+        Use for input tensors and local variables.
+
+    F_GLOBALS: Value from frame globals dictionary (e.g., f_globals["torch"]).
+        Use for module-level globals and imports.
+
+    CONSTANT: Literal constant value embedded directly in generated code.
+
+    Legacy Fallback Source (Use Only When Necessary)
+    -------------------------------------------------
+    OBJECT_ID: Value retrieved via object ID using ctypes.
+
+        WARNING: This is a LEGACY FALLBACK and should NOT be used for typical
+        nn.Module reconstruction. It exists only for edge cases where:
+        - The object cannot be accessed via module attribute traversal
+        - No module context (ModelSource) is available
+        - The object is a detached tensor or ad-hoc object
+
+        When OBJECT_ID is used, ``ArgumentExtractionNode.object_id`` contains
+        the Python id() of the object captured at compile time. The generated
+        code uses ctypes to reconstruct the object from this memory address.
+
+        Limitations of OBJECT_ID:
+        - Process-local only: Object IDs are memory addresses, invalid across
+          processes or after Python restart
+        - Lifetime-dependent: Original object must remain alive
+        - Not serializable: Generated code cannot be saved for later use
+        - Unsafe if misused: Invalid IDs cause crashes or undefined behavior
+
+        For nn.Module parameters/buffers, ALWAYS prefer PARAMETER or BUFFER
+        sources with proper ``nested_path`` and ``ModelSource`` configuration.
     """
 
     MODEL_ATTRIBUTE = auto()
@@ -186,23 +305,53 @@ class ArgumentExtractionNode(IRNode):
     """
     IR node for extracting model parameters and input tensors.
 
-    This node represents the code that retrieves values needed for
-    the compiled computation. Values can come from various sources:
-    - Model attributes (e.g., model.W for parameters)
-    - Frame locals (e.g., f_locals["x"] for input tensors)
-    - Frame globals (e.g., for accessing torch module)
-    - Object ID (via ctypes, for process-local object retrieval)
+    This node represents the code that retrieves values needed for the
+    compiled computation. Values can come from various sources, and the
+    choice of source determines how the generated code accesses the value.
+
+    Golden Path (Preferred for nn.Module)
+    -------------------------------------
+    For nn.Module parameters and buffers, the recommended approach is:
+
+    1. Set ``source`` to ``ArgumentSource.PARAMETER`` or ``ArgumentSource.BUFFER``
+    2. Populate ``nested_path`` with the attribute path (e.g., ["layer1", "weight"])
+    3. Ensure a ``ModelSource`` is configured in ``CompilationArtifacts``
+
+    The generated code will then access the value via module attribute traversal
+    (e.g., ``model.layer1.weight``), which is process-portable, supports live
+    attribute access, and aligns with typical nn.Module usage.
+
+    Available Sources
+    -----------------
+    - Model attributes: source=PARAMETER/BUFFER/MODEL_ATTRIBUTE with nested_path
+    - Frame locals: source=F_LOCALS for input tensors (e.g., f_locals["x"])
+    - Frame globals: source=F_GLOBALS for imports (e.g., f_globals["torch"])
+    - Object ID: source=OBJECT_ID when module path unavailable (LEGACY FALLBACK)
 
     Attributes:
         name: Variable name to assign the extracted value to
-        source: Where the value comes from (MODEL_ATTRIBUTE, F_LOCALS, etc.)
+        source: Where the value comes from (PARAMETER, BUFFER, F_LOCALS, etc.)
         access_path: Path to access the value (e.g., "W" for model.W, "x" for f_locals["x"])
-        nested_path: For nested module hierarchies, list of attribute names to traverse
-        object_id: Python id() of the object at compile time. When set, the generated
-            code can use ctypes to retrieve the object directly via its memory address.
-            This is only valid within the same Python process and requires the original
-            object to still be alive. Used primarily for PARAMETER and BUFFER sources
-            to avoid needing the model object in scope during exec().
+        nested_path: For nested module hierarchies, list of attribute names to traverse.
+            Required for PARAMETER/BUFFER sources to enable golden path reconstruction.
+            Example: ["encoder", "layer1", "weight"] produces ``model.encoder.layer1.weight``
+        object_id: Python id() of the object at compile time.
+
+            WARNING: This field is part of the LEGACY FALLBACK path. It should only
+            be set when ``source=OBJECT_ID`` and module-based reconstruction is not
+            possible. When set, generated code uses ctypes to retrieve the object
+            directly via its memory address.
+
+            IMPORTANT: For nn.Module parameters/buffers, DO NOT use object_id.
+            Instead, use ``source=PARAMETER`` or ``source=BUFFER`` with a populated
+            ``nested_path``. The module-based approach is:
+            - Process-portable (works across different Python processes)
+            - Live-access (sees current parameter values, not stale compile-time values)
+            - Safe (no ctypes memory access that can crash on invalid IDs)
+            - Natural (matches typical nn.Module attribute access patterns)
+
+            The object_id path remains only for edge cases: detached tensors, ad-hoc
+            objects, or scenarios where no module context is available.
     """
 
     name: str

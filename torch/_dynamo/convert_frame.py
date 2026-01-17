@@ -2861,9 +2861,11 @@ def _build_pythonify_artifacts(
         get_backward_inductor_output,
         get_forward_inductor_output,
         get_latest_inductor_output,
+        get_model_source,
     )
 
     inductor_output = get_latest_inductor_output()
+    model_source = get_model_source()
     inductor_source_code = None
     inductor_graph_str = None
     backward_inductor_source_code = None
@@ -2940,6 +2942,7 @@ def _build_pythonify_artifacts(
         parameter_names=parameter_names,
         buffer_names=buffer_names,
         model_name=model_name,
+        model_source=model_source,
         num_inputs=len(input_names),
         num_outputs=num_outputs,
         metadata=metadata,

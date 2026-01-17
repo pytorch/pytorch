@@ -72,6 +72,7 @@ from .errors import (
 from .gen_python import generate_python_code
 from .ir import (
     CompiledRegionNode,
+    ModelSource,
     MultiRegionDispatchNode,
     RegionExecutionMode,
     RuntimeWrapperIR,
@@ -105,6 +106,14 @@ class PythonifyContext:
             captured for ctypes-based object retrieval in generated code.
             The reference is set when the model enters the pythonify compilation
             region and cleared after code generation completes.
+        model_source: Specifies where the model comes from for exec() compatibility.
+            This drives how generated code accesses the model:
+            - CLOSURE: Model is directly accessible as a variable (default for exec()).
+                The generated code will reference the model by model_name directly.
+            - F_LOCALS: Model is in frame locals (f_locals[model_name]).
+            - F_GLOBALS: Model is in frame globals (f_globals[model_name]).
+            Defaults to CLOSURE which is appropriate for typical exec() usage
+            where the model is passed in the namespace dict.
         merged_wrapper_stack_order: Aggregated wrapper stack ordering from all
             artifacts. Keys are segment identifiers (e.g., "forward", "dispatch"),
             values are ordered lists of wrapper names. When multiple artifacts
@@ -125,6 +134,7 @@ class PythonifyContext:
     forward_inductor_output: Optional[dict[str, Any]] = None
     backward_inductor_output: Optional[dict[str, Any]] = None
     model_ref: Optional[Any] = None
+    model_source: ModelSource = ModelSource.CLOSURE
     merged_wrapper_stack_order: dict[str, list[str]] = field(default_factory=dict)
     merged_wrapper_stack_metadata: dict[str, dict[str, Any]] = field(default_factory=dict)
 
@@ -218,23 +228,36 @@ def is_pythonify_active() -> bool:
     return _pythonify_context.is_active()
 
 
-def set_model_reference(model: Any) -> None:
+def set_model_reference(
+    model: Any,
+    model_source: ModelSource = ModelSource.CLOSURE,
+) -> None:
     """
-    Set the model reference in the current pythonify context.
+    Set the model reference and source in the current pythonify context.
 
     This function should be called when the model enters the pythonify
     compilation region, typically from the OptimizeContext.__call__ or
-    similar entry point. The model reference is used to extract parameter
-    and buffer tensor objects so their IDs can be captured for ctypes-based
-    object retrieval in generated code.
+    similar entry point. The model reference is used for the golden path
+    reconstruction where parameters and buffers are accessed via module
+    attribute traversal (e.g., model.layer.weight) instead of object IDs.
+
+    The model_source specifies how the generated code should access the model
+    at exec() time, enabling process-portable, live-access code that doesn't
+    depend on stale object IDs.
 
     Args:
         model: The nn.Module or callable being compiled. If it's an nn.Module,
-            its parameters and buffers will be accessible for object ID capture.
+            its parameters and buffers will be accessible via attribute traversal.
+        model_source: Specifies where the model comes from for exec() compatibility.
+            - CLOSURE (default): Model is directly accessible as a variable.
+                Use when passing the model in the exec() namespace dict.
+            - F_LOCALS: Model is in frame locals (f_locals[model_name]).
+            - F_GLOBALS: Model is in frame globals (f_globals[model_name]).
     """
     ctx = _pythonify_context.get()
     if ctx is not None:
         ctx.model_ref = model
+        ctx.model_source = model_source
 
 
 def get_model_reference() -> Optional[Any]:
@@ -248,6 +271,25 @@ def get_model_reference() -> Optional[Any]:
     if ctx is not None:
         return ctx.model_ref
     return None
+
+
+def get_model_source() -> ModelSource:
+    """
+    Get the model source from the current pythonify context.
+
+    The model source specifies how the generated code should access the model
+    at exec() time. This is used by the pipeline to set the model_source field
+    on CompilationArtifacts, which in turn drives codegen to emit the correct
+    model access pattern (e.g., direct variable, f_locals["model"], etc.).
+
+    Returns:
+        The ModelSource from the current context, or CLOSURE (default) if
+        pythonify is not active or no explicit source was set.
+    """
+    ctx = _pythonify_context.get()
+    if ctx is not None:
+        return ctx.model_source
+    return ModelSource.CLOSURE
 
 
 def get_merged_wrapper_stack_order() -> dict[str, list[str]]:
@@ -736,14 +778,60 @@ def generate_pythonify_output() -> Optional[str]:
         "that is normally embedded inside torch.compile. Execute with exec():"
     )
     all_code_parts.append("")
-    all_code_parts.append("    with open('/path/to/this/file.py') as f:")
-    all_code_parts.append("        frame = inspect.currentframe()")
-    all_code_parts.append("        exec(f.read(), frame.f_globals, frame.f_locals)")
+
+    uses_object_ids = _uses_object_ids(ctx.artifacts_list)
+    model_name = ctx.model_name if ctx.model_name else "model"
+
+    if uses_object_ids:
+        all_code_parts.append("OBJECT ID FALLBACK MODE:")
+        all_code_parts.append(
+            "This file uses ctypes-based object IDs for parameter access."
+        )
+        all_code_parts.append(
+            "Execute in the same process immediately after compilation:"
+        )
+        all_code_parts.append("")
+        all_code_parts.append("    with open('/path/to/this/file.py') as f:")
+        all_code_parts.append("        frame = inspect.currentframe()")
+        all_code_parts.append("        exec(f.read(), frame.f_globals, frame.f_locals)")
+    else:
+        all_code_parts.append("GOLDEN PATH (RECOMMENDED):")
+        all_code_parts.append(
+            "This file uses module-based attribute access for parameters/buffers."
+        )
+        all_code_parts.append(
+            f"Pass your model as '{model_name}' in the exec() namespace:"
+        )
+        all_code_parts.append("")
+        all_code_parts.append("    with open('/path/to/this/file.py') as f:")
+        all_code_parts.append("        code = f.read()")
+        all_code_parts.append("    namespace = {")
+        all_code_parts.append(f'        "{model_name}": your_model,')
+        all_code_parts.append('        "compiled_fn": compiled_callable,')
+        all_code_parts.append('        "f_locals": {"x": input_tensor},')
+        all_code_parts.append("    }")
+        all_code_parts.append("    exec(code, namespace)")
+        all_code_parts.append('    result = namespace["y"]')
+        all_code_parts.append("")
+        all_code_parts.append("ADVANTAGES of Golden Path:")
+        all_code_parts.append(
+            "  - PROCESS-PORTABLE: Works across different Python processes"
+        )
+        all_code_parts.append(
+            "  - LIVE ACCESS: Always sees current parameter values (no stale IDs)"
+        )
+        all_code_parts.append(
+            "  - SAFER: No ctypes/memory address access, no crash risk"
+        )
+        all_code_parts.append(
+            "  - PERSISTABLE: Can save this file and reuse it later"
+        )
+
     all_code_parts.append('"""')
     all_code_parts.append("")
 
     # Add warning about object ID limitations if applicable
-    if _uses_object_ids(ctx.artifacts_list):
+    if uses_object_ids:
         all_code_parts.extend(_generate_object_id_warning())
 
     all_code_parts.append("import torch")

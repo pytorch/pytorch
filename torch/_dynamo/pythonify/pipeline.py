@@ -67,6 +67,7 @@ from .ir import (
     GuardType,
     KernelLoadNode,
     KernelType,
+    ModelSource,
     ReturnResultNode,
     RuntimeWrapperIR,
     RuntimeWrapperNode,
@@ -96,6 +97,14 @@ class CompilationArtifacts:
         parameter_names: Names of model parameters accessed during tracing
         buffer_names: Names of model buffers accessed during tracing
         model_name: Variable name of the model object in the original scope
+        model_source: Specifies where the model comes from for exec() compatibility.
+            This drives how generated code accesses the model:
+            - CLOSURE: Model is directly accessible as a variable (default for exec()).
+                The generated code will reference the model by model_name directly.
+            - F_LOCALS: Model is in frame locals (f_locals[model_name]).
+            - F_GLOBALS: Model is in frame globals (f_globals[model_name]).
+            When None, defaults to CLOSURE which is appropriate for typical exec()
+            usage where the model is passed in the namespace dict.
         compiled_callable: The compiled callable from Inductor
         cuda_graphs_enabled: Whether CUDA graphs are enabled
         cuda_graph_config: Configuration for CUDA graphs (if enabled)
@@ -135,6 +144,7 @@ class CompilationArtifacts:
     parameter_names: list[str] = field(default_factory=list)
     buffer_names: list[str] = field(default_factory=list)
     model_name: str = "model"
+    model_source: Optional[ModelSource] = None
     compiled_callable: Optional[Callable[..., Any]] = None
     cuda_graphs_enabled: bool = False
     cuda_graph_config: dict[str, Any] = field(default_factory=dict)
@@ -233,6 +243,7 @@ class RuntimeWrapperPipeline:
                 metadata=self.artifacts.metadata.copy(),
                 source_info={
                     "model_name": self.artifacts.model_name,
+                    "model_source": self.artifacts.model_source,
                     "input_names": self.artifacts.input_names.copy(),
                     "parameter_names": self.artifacts.parameter_names.copy(),
                     "buffer_names": self.artifacts.buffer_names.copy(),
@@ -366,6 +377,12 @@ class RuntimeWrapperPipeline:
 
         arg_counter = 1
 
+        # Determine whether we can prefer module-based reconstruction. For the
+        # ordered_arg_info path we assume module-based access is available when
+        # a model name is provided; OBJECT_ID remains a fallback when no module
+        # path is available.
+        module_context_available = bool(self.artifacts.model_name)
+
         # Use ordered_arg_info if available - this preserves the exact order
         # the Inductor kernel expects (from input_source_to_sizes_strides)
         if self.artifacts.ordered_arg_info:
@@ -373,33 +390,44 @@ class RuntimeWrapperPipeline:
                 name = info.get("name", "")
                 source_type = info.get("source_type", "input")
                 nested_path = info.get("nested_path", [])
+                object_id = info.get("object_id")
+
+                # Use provided nested_path if available, otherwise parse from name.
+                # Strip leading 'self' since external access is model.attr not model.self.attr.
+                if nested_path:
+                    resolved_nested_path = self._strip_self_from_path(nested_path)
+                else:
+                    resolved_nested_path = self._parse_nested_path(name)
+                use_module_path = module_context_available and bool(resolved_nested_path)
 
                 if source_type == "parameter":
-                    object_id = None
                     source = ArgumentSource.PARAMETER
-                    if name in self.artifacts.parameter_tensors:
-                        tensor = self.artifacts.parameter_tensors[name]
-                        object_id = id(tensor)
-                        source = ArgumentSource.OBJECT_ID
+                    if not use_module_path:
+                        if object_id is None and name in self.artifacts.parameter_tensors:
+                            tensor = self.artifacts.parameter_tensors[name]
+                            object_id = id(tensor)
+                        if object_id is not None:
+                            source = ArgumentSource.OBJECT_ID
                     node = ArgumentExtractionNode(
                         name=f"arg{arg_counter}",
                         source=source,
                         access_path=name,
-                        nested_path=nested_path if nested_path else self._parse_nested_path(name),
+                        nested_path=resolved_nested_path,
                         object_id=object_id,
                     )
                 elif source_type == "buffer":
-                    object_id = None
                     source = ArgumentSource.BUFFER
-                    if name in self.artifacts.buffer_tensors:
-                        tensor = self.artifacts.buffer_tensors[name]
-                        object_id = id(tensor)
-                        source = ArgumentSource.OBJECT_ID
+                    if not use_module_path:
+                        if object_id is None and name in self.artifacts.buffer_tensors:
+                            tensor = self.artifacts.buffer_tensors[name]
+                            object_id = id(tensor)
+                        if object_id is not None:
+                            source = ArgumentSource.OBJECT_ID
                     node = ArgumentExtractionNode(
                         name=f"arg{arg_counter}",
                         source=source,
                         access_path=name,
-                        nested_path=nested_path if nested_path else self._parse_nested_path(name),
+                        nested_path=resolved_nested_path,
                         object_id=object_id,
                     )
                 else:
@@ -429,9 +457,12 @@ class RuntimeWrapperPipeline:
 
         # Then parameters
         for param_name in self.artifacts.parameter_names:
+            nested_path = self._parse_nested_path(param_name)
+            use_module_path = module_context_available and bool(nested_path)
+
             object_id = None
             source = ArgumentSource.PARAMETER
-            if param_name in self.artifacts.parameter_tensors:
+            if not use_module_path and param_name in self.artifacts.parameter_tensors:
                 tensor = self.artifacts.parameter_tensors[param_name]
                 object_id = id(tensor)
                 source = ArgumentSource.OBJECT_ID
@@ -439,7 +470,7 @@ class RuntimeWrapperPipeline:
                 name=f"arg{arg_counter}",
                 source=source,
                 access_path=param_name,
-                nested_path=self._parse_nested_path(param_name),
+                nested_path=nested_path,
                 object_id=object_id,
             )
             self._ir.add_node(node)
@@ -447,9 +478,12 @@ class RuntimeWrapperPipeline:
 
         # Then buffers
         for buffer_name in self.artifacts.buffer_names:
+            nested_path = self._parse_nested_path(buffer_name)
+            use_module_path = module_context_available and bool(nested_path)
+
             object_id = None
             source = ArgumentSource.BUFFER
-            if buffer_name in self.artifacts.buffer_tensors:
+            if not use_module_path and buffer_name in self.artifacts.buffer_tensors:
                 tensor = self.artifacts.buffer_tensors[buffer_name]
                 object_id = id(tensor)
                 source = ArgumentSource.OBJECT_ID
@@ -457,7 +491,7 @@ class RuntimeWrapperPipeline:
                 name=f"arg{arg_counter}",
                 source=source,
                 access_path=buffer_name,
-                nested_path=self._parse_nested_path(buffer_name),
+                nested_path=nested_path,
                 object_id=object_id,
             )
             self._ir.add_node(node)
@@ -1089,15 +1123,39 @@ class RuntimeWrapperPipeline:
         """
         Parse a dotted path into a list of attribute names.
 
+        When the path has a 'self.' prefix (from Dynamo's internal representation),
+        we strip it because external code accesses attributes directly on the model
+        (e.g., model.W not model.self.W).
+
         Args:
-            path: A dotted attribute path (e.g., "layer1.weight")
+            path: A dotted attribute path (e.g., "layer1.weight" or "self.layer1.weight")
 
         Returns:
             List of individual attribute names (e.g., ["layer1", "weight"])
         """
+        if path.startswith("self."):
+            path = path[5:]
         if "." in path:
             return path.split(".")
         return [path]
+
+    def _strip_self_from_path(self, path: list[str]) -> list[str]:
+        """
+        Strip leading 'self' from a nested path list.
+
+        Dynamo's internal representation uses 'self' as the first element
+        (e.g., ['self', 'layer', 'weight']), but external code accesses
+        attributes directly on the model (model.layer.weight not model.self.layer.weight).
+
+        Args:
+            path: A list of attribute names, possibly starting with 'self'
+
+        Returns:
+            The path with leading 'self' removed if present
+        """
+        if path and path[0] == "self":
+            return path[1:]
+        return path
 
     def _map_guard_type(self, guard_type_str: str) -> GuardType:
         """
