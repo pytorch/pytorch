@@ -2958,8 +2958,10 @@ class ExpandView(BaseView):
                 # us this equality.
                 assert (
                     sizevars.optimization_hint(
-                        new_size[i] - old_size[i], fallback=0
-                    )  # pyrefly: ignore [unsupported-operation]
+                        new_size[i]
+                        - old_size[i],  # pyrefly: ignore [unsupported-operation]
+                        fallback=0,
+                    )
                     == 0
                 ), (
                     f"Broadcast failed in ExpandView({x.get_size()}, {new_size}) on dimension {i}"
