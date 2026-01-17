@@ -11,6 +11,23 @@ import torch.utils._pytree as pytree
 from torch.fx.passes.infra.pass_base import PassResult
 from torch.types import FileLike
 
+# -----------------------------------------------------------------------------
+# Security note on serialization
+#
+# torch.export serialization relies on torch.load for deserializing exported
+# artifacts. In some cases, loading exported programs may require
+# weights_only=False in order to support custom objects (for example,
+# ScriptObject).
+#
+# Using torch.load with weights_only=False can be unsafe when loading
+# untrusted artifacts, as it may execute arbitrary code during deserialization.
+#
+# Supporting safer alternatives such as weights_only=True and/or tensor-only
+# formats like safetensors would improve the security posture of torch.export,
+# especially for deployment and inference workflows.
+#
+# See discussion in: https://github.com/pytorch/pytorch/issues/153410
+# -----------------------------------------------------------------------------
 
 __all__ = [
     "AdditionalInputs",
