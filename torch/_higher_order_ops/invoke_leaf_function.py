@@ -149,9 +149,15 @@ def autograd_grad_with_mixed_inputs(
     )
 
     # Reconstruct full gradient tuple with Nones at proper positions
+    # For unused inputs that require grad, return zeros instead of None
+    # to match what the tracing backward produces
     result: list[torch.Tensor | None] = [None] * len(inputs)
     for filtered_idx, original_idx in enumerate(input_indices):
-        result[original_idx] = grads[filtered_idx]
+        grad = grads[filtered_idx]
+        if grad is None:
+            # Input was unused - return zeros to match traced backward structure
+            grad = torch.zeros_like(inputs[original_idx])
+        result[original_idx] = grad
 
     return tuple(result)
 
