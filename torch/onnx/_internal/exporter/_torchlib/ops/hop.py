@@ -349,7 +349,8 @@ def higher_order_invoke_subgraph(
 
     Args:
         subgraph: The function to invoke
-        identifier: Optional identifier for the subgraph (used for caching in PyTorch)
+        identifier: Optional identifier for the subgraph (used for caching in PyTorch,
+            not needed for ONNX export as the function reference provides all necessary information)
         *operands: Input values to pass to the function
 
     Returns:
@@ -366,6 +367,11 @@ def higher_order_invoke_subgraph(
         list(operands),
         num_outputs=len(subgraph.outputs),
     )
+
+    # ONNX Runtime complains about duplicate output names if we don't rename them.
+    # Rename outputs to avoid potential SSA form violations.
+    for func_out, out in zip(subgraph.outputs, node.outputs):
+        out.name = f"{func_out.name}_{subgraph.name}"
 
     # Add the node to the current tracer
     tracer.nodes.append(node)
