@@ -1,7 +1,7 @@
 import os
 import sys
 from collections.abc import Callable
-from typing import Any, Literal, Optional, TYPE_CHECKING, Union
+from typing import Any, cast, Literal, Optional, TYPE_CHECKING, Union
 
 import torch
 import torch._inductor.custom_graph_pass
@@ -1599,7 +1599,7 @@ class triton:
     # Note: Native matmul does not currently support block pointers or TMA matmul.
     # If both native_matmul and (use_block_ptr or enable_persistent_tma_matmul) are enabled,
     # an error will be thrown.
-    native_matmul: bool = False
+    native_matmul: bool = os.getenv("TORCHINDUCTOR_NATIVE_MATMUL", "0") == "1"
 
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
@@ -1751,6 +1751,9 @@ class triton:
         os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION_AUTOTUNE_SPLIT_SIZE", "0")
         == "1"
     )
+    # If set to true, will skip some non-critical checks in the mix order reduction
+    # this could be helpful to avoid recompilations in some cases
+    mix_order_reduction_non_strict_mode = False
 
     enable_tlx_templates: bool = (
         os.environ.get("TORCHINDUCTOR_ENABLE_TLX_TEMPLATES", "0") == "1"
@@ -2023,6 +2026,26 @@ class cuda:
 
     # The L2 swizzle values to consider when profiling CUTLASS configs in max_autotune.
     cutlass_max_profiling_swizzle_options: list[int] = [1, 2, 4, 8]
+
+    cutlass_dynamic_cluster_shape: tuple[int, int, int] = cast(
+        tuple[int, int, int],
+        tuple(
+            int(x)
+            for x in os.environ.get(
+                "TORCHINDUCTOR_CUTLASS_DYNAMIC_CLUSTER_SHAPE", "2,1,1"
+            ).split(",")
+        ),
+    )
+    cutlass_dynamic_cluster_fallback: tuple[int, int, int] = cast(
+        tuple[int, int, int],
+        tuple(
+            int(x)
+            for x in os.environ.get(
+                "TORCHINDUCTOR_CUTLASS_DYNAMIC_CLUSTER_FALLBACK",
+                ",".join(str(v) for v in cutlass_dynamic_cluster_shape),
+            ).split(",")
+        ),
+    )
 
     # Whether to use CUTLASS EVT for epilogue fusion
     cutlass_epilogue_fusion_enabled = (
