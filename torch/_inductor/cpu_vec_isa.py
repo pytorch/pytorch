@@ -86,7 +86,6 @@ cdll.LoadLibrary("__lib_path__")
     def build_arch_flags(self) -> str:
         return self._arch_flags
 
-    # No manual __hash__ needed: frozen=True generates a safe and correct one.
     def check_build(self, code: str) -> bool:
         from torch._inductor.codecache import get_lock_dir, LOCK_TIMEOUT, write
         from torch._inductor.cpp_builder import (
@@ -114,13 +113,11 @@ cdll.LoadLibrary("__lib_path__")
                 output_dir,
             )
             try:
-                # Check if the output file exist, and compile when not.
                 output_path = normalize_path_separator(
                     x86_isa_help_builder.get_target_file_path()
                 )
                 if not os.path.isfile(output_path):
                     x86_isa_help_builder.build()
-                # Check build result
                 subprocess.check_call(
                     [
                         sys.executable,
@@ -153,20 +150,19 @@ cdll.LoadLibrary("__lib_path__")
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class VecNEON(VecISA):
-    _bit_width = 128  # This is required to leverage the compute implemented in aten/src/ATen/cpu/vec/vec128/vec128_float_neon.h
+    _bit_width = 128
     _macro = ["CPU_CAPABILITY_NEON", "AT_BUILD_ARM_VEC256_WITH_SLEEF"]
-    _arch_flags = ""  # Unused
+    _arch_flags = ""
     _dtype_nelements = {torch.float: 4, torch.bfloat16: 8, torch.float16: 8}
 
     def __str__(self) -> str:
         if config.is_fbcode():
             return "neon"
-        return "asimd"  # detects the presence of advanced SIMD on armv8-a kernels
+        return "asimd"
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class VecSVE256(VecISA):
-    # this function can be repurposed for SVE with variable vec length
     _bit_width = 256
     _macro = [
         "CPU_CAPABILITY_SVE",
@@ -191,7 +187,7 @@ class VecAVX512(VecISA):
         "-mavx512f -mavx512dq -mavx512vl -mavx512bw -mfma"
         if not _IS_WINDOWS
         else "/arch:AVX512"
-    )  # TODO: use cflags
+    )
     _dtype_nelements = {torch.float: 16, torch.bfloat16: 32, torch.float16: 32}
     _is_avx512_bf16_supported = False
 
@@ -208,24 +204,14 @@ extern "C" __m512bh __avx512_bf16_chk_kernel(__m512 a, __m512 b) {
 
     @functools.cache  # noqa: B019
     def __bool__(self) -> bool:
-        if super().__bool__():
+        if VecISA.__bool__(self):
             if config.is_fbcode():
                 return False
-            # check avx512_bf16
             if torch.cpu._is_avx512_bf16_supported() and not _IS_WINDOWS:
-                # save _arch_flags
                 base_flags = self._arch_flags
-
-                # temporarily change _arch_flags for avx512_bf16 check_build
-                # We use object.__setattr__ to bypass frozen=True/slots=True constraints
-                # We use type: ignore[misc] to bypass the ClassVar mutation check
                 object.__setattr__(self, "_arch_flags", base_flags + " -mavx512bf16")  # type: ignore[misc]
-
                 if self.check_build(self._avx512_bf16_code):
-                    # Direct mutation fails on frozen dataclass, use setattr hack
                     object.__setattr__(self, "_is_avx512_bf16_supported", True)
-
-                # restore _arch_flags
                 object.__setattr__(self, "_arch_flags", base_flags)  # type: ignore[misc]
             return True
         return False
@@ -237,8 +223,7 @@ extern "C" __m512bh __avx512_bf16_chk_kernel(__m512 a, __m512 b) {
     def build_arch_flags(self) -> str:
         if self._is_avx512_bf16_supported:
             return self._arch_flags + " -mavx512bf16"
-        else:
-            return self._arch_flags
+        return self._arch_flags
 
 
 @dataclasses.dataclass(frozen=True, slots=True)
@@ -254,7 +239,6 @@ class VecAVX512VNNI(VecAVX512):
     }
 
     def __str__(self) -> str:
-        # Avoid using super().__str__() to prevent TypeError with frozen dataclasses/slots
         return "avx512 avx512_vnni"
 
     _avx512_vnni_code = """
@@ -270,7 +254,7 @@ extern "C" __m512i __avx512_vnni_chk_kernel_2(__m512i src, __m512i a, __m512i b)
 
     @functools.cache  # noqa: B019
     def __bool__(self) -> bool:
-        if super().__bool__():
+        if VecAVX512.__bool__(self):
             if config.is_fbcode():
                 return False
             if (
@@ -288,12 +272,9 @@ extern "C" __m512i __avx512_vnni_chk_kernel_2(__m512i src, __m512i a, __m512i b)
 @dataclasses.dataclass(frozen=True, slots=True)
 class VecAMX(VecAVX512VNNI):
     _arch_flags = VecAVX512VNNI._arch_flags + " -mamx-tile -mamx-bf16 -mamx-int8"
-    # check amx_fp16 separately since it is not always supported when amx is supported
-    # amx_fp16 intrinsic compilation need gcc >=13 on platforms which support amx_fp16
     _is_amx_fp16_supported = False
 
     def __str__(self) -> str:
-        # Avoid using super().__str__() to prevent TypeError with frozen dataclasses/slots
         return "avx512 avx512_vnni amx_tile"
 
     _amx_code = """
@@ -318,22 +299,15 @@ extern "C" void __amx_chk_kernel() {
 
     @functools.cache  # noqa: B019
     def __bool__(self) -> bool:
-        if super().__bool__():
+        if VecAVX512VNNI.__bool__(self):
             if config.is_fbcode():
                 return False
             if self.check_build(VecAMX._amx_code) and torch.cpu._init_amx():
-                # check amx-fp16 as well when check amx
                 if torch.cpu._is_amx_fp16_supported():
-                    # save _arch_flags
                     base_flags = self._arch_flags
-
-                    # temporarily change _arch_flags for amx-fp16 check_build
                     object.__setattr__(self, "_arch_flags", base_flags + " -mamx-fp16")  # type: ignore[misc]
-
                     if self.check_build(VecAMX._amx_fp16_code):
                         object.__setattr__(self, "_is_amx_fp16_supported", True)
-
-                    # restore _arch_flags
                     object.__setattr__(self, "_arch_flags", base_flags)  # type: ignore[misc]
                 return True
         return False
@@ -345,8 +319,6 @@ extern "C" void __amx_chk_kernel() {
     def build_arch_flags(self) -> str:
         extra_flags = ""
         if self._is_avx512_bf16_supported:
-            # avx512_bf16 is not among the base flags, so we need to check and add it here
-            # And we need this flag in the WOQ case for dequantization
             extra_flags += " -mavx512bf16"
         if self._is_amx_fp16_supported:
             extra_flags += " -mamx-fp16"
@@ -359,7 +331,7 @@ class VecAVX2(VecISA):
     _macro = ["CPU_CAPABILITY_AVX2"]
     _arch_flags = (
         "-mavx2 -mfma -mf16c" if not _IS_WINDOWS else "/arch:AVX2"
-    )  # TODO: use cflags
+    )
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
 
     def __str__(self) -> str:
@@ -383,7 +355,7 @@ class VecZVECTOR(VecISA):
 
 @dataclasses.dataclass(frozen=True, slots=True)
 class VecVSX(VecISA):
-    _bit_width = 256  # VSX simd supports 128 bit_width, but aten is emulating it as 256
+    _bit_width = 256
     _macro = ["CPU_CAPABILITY_VSX"]
     _arch_flags = "-mvsx"
     _dtype_nelements = {torch.float: 8, torch.bfloat16: 16, torch.float16: 16}
@@ -415,9 +387,6 @@ def x86_isa_checker() -> list[str]:
             dest.append(isa_name)
 
     Arch = platform.machine()
-    """
-    Arch value is x86_64 on Linux, and the value is AMD64 on Windows.
-    """
     if Arch != "x86_64" and Arch != "AMD64":
         return supported_isa
 
@@ -450,9 +419,6 @@ def get_isa_from_cpu_capability(
     vec_isa_list: list[VecISA],
     invalid_vec_isa: InvalidVecISA,
 ) -> VecISA:
-    # AMX setting is not supported in eager
-    # VecAMX will be prioritized for selection when setting ATEN_CPU_CAPABILITY to avx512
-    # TODO add sve256 support
     capability_to_isa_str = {
         "default": "INVALID_VEC_ISA",
         "zvector": "zvector",
@@ -474,9 +440,6 @@ def get_isa_from_cpu_capability(
     return vec_isa_list[0]
 
 
-# Cache the cpuinfo to avoid I/O overhead. Meanwhile, the cpuinfo content
-# might have too much redundant content that is useless for ISA check. Hence,
-# we only cache some key isa information.
 @functools.cache
 def valid_vec_isa_list() -> list[VecISA]:
     isa_list: list[VecISA] = []
@@ -493,7 +456,6 @@ def valid_vec_isa_list() -> list[VecISA]:
                 line = _cpu_info.readline()
                 if not line:
                     break
-                # process line
                 featuresmatch = re.match(r"^features\s*:\s*(.*)$", line)
                 if featuresmatch:
                     for group in featuresmatch.groups():
@@ -508,9 +470,6 @@ def valid_vec_isa_list() -> list[VecISA]:
         else:
             isa_list.append(VecNEON())
     elif arch in ["x86_64", "AMD64"]:
-        """
-        arch value is x86_64 on Linux, and the value is AMD64 on Windows.
-        """
         _cpu_supported_x86_isa = x86_isa_checker()
         isa_list.extend(
             isa
@@ -529,8 +488,6 @@ def pick_vec_isa() -> VecISA:
     if not _valid_vec_isa_list:
         return invalid_vec_isa
 
-    # If the simdlen is None, set simdlen based on the environment ATEN_CPU_CAPABILITY
-    # to control CPU vec ISA
     if config.cpp.simdlen is None:
         return get_isa_from_cpu_capability(
             os.getenv("ATEN_CPU_CAPABILITY"), _valid_vec_isa_list, invalid_vec_isa
