@@ -2124,22 +2124,33 @@ def _non_strict_export(
 
         return _aot_export_non_strict
 
-    (
-        fake_mode,
-        fake_args,
-        fake_kwargs,
-        equalities_inputs,
-        original_signature,
-        dynamic_shapes,
-    ) = make_fake_inputs(
-        mod,
-        args,
-        kwargs,
-        dynamic_shapes,
-        prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,  # for shape env initialization
+    # NOTE: We need to enter _compiling_state_context() here so that FakeTensors
+    # created for params/buffers are properly tracked for leak detection.
+    # See detect_non_strict_fake_tensor_leaks config.
+    # We only enter the context if leak detection is enabled to avoid changing
+    # behavior when the config is OFF.
+    _fakify_ctx = (
+        _compiling_state_context()
+        if torch._export.config.detect_non_strict_fake_tensor_leaks
+        else nullcontext()
     )
+    with _fakify_ctx:
+        (
+            fake_mode,
+            fake_args,
+            fake_kwargs,
+            equalities_inputs,
+            original_signature,
+            dynamic_shapes,
+        ) = make_fake_inputs(
+            mod,
+            args,
+            kwargs,
+            dynamic_shapes,
+            prefer_deferred_runtime_asserts_over_guards=prefer_deferred_runtime_asserts_over_guards,  # for shape env initialization
+        )
 
-    fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
+        fake_params_buffers = _fakify_params_buffers(fake_mode, mod)
 
     def _produce_guards_callback(gm):
         return produce_guards_and_solve_constraints(
@@ -2337,13 +2348,32 @@ def _export_for_training(
         if len(legit_leak) > 0:
             for fake_val in legit_leak:
                 if id(fake_val) in _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT:
-                    stack_trace = _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT[
-                        id(fake_val)
-                    ].meta.get("stack_trace", "<unknown stack trace>")
+                    node = _FAKE_TENSOR_ID_TO_PROXY_MAP_FOR_EXPORT[id(fake_val)]
+                    stack_trace = node.meta.get("stack_trace")
+                    node_name = node.name
+
+                    # If no stack trace on this node (e.g., placeholder), look at users
+                    if stack_trace is None:
+                        for user in node.users:
+                            user_stack = user.meta.get("stack_trace")
+                            if user_stack is not None:
+                                stack_trace = f"Used by '{user.name}':\n{user_stack}"
+                                break
+
+                    stack_trace = (
+                        "<no stack trace available>"
+                        if stack_trace is None
+                        else stack_trace
+                    )
 
                     # Get shape and dtype info
                     shape_info = f"shape={fake_val.shape}, dtype={fake_val.dtype}"
-                    leak_info = f"FakeTensor({shape_info}): {stack_trace}"
+                    leak_info = f"FakeTensor({shape_info}) from node '{node_name}':\n{stack_trace}"
+                    leak_sources.append(leak_info)
+                else:
+                    # Fallback: no proxy mapping found, show basic info
+                    shape_info = f"shape={fake_val.shape}, dtype={fake_val.dtype}"
+                    leak_info = f"FakeTensor({shape_info}): <no proxy mapping found>"
                     leak_sources.append(leak_info)
 
             # Format the warning message more nicely
