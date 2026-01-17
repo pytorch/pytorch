@@ -98,9 +98,91 @@ register_op_strategy(
 )(propagate_single_input_strategy)
 
 
-register_op_strategy(
+def _partial_needs_reduce_for_dtype_cast(
+    partial: Partial,
+    src_dtype: torch.dtype,
+    target_dtype: torch.dtype | None,
+) -> bool:
+    """
+    Check if a Partial placement must be reduced before dtype conversion.
+
+    Linearity criterion for Partial(sum): f(a + b) = f(a) + f(b)
+    - Float-to-float: approximately linear
+    - Float-to-int: NOT linear (trunc(0.6+0.6)=1, trunc(0.6)+trunc(0.6)=0)
+    - Any-to-bool: NOT linear (thresholding)
+
+    For Partial(max/min), truncation is monotonic so int is OK, but bool is not.
+    """
+    if target_dtype is None or src_dtype == target_dtype:
+        return False
+
+    reduce_op = partial.reduce_op
+
+    if reduce_op in ("sum", "avg"):
+        if target_dtype == torch.bool:
+            return True
+        if src_dtype.is_floating_point and not target_dtype.is_floating_point:
+            return True
+        return False
+
+    elif reduce_op in ("max", "min"):
+        if target_dtype == torch.bool:
+            return True
+        return False
+
+    else:
+        # Unknown reduce_op, be conservative
+        return True
+
+
+@register_op_strategy(
     aten._to_copy.default, schema_info=RuntimeSchemaInfo(static_kwargkey=["dtype"])
-)(propagate_single_input_strategy)
+)
+def _to_copy_strategy(op_schema: OpSchema) -> StrategyType:
+    """
+    Strategy for _to_copy that reduces Partial before non-linear dtype conversions.
+    """
+    first_input_strategy = op_schema.args_schema[0]
+    if not isinstance(first_input_strategy, OpStrategy):
+        raise AssertionError(f"Expected OpStrategy, got {type(first_input_strategy)}")
+
+    target_dtype = op_schema.kwargs_schema.get("dtype", None)
+
+    strategies = []
+    for strategy in first_input_strategy.strategies:
+        input_spec = strategy.output_spec
+        src_dtype = input_spec.tensor_meta.dtype
+        output_placements = list(input_spec.placements)
+
+        # Check if any Partial placement needs to be reduced before cast
+        for i, placement in enumerate(input_spec.placements):
+            if isinstance(placement, Partial):
+                if _partial_needs_reduce_for_dtype_cast(placement, src_dtype, target_dtype):
+                    output_placements[i] = Replicate()
+
+        output_spec = DTensorSpec(
+            mesh=first_input_strategy.mesh,
+            placements=tuple(output_placements),
+            tensor_meta=input_spec.tensor_meta,
+        )
+
+        strategies.append(
+            OpSpec(
+                output_specs=output_spec,
+                input_specs=[
+                    DTensorSpec(
+                        mesh=first_input_strategy.mesh,
+                        placements=tuple(output_placements),
+                        tensor_meta=input_spec.tensor_meta,
+                    )
+                ],
+                redistribute_cost=[
+                    generate_redistribute_costs(first_input_strategy, output_spec)
+                ],
+            )
+        )
+
+    return OpStrategy(strategies)
 
 
 @register_op_strategy(
