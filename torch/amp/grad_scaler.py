@@ -369,6 +369,7 @@ class GradScaler:
         **kwargs: Any,
     ) -> Optional[float]:
         retval: Optional[float] = None
+        optimizer_state["stage"] = OptState.UPDATED
         if not sum(v.item() for v in optimizer_state["found_inf_per_device"].values()):
             retval = optimizer.step(*args, **kwargs)
             optimizer_state["stage"] = OptState.STEPPED
@@ -414,8 +415,6 @@ class GradScaler:
             raise RuntimeError(
                 "step() has already been called since the last update()."
             )
-
-        retval: Optional[float] = None
 
         if getattr(optimizer, "_step_supports_amp_scaling", False):
             # This optimizer has customized scale-handling logic, so we can call optimizer.step() directly.
@@ -477,7 +476,6 @@ class GradScaler:
         if len(optimizer_state["found_inf_per_device"]) == 0:
             raise AssertionError("No inf checks were recorded for this optimizer.")
 
-        optimizer_state["stage"] = OptState.UPDATED
         retval = self._maybe_opt_step(optimizer, optimizer_state, *args, **kwargs)
 
         return retval
