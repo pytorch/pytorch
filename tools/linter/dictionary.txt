@@ -57,8 +57,6 @@ serder
 serdes
 statics
 strat
-subtile
-subtiles
 supercede
 supercedes
 te
