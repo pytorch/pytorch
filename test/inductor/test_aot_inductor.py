@@ -6323,6 +6323,49 @@ class AOTInductorTestsTemplate:
         output = runner_call(test_inputs)
         self.assertEqual(expected, output)
 
+    @requires_gpu
+    def test_update_constant_buffer_mixed_device_offsets(self):
+        if self.device != GPU_TYPE:
+            raise unittest.SkipTest("Mixed-device test requires GPU")
+
+        class Model(torch.nn.Module):
+            def __init__(self, device):
+                super().__init__()
+                self.p_cpu = torch.nn.Parameter(
+                    torch.randn(4, 4, device="cpu"), requires_grad=False
+                )
+                self.register_buffer("buf_gpu", torch.randn(4, 4, device=device))
+
+            def forward(self, x):
+                y = x + self.p_cpu.to(x.device)
+                return y @ self.buf_gpu
+
+        model = Model(self.device)
+        test_inputs = torch.randn(4, 4, device=self.device)
+        example_inputs = (test_inputs,)
+        with torch.no_grad(), config.patch({"always_keep_tensor_constants": True}):
+            so_path = AOTIRunnerUtil.legacy_compile(
+                model=model,
+                example_inputs=example_inputs,
+            )
+
+        runner = AOTIRunnerUtil.legacy_load_runner(self.device, so_path)
+        constant_name_to_fqn = runner.get_constant_names_to_original_fqns()
+        matches = [
+            name
+            for name, fqn in constant_name_to_fqn.items()
+            if fqn == "buf_gpu" or fqn.endswith("__buf_gpu") or fqn.endswith(".buf_gpu")
+        ]
+        self.assertEqual(1, len(matches))
+        buf_name = matches[0]
+
+        new_buf = torch.randn(4, 4, device=self.device)
+        runner.update_constant_buffer({buf_name: new_buf}, False, False)
+
+        expected = (test_inputs + model.p_cpu.to(self.device)) @ new_buf
+        output = runner.run([test_inputs])[0]
+        self.assertEqual(expected, output)
+
     def test_update_inactive_constant_buffer(self):
         class Model(torch.nn.Module):
             def __init__(self, n, k, device):
