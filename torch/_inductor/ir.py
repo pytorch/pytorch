@@ -2956,10 +2956,14 @@ class ExpandView(BaseView):
                 # NB: new_size[i] == old_size[i] is expected to already be
                 # guarded because the meta formula was expected to have taught
                 # us this equality.
+                x = new_size[i]
+                y = old_size[i]
+                assert x is not None
+                assert y is not None
+                diff = x - y
                 assert (
                     sizevars.optimization_hint(
-                        new_size[i]
-                        - old_size[i],  # pyrefly: ignore [unsupported-operation]
+                        diff,
                         fallback=0,
                     )
                     == 0
