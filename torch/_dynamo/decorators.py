@@ -399,6 +399,48 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
         loss = compiled_model(x, target)[0]
         loss.backward()  # Gradients propagate through the leaf function
 
+        # nn.Module method example - apply decorator directly inside the class:
+        class CustomModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            def forward(self, x):
+                # Call a custom leaf_function method
+                return self.compute(x)
+
+            @leaf_function
+            def compute(self, x):
+                # This method contains data-dependent control flow
+                if x.sum() > 0:
+                    return (self.linear(x),)
+                return (self.linear(x) + 1,)
+
+            @compute.fake_impl
+            def compute_fake(self, x):
+                return (self.linear(x),)
+
+        # nn.Module forward method example:
+        class LeafForwardModule(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.linear = torch.nn.Linear(10, 10)
+
+            @leaf_function
+            def forward(self, x):
+                if x.sum() > 0:
+                    return (self.linear(x),)
+                return (self.linear(x) + 1,)
+
+            @forward.fake_impl
+            def forward_fake(self, x):
+                return (self.linear(x),)
+
+        Note: When @leaf_function is applied to forward and hooks are registered,
+        module hooks will still be compiled by Dynamo and AOT Autograd. Only the
+        forward call itself is handled as a leaf_function. If you want both forward
+        and hooks to be opaque to the compiler, make the hook a leaf_function too.
+
     Args:
         fn: The function being decorated.
     """
