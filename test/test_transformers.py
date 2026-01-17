@@ -2924,7 +2924,6 @@ class TestSDPACudaOnly(NNTestCase):
             out = torch.nn.functional.scaled_dot_product_attention(q, q, q, dropout_p=0.5)
             out.backward(grad)
 
-    @skipIfRocm
     @unittest.skipIf(not PLATFORM_SUPPORTS_CUDNN_ATTENTION, "cudnn Attention is not supported on this system")
     def test_cudnn_attention_broken_166211(self):
         # https://github.com/pytorch/pytorch/issues/166211#issue-3551350377
