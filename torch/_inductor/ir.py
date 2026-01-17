@@ -2956,11 +2956,11 @@ class ExpandView(BaseView):
                 # NB: new_size[i] == old_size[i] is expected to already be
                 # guarded because the meta formula was expected to have taught
                 # us this equality.
-                x = new_size[i]
-                y = old_size[i]
-                assert x is not None
-                assert y is not None
-                diff = x - y
+                v1 = new_size[i]
+                v2 = old_size[i]
+                assert v1 is not None
+                assert v2 is not None
+                diff = v1 - v2
                 assert (
                     sizevars.optimization_hint(
                         diff,
