@@ -1444,7 +1444,8 @@ void run_cudnn_SDP_fprop(
     variant_pack[RAG_V_OFF] = const_cast<void*>(rag_off_v.const_data_ptr());
     variant_pack[RAG_O_OFF] = const_cast<void*>(rag_off_o.const_data_ptr());
     if (return_softmaxstats) {
-      variant_pack[RAG_LSE_OFF] = const_cast<void*>(rag_off_lse.const_data_ptr());
+      variant_pack[RAG_LSE_OFF] =
+          const_cast<void*>(rag_off_lse.const_data_ptr());
     }
   }
   auto workspace_size = mha_graph.get_workspace_size();
@@ -1560,7 +1561,8 @@ void run_cudnn_SDP_fprop_nestedtensor(
       {SEQ_LEN_KV, const_cast<void*>(seqlen_kv.const_data_ptr())}};
   if (return_softmaxstats) {
     variant_pack[LSE] = softmaxstats.mutable_data_ptr();
-    variant_pack[RAG_LSE_OFF] = const_cast<void*>(rag_stats_off.const_data_ptr());
+    variant_pack[RAG_LSE_OFF] =
+        const_cast<void*>(rag_stats_off.const_data_ptr());
   }
   if (dropout_probability != 0.0f) {
     variant_pack[SEED] = const_cast<void*>(dropoutseed.const_data_ptr());
