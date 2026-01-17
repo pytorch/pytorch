@@ -1282,6 +1282,74 @@ class TestForeach(TestCase):
         self.assertEqual(actual, [t.div(scalar_cpu_tensor) for t in tensors])
 
     @onlyCUDA
+    @dtypes(*floating_types_and(torch.half, torch.bfloat16))
+    def test_pointwise_op_with_0d_tensor1(self, device, dtype):
+        # Test that foreach_addcmul/addcdiv uses fast path when tensor1 is a list of 0D tensors
+        # This is a regression test for the optimization that allows 0D tensors in tensor1
+        # to use the fast CUDA kernel path instead of falling back to the slow path.
+        N = 5
+        # Create regular tensors for input and tensor2
+        inputs = [make_tensor((10, 10), dtype=dtype, device=device) for _ in range(N)]
+        tensor2s = [
+            make_tensor((10, 10), dtype=dtype, device=device, low=0.1) for _ in range(N)
+        ]
+        # Create 0D tensors for tensor1 (scalar tensors)
+        tensor1s_0d = [
+            torch.tensor(float(i + 1), dtype=dtype, device=device) for i in range(N)
+        ]
+
+        alpha = 0.5
+
+        # Test foreach_addcmul with 0D tensor1
+        foreach_addcmul = ForeachFuncWrapper(torch._foreach_addcmul)
+        actual_addcmul = foreach_addcmul(
+            [inputs, tensor1s_0d, tensor2s],
+            is_cuda=True,
+            expect_fastpath=True,
+            value=alpha,
+        )
+        expected_addcmul = [
+            torch.addcmul(inp, t1, t2, value=alpha)
+            for inp, t1, t2 in zip(inputs, tensor1s_0d, tensor2s)
+        ]
+        self.assertEqual(actual_addcmul, expected_addcmul, atol=0, rtol=0)
+
+        # Test foreach_addcdiv with 0D tensor1
+        foreach_addcdiv = ForeachFuncWrapper(torch._foreach_addcdiv)
+        actual_addcdiv = foreach_addcdiv(
+            [inputs, tensor1s_0d, tensor2s],
+            is_cuda=True,
+            expect_fastpath=True,
+            value=alpha,
+        )
+        expected_addcdiv = [
+            torch.addcdiv(inp, t1, t2, value=alpha)
+            for inp, t1, t2 in zip(inputs, tensor1s_0d, tensor2s)
+        ]
+        self.assertEqual(actual_addcdiv, expected_addcdiv, atol=0, rtol=0)
+
+        # Test inplace variants
+        inputs_copy = [t.clone() for t in inputs]
+        foreach_addcmul_inplace = ForeachFuncWrapper(torch._foreach_addcmul_)
+        foreach_addcmul_inplace(
+            [inputs_copy, tensor1s_0d, tensor2s],
+            is_cuda=True,
+            expect_fastpath=True,
+            value=alpha,
+        )
+        self.assertEqual(inputs_copy, expected_addcmul, atol=0, rtol=0)
+
+        inputs_copy = [t.clone() for t in inputs]
+        foreach_addcdiv_inplace = ForeachFuncWrapper(torch._foreach_addcdiv_)
+        foreach_addcdiv_inplace(
+            [inputs_copy, tensor1s_0d, tensor2s],
+            is_cuda=True,
+            expect_fastpath=True,
+            value=alpha,
+        )
+        self.assertEqual(inputs_copy, expected_addcdiv, atol=0, rtol=0)
+
+    @onlyCUDA
     def test_div_reciprocal(self):
         expect_m, expect_e = torch.frexp(
             torch.div(torch.tensor(0.1, device="cuda"), 10.0)
