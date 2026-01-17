@@ -1387,7 +1387,8 @@ def flex_attention_backward_fake_tensor_mode(
     Bq, _, _, qk_head_dim = query.shape
     Bkv, Hkv, seq_len_kv, v_head_dim = value.shape
 
-    grad_query = torch.empty_like(query)
+    grad_query = query.new_empty(query.shape)
+    grad_query = _permute_strides(grad_query, query.stride())
     # zeros_and_scatter creates a contiguous zeros tensor -> contiguous_format
     grad_score_mod_captured = tuple(
         (
