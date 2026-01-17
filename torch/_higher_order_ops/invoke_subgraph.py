@@ -218,7 +218,7 @@ def invoke_subgraph_infer(
         name = proxy_mode._invoke_subgraph_cache[subgraph]
     else:
         name = get_unique_name_wrt(
-            "subgraph",
+            "invoke_subgraph",
             proxy_mode._invoke_subgraph_names,
             requires_suffix=True,
         )

@@ -1325,7 +1325,7 @@ def forward(self, primals_1):
         """
         from torch.fx.experimental.proxy_tensor import make_fx
 
-        mesh = DeviceMesh(self.device_type, torch.arange(self.world_size))
+        mesh = DeviceMesh("cpu", torch.arange(self.world_size))
 
         torch._dynamo.reset()
 
@@ -1343,10 +1343,10 @@ def forward(self, primals_1):
             # Convert back to plain tensor
             return dt_out.to_local()
 
-        x = torch.randn(4, 4, device=self.device_type)
+        x = torch.randn(4, 4, device="cpu")
 
         # Trace with make_fx
-        traced = make_fx(outer_fn, tracing_mode="fake")(x)
+        traced = make_fx(outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True)(x)
 
         # Verify the full graph structure including invoke_subgraph
         graph_str = "\n".join(
@@ -1362,7 +1362,7 @@ class outer_fn(torch.nn.Module):
         add: "f32[4, 4]" = torch.ops.aten.add.Tensor(x_1, 1);  x_1 = None
         view: "f32[4, 4]" = torch.ops.aten.view.default(add, [4, 4]);  add = None
         repeated_subgraph0 = self.repeated_subgraph0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'subgraph_0', view);  repeated_subgraph0 = view = None
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', view);  repeated_subgraph0 = view = None
         getitem: "f32[8, 4]" = invoke_subgraph[0];  invoke_subgraph = None
         view_1: "f32[8, 4]" = torch.ops.aten.view.default(getitem, [8, 4]);  getitem = None
         return view_1

@@ -837,7 +837,7 @@ class outer_fn(torch.nn.Module):
     def forward(self, x_1: "f32[3, 3]", y_1: "f32[3, 3]"):
         add: "f32[3, 3]" = torch.ops.aten.add.Tensor(x_1, 1);  x_1 = None
         repeated_subgraph0 = self.repeated_subgraph0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'subgraph_0', add, y_1);  repeated_subgraph0 = add = y_1 = None
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', add, y_1);  repeated_subgraph0 = add = y_1 = None
         getitem: "f32[3, 3]" = invoke_subgraph[0];  invoke_subgraph = None
         mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(getitem, 2);  getitem = None
         return mul
@@ -889,10 +889,10 @@ class outer_fn(torch.nn.Module):
 class outer_fn(torch.nn.Module):
     def forward(self, x_1: "f32[3, 3]", y_1: "f32[3, 3]"):
         repeated_subgraph0 = self.repeated_subgraph0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'subgraph_0', x_1);  repeated_subgraph0 = x_1 = None
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', x_1);  repeated_subgraph0 = x_1 = None
         getitem: "f32[3, 3]" = invoke_subgraph[0];  invoke_subgraph = None
         repeated_subgraph0_1 = self.repeated_subgraph0
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, 'subgraph_0', y_1);  repeated_subgraph0_1 = y_1 = None
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, 'invoke_subgraph_0', y_1);  repeated_subgraph0_1 = y_1 = None
         getitem_1: "f32[3, 3]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
         add: "f32[3, 3]" = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
         return add
@@ -942,10 +942,10 @@ class outer_fn(torch.nn.Module):
 class outer_fn(torch.nn.Module):
     def forward(self, x_1: "f32[3, 3]"):
         repeated_subgraph0 = self.repeated_subgraph0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'subgraph_0', x_1);  repeated_subgraph0 = None
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', x_1);  repeated_subgraph0 = None
         getitem: "f32[3, 3]" = invoke_subgraph[0];  invoke_subgraph = None
         repeated_subgraph1 = self.repeated_subgraph1
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph1, 'subgraph_1', x_1);  repeated_subgraph1 = x_1 = None
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph1, 'invoke_subgraph_1', x_1);  repeated_subgraph1 = x_1 = None
         getitem_1: "f32[3, 3]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
         add: "f32[3, 3]" = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
         return add
@@ -996,7 +996,7 @@ class outer_fn(torch.nn.Module):
 class outer_fn(torch.nn.Module):
     def forward(self, w_1: "f32[3, 3]", x_1: "f32[3, 3]", y_1: "f32[3, 3]", z_1: "f32[3, 3]"):
         repeated_subgraph0 = self.repeated_subgraph0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'subgraph_0', w_1, x_1, y_1, z_1);  repeated_subgraph0 = w_1 = x_1 = y_1 = z_1 = None
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', w_1, x_1, y_1, z_1);  repeated_subgraph0 = w_1 = x_1 = y_1 = z_1 = None
         getitem: "f32[3, 3]" = invoke_subgraph[0];  invoke_subgraph = None
         return getitem
 
@@ -1042,7 +1042,7 @@ class outer_fn(torch.nn.Module):
 class outer_fn(torch.nn.Module):
     def forward(self, a_1: "f32[3, 3]", b_1: "f32[3, 3]"):
         repeated_subgraph0 = self.repeated_subgraph0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'subgraph_0', a_1, b_1);  repeated_subgraph0 = a_1 = b_1 = None
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', a_1, b_1);  repeated_subgraph0 = a_1 = b_1 = None
         getitem: "f32[3, 3]" = invoke_subgraph[0]
         getitem_1: "f32[3, 3]" = invoke_subgraph[1]
         getitem_2: "f32[3, 3]" = invoke_subgraph[2];  invoke_subgraph = None
@@ -1094,7 +1094,7 @@ class outer_fn(torch.nn.Module):
 class outer_fn(torch.nn.Module):
     def forward(self, x_1: "f32[3, 3]", y_1: "f32[3, 3]", z_1: "f32[3, 3]"):
         repeated_subgraph0 = self.repeated_subgraph0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'subgraph_0', x_1, y_1, z_1);  repeated_subgraph0 = x_1 = y_1 = z_1 = None
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', x_1, y_1, z_1);  repeated_subgraph0 = x_1 = y_1 = z_1 = None
         getitem: "f32[3, 3]" = invoke_subgraph[0]
         getitem_1: "f32[3, 3]" = invoke_subgraph[1];  invoke_subgraph = None
         sub: "f32[3, 3]" = torch.ops.aten.sub.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
