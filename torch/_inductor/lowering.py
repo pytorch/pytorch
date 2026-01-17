@@ -6957,7 +6957,7 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     Matches eager CUDA kernel order: self + value * (tensor1 * tensor2)
     This is computed as: fma(value, tensor1 * tensor2, self)
 
-    Note: FMA is only used for floating-point types. For integer types,
+    Note: FMA is only used for floating-point types on non-AMD GPUs. For integer types,
     we fall back to regular arithmetic since FMA doesn't support integers.
 
     For floating-point types, we use mul_rn (round-to-nearest multiplication)
@@ -6982,8 +6982,8 @@ def addcmul(self, tensor1, tensor2, *, value=1):
     t1_loader = tensor1.make_loader()
     t2_loader = tensor2.make_loader()
 
-    # FMA is only available for floating-point types
-    use_fma = dtype.is_floating_point
+    # FMA is only available for floating-point types on non-AMD GPUs
+    use_fma = dtype.is_floating_point and not torch.version.hip
 
     def inner_fn(idx):
         self_val = self_loader(idx)
@@ -7770,10 +7770,11 @@ def with_effects(token, op, *args, **kwargs):
         return (token, *result)
 
 
-from .comm_lowering import register_comm_lowerings
+from .comm_lowering import register_comm_lowerings, register_symm_mem_lowerings
 
 
 register_comm_lowerings()
+register_symm_mem_lowerings()
 
 
 @register_lowering(inductor_prims.prepare_softmax_online, type_promotion_kind=None)
