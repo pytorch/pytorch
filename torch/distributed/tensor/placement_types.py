@@ -136,7 +136,9 @@ class Shard(torch._C._distributed.Shard):
                 tensor, num_chunks, with_padding=with_padding, contiguous=False
             )
             result = shards[index]
-            if contiguous:
+            if clone:
+                result = result.clone()
+            elif contiguous:
                 result = result.contiguous()
             return result
 

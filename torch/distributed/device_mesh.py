@@ -1136,7 +1136,8 @@ else:
                 assert self._coordinate_on_dim is not None
                 return self._coordinate_on_dim[index]
 
-            # This will cause the ops to be registered
+            # This will cause the ops to be registered - so don't let RUFF
+            # delete this import because it thinks it's unused...
             from ._ops import device_mesh  # noqa: F401
 
             # Temporarily turn off tracing while we lift the constant
