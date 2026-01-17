@@ -866,6 +866,25 @@ joint_graph_constant_folding = True
 # Enable indirect_indexing asserts for decompositions and lowerings
 debug_index_asserts = False
 
+# Mode to emulate PyTorch eager numerics when doing lower precision compute
+# (fp16, bf16).  PyTorch eager computes bf16/fp16 by upcasting inputs to fp32
+# and downcasting after.  When two low precision operators are fused together,
+# Inductor will elide the downcast-upcast pairs (effectively a precision
+# truncation) that would occur between these two operators.  Typically,
+# Inductor's behavior should be closer to fp64 ref numerics.  However, with
+# this knob you can ensure the downcast-upcast are preserved so that you can
+# emulate the eager numerics.
+emulate_precision_casts = (
+    os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS", "0") == "1"
+)
+
+# x / y in Triton is lowered to div.full which is approx
+# PyTorch eager uses the equivalent of Triton's div_rn, which can
+# come at a performance penalty
+emulate_divison_rounding = (
+    os.environ.get("TORCHINDUCTOR_EMULATE_DIVISION_ROUNDING", "0") == "1"
+)
+
 # warnings intended for PyTorch developers, disable for point releases
 is_nightly_or_source = "dev" in torch.__version__ or "git" in torch.__version__
 developer_warnings = is_fbcode() or is_nightly_or_source
@@ -1580,7 +1599,7 @@ class triton:
     # Note: Native matmul does not currently support block pointers or TMA matmul.
     # If both native_matmul and (use_block_ptr or enable_persistent_tma_matmul) are enabled,
     # an error will be thrown.
-    native_matmul: bool = os.getenv("TORCHINDUCTOR_NATIVE_MATMUL", "0") == "1"
+    native_matmul: bool = False
 
     # should we stop a fusion to allow better tiling?
     tiling_prevents_pointwise_fusion = True
@@ -1732,9 +1751,6 @@ class triton:
         os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION_AUTOTUNE_SPLIT_SIZE", "0")
         == "1"
     )
-    # If set to true, will skip some non-critical checks in the mix order reduction
-    # this could be helpful to avoid recompilations in some cases
-    mix_order_reduction_non_strict_mode = False
 
     enable_tlx_templates: bool = (
         os.environ.get("TORCHINDUCTOR_ENABLE_TLX_TEMPLATES", "0") == "1"
@@ -2405,29 +2421,6 @@ class test_configs:
 if TYPE_CHECKING:
     from torch.utils._config_typing import *  # noqa: F401, F403
 
-
-class eager_numerics:
-    # x / y in Triton is lowered to div.full which is approx
-    # PyTorch eager uses the equivalent of Triton's div_rn, which can
-    # come at a performance penalty
-    division_rounding: bool = (
-        os.environ.get("TORCHINDUCTOR_EMULATE_DIVISION_ROUNDING", "0") == "1"
-    )
-
-    disable_ftz: bool = False
-
-
-# Mode to emulate PyTorch eager numerics when doing lower precision compute
-# (fp16, bf16).  PyTorch eager computes bf16/fp16 by upcasting inputs to fp32
-# and downcasting after.  When two low precision operators are fused together,
-# Inductor will elide the downcast-upcast pairs (effectively a precision
-# truncation) that would occur between these two operators.  Typically,
-# Inductor's behavior should be closer to fp64 ref numerics.  However, with
-# this knob you can ensure the downcast-upcast are preserved so that you can
-# emulate the eager numerics.
-emulate_precision_casts: bool = (
-    os.environ.get("TORCHINDUCTOR_EMULATE_PRECISION_CASTS", "0") == "1"
-)
 
 # adds patch, save_config, etc
 install_config_module(sys.modules[__name__])
