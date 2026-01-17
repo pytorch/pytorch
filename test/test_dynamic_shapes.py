@@ -4803,11 +4803,6 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         # Since both use same symbol, x.size()[0] == y.size()[0] is always True
         self.assertTrue(torch.allclose(result, x2 + y2))
 
-<<<<<<< HEAD
-<<<<<<< Updated upstream
-=======
-=======
->>>>>>> 936e4101ab6 ( fix dde in _exec_fft)
     @skipIfTorchDynamo("mark_unbacked is not traceable")
     def test_unbacked_view_reshape_no_dde(self):
         """
@@ -4859,6 +4854,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         torch._dynamo.decorators.mark_unbacked(x3, 0)
         compiled_func(x3)
         self.assertEqual(counter.frame_count, 2)
+
 
 instantiate_parametrized_tests(TestUnbacked)
 
