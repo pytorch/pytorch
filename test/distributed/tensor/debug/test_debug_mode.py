@@ -307,7 +307,7 @@ class TestDTensorDebugMode(TestCase):
         _c10d_functional::wait_tensor(t: f32[64, 2])  ->  t: f32[64, 2]
         aten::chunk(t: f32[64, 2], 8)  ->  ['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]']
         aten::cat(['t: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]', 't: f32[8, 2]'], 1)  ->  t: f32[8, 16]
-    aten::topk(t: f32[8, 16], 4, 1)  ->  ('t: f32[8, 4]', 't: i64[8, 4]')""",
+    aten::topk(t: f32[8, 16], 4, 1)  ->  ('t: f32[8, 4]', 't: i64[8, 4]')""",  # noqa: B950
         )
 
     def test_debug_mode_einsum(self):
