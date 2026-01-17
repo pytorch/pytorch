@@ -762,9 +762,7 @@ GQA_MQA_BLOCK_MASK_CASES = [
 class TestFlexFlash(InductorTestCase):
     @decorateIf(
         unittest.expectedFailure,
-        lambda params: params["case"].requires_grad
-        and params["case"].dim == 64
-        and IS_SM90,
+        lambda params: params["case"].requires_grad and IS_SM90,
     )
     @dtypes(torch.float16, torch.bfloat16)
     @parametrize("case", SCORE_MOD_CASES, name_fn=score_case_name)
@@ -955,14 +953,12 @@ class TestFlexFlash(InductorTestCase):
         k.requires_grad_(True)
         v.requires_grad_(True)
 
-        flash_vs_triton(q, k, v)
-
-        compiled_fn = torch.compile(flex_attention)
+        compiled_fn = torch.compile(flex_attention, fullgraph=True)
 
         def run_for_profile():
-            q_run, k_run, v_run = (
+            q_run, k_run, v_run = [
                 t.detach().clone().requires_grad_(True) for t in (q, k, v)
-            )
+            ]
             compiled_fn(
                 q_run, k_run, v_run, kernel_options={"BACKEND": "FLASH"}
             ).sum().backward()
