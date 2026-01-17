@@ -16,6 +16,7 @@ from typing import Any, NewType, Optional, Protocol, TYPE_CHECKING, TypeVar, Uni
 import torch
 import torch.utils._pytree as pytree
 from torch import SymInt, Tensor
+from torch._library.opaque_object import OpaqueType
 from torch._subclasses import FakeTensor, FakeTensorMode
 from torch._subclasses.fake_tensor import is_fake
 from torch.fx.experimental._backward_state import BackwardState
@@ -1134,7 +1135,7 @@ class AOTState:
     fake_mode: FakeTensorMode
 
 
-FxValue = Union[Tensor, int, SymInt, BackwardState]
+FxValue = Tensor | int | SymInt | BackwardState | OpaqueType
 
 
 class CompilerWrapper:
