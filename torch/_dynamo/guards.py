@@ -3082,6 +3082,30 @@ class GuardBuilder(GuardBuilderBase):
                         get_verbose_code_parts(code_part, guard),
                         guard.user_stack,
                     )
+
+                # Guard on duck_shape_ids to ensure the same symbol unification happens
+                if hasattr(value, "_dynamo_duck_shape_ids"):
+                    duck_shape_ids = value._dynamo_duck_shape_ids
+                    code_part = f"(getattr({tensor_name}, '_dynamo_duck_shape_ids', None) == {duck_shape_ids!r})"
+                    code.append(code_part)
+                    self.get_guard_manager(guard).add_lambda_guard(
+                        lambda x, expected=duck_shape_ids: getattr(
+                            x, "_dynamo_duck_shape_ids", None
+                        )
+                        == expected,
+                        get_verbose_code_parts(code_part, guard),
+                        guard.user_stack,
+                    )
+                else:
+                    code_part = (
+                        f"hasattr({tensor_name}, '_dynamo_duck_shape_ids') == False"
+                    )
+                    code.append(code_part)
+                    self.get_guard_manager(guard).add_no_hasattr_guard(
+                        "_dynamo_duck_shape_ids",
+                        get_verbose_code_parts(code_part, guard),
+                        guard.user_stack,
+                    )
             if len(code) > 0:
                 self._set_guard_export_info(guard, code)
 

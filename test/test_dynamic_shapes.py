@@ -4803,6 +4803,61 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         # Since both use same symbol, x.size()[0] == y.size()[0] is always True
         self.assertTrue(torch.allclose(result, x2 + y2))
 
+<<<<<<< Updated upstream
+=======
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_unbacked_view_reshape_no_dde(self):
+        """
+        Test that view/reshape operations on tensors with unbacked dimensions
+        do not raise GuardOnDataDependentSymNode errors.
+        This tests the unbacked handling in the view decomposition via _exec_fft.
+        """
+
+        def func(x):
+            # FFT triggers _exec_fft which calls reshape with unbacked batch dims
+            return torch.fft.fft(x)
+
+        x = torch.rand(4, 8, dtype=torch.complex64)
+        torch._dynamo.decorators.mark_unbacked(x, 0, duck_shape_id="batch")
+
+        torch._dynamo.reset()
+        # This should not raise GuardOnDataDependentSymNode
+        compiled_func = torch.compile(func, fullgraph=True, backend="eager")
+        result = compiled_func(x)
+        expected = torch.fft.fft(x)
+        self.assertTrue(torch.allclose(result, expected))
+
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_duck_shape_id_recompilation(self):
+        """
+        Test that changing _dynamo_duck_shape_ids triggers recompilation.
+        """
+        counter = CompileCounter()
+
+        def func(x):
+            return x + 1
+
+        compiled_func = torch.compile(func, backend=counter)
+
+        # First call with duck_shape_id
+        x1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, 0, duck_shape_id="batch")
+        compiled_func(x1)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Second call with same duck_shape_id - no recompilation
+        x2 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x2, 0, duck_shape_id="batch")
+        compiled_func(x2)
+        self.assertEqual(counter.frame_count, 1)
+
+        # Third call without duck_shape_id - should recompile
+        x3 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x3, 0)
+        compiled_func(x3)
+        self.assertEqual(counter.frame_count, 2)
+
+>>>>>>> Stashed changes
 
 instantiate_parametrized_tests(TestUnbacked)
 
