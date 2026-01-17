@@ -262,30 +262,32 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
     the real function. Note: fake_impl may run multiple times during compilation;
     real_impl runs once per call at runtime.
 
-    Can be used in two ways:
-    1. @leaf_function - uses the decorated function itself as fake_impl. This works
-       when the function can run with fake tensors (avoids data-dependent control
-       flow, etc.), avoids dangerous patterns, and meets the Restrictions below.
-    2. @<func>.fake_impl - provide an explicit fake_impl, where ``<func>`` is the
-       name of the decorated function (e.g., ``@my_leaf_fn.fake_impl``).
-       Required when the annotated function cannot run with fake tensors (e.g., has
-       data-dependent control flow like ``if x.sum() > 0:``), or when you don't want
-       the annotated function to run multiple times during compilation (e.g., it
-       produces side-effects). Output validation against the annotated function is
-       disabled by default to avoid runtime overhead; set
-       ``torch._dynamo.config.leaf_function_validate_outputs = True`` to enable.
+    Can be applied to:
+    1. Standalone functions - pass modules/tensors as explicit arguments, called
+       from within a module's forward method.
+    2. nn.Module methods - apply to custom methods like ``compute()``, access module
+       state via ``self``, called from forward.
+    3. nn.Module forward - the forward method itself becomes opaque. Note that module
+       hooks are still compiled by Dynamo and AOT Autograd; if you want hooks to also
+       be opaque, decorate them with @leaf_function too.
+
+    Providing fake_impl:
+    - By default, the decorated function itself is used as fake_impl. This works when
+      the function can run with fake tensors (no data-dependent control flow).
+    - For functions with data-dependent control flow (e.g., ``if x.sum() > 0:``),
+      provide an explicit fake_impl using the ``@<func>.fake_impl`` decorator, where
+      ``<func>`` is the decorated function name (e.g., ``@my_leaf_fn.fake_impl``).
+    - Output validation against the real function is disabled by default; set
+      ``torch._dynamo.config.leaf_function_validate_outputs = True`` to enable.
 
     Note:
-        - Training is supported e.g. you can call ``.backward()`` on outputs and gradients
-        will flow through the leaf function.
-
-        - ``nn.Module`` can be passed as an input argument to leaf functions. The module's
-        parameters and buffers will be properly tracked for autograd.
+        - Training is supported: you can call ``.backward()`` on outputs and gradients
+          will flow through the leaf function.
 
         - Currently works with ``backend="eager"`` and ``backend="aot_eager"`` only.
-        Inductor backend and ``torch.export`` are not yet supported.
+          Inductor backend and ``torch.export`` are not yet supported.
 
-    Dangerous patterns (apply to both usage options, may cause silent incorrectness):
+    Dangerous patterns (may cause silent incorrectness):
         - Side effects: Don't rely on side effects for correctness.
           For example, the leaf function should not depend on variables mutated by
           other code inside the compiled function before calling the leaf function,
@@ -345,20 +347,8 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
           same primitives and structure on every execution.
 
     Example:
-        # Simple usage - function itself is used as fake_impl:
-        @leaf_function
-        def my_leaf_fn(model, x):
-            return (model(x),)
-
-        class MyModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.linear = torch.nn.Linear(10, 10)
-
-            def forward(self, x):
-                return my_leaf_fn(self.linear, x)
-
-        # With explicit fake_impl for data-dependent control flow:
+        # Pattern 1: Standalone function
+        # Pass modules/tensors as explicit arguments, call from forward()
         @leaf_function
         def my_leaf_fn(model, x):
             if x.sum() > 0:  # data-dependent branch
@@ -377,41 +367,18 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
             def forward(self, x):
                 return my_leaf_fn(self.linear, x)
 
-        # Training example - gradients flow through the leaf function:
-        @leaf_function
-        def train_step_fn(model, x, target):
-            pred = model(x)
-            loss = torch.nn.functional.mse_loss(pred, target)
-            return (loss,)
-
-        class TrainableModule(torch.nn.Module):
-            def __init__(self):
-                super().__init__()
-                self.net = torch.nn.Linear(10, 10)
-
-            def forward(self, x, target):
-                return train_step_fn(self.net, x, target)
-
-        model = TrainableModule()
-        compiled_model = torch.compile(model, backend="aot_eager")
-        x = torch.randn(32, 10)
-        target = torch.randn(32, 10)
-        loss = compiled_model(x, target)[0]
-        loss.backward()  # Gradients propagate through the leaf function
-
-        # nn.Module method example - apply decorator directly inside the class:
+        # Pattern 2: nn.Module method
+        # Apply to custom methods, access module state via self
         class CustomModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
                 self.linear = torch.nn.Linear(10, 10)
 
             def forward(self, x):
-                # Call a custom leaf_function method
                 return self.compute(x)
 
             @leaf_function
             def compute(self, x):
-                # This method contains data-dependent control flow
                 if x.sum() > 0:
                     return (self.linear(x),)
                 return (self.linear(x) + 1,)
@@ -420,7 +387,8 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
             def compute_fake(self, x):
                 return (self.linear(x),)
 
-        # nn.Module forward method example:
+        # Pattern 3: nn.Module forward
+        # The forward method itself becomes opaque
         class LeafForwardModule(torch.nn.Module):
             def __init__(self):
                 super().__init__()
@@ -435,11 +403,6 @@ def leaf_function(fn: Callable[_P, _R]) -> Callable[_P, _R]:
             @forward.fake_impl
             def forward_fake(self, x):
                 return (self.linear(x),)
-
-        Note: When @leaf_function is applied to forward and hooks are registered,
-        module hooks will still be compiled by Dynamo and AOT Autograd. Only the
-        forward call itself is handled as a leaf_function. If you want both forward
-        and hooks to be opaque to the compiler, make the hook a leaf_function too.
 
     Args:
         fn: The function being decorated.
