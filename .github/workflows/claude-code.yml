@@ -23,6 +23,7 @@ jobs:
         (github.event_name == 'issues' && contains(github.event.issue.body, '@claude'))
       )
     runs-on: ubuntu-latest
+    timeout-minutes: 60
     environment: bedrock
     permissions:
       contents: read
@@ -44,3 +45,4 @@ jobs:
         uses: anthropics/claude-code-action@v1
         with:
           use_bedrock: "true"
+          claude_args: "--model global.anthropic.claude-opus-4-5-20251101-v1:0 --thinking-budget max"
