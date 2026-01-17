@@ -24,11 +24,11 @@ from torch.testing._internal.common_dtype import (
     floating_and_complex_types_and, all_types_and_complex_and, all_types_and, all_types_and_complex, integral_types_and,
     empty_types, complex_types_and, integral_types, custom_types, all_types_complex_float8_and, float8_types,
 )
-from torch.testing._internal.common_device_type import \
-    (onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
-     skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIf, precisionOverride,
-     skipCPUIfNoMklSparse,
-     toleranceOverride, tol, skipXPU)
+from torch.testing._internal.common_device_type import (
+    onlyCPU, onlyCUDA, onlyNativeDeviceTypes, disablecuDNN, skipCUDAIfNoMagma, skipCUDAIfNoMagmaAndNoCusolver,
+    skipCUDAIfNoCusolver, skipCPUIfNoLapack, skipCPUIfNoFFT, skipCUDAIf, precisionOverride,
+    skipCPUIfNoMklSparse, toleranceOverride, tol, skipXPU, e4m3_type, E4M3_MAX_POS, E5M2_MAX_POS,
+)
 from torch.testing._internal.common_cuda import (
     PLATFORM_SUPPORTS_FLASH_ATTENTION, PLATFORM_SUPPORTS_MEM_EFF_ATTENTION,
     SM53OrLater, SM80OrLater, SM89OrLater, with_tf32_off, TEST_CUDNN,
@@ -5442,6 +5442,12 @@ def sample_inputs__unsafe_masked_index_put_accumulate(op_info, device, dtype, re
         masks = [torch.logical_and(idx >= 0, idx < self_shape[i]) for i, idx in enumerate(indices) if idx is not None]
         mask = functools.reduce(torch.logical_and, masks)
         values = make_arg(idx_sizes)
+        if device == 'mps:0' and dtype in [torch.float16, torch.bfloat16]:
+            # TestConsistencyMPS.test_output_match compares CPU to MPS results
+            # Order of operations in GPU index_put_accumulate is not guaranteed,
+            # which can result in significant divergence between sequential and parallel execution
+            # Unless inputs are normalized
+            values = torch.nn.functional.normalize(values)
         yield SampleInput(make_arg(self_shape), mask, indices, values)
 
         masks = [torch.logical_and(idx >= 1, idx < self_shape[i] - 1) for i, idx in enumerate(indices) if idx is not None]
@@ -8840,30 +8846,61 @@ def error_inputs_triplet_margin_loss(op_info, device, **kwargs):
         yield ErrorInput(SampleInput(input, args=args, kwargs=kwargs),
                          error_type=error_type, error_regex=error_regex)
 
+
 def sample_inputs_scaled_mm(op_info, device, dtype, requires_grad, **kwargs):
-    make_mat_e4m3 = partial(make_tensor, device=device, dtype=torch.float8_e4m3fn, requires_grad=requires_grad)
-    make_mat_e5m2 = partial(make_tensor, device=device, dtype=torch.float8_e5m2, requires_grad=requires_grad)
-    make_scale = partial(make_tensor, device=device, dtype=torch.float, requires_grad=False)
+    def to_fp8_saturated(x: torch.Tensor, fp8_dtype: torch.dtype) -> torch.Tensor:
+        max_val = E4M3_MAX_POS if fp8_dtype == e4m3_type else E5M2_MAX_POS
+        x = x.clamp(min=-1 * max_val, max=max_val)
+        return x.to(fp8_dtype)
+
+    def amax_to_scale(amax: torch.Tensor, float8_dtype: torch.dtype) -> torch.Tensor:
+        EPS = 1e-12
+        max_pos = E4M3_MAX_POS if float8_dtype == e4m3_type else E5M2_MAX_POS
+        scale_val = max_pos / torch.clamp(amax, min=EPS)
+        return scale_val.to(dtype=torch.float32, device=device)
+
+    def make_scale(x: float, float8_dtype: torch.dtype, dim=None) -> torch.Tensor:
+        if dim is None:
+            amax = torch.tensor(abs(x), dtype=torch.float32, device=device)
+        else:
+            amax = torch.max(
+                torch.abs(torch.tensor(x, device=device)), dim=dim, keepdim=True
+            ).values
+        return amax_to_scale(amax, float8_dtype)
+
+    def make_mat(size: tuple[int], scale: float, fp8_dtype: torch.dtype) -> torch.Tensor:
+        mat = torch.randn(size, device=device, dtype=torch.float32)
+        return to_fp8_saturated(mat * scale, fp8_dtype)
+
     M, N, K = 15, 32, 16
     samples = []
-    # two e4m3
-    mat1 = make_mat_e4m3((M, K))
-    mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
-    scale1 = make_scale((1,))
-    scale2 = make_scale((1,))
-    samples.append(SampleInput(mat1, mat2, scale1, scale2))
-    # mat1 e4m3 mat2 e5m2
-    mat1 = make_mat_e4m3((M, K))
-    mat2 = make_mat_e5m2((K, N)).t().contiguous().t()
-    scale1 = make_scale((1,))
-    scale2 = make_scale((1,))
-    samples.append(SampleInput(mat1, mat2, scale1, scale2))
-    # mat1 e5m2 mat2 e4m3
-    mat1 = make_mat_e5m2((M, K))
-    mat2 = make_mat_e4m3((K, N)).t().contiguous().t()
-    scale1 = make_scale((1,))
-    scale2 = make_scale((1,))
-    samples.append(SampleInput(mat1, mat2, scale1, scale2))
+
+    # Case 1: Both matrices e4m3
+    scale1 = random.random()
+    scale2 = random.random()
+    mat1 = make_mat((M, K), scale1, torch.float8_e4m3fn)
+    mat2 = make_mat((K, N), scale2, torch.float8_e4m3fn).t().contiguous().t()
+    scale_tensor1 = make_scale(scale1, torch.float8_e4m3fn)
+    scale_tensor2 = make_scale(scale2, torch.float8_e4m3fn)
+    samples.append(SampleInput(mat1, mat2, scale_tensor1, scale_tensor2))
+
+    # Case 2: mat1 e4m3, mat2 e5m2
+    scale1 = random.random()
+    scale2 = random.random()
+    mat1 = make_mat((M, K), scale1, torch.float8_e4m3fn)
+    mat2 = make_mat((K, N), scale2, torch.float8_e5m2).t().contiguous().t()
+    scale_tensor1 = make_scale(scale1, torch.float8_e4m3fn)
+    scale_tensor2 = make_scale(scale2, torch.float8_e5m2)
+    samples.append(SampleInput(mat1, mat2, scale_tensor1, scale_tensor2))
+
+    # Case 3: mat1 e5m2, mat2 e4m3
+    scale1 = random.random()
+    scale2 = random.random()
+    mat1 = make_mat((M, K), scale1, torch.float8_e5m2)
+    mat2 = make_mat((K, N), scale2, torch.float8_e4m3fn).t().contiguous().t()
+    scale_tensor1 = make_scale(scale1, torch.float8_e5m2)
+    scale_tensor2 = make_scale(scale2, torch.float8_e4m3fn)
+    samples.append(SampleInput(mat1, mat2, scale_tensor1, scale_tensor2))
 
     yield from samples
 
@@ -12381,6 +12418,10 @@ op_db: list[OpInfo] = [
                                      'TestBinaryUfuncs',
                                      'test_type_promotion',
                                      device_type='cuda'),
+                        DecorateInfo(unittest.expectedFailure,
+                                     'TestBinaryUfuncs',
+                                     'test_type_promotion',
+                                     device_type='xpu'),
                         # dispatch to lazy test failed
                         DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
                         # test error disabled since rhs non-tensor python scalar is supported
@@ -12400,6 +12441,10 @@ op_db: list[OpInfo] = [
                                      'TestBinaryUfuncs',
                                      'test_type_promotion',
                                      device_type='cuda'),
+                        DecorateInfo(unittest.expectedFailure,
+                                     'TestBinaryUfuncs',
+                                     'test_type_promotion',
+                                     device_type='xpu'),
                         # dispatch to lazy test failed
                         DecorateInfo(unittest.expectedFailure, 'TestLazyOpInfo', 'test_dispatched_to_lazy'),
                         # test error disabled since rhs non-tensor python scalar is supported
@@ -12695,6 +12740,18 @@ op_db: list[OpInfo] = [
                    'test_noncontiguous_samples',
                    device_type='mps',
                    dtypes=(torch.complex64,)),
+               # RuntimeError: MPS device does not support addr for non-float input
+               DecorateInfo(
+                   unittest.expectedFailure,
+                   'TestCommon',
+                   'test_noncontiguous_samples',
+                   device_type='mps',
+                   dtypes=(torch.int64,)),
+               DecorateInfo(
+                   unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
+                   device_type='mps', dtypes=(torch.bool,)
+               ),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            ),
            sample_inputs_func=sample_inputs_addr,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL),
@@ -14175,6 +14232,10 @@ op_db: list[OpInfo] = [
                     always_returns_bool=True,
                     supports_autograd=False,
                     skips=(
+                        # MPS: The following dtypes worked in forward but are not listed by the OpInfo: {torch.complex64}.
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+                        # AssertionError: Tensor-likes are not equal!
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values', device_type='mps'),
                     )),
     OpInfo('geqrf',
            dtypes=floating_and_complex_types(),
@@ -14195,6 +14256,10 @@ op_db: list[OpInfo] = [
                     always_returns_bool=True,
                     supports_autograd=False,
                     skips=(
+                        # MPS: The following dtypes worked in forward but are not listed by the OpInfo: {torch.complex64}.
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+                        # AssertionError: Scalars are not equal!
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values', device_type='mps'),
                     )),
     UnaryUfuncInfo('imag',
                    ref=np.imag,
@@ -14255,6 +14320,10 @@ op_db: list[OpInfo] = [
                     always_returns_bool=True,
                     supports_autograd=False,
                     skips=(
+                        # MPS: The following dtypes worked in forward but are not listed by the OpInfo: {torch.complex64}.
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+                        # AssertionError: Scalars are not equal!
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values', device_type='mps'),
                     )),
     OpInfo('linspace',
            dtypes=all_types_and_complex_and(torch.bfloat16, torch.float16),
@@ -14353,6 +14422,10 @@ op_db: list[OpInfo] = [
                # CUDA driver allocated memory was 1254555648 and is now 1242955776.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             dtypes=(torch.cfloat,), device_type="cuda"),
+               # NotImplementedError: The operator 'aten::logspace.out' is not currently implemented for the MPS device
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_requires_grad_error', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
            )),
     OpInfo('logspace',
            dtypes=all_types_and_complex_and(torch.half, torch.bfloat16),
@@ -14387,6 +14460,10 @@ op_db: list[OpInfo] = [
                # CUDA driver allocated memory was 1254555648 and is now 1242955776.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit',
                             dtypes=(torch.cfloat,), device_type="cuda"),
+               # NotImplementedError: The operator 'aten::logspace.out' is not currently implemented for the MPS device
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_requires_grad_error', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
            )),
     UnaryUfuncInfo('log',
                    ref=np.log,
@@ -14471,9 +14548,14 @@ op_db: list[OpInfo] = [
                     dtypes=floating_and_complex_types_and(torch.bfloat16, torch.float16),
                     dtypesIfCUDA=floating_and_complex_types_and(torch.bfloat16, torch.float16, torch.complex32),
                     dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
+                    dtypesIfXPU=floating_types_and(torch.bfloat16, torch.float16),
                     supports_forward_ad=True,
                     supports_fwgrad_bwgrad=True,
-                    supports_rhs_python_scalar=False),
+                    supports_rhs_python_scalar=False,
+                    skips=(
+                        DecorateInfo(unittest.skip("Skipped!"), 'TestBinaryUfuncs', 'test_type_promotion',
+                                     device_type='xpu'),
+                    )),
     OpInfo('logaddexp2',
            dtypes=floating_types_and(torch.bfloat16, torch.half),
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16),
@@ -14510,6 +14592,10 @@ op_db: list[OpInfo] = [
                     always_returns_bool=True,
                     supports_autograd=False,
                     skips=(
+                        # MPS: The following dtypes worked in forward but are not listed by the OpInfo: {torch.complex64}.
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+                        # AssertionError: Tensor-likes are not equal!
+                        DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values', device_type='mps'),
                     )),
     OpInfo('lu_unpack',
            op=torch.lu_unpack,
@@ -14585,6 +14671,13 @@ op_db: list[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            check_batched_forward_grad=False,
+           skips=(
+               # NotImplementedError: "_local_scalar_dense_mps" not implemented for 'ComplexHalf'
+               DecorateInfo(
+                   unittest.expectedFailure, 'TestCommon', 'test_complex_half_reference_testing',
+                   device_type='mps', dtypes=(torch.complex32,)
+               ),
+           ),
            supports_out=False),
     OpInfo('masked_scatter',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16),
@@ -14639,6 +14732,8 @@ op_db: list[OpInfo] = [
                # mexp does not support bf16 and fp16
                DecorateInfo(unittest.skip('Skipped!'), 'TestInductorOpInfo', 'test_comprehensive',
                             dtypes=[torch.half], device_type="cpu"),
+               # The operator 'aten::linalg_matrix_exp' is not currently implemented for the MPS device
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
            ),
            supports_out=False,
            ),
@@ -14721,6 +14816,10 @@ op_db: list[OpInfo] = [
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
            error_inputs_func=error_inputs_median,
+           skips=(
+               # MPS: The following dtypes worked in forward but are not listed by the OpInfo: {torch.bool}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+           ),
            sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False)),
     OpInfo('nanmedian',
            dtypes=all_types_and(torch.bfloat16, torch.float16),
@@ -14728,6 +14827,10 @@ op_db: list[OpInfo] = [
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           skips=(
+               # MPS: The following dtypes worked in forward but are not listed by the OpInfo: {torch.bool}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+           ),
            sample_inputs_func=partial(sample_inputs_reduction, supports_multiple_dims=False)),
     OpInfo('var_mean',
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
@@ -14769,6 +14872,12 @@ op_db: list[OpInfo] = [
            supports_forward_ad=True,
            check_batched_forward_grad=False,
            supports_fwgrad_bwgrad=True,
+           skips=(
+               # The following dtypes worked in forward but are not listed by
+               # the OpInfo: {torch.uint8, torch.bool, torch.int8, torch.int16,
+               # torch.int32}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+           ),
            decorators=(
                DecorateInfo(toleranceOverride({torch.float64: tol(atol=2e-7, rtol=2e-7)}),
                             "TestDecomp", "test_comprehensive", device_type="cuda"),
@@ -14783,6 +14892,12 @@ op_db: list[OpInfo] = [
            supports_forward_ad=True,
            check_batched_forward_grad=False,
            supports_fwgrad_bwgrad=True,
+           skips=(
+               # The following dtypes worked in forward but are not listed by
+               # the OpInfo: {torch.uint8, torch.bool, torch.int8, torch.int16,
+               # torch.int32}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+           ),
            decorators=(
                DecorateInfo(
                    toleranceOverride({
@@ -14900,6 +15015,7 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_jit_alias_remapping'),
             # TODO: FIXME: RuntimeError: "max_elementwise_cuda" not implemented for 'ComplexFloat'
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion', device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion', device_type='xpu'),
         )),
     BinaryUfuncInfo(
         'maximum',
@@ -14912,6 +15028,7 @@ op_db: list[OpInfo] = [
         skips=(
             # TODO: FIXME: RuntimeError: "max_elementwise_cuda" not implemented for 'ComplexFloat'
             DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion', device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs', 'test_type_promotion', device_type='xpu'),
         )),
     BinaryUfuncInfo(
         'min',
@@ -14932,6 +15049,10 @@ op_db: list[OpInfo] = [
                          'TestBinaryUfuncs',
                          'test_type_promotion',
                          device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure,
+                         'TestBinaryUfuncs',
+                         'test_type_promotion',
+                         device_type='xpu'),
         )),
     BinaryUfuncInfo(
         'minimum',
@@ -14947,6 +15068,10 @@ op_db: list[OpInfo] = [
                          'TestBinaryUfuncs',
                          'test_type_promotion',
                          device_type='cuda'),
+            DecorateInfo(unittest.expectedFailure,
+                         'TestBinaryUfuncs',
+                         'test_type_promotion',
+                         device_type='xpu'),
         ),
     ),
     BinaryUfuncInfo('logical_and',
@@ -14984,6 +15109,8 @@ op_db: list[OpInfo] = [
                         # RuntimeError: "bitwise_and_cuda" not implemented for 'Half'
                         DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs',
                                      'test_type_promotion', device_type='cuda'),
+                        DecorateInfo(unittest.expectedFailure, 'TestBinaryUfuncs',
+                                     'test_type_promotion', device_type='xpu'),
                     )),
     BinaryUfuncInfo('bitwise_or',
                     ref=np.bitwise_or,
@@ -14999,6 +15126,10 @@ op_db: list[OpInfo] = [
                                      'TestBinaryUfuncs',
                                      'test_type_promotion',
                                      device_type='cuda'),
+                        DecorateInfo(unittest.expectedFailure,
+                                     'TestBinaryUfuncs',
+                                     'test_type_promotion',
+                                     device_type='xpu'),
                     )),
     BinaryUfuncInfo('bitwise_xor',
                     ref=np.bitwise_xor,
@@ -15014,6 +15145,10 @@ op_db: list[OpInfo] = [
                                      'TestBinaryUfuncs',
                                      'test_type_promotion',
                                      device_type='cuda'),
+                        DecorateInfo(unittest.expectedFailure,
+                                     'TestBinaryUfuncs',
+                                     'test_type_promotion',
+                                     device_type='xpu'),
                     )),
     BinaryUfuncInfo('heaviside',
                     ref=lambda a, b: (
@@ -15200,6 +15335,11 @@ op_db: list[OpInfo] = [
            dtypes=floating_and_complex_types_and(torch.half, torch.bfloat16),
            sample_inputs_func=sample_inputs_normalize,
            supports_forward_ad=True,
+           skips=(
+               # Exception: norm ops are not supported for complex yet
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
+           ),
            supports_fwgrad_bwgrad=True),
     OpInfo('aminmax',
            ref=lambda x, dim=None, keepdim=False: (np.amin(x, axis=dim, keepdims=keepdim), np.amax(x, axis=dim, keepdims=keepdim)),
@@ -15364,6 +15504,14 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestFakeTensor', 'test_fake'),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-5, rtol=5e-5)}),
                             "TestCompositeCompliance", "test_forward_ad"),
+               # MPS: The following dtypes worked in forward but are not listed
+               # by the OpInfo: {torch.uint8, torch.bool, torch.int8,
+               # torch.int16, torch.int32}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+               # AssertionError: The values for attribute 'shape' do not match: torch.Size([5, 5, 5]) != torch.Size([0]).
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps', dtypes=(torch.float32,)),
+               # AssertionError: The values for attribute 'shape' do not match: torch.Size([5, 5, 5]) != torch.Size([5, 5, 6]).
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
            )
            ),
     OpInfo('_native_batch_norm_legit',
@@ -15461,6 +15609,15 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            error_inputs_func=error_inputs_adaptive_avg_pool1d,
+           skips=(
+               # RuntimeError: Adaptive pool MPS: input sizes must be divisible
+               # by output sizes. Non-divisible input sizes are not implemented
+               # on MPS device yet
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
+           ),
            sample_inputs_func=sample_inputs_adaptive_avg_pool1d),
     OpInfo('nn.functional.adaptive_avg_pool2d',
            dtypes=floating_types_and(torch.half, torch.bfloat16),
@@ -15475,6 +15632,15 @@ op_db: list[OpInfo] = [
                #     return torch.nn.functional.adaptive_avg_pool2d(i0, (None, 7))
                #            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+           ),
+           skips=(
+               # RuntimeError: Adaptive pool MPS: input sizes must be divisible
+               # by output sizes. Non-divisible input sizes are not implemented
+               # on MPS device yet
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
            ),
            supports_out=False,
            supports_forward_ad=True,
@@ -15499,6 +15665,14 @@ op_db: list[OpInfo] = [
                #
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
+           skips=(
+               # NotImplementedError: The operator 'aten::_adaptive_avg_pool3d'
+               # is not currently implemented for the MPS device
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
+           ),
            # Runs very slowly on slow gradcheck - alternatively reduce input sizes
            gradcheck_fast_mode=True,
            supports_out=False,
@@ -15516,6 +15690,12 @@ op_db: list[OpInfo] = [
            check_batched_forward_grad=False,
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            error_inputs_func=error_inputs_adaptive_max_pool1d,
+           skips=(
+               # The following dtypes worked in forward but are not listed by
+               # the OpInfo: {torch.int16, torch.int32, torch.int64,
+               # torch.uint8, torch.bool, torch.int8}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+           ),
            sample_inputs_func=sample_inputs_adaptive_max_pool1d),
     OpInfo('nn.functional.adaptive_max_pool2d',
            dtypes=floating_types_and(torch.half, torch.bfloat16),
@@ -15529,6 +15709,12 @@ op_db: list[OpInfo] = [
                #     return torch.nn.functional.adaptive_max_pool2d(i0, (None, 7))
                #            ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~ <--- HERE
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+           ),
+           skips=(
+               # The following dtypes worked in forward but are not listed by
+               # the OpInfo: {torch.uint8, torch.bool, torch.int8, torch.int16,
+               # torch.int32, torch.int64}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            ),
            supports_out=False,
            supports_forward_ad=True,
@@ -15553,6 +15739,16 @@ op_db: list[OpInfo] = [
                #
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
            ),
+           skips=(
+               # NotImplementedError: The operator
+               # 'aten::adaptive_max_pool3d.out' is not currently implemented
+               # for the MPS device
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
+           ),
            supports_out=False,
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
@@ -15572,6 +15768,12 @@ op_db: list[OpInfo] = [
            dtypesIfHpu=custom_types(torch.float32, torch.bfloat16, torch.float16),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            error_inputs_func=error_inputs_avg_pool1d,
+           skips=(
+               # The following dtypes worked in forward but are not listed by
+               # the OpInfo: {torch.int8, torch.int16, torch.int32, torch.uint8,
+               # torch.bool}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+           ),
            sample_inputs_func=sample_inputs_avgpool1d),
     OpInfo('nn.functional.avg_pool3d',
            aten_name='avg_pool3d',
@@ -15587,6 +15789,12 @@ op_db: list[OpInfo] = [
            skips=(
                # AssertionError: Tensor-likes are not close!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cpu'),
+               # The following dtypes worked in forward but are not listed by
+               # the OpInfo: {torch.int32, torch.bfloat16, torch.float16,
+               # torch.uint8, torch.bool, torch.int8, torch.int16}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+               # AssertionError: Scalars are not equal!
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps', dtypes=(torch.float32,)),
            )),
     OpInfo(
         "nn.functional.binary_cross_entropy_with_logits",
@@ -15625,6 +15833,10 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_nn_activation_relu,
         supports_out=False,
         supports_fwgrad_bwgrad=True,
+        skips=(
+            # The following dtypes worked in forward but are not listed by the OpInfo: {torch.bool}.
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+        ),
         supports_forward_ad=True),
     OpInfo('nn.functional.conv_transpose1d',
            # `ref` for this function is backward of
@@ -15668,6 +15880,12 @@ op_db: list[OpInfo] = [
                # RuntimeError: "slow_conv2d_cpu_grad_input" not implemented for 'Long'
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_numpy_ref',
                             dtypes=(torch.int64,)),
+               # RuntimeError: Convolution is supported only for Floating types
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+               DecorateInfo(
+                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
+                   device_type='mps', dtypes=(torch.int64,)
+               ),
            ),
            supports_out=False,),
     OpInfo('nn.functional.conv_transpose2d',
@@ -15717,6 +15935,12 @@ op_db: list[OpInfo] = [
                # AssertionError: None mismatch: torch.complex64 is not None
                DecorateInfo(unittest.expectedFailure, 'TestDtypeCustomRules', 'test_custom_rules',
                             dtypes=(torch.complex64, torch.complex128)),
+               # RuntimeError: Convolution is supported only for Floating types
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+               DecorateInfo(
+                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
+                   device_type='mps', dtypes=(torch.int64,)
+               ),
            ),
            supports_out=False,),
     OpInfo('nn.functional.conv_transpose3d',
@@ -15779,6 +16003,12 @@ op_db: list[OpInfo] = [
                             dtypes=(torch.complex64, torch.complex128)),
                DecorateInfo(unittest.skip('Skipped for ROCm!'), 'TestCommon', 'test_complex_half_reference_testing',
                             dtypes=[torch.complex32], active_if=TEST_WITH_ROCM),
+               # RuntimeError: Convolution is supported only for Floating types
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+               DecorateInfo(
+                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
+                   device_type='mps', dtypes=(torch.int64,)
+               ),
            ),
            supports_out=False,),
     OpInfo('nn.functional.conv1d',
@@ -15816,6 +16046,15 @@ op_db: list[OpInfo] = [
                # RuntimeError: UNSUPPORTED DTYPE: complex
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo',
                             'test_nnc_correctness', dtypes=(torch.complex64, torch.complex128)),
+               # The following dtypes did not work in forward but are listed by the OpInfo: {torch.int64}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+               # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='mps'),
+               # RuntimeError: Convolution is supported only for Floating types
+               DecorateInfo(
+                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
+                   device_type='mps', dtypes=(torch.int64,)
+               ),
            ),
            supports_expanded_weight=True,
            supports_out=False,),
@@ -15855,6 +16094,16 @@ op_db: list[OpInfo] = [
                # RuntimeError: UNSUPPORTED DTYPE: complex
                DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo',
                             'test_nnc_correctness', dtypes=(torch.complex64, torch.complex128)),
+               # RuntimeError: Convolution is supported only for Floating types
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+               # TypeError: Cannot convert a MPS Tensor to float64 dtype as the
+               # MPS framework doesn't support float64
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='mps'),
+               # AssertionError: Tensor-likes are not close!
+               DecorateInfo(
+                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
+                   device_type='mps', dtypes=(torch.float32, torch.int64)
+               ),
            ),
            supports_expanded_weight=True,
            supports_out=False,),
@@ -15908,6 +16157,16 @@ op_db: list[OpInfo] = [
                # AssertionError: Tensor-likes are not close!
                # break slow tests
                DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_compare_cpu'),
+               # RuntimeError: Convolution is supported only for Floating types
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+               # TypeError: Cannot convert a MPS Tensor to float64 dtype as the
+               # MPS framework doesn't support float64
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_errors', device_type='mps'),
+               # RuntimeError: Convolution is supported only for Floating types
+               DecorateInfo(
+                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
+                   device_type='mps', dtypes=(torch.int64,)
+               ),
            ),
            supports_expanded_weight=True,
            supports_out=False,),
@@ -15930,6 +16189,9 @@ op_db: list[OpInfo] = [
                    "test_comprehensive",
                    device_type="cpu"
                ),
+               # The following dtypes worked in forward but are not listed by
+               # the OpInfo: {torch.int32, torch.int16}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            ],
            sample_inputs_func=sample_inputs_group_norm,
            reference_inputs_func=reference_inputs_group_norm,
@@ -15988,6 +16250,10 @@ op_db: list[OpInfo] = [
                # RuntimeError: falseINTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185, please report a bug to PyTorch.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+               # The following dtypes worked in forward but are not listed by
+               # the OpInfo: {torch.int8, torch.int16, torch.int32, torch.uint8,
+               # torch.bool}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            ],
            sample_inputs_func=sample_inputs_local_response_norm,),
     OpInfo('constant_pad_nd',
@@ -16024,6 +16290,8 @@ op_db: list[OpInfo] = [
                # RuntimeError: falseINTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185, please report a bug to PyTorch.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+               # The following dtypes worked in forward but are not listed by the OpInfo: {torch.bool}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            ),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_out=False),
@@ -16038,6 +16306,8 @@ op_db: list[OpInfo] = [
                # RuntimeError: falseINTERNAL ASSERT FAILED at
                # "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185, please report a bug to PyTorch.
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
+               # The following dtypes worked in forward but are not listed by the OpInfo: {torch.bool}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            ),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_out=False),
@@ -16054,6 +16324,17 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestJit', 'test_variant_consistency_jit', dtypes=(torch.float32,)),
                # Some negative padding cases cause a segfault on MPS
                DecorateInfo(unittest.skip("Not fully supported on MPS"), 'TestConsistency'),
+               # The following dtypes worked in forward but are not listed by the OpInfo: {torch.bool}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+               # RuntimeError: start == 0 || start < input_size
+               DecorateInfo(
+                   unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
+                   device_type='mps', dtypes=(torch.float32, torch.complex64)
+               ),
+               DecorateInfo(
+                   unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
+                   device_type='mps', dtypes=(torch.float32, torch.complex64)
+               ),
            ),
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            supports_out=False),
@@ -16188,6 +16469,8 @@ op_db: list[OpInfo] = [
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185,
                # please report a bug to PyTorch.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # torch.uint8 - Failed to create function state object for: upsample_bicubic2d_uchar
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            ),
            supports_out=False),
     OpInfo('nn.functional.interpolate',
@@ -16204,6 +16487,8 @@ op_db: list[OpInfo] = [
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":185,
                # please report a bug to PyTorch.
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+               # torch.uint8 - Failed to create function state object for: upsample_bicubic2d_uchar
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            ),
            supports_out=False),
     OpInfo('nn.functional.interpolate',
@@ -16302,6 +16587,11 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_multi_margin_loss,
         reference_inputs_func=reference_inputs_multi_margin_loss,
         error_inputs_func=error_inputs_multi_margin_loss,
+        skips=(
+            # NotImplementedError: The operator 'aten::multi_margin_loss' is not
+            # currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
+        ),
         decorators=(
             DecorateInfo(
                 toleranceOverride({torch.float32: tol(atol=1e-4, rtol=1e-4)}),
@@ -16319,6 +16609,11 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_multilabel_margin_loss,
         reference_inputs_func=reference_inputs_multilabel_margin_loss,
         error_inputs_func=error_inputs_multilabel_margin_loss,
+        skips=(
+            # NotImplementedError: The operator 'aten::multilabel_margin_loss' is not
+            # currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
+        ),
     ),
     OpInfo('nn.functional.leaky_relu',
            aliases=None,
@@ -16367,6 +16662,9 @@ op_db: list[OpInfo] = [
                 "test_variant_consistency_jit",
                 device_type="cuda",
             ),
+            # The following dtypes worked in forward but are not listed by the
+            # OpInfo: {torch.int8, torch.uint8, torch.int32, torch.int16}.
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
         ),
     ),
     OpInfo('nn.functional.avg_pool2d',
@@ -16380,6 +16678,12 @@ op_db: list[OpInfo] = [
            sample_inputs_func=sample_inputs_avgpool2d,
            skips=(
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='cuda'),
+               # The following dtypes worked in forward but are not listed by
+               # the OpInfo: {torch.int32, torch.uint8, torch.bool, torch.int8,
+               # torch.int16}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+               # AssertionError: Scalars are not equal!
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
            )),
     OpInfo('nn.functional.fractional_max_pool2d',
            supports_autograd=True,
@@ -16400,6 +16704,8 @@ op_db: list[OpInfo] = [
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit')),
            skips=(
+               # Exception: The operator 'aten::fractional_max_pool2d.output' is not currently implemented for the MPS device
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),)),
     OpInfo('nn.functional.fractional_max_pool3d',
            supports_autograd=True,
@@ -16423,6 +16729,8 @@ op_db: list[OpInfo] = [
                # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit')),
            skips=(
+               # Exception: The operator 'aten::fractional_max_pool3d.output' is not currently implemented for the MPS device
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),)),
     OpInfo('nn.functional.max_pool1d',
            aten_name='max_pool1d',
@@ -16444,6 +16752,10 @@ op_db: list[OpInfo] = [
                # Caffe2 uses a lazy allocation, so you will need to call mutable_data() or raw_mutable_data()
                # to actually allocate memory
                DecorateInfo(unittest.skip("Skipped!"), 'TestTags', 'test_tags'),
+               # The following dtypes worked in forward but are not listed by
+               # the OpInfo: {torch.uint8, torch.bool, torch.int8, torch.int16,
+               # torch.int32, torch.int64}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            ),
            error_inputs_func=error_inputs_max_pool1d,
            sample_inputs_func=sample_inputs_max_pool),
@@ -16462,6 +16774,10 @@ op_db: list[OpInfo] = [
            dtypes=all_types_and(torch.float16, torch.bfloat16),
            dtypesIfCUDA=floating_types_and(torch.float16, torch.bfloat16),
            error_inputs_func=error_inputs_max_pool2d,
+           skips=(
+               # The following dtypes worked in forward but are not listed by the OpInfo: {torch.bool}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+           ),
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('max_pool2d_with_indices_backward',
            op=max_pool2d_backward,
@@ -16485,6 +16801,10 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning'),
                # FX failed to normalize op - add the op to the op_skip list.
                DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
+               # MPS: The following dtypes worked in forward but are not listed
+               # by the OpInfo: {torch.int8, torch.int16, torch.int32,
+               # torch.int64, torch.uint8, torch.bool}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
                # object has no attribute max_pool2d_with_indices_backward (It's not available on torch -- so expected)
                DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit')
            )),
@@ -16504,6 +16824,10 @@ op_db: list[OpInfo] = [
            # TODO: investigate nondeterminism
            gradcheck_nondet_tol=GRADCHECK_NONDET_TOL,
            error_inputs_func=error_inputs_max_pool3d,
+           skips=(
+               # The following dtypes worked in forward but are not listed by the OpInfo: {torch.bool}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+           ),
            sample_inputs_func=sample_inputs_max_pool),
     OpInfo('nn.functional.max_unpool1d',
            aten_name='max_unpool1d',
@@ -16529,6 +16853,10 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_forward_ad',
                             device_type='cpu'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick_core_backward'),
+               # The following dtypes worked in forward but are not listed by
+               # the OpInfo: {torch.int16, torch.int32, torch.int64,
+               # torch.uint8, torch.bool, torch.int8}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            )),
     OpInfo('nn.functional.max_unpool1d',
            variant_test_name='grad',
@@ -16539,6 +16867,12 @@ op_db: list[OpInfo] = [
            supports_out=False,
            assert_jit_shape_analysis=False,
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           skips=(
+               # The following dtypes worked in forward but are not listed by
+               # the OpInfo: {torch.int16, torch.int32, torch.int64,
+               # torch.uint8, torch.bool, torch.int8}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+           ),
            sample_inputs_func=sample_inputs_max_unpool_grad),
     OpInfo('nn.functional.max_unpool2d',
            aten_name='max_unpool2d',
@@ -16563,6 +16897,10 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_grad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_forward_ad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick_core_backward'),
+               # The following dtypes worked in forward but are not listed by
+               # the OpInfo: {torch.int64, torch.uint8, torch.bool, torch.int8,
+               # torch.int16, torch.int32}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            )),
     OpInfo('nn.functional.max_unpool2d',
            variant_test_name='grad',
@@ -16576,6 +16914,12 @@ op_db: list[OpInfo] = [
            supports_out=False,
            assert_jit_shape_analysis=False,
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           skips=(
+               # The following dtypes worked in forward but are not listed by
+               # the OpInfo: {torch.int64, torch.uint8, torch.bool, torch.int8,
+               # torch.int16, torch.int32}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+           ),
            sample_inputs_func=sample_inputs_max_unpool_grad),
     OpInfo('nn.functional.max_unpool3d',
            aten_name='max_unpool3d',
@@ -16601,6 +16945,10 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Skipped!"), 'TestBwdGradients', 'test_fn_grad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestCompositeCompliance', 'test_forward_ad'),
                DecorateInfo(unittest.skip("Skipped!"), 'TestDecomp', 'test_quick_core_backward'),
+               # The following dtypes worked in forward but are not listed by
+               # the OpInfo: {torch.int32, torch.int64, torch.uint8, torch.bool,
+               # torch.int8, torch.int16}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            )),
     OpInfo('nn.functional.max_unpool3d',
            variant_test_name='grad',
@@ -16611,6 +16959,12 @@ op_db: list[OpInfo] = [
            supports_out=False,
            assert_jit_shape_analysis=False,
            dtypes=floating_types_and(torch.float16, torch.bfloat16),
+           skips=(
+               # The following dtypes worked in forward but are not listed by
+               # the OpInfo: {torch.int32, torch.int64, torch.uint8, torch.bool,
+               # torch.int8, torch.int16}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+           ),
            sample_inputs_func=sample_inputs_max_unpool_grad),
     OpInfo('nn.functional.linear',
            aten_name='linear',
@@ -16629,6 +16983,12 @@ op_db: list[OpInfo] = [
            # See https://github.com/pytorch/pytorch/issues/66357
            check_batched_forward_grad=False,
            supports_expanded_weight=True,
+           skips=(
+               # RuntimeError: MPS device does not support linear for non-float inputs
+               # RuntimeError: mps linear does not support complex types
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64, torch.int64)),
+           ),
            decorators=(
                # Strides are not the same!
                DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out'),
@@ -16662,6 +17022,12 @@ op_db: list[OpInfo] = [
            dtypes=floating_types_and(torch.bfloat16, torch.float16),
            supports_forward_ad=True,
            supports_fwgrad_bwgrad=True,
+           skips=(
+               # The following dtypes worked in forward but are not listed by
+               # the OpInfo: {torch.int32, torch.uint8, torch.bool, torch.int8,
+               # torch.int16}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+           ),
            supports_out=False),
     UnaryUfuncInfo(
         'nn.functional.elu',
@@ -16772,6 +17138,12 @@ op_db: list[OpInfo] = [
             # https://github.com/pytorch/pytorch/issues/77447
             DecorateInfo(unittest.expectedFailure, 'TestFwdGradients',
                          'test_inplace_forward_mode_AD'),
+            # NotImplementedError: The operator 'aten::rrelu_with_noise' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
             # The noise vector that's generated in these tests is not the same elementwise
             DecorateInfo(unittest.skip("Different noise"), 'TestUnaryUfuncs', 'test_batch_vs_slicing'),
             DecorateInfo(unittest.skip("Different noise"), 'TestUnaryUfuncs', 'test_contig_vs_every_other'),
@@ -16830,6 +17202,7 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
             DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
                          dtypes=(torch.float8_e4m3fn, torch.float8_e4m3fnuz, torch.float8_e5m2, torch.float8_e5m2fnuz)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_compare_cpu'),
         )
     ),
     OpInfo(
@@ -16857,6 +17230,7 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("Skipped!"), "TestVmapOperatorsOpInfo", "test_vmap_exhaustive"),
             DecorateInfo(unittest.expectedFailure, 'TestNNCOpInfo', 'test_nnc_correctness',
                          dtypes=(torch.float8_e4m3fn, torch.float8_e4m3fnuz, torch.float8_e5m2, torch.float8_e5m2fnuz)),
+            DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_compare_cpu'),
         )
     ),
     OpInfo(
@@ -17000,6 +17374,10 @@ op_db: list[OpInfo] = [
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_normal',
                          dtypes=(torch.cfloat,), device_type='cpu'),
+            # The following dtypes worked in forward but are not listed by the
+            # OpInfo: {torch.int16, torch.int32, torch.uint8, torch.bool,
+            # torch.int8}.
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
         ),
         autodiff_nonfusible_nodes=["aten::silu"],
     ),
@@ -17091,6 +17469,17 @@ op_db: list[OpInfo] = [
         skips=(
             # Resized a non-empty tensor but did not warn about it.
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='cpu'),
+            # The following dtypes worked in forward but are not listed by the
+            # OpInfo: {torch.int16, torch.int32, torch.uint8, torch.bool,
+            # torch.int8}.
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+            # RuntimeError not raised : Expected RuntimeError when doing an
+            # unsafe cast from a result of dtype torch.float32 into an out= with
+            # dtype torch.long
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps', dtypes=(torch.float32,)),
+            # UserWarning not triggered : Resized a non-empty tensor but did not
+            # warn about it
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
         ),
     ),
     UnaryUfuncInfo(
@@ -17105,6 +17494,12 @@ op_db: list[OpInfo] = [
         supports_gradgrad=True,
         supports_out=False,
         inplace_variant=partial(torch.nn.functional.mish, inplace=True),
+        skips=(
+            # The following dtypes worked in forward but are not listed by the
+            # OpInfo: {torch.int32, torch.uint8, torch.bool, torch.int8,
+            # torch.int16}.
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+        ),
         decorators=[
             DecorateInfo(
                 toleranceOverride({torch.float16: tol(atol=1e-02, rtol=1e-03)}), 'TestUnaryUfuncs',), ],
@@ -17177,6 +17572,10 @@ op_db: list[OpInfo] = [
                                                     'value': -9},
                                                     {'threshold': float.fromhex('0x1.3ap-3'),
                                                     'value': -9}),
+        skips=(
+            # The following dtypes worked in forward but are not listed by the OpInfo: {torch.bool}.
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+        ),
         # TODO(whc) should not need sample_inputs_func, but without it
         # kwargs aren't being hooked up properly
         sample_inputs_func=sample_inputs_threshold,
@@ -17189,6 +17588,11 @@ op_db: list[OpInfo] = [
         supports_out=False,
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
+        skips=(
+            # RuntimeError: norm ops are not supported for complex yet
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
+        ),
     ),
     OpInfo(
         "nn.functional.triplet_margin_with_distance_loss",
@@ -17277,6 +17681,10 @@ op_db: list[OpInfo] = [
                             device_type='cpu', dtypes=(torch.bfloat16, torch.float16)),
                DecorateInfo(toleranceOverride({torch.float32: tol(atol=5e-05, rtol=1e-05)}),
                             'TestCompositeCompliance', 'test_forward_ad', device_type="cpu"),
+               # The following dtypes worked in forward but are not listed by
+               # the OpInfo: {torch.uint8, torch.bool, torch.int8, torch.int16,
+               # torch.int32}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            )),
     # This variant tests batch_norm with cuDNN disabled only on CUDA devices
     OpInfo('nn.functional.batch_norm',
@@ -17530,6 +17938,8 @@ op_db: list[OpInfo] = [
                    dtypes=(torch.float32,),
                    device_type="cuda",
                ),
+               # The operator 'aten::mode' is not currently implemented for the MPS device
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
            ),
            sample_inputs_func=sample_inputs_mode,),
     make_mvlgamma_opinfo(variant_test_name='mvlgamma_p_1',
@@ -17808,7 +18218,12 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            # In-place ops
            check_batched_gradgrad=False,
-           decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack]),
+           decorators=[skipCUDAIfNoCusolver, skipCPUIfNoLapack],
+           skips=(
+               # NotImplementedError: The operator 'aten::linalg_qr.out' is not
+               # currently implemented for the MPS device
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
+           )),
     UnaryUfuncInfo('rad2deg',
                    ref=np.degrees,
                    decorators=(precisionOverride({torch.bfloat16: 7e-1,
@@ -18827,6 +19242,9 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestSchemaCheckModeOpInfo', 'test_schema_correctness',
                             dtypes=(torch.complex64, torch.complex128)),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
+               # NotImplementedError: The operator 'aten::linalg_qr.out' is not
+               # currently implemented for the MPS device
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
            )),
     BinaryUfuncInfo('polar',
                     dtypes=floating_types(),
@@ -19257,7 +19675,13 @@ op_db: list[OpInfo] = [
            supports_fwgrad_bwgrad=True,
            check_batched_forward_grad=False,
            check_batched_gradgrad=False,  # vmap complains of the sizes
-           sample_inputs_func=sample_inputs_put),
+           sample_inputs_func=sample_inputs_put,
+           skips=(
+               # NotImplementedError: The operator 'aten::put_' is not currently
+               # implemented for the MPS device
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
+           )),
+
     OpInfo('take',
            dtypes=all_types_and_complex_and(torch.bool, torch.float16, torch.bfloat16),
            check_batched_grad=False,  # vmap complains of the sizes
@@ -19819,6 +20243,8 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_meta_outplace'),
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace'),
                DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_dispatch_symbolic_meta_outplace_all_strides'),
+               # MPS: The following dtypes worked in forward but are not listed by the OpInfo: {torch.complex128}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            )),
     OpInfo('empty',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
@@ -19859,6 +20285,8 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Expected: empty is not comparable"),
                             'TestCommon', 'test_complex_half_reference_testing'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
+               # MPS: The following dtypes worked in forward but are not listed by the OpInfo: {torch.complex128}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            )),
     OpInfo('eye',
            dtypes=all_types_complex_float8_and(torch.bool, torch.half, torch.bfloat16),
@@ -19928,6 +20356,8 @@ op_db: list[OpInfo] = [
                DecorateInfo(unittest.skip("Expected: empty_permuted is not comparable"),
                             'TestCommon', 'test_complex_half_reference_testing'),
                DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu'),
+               # MPS: The following dtypes worked in forward but are not listed by the OpInfo: {torch.complex128}.
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
            )),
     OpInfo('scalar_tensor',
            dtypes=all_types_and_complex_and(torch.bool, torch.half, torch.bfloat16, torch.chalf),
@@ -20213,6 +20643,8 @@ op_db: list[OpInfo] = [
                # see https://github.com/pytorch/pytorch/issues/99806
                # RuntimeError: The size of tensor a (25) must match the size of tensor b (0) at non-singleton dimension 0.
                DecorateInfo(unittest.expectedFailure, 'TestBwdGradients', 'test_fn_gradgrad'),
+               # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_numpy_ref', device_type='mps', dtypes=(torch.int64,)),
            )),
     OpInfo('unbind',
            dtypes=all_types_and_complex_and(torch.complex32, torch.bool, torch.float16, torch.bfloat16),
@@ -20318,6 +20750,9 @@ op_db: list[OpInfo] = [
                             device_type='cpu', dtypes=(torch.float16,)),
                DecorateInfo(toleranceOverride({torch.float16: tol(atol=3e-4, rtol=3e-6)}),
                             "TestConsistency", "test_output_match", device_type="mps"),
+               # RuntimeError: norm ops are not supported for complex yet
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
            )),
     ShapeFuncInfo('repeat',
                   op=lambda x, dims: x.repeat(dims),
@@ -20444,6 +20879,9 @@ op_db: list[OpInfo] = [
            decorators=(
                # RuntimeError: view size is not compatible with input tensor's size and stride
                DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+               # MPS: gather(): Yet not supported for complex
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+               DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
            )),
     ShapeFuncInfo('tile',
                   ref=np.tile,
@@ -20839,6 +21277,11 @@ op_db: list[OpInfo] = [
                    dtypesIfCUDA=all_types_and(torch.bool, torch.half, torch.bfloat16),
                    supports_forward_ad=True,
                    supports_fwgrad_bwgrad=True,
+                   skips=(
+                       # AssertionError: Tensor-likes are not close!
+                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps', dtypes=(torch.float32,)),
+                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
+                   ),
                    promotes_int_to_float=True),
     UnaryUfuncInfo('erf',
                    ref=scipy.special.erf if TEST_SCIPY else None,
@@ -20928,6 +21371,9 @@ op_db: list[OpInfo] = [
                 "test_variant_consistency_jit",
                 dtypes=(torch.float32,),
             ),
+            # Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
         ),
     ),
     UnaryUfuncInfo('lgamma',
@@ -20945,6 +21391,9 @@ op_db: list[OpInfo] = [
                                     dtypes=[torch.float32, torch.float64], active_if=IS_WINDOWS),
                        DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_large',
                                     dtypes=[torch.float32, torch.float64], active_if=IS_WINDOWS),
+                       # AssertionError: Tensor-likes are not close!
+                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps', dtypes=(torch.float32,)),
+                       DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
                    ),
                    # lgamma have multiple singularities at x <= 0
                    reference_numerics_filter=NumericsFilter(condition=lambda x: x < 0.1, safe_val=1)),
@@ -21351,6 +21800,8 @@ op_db: list[OpInfo] = [
             # Probably because we have used lambda for the op here
             # AssertionError: JIT Test does not execute any logic
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # The following dtypes worked in forward but are not listed by the OpInfo: {torch.complex64}.
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
             # inplace variant dispatches to dropout kernel, while on CUDA
             # the op dispatches to _fused_dropout (with a few more conditions)
             # hence, different values and this skip here
@@ -21384,6 +21835,10 @@ op_db: list[OpInfo] = [
                 'test_correctness_with_reusing_ir',
                 active_if=TEST_WITH_ASAN
             ),
+            # The following dtypes worked in forward but are not listed by the OpInfo: {torch.complex64}.
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+            # AssertionError: Tensor-likes are not close!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values', device_type='mps'),
         ),
     ),
     OpInfo(
@@ -21395,6 +21850,8 @@ op_db: list[OpInfo] = [
             # lambda impl
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # MPS: The following dtypes worked in forward but are not listed by the OpInfo: {torch.complex64}.
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
             DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu')),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -21413,6 +21870,8 @@ op_db: list[OpInfo] = [
             # lambda impl
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # MPS: The following dtypes worked in forward but are not listed by the OpInfo: {torch.complex64}.
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
             DecorateInfo(unittest.skip('output is non-deterministic'), 'TestCommon', 'test_compare_cpu')),
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
@@ -21441,6 +21900,8 @@ op_db: list[OpInfo] = [
             # AssertionError: Tensor-likes are not close!
             # Fails in cuda11.7
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu', device_type='cuda'),
+            # The following dtypes worked in forward but are not listed by the OpInfo: {torch.complex64}.
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
             # AssertionError: Tensor-likes are not close!
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_compare_cpu', device_type='xpu'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),),),
@@ -21456,6 +21917,8 @@ op_db: list[OpInfo] = [
             # lambda impl
             DecorateInfo(unittest.expectedFailure, 'TestNormalizeOperators', 'test_normalize_operator_exhaustive'),
             DecorateInfo(unittest.expectedFailure, 'TestJit', 'test_variant_consistency_jit'),
+            # The following dtypes worked in forward but are not listed by the OpInfo: {torch.complex64}.
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
             # torch.autograd.gradcheck.GradcheckError: While computing batched gradients, got:
             # vmap: We do not yet support calling random operations inside of vmap.
             # Please perform random operations outside of vmap as a workaround
@@ -21600,6 +22063,12 @@ op_db: list[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         dtypes=floating_types_and(torch.bfloat16, torch.float16),
+        skips=(
+            # The following dtypes worked in forward but are not listed by the
+            # OpInfo: {torch.int32, torch.uint8, torch.bool, torch.int8,
+            # torch.int16}.
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+        ),
         decorators=(
             DecorateInfo(
                 toleranceOverride
@@ -21633,6 +22102,12 @@ op_db: list[OpInfo] = [
         sample_inputs_func=sample_inputs_grid_sample,
         reference_inputs_func=reference_inputs_grid_sample,
         supports_gradgrad=False,
+        skips=(
+            # Exception: The operator 'aten::grid_sampler_2d_backward' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples', device_type='mps'),
+        ),
         gradcheck_nondet_tol=1e-15),
     # TODO: delete this OpInfo once we add meta support for grid_sampler_3d
     OpInfo(
@@ -21920,6 +22395,19 @@ op_db: list[OpInfo] = [
                 unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
                 device_type='xpu',
                 dtypes=[torch.float64]),
+            # MPS: std does not support automatic differentiation for outputs with complex dtype
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
+                device_type='mps', dtypes=(torch.complex64,)
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
+                device_type='mps', dtypes=(torch.complex64,)
+            ),
+            # The operator 'aten::std.correction_out' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
         ),
     ),
     ReductionOpInfo(
@@ -21940,6 +22428,16 @@ op_db: list[OpInfo] = [
             # FIXME: dim=[] reduces all dimensions
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty'),
             DecorateInfo(unittest.skip("Skipped!"), 'TestReductions', 'test_dim_empty_keepdim'),
+            # MPS: std does not support automatic differentiation for outputs with complex dtype
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_variant_consistency_eager',
+                device_type='mps', dtypes=(torch.complex64,)
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_noncontiguous_samples',
+                device_type='mps', dtypes=(torch.complex64,)
+            ),
         ),
     ),
     ReductionOpInfo(
@@ -22146,6 +22644,8 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.skip("Fails with ASAN"),
                          'TestProxyTensorOpInfo',
                          'test_make_fx_fake_exhaustive', active_if=TEST_WITH_ASAN),
+            # NotImplementedError: The operator 'aten::_ctc_loss' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
         ),
     ),
     OpInfo(
@@ -22187,7 +22687,10 @@ op_db: list[OpInfo] = [
             ),
             DecorateInfo(unittest.skip("FP16 nll_loss cases have not been enabled on MPS yet"),
                          dtypes=(torch.half,), device_type="mps"),
-
+            # The following dtypes worked in forward but are not listed by the
+            # OpInfo: {torch.int16, torch.int32, torch.int64, torch.uint8,
+            # torch.bool, torch.int8}.
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
         ),
     ),
     OpInfo(
@@ -22241,6 +22744,10 @@ op_db: list[OpInfo] = [
             # INTERNAL ASSERT FAILED at "../torch/csrc/jit/passes/utils/check_alias_annotation.cpp":270,
             # please report a bug to PyTorch.
             DecorateInfo(unittest.skip("Skipped!"), "TestJit", "test_variant_consistency_jit", dtypes=(torch.float32,),),
+            # The following dtypes worked in forward but are not listed by the
+            # OpInfo: {torch.uint8, torch.bool, torch.int8, torch.int16,
+            # torch.int32}.
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
         )
     ),
     OpInfo(
@@ -22252,6 +22759,9 @@ op_db: list[OpInfo] = [
         supports_gradgrad=False,
         skips=(
             DecorateInfo(unittest.skip("Unsupported on MPS for now"), 'TestCommon', 'test_numpy_ref_mps'),
+            # NotImplementedError: The operator 'aten::_pdist_forward' is not
+            # currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
         )
     ),
     OpInfo(
@@ -22323,6 +22833,11 @@ op_db: list[OpInfo] = [
                 "test_variant_consistency_jit",
                 dtypes=(torch.float32, torch.complex64),
             ),
+            # Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            # RuntimeError: norm ops are not supported for complex yet
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_numpy_ref', device_type='mps', dtypes=(torch.int64,)),
         ),
     ),
     OpInfo(
@@ -22371,6 +22886,8 @@ op_db: list[OpInfo] = [
             DecorateInfo(unittest.expectedFailure, 'TestConsistency'),
             DecorateInfo(unittest.expectedFailure, 'TestDTensorOps', 'test_dtensor_op_db'),
             DecorateInfo(unittest.expectedFailure, "TestMeta", "test_dispatch_symbolic_meta_outplace_all_strides"),
+            # NotImplementedError: The operator 'aten::channel_shuffle' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
         ),
     ),
     OpInfo(
@@ -22437,6 +22954,11 @@ op_db: list[OpInfo] = [
         supports_forward_ad=True,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_scatter_reduce,
+        skips=(
+            # The following dtypes worked in forward but are not listed by the
+            # OpInfo: {torch.bool}.
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+        ),
     ),
     OpInfo(
         'scatter_reduce',
@@ -22448,6 +22970,16 @@ op_db: list[OpInfo] = [
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_scatter_reduce,
+        skips=(
+            # MPS: not supported for torch.int64
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.int64,)),
+            # AssertionError: Tensor-likes are not equal!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
+                device_type='mps', dtypes=(torch.bool,)
+            ),
+        ),
     ),
     OpInfo(
         'scatter_reduce',
@@ -22459,6 +22991,16 @@ op_db: list[OpInfo] = [
         check_batched_forward_grad=False,
         supports_fwgrad_bwgrad=True,
         sample_inputs_func=sample_inputs_scatter_reduce,
+        skips=(
+            # MPS: not supported for torch.int64
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.int64,)),
+            # AssertionError: Tensor-likes are not equal!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_non_standard_bool_values',
+                device_type='mps', dtypes=(torch.bool,)
+            ),
+        ),
     ),
     OpInfo(
         '_segment_reduce',
@@ -22977,6 +23519,12 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_executor',
                          dtypes=(torch.int16, torch.int32, torch.int64),
                          device_type="cuda"),
+            # Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps'),
         ),
     ),
     PythonRefInfo(
@@ -23015,6 +23563,12 @@ python_ref_db = [
                     torch.int16, torch.int32, torch.int64, torch.int8, torch.uint8
                 ),
                 device_type="cpu"),
+            # Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps'),
         ),
     ),
     PythonRefInfo(
@@ -23029,6 +23583,9 @@ python_ref_db = [
             DecorateInfo(unittest.expectedFailure,
                          'TestCommon',
                          'test_python_ref'),
+            # MPS: gather(): Yet not supported for complex
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
         ),
     ),
     PythonRefInfo(
@@ -23054,6 +23611,10 @@ python_ref_db = [
             DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
             DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
             DecorateInfo(unittest.skip('Skipped!'), 'TestMathBits', 'test_neg_view'),
+            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.int64, torch.int32)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
         )),
     PythonRefInfo(
         "_refs.tril_indices",
@@ -23066,6 +23627,10 @@ python_ref_db = [
             DecorateInfo(unittest.skip('Skipped!'), 'TestCommon', 'test_variant_consistency_eager'),
             DecorateInfo(unittest.skip('Skipped!'), 'TestJit', 'test_variant_consistency_jit'),
             DecorateInfo(unittest.skip('Skipped!'), 'TestMathBits', 'test_neg_view'),
+            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.int64, torch.int32)),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_out_warning', device_type='mps'),
         )),
     PythonRefInfo(
         "_refs.meshgrid",
@@ -23235,6 +23800,22 @@ python_ref_db = [
     ElementwiseUnaryPythonRefInfo(
         "_refs.digamma",
         torch_opinfo_name="digamma",
+        skips=(
+            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            # AssertionError: Tensor-likes are not close!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(
+                    torch.uint8, torch.int8, torch.int64, torch.int32,
+                    torch.int16, torch.float16, torch.bool, torch.bfloat16,
+                )
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps', dtypes=(
+                    torch.uint8, torch.int8, torch.int64, torch.int32,
+                    torch.int16, torch.float16, torch.bool, torch.bfloat16,
+                )
+            ),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.erf",
@@ -23312,6 +23893,8 @@ python_ref_db = [
         skips=(
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs', 'test_reference_numerics_extremal',
                          active_if=IS_WINDOWS),
+            # The operator 'aten::frexp.Tensor_out' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps'),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -23382,6 +23965,20 @@ python_ref_db = [
             DecorateInfo(unittest.skip("Skipped!"), 'TestUnaryUfuncs',
                          'test_reference_numerics_large',
                          dtypes=[torch.float32, torch.float64], active_if=IS_WINDOWS),
+            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            # AssertionError: Tensor-likes are not close!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(
+                    torch.uint8, torch.int8, torch.int64, torch.int32,
+                    torch.int16, torch.float16, torch.bool, torch.bfloat16,
+                )
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps', dtypes=(
+                    torch.uint8, torch.int8, torch.int64, torch.int32,
+                    torch.int16, torch.float16, torch.bool, torch.bfloat16,
+                )
+            ),
         ),
     ),
     ElementwiseUnaryPythonRefInfo(
@@ -23772,11 +24369,21 @@ python_ref_db = [
         "_refs.nn.functional.channel_shuffle",
         torch_opinfo_name="nn.functional.channel_shuffle",
         supports_out=True,
+        skips=(
+            # NotImplementedError: The operator 'aten::channel_shuffle' is not currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps'),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.threshold",
         torch_opinfo_name="nn.functional.threshold",
         supports_out=True,
+        skips=(
+            # RuntimeError: [srcBuf length] > 0
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps'),
+        ),
     ),
     PythonRefInfo(
         "_refs.nn.functional.dropout",
@@ -23849,6 +24456,12 @@ python_ref_db = [
         "_refs.nn.functional.pairwise_distance",
         torch_opinfo_name="nn.functional.pairwise_distance",
         supports_out=True,
+        skips=(
+            # Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            # RuntimeError: norm ops are not supported for complex yet
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
+        ),
     ),
     PythonRefInfo(
         "_refs.nn.functional.pdist",
@@ -23866,6 +24479,9 @@ python_ref_db = [
                 dtypes=(torch.float32,),
                 device_type='cpu',
             ),
+            # NotImplementedError: The operator 'aten::_pdist_forward' is not
+            # currently implemented for the MPS device
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps'),
         )),
     PythonRefInfo(
         "_refs.nn.functional.leaky_relu",
@@ -23896,6 +24512,17 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.poisson_nll_loss",
         torch_opinfo_name="nn.functional.poisson_nll_loss",
+        skips=(
+            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                device_type='mps', dtypes=(torch.float16, torch.bfloat16)
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                device_type='mps', dtypes=(torch.float16, torch.bfloat16)
+            ),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.prelu",
@@ -23905,6 +24532,17 @@ python_ref_db = [
         "_refs.nn.functional.relu",
         torch_opinfo_name="nn.functional.relu",
         supports_out=True,
+        skips=(
+            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                device_type='mps', dtypes=(torch.float16, torch.bfloat16, torch.float32)
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                device_type='mps', dtypes=(torch.float16, torch.bfloat16, torch.float32)
+            ),
+        ),
     ),
     ElementwiseUnaryPythonRefInfo(
         "_refs.nn.functional.relu6",
@@ -23952,6 +24590,11 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.nn.functional.l1_loss",
         torch_opinfo_name="nn.functional.l1_loss",
+        skips=(
+            # Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
+        ),
     ),
     PythonRefInfo(
         "_refs.nn.functional.margin_ranking_loss",
@@ -24223,6 +24866,10 @@ python_ref_db = [
                          'TestBinaryUfuncs', 'test_reference_numerics'),
             # FIXME output 0: meta disagrees with real impl
             DecorateInfo(unittest.expectedFailure, 'TestMeta', 'test_binary_ufuncs_mixed_dtype'),
+            # The following dtypes did not work in forward but are listed by the OpInfo: {torch.bool}.
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+            # RuntimeError: torch.bool not supported for floor_divide
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.bool,)),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -24571,6 +25218,20 @@ python_ref_db = [
                          dtypes=(torch.float16,), device_type="cpu"),
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref_torch_fallback',
                          dtypes=(torch.float16,), device_type="cpu"),
+            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            # AssertionError: Tensor-likes are not close!
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(
+                    torch.uint8, torch.int8, torch.int64, torch.int32,
+                    torch.int16, torch.float16, torch.bfloat16,
+                )
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps', dtypes=(
+                    torch.uint8, torch.int8, torch.int64, torch.int32,
+                    torch.int16, torch.float16, torch.bfloat16,
+                )
+            ),
         ),
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -24604,6 +25265,9 @@ python_ref_db = [
             # Greatest relative difference: 8.519846983548175e-06 at index (4,) (up to 1.3e-06 allowed)
             DecorateInfo(unittest.skip("Skipped!"), 'TestCommon', 'test_python_ref',
                          dtypes=(torch.uint8,), device_type="cpu"),
+            # RuntimeError: norm ops are not supported for complex yet
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
         )
     ),
     ElementwiseBinaryPythonRefInfo(
@@ -24845,6 +25509,21 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.block_diag",
         torch_opinfo_name="block_diag",
+        skips=(
+            # The following dtypes did not work in forward but are listed by the OpInfo: {torch.complex64}.
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(torch.complex64,)),
+            # RuntimeError: Failed to create function state object for: cat_int32_t_float_float2
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta',
+                device_type='mps', dtypes=(torch.complex64, torch.complex32)
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                device_type='mps', dtypes=(torch.complex64, torch.complex32)
+            ),
+        ),
     ),
     PythonRefInfo(
         "_refs.broadcast_shapes",
@@ -24864,6 +25543,10 @@ python_ref_db = [
         skips=(
             # FIXME: AssertionError: RuntimeError not raised
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_meta', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps'),
         ),
     ),
     PythonRefInfo(
@@ -25017,6 +25700,17 @@ python_ref_db = [
     PythonRefInfo(
         "_refs.renorm",
         torch_opinfo_name="renorm",
+        skips=(
+            # RuntimeError: norm ops are not supported for complex yet
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', device_type='mps', dtypes=(torch.complex64,)),
+            # Cannot convert a MPS Tensor to float64 dtype as the MPS framework doesn't support float64
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(torch.float16,)),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                device_type='mps', dtypes=(torch.float16,)
+            ),
+        ),
     ),
     PythonRefInfo(
         "_refs.repeat",
@@ -25300,12 +25994,27 @@ python_ref_db = [
                 unittest.skip('Skipped!'), 'TestReductions', 'test_ref_small_input',
                 device_type='xpu',
                 dtypes=[torch.float64]),
+            # Exception: Dtypes torch.float32 and torch.complex64 are not equal!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_dtypes', device_type='mps'),
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(torch.complex64,)),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                device_type='mps', dtypes=(torch.complex64,)
+            ),
         ),
     ),
     # std_mean and var_mean are not ReductionInfos
     PythonRefInfo(
         "_refs.std_mean",
         torch_opinfo_name="std_mean",
+        skips=(
+            # Exception: Dtypes torch.float32 and torch.complex64 are not equal!
+            DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref', device_type='mps', dtypes=(torch.complex64,)),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                device_type='mps', dtypes=(torch.complex64,)
+            ),
+        ),
     ),
     ReductionPythonRefInfo(
         "_refs.sum",
@@ -25412,6 +26121,17 @@ python_ref_db = [
         torch_opinfo_name="addr",
         decorators=(
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref',),
+            # RuntimeError: MPS device does not support addr for non-float input
+            # TypeError: Cannot convert a MPS Tensor to float64 dtype as the MPS
+            # framework doesn't support float64.
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback', device_type='mps',
+                dtypes=(
+                    torch.uint8, torch.int8, torch.int64, torch.int32,
+                    torch.int16, torch.float16, torch.complex64, torch.bool,
+                    torch.bfloat16
+                )
+            ),
         ),
     ),
     PythonRefInfo(
@@ -25616,6 +26336,15 @@ python_ref_db = [
         torch_opinfo_name="masked_fill",
         skips=(
             DecorateInfo(unittest.expectedFailure, 'TestCommon', 'test_python_ref_errors'),
+            # NotImplementedError: "_local_scalar_dense_mps" not implemented for 'ComplexHalf'
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref',
+                device_type='mps', dtypes=(torch.complex32,)
+            ),
+            DecorateInfo(
+                unittest.expectedFailure, 'TestCommon', 'test_python_ref_torch_fallback',
+                device_type='mps', dtypes=(torch.complex32,)
+            ),
         ),
     ),
     PythonRefInfo(
