@@ -485,13 +485,7 @@ def _add_nv_gemm_choices_impl(
         return
     cc_int = int(cc)
 
-    from torch._inductor.codegen.nv_universal_gemm.kernel_cache import (
-        get_kernel_by_name,
-    )
-
     # Get non-EFC kernels for autotuning
-    # EFC kernels cannot be benchmarked without epilogue args, so we only add non-EFC
-    # kernels here. When epilogue fusion is needed, we look up the EFC variant at codegen.
     non_efc_kernels = get_compatible_kernels(
         args, cc_int, metadata_filter=_exclude_efc_kernels
     )
@@ -499,40 +493,36 @@ def _add_nv_gemm_choices_impl(
         log.debug("No compatible %s kernels found", variant.op_name)
         return
 
+    # Get EFC kernels separately for epilogue fusion capability
+    efc_kernels = get_compatible_kernels(
+        args, cc_int, metadata_filter=_include_efc_kernels_only
+    )
+
     max_configs = config.nvgemm_max_profiling_configs or len(non_efc_kernels)
     if variant == GemmVariant.GEMM and mm_inputs is not None:
         heuristics = get_nvgemm_heuristics()
         non_efc_kernels = heuristics.filter_kernels(
             non_efc_kernels, mm_inputs, max_configs, accumulator_type
         )
+        efc_kernels = heuristics.filter_kernels(
+            efc_kernels, mm_inputs, max_configs, accumulator_type
+        )
     else:
         # TODO(nikhilap): Enable heuristics for grouped and scaled GEMMs
         # when nvMatmulHeuristics adds support
         non_efc_kernels = non_efc_kernels[:max_configs]
+        efc_kernels = efc_kernels[:max_configs]
 
-    # Add callers for each non-EFC kernel
-    # Also check if EFC variant exists AND supports the args
+    # Add callers for both non-EFC and EFC kernels
+    # Non-EFC kernels don't support epilogue fusion, EFC kernels do
+    all_kernels = [
+        (kernel, False) for kernel in non_efc_kernels
+    ] + [
+        (kernel, True) for kernel in efc_kernels
+    ]
+
     num_added = 0
-    for kernel in non_efc_kernels:
-        # Check if corresponding EFC kernel exists and supports the args
-        kernel_name = kernel.metadata.kernel_name
-        efc_kernel_name = kernel_name.replace("GemmKernel_", "GemmEFCKernel_")
-        has_efc_variant = False
-        if efc_kernel_name != kernel_name:
-            efc_kernel = get_kernel_by_name(efc_kernel_name)
-            if efc_kernel is not None:
-                # Verify EFC kernel actually supports the args
-                # This guarantees the runtime lookup won't fail
-                status = efc_kernel.supports(args)
-                if status.error is None:
-                    has_efc_variant = True
-                else:
-                    log.debug(
-                        "EFC kernel %s doesn't support args: %s",
-                        efc_kernel_name,
-                        status.error,
-                    )
-
+    for kernel, supports_epilogue_fusion in all_kernels:
         name = f"{variant.op_name}_{next(NVUniversalGemmCaller.index_counter)}"
         workspace_size = kernel.get_workspace_size(args)
         try:
@@ -548,8 +538,7 @@ def _add_nv_gemm_choices_impl(
                 scale_type_b=scale_type_b,
                 swizzle_type_a=swizzle_type_a,
                 swizzle_type_b=swizzle_type_b,
-                # This kernel supports epilogue fusion if its EFC variant exists and supports args
-                supports_epilogue_fusion=has_efc_variant,
+                supports_epilogue_fusion=supports_epilogue_fusion,
             )
             choices.append(caller)
             num_added += 1

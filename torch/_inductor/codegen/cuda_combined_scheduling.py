@@ -232,7 +232,9 @@ class CUDACombinedScheduling(BaseScheduling):
                     return self._nv_universal_gemm_scheduling.generate_kernel_code_from_nodes(
                         nodes, benchmark_kernel
                     )
-                break  # Only check the first template node
+                # A fused node group has at most one template (the GEMM); other nodes
+                # are epilogues. If the first template isn't NVGEMM, fall through to Triton.
+                break
         return self._triton_scheduling.generate_kernel_code_from_nodes(
             nodes, benchmark_kernel, hint_override=hint_override
         )

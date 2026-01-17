@@ -71,11 +71,18 @@ class NVUniversalGemmScheduling(BaseScheduling):
         return False
 
     @staticmethod
-    def get_nv_gemm_buffer_from_node(node: BaseSchedulerNode) -> NVUniversalGemmBuffer:
+    def get_nv_gemm_buffer_from_node(
+        node: BaseSchedulerNode, require_epilogue_fusion: bool = False
+    ) -> NVUniversalGemmBuffer:
         """Extract NVUniversalGemmBuffer from a scheduler node.
 
         Works with both direct NVUniversalGemmBuffer and MultiTemplateBuffer
         whose winning choice is NVGEMM.
+
+        Args:
+            node: The scheduler node to extract from
+            require_epilogue_fusion: If True, select the best EFC kernel (for epilogue fusion)
+                                     instead of the overall winner
         """
         assert isinstance(node, SchedulerNode)
         ir_node = node.node
@@ -83,10 +90,25 @@ class NVUniversalGemmScheduling(BaseScheduling):
         if isinstance(ir_node, NVUniversalGemmBuffer):
             return ir_node
         elif isinstance(ir_node, MultiTemplateBuffer):
-            min_choice, _ = ir_node.get_min_choice()
-            assert isinstance(min_choice, NVUniversalGemmCaller)
+            if require_epilogue_fusion:
+                # Find the best EFC kernel for epilogue fusion
+                choice_timings = ir_node.choice_timings()
+                best_efc_choice = None
+                best_efc_time = float("inf")
+                for choice, timing in choice_timings.items():
+                    if isinstance(choice, NVUniversalGemmCaller) and choice.supports_epilogue_fusion:
+                        if timing < best_efc_time:
+                            best_efc_time = timing
+                            best_efc_choice = choice
+                if best_efc_choice is None:
+                    raise RuntimeError("No EFC kernel found for epilogue fusion")
+                selected_choice = best_efc_choice
+            else:
+                min_choice, _ = ir_node.get_min_choice()
+                assert isinstance(min_choice, NVUniversalGemmCaller)
+                selected_choice = min_choice
             # Get the NVUniversalGemmBuffer from the caller's output_node()
-            tensor_box = min_choice.output_node()
+            tensor_box = selected_choice.output_node()
             return cast(NVUniversalGemmBuffer, tensor_box.data.data)
 
     def is_nv_universal_gemm_fused_template(self, node: BaseSchedulerNode) -> bool:
@@ -142,11 +164,14 @@ class NVUniversalGemmScheduling(BaseScheduling):
         Supports fusion with Pointwise operations wrapped in ComputedBuffer nodes.
         Only EFC (Epilogue Fusion Compatible) kernels support epilogue fusion.
         """
+        print(f"[DEBUG _can_fuse_epilogue_impl] called with node_to_fuse={node_to_fuse.get_name()}")
         # Get the IR buffer (could be NVUniversalGemmBuffer or MultiTemplateBuffer)
         ir_node = gemm_template_node.node
+        print(f"[DEBUG _can_fuse_epilogue_impl] ir_node type={type(ir_node).__name__}")
 
         # Check if the kernel supports epilogue fusion
         if isinstance(ir_node, NVUniversalGemmBuffer):
+            print(f"[DEBUG _can_fuse_epilogue_impl] NVUniversalGemmBuffer: supports_epilogue_fusion={ir_node.supports_epilogue_fusion}")
             if not ir_node.supports_epilogue_fusion:
                 log.debug(
                     "NVGEMM epilogue fusion: kernel %s does not support epilogue fusion",
@@ -154,18 +179,31 @@ class NVUniversalGemmScheduling(BaseScheduling):
                 )
                 return False
         elif isinstance(ir_node, MultiTemplateBuffer):
-            # For MultiTemplateBuffer, check if winning choice supports epilogue
+            # For MultiTemplateBuffer, check if ANY NVGEMM choice supports epilogue fusion.
+            # Unlike Triton (where all kernels support fusion), NVGEMM has both EFC and
+            # non-EFC kernels. The autotuning winner might be non-EFC (faster unfused),
+            # but we still want to attempt fusion if any EFC kernel exists. The actual
+            # fusion benchmarking in speedup_by_fusion will compare fused EFC vs unfused.
             try:
-                min_choice, _ = ir_node.get_min_choice()
-                if isinstance(min_choice, NVUniversalGemmCaller):
-                    if not min_choice.supports_epilogue_fusion:
-                        log.debug(
-                            "NVGEMM epilogue fusion: winning choice %s does not support epilogue fusion",
-                            min_choice.kernel.metadata.kernel_name,
-                        )
-                        return False
+                choice_timings = ir_node.choice_timings()
+                print(f"[DEBUG can_fuse_epilogue] MultiTemplateBuffer: num_choices={len(choice_timings)}")
+                has_efc_choice = False
+                for choice in choice_timings.keys():
+                    is_nvgemm = isinstance(choice, NVUniversalGemmCaller)
+                    supports_efc = getattr(choice, 'supports_epilogue_fusion', False) if is_nvgemm else False
+                    print(f"[DEBUG can_fuse_epilogue]   choice={type(choice).__name__}, is_nvgemm={is_nvgemm}, supports_efc={supports_efc}")
+                    if is_nvgemm and supports_efc:
+                        has_efc_choice = True
+                        break
+                print(f"[DEBUG can_fuse_epilogue] MultiTemplateBuffer: has_efc_choice={has_efc_choice}")
+                if not has_efc_choice:
+                    log.debug(
+                        "NVGEMM epilogue fusion: no EFC kernel available in choices"
+                    )
+                    return False
             except Exception as e:
-                log.debug("NVGEMM epilogue fusion: error checking min_choice: %s", e)
+                print(f"[DEBUG can_fuse_epilogue] EXCEPTION: {type(e).__name__}: {e}")
+                log.debug("NVGEMM epilogue fusion: error checking choices: %s", e)
                 return False
 
         scheduler_nodes_to_fuse = node_to_fuse.get_nodes()
@@ -273,6 +311,7 @@ class NVUniversalGemmScheduling(BaseScheduling):
         If `only_gen_src_code=True` the src code will be returned instead of being
         codegenned into the wrapper (used for benchmarking).
         """
+        print(f"[DEBUG codegen_template] epilogue_nodes={[n.get_name() for n in epilogue_nodes] if epilogue_nodes else []}")
         log.debug(
             "NVGEMM codegen_template: template_node=%s, epilogue_nodes=%s, prologue_nodes=%s",
             template_node,
@@ -295,7 +334,10 @@ class NVUniversalGemmScheduling(BaseScheduling):
         original_buffer_name = original_ir_node.get_name()
 
         # Get the NVUniversalGemmBuffer (extract from MultiTemplateBuffer if needed)
-        ctb: NVUniversalGemmBuffer = self.get_nv_gemm_buffer_from_node(template_node)
+        # When epilogue fusion is requested, select the best EFC kernel instead of overall winner
+        ctb: NVUniversalGemmBuffer = self.get_nv_gemm_buffer_from_node(
+            template_node, require_epilogue_fusion=bool(epilogue_nodes)
+        )
 
         # Process epilogue nodes if present
         epilogue_fn_code: str | None = None

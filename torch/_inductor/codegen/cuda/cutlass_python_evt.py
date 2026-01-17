@@ -308,12 +308,12 @@ class CutlassEVTCodegen(CutlassEVTOpsMixIn):
             for l, r in (zip(left, right))
         )
 
-    def _render_input_signature(self) -> str:
+    def _render_input_signature(self, fn_name: str = "_epilogue_fn") -> str:
         arguments = ", ".join(
             [_ACCUMULATOR_ARG_NAME]
             + [name for name in self.reads if name != self.accumulator_node_name]
         )
-        return f"def fn({arguments}):"
+        return f"def {fn_name}({arguments}):"
 
     def _render_return_statement(self) -> str:
         return_vars = OrderedSet(

@@ -3905,9 +3905,11 @@ class Scheduler:
 
             return (fut, mod)
 
+        print(f"[DEBUG speedup_by_fusion] is_multi_template={is_multi_template}, template_nodes={(node1.get_template_node(), node2.get_template_node())}")
         if is_multi_template and any(
             n.get_template_node() is not None for n in (node1, node2)
         ):
+            print("[DEBUG speedup_by_fusion] Entered MultiTemplateBuffer path")
             epilogue_fusion = node1.get_template_node() is not None
             multi_node = (
                 node1.get_template_node()
@@ -3965,7 +3967,10 @@ class Scheduler:
                 hint_override_best_fusion_choice[hint_override] = ms_fused_choice
 
             # Eagerly compile and benchmark non-template nodes
+            import sys
+            print("[DEBUG] Before choice_timings()", file=sys.stderr)
             choice_timings = multi_node.choice_timings()
+            print(f"[DEBUG] After choice_timings(), got {len(choice_timings)} choices", file=sys.stderr)
             min_choice, ms1 = multi_node.get_min_choice()
 
             # Debug: print all unfused kernel benchmark times
@@ -4009,6 +4014,8 @@ class Scheduler:
                     continue
 
                 # For NVGEMM, only consider choices that support epilogue fusion
+                if is_nvgemm:
+                    print(f"[DEBUG] NVGEMM choice: {choice.name}, supports_epilogue_fusion={choice.supports_epilogue_fusion}")
                 if is_nvgemm and not choice.supports_epilogue_fusion:
                     continue
 
@@ -4116,7 +4123,17 @@ class Scheduler:
                 if bench_epilogue:
                     log_fusion(min_ms_fused, ms1, ms2)
                     # Debug: print benchmark results
-                    print(f"[NVGEMM Epilogue Benchmark] ms_fused={min_ms_fused:.4f}, ms1(gemm)={ms1:.4f}, ms2(epilogue)={ms2:.4f}, sum={ms1+ms2:.4f}, fuse={'YES' if min_ms_fused < (ms1 + ms2) else 'NO'}")
+                    min_choice_name = getattr(min_choice, 'name', str(min_choice))
+                    fused_choice_name = getattr(ms_fused_choice, 'name', str(ms_fused_choice)) if ms_fused_choice else "None"
+                    # Also get the unfused time for the fused choice to compare fairly
+                    unfused_time_of_fused_choice = choice_timings.get(ms_fused_choice, float('inf')) if ms_fused_choice else float('inf')
+                    print(f"\n[NVGEMM Epilogue Benchmark Summary]")
+                    print(f"  ms1 (best unfused GEMM) = {ms1:.4f} ms from kernel: {min_choice_name}")
+                    print(f"  ms2 (epilogue alone)    = {ms2:.4f} ms")
+                    print(f"  ms1 + ms2               = {ms1 + ms2:.4f} ms")
+                    print(f"  ms_fused (best fused)   = {min_ms_fused:.4f} ms from kernel: {fused_choice_name}")
+                    print(f"  unfused time of fused kernel = {unfused_time_of_fused_choice:.4f} ms")
+                    print(f"  Decision: {'FUSE' if min_ms_fused < (ms1 + ms2) else 'NO FUSE'}")
 
                 if (
                     not bench_epilogue or min_ms_fused < (ms1 + ms2)

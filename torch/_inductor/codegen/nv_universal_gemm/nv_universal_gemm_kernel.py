@@ -217,10 +217,11 @@ class NVUniversalGemmKernel(Kernel):
         if self.epilogue_fn_code:
             epilogue_kwargs = self._render_epilogue_kwargs()
             epilogue_import = "from cutlass_api.arguments import EpilogueArguments"
-            epilogue_fn_def = f'_epilogue_fn = """{self.epilogue_fn_code}"""'
+            # Embed epilogue function directly as code (not as a string)
+            epilogue_fn_def = self.epilogue_fn_code
             epilogue_args_construction = f"""
     epi_args = EpilogueArguments(
-        _epilogue_fn,
+        epilogue_fn=_epilogue_fn,
         {epilogue_kwargs}
     )"""
             gemm_epilogue_arg = "epilogue=epi_args,"
@@ -251,22 +252,15 @@ class NVUniversalGemmKernel(Kernel):
         # EFC kernel. The cached kernel from get_kernel_by_name() doesn't work with epilogue
         # because it lacks the epilogue configuration.
         if self.epilogue_fn_code:
-            # Transform kernel name to EFC variant for filtering
-            efc_kernel_name = kernel_name_str.replace("GemmKernel_", "GemmEFCKernel_")
-            kernel_cache_import = ""  # cutlass_api is already imported above
-            # Use get_kernels with epilogue args to get properly configured EFC kernel
-            # Cache the kernel object to avoid repeated lookups
-            kernel_lookup_code = f"""# Get EFC kernel configured for epilogue (cached after first call)
-    global _efc_kernel_cache
-    efc_kernel_name = "{efc_kernel_name}"
-    kernel = _efc_kernel_cache.get(efc_kernel_name)
+            # EFC kernels are directly in choices, so the kernel is already an EFC kernel
+            kernel_cache_import = "from torch._inductor.codegen.nv_universal_gemm.kernel_cache import get_efc_kernel_with_epilogue"
+            # Use get_efc_kernel_with_epilogue for fast O(1) lookup + kernel construction
+            # This avoids the slow get_kernels() call by constructing the kernel directly
+            # with epilogue metadata from the cached base kernel
+            kernel_lookup_code = f"""# Get EFC kernel with epilogue (fast path using cached metadata)
+    kernel = get_efc_kernel_with_epilogue("{kernel_name_str}", epi_args)
     if kernel is None:
-        matching = [k for k in cutlass_api.get_kernels(args, cc=100)
-                    if k.metadata.kernel_name == efc_kernel_name]
-        if not matching:
-            raise RuntimeError(f"Could not find EFC kernel: {{efc_kernel_name}}")
-        kernel = matching[0]
-        _efc_kernel_cache[efc_kernel_name] = kernel"""
+        raise RuntimeError(f"Could not find EFC kernel: {kernel_name_str}")"""
         else:
             kernel_cache_import = "from torch._inductor.codegen.nv_universal_gemm.kernel_cache import get_kernel_by_name"
             kernel_lookup_code = f"""kernel = get_kernel_by_name({kernel_name_var})
@@ -276,10 +270,11 @@ class NVUniversalGemmKernel(Kernel):
         # Generate main body
         if self.epilogue_fn_code:
             # Epilogue case: create epilogue args first, then GEMM args with epilogue
-            # Need _efc_kernel_cache for caching the configured EFC kernel
-            efc_kernel_cache_init = "_efc_kernel_cache = {}"
-            global_decl = f"global {cache_var}, _efc_kernel_cache"
+            # Kernel caching is handled by get_efc_kernel_with_epilogue
+            efc_kernel_cache_init = ""
+            global_decl = f"global {cache_var}"
             main_body = f"""
+    import time as _time
     {epilogue_args_construction}
 
     {preprocess_inputs}
@@ -291,10 +286,18 @@ class NVUniversalGemmKernel(Kernel):
     cache_key = {cache_key_code_with_epilogue}
     artifact = {cache_var}.get(cache_key)
     if artifact is None:
+        _tc0 = _time.perf_counter()
         artifact = kernel.compile(args)
+        _tc1 = _time.perf_counter()
+        print(f"      [Kernel] compile: {{(_tc1-_tc0)*1000:.2f}} ms")
         {cache_var}[cache_key] = artifact
+    else:
+        print(f"      [Kernel] compile: cached")
 
-    kernel.run(args, artifact, stream=stream, workspace={workspace_arg}, assume_supported_args=True)"""
+    _tr0 = _time.perf_counter()
+    kernel.run(args, artifact, stream=stream, workspace={workspace_arg}, assume_supported_args=True)
+    _tr1 = _time.perf_counter()
+    print(f"      [Kernel] run: {{(_tr1-_tr0)*1000:.2f}} ms")"""
         else:
             # Non-epilogue case: standard order
             efc_kernel_cache_init = ""
