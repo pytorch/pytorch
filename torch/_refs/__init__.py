@@ -4921,6 +4921,15 @@ def unsqueeze(a: TensorLikeType, dim: int) -> TensorLikeType:
 # TODO: Turn this into a decomposition (currently fails on reshape meta tests)
 @register_decomposition(aten.view.default)
 def view(a: TensorLikeType, *shape: ShapeType) -> TensorLikeType:
+    from torch._subclasses.fake_impls import (
+        _view_has_unbacked_input,
+        _view_unbacked_meta,
+    )
+
+    if torch.fx.experimental._config.backed_size_oblivious or _view_has_unbacked_input(
+        a, shape
+    ):
+        return _view_unbacked_meta(a, shape)  # type: ignore[return-value]
     return _reshape_view_helper(a, *shape, allow_copy=False)
 
 

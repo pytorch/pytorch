@@ -4803,6 +4803,28 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         # Since both use same symbol, x.size()[0] == y.size()[0] is always True
         self.assertTrue(torch.allclose(result, x2 + y2))
 
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
+    def test_unbacked_view_reshape_no_dde(self):
+        """
+        Test that view/reshape operations on tensors with unbacked dimensions
+        do not raise GuardOnDataDependentSymNode errors.
+        This tests the unbacked handling in the view decomposition via _exec_fft.
+        """
+
+        def func(x):
+            # FFT triggers _exec_fft which calls reshape with unbacked batch dims
+            return torch.fft.fft(x)
+
+        x = torch.rand(4, 8, dtype=torch.complex64)
+        torch._dynamo.decorators.mark_unbacked(x, 0, duck_shape_id="batch")
+
+        torch._dynamo.reset()
+        # This should not raise GuardOnDataDependentSymNode
+        compiled_func = torch.compile(func, fullgraph=True, backend="eager")
+        result = compiled_func(x)
+        expected = torch.fft.fft(x)
+        self.assertTrue(torch.allclose(result, expected))
+
 
 instantiate_parametrized_tests(TestUnbacked)
 
