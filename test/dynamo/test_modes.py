@@ -945,7 +945,7 @@ class outer_fn(torch.nn.Module):
         invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'subgraph_0', x_1);  repeated_subgraph0 = None
         getitem: "f32[3, 3]" = invoke_subgraph[0];  invoke_subgraph = None
         repeated_subgraph1 = self.repeated_subgraph1
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph1, 'subgraph_0', x_1);  repeated_subgraph1 = x_1 = None
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph1, 'subgraph_1', x_1);  repeated_subgraph1 = x_1 = None
         getitem_1: "f32[3, 3]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
         add: "f32[3, 3]" = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
         return add
