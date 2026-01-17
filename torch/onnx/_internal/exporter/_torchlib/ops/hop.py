@@ -369,7 +369,7 @@ def higher_order_invoke_subgraph(
     )
 
     # ONNX Runtime complains about duplicate output names if we don't rename them.
-    # Rename outputs to avoid potential SSA form violations.
+    # But this doesn't seem to be an actual violation of SSA form without renaming.
     for func_out, out in zip(subgraph.outputs, node.outputs):
         out.name = f"{func_out.name}_{subgraph.name}"
 
