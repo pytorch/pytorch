@@ -953,7 +953,7 @@ class DynamoExporterNewOpsetsTest(common_utils.TestCase, _WithExport):
         x = torch.randn(8)
         y = torch.randn(8)
         
-        onnx_program = self.export(InvokeSubgraphModel(), (x, y))
+        onnx_program = self.export(InvokeSubgraphModel(), (x, y), optimize=False)
         onnx_model = onnx_program.model
         
         # Verify that the function is preserved in the ONNX graph
