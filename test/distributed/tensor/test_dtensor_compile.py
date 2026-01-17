@@ -1346,7 +1346,9 @@ def forward(self, primals_1):
         x = torch.randn(4, 4, device="cpu")
 
         # Trace with make_fx
-        traced = make_fx(outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True)(x)
+        traced = make_fx(
+            outer_fn, tracing_mode="fake", _disable_torch_fn_metadata_mode=True
+        )(x)
 
         # Verify the full graph structure including invoke_subgraph
         graph_str = "\n".join(
