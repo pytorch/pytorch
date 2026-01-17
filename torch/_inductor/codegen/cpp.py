@@ -3297,18 +3297,20 @@ class CppVecKernel(CppKernel):
             return f"Welford<{vec_type}>()"
 
         if reduction_type in ("argmin", "argmax"):
-            cdtype = DTYPE_TO_CPP[scalar_type]
+            # For bool argmin/argmax, we use float for computations
+            compute_dtype = torch.float if dtype == torch.bool else scalar_type
+            cdtype = DTYPE_TO_CPP[compute_dtype]
             acc_type = self.reduction_acc_type_vec(reduction_type, dtype)
             if reduction_type == "argmin":
                 val = (
                     f"std::numeric_limits<{cdtype}>::infinity()"
-                    if is_float_dtype(dtype)
+                    if is_float_dtype(dtype) or dtype == torch.bool
                     else f"std::numeric_limits<{cdtype}>::max()"
                 )
             else:
                 val = (
                     f"-std::numeric_limits<{cdtype}>::infinity()"
-                    if is_float_dtype(dtype)
+                    if is_float_dtype(dtype) or dtype == torch.bool
                     else f"std::numeric_limits<{cdtype}>::min()"
                 )
             return f"{acc_type}({val})"
@@ -3329,10 +3331,13 @@ class CppVecKernel(CppKernel):
         if is_welford_reduction(reduction_type):
             return f"Welford<{vec_type}>"
         if reduction_type in ("argmin", "argmax"):
-            n_src = self._get_num_vectors(scalar_type)
             n_idx = self._get_num_vectors(torch.int64)
             if dtype == torch.bool:
+                # For bool argmin/argmax, we use float for computations
+                # so n_src must be computed from float, not bool
+                n_src = self._get_num_vectors(torch.float)
                 return f"IndexValueVec<{DTYPE_TO_CPP[torch.float]}, {n_src}, {n_idx}>"
+            n_src = self._get_num_vectors(scalar_type)
             return f"IndexValueVec<{DTYPE_TO_CPP[scalar_type]}, {n_src}, {n_idx}>"
         if dtype == torch.bool:
             assert reduction_type in ("min", "max", "any", "sum")
@@ -3415,9 +3420,15 @@ class CppVecKernel(CppKernel):
         elif reduction_type in ("argmin", "argmax"):
             assert src_dtype is not None
             cdtype = DTYPE_TO_CPP[src_dtype]
+            compute_dtype = src_dtype
             if src_dtype == torch.bool:
+                # For bool argmin/argmax, we use float for computations
                 cdtype = DTYPE_TO_CPP[torch.float]
-            n_src = self._get_num_vectors(src_dtype)
+                compute_dtype = torch.float
+                # Convert bool VecMask to float vector for argmax_combine_vec
+                if isinstance(next_value, CppCSEVariable) and next_value.is_vec:
+                    (next_value,) = unify_mask_base_type(self.compute, (next_value,))
+            n_src = self._get_num_vectors(compute_dtype)
             n_idx = self._get_num_vectors(torch.int64)
             t_extra = ""
             arg_extra = ""
