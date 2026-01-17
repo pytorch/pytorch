@@ -19263,8 +19263,10 @@ op_db: list[OpInfo] = [
                         # tensor([[-0.0047]], dtype=torch.float64, grad_fn=<CopySlices>)
                         DecorateInfo(unittest.expectedFailure, 'TestFwdGradients', 'test_fn_fwgrad_bwgrad'),
                         # Comparing fp32 CPU grads with fp16 MPS ones leads to high errors
-                        DecorateInfo(unittest.expectedFailure, 'TestConsistency', 'test_output_grad_match',
-                                     device_type='mps', dtypes=(torch.float16,)),
+                        DecorateInfo(toleranceOverride({torch.float16: tol(atol=2e-5, rtol=5e-3)}),
+                                     'TestConsistency', 'test_output_match', device_type='mps'),
+                        DecorateInfo(toleranceOverride({torch.float16: tol(atol=5e-3, rtol=5e-2)}),
+                                     'TestConsistency', 'test_output_grad_match', device_type='mps'),
                     )),
     # TODO(@kshitij12345): Refactor similar to `mvlgamma` entries.
     # To test reference numerics against multiple values of argument `n`,
