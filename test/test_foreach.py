@@ -1704,10 +1704,14 @@ class TestForeach(TestCase):
         torch.complex64,
         torch.complex128,
     )
-    def test_addcmul_0d_tensor_broadcast_noncontiguous(self, device, dtype):
-        """Test addcmul with 0-d tensor broadcast falls back correctly for non-contiguous tensors."""
-        # Create non-contiguous tensors (should go through slow path)
-        shapes = [(20, 30), (10, 10, 10)]
+    def test_addcmul_0d_tensor_broadcast_transposed(self, device, dtype):
+        """Test addcmul with 0-d tensor broadcast and transposed tensors.
+
+        Transposed tensors are non-contiguous but still "non-overlapping and dense",
+        so they should use our FMA broadcast fast path and produce bitwise-identical
+        results to per-tensor add_.
+        """
+        shapes = [(64, 128), (32, 64)]
         tensors_self = [
             make_tensor(shape, device=device, dtype=dtype).transpose(0, 1)
             for shape in shapes
@@ -1721,15 +1725,16 @@ class TestForeach(TestCase):
             for _ in range(len(tensors_self))
         ]
 
-        # Expected: Python for loop
+        # Expected: Python for loop with per-tensor add_ (FMA)
         expected = [t.clone() for t in tensors_self]
         for i in range(len(tensors_self)):
             expected[i].add_(tensors1[i], alpha=scalars_0d[i].item())
 
-        # Actual
+        # Actual: foreach addcmul (should use FMA broadcast path)
         actual = [t.clone() for t in tensors_self]
         torch._foreach_addcmul_(actual, tensors1, scalars_0d, value=1)
 
+        # Bitwise equivalence expected since both use FMA
         self.assertEqual(expected, actual, rtol=0.0, atol=0.0)
 
 
