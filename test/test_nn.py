@@ -8139,6 +8139,18 @@ def _buildEquivalentAffineTransforms3d(device, input_size, output_size, angle_ra
 
 
 class TestNNDeviceType(NNTestCase):
+    def _get_mixed_dtypes(self, device):
+        """Get appropriate mixed dtype pair (param_dtype, input_dtype) for the device.
+        Returns lower precision for params and higher precision for input to test
+        mixed dtype handling without triggering unsupported dtype errors.
+        """
+        if self.device_type == 'mps':
+            # MPS doesn't support float64, use float16/float32 instead
+            return torch.float16, torch.float32
+        else:
+            # Other devices can handle float32 params with float64 input
+            return torch.float32, torch.float64
+
     def _test_InstanceNorm_general(self, cls, input, device, dtype=torch.float):
         # default case track_running_stats=False
         b, c = input.size(0), input.size(1)
@@ -8211,6 +8223,26 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqualTypeString(cudnn_output, input)
             self.assertEqual(cudnn_output, thnn_output, atol=1e-4, rtol=0)
             self.assertEqual(cudnn_input_grad, thnn_input_grad, atol=1e-3, rtol=0)
+
+    def test_InstanceNorm_cuda_mixed_running_stats_dtype(self, device):
+        if self.device_type != "cuda" or not TEST_CUDNN:
+            return
+
+        input = torch.empty(2, 3, 4, device=device, dtype=torch.half).random_(1, 10)
+        input.requires_grad_(True)
+
+        m = nn.InstanceNorm1d(input.size(1), affine=True, track_running_stats=True).to(
+            device, torch.half
+        )
+        m(input).sum().backward()
+
+        input.grad = None
+        m = m.float()
+        m.running_mean = m.running_mean.half()
+        m.running_var = m.running_var.half()
+        output = m(input)
+        output.sum().backward()
+        self.assertEqualTypeString(output, input)
 
     def _test_LayerNorm_general(self, device, dtype=torch.float):
         for i in range(2, 6):
@@ -8291,6 +8323,115 @@ class TestNNDeviceType(NNTestCase):
             self.assertEqual(out_fp32.to(dtype=dtype), out_mix)
             self.assertEqual(x_fp32.grad.to(dtype=dtype), x_bf16.grad, atol=1e-1, rtol=1e-1)
             self.assertEqual(x_fp32.grad.to(dtype=dtype), x_mix.grad, atol=1e-1, rtol=1e-1)
+
+    def test_normalization_mixed_dtype(self, device):
+        """test InstanceNorm2d with mixed dtypes (Issue #139140)
+
+        verifies that InstanceNorm2d works correctly when input dtype differs
+        from layer parameter dtype for running_mean/running_var buffers.
+        """
+        # Get device-appropriate mixed dtypes
+        param_dtype, input_dtype = self._get_mixed_dtypes(device)
+
+        layer = torch.nn.InstanceNorm2d(
+            num_features=5,
+            track_running_stats=True,
+            affine=False,
+            dtype=param_dtype,
+            device=device
+        )
+
+        # store initial running stats
+        initial_running_mean = layer.running_mean.clone()
+        initial_running_var = layer.running_var.clone()
+
+        # create input with higher precision dtype than params
+        input_tensor = torch.randn(2, 5, 10, 10, dtype=input_dtype, device=device)
+
+        # forward pass in training mode
+        layer.train()
+        output = layer(input_tensor)
+
+        # verify output dtype
+        self.assertEqual(output.dtype, input_tensor.dtype,
+                         "Output dtype should match input dtype")
+        self.assertTrue(torch.isfinite(output).all(),
+                        "Output should not contain NaN or Inf")
+
+        # verify running stats are actually updated
+        running_mean_updated = not torch.allclose(layer.running_mean, initial_running_mean)
+        running_var_updated = not torch.allclose(layer.running_var, initial_running_var)
+
+        self.assertTrue(running_mean_updated, "Running mean should be updated")
+        self.assertTrue(running_var_updated, "Running var should be updated")
+
+        # verify running stats maintain their original dtype
+        self.assertEqual(layer.running_mean.dtype, param_dtype,
+                         f"Running mean should maintain {param_dtype} dtype")
+        self.assertEqual(layer.running_var.dtype, param_dtype,
+                         f"Running var should maintain {param_dtype} dtype")
+
+        # test eval mode uses tracked stats correctly
+        layer.eval()
+        output_eval = layer(input_tensor)
+        self.assertEqual(output_eval.dtype, input_tensor.dtype,
+                         "Output dtype should match input in eval mode")
+        self.assertTrue(torch.isfinite(output_eval).all(),
+                        "Eval mode output should not contain NaN or Inf")
+
+        # test multiple forward passes to verify stats accumulation
+        layer = torch.nn.InstanceNorm2d(5, track_running_stats=True, dtype=param_dtype, device=device)
+        layer.train()
+
+        running_means = []
+        for _ in range(3):
+            input_tensor = torch.randn(2, 5, 10, 10, dtype=input_dtype, device=device)
+            output = layer(input_tensor)
+            running_means.append(layer.running_mean.clone())
+
+        # verify running stats change across passes (exponential moving average)
+        self.assertFalse(torch.allclose(running_means[0], running_means[1]),
+                         "Running stats should change between forward passes")
+        self.assertFalse(torch.allclose(running_means[1], running_means[2]),
+                         "Running stats should continue changing across passes")
+
+    @skipIfMPS  # MPS batch_norm doesn't support mixed dtypes, crashes with LLVM error
+    def test_instancenorm_mixed_dtype_backward(self, device):
+        """test backward pass with mixed dtypes for InstanceNorm2d
+
+        verifies that gradients are computed correctly when input dtype differs
+        from layer parameter dtype.
+        """
+        # Get device-appropriate mixed dtypes
+        param_dtype, input_dtype = self._get_mixed_dtypes(device)
+
+        layer = torch.nn.InstanceNorm2d(3, affine=False, dtype=param_dtype, device=device)
+
+        # create input with higher precision dtype than params
+        input_tensor = torch.randn(2, 3, 4, 4, dtype=input_dtype, device=device, requires_grad=True)
+
+        # forward and backward pass
+        layer.train()
+        output = layer(input_tensor)
+        loss = output.sum()
+        loss.backward()
+
+        # verify input gradients
+        self.assertIsNotNone(input_tensor.grad, "Input gradient should be computed")
+        self.assertEqual(input_tensor.grad.dtype, input_dtype,
+                         "Input gradient should match input dtype")
+        self.assertTrue(torch.isfinite(input_tensor.grad).all(),
+                        "Input gradient should not contain NaN or Inf")
+
+        # test that affine=True with mixed dtype errors out (from batch_norm checks)
+        layer = torch.nn.InstanceNorm2d(3, affine=True, dtype=param_dtype, device=device)
+        input_tensor = torch.randn(2, 3, 4, 4, dtype=input_dtype, device=device)
+
+        with self.assertRaisesRegex(
+            RuntimeError,
+            "(mixed dtype|does not match|Expected weight to have type|Expected tensor for argument #1 'input')",
+        ):
+            output = layer(input_tensor)
 
     def _test_GroupNorm_general(self, device, dtype=torch.float):
         good_shape_g = {

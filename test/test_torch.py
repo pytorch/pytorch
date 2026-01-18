@@ -38,7 +38,7 @@ from torch.testing._internal.common_utils import (  # type: ignore[attr-defined]
     MI300_ARCH, TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, run_tests, IS_JETSON,
     IS_FILESYSTEM_UTF8_ENCODING,
     IS_SANDCASTLE, IS_FBCODE, IS_REMOTE_GPU, skipIfRocmArch, skipIfTorchInductor, load_tests, slowTest, slowTestIf,
-    skipIfCrossRef, TEST_WITH_CROSSREF, skipIfTorchDynamo, skipRocmIfTorchInductor, set_default_dtype,
+    skipIfCrossRef, TEST_WITH_CROSSREF, skipIfTorchDynamo, set_default_dtype,
     skipCUDAMemoryLeakCheckIf, BytesIOContext,
     skipIfRocm, skipIfNoSciPy, TemporaryFileName, TemporaryDirectoryName,
     wrapDeterministicFlagAPITest, DeterministicGuard, CudaSyncGuard,
@@ -2255,9 +2255,18 @@ class TestTorchDeviceType(TestCase):
         for x in self._generate_correlation_tensors(device, dtype):
             res = torch.corrcoef(x)
             ref = np.corrcoef(x.cpu().numpy())
-            self.assertEqual(res, ref, atol=1e-04, rtol=1e-03, exact_dtype=False)
+            # complex cov can produce rounding errors, and when the norm factor is 0,
+            # the imag portion of the answer could be +/- inf instead of nan, causing
+            # the numpy answer to differ from the torch answer. We always check the real
+            # part, but only check the imag part if it contains some normal values
+            # (indicating that the norm factor was not 0).
+            if res.is_complex():
+                self.assertEqual(res.real, ref.real, atol=1e-05, rtol=1e-05, exact_dtype=False)
+                if not (torch.isnan(res.imag) | torch.isinf(res.imag)).all():
+                    self.assertEqual(res.imag, ref.imag, atol=1e-05, rtol=1e-05, exact_dtype=False)
+            else:
+                self.assertEqual(res, ref, atol=1e-05, rtol=1e-05, exact_dtype=False)
 
-    @skipRocmIfTorchInductor
     @dtypes(torch.int, torch.float, torch.cfloat)
     def test_cov(self, device, dtype):
         def check(t, correction=1, fweights=None, aweights=None):
@@ -2266,7 +2275,17 @@ class TestTorchDeviceType(TestCase):
             fweights = fweights.cpu().numpy() if fweights is not None else None
             aweights = aweights.cpu().numpy() if aweights is not None else None
             ref = np.cov(t, ddof=correction, fweights=fweights, aweights=aweights)
-            self.assertEqual(res, ref, atol=1e-05, rtol=1e-05, exact_dtype=False)
+            # complex cov can produce rounding errors, and when the norm factor is 0,
+            # the imag portion of the answer could be +/- inf instead of nan, causing
+            # the numpy answer to differ from the torch answer. We always check the real
+            # part, but only check the imag part if it contains some normal values
+            # (indicating that the norm factor was not 0).
+            if res.is_complex():
+                self.assertEqual(res.real, ref.real, atol=1e-05, rtol=1e-05, exact_dtype=False)
+                if not (torch.isnan(res.imag) | torch.isinf(res.imag)).all():
+                    self.assertEqual(res.imag, ref.imag, atol=1e-05, rtol=1e-05, exact_dtype=False)
+            else:
+                self.assertEqual(res, ref, atol=1e-05, rtol=1e-05, exact_dtype=False)
 
         for x in self._generate_correlation_tensors(device, dtype):
             check(x)
