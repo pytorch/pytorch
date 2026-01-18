@@ -4780,22 +4780,20 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
             else:
                 return x - y
 
-        # # Test 1: Without duck_shape_id, comparing unbacked symbols raises DDE
-        # x1 = torch.rand(4, 3)
-        # y1 = torch.rand(4, 3)
-        # torch._dynamo.decorators.mark_unbacked(x1, 0)
-        # torch._dynamo.decorators.mark_unbacked(y1, 0)
+        # Test 1: Without duck_shape_id, comparing unbacked symbols raises DDE
+        x1 = torch.rand(4, 3)
+        y1 = torch.rand(4, 3)
+        torch._dynamo.decorators.mark_unbacked(x1, 0)
+        torch._dynamo.decorators.mark_unbacked(y1, 0)
 
-        # torch._dynamo.reset()
-        # with self.assertRaises(torch._dynamo.exc.UserError):
-        #     compiled_func = torch.compile(func, fullgraph=True, backend="eager")
-        #     compiled_func(x1, y1)
+        torch._dynamo.reset()
+        with self.assertRaises(torch._dynamo.exc.UserError):
+            compiled_func = torch.compile(func, fullgraph=True, backend="eager")
+            compiled_func(x1, y1)
 
         # Test 2: With duck_shape_id, same symbol is used - no DDE, fullgraph succeeds
         x2 = torch.rand(4, 3)
         y2 = torch.rand(4, 3)
-        torch._dynamo.decorators.mark_unbacked(x2, 0, duck_shape_id="batch")
-        torch._dynamo.decorators.mark_unbacked(y2, 0, duck_shape_id="batch")
 
         torch._dynamo.reset()
         compiled_func = torch.compile(func, fullgraph=True, backend="eager")
