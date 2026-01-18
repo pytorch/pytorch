@@ -171,6 +171,9 @@ class InvokeSubgraphHOP(HigherOrderOperator):
 invoke_subgraph = InvokeSubgraphHOP()
 
 
+_invoke_subgraph_infer_counter = 0
+
+
 def invoke_subgraph_infer(
     subgraph: Union[GraphModule, FunctionalizeCtxWrapper],
     *operands,
@@ -182,17 +185,19 @@ def invoke_subgraph_infer(
     The identifier is automatically computed based on the current proxy mode's
     tracer state.
 
-    If no proxy mode is active, the subgraph is called directly.
+    If no proxy mode is active, we still call the HOP to ensure proper dispatch
+    (e.g., FunctionalTensorMode needs to handle FunctionalTensor inputs).
     """
     from torch.fx.experimental.proxy_tensor import get_proxy_mode
 
     proxy_mode = get_proxy_mode()
     if proxy_mode is None:
-        # No tracing active, just call the subgraph directly
-        if getattr(subgraph, "_boxed_call", False):
-            return subgraph(list(operands))
-        else:
-            return subgraph(*operands)
+        # No tracing active, but still go through HOP for proper dispatch
+        global _invoke_subgraph_infer_counter
+        _invoke_subgraph_infer_counter += 1
+        return invoke_subgraph(
+            subgraph, f"invoke_subgraph_infer_{_invoke_subgraph_infer_counter}", *operands
+        )
 
     from torch._dynamo.utils import get_unique_name_wrt
 
