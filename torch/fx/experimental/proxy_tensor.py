@@ -2353,6 +2353,7 @@ class _MakefxTracer:
         record_stack_traces: bool = False,
         parent_tracer: Optional[_MakefxTracer] = None,
         proxy_module_inputs: bool = False,
+        _disable_torch_fn_metadata_mode: bool = False,
     ) -> None:
         # Configurations that are used to initialize the context managers and their states.
         # Should not modify them during tracing.
@@ -2386,6 +2387,7 @@ class _MakefxTracer:
         self.record_stack_traces = record_stack_traces
         self.parent_tracer: Optional[_MakefxTracer] = parent_tracer
         self.proxy_module_inputs = proxy_module_inputs
+        self._disable_torch_fn_metadata_mode = _disable_torch_fn_metadata_mode
 
     def _checkpoint_modes(self) -> list[Any]:
         return [
@@ -2494,7 +2496,8 @@ class _MakefxTracer:
         if self.tracing_mode == "symbolic" or self.pre_dispatch:
             self.python_dispatcher_mode = enable_python_dispatcher()
 
-        self.torch_fn_metadata_mode = TorchFunctionMetadataMode(fx_tracer)
+        if not self._disable_torch_fn_metadata_mode:
+            self.torch_fn_metadata_mode = TorchFunctionMetadataMode(fx_tracer)
         fx_tracer.proxy_module_inputs = self.proxy_module_inputs  # type: ignore[union-attr]
 
     @contextmanager
@@ -2717,6 +2720,7 @@ def make_fx(
     _error_on_data_dependent_ops: bool = True,
     record_stack_traces: bool = False,
     proxy_module_inputs: bool = False,
+    _disable_torch_fn_metadata_mode: bool = False,
 ) -> Callable[..., GraphModule]:
     """
     Given a function f, return a new function which when executed with valid
@@ -2741,6 +2745,7 @@ def make_fx(
         record_stack_traces=record_stack_traces
         or config.trace.provenance_tracking_level == 1,
         proxy_module_inputs=proxy_module_inputs,
+        _disable_torch_fn_metadata_mode=_disable_torch_fn_metadata_mode,
     )
 
     @functools.wraps(f)

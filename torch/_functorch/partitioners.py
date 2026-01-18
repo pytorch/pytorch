@@ -26,6 +26,7 @@ from torch._functorch._activation_checkpointing.ac_logging_utils import (
     create_structured_trace_for_min_cut_info,
 )
 from torch._inductor import config as inductor_config
+from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.utils import is_builtin
 from torch._logging import trace_structured
 from torch._subclasses.fake_tensor import extract_tensor_metadata
@@ -987,10 +988,17 @@ def _extract_fwd_bwd_modules(
     # 1. tensors_saved_with_vc_check_slice - tensors saved via save_for_backward
     # 2. tensors_saved_with_no_vc_check_slice - tensors stashed on ctx without save_for_backward
     # The sort is stable, so the relative order within each group is preserved.
+    #
+    # Additionally, separate out opaque objects (FakeScriptObject) from tensors.
+    # Opaque objects should be placed after tensors in the forward outputs.
     saved_values_with_vc_check = []
     saved_values_no_vc_check = []
+    saved_opaque_objects = []
     for node in saved_values:
-        if node.meta.get("saved_tensor_with_no_vc_check", False):
+        # Check if this is an opaque object
+        if isinstance(node.meta.get("val"), FakeScriptObject):
+            saved_opaque_objects.append(node)
+        elif node.meta.get("saved_tensor_with_no_vc_check", False):
             saved_values_no_vc_check.append(node)
         else:
             saved_values_with_vc_check.append(node)
@@ -1008,17 +1016,19 @@ def _extract_fwd_bwd_modules(
 
     # Now, we re-generate the fwd/bwd graphs.
     # NB: This might increase compilation time, but I doubt it matters
-    # Convention for saved acts is (tensors_with_vc_check, tensors_no_vc_check, symints)
+    # Convention for saved acts is (tensors_with_vc_check, tensors_no_vc_check, opaque_objects, symints)
     fwd_graph = _extract_graph_with_inputs_outputs(
         joint_module.graph,
         primal_inputs + fwd_seed_offset_inputs,
-        fwd_outputs + saved_values + saved_sym_nodes,
+        fwd_outputs + saved_values + saved_opaque_objects + saved_sym_nodes,
         fwd_outputs_descs
         + [
             SavedForBackwardsNoVcCheckAOTOutput(i)
             if i >= no_vc_check_start_idx and i < len(saved_values)
             else SavedForBackwardsAOTOutput(i)
-            for i in range(len(saved_values) + len(saved_sym_nodes))
+            for i in range(
+                len(saved_values) + len(saved_opaque_objects) + len(saved_sym_nodes)
+            )
         ],
         "forward",
     )
@@ -1026,6 +1036,7 @@ def _extract_fwd_bwd_modules(
         joint_module.graph,
         saved_sym_nodes
         + saved_values
+        + saved_opaque_objects
         + tangent_inputs
         + bwd_seed_offset_inputs
         + backward_state_inputs,
@@ -2053,8 +2064,12 @@ def solve_min_cut(
         if is_sym_node(node):
             weight = float(sym_node_size(node))
         elif is_non_tensor_node:
+            # FakeScriptObjects (opaque objects) should have weight 0.0 so they can be
+            # properly partitioned between forward and backward, like BackwardState.
             weight = (
-                0.0 if isinstance(node.meta.get("val"), BackwardState) else math.inf
+                0.0
+                if isinstance(node.meta.get("val"), (BackwardState, FakeScriptObject))
+                else math.inf
             )
         else:
             weight = get_node_weight(node, node_info.static_lifetime_input_nodes)
