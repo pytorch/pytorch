@@ -56,7 +56,11 @@ def gen_structured(g: NativeFunctionsGroup, backend_index: BackendIndex) -> list
     if metadata.dispatch_meta:
         # Get the arguments for the meta function (usually same as impl but without 'out')
         meta_args = structured.meta_arguments(g)
-        meta_decl = f"void meta({', '.join(a.decl() for a in meta_args)});\n"
+        meta_decl = (
+            f"// Alias to the base meta class for easy access to native meta logic\n"
+            f"using base = at::meta::structured_{meta_name};\n"
+            f"void meta({', '.join(a.decl() for a in meta_args)});\n"
+        )
     return [
         f"""\
 struct {prefix}structured_{metadata.kernel} : public at::meta::structured_{meta_name} {{
