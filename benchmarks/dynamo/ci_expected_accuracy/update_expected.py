@@ -21,7 +21,7 @@ import os
 import subprocess
 import sys
 import urllib
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from concurrent.futures import as_completed, ThreadPoolExecutor
 from io import BytesIO
 from itertools import product
 from pathlib import Path
