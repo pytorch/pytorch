@@ -1,5 +1,4 @@
-f# torch.optim
-
+# torch.optim
 ```{eval-rst}
 .. automodule:: torch.optim
 ```
