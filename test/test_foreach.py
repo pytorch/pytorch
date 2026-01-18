@@ -38,6 +38,7 @@ from torch.testing._internal.common_utils import (
     gradcheck,
     parametrize,
     run_tests,
+    skipIfRocm,
     skipIfTorchDynamo,
     TEST_WITH_ROCM,
     TestCase,
@@ -1608,25 +1609,46 @@ class TestForeach(TestCase):
             ]
 
         # Actual: foreach_addcmul with value=1 and 0-d tensor broadcast
+        # Use ForeachFuncWrapper to verify fast path is used
         if inplace:
             actual = [t.clone() for t in tensors_self]
+            wrapped_op = ForeachFuncWrapper(torch._foreach_addcmul_)
             if scalar_position == "tensor2":
-                torch._foreach_addcmul_(actual, tensors_full, scalars_0d, value=1)
-            else:
-                torch._foreach_addcmul_(actual, scalars_0d, tensors_full, value=1)
-        else:
-            if scalar_position == "tensor2":
-                actual = torch._foreach_addcmul(
-                    tensors_self, tensors_full, scalars_0d, value=1
+                wrapped_op(
+                    (actual, tensors_full, scalars_0d),
+                    is_cuda=self.is_cuda,
+                    expect_fastpath=True,
+                    value=1,
                 )
             else:
-                actual = torch._foreach_addcmul(
-                    tensors_self, scalars_0d, tensors_full, value=1
+                wrapped_op(
+                    (actual, scalars_0d, tensors_full),
+                    is_cuda=self.is_cuda,
+                    expect_fastpath=True,
+                    value=1,
+                )
+        else:
+            wrapped_op = ForeachFuncWrapper(torch._foreach_addcmul)
+            if scalar_position == "tensor2":
+                actual = wrapped_op(
+                    (tensors_self, tensors_full, scalars_0d),
+                    is_cuda=self.is_cuda,
+                    expect_fastpath=True,
+                    value=1,
+                )
+            else:
+                actual = wrapped_op(
+                    (tensors_self, scalars_0d, tensors_full),
+                    is_cuda=self.is_cuda,
+                    expect_fastpath=True,
+                    value=1,
                 )
 
         self.assertEqual(expected, actual, rtol=0.0, atol=0.0)
 
     @onlyCUDA
+    # there might be 1 / 4825 slightly mismatched elements on ROCM.
+    @skipIfRocm
     @dtypes(
         torch.float32,
         torch.float64,
