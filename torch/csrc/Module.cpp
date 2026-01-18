@@ -1755,6 +1755,23 @@ static PyObject* THCPModule_ensureCUDADeviceGuardSet(
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
+static PyObject* THPModule_setPrintOptions(PyObject* _unused, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
+  if (!torch_module) throw python_error();
+
+  auto set_printoptions_fn = PyObject_GetAttrString(torch_module.get(), "set_printoptions");
+  if (!set_printoptions_fn) throw python_error();
+
+  auto result = PyObject_Call(set_printoptions_fn, args, kwargs);
+  Py_DECREF(set_printoptions_fn);
+
+  if (!result) throw python_error();
+  Py_DECREF(result);
+
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
 
 static std::initializer_list<PyMethodDef> TorchMethods = {
     {"_initExtension", THPModule_initExtension, METH_O, nullptr},
@@ -2056,7 +2073,7 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      THPModule_has_torch_function_unary,
      METH_O,
      nullptr},
-    {"_has_torch_function_variadic",
+        {"_has_torch_function_variadic",
      reinterpret_cast<PyCFunction>(
          reinterpret_cast<void (*)()>(THPModule_has_torch_function_variadic)),
      METH_FASTCALL,
@@ -2065,7 +2082,12 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
      THCPModule_ensureCUDADeviceGuardSet,
      METH_NOARGS,
      nullptr},
+    {"set_printoptions", 
+     castPyCFunctionWithKeywords(THPModule_setPrintOptions),
+     METH_VARARGS | METH_KEYWORDS, 
+     nullptr},
     {nullptr, nullptr, 0, nullptr}
+
 
 };
 
