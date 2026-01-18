@@ -359,6 +359,7 @@ def create_offsets(offs_box, m1_is_2d, m2_is_2d, m, n, k, alignment):
         end_hint / noffs_hint
     )
     offs[:-1] = (offs[:-1] / alignment).round() * alignment
+    offs = offs.clamp(max=end_hint)  # Ensure non-decreasing up to end_hint
     offs[-1] = end_hint
     return offs.to(dtype=offs_box.get_dtype(), device=offs_box.get_device())
 
