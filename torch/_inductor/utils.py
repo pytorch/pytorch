@@ -2097,16 +2097,12 @@ def use_nv_universal_gemm_template(
         3. We are on a NVIDIA GPU
         4. The dtype is fp16 or bf16
         5. Max autotune or max autotune gemm is enabled
-        6. Not in AOT Inductor mode (requires runtime JIT compilation)
-        7. Base pointers are 16-byte aligned
-        8. Shape dimensions are not unbacked symbols
-
-    Note: Shape and stride constraints are handled internally by
-    cutlass_api.get_kernels() which filters incompatible kernels.
-    Dynamic shapes are supported as long as they have hints (from example inputs).
+        6. We are not using dynamic shapes
+        7. A and B base pointers are 16B aligned
+        8. n and k are divisible by 16
+        9. Non-unit strides are divisible by 16
+        10. Not in AOT Inductor mode (requires runtime JIT compilation)
     """
-    from torch.fx.experimental.symbolic_shapes import has_free_unbacked_symbols
-
     if not ensure_cute_available():
         return False
 
@@ -2131,16 +2127,31 @@ def use_nv_universal_gemm_template(
     if not (config.max_autotune or config.max_autotune_gemm):
         return False
 
-    # cutlass_api can't handle unbacked symbols because it needs to evaluate
-    # shape constraints (e.g., stride divisibility by 8, N/K divisibility by 16).
-    # Unbacked symbols have no hint values, causing GuardOnDataDependentSymNode errors.
-    if any(has_free_unbacked_symbols(dim) for dim in [m, n, k]):
+    # TODO(nikhilap) Enable dynamic shapes
+    if any(is_dynamic(x) for x in [mat_a, mat_b]):
         return False
 
-    # Base pointer must be 16-byte aligned. cutlass_api can't check this at
-    # compile time because it only sees FakeTensors without real data pointers.
     if any(m.get_name() in V.graph.unaligned_buffers for m in [mat_a, mat_b]):
         return False
+
+    # TODO(nikhilap) There is a bug in cutlass_api, their compatibility check does not catch these failure cases
+    if not V.graph.sizevars.statically_known_true(sympy.Eq(n % 16, 0)):
+        return False
+    if not V.graph.sizevars.statically_known_true(sympy.Eq(k % 16, 0)):
+        return False
+
+    a_layout = mat_a.get_layout()
+    b_layout = mat_b.get_layout()
+
+    for stride in a_layout.stride:
+        if stride != 1:
+            if not V.graph.sizevars.statically_known_true(sympy.Eq(stride % 16, 0)):
+                return False
+
+    for stride in b_layout.stride:
+        if stride != 1:
+            if not V.graph.sizevars.statically_known_true(sympy.Eq(stride % 16, 0)):
+                return False
 
     return True
 
