@@ -1729,10 +1729,6 @@ def xfailIfWindows(func):
     return unittest.expectedFailure(func) if IS_WINDOWS else func
 
 
-def xfailIfROCm(func):
-    return unittest.expectedFailure(func) if torch.version.hip is not None else func
-
-
 def skipIfTorchDynamo(msg="test doesn't currently work with dynamo"):
     """
     Usage:

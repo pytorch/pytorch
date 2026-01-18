@@ -84,6 +84,7 @@ if TYPE_CHECKING:
 
     import sympy
 
+    from torch._higher_order_ops.utils import FunctionalizeCtxWrapper
     from torch._ops import OpOverload
     from torch.fx._symbolic_trace import PHBase
     from torch.types import BoolLikeType, FloatLikeType, IntLikeType
@@ -1710,6 +1711,11 @@ class ProxyTorchDispatchMode(TorchDispatchMode):
         # This lets us properly reset the state on exit.
         self.enter_stack: list[Optional[ProxyTorchDispatchMode]] = []
         self.decomp_layers: int = 0
+        # See invoke_subgraph
+        self._invoke_subgraph_names: set[str] = set()
+        self._invoke_subgraph_cache: dict[
+            torch.fx.GraphModule | FunctionalizeCtxWrapper, str
+        ] = {}
         from torch._inductor import config
 
         self.emulate_precision_casts: bool = config.emulate_precision_casts

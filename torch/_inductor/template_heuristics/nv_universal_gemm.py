@@ -122,7 +122,6 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             return kernels[:count]
 
         m, n, k = inputs.mnk_hinted()
-        batch_size = inputs.batch_hinted()
         dtype_a = inputs.dtype(inputs._mat1_idx)
         strides = inputs.strides_hinted()
         layout_a = "row" if strides[inputs._mat1_idx][-1] == 1 else "col"
@@ -144,7 +143,6 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
             count,
             OrderedSet(config_to_kernels.keys()),
             accumulator_type,
-            batch_size,
         )
 
         if not heuristic_configs:
@@ -246,7 +244,6 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
         count: int,
         valid_configs: OrderedSet[ConfigKey],
         accumulator_type: torch.dtype = torch.float32,
-        batch_size: int = 1,
     ) -> list[HeuristicConfig]:
         """
         Get kernel configurations recommended by nvMatmulHeuristics.
@@ -290,9 +287,8 @@ class NVUniversalGemmHeuristics(GemmMaxAutotuneTemplateConfigHeuristics):
 
         lh.loadInternalDiscoverySet(layout, precision=precision)
 
-        problem = lh.makeNvMatmulHeuristicsProblem(
-            m, n, k, layout, batch_size=batch_size
-        )
+        # TODO(nikhilap) support different batch sizes
+        problem = lh.makeNvMatmulHeuristicsProblem(m, n, k, layout, batch_size=1)
         raw_configs = lh.getEx(problem, count, backend, precision=precision)
         lh.destroyBackend(backend)
 
