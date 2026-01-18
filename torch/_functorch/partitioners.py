@@ -2042,13 +2042,38 @@ def solve_min_cut(
 
         if node in node_info.required_bw_nodes:
             if node not in node_info.inputs:
-                nx_graph.add_edge(
-                    node.name + "_in",
-                    "sink",
-                    capacity=math.inf,
-                    reason="must be computed in backward: required for gradient",
-                )
-                continue
+                # For nodes that are ONLY in required_bw_nodes (pure backward nodes),
+                # they must be computed in backward, so we add X_in -> sink.
+                # But for nodes that are ALSO in required_fw_nodes (computed in forward,
+                # needed in backward), they should be saveable. We treat them like inputs
+                # by adding X_out -> sink instead, allowing the cut at X_in -> X_out.
+
+                # Additionally, for getitem nodes from multi-output nodes (like invoke_subgraph),
+                # if the parent node is banned from recomputation, the getitem cannot
+                # be recomputed either and should be saveable.
+                parent_is_banned = False
+                if is_getitem_of_multi_output(node):
+                    parent = node.args[0]
+                    parent_is_banned = parent in banned_nodes
+
+                if node_info.is_required_fw(node) or parent_is_banned:
+                    # Node is computed in forward and needed in backward - saveable
+                    nx_graph.add_edge(
+                        node.name + "_out",
+                        "sink",
+                        capacity=math.inf,
+                        reason="must be available for backward: forward node required for gradient",
+                    )
+                    # Don't continue - let the node get its saveable edge below
+                else:
+                    # Pure backward node - must be computed in backward
+                    nx_graph.add_edge(
+                        node.name + "_in",
+                        "sink",
+                        capacity=math.inf,
+                        reason="must be computed in backward: required for gradient",
+                    )
+                    continue
             # If someone saves a input for backward as-is and backward
             # returns that tensor as-is as a grad input, then the node x would
             # be both a required_bw_node and an input. In this case we

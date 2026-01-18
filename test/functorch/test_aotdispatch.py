@@ -6452,6 +6452,54 @@ def forward(self, primals_1, tangents_1):
         self.assertIsNotNone(data_dep_edge)
         self.assertEqual(data_dep_edge[2], "data dependency")
 
+    @unittest.skipIf(not USE_NETWORKX, "networkx not available")
+    def test_min_cut_partitioner_getitem_of_banned_multi_output(self):
+        """Test that getitem from a banned multi-output node doesn't cause NetworkXUnbounded.
+
+        This traces a joint-like graph where:
+        - An invoke_subgraph returns multiple outputs (tuple)
+        - invoke_subgraph is banned (not in recomputable allowlist)
+        - One getitem is a backward output (in required_bw_nodes but NOT required_fw_nodes)
+
+        Without the fix, this causes NetworkXUnbounded because:
+        - invoke_subgraph can't be recomputed (banned) or saved (tuple has infinite weight)
+        - getitem is forced to backward (X_in -> sink) but can't be recomputed
+        """
+        from torch._higher_order_ops.invoke_subgraph import invoke_subgraph as invoke_subgraph_hop
+
+        # Create subgraph that returns multiple outputs
+        def subgraph_fn(x):
+            y = x.sin()
+            metric = y.sum()
+            return y, metric
+
+        subgraph_gm = make_fx(subgraph_fn)(torch.randn(4))
+
+        # Joint function: forward computation + backward output (metric) + gradient
+        def joint_fn(primals_1, tangents_1):
+            # invoke_subgraph returns tuple - multi-output node
+            result, metric = invoke_subgraph_hop(subgraph_gm, "test_subgraph", primals_1)
+            # Forward output
+            fwd_out = result.cos()
+            # Backward: compute gradient of cos
+            grad = -result.sin() * tangents_1
+            # Return: [fwd_out, metric, grad]
+            # With num_fwd_outputs=1, metric becomes a backward output
+            return fwd_out, metric, grad
+
+        # Trace the joint function
+        primals = torch.randn(4)
+        tangents = torch.randn(4)
+        joint_module = make_fx(joint_fn)(primals, tangents)
+
+        # Call the partitioner with num_fwd_outputs=1
+        # This makes metric (getitem_1) a backward output, triggering the bug
+        fw_module, bw_module = min_cut_rematerialization_partition(
+            joint_module,
+            None,
+            num_fwd_outputs=1,
+        )
+
 
 class TestAOTDispatch(AOTTestCase):
     # Tests to add cases for (non-exhaustive list, mostly for my notes):
