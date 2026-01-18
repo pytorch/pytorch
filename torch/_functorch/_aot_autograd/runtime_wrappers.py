@@ -2242,17 +2242,22 @@ class AOTDispatchAutograd:
             )
             if expected_subclass_got_plain_tensor:
                 raise RuntimeError(
-                    f"Expected a {expected_type.__name__} tangent but got a plain Tensor. "
-                    f"This happens when a compiled function returns multiple outputs that "
-                    f"require gradients, but .backward() is only called on some of them. "
-                    f"To fix: call .detach() on forward outputs you don't need gradients for."
+                    f"""
+During the backward, we encountered a tensor subclass where we guessed its
+metadata incorrectly.
+Expected a {expected_type.__name__} tangent but got a plain Tensor.
+This happens when a compiled function returns multiple outputs that
+require gradients, but .backward() is only called on some of them.
+To fix: call .detach() on forward outputs you don't need gradients for."""
                 )
             else:
                 raise RuntimeError(
-                    f"Tangent metadata mismatch during backward. "
-                    f"Expected: {expected_meta} (type {expected_type}), "
-                    f"got: {runtime_meta} (type {runtime_type}), shape: {orig_x.shape}. "
-                    f"Your tensor subclass must implement __coerce_same_metadata_as_tangent__."
+                    f"""
+During the backward, we encountered a tensor subclass where we guessed its
+metadata incorrectly.
+Expected: {expected_meta} (type {expected_type}),
+got: {runtime_meta} (type {runtime_type}), shape: {orig_x.shape}.
+Your tensor subclass must implement __coerce_same_metadata_as_tangent__."""
                 )
 
         # Coerce to expected memory format
