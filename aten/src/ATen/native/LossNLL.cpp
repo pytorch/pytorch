@@ -312,8 +312,23 @@ void nll_loss_forward_out_cpu_template(
   const auto input_dtype = input.scalar_type();
   const bool is_half_precision = (input_dtype == ScalarType::Half || input_dtype == ScalarType::BFloat16);
 
-  // Fast path for FP32 or reduction='none' (common case)
-  if (C10_LIKELY(!is_half_precision || reduction == Reduction::None)) {
+  // Fast path for FP32/FP64 (common case)
+  if (C10_LIKELY(!is_half_precision)) {
+    AT_DISPATCH_FLOATING_TYPES(
+        input_dtype, "nll_loss_out_frame", [&] {
+          if (target.scalar_type() == kByte) {
+            nll_loss_out_frame<scalar_t, uint8_t>(
+                output, total_weight, input, target, weight, reduction, ignore_index);
+          } else {
+            nll_loss_out_frame<scalar_t, int64_t>(
+                output, total_weight, input, target, weight, reduction, ignore_index);
+          }
+        });
+    return;
+  }
+
+  // FP16/BF16 with reduction='none'
+  if (C10_LIKELY(reduction == Reduction::None)) {
     AT_DISPATCH_FLOATING_TYPES_AND2(
         ScalarType::BFloat16, ScalarType::Half, input_dtype, "nll_loss_out_frame", [&] {
           if (target.scalar_type() == kByte) {
@@ -336,8 +351,8 @@ void nll_loss_forward_out_cpu_template(
 
   // Compute unreduced loss in native precision
   auto output_unreduced = at::empty_like(input.select(-1, 0));
-  AT_DISPATCH_FLOATING_TYPES_AND2(
-      ScalarType::BFloat16, ScalarType::Half, input_dtype, "nll_loss_out_frame", [&] {
+  AT_DISPATCH_REDUCED_FLOATING_TYPES(
+      input_dtype, "nll_loss_out_frame", [&] {
         if (target.scalar_type() == kByte) {
           nll_loss_out_frame<scalar_t, uint8_t>(
               output_unreduced, total_weight, input, target, weight_for_loss,
