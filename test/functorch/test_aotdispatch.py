@@ -6372,10 +6372,10 @@ def forward(self, primals_1, tangents_1):
     def test_min_cut_partitioner_unbounded_error_message(self):
         """Test that NetworkXUnbounded errors produce user-friendly error messages."""
         import math
+
         import networkx as nx
-        from torch._functorch.partitioners import (
-            _find_infinite_capacity_path,
-        )
+
+        from torch._functorch.partitioners import _find_infinite_capacity_path
 
         # Test 1: Verify _find_infinite_capacity_path finds a path with edge reasons
         nx_graph = nx.DiGraph()

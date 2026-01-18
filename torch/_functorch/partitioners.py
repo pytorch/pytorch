@@ -29,6 +29,7 @@ from torch._inductor import config as inductor_config
 from torch._library.fake_class_registry import FakeScriptObject
 from torch._library.utils import is_builtin
 from torch._logging import trace_structured
+from torch._logging._internal import trace_log
 from torch._subclasses.fake_tensor import extract_tensor_metadata
 from torch.fx.experimental._backward_state import BackwardState
 from torch.fx.experimental.proxy_tensor import is_sym_node, py_sym_types
@@ -1963,12 +1964,19 @@ def solve_min_cut(
 
         return not all(is_fusible(node, user) for user in node.users)
 
-    def get_node_weight(node, static_lifetime_input_nodes) -> float:
+    def get_node_weight(
+        node, static_lifetime_input_nodes
+    ) -> tuple[float, Optional[str]]:
+        """Returns (weight, cannot_save_reason).
+
+        cannot_save_reason is None for finite weights, or a string explaining
+        why the node cannot be saved for infinite weights.
+        """
         if (
             config.treat_parameters_as_free_to_save
             and node in static_lifetime_input_nodes
         ):
-            return 0
+            return 0, None
         mem_sz = _size_of(node)
         if config.recompute_views and op_types.is_view(node):
             # If `config.recompute_views=True`, we don't save views. This is generally
@@ -1978,20 +1986,20 @@ def solve_min_cut(
             # think we should modify checks for view_ops to `is_view` and check
             # that. Basically, with nested tensors, `aten.view` is not a "view
             # op".
-            return math.inf
+            return math.inf, "view op (recompute_views=True)"
 
         if isinstance(node.meta["val"], py_sym_types):
             # We never want to save symfloats
             if not isinstance(node.meta["val"], torch.SymInt):
-                return INT_INF
+                return INT_INF, "SymFloat (non-SymInt symbolic value)"
 
         # Heuristic to bias towards nodes closer to the backwards pass
         # Complete guess about current value
         mem_sz = int(mem_sz * (1.1 ** max(min(node.dist_from_bw, 100), 1)))
         if is_materialized(node):
-            return mem_sz
+            return mem_sz, None
         else:
-            return mem_sz * 2
+            return mem_sz * 2, None
 
     nx_graph = nx.DiGraph()
     banned_nodes: OrderedSet[fx.Node] = OrderedSet()
@@ -2099,17 +2107,9 @@ def solve_min_cut(
                 weight = math.inf
                 cannot_save_reason = "non-tensor output"
         else:
-            weight = get_node_weight(node, node_info.static_lifetime_input_nodes)
-            # Check for specific reasons why saving is banned
-            if weight == math.inf:
-                if config.recompute_views and op_types.is_view(node):
-                    cannot_save_reason = "view op (recompute_views=True)"
-                else:
-                    cannot_save_reason = "cannot save"
-            elif weight == INT_INF:
-                cannot_save_reason = "SymFloat (non-SymInt symbolic value)"
-            else:
-                cannot_save_reason = None
+            weight, cannot_save_reason = get_node_weight(
+                node, node_info.static_lifetime_input_nodes
+            )
 
         # Creates the weights on the "node" edge
         if cannot_save_reason and (weight == math.inf or weight == INT_INF):
@@ -2254,8 +2254,12 @@ def solve_min_cut(
     try:
         cut_value, partition = nx.minimum_cut(nx_graph, "source", "sink")
     except nx.NetworkXUnbounded:
-        # Dump the FX graph to a file for debugging
-        fx_graph_file = "min_cut_failed_graph.txt"
+        # Check if structured tracing is enabled (for production job debugging via tlparse)
+        structured_tracing_enabled = bool(trace_log.handlers)
+
+        # Dump the FX graph for debugging
+        fx_graph_file: Optional[str] = None
+        fx_graph_str: Optional[str] = None
         joint_module = joint_graph.owning_module
         try:
             fx_graph_str = (
@@ -2265,10 +2269,32 @@ def solve_min_cut(
                 if joint_module
                 else str(joint_graph)
             )
+            # Always log to structured trace for production debugging
+            trace_structured(
+                "artifact",
+                metadata_fn=lambda: {
+                    "name": "min_cut_failed_fx_graph",
+                    "encoding": "string",
+                },
+                payload_fn=lambda: fx_graph_str,
+            )
+            # Also write to local file for local debugging
+            fx_graph_file = _get_unique_path("min_cut_failed_graph", ".txt")
             with open(fx_graph_file, "w") as f:
                 f.write(fx_graph_str)
         except Exception as e:
             fx_graph_file = f"(failed to write: {e})"
+
+        # Dump the min-cut edge list to structured trace
+        edge_list_str = "\n".join(nx.readwrite.edgelist.generate_edgelist(nx_graph))
+        trace_structured(
+            "artifact",
+            metadata_fn=lambda: {
+                "name": "min_cut_failed_edge_list",
+                "encoding": "string",
+            },
+            payload_fn=lambda: edge_list_str,
+        )
 
         # Find and report the infinite-capacity path
         inf_path = _find_infinite_capacity_path(nx_graph)
@@ -2326,13 +2352,32 @@ def solve_min_cut(
             constraints_str = "\n".join(constraint_lines)
             raw_path_str = " -> ".join(raw_path_nodes)
 
-            # Try to visualize
-            svg_saved = visualize_min_cut_graph(nx_graph)
-            svg_msg = (
-                "Min-cut graph visualization: min_cut_failed.svg\n"
-                if svg_saved
-                else ""
+            # Try to visualize (logs to structured trace and writes local file)
+            svg_path, svg_content = visualize_min_cut_graph(nx_graph)
+            if svg_content:
+                trace_structured(
+                    "artifact",
+                    metadata_fn=lambda: {
+                        "name": "min_cut_failed_svg",
+                        "encoding": "string",
+                    },
+                    payload_fn=lambda: svg_content,
+                )
+
+            # Build file location messages
+            local_files_msg = (
+                f"FX graph dump: {fx_graph_file}\n" if fx_graph_file else ""
             )
+            if svg_path:
+                local_files_msg += f"Min-cut graph visualization: {svg_path}\n"
+
+            # Suggest tlparse if structured tracing is enabled
+            tlparse_msg = ""
+            if structured_tracing_enabled:
+                tlparse_msg = (
+                    "[Production debugging: Use tlparse to extract debug artifacts "
+                    "(min_cut_failed_fx_graph, min_cut_failed_edge_list, min_cut_failed_svg)]\n"
+                )
 
             raise RuntimeError(
                 f"AOT Autograd failed to partition the joint forward-backward graph.\n\n"
@@ -2346,8 +2391,8 @@ def solve_min_cut(
                 f"[For PyTorch developers: one of the above constraints is wrong. "
                 f"Either the node should be recomputable, saveable, or not required for backward.]\n\n"
                 f"[Debug: min-cut path] {raw_path_str}\n"
-                f"FX graph dump: {fx_graph_file}\n"
-                f"{svg_msg}"
+                f"{local_files_msg}"
+                f"{tlparse_msg}"
             ) from None
 
         # Fallback if we couldn't find the path
@@ -2391,7 +2436,7 @@ def _find_infinite_capacity_path(
     """
     from collections import deque
 
-    visited = {"source"}
+    visited = OrderedSet(["source"])
     # Each queue item: (current_node, path_of_edges)
     # where path_of_edges is a list of (from_node, to_node, reason) tuples
     queue: deque[tuple[str, list[tuple[str, str, str]]]] = deque([("source", [])])
@@ -2415,17 +2460,34 @@ def _find_infinite_capacity_path(
     return None
 
 
-def visualize_min_cut_graph(nx_graph) -> bool:
+def _get_unique_path(base_name: str, extension: str) -> str:
+    """Get a unique file path, appending a counter if the file already exists.
+
+    For example, if "min_cut_failed.svg" exists, returns "min_cut_failed_1.svg".
+    """
+    import os
+
+    path = f"{base_name}{extension}"
+    if not os.path.exists(path):
+        return path
+
+    counter = 1
+    while os.path.exists(f"{base_name}_{counter}{extension}"):
+        counter += 1
+    return f"{base_name}_{counter}{extension}"
+
+
+def visualize_min_cut_graph(nx_graph) -> tuple[Optional[str], Optional[str]]:
     """Visualize the min-cut graph to an SVG file.
 
-    Returns True if visualization was successful, False otherwise.
+    Returns (path_to_svg, svg_content) tuple. Both are None if pydot is unavailable.
     """
     import networkx as nx
 
     try:
         import pydot
     except ImportError:
-        return False
+        return None, None
 
     dot_format = nx.nx_pydot.to_pydot(nx_graph).to_string()
     dot_graph = pydot.graph_from_dot_data(dot_format)[0]  # type: ignore[index]
@@ -2436,8 +2498,16 @@ def visualize_min_cut_graph(nx_graph) -> bool:
         # Color edges with weight 'inf' as red
         if weight == float("inf"):
             edge.set_color("red")  # type: ignore[union-attr]
-    dot_graph.write_svg("min_cut_failed.svg")  # type: ignore[union-attr]
-    return True
+
+    # Generate SVG content
+    svg_content = dot_graph.create_svg().decode("utf-8")  # type: ignore[union-attr]
+
+    # Write to local file
+    svg_path = _get_unique_path("min_cut_failed", ".svg")
+    with open(svg_path, "w") as f:
+        f.write(svg_content)
+
+    return svg_path, svg_content
 
 
 def get_default_op_list() -> OpTypes:
