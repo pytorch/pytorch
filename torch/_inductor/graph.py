@@ -323,7 +323,9 @@ def is_mkldnn_conv(node: Node) -> bool:
     # When mkldnn_fusion is enabled, conv will be replaced by the lowering pattern function.
     # See _register_unary_fusion_lowering in torch/_inductor/fx_passes/mkldnn_fusion.py.
     if (
-        isinstance(node.target, functools.partial)
+        getattr(torch.ops, "mkldnn", None) is not None
+        and getattr(torch.ops.mkldnn, "_convolution_pointwise", None) is not None
+        and isinstance(node.target, functools.partial)
         and len(node.target.args) > 0
         and hasattr(node.target.args[0], "targets")
     ):
@@ -692,13 +694,9 @@ class GraphLowering(torch.fx.Interpreter):
             n for n in gm.graph.nodes if n.target is torch.ops.aten.convolution.default
         ]
 
-        if (
-            getattr(torch.ops, "mkldnn", None) is not None
-            and getattr(torch.ops.mkldnn, "_convolution_pointwise", None) is not None
-        ):
-            for n in gm.graph.nodes:
-                if is_mkldnn_conv(n):
-                    conv_nodes.append(n)
+        for n in gm.graph.nodes:
+            if is_mkldnn_conv(n):
+                conv_nodes.append(n)
 
         nconv = len(conv_nodes)
 
@@ -904,12 +902,7 @@ class GraphLowering(torch.fx.Interpreter):
                 continue
             if n.target in nodes_cannot_propagate:
                 continue
-            if (
-                getattr(torch.ops, "mkldnn", None) is not None
-                and getattr(torch.ops.mkldnn, "_convolution_pointwise", None)
-                is not None
-                and is_mkldnn_conv(n)
-            ):
+            if is_mkldnn_conv(n):
                 output_set.add(n)
                 continue
             for user in n.users:
@@ -1953,10 +1946,13 @@ class GraphLowering(torch.fx.Interpreter):
                         if isinstance(result.data.data, (Pointwise, Reduction)):
                             result.realize()
 
-                data = result.data  # type: ignore[attr-defined]
-                while hasattr(data, "data") and not isinstance(data, StorageBox):
-                    data = data.data
-                if isinstance(data, StorageBox) and data.should_realize_on_reuse(
+                _data = result.data  # type: ignore[attr-defined]
+                while not isinstance(_data, StorageBox) and isinstance(
+                    _data, (ir.BaseView, ir.MutableBox)
+                ):
+                    _data = _data.data
+
+                if isinstance(_data, StorageBox) and _data.should_realize_on_reuse(
                     len(n.users)
                 ):
                     result = maybe_apply_channels_last_stride_order(result, n)
