@@ -1997,6 +1997,58 @@ def forward(self, L_x_ : torch.Tensor):
         result.backward(grad_o)
         self.assertEqual(x2.grad, grad_o * 1.5)
 
+    def test_invoke_subgraph(self):
+        @torch.compiler.nested_compile_region
+        def fn(scale_obj, x):
+            result = torch.ops._TestOpaqueObject.mul_with_scale(scale_obj, x)
+            result = result * 2
+            return result
+
+        def gn(scale_obj, x):
+            z = fn(scale_obj, x)
+            return z + z
+
+        scale_obj = OpaqueMultiplier(3.0)
+        x = torch.randn(2, 2, requires_grad=True)
+        x_clone = x.detach().clone().requires_grad_(True)
+
+        ref = gn(scale_obj, x_clone)
+        ref.sum().backward()
+
+        backend = AotEagerAndRecordGraphs()
+        opt_outer = torch.compile(gn, fullgraph=True, backend=backend)
+        res = opt_outer(scale_obj, x)
+        res.sum().backward()
+
+        actual = normalize_gm(backend.graphs[0].print_readable(print_output=False))
+        fx_class = _illegal_char_regex.sub("_", get_opaque_type_name(OpaqueMultiplier))
+        self.assertExpectedInline(
+            actual,
+            f"""\
+class GraphModule(torch.nn.Module):
+    def forward(self, L_scale_obj_ : {fx_class}, L_x_: "f32[2, 2]"):
+        l_scale_obj_ = L_scale_obj_
+        l_x_ = L_x_
+
+        subgraph_0 = self.subgraph_0
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(subgraph_0, 'subgraph_0', l_scale_obj_, l_x_);  subgraph_0 = l_scale_obj_ = l_x_ = None
+        getitem_2: "f32[2, 2]" = invoke_subgraph[0];  invoke_subgraph = None
+
+        add: "f32[2, 2]" = getitem_2 + getitem_2;  getitem_2 = None
+        return (add,)
+
+    class subgraph_0(torch.nn.Module):
+        def forward(self, l_scale_obj_ : {fx_class}, l_x_: "f32[2, 2]"):
+            result: "f32[2, 2]" = torch.ops._TestOpaqueObject.mul_with_scale(l_scale_obj_, l_x_);  l_scale_obj_ = l_x_ = None
+
+            result_1: "f32[2, 2]" = result * 2;  result = None
+            return (result_1,)
+""",  # noqa: B950
+        )
+
+        self.assertEqual(ref, res)
+        self.assertEqual(ref.grad, res.grad)
+
 
 instantiate_parametrized_tests(TestOpaqueObject)
 
