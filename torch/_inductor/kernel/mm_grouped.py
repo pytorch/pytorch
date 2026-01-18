@@ -26,6 +26,7 @@ from ..utils import (
     has_free_symbols,
     use_aten_gemm_kernels,
     use_blackwell_cutedsl_grouped_mm,
+    use_gluon_template,
     use_triton_template,
 )
 from .mm_common import (
@@ -315,16 +316,6 @@ def can_use_gluon_kernel(
     bias: Optional[TensorBox],
     scale_result: Optional[TensorBox],
 ) -> bool:
-    import torch._inductor.config as config
-
-    from ..utils import _use_autotune_backend
-
-    if not (config.max_autotune or config.max_autotune_gemm):
-        return False
-
-    if not _use_autotune_backend("GLUON"):
-        return False
-
     if not torch.cuda.is_available() or torch.version.hip:
         return False
 
@@ -530,7 +521,11 @@ def _tuned_grouped_mm_common(
                 **asdict(config),
             )
 
-    if can_use_gluon_kernel(mat_a, mat_b, offs, bias, scale_result):
+    if (
+        is_nonzero
+        and use_gluon_template(layout)
+        and can_use_gluon_kernel(mat_a, mat_b, offs, bias, scale_result)
+    ):
         use_ragged_tensor_descriptor = a_is_2d and not b_is_2d
         if use_ragged_tensor_descriptor:
             has_ragged_tma = False

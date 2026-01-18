@@ -1769,6 +1769,7 @@ def use_triton_template(
     enable_int32: bool = False,
     enable_float8: bool = False,
     check_max_autotune: bool = True,
+    backend: str = "TRITON",
 ) -> bool:
     from .codegen.common import BackendFeature, has_backend_feature
 
@@ -1777,6 +1778,13 @@ def use_triton_template(
         layout_dtypes = [torch.float16, torch.bfloat16, torch.float32, torch.int32]
     if enable_float8:
         layout_dtypes.extend([torch.float8_e4m3fn, torch.float8_e5m2])
+    backend_upper = backend.upper()
+    if backend_upper == "TRITON":
+        template_feature = BackendFeature.TRITON_TEMPLATES
+    elif backend_upper == "GLUON":
+        template_feature = BackendFeature.GLUON_TEMPLATES
+    else:
+        raise ValueError(f"Unknown template backend: {backend}")
     return (
         (
             (
@@ -1787,9 +1795,12 @@ def use_triton_template(
         )
         # some callers handle max-autotune checking externally
         and (config.max_autotune or config.max_autotune_gemm or not check_max_autotune)
-        and _use_autotune_backend("TRITON")
-        and has_backend_feature(layout.device, BackendFeature.TRITON_TEMPLATES)
+        and _use_autotune_backend(backend_upper)
+        and has_backend_feature(layout.device, template_feature)
     )
+
+
+use_gluon_template = functools.partial(use_triton_template, backend="GLUON")
 
 
 def can_use_tma(

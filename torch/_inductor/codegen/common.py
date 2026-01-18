@@ -441,6 +441,7 @@ class BackendFeature(Enum):
     TUPLE_REDUCTION = auto()
     PREFER_STORE_LOOP_ORDER = auto()
     TRITON_TEMPLATES = auto()
+    GLUON_TEMPLATES = auto()
     REDUCE_TO_SINGLE_ELEMENT = auto()
 
 
