@@ -1607,9 +1607,9 @@ class DeviceCachingAllocator {
               reserved_bytes - allocated_bytes - allocated_in_private_pools),
           " is reserved by PyTorch but unallocated.",
           " If reserved but unallocated memory is large try setting",
-          " PYTORCH_CUDA_ALLOC_CONF=expandable_segments:True to avoid"
+          " PYTORCH_ALLOC_CONF=expandable_segments:True to avoid"
           " fragmentation.  See documentation for Memory Management "
-          " (https://docs.pytorch.org/docs/stable/notes/cuda.html#optimizing-memory-usage-with-pytorch-cuda-alloc-conf)");
+          " (https://pytorch.org/docs/stable/notes/cuda.html#environment-variables)");
     }
 
     bool split_remainder = should_split(
@@ -2829,9 +2829,7 @@ class DeviceCachingAllocator {
         return c;
       }
     }
-    auto segment_size = pool->is_small
-        ? kSmallBuffer
-        : AcceleratorAllocatorConfig::large_segment_size();
+    auto segment_size = pool->is_small ? kSmallBuffer : kLargeBuffer;
     expandable_segments_.emplace_back(new ExpandableSegment(
         device, stream, segment_size, devices_with_peer_access_));
 
@@ -3116,7 +3114,7 @@ class DeviceCachingAllocator {
     if (size <= kSmallSize) {
       return kSmallBuffer;
     } else if (size < kMinLargeAlloc) {
-      return AcceleratorAllocatorConfig::large_segment_size();
+      return kLargeBuffer;
     } else {
       return kRoundLarge * ((size + kRoundLarge - 1) / kRoundLarge);
     }
