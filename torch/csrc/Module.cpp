@@ -1880,6 +1880,23 @@ static PyObject* THCPModule_ensureCUDADeviceGuardSet(
   Py_RETURN_NONE;
   END_HANDLE_TH_ERRORS
 }
+static PyObject* THPModule_setPrintOptions(PyObject* _unused, PyObject* args, PyObject* kwargs) {
+  HANDLE_TH_ERRORS
+  auto torch_module = THPObjectPtr(PyImport_ImportModule("torch"));
+  if (!torch_module) throw python_error();
+  
+  auto set_printoptions_fn = PyObject_GetAttrString(torch_module.get(), "set_printoptions");
+  if (!set_printoptions_fn) throw python_error();
+  
+  auto result = PyObject_Call(set_printoptions_fn, args, kwargs);
+  Py_DECREF(set_printoptions_fn);
+  
+  if (!result) throw python_error();
+  Py_DECREF(result);
+  
+  Py_RETURN_NONE;
+  END_HANDLE_TH_ERRORS
+}
 
 struct TorchModuleState {
   PyObject* log_api_usage_seen; // dict used by _log_api_usage_once
@@ -2266,9 +2283,13 @@ static std::initializer_list<PyMethodDef> TorchMethods = {
          reinterpret_cast<void (*)()>(THPModule_has_torch_function_variadic)),
      METH_FASTCALL,
      nullptr},
-    {"_ensureCUDADeviceGuardSet",
+        {"_ensureCUDADeviceGuardSet",
      THCPModule_ensureCUDADeviceGuardSet,
      METH_NOARGS,
+     nullptr},
+    {"set_printoptions", 
+     castPyCFunctionWithKeywords(THPModule_setPrintOptions),
+     METH_VARARGS | METH_KEYWORDS, 
      nullptr},
     {nullptr, nullptr, 0, nullptr}
 
@@ -3123,6 +3144,7 @@ Call this whenever a new thread is created in order to propagate values from
     std::cout << "Included: " << toString(local_keyset.included_) << '\n';
     std::cout << "Excluded: " << toString(local_keyset.excluded_) << '\n';
   });
+  
 
   py_module.def(
       "_should_allow_numbers_as_tensors", [](const std::string& name) {
