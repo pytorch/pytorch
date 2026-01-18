@@ -149,6 +149,52 @@ def torchscript(
     return torch.jit.script(gm)
 
 
+def invoke_subgraph_inner_compiler(
+    subgraph: torch.fx.GraphModule, example_inputs: list[torch.Tensor]
+) -> Callable[..., Any]:
+    """Inner compiler that wraps forward/backward graphs in invoke_subgraph HOP.
+
+    This is used as the fw_compiler/bw_compiler for aot_autograd. When the resulting
+    function is traced by make_fx, it emits an invoke_subgraph HOP instead of inlining.
+    """
+    from torch._dynamo import disable
+    from torch._higher_order_ops.invoke_subgraph import invoke_subgraph_infer
+
+    @disable
+    @torch._dynamo.allow_in_graph
+    def invoke_subgraph_wrapper(*operands: Any) -> Any:
+        return invoke_subgraph_infer(subgraph, *operands)
+
+    return invoke_subgraph_wrapper
+
+
+@register_backend
+def invoke_subgraph(
+    gm: torch.fx.GraphModule, fake_tensor_inputs: list[torch.Tensor], **kwargs: Any
+) -> Callable[..., Any]:
+    """Backend that wraps forward/backward graphs in invoke_subgraph HOP when traced by make_fx.
+
+    This backend uses AOTAutograd to partition into forward/backward graphs, then wraps
+    each in an invoke_subgraph HOP. This is useful for recursive Dynamo tracing scenarios
+    where you want the compiled subgraph to appear as invoke_subgraph HOPs in the outer
+    trace rather than being inlined.
+
+    Requires:
+    - torch._dynamo.config.force_compile_during_fx_trace = True
+      (this implicitly overrides error_on_nested_fx_trace)
+    """
+    if kwargs:
+        log.warning("invoke_subgraph backend ignoring extra kwargs %s", kwargs)
+
+    # Use AOTAutograd to partition into forward/backward
+    return aot_autograd(
+        fw_compiler=invoke_subgraph_inner_compiler,
+        bw_compiler=invoke_subgraph_inner_compiler,
+        partition_fn=min_cut_rematerialization_partition,
+        keep_inference_input_mutations=True,
+    )(gm, fake_tensor_inputs)
+
+
 # used boxed call to discard inputs when they are no longer needed
 def boxed_nop(
     fx_g: torch.fx.GraphModule, example_inputs: list[torch.Tensor]

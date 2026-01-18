@@ -2229,7 +2229,14 @@ def solve_min_cut(
 
 def visualize_min_cut_graph(nx_graph):
     import networkx as nx
-    import pydot
+
+    try:
+        import pydot
+    except ImportError:
+        log.info(
+            "Install pydot to visualize the min-cut graph for debugging: pip install pydot"
+        )
+        return
 
     dot_format = nx.nx_pydot.to_pydot(nx_graph).to_string()
     dot_graph = pydot.graph_from_dot_data(dot_format)[0]  # type: ignore[index]
