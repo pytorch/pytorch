@@ -506,12 +506,8 @@ struct PointwiseOpScalarListFunctor {
 // The 0D tensor1 value is loaded from device memory once and used as a scalar.
 // Computes: input + alpha * tensor1_val * tensor2 (for addcmul with
 // std::multiplies) or: input + alpha * tensor1_val / tensor2 (for addcdiv with
-// std::divides) 
-template <
-    typename T,
-    int depth,
-    int r_args_depth,
-    int res_arg_index>
+// std::divides)
+template <typename T, int depth, int r_args_depth, int res_arg_index>
 struct PointwiseOpScalar0dTensorFunctor {
   using opmath_t = at::opmath_type<T>;
   template <typename Op>
@@ -529,8 +525,8 @@ struct PointwiseOpScalar0dTensorFunctor {
         init_args<depth>(args, tl, chunk_idx, chunk_size, tensor_loc);
 
     // Load the 0D tensor1 value from device memory (just one element)
-    opmath_t tensor1_val = static_cast<opmath_t>(*reinterpret_cast<const T*>(
-        tl.addresses[1][tensor_loc]));
+    opmath_t tensor1_val = static_cast<opmath_t>(
+        *reinterpret_cast<const T*>(tl.addresses[1][tensor_loc]));
 
     n -= chunk_idx * chunk_size;
     T r_args[r_args_depth][kILP];

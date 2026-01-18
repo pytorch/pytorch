@@ -1300,54 +1300,67 @@ class TestForeach(TestCase):
 
         alpha = 0.5
 
-        # Test foreach_addcmul with 0D tensor1
-        foreach_addcmul = ForeachFuncWrapper(torch._foreach_addcmul)
-        actual_addcmul = foreach_addcmul(
-            [inputs, tensor1s_0d, tensor2s],
-            is_cuda=True,
-            expect_fastpath=True,
-            value=alpha,
-        )
-        expected_addcmul = [
-            torch.addcmul(inp, t1, t2, value=alpha)
-            for inp, t1, t2 in zip(inputs, tensor1s_0d, tensor2s)
-        ]
-        self.assertEqual(actual_addcmul, expected_addcmul, atol=0, rtol=0)
+        # Test with 0D tensors in either tensor1 or tensor2 position
+        # For addcmul (commutative), both orderings should use the fast path
+        # For addcdiv (non-commutative), only 0D tensor1 uses the fast path
+        for swap_args in [False, True]:
+            if swap_args:
+                # 0D tensors in tensor2 position
+                t1_args, t2_args = tensor2s, tensor1s_0d
+            else:
+                # 0D tensors in tensor1 position
+                t1_args, t2_args = tensor1s_0d, tensor2s
 
-        # Test foreach_addcdiv with 0D tensor1
-        foreach_addcdiv = ForeachFuncWrapper(torch._foreach_addcdiv)
-        actual_addcdiv = foreach_addcdiv(
-            [inputs, tensor1s_0d, tensor2s],
-            is_cuda=True,
-            expect_fastpath=True,
-            value=alpha,
-        )
-        expected_addcdiv = [
-            torch.addcdiv(inp, t1, t2, value=alpha)
-            for inp, t1, t2 in zip(inputs, tensor1s_0d, tensor2s)
-        ]
-        self.assertEqual(actual_addcdiv, expected_addcdiv, atol=0, rtol=0)
+            # Test foreach_addcmul (commutative - both orderings use fast path)
+            foreach_addcmul = ForeachFuncWrapper(torch._foreach_addcmul)
+            actual_addcmul = foreach_addcmul(
+                [inputs, t1_args, t2_args],
+                is_cuda=True,
+                expect_fastpath=True,
+                value=alpha,
+            )
+            expected_addcmul = [
+                torch.addcmul(inp, t1, t2, value=alpha)
+                for inp, t1, t2 in zip(inputs, t1_args, t2_args)
+            ]
+            self.assertEqual(actual_addcmul, expected_addcmul)
 
-        # Test inplace variants
-        inputs_copy = [t.clone() for t in inputs]
-        foreach_addcmul_inplace = ForeachFuncWrapper(torch._foreach_addcmul_)
-        foreach_addcmul_inplace(
-            [inputs_copy, tensor1s_0d, tensor2s],
-            is_cuda=True,
-            expect_fastpath=True,
-            value=alpha,
-        )
-        self.assertEqual(inputs_copy, expected_addcmul, atol=0, rtol=0)
+            # Test foreach_addcdiv (non-commutative - only 0D tensor1 uses fast path)
+            if not swap_args:
+                foreach_addcdiv = ForeachFuncWrapper(torch._foreach_addcdiv)
+                actual_addcdiv = foreach_addcdiv(
+                    [inputs, t1_args, t2_args],
+                    is_cuda=True,
+                    expect_fastpath=True,
+                    value=alpha,
+                )
+                expected_addcdiv = [
+                    torch.addcdiv(inp, t1, t2, value=alpha)
+                    for inp, t1, t2 in zip(inputs, t1_args, t2_args)
+                ]
+                self.assertEqual(actual_addcdiv, expected_addcdiv)
 
-        inputs_copy = [t.clone() for t in inputs]
-        foreach_addcdiv_inplace = ForeachFuncWrapper(torch._foreach_addcdiv_)
-        foreach_addcdiv_inplace(
-            [inputs_copy, tensor1s_0d, tensor2s],
-            is_cuda=True,
-            expect_fastpath=True,
-            value=alpha,
-        )
-        self.assertEqual(inputs_copy, expected_addcdiv, atol=0, rtol=0)
+            # Test inplace variants
+            inputs_copy = [t.clone() for t in inputs]
+            foreach_addcmul_inplace = ForeachFuncWrapper(torch._foreach_addcmul_)
+            foreach_addcmul_inplace(
+                [inputs_copy, t1_args, t2_args],
+                is_cuda=True,
+                expect_fastpath=True,
+                value=alpha,
+            )
+            self.assertEqual(inputs_copy, expected_addcmul)
+
+            if not swap_args:
+                inputs_copy = [t.clone() for t in inputs]
+                foreach_addcdiv_inplace = ForeachFuncWrapper(torch._foreach_addcdiv_)
+                foreach_addcdiv_inplace(
+                    [inputs_copy, t1_args, t2_args],
+                    is_cuda=True,
+                    expect_fastpath=True,
+                    value=alpha,
+                )
+                self.assertEqual(inputs_copy, expected_addcdiv)
 
     @onlyCUDA
     def test_div_reciprocal(self):

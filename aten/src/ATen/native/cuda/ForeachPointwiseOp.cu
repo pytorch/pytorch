@@ -35,6 +35,12 @@ inline bool all_same_dtype(TensorList tensors, ScalarType dtype) {
   });
 }
 
+inline bool all_same_device(TensorList tensors, Device device) {
+  return std::all_of(tensors.begin(), tensors.end(), [device](const Tensor& t) {
+    return t.device() == device;
+  });
+}
+
 // Inplace variant for when tensor1 is a list of 0D tensors (scalars)
 template <template <class> class Op>
 void foreach_pointwise_op_0d_tensor1_(
@@ -254,61 +260,83 @@ std::vector<Tensor> foreach_pointwise_op(
   return std::move(tensor_lists[3]);
 }
 
-#define FOREACH_POINTWISE_OP_SCALAR(NAME, OP)                              \
-  std::vector<Tensor> foreach_tensor_##NAME##_scalar_cuda(                 \
-      TensorList input,                                                    \
-      TensorList tensors1,                                                 \
-      TensorList tensors2,                                                 \
-      const Scalar& scalar) {                                              \
-    check_foreach_api_restrictions(input, tensors1, tensors2);             \
-                                                                           \
-    if (has_integral_tensor(input, /* includeBool */ true)) {              \
-      return at::native::foreach_tensor_##NAME##_scalar_slow(              \
-          input, tensors1, tensors2, scalar);                              \
-    }                                                                      \
-                                                                           \
-    if (can_use_fast_route({input, tensors1, tensors2}, scalar)) {         \
-      return foreach_pointwise_op<OP>(input, tensors1, tensors2, scalar);  \
-    }                                                                      \
-                                                                           \
-    /* Check if we can use 0D tensor1 fast path */                         \
-    if (all_tensors_are_0d(tensors1) &&                                    \
-        all_same_dtype(tensors1, input[0].scalar_type()) &&                \
-        can_use_fast_route({input, tensors2}, scalar)) {                   \
-      return foreach_pointwise_op_0d_tensor1<OP>(                          \
-          input, tensors1, tensors2, scalar);                              \
-    }                                                                      \
-                                                                           \
-    return at::native::foreach_tensor_##NAME##_scalar_slow(                \
-        input, tensors1, tensors2, scalar);                                \
-  }                                                                        \
-                                                                           \
-  void foreach_tensor_##NAME##_scalar_cuda_(                               \
-      TensorList input,                                                    \
-      TensorList tensors1,                                                 \
-      TensorList tensors2,                                                 \
-      const Scalar& scalar) {                                              \
-    check_foreach_api_restrictions(input, tensors1, tensors2);             \
-                                                                           \
-    if (has_integral_tensor(input, /* includeBool */ true)) {              \
-      return at::native::foreach_tensor_##NAME##_scalar_slow_(             \
-          input, tensors1, tensors2, scalar);                              \
-    }                                                                      \
-                                                                           \
-    if (can_use_fast_route({input, tensors1, tensors2}, scalar)) {         \
-      return foreach_pointwise_op_<OP>(input, tensors1, tensors2, scalar); \
-    }                                                                      \
-                                                                           \
-    /* Check if we can use 0D tensor1 fast path */                         \
-    if (all_tensors_are_0d(tensors1) &&                                    \
-        all_same_dtype(tensors1, input[0].scalar_type()) &&                \
-        can_use_fast_route({input, tensors2}, scalar)) {                   \
-      return foreach_pointwise_op_0d_tensor1_<OP>(                         \
-          input, tensors1, tensors2, scalar);                              \
-    }                                                                      \
-                                                                           \
-    return at::native::foreach_tensor_##NAME##_scalar_slow_(               \
-        input, tensors1, tensors2, scalar);                                \
+#define FOREACH_POINTWISE_OP_SCALAR(NAME, OP)                                 \
+  std::vector<Tensor> foreach_tensor_##NAME##_scalar_cuda(                    \
+      TensorList input,                                                       \
+      TensorList tensors1,                                                    \
+      TensorList tensors2,                                                    \
+      const Scalar& scalar) {                                                 \
+    check_foreach_api_restrictions(input, tensors1, tensors2);                \
+                                                                              \
+    if (has_integral_tensor(input, /* includeBool */ true)) {                 \
+      return at::native::foreach_tensor_##NAME##_scalar_slow(                 \
+          input, tensors1, tensors2, scalar);                                 \
+    }                                                                         \
+                                                                              \
+    if (can_use_fast_route({input, tensors1, tensors2}, scalar)) {            \
+      return foreach_pointwise_op<OP>(input, tensors1, tensors2, scalar);     \
+    }                                                                         \
+                                                                              \
+    /* Check if we can use 0D tensor1 fast path */                            \
+    if (all_tensors_are_0d(tensors1) &&                                       \
+        all_same_dtype(tensors1, input[0].scalar_type()) &&                   \
+        all_same_device(tensors1, input[0].device()) &&                       \
+        can_use_fast_route({input, tensors2}, scalar)) {                      \
+      return foreach_pointwise_op_0d_tensor1<OP>(                             \
+          input, tensors1, tensors2, scalar);                                 \
+    }                                                                         \
+    /* Check if we can use 0D tensor2 fast path (only for commutative ops) */ \
+    if constexpr (!std::is_same_v<OP<float>, std::divides<float>>) {          \
+      if (all_tensors_are_0d(tensors2) &&                                     \
+          all_same_dtype(tensors2, input[0].scalar_type()) &&                 \
+          all_same_device(tensors2, input[0].device()) &&                     \
+          can_use_fast_route({input, tensors1}, scalar)) {                    \
+        return foreach_pointwise_op_0d_tensor1<OP>(                           \
+            input, tensors2, tensors1, scalar);                               \
+      }                                                                       \
+    }                                                                         \
+                                                                              \
+    return at::native::foreach_tensor_##NAME##_scalar_slow(                   \
+        input, tensors1, tensors2, scalar);                                   \
+  }                                                                           \
+                                                                              \
+  void foreach_tensor_##NAME##_scalar_cuda_(                                  \
+      TensorList input,                                                       \
+      TensorList tensors1,                                                    \
+      TensorList tensors2,                                                    \
+      const Scalar& scalar) {                                                 \
+    check_foreach_api_restrictions(input, tensors1, tensors2);                \
+                                                                              \
+    if (has_integral_tensor(input, /* includeBool */ true)) {                 \
+      return at::native::foreach_tensor_##NAME##_scalar_slow_(                \
+          input, tensors1, tensors2, scalar);                                 \
+    }                                                                         \
+                                                                              \
+    if (can_use_fast_route({input, tensors1, tensors2}, scalar)) {            \
+      return foreach_pointwise_op_<OP>(input, tensors1, tensors2, scalar);    \
+    }                                                                         \
+                                                                              \
+    /* Check if we can use 0D tensor1 fast path */                            \
+    if (all_tensors_are_0d(tensors1) &&                                       \
+        all_same_dtype(tensors1, input[0].scalar_type()) &&                   \
+        all_same_device(tensors1, input[0].device()) &&                       \
+        can_use_fast_route({input, tensors2}, scalar)) {                      \
+      return foreach_pointwise_op_0d_tensor1_<OP>(                            \
+          input, tensors1, tensors2, scalar);                                 \
+    }                                                                         \
+    /* Check if we can use 0D tensor2 fast path (only for commutative ops) */ \
+    if constexpr (!std::is_same_v<OP<float>, std::divides<float>>) {          \
+      if (all_tensors_are_0d(tensors2) &&                                     \
+          all_same_dtype(tensors2, input[0].scalar_type()) &&                 \
+          all_same_device(tensors2, input[0].device()) &&                     \
+          can_use_fast_route({input, tensors1}, scalar)) {                    \
+        return foreach_pointwise_op_0d_tensor1_<OP>(                          \
+            input, tensors2, tensors1, scalar);                               \
+      }                                                                       \
+    }                                                                         \
+                                                                              \
+    return at::native::foreach_tensor_##NAME##_scalar_slow_(                  \
+        input, tensors1, tensors2, scalar);                                   \
   }
 
 #define FOREACH_POINTWISE_OP_SCALARLIST(NAME, OP)                        \
