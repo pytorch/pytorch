@@ -1060,7 +1060,7 @@ class PythonWrapperCodegen(CodeGen):
     Generate outer wrapper in Python that calls the kernels.
     """
 
-    supports_caching = True  # Whether the output code is cacheable.
+    supports_caching: bool = True  # Whether the output code is cacheable.
 
     def __init__(self):
         super().__init__()
@@ -2290,7 +2290,7 @@ class PythonWrapperCodegen(CodeGen):
 
             for name, value in V.graph.graph_inputs.items():
                 if isinstance(value, sympy.Symbol) and isinstance(
-                    V.graph.sizevars.var_to_val.get(value, None), SingletonInt
+                    V.graph.sizevars.backed_var_to_val.get(value, None), SingletonInt
                 ):
                     # Inductor should only work with dense -> dense graph, and
                     # SingletonInts belong to metadata that should only live on
@@ -2408,6 +2408,16 @@ class PythonWrapperCodegen(CodeGen):
     def define_subgraph_launcher_fn(self, name: str, subgraph_code):
         self.subgraph_definitions.splice(subgraph_code.value)
 
+    @classmethod
+    def _get_triton_info_kernel_cls(cls):
+        # Other inductor triton backends may subclass from
+        # the `TritonKernel` class. An override of this method
+        # allows them to set which subclass to use to get information
+        # such as common triton imports or inductor metadata
+        from .triton import TritonKernel
+
+        return TritonKernel
+
     def define_user_defined_triton_kernel(
         self,
         kernel,
@@ -2429,7 +2439,6 @@ class PythonWrapperCodegen(CodeGen):
             TensorArg,
             TMADescriptorArg,
         )
-        from .triton import gen_common_triton_imports, TritonKernel
 
         original_name = kernel.__name__
         signature: list[KernelArgType] = []
@@ -2642,11 +2651,13 @@ class PythonWrapperCodegen(CodeGen):
             compile_wrapper.writeline(f"async_compile.triton({original_name!r}, '''")
 
         inductor_meta["kernel_name"] = name
-        inductor_meta.update(TritonKernel.inductor_meta_common())
+        triton_info_kernel_cls = self._get_triton_info_kernel_cls()
+        inductor_meta.update(triton_info_kernel_cls.inductor_meta_common())
 
-        compile_wrapper.splice(gen_common_triton_imports())
+        compile_wrapper.splice(triton_info_kernel_cls.gen_common_triton_imports())
         if config.triton.proton_profiling:
             compile_wrapper.writeline('pl.enable_semantic("triton")')
+
         compile_wrapper.splice(
             f"""
             @triton_heuristics.user_autotune(

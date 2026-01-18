@@ -19,6 +19,7 @@ from torch.quantization._quantized_conversions import (
 
 from torch.testing import make_tensor
 from torch.testing._internal.common_cuda import (
+    blas_library_context,
     PLATFORM_SUPPORTS_BF16,
     PLATFORM_SUPPORTS_GREEN_CONTEXT,
     SM80OrLater,
@@ -74,15 +75,6 @@ def xfailIfSM100OrLaterNonRTXAndCondition(condition_fn):
         lambda params: computeCapabilityCheck and condition_fn(params)
     )
 
-
-@contextlib.contextmanager
-def blas_library_context(backend):
-    prev_backend = torch.backends.cuda.preferred_blas_library()
-    torch.backends.cuda.preferred_blas_library(backend)
-    try:
-        yield
-    finally:
-        torch.backends.cuda.preferred_blas_library(prev_backend)
 
 @contextlib.contextmanager
 def rocm_group_gemm_ck_env(value):
@@ -1000,6 +992,27 @@ class TestMatmulCuda(InductorTestCase):
         self.assertEqual(partial_res, full_res)
         self.assertGreater(t1 - t0, t3 - t2)
 
+    @unittest.skipIf(not PLATFORM_SUPPORTS_GREEN_CONTEXT, "Green contexts are not supported")
+    @serialTest()
+    def test_greencontext_stream_carveout(self):
+        a = torch.randn(4096, 4096, device='cuda', dtype=torch.bfloat16)
+        ctx = torch.cuda.green_contexts.GreenContext.create(1, 0)
+        ctx_stream = ctx.Stream()
+        with torch.cuda.stream(ctx_stream):
+            torch.matmul(a, a)
+            torch.cuda.synchronize()
+            t0 = time.perf_counter()
+            partial_res = torch.matmul(a, a)
+            torch.cuda.synchronize()
+            t1 = time.perf_counter()
+        torch.matmul(a, a)
+        torch.cuda.synchronize()
+        t2 = time.perf_counter()
+        full_res = torch.matmul(a, a)
+        torch.cuda.synchronize()
+        t3 = time.perf_counter()
+        self.assertEqual(partial_res, full_res)
+        self.assertGreater(t1 - t0, t3 - t2)
 
     @unittest.skipIf(not PLATFORM_SUPPORTS_GREEN_CONTEXT, "Green contexts are not supported")
     @serialTest()
