@@ -633,6 +633,54 @@ def validate_qmin_qmax(quant_min: int, quant_max: int) -> None:
         )
 
 
+def round_to_power_of_2(scale: torch.Tensor, eps: torch.Tensor) -> torch.Tensor:
+    r"""Rounds scale values to the nearest power of 2.
+
+    This function is used for power-of-2 scale optimization in quantization,
+    which improves operational efficiency on hardware like DSPs, NPUs, and FPGAs
+    by enabling efficient bit-shift operations instead of multiplications.
+
+    Args:
+        scale: Scale tensor to round. Can be scalar or multi-dimensional
+            (for per-channel quantization).
+        eps: Epsilon value to use as minimum valid scale
+            (typically from observer.eps).
+
+    Returns:
+        Rounded scale tensor where each value is a power of 2
+        (2^n for some integer n).
+
+    Example:
+        >>> scale = torch.tensor([0.3, 0.7, 1.5, 3.2])
+        >>> eps = torch.tensor([torch.finfo(torch.float32).eps])
+        >>> rounded = round_to_power_of_2(scale, eps)
+        >>> # rounded will be [0.25, 0.5, 2.0, 4.0] (powers of 2)
+    """
+    # Clamp scale to be at least eps to avoid log(0) or log(negative)
+    scale = torch.max(scale, eps)
+
+    # Calculate log2(scale)
+    log2_scale = torch.log2(scale)
+
+    # Round to nearest integer exponent
+    rounded_exponent = torch.round(log2_scale)
+
+    # Clamp exponent to reasonable range for float32
+    # Minimum: -126 (near float32 minimum normal)
+    # Maximum: 127 (near float32 maximum)
+    min_exponent = -126.0
+    max_exponent = 127.0
+    rounded_exponent = torch.clamp(rounded_exponent, min_exponent, max_exponent)
+
+    # Calculate 2^rounded_exponent
+    rounded_scale = torch.pow(2.0, rounded_exponent)
+
+    # Ensure we don't go below eps
+    rounded_scale = torch.max(rounded_scale, eps)
+
+    return rounded_scale
+
+
 # Functionally equivalent to '_calculate_qparams' in observer.py. Observers must be torchscriptable however and qscheme
 # as far as I can tell is not allowed to passed as a parameter in torchscript functions. This makes refactoring observer
 # to use this utility a massive pain and very gross. For now Im opting just to duplicate as this code seems unlikely to change
@@ -855,5 +903,6 @@ __all__ = [
     "to_underlying_dtype",
     "determine_qparams",
     "validate_qmin_qmax",
+    "round_to_power_of_2",
     "DEPRECATION_WARNING",
 ]
