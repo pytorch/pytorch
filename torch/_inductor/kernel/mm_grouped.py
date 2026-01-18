@@ -125,7 +125,9 @@ def early_config_prune(g, m, dtsize, configs, named_args):
     return pruned_configs
 
 
-def gluon_grouped_mm_configs(dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=None):
+def gluon_grouped_mm_configs(
+    dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=None, a_is_2d=None, b_is_2d=None
+):
     import torch._inductor.config as config
 
     from ..template_heuristics.gluon import get_grouped_mm_configs
@@ -142,8 +144,20 @@ def gluon_grouped_mm_configs(dtype_AB, dtype_C, dtype_acc, M=None, N=None, K=Non
         exhaustive=exhaustive,
     )
 
+    def filter_configs(configs):
+        if a_is_2d and b_is_2d:
+            # Masking along K modifies shared memory before MMA, thus
+            # require NUM_COMPUTE_WARPS=1 in configs, in order to
+            # avoid intra-warp sync issues.
+            return [
+                config
+                for config in configs
+                if config.NUM_COMPUTE_WARPS == 1
+            ]
+        return configs
+
     configs = []
-    for gluon_config in gluon_configs:
+    for gluon_config in filter_configs(gluon_configs):
         configs.append(
             Config(
                 kwargs={
@@ -305,8 +319,9 @@ def can_use_gluon_kernel(
     bias: Optional[TensorBox],
     scale_result: Optional[TensorBox],
 ) -> bool:
-    from ..utils import _use_autotune_backend
     import torch._inductor.config as config
+
+    from ..utils import _use_autotune_backend
 
     if not (config.max_autotune or config.max_autotune_gemm):
         return False
@@ -548,6 +563,8 @@ def _tuned_grouped_mm_common(
             M=m,
             N=layout.size[-1],
             K=k,
+            a_is_2d=a_is_2d,
+            b_is_2d=b_is_2d,
         ):
             gluon_grouped_mm_template.maybe_append_choice(
                 choices,

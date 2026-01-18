@@ -71,8 +71,8 @@ class PartitionArgs:
     BLOCK_M: gl.constexpr
     BLOCK_N: gl.constexpr
     BLOCK_K: gl.constexpr
-    store_layout: gl.constexpr
     NUM_BLOCKS: gl.constexpr
+    NUM_COMPUTE_WARPS: gl.constexpr
     NUM_STORE_WARPS: gl.constexpr
 
     @gluon.constexpr_function
@@ -110,8 +110,8 @@ class PartitionArgs:
         BLOCK_M,
         BLOCK_N,
         BLOCK_K,
-        store_layout,
         NUM_BLOCKS,
+        NUM_COMPUTE_WARPS,
         NUM_STORE_WARPS,
     ):
         self.a_desc = a_desc
@@ -146,8 +146,8 @@ class PartitionArgs:
         self.BLOCK_M = gl.constexpr(BLOCK_M)
         self.BLOCK_N = gl.constexpr(BLOCK_N)
         self.BLOCK_K = gl.constexpr(BLOCK_K)
-        self.store_layout = gl.constexpr(store_layout)
         self.NUM_BLOCKS = gl.constexpr(NUM_BLOCKS)
+        self.NUM_COMPUTE_WARPS = gl.constexpr(NUM_COMPUTE_WARPS)
         self.NUM_STORE_WARPS = gl.constexpr(NUM_STORE_WARPS)
 
 
@@ -402,6 +402,7 @@ def load_partition(pargs: PartitionArgs):
     BLOCK_N: gl.constexpr = pargs.BLOCK_N
     BLOCK_K: gl.constexpr = pargs.BLOCK_K
     NUM_BLOCKS: gl.constexpr = pargs.NUM_BLOCKS
+    NUM_COMPUTE_WARPS: gl.constexpr = pargs.NUM_COMPUTE_WARPS
 
     load_buf_empty_bars = pargs.load_buf_empty_bars
     load_buf_full_bars = pargs.load_buf_full_bars
@@ -498,6 +499,7 @@ def compute_partition(pargs: PartitionArgs):
     BLOCK_N: gl.constexpr = pargs.BLOCK_N
     BLOCK_K: gl.constexpr = pargs.BLOCK_K
     NUM_BLOCKS: gl.constexpr = pargs.NUM_BLOCKS
+    NUM_COMPUTE_WARPS: gl.constexpr = pargs.NUM_COMPUTE_WARPS
 
     load_buf_empty_bars = pargs.load_buf_empty_bars
     load_buf_full_bars = pargs.load_buf_full_bars
@@ -506,6 +508,19 @@ def compute_partition(pargs: PartitionArgs):
     acc_buf_empty_bars = pargs.acc_buf_empty_bars
     acc_buf_full_bars = pargs.acc_buf_full_bars
     acc_state = Counter.create(1, acc_buf_empty_bars.shape[0])
+
+{%- if K_IS_VARYING %}
+    range_layout: gl.constexpr = gl.SliceLayout(
+        0,
+        gl.BlockedLayout(
+            size_per_thread=[1, BLOCK_K // (32 * NUM_COMPUTE_WARPS)],
+            threads_per_warp=[1, 32],
+            warps_per_cta=[1, NUM_COMPUTE_WARPS],
+            order=[1, 0],
+            cga_layout=[],
+        ),
+    )
+{%- endif %}
 
     group_iter = GroupIterator.create(
         G, M, N, K,
@@ -544,6 +559,20 @@ def compute_partition(pargs: PartitionArgs):
 {%- endif %}
 {%- if B_IS_K_MAJOR %}
                     b_smem = b_smem.permute((1, 0))
+{%- endif %}
+
+{%- if K_IS_VARYING %}
+                    if k + BLOCK_K > group_iter.k_size:
+                        with pl.scope("mask_k_tail"):
+                            mask = k + gl.arange(0, BLOCK_K, layout=range_layout) < group_iter.k_size
+                            a = a_smem.load(gl.AutoLayout())
+                            # Only mask A, as zeroing A's columns
+                            # makes corresponding B rows irrelevant.
+                            a = gl.where(mask[None, :], a, 0)
+                            a_smem.store(a)
+                            # No barrier needed, as K_IS_VARYING
+                            # requires NUM_COMPUTE_WARPS=1.
+                            fence_async_shared()
 {%- endif %}
 
                 with pl.scope("compute_mma"):
@@ -734,13 +763,6 @@ def store_partition(pargs: PartitionArgs):
         transposed=False,
         fp4_padded=False,
         cga_layout=[]
-    )
-    store_layout: gl.constexpr = gl.BlockedLayout(
-        size_per_thread=[{{BLOCK_M}} // 1, {{BLOCK_N}} // 32],
-        threads_per_warp=[1, 32],
-        warps_per_cta=[{{NUM_STORE_WARPS}}, 1],
-        order=[1, 0],
-        cga_layout=[],
     )
 
     c_ptr = {{get_output()}}
@@ -939,8 +961,8 @@ def store_partition(pargs: PartitionArgs):
         BLOCK_M,
         BLOCK_N,
         BLOCK_K,
-        store_layout,
         NUM_BLOCKS,
+        NUM_COMPUTE_WARPS,
         NUM_STORE_WARPS,
     )
 
