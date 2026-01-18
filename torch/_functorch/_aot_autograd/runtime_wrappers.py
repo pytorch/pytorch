@@ -2235,19 +2235,25 @@ class AOTDispatchAutograd:
         orig_x = x
         x = maybe_coerce(x)
         if x is None:
-            raise RuntimeError(
-                f"""
-During the backward, we encountered a tensor subclass where we guessed its
-metadata incorrectly.
-
-Expected metadata: {str(expected_meta)}, expected type: {str(expected_type)}
-
-Runtime metadata: {str(runtime_meta)}, runtime type: {str(runtime_type)}
-
-shape: {str(orig_x.shape)}
-To fix this, your tensor subclass must implement the dunder method __force_to_same_metadata__.
-"""
+            expected_subclass_got_plain_tensor = (
+                expected_type is not None
+                and expected_type is not torch.Tensor
+                and runtime_type is torch.Tensor
             )
+            if expected_subclass_got_plain_tensor:
+                raise RuntimeError(
+                    f"Expected a {expected_type.__name__} tangent but got a plain Tensor. "
+                    f"This happens when a compiled function returns multiple outputs that "
+                    f"require gradients, but .backward() is only called on some of them. "
+                    f"To fix: call .detach() on forward outputs you don't need gradients for."
+                )
+            else:
+                raise RuntimeError(
+                    f"Tangent metadata mismatch during backward. "
+                    f"Expected: {expected_meta} (type {expected_type}), "
+                    f"got: {runtime_meta} (type {runtime_type}), shape: {orig_x.shape}. "
+                    f"Your tensor subclass must implement __coerce_same_metadata_as_tangent__."
+                )
 
         # Coerce to expected memory format
         assert meta.memory_format
