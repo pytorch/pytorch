@@ -1110,6 +1110,164 @@ class outer_fn(torch.nn.Module):
 """,  # noqa: B950
         )
 
+    @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
+    def test_aot_autograd_over_dynamo_with_requires_grad(self):
+        """Test AOTAutograd tracing over a torch.compile'd function with requires_grad inputs.
+
+        This tests the scenario where:
+        1. An outer aot_function traces a function with requires_grad inputs
+        2. Inside that function, a torch.compile'd function with invoke_subgraph backend is called
+        3. AOTAutograd partitions into forward/backward graphs
+        4. The inner Dynamo region should only be compiled once
+        """
+        from torch._dynamo.testing import CompileCounterWithBackend
+        from torch._functorch.aot_autograd import aot_function
+        from torch._functorch.compilers import nop
+
+        torch._dynamo.reset()
+
+        # Use a compile counter to track how many times Dynamo compiles
+        compile_counter = CompileCounterWithBackend("invoke_subgraph")
+
+        def inner_fn(x):
+            return x * 2 + 1
+
+        compiled_fn = torch.compile(inner_fn, backend=compile_counter)
+
+        def outer_fn(x):
+            y = x + 1
+            z = compiled_fn(y)
+            return z.sum()
+
+        x = torch.randn(3, 3, requires_grad=True)
+
+        # Track forward graph to verify invoke_subgraph appears
+        fw_graph = None
+
+        def fw_compiler(gm, example_inputs):
+            nonlocal fw_graph
+            fw_graph = gm
+            return gm
+
+        aot_fn = aot_function(
+            outer_fn,
+            fw_compiler=fw_compiler,
+            bw_compiler=nop,
+            _disable_torch_fn_metadata_mode=True,
+        )
+
+        # Run forward and backward
+        result = aot_fn(x)
+        result.backward()
+
+        # Check that we got a forward graph with invoke_subgraph
+        self.assertIsNotNone(fw_graph, "Expected a forward graph")
+        fw_graph_code = fw_graph.print_readable(print_output=False)
+        self.assertIn("invoke_subgraph", fw_graph_code)
+
+        # Check compile count - should be 1 (compiled once during tracing)
+        self.assertEqual(
+            compile_counter.frame_count,
+            1,
+            f"Expected 1 compilation, got {compile_counter.frame_count}",
+        )
+
+    @torch._dynamo.config.patch(force_compile_during_fx_trace=True)
+    def test_aot_autograd_over_dynamo_train_step(self):
+        """Test a full training step with nn.Module traced by AOTAutograd over Dynamo.
+
+        This tests a realistic training scenario where:
+        1. We have an actual nn.Module with parameters
+        2. make_fx traces the forward and backward as a single graph
+        3. Inside the module, a torch.compile'd function with invoke_subgraph is called
+        4. We use torch.autograd.grad to compute gradients (not .backward())
+        5. Gradients are returned explicitly from the traced function
+        """
+        from torch._dynamo.testing import CompileCounterWithBackend
+        from torch.fx.experimental.proxy_tensor import make_fx
+
+        torch._dynamo.reset()
+
+        # Use a compile counter to track how many times Dynamo compiles
+        compile_counter = CompileCounterWithBackend("invoke_subgraph")
+
+        # Define a simple MLP module
+        class SimpleMLP(torch.nn.Module):
+            def __init__(self):
+                super().__init__()
+                self.fc1 = torch.nn.Linear(4, 8)
+                self.fc2 = torch.nn.Linear(8, 4)
+
+            def forward(self, x):
+                x = self.fc1(x)
+                x = torch.relu(x)
+                x = self.fc2(x)
+                return x
+
+        model = SimpleMLP()
+
+        # Inner compiled function that will be called inside the training step
+        def inner_fn(x):
+            return x * 2 + 1
+
+        compiled_inner = torch.compile(inner_fn, backend=compile_counter)
+
+        # Training step function that uses the model and compiled inner function
+        def train_step(params, x):
+            # params is a flat list of parameters: [fc1.weight, fc1.bias, fc2.weight, fc2.bias]
+            fc1_weight, fc1_bias, fc2_weight, fc2_bias = params
+
+            # Manual forward pass using functional style
+            h = torch.nn.functional.linear(x, fc1_weight, fc1_bias)
+            h = torch.relu(h)
+            # Apply compiled inner function
+            h = compiled_inner(h)
+            out = torch.nn.functional.linear(h, fc2_weight, fc2_bias)
+
+            # Compute loss
+            loss = out.sum()
+
+            # Compute gradients using torch.autograd.grad
+            grads = torch.autograd.grad(loss, params)
+
+            return (loss, *grads)
+
+        # Prepare inputs
+        x = torch.randn(2, 4)
+        params = (
+            model.fc1.weight.detach().clone().requires_grad_(True),
+            model.fc1.bias.detach().clone().requires_grad_(True),
+            model.fc2.weight.detach().clone().requires_grad_(True),
+            model.fc2.bias.detach().clone().requires_grad_(True),
+        )
+
+        # Trace using make_fx
+        fx_graph = make_fx(train_step, _disable_torch_fn_metadata_mode=True)(params, x)
+
+        # Run the traced graph
+        result = fx_graph(params, x)
+        loss = result[0]
+        grads = result[1:]
+
+        # Basic sanity checks
+        self.assertEqual(loss.shape, ())
+        self.assertEqual(len(grads), 4)
+        self.assertEqual(grads[0].shape, params[0].shape)  # fc1.weight grad
+        self.assertEqual(grads[1].shape, params[1].shape)  # fc1.bias grad
+        self.assertEqual(grads[2].shape, params[2].shape)  # fc2.weight grad
+        self.assertEqual(grads[3].shape, params[3].shape)  # fc2.bias grad
+
+        # Check that we got a graph with invoke_subgraph
+        graph_code = fx_graph.print_readable(print_output=False)
+        self.assertIn("invoke_subgraph", graph_code)
+
+        # Check compile count - should be exactly 1 compilation
+        self.assertEqual(
+            compile_counter.frame_count,
+            1,
+            f"Expected 1 compilation, got {compile_counter.frame_count}",
+        )
+
 
 class TorchFunctionModeLifecycleTests(torch._dynamo.test_case.TestCase):
     def test_default_device_restored_after_mode_tests(self):
