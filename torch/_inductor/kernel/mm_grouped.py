@@ -149,11 +149,7 @@ def gluon_grouped_mm_configs(
             # Masking along K modifies shared memory before MMA, thus
             # require NUM_COMPUTE_WARPS=1 in configs, in order to
             # avoid intra-warp sync issues.
-            return [
-                config
-                for config in configs
-                if config.NUM_COMPUTE_WARPS == 1
-            ]
+            return [config for config in configs if config.NUM_COMPUTE_WARPS == 1]
         return configs
 
     configs = []
