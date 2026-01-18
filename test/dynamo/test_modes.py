@@ -808,11 +808,9 @@ class InvokeSubgraphBackendTests(torch._dynamo.test_case.TestCase):
         When force_compile_during_fx_trace=True, the invoke_subgraph backend should
         emit an invoke_subgraph HOP in the traced graph instead of inlining the subgraph.
         """
-        import torch._dynamo.backends.debugging as dbg
         from torch.fx.experimental.proxy_tensor import make_fx
 
         torch._dynamo.reset()  # Clear any cached graphs
-        dbg._invoke_subgraph_counter = 0  # Reset for test stability
 
         def simple_fn(x, y):
             return x * 2 + y
@@ -839,7 +837,7 @@ class outer_fn(torch.nn.Module):
     def forward(self, x_1: "f32[3, 3]", y_1: "f32[3, 3]"):
         add: "f32[3, 3]" = torch.ops.aten.add.Tensor(x_1, 1);  x_1 = None
         repeated_subgraph0 = self.repeated_subgraph0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_1', add, y_1);  repeated_subgraph0 = add = y_1 = None
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', add, y_1);  repeated_subgraph0 = add = y_1 = None
         getitem: "f32[3, 3]" = invoke_subgraph[0];  invoke_subgraph = None
         mul: "f32[3, 3]" = torch.ops.aten.mul.Tensor(getitem, 2);  getitem = None
         return mul
@@ -859,12 +857,10 @@ class outer_fn(torch.nn.Module):
         When the same compiled function is called multiple times with inputs that
         don't cause guard failures, both calls should reference the same subgraph.
         """
-        import torch._dynamo.backends.debugging as dbg
         from torch._guards import tracing, TracingContext
         from torch.fx.experimental.proxy_tensor import make_fx
 
         torch._dynamo.reset()
-        dbg._invoke_subgraph_counter = 0  # Reset for test stability
 
         def simple_fn(x):
             return x * 2
@@ -893,10 +889,10 @@ class outer_fn(torch.nn.Module):
 class outer_fn(torch.nn.Module):
     def forward(self, x_1: "f32[3, 3]", y_1: "f32[3, 3]"):
         repeated_subgraph0 = self.repeated_subgraph0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_1', x_1);  repeated_subgraph0 = x_1 = None
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', x_1);  repeated_subgraph0 = x_1 = None
         getitem: "f32[3, 3]" = invoke_subgraph[0];  invoke_subgraph = None
         repeated_subgraph0_1 = self.repeated_subgraph0
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, 'invoke_subgraph_1', y_1);  repeated_subgraph0_1 = y_1 = None
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0_1, 'invoke_subgraph_0', y_1);  repeated_subgraph0_1 = y_1 = None
         getitem_1: "f32[3, 3]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
         add: "f32[3, 3]" = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
         return add
@@ -916,11 +912,9 @@ class outer_fn(torch.nn.Module):
         failures (e.g., different bool values), each compilation should result
         in a separate invoke_subgraph with a different identifier.
         """
-        import torch._dynamo.backends.debugging as dbg
         from torch.fx.experimental.proxy_tensor import make_fx
 
         torch._dynamo.reset()
-        dbg._invoke_subgraph_counter = 0  # Reset for test stability
 
         def conditional_fn(x, flag: bool):
             if flag:
@@ -948,10 +942,10 @@ class outer_fn(torch.nn.Module):
 class outer_fn(torch.nn.Module):
     def forward(self, x_1: "f32[3, 3]"):
         repeated_subgraph0 = self.repeated_subgraph0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_1', x_1);  repeated_subgraph0 = None
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', x_1);  repeated_subgraph0 = None
         getitem: "f32[3, 3]" = invoke_subgraph[0];  invoke_subgraph = None
         repeated_subgraph1 = self.repeated_subgraph1
-        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph1, 'invoke_subgraph_2', x_1);  repeated_subgraph1 = x_1 = None
+        invoke_subgraph_1 = torch.ops.higher_order.invoke_subgraph(repeated_subgraph1, 'invoke_subgraph_1', x_1);  repeated_subgraph1 = x_1 = None
         getitem_1: "f32[3, 3]" = invoke_subgraph_1[0];  invoke_subgraph_1 = None
         add: "f32[3, 3]" = torch.ops.aten.add.Tensor(getitem, getitem_1);  getitem = getitem_1 = None
         return add
@@ -975,11 +969,9 @@ class outer_fn(torch.nn.Module):
         Verifies that the invoke_subgraph HOP correctly handles functions
         that take more than 2 tensor inputs.
         """
-        import torch._dynamo.backends.debugging as dbg
         from torch.fx.experimental.proxy_tensor import make_fx
 
         torch._dynamo.reset()
-        dbg._invoke_subgraph_counter = 0
 
         def multi_input_fn(a, b, c, d):
             return a * b + c * d
@@ -1004,7 +996,7 @@ class outer_fn(torch.nn.Module):
 class outer_fn(torch.nn.Module):
     def forward(self, w_1: "f32[3, 3]", x_1: "f32[3, 3]", y_1: "f32[3, 3]", z_1: "f32[3, 3]"):
         repeated_subgraph0 = self.repeated_subgraph0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_1', w_1, x_1, y_1, z_1);  repeated_subgraph0 = w_1 = x_1 = y_1 = z_1 = None
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', w_1, x_1, y_1, z_1);  repeated_subgraph0 = w_1 = x_1 = y_1 = z_1 = None
         getitem: "f32[3, 3]" = invoke_subgraph[0];  invoke_subgraph = None
         return getitem
 
@@ -1024,11 +1016,9 @@ class outer_fn(torch.nn.Module):
         Verifies that the invoke_subgraph HOP correctly handles functions
         that return multiple tensors.
         """
-        import torch._dynamo.backends.debugging as dbg
         from torch.fx.experimental.proxy_tensor import make_fx
 
         torch._dynamo.reset()
-        dbg._invoke_subgraph_counter = 0
 
         def multi_output_fn(x, y):
             return x + y, x - y, x * y
@@ -1052,7 +1042,7 @@ class outer_fn(torch.nn.Module):
 class outer_fn(torch.nn.Module):
     def forward(self, a_1: "f32[3, 3]", b_1: "f32[3, 3]"):
         repeated_subgraph0 = self.repeated_subgraph0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_1', a_1, b_1);  repeated_subgraph0 = a_1 = b_1 = None
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', a_1, b_1);  repeated_subgraph0 = a_1 = b_1 = None
         getitem: "f32[3, 3]" = invoke_subgraph[0]
         getitem_1: "f32[3, 3]" = invoke_subgraph[1]
         getitem_2: "f32[3, 3]" = invoke_subgraph[2];  invoke_subgraph = None
@@ -1076,11 +1066,9 @@ class outer_fn(torch.nn.Module):
         Verifies that the invoke_subgraph HOP correctly handles functions
         that have both multiple tensor inputs and multiple tensor outputs.
         """
-        import torch._dynamo.backends.debugging as dbg
         from torch.fx.experimental.proxy_tensor import make_fx
 
         torch._dynamo.reset()
-        dbg._invoke_subgraph_counter = 0
 
         def multi_io_fn(a, b, c):
             # Multiple inputs, multiple outputs
@@ -1106,7 +1094,7 @@ class outer_fn(torch.nn.Module):
 class outer_fn(torch.nn.Module):
     def forward(self, x_1: "f32[3, 3]", y_1: "f32[3, 3]", z_1: "f32[3, 3]"):
         repeated_subgraph0 = self.repeated_subgraph0
-        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_1', x_1, y_1, z_1);  repeated_subgraph0 = x_1 = y_1 = z_1 = None
+        invoke_subgraph = torch.ops.higher_order.invoke_subgraph(repeated_subgraph0, 'invoke_subgraph_0', x_1, y_1, z_1);  repeated_subgraph0 = x_1 = y_1 = z_1 = None
         getitem: "f32[3, 3]" = invoke_subgraph[0]
         getitem_1: "f32[3, 3]" = invoke_subgraph[1];  invoke_subgraph = None
         sub: "f32[3, 3]" = torch.ops.aten.sub.Tensor(getitem, getitem_1);  getitem = getitem_1 = None

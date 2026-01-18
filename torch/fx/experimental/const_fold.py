@@ -82,7 +82,7 @@ class FoldedGraphModule(torch.fx.GraphModule):
 
 
 def _inline_module(
-    gm: torch.fx.GraphModule, inline_mod_name: str, run_dce: bool = True
+    gm: torch.fx.GraphModule, inline_mod_name: str
 ) -> dict[torch.fx.Node, torch.fx.Node]:
     """
     Given `gm` and some graph module which is called with target name `inline_mod_name`,
@@ -150,7 +150,6 @@ def _inline_module(
                 assert isinstance(idx, int)
                 user.replace_all_uses_with(output_replacements[idx])
                 gm.graph.erase_node(user)
-                replacement_mapping[user] = output_replacements[idx]
 
             continue
 
@@ -162,8 +161,7 @@ def _inline_module(
     # this module may contain impure ops so cannot be dead code eliminated,
     # this module is unneeded as it's just inlined back to main graph.
     gm.graph.erase_node(call_mod_node_to_replace)
-    if run_dce:
-        gm.graph.eliminate_dead_code()
+    gm.graph.eliminate_dead_code()
 
     return replacement_mapping
 

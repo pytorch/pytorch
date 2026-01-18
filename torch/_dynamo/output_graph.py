@@ -103,7 +103,6 @@ from .exc import (
 )
 from .graph_bytecode_inputs import has_user_objects, index_to_bytecode_constructor
 from .graph_deduplication import apply_graph_deduplication
-from .graph_id_filter import get_backend_override_for_compile_id
 from .graph_region_tracker import GraphRegionTracker
 from .guards import GuardBuilder, install_guard
 from .mutation_guard import is_dynamic_nn_module
@@ -187,7 +186,7 @@ og_module_named_buffers_fn_ptr = torch.nn.Module.named_buffers
 og_module_named_parameters_fn_ptr = torch.nn.Module.named_parameters
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class VariableTrackerCacheKey:
     vt_id: int
     # Two different source can point to the same object. However, Dynamo handles
@@ -196,13 +195,13 @@ class VariableTrackerCacheKey:
     source: Source
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class AliasingInfo:
     has_aliasing: bool
     msg: str
 
 
-@dataclass(frozen=True)
+@dataclass(frozen=True, slots=True)
 class MutationInfo:
     has_mutation: bool
     msg: str
@@ -1418,12 +1417,6 @@ class OutputGraph(OutputGraphCommon):
         stack_values = []
         meta = StackLocalsMetadata()
 
-        def ctx_exit_check(var: VariableTracker) -> None:
-            if type.__instancecheck__(variables.WithExitFunctionVariable, var):
-                raise AssertionError(
-                    "Attempted to reconstruct WithExitFunctionVariable outside the stack"
-                )
-
         # realize any unrealized tensor VTs in case they
         # need to be added to self.nn_modules as attributes
         for i, value in enumerate(tx.stack):
@@ -1432,9 +1425,6 @@ class OutputGraph(OutputGraphCommon):
             variables.LazyVariableTracker.realize_all(
                 value, allow_lazy_constant=allow_lazy_constant
             )
-            # Do not allow non-stack WithExitFunctionVariable reconstructions
-            if not isinstance(value, variables.WithExitFunctionVariable):
-                VariableTracker.visit(ctx_exit_check, value)
             # ignore top `stack_pops` values on the stack
             if allow_lazy_constant:
                 stack_values.append(value)
@@ -1464,8 +1454,6 @@ class OutputGraph(OutputGraphCommon):
         # so checks for NULLs and context managers in the case of codegen'ing resume
         # functions will not be performed on them. This is expected behavior.
         for k, v in tx.symbolic_locals.items():
-            # Do not reconstruct WithExitFunctionVariable!
-            VariableTracker.visit(ctx_exit_check, v)
             # Note! this explicitly uses .local_name for matching
             # Failure to do so will cause spurious registrations in val_to_names.
             # This will in turn result in spurious variables showing up in the graph.
@@ -1506,6 +1494,7 @@ class OutputGraph(OutputGraphCommon):
         self,
         tx: "InstructionTranslatorBase",
         reason: GraphCompileReason,
+        partial_convert: bool = False,
         stack_pops: int = 0,
     ) -> list[StackLocalsMetadata]:
         """
@@ -1532,6 +1521,7 @@ class OutputGraph(OutputGraphCommon):
         # bytecode tracing has finished. Pop the context manager for dynamo_timed
         self.mark_bytecode_tracing_stop()
 
+        self.partial_convert = partial_convert
         self.compile_subgraph_reason = reason
         self.should_exit = True
 
@@ -2529,21 +2519,14 @@ class OutputGraph(OutputGraphCommon):
         gm._param_name_to_source = self.param_name_to_source  # type: ignore[assignment]
         gm._source_to_user_stacks = self.source_to_user_stacks  # type: ignore[assignment]
 
-        # Check for per-graph backend override (for debugging/bisecting)
-        compiler_fn = (
-            get_backend_override_for_compile_id(
-                self.dynamo_compile_id, config.debug_backend_override
-            )
-            or self.compiler_fn
-        )
-
         name = (
-            compiler_fn.__name__
-            if hasattr(compiler_fn, "__name__")
+            self.compiler_fn.__name__
+            if hasattr(self.compiler_fn, "__name__")
             else "<unknown compiler_fn>"
         )
         try:
             _step_logger()(logging.INFO, f"calling compiler function {name}")
+            compiler_fn = self.compiler_fn
             if config.verify_correctness:
                 compiler_fn = WrapperBackend(compiler_fn)
             compiled_fn = compiler_fn(gm, example_inputs)
@@ -2586,7 +2569,7 @@ class OutputGraph(OutputGraphCommon):
             },
         )
 
-        # pyrefly: ignore [unbound-name, bad-return]
+        # pyrefly: ignore [unbound-name]
         return compiled_fn
 
     def dedup_pass(self) -> dict[str, torch.fx.GraphModule]:
