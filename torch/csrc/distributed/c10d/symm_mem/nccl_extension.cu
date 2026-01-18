@@ -192,7 +192,7 @@ void nccl_wait_for_signal(at::Tensor& sigpad, int64_t signal, int64_t peer) {
 
 #ifdef NCCL_HAS_ONE_SIDED_API
   // use NCCL 2.29+ host-side API
-  auto& manager = NCCLDevCommManager::get(sigpad.device());
+  auto& manager = c10d::symmetric_memory::NCCLDevCommManager::get(sigpad.device());
   ncclComm_t comm = manager.get_comm("0");  // group_name is "0"
 
   // Populate all fields in ncclWaitSignalDesc_t
@@ -235,7 +235,7 @@ void nccl_put_with_signal(at::Tensor& tensor, int64_t signal, int64_t peer) {
 
 #ifdef NCCL_HAS_ONE_SIDED_API
   // use NCCL 2.29+ host-side API
-  auto& manager = NCCLDevCommManager::get(tensor.device());
+  auto& manager = c10d::symmetric_memory::NCCLDevCommManager::get(tensor.device());
   ncclComm_t comm = manager.get_comm("0");  // group_name is "0"
 
   auto* nccl_symm_mem = dynamic_cast<c10d::symmetric_memory::NCCLSymmetricMemory*>(symm_mem.get());
