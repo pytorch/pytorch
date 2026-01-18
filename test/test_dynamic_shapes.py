@@ -4892,6 +4892,7 @@ def forward(self, arg0_1: "i64[1][1]cpu", arg1_1: "Sym(u1)", arg2_1: "i64[u1][1]
         compiled_func(x2)
         self.assertEqual(counter.frame_count, 1)
 
+    @skipIfTorchDynamo("mark_unbacked is not traceable")
     def test_duck_shape_id_recompile_with_different_id(self):
         """
         Test that passing a tensor with same _dynamo_dynamic_indices but
