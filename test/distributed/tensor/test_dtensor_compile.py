@@ -1412,9 +1412,7 @@ class outer_fn(torch.nn.Module):
 
         # Create DTensor with requires_grad
         local_tensor = torch.randn(4, 4, requires_grad=True)
-        dt_input = DTensor.from_local(
-            local_tensor, mesh, [Shard(0)], run_check=False
-        )
+        dt_input = DTensor.from_local(local_tensor, mesh, [Shard(0)], run_check=False)
 
         # Track forward graph to verify invoke_subgraph appears
         fw_graph = None
