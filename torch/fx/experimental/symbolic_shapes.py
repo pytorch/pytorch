@@ -3840,10 +3840,6 @@ class ShapeEnv:
         # Duck-shaping says that if two input tensors have the same size,
         # they get assigned the same symbolic variable
         self.val_to_var: dict[int, sympy.Symbol] = {}
-        # Maps duck_shape_id to unbacked symbol. When mark_unbacked is called with
-        # a duck_shape_id, all unbacked dimensions with the same duck_shape_id will
-        # share the same unbacked symbol.
-        self.duck_shape_id_to_unbacked_symbol: dict[Any, sympy.Expr] = {}
         self.unbacked_symfloat_counter = 0
         self.unbacked_symint_counter = 0
         # Similar to guards, but these MUST evaluate to true and can
@@ -3988,6 +3984,11 @@ class ShapeEnv:
             # variable. Otherwise, the built FX graph on the replayed ShapeEnv will
             # not be valid.
             self.name_to_node: dict[str, torch.fx.Node] = {}
+
+        # Maps duck_shape_id -> unbacked symbol.
+        # When mark_unbacked is called with a duck_shape_id, we allocate fresh
+        # symbols but add runtime equality checks via torch._check.
+        self._duck_shape_id_to_unbacked_symbol: dict[Any, sympy.Expr] = {}
 
     @property
     def allow_scalar_outputs(self) -> bool:
@@ -5087,8 +5088,10 @@ class ShapeEnv:
             ]
 
         if dynamic_dim is DimDynamic.UNBACKED:
-            # Check if this unbacked dimension has a duck_shape_id
-            # If so, reuse the same unbacked symbol for all dimensions with same duck_shape_id
+            # Check if this unbacked dimension has a duck_shape_id.
+            # If so, we allocate a fresh symbol but add a runtime equality check
+            # via torch._check against the existing symbol with the same duck_shape_id.
+            # This catches mismatches at trace time rather than silently assuming equality.
             duck_shape_id = None
             if (
                 isinstance(symbolic_context, StatelessSymbolicContext)
@@ -5099,17 +5102,20 @@ class ShapeEnv:
                 if isinstance(source, TensorPropertySource) and source.idx is not None:
                     duck_shape_id = symbolic_context.duck_shape_ids.get(source.idx)
 
-            if (
-                duck_shape_id is not None
-                and duck_shape_id in self.duck_shape_id_to_unbacked_symbol
-            ):
-                out = self.duck_shape_id_to_unbacked_symbol[duck_shape_id]
-            else:
-                out = self.create_unbacked_symint(source).node.expr
-                self._constrain_range_for_size(out)
+            # Always allocate a fresh unbacked symbol
+            out = self.create_unbacked_symint(source).node.expr
+            self._constrain_range_for_size(out)
 
-                if duck_shape_id is not None:
-                    self.duck_shape_id_to_unbacked_symbol[duck_shape_id] = out
+            # Add runtime equality check for duck_shape_id if applicable
+            if duck_shape_id is not None:
+                if duck_shape_id in self._duck_shape_id_to_unbacked_symbol:
+                    # Add runtime equality check instead of reusing the same symbol
+                    existing_sym = self._duck_shape_id_to_unbacked_symbol[duck_shape_id]
+                    existing_symint = self.create_symintnode(existing_sym, hint=None)
+                    out_symint = self.create_symintnode(out, hint=None)
+                    torch._check(out_symint == existing_symint)
+                else:
+                    self._duck_shape_id_to_unbacked_symbol[duck_shape_id] = out
 
             self.unbacked_inputs.add(out)
 
