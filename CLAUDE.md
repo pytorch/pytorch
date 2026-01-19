@@ -92,3 +92,21 @@ if trace_log.handlers:
   - Local files: "FX graph dump: min_cut_failed_graph.txt"
   - Production: "Use tlparse to extract artifacts" (only if tracing enabled)
 - Use `_get_unique_path()` pattern to avoid overwriting existing debug files
+# Fixing B950 line too long in multi-line string blocks
+
+If B950 line too long triggers on a multi-line string block, you cannot fix it by
+putting # noqa: B950 on that line directly, as that would change the meaning of the
+string, nor can you fix it by line breaking the string (since you need the string
+to stay the same).  Instead, put # noqa: B950 on the same line as the terminating
+triple quote.
+
+Example:
+
+```
+    self.assertExpectedInline(
+        foo(),
+        """
+this line is too long...
+""",  # noqa: B950
+    )
+```
