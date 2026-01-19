@@ -424,6 +424,14 @@ class TorchBenchmarkRunner(BenchmarkRunner):
         iou_models = self._tolerance.get("use_iou_for_bool_masks", [])
         return name in iou_models
 
+    def get_iou_threshold(self, name):
+        iou_thresholds = self._tolerance.get("iou_thresholds", {})
+        return iou_thresholds.get(name, 0.99)
+
+    def get_accuracy_check_runs(self, name):
+        accuracy_check_runs = self._tolerance.get("accuracy_check_runs", {})
+        return accuracy_check_runs.get(name, 1)
+
     def get_tolerance_and_cosine_flag(self, is_training, current_device, name):
         tolerance = 1e-4
         cosine = self.args.cosine
