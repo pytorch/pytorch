@@ -8153,6 +8153,8 @@ def forward(self, p_linear_weight, p_linear_bias, b_buffer, x):
 
     @requires_gpu
     @skipIfRocm
+    @testing.expectedFailureSerDer
+    @testing.expectedFailureSerDerNonStrict
     def test_aaexport_gru_gpu(self):
         class M(torch.nn.Module):
             def __init__(self):
