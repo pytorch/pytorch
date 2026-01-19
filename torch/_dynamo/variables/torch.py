@@ -2746,11 +2746,13 @@ For now, dynamo will explicitly graph break when it encounters user code with th
         real_impl = get_leaf_function_real_impl(decorated_fn)
         fake_impl = get_leaf_function_fake_impl(decorated_fn)
 
-        # fake_impl is always set by the decorator (either explicit or defaults to real_impl)
-        assert fake_impl is not None, (
-            f"leaf_function {decorated_fn} has no fake_impl. "
-            "This should not happen - please report a bug."
-        )
+        # fake_impl must be provided by the user via @fn.fake_impl decorator
+        if fake_impl is None:
+            raise ValueError(
+                f"leaf_function '{getattr(decorated_fn, '__name__', decorated_fn)}' "
+                "requires a fake_impl. Please provide one using the @<func>.fake_impl "
+                "decorator. See the leaf_function docstring for details."
+            )
 
         # Create flattening wrappers for pytree output support.
         # The output spec is captured during fake tensor propagation and used

@@ -354,34 +354,9 @@ def _check_no_input_mutation(
                 )
 
 
-@contextlib.contextmanager
-def _allow_non_fake_inputs() -> Generator[None, None, None]:
-    """
-    Context manager to temporarily allow non-fake inputs in fake tensor mode.
-
-    This is controlled by torch._dynamo.config.leaf_function_allow_non_fake_inputs.
-    When enabled, real tensors in closures are auto-converted to fake tensors.
-    When disabled (default), an error is raised if fake_impl uses non-fake tensors.
-    """
-    from torch._dynamo import config as dynamo_config
-    from torch._subclasses.fake_tensor import fake_tensor_tls
-
-    if not dynamo_config.leaf_function_allow_non_fake_inputs:
-        yield
-        return
-
-    old_override = fake_tensor_tls.allow_non_fake_inputs_override
-    try:
-        fake_tensor_tls.allow_non_fake_inputs_override = True
-        yield
-    finally:
-        fake_tensor_tls.allow_non_fake_inputs_override = old_override
-
-
 @register_fake(invoke_leaf_function)
 def invoke_leaf_function_fake(real_fn_spec, fake_fn_spec, input_spec, *flat_args):
-    with _allow_non_fake_inputs():
-        return _invoke_leaf_function_impl(fake_fn_spec, input_spec, *flat_args)
+    return _invoke_leaf_function_impl(fake_fn_spec, input_spec, *flat_args)
 
 
 @invoke_leaf_function.py_impl(DispatchKey.CompositeExplicitAutograd)
