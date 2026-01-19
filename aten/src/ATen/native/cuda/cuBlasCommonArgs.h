@@ -186,6 +186,11 @@ struct cublasCommonArgs {
     if (!self.has_value() || c.is_same(*self) || is_beta_zero()) {
       return;
     }
+    // Required: bias.dtype == result.dtype
+    if (self->scalar_type() != c.scalar_type()) {
+      must_copy_bias = true;
+      return;
+    }
     if (self->scalar_type() == c.scalar_type() && self->scalar_type() != mat1.scalar_type()) {
       // NOTE: self and result are different tensors here
       // NOTE: possible Lt dispatch with self.dtype == result.dtype == Float and

@@ -371,11 +371,6 @@ Tensor& addmm_out_cuda_impl(Tensor& result, const Tensor& self, const Tensor& ma
     if (result.is_complex() && args.bias.has_value()) {
       copy_bias_into_result(args, **args.bias);
     }
-    // FIXME: Float output with reduced self/mat1/mat2 dtype produces incorrect results,
-    // unless bias (self) is copied into result
-    if (!disable_addmm_cuda_lt && is_float_output_with_half_input && args.bias.has_value()) {
-      copy_bias_into_result(args, **args.bias);
-    }
   } else {
     copy_bias_into_result(args, args.bias.has_value() ? **args.bias : self);
   }
