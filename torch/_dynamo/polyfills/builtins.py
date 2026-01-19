@@ -82,16 +82,15 @@ class _CallableIterator:
         return r
 
 
-class _SENTINEL_MISSING:
-    pass
+_sentinel_missing = object()
 
 
 # TODO(guilhermeleobas): use substitute_in_graph for iter()
-def iter_(fn_or_iterable, sentinel=_SENTINEL_MISSING, /):  # type: ignore[no-untyped-def]
+def iter_(fn_or_iterable, sentinel=_sentinel_missing, /):  # type: ignore[no-untyped-def]
     # Without a second argument, object must be a collection object which supports
     # the iterable (__iter__) or the sequence protocol (__getitem__ with an integer
     # starting at 0)
-    if sentinel is _SENTINEL_MISSING:
+    if sentinel is _sentinel_missing:
         iterable = fn_or_iterable
         if hasattr(iterable, "__iter__"):
             iterator = iterable.__iter__()

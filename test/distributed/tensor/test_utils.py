@@ -2,6 +2,8 @@
 
 
 import itertools
+import math
+from collections.abc import Sequence
 from contextlib import nullcontext
 from typing import Any
 from unittest import expectedFailure
@@ -17,6 +19,10 @@ from torch.distributed._local_tensor import (
 from torch.distributed.device_mesh import init_device_mesh
 from torch.distributed.tensor import DeviceMesh, distribute_tensor, DTensor
 from torch.distributed.tensor._dtensor_spec import DTensorSpec, TensorMeta
+from torch.distributed.tensor._ops.utils import (
+    is_tensor_evenly_shardable,
+    is_tensor_shardable,
+)
 from torch.distributed.tensor._utils import (
     _compute_local_shape_and_global_offset,
     compute_global_tensor_info,
@@ -68,7 +74,7 @@ class LocalTest(TestCase):
         TP_shard_size = global_shape[0] / TP
         for my_coordinate in itertools.product(range(DP), range(TP)):
             local_shape, global_offset = _compute_local_shape_and_global_offset(
-                global_shape, mesh_shape, list(my_coordinate), placements
+                global_shape, mesh_shape, lambda idx: my_coordinate[idx], placements
             )
             dp_rank, tp_rank = my_coordinate
             expected_shard_size = 18
@@ -92,7 +98,7 @@ class LocalTest(TestCase):
         for my_coordinate in itertools.product(range(DP), range(TP)):
             dp_rank, tp_rank = my_coordinate
             local_shape, global_offset = _compute_local_shape_and_global_offset(
-                global_shape, mesh_shape, list(my_coordinate), placements
+                global_shape, mesh_shape, lambda idx: my_coordinate[idx], placements
             )
 
             dp012_shard_size = 5
@@ -127,7 +133,7 @@ class LocalTest(TestCase):
         for my_coordinate in itertools.product(range(DP), range(TP)):
             dp_rank, tp_rank = my_coordinate
             local_shape, global_offset = _compute_local_shape_and_global_offset(
-                global_shape, mesh_shape, list(my_coordinate), placements
+                global_shape, mesh_shape, lambda idx: my_coordinate[idx], placements
             )
 
             dp012_shard_size = 4
@@ -163,7 +169,7 @@ class LocalTest(TestCase):
         for my_coordinate in itertools.product(range(DP), range(TP)):
             dp_rank, tp_rank = my_coordinate
             local_shape, global_offset = _compute_local_shape_and_global_offset(
-                global_shape, mesh_shape, list(my_coordinate), placements
+                global_shape, mesh_shape, lambda idx: my_coordinate[idx], placements
             )
             expected_shard_size = 3
             expected_shard_offset = (
@@ -187,7 +193,7 @@ class LocalTest(TestCase):
         for my_coordinate in itertools.product(range(DP), range(TP)):
             dp_rank, tp_rank = my_coordinate
             local_shape, global_offset = _compute_local_shape_and_global_offset(
-                global_shape, mesh_shape, list(my_coordinate), placements
+                global_shape, mesh_shape, lambda idx: my_coordinate[idx], placements
             )
             if dp_rank in (0, 1, 2):
                 tp0_shard_size = 8
@@ -220,7 +226,7 @@ class LocalTest(TestCase):
         for my_coordinate in itertools.product(range(DP), range(TP)):
             dp_rank, tp_rank = my_coordinate
             local_shape, global_offset = _compute_local_shape_and_global_offset(
-                global_shape, mesh_shape, list(my_coordinate), placements
+                global_shape, mesh_shape, lambda idx: my_coordinate[idx], placements
             )
             if dp_rank in (0, 1, 2):
                 tp0_shard_size = 3
@@ -253,7 +259,7 @@ class LocalTest(TestCase):
         ):
             mesh0_rank, mesh1_rank, mesh2_rank = my_coordinate
             local_shape, global_offset = _compute_local_shape_and_global_offset(
-                global_shape, mesh_shape, list(my_coordinate), placements
+                global_shape, mesh_shape, lambda idx: my_coordinate[idx], placements
             )
             if mesh0_rank in (0, 1, 2):
                 if mesh1_rank == 0:
@@ -1029,12 +1035,12 @@ class Test_StridedShard_Propagation(LocalDTensorTestBase):
 
             with CommDebugMode() as comm_mode:
                 # `A @ B2` will trigger redistribution on both inputs as below:
-                # A: S(1)[0]S(1)[1]->S(1)R->RR->RS(1)
-                # B2: _S(0, 4)S(0)[0] -> RS(0)
-                # The final output res2's placements will be RP.
+                # A: S(1)[0]S(1)[1]
+                # B2: _S(0, 4)S(0)[0]->RS(0)->RR->S(0)R->S(0)[0]S(0)[1]
+                # The final output res2's placements will be PP.
                 res2 = A @ B2
             self.assertEqual(
-                comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 3
+                comm_mode.get_comm_counts()[c10d_functional.all_gather_into_tensor], 2
             )
             assert isinstance(res1, DTensor)
             assert isinstance(res2, DTensor)
@@ -1069,8 +1075,6 @@ class Test_StridedShard_Propagation(LocalDTensorTestBase):
         view_into_shape: list[int],
         expected_placements_after_view,
     ):
-        import math
-
         assert math.prod(original_full_tensor.shape) == math.prod(view_into_shape)
         # verify user specified `expected_placements_after_view `is correct
         A = distribute_tensor(original_full_tensor, mesh, original_placements)
@@ -1492,10 +1496,168 @@ class LocalTensorTestBase(TestCase):
             pass
 
 
+class TestStridedShardCollectiveOpUtils:
+    from collections import namedtuple
+
+    ShardConfig = namedtuple("ShardConfig", ["mesh_dim", "split_factor"], defaults=(1,))
+
+    def _convert_default_order_placements_to_ShardConfig(
+        self, placements: Sequence[Placement]
+    ) -> dict[int, list["TestStridedShardCollectiveOpUtils.ShardConfig"]]:
+        """
+        Convert placements to a shard_map for use with _get_logical_shape.
+
+        Given placements like [Shard(0), _StridedShard(0, split_factor=2), Shard(1)],
+        creates a mapping from tensor dimension to list of ShardConfigs:
+        {
+            0: [ShardConfig(mesh_dim=0, split_factor=1), ShardConfig(mesh_dim=1, split_factor=2)],
+            1: [ShardConfig(mesh_dim=2, split_factor=1)]
+        }
+
+        Each mesh_dim corresponds to the index of the placement in the placements list.
+        """
+        shard_map: dict[int, list[TestStridedShardCollectiveOpUtils.ShardConfig]] = {}
+
+        for mesh_dim, placement in enumerate(placements):
+            if isinstance(placement, _StridedShard):
+                tensor_dim = placement.dim
+                split_factor = placement.split_factor
+            elif isinstance(placement, Shard):
+                tensor_dim = placement.dim
+                split_factor = 1
+            else:
+                continue
+
+            if tensor_dim not in shard_map:
+                shard_map[tensor_dim] = []
+            shard_map[tensor_dim].append(
+                self.ShardConfig(mesh_dim=mesh_dim, split_factor=split_factor)
+            )
+
+        return shard_map
+
+    def _get_logical_shape(
+        self,
+        shard_map: dict[int, list["TestStridedShardCollectiveOpUtils.ShardConfig"]],
+        mesh: DeviceMesh,
+        operate_mesh_dim: int,
+        full_tensor_shape: tuple[int, ...],
+    ) -> list[int]:
+        """
+        Compute the logical shape after applying sharding, excluding `operate_mesh_dim`.
+
+        Args:
+            shard_map: Maps tensor dim to list of ShardConfigs describing how it's sharded
+            mesh: The device mesh
+            operate_mesh_dim: The mesh dimension to exclude from shape computation
+            full_tensor_shape: The original full tensor shape
+
+        Returns:
+            The logical shape after applying all sharding except on operate_mesh_dim
+        """
+        new_logical_shape = list(full_tensor_shape)
+        coordinate = mesh.get_coordinate()
+        assert coordinate is not None
+
+        for tensor_dim, shard_configs in shard_map.items():
+            for config in shard_configs:
+                if operate_mesh_dim == config.mesh_dim:
+                    continue
+                if config.split_factor == 1:
+                    placement = Shard(tensor_dim)
+                else:
+                    placement = _StridedShard(
+                        tensor_dim, split_factor=config.split_factor
+                    )
+                new_size, _ = placement._local_shard_size_and_offset(
+                    curr_local_size=new_logical_shape[tensor_dim],
+                    num_chunks=mesh.size(mesh_dim=config.mesh_dim),
+                    rank=coordinate[config.mesh_dim],
+                )
+                new_logical_shape[tensor_dim] = new_size
+
+        return new_logical_shape
+
+
+class TestStridedShardReplicate(TestStridedShardCollectiveOpUtils, DTensorTestBase):
+    @property
+    def world_size(self):
+        return 4
+
+    @with_comms
+    def test_StridedShard_to_replicate(self):
+        mesh = self.build_device_mesh()
+        for split_factor in range(2, 17):
+            for tensor_size in range(1, 200):
+                a = torch.arange(tensor_size)
+                src_p = (_StridedShard(0, split_factor=split_factor),)
+                a_dt = distribute_tensor(a, mesh, src_p, src_data_rank=None)
+                logical_shape = self._get_logical_shape(
+                    self._convert_default_order_placements_to_ShardConfig(src_p),
+                    mesh,
+                    0,
+                    a.shape,
+                )
+                p = _StridedShard(0, split_factor=split_factor)
+                a_dt_after_to_replicate = p._to_replicate_tensor(
+                    a_dt.to_local(), mesh, 0, logical_shape
+                )
+                b_dt = distribute_tensor(a, mesh, [Replicate()], src_data_rank=None)
+                self.assertEqual(
+                    a_dt_after_to_replicate,
+                    b_dt.to_local(),
+                    f"{tensor_size=}, placements={src_p}",
+                )
+
+    @with_comms
+    def test_replicate_to_StridedShard(self):
+        mesh = self.build_device_mesh()
+        coordinate = mesh.get_coordinate()
+        for split_factor in range(2, 17):
+            for tensor_size in range(1, 200):
+                a = torch.arange(tensor_size)
+                a_dt_replicate = distribute_tensor(
+                    a, mesh, [Replicate()], src_data_rank=None
+                )
+                p = _StridedShard(0, split_factor=split_factor)
+                a_dt_strided = p._replicate_to_strided_shard(
+                    a_dt_replicate.to_local(), mesh, 0, coordinate[0]
+                )
+                b_dt = distribute_tensor(a, mesh, (p,), src_data_rank=None)
+                self.assertEqual(
+                    a_dt_strided,
+                    b_dt.to_local(),
+                )
+
+
 class TestExplicitRedistribute(LocalTensorTestBase):
     @property
     def world_size(self):
         return 4
+
+    def test_message_fn_not_called_in_fastpath(self):
+        """Test that message_fn is not called when no ExplicitRedistributionContext is active.
+
+        This ensures that string formatting overhead is avoided in the common case.
+        """
+        from unittest.mock import patch
+
+        from torch.distributed.tensor._op_schema import OpSchema
+
+        with LocalTensorMode(self.world_size):
+            device_mesh = self.build_device_mesh()
+            dim = 128
+            x = torch.randn(8, dim, requires_grad=True)
+            A = torch.randn(dim, dim, requires_grad=True)
+
+            # Prepare DTensors that will trigger redistribution
+            dx = distribute_tensor(x, device_mesh, [Shard(0)])
+            dA = distribute_tensor(A, device_mesh, [Shard(0)])
+
+            # Without ExplicitRedistributionContext, OpSchema.__str__ should NOT be called
+            with patch.object(OpSchema, "__str__", autospec=True) as mock_str:
+                torch.matmul(dx, dA)
+                mock_str.assert_not_called()
 
     def test_explicit_matmul(self):
         with LocalTensorMode(self.world_size):
@@ -1529,10 +1691,10 @@ class TestExplicitRedistribute(LocalTensorTestBase):
                     )
                     # TODO enable this once fixing the issue that op_info.schema is None in some calls to
                     # redistribute_local_tensor
-                    # self.assertRegex(
-                    #     captured.output[0],
-                    #     r".*aten\.mm\.default.*",
-                    # )
+                    self.assertRegex(
+                        captured.output[0],
+                        r".*aten\.mm\.default.*",
+                    )
 
             # explicit redistribute allows manual redistribute
             with ExplicitRedistributionContext():
@@ -1560,6 +1722,43 @@ class TestExplicitRedistribute(LocalTensorTestBase):
                 # and re-enable
                 with self.assertRaisesRegex(RuntimeError, "Implicit redistribution"):
                     loss.backward(retain_graph=True)
+
+
+class TestIsTensorShardable(LocalTensorTestBase):
+    @property
+    def world_size(self):
+        return 8
+
+    def _create_spec(
+        self, mesh_shape: tuple[int, ...], placements: list[Placement]
+    ) -> DTensorSpec:
+        mesh = init_device_mesh("cpu", mesh_shape)
+        return DTensorSpec(mesh=mesh, placements=tuple(placements))
+
+    def test_is_tensor_shardable(self):
+        spec = self._create_spec((4,), [Shard(0)])
+        self.assertTrue(is_tensor_shardable([8], spec))
+        self.assertTrue(is_tensor_shardable([10], spec))
+        self.assertFalse(is_tensor_shardable([2], spec))
+
+        spec = self._create_spec((4, 2), [Shard(0), Shard(0)])
+        self.assertTrue(is_tensor_shardable([8, 8], spec))
+
+        spec = self._create_spec((4, 2), [Shard(0), _StridedShard(0, split_factor=2)])
+        # not shardable now because of the split_factor
+        self.assertFalse(is_tensor_shardable([8, 8], spec))
+
+    def test_is_tensor_evenly_shardable(self):
+        spec = self._create_spec((4,), [Shard(0)])
+        self.assertTrue(is_tensor_evenly_shardable([8], spec))
+        self.assertFalse(is_tensor_evenly_shardable([10], spec))
+
+        spec = self._create_spec((4, 2), [Shard(0), Shard(0)])
+        self.assertTrue(is_tensor_evenly_shardable([16, 8], spec))
+
+        spec = self._create_spec((4, 2), [_StridedShard(0, split_factor=3), Shard(0)])
+        # not evenly shardable now because of the split_factor
+        self.assertFalse(is_tensor_evenly_shardable([16, 8], spec))
 
 
 UtilTestWithLocalTensor = create_local_tensor_test_class(UtilTest)

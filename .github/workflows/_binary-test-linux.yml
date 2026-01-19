@@ -150,12 +150,6 @@ jobs:
         with:
           ALPINE_IMAGE: ${{ inputs.ALPINE_IMAGE }}
 
-      - name: Clean workspace
-        shell: bash
-        run: |
-          rm -rf "${GITHUB_WORKSPACE}"
-          mkdir "${GITHUB_WORKSPACE}"
-
       - name: Checkout PyTorch to pytorch dir
         uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.2
         with:

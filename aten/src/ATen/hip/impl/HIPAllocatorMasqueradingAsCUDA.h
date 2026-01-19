@@ -142,8 +142,8 @@ public:
   void createOrIncrefPool(
       c10::DeviceIndex device,
       MempoolId_t mempool_id,
-      HIPAllocator* allocator = nullptr) override {
-    allocator_->createOrIncrefPool(device, mempool_id, allocator);
+      std::shared_ptr<HIPAllocator> allocator = nullptr) override {
+    allocator_->createOrIncrefPool(device, mempool_id, std::move(allocator));
   }
 
   void setUseOnOOM(c10::DeviceIndex device, MempoolId_t mempool_id, bool use_on_oom) override {
@@ -178,8 +178,9 @@ public:
       HIPCachingAllocator::CreateContextFn context_recorder,
       size_t alloc_trace_max_entries,
       HIPCachingAllocator::RecordContext when,
-      bool clearHistory) override {
-    allocator_->recordHistory(enabled, context_recorder, alloc_trace_max_entries, when, clearHistory);
+      bool clearHistory,
+      const std::vector<std::string>& skip_actions) override {
+    allocator_->recordHistory(enabled, context_recorder, alloc_trace_max_entries, when, clearHistory, skip_actions);
   }
 
   void recordAnnotation(

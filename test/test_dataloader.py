@@ -429,6 +429,13 @@ class TestTensorDataset(TestCase):
             self.assertEqual(t2[i], source[i][2])
             self.assertEqual(t3[i], source[i][3])
 
+    def test_size_mismatch(self):
+        tensor1 = torch.randn(10, 5)
+        tensor2 = torch.randn(10, 3)
+        tensor3 = torch.randn(20, 7)
+        with self.assertRaisesRegex(AssertionError, "Size mismatch between tensors"):
+            TensorDataset(tensor1, tensor2, tensor3)
+
 
 @unittest.skipIf(
     TEST_WITH_TSAN,
@@ -2477,6 +2484,113 @@ except RuntimeError as e:
                 ErrorDataset(41), batch_size=2, shuffle=True, num_workers=4
             )
         )
+
+    def test_subset_custom_getitem(self):
+        """
+        Regression test for issue #163184 where DataLoader ignores custom
+        transformations in Subset subclasses that override __getitem__.
+        """
+
+        class SimpleDataset(Dataset):
+            def __init__(self):
+                self.data = torch.arange(20)
+
+            def __len__(self):
+                return 20
+
+            def __getitem__(self, idx):
+                return self.data[idx]
+
+        class TransformSubset(Subset):
+            def __getitem__(self, idx):
+                # transform: multiply by 2
+                original_idx = self.indices[idx]
+                value = self.dataset[original_idx]
+                return value * 2
+
+            def __getitems__(self, indices):
+                return [self.__getitem__(idx) for idx in indices]
+
+        dataset = SimpleDataset()
+        subset = TransformSubset(dataset, [0, 1, 2, 3])
+
+        self.assertEqual(subset[0].item(), 0)
+        self.assertEqual(subset[1].item(), 2)
+        self.assertEqual(subset[2].item(), 4)
+
+        loader = self._get_data_loader(subset, batch_size=2, shuffle=False)
+        batches = list(loader)
+
+        self.assertTrue(torch.equal(batches[0], torch.tensor([0, 2])))
+        self.assertTrue(torch.equal(batches[1], torch.tensor([4, 6])))
+
+    def test_subset_custom_getitem_with_tuple_data(self):
+        """Test Subset custom __getitem__ with tuple data (like the original issue)."""
+
+        class TupleDataset(Dataset):
+            def __init__(self):
+                self.a = torch.arange(10)
+                self.b = torch.arange(100, 110)
+
+            def __len__(self):
+                return 10
+
+            def __getitem__(self, idx):
+                return self.a[idx], self.b[idx]
+
+        class SumSubset(Subset):
+            """Subset that returns sum instead of tuple"""
+
+            def __getitem__(self, idx):
+                original_idx = self.indices[idx]
+                a, b = self.dataset[original_idx]
+                return a + b
+
+            def __getitems__(self, indices):
+                return [self.__getitem__(idx) for idx in indices]
+
+        dataset = TupleDataset()
+        subset = SumSubset(dataset, [0, 1, 2, 3])
+
+        self.assertEqual(subset[0].item(), 100)
+        self.assertEqual(subset[1].item(), 102)
+
+        loader = self._get_data_loader(subset, batch_size=2, shuffle=False)
+        batches = list(loader)
+
+        self.assertTrue(torch.equal(batches[0], torch.tensor([100, 102])))
+        self.assertTrue(torch.equal(batches[1], torch.tensor([104, 106])))
+
+    def test_subset_override_getitem_requires_getitems(self):
+        """
+        Test that subclassing Subset and overriding only __getitem__ without
+        __getitems__ raises a NotImplementedError at instantiation time.
+        """
+
+        class SimpleDataset(Dataset):
+            def __init__(self):
+                self.data = torch.arange(10)
+
+            def __len__(self):
+                return 10
+
+            def __getitem__(self, idx):
+                return self.data[idx]
+
+        class IncompleteSubset(Subset):
+            def __getitem__(self, idx):
+                original_idx = self.indices[idx]
+                return self.dataset[original_idx] * 2
+
+        dataset = SimpleDataset()
+
+        with self.assertRaises(NotImplementedError) as cm:
+            subset = IncompleteSubset(dataset, [0, 1, 2, 3])
+
+        error_message = str(cm.exception)
+        self.assertIn("IncompleteSubset", error_message)
+        self.assertIn("__getitem__", error_message)
+        self.assertIn("__getitems__", error_message)
 
     @unittest.skipIf(IS_WINDOWS, "FIXME: stuck test")
     def test_partial_workers(self):
