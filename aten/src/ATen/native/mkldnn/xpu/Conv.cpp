@@ -609,7 +609,7 @@ std::tuple<Tensor, Tensor, Tensor> convolution_backward_overrideable(
     grad_bias = at::empty({grad_output_.size(1)}, opt);
   }
 
-  if (output_mask[0] && grad_input.defined()) {
+  if (output_mask[0]) {
     TensorArg grad_output_t{grad_output, "grad_output", 1},
         input_t{input, "input", 2};
     checkAllSameType(c, {grad_output_t, input_t});
