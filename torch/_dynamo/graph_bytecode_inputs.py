@@ -94,13 +94,3 @@ def register_user_object(value: Any, source: Source) -> int:
             from_exc=e,
         )
     return index
-
-
-# Register the module retriever callback with the HOP layer.
-# This enables dependency inversion: the HOP layer defines the interface
-# for retrieving modules by index, and Dynamo provides the implementation.
-# This avoids a layering violation where HOPs would import from Dynamo.
-from torch._higher_order_ops.utils import set_module_retriever
-
-
-set_module_retriever(get_external_object_by_index)
