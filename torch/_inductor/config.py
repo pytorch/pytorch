@@ -91,7 +91,9 @@ worker_log_path = (
 )
 
 # precompilation timeout
-precompilation_timeout_seconds: int = 60 * 60
+precompilation_timeout_seconds: int = int(
+    os.environ.get("TORCHINDUCTOR_PRECOMPILATION_TIMEOUT_SECONDS", 60 * 5)
+)
 
 # use fx aot graph codegen cache
 fx_graph_cache: bool = Config(
@@ -1751,6 +1753,9 @@ class triton:
         os.environ.get("TORCHINDUCTOR_MIX_ORDER_REDUCTION_AUTOTUNE_SPLIT_SIZE", "0")
         == "1"
     )
+    # If set to true, will skip some non-critical checks in the mix order reduction
+    # this could be helpful to avoid recompilations in some cases
+    mix_order_reduction_non_strict_mode = False
 
     enable_tlx_templates: bool = (
         os.environ.get("TORCHINDUCTOR_ENABLE_TLX_TEMPLATES", "0") == "1"
