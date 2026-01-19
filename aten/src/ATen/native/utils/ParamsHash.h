@@ -60,16 +60,7 @@ struct ParamsWrapper {
     memcpy(&(this->pod), &(other.pod), sizeof(this->pod));
   }
 
-  ParamsWrapper(ParamsWrapper&& other) noexcept {
-    memcpy(&(this->pod), &(other.pod), sizeof(this->pod));
-  }
-
   ParamsWrapper& operator=(const ParamsWrapper& other) noexcept {
-    memcpy(&(this->pod), &(other.pod), sizeof(this->pod));
-    return *this;
-  }
-
-  ParamsWrapper& operator=(ParamsWrapper&& other) noexcept {
     memcpy(&(this->pod), &(other.pod), sizeof(this->pod));
     return *this;
   }
@@ -87,20 +78,9 @@ struct ParamsWrapper {
 // constructors for additional safety
 template <typename ParamsWrapper>
 struct ParamsWrapperHash {
-  // Params must be a POD because we read out its memory
-  // contents as char* when hashing
-  static_assert(
-      std::is_standard_layout_v<decltype(ParamsWrapper::pod)>,
-      "ParamsWrapper cannot wrap non-POD data");
-
   size_t operator()(const ParamsWrapper& params_wrapper) const noexcept {
-    auto ptr = reinterpret_cast<const uint8_t*>(&(params_wrapper.pod));
-    uint32_t value = 0x811C9DC5;
-    for (const auto i : c10::irange(sizeof(params_wrapper.pod))) {
-      value ^= ptr[i];
-      value *= 0x01000193;
-    }
-    return (size_t)value;
+    ParamsHash<decltype(ParamsWrapper::pod)> hasher;
+    return hasher(params_wrapper.pod);
   }
 };
 
