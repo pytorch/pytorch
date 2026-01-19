@@ -8970,6 +8970,24 @@ class TestONNXRuntime(onnx_test_common._TestONNXRuntime):
         y = torch.randn(1, 32, 4)
         self.run_test(Cdist(), input_args=(x, y))
 
+    @skipIfUnsupportedMinOpsetVersion(9)
+    def test_cdist_dynamic_shape(self):
+        """Test cdist with dynamic input shapes where row_size is None.
+        This tests the optimistic strategy that uses _euclidean_dist for dynamic inputs.
+        """
+        class Cdist(torch.nn.Module):
+            def forward(self, x, y):
+                return torch.cdist(x, y, p=2.0)
+
+        x = torch.randn(5, 3, 3)
+        y = torch.randn(5, 2, 3)
+        # Make the -2 dimension (second-to-last) dynamic
+        self.run_test(
+            Cdist(),
+            input_args=(x, y),
+            dynamic_axes={"x": [0, 1], "y": [0, 1]},
+        )
+
     @skipIfUnsupportedMinOpsetVersion(12)
     def test_crossentropyloss(self):
         for ignore_index in [-100, 1]:
