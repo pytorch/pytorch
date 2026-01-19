@@ -50,6 +50,29 @@ if(PYTORCH_ROCM_ARCH STREQUAL "")
 endif()
 message("Building PyTorch for GPU arch: ${PYTORCH_ROCM_ARCH}")
 
+# Synchronize PYTORCH_ROCM_ARCH with CMAKE_HIP_ARCHITECTURES
+# This ensures both variables are consistent
+if(DEFINED PYTORCH_ROCM_ARCH AND PYTORCH_ROCM_ARCH)
+  # PYTORCH_ROCM_ARCH is set (from env or auto-detected)
+  if(DEFINED CMAKE_HIP_ARCHITECTURES AND CMAKE_HIP_ARCHITECTURES)
+    # Both are set - check if they match
+    if(NOT "${CMAKE_HIP_ARCHITECTURES}" STREQUAL "${PYTORCH_ROCM_ARCH}")
+      message(WARNING
+        "CMAKE_HIP_ARCHITECTURES (${CMAKE_HIP_ARCHITECTURES}) differs from "
+        "PYTORCH_ROCM_ARCH (${PYTORCH_ROCM_ARCH}). "
+        "Using PYTORCH_ROCM_ARCH for consistency.")
+    endif()
+  endif()
+  # Set CMAKE_HIP_ARCHITECTURES to match PYTORCH_ROCM_ARCH
+  set(CMAKE_HIP_ARCHITECTURES ${PYTORCH_ROCM_ARCH})
+elseif(DEFINED CMAKE_HIP_ARCHITECTURES AND CMAKE_HIP_ARCHITECTURES)
+  # Only CMAKE_HIP_ARCHITECTURES is set - use it to set PYTORCH_ROCM_ARCH
+  set(PYTORCH_ROCM_ARCH ${CMAKE_HIP_ARCHITECTURES})
+  message(STATUS "Set PYTORCH_ROCM_ARCH from CMAKE_HIP_ARCHITECTURES: ${PYTORCH_ROCM_ARCH}")
+else()
+  message(FATAL_ERROR "No GPU architectures specified. Set PYTORCH_ROCM_ARCH environment variable or CMAKE_HIP_ARCHITECTURES.")
+endif()
+
 # Add HIP to the CMAKE Module Path
 # needed because the find_package call to this module uses the Module mode search
 # https://cmake.org/cmake/help/latest/command/find_package.html#search-modes
@@ -75,14 +98,24 @@ macro(find_package_and_print_version PACKAGE_NAME)
   endif()
 endmacro()
 
-# Find the HIP Package
-# MODULE argument is added for clarity that CMake is searching
-# for FindHIP.cmake in Module mode
-find_package_and_print_version(HIP 1.0 MODULE)
+# Enable HIP as a first-class CMake language (requires CMake 3.21+)
+# Note: developers can either set HIPCXX environment variable or define
+# CMAKE_HIP_COMPILER to specify a specific HIP compiler if needed.
+enable_language(HIP)
 
-if(HIP_FOUND)
+if(CMAKE_HIP_COMPILER)
   set(PYTORCH_FOUND_HIP TRUE)
+
+  # Set HIP_PLATFORM before find_package(hip) - required because hip-config.cmake
+  # tries to determine platform via hipconfig executable which may not be available
+  if(NOT ENV{HIP_PLATFORM})
+    set(HIP_PLATFORM "amd" CACHE STRING "HIP Platform (amd or nvidia)")
+    message(STATUS "Set HIP_PLATFORM to 'amd' (default for ROCm)")
+  endif()
+
   find_package_and_print_version(hip REQUIRED CONFIG)
+  set(HIP_VERSION ${hip_VERSION})
+
   if(HIP_VERSION)
     # Check if HIP_VERSION contains a dash (e.g., "7.1.25421-32f9fa6ca5")
     # and strip everything after it to get clean numeric version
@@ -96,6 +129,15 @@ if(HIP_FOUND)
     message("HIP version: ${HIP_VERSION}")
   else()
     set(HIP_VERSION_CLEAN "")
+  endif()
+
+  # Extract HIP version components from HIP_VERSION
+  if(HIP_VERSION)
+    string(REGEX MATCH "^([0-9]+)\\.([0-9]+)" _hip_version_match "${HIP_VERSION}")
+    if(_hip_version_match)
+      set(HIP_VERSION_MAJOR "${CMAKE_MATCH_1}")
+      set(HIP_VERSION_MINOR "${CMAKE_MATCH_2}")
+    endif()
   endif()
 
 # The rocm-core package was only introduced in ROCm 6.4, so we make it optional.
