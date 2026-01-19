@@ -9,11 +9,12 @@ import unittest
 import functools
 from contextlib import redirect_stderr
 from torch.testing import make_tensor, FileCheck
-from torch.testing._internal.common_cuda import SM80OrLater, TEST_CUSPARSE_GENERIC
+from torch.testing._internal.common_cuda import (
+    SM80OrLater, PLATFORM_SUPPORTS_BF16, PLATFORM_SUPPORTS_BF16_ATOMICS, PLATFORM_SUPPORTS_HALF_ATOMICS)
 from torch.testing._internal.common_utils import \
     (TEST_WITH_TORCHINDUCTOR, TEST_WITH_ROCM, TEST_CUDA_CUDSS, TEST_SCIPY, TEST_NUMPY, TEST_MKL, IS_WINDOWS, TestCase,
      run_tests, load_tests, coalescedonoff, parametrize, subtest, skipIfTorchDynamo,
-     IS_FBCODE, IS_REMOTE_GPU, suppress_warnings, LazyVal, getRocmVersion)
+     IS_FBCODE, IS_REMOTE_GPU, suppress_warnings)
 from torch.testing._internal.common_device_type import \
     (ops, instantiate_device_type_tests, dtypes, OpDTypes, dtypesIfCUDA, onlyCPU, onlyCUDA, skipCUDAIfNoSparseGeneric,
      precisionOverride, skipMeta, skipCUDAIfRocm, skipCPUIfNoMklSparse, largeTensorTest)
@@ -39,28 +40,6 @@ load_tests = load_tests  # noqa: PLW0127
 
 no_mkl_sparse = IS_WINDOWS or not TEST_MKL
 
-def evaluate_platform_supports_bf16():
-    if torch.version.cuda:
-        return SM80OrLater
-    elif torch.version.hip:
-        return True
-    return False
-
-def evaluate_platform_supports_bf16_atomics():
-    if torch.version.cuda:
-        return SM80OrLater
-    elif torch.version.hip:
-        return getRocmVersion() >= (8, 0)
-    return False
-
-def evaluate_platform_supports_half_atomics():
-    if torch.version.hip:
-        return getRocmVersion() >= (8, 0)
-    return True
-
-PLATFORM_SUPPORTS_BF16: bool = LazyVal(lambda: evaluate_platform_supports_bf16())
-PLATFORM_SUPPORTS_BF16_ATOMICS: bool = LazyVal(lambda: evaluate_platform_supports_bf16_atomics())
-PLATFORM_SUPPORTS_HALF_ATOMICS: bool = LazyVal(lambda: evaluate_platform_supports_half_atomics())
 
 def _check_cusparse_spgemm_available():
     # cusparseSpGEMM was added in 11.0
