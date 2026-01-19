@@ -1941,13 +1941,8 @@ class TestSparseCSR(TestCase):
 
     @dtypes(*floating_and_complex_types())
     @dtypesIfCUDA(*floating_and_complex_types_and(
-<<<<<<< HEAD
-                  *[torch.half] if SPARSE_FLOAT16_SUPPORTED else [],
-                  *[torch.bfloat16] if SPARSE_BFLOAT16_SUPPORTED else []))
-=======
                   *[torch.half] if not TEST_WITH_ROCM else [],
                   *[torch.bfloat16] if SM80OrLater and TEST_CUSPARSE_GENERIC else []))
->>>>>>> upstream/main
     @precisionOverride({torch.bfloat16: 3.5e-2, torch.float16: 1e-2})
     def test_sparse_addmm(self, device, dtype):
         def test_shape(m, n, p, nnz, broadcast, index_dtype, alpha_beta=None):
