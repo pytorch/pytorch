@@ -2944,6 +2944,14 @@ class FakeTensorMode(TorchDispatchMode):
                 return x
 
             nonlocal flat_arg_fake_tensors
+            inner: Tensor = x
+
+            while is_functorch_wrapped_tensor(inner):
+                inner = torch._C._functorch.get_unwrapped(inner)
+            if inner is not x and self.is_our_fake(inner):
+                flat_arg_fake_tensors.append(inner)
+                return x  # type: ignore[return-value]
+
             if not self.is_our_fake(x):
                 if hasattr(func, "tags") and torch.Tag.inplace_view in func.tags:
                     args, kwargs = pytree.tree_unflatten(flat_args, args_spec)
