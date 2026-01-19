@@ -4331,7 +4331,6 @@ event=cudaLaunchKernel node=addmm_1 stack_trace=x = self.linear2(x)"""
             )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    @skipIfRocm
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     def test_profiler_multiple_modules(self):
         """
@@ -4367,15 +4366,15 @@ event=cudaLaunchKernel node=addmm_1 stack_trace=x = self.linear2(x)"""
             result_b = compiled_b(torch.randn(1, 3, 8, 8, device="cuda"))
 
         actual_traces = _enrich_profiler_traces(prof)
-        self.assertExpectedInline(actual_traces, """\
+        kernel_event = "hipLaunchKernel" if torch.version.hip else "cudaLaunchKernel"
+        self.assertExpectedInline(actual_traces, f"""\
 event=aten::add node=add stack_trace=return x + 1
-event=cudaLaunchKernel node=add stack_trace=return x + 1
+event={kernel_event} node=add stack_trace=return x + 1
 event=aten::sub node=sub stack_trace=return x - 1
-event=cudaLaunchKernel node=sub stack_trace=return x - 1"""
+event={kernel_event} node=sub stack_trace=return x - 1"""
             )
 
     @unittest.skipIf(not torch.cuda.is_available(), "CUDA not available")
-    @skipIfRocm
     @torch.fx.experimental._config.patch("enrich_profiler_metadata", True)
     def test_profiler_nested_graph_modules(self):
         """
@@ -4412,13 +4411,14 @@ event=cudaLaunchKernel node=sub stack_trace=return x - 1"""
             result = compiled_model(torch.randn(10, 10, device="cuda"), torch.randn(10, 10, device="cuda"))
 
         actual_traces = _enrich_profiler_traces(prof)
-        self.assertExpectedInline(actual_traces, """\
+        kernel_event = "hipLaunchKernel" if torch.version.hip else "cudaLaunchKernel"
+        self.assertExpectedInline(actual_traces, f"""\
 event=aten::mul node=mul stack_trace=m = torch.mul(x, y)
-event=cudaLaunchKernel node=mul stack_trace=m = torch.mul(x, y)
+event={kernel_event} node=mul stack_trace=m = torch.mul(x, y)
 event=aten::sin node=sin stack_trace=s = m.sin()
-event=cudaLaunchKernel node=sin stack_trace=s = m.sin()
+event={kernel_event} node=sin stack_trace=s = m.sin()
 event=aten::add node=add stack_trace=a = s + self.c
-event=cudaLaunchKernel node=add stack_trace=a = s + self.c"""
+event={kernel_event} node=add stack_trace=a = s + self.c"""
             )
 
 
