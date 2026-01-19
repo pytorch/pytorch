@@ -7031,7 +7031,7 @@ class AOTInductorTestsTemplate:
 
         with config.patch("triton.autotune_with_sample_inputs", True):
             # The tuned best config on XPU is different with CUDA.
-            if GPU_TYPE == "xpu" or torch.version.hip:
+            if GPU_TYPE == "xpu":
                 grid_0 = 32736
             else:
                 grid_0 = 1023
