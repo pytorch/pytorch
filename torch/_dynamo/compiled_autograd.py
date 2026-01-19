@@ -449,6 +449,7 @@ class AutogradCompilerInstance:
         pctx: Any,
         ctx: Any,
         maybe_backward_state_idx: Optional[int],
+        opaque_object_indices: list[int],
     ) -> Sequence[Any]:
         # The AOTBackward call consists of three things: the prologue, the
         # backward graph, and the epilogue.
@@ -463,8 +464,10 @@ class AutogradCompilerInstance:
 
         psymints = [self.to_proxy(e) for e in ctx._get_compiled_autograd_symints()]
 
-        # Get opaque objects from ctx (empty list if not present for backward compatibility)
-        ctx_opaque_objects = getattr(ctx, "opaque_objects", [])
+        popaque_objects = [
+            self.hooks_proxy[idx]  # type: ignore[index]
+            for idx in opaque_object_indices
+        ]
 
         # NOTE: we should only close over constants
         CompiledFunction = ctx._forward_cls
@@ -504,7 +507,7 @@ class AutogradCompilerInstance:
             args=(
                 psaved_tensors,
                 psymints,
-                ctx_opaque_objects,
+                popaque_objects,
                 *pinputs,
             ),
             kwargs={},
@@ -655,6 +658,7 @@ class AutogradCompilerInstance:
         backward_idx: int,
         ctx: torch.autograd.function.BackwardCFunction,
         maybe_backward_state_idx: Optional[int],
+        opaque_object_indices: list[int],
     ) -> tuple[Optional[torch.Tensor], ...]:
         assert self.hooks_proxy is not None
         pctx = self.hooks_proxy[backward_idx]  # type: ignore[index]
@@ -669,6 +673,7 @@ class AutogradCompilerInstance:
                 pctx,
                 ctx,
                 maybe_backward_state_idx,
+                opaque_object_indices,
             )
         else:
             proxies = self.fx_tracer.create_proxy(
